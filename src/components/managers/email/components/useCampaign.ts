@@ -240,6 +240,27 @@ export function useSendCampaignNow() {
   );
 }
 
+// useAutoTranslateCampaign asks the backend to fill the non-English locales' subject + block
+// translations from the English source via AI, then refetches the campaign so the editor shows the
+// filled translations for review. overwrite re-translates all locales; default fills only missing.
+export function useAutoTranslateCampaign() {
+  const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    mutationFn: (vars: { id: number; overwrite?: boolean }) =>
+      adminService.AutoTranslateEmailCampaign({ id: vars.id, overwrite: vars.overwrite ?? false }),
+    onSuccess: async (res, vars) => {
+      const n = res?.translatedCount ?? 0;
+      showMessage(`auto-translated ${n} string${n === 1 ? '' : 's'} — review before sending`, 'success');
+      await queryClient.refetchQueries({ queryKey: emailCampaignKeys.detail(vars.id) });
+    },
+    onError: (error) => {
+      const msg = error instanceof Error ? error.message : 'unknown error';
+      showMessage(`couldn't auto-translate — ${msg}`, 'error');
+    },
+  });
+}
+
 export function useScheduleCampaign() {
   return useLifecycleMutation(
     (vars: { id: number; scheduleAt: number }) =>

@@ -1,13 +1,24 @@
 import { formatDateShort } from 'components/managers/orders-catalog/components/utility';
-import { cn } from 'lib/utility';
+import { BoardCard } from 'ui/components/board';
 import { Button } from 'ui/components/button';
+import { Pill } from 'ui/components/pill';
+import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { FulfillmentCard as FulfillmentCardModel } from '../api/types';
-import { COLUMN_ACTION, formatMoney, initials } from '../utils/meta';
+import { CardAssignee } from './card-assignee';
+import { cardAgeDays, COLUMN_ACTION, formatMoney, isOverdue } from '../utils/meta';
 
-// One order tile on the board. Body click opens the card detail; the forward
-// action (ship / mark delivered) is a sibling button so it never doubles as the
-// open target. Delivered cards have no action.
+// ffCard v2 — one order tile on the board. The whole card opens the detail; the
+// forward action (ship / mark delivered) and the assignee popover live inside it
+// and stop the click from bubbling, so neither doubles as the open target.
+//
+// Gap note (ff-card-summary): the board RPC projects a common_Order onto each card
+// (see api/types → FulfillmentCard), which carries NO order items — so there is no
+// thumbnail and no item count to show here, and fetching them per card would be the
+// forbidden N+1. We therefore render a quiet Placeholder where the preview would go
+// and surface only what the card actually holds: assignee, checklist progress,
+// packing-notes flag and (for the to-pack lane) queue age. Real thumbnails / item
+// counts need the board RPC to project order items first.
 export function FulfillmentCard({
   card,
   canWrite,
@@ -24,59 +35,63 @@ export function FulfillmentCard({
   busy?: boolean;
 }) {
   const action = COLUMN_ACTION[card.column];
-  const check = card.checklistTotal > 0 ? `✓ ${card.checklistDone}/${card.checklistTotal}` : '';
+  const isToPack = card.column === 'FULFILLMENT_COLUMN_TO_FULFILL';
+  const overdue = isToPack && isOverdue(card.placed);
+  const age = cardAgeDays(card.placed);
+  const checklistDone = card.checklistTotal > 0 && card.checklistDone >= card.checklistTotal;
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor bg-bgColor p-3 transition-[border-color,transform,box-shadow] duration-150 hover:-translate-y-0.5 hover:border-textInactiveColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0'>
-      <button
-        type='button'
-        onClick={() => onOpen(card.orderUuid)}
-        aria-label={`Open order #${card.orderId}`}
-        className='flex flex-col gap-2 text-left outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-      >
-        <div className='flex items-baseline justify-between gap-2'>
-          <Text className='font-bold'>#{card.orderId}</Text>
-          <Text size='small'>{formatMoney(card.total, card.currency)}</Text>
-        </div>
-
-        <Text variant='label' size='small'>
-          placed {formatDateShort(card.placed) || '—'}
-        </Text>
-
-        <div className='flex items-center justify-between gap-2'>
-          <div className='flex min-w-0 items-center gap-2 text-[10px] uppercase text-labelColor'>
-            {check && <span>{check}</span>}
-            {card.hasNotes && <span title='has packing notes'>notes</span>}
+    <BoardCard onClick={() => onOpen(card.orderUuid)}>
+      <div className='flex flex-col gap-1.5'>
+        <div className='flex items-start gap-2'>
+          {/* No thumbnail on the board card — striped slot stands in for the preview. */}
+          <Placeholder aspect='square' className='w-9 shrink-0' />
+          <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
+            <div className='flex flex-wrap items-center gap-1.5'>
+              <Text component='span' className='font-bold'>
+                #{card.orderId}
+              </Text>
+              {overdue && <Pill tone='warn'>overdue</Pill>}
+            </div>
+            <Text size='micro' variant='label' component='span'>
+              placed {formatDateShort(card.placed) || '—'}
+              {isToPack && age > 0 ? ` · ${age}d` : ''}
+            </Text>
           </div>
-          {card.assignee ? (
-            <span
-              title={card.assignee}
-              className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-textColor text-[10px] leading-none text-bgColor'
-            >
-              {initials(card.assignee)}
-            </span>
-          ) : (
-            <span
-              title='unassigned'
-              className='h-5 w-5 shrink-0 rounded-full border border-dashed border-textInactiveColor'
-            />
-          )}
+          <Text component='span' className='shrink-0 font-bold tabular-nums'>
+            {formatMoney(card.total, card.currency)}
+          </Text>
         </div>
-      </button>
 
-      {canWrite && action && (
-        <Button
-          type='button'
-          variant='secondary'
-          size='lg'
-          loading={busy}
-          disabled={busy}
-          className={cn('w-full')}
-          onClick={() => (action === 'ship' ? onShip(card) : onDeliver(card))}
-        >
-          {action === 'ship' ? 'ship' : 'mark delivered'}
-        </Button>
-      )}
-    </div>
+        <div className='flex items-center gap-1.5'>
+          {card.checklistTotal > 0 && (
+            <Pill tone={checklistDone ? 'ok' : 'mut'}>
+              ✓ {card.checklistDone}/{card.checklistTotal}
+            </Pill>
+          )}
+          {card.hasNotes && <Pill tone='mut'>notes</Pill>}
+          <div className='ml-auto'>
+            <CardAssignee orderUuid={card.orderUuid} assignee={card.assignee} canWrite={canWrite} />
+          </div>
+        </div>
+
+        {canWrite && action && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='sm'
+            loading={busy}
+            disabled={busy}
+            className='w-full'
+            onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
+              e.stopPropagation();
+              action === 'ship' ? onShip(card) : onDeliver(card);
+            }}
+          >
+            {action === 'ship' ? 'ship' : 'mark delivered'}
+          </Button>
+        )}
+      </div>
+    </BoardCard>
   );
 }

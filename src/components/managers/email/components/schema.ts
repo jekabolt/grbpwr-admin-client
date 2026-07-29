@@ -122,6 +122,8 @@ const headerMember = z.object({
     // transient thumbnail url for the preview (not sent to the proto; the mapper
     // reads logoMediaId only). Mirrors hero storing mediaLandscapeUrl in-form.
     logoMediaUrl: z.string().optional(),
+    // brand logo alignment: left | center | right (default center).
+    logoPosition: z.string().optional(),
   }),
   translations: createStrictTranslationSchema(headerTranslation, requiredLanguageIds),
 });
@@ -136,6 +138,8 @@ const imageLinkMember = z.object({
     // click-through link target); not sent to the proto.
     mediaUrl: z.string().optional(),
     url: z.string().optional(),
+    // display aspect ratio: 16:9 | 1:1 | 4:5 (default 16:9).
+    aspect: z.string().optional(),
   }),
   translations: createStrictTranslationSchema(imageLinkTranslation, requiredLanguageIds),
 });
@@ -478,12 +482,17 @@ export function makeEmptyBlock(type: EmailBlockType, uid: string): EmailBlockFor
   const base = { _uid: uid, backgroundColor: '' };
   switch (type) {
     case 'EMAIL_BLOCK_TYPE_HEADER':
-      return { ...base, type, header: {}, translations: emptyTranslations } as EmailBlockForm;
+      return {
+        ...base,
+        type,
+        header: { logoPosition: 'center' },
+        translations: emptyTranslations,
+      } as EmailBlockForm;
     case 'EMAIL_BLOCK_TYPE_IMAGE_LINK':
       return {
         ...base,
         type,
-        imageLink: { url: '' },
+        imageLink: { url: '', aspect: '16:9' },
         translations: emptyTranslations,
       } as EmailBlockForm;
     case 'EMAIL_BLOCK_TYPE_RICH_TEXT':
@@ -512,7 +521,7 @@ export function makeEmptyBlock(type: EmailBlockType, uid: string): EmailBlockFor
     case 'EMAIL_BLOCK_TYPE_DIVIDER':
       return { ...base, type, divider: { color: '', height: 1 } } as EmailBlockForm;
     case 'EMAIL_BLOCK_TYPE_SPACER':
-      return { ...base, type, spacer: { height: 24 } } as EmailBlockForm;
+      return { ...base, type, spacer: { height: 32 } } as EmailBlockForm;
     case 'EMAIL_BLOCK_TYPE_TWO_COLUMN':
       return { ...base, type, twoColumn: { left: [], right: [] } } as EmailBlockForm;
     case 'EMAIL_BLOCK_TYPE_SOCIAL_LINKS':
@@ -532,7 +541,7 @@ export function makeEmptyBlock(type: EmailBlockType, uid: string): EmailBlockFor
         translations: emptyTranslations,
       } as EmailBlockForm;
     default:
-      return { ...base, type, spacer: { height: 24 } } as EmailBlockForm;
+      return { ...base, type, spacer: { height: 32 } } as EmailBlockForm;
   }
 }
 

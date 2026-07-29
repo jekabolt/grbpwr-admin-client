@@ -38,10 +38,10 @@ function isEmpty(value: number | string, empty: number | string) {
   return value === empty || value === 0 || value === '';
 }
 
-// Searchable, portalled entity typeahead. The results panel is a Radix Popover
-// rendered through a Portal (modal=false) so it escapes the create/edit modal's
-// overflow/stacking context instead of being clipped. Interact-outside is
-// guarded so typing in the input doesn't dismiss the results.
+// Searchable, portalled entity typeahead. tskLinks v2 drives it type-first: the
+// link editor picks the config, this searches within it. The results panel is a
+// Radix Popover (modal=false) so it escapes the create/edit modal's overflow.
+// Interact-outside is guarded so typing in the input doesn't dismiss the results.
 export function EntityPicker({
   value,
   onChange,
@@ -102,20 +102,20 @@ export function EntityPicker({
   return (
     <div className='flex flex-col gap-1.5' ref={rootRef}>
       {selected && (
-        <div className='flex items-center gap-2 border border-textInactiveColor p-1.5'>
+        <div className='flex items-center gap-2 border border-borderColor p-1.5'>
           {selected.thumbnail && (
             <img
               src={selected.thumbnail}
               alt=''
-              className='h-8 w-8 shrink-0 border border-textInactiveColor object-cover'
+              className='h-8 w-8 shrink-0 border border-borderColor object-cover'
             />
           )}
           <div className='min-w-0 flex-1'>
-            <Text size='small' className='truncate'>
+            <Text size='micro' className='truncate'>
               {selected.label}
             </Text>
             {selected.sublabel && (
-              <Text variant='inactive' size='small' className='truncate'>
+              <Text size='micro' variant='label' className='truncate'>
                 {selected.sublabel}
               </Text>
             )}
@@ -156,14 +156,14 @@ export function EntityPicker({
               // Keep results open while interacting with our own input/rows.
               if (rootRef.current?.contains(e.target as Node)) e.preventDefault();
             }}
-            className='z-[var(--z-popover)] max-h-60 w-[var(--radix-popover-trigger-width)] overflow-auto border border-textInactiveColor bg-bgColor'
+            className='z-[var(--z-popover)] max-h-60 w-[var(--radix-popover-trigger-width)] overflow-auto border border-textColor bg-bgColor shadow-[var(--shadow-popover)]'
           >
             {isFetching && results.length === 0 ? (
-              <Text variant='inactive' size='small' className='block p-2'>
+              <Text size='micro' variant='label' className='block p-2'>
                 searching…
               </Text>
             ) : results.length === 0 ? (
-              <Text variant='inactive' size='small' className='block p-2'>
+              <Text size='micro' variant='label' className='block p-2'>
                 {config.emptyResult}
               </Text>
             ) : (
@@ -173,23 +173,23 @@ export function EntityPicker({
                   type='button'
                   onClick={() => choose(o)}
                   className={cn(
-                    'flex w-full items-center gap-2 border-b border-textInactiveColor p-1.5 text-left last:border-b-0 hover:bg-black/[0.04]',
-                    o.value === value && 'bg-black/[0.06]',
+                    'flex w-full items-center gap-2 border-b border-borderColor p-1.5 text-left last:border-b-0 hover:bg-bgZebra',
+                    o.value === value && 'bg-bgSecondary',
                   )}
                 >
                   {o.thumbnail && (
                     <img
                       src={o.thumbnail}
                       alt=''
-                      className='h-8 w-8 shrink-0 border border-textInactiveColor object-cover'
+                      className='h-8 w-8 shrink-0 border border-borderColor object-cover'
                     />
                   )}
                   <div className='min-w-0'>
-                    <Text size='small' className='truncate'>
+                    <Text size='micro' className='truncate'>
                       {o.label}
                     </Text>
                     {o.sublabel && (
-                      <Text variant='inactive' size='small' className='truncate'>
+                      <Text size='micro' variant='label' className='truncate'>
                         {o.sublabel}
                       </Text>
                     )}

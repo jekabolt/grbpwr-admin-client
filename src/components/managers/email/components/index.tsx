@@ -34,7 +34,7 @@ import { campaignSchema, CampaignSchema, defaultCampaign } from './schema';
 import { SegmentPanel } from './segment-builder';
 import { SelectEmailType } from './selectEmailType';
 import { TestSendModal } from './test-send-modal';
-import { useCampaign, useSaveCampaign } from './useCampaign';
+import { useAutoTranslateCampaign, useCampaign, useSaveCampaign } from './useCampaign';
 
 /**
  * Email-campaign builder (route :id). Fork of hero/components/index.tsx MINUS the
@@ -51,6 +51,7 @@ export function CampaignBuilder() {
 
   const { data: campaignData, isLoading, isError, refetch } = useCampaign(routeId);
   const saveCampaign = useSaveCampaign();
+  const autoTranslate = useAutoTranslateCampaign();
 
   const entityRefs = useRef<{ [uid: string]: HTMLDivElement | null }>({});
   const productsByBlockUidRef = useRef<Record<string, common_Colorway[]>>({});
@@ -224,6 +225,23 @@ export function CampaignBuilder() {
             )}
           </div>
           <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => routeId && autoTranslate.mutate({ id: routeId })}
+              disabled={
+                !canWrite(SECTION.marketing) ||
+                !routeId ||
+                autoTranslate.isPending ||
+                saveCampaign.isPending
+              }
+              loading={autoTranslate.isPending}
+              title='Fill the other languages from English via AI (save first). Review before sending.'
+            >
+              auto-translate
+            </Button>
             <Button
               type='button'
               variant='secondary'

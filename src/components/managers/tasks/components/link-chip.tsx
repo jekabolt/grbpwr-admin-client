@@ -87,12 +87,13 @@ const KIND_PREFIX: Record<TaskLink['kind'], string> = {
 export function LinkChip({ link, onNavigate }: { link: TaskLink; onNavigate?: () => void }) {
   const { data } = useLinkName(link);
   const text = data?.name ? `${KIND_PREFIX[link.kind]}: ${data.name}` : link.label;
+  // Same box metrics as Pill/Chip, but a real navigating anchor.
   return (
     <Link
       to={data?.to ?? link.to}
       onClick={onNavigate}
       title={text}
-      className='max-w-full truncate border border-textInactiveColor px-2 py-0.5 text-textBaseSize lowercase hover:bg-textColor hover:text-bgColor'
+      className='inline-flex max-w-full items-center truncate border border-borderColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor transition-colors hover:bg-textColor hover:text-bgColor'
     >
       {text}
     </Link>

@@ -6,7 +6,22 @@ export const ordersKeys = {
   all: ['order'] as const,
   orders: (orderFactor?: string) => [...ordersKeys.all, 'orders', orderFactor] as const,
   order: (filters: { limit: number; offset: number }) => [...ordersKeys.orders(), filters] as const,
+  overview: () => [...ordersKeys.all, 'overview'] as const,
 };
+
+/**
+ * ordHead v2 — the counts strip now has a real aggregate RPC. GetOrdersOverview returns
+ * whole-table figures (per-status counts + today's orders/revenue) independent of which
+ * pages the list has loaded, so the strip no longer derives from fetched rows. Cached a
+ * couple of minutes since these move slowly relative to a browsing session.
+ */
+export function useOrdersOverview() {
+  return useQuery({
+    queryKey: ordersKeys.overview(),
+    queryFn: () => adminService.GetOrdersOverview({}),
+    staleTime: 2 * 60 * 1000,
+  });
+}
 
 export function useOrders(limit: number = 50, offset: number = 0) {
   return useQuery({
@@ -27,22 +42,45 @@ export function useOrders(limit: number = 50, offset: number = 0) {
   });
 }
 
-/** Parses search value: numeric → orderId, else → orderUuid */
-export function parseOrderSearch(value: string): { orderId?: number; orderUuid?: string } {
+/** Which of the three `ListOrders` lookups a typed search string resolved to. */
+export type OrderSearchKind = 'id' | 'email' | 'uuid';
+
+export type ParsedOrderSearch = {
+  kind?: OrderSearchKind;
+  orderId?: number;
+  orderUuid?: string;
+  email?: string;
+};
+
+/**
+ * ordFilters v3 — one box, three targets. `ListOrders` already accepts orderId,
+ * orderUuid and email as separate parameters; the operator should not have to know
+ * which field they are holding.
+ *
+ *   digits (`1042`, `#1042`) → orderId
+ *   contains `@`             → buyer email
+ *   anything else            → orderUuid
+ *
+ * The `?ref=` deep link from a support ticket lands in the same box and is parsed the
+ * same way, so a ticket carrying either an id or a uuid resolves without branching.
+ */
+export function parseOrderSearch(value: string): ParsedOrderSearch {
   const trimmed = value.trim();
   if (!trimmed) return {};
-  if (/^\d+$/.test(trimmed)) return { orderId: Number(trimmed) };
-  return { orderUuid: trimmed };
+  // Operators paste order numbers straight out of an email, `#` and all.
+  const digits = trimmed.replace(/^#/, '');
+  if (/^\d+$/.test(digits)) return { kind: 'id', orderId: Number(digits) };
+  if (trimmed.includes('@')) return { kind: 'email', email: trimmed };
+  return { kind: 'uuid', orderUuid: trimmed };
 }
 
 export function useInfiniteOrders(
   limit: number = 50,
   orderFactor: 'ORDER_FACTOR_ASC' | 'ORDER_FACTOR_DESC' = 'ORDER_FACTOR_DESC',
-  email?: string,
   status?: common_OrderStatusEnum,
-  orderSearch?: string,
+  search?: string,
 ) {
-  const { orderId, orderUuid } = parseOrderSearch(orderSearch ?? '');
+  const { orderId, orderUuid, email } = parseOrderSearch(search ?? '');
   return useInfiniteQuery({
     queryKey: [...ordersKeys.orders(orderFactor), email, status, orderId, orderUuid],
     queryFn: async ({ pageParam }: { pageParam: number }) => {
@@ -58,6 +96,9 @@ export function useInfiniteOrders(
       });
       return {
         orders: response.orders || [],
+        // Whole-table row count (ListOrdersResponse.total) — same on every page, read
+        // from page 0 for the header count. Independent of how many pages are loaded.
+        total: response.total,
         nextOffset: response.orders?.length === limit ? pageParam + limit : undefined,
       };
     },

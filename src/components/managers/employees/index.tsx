@@ -1,32 +1,57 @@
-import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { Employee, EmployeeInsert, OpexRecurring } from 'api/proto-http/admin';
+import { Employee, EmployeeInsert, OpexRecurring, OpexRecurringInsert } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useCostingFxRates, useOpexRecurring } from 'components/managers/opex/utils/hooks';
 import {
   currentMonth,
   formatMoney,
   latestRateToBase,
+  monthLabelShort,
   opexCurrencyOptions,
-  opexCurrencySymbol,
 } from 'components/managers/opex/utils/options';
-import { ROUTES } from 'constants/routes';
+import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { DataTable, EmptyCell } from 'ui/components/data-table';
+import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
+import SelectComponent from 'ui/components/select';
+import { SkeletonRows } from 'ui/components/skeleton';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
+import { SectionHeader } from 'ui/components/section-header';
 import { decimalToInput, normalizeDecimalInput, parseDecimalNumber } from 'utils/decimal';
-import { useArchiveEmployee, useEmployees, useUpsertEmployee } from './utils/hooks';
+import {
+  useArchiveEmployee,
+  useEmployees,
+  useUpsertEmployee,
+  useUpsertSalaryTemplate,
+} from './utils/hooks';
 
-// Employee registry (gap-07 v2 A): the people a salary OPEX template can point at. Costing-gated
-// like OPEX (the backend requires costing:read to list and costing:write to edit). This screen is a
-// people directory first — who is on the team, since when, in what role — and a salary-coverage
-// dashboard second: it cross-references the OPEX recurring templates to show, per person, whether
-// their salary is actually being booked as a cost, or whether the registry is tracking someone we
-// are silently not paying through OPEX. default_monthly_cost is only a template pre-fill hint, never
-// a booked figure — the OPEX journal stays the single source of truth for cost.
+/**
+ * empList v2 — the registry is a TABLE (DataTable), not a card grid. A person is one row:
+ * name (+ anomaly chips) · employment window · cost/month · lifecycle status. Clicking a row opens
+ * the edit form — the only per-row surface, so the table stays legible under many rows.
+ *
+ * empFilters v3 — no search/status controls: the table is SEGMENTED BY ROLE. Each role is a
+ * DataTable section-header row with a count; the empty-role bucket reads red as an anomaly.
+ *
+ * empKpi v1 / empAnomaly v1 — a 3-tile StatGrid (head-count · salary run-rate in base · left) and
+ * the OPEX salary cross-reference are ported verbatim: default_monthly_cost is only a template
+ * pre-fill hint, the OpexRecurring journal stays the single source of truth for booked cost. The
+ * anomaly logic (no salary / still booking / uncosted) now renders as row chips instead of on cards.
+ *
+ * empSalary v3 — the "create salary template" action lives HERE (was a link out to OPEX): from the
+ * edit form we upsert an OpexRecurring (category 'salaries', employee_id set) prefilled from the
+ * person's default cost / currency / employment start.
+ *
+ * empArchive v3 — the primary lifecycle action is "mark as left" (sets employment_end via
+ * UpsertEmployee); hard-archive stays available but demoted to a quiet underline.
+ */
 
 // Column limits mirror the backend (dto.ConvertPbEmployeeToEntity / g25-09): an over-long value must
 // be a clean client-side error, not a backend InvalidArgument surfaced as a failed save.
@@ -34,15 +59,21 @@ const MAX_NAME = 191;
 const MAX_ROLE = 64;
 const MAX_NOTE = 255;
 
-const fieldCls =
-  'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize text-textColor focus:border-textColor focus:outline-none';
+const NO_ROLE = '__none__';
 
 const day = (v?: string) => (v ? v.slice(0, 10) : '');
 const toMonth = (v?: string) => (v ? v.slice(0, 7) : '');
+const monthFirst = (v?: string) => {
+  const m = toMonth(v);
+  return m ? `${m}-01` : '';
+};
 
-// Today as YYYY-MM-DD from local wall-clock parts (new Date() is available in the app runtime; only
-// workflow scripts forbid it). YYYY-MM-DD compares lexicographically, so string `<` is a real date
-// comparison — no Date parsing needed for the employment-window checks.
+// value + currency CODE, per the design's money rule (never a symbol; the cell is right-aligned
+// tabular-nums by the DataTable grammar).
+const money = (n: number, code?: string) => `${formatMoney(n)} ${(code || '').toUpperCase()}`.trim();
+
+// Today as YYYY-MM-DD from local wall-clock parts. YYYY-MM-DD compares lexicographically, so string
+// `<` is a real date comparison — no Date parsing needed for the employment-window checks.
 function todayISO(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
@@ -50,7 +81,7 @@ function todayISO(): string {
   ).padStart(2, '0')}`;
 }
 
-// Whole months between two YYYY-MM-DD dates, floored (so a partial final month doesn't round up).
+// Whole months between two YYYY-MM-DD dates, floored (a partial final month doesn't round up).
 function monthsBetween(startISO: string, endISO: string): number {
   const [sy, sm, sd] = startISO.split('-').map(Number);
   const [ey, em, ed] = endISO.split('-').map(Number);
@@ -106,15 +137,17 @@ function activeThisMonth(r: OpexRecurring): boolean {
   return true;
 }
 
-// What OPEX says about a person's salary, derived by cross-referencing the (non-archived) recurring
-// templates linked to their id. `activeTemplates` are the ones booking cost this month (the real
-// figure); `linkedButInactive` are linked templates that are future-dated or already ended.
+// What OPEX says about a person's salary, from the (non-archived) recurring templates linked to
+// their id. `activeTemplates` book cost this month (the real figure); `linkedButInactive` are linked
+// but future-dated or ended; `uncosted` counts active templates whose currency has no FX rate today.
 type SalaryInfo = {
   activeTemplates: OpexRecurring[];
   linkedButInactive: OpexRecurring[];
-  bookedBase: number; // sum of active templates folded to base currency
-  uncosted: number; // active templates whose currency has no FX rate today (excluded from bookedBase)
+  bookedBase: number;
+  uncosted: number;
 };
+
+type RoleGroup = { key: string; label: string; isNoRole: boolean; employees: Employee[] };
 
 export function Employees() {
   const { canReadCosting, canWriteCosting } = usePermissions();
@@ -122,23 +155,21 @@ export function Employees() {
   const { dictionary } = useDictionary();
   const base = (dictionary?.baseCurrency || 'EUR').toUpperCase();
 
-  const [showArchived, setShowArchived] = useState(false);
-  const [query, setQuery] = useState('');
-  const [onlyUnbooked, setOnlyUnbooked] = useState(false);
-
-  const { data, isLoading, isError, refetch } = useEmployees(showArchived);
+  // empFilters v3 dropped the show-archived toggle: the registry lists current + departed staff.
+  const { data, isLoading, isError, refetch } = useEmployees(false);
   const rows = useMemo(() => data?.employees ?? [], [data]);
 
-  // Salary cross-reference: non-archived recurring templates that carry an employee link, plus the
-  // costing FX rates used to fold each into the base currency. Both are OPEX/costing data, gated the
-  // same way — only fetch the rates when the caller can read costing.
+  // Salary cross-reference: non-archived recurring templates carrying an employee link, plus the
+  // costing FX rates used to fold each into base. Both are costing data — only fetch rates when the
+  // caller can read costing.
   const { data: recurringData } = useOpexRecurring(false);
   const { data: fxData } = useCostingFxRates(canReadCosting);
   const fxRates = useMemo(() => fxData?.rates ?? [], [fxData]);
+  const recurring = useMemo(() => recurringData?.recurring ?? [], [recurringData]);
 
   const salaryByEmployee = useMemo(() => {
     const linked = new Map<number, OpexRecurring[]>();
-    for (const t of recurringData?.recurring ?? []) {
+    for (const t of recurring) {
       const eid = t.recurring?.employeeId;
       if (t.archived || !eid) continue;
       const list = linked.get(eid) ?? [];
@@ -167,7 +198,7 @@ export function Employees() {
       map.set(eid, info);
     }
     return map;
-  }, [recurringData, fxRates, base]);
+  }, [recurring, fxRates, base]);
 
   // Existing role titles, offered as a datalist so the same title is spelled the same way twice.
   const roleOptions = useMemo(() => {
@@ -179,47 +210,107 @@ export function Employees() {
     return [...set].sort((a, b) => a.localeCompare(b));
   }, [rows]);
 
-  // Team summary over the visible, still-active people: headcount, salary actually booked this month
-  // (base currency), and how many active people have no salary template booking a cost at all.
+  // empKpi v1: head-count (current staff), salary actually booked this month (base), and how many
+  // people have left. Uncosted active templates and current staff with no salary booked are surfaced
+  // in the subs so the strip stays 3 tiles.
   const summary = useMemo(() => {
     let headcount = 0;
+    let left = 0;
     let bookedBase = 0;
     let uncosted = 0;
     let unbooked = 0;
     for (const r of rows) {
-      if (r.archived) continue;
-      headcount += 1;
       const info = r.id ? salaryByEmployee.get(r.id) : undefined;
+      if (hasLeft(r.employee)) {
+        left += 1;
+        continue;
+      }
+      headcount += 1;
       if (info && info.activeTemplates.length > 0) {
         bookedBase += info.bookedBase;
         uncosted += info.uncosted;
-      } else if (!hasLeft(r.employee)) {
-        // Someone who has left is expected to have no active salary; only flag current staff.
+      } else {
         unbooked += 1;
       }
     }
-    return { headcount, bookedBase, uncosted, unbooked };
+    return { headcount, left, bookedBase, uncosted, unbooked };
   }, [rows, salaryByEmployee]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (q) {
-        const hay = `${r.employee?.fullName ?? ''} ${r.employee?.role ?? ''}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
-      if (onlyUnbooked) {
-        if (r.archived || hasLeft(r.employee)) return false;
-        const info = r.id ? salaryByEmployee.get(r.id) : undefined;
-        if (info && info.activeTemplates.length > 0) return false;
-      }
-      return true;
+  // empFilters v3: bucket by role, roles A→Z, the empty-role bucket last. Within a role, current
+  // staff first then departed, each alphabetical.
+  const groups = useMemo<RoleGroup[]>(() => {
+    const map = new Map<string, Employee[]>();
+    for (const r of rows) {
+      const key = r.employee?.role?.trim() || NO_ROLE;
+      const list = map.get(key) ?? [];
+      list.push(r);
+      map.set(key, list);
+    }
+    const keys = [...map.keys()].sort((a, b) => {
+      if (a === NO_ROLE) return 1;
+      if (b === NO_ROLE) return -1;
+      return a.localeCompare(b);
     });
-  }, [rows, query, onlyUnbooked, salaryByEmployee]);
+    return keys.map((key) => ({
+      key,
+      label: key === NO_ROLE ? 'no role' : key,
+      isNoRole: key === NO_ROLE,
+      employees: map.get(key)!.slice().sort((a, b) => {
+        const la = hasLeft(a.employee) ? 1 : 0;
+        const lb = hasLeft(b.employee) ? 1 : 0;
+        if (la !== lb) return la - lb;
+        return (a.employee?.fullName ?? '').localeCompare(b.employee?.fullName ?? '');
+      }),
+    }));
+  }, [rows]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Employee | undefined>();
+  const [leaving, setLeaving] = useState<Employee | undefined>();
   const [archiving, setArchiving] = useState<Employee | undefined>();
+
+  const openAdd = () => {
+    setEditing(undefined);
+    setFormOpen(true);
+  };
+  const openEdit = (r: Employee) => {
+    setEditing(r);
+    setFormOpen(true);
+  };
+  // Lifecycle actions leave the form and open their own small modal — never a nested dialog.
+  const onMarkLeft = (r: Employee) => {
+    setFormOpen(false);
+    setLeaving(r);
+  };
+  const onArchive = (r: Employee) => {
+    setFormOpen(false);
+    setArchiving(r);
+  };
+
+  // empArchive v3: "mark as left" = UpsertEmployee with employment_end set. Upsert replaces the row,
+  // so every existing field is sent back alongside the new end date.
+  const upsertLeave = useUpsertEmployee();
+  const [leaveDate, setLeaveDate] = useState(todayISO());
+  useEffect(() => {
+    if (leaving) setLeaveDate(day(leaving.employee?.employmentEnd) || todayISO());
+  }, [leaving]);
+  const confirmLeave = () => {
+    if (!leaving?.id || !leaving.employee) return;
+    const start = day(leaving.employee.employmentStart);
+    if (start && leaveDate < start) {
+      showMessage('Leave date is before the employment start', 'error');
+      return;
+    }
+    upsertLeave.mutate(
+      { id: leaving.id, employee: { ...leaving.employee, employmentEnd: leaveDate } },
+      {
+        onSuccess: () =>
+          showMessage(`${leaving.employee?.fullName || 'Employee'} marked as left`, 'success'),
+        onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save', 'error'),
+        onSettled: () => setLeaving(undefined),
+      },
+    );
+  };
 
   const archive = useArchiveEmployee();
   const confirmArchive = () => {
@@ -230,146 +321,134 @@ export function Employees() {
       onSettled: () => setArchiving(undefined),
     });
   };
-
-  const openAdd = () => {
-    setEditing(undefined);
-    setFormOpen(true);
-  };
-
   const archivingInfo = archiving?.id ? salaryByEmployee.get(archiving.id) : undefined;
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
-      <div className='-mx-2.5 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
-        <Text variant='uppercase' size='large'>
-          employees
-        </Text>
-        {canWriteCosting && canReadCosting && (
-          <Button type='button' variant='main' size='lg' className='uppercase' onClick={openAdd}>
-            + employee
-          </Button>
-        )}
-      </div>
+      <SectionHeader
+        title='employees'
+        question='who is on the team — and is each salary booked as a cost?'
+        action={
+          canReadCosting &&
+          canWriteCosting && (
+            <Button type='button' variant='main' size='sm' onClick={openAdd}>
+              + employee
+            </Button>
+          )
+        }
+      />
 
-      {/* Registry is costing data: without costing:read the backend refuses the list. Say so rather
-          than render an empty/failed screen (mirrors the OPEX page). */}
+      {/* Registry is costing data: without costing:read the backend refuses the list. */}
       {!canReadCosting ? (
-        <Text variant='inactive' size='small'>
-          The employee registry requires costing access — ask an admin for the costing section.
-        </Text>
+        <CalloutBox tone='note'>
+          <Text size='micro' variant='label' component='span'>
+            The employee registry requires costing access — ask an admin for the costing section.
+          </Text>
+        </CalloutBox>
       ) : (
         <>
           {rows.length > 0 && (
-            <div className='grid grid-cols-1 gap-px border border-textInactiveColor bg-textInactiveColor sm:grid-cols-3'>
-              <StatTile label='current team' value={String(summary.headcount)} />
-              <StatTile
-                label={`salary booked / month · ${base}`}
-                value={`${opexCurrencySymbol(base)}${formatMoney(summary.bookedBase)}`}
+            <StatGrid min={150}>
+              <Stat
+                label='current team'
+                value={String(summary.headcount)}
+                sub={summary.unbooked > 0 ? `${summary.unbooked} without salary` : 'all covered'}
+                tone={summary.unbooked > 0 ? 'down' : undefined}
+              />
+              <Stat
+                label={`salary run-rate · ${base}`}
+                value={money(summary.bookedBase, base)}
                 sub={
                   summary.uncosted > 0
-                    ? `${summary.uncosted} template(s) uncosted (excluded) !`
-                    : 'from active OPEX salary templates'
+                    ? `${summary.uncosted} template(s) uncosted`
+                    : 'booked via OPEX'
                 }
-                alert={summary.uncosted > 0}
+                tone={summary.uncosted > 0 ? 'down' : undefined}
               />
-              <StatTile
-                label='no salary booked'
-                value={String(summary.unbooked)}
-                sub={
-                  summary.unbooked > 0 ? 'active people not booked in OPEX' : 'everyone is covered'
-                }
-                alert={summary.unbooked > 0}
+              <Stat
+                label='left'
+                value={String(summary.left)}
+                sub={summary.left > 0 ? 'employment ended' : 'nobody has left'}
               />
-            </div>
+            </StatGrid>
           )}
 
-          {/* controls */}
-          <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
-            <input
-              className={`${fieldCls} w-auto min-w-52 grow`}
-              placeholder='search name or role'
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
-            <label className='flex items-center gap-2'>
-              <input
-                type='checkbox'
-                checked={onlyUnbooked}
-                onChange={(e) => setOnlyUnbooked(e.target.checked)}
-              />
-              <Text size='small'>only missing salary</Text>
-            </label>
-            <label className='flex items-center gap-2'>
-              <input
-                type='checkbox'
-                checked={showArchived}
-                onChange={(e) => setShowArchived(e.target.checked)}
-              />
-              <Text size='small'>show archived</Text>
-            </label>
-          </div>
-
-          {isLoading ? (
-            <Text variant='inactive' size='small'>
-              loading…
-            </Text>
+          {isLoading && !rows.length ? (
+            <DataTable>
+              <EmployeeTableHead />
+              <tbody>
+                <SkeletonRows rows={6} widths={[170, 130, 90, 60]} />
+              </tbody>
+            </DataTable>
           ) : isError ? (
             <div className='flex items-center gap-3'>
-              <Text variant='error' size='small'>
+              <Text variant='error' size='micro' tracking='label' component='span'>
                 failed to load employees
               </Text>
-              <button
-                type='button'
-                className='text-textBaseSize uppercase underline'
-                onClick={() => refetch()}
-              >
+              <Button variant='underline' size='xs' onClick={() => refetch()}>
                 retry
-              </button>
+              </Button>
             </div>
           ) : rows.length === 0 ? (
-            <div className='flex flex-col items-start gap-2 border border-dashed border-textInactiveColor p-6'>
-              <Text variant='uppercase' size='small'>
+            <CalloutBox tone='note' className='flex flex-col items-start gap-2 border-dashed'>
+              <Text
+                size='micro'
+                variant='label'
+                tracking='label'
+                component='span'
+                className='font-bold uppercase'
+              >
                 no employees yet
               </Text>
-              <Text variant='inactive' size='small'>
-                The registry lists the people behind your salary costs. Add someone here, then link
-                an OPEX “salaries” template to them so their monthly cost is booked automatically.
-                The default monthly cost you set is only a pre-fill hint for that template — never a
-                booked figure on its own.
+              <Text size='micro' variant='label' component='span'>
+                The registry lists the people behind your salary costs. Add someone, then create a
+                salary template so their monthly cost is booked in OPEX automatically. Default
+                monthly cost is only a pre-fill hint — never a booked figure on its own.
               </Text>
               {canWriteCosting && (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='lg'
-                  className='mt-1 uppercase'
-                  onClick={openAdd}
-                >
+                <Button type='button' variant='main' size='sm' className='mt-1' onClick={openAdd}>
                   + employee
                 </Button>
               )}
-            </div>
-          ) : filtered.length === 0 ? (
-            <Text variant='inactive' size='small'>
-              no employees match the current filters
-            </Text>
+            </CalloutBox>
           ) : (
-            <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-              {filtered.map((r) => (
-                <EmployeeCard
-                  key={r.id}
-                  row={r}
-                  base={base}
-                  salary={r.id ? salaryByEmployee.get(r.id) : undefined}
-                  canWrite={canWriteCosting}
-                  onEdit={() => {
-                    setEditing(r);
-                    setFormOpen(true);
-                  }}
-                  onArchive={() => setArchiving(r)}
-                />
+            <DataTable>
+              <EmployeeTableHead />
+              {groups.map((g, gi) => (
+                <tbody key={g.key}>
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className={cn('align-bottom !border-b-borderColor pb-0.5', gi > 0 && 'pt-4')}
+                    >
+                      <span className='flex items-baseline gap-1.5'>
+                        <Text
+                          size='micro'
+                          variant={g.isNoRole ? 'error' : 'label'}
+                          tracking='group'
+                          component='span'
+                          className='font-bold uppercase'
+                        >
+                          {g.label}
+                        </Text>
+                        <Text size='micro' variant='label' component='span'>
+                          · {g.employees.length}
+                        </Text>
+                      </span>
+                    </td>
+                  </tr>
+                  {g.employees.map((r) => (
+                    <EmployeeRow
+                      key={r.id}
+                      row={r}
+                      base={base}
+                      salary={r.id ? salaryByEmployee.get(r.id) : undefined}
+                      onOpen={() => openEdit(r)}
+                    />
+                  ))}
+                </tbody>
               ))}
-            </div>
+            </DataTable>
           )}
         </>
       )}
@@ -380,7 +459,40 @@ export function Employees() {
         existing={editing}
         base={base}
         roleOptions={roleOptions}
+        recurring={recurring}
+        onMarkLeft={onMarkLeft}
+        onArchive={onArchive}
       />
+
+      <ConfirmationModal
+        open={leaving != null}
+        onOpenChange={(v) => !v && setLeaving(undefined)}
+        onConfirm={confirmLeave}
+        title='mark as left?'
+        confirmLabel='mark as left'
+        confirmDisabled={upsertLeave.isPending}
+        closeOnConfirm={false}
+        width='sm'
+      >
+        <div className='flex flex-col gap-2.5'>
+          <Text size='micro' variant='label' component='span'>
+            Set the last working day for “{leaving?.employee?.fullName}”. They stay in the registry,
+            rendered as left. Any linked salary template keeps booking until you end it in OPEX.
+          </Text>
+          <label className='flex flex-col gap-1'>
+            <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+              leave date
+            </Text>
+            <Input
+              type='date'
+              name='leave-date'
+              value={leaveDate}
+              min={day(leaving?.employee?.employmentStart) || undefined}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeaveDate(e.target.value)}
+            />
+          </label>
+        </div>
+      </ConfirmationModal>
 
       <ConfirmationModal
         open={archiving != null}
@@ -389,17 +501,18 @@ export function Employees() {
         title='archive employee?'
         confirmLabel='archive'
         confirmDisabled={archive.isPending}
+        closeOnConfirm={false}
+        width='sm'
       >
         <div className='flex flex-col gap-2'>
-          <Text size='small'>
-            Archive “{archiving?.employee?.fullName}”? They stop appearing in the salary-template
-            picker and this list (unless you show archived).
+          <Text size='micro' variant='label' component='span'>
+            Archive “{archiving?.employee?.fullName}”? They drop out of this list and the
+            salary-template picker. Prefer “mark as left” if they simply stopped working here.
           </Text>
           {archivingInfo && archivingInfo.activeTemplates.length > 0 && (
-            <Text size='small' variant='error'>
+            <Text size='micro' variant='error' component='span'>
               Heads up: {archivingInfo.activeTemplates.length} linked salary template(s) stay active
-              and KEEP booking their cost every month. If this person has left, archive those
-              templates in OPEX too.
+              and KEEP booking their cost every month. End them in OPEX too.
             </Text>
           )}
         </div>
@@ -408,176 +521,123 @@ export function Employees() {
   );
 }
 
-function StatTile({
-  label,
-  value,
-  sub,
-  alert,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  alert?: boolean;
-}) {
+function EmployeeTableHead() {
   return (
-    <div className='flex flex-col gap-1 bg-bgColor p-3'>
-      <Text size='small' variant='inactive' className='uppercase'>
-        {label}
-      </Text>
-      <Text size='large'>{value}</Text>
-      {sub && (
-        <Text size='small' variant={alert ? 'error' : 'inactive'}>
-          {sub}
-        </Text>
-      )}
-    </div>
+    <thead>
+      <tr>
+        <th>name</th>
+        <th>employment</th>
+        <th>cost / mo</th>
+        <th>status</th>
+      </tr>
+    </thead>
   );
 }
 
-function Chip({
-  children,
-  tone = 'default',
-}: {
-  children: React.ReactNode;
-  tone?: 'default' | 'warn';
-}) {
-  const cls =
-    tone === 'warn' ? 'border-error text-error' : 'border-textInactiveColor text-textInactiveColor';
-  return <span className={`border px-1.5 py-0.5 text-small uppercase ${cls}`}>{children}</span>;
-}
-
-function EmployeeCard({
+// empList v2 row + empAnomaly v1 chips. Clicking anywhere opens the edit form.
+function EmployeeRow({
   row,
   base,
   salary,
-  canWrite,
-  onEdit,
-  onArchive,
+  onOpen,
 }: {
   row: Employee;
   base: string;
   salary?: SalaryInfo;
-  canWrite: boolean;
-  onEdit: () => void;
-  onArchive: () => void;
+  onOpen: () => void;
 }) {
   const e = row.employee;
   const left = hasLeft(e);
   const booked = (salary?.activeTemplates.length ?? 0) > 0;
-  const defaultCost = decimalToInput(e?.defaultMonthlyCost);
+  const linkedInactive = (salary?.linkedButInactive.length ?? 0) > 0;
+  const defaultCostStr = decimalToInput(e?.defaultMonthlyCost);
   const tenure = tenureLabel(e?.employmentStart, e?.employmentEnd);
 
+  const chips: React.ReactNode[] = [];
+  if (left && booked) chips.push(<Chip key='sb' tone='error'>still booking</Chip>);
+  if (booked && (salary?.uncosted ?? 0) > 0) chips.push(<Chip key='uc' tone='error'>uncosted</Chip>);
+  if (!left && !booked) {
+    if (linkedInactive) chips.push(<Chip key='si'>salary inactive</Chip>);
+    else chips.push(<Chip key='ns' tone='error'>no salary</Chip>);
+  }
+
   return (
-    <div
-      className={`flex flex-col gap-2 border border-textInactiveColor p-3 ${
-        row.archived ? 'opacity-60' : ''
-      }`}
+    <tr
+      role='button'
+      tabIndex={0}
+      aria-label={`edit ${e?.fullName || 'employee'}`}
+      onClick={onOpen}
+      onKeyDown={(ev: React.KeyboardEvent<HTMLTableRowElement>) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          onOpen();
+        }
+      }}
+      className={cn(
+        'cursor-pointer transition-colors hover:bg-bgZebra',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+        left && 'opacity-60',
+      )}
     >
-      <div className='flex items-start justify-between gap-2'>
-        <div className='flex min-w-0 flex-col'>
-          <Text className='truncate'>{e?.fullName || '—'}</Text>
-          <div className='mt-0.5 flex flex-wrap items-center gap-1'>
-            {e?.role && <Chip>{e.role}</Chip>}
-            {row.archived ? (
-              <Chip>archived</Chip>
-            ) : left ? (
-              <Chip tone='warn'>left</Chip>
+      <td>
+        <span className='flex flex-col items-start gap-0.5 text-left'>
+          <Text component='span' className='font-medium'>
+            {e?.fullName || '—'}
+          </Text>
+          {chips.length > 0 && <ChipRow>{chips}</ChipRow>}
+          {e?.note && (
+            <Text size='micro' variant='label' component='span' className='block max-w-[32ch] truncate'>
+              {e.note}
+            </Text>
+          )}
+        </span>
+      </td>
+      <td>
+        <span className='flex flex-col items-end gap-0.5'>
+          <Text component='span'>
+            {!e?.employmentStart && !e?.employmentEnd ? (
+              <EmptyCell />
             ) : (
-              <Chip>active</Chip>
+              <>
+                {e?.employmentStart ? fmtDate(e.employmentStart) : '—'} →{' '}
+                {e?.employmentEnd ? fmtDate(e.employmentEnd) : '—'}
+              </>
             )}
-            {/* Anomaly: a departed/archived person whose salary template is still booking cost. */}
-            {(left || row.archived) && booked && <Chip tone='warn'>still booking !</Chip>}
-            {/* Current staff with no salary template booking a cost — the actionable gap. */}
-            {!row.archived && !left && !booked && <Chip tone='warn'>no salary</Chip>}
-            {booked && (salary?.uncosted ?? 0) > 0 && <Chip tone='warn'>uncosted !</Chip>}
-          </div>
-        </div>
-        <div className='shrink-0 text-right'>
-          {booked ? (
-            <>
-              <Text>
-                {opexCurrencySymbol(base)}
-                {formatMoney(salary?.bookedBase ?? 0)}
-              </Text>
-              <Text size='small' variant='inactive'>
-                booked / mo
-              </Text>
-            </>
-          ) : defaultCost ? (
-            <>
-              <Text variant='inactive'>
-                {opexCurrencySymbol(e?.defaultCurrency || base)}
-                {formatMoney(Number(defaultCost) || 0)}
-              </Text>
-              <Text size='small' variant='inactive'>
-                default (hint)
-              </Text>
-            </>
-          ) : null}
-        </div>
-      </div>
-
-      <Text size='small' variant='inactive'>
-        {e?.employmentStart ? fmtDate(e.employmentStart) : 'start —'} →{' '}
-        {e?.employmentEnd ? fmtDate(e.employmentEnd) : 'present'}
-        {tenure ? ` · ${tenure}` : ''}
-      </Text>
-
-      {/* Salary detail: what's booked, or a nudge toward booking it. */}
-      {booked ? (
-        <Text size='small' variant='inactive'>
-          booked via{' '}
-          {salary?.activeTemplates
-            .map(
-              (t) =>
-                `${t.recurring?.label || 'salary'} (${opexCurrencySymbol(t.recurring?.currency)}${formatMoney(
-                  Number(decimalToInput(t.recurring?.amount)) || 0,
-                )} ${t.recurring?.currency || ''})`,
-            )
-            .join(', ')}
-        </Text>
-      ) : (salary?.linkedButInactive.length ?? 0) > 0 ? (
-        <Text size='small' variant='inactive'>
-          a linked salary template is not booking this month (future-dated or ended) —{' '}
-          <Link to={`${ROUTES.opex}?view=recurring`} className='underline'>
-            review in OPEX
-          </Link>
-        </Text>
-      ) : !row.archived && !left ? (
-        <Text size='small' variant='inactive'>
-          no salary booked —{' '}
-          <Link to={`${ROUTES.opex}?view=recurring`} className='underline'>
-            add a salaries template
-          </Link>{' '}
-          linked to this person
-        </Text>
-      ) : null}
-
-      {e?.note && (
-        <Text size='small' variant='inactive' className='truncate'>
-          {e.note}
-        </Text>
-      )}
-
-      {canWrite && !row.archived && (
-        <div className='flex items-center gap-3 border-t border-textInactiveColor/40 pt-2'>
-          <button
-            type='button'
-            className='text-textBaseSize uppercase underline hover:text-textColor'
-            onClick={onEdit}
-          >
-            edit
-          </button>
-          <button
-            type='button'
-            className='text-textBaseSize uppercase text-textInactiveColor hover:text-error'
-            onClick={onArchive}
-          >
-            archive
-          </button>
-        </div>
-      )}
-    </div>
+          </Text>
+          {tenure && (
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              {tenure}
+            </Text>
+          )}
+        </span>
+      </td>
+      <td>
+        {booked ? (
+          <span className='flex flex-col items-end gap-0.5'>
+            <Text component='span' className='font-medium'>
+              {money(salary?.bookedBase ?? 0, base)}
+            </Text>
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              booked / mo
+            </Text>
+          </span>
+        ) : defaultCostStr ? (
+          <span className='flex flex-col items-end gap-0.5'>
+            <Text component='span' variant='label'>
+              {money(Number(defaultCostStr) || 0, e?.defaultCurrency || base)}
+            </Text>
+            <Text size='micro' variant='label' component='span' className='uppercase'>
+              default (hint)
+            </Text>
+          </span>
+        ) : (
+          <EmptyCell />
+        )}
+      </td>
+      <td>
+        {left ? <Pill tone='mut'>left</Pill> : <Pill tone='ink'>active</Pill>}
+      </td>
+    </tr>
   );
 }
 
@@ -601,21 +661,56 @@ const makeEmptyDraft = (base: string): Draft => ({
   note: '',
 });
 
+const currencyItems = opexCurrencyOptions.map((c) => ({ value: c.value, label: c.value }));
+
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className='flex flex-col gap-1'>
+      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+        {label}
+      </Text>
+      {children}
+      {hint && (
+        <Text size='micro' variant='label' component='span'>
+          {hint}
+        </Text>
+      )}
+    </label>
+  );
+}
+
+// empForm v1 (single-column, ~7 fields matching EmployeeInsert) + empSalary v3 (create/inspect the
+// linked salary template) + empArchive v3 lifecycle actions, all inside the one ConfirmationModal.
 function EmployeeFormModal({
   open,
   onOpenChange,
   existing,
   base,
   roleOptions,
+  recurring,
+  onMarkLeft,
+  onArchive,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   existing?: Employee;
   base: string;
   roleOptions: string[];
+  recurring: OpexRecurring[];
+  onMarkLeft: (r: Employee) => void;
+  onArchive: (r: Employee) => void;
 }) {
   const { showMessage } = useSnackBarStore();
   const upsert = useUpsertEmployee();
+  const salaryMut = useUpsertSalaryTemplate();
   const [d, setD] = useState<Draft>(makeEmptyDraft(base));
 
   useEffect(() => {
@@ -638,36 +733,53 @@ function EmployeeFormModal({
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
 
+  // Salary templates already linked to THIS person (non-archived), split into booking-this-month and
+  // linked-but-idle — the same activeThisMonth test the list uses.
+  const linked = useMemo(() => {
+    if (!existing?.id) return { all: [] as OpexRecurring[], active: 0 };
+    const all = recurring.filter((t) => !t.archived && t.recurring?.employeeId === existing.id);
+    return { all, active: all.filter(activeThisMonth).length };
+  }, [recurring, existing]);
+
+  const canCreateSalary = !!d.defaultMonthlyCost.trim();
+  const createSalary = () => {
+    if (!existing?.id) return;
+    const recurringInsert: OpexRecurringInsert = {
+      label: `${d.fullName.trim() || 'employee'} — salary`,
+      category: 'salaries',
+      amount: { value: normalizeDecimalInput(d.defaultMonthlyCost) },
+      currency: d.defaultCurrency,
+      activeFrom: monthFirst(d.employmentStart) || `${currentMonth()}-01`,
+      activeTo: '',
+      note: '',
+      employeeId: existing.id,
+    };
+    salaryMut.mutate(
+      { id: 0, recurring: recurringInsert },
+      {
+        onSuccess: () => showMessage('Salary template created', 'success'),
+        onError: (e) =>
+          showMessage(e instanceof Error ? e.message : 'Failed to create template', 'error'),
+      },
+    );
+  };
+
   const submit = async () => {
     const name = d.fullName.trim();
-    if (!name) {
-      showMessage('Enter a name', 'error');
-      return;
-    }
-    if (name.length > MAX_NAME) {
-      showMessage(`Name must be at most ${MAX_NAME} characters`, 'error');
-      return;
-    }
-    if (d.role.trim().length > MAX_ROLE) {
-      showMessage(`Role must be at most ${MAX_ROLE} characters`, 'error');
-      return;
-    }
-    if (d.note.trim().length > MAX_NOTE) {
-      showMessage(`Note must be at most ${MAX_NOTE} characters`, 'error');
-      return;
-    }
+    if (!name) return showMessage('Enter a name', 'error');
+    if (name.length > MAX_NAME) return showMessage(`Name must be at most ${MAX_NAME} characters`, 'error');
+    if (d.role.trim().length > MAX_ROLE)
+      return showMessage(`Role must be at most ${MAX_ROLE} characters`, 'error');
+    if (d.note.trim().length > MAX_NOTE)
+      return showMessage(`Note must be at most ${MAX_NOTE} characters`, 'error');
     if (d.defaultMonthlyCost.trim()) {
       const n = parseDecimalNumber(d.defaultMonthlyCost);
-      if (!Number.isFinite(n) || n < 0) {
-        showMessage('Default monthly cost must be a non-negative number', 'error');
-        return;
-      }
+      if (!Number.isFinite(n) || n < 0)
+        return showMessage('Default monthly cost must be a non-negative number', 'error');
     }
     // YYYY-MM-DD strings compare lexicographically.
-    if (d.employmentEnd && d.employmentStart && d.employmentEnd < d.employmentStart) {
-      showMessage('End date is before the start date', 'error');
-      return;
-    }
+    if (d.employmentEnd && d.employmentStart && d.employmentEnd < d.employmentStart)
+      return showMessage('End date is before the start date', 'error');
     try {
       await upsert.mutateAsync({
         id: existing?.id ?? 0,
@@ -690,166 +802,182 @@ function EmployeeFormModal({
     }
   };
 
+  const isEdit = !!existing?.id;
+  const alreadyLeft = hasLeft(existing?.employee);
+
   return (
-    <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
-      <DialogPrimitives.Portal>
-        <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[440px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
-            <DialogPrimitives.Title className='text-lg uppercase'>
-              {existing ? 'edit employee' : 'add employee'}
-            </DialogPrimitives.Title>
-            <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
-            </DialogPrimitives.Close>
-          </div>
-          <DialogPrimitives.Description className='sr-only'>
-            employee registry entry
-          </DialogPrimitives.Description>
-          <div className='flex flex-col gap-3 p-4'>
-            <label className='flex flex-col gap-1'>
-              <Text size='small' variant='label'>
-                full name *
-              </Text>
-              <input
-                className={fieldCls}
-                value={d.fullName}
-                maxLength={MAX_NAME}
-                autoFocus
-                onChange={(e) => set({ fullName: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='small' variant='label'>
-                role
-              </Text>
-              <input
-                className={fieldCls}
-                value={d.role}
-                maxLength={MAX_ROLE}
-                list='employee-roles'
-                onChange={(e) => set({ role: e.target.value })}
-                placeholder='e.g. seamstress, pattern maker'
-              />
-              <datalist id='employee-roles'>
-                {roleOptions.map((r) => (
-                  <option key={r} value={r} />
-                ))}
-              </datalist>
-            </label>
-            <div className='grid grid-cols-2 gap-2'>
-              <label className='flex flex-col gap-1'>
-                <Text size='small' variant='label'>
-                  employment from
-                </Text>
-                <input
-                  className={fieldCls}
-                  type='date'
-                  value={d.employmentStart}
-                  max={d.employmentEnd || undefined}
-                  onChange={(e) => set({ employmentStart: e.target.value })}
-                />
-              </label>
-              <label className='flex flex-col gap-1'>
-                <div className='flex items-center justify-between gap-2'>
-                  <Text size='small' variant='label'>
-                    to (optional)
-                  </Text>
-                  {d.employmentEnd ? (
-                    <button
-                      type='button'
-                      className='text-small uppercase text-textInactiveColor underline hover:text-textColor'
-                      onClick={() => set({ employmentEnd: '' })}
-                    >
-                      clear
-                    </button>
-                  ) : (
-                    <button
-                      type='button'
-                      className='text-small uppercase text-textInactiveColor underline hover:text-textColor'
-                      onClick={() => set({ employmentEnd: todayISO() })}
-                    >
-                      ended today
-                    </button>
-                  )}
-                </div>
-                <input
-                  className={fieldCls}
-                  type='date'
-                  value={d.employmentEnd}
-                  min={d.employmentStart || undefined}
-                  onChange={(e) => set({ employmentEnd: e.target.value })}
-                />
-              </label>
-            </div>
-            <div className='grid grid-cols-[1fr_7rem] gap-2'>
-              <label className='flex flex-col gap-1'>
-                <Text size='small' variant='label'>
-                  default monthly cost
-                </Text>
-                <input
-                  className={fieldCls}
-                  type='number'
-                  step='0.01'
-                  min='0'
-                  inputMode='decimal'
-                  placeholder='0.00'
-                  value={d.defaultMonthlyCost}
-                  onChange={(e) => set({ defaultMonthlyCost: e.target.value })}
-                />
-              </label>
-              <label className='flex flex-col gap-1'>
-                <Text size='small' variant='label'>
-                  currency
-                </Text>
-                <select
-                  className={fieldCls}
-                  value={d.defaultCurrency}
-                  onChange={(e) => set({ defaultCurrency: e.target.value })}
-                >
-                  {opexCurrencyOptions.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.value}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <Text variant='inactive' size='small'>
-              Default monthly cost only pre-fills a salary OPEX template when you link this person
-              to one — it is never itself a booked cost.
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={submit}
+      title={isEdit ? 'edit employee' : 'add employee'}
+      confirmLabel={isEdit ? 'save' : 'add'}
+      confirmDisabled={upsert.isPending}
+      closeOnConfirm={false}
+      width='md'
+    >
+      <div className='flex flex-col gap-2.5'>
+        <Field label='full name *'>
+          <Input
+            name='fullName'
+            value={d.fullName}
+            maxLength={MAX_NAME}
+            autoFocus
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ fullName: e.target.value })}
+          />
+        </Field>
+        <Field label='role'>
+          <Input
+            name='role'
+            value={d.role}
+            maxLength={MAX_ROLE}
+            list='employee-roles'
+            placeholder='e.g. seamstress, pattern maker'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ role: e.target.value })}
+          />
+          <datalist id='employee-roles'>
+            {roleOptions.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
+        </Field>
+        <div className='grid grid-cols-2 gap-2'>
+          <Field label='employment from'>
+            <Input
+              type='date'
+              name='employmentStart'
+              value={d.employmentStart}
+              max={d.employmentEnd || undefined}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                set({ employmentStart: e.target.value })
+              }
+            />
+          </Field>
+          <Field label='employment to (optional)'>
+            <Input
+              type='date'
+              name='employmentEnd'
+              value={d.employmentEnd}
+              min={d.employmentStart || undefined}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                set({ employmentEnd: e.target.value })
+              }
+            />
+          </Field>
+        </div>
+        <div className='grid grid-cols-[1fr_7rem] gap-2'>
+          <Field label='default monthly cost' hint='pre-fill hint only — never a booked cost'>
+            <Input
+              type='number'
+              name='defaultMonthlyCost'
+              step='0.01'
+              min='0'
+              inputMode='decimal'
+              placeholder='0.00'
+              value={d.defaultMonthlyCost}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                set({ defaultMonthlyCost: e.target.value })
+              }
+            />
+          </Field>
+          <Field label='currency'>
+            <SelectComponent
+              name='defaultCurrency'
+              placeholder='currency'
+              fullWidth
+              items={currencyItems}
+              value={d.defaultCurrency}
+              onValueChange={(v: string) => set({ defaultCurrency: v })}
+            />
+          </Field>
+        </div>
+        <Field label='note (optional)'>
+          <Input
+            name='note'
+            value={d.note}
+            maxLength={MAX_NOTE}
+            placeholder='e.g. night shift, contractor'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => set({ note: e.target.value })}
+          />
+        </Field>
+
+        {isEdit && (
+          <div className='flex flex-col gap-1.5 border-t border-borderColor pt-2.5'>
+            <Text
+              size='micro'
+              variant='label'
+              tracking='label'
+              component='span'
+              className='font-bold uppercase'
+            >
+              salary template
             </Text>
-            <label className='flex flex-col gap-1'>
-              <Text size='small' variant='label'>
-                note (optional)
-              </Text>
-              <input
-                className={fieldCls}
-                value={d.note}
-                maxLength={MAX_NOTE}
-                onChange={(e) => set({ note: e.target.value })}
-                placeholder='e.g. night shift, contractor'
-              />
-            </label>
+            {linked.all.length > 0 ? (
+              <CalloutBox tone='note' className='flex flex-col gap-1'>
+                <Text size='micro' variant='label' component='span'>
+                  {linked.active > 0
+                    ? 'a salary template is booking this cost every month:'
+                    : 'a linked salary template exists but is not booking this month:'}
+                </Text>
+                {linked.all.map((t) => (
+                  <Text key={t.id} size='micro' component='span'>
+                    {t.recurring?.label} —{' '}
+                    {money(Number(decimalToInput(t.recurring?.amount)) || 0, t.recurring?.currency)}{' '}
+                    · {monthLabelShort(toMonth(t.recurring?.activeFrom))} →{' '}
+                    {t.recurring?.activeTo ? monthLabelShort(toMonth(t.recurring.activeTo)) : 'open'}
+                    {activeThisMonth(t) ? '' : ' (inactive)'}
+                  </Text>
+                ))}
+              </CalloutBox>
+            ) : (
+              <>
+                <Text size='micro' variant='label' component='span'>
+                  No salary template links to this person, so their cost is not booked in OPEX.
+                  Create one prefilled from the default monthly cost and employment start.
+                </Text>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  disabled={!canCreateSalary || salaryMut.isPending}
+                  onClick={createSalary}
+                >
+                  {salaryMut.isPending ? 'creating…' : 'create salary template'}
+                </Button>
+                {!canCreateSalary && (
+                  <Text size='micro' variant='label' component='span'>
+                    Set a default monthly cost above to enable this.
+                  </Text>
+                )}
+              </>
+            )}
           </div>
-          <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
-            <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
-              cancel
-            </Button>
+        )}
+
+        {isEdit && existing && (
+          <div className='flex items-center gap-3 border-t border-borderColor pt-2.5'>
+            {!alreadyLeft && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                onClick={() => onMarkLeft(existing)}
+              >
+                mark as left
+              </Button>
+            )}
             <Button
               type='button'
-              variant='main'
-              size='lg'
-              disabled={upsert.isPending}
-              onClick={submit}
+              variant='underline'
+              size='xs'
+              className='ml-auto text-labelColor'
+              onClick={() => onArchive(existing)}
             >
-              {upsert.isPending ? 'saving…' : 'save'}
+              archive
             </Button>
           </div>
-        </DialogPrimitives.Content>
-      </DialogPrimitives.Portal>
-    </DialogPrimitives.Root>
+        )}
+      </div>
+    </ConfirmationModal>
   );
 }

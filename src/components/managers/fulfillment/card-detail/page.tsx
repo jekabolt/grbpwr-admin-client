@@ -3,6 +3,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { Buyer } from 'components/managers/order/components/buyer';
 import { OrderTable } from 'components/managers/order/components/order-table';
 import { RiskBanner, SettlementCompact } from 'components/managers/order/components/stripe-details';
+import { OrderStatus } from 'components/managers/orders-catalog/components/order-status';
 import {
   formatDateShort,
   getOrderStatusName,
@@ -12,8 +13,10 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
+import { SkeletonBlocks } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
 import { FulfillmentAnnotation } from '../components/fulfillment-annotation';
 import { ShipLabelModal } from '../components/ship-label-modal';
@@ -22,11 +25,24 @@ import {
   useMarkFulfillmentDelivered,
   useShippingLabelPrep,
 } from '../hooks/useFulfillment';
-import { columnFromStatusName, COLUMN_ACTION, COLUMN_LABEL, formatMoney } from '../utils/meta';
+import { columnFromStatusName, COLUMN_ACTION, formatMoney } from '../utils/meta';
+
+// ffDetail v2 — pack-first, three columns: the pick list (items + summary) leads,
+// then the packing overlay (assignee / notes / checklist), then shipping (address,
+// tracking, customer, settlement). Reuses the shared order components (OrderTable,
+// Buyer, stripe-details) rather than re-rendering the order.
+
+function ColHead({ children }: { children: React.ReactNode }) {
+  return (
+    <Text size='micro' variant='label' tracking='group' component='span' className='font-bold uppercase'>
+      {children}
+    </Text>
+  );
+}
 
 function Centered({ children }: { children: React.ReactNode }) {
   return (
-    <div className='mx-auto flex min-h-[50vh] max-w-md flex-col items-center justify-center gap-3 text-center'>
+    <div className='mx-auto flex min-h-[40vh] max-w-md flex-col items-center justify-center gap-3 text-center'>
       {children}
     </div>
   );
@@ -35,7 +51,7 @@ function Centered({ children }: { children: React.ReactNode }) {
 function AddressBlock({ address }: { address: common_AddressInsert | undefined }) {
   if (!address)
     return (
-      <Text variant='label' size='small'>
+      <Text size='micro' variant='label' component='span'>
         No shipping address.
       </Text>
     );
@@ -49,7 +65,7 @@ function AddressBlock({ address }: { address: common_AddressInsert | undefined }
   return (
     <div className='flex flex-col gap-0.5'>
       {lines.map((l, i) => (
-        <Text key={i} size='small' className='break-words'>
+        <Text key={i} size='micro' component='span' className='break-words'>
           {l}
         </Text>
       ))}
@@ -73,8 +89,7 @@ export function FulfillmentCardDetail() {
   const [delivering, setDelivering] = useState(false);
 
   // Reprint/void access for an already-shipped order. Read-only; only fires once
-  // the order is shipped (a to-fulfill order has no label yet — the ship modal
-  // prepares it on demand). Shares the label cache with the modal.
+  // the order is shipped. Shares the label cache with the ship modal.
   const isShipped =
     columnFromStatusName(getOrderStatusName(dictionary, data?.order?.order?.orderStatusId)) ===
     'FULFILLMENT_COLUMN_SHIPPED';
@@ -84,36 +99,37 @@ export function FulfillmentCardDetail() {
   if (!canView) {
     return (
       <Centered>
-        <Text variant='uppercase' size='large'>
-          fulfillment
-        </Text>
-        <Text variant='label' size='small'>
-          You don’t have access to this section.
-        </Text>
+        <ColHead>fulfillment</ColHead>
+        <CalloutBox tone='note'>
+          <Text size='micro' variant='label' component='span'>
+            You don’t have access to this section.
+          </Text>
+        </CalloutBox>
       </Centered>
     );
   }
 
   if (isLoading) {
     return (
-      <Centered>
-        <Text variant='inactive' className='animate-pulse uppercase'>
-          loading order…
-        </Text>
-      </Centered>
+      <div className='flex flex-col gap-4 pb-16'>
+        <SkeletonBlocks count={1} height={48} />
+        <div className='grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]'>
+          <SkeletonBlocks count={3} height={64} />
+          <SkeletonBlocks count={2} height={64} />
+          <SkeletonBlocks count={2} height={64} />
+        </div>
+      </div>
     );
   }
 
   if (isError || !data?.order) {
     return (
       <Centered>
-        <Text variant='uppercase' size='large'>
-          order not found
-        </Text>
-        <Text variant='label' size='small'>
+        <ColHead>order not found</ColHead>
+        <Text size='micro' variant='label' component='span'>
           It may not be in fulfillment, or the link is wrong.
         </Text>
-        <Button asChild variant='main' size='lg'>
+        <Button asChild variant='main' size='sm'>
           <Link to={ROUTES.fulfillment}>← back to board</Link>
         </Button>
       </Centered>
@@ -136,55 +152,52 @@ export function FulfillmentCardDetail() {
   }
 
   return (
-    <div className='mx-auto flex w-full max-w-5xl flex-col gap-5 pb-10'>
+    <div className='flex flex-col gap-4 pb-16'>
       {/* Header */}
-      <div className='flex flex-col gap-3 border-b border-textInactiveColor pb-3'>
-        <Link
-          to={ROUTES.fulfillment}
-          className='w-fit text-textBaseSize lowercase text-labelColor underline hover:text-textColor'
-        >
-          ← board
-        </Link>
+      <div className='flex flex-col gap-2 border-b-2 border-textColor pb-2'>
+        <Button asChild variant='underline' size='xs'>
+          <Link to={ROUTES.fulfillment}>← board</Link>
+        </Button>
         <div className='flex flex-wrap items-start justify-between gap-3'>
           <div className='flex min-w-0 flex-col gap-1'>
             <div className='flex flex-wrap items-center gap-2'>
-              <h1 className='text-lg leading-tight'>order #{o?.id ?? ''}</h1>
-              <span className='bg-textColor px-1.5 py-0.5 text-textBaseSize uppercase leading-4 text-bgColor'>
-                {COLUMN_LABEL[column]}
-              </span>
+              <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
+                order #{o?.id ?? ''}
+              </Text>
+              <OrderStatus status={statusName} />
             </div>
             <div className='flex flex-wrap items-center gap-3'>
               <span className='flex items-center gap-1'>
-                <Text variant='label' size='small'>
+                <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                   ref
                 </Text>
                 <CopyToClipboard text={o?.uuid || ''} />
               </span>
-              <Text variant='label' size='small'>
+              <Text size='micro' variant='label' component='span'>
                 placed {formatDateShort(o?.placed, true) || '—'}
               </Text>
             </div>
           </div>
-          <div className='flex shrink-0 flex-wrap justify-end gap-2'>
+          <div className='flex shrink-0 flex-wrap justify-end gap-1.5'>
             {canReadOrders && (
-              <Button asChild variant='secondary' size='lg'>
+              <Button asChild variant='secondary' size='sm'>
                 <Link to={`${ROUTES.orders}/${o?.uuid}`}>open full order</Link>
               </Button>
             )}
             {canWrite && action === 'ship' && (
-              <Button variant='main' size='lg' onClick={() => setShipping(true)}>
+              <Button variant='main' size='sm' onClick={() => setShipping(true)}>
                 ship
               </Button>
             )}
             {canWrite && action === 'deliver' && hasExistingLabel && (
-              <Button variant='secondary' size='lg' onClick={() => setShipping(true)}>
+              <Button variant='secondary' size='sm' onClick={() => setShipping(true)}>
                 shipping label
               </Button>
             )}
             {canWrite && action === 'deliver' && (
               <Button
                 variant='main'
-                size='lg'
+                size='sm'
                 loading={deliver.isPending}
                 disabled={deliver.isPending}
                 onClick={() => setDelivering(true)}
@@ -199,55 +212,56 @@ export function FulfillmentCardDetail() {
       {/* Stripe Radar risk — same screen as the ship action so it can't be missed. */}
       <RiskBanner riskLevel={stripeDetails?.riskLevel} />
 
-      {/* Body */}
-      <div className='grid grid-cols-1 gap-6 md:grid-cols-[1fr_20rem]'>
-        {/* Main — items + summary */}
-        <div className='flex min-w-0 flex-col gap-6 md:order-1'>
-          <section className='flex flex-col gap-2'>
-            <Text variant='uppercase' size='small' className='text-labelColor'>
-              items
-            </Text>
-            <OrderTable orderDetails={order} />
-          </section>
-
-          <section className='flex flex-col gap-1'>
-            <Text variant='uppercase' size='small' className='text-labelColor'>
-              summary
-            </Text>
+      {/* Pack-first body */}
+      <div className='grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]'>
+        {/* 1 — pick list */}
+        <section className='flex min-w-0 flex-col gap-3'>
+          <ColHead>pick list</ColHead>
+          <OrderTable orderDetails={order} />
+          <div className='flex flex-col gap-1'>
             <div className='flex items-center justify-between gap-4'>
-              <Text variant='label' size='small'>
+              <Text size='micro' variant='label' component='span'>
                 shipping
               </Text>
-              <Text size='small'>{formatMoney(order.shipment?.cost?.value, currency)}</Text>
+              <Text size='micro' component='span' className='tabular-nums'>
+                {formatMoney(order.shipment?.cost?.value, currency)}
+              </Text>
             </div>
-            <div className='mt-1 flex items-center justify-between gap-4 border-t border-textInactiveColor pt-2'>
-              <Text className='font-bold uppercase'>total</Text>
-              <Text className='font-bold'>{formatMoney(o?.totalPrice?.value, currency)}</Text>
+            <div className='flex items-center justify-between gap-4 border-t border-borderColor pt-1.5'>
+              <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                total
+              </Text>
+              <Text component='span' className='font-bold tabular-nums'>
+                {formatMoney(o?.totalPrice?.value, currency)}
+              </Text>
             </div>
-          </section>
-        </div>
-
-        {/* Aside — annotation + customer + shipping */}
-        <aside className='flex flex-col gap-5 border border-textInactiveColor p-4 md:order-2 md:h-fit'>
-          <FulfillmentAnnotation annotation={annotation} canWrite={canWrite} />
-
-          <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-4'>
-            <Buyer buyer={order.buyer?.buyerInsert} isPrinting={false} />
           </div>
+        </section>
 
-          <div className='flex flex-col gap-2 border-t border-textInactiveColor pt-4'>
-            <Text variant='uppercase' size='small' className='text-labelColor'>
-              ship to
-            </Text>
+        {/* 2 — packing overlay */}
+        <aside className='flex min-w-0 flex-col gap-3 border border-borderColor p-3 lg:h-fit'>
+          <ColHead>packing</ColHead>
+          <FulfillmentAnnotation annotation={annotation} canWrite={canWrite} />
+        </aside>
+
+        {/* 3 — shipping */}
+        <aside className='flex min-w-0 flex-col gap-4 border border-borderColor p-3 lg:h-fit'>
+          <div className='flex flex-col gap-2'>
+            <ColHead>ship to</ColHead>
             <AddressBlock address={order.shipping?.addressInsert} />
             {trackingCode && (
               <div className='flex items-center gap-1 pt-1'>
-                <Text variant='label' size='small'>
+                <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                   tracking
                 </Text>
                 <CopyToClipboard text={trackingCode} />
               </div>
             )}
+          </div>
+
+          <div className='flex flex-col gap-2 border-t border-borderColor pt-3'>
+            <ColHead>customer</ColHead>
+            <Buyer buyer={order.buyer?.buyerInsert} isPrinting={false} />
           </div>
 
           {canReadCosting && <SettlementCompact stripeDetails={stripeDetails} />}
@@ -266,10 +280,14 @@ export function FulfillmentCardDetail() {
         onOpenChange={setDelivering}
         onConfirm={confirmDeliver}
         confirmDisabled={deliver.isPending}
-        title='mark delivered'
+        closeOnConfirm={false}
+        title='mark delivered?'
         confirmLabel='mark delivered'
+        width='sm'
       >
-        <Text size='small'>Mark order #{o?.id ?? ''} as delivered?</Text>
+        <Text size='micro' variant='label' component='span'>
+          Mark order #{o?.id ?? ''} as delivered? This closes out fulfillment for the order.
+        </Text>
       </ConfirmationModal>
     </div>
   );

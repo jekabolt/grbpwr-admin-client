@@ -35,19 +35,19 @@ export type EmailCampaignStatus =
   | 'EMAIL_CAMPAIGN_STATUS_CANCELLED';
 
 // The 12 block types, in palette order — mirrors `heroTypes` in constants.ts.
+// The "add block" palette. Deliberately omits two_column (no real use), social_links (useless)
+// and video_thumb (email clients don't play video — use an image-link block with an animated GIF
+// instead). The underlying block types still exist so any legacy campaign keeps rendering.
 export const emailBlockTypes: { value: EmailBlockType; label: string }[] = [
   { value: 'EMAIL_BLOCK_TYPE_HEADER', label: 'header' },
-  { value: 'EMAIL_BLOCK_TYPE_IMAGE_LINK', label: 'image link' },
+  { value: 'EMAIL_BLOCK_TYPE_IMAGE_LINK', label: 'image / gif' },
   { value: 'EMAIL_BLOCK_TYPE_RICH_TEXT', label: 'rich text' },
   { value: 'EMAIL_BLOCK_TYPE_PRODUCT_CARD', label: 'product card' },
   { value: 'EMAIL_BLOCK_TYPE_PRODUCT_GRID', label: 'product grid' },
   { value: 'EMAIL_BLOCK_TYPE_CTA_BUTTON', label: 'cta button' },
   { value: 'EMAIL_BLOCK_TYPE_DIVIDER', label: 'divider' },
   { value: 'EMAIL_BLOCK_TYPE_SPACER', label: 'spacer' },
-  { value: 'EMAIL_BLOCK_TYPE_TWO_COLUMN', label: 'two column' },
-  { value: 'EMAIL_BLOCK_TYPE_SOCIAL_LINKS', label: 'social links' },
   { value: 'EMAIL_BLOCK_TYPE_COUNTDOWN', label: 'countdown' },
-  { value: 'EMAIL_BLOCK_TYPE_VIDEO_THUMB', label: 'video thumb' },
 ];
 
 // One-line summaries surfaced in the add-block palette — mirrors
@@ -159,6 +159,31 @@ export const CTA_ALIGNMENT_OPTIONS: { value: string; label: string }[] = [
   { value: 'left', label: 'left' },
   { value: 'center', label: 'center' },
   { value: 'right', label: 'right' },
+];
+
+// Header logo alignment (EmailHeaderBlock.logoPosition). The logo itself is the
+// locked brand default — only its position is authorable.
+export const LOGO_POSITION_OPTIONS: { value: string; label: string }[] = [
+  { value: 'left', label: 'left' },
+  { value: 'center', label: 'center' },
+  { value: 'right', label: 'right' },
+];
+
+// Image block display aspect ratio (EmailImageLinkBlock.aspect). Drives both the
+// media-picker crop target and the rendered max-width.
+export const IMAGE_ASPECT_OPTIONS: { value: string; label: string }[] = [
+  { value: '16:9', label: 'horizontal (16:9)' },
+  { value: '1:1', label: 'square (1:1)' },
+  { value: '4:5', label: 'vertical (4:5)' },
+];
+
+// Spacer presets (EmailSpacerBlock.height in px) — a few sizes instead of a raw
+// number input.
+export const SPACER_HEIGHT_OPTIONS: { value: number; label: string }[] = [
+  { value: 16, label: 'small (16px)' },
+  { value: 32, label: 'medium (32px)' },
+  { value: 56, label: 'large (56px)' },
+  { value: 80, label: 'x-large (80px)' },
 ];
 
 // ── A/B testing (ABConfig) ─────────────────────────────────────────────────────

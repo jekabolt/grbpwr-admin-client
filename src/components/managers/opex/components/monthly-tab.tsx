@@ -1,22 +1,26 @@
-import { OpexLine } from 'api/proto-http/admin';
-import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { useDictionary } from 'lib/providers/dictionary-provider';
+import { OpexLine, OpexLineInsert } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import CheckboxCommon from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Pill } from 'ui/components/pill';
+import { SkeletonLine } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
+import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput } from 'utils/decimal';
-import { monthToApi, useDeleteOpexLine, useOpexLines, useUpsertOpexLines } from '../utils/hooks';
+import { monthToApi, useDeleteOpexLine, useUpsertOpexLines } from '../utils/hooks';
 import {
   currentMonth,
-  formatMoney,
   isRecurringLine,
   isUncostedLine,
+  MonthBucket,
+  money,
   monthLabel,
+  monthMini,
   opexCategoryLabel,
-  opexCurrencySymbol,
   shiftMonth,
   sumBase,
   summarizeLines,
@@ -25,34 +29,47 @@ import { LineFormModal } from './line-form';
 import { OpexWizard } from './opex-wizard';
 import { MonthSummary } from './summary';
 
-// Monthly OPEX view (screen H1): summary-first header, then lines grouped by category as scannable
-// cards. Recurring (⟳, worker-owned) lines are read-only; manual one-off lines are editable. A
-// copy-from-previous-month shortcut clones last month's manual lines (R-12). Adding goes through the
-// guided wizard; editing stays inline.
-export function MonthlyTab() {
-  const { canWriteCosting } = usePermissions();
+// opxLines v1 (keep) — the month's lines grouped into per-category cards, restyled onto tokens.
+// opxMonth v2 — a 12-month strip (mini bar per month) rides above the lines for quick jump.
+// opxUncosted v2 — incomplete lines surface as a warning CalloutBox with a one-click fix, not as
+//   red text buried on a row.
+// opxCopy v2 — "copy from previous month" opens a modal of last month's lines, each with a checkbox.
+// opxGate v2 — `canRead` masks every figure; the structure (months, categories, labels) stays.
+//
+// The month list, its per-month buckets and the selected month's lines all arrive from the page
+// (one ListOpexLines range query — there is no per-month aggregate RPC), so this component is pure
+// month-scoped content with no fetching of its own beyond the mutations it fires.
+export function MonthlyContent({
+  month,
+  onSelectMonth,
+  buckets,
+  linesByMonth,
+  base,
+  canWrite,
+  canRead,
+  isLoading,
+  isError,
+  refetch,
+}: {
+  month: string;
+  onSelectMonth: (m: string) => void;
+  buckets: MonthBucket[];
+  linesByMonth: Map<string, OpexLine[]>;
+  base: string;
+  canWrite: boolean;
+  canRead: boolean;
+  isLoading: boolean;
+  isError: boolean;
+  refetch: () => void;
+}) {
   const { showMessage } = useSnackBarStore();
-  const { dictionary } = useDictionary();
-  const base = (dictionary?.baseCurrency || 'EUR').toUpperCase();
 
-  const [params, setParams] = useSearchParams();
-  const month = params.get('month') || currentMonth();
-  const setMonth = (m: string) =>
-    setParams(
-      (prev) => {
-        const p = new URLSearchParams(prev);
-        p.set('month', m);
-        return p;
-      },
-      { replace: true },
-    );
-
-  const { data, isLoading, isError, refetch } = useOpexLines(month);
-  const lines = useMemo(() => data?.lines ?? [], [data]);
+  const lines = useMemo(() => linesByMonth.get(month) ?? [], [linesByMonth, month]);
   const prevMonth = shiftMonth(month, -1);
-  // Previous month, only to power the copy shortcut (manual lines only).
-  const { data: prevData } = useOpexLines(prevMonth, canWriteCosting);
-  const prevManual = (prevData?.lines ?? []).filter((l) => !isRecurringLine(l));
+  const prevManual = useMemo(
+    () => (linesByMonth.get(prevMonth) ?? []).filter((l) => !isRecurringLine(l)),
+    [linesByMonth, prevMonth],
+  );
 
   const upsert = useUpsertOpexLines();
   const del = useDeleteOpexLine();
@@ -60,6 +77,7 @@ export function MonthlyTab() {
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editing, setEditing] = useState<OpexLine | undefined>();
   const [deleting, setDeleting] = useState<OpexLine | undefined>();
+  const [copyOpen, setCopyOpen] = useState(false);
 
   const groups = useMemo(() => {
     const m = new Map<string, OpexLine[]>();
@@ -72,6 +90,9 @@ export function MonthlyTab() {
 
   const summary = useMemo(() => summarizeLines(lines), [lines]);
 
+  // opxUncosted v2: the first line the backend could not fold to base — the "one-click fix" target.
+  const firstUncosted = useMemo(() => lines.find(isUncostedLine), [lines]);
+
   const confirmDelete = () => {
     if (!deleting?.id) return;
     del.mutate(deleting.id, {
@@ -81,188 +102,139 @@ export function MonthlyTab() {
     });
   };
 
-  const copyPrevious = () => {
-    // Upserts share the (month, category, label) key with existing lines, so a clone
-    // colliding with a line already in this month would silently overwrite it — skip those.
-    const existingKeys = new Set(lines.map((l) => `${l.category || 'other'} ${l.label || ''}`));
-    const clones = prevManual
-      .filter((l) => !existingKeys.has(`${l.category ?? 'other'} ${l.label ?? ''}`))
-      .map((l) => ({
-        month: monthToApi(month),
-        category: l.category ?? 'other',
-        label: l.label ?? '',
-        amount: { value: decimalToInput(l.amount) },
-        currency: l.currency ?? 'EUR',
-        note: l.note ?? '',
-        vatAmount: undefined,
-        vatRegime: undefined,
-        docNumber: undefined,
-        docDate: undefined,
-        supplierVatId: undefined,
-        supplierName: undefined,
-      }));
-    const skipped = prevManual.length - clones.length;
-    if (!clones.length) {
-      showMessage(
-        `Nothing to copy — all ${prevManual.length} line(s) already exist this month`,
-        'error',
-      );
-      return;
-    }
-    upsert.mutate(clones, {
-      onSuccess: () =>
-        showMessage(
-          `Copied ${clones.length} line(s) from ${prevMonth}` +
-            (skipped ? ` · skipped ${skipped} already present` : ''),
-          'success',
-        ),
-      onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to copy', 'error'),
-    });
-  };
+  const isToday = month === currentMonth();
 
   return (
-    <div className='flex flex-col gap-4'>
-      {/* month nav */}
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <div className='flex items-center gap-2'>
+    <div className='flex flex-col gap-3'>
+      {/* month nav + actions */}
+      <Toolbar>
+        <div className='flex items-center gap-1.5'>
           <Button
             type='button'
             variant='secondary'
-            size='lg'
+            size='sm'
             aria-label='previous month'
-            onClick={() => setMonth(shiftMonth(month, -1))}
+            onClick={() => onSelectMonth(shiftMonth(month, -1))}
           >
             ‹
           </Button>
-          <Text variant='uppercase'>{monthLabel(month)}</Text>
+          <Text component='span' variant='uppercase' className='min-w-[7.5rem] text-center font-bold'>
+            {monthLabel(month)}
+          </Text>
           <Button
             type='button'
             variant='secondary'
-            size='lg'
+            size='sm'
             aria-label='next month'
-            onClick={() => setMonth(shiftMonth(month, 1))}
+            onClick={() => onSelectMonth(shiftMonth(month, 1))}
           >
             ›
           </Button>
-          {month !== currentMonth() && (
-            <button
-              type='button'
-              className='text-textBaseSize uppercase underline hover:text-textColor'
-              onClick={() => setMonth(currentMonth())}
-            >
+          {!isToday && (
+            <Button variant='underline' size='xs' onClick={() => onSelectMonth(currentMonth())}>
               today
-            </button>
+            </Button>
           )}
         </div>
-        {canWriteCosting && (
-          <Button
-            type='button'
-            variant='main'
-            size='lg'
-            className='uppercase'
-            onClick={() => setWizardOpen(true)}
-          >
-            + add opex
-          </Button>
+        <ToolbarSpacer />
+        {canWrite && (
+          <>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              disabled={prevManual.length === 0 || upsert.isPending}
+              title={
+                prevManual.length === 0
+                  ? `no manual lines in ${prevMonth} to copy`
+                  : `copy from ${prevMonth}`
+              }
+              onClick={() => setCopyOpen(true)}
+            >
+              copy previous
+            </Button>
+            <Button type='button' variant='main' size='sm' onClick={() => setWizardOpen(true)}>
+              + add opex
+            </Button>
+          </>
         )}
-      </div>
+      </Toolbar>
 
-      {isLoading ? (
-        <Text variant='inactive' size='small'>
-          loading…
-        </Text>
-      ) : isError ? (
-        <div className='flex items-center gap-3'>
-          <Text variant='error' size='small'>
-            failed to load OPEX lines
-          </Text>
-          <button
-            type='button'
-            className='text-textBaseSize uppercase underline'
-            onClick={() => refetch()}
-          >
-            retry
-          </button>
+      {/* opxMonth v2: 12-month strip */}
+      <MonthStrip buckets={buckets} month={month} onSelectMonth={onSelectMonth} reveal={canRead} />
+
+      {isLoading && lines.length === 0 ? (
+        <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-2.5'>
+          <SkeletonLine width={220} />
+          <SkeletonLine width={160} />
+          <SkeletonLine width={190} />
         </div>
+      ) : isError ? (
+        <CalloutBox tone='error' className='flex items-center gap-3'>
+          <Text size='micro' variant='label' component='span'>
+            <b>failed to load OPEX lines</b>
+          </Text>
+          <Button variant='underline' size='xs' onClick={refetch} className='ml-auto'>
+            retry
+          </Button>
+        </CalloutBox>
       ) : (
         <>
-          {summary.count > 0 && <MonthSummary summary={summary} base={base} />}
+          {/* opxUncosted v2: banner + one-click fix */}
+          {canRead && summary.uncosted > 0 && firstUncosted && (
+            <CalloutBox tone='warning' className='flex flex-wrap items-center gap-2'>
+              <Text size='micro' component='span'>
+                {summary.uncosted} line{summary.uncosted === 1 ? '' : 's'} could not be folded to{' '}
+                {base} — no costing FX rate for the line's currency, so it is excluded from the
+                operating result.
+              </Text>
+              {canWrite && (
+                <Button
+                  variant='underline'
+                  size='xs'
+                  className='ml-auto'
+                  onClick={() => setEditing(firstUncosted)}
+                >
+                  fix “{firstUncosted.label || '—'}”
+                </Button>
+              )}
+            </CalloutBox>
+          )}
+
+          {summary.count > 0 && <MonthSummary summary={summary} base={base} reveal={canRead} />}
 
           {groups.length === 0 ? (
-            <div className='flex flex-col items-start gap-2 border border-dashed border-textInactiveColor p-6'>
-              <Text variant='uppercase' size='small'>
+            <CalloutBox tone='note' className='flex flex-col items-start gap-2 border-dashed'>
+              <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
                 no opex booked for {monthLabel(month)}
               </Text>
-              <Text variant='inactive' size='small'>
+              <Text size='micro' variant='label' component='span'>
                 Add a one-off cost for this month, or set up a recurring template that books itself
-                every month. Recurring templates (⟳) also appear here once the worker materialises
-                them.
+                every month. Recurring (⟳) lines also appear here once the worker materialises them.
               </Text>
-              {canWriteCosting && (
-                <Button
-                  type='button'
-                  variant='main'
-                  size='lg'
-                  className='mt-1 uppercase'
-                  onClick={() => setWizardOpen(true)}
-                >
+              {canWrite && (
+                <Button type='button' variant='main' size='sm' className='mt-1' onClick={() => setWizardOpen(true)}>
                   + add opex
                 </Button>
               )}
-            </div>
+            </CalloutBox>
           ) : (
-            <div className='flex flex-col gap-3'>
-              {groups.map(([category, catLines]) => {
-                const catTotal = sumBase(catLines).total;
-                return (
-                  <div key={category} className='border border-textInactiveColor'>
-                    <div className='flex items-center justify-between border-b border-textInactiveColor bg-textInactiveColor/10 px-3 py-2'>
-                      <Text variant='uppercase' size='small'>
-                        {opexCategoryLabel(category)}
-                      </Text>
-                      <Text size='small'>
-                        {opexCurrencySymbol(base)}
-                        {formatMoney(catTotal)}
-                      </Text>
-                    </div>
-                    <div className='flex flex-col'>
-                      {catLines.map((l) => (
-                        <LineRow
-                          key={l.id}
-                          line={l}
-                          base={base}
-                          canWrite={canWriteCosting}
-                          onEdit={() => setEditing(l)}
-                          onDelete={() => setDeleting(l)}
-                        />
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
+            <div className='flex flex-col gap-2.5'>
+              {groups.map(([category, catLines]) => (
+                <CategoryCard
+                  key={category}
+                  category={category}
+                  lines={catLines}
+                  base={base}
+                  canWrite={canWrite}
+                  canRead={canRead}
+                  onEdit={setEditing}
+                  onDelete={setDeleting}
+                />
+              ))}
             </div>
           )}
         </>
-      )}
-
-      {canWriteCosting && groups.length > 0 && (
-        <div className='flex flex-wrap items-center gap-2 border-t border-textInactiveColor pt-3'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase'
-            disabled={prevManual.length === 0 || upsert.isPending}
-            title={
-              prevManual.length === 0
-                ? `no manual lines in ${prevMonth} to copy`
-                : `copy ${prevManual.length} manual line(s) from ${prevMonth}`
-            }
-            onClick={copyPrevious}
-          >
-            copy from previous month
-          </Button>
-        </div>
       )}
 
       <OpexWizard
@@ -280,92 +252,219 @@ export function MonthlyTab() {
         lines={lines}
       />
 
+      <CopyPreviousModal
+        open={copyOpen}
+        onOpenChange={setCopyOpen}
+        month={month}
+        prevMonth={prevMonth}
+        prevManual={prevManual}
+        existing={lines}
+        canRead={canRead}
+      />
+
       <ConfirmationModal
         open={deleting != null}
         onOpenChange={(v) => !v && setDeleting(undefined)}
         onConfirm={confirmDelete}
         title='delete OPEX line?'
         confirmLabel='delete'
+        confirmDisabled={del.isPending}
+        closeOnConfirm={false}
+        width='sm'
       >
-        <Text size='small'>Delete “{deleting?.label}”? This cannot be undone.</Text>
+        <Text size='micro' variant='label' component='span'>
+          Delete “{deleting?.label}”? This cannot be undone.
+        </Text>
       </ConfirmationModal>
     </div>
   );
 }
 
-// One expense line as a compact row: label (+ ⟳ badge / note), amount folded to base, and edit/
-// delete for manual lines. Recurring (worker-owned) lines are read-only — deleting them is refused
-// server-side, so no destructive affordance is offered.
+// opxMonth v2 — a horizontal timeline of the window's months as mini vertical bars scaled to the
+// biggest month, oldest → newest, the selected one emphasised. Totals are derived client-side
+// (no aggregate RPC). Masked for a non-costing viewer: the timeline shape stays, the bars flatten.
+function MonthStrip({
+  buckets,
+  month,
+  onSelectMonth,
+  reveal,
+}: {
+  buckets: MonthBucket[];
+  month: string;
+  onSelectMonth: (m: string) => void;
+  reveal: boolean;
+}) {
+  const max = Math.max(1, ...buckets.map((b) => b.total));
+  // buckets arrive most-recent first; render oldest → newest so time reads left to right.
+  const ordered = useMemo(() => buckets.slice().reverse(), [buckets]);
+
+  return (
+    <div className='flex items-end gap-1 overflow-x-auto border border-borderColor bg-bgColor p-1.5'>
+      {ordered.map((b) => {
+        const selected = b.key === month;
+        const pct = reveal && b.total > 0 ? Math.max(4, (b.total / max) * 100) : 0;
+        return (
+          <button
+            key={b.key}
+            type='button'
+            aria-pressed={selected}
+            aria-label={`${b.key} — ${b.count} line(s)`}
+            onClick={() => onSelectMonth(b.key)}
+            className={cn(
+              'flex min-w-[2.4rem] flex-1 flex-col items-center gap-1 border px-1 py-1',
+              selected
+                ? 'border-textColor bg-bgZebra'
+                : 'border-transparent hover:border-borderColor',
+            )}
+          >
+            <span className='flex h-8 w-3 items-end bg-trackBg' aria-hidden>
+              <span
+                className={cn('block w-full', b.uncosted > 0 ? 'bg-error/60' : 'bg-textColor')}
+                style={{ height: `${pct}%` }}
+              />
+            </span>
+            <Text
+              size='nano'
+              component='span'
+              className={cn('uppercase tabular-nums', selected ? 'font-bold text-textColor' : 'text-labelColor')}
+            >
+              {monthMini(b.key)}
+            </Text>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// opxLines v1 — one category as a bordered card: a zebra header (name · count · folded total) over
+// hairline-separated line rows.
+function CategoryCard({
+  category,
+  lines,
+  base,
+  canWrite,
+  canRead,
+  onEdit,
+  onDelete,
+}: {
+  category: string;
+  lines: OpexLine[];
+  base: string;
+  canWrite: boolean;
+  canRead: boolean;
+  onEdit: (l: OpexLine) => void;
+  onDelete: (l: OpexLine) => void;
+}) {
+  const { total, uncosted } = sumBase(lines);
+  return (
+    <div className='border border-borderColor bg-bgColor'>
+      <div className='flex items-center justify-between gap-2 border-b border-borderColor bg-bgZebra px-2.5 py-1.5'>
+        <span className='flex items-baseline gap-1.5'>
+          <Text size='micro' variant='label' tracking='group' component='span' className='font-bold uppercase'>
+            {opexCategoryLabel(category)}
+          </Text>
+          <Text size='micro' variant='label' component='span'>
+            · {lines.length}
+            {uncosted > 0 ? ` · ${uncosted} uncosted` : ''}
+          </Text>
+        </span>
+        <Text
+          size='micro'
+          component='span'
+          className={cn('tabular-nums', uncosted > 0 ? 'text-error' : undefined)}
+        >
+          {money(total, base, canRead)}
+        </Text>
+      </div>
+      <div className='flex flex-col'>
+        {lines.map((l) => (
+          <LineRow
+            key={l.id}
+            line={l}
+            base={base}
+            canWrite={canWrite}
+            canRead={canRead}
+            onEdit={() => onEdit(l)}
+            onDelete={() => onDelete(l)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// One expense line. Recurring (⟳, worker-owned) lines are read-only — the backend refuses to delete
+// them, so no destructive affordance is offered.
 function LineRow({
   line,
   base,
   canWrite,
+  canRead,
   onEdit,
   onDelete,
 }: {
   line: OpexLine;
   base: string;
   canWrite: boolean;
+  canRead: boolean;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const recurring = isRecurringLine(line);
   const uncosted = isUncostedLine(line);
   const sameCurrency = (line.currency || '').toUpperCase() === base;
+  const amount = Number(decimalToInput(line.amount)) || 0;
+  const amountBase = Number(decimalToInput(line.amountBase)) || 0;
+  const hasVat = !!line.vatAmount?.value;
 
   return (
-    <div className='flex flex-wrap items-center justify-between gap-2 border-b border-textInactiveColor/40 px-3 py-2 last:border-b-0'>
-      <div className='flex min-w-0 flex-col'>
+    <div className='flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-2.5 py-1.5 last:border-b-0'>
+      <div className='flex min-w-0 flex-col gap-0.5'>
         <div className='flex items-center gap-1.5'>
           {recurring && (
-            <span
-              className='shrink-0 border border-textInactiveColor px-1 text-small uppercase text-textInactiveColor'
-              title='booked from a recurring template — read-only'
-            >
+            <Pill tone='mut' title='booked from a recurring template — read-only'>
               ⟳
-            </span>
+            </Pill>
           )}
-          <Text size='small' className='truncate'>
+          <Text component='span' className='truncate font-medium'>
             {line.label || '—'}
           </Text>
+          {hasVat && (
+            <Pill tone='ink' title='carries recoverable VAT / document data'>
+              vat
+            </Pill>
+          )}
         </div>
         {line.note && (
-          <Text size='small' variant='inactive' className='truncate'>
+          <Text size='micro' variant='label' component='span' className='block max-w-[40ch] truncate'>
             {line.note}
           </Text>
         )}
       </div>
       <div className='flex items-center gap-3'>
-        <div className='text-right'>
-          <Text size='small'>
-            {opexCurrencySymbol(line.currency)}
-            {formatMoney(Number(decimalToInput(line.amount)) || 0)} {line.currency}
+        <div className='flex flex-col items-end gap-0.5'>
+          <Text component='span' className='tabular-nums'>
+            {money(amount, line.currency, canRead)}
           </Text>
           {uncosted ? (
-            <Text variant='error' size='small'>
-              uncosted !
-            </Text>
+            <Pill tone='warn'>uncosted</Pill>
           ) : (
             !sameCurrency && (
-              <Text variant='inactive' size='small'>
-                {opexCurrencySymbol(base)}
-                {formatMoney(Number(decimalToInput(line.amountBase)) || 0)} {base}
+              <Text size='micro' variant='label' component='span' className='tabular-nums'>
+                {money(amountBase, base, canRead)}
               </Text>
             )
           )}
         </div>
         {canWrite && !recurring && (
           <div className='flex shrink-0 items-center gap-2'>
-            <button
-              type='button'
-              className='text-textBaseSize uppercase underline hover:text-textColor'
-              onClick={onEdit}
-            >
+            <Button variant='underline' size='xs' onClick={onEdit}>
               edit
-            </button>
+            </Button>
             <button
               type='button'
-              className='text-textInactiveColor hover:text-error'
+              className='text-labelColor hover:text-error'
               aria-label='delete line'
               onClick={onDelete}
             >
@@ -375,5 +474,142 @@ function LineRow({
         )}
       </div>
     </div>
+  );
+}
+
+// opxCopy v2 — the previous month's manual lines, each with a checkbox. A line whose (category,
+// label) already exists this month can't be copied without silently clobbering it, so it is shown
+// disabled and marked "present". Confirming re-upserts only the checked, non-colliding lines.
+function CopyPreviousModal({
+  open,
+  onOpenChange,
+  month,
+  prevMonth,
+  prevManual,
+  existing,
+  canRead,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  month: string;
+  prevMonth: string;
+  prevManual: OpexLine[];
+  existing: OpexLine[];
+  canRead: boolean;
+}) {
+  const { showMessage } = useSnackBarStore();
+  const upsert = useUpsertOpexLines();
+
+  const existingKeys = useMemo(
+    () => new Set(existing.map((l) => `${l.category || 'other'} ${l.label || ''}`)),
+    [existing],
+  );
+  const keyOf = (l: OpexLine) => `${l.category || 'other'} ${l.label || ''}`;
+  const collides = (l: OpexLine) => existingKeys.has(keyOf(l));
+
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  useEffect(() => {
+    if (!open) return;
+    // Default: every copyable (non-colliding) line checked.
+    setSelected(new Set(prevManual.filter((l) => !collides(l) && l.id).map((l) => l.id!)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, prevManual]);
+
+  const toggle = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  const chosen = prevManual.filter((l) => l.id && selected.has(l.id) && !collides(l));
+
+  const confirm = () => {
+    if (chosen.length === 0) {
+      showMessage('Select at least one line to copy', 'error');
+      return;
+    }
+    const clones: OpexLineInsert[] = chosen.map((l) => ({
+      month: monthToApi(month),
+      category: l.category ?? 'other',
+      label: l.label ?? '',
+      amount: { value: decimalToInput(l.amount) },
+      currency: l.currency ?? 'EUR',
+      note: l.note ?? '',
+      // Carry the document/VAT group across too, so a copied invoice line keeps its VAT identity.
+      vatAmount: l.vatAmount?.value ? { value: decimalToInput(l.vatAmount) } : undefined,
+      vatRegime: l.vatRegime || undefined,
+      docNumber: l.docNumber || undefined,
+      docDate: l.docDate || undefined,
+      supplierVatId: l.supplierVatId || undefined,
+      supplierName: l.supplierName || undefined,
+    }));
+    upsert.mutate(clones, {
+      onSuccess: () => showMessage(`Copied ${clones.length} line(s) from ${prevMonth}`, 'success'),
+      onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to copy', 'error'),
+      onSettled: () => onOpenChange(false),
+    });
+  };
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={confirm}
+      title={`copy from ${prevMonth}`}
+      confirmLabel={`copy ${chosen.length || ''}`.trim()}
+      confirmDisabled={upsert.isPending || chosen.length === 0}
+      closeOnConfirm={false}
+      width='md'
+    >
+      {prevManual.length === 0 ? (
+        <Text size='micro' variant='label' component='span'>
+          No manual lines in {prevMonth} to copy.
+        </Text>
+      ) : (
+        <div className='flex flex-col'>
+          <Text size='micro' variant='label' component='span' className='mb-1.5'>
+            Pick which of last month's manual lines to book into this month. Recurring (⟳) lines are
+            never copied — the worker re-books them.
+          </Text>
+          {prevManual.map((l) => {
+            const clash = collides(l);
+            const id = l.id ?? 0;
+            const amount = Number(decimalToInput(l.amount)) || 0;
+            return (
+              <label
+                key={id}
+                className={cn(
+                  'flex items-center gap-2 border-b border-hairline py-1.5 last:border-b-0',
+                  clash ? 'opacity-60' : 'cursor-pointer',
+                )}
+              >
+                <CheckboxCommon
+                  name={`copy-${id}`}
+                  checked={!clash && selected.has(id)}
+                  disabled={clash}
+                  onChange={() => !clash && toggle(id)}
+                />
+                <span className='flex min-w-0 flex-1 items-baseline gap-1.5'>
+                  <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+                    {opexCategoryLabel(l.category)}
+                  </Text>
+                  <Text component='span' className='truncate'>
+                    {l.label || '—'}
+                  </Text>
+                </span>
+                {clash ? (
+                  <Pill tone='mut'>present</Pill>
+                ) : (
+                  <Text size='micro' component='span' className='tabular-nums'>
+                    {money(amount, l.currency, canRead)}
+                  </Text>
+                )}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </ConfirmationModal>
   );
 }

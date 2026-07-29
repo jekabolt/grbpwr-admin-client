@@ -88,11 +88,21 @@ function toBlock(b: any): common_EmailBlock {
 
   switch (b.type) {
     case 'EMAIL_BLOCK_TYPE_HEADER':
-      return { ...base, header: { logoMediaId: b.header?.logoMediaId || 0 } };
+      return {
+        ...base,
+        header: {
+          logoMediaId: b.header?.logoMediaId || 0,
+          logoPosition: b.header?.logoPosition || 'center',
+        },
+      };
     case 'EMAIL_BLOCK_TYPE_IMAGE_LINK':
       return {
         ...base,
-        imageLink: { mediaId: b.imageLink?.mediaId || 0, url: b.imageLink?.url || '' },
+        imageLink: {
+          mediaId: b.imageLink?.mediaId || 0,
+          url: b.imageLink?.url || '',
+          aspect: b.imageLink?.aspect || '16:9',
+        },
       };
     case 'EMAIL_BLOCK_TYPE_RICH_TEXT':
       return { ...base, richText: {} };
@@ -252,12 +262,24 @@ function readBlock(b: any, productIdsByUid: ProductIdsByBlockUid): EmailBlockFor
 
   switch (b.type) {
     case 'EMAIL_BLOCK_TYPE_HEADER':
-      return { ...base, type: b.type, header: { logoMediaId: b.header?.logoMediaId || undefined }, translations };
+      return {
+        ...base,
+        type: b.type,
+        header: {
+          logoMediaId: b.header?.logoMediaId || undefined,
+          logoPosition: b.header?.logoPosition || 'center',
+        },
+        translations,
+      };
     case 'EMAIL_BLOCK_TYPE_IMAGE_LINK':
       return {
         ...base,
         type: b.type,
-        imageLink: { mediaId: b.imageLink?.mediaId || undefined, url: b.imageLink?.url || '' },
+        imageLink: {
+          mediaId: b.imageLink?.mediaId || undefined,
+          url: b.imageLink?.url || '',
+          aspect: b.imageLink?.aspect || '16:9',
+        },
         translations,
       };
     case 'EMAIL_BLOCK_TYPE_RICH_TEXT':

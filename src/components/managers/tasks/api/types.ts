@@ -109,6 +109,14 @@ export interface ListTasksFilter {
   assignee?: string;
   techCardId?: number;
   productId?: number;
+  // Reverse-link filters — one per typed task attachment. The backend now filters
+  // ListTasks server-side by each of these, so an embed on any host entity can ask
+  // for exactly its own tasks (see related-tasks.tsx / entity-configs.ts).
+  orderUuid?: string;
+  archiveId?: number;
+  fittingId?: number;
+  productionRunId?: number;
+  sampleId?: number;
   includeArchived?: boolean; // false/undefined = active only; true = include archived
 }
 

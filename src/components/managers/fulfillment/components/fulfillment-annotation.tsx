@@ -42,20 +42,22 @@ export function FulfillmentAnnotation({
   return (
     <div className='flex flex-col gap-4'>
       <label className='flex flex-col gap-1'>
-        <Text variant='label' size='small' component='span'>
+        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
           assignee
         </Text>
         {canWrite ? (
           <AssigneeSelect value={annotation.assignee} onChange={(u) => setAssignee.mutate(u)} />
         ) : (
-          <Text size='small'>
-            {annotation.assignee || <span className='text-labelColor'>unassigned</span>}
+          <Text size='micro' component='span'>
+            {annotation.assignee || (
+              <span className='text-labelColor'>unassigned</span>
+            )}
           </Text>
         )}
       </label>
 
       <div className='flex flex-col gap-1'>
-        <Text variant='label' size='small' component='span'>
+        <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
           packing notes
         </Text>
         {canWrite ? (
@@ -64,7 +66,7 @@ export function FulfillmentAnnotation({
               name='fulfillment-notes'
               variant='secondary'
               placeholder='Internal notes for whoever packs this…'
-              className='mb-0 min-h-16 border border-textInactiveColor'
+              className='mb-0 min-h-16 border border-borderColor'
               value={notes}
               onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                 setNotesDraft(e.target.value)
@@ -73,7 +75,7 @@ export function FulfillmentAnnotation({
             <Button
               type='button'
               variant='secondary'
-              size='lg'
+              size='sm'
               className='self-end'
               loading={setNotes.isPending}
               disabled={!notesDirty}
@@ -83,21 +85,17 @@ export function FulfillmentAnnotation({
             </Button>
           </>
         ) : annotation.notes ? (
-          <Text size='small' className='whitespace-pre-wrap break-words'>
+          <Text size='micro' component='span' className='whitespace-pre-wrap break-words'>
             {annotation.notes}
           </Text>
         ) : (
-          <Text variant='label' size='small'>
+          <Text size='micro' variant='label' component='span'>
             No notes.
           </Text>
         )}
       </div>
 
-      <FulfillmentChecklist
-        orderUuid={orderUuid}
-        items={annotation.checklist}
-        canWrite={canWrite}
-      />
+      <FulfillmentChecklist orderUuid={orderUuid} items={annotation.checklist} canWrite={canWrite} />
     </div>
   );
 }
