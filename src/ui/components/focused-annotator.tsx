@@ -1,11 +1,10 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
-import { useMedia } from 'components/managers/media/utils/useMediaQuery';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { useMemo, useRef, useState, type ReactNode } from 'react';
-import { AnnotatedImage, type AnnotatedCallout } from './annotated-image';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { AnnotatedImage, ImageCallout, type AnnotatedCallout } from './annotated-image';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
 import { MediaViewer, mediaFullListToViewerItems, useMediaViewer } from './media-viewer';
@@ -37,9 +36,6 @@ export type FocusedView = {
   full: common_MediaFull;
 };
 
-/** How many library items the inline "recent" strip offers before you must browse the archive. */
-const RECENT_COUNT = 5;
-
 const mediaUrl = (full?: common_MediaFull): string =>
   full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
 
@@ -59,6 +55,48 @@ function mediaAspect(full: common_MediaFull | undefined, fallback: string): stri
 }
 
 const isMediaFile = (f: File) => f.type.startsWith('image/') || f.type.startsWith('video/');
+
+/** Width of one rail cell, and the gap between two — the arrow step has to match the snap step. */
+const RAIL_CARD = 300;
+const RAIL_GAP = 8;
+
+// Horizontal rail controller: reports whether the strip actually overflows (so the arrows only
+// exist when they do anything) and steps by exactly one card, wrapping at both ends. The wrap is
+// what makes it read as a loop; cloning the views to get a truly seamless one would duplicate
+// media ids, and every pin, piece and "pinned to" select addresses an image BY id.
+function useRailScroll(itemCount: number) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setOverflowing(el.scrollWidth > el.clientWidth + 1);
+    measure();
+    // Both the rail (viewport width) and its content (a view added or removed) move the answer.
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    return () => ro.disconnect();
+  }, [itemCount]);
+
+  const step = (dir: 1 | -1) => {
+    const el = ref.current;
+    if (!el) return;
+    const card = (el.firstElementChild as HTMLElement | null)?.getBoundingClientRect().width;
+    const by = (card || RAIL_CARD) + RAIL_GAP;
+    const max = el.scrollWidth - el.clientWidth;
+    const next = el.scrollLeft + dir * by;
+    // Clamp to the end first, and only wrap once already there — otherwise a rail that overflows
+    // by less than one card would jump from the start straight back to the start.
+    const atEnd = el.scrollLeft >= max - 1;
+    const atStart = el.scrollLeft <= 1;
+    const left = dir === 1 ? (atEnd ? 0 : Math.min(next, max)) : atStart ? max : Math.max(next, 0);
+    el.scrollTo({ left, behavior: 'smooth' });
+  };
+
+  return { ref, overflowing, step };
+}
 
 // Drag-and-drop plumbing for a single drop target. Kept local (rather than reusing the media
 // manager's DragDropArea) because that one is bound to the manager's pending-files queue, while
@@ -163,7 +201,8 @@ export function FocusedAnnotator({
   const [uploading, setUploading] = useState(false);
   const viewer = useMediaViewer();
   const uploadMedia = useUploadMedia();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // +1 for the trailing "+ add view" slot, which is part of what can overflow.
+  const rail = useRailScroll(views.length + 1);
 
   const isGrid = layout === 'grid';
   const hasMedia = views.length > 0;
@@ -211,8 +250,6 @@ export function FocusedAnnotator({
     if (added.length) handlePick(added);
   }
 
-  const openFilePicker = () => fileInputRef.current?.click();
-
   const modeToggles = (
     <ChipRow>
       {notesMode === 'auto' && (
@@ -236,20 +273,6 @@ export function FocusedAnnotator({
 
   return (
     <div className='space-y-2.5'>
-      {/* One hidden input serves both the "+ add view" tile and the drop zone's click-to-upload. */}
-      <input
-        ref={fileInputRef}
-        type='file'
-        accept='image/*,video/*'
-        multiple
-        className='hidden'
-        onChange={(e) => {
-          void handleFiles(Array.from(e.target.files ?? []));
-          // Reset so picking the same file twice in a row still fires a change.
-          e.target.value = '';
-        }}
-      />
-
       {hasMedia &&
         (isGrid ? (
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
@@ -259,6 +282,31 @@ export function FocusedAnnotator({
               {hint}
             </Text>
             <ToolbarSpacer />
+            {/* Only once the rail actually runs off the edge — arrows that can't move anything are
+                noise. They live in the bar rather than floating over the pictures, where they would
+                sit on top of the pins they exist to help you reach. */}
+            {rail.overflowing && (
+              <div className='flex items-center gap-1'>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  aria-label='previous view'
+                  onClick={() => rail.step(-1)}
+                >
+                  ‹
+                </Button>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  aria-label='next view'
+                  onClick={() => rail.step(1)}
+                >
+                  ›
+                </Button>
+              </div>
+            )}
             {modeToggles}
           </Toolbar>
         ) : (
@@ -273,13 +321,22 @@ export function FocusedAnnotator({
       {isGrid ? (
         <>
           <div
+            ref={rail.ref}
             aria-label={carouselLabel}
-            className='grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] items-start gap-2'
+            // A ONE-ROW rail, not a wrapping grid: 300px cells (a callout pin has to land on a seam
+            // you can actually see) that stay one row and scroll sideways, with the arrows above
+            // looping past either end. Trade-off: `overflow-x` makes the vertical axis scroll too,
+            // so in show-all-notes mode a note pinned near the top or bottom edge can be clipped —
+            // the hover notes are portalled and unaffected. `py-1` buys back the common case.
+            className='flex snap-x snap-mandatory items-start gap-2 overflow-x-auto py-1'
           >
             {views.map((v, i) => {
               const url = mediaUrl(v.full);
               return (
-                <div key={v.key} className='relative min-w-0 space-y-1'>
+                <div
+                  key={v.key}
+                  className='relative w-[300px] max-w-[85vw] shrink-0 snap-start space-y-1'
+                >
                   <AnnotatedImage
                     src={url}
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
@@ -292,8 +349,8 @@ export function FocusedAnnotator({
                     notesMode={notesMode}
                     showAllNotes={showAllNotes}
                     pinSize={pinSize}
-                    // A 240px note over a 180px tile needs trimming; the lightbox keeps the full card.
-                    noteClassName='w-44'
+                    // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
+                    noteClassName='w-60'
                     onAdd={(x, y) => onAddCallout(v.mediaId, x, y)}
                     onMove={onMoveCallout}
                     onRemove={onRemoveCallout}
@@ -326,13 +383,26 @@ export function FocusedAnnotator({
               );
             })}
 
-            {/* "+ add view" — a dashed slot in the grid itself, so adding an image is one click
-                from where the gap is, with no modal in the way. */}
-            <AddTile
-              aspect={fallbackAspect}
-              busy={uploading}
-              onFiles={handleFiles}
-              onClick={openFilePicker}
+            {/* "+ add view" — a dashed slot in the grid itself, so the empty spot IS the control
+                that fills it. Clicking opens the media library: a sketch view is nearly always an
+                image that already exists, and sending the click straight to the OS file dialog
+                made the library the harder path to reach. Dropping files on the tile still
+                uploads — that gesture already carries the file. */}
+            <MediaSelector
+              label={addLabel}
+              purpose={purpose}
+              aspectRatio={pickerAspectRatio}
+              allowMultiple
+              showVideos
+              saveSelectedMedia={handlePick}
+              trigger={
+                <AddTile
+                  aspect={fallbackAspect}
+                  busy={uploading}
+                  onFiles={handleFiles}
+                  className='w-[300px] max-w-[85vw] shrink-0 snap-start'
+                />
+              }
             />
           </div>
 
@@ -341,16 +411,8 @@ export function FocusedAnnotator({
               {emptyLabel}
             </Text>
           )}
-
-          <AddImageStrip
-            addLabel={addLabel}
-            purpose={purpose}
-            pickerAspectRatio={pickerAspectRatio}
-            busy={uploading}
-            onFiles={handleFiles}
-            onClickUpload={openFilePicker}
-            onPick={handlePick}
-          />
+          {/* No separate "add image" panel below the grid: the ghost slot IS the add control, and
+              a second one restated the same action twice on the same screen. */}
         </>
       ) : !hasMedia ? (
         <Text size='micro' variant='label'>
@@ -460,8 +522,33 @@ export function FocusedAnnotator({
         </div>
       )}
 
-      {/* Shared lightbox — pan + freehand draw (session-only markup). */}
-      <MediaViewer items={viewerItems} {...viewer} />
+      {/* Shared lightbox — pan + freehand draw (session-only markup), with this surface's callouts
+          laid over the picture behind a toggle. Read-only there: the pins are for reading the notes
+          at a size where they can be read, and a drag on a zoomed stage means pan, not reposition —
+          editing stays on the tile, where the gesture is unambiguous. */}
+      <MediaViewer
+        items={viewerItems}
+        {...viewer}
+        overlayLabel='callouts'
+        renderOverlay={({ index: i, scale }) => {
+          const v = views[i];
+          if (!v) return null;
+          return calloutsFor(v.mediaId).map((c) =>
+            Number.isNaN(c.xNorm) || Number.isNaN(c.yNorm) ? null : (
+              <ImageCallout
+                key={c.key}
+                data={c}
+                title={noteTitle?.(c.key)}
+                scale={scale}
+                showAll
+                editable={false}
+                pinSize={pinSize}
+                renderNote={(opts) => renderNote(c.key, opts)}
+              />
+            ),
+          );
+        }}
+      />
     </div>
   );
 }
@@ -499,33 +586,41 @@ function FrameButton({
 }
 
 // ---------------------------------------------------------------------------
-// The "+ add view" grid cell — a dashed slot that is both a click-to-upload target and a drop
-// target, so the empty spot in the grid is itself the control that fills it.
+// The "+ add view" grid cell — a dashed slot that opens the media library on click and accepts a
+// file drop, so the empty spot in the grid is itself the control that fills it.
+//
+// It spreads the props it is given rather than taking an `onClick`, because it is handed to
+// `MediaSelector` through Radix `asChild`: the dialog's own trigger props (onClick, aria-haspopup,
+// data-state) arrive as props and have to land on the real button or the tile does nothing.
 // ---------------------------------------------------------------------------
 
 function AddTile({
   aspect,
   busy,
   onFiles,
-  onClick,
+  className,
+  ...triggerProps
 }: {
   aspect: string;
   busy: boolean;
   onFiles: (files: File[]) => void;
-  onClick: () => void;
-}) {
+} & React.ComponentPropsWithRef<'button'>) {
   const { dragging, handlers } = useFileDrop(onFiles);
   return (
     <button
       type='button'
-      onClick={onClick}
+      {...triggerProps}
+      // After the trigger props, so a drop is always handled here and never by the dialog.
       {...handlers}
       aria-label='add view'
-      className='block w-full cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+      className={cn(
+        'block cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+        className,
+      )}
     >
       <Placeholder
         dashed
-        label={busy ? 'uploading…' : dragging ? 'drop to add' : '+ add view'}
+        label={busy ? 'uploading…' : dragging ? 'drop to upload' : '+ add view'}
         // The ratio lives on the placeholder itself, so it never depends on a percentage
         // height resolving against the button.
         style={{ aspectRatio: aspect }}
@@ -535,105 +630,3 @@ function AddTile({
   );
 }
 
-// ---------------------------------------------------------------------------
-// The add-image strip — drop zone + the most recent library items inline, with the full library
-// dialog demoted to "browse all…". No overlay in the common case: the sheet you are adding to
-// stays on screen while you add to it.
-// ---------------------------------------------------------------------------
-
-function AddImageStrip({
-  addLabel,
-  purpose,
-  pickerAspectRatio,
-  busy,
-  onFiles,
-  onClickUpload,
-  onPick,
-}: {
-  addLabel: string;
-  purpose: string;
-  pickerAspectRatio?: string[];
-  busy: boolean;
-  onFiles: (files: File[]) => void;
-  onClickUpload: () => void;
-  onPick: (items: common_MediaFull[]) => void;
-}) {
-  const { data: recent } = useMedia(RECENT_COUNT, 0);
-  const { dragging, handlers } = useFileDrop(onFiles);
-
-  return (
-    <div className='border border-borderColor bg-bgColor p-2.5'>
-      <div className='mb-1.5 flex flex-wrap items-center gap-2'>
-        <Text
-          size='micro'
-          variant='uppercase'
-          tracking='group'
-          component='span'
-          className='font-bold'
-        >
-          add image
-        </Text>
-        <ToolbarSpacer />
-        <Text size='micro' variant='label' component='span'>
-          recent
-        </Text>
-        <MediaSelector
-          label={addLabel}
-          purpose={purpose}
-          aspectRatio={pickerAspectRatio}
-          allowMultiple
-          showVideos
-          saveSelectedMedia={onPick}
-          trigger={
-            <Button type='button' variant='secondary' size='sm'>
-              browse all…
-            </Button>
-          }
-        />
-      </div>
-
-      <div className='flex items-stretch gap-1.5'>
-        <button
-          type='button'
-          onClick={onClickUpload}
-          {...handlers}
-          className='flex min-h-[52px] flex-1 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-        >
-          <Placeholder
-            dashed
-            label={
-              busy
-                ? 'uploading…'
-                : dragging
-                  ? 'drop to upload'
-                  : 'drop files here or click to upload'
-            }
-            className={cn('w-full px-2 text-center', dragging && 'border-textColor text-textColor')}
-          />
-        </button>
-
-        {(recent ?? [])
-          .filter((m) => m.id != null)
-          .map((m) => {
-            const url = thumbUrl(m);
-            const video = isVideo(mediaUrl(m)) || isVideo(url);
-            return (
-              <button
-                key={m.id}
-                type='button'
-                aria-label='add this recent image'
-                onClick={() => onPick([m])}
-                className='size-[52px] shrink-0 cursor-pointer overflow-hidden border border-borderColor hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-              >
-                {video ? (
-                  <video src={url} muted className='size-full object-cover' />
-                ) : (
-                  <img src={url} alt='' draggable={false} className='size-full object-cover' />
-                )}
-              </button>
-            );
-          })}
-      </div>
-    </div>
-  );
-}
