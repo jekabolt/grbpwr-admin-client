@@ -19,6 +19,15 @@ import {
 // Sample substitutions (§2.7): a dev-time deviation from the spec BOM — a line sewn with a different
 // material. Documentation only (Q2: never COGS; the authoritative spend stays in the stock ledger +
 // the BOM plan). Pick the BOM line, see its original (spec) material, record what was used instead.
+//
+// DELIBERATE — this panel does NOT stage into the card's one save (phase 19, same reasoning as
+// roles-field and the dev-expense ledger). Substitutions are an append-only record of what actually
+// happened at the machine, not a draft of the sample: the boxed form below is a composer, "+ add
+// substitution" IS the commit, and the row it writes appears immediately in the SUBSTITUTIONS
+// summary the sample editor keeps visible. Staging it would leave "add" doing nothing until the
+// operator found the header save — and each row is one indivisible fact, so there is no dirty state
+// to accumulate anyway. The parent sample's FIELDS are a draft form and do stage; this list does
+// not. Do not "fix" it into the staged model.
 
 // Shared naming so the always-visible rows and the editor read a substitution identically.
 function useSubstitutionNaming(techCard?: common_TechCard) {
