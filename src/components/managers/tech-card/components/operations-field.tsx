@@ -119,7 +119,15 @@ type BomLine = { lineKey?: string; name?: string; section?: string };
 // Wiring 14 operations to their pieces used to mean opening 14 popovers. The tray puts every
 // DECLARED piece on one sticky strip: drag a chip onto an operation, or — the keyboard and touch
 // path, which is not optional — click it and it lands on the operation currently targeted.
-function TrayChip({ piece, onAdd }: { piece: PieceRef; onAdd: () => void }) {
+function TrayChip({
+  piece,
+  onAdd,
+  highlighted = false,
+}: {
+  piece: PieceRef;
+  onAdd: () => void;
+  highlighted?: boolean;
+}) {
   return (
     <span
       role='button'
@@ -139,7 +147,11 @@ function TrayChip({ piece, onAdd }: { piece: PieceRef; onAdd: () => void }) {
         }
       }}
       title={piece.name}
-      className='flex size-16 cursor-grab flex-col items-center justify-center gap-0.5 border border-borderColor bg-bgColor p-1 text-center transition-colors hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor active:cursor-grabbing'
+      className={cn(
+        'flex size-16 cursor-grab flex-col items-center justify-center gap-0.5 border bg-bgColor p-1 text-center transition-colors hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor active:cursor-grabbing',
+        // flashed by clicking an operation's «＋» — pull the eye to the pieces now clickable
+        highlighted ? 'animate-pulse border-textColor bg-bgZebra' : 'border-borderColor',
+      )}
     >
       <Text
         size='nano'
@@ -164,7 +176,9 @@ function PieceDropTarget({
 }) {
   const [over, setOver] = useState(false);
   return (
-    <span
+    <button
+      type='button'
+      onClick={onActivate}
       onDragEnter={(e: React.DragEvent) => {
         e.preventDefault();
         setOver(true);
@@ -181,29 +195,19 @@ function PieceDropTarget({
         const key = raw.startsWith(PIECE_DND_PREFIX) ? raw.slice(PIECE_DND_PREFIX.length) : raw;
         if (key) onDropKey(key);
       }}
-      className='block'
-    >
-      <button
-        type='button'
-        onClick={onActivate}
-        title='перетащите детали из лотка сюда — или нажмите, чтобы выбрать эту операцию, затем кликните деталь в лотке'
-        className={cn(
-          'flex min-h-[40px] w-full items-center justify-center gap-1.5 border border-dashed px-3 py-2 text-center text-micro uppercase tracking-label transition-colors',
-          over
-            ? 'border-textColor bg-bgZebra text-textColor'
-            : targeted
-              ? 'border-textColor text-textColor'
-              : 'border-borderColor text-labelColor hover:border-textColor hover:text-textColor',
-        )}
-      >
-        <span aria-hidden>⬇</span>
-        {over
-          ? 'отпустите деталь здесь'
+      aria-label='добавить деталь — подсветить детали в лотке'
+      title='нажмите, чтобы подсветить детали в лотке и выбрать нужную — или перетащите деталь сюда'
+      className={cn(
+        'flex size-8 items-center justify-center border border-dashed text-control leading-none transition-colors',
+        over
+          ? 'border-textColor bg-bgZebra text-textColor'
           : targeted
-            ? 'выберите деталь в лотке ↑'
-            : 'перетащите детали сюда'}
-      </button>
-    </span>
+            ? 'border-textColor text-textColor'
+            : 'border-borderColor text-labelColor hover:border-textColor hover:text-textColor',
+      )}
+    >
+      <span aria-hidden>＋</span>
+    </button>
   );
 }
 
@@ -222,6 +226,7 @@ function OperationRow({
   onActiveBomChange,
   targeted,
   onTarget,
+  onFlashPieces,
 }: {
   index: number;
   onRemove: () => void;
@@ -234,18 +239,16 @@ function OperationRow({
   onActiveBomChange?: (k: string | null) => void;
   targeted: boolean;
   onTarget: () => void;
+  onFlashPieces: () => void;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const opNumber = (index + 1) * 10;
   const opType = useWatch({ control, name: `operations.${index}.operationType` }) as string;
   const node = (useWatch({ control, name: `operations.${index}.node` }) ?? '') as string;
-  const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
-  const timeNorm = (useWatch({ control, name: `operations.${index}.timeNorm` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
     0) as number;
-  // The collapsed card shows only операция · узел/что · зона · пин — every other field is «детали».
-  const opTypeLabel = operationTypeOptions.find((o) => o.value === opType)?.label ?? '';
-  const zoneLabel = zoneOptions.find((o) => o.value === zone)?.label ?? zone;
+  // операция · узел/что · зона · пин are edited inline in the header (row A); every other field is
+  // «детали». opType is still watched to drive the machine/stitch presets below.
 
   // A blocking error must never hide behind a collapsed card (`node` is required), so the row
   // opens itself when its own subtree reports one — and a brand-new row opens because it is empty.
@@ -422,73 +425,125 @@ function OperationRow({
         linked ? 'border-error' : targeted ? 'border-textColor' : 'border-borderColor',
       )}
     >
-      {/* header — the assembly order at a glance, and the tray's drop zone */}
+      {/* header — операция · узел · зона · пин are edited inline here (row A); the pieces this
+          operation joins are the square tiles + drop zone (row B), so the tray can wire a whole
+          card without opening a single «детали» body. */}
       <div
         onClick={onTarget}
-        className='flex flex-wrap items-center gap-1.5 border-b border-hairline bg-bgZebra px-2 py-1.5'
+        className='flex flex-col gap-2 border-b border-hairline bg-bgZebra px-2 py-2'
       >
-        <Text size='control' component='span' className='font-bold tabular-nums'>
-          {opNumber}
-        </Text>
-        <Text size='control' component='span' className='min-w-0 flex-1 truncate'>
-          {[opTypeLabel, node.trim(), zoneLabel].filter(Boolean).join(' · ') || (
-            <span className='text-labelColor'>— задайте операцию —</span>
-          )}
-        </Text>
-
-        <ChipRow>
-          {chosenPieces.map((k) => (
-            <Chip key={k} selected onRemove={() => removePieceKey(k)}>
-              {byKey.get(k)?.name}
-            </Chip>
-          ))}
-          {danglingPieces.map((k) => (
-            <Chip key={k} tone='error' onRemove={() => removePieceKey(k)} title={k}>
-              {`#${k.slice(-6)} — not found`}
-            </Chip>
-          ))}
-          <PieceDropTarget targeted={targeted} onDropKey={addPieceKey} onActivate={onTarget} />
-        </ChipRow>
-
-        <div className='ml-auto flex shrink-0 items-center gap-1.5'>
-          {linkedMaterials.map((b) => (
-            <Pill key={b.lineKey} tone='mut'>
-              {b.name?.trim() || 'unnamed'}
-            </Pill>
-          ))}
-          {calloutNumber > 0 && <Pill tone='ink'>{`пин ${calloutNumber}`}</Pill>}
-          <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {timeNorm.trim() ? `${timeNorm} мин` : '— мин'}
+        {/* row A — the four key fields, always editable and visible */}
+        <div className='flex flex-wrap items-end gap-1.5'>
+          <Text size='control' component='span' className='self-center font-bold tabular-nums'>
+            {opNumber}
           </Text>
-          <Button type='button' variant='secondary' size='xs' onClick={() => setOpen((o) => !o)}>
-            {open ? 'детали ▴' : 'детали ▾'}
-          </Button>
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            aria-label='remove operation'
-            onClick={onRemove}
-          >
-            ✕
-          </Button>
-        </div>
-      </div>
-
-      {open && (
-        <div className='space-y-2 p-2'>
-          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
+          <div className='min-w-[130px] flex-1'>
             <SelectField
               name={`operations.${index}.operationType`}
               label='операция *'
               items={operationTypeOptions}
             />
+          </div>
+          <div className='min-w-[130px] flex-1'>
             <ComboField
               name={`operations.${index}.node`}
               label='узел / что *'
               placeholder='плечевые швы'
               options={nodeOptions}
             />
+          </div>
+          <div className='min-w-[110px]'>
+            <SelectField name={`operations.${index}.zone`} label='зона' items={zoneOptions} />
+          </div>
+          <div className='min-w-[92px]'>
+            <SelectField
+              name={`operations.${index}.calloutNumber`}
+              label='пин'
+              items={rowPinOptions}
+              valueAsNumber
+            />
+          </div>
+          <div className='ml-auto flex shrink-0 items-center gap-1.5'>
+            <Button type='button' variant='secondary' size='xs' onClick={() => setOpen((o) => !o)}>
+              {open ? 'детали ▴' : 'детали ▾'}
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              aria-label='remove operation'
+              onClick={onRemove}
+            >
+              ✕
+            </Button>
+          </div>
+        </div>
+
+        {/* row B — pieces this operation joins: equal square tiles matching the tray + a square
+            drop target */}
+        <div className='flex flex-wrap items-start gap-2'>
+          {chosenPieces.map((k) => (
+            <div
+              key={k}
+              title={byKey.get(k)?.name}
+              className='relative flex size-16 flex-col items-center justify-center border border-borderColor bg-bgColor p-1 text-center'
+            >
+              <Text
+                size='nano'
+                variant='label'
+                component='span'
+                className='line-clamp-3 uppercase leading-tight text-textColor'
+              >
+                {byKey.get(k)?.name}
+              </Text>
+              <button
+                type='button'
+                aria-label='remove piece'
+                onClick={() => removePieceKey(k)}
+                className='absolute right-0.5 top-0.5 leading-none text-labelColor transition-colors hover:text-textColor'
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          {danglingPieces.map((k) => (
+            <div
+              key={k}
+              title={k}
+              className='relative flex size-16 flex-col items-center justify-center border border-error bg-bgColor p-1 text-center'
+            >
+              <Text
+                size='nano'
+                variant='error'
+                component='span'
+                className='line-clamp-3 leading-tight'
+              >
+                {`#${k.slice(-6)} — not found`}
+              </Text>
+              <button
+                type='button'
+                aria-label='remove piece'
+                onClick={() => removePieceKey(k)}
+                className='absolute right-0.5 top-0.5 leading-none text-error transition-colors hover:text-textColor'
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <PieceDropTarget
+            targeted={targeted}
+            onDropKey={addPieceKey}
+            onActivate={() => {
+              onTarget();
+              onFlashPieces();
+            }}
+          />
+        </div>
+      </div>
+
+      {open && (
+        <div className='space-y-2 p-2'>
+          <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
             <ComboField
               name={`operations.${index}.machine`}
               label='машина'
@@ -505,13 +560,6 @@ function OperationRow({
                 standard minutes
               </Text>
             </div>
-            <SelectField
-              name={`operations.${index}.calloutNumber`}
-              label='пин'
-              items={rowPinOptions}
-              valueAsNumber
-            />
-            <SelectField name={`operations.${index}.zone`} label='зона' items={zoneOptions} />
             <ComboField
               name={`operations.${index}.seamType`}
               label='тип шва'
@@ -951,6 +999,23 @@ export function OperationsField({
   const [targetIndex, setTargetIndex] = useState(0);
   const effectiveTarget = fields.length === 0 ? -1 : Math.min(targetIndex, fields.length - 1);
 
+  // Clicking an operation's «＋» targets it AND briefly flashes the tray, so the eye is pulled to
+  // the pieces now clickable. A short pulse, not a persisted mode — the pieces stay clickable
+  // regardless; the flash is only the "выберите деталь" cue that answers the small «＋».
+  const [highlightPieces, setHighlightPieces] = useState(false);
+  const flashTimer = useRef<number | null>(null);
+  const flashPieces = () => {
+    setHighlightPieces(true);
+    if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    flashTimer.current = window.setTimeout(() => setHighlightPieces(false), 2600);
+  };
+  useEffect(
+    () => () => {
+      if (flashTimer.current) window.clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+
   const addPieceToOperation = (index: number, lineKey: string) => {
     if (index < 0) return;
     const cur = (getValues(`operations.${index}.pieceLineKeys`) ?? []) as string[];
@@ -987,6 +1052,7 @@ export function OperationsField({
             <TrayChip
               key={p.lineKey}
               piece={p}
+              highlighted={highlightPieces}
               onAdd={() => addPieceToOperation(effectiveTarget, p.lineKey)}
             />
           ))
@@ -995,8 +1061,17 @@ export function OperationsField({
           + new piece
         </Chip>
         <ToolbarSpacer />
-        <Text size='micro' variant='label' component='span'>
-          {effectiveTarget >= 0 ? `→ оп. ${(effectiveTarget + 1) * 10}` : 'нет операций'}
+        <Text
+          size='micro'
+          variant='label'
+          component='span'
+          className={cn(highlightPieces && 'font-bold text-textColor')}
+        >
+          {effectiveTarget < 0
+            ? 'нет операций'
+            : highlightPieces
+              ? `кликните деталь → оп. ${(effectiveTarget + 1) * 10}`
+              : `→ оп. ${(effectiveTarget + 1) * 10}`}
         </Text>
       </Toolbar>
 
@@ -1020,6 +1095,7 @@ export function OperationsField({
               onActiveBomChange={onActiveBomChange}
               targeted={index === effectiveTarget}
               onTarget={() => setTargetIndex(index)}
+              onFlashPieces={flashPieces}
             />
           ))}
           <div className='flex justify-end border-t border-hairline pt-1.5'>
