@@ -39,7 +39,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { sectionShort } from './bom-line-picker';
-import { PieceRef, PieceSinglePicker } from './piece-picker';
+import { PieceRef } from './piece-picker';
 import {
   createColorwayErrorMessage,
   recipeSaveErrorMessage,
@@ -155,15 +155,20 @@ async function readColorwayVersion(
 
 // How many recipe lines this draft actually changes against what the server returned. The header's
 // label has to be a FACT, and the write is a FULL REPLACE — counting every line it sends would claim
-// work nobody did. Keyed by bom_line_key, which is what the write itself is keyed by.
-function changedLines(base: UsageDraft[], next: UsageDraft[]): number {
+// work nobody did. Re-derived over the PIECE MODEL: a line is identified by the piece it sits on
+// (piece-bound), or by its fabric when its piece is gone (an orphan). Blank piece cards carry no
+// fabric, are not lines, and are never counted — so poking a piece and leaving it empty stages
+// nothing.
+function changedLines(base: UsageDraft[], next: UsageDraft[], pieceKeys: Set<string>): number {
+  const key = (u: UsageDraft) =>
+    pieceKeys.has(u.pieceLineKey) ? `p:${u.pieceLineKey}` : `o:${u.bomLineKey}`;
   const sig = (u: UsageDraft) => JSON.stringify(toWire(u));
-  const before = new Map(base.map((u) => [u.bomLineKey, sig(u)]));
-  const keys = new Set(next.map((u) => u.bomLineKey));
+  const before = new Map(base.filter((u) => u.bomLineKey).map((u) => [key(u), sig(u)]));
+  const after = new Map(next.filter((u) => u.bomLineKey).map((u) => [key(u), sig(u)]));
   let n = 0;
   // added (no such key before) or edited (same key, different payload)
-  for (const u of next) if (before.get(u.bomLineKey) !== sig(u)) n += 1;
-  for (const key of before.keys()) if (!keys.has(key)) n += 1; // removed
+  for (const [k, s] of after) if (before.get(k) !== s) n += 1;
+  for (const k of before.keys()) if (!after.has(k)) n += 1; // removed
   return n;
 }
 
@@ -712,134 +717,111 @@ function RecipeMaterialCard({ article }: { article?: BomLine }) {
   );
 }
 
-// One usage row = one material on one part in this colourway. A bordered card per line (the
-// reference's `.surf.pad`), because the two references it carries — an article and a piece — are
-// pickers, not cells, and a table row cannot hold them at a readable density.
-function UsageRowEditor({
-  index,
+// Option label for the fabric picker: the linked catalog material's article code (or its name) plus
+// its spec, so an operator picks a fabric by what it IS, not by a BOM row number. Falls back to the
+// BOM line's own name for a legacy/unlinked line.
+function fabricOptionLabel(b: BomLine): string {
+  const m = b.material;
+  const base = m
+    ? composeArticleFromMaterial(m, true) || m.name?.trim() || b.name?.trim() || 'material'
+    : b.name?.trim() || 'unnamed';
+  const spec = m ? materialSpec(m) : '';
+  return spec ? `${base} · ${spec}` : base;
+}
+
+// A fresh usage for a piece that has none yet: no fabric, its placement primed to the piece name so
+// the PDF and legacy readers still get a human label the moment a fabric is picked.
+function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
+  return {
+    bomLineKey: '',
+    placement,
+    color: '',
+    pantone: '',
+    consumption: '',
+    quantity: '',
+    sizeConsumptions: [],
+    pieceLineKey,
+    lineTotal: '',
+    sizeRunTotal: '',
+  };
+}
+
+// Stable-enough identity for an orphan usage in the session keep-set: its fabric, else its dead
+// piece key.
+const orphanKey = (u: UsageDraft) => u.bomLineKey || u.pieceLineKey || '∅';
+
+// ONE CARD PER DECLARED CUT PIECE. The header NAMES the piece and is fixed — the recipe assigns a
+// fabric TO a piece, it never chooses which piece (that is the PIECES tab). A piece takes exactly one
+// fabric, so the picker is a single select whose options carry the material's own meta; the chosen
+// article renders as the same square BOM card the catalogue shows, and the consumption controls
+// below are the measured/counted pair, unchanged.
+function PieceRecipeCard({
+  piece,
   draft,
   bomItems,
-  pieces,
   sizeIds,
   sizeQuantities,
   sizeNameById,
   canEdit,
   onChange,
-  onRemove,
 }: {
-  index: number;
+  piece: PieceRef;
   draft: UsageDraft;
   bomItems: BomLine[];
-  pieces: PieceRef[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
   onChange: (patch: Partial<UsageDraft>) => void;
-  onRemove: () => void;
 }) {
   const article = draft.bomLineKey
     ? bomItems.find((b) => b.lineKey === draft.bomLineKey)
     : undefined;
   const isMeasured = measured(article?.section);
   const unit = article?.unit?.trim() || '';
+  const hasFabric = !!draft.bomLineKey;
 
   return (
     <div className='flex flex-col gap-2 border border-borderColor p-2.5'>
+      {/* HEADER — the cut piece, fixed. No piece picker: this card IS that piece's line. */}
       <div className='flex items-center justify-between gap-2'>
-        <Text size='micro' variant='label' component='span' className='min-w-0 truncate uppercase'>
-          материал {index + 1}
+        <Text size='control' component='span' className='min-w-0 truncate font-bold uppercase'>
+          {piece.name?.trim() || 'без названия'}
         </Text>
-        {canEdit && (
-          <Button
-            type='button'
-            variant='secondary'
-            size='xs'
-            className='shrink-0'
-            aria-label='remove material'
-            onClick={onRemove}
-          >
-            ✕
-          </Button>
-        )}
+        {!hasFabric && <Pill tone='mut'>no fabric yet</Pill>}
       </div>
 
       <div className='flex flex-col gap-3 sm:flex-row sm:items-start'>
-        {/* LEFT — the material AS the BOM square card, with the picker that (re)selects which
-            catalog article this usage points at directly under it. The card is the display; the
-            select stays as the control, so add/change/remove-usage all keep working. */}
+        {/* LEFT — the fabric AS the square BOM card, with the single picker that assigns which catalog
+            article this piece is cut from directly under it. Option labels carry the material's meta
+            so a fabric is chosen by what it is, not a row number. */}
         <div className='flex w-full flex-col gap-1.5 sm:w-40 sm:shrink-0'>
           <RecipeMaterialCard article={article} />
           <label className='flex flex-col gap-1'>
-            <FieldLabel>BOM article *</FieldLabel>
+            <FieldLabel>ткань</FieldLabel>
             <select
-              className={cn(cell, !draft.bomLineKey && 'border-error')}
+              className={cell}
               disabled={!canEdit}
-              aria-invalid={!draft.bomLineKey || undefined}
               value={draft.bomLineKey}
               onChange={(e) => onChange({ bomLineKey: e.target.value })}
             >
-              <option value=''>— select article —</option>
+              <option value=''>— no fabric yet —</option>
               {/* keep an unknown stored key selectable so a save never silently drops it */}
               {draft.bomLineKey && !bomItems.some((b) => b.lineKey === draft.bomLineKey) ? (
-                <option value={draft.bomLineKey}>(unknown / removed article)</option>
+                <option value={draft.bomLineKey}>(unknown / removed material)</option>
               ) : null}
-              {bomItems.map((b, bi) => (
+              {bomItems.map((b) => (
                 <option key={b.lineKey} value={b.lineKey}>
-                  {bi + 1}. {b.name?.trim() || 'unnamed'}
+                  {fabricOptionLabel(b)}
                 </option>
               ))}
             </select>
           </label>
         </div>
 
-        {/* RIGHT — which piece is cut from this fabric, then how much of it. */}
+        {/* RIGHT — how much of that fabric this piece takes. Measured articles cost by a rate (per-size
+            gradable); counted ones by a flat quantity (M14) — the controls are unchanged. */}
         <div className='flex min-w-0 flex-1 flex-col gap-3'>
-          {/* The part a norm is about is a CUT PIECE, not a label: the contract already carries
-              piece_line_key -> a real usage.piece_id FK (RESTRICT), and the client already round-trips
-              it — there was simply no control to set it, so operators retyped part names as free text
-              that nothing could join on. Picking here writes the stable key; `placement` stays as the
-              human label (auto-filled from the piece) so the PDF and legacy rows keep reading.
-              Single-select, unlike the operation picker: a consumption norm is about exactly one
-              piece. No create affordance either — the recipe saves through UpdateColorwayRecipe and
-              cannot author a piece; that belongs to the tech-card save. */}
-          <div className='flex flex-col gap-1'>
-            <FieldLabel>деталь из этой ткани (норма считается на неё)</FieldLabel>
-            {pieces.length > 0 ? (
-              <PieceSinglePicker
-                pieces={pieces}
-                value={draft.pieceLineKey}
-                disabled={!canEdit}
-                placeholder='— всё изделие —'
-                onChange={(key, piece) =>
-                  onChange({
-                    pieceLineKey: key,
-                    // Keep the label in step with the pick, but never clobber a placement the
-                    // operator typed for a norm that is not about one specific piece.
-                    placement: piece?.name?.trim() ? piece.name.trim() : key ? draft.placement : '',
-                  })
-                }
-              />
-            ) : (
-              // No cut pieces declared yet — the norm still needs a human-readable part, so the
-              // legacy free-text placement stays as the fallback rather than blocking the row.
-              <>
-                <input
-                  className={cell}
-                  disabled={!canEdit}
-                  placeholder='outer / lining / collar…'
-                  aria-label='placement'
-                  value={draft.placement}
-                  onChange={(e) => onChange({ placement: e.target.value })}
-                />
-                <Text size='micro' variant='label'>
-                  Add cut pieces on the PIECES tab to pick a real part here instead of typing one.
-                </Text>
-              </>
-            )}
-          </div>
-
-          {/* measured articles cost by a rate (per-size gradable); counted ones by a flat quantity (M14) */}
           {isMeasured ? (
             <UsagePerSizeLocal
               draft={draft}
@@ -873,6 +855,79 @@ function UsageRowEditor({
           {draft.sizeRunTotal ? `run ${draft.sizeRunTotal}` : ''}
         </Text>
       )}
+    </div>
+  );
+}
+
+// A usage whose piece is no longer declared (removed on the PIECES tab, a legacy/empty pieceLineKey,
+// or a duplicate of a piece that already has a card). Surfaced rather than silently dropped: KEEP
+// retains it in the full-replace save exactly as it is, UNLINK removes it from the recipe. Read-only
+// — this is triage, not editing.
+function OrphanRecipeCard({
+  draft,
+  bomItems,
+  canEdit,
+  kept,
+  onKeep,
+  onUnlink,
+}: {
+  draft: UsageDraft;
+  bomItems: BomLine[];
+  canEdit: boolean;
+  kept: boolean;
+  onKeep: () => void;
+  onUnlink: () => void;
+}) {
+  const article = draft.bomLineKey
+    ? bomItems.find((b) => b.lineKey === draft.bomLineKey)
+    : undefined;
+  const consumption =
+    draft.sizeConsumptions.length > 0
+      ? 'per-size consumption'
+      : draft.consumption
+        ? `consumption ${draft.consumption}`
+        : draft.quantity
+          ? `quantity ${draft.quantity}`
+          : '';
+
+  return (
+    <div className='flex flex-col gap-2 border border-borderColor p-2.5'>
+      <div className='flex items-center justify-between gap-2'>
+        <Text size='micro' variant='label' component='span' className='min-w-0 truncate uppercase'>
+          {draft.placement?.trim() || 'unassigned'}
+        </Text>
+        <Pill tone='warn'>piece removed</Pill>
+      </div>
+      <div className='flex flex-col gap-3 sm:flex-row sm:items-start'>
+        <div className='w-full sm:w-40 sm:shrink-0'>
+          <RecipeMaterialCard article={article} />
+        </div>
+        <div className='flex min-w-0 flex-1 flex-col gap-2'>
+          <Text size='micro' variant='label'>
+            This fabric points at a cut piece that is no longer on the PIECES tab.
+          </Text>
+          {consumption && (
+            <Text size='micro' variant='label'>
+              {consumption}
+            </Text>
+          )}
+          {canEdit &&
+            (kept ? (
+              <Text size='micro' variant='label'>
+                kept · saved as-is
+              </Text>
+            ) : (
+              <div className='flex flex-wrap items-center gap-1.5'>
+                <Button type='button' variant='secondary' size='sm' onClick={onKeep}>
+                  keep
+                </Button>
+                <Button type='button' variant='secondary' size='sm' onClick={onUnlink}>
+                  unlink
+                </Button>
+              </div>
+            ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1357,72 +1412,84 @@ function ColorwayRecipeEditor({
     setDirty(true);
   }, [staging, colorwayId, stagingKey]);
 
+  // The recipe is now PIECE-DRIVEN: one card per declared cut piece, its usage matched by
+  // pieceLineKey. pieceKeySet is the membership test that classifies every draft as piece-bound or
+  // orphaned.
+  const pieceKeySet = useMemo(() => new Set(pieces.map((p) => p.lineKey)), [pieces]);
+  // The FIRST usage that names each declared piece owns that piece's card. A second usage naming the
+  // same piece (legacy dup) falls through to the orphan group rather than being silently re-saved
+  // behind a card that never shows it.
+  const usageIndexByPiece = useMemo(() => {
+    const m = new Map<string, number>();
+    usages.forEach((u, i) => {
+      if (u.pieceLineKey && pieceKeySet.has(u.pieceLineKey) && !m.has(u.pieceLineKey))
+        m.set(u.pieceLineKey, i);
+    });
+    return m;
+  }, [usages, pieceKeySet]);
+  const boundIndices = useMemo(() => new Set(usageIndexByPiece.values()), [usageIndexByPiece]);
+  // Usages no declared piece claims: a piece removed on the PIECES tab, a legacy/empty pieceLineKey,
+  // or a duplicate. Surfaced, never dropped.
+  const orphans = useMemo(
+    () => usages.map((u, i) => ({ u, i })).filter(({ i }) => !boundIndices.has(i)),
+    [usages, boundIndices],
+  );
+
+  // What a save actually sends: every usage that names a fabric. A piece with no fabric emits
+  // nothing — the full-replace simply omits it.
+  const saveUsages = useMemo(() => usages.filter((u) => u.bomLineKey), [usages]);
+
   // Dirty says a control was touched; STAGED says the recipe would actually write something else, and
-  // `lines` is what the header's label counts. Typing a value and typing it back must not leave the
-  // header claiming work that is not there.
-  const lines = useMemo(() => changedLines(baseline, usages), [baseline, usages]);
+  // `lines` is what the header's label counts — re-derived over the piece model. Typing a value and
+  // typing it back must not leave the header claiming work that is not there.
+  const lines = useMemo(
+    () => changedLines(baseline, usages, pieceKeySet),
+    [baseline, usages, pieceKeySet],
+  );
   const staged = dirty && lines > 0;
   // Memoised so re-staging for an unrelated reason (a lock version, a title) hands the store the SAME
-  // snapshot object and it can skip the re-render — the lab-dip's snapshot is its draft state, which
-  // is identity-stable for the same reason.
+  // snapshot object and it can skip the re-render — the whole draft list travels, so blank piece
+  // cards and kept orphans both survive a tab refresh.
   const snapshot = useMemo<RecipeSnapshot>(() => ({ usages }), [usages]);
 
-  // Feed the grid tile: the live material count and whether anything here is waiting on the Save.
+  // Feed the grid tile: how many pieces have a fabric, and whether anything here is waiting on the Save.
   useEffect(() => {
-    onStatus(colorwayId, { count: usages.length, staged: staged || labDipStaged });
-  }, [colorwayId, usages.length, staged, labDipStaged, onStatus]);
+    onStatus(colorwayId, { count: saveUsages.length, staged: staged || labDipStaged });
+  }, [colorwayId, saveUsages.length, staged, labDipStaged, onStatus]);
 
-  const setRow = (i: number, patch: Partial<UsageDraft>) => {
+  // Orphans the operator has explicitly chosen to KEEP (session-only, by fabric key). They stay in
+  // the save either way — this only dismisses the keep/unlink prompt.
+  const [keptKeys, setKeptKeys] = useState<Set<string>>(() => new Set());
+
+  // Write a piece's card back into the flat draft list, CREATING the usage on first touch so a piece
+  // that had no usage becomes one the moment a fabric (or a consumption) is set.
+  const patchPiece = (piece: PieceRef, patch: Partial<UsageDraft>) => {
     setDirty(true);
-    setUsages((prev) => prev.map((u, idx) => (idx === i ? { ...u, ...patch } : u)));
+    setUsages((prev) => {
+      const i = prev.findIndex((u) => u.pieceLineKey === piece.lineKey);
+      if (i >= 0) return prev.map((u, idx) => (idx === i ? { ...u, ...patch } : u));
+      return [...prev, { ...blankDraft(piece.lineKey, piece.name?.trim() || ''), ...patch }];
+    });
   };
-  const addRow = () => {
-    setDirty(true);
-    setUsages((prev) => [
-      ...prev,
-      {
-        bomLineKey: '',
-        placement: '',
-        color: '',
-        pantone: '',
-        consumption: '',
-        quantity: '',
-        sizeConsumptions: [],
-        pieceLineKey: '',
-        lineTotal: '',
-        sizeRunTotal: '',
-      },
-    ]);
-  };
-  const removeRow = (i: number) => {
+  const removeUsage = (i: number) => {
     setDirty(true);
     setUsages((prev) => prev.filter((_, idx) => idx !== i));
   };
-
-  // M8: never silently drop a half-filled row. A usage without a BOM article cannot be persisted
-  // (bom_line_key is the recipe key), so it is named here and refused at commit — instead of the old
-  // `usages.filter(u => u.bomLineKey)` that made those rows vanish under a bare "Recipe saved". Named
-  // on screen too, because with no save button of its own the first the operator would otherwise hear
-  // of it is the card's Save stopping halfway.
-  const incomplete = usages.map((u, i) => (u.bomLineKey ? 0 : i + 1)).filter((n) => n > 0);
+  const keepOrphan = (u: UsageDraft) => setKeptKeys((prev) => new Set(prev).add(orphanKey(u)));
 
   // The panel's mutation, unwrapped: it THROWS instead of toasting, because the header's one save is
   // what reports the outcome now — it needs the rejection to name this panel in the partial-failure
-  // banner and to keep everything queued after it staged (19.3).
+  // banner and to keep everything queued after it staged (19.3). A blank piece card carries no fabric
+  // and is simply not part of `saveUsages`, so there is no half-filled row to refuse — a piece with
+  // no fabric is a valid state, not an error.
   async function commitRecipe() {
     if (!colorwayId) return;
-    if (incomplete.length > 0)
-      throw new Error(
-        `pick a BOM article for material ${incomplete.join(', ')} (or remove ${
-          incomplete.length === 1 ? 'it' : 'them'
-        })`,
-      );
     try {
       const expected = await readColorwayVersion(techCardId, colorwayId, lockVersion);
       await save.mutateAsync({
         colorwayId,
         expectedColorwayVersion: expected,
-        usages: usages.map(toWire),
+        usages: saveUsages.map(toWire),
       });
     } catch (e) {
       // Re-throw carrying this panel's copy: the header prints the message it is handed.
@@ -1470,31 +1537,67 @@ function ColorwayRecipeEditor({
     <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
       <SectionHeader
         title={`${title} · рецепт`}
-        question={[colorway.baseSku, `${usages.length} material${usages.length === 1 ? '' : 's'}`]
+        question={[
+          colorway.baseSku,
+          `${pieces.length} ${pieces.length === 1 ? 'piece' : 'pieces'}`,
+          `${saveUsages.length} with fabric`,
+        ]
           .filter(Boolean)
           .join(' · ')}
         action={staged ? <Pill tone='attention'>staged</Pill> : undefined}
       />
 
-      {usages.length === 0 ? (
+      {bomItems.length === 0 && (
         <Text size='micro' variant='label'>
-          no materials in this colourway’s recipe yet
+          add BOM articles on the BOM tab first — then assign one to each piece here
         </Text>
+      )}
+
+      {pieces.length === 0 ? (
+        <CalloutBox tone='note'>
+          <Text size='micro' component='span'>
+            Declare cut pieces on the PIECES tab — the recipe assigns a fabric to each piece.
+          </Text>
+        </CalloutBox>
       ) : (
         <div className='flex flex-col gap-1.5'>
-          {usages.map((u, i) => (
-            <UsageRowEditor
-              key={i}
-              index={i}
+          {pieces.map((piece) => {
+            const idx = usageIndexByPiece.get(piece.lineKey);
+            const draft =
+              idx != null ? usages[idx] : blankDraft(piece.lineKey, piece.name?.trim() || '');
+            return (
+              <PieceRecipeCard
+                key={piece.lineKey}
+                piece={piece}
+                draft={draft}
+                bomItems={bomItems}
+                sizeIds={sizeIds}
+                sizeQuantities={sizeQuantities}
+                sizeNameById={sizeNameById}
+                canEdit={canEdit}
+                onChange={(patch) => patchPiece(piece, patch)}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {orphans.length > 0 && (
+        <div className='flex flex-col gap-1.5'>
+          <GroupLabel>unassigned · piece removed</GroupLabel>
+          <Text size='micro' variant='label'>
+            These fabrics point at a cut piece that is no longer declared — keep them in the recipe or
+            unlink them.
+          </Text>
+          {orphans.map(({ u, i }) => (
+            <OrphanRecipeCard
+              key={`orphan-${i}`}
               draft={u}
               bomItems={bomItems}
-              pieces={pieces}
-              sizeIds={sizeIds}
-              sizeQuantities={sizeQuantities}
-              sizeNameById={sizeNameById}
               canEdit={canEdit}
-              onChange={(patch) => setRow(i, patch)}
-              onRemove={() => removeRow(i)}
+              kept={keptKeys.has(orphanKey(u))}
+              onKeep={() => keepOrphan(u)}
+              onUnlink={() => removeUsage(i)}
             />
           ))}
         </div>
@@ -1502,43 +1605,12 @@ function ColorwayRecipeEditor({
 
       <CompositionBar {...derived} />
 
-      {canEdit && staged && incomplete.length > 0 && (
-        <CalloutBox tone='warning'>
-          <Text size='micro' component='span'>
-            выберите артикул BOM для материала {incomplete.join(', ')} — иначе сохранение карточки
-            остановится на этом рецепте
-          </Text>
-        </CalloutBox>
-      )}
-
-      {canEdit && (
-        <Toolbar>
-          <Button
-            type='button'
-            variant='secondary'
-            size='sm'
-            disabled={bomItems.length === 0}
-            onClick={addRow}
-          >
-            + material
-          </Button>
-          {bomItems.length === 0 && (
-            <Text size='micro' variant='label' component='span'>
-              add BOM articles first — then pick them here for each part of the garment
-            </Text>
-          )}
-          <ToolbarSpacer />
-          {/* No save button of its own any more: the recipe write is queued behind the card's one
-              Save, which is what reports whether it landed. */}
-          {staged && (
-            <>
-              <Pill tone='attention'>{save.isPending ? 'saving…' : 'staged for save'}</Pill>
-              <Text size='micro' variant='label' component='span'>
-                included in the card’s Save
-              </Text>
-            </>
-          )}
-        </Toolbar>
+      {/* No save button of its own any more: the recipe write is queued behind the card's one Save,
+          which is what reports whether it landed. */}
+      {canEdit && staged && (
+        <Text size='micro' variant='label'>
+          {save.isPending ? 'saving…' : 'staged'} · included in the card’s Save
+        </Text>
       )}
 
       {/* Dye approval is a SEPARATE concern from the material recipe — its own group and its own RPC,
