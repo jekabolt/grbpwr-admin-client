@@ -242,10 +242,10 @@ function TechCardGallery({
       pinSize={pinSize}
       emptyLabel={emptyLabel}
       fallbackAspect='3/4'
-      // Moodboard: bigger tiles, all forced to one aspect so the grid reads as a tidy wall of
-      // equal-height images. The technical sketch keeps each drawing's own ratio (pins map 1:1).
-      gridCardClass={isMoodboard ? 'w-[360px]' : undefined}
-      gridUniformAspect={isMoodboard ? '4/5' : undefined}
+      // Moodboard: a fixed-height filmstrip — every image the same height, natural width (landscapes
+      // wider), horizontal-only scroll. Images aren't cropped, so pins still map 1:1. The technical
+      // sketch keeps the default width-driven tiles.
+      gridRowHeight={isMoodboard ? 480 : undefined}
       previewFirst
       mediaLabel={mediaLabel}
       carouselLabel={`${isMoodboard ? 'moodboard' : 'sketch'} images`}

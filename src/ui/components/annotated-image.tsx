@@ -395,6 +395,11 @@ export type AnnotatedImageProps = {
   noteClassName?: string;
   /** Overlaid on the frame's top-right (e.g. a remove-photo control). */
   cornerSlot?: ReactNode;
+  /** Sizing for the inline frame. Default is width-driven ('w-full', height from aspectRatio);
+   *  pass 'w-auto' + a fixed height in frameStyle to make it height-driven with natural width
+   *  (a filmstrip row of equal-height, variable-width images). */
+  frameClassName?: string;
+  frameStyle?: React.CSSProperties;
 };
 
 // ---------------------------------------------------------------------------
@@ -801,6 +806,8 @@ export function AnnotatedImage({
   pinSize = 'md',
   noteClassName,
   cornerSlot,
+  frameClassName = 'w-full',
+  frameStyle,
 }: AnnotatedImageProps) {
   const [enlarged, setEnlarged] = useState(false);
 
@@ -844,7 +851,8 @@ export function AnnotatedImage({
         {...shared}
         zoom={false}
         showAll={inlineShowAll}
-        frameClassName='w-full'
+        frameClassName={frameClassName}
+        frameStyle={frameStyle}
         cornerSlot={cornerSlot}
         onBackgroundView={openEnlarged}
       />

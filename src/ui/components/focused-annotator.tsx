@@ -170,12 +170,11 @@ export type FocusedAnnotatorProps = {
   renderFocusedFooter?: (view: FocusedView, positionInViews: number) => ReactNode;
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
-  /** Grid only: Tailwind width class for each tile (default 'w-[300px]'). */
-  gridCardClass?: string;
-  /** Grid only: force every tile to this aspect ratio (object-cover) for a uniform-height grid,
-   *  instead of each media's own ratio. Cover-crops the image, so it slightly offsets callout pins
-   *  — use only where a tidy uniform grid matters more than 1:1 pin mapping (the moodboard). */
-  gridUniformAspect?: string;
+  /** Grid only: when set, the grid is a fixed-HEIGHT filmstrip — every image is this many px tall
+   *  and keeps its own aspect (natural width, so a landscape is wider), and only the horizontal axis
+   *  scrolls. The image is never cropped, so callout pins still map 1:1. Unset = the default
+   *  300px-wide, width-driven tiles. */
+  gridRowHeight?: number;
 };
 
 export function FocusedAnnotator({
@@ -200,8 +199,7 @@ export function FocusedAnnotator({
   mediaLabel,
   renderFocusedFooter,
   carouselLabel,
-  gridCardClass = 'w-[300px]',
-  gridUniformAspect,
+  gridRowHeight,
 }: FocusedAnnotatorProps) {
   const [addMode, setAddMode] = useState(false);
   const [showAllNotes, setShowAllNotes] = useState(false);
@@ -213,6 +211,8 @@ export function FocusedAnnotator({
   const rail = useRailScroll(views.length + 1);
 
   const isGrid = layout === 'grid';
+  // Filmstrip mode: fixed-height, natural-width tiles, horizontal-only scroll (the moodboard).
+  const rowMode = isGrid && gridRowHeight != null;
   const hasMedia = views.length > 0;
   const focused = views.find((v) => v.mediaId === focusedId) ?? views[0];
   const focusedPosition = focused ? views.findIndex((v) => v.mediaId === focused.mediaId) : -1;
@@ -336,7 +336,12 @@ export function FocusedAnnotator({
             // looping past either end. Trade-off: `overflow-x` makes the vertical axis scroll too,
             // so in show-all-notes mode a note pinned near the top or bottom edge can be clipped —
             // the hover notes are portalled and unaffected. `py-1` buys back the common case.
-            className='flex snap-x snap-mandatory items-start gap-2 overflow-x-auto py-1'
+            className={cn(
+              'flex snap-x snap-mandatory items-start gap-2 overflow-x-auto py-1',
+              // Filmstrip: only the horizontal axis scrolls. Hover notes are portalled, so nothing
+              // useful is clipped vertically.
+              rowMode && 'overflow-y-hidden',
+            )}
           >
             {views.map((v, i) => {
               const url = mediaUrl(v.full);
@@ -344,15 +349,18 @@ export function FocusedAnnotator({
                 <div
                   key={v.key}
                   className={cn(
-                    'relative max-w-[85vw] shrink-0 snap-start space-y-1',
-                    gridCardClass,
+                    'relative shrink-0 snap-start space-y-1',
+                    rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
                   )}
                 >
                   <AnnotatedImage
                     src={url}
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
                     type={isVideo(url) ? 'video' : 'image'}
-                    aspectRatio={gridUniformAspect ?? mediaAspect(v.full, fallbackAspect)}
+                    aspectRatio={mediaAspect(v.full, fallbackAspect)}
+                    className={rowMode ? 'w-fit' : undefined}
+                    frameClassName={rowMode ? 'w-auto' : 'w-full'}
+                    frameStyle={rowMode ? { height: gridRowHeight } : undefined}
                     callouts={calloutsFor(v.mediaId)}
                     editable
                     addMode={addMode}
@@ -408,10 +416,14 @@ export function FocusedAnnotator({
               saveSelectedMedia={handlePick}
               trigger={
                 <AddTile
-                  aspect={gridUniformAspect ?? fallbackAspect}
+                  aspect={fallbackAspect}
+                  heightPx={rowMode ? gridRowHeight : undefined}
                   busy={uploading}
                   onFiles={handleFiles}
-                  className={cn('max-w-[85vw] shrink-0 snap-start', gridCardClass)}
+                  className={cn(
+                    'shrink-0 snap-start',
+                    rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
+                  )}
                 />
               }
             />
@@ -607,12 +619,15 @@ function FrameButton({
 
 function AddTile({
   aspect,
+  heightPx,
   busy,
   onFiles,
   className,
   ...triggerProps
 }: {
   aspect: string;
+  /** Filmstrip mode: fix the slot's height (natural width from the ratio) so it matches the tiles. */
+  heightPx?: number;
   busy: boolean;
   onFiles: (files: File[]) => void;
 } & React.ComponentPropsWithRef<'button'>) {
@@ -633,9 +648,10 @@ function AddTile({
         dashed
         label={busy ? 'uploading…' : dragging ? 'drop to upload' : '+ add view'}
         // The ratio lives on the placeholder itself, so it never depends on a percentage
-        // height resolving against the button.
-        style={{ aspectRatio: aspect }}
-        className={cn('w-full', dragging && 'border-textColor text-textColor')}
+        // height resolving against the button. In filmstrip mode a fixed height (natural width)
+        // makes the add slot the same height as the image tiles.
+        style={heightPx != null ? { aspectRatio: aspect, height: heightPx } : { aspectRatio: aspect }}
+        className={cn(heightPx != null ? 'w-auto' : 'w-full', dragging && 'border-textColor text-textColor')}
       />
     </button>
   );
