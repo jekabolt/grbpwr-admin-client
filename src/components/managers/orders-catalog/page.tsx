@@ -31,8 +31,8 @@ const QUEUE_FILTERS: { key: keyof ReturnType<typeof deriveOrderCounts>; status: 
  * A counts-strip cell that is also a filter link. Mirrors `Stat`'s cell grammar so it
  * sits flush in the same `StatGrid`, but it is a button and inverts when its status is
  * the active filter. The three queue cells carry WHOLE-TABLE figures from the aggregate
- * `GetOrdersOverview` RPC (see order-stats.ts), falling back to loaded-page derivation
- * only while the overview query is in flight or errored.
+ * `GetOrdersOverview` RPC (see order-stats.ts), falling back to loaded-page derivation while
+ * the overview query is in flight/errored or its status keys are unrecognisable.
  */
 function StatButton({
   label,
@@ -95,14 +95,15 @@ export function OrdersCatalog() {
   );
   const orders = useMemo(() => data?.pages.flatMap((page) => page.orders) ?? [], [data]);
 
-  // Counts strip is whole-table via GetOrdersOverview; deriveOrderCounts (loaded pages)
-  // is only the graceful fallback while that aggregate is loading or errored.
+  // Counts strip is whole-table via GetOrdersOverview; deriveOrderCounts (loaded pages) is the
+  // graceful fallback while that aggregate is loading/errored — and also when its status map
+  // resolves to nothing we recognise (overviewToCounts returns undefined then), so a moved
+  // contract degrades to honest page-derived figures instead of three zeroes reading "clear".
   const overview = useOrdersOverview();
   const counts = useMemo(
     () =>
-      overview.data
-        ? overviewToCounts(overview.data)
-        : deriveOrderCounts(orders, dictionary),
+      (overview.data ? overviewToCounts(overview.data) : undefined) ??
+      deriveOrderCounts(orders, dictionary),
     [overview.data, orders, dictionary],
   );
   // Whole-table row count returned by ListOrders — same on every page.

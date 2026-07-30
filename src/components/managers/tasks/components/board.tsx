@@ -18,17 +18,40 @@ import { STATUSES } from '../utils/meta';
 import { BoardColumn } from './board-column';
 import { TaskCardBody } from './task-card';
 
+function groupByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
+  const map: Record<TaskStatus, Task[]> = {
+    TASK_STATUS_UNKNOWN: [],
+    TASK_STATUS_BACKLOG: [],
+    TASK_STATUS_TODO: [],
+    TASK_STATUS_IN_PROGRESS: [],
+    TASK_STATUS_REVIEW: [],
+    TASK_STATUS_DONE: [],
+  };
+  for (const t of tasks) (map[t.status] ??= []).push(t);
+  for (const s of STATUSES) map[s].sort((a, b) => a.position - b.position);
+  return map;
+}
+
 // Groups a board's tasks into ordered status columns and wires cross-column
 // drag-and-drop to the optimistic MoveTask mutation.
 export function Board({
   tasks,
+  allTasks,
   filter,
   onOpen,
   onAdd,
   canWrite,
   filtered,
 }: {
+  /** The cards actually rendered (client-filtered by priority / "my tasks"). */
   tasks: Task[];
+  /**
+   * The unfiltered column contents. MoveTask's `position` — and applyMove's optimistic patch — are
+   * applied to the FULL cached column, so a drop index derived from the visible subset lands the
+   * card in the wrong slot whenever a filter hides cards above it. Defaults to `tasks` when no
+   * filter is in play.
+   */
+  allTasks?: Task[];
   filter: ListTasksFilter;
   onOpen: (task: Task) => void;
   onAdd: (status: TaskStatus) => void;
@@ -44,19 +67,10 @@ export function Board({
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const byStatus = useMemo(() => {
-    const map: Record<TaskStatus, Task[]> = {
-      TASK_STATUS_UNKNOWN: [],
-      TASK_STATUS_BACKLOG: [],
-      TASK_STATUS_TODO: [],
-      TASK_STATUS_IN_PROGRESS: [],
-      TASK_STATUS_REVIEW: [],
-      TASK_STATUS_DONE: [],
-    };
-    for (const t of tasks) (map[t.status] ??= []).push(t);
-    for (const s of STATUSES) map[s].sort((a, b) => a.position - b.position);
-    return map;
-  }, [tasks]);
+  // What the operator sees…
+  const byStatus = useMemo(() => groupByStatus(tasks), [tasks]);
+  // …and what the server will re-sequence. Drop positions are computed against this.
+  const fullByStatus = useMemo(() => groupByStatus(allTasks ?? tasks), [allTasks, tasks]);
 
   const activeTask = activeId != null ? tasks.find((t) => t.id === activeId) : undefined;
 
@@ -75,15 +89,18 @@ export function Board({
     let targetStatus: TaskStatus;
     let targetIndex: number;
 
+    // Every index below is taken from the FULL column, not the rendered one: the position we send
+    // is applied to the full column server-side, so measuring it on a filtered subset would drop
+    // the card above every hidden card that still occupies a slot.
     if (typeof over.id === 'string') {
       // Dropped onto a column (including empty ones): append to the end.
       targetStatus = over.id as TaskStatus;
-      targetIndex = byStatus[targetStatus].filter((t) => t.id !== activeIdNum).length;
+      targetIndex = fullByStatus[targetStatus].filter((t) => t.id !== activeIdNum).length;
     } else {
       const overTask = tasks.find((t) => t.id === Number(over.id));
       if (!overTask) return;
       targetStatus = overTask.status;
-      targetIndex = byStatus[targetStatus]
+      targetIndex = fullByStatus[targetStatus]
         .filter((t) => t.id !== activeIdNum)
         .findIndex((t) => t.id === overTask.id);
       if (targetIndex < 0) targetIndex = 0;
@@ -91,7 +108,7 @@ export function Board({
 
     // Skip a genuine no-op (same column, same slot).
     if (dragged.status === targetStatus) {
-      const currentIndex = byStatus[targetStatus].findIndex((t) => t.id === activeIdNum);
+      const currentIndex = fullByStatus[targetStatus].findIndex((t) => t.id === activeIdNum);
       if (currentIndex === targetIndex) return;
     }
 

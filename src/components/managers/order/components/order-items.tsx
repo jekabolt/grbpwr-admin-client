@@ -15,23 +15,56 @@ export type OrderLine = {
   basePrice: number;
   salePct: number;
   lineTotal: number;
+  /** Units of this line already refunded, from the refunded_order_item ledger. */
+  refundedQty: number;
+  /** Units still refundable (qty − refundedQty). */
+  remainingQty: number;
+  /** Every unit refunded — the line is closed and offers no checkboxes. */
   refunded: boolean;
-  /** One key per unit — the refund payload sends one order_item id per unit. */
+  /** One key per STILL-REFUNDABLE unit — the refund payload sends one order_item id per unit. */
   unitKeys: string[];
 };
+
+/** The minimum shape the refund-quantity helpers need — satisfied by admin and frontend items. */
+type QuantifiedItem = { id?: number; orderItem?: { quantity?: number } };
+
+/** A line's unit count; a missing quantity means one unit, never zero. */
+export function lineUnits(item: QuantifiedItem): number {
+  return Math.max(1, item.orderItem?.quantity ?? 1);
+}
+
+/**
+ * Units already refunded, per order-item id.
+ *
+ * The refunded_order_item ledger returns one entry per refund carrying the SAME order-item id as
+ * the line it came from, with `quantity` = the units that refund covered (backend
+ * store/order/fetch.go mergeRefundedOrderItems). So membership of an id proves nothing about
+ * whether the LINE is done — refunding 1 of 2 units leaves the second unit refundable, and the
+ * backend explicitly allows refunding it from PARTIALLY REFUNDED. Quantities accumulate per id.
+ *
+ * Shared with the refund modal, whose preview has to match calculateFullRefundAmount server-side.
+ */
+export function refundedUnitsByItemId(refundedOrderItems?: QuantifiedItem[]): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const r of refundedOrderItems ?? []) {
+    if (typeof r.id !== 'number') continue;
+    out.set(r.id, (out.get(r.id) ?? 0) + lineUnits(r));
+  }
+  return out;
+}
 
 /** One row per ORDER LINE with its per-unit refund keys, shared by the card grid and the modal. */
 export function useOrderLines(orderDetails?: common_OrderFull): OrderLine[] {
   return useMemo(() => {
-    const refundedIds = new Set(
-      (orderDetails?.refundedOrderItems ?? []).map((r) => r.id).filter((id) => id != null),
-    );
+    const refundedUnits = refundedUnitsByItemId(orderDetails?.refundedOrderItems);
     return (orderDetails?.orderItems ?? []).map((item) => {
-      const qty = Math.max(1, item.orderItem?.quantity ?? 1);
+      const qty = lineUnits(item);
       const unitPrice = toNum(item.productPriceWithSale);
       const basePrice = toNum(item.productPrice);
       const salePct = toNum(item.productSalePercentage);
       const id = typeof item.id === 'number' ? item.id : null;
+      const refundedQty = id == null ? 0 : Math.min(qty, refundedUnits.get(id) ?? 0);
+      const remainingQty = Math.max(0, qty - refundedQty);
       return {
         item,
         qty,
@@ -39,8 +72,13 @@ export function useOrderLines(orderDetails?: common_OrderFull): OrderLine[] {
         basePrice,
         salePct,
         lineTotal: unitPrice * qty,
-        refunded: id != null && refundedIds.has(id),
-        unitKeys: id == null ? [] : Array.from({ length: qty }, (_, i) => `${id}-${i}`),
+        refundedQty,
+        remainingQty,
+        refunded: refundedQty > 0 && remainingQty === 0,
+        // Only the units that are still refundable get a key/checkbox. The units are
+        // interchangeable (the payload encodes quantity by repeating the id), so indexing the
+        // remainder from 0 is enough.
+        unitKeys: id == null ? [] : Array.from({ length: remainingQty }, (_, i) => `${id}-${i}`),
       };
     });
   }, [orderDetails?.orderItems, orderDetails?.refundedOrderItems]);
@@ -58,13 +96,19 @@ function UnitSelector({
   if (line.refunded) return <Pill tone='mut'>refunded</Pill>;
   if (!line.unitKeys.length || !onToggleOrderItems) return null;
 
-  // Quantity 1 reads as one checkbox; a multi-unit line gets one box per unit so a
-  // "refund 1 of 2" is expressible without ever leaving the card.
+  // Quantity 1 reads as one checkbox; a multi-unit line gets one box per REMAINING unit so a
+  // "refund 1 of 2" is expressible without ever leaving the card — and so the second unit of an
+  // already-partially-refunded line is still refundable, which the backend allows.
   return (
     <div className='flex flex-wrap items-center gap-2'>
       <Text size='micro' variant='label' component='span' className='uppercase'>
         refund
       </Text>
+      {line.refundedQty > 0 && (
+        <Pill tone='mut'>
+          {line.refundedQty} of {line.qty} refunded
+        </Pill>
+      )}
       {line.unitKeys.map((key, i) => (
         <label key={key} className='flex cursor-pointer items-center gap-1'>
           <Checkbox
@@ -72,7 +116,7 @@ function UnitSelector({
             checked={selectedUnitKeys.includes(key)}
             onChange={() => onToggleOrderItems([key])}
           />
-          {line.qty > 1 && (
+          {line.unitKeys.length > 1 && (
             <Text size='micro' variant='label' component='span'>
               {i + 1}
             </Text>
@@ -152,7 +196,11 @@ export function OrderItems({
                   onToggleOrderItems={onToggleOrderItems}
                 />
               )}
-              {!showRefundSelection && line.refunded && <Pill tone='mut'>refunded</Pill>}
+              {!showRefundSelection && line.refundedQty > 0 && (
+                <Pill tone='mut'>
+                  {line.refunded ? 'refunded' : `${line.refundedQty} of ${line.qty} refunded`}
+                </Pill>
+              )}
             </div>
           </Tile>
         );

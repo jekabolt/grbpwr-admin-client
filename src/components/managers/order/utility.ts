@@ -161,7 +161,11 @@ export const useOrderDetails = (uuid: string) => {
         reason: payload.reason || undefined,
         // Structured code drives the return-analysis breakdown; free-text reason is the audit note.
         reasonCode: payload.reasonCode ?? 'REFUND_REASON_UNSPECIFIED',
-        refundShipping: isPartial ? payload.refundShipping ?? false : undefined,
+        // Sent on FULL refunds too, not just partial ones: the backend reads the flag for a full
+        // refund of any shipped status (delivered / pending return / refund in progress /
+        // partially refunded) and only overrides it to true for a not-yet-shipped CONFIRMED
+        // order. Omitting it silently dropped the shipping fee the modal had promised.
+        refundShipping: payload.refundShipping ?? false,
       });
       fetchOrderDetails();
       setSelectedUnitKeys([]);

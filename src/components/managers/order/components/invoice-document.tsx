@@ -10,15 +10,22 @@ const TD = 'border border-black px-1.5 py-1 align-top';
 const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-bgZebra uppercase';
 
 // GRBPWR seller identity printed as the invoice "from" party. Contact only — no legal
-// entity address is carried in the client, so we surface what we know. vatId is GRBPWR's
-// own VAT/NIP number, printed on B2B (reverse-charge) invoices; leave empty to omit the line.
-// TODO(grbpwr): replace the PLXXXXXXXXXX placeholder with GRBPWR's real VAT/NIP before prod —
-// it prints verbatim on invoices, so an unedited placeholder must never reach a real invoice.
+// entity address is carried in the client, so we surface what we know.
+//
+// vatId is GRBPWR's own VAT/NIP number and it prints verbatim on a legal document, so it is
+// ENVIRONMENT CONFIG, not a constant: beta and prod must be able to differ, and a hardcoded
+// 'PLXXXXXXXXXX' placeholder would hand a customer an invoice bearing a fabricated tax number.
+// Read it from VITE_SELLER_VAT_ID (same import.meta.env pattern as VITE_SERVER_URL in
+// src/api/api.ts); set it per environment in Vercel. When it is unset the sheet prints a loud
+// "not configured" marker instead of a plausible-looking number — an invoice that is obviously
+// unfinished is safe, one that quietly lies is not.
+const SELLER_VAT_ID = String(import.meta.env.VITE_SELLER_VAT_ID ?? '').trim();
+
 const SELLER = {
   name: 'GRBPWR',
   site: 'grbpwr.com',
   email: 'customercare@grbpwr.com',
-  vatId: 'PLXXXXXXXXXX',
+  vatId: SELLER_VAT_ID,
 };
 
 const toNum = (s?: string): number => {
@@ -210,7 +217,13 @@ export function InvoiceDocument({
             <div className='font-bold uppercase'>{SELLER.name}</div>
             <div>{SELLER.site}</div>
             <div>{SELLER.email}</div>
-            {SELLER.vatId && <div>VAT {SELLER.vatId}</div>}
+            {SELLER.vatId ? (
+              <div>VAT {SELLER.vatId}</div>
+            ) : (
+              <div className='mt-0.5 inline-block border border-black px-1 font-bold uppercase'>
+                seller vat id not configured
+              </div>
+            )}
           </div>
         </div>
         <div>
@@ -343,6 +356,14 @@ export function InvoiceDocument({
         <div className='mb-5 break-inside-avoid border border-black px-3 py-2 text-[10px] leading-snug'>
           <div className='mb-0.5 font-bold uppercase tracking-[0.12em]'>vat — reverse charge</div>
           <div>{reverseChargeNote}</div>
+          {/* A reverse-charge invoice must carry the SELLER's VAT number to substantiate the
+              zero-rated supply — without it the sheet is not valid for the regime it claims. */}
+          {!SELLER.vatId && (
+            <div className='mt-1 font-bold uppercase'>
+              seller vat id not configured — this sheet is not valid for reverse charge until
+              VITE_SELLER_VAT_ID is set
+            </div>
+          )}
         </div>
       )}
 

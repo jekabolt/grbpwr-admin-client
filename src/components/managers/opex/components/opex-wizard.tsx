@@ -94,8 +94,11 @@ export function OpexWizard({
   const { data: employeeData } = useEmployees(false, open && kind === 'recurring');
   const employees = employeeData?.employees ?? [];
 
-  // FX rates power the base-currency preview + uncosted warning on the review step.
-  const { data: fxData } = useCostingFxRates(open);
+  // FX rates power the base-currency preview + uncosted warning on the review step. GetCostingFxRates
+  // is gated on TECH-CARDS read (not costing), so a costing-only operator gets 403 and an empty
+  // `rates` — which is "rates unknown", not "this currency has no rate". Branch on the error before
+  // asserting anything about how the line will be booked.
+  const { data: fxData, isError: fxError } = useCostingFxRates(open);
   const rates = fxData?.rates ?? [];
 
   // The target month's existing lines, only for the one-off natural-key collision guard.
@@ -143,7 +146,7 @@ export function OpexWizard({
   // Base-currency preview. rate === null means the currency has no costing FX rate today → the
   // backend will book the line uncosted (excluded from the operating result until a rate exists).
   const rate = latestRateToBase(rates, d.currency, base);
-  const willBeUncosted = rate === null;
+  const willBeUncosted = !fxError && rate === null;
   const basePreview = rate != null && amountValid ? amountNum * rate : null;
   const sameCurrency = d.currency.toUpperCase() === base;
 
@@ -156,7 +159,9 @@ export function OpexWizard({
     if (d.activeTo && d.activeTo < end) end = d.activeTo;
     if (d.activeFrom > end) return 0;
     let n = 0;
-    for (let m = d.activeFrom; m <= end; m = shiftMonth(m, 1)) n += 1;
+    // Bounded: shiftMonth returns unparseable input UNCHANGED, so an unexpected activeFrom would
+    // otherwise spin this loop forever inside a render (the same hazard as the OPEX month window).
+    for (let m = d.activeFrom; m <= end && n < 1200; m = shiftMonth(m, 1)) n += 1;
     return n;
   }, [kind, d.activeFrom, d.activeTo]);
 
@@ -437,6 +442,12 @@ export function OpexWizard({
                 {sameCurrency ? (
                   <Text size='small' variant='label'>
                     Booked in the base currency ({base}).
+                  </Text>
+                ) : fxError ? (
+                  <Text size='small' variant='label'>
+                    Couldn’t read the costing FX rates (that read needs the tech-cards section), so
+                    there is no {base} preview here. The server still folds this line on save if a{' '}
+                    {d.currency} rate exists.
                   </Text>
                 ) : willBeUncosted ? (
                   <Text variant='error' size='small'>

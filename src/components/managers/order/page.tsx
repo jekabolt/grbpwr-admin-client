@@ -24,11 +24,15 @@ import { NewTrackCode } from './components/shipping-information/new-track-code';
 import { money, toNum } from './money';
 import { useOrderDetails } from './utility';
 
+// PARTIALLY REFUNDED belongs here: the backend explicitly allows refunding the remainder from
+// that status (RefundOrder's allow-list) and tracks per-unit remainders in the
+// refunded_order_item ledger. Without it a "refund 1 of 2" dead-ended the second unit.
 const DISPLAY_REFUND_BUTTON_STATUSES = [
   'CONFIRMED',
   'DELIVERED',
   'PENDING RETURN',
   'REFUND IN PROGRESS',
+  'PARTIALLY REFUNDED',
 ];
 
 /** A bordered panel with an uppercase group label — the redesign's section grammar. */
@@ -312,6 +316,7 @@ export function OrderDetails() {
 
         <RefundConfirmation
           orderDetails={orderDetails}
+          orderStatus={orderStatus}
           open={isRefundModalOpen}
           selectedUnitKeys={selectedUnitKeys}
           onOpenChange={setIsRefundModalOpen}

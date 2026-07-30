@@ -12,8 +12,16 @@ import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 
 // Refunding is only meaningful once money has been taken and before the order is fully
-// unwound — same list the old bottom bar used.
-const REFUNDABLE_STATUSES = ['CONFIRMED', 'DELIVERED', 'PENDING RETURN', 'REFUND IN PROGRESS'];
+// unwound — same list the old bottom bar used. PARTIALLY REFUNDED stays refundable: the backend
+// allows the remainder from that status, so hiding the button dead-ended the second refund.
+// Keep in sync with DISPLAY_REFUND_BUTTON_STATUSES in ../page.tsx.
+const REFUNDABLE_STATUSES = [
+  'CONFIRMED',
+  'DELIVERED',
+  'PENDING RETURN',
+  'REFUND IN PROGRESS',
+  'PARTIALLY REFUNDED',
+];
 
 // CancelOrder is a pre-fulfilment escape hatch: once a parcel is with the carrier the only
 // way back is a refund, so the button disappears after SHIPPED.

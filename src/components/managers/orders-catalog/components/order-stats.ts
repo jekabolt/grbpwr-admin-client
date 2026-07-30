@@ -13,8 +13,9 @@ import { getOrderStatusName } from './utility';
  * The backend now serves an aggregate: `GetOrdersOverview` returns whole-table per-status
  * counts + today's orders/revenue, and `ListOrdersResponse` carries a `total`. So the
  * strip describes the WHOLE table (see overviewToCounts below). `deriveOrderCounts` is
- * retained only as a graceful fallback for while the overview query is loading/errored —
- * it derives from the pages actually fetched and cannot claim to be the whole table.
+ * retained as the graceful fallback for while the overview query is loading/errored — or
+ * when its status map speaks a shape we don't recognise — it derives from the pages
+ * actually fetched and cannot claim to be the whole table.
  */
 
 const MONEY = new Intl.NumberFormat('en-US', {
@@ -117,19 +118,60 @@ function buildTodayStat(count: number, total: number, currencies: Set<string>): 
 }
 
 /**
- * Whole-table counts from the aggregate RPC. Status keys are the order_status enum
- * NAMES the overview returns (e.g. `ORDER_STATUS_ENUM_CONFIRMED`), matching the queue
- * filters the strip exposes. Today's cell shows revenue when a single currency is
- * present; with several it shows the order count only and lists the currencies, since
- * summing across currencies is meaningless (mirrors buildTodayStat's discipline).
+ * Every order_status the dictionary can hold, in resolved form (see normalizeStatusName).
+ * Used only to decide whether an overview status map is one we understand at all.
  */
-export function overviewToCounts(overview: GetOrdersOverviewResponse): OrderCounts {
-  const counts = overview.statusCounts ?? {};
-  const at = (name: string) => counts[name] ?? 0;
+const KNOWN_STATUS_NAMES: readonly string[] = [
+  'PLACED',
+  'AWAITING PAYMENT',
+  'CONFIRMED',
+  'SHIPPED',
+  'DELIVERED',
+  'CANCELLED',
+  'REFUNDED',
+  'PARTIALLY REFUNDED',
+  'PENDING RETURN',
+  'REFUND IN PROGRESS',
+];
 
-  const toFulfil = at('ORDER_STATUS_ENUM_CONFIRMED');
-  const awaitingPayment = at('ORDER_STATUS_ENUM_AWAITING_PAYMENT');
-  const refundInProgress = at('ORDER_STATUS_ENUM_REFUND_IN_PROGRESS');
+/**
+ * Fold `statusCounts` onto resolved status names.
+ *
+ * KEY SHAPE — the reason this exists: `GetOrdersOverview` groups by `order_status.name` and
+ * passes the keys through verbatim, so the map arrives keyed by the RAW DB names
+ * (`confirmed`, `awaiting_payment`, `refund_in_progress`), NOT by the proto enum names the
+ * dictionary exposes. Reading `counts['ORDER_STATUS_ENUM_CONFIRMED']` therefore missed every
+ * key and printed three confident zeroes over a full refund queue. normalizeStatusName
+ * accepts both shapes, so this keeps working if the backend ever switches to enum names.
+ */
+function normalizedStatusCounts(overview: GetOrdersOverviewResponse): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const [key, count] of Object.entries(overview.statusCounts ?? {})) {
+    const name = normalizeStatusName(key);
+    if (!name) continue;
+    out.set(name, (out.get(name) ?? 0) + (Number(count) || 0));
+  }
+  return out;
+}
+
+/**
+ * Whole-table counts from the aggregate RPC, keyed tolerantly (see normalizedStatusCounts).
+ * Today's cell shows revenue when a single currency is present; with several it shows the
+ * order count only and lists the currencies, since summing across currencies is meaningless
+ * (mirrors buildTodayStat's discipline).
+ *
+ * Returns `undefined` when the status map resolves to nothing we recognise — the contract has
+ * moved again and the caller must fall back to `deriveOrderCounts` rather than print zeroes
+ * that read as "queues clear".
+ */
+export function overviewToCounts(overview: GetOrdersOverviewResponse): OrderCounts | undefined {
+  const counts = normalizedStatusCounts(overview);
+  if (!KNOWN_STATUS_NAMES.some((name) => counts.has(name))) return undefined;
+
+  const at = (name: string) => counts.get(name) ?? 0;
+  const toFulfil = at('CONFIRMED');
+  const awaitingPayment = at('AWAITING PAYMENT');
+  const refundInProgress = at('REFUND IN PROGRESS');
 
   return {
     toFulfil: { value: String(toFulfil), sub: 'paid, unshipped' },

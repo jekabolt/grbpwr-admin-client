@@ -1,12 +1,15 @@
 import { common_OrderFull, type RefundReason } from 'api/proto-http/admin';
+import { normalizeStatusName } from 'components/managers/orders-catalog/components/order-status';
 import { REASONS } from 'constants/constants';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Checkbox from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { money, toNum } from '../money';
+import { lineUnits, refundedUnitsByItemId } from './order-items';
 
 // Maps the free-text refund reasons to the structured RefundReason enum, which drives the
 // return-analysis breakdown. Anything unmapped falls back to OTHER.
@@ -26,12 +29,15 @@ function reasonCodeFor(reason: string): RefundReason {
 
 export function RefundConfirmation({
   orderDetails,
+  orderStatus,
   open,
   selectedUnitKeys,
   onOpenChange,
   refundOrder,
 }: {
   orderDetails?: common_OrderFull;
+  /** Resolved order status name (e.g. `CONFIRMED`) — decides how the backend scopes a full refund. */
+  orderStatus?: string;
   open: boolean;
   selectedUnitKeys: string[];
   onOpenChange: (open: boolean) => void;
@@ -42,6 +48,13 @@ export function RefundConfirmation({
   }) => void;
 }) {
   const isFullRefund = !selectedUnitKeys.length;
+  // A full refund of a not-yet-shipped (CONFIRMED) order is the ONLY scope where the backend
+  // forces shipping in: it refunds the whole PaymentIntent, so the preview is the order total.
+  // From every other refundable status a full refund is calculateFullRefundAmount(order,
+  // refundShipping) = the units NOT already refunded, plus shipping only if the request asks
+  // (internal/apisrv/admin/order.go). Preview both cases exactly, or the modal promises money
+  // Stripe will not move.
+  const isWholePaymentRefund = isFullRefund && normalizeStatusName(orderStatus) === 'CONFIRMED';
   const existingReason = orderDetails?.order?.refundReason ?? '';
   const [selectedReason, setSelectedReason] = useState('');
   const [refundShipping, setRefundShipping] = useState(false);
@@ -76,36 +89,68 @@ export function RefundConfirmation({
     }
   }, [open, existingReason]);
 
-  const handleRefundConfirm = () => {
-    const reasonCode = reasonCodeFor(selectedReason);
-    refundOrder(
-      isFullRefund
-        ? { reason: selectedReason, reasonCode }
-        : { reason: selectedReason, refundShipping, reasonCode },
-    );
-  };
-
-  const canConfirm = selectedReason.length > 0;
-
   const order = orderDetails?.order;
   const currency = order?.currency ?? '';
   const total = order?.totalPrice?.value;
   const unitCount = selectedUnitKeys.length;
-  const shippingFee = toNum(orderDetails?.shipment?.cost?.value);
+  // Free shipping is excluded server-side, so there is no fee to offer or preview.
+  const freeShipping = !!orderDetails?.shipment?.freeShipping;
+  const shippingFee = freeShipping ? 0 : toNum(orderDetails?.shipment?.cost?.value);
+  const alreadyRefunded = toNum(order?.refundedAmount?.value);
+
+  // Units NOT already refunded, and what they are worth — mirrors calculateFullRefundAmount, which
+  // subtracts the refunded_order_item ledger before asking Stripe for anything.
+  const remaining = useMemo(() => {
+    const refundedUnits = refundedUnitsByItemId(orderDetails?.refundedOrderItems);
+    let amount = 0;
+    let units = 0;
+    for (const item of orderDetails?.orderItems ?? []) {
+      const qty = lineUnits(item);
+      const done = typeof item.id === 'number' ? refundedUnits.get(item.id) ?? 0 : 0;
+      const left = Math.max(0, qty - done);
+      amount += toNum(item.productPriceWithSale) * left;
+      units += left;
+    }
+    return { amount, units };
+  }, [orderDetails?.orderItems, orderDetails?.refundedOrderItems]);
+
+  // The shipping fee is the operator's choice on every scope the backend reads the flag for —
+  // i.e. everything except the whole-payment refund of a not-yet-shipped order, where it is
+  // always included.
+  const canChooseShipping = !isWholePaymentRefund && shippingFee > 0;
+  const includesShipping = isWholePaymentRefund || (canChooseShipping && refundShipping);
 
   // ordRefund v2 — amount preview. There is no PreviewRefund RPC, so the figure is summed
-  // client-side: full refund = the order total; partial = the selected units' sale prices,
-  // plus the shipping fee only when the operator ticks it in.
+  // client-side to match exactly what RefundOrder will hand Stripe.
   const itemsAmount = useMemo(
     () => selectedSummary.reduce((sum, s) => sum + s.amount, 0),
     [selectedSummary],
   );
-  const previewAmount = isFullRefund
+  // The whole-payment case already has shipping inside the order total; every other scope adds the
+  // fee on top of the items it refunds.
+  const previewAmount = isWholePaymentRefund
     ? toNum(total)
-    : itemsAmount + (refundShipping ? shippingFee : 0);
+    : (isFullRefund ? remaining.amount : itemsAmount) + (includesShipping ? shippingFee : 0);
   const previewLabel = money(previewAmount, currency);
+
+  // Nothing left to refund: every unit is already in the ledger and shipping isn't ticked. The
+  // backend would be asked for a zero refund, so block it instead of pretending it did something.
+  const nothingToRefund =
+    isFullRefund && !isWholePaymentRefund && remaining.units === 0 && !includesShipping;
+  const canConfirm = selectedReason.length > 0 && !nothingToRefund;
+
+  const handleRefundConfirm = () => {
+    const reasonCode = reasonCodeFor(selectedReason);
+    // refundShipping is meaningful on every scope the backend reads it for; the whole-payment
+    // case overrides it to true server-side, so sending the checkbox value verbatim is correct.
+    refundOrder({ reason: selectedReason, refundShipping: includesShipping, reasonCode });
+  };
+
+  const fullRefundScope = isWholePaymentRefund
+    ? 'refund whole order'
+    : `refund remaining ${remaining.units} unit${remaining.units === 1 ? '' : 's'}`;
   const confirmLabel = isFullRefund
-    ? `refund whole order · ${previewLabel}`
+    ? `${fullRefundScope} · ${previewLabel}`
     : `refund ${unitCount} unit${unitCount === 1 ? '' : 's'} · ${previewLabel}`;
 
   return (
@@ -131,15 +176,51 @@ export function RefundConfirmation({
 
         {/* Scope — full refund is loud, partial lists exactly what's affected */}
         {isFullRefund ? (
-          <div className='space-y-1 border border-error p-3'>
+          <div className='space-y-2 border border-error p-3'>
             <Text variant='error' className='font-bold'>
-              full refund — entire order
+              full refund — {isWholePaymentRefund ? 'entire order' : 'everything not yet refunded'}
             </Text>
+            {isWholePaymentRefund ? (
+              <Text size='small'>
+                The order has not shipped, so this refunds the whole payment — every item AND the
+                shipping fee{total ? ` (${money(toNum(total), currency)})` : ''}. This can’t be
+                undone.
+              </Text>
+            ) : (
+              <>
+                <div className='space-y-1'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <Text size='small'>
+                      {remaining.units} unit{remaining.units === 1 ? '' : 's'} not yet refunded
+                    </Text>
+                    <Text size='small' className='tabular-nums'>
+                      {money(remaining.amount, currency)}
+                    </Text>
+                  </div>
+                  <div className='flex items-center justify-between gap-3'>
+                    <Text size='small' variant={includesShipping ? undefined : 'inactive'}>
+                      {includesShipping ? '+ shipping' : 'shipping — not refunded'}
+                    </Text>
+                    <Text size='small' className='tabular-nums'>
+                      {includesShipping ? money(shippingFee, currency) : money(0, currency)}
+                    </Text>
+                  </div>
+                </div>
+                <Text size='small'>
+                  The order has shipped, so the shipping fee is refunded only if you tick it below;
+                  units already refunded are skipped. This can’t be undone.
+                </Text>
+              </>
+            )}
             <Text size='small'>
-              Refunds ALL items{total ? ` (${total} ${currency})` : ''} including shipping. This
-              can’t be undone. To refund only some units, close this and tick them in the items
-              table.
+              To refund only some units, close this and tick them in the items table.
             </Text>
+            {nothingToRefund && (
+              <Text variant='error' size='small' className='font-bold'>
+                Every unit is already refunded and shipping is not ticked — there is nothing left to
+                refund.
+              </Text>
+            )}
           </div>
         ) : (
           <div className='space-y-2 border border-textInactiveColor p-3'>
@@ -157,7 +238,7 @@ export function RefundConfirmation({
                   </Text>
                 </div>
               ))}
-              {refundShipping && (
+              {includesShipping && (
                 <div className='flex items-center justify-between gap-3 border-t border-borderColor pt-1'>
                   <Text size='small'>+ shipping</Text>
                   <Text size='small' className='tabular-nums'>
@@ -169,17 +250,43 @@ export function RefundConfirmation({
           </div>
         )}
 
-        {!isFullRefund && (
-          <label htmlFor='refund-shipping' className='flex items-center gap-2 cursor-pointer'>
-            <Checkbox
-              name='refund-shipping'
-              checked={refundShipping}
-              onCheckedChange={(checked: boolean | 'indeterminate') =>
-                setRefundShipping(checked === true)
-              }
-            />
-            <Text variant='uppercase'>include shipping fee in refund</Text>
-          </label>
+        {canChooseShipping && (
+          <div className='flex flex-col gap-1'>
+            <label htmlFor='refund-shipping' className='flex items-center gap-2 cursor-pointer'>
+              <Checkbox
+                name='refund-shipping'
+                checked={refundShipping}
+                onCheckedChange={(checked: boolean | 'indeterminate') =>
+                  setRefundShipping(checked === true)
+                }
+              />
+              <Text variant='uppercase'>
+                include shipping fee in refund ({money(shippingFee, currency)})
+              </Text>
+            </label>
+            {/* `shipping_refunded` is not on the wire, so the client cannot tell whether an earlier
+                refund already covered the fee. The backend gates on it and silently skips the
+                second one, which would make this preview high by exactly the fee. Say so. */}
+            {refundShipping && alreadyRefunded > 0 && (
+              <Text size='micro' variant='label'>
+                This order already has {money(alreadyRefunded, currency)} refunded — if that refund
+                included shipping, the server skips the fee and the actual refund will be{' '}
+                {money(shippingFee, currency)} lower.
+              </Text>
+            )}
+          </div>
+        )}
+
+        {!isWholePaymentRefund && freeShipping && (
+          <Text size='micro' variant='label'>
+            Shipping was free on this order, so there is no fee to refund.
+          </Text>
+        )}
+
+        {isWholePaymentRefund && (
+          <div>
+            <Pill tone='mut'>shipping always included · not yet shipped</Pill>
+          </div>
         )}
 
         <div className='flex flex-col gap-2'>

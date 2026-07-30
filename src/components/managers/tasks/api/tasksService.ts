@@ -127,6 +127,15 @@ function mapComment(c: common_TaskComment): TaskComment {
 // positions on MoveTask. A TaskInsert is structurally a common_TaskInsert, so it
 // passes through unchanged.
 // ---------------------------------------------------------------------------
+/**
+ * ListTasks clamps a missing limit to the backend's DEFAULT page (200) and its ceiling is 1000
+ * (internal/store/task/task.go). A kanban board wants the whole column set, and the all-boards
+ * rail-count read wants every task, so ask for the ceiling explicitly instead of silently taking
+ * the 200-row default. `total` is still compared against the returned length by the caller — past
+ * 1000 tasks the board would drop cards, and it says so rather than hiding them.
+ */
+export const TASKS_PAGE_LIMIT = 1000;
+
 export const tasksService: TasksService = {
   listTasks: (filter) =>
     adminService
@@ -134,7 +143,7 @@ export const tasksService: TasksService = {
         board: filter.board,
         status: filter.status,
         assignee: filter.assignee,
-        limit: undefined,
+        limit: TASKS_PAGE_LIMIT,
         offset: undefined,
         orderFactor: undefined,
         techCardId: filter.techCardId,

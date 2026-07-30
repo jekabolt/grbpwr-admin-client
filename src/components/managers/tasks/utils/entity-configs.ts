@@ -1,5 +1,6 @@
-import { adminService, frontendService } from 'api/api';
+import { adminService } from 'api/api';
 import type {
+  common_ArchiveList,
   common_Fitting,
   common_Order,
   common_Colorway,
@@ -7,7 +8,6 @@ import type {
   common_Sample,
   common_TechCardListItem,
 } from 'api/proto-http/admin';
-import type { StorefrontArchiveList } from 'api/proto-http/frontend';
 import { formatFittingDate, statusLabel } from 'components/managers/fittings/components/utils';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { samplePurposeLabel } from 'components/managers/tech-card/components/sample-options';
@@ -148,19 +148,21 @@ export const orderConfig: EntityConfig = {
   },
 };
 
-// ---- archive / timeline drop (frontendService.GetArchivesPaged, no search) --
-// NOTE(R6 cutover): StorefrontArchiveList (the storefront-facing list item) no longer carries the
-// internal numeric `id` — only admin's own common_ArchiveList does. archiveConfig.resolve still
-// round-trips through adminService.GetArchiveByID({ id }), so this option's `value` needs a real
-// id. Falling back to `any` here to unblock the typecheck; hero/components/archive-picker.tsx hits
-// the identical gap (also reads `.id` off a StorefrontArchiveList) and should be reconciled the
-// same way — ideally both move to `code`-based identity instead of this cast.
-function archiveOption(a: StorefrontArchiveList): EntityOption {
-  const id = (a as any).id ?? 0;
+// ---- archive / timeline drop (adminService.GetArchivesPaged, no search) -----
+// The task link is stored as TaskInsert.archiveId, and archiveConfig.resolve round-trips through
+// adminService.GetArchiveByID({ id }) — so an option's `value` has to be the internal numeric id.
+// Since the R3/R6 cutover the STOREFRONT list item (StorefrontArchiveList) no longer carries that
+// id (only the public `code`), which made every option collapse to 0: the picker rendered duplicate
+// keys and choosing a drop set archiveId 0, which link-editor reads as "unset", so the link could
+// never be saved. Admin's own GetArchivesPaged returns common_ArchiveList WITH the id, so read the
+// list from there. (hero/components/archive-picker.tsx has the identical gap against the storefront
+// list and needs the same treatment.)
+function archiveOption(a: common_ArchiveList): EntityOption {
+  const id = a.id ?? 0;
   return {
     value: id,
     label: a.translations?.[0]?.heading || a.slug || `drop #${id}`,
-    sublabel: a.tag || `#${id}`,
+    sublabel: a.tag || a.code || `#${id}`,
     thumbnail: a.thumbnail?.media?.thumbnail?.mediaUrl,
   };
 }
@@ -274,12 +276,13 @@ export const archiveConfig: EntityConfig = {
   searchPlaceholder: 'search timeline drops…',
   emptyResult: 'no drops',
   load: async () => {
-    const r = await frontendService.GetArchivesPaged({
+    const r = await adminService.GetArchivesPaged({
       limit: 100,
       offset: undefined,
       orderFactor: 'ORDER_FACTOR_DESC',
     });
-    return (r.archives ?? []).map(archiveOption);
+    // A drop with no id cannot be linked (0 = unset) — drop it rather than offer a dead option.
+    return (r.archives ?? []).filter((a) => !!a.id).map(archiveOption);
   },
   resolve: async (value) => {
     const r: any = await adminService.GetArchiveByID({ id: value as number });

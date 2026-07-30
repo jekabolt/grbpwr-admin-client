@@ -14,6 +14,16 @@ export const opexKeys = {
 
 export const monthToApi = (month: string) => (month ? `${month}-01` : '');
 
+/**
+ * Every OPEX read is costing-gated server-side and returns PermissionDenied (HTTP 403) without
+ * `costing:read` — it is NOT shaped into an empty success. requestHandler puts the HTTP status on
+ * the thrown Error, so callers can tell "you may not read this" apart from a transient failure and
+ * render a no-access state instead of a retry button that can never succeed.
+ */
+export function isPermissionDenied(error: unknown): boolean {
+  return (error as { status?: number } | null)?.status === 403;
+}
+
 export function useOpexLines(month: string, enabled = true) {
   const monthKey = monthToApi(month);
   return useQuery({
@@ -21,6 +31,9 @@ export function useOpexLines(month: string, enabled = true) {
     queryFn: () =>
       adminService.ListOpexLines({ monthFrom: monthKey, monthTo: monthKey, category: '' }),
     enabled: enabled && !!month,
+    // retry:false so a 403 surfaces immediately as query.error rather than being retried like a
+    // transient failure (see isPermissionDenied).
+    retry: false,
   });
 }
 
@@ -38,6 +51,7 @@ export function useOpexLinesRange(monthFrom: string, monthTo: string, enabled = 
         category: '',
       }),
     enabled: enabled && !!monthFrom && !!monthTo,
+    retry: false,
   });
 }
 
@@ -57,10 +71,15 @@ export function useDeleteOpexLine() {
   });
 }
 
-export function useOpexRecurring(includeArchived: boolean) {
+// `enabled` exists so the page can keep this read off the wire entirely for a viewer without
+// costing:read — ListOpexRecurring denies them outright, and a query that can only ever 403 has
+// nothing to show and no retry worth offering.
+export function useOpexRecurring(includeArchived: boolean, enabled = true) {
   return useQuery({
     queryKey: opexKeys.recurring(includeArchived),
     queryFn: () => adminService.ListOpexRecurring({ includeArchived }),
+    enabled,
+    retry: false,
   });
 }
 
@@ -84,10 +103,18 @@ export function useArchiveOpexRecurring() {
 // Manual costing FX rates — the same rates the backend folds OPEX amounts to base with. The wizard
 // reads them only to preview the base-currency value and warn when a chosen currency has no rate
 // (the line would be booked "uncosted"). Cached broadly; only fetched while a form needs it.
+//
+// CAVEAT: GetCostingFxRates is mapped to TECH-CARDS read on the backend (internal/rbac/rbac.go),
+// not to costing/analytics — so an operator with costing but no tech-cards section gets
+// PermissionDenied here even though the server folds their OPEX lines perfectly well on save. An
+// empty `rates` from a denied read is therefore NOT evidence that a currency has no rate; callers
+// must branch on `isError` before claiming a line will be booked UNCOSTED. retry:false keeps that
+// distinction cheap to make.
 export function useCostingFxRates(enabled = true) {
   return useQuery({
     queryKey: ['costingFxRates'],
     queryFn: () => adminService.GetCostingFxRates({}),
     enabled,
+    retry: false,
   });
 }

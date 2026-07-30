@@ -13,6 +13,7 @@ import {
 } from 'ui/components/side-rail';
 import Text from 'ui/components/text';
 import { Toolbar } from 'ui/components/toolbar';
+import { TASKS_PAGE_LIMIT } from './api/tasksService';
 import { emptyFormValues, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
@@ -61,6 +62,12 @@ export function Tasks() {
   // Per-board open-task counts for the rail — one all-boards, active-only read.
   const countsFilter = useMemo(() => ({}), []);
   const { data: countsData } = useTasks(countsFilter);
+
+  // ListTasks is a single page capped at TASKS_PAGE_LIMIT. Past that the board silently drops
+  // cards and the rail counts undercount, which is indistinguishable from a deleted task — so
+  // compare the server's `total` against what we actually got and say when it's short.
+  const boardTruncated = (data?.total ?? 0) > tasks.length;
+  const countsTruncated = (countsData?.total ?? 0) > (countsData?.tasks.length ?? 0);
   const counts = useMemo(() => {
     const m = new Map<TaskBoard, number>();
     for (const b of BOARDS) m.set(b, 0);
@@ -181,6 +188,20 @@ export function Tasks() {
             </div>
           ) : (
             <>
+              {(boardTruncated || countsTruncated) && (
+                <CalloutBox tone='warning' className='flex flex-wrap items-baseline gap-1.5'>
+                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                    not all tasks loaded
+                  </Text>
+                  <Text size='micro' component='span'>
+                    {boardTruncated
+                      ? `showing ${tasks.length} of ${data?.total} tasks on this board — cards are missing from the columns. `
+                      : 'the per-board counts in the rail are short. '}
+                    The server returns at most {TASKS_PAGE_LIMIT} tasks per read; archive finished
+                    tasks to bring it back under the cap.
+                  </Text>
+                </CalloutBox>
+              )}
               {active && visible.length === 0 && (
                 <CalloutBox className='flex flex-wrap items-baseline gap-1.5'>
                   <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
@@ -193,6 +214,7 @@ export function Tasks() {
               )}
               <Board
                 tasks={visible}
+                allTasks={tasks}
                 filter={filter}
                 filtered={active}
                 canWrite={writable}

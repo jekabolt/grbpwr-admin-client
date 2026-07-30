@@ -70,8 +70,12 @@ export function RecurringTab({
       if (e.id) m.set(e.id, e.employee?.fullName || `employee #${e.id}`);
     return m;
   }, [employeeData]);
-  const { data: fxData } = useCostingFxRates(canRead);
+  // GetCostingFxRates is gated on TECH-CARDS read, not costing — a costing operator without that
+  // section gets 403 here. An errored read means "rates unknown", NOT "no rate exists", so the
+  // run-rate must not report every non-base template as uncosted (the server folds them fine).
+  const { data: fxData, isError: fxError } = useCostingFxRates(canRead);
   const fxRates = useMemo(() => fxData?.rates ?? [], [fxData]);
+  const fxUnavailable = fxError;
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [editing, setEditing] = useState<OpexRecurring | undefined>();
@@ -128,11 +132,19 @@ export function RecurringTab({
         <StatGrid min={150}>
           <Stat
             label={`recurring / month · ${base}`}
-            value={money(runRate.total, base, canRead)}
-            sub={
-              runRate.uncosted > 0 ? `${runRate.uncosted} uncosted (excluded)` : 'booked every month'
+            // With the FX read denied we cannot fold non-base templates, so the total would be
+            // silently short — say "—" rather than print a plausible-looking lie.
+            value={
+              fxUnavailable && runRate.uncosted > 0 ? '—' : money(runRate.total, base, canRead)
             }
-            tone={runRate.uncosted > 0 ? 'down' : undefined}
+            sub={
+              fxUnavailable && runRate.uncosted > 0
+                ? 'fx rates unavailable · needs tech-cards access'
+                : runRate.uncosted > 0
+                  ? `${runRate.uncosted} uncosted (excluded)`
+                  : 'booked every month'
+            }
+            tone={!fxUnavailable && runRate.uncosted > 0 ? 'down' : undefined}
           />
           <Stat
             label='active templates'
