@@ -4,11 +4,18 @@ import {
   common_AdminColorwayRef,
   common_ColorwayDevelopmentInsert,
   common_ColorwayLabDipRound,
+  common_Material,
   common_TechCard,
   common_TechCardColorwayUsage,
   common_TechCardLabDipStatus,
   UpdateColorwayRequest,
 } from 'api/proto-http/admin';
+import {
+  composeArticleFromMaterial,
+  materialSpec,
+} from 'components/managers/materials/components/material-code';
+import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardLabDipStatusOptions } from 'constants/filter';
@@ -21,6 +28,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
+import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import GenericPopover from 'ui/components/popover';
@@ -30,6 +38,7 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { sectionShort } from './bom-line-picker';
 import { PieceRef, PieceSinglePicker } from './piece-picker';
 import {
   createColorwayErrorMessage,
@@ -80,6 +89,10 @@ type BomLine = {
   currency?: string;
   wastagePercent?: string; // decimal string
   composition?: string; // legacy free-text (never structured, M1)
+  materialId?: number;
+  // the linked catalog material (resolved from ListMaterials by materialId) — carries the photo,
+  // article code, class and spec the recipe card renders. undefined for a legacy/unlinked line.
+  material?: common_Material;
 };
 
 type UsageDraft = {
@@ -646,6 +659,59 @@ function UsagePerSizeLocal({
   );
 }
 
+// The one-word material class ("тип"): fabric / hardware / thread / packaging — the same rule the
+// catalog card uses, kept local so the recipe card badges class the way the BOM catalogue does.
+function materialClassLabel(c?: string): string {
+  return c && c !== 'MATERIAL_CLASS_UNKNOWN' ? c.replace('MATERIAL_CLASS_', '').toLowerCase() : '';
+}
+
+// The material rendered as the SAME square article card the BOM tab shows — identical fields in the
+// same order (photo · section+тип pills · name · code · spec+colour) so a usage reads as the article
+// it points at, not as a dropdown value. For a legacy/unlinked line (no catalog material) it degrades
+// to the placeholder photo + the BOM line's own name, so the card still stands in for the article.
+function RecipeMaterialCard({ article }: { article?: BomLine }) {
+  const material = article?.material;
+  const url = materialImageUrl(material);
+  const section = sectionShort(article?.section);
+  const klass = materialClassLabel(material?.materialClass);
+  const name = material?.name?.trim() || article?.name?.trim() || 'new material';
+  const code = material ? composeArticleFromMaterial(material, true) : '';
+  const spec = material
+    ? [materialSpec(material), material.color?.trim()].filter(Boolean).join(' · ')
+    : '';
+
+  return (
+    <div className='flex min-w-0 flex-col gap-1'>
+      <span className='relative block aspect-square w-full overflow-hidden border border-borderColor'>
+        {url ? (
+          <Media src={url} alt={name} aspectRatio='1/1' fit='cover' />
+        ) : (
+          <Placeholder aspect='square' label='no photo' />
+        )}
+      </span>
+      {(section || klass) && (
+        <div className='flex flex-wrap items-center gap-1'>
+          {section && <Pill tone='mut'>{section}</Pill>}
+          {klass && <Pill tone='mut'>{klass}</Pill>}
+        </div>
+      )}
+      <Text component='span' size='control' className='block truncate font-bold'>
+        {name}
+      </Text>
+      {code && (
+        <Text component='span' size='micro' className='block truncate font-mono tabular-nums'>
+          {code}
+        </Text>
+      )}
+      {spec && (
+        <Text component='span' size='micro' variant='label' className='block truncate'>
+          {spec}
+        </Text>
+      )}
+    </div>
+  );
+}
+
 // One usage row = one material on one part in this colourway. A bordered card per line (the
 // reference's `.surf.pad`), because the two references it carries — an article and a piece — are
 // pickers, not cells, and a table row cannot hold them at a readable density.
@@ -682,8 +748,7 @@ function UsageRowEditor({
     <div className='flex flex-col gap-2 border border-borderColor p-2.5'>
       <div className='flex items-center justify-between gap-2'>
         <Text size='micro' variant='label' component='span' className='min-w-0 truncate uppercase'>
-          {index + 1} · {article?.name?.trim() || 'new material'}
-          {draft.placement.trim() ? ` · ${draft.placement.trim()}` : ''}
+          материал {index + 1}
         </Text>
         {canEdit && (
           <Button
@@ -699,97 +764,106 @@ function UsageRowEditor({
         )}
       </div>
 
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-        <label className='flex flex-col gap-1'>
-          <FieldLabel>BOM article *</FieldLabel>
-          <select
-            className={cn(cell, !draft.bomLineKey && 'border-error')}
-            disabled={!canEdit}
-            aria-invalid={!draft.bomLineKey || undefined}
-            value={draft.bomLineKey}
-            onChange={(e) => onChange({ bomLineKey: e.target.value })}
-          >
-            <option value=''>— select article —</option>
-            {/* keep an unknown stored key selectable so a save never silently drops it */}
-            {draft.bomLineKey && !bomItems.some((b) => b.lineKey === draft.bomLineKey) ? (
-              <option value={draft.bomLineKey}>(unknown / removed article)</option>
-            ) : null}
-            {bomItems.map((b, bi) => (
-              <option key={b.lineKey} value={b.lineKey}>
-                {bi + 1}. {b.name?.trim() || 'unnamed'}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {/* The part a norm is about is a CUT PIECE, not a label: the contract already carries
-            piece_line_key -> a real usage.piece_id FK (RESTRICT), and the client already round-trips
-            it — there was simply no control to set it, so operators retyped part names as free text
-            that nothing could join on. Picking here writes the stable key; `placement` stays as the
-            human label (auto-filled from the piece) so the PDF and legacy rows keep reading.
-            Single-select, unlike the operation picker: a consumption norm is about exactly one
-            piece. No create affordance either — the recipe saves through UpdateColorwayRecipe and
-            cannot author a piece; that belongs to the tech-card save. */}
-        <div className='flex flex-col gap-1'>
-          <FieldLabel>деталь (норма считается на неё)</FieldLabel>
-          {pieces.length > 0 ? (
-            <PieceSinglePicker
-              pieces={pieces}
-              value={draft.pieceLineKey}
+      <div className='flex flex-col gap-3 sm:flex-row sm:items-start'>
+        {/* LEFT — the material AS the BOM square card, with the picker that (re)selects which
+            catalog article this usage points at directly under it. The card is the display; the
+            select stays as the control, so add/change/remove-usage all keep working. */}
+        <div className='flex w-full flex-col gap-1.5 sm:w-40 sm:shrink-0'>
+          <RecipeMaterialCard article={article} />
+          <label className='flex flex-col gap-1'>
+            <FieldLabel>BOM article *</FieldLabel>
+            <select
+              className={cn(cell, !draft.bomLineKey && 'border-error')}
               disabled={!canEdit}
-              placeholder='— всё изделие —'
-              onChange={(key, piece) =>
-                onChange({
-                  pieceLineKey: key,
-                  // Keep the label in step with the pick, but never clobber a placement the
-                  // operator typed for a norm that is not about one specific piece.
-                  placement: piece?.name?.trim() ? piece.name.trim() : key ? draft.placement : '',
-                })
-              }
+              aria-invalid={!draft.bomLineKey || undefined}
+              value={draft.bomLineKey}
+              onChange={(e) => onChange({ bomLineKey: e.target.value })}
+            >
+              <option value=''>— select article —</option>
+              {/* keep an unknown stored key selectable so a save never silently drops it */}
+              {draft.bomLineKey && !bomItems.some((b) => b.lineKey === draft.bomLineKey) ? (
+                <option value={draft.bomLineKey}>(unknown / removed article)</option>
+              ) : null}
+              {bomItems.map((b, bi) => (
+                <option key={b.lineKey} value={b.lineKey}>
+                  {bi + 1}. {b.name?.trim() || 'unnamed'}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        {/* RIGHT — which piece is cut from this fabric, then how much of it. */}
+        <div className='flex min-w-0 flex-1 flex-col gap-3'>
+          {/* The part a norm is about is a CUT PIECE, not a label: the contract already carries
+              piece_line_key -> a real usage.piece_id FK (RESTRICT), and the client already round-trips
+              it — there was simply no control to set it, so operators retyped part names as free text
+              that nothing could join on. Picking here writes the stable key; `placement` stays as the
+              human label (auto-filled from the piece) so the PDF and legacy rows keep reading.
+              Single-select, unlike the operation picker: a consumption norm is about exactly one
+              piece. No create affordance either — the recipe saves through UpdateColorwayRecipe and
+              cannot author a piece; that belongs to the tech-card save. */}
+          <div className='flex flex-col gap-1'>
+            <FieldLabel>деталь из этой ткани (норма считается на неё)</FieldLabel>
+            {pieces.length > 0 ? (
+              <PieceSinglePicker
+                pieces={pieces}
+                value={draft.pieceLineKey}
+                disabled={!canEdit}
+                placeholder='— всё изделие —'
+                onChange={(key, piece) =>
+                  onChange({
+                    pieceLineKey: key,
+                    // Keep the label in step with the pick, but never clobber a placement the
+                    // operator typed for a norm that is not about one specific piece.
+                    placement: piece?.name?.trim() ? piece.name.trim() : key ? draft.placement : '',
+                  })
+                }
+              />
+            ) : (
+              // No cut pieces declared yet — the norm still needs a human-readable part, so the
+              // legacy free-text placement stays as the fallback rather than blocking the row.
+              <>
+                <input
+                  className={cell}
+                  disabled={!canEdit}
+                  placeholder='outer / lining / collar…'
+                  aria-label='placement'
+                  value={draft.placement}
+                  onChange={(e) => onChange({ placement: e.target.value })}
+                />
+                <Text size='micro' variant='label'>
+                  Add cut pieces on the PIECES tab to pick a real part here instead of typing one.
+                </Text>
+              </>
+            )}
+          </div>
+
+          {/* measured articles cost by a rate (per-size gradable); counted ones by a flat quantity (M14) */}
+          {isMeasured ? (
+            <UsagePerSizeLocal
+              draft={draft}
+              sizeIds={sizeIds}
+              sizeQuantities={sizeQuantities}
+              article={article}
+              canEdit={canEdit}
+              sizeNameById={sizeNameById}
+              onChange={onChange}
             />
           ) : (
-            // No cut pieces declared yet — the norm still needs a human-readable part, so the
-            // legacy free-text placement stays as the fallback rather than blocking the row.
-            <>
+            <label className='flex flex-col gap-1'>
+              <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
               <input
                 className={cell}
+                inputMode='decimal'
                 disabled={!canEdit}
-                placeholder='outer / lining / collar…'
-                aria-label='placement'
-                value={draft.placement}
-                onChange={(e) => onChange({ placement: e.target.value })}
+                value={draft.quantity}
+                onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
               />
-              <Text size='micro' variant='label'>
-                Add cut pieces on the PIECES tab to pick a real part here instead of typing one.
-              </Text>
-            </>
+            </label>
           )}
         </div>
       </div>
-
-      {/* measured articles cost by a rate (per-size gradable); counted ones by a flat quantity (M14) */}
-      {isMeasured ? (
-        <UsagePerSizeLocal
-          draft={draft}
-          sizeIds={sizeIds}
-          sizeQuantities={sizeQuantities}
-          article={article}
-          canEdit={canEdit}
-          sizeNameById={sizeNameById}
-          onChange={onChange}
-        />
-      ) : (
-        <label className='flex flex-col gap-1'>
-          <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
-          <input
-            className={cell}
-            inputMode='decimal'
-            disabled={!canEdit}
-            value={draft.quantity}
-            onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
-          />
-        </label>
-      )}
 
       {/* server-computed spend — present only with costing:read (stripped otherwise) */}
       {(draft.lineTotal || draft.sizeRunTotal) && (
@@ -1657,24 +1731,39 @@ export function ColorwayRecipes({
         .map((p) => ({ lineKey: p.lineKey as string, name: p.name ?? '' })),
     [techCard?.techCard?.pieces],
   );
+  // The catalog materials the BOM lines link to (materialId) — loaded once for the whole tab so each
+  // recipe usage can render the SAME square article card the BOM tab shows (photo · code · spec).
+  // section '' = all sections; includeArchived so a line linked to an archived material still resolves.
+  const { data: materialsData } = useMaterials('', true);
+  const materialById = useMemo(() => {
+    const m = new Map<number, common_Material>();
+    for (const mat of materialsData?.materials ?? []) if (mat.id != null) m.set(Number(mat.id), mat);
+    return m;
+  }, [materialsData?.materials]);
   // Enrich BOM lines with the fields the recipe editor now needs: price/wastage/unit for the run-cost
-  // preview (per-size grading) and the legacy composition string for the derived-composition summary.
+  // preview (per-size grading), the legacy composition string for the derived-composition summary,
+  // and the linked catalog material so each usage renders as the square article card.
   const bomItems = useMemo<BomLine[]>(
     () =>
       (techCard?.techCard?.bomItems ?? [])
         .filter((b) => !!b.lineKey)
-        .map((b) => ({
-          id: b.id,
-          lineKey: b.lineKey,
-          name: b.name,
-          section: b.section,
-          unit: b.unit,
-          unitPrice: decimalToInput(b.unitPrice),
-          currency: b.currency,
-          wastagePercent: decimalToInput(b.wastagePercent),
-          composition: b.composition,
-        })),
-    [techCard?.techCard?.bomItems],
+        .map((b) => {
+          const materialId = Number(b.materialId) || 0;
+          return {
+            id: b.id,
+            lineKey: b.lineKey,
+            name: b.name,
+            section: b.section,
+            unit: b.unit,
+            unitPrice: decimalToInput(b.unitPrice),
+            currency: b.currency,
+            wastagePercent: decimalToInput(b.wastagePercent),
+            composition: b.composition,
+            materialId,
+            material: materialId > 0 ? materialById.get(materialId) : undefined,
+          };
+        }),
+    [techCard?.techCard?.bomItems, materialById],
   );
   const sizeIds = (techCard?.techCard?.sizeIds ?? []) as number[];
   const sizeQuantities = (techCard?.techCard?.sizeQuantities ?? []) as {

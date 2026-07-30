@@ -6,6 +6,7 @@ import { useStyleEconomics } from 'components/managers/page/useStyleEconomics';
 import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
+import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
@@ -18,6 +19,7 @@ import Text from 'ui/components/text';
 import { Toolbar } from 'ui/components/toolbar';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { SamplePicker } from './sample-picker';
+import { TechCardFormData } from './schema';
 import { sampleKeys, useSamples } from './useSamples';
 
 const KINDS = ['sample', 'materials', 'labour', 'outsourcing', 'other'];
@@ -95,6 +97,14 @@ export function DevExpensesField({
   const key = devExpenseKeys.list(techCardId);
 
   const { data, isLoading } = useDevExpenses(techCardId);
+
+  // Planned run for the amortisation panel — the size run set on the patterns tab
+  // (size_quantities), read straight off the card form (no extra fetch), the same source
+  // packaging-field derives its carton run from. 0/undefined qty guarded to 0.
+  const { control } = useFormContext<TechCardFormData>();
+  const plannedUnits = (
+    (useWatch({ control, name: 'sizeQuantities' }) ?? []) as Array<{ orderQty?: number }>
+  ).reduce((n, q) => n + (q.orderQty ?? 0), 0);
 
   // Per-card sample numbers for labelling rows (`sample #N` rather than the DB id). Cached from
   // the samples tab, so this is usually free. Skipped in scoped mode where the sample is implied.
@@ -229,36 +239,59 @@ export function DevExpensesField({
           </StatGrid>
         )
       ) : (
-        <StatGrid min={130}>
-          {byKind.map((b) => (
+        <div className='flex flex-col gap-2'>
+          {/* Amortisation headline: dev spend ÷ planned units = per-unit, and the units the
+              unit margin must sell to earn the R&D back. Both are reference figures — R&D is an
+              amortised PERIOD cost, deliberately outside product cost_price / COGS. */}
+          <StatGrid min={130}>
             <Stat
-              key={b.kind}
-              label={b.kind}
-              value={b.amount.toFixed(2)}
-              sub={totalBaseNum > 0 ? `${Math.round((b.amount / totalBaseNum) * 100)}%` : undefined}
+              label='R&D spent'
+              big
+              value={totalBaseNum > 0 ? totalBaseNum.toFixed(2) : '—'}
+              sub={summary?.hasUnconverted ? 'partial — missing FX rate' : 'base currency'}
             />
-          ))}
-          <Stat
-            label='total'
-            big
-            value={totalBaseNum > 0 ? totalBaseNum.toFixed(2) : '—'}
-            sub={summary?.hasUnconverted ? 'partial — missing FX rate' : 'base currency'}
-          />
-          <Stat
-            label='recovered at'
-            value={recoveredAtUnits != null ? String(recoveredAtUnits) : '—'}
-            sub={recoveredAtUnits != null ? 'units sold, at margin' : 'needs sales + a unit cost'}
-          />
-          <Stat
-            label='per unit'
-            value={decimalToInput(summary?.unitCostWithDev) || '—'}
-            sub={
-              (summary?.orderQty ?? 0) > 0
-                ? `unit cost + dev ÷ ${summary?.orderQty}`
-                : 'reference, not COGS'
-            }
-          />
-        </StatGrid>
+            <Stat
+              label='planned units'
+              value={plannedUnits > 0 ? String(plannedUnits) : '—'}
+              sub={plannedUnits > 0 ? 'size run' : 'set the size run (patterns tab)'}
+            />
+            <Stat
+              label='per unit'
+              value={plannedUnits > 0 ? (totalBaseNum / plannedUnits).toFixed(2) : '—'}
+              sub={plannedUnits > 0 ? 'amortised R&D' : 'needs planned units'}
+            />
+            <Stat
+              label='break-even'
+              value={recoveredAtUnits != null ? String(recoveredAtUnits) : '—'}
+              sub={
+                recoveredAtUnits != null
+                  ? `units @ ${unitMargin.toFixed(2)} margin`
+                  : 'needs a unit margin (costing tab)'
+              }
+            />
+          </StatGrid>
+
+          <Text size='micro' variant='label'>
+            per unit = R&amp;D ÷ planned units; break-even = R&amp;D ÷ unit margin — reference
+            figures, still outside product COGS.
+          </Text>
+
+          {/* Where the money went — by-kind breakdown, kept from the ledger summary. */}
+          {byKind.length > 0 && (
+            <StatGrid min={130}>
+              {byKind.map((b) => (
+                <Stat
+                  key={b.kind}
+                  label={b.kind}
+                  value={b.amount.toFixed(2)}
+                  sub={
+                    totalBaseNum > 0 ? `${Math.round((b.amount / totalBaseNum) * 100)}%` : undefined
+                  }
+                />
+              ))}
+            </StatGrid>
+          )}
+        </div>
       )}
 
       {/* Ledger */}

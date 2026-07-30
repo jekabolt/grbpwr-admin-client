@@ -608,14 +608,12 @@ export function TechCardForm({
 
   return (
     <Form {...form}>
-      {/* TWO-TIER CHROME (top-16 clears the fixed Layout nav; -mx-2.5 cancels the Layout content
-          px-2.5 so the bar spans full width).
+      {/* TWO-TIER CHROME (-mx-2.5 cancels the Layout content px-2.5 so the bar spans full width).
           Row 1 is identity + the page actions. Row 2 is the card's STATE: stage, approval,
           and one chip per release blocker — each chip navigates to the tab that fixes it.
-          Pinned only from lg up: on a phone this two-tier bar plus the fixed nav left almost no
-          room for the actual spec, so below lg it scrolls away with the content (the tab rail
-          below is already lg-only sticky, so nothing stays pinned on mobile). */}
-      <div className='-mx-2.5 border-b border-borderColor bg-bgColor lg:sticky lg:top-16 lg:z-30'>
+          NOT sticky — it scrolls away with the content on every screen (the left tab rail stays
+          pinned so the sections remain reachable while scrolling). */}
+      <div className='-mx-2.5 border-b border-borderColor bg-bgColor'>
         <div className='flex flex-wrap items-center gap-2 px-2.5 py-2'>
           <Button asChild variant='secondary' size='sm'>
             <Link to={ROUTES.techCards}>←</Link>
@@ -876,7 +874,7 @@ export function TechCardForm({
       <div className='grid gap-2.5 pt-3 lg:grid-cols-[150px_1fr]'>
         <aside
           aria-label='Tech card sections'
-          className='top-40 self-start lg:sticky lg:max-h-[calc(100vh-11rem)] lg:overflow-y-auto'
+          className='top-16 self-start lg:sticky lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'
         >
           <div className='flex gap-1 overflow-x-auto lg:block lg:overflow-visible'>
             {TAB_GROUPS.map((group, gi) => {

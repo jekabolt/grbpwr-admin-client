@@ -1,11 +1,18 @@
 import { common_Material, common_TechCardBomSection } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import {
+  composeArticleFromMaterial,
+  materialSpec,
+} from 'components/managers/materials/components/material-code';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
   MaterialPicker,
   useMaterialOnHand,
 } from 'components/managers/materials/components/material-picker';
-import { MaterialThumb } from 'components/managers/materials/components/material-thumb';
+import {
+  MaterialThumb,
+  materialImageUrl,
+} from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
@@ -24,6 +31,7 @@ import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { GroupLabel } from 'ui/components/group-label';
+import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
@@ -74,6 +82,11 @@ function materialFabricWeight(m?: common_Material): string | undefined {
 const join = (...parts: Array<string | undefined>) => parts.filter((p) => !!p?.trim()).join(' · ');
 const widthLabel = (v?: string) => (v?.trim() ? `${v.trim()} cm` : '');
 const weightLabel = (v?: string) => (v?.trim() ? `${v.trim()} g/m²` : '');
+
+// The material's class as a short lowercase tag (fabric / hardware / thread / packaging) — the
+// "тип" pill beside the section on a linked article tile.
+const classShort = (c?: string) =>
+  c && c !== 'MATERIAL_CLASS_UNKNOWN' ? c.replace('MATERIAL_CLASS_', '').toLowerCase() : '';
 
 // This style's use of the article — the ONLY three controls a linked line owns. Everything else on
 // a linked line is a catalog fact, rendered as a plate (below) rather than as disabled inputs.
@@ -394,9 +407,10 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
   );
 }
 
-// #33: one BOM article as a scannable TILE — thumb · section pill · name · price · chevron — that
-// expands in place to the editor. An expanded tile spans the full grid width so the two-column
-// editor never gets crushed in a column.
+// #33: one BOM article as a square, photo-forward TILE — a square material photo over section/тип
+// pills, the article name, its self-describing code, spec line and price — that expands in place to
+// the editor. An expanded tile spans the full grid width so the two-column editor never gets
+// crushed in a column.
 function BomTile({
   index,
   onRemove,
@@ -446,52 +460,100 @@ function BomTile({
   const priceLabel = price
     ? `${price}${row.currency?.trim() ? ` ${row.currency.trim()}` : ''}${row.unit?.trim() ? ` / ${row.unit.trim()}` : ''}`
     : '';
+  const imageUrl = materialImageUrl(material);
+  const cls = classShort(material?.materialClass);
+  // грамматура · ширина · мат/сатин/блеск · состав · цвет — the identifying spec line, with the
+  // colour appended. Empty on an unlinked line, which has no catalog material behind it yet.
+  const specLine = material ? join(materialSpec(material), material.color) : '';
+
+  // #64: an unlinked line is the release blocker, so it reads as the blocker marker; a linked line
+  // shows its price, or flags a missing one.
+  const priceStatus = !linked ? (
+    <Pill tone='warn'>! link a material</Pill>
+  ) : priceLabel ? (
+    <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
+      {priceLabel}
+    </Text>
+  ) : (
+    <Pill tone='attention'>no price</Pill>
+  );
 
   return (
+    // relative so the remove ✕ can sit at the card's top-right OUTSIDE the toggle button — inside
+    // it, the ✕ would grow the square tile and steal clicks meant for expand.
     <div
       className={cn(
-        'border bg-bgColor',
-        open && 'lg:col-span-2',
+        'relative border bg-bgColor',
+        open && 'col-span-full',
         linked && !hasError ? 'border-borderColor' : 'border-error',
       )}
     >
-      <div className='flex items-center gap-2 px-2 py-1.5'>
-        <button
-          type='button'
-          onClick={() => setOpen((o) => !o)}
-          className='flex min-w-0 flex-1 items-center gap-2 text-left'
-          aria-expanded={open}
-        >
-          <MaterialThumb material={material} size='sm' className='h-6 w-6' />
+      <Button
+        type='button'
+        size='xs'
+        variant='secondary'
+        aria-label='remove BOM article'
+        onClick={onRemove}
+        className='absolute right-1 top-1 z-10'
+      >
+        ✕
+      </Button>
+
+      <button
+        type='button'
+        onClick={() => setOpen((o) => !o)}
+        className='flex w-full flex-col gap-1 p-1.5 text-left'
+        aria-expanded={open}
+      >
+        {/* the square material photo — the tile's centre of gravity */}
+        {imageUrl ? (
+          <span className='relative block aspect-square w-full overflow-hidden border border-borderColor'>
+            <Media
+              src={imageUrl}
+              alt={row.name?.trim() || 'material'}
+              aspectRatio='1/1'
+              fit='cover'
+            />
+          </span>
+        ) : (
+          <Placeholder aspect='square' label='no photo' />
+        )}
+
+        {/* секция / тип */}
+        <div className='flex flex-wrap items-center gap-1'>
           <Pill tone='mut'>{sectionShort(row.section) || 'section?'}</Pill>
-          <Text component='span' className='min-w-0 flex-1 truncate font-bold'>
-            {row.name?.trim() || `артикул ${index + 1}`}
+          {cls ? <Pill tone='mut'>{cls}</Pill> : null}
+        </div>
+
+        <Text component='span' className='min-w-0 truncate font-bold'>
+          {row.name?.trim() || `артикул ${index + 1}`}
+        </Text>
+
+        {/* the self-describing article code, only once a catalog material is linked */}
+        {linked && material ? (
+          <Text
+            component='span'
+            variant='label'
+            size='micro'
+            className='min-w-0 truncate font-mono tabular-nums'
+          >
+            {composeArticleFromMaterial(material, true)}
           </Text>
-          {/* #64: an unlinked line is scannable on the collapsed tile — no need to expand to find
-              it. It is also what blocks the release, so it reads as the blocker marker. */}
-          {!linked ? (
-            <Pill tone='warn'>! link a material</Pill>
-          ) : priceLabel ? (
-            <Text component='span' variant='label' size='micro' className='shrink-0'>
-              {priceLabel}
-            </Text>
-          ) : (
-            <Pill tone='attention'>no price</Pill>
-          )}
-          <Text component='span' variant='inactive' className='shrink-0'>
+        ) : null}
+
+        {specLine ? (
+          <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
+            {specLine}
+          </Text>
+        ) : null}
+
+        <div className='mt-0.5 flex min-w-0 items-center gap-1'>
+          {priceStatus}
+          <Text component='span' variant='inactive' className='ml-auto shrink-0'>
             {open ? '▴' : '▾'}
           </Text>
-        </button>
-        <Button
-          type='button'
-          size='xs'
-          variant='secondary'
-          aria-label='remove BOM article'
-          onClick={onRemove}
-        >
-          ✕
-        </Button>
-      </div>
+        </div>
+      </button>
 
       {/* Same idea as the "! link a material" marker, for anything BLOCKING the save: name the
           offending fields on the tile so a collapsed row is diagnosable at a glance. */}
@@ -584,7 +646,7 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
       {fields.length === 0 ? (
         <Placeholder label='no BOM articles yet' className='h-16' />
       ) : (
-        <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
+        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4'>
           {fields.map((f, index) => (
             <BomTile
               key={f.id}

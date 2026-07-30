@@ -334,7 +334,9 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
             no pieces yet — add the pattern parts that get cut (front, back, collar…)
           </Text>
         ) : (
-          <div className='grid gap-2.5 lg:grid-cols-[1fr_160px]'>
+          // minmax(0,1fr) — not 1fr — so the wide 8-column table can shrink and scroll inside its
+          // own overflow-x-auto instead of forcing the track wide and shoving the diagram column.
+          <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_160px]'>
             <DataTable>
               <thead>
                 <tr>
