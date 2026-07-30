@@ -7,6 +7,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
+import GenericPopover from 'ui/components/popover';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
@@ -102,9 +103,9 @@ function assemblyProblem(rows: Row[]): string | null {
 }
 
 // One assembly line as a square, photo-forward TILE (mirroring the BOM article tile): the picked
-// component's photo over its sub-type + name, with a compact size · qty summary, expanding IN PLACE
-// to the per-line editor (size, qty, print / position notes, active, change component). An expanded
-// tile spans the full grid width so its four-column editor never gets crushed in a column.
+// component's photo over its sub-type + name, with a compact size · qty summary. Editing happens in a
+// POPOVER anchored to the tile — so the per-line editor never enlarges the tile or reflows the grid
+// (a col-span-full expander used to yank the whole grid around). Fixed-size tiles, stable grid.
 function AssemblyTile({
   row,
   sizeOptions,
@@ -118,7 +119,7 @@ function AssemblyTile({
   onRemove: () => void;
   canEdit: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const knownSize = row.sizeId === 0 || sizeOptions.some((o) => o.id === row.sizeId);
   const resolvedSubtype = auxSubtypeLabel(row.componentAuxSubtype);
@@ -128,15 +129,11 @@ function AssemblyTile({
     [auxData, row.componentTechCardId],
   );
 
-  // A line is unsavable with no component or a non-positive qty (mirrors assemblyProblem, per row).
-  // A broken row borders red and forces itself open, so a collapsed tile is never silently blocking
-  // the save.
+  // A line is unsavable with no component or a non-positive qty (mirrors assemblyProblem, per row) —
+  // the tile borders red so an invalid line is visible without opening its editor.
   const qtyNum = parseDecimalNumber(row.qty);
   const rowInvalid =
     !row.componentTechCardId || !row.qty.trim() || !Number.isFinite(qtyNum) || qtyNum <= 0;
-  useEffect(() => {
-    if (rowInvalid) setOpen(true);
-  }, [rowInvalid]);
 
   const sizeLabel =
     row.sizeId === 0
@@ -155,16 +152,118 @@ function AssemblyTile({
     return items;
   }, [sizeOptions, knownSize, row.sizeId, row.sizeName]);
 
+  // The fixed-size tile face — the popover TRIGGER. Not a <button> (GenericPopover already renders a
+  // Popover.Trigger button; a button-in-button would be invalid), so the whole face opens the editor.
+  const face = (
+    <div className='flex w-full flex-col gap-1 p-1.5 text-left'>
+      <Thumb
+        url={auxCardThumbUrl(selectedCard)}
+        alt={row.componentName || 'aux card'}
+        className='aspect-square w-full'
+        placeholder='no image'
+      />
+      <div className='flex flex-wrap items-center gap-1'>
+        {resolvedSubtype ? <Pill tone='mut'>{resolvedSubtype}</Pill> : null}
+        {!row.active && <Pill tone='mut'>inactive</Pill>}
+      </div>
+      <Text component='span' className='min-w-0 truncate font-bold uppercase'>
+        {row.componentName || `#${row.componentTechCardId}`}
+      </Text>
+      {row.outputMaterialName ? (
+        <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
+          → {row.outputMaterialName}
+        </Text>
+      ) : null}
+      <div className='mt-0.5 flex min-w-0 items-center gap-1'>
+        <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
+          {sizeLabel} · ×{row.qty.trim() || '—'}
+        </Text>
+        {canEdit && (
+          <Text component='span' variant='inactive' className='ml-auto shrink-0'>
+            {editOpen ? '▴' : '✎'}
+          </Text>
+        )}
+      </div>
+    </div>
+  );
+
+  // The per-line editor, stacked to fit a ~280px popover (no wide four-column grid).
+  const editor = (
+    <div className='flex flex-col gap-2'>
+      <Field label='size'>
+        <Select
+          name={`assembly-size-${row.key}`}
+          placeholder='all sizes'
+          items={sizeItems}
+          fullWidth
+          readOnly={!canEdit}
+          value={String(row.sizeId || 0)}
+          onValueChange={(v: string) => onPatch({ sizeId: Number(v) || 0 })}
+        />
+      </Field>
+      <Field label='qty'>
+        <Input
+          name={`assembly-qty-${row.key}`}
+          inputMode='decimal'
+          value={row.qty}
+          disabled={!canEdit}
+          className='text-right'
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            onPatch({ qty: sanitizeDecimal(e.target.value) })
+          }
+        />
+      </Field>
+      <Field label='print note'>
+        <Input
+          name={`assembly-print-${row.key}`}
+          value={row.printNote}
+          disabled={!canEdit}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) => onPatch({ printNote: e.target.value })}
+        />
+      </Field>
+      <Field label='position note'>
+        <Input
+          name={`assembly-position-${row.key}`}
+          value={row.positionNote}
+          disabled={!canEdit}
+          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+            onPatch({ positionNote: e.target.value })
+          }
+        />
+      </Field>
+      <div className='flex flex-wrap items-center gap-2'>
+        <label className='flex items-center gap-1.5'>
+          <input
+            type='checkbox'
+            checked={row.active}
+            disabled={!canEdit}
+            onChange={(e) => onPatch({ active: e.target.checked })}
+          />
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            active
+          </Text>
+        </label>
+        {canEdit && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            className='ml-auto'
+            onClick={() => {
+              setEditOpen(false);
+              setPickerOpen(true);
+            }}
+          >
+            change
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+
   return (
-    // relative so the remove ✕ can sit at the card's top-right OUTSIDE the toggle button — inside it
-    // the ✕ would grow the square tile and steal clicks meant for expand.
-    <div
-      className={cn(
-        'relative border bg-bgColor',
-        open && 'col-span-full',
-        rowInvalid ? 'border-error' : 'border-borderColor',
-      )}
-    >
+    // relative so the remove ✕ sits at the top-right OUTSIDE the popover trigger.
+    <div className={cn('relative border bg-bgColor', rowInvalid ? 'border-error' : 'border-borderColor')}>
       {canEdit && (
         <Button
           type='button'
@@ -178,123 +277,22 @@ function AssemblyTile({
         </Button>
       )}
 
-      <button
-        type='button'
-        onClick={() => setOpen((o) => !o)}
-        className='flex w-full flex-col gap-1 p-1.5 text-left'
-        aria-expanded={open}
-      >
-        {/* The square component photo — full-bleed on the collapsed grid tile, capped small once the
-            tile is open (col-span-full), or a w-full square would blow past the viewport. */}
-        <Thumb
-          url={auxCardThumbUrl(selectedCard)}
-          alt={row.componentName || 'aux card'}
-          className={cn('aspect-square', open ? 'w-28' : 'w-full')}
-          placeholder='no image'
-        />
-
-        <div className='flex flex-wrap items-center gap-1'>
-          {resolvedSubtype ? <Pill tone='mut'>{resolvedSubtype}</Pill> : null}
-          {!row.active && <Pill tone='mut'>inactive</Pill>}
-        </div>
-
-        <Text component='span' className='min-w-0 truncate font-bold uppercase'>
-          {row.componentName || `#${row.componentTechCardId}`}
-        </Text>
-
-        {row.outputMaterialName ? (
-          <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
-            → {row.outputMaterialName}
-          </Text>
-        ) : null}
-
-        <div className='mt-0.5 flex min-w-0 items-center gap-1'>
-          <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-            {sizeLabel} · ×{row.qty.trim() || '—'}
-          </Text>
-          <Text component='span' variant='inactive' className='ml-auto shrink-0'>
-            {open ? '▴' : '▾'}
-          </Text>
-        </div>
-      </button>
-
-      {open && (
-        <div className='border-t border-hairline p-2'>
-          <div className='grid grid-cols-2 gap-2 lg:grid-cols-4'>
-            <Field label='size'>
-              <Select
-                name={`assembly-size-${row.key}`}
-                placeholder='all sizes'
-                items={sizeItems}
-                fullWidth
-                readOnly={!canEdit}
-                value={String(row.sizeId || 0)}
-                onValueChange={(v: string) => onPatch({ sizeId: Number(v) || 0 })}
-              />
-            </Field>
-            <Field label='qty'>
-              <Input
-                name={`assembly-qty-${row.key}`}
-                inputMode='decimal'
-                value={row.qty}
-                disabled={!canEdit}
-                className='text-right'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  onPatch({ qty: sanitizeDecimal(e.target.value) })
-                }
-              />
-            </Field>
-            <Field label='print note'>
-              <Input
-                name={`assembly-print-${row.key}`}
-                value={row.printNote}
-                disabled={!canEdit}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  onPatch({ printNote: e.target.value })
-                }
-              />
-            </Field>
-            <Field label='position note'>
-              <Input
-                name={`assembly-position-${row.key}`}
-                value={row.positionNote}
-                disabled={!canEdit}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  onPatch({ positionNote: e.target.value })
-                }
-              />
-            </Field>
-          </div>
-
-          <div className='mt-1.5 flex flex-wrap items-center gap-2'>
-            <label className='flex items-center gap-1.5'>
-              <input
-                type='checkbox'
-                checked={row.active}
-                disabled={!canEdit}
-                onChange={(e) => onPatch({ active: e.target.checked })}
-              />
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                active
-              </Text>
-            </label>
-            {canEdit && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='xs'
-                className='ml-auto'
-                onClick={() => setPickerOpen(true)}
-              >
-                change component
-              </Button>
-            )}
-          </div>
-        </div>
+      {canEdit ? (
+        <GenericPopover
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          title='assembly line'
+          className='w-[280px]'
+          triggerProps={{ 'aria-label': 'edit assembly line', className: 'block w-full text-left' }}
+          openElement={face}
+        >
+          {editor}
+        </GenericPopover>
+      ) : (
+        face
       )}
 
-      {/* Mounted only while open: one dialog per line would otherwise sit in the tree of every
-          row at once. Single-select — swapping the component of ONE line, not adding more. */}
+      {/* Mounted only while open. Single-select — swapping the component of ONE line, not adding more. */}
       {canEdit && pickerOpen && (
         <AuxCardPickerModal
           open

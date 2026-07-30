@@ -19,7 +19,6 @@ import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { generateCareLabel, hasAnyComposition } from 'utils/care-label';
-import { LabelPlacementBadge } from './label-placement-pictogram';
 import { LabelsChecklist } from './labels-checklist';
 import { TechCardFormData, wireInt } from './schema';
 import { labelAttachmentOptions, labelPlacementOptions } from './tech-card-options';
@@ -54,21 +53,20 @@ const LABEL_TYPE_BADGE: Record<string, string> = {
 };
 
 // One label card. A CARE label gets the care-instruction picker for its content (laundry
-// symbols); the composition text lives in its note. Other types use a free-text content.
+// symbols); the composition text lives in its note. Other types use a free-text content. One clean
+// uniform grid — no per-row pictogram, so the fields align instead of stepping around a badge.
 function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) {
   const { control } = useFormContext<TechCardFormData>();
   const labelType = useWatch({ control, name: `labels.${index}.labelType` }) as string;
-  const placement = useWatch({ control, name: `labels.${index}.placement` }) as string;
-  const attachment = useWatch({ control, name: `labels.${index}.attachment` }) as string;
   const isCare = labelType === CARE;
 
   return (
-    <div id={`label-row-${index}`} className='border border-borderColor p-2'>
+    <div id={`label-row-${index}`} className='border border-borderColor bg-bgColor p-2'>
       <div className='mb-1.5 flex items-center gap-2'>
+        <Pill tone='ink'>{LABEL_TYPE_BADGE[labelType] ?? 'lbl'}</Pill>
         <Text size='micro' variant='label' component='span' tracking='label' className='uppercase'>
           label {index + 1}
         </Text>
-        <Pill tone='ink'>{LABEL_TYPE_BADGE[labelType] ?? 'lbl'}</Pill>
         <span className='ml-auto'>
           <Button
             type='button'
@@ -82,31 +80,26 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         </span>
       </div>
 
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+      <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
         <SelectField
           name={`labels.${index}.labelType`}
           label='type *'
           items={techCardLabelTypeOptions}
         />
         {isCare ? (
-          <div className='sm:col-span-2'>
+          <div className='col-span-2 sm:col-span-3'>
             <CarePicker name={`labels.${index}.content`} label='care symbols' />
           </div>
         ) : (
-          <InputField name={`labels.${index}.content`} label='content / ref' />
-        )}
-        <div className='flex items-end gap-1.5'>
-          <div className='min-w-0 flex-1'>
-            <ComboField
-              name={`labels.${index}.placement`}
-              label='placement'
-              options={labelPlacementOptions}
-            />
+          <div className='col-span-1 sm:col-span-2'>
+            <InputField name={`labels.${index}.content`} label='content / ref' />
           </div>
-          {/* Pictogram of WHERE this label sits on the garment + a glyph for how it's attached —
-              hover/focus for the enlarged view (the per-row twin of the garment map above). */}
-          <LabelPlacementBadge placement={placement} attachment={attachment} />
-        </div>
+        )}
+        <ComboField
+          name={`labels.${index}.placement`}
+          label='placement'
+          options={labelPlacementOptions}
+        />
         <ComboField
           name={`labels.${index}.attachment`}
           label='attachment'
@@ -318,14 +311,8 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
   return (
     <TooltipProvider delayDuration={200} skipDelayDuration={150}>
       <div className='flex flex-col gap-3'>
-        {/* Two-pane at lg (stacks below): the checklist on the left, a live printed-label preview
-            on the right. Both read the same RHF data, so the preview can never disagree with the
-            spec the checklist is scoring. */}
-        <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
-          <LabelsChecklist onAddLabel={addLabel} onOpenPackaging={openPackaging} />
-          <LabelPreview />
-        </div>
-
+        {/* PRIMARY — creating labels: the toolbar + the label cards. This is the work; the preview
+            and the completeness checklist are secondary and sit below, separated by a rule. */}
         <Toolbar>
           <Button type='button' variant='secondary' size='sm' onClick={generateCare}>
             сгенерировать состав / уход
@@ -351,6 +338,13 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
             ))}
           </div>
         )}
+
+        {/* SECONDARY — the printed-label preview + a compact completeness checklist, separated from
+            the editing above so label creation stays the focus. */}
+        <div className='flex flex-col gap-2 border-t border-hairline pt-3'>
+          <LabelPreview />
+          <LabelsChecklist onAddLabel={addLabel} onOpenPackaging={openPackaging} />
+        </div>
       </div>
     </TooltipProvider>
   );
