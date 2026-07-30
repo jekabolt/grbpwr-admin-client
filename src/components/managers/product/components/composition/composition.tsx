@@ -5,6 +5,7 @@ import { Button } from 'ui/components/button';
 import InputField from 'ui/form/fields/input-field';
 import { ReadOnlyField } from '../read-only-field';
 import { CompositionModal } from './composition-modal/composition-modal';
+import { compositionToValue } from './composition-modal/utils';
 
 interface CompositionProps {
   editMode: boolean;
@@ -60,10 +61,8 @@ export function Composition({ editMode }: CompositionProps) {
   const handleSelectComposition = (newComposition: CompositionStructure) => {
     setSelectedComposition(newComposition);
 
-    const compositionValue =
-      Object.keys(newComposition).length > 0 ? JSON.stringify(newComposition) : '';
-
-    setValue('product.productBodyInsert.composition', compositionValue, {
+    // Shared with the BOM picker: a part emptied in the dialog must clear the field, not store '{}'.
+    setValue('product.productBodyInsert.composition', compositionToValue(newComposition), {
       shouldDirty: true,
       shouldTouch: true,
       shouldValidate: true,

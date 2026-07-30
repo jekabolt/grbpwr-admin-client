@@ -1,10 +1,31 @@
-import { composition as dict, CompositionStructure } from 'constants/garment-composition';
+import {
+  composition as dict,
+  CompositionItem,
+  CompositionStructure,
+} from 'constants/garment-composition';
 import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { FormLabel } from 'ui/form';
 import { CompositionModal } from './composition-modal/composition-modal';
+import { compositionToValue } from './composition-modal/utils';
+
+// A BOM line snapshotted off a linked material carries its blend under `fibre`
+// (materials/material-code.ts), a key `garment_parts` has no tab for — so the dialog used to open
+// with every tab empty while that data sat invisible underneath it, blocking save on a sum no
+// visible tab explained and double-printing on the care label once the operator re-entered the blend
+// under `body`. Fold it into `body`, which is the tab that shows it. When `body` is already taken the
+// key is left alone: GarmentPartTabs renders a chip for any key it does not know, so either way the
+// data is visible and removable rather than hidden.
+function foldMaterialFibres(structure: CompositionStructure): CompositionStructure {
+  const parts = structure as Record<string, CompositionItem[] | undefined>;
+  const fibres = parts.fibre;
+  if (!fibres?.length || parts.body?.length) return structure;
+  const next: Record<string, CompositionItem[] | undefined> = { ...parts, body: fibres };
+  delete next.fibre;
+  return next as CompositionStructure;
+}
 
 // Parse a stored composition string: the structured JSON the picker writes, or the legacy
 // "COD:60, POL:40" form.
@@ -12,7 +33,12 @@ export function parseComposition(value?: string): CompositionStructure {
   const v = value?.trim();
   if (!v) return {};
   try {
-    return JSON.parse(v) as CompositionStructure;
+    const parsed = JSON.parse(v) as unknown;
+    // Valid JSON that is not an object of parts (a bare number, a string, an array) is not a
+    // composition — hand back nothing rather than something Object.entries() will silently read as
+    // empty further down.
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return foldMaterialFibres(parsed as CompositionStructure);
   } catch {
     const items = v
       .split(',')
@@ -68,7 +94,7 @@ export function CompositionPicker({
   })();
 
   const selectComposition = (c: CompositionStructure) => {
-    setValue(name, Object.keys(c).length > 0 ? JSON.stringify(c) : '', {
+    setValue(name, compositionToValue(c), {
       shouldDirty: true,
       shouldValidate: true,
     });

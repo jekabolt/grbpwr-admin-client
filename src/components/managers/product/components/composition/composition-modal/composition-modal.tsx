@@ -20,12 +20,23 @@ interface CompositionModalProps {
 // The fibre-content dialog: pick a garment part, add fibres to it, split them to 100%. On the shared
 // modal shell at `sm` — it is a narrow column of rows, not a browser. The live total gates SAVE:
 // a part that has fibres must sum to exactly 100 before the dialog will let go.
-export function CompositionModal({
-  isOpen,
+//
+// The dialog is TRANSACTIONAL, and the mount boundary is what makes it so: the draft lives in the
+// body below, which exists only while the dialog is open. So it is seeded from the stored value on
+// every opening and thrown away on close, and `selectComposition` is called exactly once, from the
+// confirm handler the total already gates. Writing through on every keystroke instead meant the
+// disabled save button gated nothing — `close`, ✕, Esc and the overlay all left a half-typed blend
+// (a 60%-only body) in the field, where the care label and the storefront then read it.
+export function CompositionModal({ isOpen, ...props }: CompositionModalProps) {
+  if (!isOpen) return null;
+  return <CompositionDialog {...props} />;
+}
+
+function CompositionDialog({
   selectedComposition,
   onClose,
   selectComposition,
-}: CompositionModalProps) {
+}: Omit<CompositionModalProps, 'isOpen'>) {
   const {
     selectedCategory,
     selectedPart,
@@ -40,19 +51,20 @@ export function CompositionModal({
     handleToggleMaterial,
     handleRemovePart,
     handleAutoAdjust,
-  } = useCompositionForm(selectedComposition, selectComposition);
-
-  if (!isOpen) return null;
+  } = useCompositionForm(selectedComposition);
 
   const invalid = hasInvalidParts(localComposition);
 
   return (
     <ConfirmationModal
-      open={isOpen}
+      open
       onOpenChange={(v) => {
         if (!v) onClose();
       }}
-      onConfirm={onClose}
+      onConfirm={() => {
+        selectComposition(localComposition);
+        onClose();
+      }}
       closeOnConfirm={false}
       width='sm'
       title='composition'

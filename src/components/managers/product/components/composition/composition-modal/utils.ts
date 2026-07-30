@@ -5,6 +5,15 @@ export function getPartTotal(items: CompositionItem[] | undefined): number {
   return items.reduce((acc, item) => acc + item.percent, 0);
 }
 
+// Serialise a composition for storage. Parts holding no fibres are dropped, and a structure with
+// nothing left in it stores '' — never '{}'. That distinction is load-bearing: every "is composition
+// set" check downstream is string-truthiness (`hasAnyComposition`, the BOM line's missing-composition
+// highlight, the labels checklist), so a stored '{}' reads as FILLED while generating nothing.
+export function compositionToValue(structure: CompositionStructure): string {
+  const filled = Object.entries(structure).filter(([, items]) => !!items && items.length > 0);
+  return filled.length > 0 ? JSON.stringify(Object.fromEntries(filled)) : '';
+}
+
 export function hasInvalidParts(structure: CompositionStructure): boolean {
   return Object.entries(structure).some(([, items]) => {
     if (!items || items.length === 0) return false;

@@ -4,6 +4,7 @@ import Media from 'ui/components/media';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { cn } from 'lib/utility';
+import { CARE_ARTWORK } from './care-artwork';
 import { CareGroup, CareSymbolView } from './care-codes';
 import { useCareVocabulary } from './use-care-vocabulary';
 
@@ -23,13 +24,19 @@ export function CareSymbol({ code, onRemove }: { code: string; onRemove?: () => 
   const vocabulary = useCareVocabulary();
   const meta = vocabulary.byCode[code];
   const label = meta?.name ?? code;
+  // The drawing is LOCAL and keyed by code (`care-artwork.ts`); the dictionary only NAMES the code.
+  // So the picture is looked up directly when the vocabulary has no entry — the dictionary still in
+  // flight, its fetch exhausted, or a backend that does not serve care symbols yet — because it is
+  // the same asset either way. Going through `meta.img` alone turned every stored code into a '?'
+  // for reasons that had nothing to do with whether the symbol exists.
+  const img = meta?.img ?? CARE_ARTWORK[code];
   const symbol = (
     <>
-      {meta?.img ? (
-        <img src={meta.img} alt={meta.name} className='size-6' />
+      {img ? (
+        <img src={img} alt={label} className='size-6' />
       ) : (
-        // A code with no symbol is real data — from before the symbol set, a code retired since, or
-        // simply the dictionary not loaded yet. Show it rather than dropping it silently.
+        // A code with no drawing at all is real data — from before the symbol set, or a code retired
+        // since. Show it rather than dropping it silently.
         <span className='flex size-6 items-center justify-center text-nano'>?</span>
       )}
       <Text component='span' size='nano' variant='label' className='truncate uppercase'>

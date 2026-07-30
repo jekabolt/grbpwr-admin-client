@@ -1,12 +1,35 @@
 import { composition, CompositionItem, CompositionStructure } from 'constants/garment-composition';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 
-export function useCompositionForm(
-  selectedComposition: CompositionStructure,
-  selectComposition: (composition: CompositionStructure) => void,
-) {
+// A part's fibres, by key. Indexed loosely on purpose: a stored composition may carry a key
+// `garment_parts` has no tab for (`fibre`, from a material snapshot), and that data has to be
+// readable and removable rather than silently dropped.
+const partItems = (structure: CompositionStructure, part: string): CompositionItem[] =>
+  (structure as Record<string, CompositionItem[] | undefined>)[part] ?? [];
+
+// Set a part's fibres, DELETING the key when none are left rather than assigning `undefined`:
+// `{ body: undefined }` serialises to '{}', and every "is composition set" check downstream is
+// string-truthiness, so '{}' reads as a filled composition that then generates nothing.
+const withPart = (
+  structure: CompositionStructure,
+  part: string,
+  items: CompositionItem[],
+): CompositionStructure => {
+  const next = { ...structure } as Record<string, CompositionItem[] | undefined>;
+  if (items.length > 0) next[part] = items;
+  else delete next[part];
+  return next as CompositionStructure;
+};
+
+export function useCompositionForm(selectedComposition: CompositionStructure) {
   const [selectedCategory, setSelectedCategory] = useState<string>('Natural Fibers');
   const [selectedPart, setSelectedPart] = useState<string>('body');
+  // The DRAFT, and the only thing every handler below touches. Nothing reaches the outer form until
+  // the dialog is SAVED (composition-modal.tsx commits it once, from the confirm handler). This hook
+  // is mounted with the open dialog and dies with it, so the draft is seeded from the stored value
+  // on every opening and discarded on close — which is what makes `close` / ✕ / Esc / the overlay
+  // abandon an unfinished blend instead of leaving a 60%-only body behind in the field, past a save
+  // button that was disabled precisely because the blend was not savable.
   const [localComposition, setLocalComposition] =
     useState<CompositionStructure>(selectedComposition);
 
@@ -16,16 +39,12 @@ export function useCompositionForm(
     ],
   );
 
-  const currentPartItems = localComposition[selectedPart as keyof CompositionStructure] || [];
+  const currentPartItems = partItems(localComposition, selectedPart);
 
   const totalPercentage = useMemo(
     () => currentPartItems.reduce((acc, curr) => acc + curr.percent, 0),
     [currentPartItems],
   );
-
-  useEffect(() => {
-    setLocalComposition(selectedComposition);
-  }, [selectedComposition]);
 
   const isSelected = (materialKey: string) => {
     const code = compositionGarment.find(([key]) => key === materialKey)?.[1];
@@ -33,15 +52,9 @@ export function useCompositionForm(
   };
 
   const updatePart = (updater: (part: CompositionItem[]) => CompositionItem[]) => {
-    setLocalComposition((prev) => {
-      const newComposition = { ...prev };
-      const currentPart = newComposition[selectedPart as keyof CompositionStructure] || [];
-      const updatedPart = updater(currentPart);
-      newComposition[selectedPart as keyof CompositionStructure] =
-        updatedPart.length > 0 ? updatedPart : undefined;
-      selectComposition(newComposition);
-      return newComposition;
-    });
+    setLocalComposition((prev) =>
+      withPart(prev, selectedPart, updater(partItems(prev, selectedPart))),
+    );
   };
 
   // Keyed by CODE, not by the dictionary display key: a part's selected fibres are edited as rows
@@ -59,33 +72,20 @@ export function useCompositionForm(
 
   const handleToggleMaterial = (materialKey: string, materialCode: string) => {
     setLocalComposition((prev) => {
-      const newComposition = { ...prev };
-      const currentPart = newComposition[selectedPart as keyof CompositionStructure] || [];
-      const existingIndex = currentPart.findIndex((item) => item.code === materialCode);
-
-      if (existingIndex >= 0) {
-        const updatedPart = currentPart.filter((_, index) => index !== existingIndex);
-        newComposition[selectedPart as keyof CompositionStructure] =
-          updatedPart.length > 0 ? updatedPart : undefined;
-      } else {
-        newComposition[selectedPart as keyof CompositionStructure] = [
-          ...currentPart,
-          { code: materialCode, percent: 0 },
-        ];
-      }
-
-      selectComposition(newComposition);
-      return newComposition;
+      const current = partItems(prev, selectedPart);
+      const existingIndex = current.findIndex((item) => item.code === materialCode);
+      return withPart(
+        prev,
+        selectedPart,
+        existingIndex >= 0
+          ? current.filter((_, index) => index !== existingIndex)
+          : [...current, { code: materialCode, percent: 0 }],
+      );
     });
   };
 
   const handleRemovePart = (part: string) => {
-    setLocalComposition((prev) => {
-      const newComposition = { ...prev };
-      delete newComposition[part as keyof CompositionStructure];
-      selectComposition(newComposition);
-      return newComposition;
-    });
+    setLocalComposition((prev) => withPart(prev, part, []));
   };
 
   const handleAutoAdjust = () => {

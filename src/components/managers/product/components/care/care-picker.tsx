@@ -45,8 +45,15 @@ export function CarePicker({
   // otherwise open looking empty, and the operator's first pick silently overwrites this text with
   // no warning. Surface it as a note while it's still the stored value — it disappears on its own
   // once a real pick is written (the value then parses again).
+  //
+  // Only once the vocabulary is LOADED, though: with no care symbols in the dictionary nothing parses,
+  // so a perfectly good "MW30,DNB" would be announced as free text about to be replaced. Nothing can
+  // be picked in that state anyway — the modal says so — so there is nothing to warn about.
   const trimmedValue = value.trim();
-  const legacyValue = trimmedValue && Object.keys(selected).length === 0 ? trimmedValue : undefined;
+  const legacyValue =
+    vocabulary.loaded && trimmedValue && Object.keys(selected).length === 0
+      ? trimmedValue
+      : undefined;
 
   /**
    * Write the selection back in the dictionary's print order — wash → bleach → dry → iron →
