@@ -170,6 +170,12 @@ export type FocusedAnnotatorProps = {
   renderFocusedFooter?: (view: FocusedView, positionInViews: number) => ReactNode;
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
+  /** Grid only: Tailwind width class for each tile (default 'w-[300px]'). */
+  gridCardClass?: string;
+  /** Grid only: force every tile to this aspect ratio (object-cover) for a uniform-height grid,
+   *  instead of each media's own ratio. Cover-crops the image, so it slightly offsets callout pins
+   *  — use only where a tidy uniform grid matters more than 1:1 pin mapping (the moodboard). */
+  gridUniformAspect?: string;
 };
 
 export function FocusedAnnotator({
@@ -194,6 +200,8 @@ export function FocusedAnnotator({
   mediaLabel,
   renderFocusedFooter,
   carouselLabel,
+  gridCardClass = 'w-[300px]',
+  gridUniformAspect,
 }: FocusedAnnotatorProps) {
   const [addMode, setAddMode] = useState(false);
   const [showAllNotes, setShowAllNotes] = useState(false);
@@ -335,13 +343,16 @@ export function FocusedAnnotator({
               return (
                 <div
                   key={v.key}
-                  className='relative w-[300px] max-w-[85vw] shrink-0 snap-start space-y-1'
+                  className={cn(
+                    'relative max-w-[85vw] shrink-0 snap-start space-y-1',
+                    gridCardClass,
+                  )}
                 >
                   <AnnotatedImage
                     src={url}
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
                     type={isVideo(url) ? 'video' : 'image'}
-                    aspectRatio={mediaAspect(v.full, fallbackAspect)}
+                    aspectRatio={gridUniformAspect ?? mediaAspect(v.full, fallbackAspect)}
                     callouts={calloutsFor(v.mediaId)}
                     editable
                     addMode={addMode}
@@ -397,10 +408,10 @@ export function FocusedAnnotator({
               saveSelectedMedia={handlePick}
               trigger={
                 <AddTile
-                  aspect={fallbackAspect}
+                  aspect={gridUniformAspect ?? fallbackAspect}
                   busy={uploading}
                   onFiles={handleFiles}
-                  className='w-[300px] max-w-[85vw] shrink-0 snap-start'
+                  className={cn('max-w-[85vw] shrink-0 snap-start', gridCardClass)}
                 />
               }
             />
