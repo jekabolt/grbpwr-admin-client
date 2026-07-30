@@ -16,11 +16,11 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
+import { EmptyCell } from 'ui/components/data-table';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import SelectComponent from 'ui/components/select';
-import { SkeletonRows } from 'ui/components/skeleton';
+import { SkeletonLine } from 'ui/components/skeleton';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { SectionHeader } from 'ui/components/section-header';
@@ -33,12 +33,12 @@ import {
 } from './utils/hooks';
 
 /**
- * empList v2 — the registry is a TABLE (DataTable), not a card grid. A person is one row:
- * name (+ anomaly chips) · employment window · cost/month · lifecycle status. Clicking a row opens
- * the edit form — the only per-row surface, so the table stays legible under many rows.
+ * empList v2 — the registry is a CARD GRID: each person is a white card (bg-bgColor) on the gray
+ * page ground. A card carries name (+ anomaly chips) · lifecycle status · employment window ·
+ * cost/month. Clicking a card opens the edit form — the only per-person surface.
  *
- * empFilters v3 — no search/status controls: the table is SEGMENTED BY ROLE. Each role is a
- * DataTable section-header row with a count; the empty-role bucket reads red as an anomaly.
+ * empFilters v3 — no search/status controls: the grid is SEGMENTED BY ROLE. Each role is a
+ * section header with a count; the empty-role bucket reads red as an anomaly.
  *
  * empKpi v1 / empAnomaly v1 — a 3-tile StatGrid (head-count · salary run-rate in base · left) and
  * the OPEX salary cross-reference are ported verbatim: default_monthly_cost is only a template
@@ -68,8 +68,8 @@ const monthFirst = (v?: string) => {
   return m ? `${m}-01` : '';
 };
 
-// value + currency CODE, per the design's money rule (never a symbol; the cell is right-aligned
-// tabular-nums by the DataTable grammar).
+// value + currency CODE, per the design's money rule (never a symbol; right-aligned in the card
+// footer).
 const money = (n: number, code?: string) => `${formatMoney(n)} ${(code || '').toUpperCase()}`.trim();
 
 // Today as YYYY-MM-DD from local wall-clock parts. YYYY-MM-DD compares lexicographically, so string
@@ -374,12 +374,15 @@ export function Employees() {
           )}
 
           {isLoading && !rows.length ? (
-            <DataTable>
-              <EmployeeTableHead />
-              <tbody>
-                <SkeletonRows rows={6} widths={[170, 130, 90, 60]} />
-              </tbody>
-            </DataTable>
+            <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3'>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className='flex flex-col gap-2 border border-borderColor bg-bgColor p-3'>
+                  <SkeletonLine width={150} />
+                  <SkeletonLine width={90} />
+                  <SkeletonLine width={120} />
+                </div>
+              ))}
+            </div>
           ) : isError ? (
             <div className='flex items-center gap-3'>
               <Text variant='error' size='micro' tracking='label' component='span'>
@@ -412,43 +415,37 @@ export function Employees() {
               )}
             </CalloutBox>
           ) : (
-            <DataTable>
-              <EmployeeTableHead />
-              {groups.map((g, gi) => (
-                <tbody key={g.key}>
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className={cn('align-bottom !border-b-borderColor pb-0.5', gi > 0 && 'pt-4')}
+            <div className='flex flex-col gap-4'>
+              {groups.map((g) => (
+                <div key={g.key} className='flex flex-col gap-2'>
+                  <span className='flex items-baseline gap-1.5'>
+                    <Text
+                      size='micro'
+                      variant={g.isNoRole ? 'error' : 'label'}
+                      tracking='group'
+                      component='span'
+                      className='font-bold uppercase'
                     >
-                      <span className='flex items-baseline gap-1.5'>
-                        <Text
-                          size='micro'
-                          variant={g.isNoRole ? 'error' : 'label'}
-                          tracking='group'
-                          component='span'
-                          className='font-bold uppercase'
-                        >
-                          {g.label}
-                        </Text>
-                        <Text size='micro' variant='label' component='span'>
-                          · {g.employees.length}
-                        </Text>
-                      </span>
-                    </td>
-                  </tr>
-                  {g.employees.map((r) => (
-                    <EmployeeRow
-                      key={r.id}
-                      row={r}
-                      base={base}
-                      salary={r.id ? salaryByEmployee.get(r.id) : undefined}
-                      onOpen={() => openEdit(r)}
-                    />
-                  ))}
-                </tbody>
+                      {g.label}
+                    </Text>
+                    <Text size='micro' variant='label' component='span'>
+                      · {g.employees.length}
+                    </Text>
+                  </span>
+                  <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3'>
+                    {g.employees.map((r) => (
+                      <EmployeeCard
+                        key={r.id}
+                        row={r}
+                        base={base}
+                        salary={r.id ? salaryByEmployee.get(r.id) : undefined}
+                        onOpen={() => openEdit(r)}
+                      />
+                    ))}
+                  </div>
+                </div>
               ))}
-            </DataTable>
+            </div>
           )}
         </>
       )}
@@ -521,21 +518,10 @@ export function Employees() {
   );
 }
 
-function EmployeeTableHead() {
-  return (
-    <thead>
-      <tr>
-        <th>name</th>
-        <th>employment</th>
-        <th>cost / mo</th>
-        <th>status</th>
-      </tr>
-    </thead>
-  );
-}
-
-// empList v2 row + empAnomaly v1 chips. Clicking anywhere opens the edit form.
-function EmployeeRow({
+// empList v2 card + empAnomaly v1 chips. Clicking anywhere opens the edit form. A white card
+// (bg-bgColor) on the gray page ground: name + status header, anomaly chips, note, then an
+// employment / cost footer split across a hairline.
+function EmployeeCard({
   row,
   base,
   salary,
@@ -562,39 +548,45 @@ function EmployeeRow({
   }
 
   return (
-    <tr
+    <div
       role='button'
       tabIndex={0}
       aria-label={`edit ${e?.fullName || 'employee'}`}
       onClick={onOpen}
-      onKeyDown={(ev: React.KeyboardEvent<HTMLTableRowElement>) => {
+      onKeyDown={(ev: React.KeyboardEvent<HTMLDivElement>) => {
         if (ev.key === 'Enter' || ev.key === ' ') {
           ev.preventDefault();
           onOpen();
         }
       }}
       className={cn(
+        'flex flex-col gap-2 border border-borderColor bg-bgColor p-3 text-left',
         'cursor-pointer transition-colors hover:bg-bgZebra',
         'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
         left && 'opacity-60',
       )}
     >
-      <td>
-        <span className='flex flex-col items-start gap-0.5 text-left'>
-          <Text component='span' className='font-medium'>
-            {e?.fullName || '—'}
+      <div className='flex items-start justify-between gap-2'>
+        <Text component='span' className='font-bold'>
+          {e?.fullName || '—'}
+        </Text>
+        {left ? <Pill tone='mut'>left</Pill> : <Pill tone='ink'>active</Pill>}
+      </div>
+
+      {chips.length > 0 && <ChipRow>{chips}</ChipRow>}
+
+      {e?.note && (
+        <Text size='micro' variant='label' component='span' className='block truncate'>
+          {e.note}
+        </Text>
+      )}
+
+      <div className='mt-auto flex items-end justify-between gap-3 border-t border-borderColor pt-2'>
+        <span className='flex flex-col gap-0.5'>
+          <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+            employment
           </Text>
-          {chips.length > 0 && <ChipRow>{chips}</ChipRow>}
-          {e?.note && (
-            <Text size='micro' variant='label' component='span' className='block max-w-[32ch] truncate'>
-              {e.note}
-            </Text>
-          )}
-        </span>
-      </td>
-      <td>
-        <span className='flex flex-col items-end gap-0.5'>
-          <Text component='span'>
+          <Text size='micro' component='span'>
             {!e?.employmentStart && !e?.employmentEnd ? (
               <EmptyCell />
             ) : (
@@ -605,39 +597,36 @@ function EmployeeRow({
             )}
           </Text>
           {tenure && (
-            <Text size='micro' variant='label' component='span' className='uppercase'>
+            <Text size='nano' variant='label' component='span' className='uppercase'>
               {tenure}
             </Text>
           )}
         </span>
-      </td>
-      <td>
-        {booked ? (
-          <span className='flex flex-col items-end gap-0.5'>
-            <Text component='span' className='font-medium'>
-              {money(salary?.bookedBase ?? 0, base)}
-            </Text>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              booked / mo
-            </Text>
-          </span>
-        ) : defaultCostStr ? (
-          <span className='flex flex-col items-end gap-0.5'>
-            <Text component='span' variant='label'>
-              {money(Number(defaultCostStr) || 0, e?.defaultCurrency || base)}
-            </Text>
-            <Text size='micro' variant='label' component='span' className='uppercase'>
-              default (hint)
-            </Text>
-          </span>
-        ) : (
-          <EmptyCell />
-        )}
-      </td>
-      <td>
-        {left ? <Pill tone='mut'>left</Pill> : <Pill tone='ink'>active</Pill>}
-      </td>
-    </tr>
+        <span className='flex flex-col items-end gap-0.5'>
+          {booked ? (
+            <>
+              <Text component='span' className='font-bold'>
+                {money(salary?.bookedBase ?? 0, base)}
+              </Text>
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                booked / mo
+              </Text>
+            </>
+          ) : defaultCostStr ? (
+            <>
+              <Text component='span' variant='label'>
+                {money(Number(defaultCostStr) || 0, e?.defaultCurrency || base)}
+              </Text>
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                default (hint)
+              </Text>
+            </>
+          ) : (
+            <EmptyCell />
+          )}
+        </span>
+      </div>
+    </div>
   );
 }
 

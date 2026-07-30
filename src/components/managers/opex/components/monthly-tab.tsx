@@ -16,10 +16,8 @@ import {
   currentMonth,
   isRecurringLine,
   isUncostedLine,
-  MonthBucket,
   money,
   monthLabel,
-  monthMini,
   opexCategoryLabel,
   shiftMonth,
   sumBase,
@@ -30,19 +28,18 @@ import { OpexWizard } from './opex-wizard';
 import { MonthSummary } from './summary';
 
 // opxLines v1 (keep) — the month's lines grouped into per-category cards, restyled onto tokens.
-// opxMonth v2 — a 12-month strip (mini bar per month) rides above the lines for quick jump.
 // opxUncosted v2 — incomplete lines surface as a warning CalloutBox with a one-click fix, not as
 //   red text buried on a row.
 // opxCopy v2 — "copy from previous month" opens a modal of last month's lines, each with a checkbox.
 // opxGate v2 — `canRead` masks every figure; the structure (months, categories, labels) stays.
 //
-// The month list, its per-month buckets and the selected month's lines all arrive from the page
-// (one ListOpexLines range query — there is no per-month aggregate RPC), so this component is pure
-// month-scoped content with no fetching of its own beyond the mutations it fires.
+// The month list and the selected month's lines all arrive from the page (one ListOpexLines range
+// query — there is no per-month aggregate RPC), so this component is pure month-scoped content with
+// no fetching of its own beyond the mutations it fires. Month navigation lives in the left rail and
+// the ‹ › toolbar buttons.
 export function MonthlyContent({
   month,
   onSelectMonth,
-  buckets,
   linesByMonth,
   base,
   canWrite,
@@ -53,7 +50,6 @@ export function MonthlyContent({
 }: {
   month: string;
   onSelectMonth: (m: string) => void;
-  buckets: MonthBucket[];
   linesByMonth: Map<string, OpexLine[]>;
   base: string;
   canWrite: boolean;
@@ -159,9 +155,6 @@ export function MonthlyContent({
           </>
         )}
       </Toolbar>
-
-      {/* opxMonth v2: 12-month strip */}
-      <MonthStrip buckets={buckets} month={month} onSelectMonth={onSelectMonth} reveal={canRead} />
 
       {isLoading && lines.length === 0 ? (
         <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-2.5'>
@@ -280,62 +273,6 @@ export function MonthlyContent({
   );
 }
 
-// opxMonth v2 — a horizontal timeline of the window's months as mini vertical bars scaled to the
-// biggest month, oldest → newest, the selected one emphasised. Totals are derived client-side
-// (no aggregate RPC). Masked for a non-costing viewer: the timeline shape stays, the bars flatten.
-function MonthStrip({
-  buckets,
-  month,
-  onSelectMonth,
-  reveal,
-}: {
-  buckets: MonthBucket[];
-  month: string;
-  onSelectMonth: (m: string) => void;
-  reveal: boolean;
-}) {
-  const max = Math.max(1, ...buckets.map((b) => b.total));
-  // buckets arrive most-recent first; render oldest → newest so time reads left to right.
-  const ordered = useMemo(() => buckets.slice().reverse(), [buckets]);
-
-  return (
-    <div className='flex items-end gap-1 overflow-x-auto border border-borderColor bg-bgColor p-1.5'>
-      {ordered.map((b) => {
-        const selected = b.key === month;
-        const pct = reveal && b.total > 0 ? Math.max(4, (b.total / max) * 100) : 0;
-        return (
-          <button
-            key={b.key}
-            type='button'
-            aria-pressed={selected}
-            aria-label={`${b.key} — ${b.count} line(s)`}
-            onClick={() => onSelectMonth(b.key)}
-            className={cn(
-              'flex min-w-[2.4rem] flex-1 flex-col items-center gap-1 border px-1 py-1',
-              selected
-                ? 'border-textColor bg-bgZebra'
-                : 'border-transparent hover:border-borderColor',
-            )}
-          >
-            <span className='flex h-8 w-3 items-end bg-trackBg' aria-hidden>
-              <span
-                className={cn('block w-full', b.uncosted > 0 ? 'bg-error/60' : 'bg-textColor')}
-                style={{ height: `${pct}%` }}
-              />
-            </span>
-            <Text
-              size='nano'
-              component='span'
-              className={cn('uppercase tabular-nums', selected ? 'font-bold text-textColor' : 'text-labelColor')}
-            >
-              {monthMini(b.key)}
-            </Text>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
 
 // opxLines v1 — one category as a bordered card: a zebra header (name · count · folded total) over
 // hairline-separated line rows.

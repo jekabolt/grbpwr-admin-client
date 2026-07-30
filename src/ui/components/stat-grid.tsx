@@ -18,8 +18,10 @@ export function StatGrid({
   className?: string;
 }) {
   return (
+    // bg-bgColor: the strip is a white card. Without a fill the bordered cells are transparent and
+    // the gray page ground shows through every KPI — data must read on white.
     <div
-      className={`grid border border-borderColor ${className ?? ''}`}
+      className={`grid border border-borderColor bg-bgColor ${className ?? ''}`}
       style={{ gridTemplateColumns: `repeat(auto-fit, minmax(${min}px, 1fr))` }}
     >
       {children}

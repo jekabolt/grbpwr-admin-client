@@ -16,7 +16,7 @@ export function BillingFieldsGroup() {
   );
 
   return (
-    <div className='flex flex-col gap-4'>
+    <div className='flex flex-col gap-4 border border-borderColor bg-bgColor p-3'>
       <InputField name='buyerVatId' label='VAT ID (B2B)' />
       <CheckboxField name='billingSameAsShipping' label='billing address same as shipping' />
       {!billingSameAsShipping && (

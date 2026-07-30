@@ -115,7 +115,7 @@ export function Tasks() {
 
   if (!canView) {
     return (
-      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-borderColor p-10 text-center'>
+      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-borderColor bg-bgColor p-10 text-center'>
         <Text variant='uppercase' size='large'>
           tasks
         </Text>

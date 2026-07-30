@@ -258,15 +258,17 @@ export function CustomOrderForm({
           {/* 4 — payment */}
           <section className='flex flex-col gap-3'>
             <SectionHeader title='4 · payment' question='how this order is settled' />
-            <div className='max-w-xs'>
-              <SelectField
-                name='paymentMethod'
-                label='payment method'
-                items={[
-                  { value: 'PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE', label: 'Bank invoice' },
-                  { value: 'PAYMENT_METHOD_NAME_ENUM_CASH', label: 'Cash' },
-                ]}
-              />
+            <div className='border border-borderColor bg-bgColor p-3'>
+              <div className='max-w-xs'>
+                <SelectField
+                  name='paymentMethod'
+                  label='payment method'
+                  items={[
+                    { value: 'PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE', label: 'Bank invoice' },
+                    { value: 'PAYMENT_METHOD_NAME_ENUM_CASH', label: 'Cash' },
+                  ]}
+                />
+              </div>
             </div>
           </section>
 

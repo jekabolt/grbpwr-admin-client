@@ -215,7 +215,7 @@ export function FulfillmentCardDetail() {
       {/* Pack-first body */}
       <div className='grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]'>
         {/* 1 — pick list */}
-        <section className='flex min-w-0 flex-col gap-3'>
+        <section className='flex min-w-0 flex-col gap-3 border border-borderColor bg-bgColor p-3'>
           <ColHead>pick list</ColHead>
           <OrderTable orderDetails={order} />
           <div className='flex flex-col gap-1'>
@@ -239,13 +239,13 @@ export function FulfillmentCardDetail() {
         </section>
 
         {/* 2 — packing overlay */}
-        <aside className='flex min-w-0 flex-col gap-3 border border-borderColor p-3 lg:h-fit'>
+        <aside className='flex min-w-0 flex-col gap-3 border border-borderColor bg-bgColor p-3 lg:h-fit'>
           <ColHead>packing</ColHead>
           <FulfillmentAnnotation annotation={annotation} canWrite={canWrite} />
         </aside>
 
         {/* 3 — shipping */}
-        <aside className='flex min-w-0 flex-col gap-4 border border-borderColor p-3 lg:h-fit'>
+        <aside className='flex min-w-0 flex-col gap-4 border border-borderColor bg-bgColor p-3 lg:h-fit'>
           <div className='flex flex-col gap-2'>
             <ColHead>ship to</ColHead>
             <AddressBlock address={order.shipping?.addressInsert} />

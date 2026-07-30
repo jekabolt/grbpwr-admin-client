@@ -44,28 +44,34 @@ export function MonthSummary({
       </StatGrid>
 
       {summary.byCategory.length > 0 && (
-        <div className='flex flex-col gap-0.5'>
+        <div className='flex flex-col gap-1.5'>
           <GroupLabel flush>by category</GroupLabel>
           {summary.byCategory.map((c) => {
             const share = summary.total > 0 ? (c.total / summary.total) * 100 : 0;
             return (
-              <BarRow
+              // Each category sits on its own white card (opxKpi card grammar) rather than
+              // as bare text on the page ground, so the breakdown reads as a stack of cards.
+              <div
                 key={c.category}
-                name={
-                  <>
-                    {opexCategoryLabel(c.category)}
-                    <span className='font-normal text-labelColor'>
-                      {' · '}
-                      {c.count}
-                      {c.uncosted > 0 ? ` · ${c.uncosted} uncosted` : ''}
-                    </span>
-                  </>
-                }
-                // reveal=false: a masked strip shows the ranking bones with no magnitude (pct 0).
-                pct={reveal ? share : 0}
-                value={money(c.total, base, reveal)}
-                tone={c.uncosted > 0 ? 'down' : 'ink'}
-              />
+                className='border border-borderColor bg-bgColor px-2.5 py-1.5'
+              >
+                <BarRow
+                  name={
+                    <>
+                      {opexCategoryLabel(c.category)}
+                      <span className='font-normal text-labelColor'>
+                        {' · '}
+                        {c.count}
+                        {c.uncosted > 0 ? ` · ${c.uncosted} uncosted` : ''}
+                      </span>
+                    </>
+                  }
+                  // reveal=false: a masked strip shows the ranking bones with no magnitude (pct 0).
+                  pct={reveal ? share : 0}
+                  value={money(c.total, base, reveal)}
+                  tone={c.uncosted > 0 ? 'down' : 'ink'}
+                />
+              </div>
             );
           })}
         </div>

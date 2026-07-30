@@ -143,7 +143,7 @@ export function OrderTable({
 
   return (
     <div className='w-full'>
-      <div className='overflow-x-auto w-full'>
+      <div className='overflow-x-auto w-full bg-bgColor'>
         <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max print:border-separate print:border-spacing-0 print:[border:1px_solid_currentColor]'>
           <thead className='bg-textInactiveColor h-10'>
             <tr className='border-b border-textInactiveColor'>

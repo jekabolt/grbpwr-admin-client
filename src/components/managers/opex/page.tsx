@@ -163,7 +163,6 @@ export function OpexPage() {
           <MonthlyContent
             month={month}
             onSelectMonth={selectMonth}
-            buckets={buckets}
             linesByMonth={linesByMonth}
             base={base}
             canWrite={canWriteCosting}

@@ -9,11 +9,13 @@ export function BoardSkeleton() {
     <div className='flex gap-4 overflow-hidden pb-4' aria-hidden aria-busy='true'>
       {STATUSES.map((status, i) => (
         <div key={status} className='flex w-[85vw] shrink-0 flex-col sm:w-72'>
-          <div className='mb-2 flex items-center justify-between border-b border-borderColor pb-1.5'>
+          <div className='flex items-center justify-between border-b border-borderColor bg-bgColor pb-1.5'>
             <SkeletonLine width={72} />
             <SkeletonLine width={16} />
           </div>
-          <SkeletonBlocks count={(i % 3) + 1} height={80} className='mt-2' />
+          <div className='mt-2 bg-bgZebra p-1'>
+            <SkeletonBlocks count={(i % 3) + 1} height={80} />
+          </div>
         </div>
       ))}
     </div>

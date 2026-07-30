@@ -25,7 +25,7 @@ export function TaskComments({ taskId }: { taskId: number }) {
   }
 
   return (
-    <div className='flex flex-col gap-3'>
+    <div className='flex flex-col gap-3 border border-borderColor bg-bgColor p-3'>
       <Text size='micro' variant='label' tracking='group' component='span' className='font-bold uppercase'>
         comments{comments.length ? ` · ${comments.length}` : ''}
       </Text>

@@ -219,7 +219,7 @@ export function TaskDetail() {
       <div className='grid grid-cols-1 gap-6 lg:grid-cols-[1fr_20rem]'>
         {/* Left — reading the task */}
         <div className='flex min-w-0 flex-col gap-6'>
-          <section className='flex flex-col gap-2'>
+          <section className='flex flex-col gap-2 border border-borderColor bg-bgColor p-3'>
             <GroupLabel>description</GroupLabel>
             {t.description ? (
               <Text size='micro' component='span' className='whitespace-pre-wrap break-words'>
@@ -235,7 +235,7 @@ export function TaskDetail() {
           <TaskChecklist taskId={task.id} items={task.checklist} canWrite={canWrite} />
 
           {links.length > 0 && (
-            <section className='flex flex-col gap-2'>
+            <section className='flex flex-col gap-2 border border-borderColor bg-bgColor p-3'>
               <GroupLabel>links</GroupLabel>
               <div className='flex flex-wrap gap-2'>
                 {links.map((l) => (
@@ -246,7 +246,7 @@ export function TaskDetail() {
           )}
 
           {task.media.length > 0 && (
-            <section className='flex flex-col gap-2'>
+            <section className='flex flex-col gap-2 border border-borderColor bg-bgColor p-3'>
               <GroupLabel>attachments · {task.media.length}</GroupLabel>
               <MediaGallery
                 items={task.media.map((m) => ({
@@ -259,99 +259,99 @@ export function TaskDetail() {
         </div>
 
         {/* Right — facts + activity */}
-        <aside className='flex flex-col gap-5 lg:border-l lg:border-borderColor lg:pl-5'>
-          <div className='flex flex-col gap-3'>
-            {/* Placement — inline move without opening the editor */}
-            <label className='flex flex-col gap-1'>
-              <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-                board
-              </Text>
-              <SelectComponent
-                name='detail-board'
-                items={boardOptions}
-                value={task.board}
-                onValueChange={(v: string) =>
-                  canWrite &&
-                  v !== task.board &&
-                  move.mutate({ id: task.id, board: v as TaskBoard, status: task.status, position: 0 })
-                }
-                readOnly={!canWrite}
-                fullWidth
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-                column
-              </Text>
-              <SelectComponent
-                name='detail-status'
-                items={statusOptions}
-                value={task.status}
-                onValueChange={(v: string) =>
-                  canWrite &&
-                  v !== task.status &&
-                  move.mutate({ id: task.id, board: task.board, status: v as TaskStatus, position: 0 })
-                }
-                readOnly={!canWrite}
-                fullWidth
-              />
-            </label>
-          </div>
-
-          <div className='flex flex-col divide-y divide-borderColor border-t border-borderColor'>
-            <Row label='priority'>
-              {t.priority !== 'TASK_PRIORITY_UNKNOWN' ? (
-                <PriorityTag priority={t.priority} />
-              ) : (
-                <Text size='micro' variant='label' component='span'>
-                  none
+        <aside className='flex flex-col gap-4'>
+          <div className='flex flex-col gap-3 border border-borderColor bg-bgColor p-3'>
+            <div className='flex flex-col gap-3'>
+              {/* Placement — inline move without opening the editor */}
+              <label className='flex flex-col gap-1'>
+                <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+                  board
                 </Text>
-              )}
-            </Row>
-            <Row label='assignee'>
-              <span className='flex items-center justify-end gap-1.5'>
-                <Avatar name={t.assignee} />
-                <Text size='micro' component='span' className={cn(!t.assignee && 'text-labelColor', isMine && 'font-bold')}>
-                  {t.assignee || 'unassigned'}
+                <SelectComponent
+                  name='detail-board'
+                  items={boardOptions}
+                  value={task.board}
+                  onValueChange={(v: string) =>
+                    canWrite &&
+                    v !== task.board &&
+                    move.mutate({ id: task.id, board: v as TaskBoard, status: task.status, position: 0 })
+                  }
+                  readOnly={!canWrite}
+                  fullWidth
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
+                  column
                 </Text>
-              </span>
-            </Row>
-            <Row label='planned start'>
-              <Text size='micro' component='span' className={cn(!t.startDate && 'text-labelColor')}>
-                {t.startDate ? format(new Date(t.startDate), 'PP') : '—'}
-              </Text>
-            </Row>
-            <Row label='due'>
-              <Text size='micro' component='span' className={cn(due.state === 'overdue' && 'text-error')}>
-                {t.dueDate ? format(new Date(t.dueDate), 'PP') : '—'}
-              </Text>
-            </Row>
-            <Row label='started'>
-              <Text size='micro' variant='label' component='span'>
-                {task.startedAt ? format(new Date(task.startedAt), 'PP') : 'not started'}
-              </Text>
-            </Row>
-            <Row label='created'>
-              <Text size='micro' variant='label' component='span'>
-                {task.createdBy ? `${task.createdBy} · ` : ''}
-                {task.createdAt ? format(new Date(task.createdAt), 'PP') : '—'}
-              </Text>
-            </Row>
-          </div>
-
-          {t.labels.length > 0 && (
-            <div className='flex flex-wrap gap-1'>
-              {t.labels.map((l) => (
-                <Pill key={l} tone='mut'>
-                  {l}
-                </Pill>
-              ))}
+                <SelectComponent
+                  name='detail-status'
+                  items={statusOptions}
+                  value={task.status}
+                  onValueChange={(v: string) =>
+                    canWrite &&
+                    v !== task.status &&
+                    move.mutate({ id: task.id, board: task.board, status: v as TaskStatus, position: 0 })
+                  }
+                  readOnly={!canWrite}
+                  fullWidth
+                />
+              </label>
             </div>
-          )}
 
-          <div className='border-t border-borderColor pt-4'>
-            <TaskComments taskId={task.id} />
+            <div className='flex flex-col divide-y divide-borderColor border-t border-borderColor'>
+              <Row label='priority'>
+                {t.priority !== 'TASK_PRIORITY_UNKNOWN' ? (
+                  <PriorityTag priority={t.priority} />
+                ) : (
+                  <Text size='micro' variant='label' component='span'>
+                    none
+                  </Text>
+                )}
+              </Row>
+              <Row label='assignee'>
+                <span className='flex items-center justify-end gap-1.5'>
+                  <Avatar name={t.assignee} />
+                  <Text size='micro' component='span' className={cn(!t.assignee && 'text-labelColor', isMine && 'font-bold')}>
+                    {t.assignee || 'unassigned'}
+                  </Text>
+                </span>
+              </Row>
+              <Row label='planned start'>
+                <Text size='micro' component='span' className={cn(!t.startDate && 'text-labelColor')}>
+                  {t.startDate ? format(new Date(t.startDate), 'PP') : '—'}
+                </Text>
+              </Row>
+              <Row label='due'>
+                <Text size='micro' component='span' className={cn(due.state === 'overdue' && 'text-error')}>
+                  {t.dueDate ? format(new Date(t.dueDate), 'PP') : '—'}
+                </Text>
+              </Row>
+              <Row label='started'>
+                <Text size='micro' variant='label' component='span'>
+                  {task.startedAt ? format(new Date(task.startedAt), 'PP') : 'not started'}
+                </Text>
+              </Row>
+              <Row label='created'>
+                <Text size='micro' variant='label' component='span'>
+                  {task.createdBy ? `${task.createdBy} · ` : ''}
+                  {task.createdAt ? format(new Date(task.createdAt), 'PP') : '—'}
+                </Text>
+              </Row>
+            </div>
+
+            {t.labels.length > 0 && (
+              <div className='flex flex-wrap gap-1'>
+                {t.labels.map((l) => (
+                  <Pill key={l} tone='mut'>
+                    {l}
+                  </Pill>
+                ))}
+              </div>
+            )}
           </div>
+
+          <TaskComments taskId={task.id} />
         </aside>
       </div>
 

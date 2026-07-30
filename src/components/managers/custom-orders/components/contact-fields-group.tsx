@@ -5,7 +5,7 @@ import InputField from 'ui/form/fields/input-field';
 // stage). Name + phone moved here off the old shipping step so "who" and "where" are separate.
 export function ContactFieldsGroup() {
   return (
-    <div className='flex flex-col gap-4'>
+    <div className='flex flex-col gap-4 border border-borderColor bg-bgColor p-3'>
       <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
         <InputField name='buyer.firstName' label='first name' />
         <InputField name='buyer.lastName' label='last name' />
