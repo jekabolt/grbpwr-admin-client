@@ -147,8 +147,16 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save is what reports the outcome now — it needs the rejection to name this panel in a
   // partial-failure banner and keep everything after it staged (19.3).
-  async function commitFacts() {
+  //
+  // The mask names ONLY the fields that actually moved, and the patch carries only those. That is not
+  // tidiness: UpdateStyle validates careInstructions STRICTLY whenever the mask names it (every token
+  // must be a care-dictionary code), and a card whose style still holds pre-ISO free text — which the
+  // backend explicitly keeps — would then reject a fit-only edit with unknown_care_code on a field the
+  // operator never touched. Which fields moved is decided at STAGING time, not here: the card body
+  // commits first and its form.reset() clears the dirty flags before this runs.
+  async function commitFacts(dirty: { fit: boolean; care: boolean }) {
     if (!styleId) return;
+    if (!dirty.fit && !dirty.care) return;
     setSaving(true);
     try {
       // The chart read is the cheapest way to read the fresh shared lock (it echoes
@@ -156,14 +164,24 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
       // commits first and bumps that version, so anything read at mount is already stale.
       const cur = await adminService.GetStyleSizeChart({ styleId });
       const expectedLockVersion = cur.chart?.lockVersion ?? 0;
+      type StylePatch = NonNullable<Parameters<typeof adminService.UpdateStyle>[0]['patch']>;
+      const patch: Partial<StylePatch> = {};
+      const mask: string[] = [];
+      if (dirty.fit) {
+        patch.fit = getValues('fit') || '';
+        mask.push('fit');
+      }
+      if (dirty.care) {
+        patch.careInstructions = getValues('careInstructions') || '';
+        mask.push('careInstructions');
+      }
       await adminService.UpdateStyle({
         styleId,
-        patch: {
-          fit: getValues('fit') || '',
-          careInstructions: getValues('careInstructions') || '',
-        } as Parameters<typeof adminService.UpdateStyle>[0]['patch'],
+        // The mask is what decides which of these the server reads; the rest of StylePatch is
+        // deliberately absent rather than echoed back.
+        patch: patch as StylePatch,
         expectedLockVersion,
-        updateMask: 'fit,careInstructions',
+        updateMask: mask.join(','),
       });
     } finally {
       setSaving(false);
@@ -179,11 +197,15 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
       staging.unstage(STAGING_KEY);
       return;
     }
+    // The dirty set is FROZEN into the commit here, from the same render that computed the label —
+    // so the two can never disagree, and the card body's form.reset() (which runs between staging and
+    // committing whenever the body was dirty too) cannot widen the mask back onto untouched care.
+    const dirty = { fit: !!dirtyFields.fit, care: !!dirtyFields.careInstructions };
     staging.stage({
       key: STAGING_KEY,
       label: `${changed.join('/')} — ${changed.length} ${changed.length === 1 ? 'field' : 'fields'}`,
       order: COMMIT_ORDER.styleFacts,
-      commit: commitFacts,
+      commit: () => commitFacts(dirty),
       // These two values ARE form fields, so the card body's own reset normally clears them first —
       // but only when the body was dirty. Re-baselining them here keeps the header count honest on
       // the panel's own terms instead of borrowing another panel's cleanup.

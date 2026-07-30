@@ -13,6 +13,7 @@ import {
 import {
   composeArticleFromMaterial,
   materialSpec,
+  parseCompositionCode,
 } from 'components/managers/materials/components/material-code';
 import {
   MaterialThumb,
@@ -22,6 +23,7 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardLabDipStatusOptions } from 'constants/filter';
+import { composition as compositionDict } from 'constants/garment-composition';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -91,7 +93,9 @@ type BomLine = {
   unitPrice?: string; // decimal string
   currency?: string;
   wastagePercent?: string; // decimal string
-  composition?: string; // legacy free-text (never structured, M1)
+  // structured { part: [{ code, percent }] } JSON on catalog-linked / picker-authored lines, free
+  // text only on legacy rows — read it through parseCompositionCode, never with a bare regex.
+  composition?: string;
   materialId?: number;
   // the linked catalog material (resolved from ListMaterials by materialId) — carries the photo,
   // article code, class and spec the recipe card renders. undefined for a legacy/unlinked line.
@@ -465,11 +469,25 @@ function runTotalPreview(
   return Number.isFinite(total) ? String(Number(total.toFixed(2))) : '';
 }
 
+// A composition code as the operator reads it. The code slot holds different things depending on who
+// wrote the line: the CompositionPicker stores garment-composition CODES ('COT'), a catalog-linked
+// material stores its resolved fibre NAME ('хлопок органический'). Resolve what the table knows,
+// print the rest as-is — the same `codeToName ?? code` rule the care-label generator uses.
+const FIBRE_NAME_BY_CODE: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  for (const cat of Object.values(compositionDict.garment_composition)) {
+    for (const [name, code] of Object.entries(cat as Record<string, string>)) m[code] = name;
+  }
+  return m;
+})();
+
 // #29 — best-effort DERIVED fibre composition for a colourway, computed from its recipe's BOM lines.
-// The BOM line `composition` is legacy FREE TEXT (never structured, M1), so this parses "NN% fibre"
-// tokens and weights each line's fibres by that usage's per-garment consumption (fallback: equal
-// weight), then normalises to 100%. Approximate by construction — flagged in the UI. A precise
-// weighted composition needs a structured per-material composition on the backend (see report).
+// A line's `composition` is the structured { part: [{ code, percent }] } JSON on every catalog-linked
+// or picker-authored line, and free text only on genuinely legacy rows — parseCompositionCode reads
+// both (a regex hunting for an 'NN%' token finds NOTHING in the JSON, which is what used to leave this
+// bar blank, or claiming "no readable composition", on cards whose blends were fully entered).
+// Each line's fibres are weighted by that usage's per-garment consumption (fallback: equal weight),
+// then normalised to 100%. Approximate by construction — flagged in the UI.
 function deriveComposition(
   usages: UsageDraft[],
   bomItems: BomLine[],
@@ -479,18 +497,16 @@ function deriveComposition(
   for (const u of usages) {
     if (!u.bomLineKey) continue;
     const line = bomItems.find((b) => b.lineKey === u.bomLineKey);
-    const comp = line?.composition?.trim();
     const weight = Number(u.consumption) > 0 ? Number(u.consumption) : 1;
-    const tokens = comp ? [...comp.matchAll(/(\d+(?:\.\d+)?)\s*%\s*([\p{L}][\p{L} .\-/]*)/gu)] : [];
-    if (tokens.length === 0) {
+    const shares = parseCompositionCode(line?.composition);
+    if (shares.length === 0) {
       skipped += 1;
       continue;
     }
-    for (const t of tokens) {
-      const pct = Number(t[1]);
-      const name = t[2].trim().toLowerCase();
-      if (!name || !Number.isFinite(pct)) continue;
-      totals.set(name, (totals.get(name) ?? 0) + (pct / 100) * weight);
+    for (const s of shares) {
+      const name = (FIBRE_NAME_BY_CODE[s.code] ?? s.code).trim().toLowerCase();
+      if (!name || !Number.isFinite(s.percent) || s.percent <= 0) continue;
+      totals.set(name, (totals.get(name) ?? 0) + (s.percent / 100) * weight);
     }
   }
   const sum = [...totals.values()].reduce((a, b) => a + b, 0);
@@ -1478,7 +1494,7 @@ function LabDipTimeline({
   );
 }
 
-// #29 derived composition — approximate, parsed from BOM free-text, weighted by consumption.
+// #29 derived composition — approximate, read off each BOM line's composition, weighted by consumption.
 function CompositionBar({ fibers, skipped }: ReturnType<typeof deriveComposition>) {
   if (fibers.length === 0) return null;
   return (
@@ -1980,7 +1996,7 @@ export function ColorwayRecipes({
     return m;
   }, [materialsData?.materials]);
   // Enrich BOM lines with the fields the recipe editor now needs: price/wastage/unit for the run-cost
-  // preview (per-size grading), the legacy composition string for the derived-composition summary,
+  // preview (per-size grading), the composition cell for the derived-composition summary,
   // and the linked catalog material so each usage renders as the square article card.
   const bomItems = useMemo<BomLine[]>(
     () =>

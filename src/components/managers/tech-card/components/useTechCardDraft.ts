@@ -125,8 +125,10 @@ export function useTechCardDraft(
   const restore = () => {
     if (!pending) return;
     form.reset(pending.data, { keepDefaultValues: true });
-    // Seed the sub-panel snapshots BEFORE clearing `pending`: each panel claims its own on mount
-    // (takeSnapshot), so a panel already mounted picks it up on its next render.
+    // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging
+    // identity, which is what makes an ALREADY-MOUNTED panel re-run its claim effect and adopt its
+    // snapshot — every tab body is mounted from page load, so without that bump the claim had
+    // already run against an empty map and the restore dropped every staged sub-panel edit.
     staging?.hydrate(pending.staging ?? null);
     setPending(null);
   };

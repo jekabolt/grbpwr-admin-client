@@ -11,6 +11,7 @@ import {
   PackagingRecipeLine,
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
+import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
 import { formatCompositionEntries } from './composition-entries';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
@@ -787,12 +788,15 @@ export function TechPackDocument({
                           <div className='flex flex-wrap items-center gap-1'>
                             {careCodes.map((code, k) => {
                               const m = careVocabulary.byCode[code];
-                              return m?.img ? (
+                              // Local artwork fallback: the printed tech pack must not degrade
+                              // to bare codes while the backend dictionary is empty (pre-0217).
+                              const img = m?.img ?? CARE_ARTWORK[code];
+                              return img ? (
                                 <img
                                   key={k}
-                                  src={m.img}
-                                  alt={m.name}
-                                  title={m.name}
+                                  src={img}
+                                  alt={m?.name ?? code}
+                                  title={m?.name ?? code}
                                   className='h-5 w-5'
                                 />
                               ) : (

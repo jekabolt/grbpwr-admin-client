@@ -86,6 +86,27 @@ const rowFromCard = (card: common_TechCardListItem): Row => ({
   componentAuxSubtype: card.auxSubtype ?? 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
 });
 
+// The bill as one comparable string, order- and formatting-insensitive: what makes "differs from the
+// server" a FACT instead of "a control was touched". UpsertStyleAssembly is a full replace, so a bill
+// that matches the server must not ride the card's Save — picking a component and removing it again
+// used to leave the panel staged as «cleared», and any later Save then deleted the real bill.
+const assemblySignature = (rows: Row[]): string =>
+  rows
+    .map((r) => {
+      const n = parseDecimalNumber(r.qty);
+      // JSON per row, so a ':' or '|' typed into a note cannot forge a match.
+      return JSON.stringify([
+        r.componentTechCardId,
+        r.sizeId || 0,
+        Number.isFinite(n) ? n : null,
+        r.printNote.trim(),
+        r.positionNote.trim(),
+        r.active,
+      ]);
+    })
+    .sort()
+    .join('|');
+
 // What would make this bill unsavable, in the operator's words — or null when it is fine. Computed
 // from the rows rather than checked inside the save, because the panel no longer owns a button that
 // could report it on click: it is shown next to the staged pill AND thrown from the commit, so the
@@ -354,6 +375,13 @@ export function AssemblyField({
     setRows((data?.items ?? []).map(rowFrom));
   }, [data, dirty]);
 
+  // Has the server's bill actually been READ? Until it has, `rows` being empty means "unknown", not
+  // "empty" — and since the load effect steps aside as soon as the panel is dirty, a component picked
+  // while the bill was still in flight (or after it failed) would leave the server's lines out of
+  // `rows` for good and the full-replace commit would delete every line the operator never saw. So:
+  // no picking and no staging before the bill is in hand.
+  const loaded = data !== undefined;
+
   const patch = (i: number, p: Partial<Row>) => {
     setDirty(true);
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
@@ -362,6 +390,7 @@ export function AssemblyField({
   // size — the same (component, size 0) key newRow() creates, so re-picking a card the bill already
   // carries at all-sizes is a no-op rather than a duplicate the commit would reject.
   const addCards = (cards: common_TechCardListItem[]) => {
+    if (!loaded) return;
     setDirty(true);
     setRows((prev) => {
       const existing = new Set(
@@ -392,12 +421,23 @@ export function AssemblyField({
   );
 
   const problem = assemblyProblem(rows);
+  // Staged = the bill is in hand, a control was touched, AND the result differs from the server's. An
+  // operator who deliberately removed every line still stages — that is a real change to a bill that
+  // HAD lines (label «cleared»); an empty bill that was already empty is not.
+  const serverSignature = useMemo(
+    () => assemblySignature((data?.items ?? []).map(rowFrom)),
+    [data],
+  );
+  const changed = loaded && dirty && assemblySignature(rows) !== serverSignature;
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save is what reports the outcome now — it needs the rejection to name this panel in a
   // partial-failure banner and keep everything after it staged (19.3). A bill that would be rejected
   // fails the same way, before the request goes out.
   const commitAssembly = async () => {
+    // Belt and braces with the staging gate: a full replace built from rows that never saw the
+    // server's bill deletes lines nobody looked at.
+    if (!loaded) throw new Error('The assembly bill has not loaded yet — retry the load first');
     if (problem) throw new Error(problem);
     const items: StyleAssemblyItem[] = rows.map((r) => ({
       componentTechCardId: r.componentTechCardId,
@@ -417,7 +457,7 @@ export function AssemblyField({
   // shows the "save this card first" prompt instead).
   useEffect(() => {
     if (!staging || !styleId || !canEdit) return;
-    if (!dirty) {
+    if (!changed) {
       staging.unstage(STAGING_KEY);
       return;
     }
@@ -438,7 +478,7 @@ export function AssemblyField({
     // commitAssembly is redefined every render by design (it reads current rows); depending on it
     // here would restage twice per keystroke for no gain, so the state it reads is the dep list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, styleId, canEdit, dirty, rows]);
+  }, [staging, styleId, canEdit, changed, rows]);
 
   if (!styleId) {
     return (
@@ -456,7 +496,15 @@ export function AssemblyField({
         </Text>
         <ToolbarSpacer />
         {canEdit && (
-          <Button type='button' variant='main' size='sm' onClick={() => setPickerOpen(true)}>
+          <Button
+            type='button'
+            variant='main'
+            size='sm'
+            // Picking before the bill is read is how the full replace deletes unseen lines.
+            disabled={!loaded}
+            title={loaded ? undefined : 'wait for the assembly bill to load'}
+            onClick={() => setPickerOpen(true)}
+          >
             + pick items
           </Button>
         )}
@@ -497,7 +545,7 @@ export function AssemblyField({
         </div>
       )}
 
-      {canEdit && dirty && (
+      {canEdit && changed && (
         <div className='flex flex-wrap items-center gap-2'>
           <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged for save'}</Pill>
           {/* Named here as well as thrown from the commit: the save button that used to report it

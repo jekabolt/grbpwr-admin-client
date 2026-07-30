@@ -63,8 +63,8 @@ export function materialSpec(m: common_Material): string {
 }
 
 // One fibre share of a material's blend, normalised off the structured entries the material modal
-// writes (#37): a resolved dictionary display name and a numeric percent.
-type MaterialFibre = { name: string; percent: number };
+// writes (#37): a resolved dictionary display name, the dictionary code, and a numeric percent.
+type MaterialFibre = { name: string; code: string; percent: number };
 
 function materialFibres(m: common_Material): MaterialFibre[] {
   return (m.compositionEntries ?? [])
@@ -72,6 +72,9 @@ function materialFibres(m: common_Material): MaterialFibre[] {
       // `name` is the fibres-dictionary label resolved server-side; fall back to the raw code so an
       // unresolved entry still reads as something rather than vanishing.
       name: (e.name ?? '').trim() || (e.fiberCode ?? '').trim(),
+      // …and the other way round for the code: it is the compact form, used when the names would
+      // overflow the BOM composition column (see materialCompositionCode).
+      code: (e.fiberCode ?? '').trim() || (e.name ?? '').trim(),
       percent: Number(decimalToInput(e.percent)) || 0,
     }))
     .filter((f) => f.name && f.percent > 0);
@@ -100,13 +103,100 @@ export function materialCompositionText(m: common_Material): string {
 // different code space than care-label's garment-composition table, so encoding the resolved name
 // makes the generator print the authoritative fibre name (its `codeToName[code] ?? code` falls
 // through to it) instead of an unresolved code. Legacy plain-text `composition` (older materials)
-// passes through untouched — parseComposition reads that shape too. '' when the material has neither.
+// passes through in its own shape — parseComposition reads that too. '' when the material has neither.
+//
+// LENGTH IS A CONTRACT, not a detail: the backend validates tech_card_bom_item.composition at 255
+// bytes, so a 6-fibre blend with long localized names would make the whole card save fail with a
+// field violation on a BOM line the operator never typed — merely LINKING that material broke the
+// card. So the encoding degrades instead: display names → compact dictionary codes → the dominant
+// fibres that still fit. Every step stays the same JSON shape, because that is the shape the care-label
+// generator and the composition picker read; the readable free-text form is NOT a fallback here (the
+// generator's parser scores it as zero-percent and would silently drop the section).
+const MAX_BOM_COMPOSITION = 255;
+// Measured in BYTES, because the validator that rejects it is `len(s) > 255` on the Go side — a
+// Cyrillic fibre name costs two bytes per character there and one unit here.
+const byteLength = (s: string): number => new TextEncoder().encode(s).length;
+
+// Free text cut to fit the column, at a clause boundary so what is left still reads — and still
+// parses — as a composition. The material's own composition column holds more than the BOM cell
+// accepts (255 BYTES there, characters here), and an over-long value fails the whole card save.
+const fitFreeText = (text: string): string => {
+  if (byteLength(text) <= MAX_BOM_COMPOSITION) return text;
+  let out = '';
+  for (const clause of text.split(',')) {
+    const next = out ? `${out},${clause}` : clause;
+    if (byteLength(next) > MAX_BOM_COMPOSITION) break;
+    out = next;
+  }
+  // One clause already over the limit: cut it down character by character.
+  let cut = out || text;
+  while (cut.length > 0 && byteLength(cut) > MAX_BOM_COMPOSITION) cut = cut.slice(0, -1);
+  return cut.trim();
+};
+
 export function materialCompositionCode(m: common_Material): string {
   const legacy = m.composition?.trim();
-  if (legacy) return legacy;
-  const fibres = materialFibres(m);
+  if (legacy) return fitFreeText(legacy);
+  // Dominant fibre first, so a truncation drops the least significant shares.
+  const fibres = materialFibres(m)
+    .slice()
+    .sort((a, b) => b.percent - a.percent);
   if (!fibres.length) return '';
-  return JSON.stringify({ fibre: fibres.map((f) => ({ code: f.name, percent: f.percent })) });
+  const encode = (list: MaterialFibre[], key: 'name' | 'code') =>
+    JSON.stringify({ fibre: list.map((f) => ({ code: f[key], percent: f.percent })) });
+
+  const byName = encode(fibres, 'name');
+  if (byteLength(byName) <= MAX_BOM_COMPOSITION) return byName;
+  const byCode = encode(fibres, 'code');
+  if (byteLength(byCode) <= MAX_BOM_COMPOSITION) return byCode;
+  for (let n = fibres.length - 1; n >= 1; n -= 1) {
+    const trimmed = encode(fibres.slice(0, n), 'code');
+    if (byteLength(trimmed) <= MAX_BOM_COMPOSITION) return trimmed;
+  }
+  return '';
+}
+
+/** One fibre share read back OUT of a BOM composition cell. */
+export type CompositionShare = {
+  /** Whatever the writer put in the code slot: a dictionary code, or a resolved fibre NAME. */
+  code: string;
+  percent: number;
+};
+
+// The inverse of materialCompositionCode / the CompositionPicker: read a BOM line's composition cell
+// back into fibre shares, in whichever shape it is stored —
+//   • the structured JSON both writers produce: { <part>: [{ code, percent }] }
+//   • genuine free text: "60% Cotton, 40% Polyester"
+// '' or unparseable → []. Consumers that show the blend (the colourway composition bar) must go
+// through this: the same field is JSON on every catalog-linked line, and a regex looking for an
+// 'NN%' token finds nothing in it.
+export function parseCompositionCode(value?: string): CompositionShare[] {
+  const v = value?.trim();
+  if (!v) return [];
+  if (v.startsWith('{') || v.startsWith('[')) {
+    try {
+      const struct = JSON.parse(v) as unknown;
+      if (struct && typeof struct === 'object') {
+        // Shape-walk rather than key-match: the part key is 'body' from the picker, 'fibre' from a
+        // material link, and any garment part from the modal. Mirrors utils/care-label.ts.
+        const items: CompositionShare[] = [];
+        for (const part of Object.values(struct as Record<string, unknown>)) {
+          if (!Array.isArray(part)) continue;
+          for (const it of part) {
+            const code = String((it as { code?: unknown })?.code ?? '').trim();
+            const percent = Number((it as { percent?: unknown })?.percent) || 0;
+            if (code) items.push({ code, percent });
+          }
+        }
+        if (items.length) return items;
+      }
+    } catch {
+      /* not JSON after all — fall through to the free-text form */
+    }
+  }
+  return [...v.matchAll(/(\d+(?:\.\d+)?)\s*%\s*([\p{L}][\p{L} .\-/]*)/gu)]
+    .map((t) => ({ code: t[2].trim(), percent: Number(t[1]) }))
+    .filter((s) => s.code && Number.isFinite(s.percent));
 }
 
 const CLASS_PREFIX: Record<string, string> = {

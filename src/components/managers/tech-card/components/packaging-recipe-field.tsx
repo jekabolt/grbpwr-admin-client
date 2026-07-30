@@ -50,6 +50,22 @@ const newRow = (): RecipeRow => ({
   active: true,
 });
 
+// The rows as one comparable string, order- and formatting-insensitive: what makes "differs from the
+// server" a FACT instead of "a control was touched". UpsertPackagingRecipe is a full replace, so a
+// recipe that matches the server must not ride the card's Save — adding a row and removing it again
+// used to leave the panel staged as «cleared», and any later Save then deleted the real recipe.
+const normQty = (v: string): string => {
+  const n = parseDecimalNumber(v);
+  return Number.isFinite(n) ? String(n) : '';
+};
+const recipeSignature = (rows: RecipeRow[]): string =>
+  rows
+    .map((r) =>
+      [r.materialId, normQty(r.qtyPerOrder), normQty(r.qtyPerItem), r.active ? 1 : 0].join(':'),
+    )
+    .sort()
+    .join('|');
+
 // What would make this recipe unsavable, in the operator's words — or null when it is fine. Shown
 // next to the staged pill AND thrown from the commit, so the header's partial-failure banner names
 // the same problem.
@@ -184,11 +200,19 @@ export function PackagingRecipeField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data, dirty, techCardId]);
 
+  // Has the server's list actually been READ? Until it has, `rows` being empty means "unknown", not
+  // "empty" — and since the load effect steps aside as soon as the panel is dirty, an edit made while
+  // the list was still in flight (or after it failed) would leave the server's lines out of `rows`
+  // for good and the full-replace commit would delete every line the operator never saw. So: no
+  // editing and no staging before the list is in hand.
+  const loaded = data !== undefined;
+
   const patch = (i: number, p: Partial<RecipeRow>) => {
     setDirty(true);
     setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, ...p } : r)));
   };
   const addRow = () => {
+    if (!loaded) return;
     setDirty(true);
     setRows((prev) => [...prev, newRow()]);
   };
@@ -198,12 +222,20 @@ export function PackagingRecipeField({
   };
 
   const problem = recipeProblem(rows);
+  // Staged = the list is in hand, a control was touched, AND the result differs from the server's.
+  // An operator who deliberately removed every row still stages — that is a real change to a recipe
+  // that HAD lines (label «cleared»); an empty list that was already empty is not.
+  const serverSignature = useMemo(() => recipeSignature(styleLines.map(rowFrom)), [styleLines]);
+  const changed = loaded && dirty && recipeSignature(rows) !== serverSignature;
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
   // one save reports the outcome now — it needs the rejection to name this panel in a partial-failure
   // banner and keep everything after it staged (19.3).
   const commitRecipe = async () => {
     if (!techCardId) return;
+    // Belt and braces with the staging gate: a full replace built from rows that never saw the
+    // server's list deletes lines nobody looked at.
+    if (!loaded) throw new Error('The packaging recipe has not loaded yet — retry the load first');
     if (problem) throw new Error(problem);
     const items: PackagingRecipeItem[] = rows.map((r) => ({
       materialId: r.materialId,
@@ -220,7 +252,7 @@ export function PackagingRecipeField({
   // this render's rows; unstaged the moment the recipe is pristine again.
   useEffect(() => {
     if (!staging || !techCardId || !canEdit) return;
-    if (!dirty) {
+    if (!changed) {
       staging.unstage(STAGING_KEY);
       return;
     }
@@ -237,7 +269,7 @@ export function PackagingRecipeField({
     // commitRecipe is redefined every render by design (it reads current rows); depending on it here
     // would restage twice per keystroke for no gain, so the state it reads is the dep list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, techCardId, canEdit, dirty, rows]);
+  }, [staging, techCardId, canEdit, changed, rows]);
 
   return (
     <div className='flex flex-col gap-2'>
@@ -252,6 +284,9 @@ export function PackagingRecipeField({
             variant='secondary'
             size='sm'
             className='ml-auto'
+            // Adding before the list is read is how the full replace deletes unseen lines.
+            disabled={!loaded}
+            title={loaded ? undefined : 'wait for the recipe to load'}
             onClick={addRow}
           >
             ＋ material
@@ -292,7 +327,7 @@ export function PackagingRecipeField({
         </div>
       )}
 
-      {canEdit && dirty && (
+      {canEdit && changed && (
         <div className='flex flex-wrap items-center gap-2'>
           <Pill tone='attention'>{upsert.isPending ? 'saving…' : 'staged for save'}</Pill>
           {problem && (

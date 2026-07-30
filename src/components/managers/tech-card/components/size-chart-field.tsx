@@ -8,7 +8,7 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
@@ -83,6 +83,13 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
   // Instead of owning a save button it STAGES into the card's one save — `touched` is what makes
   // the header's "размерная таблица — 6 cells" a fact rather than a guess.
   const [dirty, setDirty] = useState(false);
+  // Mirror of `dirty` readable inside async continuations: a server load that resolves
+  // AFTER the operator typed (restored draft, or a keystroke while commitChart's trailing
+  // refresh was in flight) must not overwrite the newer local grid or unstage it.
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const markTouched = (key: string) =>
     setTouched((prev) => (prev.has(key) ? prev : new Set(prev).add(key)));
@@ -92,6 +99,7 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     adminService
       .GetStyleSizeChart({ styleId })
       .then((res) => {
+        if (dirtyRef.current) return;
         const next = new Map<number, Map<number, string>>();
         for (const c of res.chart?.cells ?? []) {
           if (c.sizeId == null || c.measurementNameId == null) continue;
@@ -104,6 +112,7 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
       })
       .catch(() => {
         /* no chart yet (draft) — leave the grid empty */
+        if (dirtyRef.current) return;
         setDirty(false);
       });
   }, [styleId]);

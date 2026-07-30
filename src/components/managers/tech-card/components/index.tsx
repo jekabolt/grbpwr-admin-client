@@ -1,7 +1,10 @@
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useQueryClient } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import { common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
+  techCardKeys,
   useCreateTechCard,
   useTechCardReadiness,
   useUpdateTechCard,
@@ -27,7 +30,7 @@ import {
   revealField,
 } from 'utils/field-errors';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm, useWatch, type FieldErrors } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -255,6 +258,7 @@ export function TechCardForm({
   const createTechCard = useCreateTechCard();
   const updateTechCard = useUpdateTechCard();
   const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
+  const queryClient = useQueryClient();
   // Sub-panels stage their mutation here instead of firing it; the header's one save commits the
   // card body and then this queue (phase 19).
   const staging = useTechCardStagingRequired();
@@ -305,6 +309,13 @@ export function TechCardForm({
     );
   const setActiveTab = (id: TabId) => navTo(id);
   const [conflict, setConflict] = useState(false);
+  // The version the NEXT body save must claim. Null = the loaded card's, the normal case. A 409 that
+  // the operator answered with «keep mine & overwrite» parks the server's CURRENT version here: the
+  // techCard prop stays stale after a failed save (nothing invalidates it, and the query neither
+  // refetches on focus nor remounts), so without this the retry resent the same rejected version and
+  // 409'd forever — the modal's overwrite affordance could never do what it said. A ref, not state:
+  // the handler re-runs the save immediately after setting it.
+  const lockOverride = useRef<number | null>(null);
   const [blockersOpen, setBlockersOpen] = useState(false);
   // Drawer state lives in the URL so it survives a refresh and can be linked to.
   const tasksOpen = params.get('tasks') === '1';
@@ -408,12 +419,20 @@ export function TechCardForm({
   // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
   // the product manager) or a hard refresh no longer loses unsaved edits — restore on return.
   const draftKey = isEditMode ? `edit.${numId ?? id ?? '0'}` : 'new';
+  // Only the two staging functions, pinned: `staging` itself is a fresh object every render (it
+  // carries the live `changes` array), and handing that straight to the hook restarted its debounced
+  // autosave timer on every render — a card being edited could keep re-arming the timer and never
+  // actually persist the staged snapshots the restore banner then promises.
+  const stagingIO = useMemo(
+    () => ({ serialize: staging.serialize, hydrate: staging.hydrate }),
+    [staging.serialize, staging.hydrate],
+  );
   const draft = useTechCardDraft(
     form,
     draftKey,
     canWrite(SECTION.techCards) && !frozen,
     staging.changes.length > 0,
-    staging,
+    stagingIO,
   );
 
   // Section-completion progress (Q9): a visible "how filled is this card" signal, per tab + overall.
@@ -524,8 +543,13 @@ export function TechCardForm({
           await updateTechCard.mutateAsync({
             id: parseInt(id || '0', 10),
             techCard: techCardInsert,
-            expectedLockVersion: techCard?.lockVersion ?? 0,
+            // Normally the loaded card's version; after «keep mine & overwrite» the version read
+            // back from the server, so that choice actually overwrites (see keepMineAndOverwrite).
+            expectedLockVersion: lockOverride.current ?? techCard?.lockVersion ?? 0,
           });
+          // Spent: the write moved the server's version on, and useUpdateTechCard's invalidation
+          // brings the new one back. Holding it would 409 the save after next.
+          lockOverride.current = null;
           form.reset(data);
         }
         // Then the staged sub-panels, in commit order. These are separate RPCs — there is NO
@@ -540,8 +564,26 @@ export function TechCardForm({
           showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
           return;
         }
+        // A committed panel bumps the SHARED tech_card.lock_version server-side (UpdateStyleSizeChart
+        // and UpdateStyle both do), but only useUpdateTechCard invalidates this card. Without this
+        // refetch a save that committed panels ONLY leaves the cached lockVersion a step behind, and
+        // the next body save 409s into the "this card moved on without you" modal over a conflict
+        // that never happened.
+        if (numId && outcome.committed.length > 0) {
+          queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
+        }
         showMessage(planned > 1 ? `saved ${planned} changes` : 'tech card updated', 'success');
-        draft.clear();
+        // A panel edited WHILE its own commit was in flight wrote the older values and kept the newer
+        // ones staged (see commitAll). Saying so is the whole point — the previous behaviour reported
+        // everything saved and dropped those keystrokes. The draft stays too: it is the only copy of
+        // those newer values until the next autosave tick rewrites it.
+        if (outcome.restaged?.length) {
+          setStagingError(
+            `«${outcome.restaged.map((c) => c.label).join('», «')}» changed while the save was running — the newer values are still staged. Press Save again.`,
+          );
+        } else {
+          draft.clear();
+        }
       } else {
         const created = await createTechCard.mutateAsync(techCardInsert);
         showMessage('tech card created', 'success');
@@ -598,6 +640,27 @@ export function TechCardForm({
     showMessage(`${tabLabel} → ${first.path} — ${first.message || 'invalid'}${more}`, 'error');
   };
   const save = () => form.handleSubmit(doSubmit, onInvalid)();
+
+  // «keep mine & overwrite» — the conflict modal's other exit. Read the card's CURRENT version off
+  // the server, then re-run the same save carrying it: the form's values are untouched, so the
+  // operator's edits land on top of the other editor's, which is exactly what the button offers. The
+  // old handler only closed the modal, leaving the stale version in place — every retry 409'd again
+  // and the only way out was «reload theirs», discarding the work.
+  const keepMineAndOverwrite = async () => {
+    if (!numId) return;
+    try {
+      const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
+      lockOverride.current = res.techCard?.lockVersion ?? 0;
+    } catch (error) {
+      showMessage(
+        techCardErrorMessage(error, 'could not read the server’s version — try saving again'),
+        'error',
+      );
+      return;
+    }
+    // The header's Save button shows the spinner for this second run (form.formState.isSubmitting).
+    save();
+  };
   // Pass the approval override INTO the validated submit (don't mutate form state before
   // validation — on failure that would leave the card stuck in an ungated state that a later
   // plain save would persist).
@@ -808,14 +871,15 @@ export function TechCardForm({
         width='sm'
         cancelLabel='keep mine & overwrite'
         confirmLabel='reload theirs'
-        onCancel={() => setConflict(false)}
+        onCancel={keepMineAndOverwrite}
         onConfirm={() => window.location.reload()}
       >
         <Row label='your version' value={`v${techCard?.lockVersion ?? 0} · edited here`} />
         <Row label='on the server' value='newer' />
         <Text size='micro' variant='label' className='mt-2'>
           Someone saved this card while you were editing. Reloading fetches their version and
-          discards your unsaved changes; keeping yours will overwrite theirs on the next save.
+          discards your unsaved changes; keeping yours re-reads their version number and saves your
+          values straight over theirs.
         </Text>
       </ConfirmationModal>
 
