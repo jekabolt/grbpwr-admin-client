@@ -111,7 +111,9 @@ type TabId = (typeof TABS)[number]['id'];
 // Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
 // DEVELOP how it's made, SPEC what ships. History stands alone.
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
-  { band: 'design', tabs: ['header', 'sketch', 'moodboard', 'patterns'] },
+  // Moodboard before sketch: the reference comes first and the technical drawing is derived from
+  // it, so the rail follows the order the work actually happens in.
+  { band: 'design', tabs: ['header', 'moodboard', 'sketch', 'patterns'] },
   { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'pieces', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   { band: '', tabs: ['history'] },

@@ -373,7 +373,6 @@ export function TechPackDocument({
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
                   <th className={TH}>part</th>
-                  <th className={TH}>dimensions</th>
                   <th className={TH}>description</th>
                 </tr>
               </thead>
@@ -382,7 +381,6 @@ export function TechPackDocument({
                   <tr key={i} className='break-inside-avoid'>
                     <td className={`${TD} text-center font-semibold`}>{c.number ?? i + 1}</td>
                     <td className={TD}>{c.part || '—'}</td>
-                    <td className={TD}>{c.dimensions || '—'}</td>
                     <td className={TD}>{c.description || '—'}</td>
                   </tr>
                 ))}

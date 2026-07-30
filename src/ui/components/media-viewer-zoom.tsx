@@ -1,10 +1,12 @@
 import {
+  DownloadIcon,
   Pencil1Icon,
   RotateCounterClockwiseIcon,
   TrashIcon,
   ZoomInIcon,
   ZoomOutIcon,
 } from '@radix-ui/react-icons';
+import { urlToDataUrl } from 'lib/features/getCropped';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
@@ -319,22 +321,81 @@ const ANNOTATE_COLORS: AnnotateColor[] = [
   { name: 'white', value: '#ffffff' },
 ];
 
+/** Pen weights, in image-space px. `fine` is for marking a stitch line, `bold` for circling a panel. */
+export const ANNOTATE_WIDTHS = [
+  { name: 'fine', value: 2 },
+  { name: 'medium', value: 4 },
+  { name: 'bold', value: 9 },
+] as const;
+
 interface Stroke {
   color: string;
+  /** Captured per stroke, so changing the pen never rewrites ink already laid down. */
+  width: number;
   points: Point[];
 }
 
+const paintSegment = (
+  ctx: CanvasRenderingContext2D,
+  from: Point,
+  to: Point,
+  strokeColor: string,
+  strokeWidth: number,
+) => {
+  ctx.strokeStyle = strokeColor;
+  ctx.lineWidth = strokeWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(from.x, from.y);
+  ctx.lineTo(to.x, to.y);
+  ctx.stroke();
+};
+
+const paintDot = (
+  ctx: CanvasRenderingContext2D,
+  p: Point,
+  strokeColor: string,
+  strokeWidth: number,
+) => {
+  ctx.fillStyle = strokeColor;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, strokeWidth / 2, 0, Math.PI * 2);
+  ctx.fill();
+};
+
+// One painter for both destinations — the live overlay and the exported file — so what gets saved
+// is what was drawn, rather than a second implementation that can drift from it.
+const paintStrokes = (ctx: CanvasRenderingContext2D, strokes: Stroke[]) => {
+  for (const stroke of strokes) {
+    const [first, ...rest] = stroke.points;
+    if (!first) continue;
+    const w = stroke.width || STROKE_WIDTH;
+    if (rest.length === 0) {
+      paintDot(ctx, first, stroke.color, w);
+      continue;
+    }
+    let prev = first;
+    for (const p of rest) {
+      paintSegment(ctx, prev, p, stroke.color, w);
+      prev = p;
+    }
+  }
+};
+
 /**
- * Session-only freehand annotation over the image. Nothing here is
- * persisted anywhere — strokes live in a ref and are dropped whenever
- * `resetKey` changes (navigate / close), by design (see report: no backend
- * field exists yet to save markup against a media item).
+ * Freehand annotation over the image. Strokes live in a ref and are dropped whenever `resetKey`
+ * changes (navigate / close) — there is still no backend field to persist markup against a media
+ * item, so the way out of the session is `saveImage`, which flattens the ink onto a copy of the
+ * picture and downloads it.
  */
 export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) {
   const { resetKey, baseSize } = params;
   const [drawMode, setDrawMode] = useState(false);
   const [color, setColor] = useState(ANNOTATE_COLORS[0]?.value ?? '#ff3b30');
+  const [width, setWidth] = useState<number>(ANNOTATE_WIDTHS[1].value);
   const [hasStrokes, setHasStrokes] = useState(false);
+  const [saving, setSaving] = useState(false);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const strokesRef = useRef<Stroke[]>([]);
   const currentRef = useRef<Stroke | null>(null);
@@ -346,47 +407,12 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
     setDrawMode(false);
   }, [resetKey]);
 
-  const paintSegment = (
-    ctx: CanvasRenderingContext2D,
-    from: Point,
-    to: Point,
-    strokeColor: string,
-  ) => {
-    ctx.strokeStyle = strokeColor;
-    ctx.lineWidth = STROKE_WIDTH;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.beginPath();
-    ctx.moveTo(from.x, from.y);
-    ctx.lineTo(to.x, to.y);
-    ctx.stroke();
-  };
-
-  const paintDot = (ctx: CanvasRenderingContext2D, p: Point, strokeColor: string) => {
-    ctx.fillStyle = strokeColor;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, STROKE_WIDTH / 2, 0, Math.PI * 2);
-    ctx.fill();
-  };
-
   const redraw = useCallback(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    for (const stroke of strokesRef.current) {
-      const [first, ...rest] = stroke.points;
-      if (!first) continue;
-      if (rest.length === 0) {
-        paintDot(ctx, first, stroke.color);
-        continue;
-      }
-      let prev = first;
-      for (const p of rest) {
-        paintSegment(ctx, prev, p, stroke.color);
-        prev = p;
-      }
-    }
+    paintStrokes(ctx, strokesRef.current);
   }, []);
 
   // Match the canvas's pixel buffer to the image's displayed size (DPR-scaled
@@ -420,12 +446,12 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
       const pt = toCanvasPoint(e);
       if (!pt) return;
       canvasRef.current?.setPointerCapture(e.pointerId);
-      currentRef.current = { color, points: [pt] };
+      currentRef.current = { color, width, points: [pt] };
       const ctx = canvasRef.current?.getContext('2d');
-      if (ctx) paintDot(ctx, pt, color);
+      if (ctx) paintDot(ctx, pt, color, width);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [drawMode, color, baseSize.w, baseSize.h],
+    [drawMode, color, width, baseSize.w, baseSize.h],
   );
 
   const onPointerMove = useCallback(
@@ -438,7 +464,9 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
       const last = pts[pts.length - 1];
       pts.push(pt);
       const ctx = canvasRef.current?.getContext('2d');
-      if (ctx && last) paintSegment(ctx, last, pt, currentRef.current.color);
+      if (ctx && last) {
+        paintSegment(ctx, last, pt, currentRef.current.color, currentRef.current.width);
+      }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [drawMode, baseSize.w, baseSize.h],
@@ -468,15 +496,70 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
 
   const toggleDrawMode = useCallback(() => setDrawMode((v) => !v), []);
 
+  /**
+   * Flatten the ink onto a copy of the picture and download it. The source is re-fetched through
+   * the CORS proxy rather than reused from the <img> on screen: a media-server image painted onto
+   * a canvas taints it, and `toBlob` on a tainted canvas throws.
+   *
+   * Strokes are stored in displayed-image space (`baseSize`), so they are scaled up to the media's
+   * natural size — the export is full resolution, not a screenshot of the stage.
+   */
+  const saveImage = useCallback(
+    async (src: string, filename?: string) => {
+      if (!src || !strokesRef.current.length) return;
+      setSaving(true);
+      try {
+        const dataUrl = await urlToDataUrl(src);
+        const img = new Image();
+        img.src = dataUrl;
+        await img.decode();
+
+        const w = img.naturalWidth || baseSize.w;
+        const h = img.naturalHeight || baseSize.h;
+        if (!w || !h) return;
+
+        const out = document.createElement('canvas');
+        out.width = w;
+        out.height = h;
+        const ctx = out.getContext('2d');
+        if (!ctx) return;
+        ctx.drawImage(img, 0, 0, w, h);
+        ctx.save();
+        ctx.scale(w / (baseSize.w || w), h / (baseSize.h || h));
+        paintStrokes(ctx, strokesRef.current);
+        ctx.restore();
+
+        const blob = await new Promise<Blob | null>((r) => out.toBlob(r, 'image/png'));
+        if (!blob) return;
+        const href = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = filename || 'annotated.png';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(href);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [baseSize.w, baseSize.h],
+  );
+
   return {
     drawMode,
     toggleDrawMode,
     color,
     setColor,
     colors: ANNOTATE_COLORS,
+    width,
+    setWidth,
+    widths: ANNOTATE_WIDTHS,
     hasStrokes,
     undo,
     clear,
+    saving,
+    saveImage,
     canvasRef,
     canvasHandlers: {
       onPointerDown,
@@ -535,13 +618,19 @@ interface ZoomDrawToolbarProps {
   color: string;
   onColorChange: (c: string) => void;
   colors: AnnotateColor[];
+  width: number;
+  onWidthChange: (w: number) => void;
+  widths: readonly { name: string; value: number }[];
   hasStrokes: boolean;
   onUndo: () => void;
   onClear: () => void;
+  /** Flatten the ink onto the picture and download it. Omitted where there is nothing to save to. */
+  onSave?: () => void;
+  saving?: boolean;
 }
 
 /** Floating bottom-center toolbar: zoom controls always shown, draw controls
- * (colors / undo / clear) appear once draw mode is toggled on. */
+ * (pen weight / colors / undo / clear / save) appear once draw mode is toggled on. */
 export function ZoomDrawToolbar({
   scale,
   canZoomIn,
@@ -555,9 +644,14 @@ export function ZoomDrawToolbar({
   color,
   onColorChange,
   colors,
+  width,
+  onWidthChange,
+  widths,
   hasStrokes,
   onUndo,
   onClear,
+  onSave,
+  saving,
 }: ZoomDrawToolbarProps) {
   return (
     <div
@@ -599,6 +693,39 @@ export function ZoomDrawToolbar({
 
         {drawMode && (
           <>
+            {/* Pen weight, shown as the dot it draws — a "2 / 4 / 9" label would make you
+                translate a number into a line thickness on every pick. */}
+            <div role='radiogroup' aria-label='Pen weight' className='ml-1 flex items-center gap-1'>
+              {widths.map((w) => (
+                <button
+                  key={w.value}
+                  type='button'
+                  role='radio'
+                  aria-checked={width === w.value}
+                  aria-label={`${w.name} pen`}
+                  title={`${w.name} pen`}
+                  onClick={() => onWidthChange(w.value)}
+                  className={cn(
+                    'flex size-6 shrink-0 items-center justify-center border transition-colors',
+                    width === w.value
+                      ? 'border-bgColor bg-bgColor'
+                      : 'border-transparent hover:border-bgColor/40',
+                  )}
+                >
+                  <span
+                    aria-hidden
+                    // Sized off the real pen width, clamped so `bold` still fits the 24px cell.
+                    style={{
+                      width: Math.min(w.value + 1, 12),
+                      height: Math.min(w.value + 1, 12),
+                      backgroundColor: width === w.value ? '#000' : color,
+                    }}
+                    className='block rounded-full'
+                  />
+                </button>
+              ))}
+            </div>
+
             <div role='radiogroup' aria-label='Pen color' className='mx-1 flex items-center gap-1'>
               {colors.map((c) => (
                 <button
@@ -623,6 +750,17 @@ export function ZoomDrawToolbar({
             <ToolbarIconButton label='Clear drawing' onClick={onClear} disabled={!hasStrokes}>
               <TrashIcon className='size-4' />
             </ToolbarIconButton>
+            {onSave && (
+              // The markup is session-only — there is no backend field to persist it against — so
+              // downloading the flattened picture is the only way it survives the dialog closing.
+              <ToolbarIconButton
+                label={saving ? 'Saving…' : 'Save image with drawing'}
+                onClick={onSave}
+                disabled={!hasStrokes || !!saving}
+              >
+                <DownloadIcon className='size-4' />
+              </ToolbarIconButton>
+            )}
           </>
         )}
       </div>

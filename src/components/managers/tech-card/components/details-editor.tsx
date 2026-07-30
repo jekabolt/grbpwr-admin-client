@@ -199,11 +199,14 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                     upsert(key, { text: e.target.value })
                   }
                 />
-                <div className='flex flex-wrap items-center gap-1'>
+                {/* 100px, not the 40px these used to be: a construction reference is looked AT —
+                    a seam finish or a pocket bartack is unreadable at thumbnail size, which made
+                    the strip a list of things you had to open one by one to identify. */}
+                <div className='flex flex-wrap items-start gap-1.5'>
                   {ids.map((id, imgIndex) => {
                     const url = urlOf(id);
                     return (
-                      <div key={id} className='relative size-10 border border-borderColor'>
+                      <div key={id} className='relative size-[100px] border border-borderColor'>
                         <button
                           type='button'
                           onClick={() =>
@@ -216,7 +219,7 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                           {url ? (
                             <Media src={url} alt='ref' aspectRatio='1/1' fit='cover' />
                           ) : (
-                            <span className='flex size-full items-center justify-center text-nano'>
+                            <span className='flex size-full items-center justify-center text-micro'>
                               #{id}
                             </span>
                           )}
@@ -239,10 +242,15 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                     allowMultiple
                     showVideos={false}
                     saveSelectedMedia={(picked) => addImages(key, picked)}
+                    // Matches the thumbnails it sits beside — an xs button next to 100px tiles read
+                    // as a stray control rather than the next slot in the strip.
                     trigger={
-                      <Button type='button' variant='secondary' size='xs'>
+                      <button
+                        type='button'
+                        className='flex size-[100px] items-center justify-center border border-dashed border-textInactiveColor text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor'
+                      >
                         + картинка
-                      </Button>
+                      </button>
                     }
                   />
                 </div>

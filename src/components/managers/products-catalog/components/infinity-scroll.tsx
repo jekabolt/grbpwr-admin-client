@@ -17,10 +17,17 @@ import { useCatalogSelection } from './useCatalogSelection';
 interface Props {
   firstItems: common_Colorway[];
   initialLoading?: boolean;
+  /** The first page failed. Shown instead of the empty state — a 500 is not an empty catalogue. */
+  error?: string;
   onCountChange?: (count: number, hasMore: boolean) => void;
 }
 
-export function InfinityScroll({ firstItems, initialLoading = false, onCountChange }: Props) {
+export function InfinityScroll({
+  firstItems,
+  initialLoading = false,
+  error,
+  onCountChange,
+}: Props) {
   const [searchParams] = useSearchParams();
   const [items, setItems] = useState<common_Colorway[]>(firstItems);
   const [isLoading, setIsLoading] = useState(false);
@@ -105,11 +112,20 @@ export function InfinityScroll({ firstItems, initialLoading = false, onCountChan
     onCountChange?.(items.length, hasMore);
   }, [items.length, hasMore, onCountChange]);
 
-  const showEmpty = !initialLoading && !isLoading && items.length === 0;
+  const showEmpty = !initialLoading && !isLoading && items.length === 0 && !error;
 
   return (
     <div>
-      {showEmpty ? (
+      {error ? (
+        <div className='flex flex-col items-center justify-center gap-2 py-20'>
+          <Text variant='uppercase' className='text-error'>
+            couldn’t load products
+          </Text>
+          <Text variant='inactive' size='small'>
+            {error}
+          </Text>
+        </div>
+      ) : showEmpty ? (
         <div className='flex flex-col items-center justify-center gap-2 py-20'>
           <Text variant='uppercase'>no products found</Text>
           <Text variant='inactive' size='small'>
