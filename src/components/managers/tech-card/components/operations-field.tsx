@@ -47,6 +47,10 @@ const NONE_ZONE = 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN';
 const PIECE_DND_TYPE = 'application/x-grbpwr-piece';
 const PIECE_DND_PREFIX = 'grbpwr-piece:';
 
+// Keep a Radix select from ballooning when its selected option is long: clip the value span (the
+// trigger's first child) with an ellipsis instead of letting the text wrap the control taller/wider.
+const selectNoGrow = '[&>span:first-child]:min-w-0 [&>span:first-child]:truncate';
+
 export const emptyOperation = {
   operationNumber: 0,
   node: '',
@@ -432,19 +436,32 @@ function OperationRow({
         onClick={onTarget}
         className='flex flex-col gap-2 border-b border-hairline bg-bgZebra px-2 py-2'
       >
-        {/* row A — the four key fields, always editable and visible */}
+        {/* row A — number (read-only, styled like the selects) + the four key fields, always
+            editable. Fixed widths so a long option never balloons a control; the ✕ removes the op. */}
         <div className='flex flex-wrap items-end gap-1.5'>
-          <Text size='control' component='span' className='self-center font-bold tabular-nums'>
-            {opNumber}
-          </Text>
-          <div className='min-w-[130px] flex-1'>
+          <div className='w-[46px] shrink-0 space-y-px'>
+            <Text
+              size='micro'
+              variant='label'
+              tracking='label'
+              component='span'
+              className='block leading-none uppercase'
+            >
+              №
+            </Text>
+            <div className='flex min-h-[22px] items-center border border-borderColor bg-bgSecondary px-[7px] py-[3px] text-textBaseSize tabular-nums text-labelColor'>
+              {opNumber}
+            </div>
+          </div>
+          <div className='w-[168px] shrink-0'>
             <SelectField
               name={`operations.${index}.operationType`}
               label='операция *'
               items={operationTypeOptions}
+              className={selectNoGrow}
             />
           </div>
-          <div className='min-w-[130px] flex-1'>
+          <div className='w-[168px] shrink-0'>
             <ComboField
               name={`operations.${index}.node`}
               label='узел / что *'
@@ -452,21 +469,24 @@ function OperationRow({
               options={nodeOptions}
             />
           </div>
-          <div className='min-w-[110px]'>
-            <SelectField name={`operations.${index}.zone`} label='зона' items={zoneOptions} />
+          <div className='w-[128px] shrink-0'>
+            <SelectField
+              name={`operations.${index}.zone`}
+              label='зона'
+              items={zoneOptions}
+              className={selectNoGrow}
+            />
           </div>
-          <div className='min-w-[92px]'>
+          <div className='w-[84px] shrink-0'>
             <SelectField
               name={`operations.${index}.calloutNumber`}
               label='пин'
               items={rowPinOptions}
               valueAsNumber
+              className={selectNoGrow}
             />
           </div>
-          <div className='ml-auto flex shrink-0 items-center gap-1.5'>
-            <Button type='button' variant='secondary' size='xs' onClick={() => setOpen((o) => !o)}>
-              {open ? 'детали ▴' : 'детали ▾'}
-            </Button>
+          <div className='ml-auto flex shrink-0 items-center'>
             <Button
               type='button'
               variant='secondary'
@@ -486,7 +506,7 @@ function OperationRow({
             <div
               key={k}
               title={byKey.get(k)?.name}
-              className='relative flex size-16 flex-col items-center justify-center border border-borderColor bg-bgColor p-1 text-center'
+              className='relative flex size-12 flex-col items-center justify-center border border-borderColor bg-bgColor p-1 text-center'
             >
               <Text
                 size='nano'
@@ -510,7 +530,7 @@ function OperationRow({
             <div
               key={k}
               title={k}
-              className='relative flex size-16 flex-col items-center justify-center border border-error bg-bgColor p-1 text-center'
+              className='relative flex size-12 flex-col items-center justify-center border border-error bg-bgColor p-1 text-center'
             >
               <Text
                 size='nano'
@@ -541,8 +561,51 @@ function OperationRow({
         </div>
       </div>
 
+      {/* materials strip — always visible at the card foot: the operation's нитки / клеевые as a
+          toggle row, and the arrow that expands the sewing spec + description below it. */}
+      <div className='flex flex-wrap items-start gap-2 px-2 py-2'>
+        <Text
+          size='micro'
+          variant='label'
+          tracking='label'
+          component='span'
+          className='mt-0.5 shrink-0 uppercase'
+        >
+          материалы
+        </Text>
+        <div className='min-w-0 flex-1'>
+          {linkableBoms.length === 0 ? (
+            <Text size='micro' variant='label'>
+              в BOM ещё нет ниток и клеевых — добавьте их на вкладке BOM
+            </Text>
+          ) : (
+            <ChipRow>
+              {linkableBoms.map((b) => {
+                const key = b.lineKey ?? '';
+                const on = selectedBomKeys.includes(key);
+                return (
+                  <Chip key={key} selected={on} pressed={on} onClick={() => toggleBom(key)}>
+                    {b.name?.trim() || 'unnamed'}
+                  </Chip>
+                );
+              })}
+            </ChipRow>
+          )}
+          {bomOutOfRange && (
+            <Text size='micro' variant='error' className='mt-1'>
+              материал был удалён или перемещён — перевыберите его
+            </Text>
+          )}
+        </div>
+        <div className='ml-auto flex shrink-0 items-center'>
+          <Button type='button' variant='secondary' size='xs' onClick={() => setOpen((o) => !o)}>
+            {open ? 'подробнее ▴' : 'подробнее ▾'}
+          </Button>
+        </div>
+      </div>
+
       {open && (
-        <div className='space-y-2 p-2'>
+        <div className='space-y-2 border-t border-hairline p-2'>
           <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
             <ComboField
               name={`operations.${index}.machine`}
@@ -602,31 +665,6 @@ function OperationRow({
               placeholder='1.8'
             />
           </div>
-
-          <GroupLabel>материалы операции — нитки / клеевые</GroupLabel>
-          {linkableBoms.length === 0 ? (
-            <Text size='micro' variant='label'>
-              в BOM ещё нет ниток и клеевых — добавьте их на вкладке BOM, и они появятся здесь
-            </Text>
-          ) : (
-            <ChipRow>
-              {linkableBoms.map((b) => {
-                const key = b.lineKey ?? '';
-                const on = selectedBomKeys.includes(key);
-                return (
-                  <Chip key={key} selected={on} pressed={on} onClick={() => toggleBom(key)}>
-                    {b.name?.trim() || 'unnamed'}
-                  </Chip>
-                );
-              })}
-            </ChipRow>
-          )}
-
-          {bomOutOfRange && (
-            <Text size='micro' variant='error'>
-              материал был удалён или перемещён — перевыберите его
-            </Text>
-          )}
 
           <TextareaField
             name={`operations.${index}.description`}
