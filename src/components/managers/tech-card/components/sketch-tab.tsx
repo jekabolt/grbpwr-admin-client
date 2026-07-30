@@ -242,10 +242,10 @@ function TechCardGallery({
       pinSize={pinSize}
       emptyLabel={emptyLabel}
       fallbackAspect='3/4'
-      // Moodboard: a fixed-height filmstrip — every image the same height, natural width (landscapes
-      // wider), horizontal-only scroll. Images aren't cropped, so pins still map 1:1. The technical
-      // sketch keeps the default width-driven tiles.
-      gridRowHeight={isMoodboard ? 480 : undefined}
+      // Both surfaces are a fixed-height filmstrip — every image the same height, natural width
+      // (landscapes wider), horizontal-only scroll. Images aren't cropped, so callout pins still
+      // map 1:1.
+      gridRowHeight={480}
       previewFirst
       mediaLabel={mediaLabel}
       carouselLabel={`${isMoodboard ? 'moodboard' : 'sketch'} images`}
