@@ -1,9 +1,13 @@
+import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
+import { careCodes } from 'components/managers/product/components/care/care-codes';
 import { CarePicker } from 'components/managers/product/components/care/care-picker';
+import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { techCardLabelTypeOptions } from 'constants/filter';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
@@ -19,6 +23,10 @@ import { labelAttachmentOptions, labelPlacementOptions } from './tech-card-optio
 
 const CARE = 'TECH_CARD_LABEL_TYPE_CARE';
 const ORIGIN = 'TECH_CARD_LABEL_TYPE_ORIGIN';
+
+// The brand line printed at the top of the care/composition tag. It is the company mark, not a
+// per-card field, so it is a constant here rather than read from a label row.
+const BRAND = 'GRBPWR';
 
 const emptyLabel = {
   labelType: 'TECH_CARD_LABEL_TYPE_MAIN',
@@ -108,6 +116,111 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   );
 }
 
+// A live printed-label preview, composed from the SAME react-hook-form data the checklist reads
+// (bomItems + labels), so it can never word the tag differently from the spec. Nothing here writes:
+// it recomposes on every keystroke in the BOM, the CarePicker or the origin label, which is what
+// lets the operator catch a stale blend or a wrong symbol before the order goes to print.
+function LabelPreview() {
+  const { control } = useFormContext<TechCardFormData>();
+  const vocabulary = useCareVocabulary();
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
+    section?: string;
+    composition?: string;
+  }>;
+  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
+    labelType?: string;
+    content?: string;
+  }>;
+
+  const origin = labels.find((l) => l.labelType === ORIGIN)?.content?.trim() || undefined;
+  const careContent = labels.find((l) => l.labelType === CARE)?.content ?? '';
+  const symbolCodes = careCodes(careContent);
+  // Same wording the storefront and the printed tag use — the dictionary's canonical care prose.
+  const careProse = vocabulary.prose(careContent);
+
+  // The composition / care text is the EXISTING generator's output, split so the "Made in …" line
+  // can print at the foot of the tag (as it does on a real care label) below the symbols.
+  const composed = generateCareLabel(bomItems, origin)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const madeIn = composed.find((l) => /^made in/i.test(l));
+  const compositionLines = composed.filter((l) => !/^made in/i.test(l));
+
+  const empty = compositionLines.length === 0 && symbolCodes.length === 0 && !madeIn;
+
+  return (
+    <div className='flex flex-col'>
+      <GroupLabel flush>label preview</GroupLabel>
+      <div className='border border-borderColor bg-bgColor p-3'>
+        {empty ? (
+          <Text size='micro' variant='label' className='text-center'>
+            заполните состав (BOM), символы ухода или origin — здесь появится этикетка как на печать
+          </Text>
+        ) : (
+          <div className='mx-auto flex max-w-[240px] flex-col items-center gap-2 text-center'>
+            <Text component='span' tracking='label' className='font-bold uppercase'>
+              {BRAND}
+            </Text>
+
+            {compositionLines.length > 0 ? (
+              <div className='flex flex-col items-center gap-0.5'>
+                {compositionLines.map((line) => (
+                  <Text key={line} size='micro' component='span' className='uppercase'>
+                    {line}
+                  </Text>
+                ))}
+              </div>
+            ) : (
+              <Text size='micro' variant='label' component='span'>
+                — no composition —
+              </Text>
+            )}
+
+            {symbolCodes.length > 0 && (
+              <div className='flex flex-wrap items-center justify-center gap-1.5'>
+                {symbolCodes.map((code) =>
+                  CARE_ARTWORK[code] ? (
+                    <img
+                      key={code}
+                      src={CARE_ARTWORK[code]}
+                      alt={code}
+                      title={code}
+                      className='size-5'
+                    />
+                  ) : (
+                    <Text
+                      key={code}
+                      size='nano'
+                      variant='label'
+                      component='span'
+                      className='uppercase'
+                    >
+                      {code}
+                    </Text>
+                  ),
+                )}
+              </div>
+            )}
+
+            {careProse && (
+              <Text size='micro' variant='label' component='span'>
+                {careProse}
+              </Text>
+            )}
+
+            {madeIn && (
+              <Text size='micro' variant='label' component='span' className='uppercase'>
+                {madeIn}
+              </Text>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // Labels / tags (Sheet «Этикетки и упаковка»). label_type is required on each. The care
 // generator builds a composition block from the BOM into the CARE label's note; the laundry
 // symbols are chosen with the CarePicker on the CARE label's content.
@@ -184,7 +297,13 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
   return (
     <TooltipProvider delayDuration={200} skipDelayDuration={150}>
       <div className='flex flex-col gap-3'>
-        <LabelsChecklist onAddLabel={addLabel} onOpenPackaging={openPackaging} />
+        {/* Two-pane at lg (stacks below): the checklist on the left, a live printed-label preview
+            on the right. Both read the same RHF data, so the preview can never disagree with the
+            spec the checklist is scoring. */}
+        <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>
+          <LabelsChecklist onAddLabel={addLabel} onOpenPackaging={openPackaging} />
+          <LabelPreview />
+        </div>
 
         <Toolbar>
           <Button type='button' variant='secondary' size='sm' onClick={generateCare}>

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_Material, googletype_Decimal } from 'api/proto-http/admin';
+import { common_Material } from 'api/proto-http/admin';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -14,6 +14,7 @@ import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { decimalToInput } from 'utils/decimal';
+import { materialSpec } from './material-code';
 import { MaterialThumb, materialImageUrl } from './material-thumb';
 import { useMaterials } from './useMaterials';
 
@@ -33,57 +34,6 @@ const numId = (v: unknown): number => Number(v) || 0;
 // The picked material's one-line identity: "CODE · Name" (code dropped when absent).
 const materialLabel = (m: common_Material): string =>
   `${m.code ? `${m.code} · ` : ''}${m.name ?? `#${m.id}`}`;
-
-// A decimal as a clean string, treating undefined / 0 as absent (so "0 g/m²" never shows).
-const dec = (d?: googletype_Decimal): string => {
-  const s = decimalToInput(d);
-  return s && s !== '0' ? s : '';
-};
-
-// The identifying spec of a material, by class: what makes "хлопок 180" readable as a specific
-// cloth rather than a row you have to open. Fabric → gsm · width; hardware → finish · Ø; packaging
-// → gsm · substrate; thread → tex. The free-text `spec` (e.g. matte / satin / gloss) and the fibre
-// composition trail after, since they identify the material regardless of class.
-function materialSpec(m: common_Material): string {
-  const parts: string[] = [];
-  switch (m.materialClass) {
-    case 'MATERIAL_CLASS_FABRIC': {
-      const gsm = dec(m.fabricAttrs?.weightGsm) || dec(m.fabricWeightGsm);
-      const width = dec(m.fabricAttrs?.widthCm) || dec(m.fabricWidth);
-      if (gsm) parts.push(`${gsm} g/m²`);
-      if (width) parts.push(`${width} cm`);
-      break;
-    }
-    case 'MATERIAL_CLASS_HARDWARE': {
-      const fin = m.hardwareAttrs?.finish?.trim();
-      const dia = dec(m.hardwareAttrs?.diameterMm);
-      if (fin) parts.push(fin);
-      if (dia) parts.push(`Ø${dia} mm`);
-      if (m.hardwareAttrs?.dimensions?.trim()) parts.push(m.hardwareAttrs.dimensions.trim());
-      break;
-    }
-    case 'MATERIAL_CLASS_PACKAGING': {
-      const gsm = dec(m.packagingAttrs?.gsm);
-      if (gsm) parts.push(`${gsm} g/m²`);
-      if (m.packagingAttrs?.substrate?.trim()) parts.push(m.packagingAttrs.substrate.trim());
-      break;
-    }
-    case 'MATERIAL_CLASS_THREAD': {
-      if (m.threadAttrs?.ticketTex?.trim()) parts.push(`tex ${m.threadAttrs.ticketTex.trim()}`);
-      break;
-    }
-    default: {
-      // OTHER / unknown class: fall back to the top-level fabric fields if they carry anything.
-      const gsm = dec(m.fabricWeightGsm);
-      const width = dec(m.fabricWidth);
-      if (gsm) parts.push(`${gsm} g/m²`);
-      if (width) parts.push(`${width} cm`);
-    }
-  }
-  if (m.spec?.trim()) parts.push(m.spec.trim());
-  if (m.composition?.trim()) parts.push(m.composition.trim());
-  return parts.join(' · ');
-}
 
 // On-hand balance per material id, for the swatch grid's "€8.00 · 41 m" caption and its "in stock"
 // filter. Lazy (`enabled`) because the combobox variant — which is on almost every screen — must not

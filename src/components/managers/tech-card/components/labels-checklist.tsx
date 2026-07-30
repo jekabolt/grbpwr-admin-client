@@ -53,6 +53,8 @@ type Packaging = {
 type CheckItem = {
   key: string;
   name: string;
+  /** Where the value comes from — auto from composition / care symbols, packaging, or manual. */
+  source: string;
   /** What the row says after the name — attachment · placement, or the packaging fact. */
   detail: string;
   glyph: SpecGlyphKind;
@@ -96,6 +98,10 @@ function spreadPins(items: CheckItem[]): CheckItem[] {
   });
 }
 
+// The two rows whose value the card composes for you rather than the operator typing it — their
+// status reads "auto" instead of "present", the cue that they cannot drift from the spec.
+const AUTO_SOURCE = new Set(['composition', 'care']);
+
 export function LabelsChecklist({
   onAddLabel,
   onOpenPackaging,
@@ -118,6 +124,7 @@ export function LabelsChecklist({
     key: string,
     name: string,
     labelType: string,
+    source: string,
     glyph: SpecGlyphKind = 'label',
   ): CheckItem => {
     const row = rowOfType(labelType);
@@ -126,6 +133,7 @@ export function LabelsChecklist({
       key,
       name,
       labelType,
+      source,
       glyph,
       present: !!row,
       pin,
@@ -163,12 +171,13 @@ export function LabelsChecklist({
   // The nine recommended items. The first five/six sit ON the garment and can therefore be pinned;
   // the last three are packaging and never carry a placement, so they are listed, never drawn.
   const base: CheckItem[] = [
-    garmentItem('main', 'main / brand', TYPE.MAIN),
-    garmentItem('size', 'size', TYPE.SIZE),
-    garmentItem('care', 'care', TYPE.CARE),
+    garmentItem('main', 'main / brand', TYPE.MAIN, 'manual'),
+    garmentItem('size', 'size', TYPE.SIZE, 'manual'),
+    garmentItem('care', 'care', TYPE.CARE, 'from care symbols'),
     {
       key: 'composition',
       name: 'composition',
+      source: 'from composition',
       // Composition is written INTO the care label's note (see the care generator) — it has no
       // placement of its own, so it never gets a pin.
       detail: careLabel?.note?.trim() ? 'in the care label' : 'not specified',
@@ -177,11 +186,12 @@ export function LabelsChecklist({
       labelType: TYPE.CARE,
       pin: null,
     },
-    garmentItem('origin', 'origin', TYPE.ORIGIN),
-    garmentItem('hangtag', 'hangtag', TYPE.HANGTAG, 'hangtag'),
+    garmentItem('origin', 'origin', TYPE.ORIGIN, 'manual'),
+    garmentItem('hangtag', 'hangtag', TYPE.HANGTAG, 'manual', 'hangtag'),
     {
       key: 'polybag',
       name: 'polybag',
+      source: 'from packaging',
       detail: polybagPresent ? (packaging.polybag ?? '').trim() : 'not specified',
       glyph: 'polybag',
       present: polybagPresent,
@@ -190,6 +200,7 @@ export function LabelsChecklist({
     {
       key: 'greeting',
       name: 'greeting card',
+      source: 'from packaging',
       detail: greetingCardPresent ? 'in the packaging' : 'not specified',
       glyph: 'greetingCard',
       present: greetingCardPresent,
@@ -198,6 +209,7 @@ export function LabelsChecklist({
     {
       key: 'dustbag',
       name: 'dust bag',
+      source: 'from packaging',
       detail: dustBagPresent ? 'in the packaging' : 'not specified',
       glyph: 'dustBag',
       present: dustBagPresent,
@@ -233,6 +245,9 @@ export function LabelsChecklist({
   };
   const canFix = (item: CheckItem) => (item.labelType ? !!onAddLabel : !!onOpenPackaging);
 
+  // Each row now carries its SOURCE ("· from composition / from care symbols / from packaging /
+  // manual") right after the name — the operator can see whether a value is composed for them or
+  // typed by hand — then the placement detail, which truncates first when the pane is narrow.
   const rowLabel = (item: CheckItem) => (
     <span className='flex min-w-0 items-center gap-1.5'>
       {item.letter ? (
@@ -242,11 +257,24 @@ export function LabelsChecklist({
       ) : (
         <SpecGlyph kind={item.glyph} className='h-3.5 w-3.5 shrink-0' />
       )}
-      <span className='truncate'>
-        {item.name} · {item.detail}
+      <span className='shrink-0'>{item.name}</span>
+      <span className='min-w-0 truncate text-labelColor'>
+        · {item.source}
+        {item.detail ? ` · ${item.detail}` : ''}
       </span>
     </span>
   );
+
+  // The status marker: a composed row reads "auto" (it tracks the spec on its own), a filled manual
+  // row "present", an unfilled one "missing".
+  const statusPill = (item: CheckItem) =>
+    !item.present ? (
+      <Pill tone='warn'>missing</Pill>
+    ) : AUTO_SOURCE.has(item.key) ? (
+      <Pill tone='ok'>auto</Pill>
+    ) : (
+      <Pill tone='ok'>present</Pill>
+    );
 
   return (
     <div className='flex flex-col gap-2'>
@@ -271,31 +299,38 @@ export function LabelsChecklist({
 
         <div className='min-w-0'>
           {placed.map((item) => (
-            <Row key={item.key} label={rowLabel(item)} value={<Pill tone='ok'>✓</Pill>} />
+            <Row key={item.key} label={rowLabel(item)} value={statusPill(item)} />
           ))}
-          {unplaced.map((item) => (
-            <Row
-              key={item.key}
-              tone='error'
-              label={
-                canFix(item) ? (
-                  <button
-                    type='button'
-                    onClick={() => fix(item)}
-                    title={
-                      item.labelType ? 'add this label and jump to it' : 'open the packaging spec'
-                    }
-                    className='flex min-w-0 max-w-full items-center gap-1.5 text-left underline'
-                  >
-                    {rowLabel(item)}
-                  </button>
-                ) : (
-                  rowLabel(item)
-                )
-              }
-              value={<Pill tone='warn'>!</Pill>}
-            />
-          ))}
+          {/* An item off the drawing is either present-without-a-placement (composition, packaging,
+              a label with no spot yet) — a plain row — or genuinely missing, listed in red one click
+              from being fixed. Splitting on `present` stops a filled row reading as an error. */}
+          {unplaced.map((item) =>
+            item.present ? (
+              <Row key={item.key} label={rowLabel(item)} value={statusPill(item)} />
+            ) : (
+              <Row
+                key={item.key}
+                tone='error'
+                label={
+                  canFix(item) ? (
+                    <button
+                      type='button'
+                      onClick={() => fix(item)}
+                      title={
+                        item.labelType ? 'add this label and jump to it' : 'open the packaging spec'
+                      }
+                      className='flex min-w-0 max-w-full items-center gap-1.5 text-left underline'
+                    >
+                      {rowLabel(item)}
+                    </button>
+                  ) : (
+                    rowLabel(item)
+                  )
+                }
+                value={statusPill(item)}
+              />
+            ),
+          )}
           {extras.length > 0 && (
             <div className='flex flex-wrap items-center gap-1 pt-1.5'>
               <Text size='micro' variant='label' component='span'>

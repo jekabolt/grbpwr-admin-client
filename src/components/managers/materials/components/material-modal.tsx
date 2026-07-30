@@ -8,7 +8,6 @@ import {
 } from 'api/proto-http/admin';
 import { MediaPreviewWithSelector } from 'components/managers/media/components/media-preview-with-selector';
 import { techCardBomSectionOptions } from 'constants/filter';
-import { cn } from 'lib/utility';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
@@ -20,6 +19,7 @@ import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { CompositionWizard, type CompRow } from './composition-wizard';
+import { composeArticle, type ArticleInput } from './material-code';
 import { mediaThumbUrl } from './material-thumb';
 import { materialPurposeOptions, resolveMaterialPurpose } from './purpose-options';
 import { useSaveMaterial } from './useMaterials';
@@ -577,6 +577,50 @@ export function MaterialModal({
     });
   };
 
+  // ---- article preview (matModal v2 / matArticle v3) ----------------------------------------
+  // A CLIENT-SIDE preview composed from the draft's own attributes (supplier-prefixed, matArticle
+  // v3). Every field that shapes it lives in the left pane, so the code assembles live as the
+  // operator types — the authoritative article is still backend-minted on save (see composeArticle).
+  const articleInput: ArticleInput = {
+    materialClass: d.materialClass,
+    fibreCodes: d.compositionEntries.map((r) => r.fiberCode).filter(Boolean),
+    gsm: d.fabric.weightGsm || d.packaging.gsm,
+    widthCm: d.fabric.widthCm,
+    diameterMm: d.hardware.diameterMm,
+    finish: d.hardware.finish,
+    baseMaterial: d.hardware.baseMaterial,
+    colour: d.color,
+    supplier: d.supplier,
+  };
+  const articlePreview = composeArticle(articleInput, true);
+  // "reads as" — the same draft values in plain words (class · fibre/type · gsm|Ø · width · colour),
+  // empty parts dropped, so the code above never reads as a mystery string.
+  const classLabel = materialClassOptions.find((o) => o.value === d.materialClass)?.label ?? '';
+  const dominantFibre = articleInput.fibreCodes?.[0];
+  const readsAsParts: string[] = [classLabel];
+  if (d.materialClass === 'MATERIAL_CLASS_FABRIC' || d.materialClass === 'MATERIAL_CLASS_THREAD') {
+    if (dominantFibre) readsAsParts.push(fiberName(dominantFibre));
+  } else if (d.materialClass === 'MATERIAL_CLASS_HARDWARE' && d.hardware.baseMaterial.trim()) {
+    readsAsParts.push(d.hardware.baseMaterial.trim());
+  } else if (d.materialClass === 'MATERIAL_CLASS_PACKAGING' && d.packaging.substrate.trim()) {
+    readsAsParts.push(d.packaging.substrate.trim());
+  }
+  if (d.materialClass === 'MATERIAL_CLASS_FABRIC' && d.fabric.weightGsm.trim()) {
+    readsAsParts.push(`${d.fabric.weightGsm.trim()} g/m²`);
+  } else if (d.materialClass === 'MATERIAL_CLASS_PACKAGING' && d.packaging.gsm.trim()) {
+    readsAsParts.push(`${d.packaging.gsm.trim()} g/m²`);
+  } else if (d.materialClass === 'MATERIAL_CLASS_HARDWARE' && d.hardware.diameterMm.trim()) {
+    readsAsParts.push(`Ø${d.hardware.diameterMm.trim()}`);
+  }
+  if (d.materialClass === 'MATERIAL_CLASS_FABRIC' && d.fabric.widthCm.trim()) {
+    readsAsParts.push(`${d.fabric.widthCm.trim()} cm`);
+  }
+  if (d.materialClass === 'MATERIAL_CLASS_HARDWARE' && d.hardware.finish.trim()) {
+    readsAsParts.push(d.hardware.finish.trim());
+  }
+  if (d.color.trim()) readsAsParts.push(d.color.trim());
+  const readsAs = readsAsParts.filter(Boolean).join(' · ');
+
   return (
     <ConfirmationModal
       open={open}
@@ -589,29 +633,17 @@ export function MaterialModal({
       confirmLabel={save.isPending ? 'saving…' : 'save'}
       // Block save while composition is present but doesn't sum to 100 (#37) — flagged inline too.
       confirmDisabled={save.isPending || !compValid}
+      // Wider so the two-pane layout (inputs · live article preview) fits at lg.
+      width='lg'
     >
-      <div className='flex w-full flex-col gap-2 lg:w-[36rem]'>
+      {/* matModal v2 — two panes at lg (inputs · live article preview), one column below lg. */}
+      <div className='flex w-full flex-col gap-3 lg:grid lg:grid-cols-[1fr_240px] lg:gap-3'>
+        {/* ---- LEFT PANE — every input group kept as-is (identity, sourcing, attributes-by-
+            class, composition, warehouse); disclosures, validation + submit payload unchanged.
+            Only the image + the article/code affordance move to the preview pane on the right. */}
+        <div className='flex min-w-0 flex-col gap-2'>
         {/* ---- IDENTITY -------------------------------------------------------------------- */}
         <GroupLabel>identity</GroupLabel>
-        {/* #39: catalog image — image_id is the write-side ref; MediaSelector handles upload +
-            crop (reused as-is from the product/archive thumbnail pattern). */}
-        <div className='flex flex-col gap-1'>
-          <Text variant='label' size='micro' tracking='label' className='uppercase'>
-            image
-          </Text>
-          <MediaPreviewWithSelector
-            mediaUrl={mediaThumbUrl(image)}
-            aspectRatio={['1:1', 'Custom']}
-            allowMultiple={false}
-            showVideos={false}
-            heightClass='h-24'
-            label='add image'
-            purpose='material image'
-            alt={d.name || 'material image'}
-            onSaveMedia={handleSetImage}
-            onClear={imageId ? clearImage : undefined}
-          />
-        </div>
         <div className={grid}>
           <label className='sm:col-span-2 flex flex-col gap-1'>
             <Text variant='label' size='micro' tracking='label' className='uppercase'>
@@ -1082,30 +1114,8 @@ export function MaterialModal({
         </GroupLabel>
         {warehouseOpen && (
           <div className={grid}>
-            {/* #68: code is backend-generated; locked/auto by default with an explicit override. */}
-            <label className='flex flex-col gap-1'>
-              <div className='flex items-center justify-between gap-2'>
-                <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                  code {codeOverride ? '' : '(auto)'}
-                </Text>
-                <Button type='button' size='xs' variant='underline' onClick={toggleCodeOverride}>
-                  {codeOverride ? 'use auto' : 'customize'}
-                </Button>
-              </div>
-              <input
-                className={cn(cell, !codeOverride && 'cursor-not-allowed text-textInactiveColor')}
-                readOnly={!codeOverride}
-                placeholder={
-                  codeOverride
-                    ? 'unique among active'
-                    : material?.code
-                      ? ''
-                      : 'auto — generated on save'
-                }
-                value={d.code}
-                onChange={(e) => set({ code: e.target.value })}
-              />
-            </label>
+            {/* #68: the material `code` (the article) is edited in the preview pane on the right —
+                backend-generated by default, "customize" there reveals a manual override. */}
             <label className='flex flex-col gap-1'>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
                 min stock ({d.unit.trim() || 'unit'})
@@ -1150,6 +1160,69 @@ export function MaterialModal({
             </label>
           </div>
         )}
+        </div>
+        {/* end LEFT pane */}
+
+        {/* ---- RIGHT PANE — live article preview (matModal v2) ------------------------------
+            The generated article is the centrepiece: it assembles live from the draft's own
+            attributes (composeArticle, supplier-prefixed per matArticle v3) and the "reads as"
+            line restates them in plain words. The authoritative code is backend-minted on save —
+            this is a preview; "customize" reveals the manual override (#68). */}
+        <div className='flex flex-col gap-3 border border-borderColor bg-bgColor p-3 lg:sticky lg:top-0'>
+          <div className='flex flex-col gap-1'>
+            <Text variant='label' size='micro' tracking='label' className='uppercase'>
+              article · preview
+            </Text>
+            <div className='break-all font-mono text-lg leading-tight tabular-nums'>
+              {articlePreview}
+            </div>
+            <div>
+              <Button type='button' size='xs' variant='underline' onClick={toggleCodeOverride}>
+                {codeOverride ? 'use auto' : 'customize'}
+              </Button>
+            </div>
+            {codeOverride && (
+              <input
+                className={cell}
+                placeholder='unique among active'
+                value={d.code}
+                onChange={(e) => set({ code: e.target.value })}
+              />
+            )}
+            <Text variant='inactive' size='micro'>
+              assigned on save
+            </Text>
+          </div>
+
+          <div className='flex flex-col gap-1'>
+            <Text variant='label' size='micro' tracking='label' className='uppercase'>
+              reads as
+            </Text>
+            <Text variant='label' size='small'>
+              {readsAs}
+            </Text>
+          </div>
+
+          {/* #39: catalog image — image_id is the write-side ref; MediaSelector handles upload +
+              crop (reused as-is). Lives here so the pane shows the material as it will look. */}
+          <div className='flex flex-col gap-1'>
+            <Text variant='label' size='micro' tracking='label' className='uppercase'>
+              image
+            </Text>
+            <MediaPreviewWithSelector
+              mediaUrl={mediaThumbUrl(image)}
+              aspectRatio={['1:1', 'Custom']}
+              allowMultiple={false}
+              showVideos={false}
+              heightClass='h-24'
+              label='add image'
+              purpose='material image'
+              alt={d.name || 'material image'}
+              onSaveMedia={handleSetImage}
+              onClear={imageId ? clearImage : undefined}
+            />
+          </div>
+        </div>
       </div>
     </ConfirmationModal>
   );
