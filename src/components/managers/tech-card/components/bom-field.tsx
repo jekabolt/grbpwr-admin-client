@@ -505,9 +505,15 @@ function BomTile({
         className='flex w-full flex-col gap-1 p-1.5 text-left'
         aria-expanded={open}
       >
-        {/* the square material photo — the tile's centre of gravity */}
+        {/* The square material photo — full-bleed on the collapsed grid tile, but capped small once
+            the tile is open (col-span-full), or a w-full square would blow past the viewport. */}
         {imageUrl ? (
-          <span className='relative block aspect-square w-full overflow-hidden border border-borderColor'>
+          <span
+            className={cn(
+              'relative block aspect-square overflow-hidden border border-borderColor',
+              open ? 'w-28' : 'w-full',
+            )}
+          >
             <Media
               src={imageUrl}
               alt={row.name?.trim() || 'material'}
@@ -516,7 +522,7 @@ function BomTile({
             />
           </span>
         ) : (
-          <Placeholder aspect='square' label='no photo' />
+          <Placeholder aspect='square' label='no photo' className={open ? 'w-28' : 'w-full'} />
         )}
 
         {/* секция / тип */}

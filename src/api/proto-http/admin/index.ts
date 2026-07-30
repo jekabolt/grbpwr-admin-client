@@ -5986,6 +5986,7 @@ export type common_TechCardOperation = {
   // empty. Distinct from piece_line_keys: those are the parts joined, these are what joins them.
   bomLineKeys: string[] | undefined;
   bomItemIds: number[] | undefined;
+  smv: googletype_Decimal | undefined;
 };
 
 // TechCardOperationType classifies an operation by its machine / stitch class

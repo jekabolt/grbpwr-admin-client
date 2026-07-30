@@ -339,6 +339,9 @@ const operationSchema = z.object({
   description: z.string().optional().default(''),
   seamType: z.string().optional().default(''),
   stitchesPerCm: z.string().optional().default(''), // decimal as string
+  // Standard minute value — the sewing time this operation contributes to the garment's SMV
+  // roll-up. Same google.type.Decimal-as-form-string handling as stitchesPerCm.
+  smv: z.string().optional().default(''), // decimal as string
   topstitchWidth: z.string().optional().default(''),
   thread: z.string().optional().default(''),
   note: z.string().optional().default(''),
@@ -875,6 +878,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       description: o.description || '',
       seamType: o.seamType || '',
       stitchesPerCm: decimalToInput(o.stitchesPerCm),
+      smv: decimalToInput(o.smv),
       topstitchWidth: o.topstitchWidth || '',
       thread: o.thread || '',
       note: o.note || '',
@@ -1246,6 +1250,7 @@ export function mapFormToTechCardInsert(
         description: o.description?.trim() || '',
         seamType: o.seamType?.trim() || '',
         stitchesPerCm: inputToDecimal(o.stitchesPerCm),
+        smv: inputToDecimal(o.smv),
         topstitchWidth: o.topstitchWidth?.trim() || '',
         thread: o.thread?.trim() || '',
         note: o.note?.trim() || '',

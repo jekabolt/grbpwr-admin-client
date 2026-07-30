@@ -19,7 +19,7 @@ import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { decimalToInput } from 'utils/decimal';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { fieldErrorSummary, revealField } from 'utils/field-errors';
 import {
   OPERATION_TYPE_PRESETS,
@@ -58,6 +58,7 @@ export const emptyOperation = {
   seamType: '',
   seamAllowance: '',
   stitchesPerCm: '',
+  smv: '',
   topstitchWidth: '',
   needle: '',
   thread: '',
@@ -99,6 +100,7 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     seamType: o.seamType?.trim() || '',
     seamAllowance: o.seamAllowance?.trim() || '',
     stitchesPerCm: decimalToInput(o.stitchesPerCm),
+    smv: decimalToInput(o.smv),
     topstitchWidth: o.topstitchWidth?.trim() || '',
     needle: o.needle?.trim() || '',
     thread: o.thread?.trim() || '',
@@ -466,6 +468,17 @@ function OperationRow({
               label='машина'
               options={machineOptions}
             />
+            <div className='space-y-px'>
+              <DecimalField
+                name={`operations.${index}.smv`}
+                label='SMV'
+                placeholder='0.5'
+                min={0}
+              />
+              <Text size='micro' variant='label'>
+                standard minutes
+              </Text>
+            </div>
             <SelectField
               name={`operations.${index}.calloutNumber`}
               label='пин'
@@ -774,6 +787,24 @@ function GenerateOperationsPanel({
   );
 }
 
+// Live roll-up of the operations list: how many operations, and their total SMV (standard minute
+// value, summed across rows — blank/garbage counts as 0). Kept in its own component so watching the
+// whole operations array re-renders only this footer on each keystroke, not every OperationRow
+// (same discipline as readReplaceImpact reading impact off form state instead of watching).
+function OperationsSummary() {
+  const { control } = useFormContext<TechCardFormData>();
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationFormValue[];
+  const smvTotal = operations.reduce((sum, o) => {
+    const n = parseDecimalNumber(o?.smv);
+    return sum + (Number.isFinite(n) ? n : 0);
+  }, 0);
+  return (
+    <Text size='micro' variant='label' component='span' className='tabular-nums'>
+      {`${operations.length} ops · ${smvTotal.toFixed(1)} SMV`}
+    </Text>
+  );
+}
+
 // Per-node sewing operations (Sheet «Обработка», lower block). Operations are an ordered
 // assembly sequence (№ 10, 20, 30…); the backend returns them sorted by number.
 export function OperationsField({
@@ -965,6 +996,9 @@ export function OperationsField({
               onTarget={() => setTargetIndex(index)}
             />
           ))}
+          <div className='flex justify-end border-t border-hairline pt-1.5'>
+            <OperationsSummary />
+          </div>
         </div>
       )}
 
