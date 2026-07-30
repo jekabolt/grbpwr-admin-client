@@ -14,7 +14,10 @@ import {
   composeArticleFromMaterial,
   materialSpec,
 } from 'components/managers/materials/components/material-code';
-import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
+import {
+  MaterialThumb,
+  materialImageUrl,
+} from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -717,16 +720,183 @@ function RecipeMaterialCard({ article }: { article?: BomLine }) {
   );
 }
 
-// Option label for the fabric picker: the linked catalog material's article code (or its name) plus
-// its spec, so an operator picks a fabric by what it IS, not by a BOM row number. Falls back to the
-// BOM line's own name for a legacy/unlinked line.
-function fabricOptionLabel(b: BomLine): string {
+// The line's identifying CODE for the fabric picker: the linked catalog material's article code (or
+// its name), so a fabric reads by what it IS, not by a BOM row number. Falls back to the BOM line's
+// own name for a legacy/unlinked line.
+function fabricCode(b: BomLine): string {
   const m = b.material;
-  const base = m
-    ? composeArticleFromMaterial(m, true) || m.name?.trim() || b.name?.trim() || 'material'
-    : b.name?.trim() || 'unnamed';
-  const spec = m ? materialSpec(m) : '';
-  return spec ? `${base} · ${spec}` : base;
+  if (m) return composeArticleFromMaterial(m, true) || m.name?.trim() || b.name?.trim() || 'material';
+  return b.name?.trim() || 'unnamed';
+}
+
+// The spec line under the code: the material's own spec (gsm · width · finish · tex …) plus its
+// colour. Empty for a legacy/unlinked line that has no catalog material behind it.
+function fabricSpecLine(b: BomLine): string {
+  const m = b.material;
+  if (!m) return '';
+  return [materialSpec(m), m.color?.trim()].filter(Boolean).join(' · ');
+}
+
+// The fabric chooser. Replaces the native <select> — a select can render only text, and a fabric is
+// picked by its photo + spec, not a row number. A field-box trigger (the shared `cell` box, so it
+// reads as a form field) shows the current pick as a thumbnail + code + spec; the menu is the app's
+// one popover shell (GenericPopover → Radix Popover: portalled so it escapes the card's overflow,
+// focus-trapped, Esc to close, click-outside to dismiss, focus restored to the trigger). Each option
+// is a real <button role="option"> — Tab reaches it, Enter/Space activates it. Respects canEdit by
+// disabling the trigger (a disabled Radix trigger cannot open).
+function FabricPicker({
+  value,
+  bomItems,
+  canEdit,
+  onChange,
+}: {
+  value: string;
+  bomItems: BomLine[];
+  canEdit: boolean;
+  onChange: (patch: Partial<UsageDraft>) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = value ? bomItems.find((b) => b.lineKey === value) : undefined;
+  // A stored key that no longer resolves to a live BOM line. Kept visible AND kept as the selection
+  // (we never rewrite draft.bomLineKey unless the operator picks something), so a save never silently
+  // drops it — the same guarantee the old <select>'s "(unknown / removed material)" option gave.
+  const unknown = !!value && !selected;
+
+  const pick = (bomLineKey: string) => {
+    onChange({ bomLineKey });
+    setOpen(false);
+  };
+
+  return (
+    <GenericPopover
+      open={open && canEdit}
+      onOpenChange={setOpen}
+      noTail
+      title='ткань'
+      className='w-[280px]'
+      triggerProps={{
+        disabled: !canEdit,
+        'aria-label': 'ткань',
+        className: cn(cell, 'flex items-center gap-2 text-left'),
+      }}
+      openElement={(isOpen) => (
+        <>
+          {selected ? (
+            <MaterialThumb material={selected.material} size='sm' className='h-5 w-5' />
+          ) : null}
+          <span className='min-w-0 flex-1'>
+            {selected ? (
+              <>
+                <Text
+                  component='span'
+                  size='control'
+                  className='block truncate font-mono tabular-nums'
+                >
+                  {fabricCode(selected)}
+                </Text>
+                {fabricSpecLine(selected) && (
+                  <Text component='span' size='micro' variant='label' className='block truncate'>
+                    {fabricSpecLine(selected)}
+                  </Text>
+                )}
+              </>
+            ) : (
+              <Text component='span' variant='label' className='block truncate'>
+                {unknown ? '(unknown / removed material)' : '— выбрать ткань —'}
+              </Text>
+            )}
+          </span>
+          <Text component='span' variant='inactive' className='shrink-0'>
+            {isOpen ? '▴' : '▾'}
+          </Text>
+        </>
+      )}
+    >
+      {/* full-bleed list inside the popover body's px-2 py-1.5 padding */}
+      <div role='listbox' aria-label='ткань' className='-mx-2 -my-1.5'>
+        {/* clear — this piece takes no fabric */}
+        <button
+          type='button'
+          role='option'
+          aria-selected={!value}
+          onClick={() => pick('')}
+          className={cn(
+            'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left text-labelColor',
+            !value && 'bg-bgZebra',
+          )}
+        >
+          <span className='flex h-8 w-8 shrink-0 items-center justify-center'>✕</span>
+          <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
+            — no fabric yet —
+          </Text>
+        </button>
+
+        {/* the stored-but-removed material, surfaced as the current selection so it is never dropped */}
+        {unknown && (
+          <div
+            role='option'
+            aria-selected
+            className='flex w-full items-center gap-2 border-b border-hairline bg-bgZebra px-2 py-1 text-left'
+          >
+            <MaterialThumb size='sm' className='h-8 w-8' />
+            <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
+              (unknown / removed material)
+            </Text>
+            <Text component='span' variant='inactive' className='shrink-0'>
+              ✓
+            </Text>
+          </div>
+        )}
+
+        {bomItems.length === 0 ? (
+          <div className='px-2 py-2.5'>
+            <Text variant='label' size='micro'>
+              no fabric lines on this tech card
+            </Text>
+          </div>
+        ) : (
+          bomItems.map((b) => {
+            const current = value === b.lineKey;
+            const spec = fabricSpecLine(b);
+            return (
+              <button
+                key={b.lineKey}
+                type='button'
+                role='option'
+                aria-selected={current}
+                onClick={() => pick(b.lineKey ?? '')}
+                className={cn(
+                  'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
+                  current && 'bg-bgZebra',
+                )}
+              >
+                <MaterialThumb material={b.material} size='sm' className='h-8 w-8' />
+                <span className='min-w-0 flex-1'>
+                  <Text
+                    component='span'
+                    size='control'
+                    className='block truncate font-mono tabular-nums'
+                  >
+                    {fabricCode(b)}
+                  </Text>
+                  {spec && (
+                    <Text component='span' size='micro' variant='label' className='block truncate'>
+                      {spec}
+                    </Text>
+                  )}
+                </span>
+                {current && (
+                  <Text component='span' variant='inactive' className='shrink-0'>
+                    ✓
+                  </Text>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </GenericPopover>
+  );
 }
 
 // A fresh usage for a piece that has none yet: no fabric, its placement primed to the piece name so
@@ -792,36 +962,28 @@ function PieceRecipeCard({
       </div>
 
       <div className='flex flex-col gap-3 sm:flex-row sm:items-start'>
-        {/* LEFT — the fabric AS the square BOM card, with the single picker that assigns which catalog
-            article this piece is cut from directly under it. Option labels carry the material's meta
-            so a fabric is chosen by what it is, not a row number. */}
-        <div className='flex w-full flex-col gap-1.5 sm:w-40 sm:shrink-0'>
+        {/* LEFT — the chosen fabric AS the square BOM article card (photo · section/тип · name · code ·
+            spec+colour), read-only. It shows WHAT this piece is cut from; the picker that changes it
+            now lives on the right, with the rest of the controls. */}
+        <div className='w-full sm:w-40 sm:shrink-0'>
           <RecipeMaterialCard article={article} />
-          <label className='flex flex-col gap-1'>
-            <FieldLabel>ткань</FieldLabel>
-            <select
-              className={cell}
-              disabled={!canEdit}
-              value={draft.bomLineKey}
-              onChange={(e) => onChange({ bomLineKey: e.target.value })}
-            >
-              <option value=''>— no fabric yet —</option>
-              {/* keep an unknown stored key selectable so a save never silently drops it */}
-              {draft.bomLineKey && !bomItems.some((b) => b.lineKey === draft.bomLineKey) ? (
-                <option value={draft.bomLineKey}>(unknown / removed material)</option>
-              ) : null}
-              {bomItems.map((b) => (
-                <option key={b.lineKey} value={b.lineKey}>
-                  {fabricOptionLabel(b)}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
 
-        {/* RIGHT — how much of that fabric this piece takes. Measured articles cost by a rate (per-size
-            gradable); counted ones by a flat quantity (M14) — the controls are unchanged. */}
+        {/* RIGHT — every picker for this piece. First WHICH catalog fabric it is cut from (a proper
+            popover picker showing each option's photo + code + spec, which a native select cannot),
+            then HOW MUCH of it: measured articles cost by a rate (per-size gradable), counted ones by
+            a flat quantity (M14) — the consumption controls are unchanged. */}
         <div className='flex min-w-0 flex-1 flex-col gap-3'>
+          <div className='flex flex-col gap-1'>
+            <FieldLabel>ткань</FieldLabel>
+            <FabricPicker
+              value={draft.bomLineKey}
+              bomItems={bomItems}
+              canEdit={canEdit}
+              onChange={onChange}
+            />
+          </div>
+
           {isMeasured ? (
             <UsagePerSizeLocal
               draft={draft}
