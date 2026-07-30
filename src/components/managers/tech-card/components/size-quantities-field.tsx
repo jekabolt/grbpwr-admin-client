@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
+import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
@@ -107,13 +107,14 @@ export function SizeQuantitiesField() {
                 </tr>
               );
             })}
-            <TotalRow>
+            {/* Summary row: ruled above like a total, but not bold — this table reads as plain rows. */}
+            <tr className='[&>td]:border-t [&>td]:border-b-0 [&>td]:border-textColor'>
               <td>
                 {rows.length} {rows.length === 1 ? 'size' : 'sizes'}
               </td>
               <td>{total || <EmptyCell />}</td>
               <td />
-            </TotalRow>
+            </tr>
           </tbody>
         </DataTable>
       )}
