@@ -204,7 +204,7 @@ export function SamplesTab({
 
   if (expanded === 'new') {
     return (
-      <div className='flex flex-col'>
+      <div className='flex flex-col border border-borderColor bg-bgColor p-4'>
         <SectionHeader
           title='new sample'
           question='— one short form; the material write-off is optional and can be done later'
@@ -247,7 +247,7 @@ export function SamplesTab({
   }
 
   return (
-    <div className='flex flex-col'>
+    <div className='flex flex-col border border-borderColor bg-bgColor p-4'>
       <SectionHeader
         title='samples'
         question='— every physical sample made; each one consumed real material and carries a cost'
@@ -889,7 +889,7 @@ function SampleEditor({
 
       {/* 10.3 — photos + facts left, the whole activity trail right, nothing collapsed. */}
       <div className='grid grid-cols-1 gap-2.5 lg:grid-cols-[200px_1fr]'>
-        <div className='flex min-w-0 flex-col gap-1'>
+        <div className='flex min-w-0 flex-col gap-1 border border-borderColor bg-bgColor p-3'>
           {heroThumb ? (
             <span className='block aspect-[3/4] overflow-hidden border border-borderColor'>
               <Media
@@ -1037,7 +1037,7 @@ function SampleEditor({
           ) : null}
         </div>
 
-        <div className='flex min-w-0 flex-col'>
+        <div className='flex min-w-0 flex-col border border-borderColor bg-bgColor p-3'>
           <SampleTabs tabs={tabs} active={activeTab} onSelect={setTab} />
 
           {activeTab === 'fittings' && (

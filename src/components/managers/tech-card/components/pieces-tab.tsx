@@ -313,7 +313,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       </datalist>
 
       {/* CUT PIECES — table + mini diagram */}
-      <section>
+      <section className='border border-borderColor bg-bgColor p-4'>
         <SectionHeader
           title='детали кроя'
           question='— code, name, per garment, mirrored, grainline, fused, callout number'
@@ -491,7 +491,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       </section>
 
       {/* FABRIC MAP — piece × colourway matrix */}
-      <section>
+      <section className='border border-borderColor bg-bgColor p-4'>
         <SectionHeader
           title='fabric map'
           question='— which fabric on which piece, per colourway; a fused piece carries a second “fusing” choice'

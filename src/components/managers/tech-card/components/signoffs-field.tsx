@@ -352,7 +352,7 @@ export function SignoffsField() {
     .join(' · ');
 
   return (
-    <div className='flex flex-col'>
+    <div className='flex flex-col border border-borderColor bg-bgColor p-3'>
       <SectionHeader title='every section signed before release' question={summary} />
       <Text size='micro' variant='label' className='mb-2'>
         each section is checked and approved by its responsible role — confirmation the sheet is

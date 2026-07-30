@@ -176,7 +176,11 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`space-y-2.5 ${className ?? ''}`}>
+    // Each logical block is a white card (bg-bgColor + border) on the gray page ground; the gap
+    // between cards is the gray divider. Without a fill the block floats bare on gray.
+    <section
+      className={`space-y-2.5 border border-borderColor bg-bgColor p-4 ${className ?? ''}`}
+    >
       <SectionHeader title={title} question={question} />
       {children}
     </section>

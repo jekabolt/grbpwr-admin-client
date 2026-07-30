@@ -496,7 +496,7 @@ export function SketchTab({
 
   if (view === 'moodboard') {
     return (
-      <section className='flex flex-col gap-2.5'>
+      <section className='flex flex-col gap-2.5 border border-borderColor bg-bgColor p-4'>
         <SectionHeader
           title='moodboard'
           question='— mood, reference and swatch images; pin a note on any of them'
@@ -518,7 +518,7 @@ export function SketchTab({
   }
 
   return (
-    <section className='flex flex-col gap-2.5'>
+    <section className='flex flex-col gap-2.5 border border-borderColor bg-bgColor p-4'>
       <SectionHeader
         title='technical sketch'
         question='— front / back / detail views, each carrying the numbered callouts the construction tab points at'
