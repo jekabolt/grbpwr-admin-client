@@ -327,3 +327,169 @@ export function AuxCardPickerModal({
     </ConfirmationModal>
   );
 }
+
+// The MULTI-select twin of AuxCardPickerModal: same look (search + sub-type chips + a grid of square
+// tiles), but a tile TOGGLES membership in a selection instead of committing on click, so several
+// aux cards land on the assembly bill in one pass. There is no per-card stock "resolving" step —
+// the output material resolves on save — so the confirm commits every selected card at once.
+export function AuxCardMultiPickerModal({
+  open,
+  onOpenChange,
+  onPick,
+  alreadyAddedIds = [],
+  title = 'pick auxiliary items',
+  hint,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Commits every selected card at once. */
+  onPick: (cards: common_TechCardListItem[]) => void;
+  /** Cards already on the bill — still shown, but marked and not selectable (no re-adding). */
+  alreadyAddedIds?: number[];
+  title?: string;
+  hint?: ReactNode;
+}) {
+  const { data, isLoading } = useAuxTechCards();
+  const cards = useMemo(() => data?.techCards ?? [], [data]);
+  const [q, setQ] = useState('');
+  const [subtype, setSubtype] = useState<string>('all');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const added = useMemo(() => new Set(alreadyAddedIds), [alreadyAddedIds]);
+
+  // Re-arm on every opening: no selection, no search, all sub-types — never the last run's leftovers.
+  useEffect(() => {
+    if (!open) return;
+    setQ('');
+    setSubtype('all');
+    setSelected(new Set());
+  }, [open]);
+
+  const subtypes = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of cards)
+      if (c.auxSubtype && c.auxSubtype !== 'TECH_CARD_AUX_SUBTYPE_UNKNOWN') set.add(c.auxSubtype);
+    return Array.from(set);
+  }, [cards]);
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return cards.filter((c) => {
+      if (subtype !== 'all' && c.auxSubtype !== subtype) return false;
+      if (!needle) return true;
+      return (
+        (c.styleNumber ?? '').toLowerCase().includes(needle) ||
+        (c.name ?? '').toLowerCase().includes(needle)
+      );
+    });
+  }, [cards, q, subtype]);
+
+  const toggle = (id: number) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const confirm = () => {
+    if (selected.size === 0) return;
+    onPick(cards.filter((c) => selected.has(Number(c.id) || 0)));
+  };
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={confirm}
+      title={title}
+      confirmLabel={selected.size ? `add ${selected.size}` : 'add'}
+      confirmDisabled={selected.size === 0}
+      width='lg'
+    >
+      <div className='flex flex-col gap-2'>
+        {hint ? (
+          <Text size='micro' variant='label'>
+            {hint}
+          </Text>
+        ) : null}
+
+        <Toolbar>
+          <Input
+            name='aux-card-multi-search'
+            placeholder='search style № / name'
+            value={q}
+            autoComplete='off'
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQ(e.target.value)}
+            className='min-w-40 flex-1'
+          />
+          <ChipRow>
+            <Chip
+              selected={subtype === 'all'}
+              pressed={subtype === 'all'}
+              onClick={() => setSubtype('all')}
+            >
+              all
+            </Chip>
+            {subtypes.map((s) => (
+              <Chip
+                key={s}
+                selected={subtype === s}
+                pressed={subtype === s}
+                onClick={() => setSubtype(s)}
+              >
+                {auxSubtypeLabel(s)}
+              </Chip>
+            ))}
+          </ChipRow>
+        </Toolbar>
+
+        {isLoading ? (
+          <Text size='micro' variant='label'>
+            loading…
+          </Text>
+        ) : filtered.length === 0 ? (
+          <CalloutBox tone='note'>
+            <Text size='micro' component='span'>
+              <b>no auxiliary cards</b>
+              {subtype !== 'all' ? ` of type “${auxSubtypeLabel(subtype)}”` : ''} found — create one
+              as an auxiliary tech card (purpose = auxiliary) with an output material set.
+            </Text>
+          </CalloutBox>
+        ) : (
+          <Tiles min={140} className='max-h-[52vh] overflow-y-auto'>
+            {filtered.map((c) => {
+              const id = Number(c.id) || 0;
+              const isAdded = added.has(id);
+              const isSelected = selected.has(id);
+              return (
+                <Tile
+                  key={id}
+                  selected={isSelected}
+                  // An already-added card is a plain (non-toggling) tile — clicking it must not queue
+                  // a duplicate the bill would only drop again.
+                  onClick={isAdded ? undefined : () => toggle(id)}
+                  media={
+                    <Thumb
+                      url={auxCardThumbUrl(c)}
+                      alt={c.name || 'aux card'}
+                      className='aspect-square w-full'
+                      placeholder='no image'
+                    />
+                  }
+                  name={c.name || `#${id}`}
+                  sub={[c.styleNumber, auxSubtypeLabel(c.auxSubtype)].filter(Boolean).join(' · ')}
+                >
+                  {isAdded ? (
+                    <Pill tone='mut'>on bill</Pill>
+                  ) : isSelected ? (
+                    <Pill tone='ok'>selected</Pill>
+                  ) : null}
+                </Tile>
+              );
+            })}
+          </Tiles>
+        )}
+      </div>
+    </ConfirmationModal>
+  );
+}
