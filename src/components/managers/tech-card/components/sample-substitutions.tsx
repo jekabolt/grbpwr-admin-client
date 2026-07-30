@@ -1,4 +1,5 @@
 import { common_TechCard } from 'api/proto-http/admin';
+import { materialSpec } from 'components/managers/materials/components/material-code';
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -42,7 +43,14 @@ function useSubstitutionNaming(techCard?: common_TechCard) {
     const b = bomItems.find((x) => x.id === id);
     return b?.name?.trim() || (id ? `#${id}` : '—');
   };
-  return { bomItems, materialName, bomName };
+  // The BOM-line picker option: the line name + its material's spec (gsm·width·finish·composition),
+  // so the original line is chosen by what it is, not a bare name.
+  const bomOptionLabel = (b: (typeof bomItems)[number]) => {
+    const m = b.materialId ? materialsData?.materials?.find((x) => x.id === b.materialId) : undefined;
+    const spec = m ? materialSpec(m) : '';
+    return [b.name?.trim() || `#${b.id}`, spec].filter(Boolean).join(' · ');
+  };
+  return { bomItems, materialName, bomName, bomOptionLabel };
 }
 
 /**
@@ -91,7 +99,7 @@ export function SampleSubstitutions({
   const { data } = useSampleSubstitutions(sampleId);
   const add = useAddSampleSubstitution(sampleId);
   const del = useDeleteSampleSubstitution(sampleId);
-  const { bomItems, materialName, bomName } = useSubstitutionNaming(techCard);
+  const { bomItems, materialName, bomName, bomOptionLabel } = useSubstitutionNaming(techCard);
 
   const substitutions = data?.substitutions ?? [];
 
@@ -206,7 +214,7 @@ export function SampleSubstitutions({
                 <option value={0}>— select BOM line —</option>
                 {bomItems.map((b) => (
                   <option key={b.id} value={b.id}>
-                    {b.name?.trim() || `#${b.id}`}
+                    {bomOptionLabel(b)}
                   </option>
                 ))}
               </select>
