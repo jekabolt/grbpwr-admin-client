@@ -5,14 +5,11 @@ import { Button } from 'ui/components/button';
 import { Canvas, Pin } from 'ui/components/canvas';
 import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
-import { Pill } from 'ui/components/pill';
 import GenericPopover from 'ui/components/popover';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
-import { BomLineSelect } from './bom-line-picker';
 import { grainlineArrow, grainlineOptions, pieceCodeOptions } from './piece-codes';
-import { PieceLegend } from './piece-legend';
 import { normalizePieceName } from './piece-picker';
 import { TechCardFormData } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
@@ -147,50 +144,6 @@ function PieceDiagram({
 }
 
 // A colourway column's «copy from ▾»: fills this colourway's whole fabric map from another one.
-// 12 pieces × 3 colourways is 36 dropdowns to click through, and the second and third colourway are
-// almost always the first one with a different shell — so this removes most of that clicking
-// without changing what the matrix means.
-function CopyColumnMenu({
-  target,
-  sources,
-  onCopy,
-}: {
-  target: string;
-  sources: { id: number; label: string }[];
-  onCopy: (fromId: number) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  return (
-    <GenericPopover
-      open={open}
-      onOpenChange={setOpen}
-      noTail
-      title={`copy into ${target}`}
-      triggerProps={{ 'aria-label': `copy the fabric map of another colourway into ${target}` }}
-      openElement={
-        <Text size='nano' variant='label' component='span' className='uppercase underline'>
-          copy from ▾
-        </Text>
-      }
-    >
-      <div className='flex flex-col'>
-        {sources.map((s) => (
-          <button
-            key={s.id}
-            type='button'
-            onClick={() => {
-              onCopy(s.id);
-              setOpen(false);
-            }}
-            className='px-1 py-1 text-left text-control uppercase hover:bg-bgZebra'
-          >
-            {s.label}
-          </button>
-        ))}
-      </div>
-    </GenericPopover>
-  );
-}
 
 // Cut-piece details (детали кроя) + the piece × colourway fabric map (NF-05). Pieces are positional.
 // The map stores a sparse materials list keyed by the colourway id (pieceMaterial.colorwayIndex holds
@@ -347,7 +300,6 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                 <col className='w-[92px]' />
                 <col className='w-[150px]' />
                 <col className='w-[56px]' />
-                <col className='w-[64px]' />
                 <col className='w-[180px]' />
                 <col className='w-[40px]' />
               </colgroup>
@@ -358,7 +310,6 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                   <th>mirror</th>
                   <th>grain</th>
                   <th>fused</th>
-                  <th>callout</th>
                   <th>note</th>
                   <th />
                 </tr>
@@ -456,19 +407,6 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                       <td>
                         <Input
                           className='w-full'
-                          type='number'
-                          min='0'
-                          value={p.calloutNumber || 0}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setValue(`pieces.${pi}.calloutNumber`, Number(e.target.value) || 0, {
-                              shouldDirty: true,
-                            })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <Input
-                          className='w-full'
                           value={p.note ?? ''}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                             setValue(`pieces.${pi}.note`, e.target.value, { shouldDirty: true })
@@ -503,108 +441,6 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
         )}
       </section>
 
-      {/* FABRIC MAP — piece × colourway matrix */}
-      <section className='border border-borderColor bg-bgColor p-4'>
-        <SectionHeader
-          title='fabric map'
-          question='— which fabric on which piece, per colourway; a fused piece carries a second “fusing” choice'
-        />
-        {fields.length === 0 ? (
-          <Text size='micro' variant='label'>
-            add pieces above to map their fabrics
-          </Text>
-        ) : colorways.length === 0 ? (
-          <Text size='micro' variant='label'>
-            add colourways (colorways tab) to map fabrics per colour
-          </Text>
-        ) : bomItems.length === 0 ? (
-          <Text size='micro' variant='label'>
-            add fabric / lining articles (BOM tab) to pick from
-          </Text>
-        ) : (
-          <DataTable variant='grid'>
-            <thead>
-              <tr>
-                <th>piece</th>
-                {colorways.map((c) => {
-                  const cwId = c.colorwayId ?? 0;
-                  const label = colorwayLabel(c);
-                  return (
-                    <th key={cwId}>
-                      <div className='flex flex-col items-center gap-0.5'>
-                        <span>{label}</span>
-                        {colorways.length > 1 && (
-                          <CopyColumnMenu
-                            target={label}
-                            sources={colorways
-                              .filter((o) => (o.colorwayId ?? 0) !== cwId)
-                              .map((o) => ({ id: o.colorwayId ?? 0, label: colorwayLabel(o) }))}
-                            onCopy={(fromId) => copyColumn(fromId, cwId)}
-                          />
-                        )}
-                      </div>
-                    </th>
-                  );
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {fields.map((f, pi) => {
-                const p = pieces[pi] ?? {};
-                return (
-                  <tr key={f.id}>
-                    <td className='whitespace-nowrap'>
-                      <span className='inline-flex items-center gap-1.5'>
-                        {p.name?.trim() || `piece ${pi + 1}`}
-                        {p.fused && <Pill tone='mut'>fused</Pill>}
-                      </span>
-                    </td>
-                    {colorways.map((cw) => {
-                      const cwId = cw.colorwayId ?? 0;
-                      const c = cellFor(pi, cwId);
-                      const fabricVal = c?.bomLineKey ?? '';
-                      const fusingVal = c?.fusingBomLineKey ?? '';
-                      const missingFusing = !!p.fused && !fusingVal;
-                      return (
-                        <td key={cwId}>
-                          <div className='flex flex-col gap-1'>
-                            {/* an unset cell reads «— fabric —» in label grey, never blank */}
-                            <div className={fabricVal ? undefined : '[&_select]:text-labelColor'}>
-                              <BomLineSelect
-                                value={fabricVal}
-                                onChange={(lk) => setCell(pi, cwId, { bomLineKey: lk })}
-                                sections={FABRIC_SECTIONS}
-                                noneLabel='— fabric —'
-                              />
-                            </div>
-                            {p.fused && (
-                              <div className={fusingVal ? undefined : '[&_select]:text-labelColor'}>
-                                <BomLineSelect
-                                  value={fusingVal}
-                                  onChange={(lk) => setCell(pi, cwId, { fusingBomLineKey: lk })}
-                                  sections={FUSING_SECTIONS}
-                                  noneLabel='— fusing —'
-                                />
-                                {missingFusing && (
-                                  <Text size='micro' variant='error'>
-                                    ! no fusing
-                                  </Text>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </DataTable>
-        )}
-      </section>
-
-      <PieceLegend />
     </div>
   );
 }
