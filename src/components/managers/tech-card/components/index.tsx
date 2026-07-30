@@ -608,13 +608,14 @@ export function TechCardForm({
 
   return (
     <Form {...form}>
-      {/* TWO-TIER STICKY CHROME (top-16 clears the fixed Layout nav; -mx-2.5 cancels the
-          Layout content px-2.5 so the bar spans full width).
+      {/* TWO-TIER CHROME (top-16 clears the fixed Layout nav; -mx-2.5 cancels the Layout content
+          px-2.5 so the bar spans full width).
           Row 1 is identity + the page actions. Row 2 is the card's STATE: stage, approval,
           and one chip per release blocker — each chip navigates to the tab that fixes it.
-          The blockers used to live only in a `title` on a disabled button: invisible on
-          touch, unreadable by a screen reader, and gone the moment you looked away. */}
-      <div className='sticky top-16 z-30 -mx-2.5 border-b border-borderColor bg-bgColor'>
+          Pinned only from lg up: on a phone this two-tier bar plus the fixed nav left almost no
+          room for the actual spec, so below lg it scrolls away with the content (the tab rail
+          below is already lg-only sticky, so nothing stays pinned on mobile). */}
+      <div className='-mx-2.5 border-b border-borderColor bg-bgColor lg:sticky lg:top-16 lg:z-30'>
         <div className='flex flex-wrap items-center gap-2 px-2.5 py-2'>
           <Button asChild variant='secondary' size='sm'>
             <Link to={ROUTES.techCards}>←</Link>

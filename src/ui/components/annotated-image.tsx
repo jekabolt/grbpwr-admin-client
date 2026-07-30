@@ -132,7 +132,9 @@ function StickyNote({
       onPointerDown={(e) => e.stopPropagation()}
       onPointerUp={(e) => e.stopPropagation()}
       className={cn(
-        'w-60 max-w-[min(15rem,72vw)] border border-textColor bg-bgColor text-left',
+        // text-textColor is explicit, not inherited: inside the media viewer the ambient ink is
+        // white (dark lightbox), which on this white note would be invisible.
+        'w-60 max-w-[min(15rem,72vw)] border border-textColor bg-bgColor text-left text-textColor',
         'shadow-[var(--shadow-popover)]',
         className,
       )}
