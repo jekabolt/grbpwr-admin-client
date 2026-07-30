@@ -138,9 +138,17 @@ function TrayChip({ piece, onAdd }: { piece: PieceRef; onAdd: () => void }) {
           onAdd();
         }
       }}
-      className='inline-flex cursor-grab focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor active:cursor-grabbing'
+      title={piece.name}
+      className='flex size-16 cursor-grab flex-col items-center justify-center gap-0.5 border border-borderColor bg-bgColor p-1 text-center transition-colors hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor active:cursor-grabbing'
     >
-      <Chip>{piece.name}</Chip>
+      <Text
+        size='nano'
+        variant='label'
+        component='span'
+        className='line-clamp-3 uppercase leading-tight text-textColor'
+      >
+        {piece.name}
+      </Text>
     </span>
   );
 }
@@ -173,16 +181,28 @@ function PieceDropTarget({
         const key = raw.startsWith(PIECE_DND_PREFIX) ? raw.slice(PIECE_DND_PREFIX.length) : raw;
         if (key) onDropKey(key);
       }}
-      className='inline-flex'
+      className='block'
     >
-      <Chip
-        dashed
-        selected={over}
+      <button
+        type='button'
         onClick={onActivate}
-        title='перетащите деталь из лотка сюда — или нажмите, чтобы выбрать эту операцию, и кликните деталь в лотке'
+        title='перетащите детали из лотка сюда — или нажмите, чтобы выбрать эту операцию, затем кликните деталь в лотке'
+        className={cn(
+          'flex min-h-[40px] w-full items-center justify-center gap-1.5 border border-dashed px-3 py-2 text-center text-micro uppercase tracking-label transition-colors',
+          over
+            ? 'border-textColor bg-bgZebra text-textColor'
+            : targeted
+              ? 'border-textColor text-textColor'
+              : 'border-borderColor text-labelColor hover:border-textColor hover:text-textColor',
+        )}
       >
-        {targeted ? '↑ выберите деталь в лотке' : 'drop here'}
-      </Chip>
+        <span aria-hidden>⬇</span>
+        {over
+          ? 'отпустите деталь здесь'
+          : targeted
+            ? 'выберите деталь в лотке ↑'
+            : 'перетащите детали сюда'}
+      </button>
     </span>
   );
 }
@@ -219,9 +239,13 @@ function OperationRow({
   const opNumber = (index + 1) * 10;
   const opType = useWatch({ control, name: `operations.${index}.operationType` }) as string;
   const node = (useWatch({ control, name: `operations.${index}.node` }) ?? '') as string;
+  const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
   const timeNorm = (useWatch({ control, name: `operations.${index}.timeNorm` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
     0) as number;
+  // The collapsed card shows only операция · узел/что · зона · пин — every other field is «детали».
+  const opTypeLabel = operationTypeOptions.find((o) => o.value === opType)?.label ?? '';
+  const zoneLabel = zoneOptions.find((o) => o.value === zone)?.label ?? zone;
 
   // A blocking error must never hide behind a collapsed card (`node` is required), so the row
   // opens itself when its own subtree reports one — and a brand-new row opens because it is empty.
@@ -406,8 +430,10 @@ function OperationRow({
         <Text size='control' component='span' className='font-bold tabular-nums'>
           {opNumber}
         </Text>
-        <Text size='control' component='span' className='min-w-0 truncate'>
-          {node.trim() || <span className='text-labelColor'>— узел не задан —</span>}
+        <Text size='control' component='span' className='min-w-0 flex-1 truncate'>
+          {[opTypeLabel, node.trim(), zoneLabel].filter(Boolean).join(' · ') || (
+            <span className='text-labelColor'>— задайте операцию —</span>
+          )}
         </Text>
 
         <ChipRow>

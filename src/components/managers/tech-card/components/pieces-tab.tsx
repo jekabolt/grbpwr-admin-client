@@ -337,7 +337,20 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
           // minmax(0,1fr) — not 1fr — so the wide 8-column table can shrink and scroll inside its
           // own overflow-x-auto instead of forcing the track wide and shoving the diagram column.
           <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_160px]'>
-            <DataTable>
+            <DataTable className='min-w-[760px] [&_td]:!align-middle [&_td]:!text-left [&_th]:!text-left'>
+              {/* Fixed column widths so every row lines up; the code/name column flexes, the rest are
+                  sized to their control. Alignment is forced left/middle (the DataTable default right-
+                  aligns, which fought the left-aligned inputs and read crooked). */}
+              <colgroup>
+                <col />
+                <col className='w-[52px]' />
+                <col className='w-[92px]' />
+                <col className='w-[150px]' />
+                <col className='w-[56px]' />
+                <col className='w-[64px]' />
+                <col className='w-[180px]' />
+                <col className='w-[40px]' />
+              </colgroup>
               <thead>
                 <tr>
                   <th>code / name</th>
@@ -363,7 +376,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                     >
                       <td>
                         <Input
-                          className='w-40'
+                          className='w-full'
                           data-field={`pieces.${pi}.name`}
                           aria-invalid={duplicateRows.has(pi)}
                           list='piece-code-suggestions'
@@ -381,7 +394,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                       </td>
                       <td>
                         <Input
-                          className='w-14'
+                          className='w-full'
                           type='number'
                           min='1'
                           value={p.piecesPerGarment ?? 1}
@@ -394,7 +407,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                       </td>
                       <td>
                         {/* the resulting multiplier is shown inline so the cut list is predictable */}
-                        <div className='flex items-center justify-center gap-1'>
+                        <div className='flex items-center gap-1'>
                           <input
                             type='checkbox'
                             aria-label='mirrored pair'
@@ -413,7 +426,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                       <td>
                         <div className='flex items-center gap-1'>
                           <Input
-                            className='w-24'
+                            className='w-full'
                             list='grainline-suggestions'
                             value={p.grainline ?? ''}
                             onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -429,22 +442,20 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                         </div>
                       </td>
                       <td>
-                        <div className='flex justify-center'>
-                          <input
-                            type='checkbox'
-                            aria-label='fused'
-                            checked={!!p.fused}
-                            onChange={(e) =>
-                              setValue(`pieces.${pi}.fused`, e.target.checked, {
-                                shouldDirty: true,
-                              })
-                            }
-                          />
-                        </div>
+                        <input
+                          type='checkbox'
+                          aria-label='fused'
+                          checked={!!p.fused}
+                          onChange={(e) =>
+                            setValue(`pieces.${pi}.fused`, e.target.checked, {
+                              shouldDirty: true,
+                            })
+                          }
+                        />
                       </td>
                       <td>
                         <Input
-                          className='w-14'
+                          className='w-full'
                           type='number'
                           min='0'
                           value={p.calloutNumber || 0}
@@ -457,7 +468,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                       </td>
                       <td>
                         <Input
-                          className='w-40'
+                          className='w-full'
                           value={p.note ?? ''}
                           onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                             setValue(`pieces.${pi}.note`, e.target.value, { shouldDirty: true })
