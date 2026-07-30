@@ -598,7 +598,7 @@ function UsagePerSizeLocal({
         />
       ) : (
         <div className='flex flex-col gap-1.5'>
-          <DataTable variant='grid'>
+          <DataTable variant='grid' className='[&_td]:text-micro'>
             <thead>
               <tr>
                 <th>size</th>
@@ -613,7 +613,7 @@ function UsagePerSizeLocal({
                 {sizeIds.map((id) => (
                   <td key={id}>
                     <input
-                      className={gridInput}
+                      className={cn(gridInput, 'text-micro')}
                       inputMode='decimal'
                       disabled={!canEdit}
                       placeholder='0.00'
@@ -632,13 +632,14 @@ function UsagePerSizeLocal({
                   </td>
                 ))}
               </tr>
+              <tr>
+                <td className='font-bold'>расход на партию ≈</td>
+                <td colSpan={sizeIds.length} className='!text-right font-bold'>
+                  {preview ? `${preview} ${currency}`.trim() : '—'}
+                </td>
+              </tr>
             </tbody>
           </DataTable>
-
-          <RowTotal
-            label='расход на партию ≈'
-            value={preview ? `${preview} ${currency}`.trim() : '—'}
-          />
           {draft.sizeRunTotal && (
             <Row
               tone='label'
@@ -1696,7 +1697,8 @@ function ColorwayRecipeEditor({
   const derived = useMemo(() => deriveComposition(usages, bomItems), [usages, bomItems]);
 
   return (
-    <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
+    <div className='flex flex-col gap-4'>
+      <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
       <SectionHeader
         title={`${title} · рецепт`}
         question={[
@@ -1774,18 +1776,21 @@ function ColorwayRecipeEditor({
           {save.isPending ? 'saving…' : 'staged'} · included in the card’s Save
         </Text>
       )}
+      </div>
 
-      {/* Dye approval is a SEPARATE concern from the material recipe — its own group and its own RPC,
+      {/* Dye approval is a SEPARATE concern from the material recipe — its OWN card and its own RPC,
           staged separately so a lab-dip verdict and a recipe edit are two lines in the header. */}
-      <GroupLabel>dye · lab-dip</GroupLabel>
-      <LabDipTimeline
-        colorway={colorway}
-        techCardId={techCardId}
-        lockVersion={lockVersion}
-        canEdit={canEdit}
-        swatchHex={swatchHex}
-        onStagedChange={setLabDipStaged}
-      />
+      <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
+        <SectionHeader title={`${title} · dye · lab-dip`} question={colorway.baseSku} />
+        <LabDipTimeline
+          colorway={colorway}
+          techCardId={techCardId}
+          lockVersion={lockVersion}
+          canEdit={canEdit}
+          swatchHex={swatchHex}
+          onStagedChange={setLabDipStaged}
+        />
+      </div>
     </div>
   );
 }

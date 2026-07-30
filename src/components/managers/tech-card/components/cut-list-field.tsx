@@ -210,7 +210,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
         <Text size='micro'>{INTRO}</Text>
       </CalloutBox>
 
-      <DataTable>
+      <DataTable className='[&_td]:text-micro'>
         <thead>
           <tr>
             <th>piece</th>
