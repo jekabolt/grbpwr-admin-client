@@ -11,16 +11,22 @@ import Text from './text';
  *   body   p-2.5, scrolls, capped at 90vh
  *   foot   ruled top, right-aligned actions
  *
- * Also the shell for MaterialModal / StyleEconomicsModal / SizePickerModal / the
- * media library — those pass `width` instead of inventing their own lg:w-[…].
+ * Also the shell for MaterialModal / SizePickerModal / the media library — those pass
+ * `width` instead of inventing their own lg:w-[…]. Callers that still declare a width on
+ * their own children (StyleEconomicsModal, vat-rates-modal, material-prices-modal) keep
+ * working: `md` is a MINIMUM, so the panel grows to whatever the children ask for.
  */
 export type ModalWidth = 'sm' | 'md' | 'lg';
 
 const WIDTH: Record<ModalWidth, string> = {
   // Confirmations and short forms.
   sm: 'lg:w-[340px]',
-  // The default: a real form.
-  md: 'lg:w-[420px]',
+  // The default: a real form. A FLOOR, not a fixed width — the panel opens at 420 for a normal
+  // form, but content that declares its own wider box (a 30–34rem grid or field pair) grows to fit
+  // instead of scrolling sideways inside a 420px body, which is how this shell behaved before the
+  // width prop existed. Capped so a long unwrapped paragraph can't stretch it half across the
+  // viewport; past the cap the body scrolls as before.
+  md: 'lg:min-w-[420px] lg:max-w-xl',
   // Browsers and grids — the media library, the swatch picker, the aux-card grid.
   lg: 'lg:w-full lg:max-w-6xl',
 };

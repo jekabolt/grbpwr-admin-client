@@ -1,4 +1,6 @@
-import { common_ArchiveList } from 'api/proto-http/frontend';
+// The data comes from adminService.GetArchivesPaged (useInfiniteArchives), so type
+// against the admin client — the id the hero link stores is the internal one.
+import { common_ArchiveList } from 'api/proto-http/admin';
 import { useInfiniteArchives } from 'components/managers/archives/components/useArchiveQuery';
 import { ChangeEvent, useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';

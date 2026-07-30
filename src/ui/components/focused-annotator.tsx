@@ -279,6 +279,28 @@ export function FocusedAnnotator({
     ? 'click an image to drop a callout · drag a pin to move it'
     : 'hover a pin to read · click a pin to edit · use zoom to draw';
 
+  // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
+  // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
+  // no other media-add path: gating it on `hasMedia` made the empty state a dead end, where a new
+  // fitting could never get its first photo and removing the last one made re-adding impossible.
+  // Staying mounted across empty → populated also keeps an open picker dialog alive through the
+  // pick that fills the gallery. (The grid layout has its own always-present AddTile slot instead.)
+  const addControl = (
+    <MediaSelector
+      label={addLabel}
+      purpose={purpose}
+      aspectRatio={pickerAspectRatio}
+      allowMultiple
+      showVideos
+      saveSelectedMedia={handlePick}
+      trigger={
+        <Button type='button' variant='main' size='sm'>
+          {addLabel}
+        </Button>
+      }
+    />
+  );
+
   return (
     <div className='space-y-2.5'>
       {hasMedia &&
@@ -528,22 +550,12 @@ export function FocusedAnnotator({
               );
             })}
           </div>
-
-          <MediaSelector
-            label={addLabel}
-            purpose={purpose}
-            aspectRatio={pickerAspectRatio}
-            allowMultiple
-            showVideos
-            saveSelectedMedia={handlePick}
-            trigger={
-              <Button type='button' variant='main' size='sm'>
-                {addLabel}
-              </Button>
-            }
-          />
         </div>
       )}
+
+      {/* Always present in the focused layout — the empty hint above tells you to add a photo, so
+          the control that adds one has to be reachable in that state too. */}
+      {!isGrid && addControl}
 
       {/* Shared lightbox — pan + freehand draw (session-only markup), with this surface's callouts
           laid over the picture behind a toggle. Read-only there: the pins are for reading the notes

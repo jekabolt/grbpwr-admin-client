@@ -148,8 +148,15 @@ body {
      what is on screen.
 
      Body copy stays black on white: a swatch key drawn in greys must survive a mono laser, so the
-     browser is told to keep the fills it was given. */
-  body:has([data-print-region]) *:not(:has([data-print-region])):not([data-print-region] *) {
+     browser is told to keep the fills it was given.
+
+     Three exclusions below, all load-bearing: the region's ANCESTORS survive via `:has()` (they
+     hold it in place), its DESCENDANTS via `[data-print-region] *`, and the region ITSELF via
+     `:not([data-print-region])` — `:has()` only ever looks at descendants and an element is not
+     its own descendant, so without that third `:not()` the marked region matched the hide rule
+     too and every page came out blank. */
+  body:has([data-print-region])
+    *:not([data-print-region]):not(:has([data-print-region])):not([data-print-region] *) {
     display: none !important;
   }
   [data-print-region] {
