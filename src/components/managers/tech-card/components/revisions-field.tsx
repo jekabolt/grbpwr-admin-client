@@ -33,7 +33,7 @@ export function RevisionsField({ revisions }: { revisions?: common_TechCardRevis
   const ordered = [...rows].reverse();
 
   return (
-    <div className='flex flex-col'>
+    <div className='flex flex-col border border-borderColor bg-bgColor p-3'>
       <SectionHeader
         title='auto-journal'
         question='— server-stamped, newest first; the only record of who changed what'

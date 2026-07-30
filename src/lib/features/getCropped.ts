@@ -17,7 +17,12 @@ function getFetchUrl(url: string): string {
   }
 }
 
-async function urlToDataUrl(imageUrl: string): Promise<string> {
+/**
+ * Fetch a remote media url through the CORS proxy and return it as a data url — the only way to
+ * get a media-server image onto a canvas without tainting it. Exported because saving a drawn-on
+ * image out of the viewer has exactly the same constraint as cropping does.
+ */
+export async function urlToDataUrl(imageUrl: string): Promise<string> {
   if (imageUrl.startsWith('data:')) {
     return imageUrl;
   }

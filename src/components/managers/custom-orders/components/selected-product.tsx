@@ -8,12 +8,19 @@ import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 
+// custFlow v2 — one basket line. Thumbnail + name, then the per-line controls (qty, size, price)
+// the order needs. The container (in custom-order-form) draws the outer border and divides rows, so
+// this row is borderless; the [x] is now wired to remove the line.
 export function SelectedProduct({
   product,
   itemIdx,
+  currency,
+  onRemove,
 }: {
   product?: common_Colorway;
   itemIdx: number;
+  currency?: string;
+  onRemove?: () => void;
 }) {
   const { dictionary } = useDictionary();
   const name = product?.display?.translations?.[0]?.name;
@@ -64,52 +71,50 @@ export function SelectedProduct({
   }, [dictionary, topCategoryId, typeId, targetGender]);
 
   return (
-    <div
-      key={product?.id}
-      className='flex gap-x-3 border-b border-solid border-textInactiveColor py-6 text-textColor first:pt-0 last:border-b-0'
-    >
-      <div className='relative h-full min-w-[90px] shrink-0'>
+    <div className='flex gap-3 p-2.5 text-textColor'>
+      <div className='w-16 shrink-0'>
         <Media
           src={product?.display?.thumbnail?.media?.thumbnail?.mediaUrl ?? ''}
-          alt='product'
+          alt={name || 'product'}
           aspectRatio='4/5'
           fit='contain'
         />
       </div>
 
-      <div className='relative flex w-full items-stretch justify-between'>
-        <div className='flex w-full flex-col justify-between'>
-          <div className='space-y-3'>
-            <Text className='line-clamp-1 overflow-hidden text-ellipsis' variant='uppercase'>
-              {name}
-            </Text>
-            <div className='space-y-2'>
-              <InputField
-                name={`items.${itemIdx}.quantity`}
-                label='qty'
-                type='number'
-                min={1}
-                valueAsNumber
-                className='w-12 text-center'
-              />
-              <SelectField
-                name={`items.${itemIdx}.sizeId`}
-                label='size'
-                items={sizeItems}
-                valueAsNumber
-                className='w-24 text-center'
-              />
-            </div>
-          </div>
+      <div className='flex min-w-0 flex-1 flex-col gap-2'>
+        <div className='flex items-start justify-between gap-2'>
+          <Text size='micro' component='span' className='min-w-0 truncate font-bold uppercase'>
+            {name || `#${product?.id}`}
+          </Text>
+          {onRemove && (
+            <Button variant='underline' size='xs' type='button' title='remove' onClick={onRemove}>
+              remove
+            </Button>
+          )}
         </div>
-        <div className='relative z-10 flex w-full flex-col items-end justify-between self-stretch'>
-          <Button>[x]</Button>
-          <div className='flex items-center justify-end whitespace-nowrap text-right'>
+        <div className='flex flex-wrap items-end gap-3'>
+          <div className='w-14'>
+            <InputField
+              name={`items.${itemIdx}.quantity`}
+              label='qty'
+              type='number'
+              min={1}
+              valueAsNumber
+            />
+          </div>
+          <div className='w-28'>
+            <SelectField
+              name={`items.${itemIdx}.sizeId`}
+              label='size'
+              items={sizeItems}
+              valueAsNumber
+            />
+          </div>
+          <div className='w-24'>
             <InputField
               name={`items.${itemIdx}.customPrice.value`}
-              label='price'
+              label={currency ? `price · ${currency}` : 'price'}
               placeholder='0.00'
-              className='w-16 text-center'
             />
           </div>
         </div>

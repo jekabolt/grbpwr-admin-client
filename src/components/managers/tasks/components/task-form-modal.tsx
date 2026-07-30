@@ -1,7 +1,6 @@
-import * as Dialog from '@radix-ui/react-dialog';
 import { useEffect } from 'react';
-import { Controller, useForm } from 'react-hook-form';
-import { Button } from 'ui/components/button';
+import { Controller, useForm, useWatch } from 'react-hook-form';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DatePicker } from 'ui/components/date-picker';
 import Input from 'ui/components/input';
 import SelectComponent from 'ui/components/select';
@@ -17,18 +16,17 @@ import {
   STATUSES,
   toOptions,
 } from '../utils/meta';
-import {
-  archiveConfig,
-  fittingConfig,
-  orderConfig,
-  productConfig,
-  runConfig,
-  sampleConfig,
-  techCardConfig,
-} from '../utils/entity-configs';
 import { AssigneeSelect } from './assignee-select';
-import { EntityPicker } from './entity-picker';
+import { LinkEditor } from './link-editor';
 import { MediaAttachments } from './media-attachments';
+
+/**
+ * tskForm v2 — a real two-column editor inside the app's one modal shell
+ * (ConfirmationModal). Title is the full-width headline; the left column carries the
+ * writing (description / priority / dates), the right column the associations
+ * (placement / assignee / labels / links / media). Links are the single type-first
+ * picker (tskLinks v2), not seven stacked fields.
+ */
 
 interface Props {
   open: boolean;
@@ -49,7 +47,7 @@ const priorityOptions = [
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className='flex flex-col gap-1'>
-      <Text variant='label' size='small' component='span'>
+      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         {label}
       </Text>
       {children}
@@ -62,6 +60,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     handleSubmit,
     control,
     reset,
+    setValue,
     formState: { errors },
   } = useForm<TaskFormValues>({ defaultValues: initial });
 
@@ -71,56 +70,57 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initial]);
 
+  // The combined type-first link picker edits all seven FKs at once, so it reads them
+  // via useWatch and writes them back through setValue rather than one Controller each.
+  const links = {
+    techCardId: useWatch({ control, name: 'techCardId' }),
+    productId: useWatch({ control, name: 'productId' }),
+    orderUuid: useWatch({ control, name: 'orderUuid' }),
+    archiveId: useWatch({ control, name: 'archiveId' }),
+    fittingId: useWatch({ control, name: 'fittingId' }),
+    sampleId: useWatch({ control, name: 'sampleId' }),
+    productionRunId: useWatch({ control, name: 'productionRunId' }),
+  };
+
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
-        <Dialog.Content
-          aria-describedby={undefined}
-          className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[92vh] w-auto -translate-y-1/2 flex-col overflow-hidden border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[34rem] lg:-translate-x-1/2'
-          onOpenAutoFocus={(e) => e.preventDefault()}
-        >
-          <div className='flex items-center justify-between gap-2 border-b border-textInactiveColor px-4 py-3'>
-            <Dialog.Title className='text-lg uppercase'>
-              {mode === 'create' ? 'new task' : 'edit task'}
-            </Dialog.Title>
-            <Dialog.Close asChild>
-              <Button type='button' aria-label='close'>
-                [x]
-              </Button>
-            </Dialog.Close>
-          </div>
-
-          <form
-            onSubmit={handleSubmit(onSubmit)}
-            className='flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4'
-          >
-            <div className='flex flex-col gap-1'>
-              <Controller
-                control={control}
-                name='title'
-                rules={{ required: true }}
-                render={({ field }) => (
-                  <Input
-                    placeholder='Task title'
-                    aria-label='task title'
-                    autoFocus
-                    className='border-textInactiveColor pb-1 text-lg'
-                    value={field.value}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      field.onChange(e.target.value)
-                    }
-                    onBlur={field.onBlur}
-                  />
-                )}
+    <ConfirmationModal
+      open={open}
+      onOpenChange={onOpenChange}
+      onConfirm={() => handleSubmit(onSubmit)()}
+      title={mode === 'create' ? 'new task' : 'edit task'}
+      confirmLabel={mode === 'create' ? 'create' : 'save'}
+      confirmDisabled={saving}
+      closeOnConfirm={false}
+      width='lg'
+    >
+      <form onSubmit={handleSubmit(onSubmit)} className='flex flex-col gap-4'>
+        <div className='flex flex-col gap-1'>
+          <Controller
+            control={control}
+            name='title'
+            rules={{ required: true }}
+            render={({ field }) => (
+              <Input
+                placeholder='task title'
+                aria-label='task title'
+                autoFocus
+                className='text-lg'
+                value={field.value}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => field.onChange(e.target.value)}
+                onBlur={field.onBlur}
               />
-              {errors.title && (
-                <Text variant='error' size='small'>
-                  title is required
-                </Text>
-              )}
-            </div>
+            )}
+          />
+          {errors.title && (
+            <Text size='micro' variant='error' component='span'>
+              title is required
+            </Text>
+          )}
+        </div>
 
+        <div className='grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2'>
+          {/* Left — the writing */}
+          <div className='flex min-w-0 flex-col gap-3'>
             <Field label='description'>
               <Controller
                 control={control}
@@ -128,8 +128,8 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 render={({ field }) => (
                   <Textarea
                     variant='secondary'
-                    placeholder='Add details or acceptance criteria…'
-                    className='mb-0 min-h-24 border-b border-textInactiveColor'
+                    placeholder='add details or acceptance criteria…'
+                    className='mb-0 min-h-32 border border-borderColor'
                     value={field.value}
                     onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
                       field.onChange(e.target.value)
@@ -139,7 +139,52 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 )}
               />
             </Field>
+            <Field label='priority'>
+              <Controller
+                control={control}
+                name='priority'
+                render={({ field }) => (
+                  <SelectComponent
+                    name='priority'
+                    items={priorityOptions}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    placeholder='priority'
+                    fullWidth
+                  />
+                )}
+              />
+            </Field>
+            <div className='grid grid-cols-2 gap-3'>
+              <Field label='planned start'>
+                <Controller
+                  control={control}
+                  name='startDate'
+                  render={({ field }) => (
+                    <DatePicker
+                      value={field.value ? new Date(field.value) : undefined}
+                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
+                    />
+                  )}
+                />
+              </Field>
+              <Field label='due date'>
+                <Controller
+                  control={control}
+                  name='dueDate'
+                  render={({ field }) => (
+                    <DatePicker
+                      value={field.value ? new Date(field.value) : undefined}
+                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
+                    />
+                  )}
+                />
+              </Field>
+            </div>
+          </div>
 
+          {/* Right — the associations */}
+          <div className='flex min-w-0 flex-col gap-3'>
             <div className='grid grid-cols-2 gap-3'>
               <Field label='board'>
                 <Controller
@@ -173,48 +218,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                   )}
                 />
               </Field>
-              <Field label='priority'>
-                <Controller
-                  control={control}
-                  name='priority'
-                  render={({ field }) => (
-                    <SelectComponent
-                      name='priority'
-                      items={priorityOptions}
-                      value={field.value}
-                      onValueChange={field.onChange}
-                      placeholder='priority'
-                      fullWidth
-                    />
-                  )}
-                />
-              </Field>
-              <Field label='start date'>
-                <Controller
-                  control={control}
-                  name='startDate'
-                  render={({ field }) => (
-                    <DatePicker
-                      value={field.value ? new Date(field.value) : undefined}
-                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
-                    />
-                  )}
-                />
-              </Field>
-              <Field label='due date'>
-                <Controller
-                  control={control}
-                  name='dueDate'
-                  render={({ field }) => (
-                    <DatePicker
-                      value={field.value ? new Date(field.value) : undefined}
-                      onChange={(d) => field.onChange(d ? d.toISOString() : undefined)}
-                    />
-                  )}
-                />
-              </Field>
             </div>
-
             <Field label='assignee'>
               <Controller
                 control={control}
@@ -224,7 +228,6 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 )}
               />
             </Field>
-
             <Field label='labels (comma separated)'>
               <Controller
                 control={control}
@@ -246,8 +249,13 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 )}
               />
             </Field>
-
-            <Field label='attachments'>
+            <Field label='links'>
+              <LinkEditor
+                links={links}
+                setLink={(f, v) => setValue(f, v as never, { shouldDirty: true })}
+              />
+            </Field>
+            <Field label='media'>
               <Controller
                 control={control}
                 name='mediaIds'
@@ -256,123 +264,9 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 )}
               />
             </Field>
-
-            <details className='border-t border-textInactiveColor pt-2'>
-              <summary className='cursor-pointer text-textBaseSize uppercase text-labelColor'>
-                links (optional)
-              </summary>
-              <div className='mt-3 flex flex-col gap-3'>
-                <Field label='техкарта'>
-                  <Controller
-                    control={control}
-                    name='techCardId'
-                    render={({ field }) => (
-                      <EntityPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        config={techCardConfig}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label='product'>
-                  <Controller
-                    control={control}
-                    name='productId'
-                    render={({ field }) => (
-                      <EntityPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        config={productConfig}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label='примерка'>
-                  <Controller
-                    control={control}
-                    name='fittingId'
-                    render={({ field }) => (
-                      <EntityPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        config={fittingConfig}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label='образец'>
-                  <Controller
-                    control={control}
-                    name='sampleId'
-                    render={({ field }) => (
-                      <EntityPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        config={sampleConfig}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label='партия'>
-                  <Controller
-                    control={control}
-                    name='productionRunId'
-                    render={({ field }) => (
-                      <EntityPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        config={runConfig}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label='order'>
-                  <Controller
-                    control={control}
-                    name='orderUuid'
-                    render={({ field }) => (
-                      <EntityPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        config={orderConfig}
-                      />
-                    )}
-                  />
-                </Field>
-                <Field label='timeline drop'>
-                  <Controller
-                    control={control}
-                    name='archiveId'
-                    render={({ field }) => (
-                      <EntityPicker
-                        value={field.value}
-                        onChange={field.onChange}
-                        config={archiveConfig}
-                      />
-                    )}
-                  />
-                </Field>
-              </div>
-            </details>
-          </form>
-
-          <div className='flex justify-end gap-2 border-t border-textInactiveColor px-4 py-3'>
-            <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
-              cancel
-            </Button>
-            <Button
-              type='button'
-              variant='main'
-              size='lg'
-              loading={saving}
-              onClick={handleSubmit(onSubmit)}
-            >
-              {mode === 'create' ? 'create' : 'save'}
-            </Button>
           </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </div>
+      </form>
+    </ConfirmationModal>
   );
 }

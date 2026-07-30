@@ -8,6 +8,7 @@ import { OpexLineInsert, OpexRecurringInsert } from 'api/proto-http/admin';
 export const opexKeys = {
   all: ['opex'] as const,
   lines: (month: string) => [...opexKeys.all, 'lines', month] as const,
+  linesRange: (from: string, to: string) => [...opexKeys.all, 'linesRange', from, to] as const,
   recurring: (includeArchived: boolean) => [...opexKeys.all, 'recurring', includeArchived] as const,
 };
 
@@ -20,6 +21,23 @@ export function useOpexLines(month: string, enabled = true) {
     queryFn: () =>
       adminService.ListOpexLines({ monthFrom: monthKey, monthTo: monthKey, category: '' }),
     enabled: enabled && !!month,
+  });
+}
+
+// opxMonth v2 / opxNav v3: one query fetches a whole span of months (ListOpexLines already takes a
+// month RANGE), so the rail's per-month counts, the 12-month strip's per-month totals and the
+// selected month's lines all come from a single request grouped client-side — there is no per-month
+// aggregate RPC to lean on. Inclusive months, YYYY-MM.
+export function useOpexLinesRange(monthFrom: string, monthTo: string, enabled = true) {
+  return useQuery({
+    queryKey: opexKeys.linesRange(monthFrom, monthTo),
+    queryFn: () =>
+      adminService.ListOpexLines({
+        monthFrom: monthToApi(monthFrom),
+        monthTo: monthToApi(monthTo),
+        category: '',
+      }),
+    enabled: enabled && !!monthFrom && !!monthTo,
   });
 }
 

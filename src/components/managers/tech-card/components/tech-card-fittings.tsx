@@ -145,7 +145,7 @@ export function TechCardFittings({ techCardId }: { techCardId: number }) {
     );
 
   return (
-    <div className='flex flex-col'>
+    <div className='flex flex-col border border-borderColor bg-bgColor p-3'>
       <SectionHeader
         title='fittings on this style'
         question='— each has a verdict, photos and change requests that may still be unresolved'

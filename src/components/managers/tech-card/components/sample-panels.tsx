@@ -294,15 +294,23 @@ export function useSampleWriteoff({
 
   const rows = useMemo(() => [...bomRows, ...extraRows], [bomRows, extraRows]);
 
-  // Overrides only. The default (checked when the line is sample-marked AND the recipe has a
-  // norm; actual pre-filled from spec) is derived, so a late-arriving stock/recipe read fills
-  // the sheet in without clobbering anything already typed.
+  // Overrides only, so a late-arriving stock/recipe read can fill the reference columns without
+  // clobbering anything already typed.
+  //
+  // NOTHING is pre-filled. A sample is not a production run: it is routinely cut from sample
+  // yardage, a substitute fabric or a leftover, so the colourway's material and its consumption
+  // norm are a REFERENCE (the spec column), never a claim about what was actually spent. Ticking
+  // BOM lines by default and copying spec into actual meant an operator who just pressed save
+  // issued the recipe rather than the truth — and an unnoticed default is indistinguishable from
+  // a deliberate entry once it is stock movement. Every line is ticked and typed by hand.
   const [edits, setEdits] = useState<Record<string, Partial<WriteoffLineState>>>({});
   const stateOf = (r: WriteoffRow): WriteoffLineState => {
-    const specNum = parseDecimalNumber(r.spec);
     const fallback: WriteoffLineState = {
-      checked: r.offBom || (r.sampleMarked && Number.isFinite(specNum) && specNum > 0),
-      actual: r.spec,
+      // An off-BOM row exists only because someone just picked that material for this sample —
+      // adding it IS the tick, so making them tick it again would be a second confirmation of the
+      // action they only just took.
+      checked: r.offBom,
+      actual: '',
     };
     const e = edits[r.key];
     return { checked: e?.checked ?? fallback.checked, actual: e?.actual ?? fallback.actual };
@@ -774,6 +782,158 @@ export function WriteoffReceipt({
 // pick-a-material → IssueStockModal → repeat loop with the batch sheet: the style's BOM,
 // pre-filled, issued in one action. `IssueStockModal` still exists for one-off corrections
 // from the materials manager — this is the sample path only.
+/**
+ * What this sample ATE, folded by material rather than listed by movement.
+ *
+ * Three reasons the fold is the honest unit. One catalog material legitimately sits on two BOM
+ * lines (the same fabric on the shell and the hood) and the warehouse moved it once — that is the
+ * very fold `mergeWriteoffLines` applies on the way out, so reporting it any other way makes the
+ * receipt disagree with the ledger. A sample is also issued in several goes (cut it, run short,
+ * issue more), and «1.2 m then 0.45 m» is not a fact anybody needs. And spec-versus-actual only
+ * means anything per cloth: two lines of the same twill are one question about one bolt.
+ *
+ * Actuals come from the LEDGER (issues minus returns), never from the sheet above — the sheet is
+ * an intention until it posts.
+ */
+export function SampleMaterialsRollup({
+  sampleId,
+  techCard,
+  colorwayId,
+  sizeId,
+  canReadCosting,
+}: {
+  sampleId: number;
+  techCard?: common_TechCard;
+  colorwayId?: number;
+  sizeId?: number;
+  canReadCosting: boolean;
+}) {
+  const wo = useSampleWriteoff({ techCard, colorwayId, sizeId, canReadCosting });
+  const { data } = useMaterialMovements({ sampleId }, 50);
+
+  const rows = useMemo(() => {
+    // Spec + identity per material, summed across the BOM lines that share one material.
+    const byMaterial = new Map<
+      number,
+      { label: string; unit: string; spec: number; actual: number; cost: number; offBom: boolean }
+    >();
+    for (const r of wo.rows) {
+      if (!r.materialId) continue;
+      const seat = byMaterial.get(r.materialId) ?? {
+        label: r.label,
+        unit: r.unit,
+        spec: 0,
+        actual: 0,
+        cost: 0,
+        offBom: r.offBom,
+      };
+      const spec = parseDecimalNumber(r.spec);
+      if (Number.isFinite(spec)) seat.spec += spec;
+      seat.unit = seat.unit || r.unit;
+      byMaterial.set(r.materialId, seat);
+    }
+
+    for (const page of data?.pages ?? []) {
+      for (const m of page.movements) {
+        const id = wireInt(m.materialId);
+        if (!id) continue;
+        const qty = parseDecimalNumber(decimalToInput(m.quantity));
+        if (!Number.isFinite(qty)) continue;
+        // A return puts cloth back; netting it here is what makes «actual» the amount consumed.
+        const signed =
+          m.movementType === 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE'
+            ? -Math.abs(qty)
+            : Math.abs(qty);
+        const unitCost = parseDecimalNumber(decimalToInput(m.unitCostBase));
+        const seat = byMaterial.get(id) ?? {
+          // Issued against this sample but on no BOM line — it still moved, so it is still reported.
+          label: `material #${id}`,
+          unit: '',
+          spec: NaN,
+          actual: 0,
+          cost: 0,
+          offBom: true,
+        };
+        seat.actual += signed;
+        if (Number.isFinite(unitCost)) seat.cost += signed * unitCost;
+        byMaterial.set(id, seat);
+      }
+    }
+
+    // Only materials that actually moved, or that the recipe expects — a BOM line with neither is
+    // noise on a sheet about one sewn sample.
+    return [...byMaterial.entries()]
+      .map(([materialId, v]) => ({ materialId, ...v }))
+      .filter((r) => r.actual !== 0 || (Number.isFinite(r.spec) && r.spec > 0));
+  }, [wo.rows, data?.pages]);
+
+  const totalCost = rows.reduce((s, r) => s + (Number.isFinite(r.cost) ? r.cost : 0), 0);
+  const overCount = rows.filter(
+    (r) => Number.isFinite(r.spec) && r.spec > 0 && r.actual > r.spec,
+  ).length;
+
+  if (rows.length === 0) {
+    return (
+      <Text size='micro' variant='label'>
+        nothing issued against this sample yet
+      </Text>
+    );
+  }
+
+  return (
+    <div className='flex flex-col gap-1.5'>
+      <div className='flex flex-col'>
+        {rows.map((r) => {
+          const hasSpec = Number.isFinite(r.spec) && r.spec > 0;
+          const delta = hasSpec ? r.actual - r.spec : NaN;
+          const over = Number.isFinite(delta) && delta > 0;
+          const unit = r.unit ? ` ${r.unit}` : '';
+          return (
+            <div
+              key={r.materialId}
+              className='flex items-start justify-between gap-2.5 border-b border-hairline py-1'
+            >
+              <span className='min-w-0'>
+                <Text size='micro' component='span'>
+                  {r.label}
+                </Text>
+                <Text size='nano' variant='label' className='uppercase'>
+                  {r.offBom ? 'not on the BOM · ' : ''}
+                  {hasSpec ? `spec ${Number(r.spec.toFixed(3))}${unit}` : 'no norm'}
+                  {Number.isFinite(delta) && delta !== 0
+                    ? ` · ${over ? '+' : ''}${Number(delta.toFixed(3))}`
+                    : hasSpec
+                      ? ' · on norm'
+                      : ''}
+                </Text>
+              </span>
+              <span className='shrink-0 text-right tabular-nums'>
+                <Text size='micro' component='span' variant={over ? 'error' : undefined}>
+                  {Number(r.actual.toFixed(3))}
+                  {unit}
+                </Text>
+                {canReadCosting && r.cost > 0 && (
+                  <Text size='nano' variant='label' className='uppercase'>
+                    {wo.money(r.cost)}
+                  </Text>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className='flex flex-wrap items-center gap-1.5'>
+        <Pill tone='mut'>
+          {rows.length} material{rows.length === 1 ? '' : 's'}
+        </Pill>
+        {overCount > 0 && <Pill tone='attention'>{overCount} over the norm</Pill>}
+        {canReadCosting && totalCost > 0 && <Pill tone='mut'>{wo.money(totalCost)}</Pill>}
+      </div>
+    </div>
+  );
+}
+
 export function SampleMovements({
   sampleId,
   techCard,

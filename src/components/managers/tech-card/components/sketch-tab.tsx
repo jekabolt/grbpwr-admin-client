@@ -11,11 +11,8 @@ import { Pill } from 'ui/components/pill';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
-import ComboField from 'ui/form/fields/combo-field';
-import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { pieceCodeOptions } from './piece-codes';
 import { TechCardFormData } from './schema';
 
 const kindLabels: Record<string, string> = Object.fromEntries(
@@ -41,7 +38,6 @@ type FormCallout = {
   number?: number;
   part?: string;
   description?: string;
-  dimensions?: string;
   mediaId?: number;
   posX?: string;
   posY?: string;
@@ -52,9 +48,9 @@ type FormCallout = {
 const mediaUrl = (full?: common_MediaFull): string =>
   full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
 
-// The editable body of a callout's note: just its text. The structured fields (part, dimensions,
-// number, which image it's pinned to) live in the "callouts" accordion below, so the note that pops
-// on a pin stays small and legible — a place to write, not a form.
+// The editable body of a callout's note: just its text. The structured fields (part, number, which
+// image it's pinned to) live in the "callouts" accordion below, so the note that pops on a pin
+// stays small and legible — a place to write, not a form.
 function CalloutNoteBody({ index }: { index: number }) {
   const { control } = useFormContext<TechCardFormData>();
   const { field } = useController({ control, name: `callouts.${index}.description` });
@@ -79,7 +75,7 @@ function CalloutNoteBody({ index }: { index: number }) {
 // The tech-card adapter over the shared FocusedAnnotator, driven in GRID layout: every view is on
 // screen at once carrying its own pins, so front and back can be read together without clicking
 // between them. It owns the tech-card-specific data — the `{ mediaId, kind }` media rows, the
-// structured `{ part, description, dimensions }` callouts, the per-image "kind" select, and "set as
+// structured `{ part, description }` callouts, the per-image "kind" select, and "set as
 // preview" — and hands the shared component only resolved views + callbacks, so moodboard/sketch
 // behave exactly as before while the fitting reuses the same component with its own bindings.
 function TechCardGallery({
@@ -112,11 +108,28 @@ function TechCardGallery({
   const kindOptions = techCardMediaKindOptions.filter((o) => kinds.includes(o.value));
   const defaultKind: common_TechCardMediaKind = kinds[0];
 
-  // max+1, not length+1: after a mid-list delete, length+1 collides with an existing number —
-  // and pieces/operations/issues reference callouts BY number.
+  const myMediaIds = useMemo(
+    () => new Set(mediaFA.fields.map((f) => f.mediaId)),
+    [mediaFA.fields],
+  );
+
+  // Which sheet a callout counts against — the same rule `CalloutsList` filters by, so the two can
+  // never disagree about who owns a number. An unpinned callout falls to the technical sheet.
+  const isMine = (c: FormCallout) => (c.mediaId ? myMediaIds.has(c.mediaId) : !isMoodboard);
+
+  // The sketch and the moodboard number INDEPENDENTLY: they are two different documents, and a
+  // moodboard reference note has no business pushing the next sketch callout to 7. Construction,
+  // pieces and issues all point at SKETCH callouts, so that sequence stays dense and predictable
+  // instead of being perforated by notes stuck on a swatch photo.
+  //
+  // max+1, not length+1: after a mid-list delete, length+1 collides with an existing number.
   const nextNumber = () =>
-    Math.max(0, ...calloutValues.map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0))) +
-    1;
+    Math.max(
+      0,
+      ...calloutValues
+        .filter(isMine)
+        .map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0)),
+    ) + 1;
 
   // Commit a media pick: dedupe against BOTH lists (ids are unique across technical ∪ moodboard),
   // resolve the picked full-media, append, and report the fresh ids so the gallery focuses one.
@@ -157,7 +170,6 @@ function TechCardGallery({
       number: nextNumber(),
       part: '',
       description: '',
-      dimensions: '',
       mediaId,
       posX: x.toFixed(3),
       posY: y.toFixed(3),
@@ -266,8 +278,8 @@ function TechCardGallery({
   );
 }
 
-// The full, structured callout editor — number, part code, dimensions, which image it is pinned to,
-// and the note. With every view on screen carrying its own pins, this list's job narrows to
+// The full, structured callout editor — number, part code, which image it is pinned to, and the
+// note. With every view on screen carrying its own pins, this list's job narrows to
 // reaching UNPINNED callouts (a callout survives its image being removed), so it announces how many
 // there are and opens itself when any exist.
 function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
@@ -302,6 +314,34 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
   // not in the DOM — leaving a toast that names a field nobody can see (19.8).
   const hasCalloutError = !!formState.errors.callouts;
   const isOpen = hasCalloutError || (open ?? unpinned > 0);
+
+  // A callout names a PIECE, and a piece is a row on the pieces tab — so the vocabulary here is
+  // that table, not the standard nomenclature it was typed from. Free text let a callout point at
+  // «FP_R» while the card's only front piece was named «FP_R_1», and nothing ever flagged it.
+  const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{ name?: string }>;
+  const pieceOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const p of pieces) {
+      const name = p.name?.trim();
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      out.push(name);
+    }
+    return out;
+  }, [pieces]);
+
+  // Tolerant read: a value typed before this field was a picker (or left behind when its piece was
+  // renamed) still shows, flagged, instead of silently reading as empty and being dropped by the
+  // next save of an unrelated field.
+  const partOptionsFor = (current?: string) => {
+    const value = current?.trim();
+    const items = pieceOptions.map((p) => ({ value: p, label: p }));
+    if (value && !pieceOptions.includes(value)) {
+      items.unshift({ value, label: `${value} — not in pieces` });
+    }
+    return items;
+  };
 
   const pinOptions = [
     { value: 0, label: '(unpinned)' },
@@ -368,13 +408,15 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
                   </Button>
                 </div>
               </div>
-              <div className='grid grid-cols-1 gap-2 lg:grid-cols-3'>
-                <ComboField
+              <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
+                <SelectField
                   name={`callouts.${index}.part`}
                   label='part (код детали)'
-                  options={pieceCodeOptions}
+                  placeholder={
+                    pieceOptions.length ? 'pick a piece…' : 'no pieces on this card yet'
+                  }
+                  items={partOptionsFor(callouts[index]?.part)}
                 />
-                <InputField name={`callouts.${index}.dimensions`} label='dimensions' />
                 <SelectField
                   name={`callouts.${index}.mediaId`}
                   label='pinned to'
@@ -454,7 +496,7 @@ export function SketchTab({
 
   if (view === 'moodboard') {
     return (
-      <section className='flex flex-col gap-2.5'>
+      <section className='flex flex-col gap-2.5 border border-borderColor bg-bgColor p-4'>
         <SectionHeader
           title='moodboard'
           question='— mood, reference and swatch images; pin a note on any of them'
@@ -476,7 +518,7 @@ export function SketchTab({
   }
 
   return (
-    <section className='flex flex-col gap-2.5'>
+    <section className='flex flex-col gap-2.5 border border-borderColor bg-bgColor p-4'>
       <SectionHeader
         title='technical sketch'
         question='— front / back / detail views, each carrying the numbered callouts the construction tab points at'

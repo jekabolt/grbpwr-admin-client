@@ -39,6 +39,23 @@ export const opexCurrencyOptions = EXPENSE_CURRENCIES.map((c) => ({
 export const opexCurrencySymbol = (code?: string) =>
   (code && currencySymbols[code.toUpperCase()]) || code || '';
 
+// Money is value + currency CODE, never a symbol (design money rule). `reveal=false` is opxGate v2:
+// a viewer without costing sees the STRUCTURE but the figure itself is masked, not faked to €0.00.
+export const MASK = '•••';
+export const money = (n: number, code?: string, reveal = true) =>
+  reveal ? `${formatMoney(n)} ${(code || '').toUpperCase()}`.trim() : MASK;
+
+// The stored month is YYYY-MM-01; the UI keys on YYYY-MM.
+export const lineMonthKey = (l: OpexLine) => (l.month || '').slice(0, 7);
+
+// opxVat v2: the recoverable-input-VAT regimes OpexLineInsert accepts. The proto documents
+// domestic_pl | domestic_uk for OPEX (purchase register / JPK ewidencja zakupu); '' = not recorded.
+export const opexVatRegimeOptions = [
+  { value: '', label: '— none —' },
+  { value: 'domestic_pl', label: 'domestic PL' },
+  { value: 'domestic_uk', label: 'domestic UK' },
+];
+
 // Months are YYYY-MM in the UI. new Date() is available in the app runtime (only workflow scripts
 // forbid it). Local date parts, not toISOString(): the user's "this month" is their wall-clock
 // month, and UTC flips it around midnight on the 1st in non-UTC timezones.
@@ -75,6 +92,19 @@ export function monthLabelShort(month: string): string {
     timeZone: 'UTC',
   });
 }
+
+// Month-only label ("Jul") for the dense 12-month strip; the rail carries the year.
+export function monthMini(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  if (!y || !m) return month;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, {
+    month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
+// opxMonth v2 / opxNav v3: a month's client-derived rollup (there is no per-month aggregate RPC).
+export type MonthBucket = { key: string; total: number; count: number; uncosted: number };
 
 // A recurring-materialised line is read-only here (owned by the worker); manual lines are editable.
 export const isRecurringLine = (l: OpexLine) => !!l.recurringId;

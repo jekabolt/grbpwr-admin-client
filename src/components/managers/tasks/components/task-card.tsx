@@ -1,34 +1,45 @@
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { cn } from 'lib/utility';
+import { Avatar } from 'ui/components/avatar';
+import { Chip } from 'ui/components/chip';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Task, TaskPriority } from '../api/types';
-import { PRIORITY_LABEL, dueMeta } from '../utils/meta';
+import { taskLinkCount } from '../utils/links';
+import { dueMeta, PRIORITY_LABEL } from '../utils/meta';
 
-const PRIORITY_STYLE: Record<TaskPriority, string> = {
-  TASK_PRIORITY_URGENT: 'bg-textColor text-bgColor',
-  TASK_PRIORITY_HIGH: 'border border-textInactiveColor text-textColor',
-  TASK_PRIORITY_MEDIUM: 'border border-textInactiveColor text-labelColor',
-  TASK_PRIORITY_LOW: 'text-labelColor',
-  TASK_PRIORITY_UNKNOWN: 'hidden',
-};
+/**
+ * tskCard v3 — a card leads with its PICTURE. The first attached media (resolved by
+ * the list read) becomes a cover band; a card with no media shows no band rather
+ * than a forced placeholder, so a wall of cards reads as "these three have refs".
+ *
+ * Priority stops being a bespoke hue map: urgent fills ink (Chip), high is an ink
+ * outline, everything lower is a quiet grey Pill — weight carries urgency, no health
+ * colours borrowed. The assignee is the shared `Avatar`; labels are read-only Pills.
+ */
 
-function initials(username: string) {
-  // Keep letters/digits across scripts (Cyrillic usernames included).
-  return username.replace(/\s+/g, '').slice(0, 2).toUpperCase() || '?';
+// tskPriority — weight over hue. Urgent is the only filled tag; nothing here spends a
+// health colour (red/green/blue) on what is really an importance rank.
+export function PriorityTag({ priority }: { priority: TaskPriority }) {
+  if (priority === 'TASK_PRIORITY_UNKNOWN') return null;
+  const label = PRIORITY_LABEL[priority];
+  if (priority === 'TASK_PRIORITY_URGENT') return <Chip selected>{label}</Chip>;
+  if (priority === 'TASK_PRIORITY_HIGH') return <Pill tone='ink'>{label}</Pill>;
+  return <Pill tone='mut'>{label}</Pill>;
 }
 
 // Presentational card body — reused by the sortable card and the drag overlay.
 export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolean }) {
   const t = task.task;
   const due = dueMeta(t.dueDate);
-  const linkCount =
-    [t.techCardId, t.productId, t.archiveId, t.fittingId, t.sampleId, t.productionRunId].filter(
-      (v) => v > 0,
-    ).length + (t.orderUuid ? 1 : 0);
+  const cover = task.media[0];
+  const coverUrl = cover?.thumbnail || cover?.fullSize;
+  const linkCount = taskLinkCount(t);
   const checkTotal = task.checklist.length;
   const checkDone = task.checklist.filter((c) => c.isDone).length;
   const isArchived = !!task.archivedAt;
+
   const meta: string[] = [];
   if (checkTotal) meta.push(`✓ ${checkDone}/${checkTotal}`);
   if (linkCount) meta.push(`${linkCount} link${linkCount > 1 ? 's' : ''}`);
@@ -37,80 +48,64 @@ export function TaskCardBody({ task, dragging }: { task: Task; dragging?: boolea
   return (
     <div
       className={cn(
-        'flex flex-col gap-2 border bg-bgColor p-3 transition-[border-color,transform,box-shadow] duration-150',
+        'flex flex-col border bg-bgColor transition-[border-color,transform] duration-150',
         dragging
-          ? 'border-textInactiveColor shadow-[4px_4px_0_0_var(--text)]'
-          : 'border-textInactiveColor hover:-translate-y-0.5 hover:border-textInactiveColor hover:shadow-[2px_2px_0_0_var(--text)] motion-reduce:hover:translate-y-0',
+          ? 'border-textColor'
+          : 'border-borderColor hover:-translate-y-0.5 hover:border-textColor motion-reduce:hover:translate-y-0',
         isArchived && 'opacity-60',
       )}
     >
-      {isArchived && (
-        <span className='w-fit bg-textColor px-1.5 py-px text-[10px] uppercase leading-4 text-bgColor'>
-          archived
-        </span>
+      {coverUrl && (
+        <img
+          src={coverUrl}
+          alt=''
+          className='block aspect-[16/10] w-full border-b border-borderColor object-cover'
+        />
       )}
 
-      {t.labels.length > 0 && (
-        <div className='flex flex-wrap gap-1'>
-          {t.labels.map((l) => (
-            <span
-              key={l}
-              className='border border-textInactiveColor px-1.5 py-px text-[10px] uppercase leading-4 text-labelColor'
-            >
-              {l}
-            </span>
-          ))}
-        </div>
-      )}
+      <div className='flex flex-col gap-1.5 p-2'>
+        {(isArchived || t.labels.length > 0) && (
+          <div className='flex flex-wrap gap-1'>
+            {isArchived && <Pill tone='ink'>archived</Pill>}
+            {t.labels.map((l) => (
+              <Pill key={l} tone='mut'>
+                {l}
+              </Pill>
+            ))}
+          </div>
+        )}
 
-      <Text className='text-textBaseSize leading-snug'>{t.title}</Text>
+        <Text className='leading-snug'>{t.title}</Text>
 
-      <div className='flex items-center justify-between gap-2'>
-        <div className='flex min-w-0 items-center gap-2'>
-          {t.priority !== 'TASK_PRIORITY_UNKNOWN' && (
-            <span
-              className={cn(
-                'shrink-0 px-1.5 py-px text-[10px] uppercase leading-4',
-                PRIORITY_STYLE[t.priority],
-              )}
-            >
-              {PRIORITY_LABEL[t.priority]}
-            </span>
-          )}
-          {due.state !== 'none' && (
-            <span
-              className={cn(
-                'shrink-0 text-[10px] uppercase',
-                due.state === 'overdue'
-                  ? 'text-error'
-                  : due.state === 'today' || due.state === 'soon'
-                    ? 'text-textColor'
-                    : 'text-labelColor',
-              )}
-            >
-              {due.label}
-            </span>
-          )}
+        <div className='flex items-center justify-between gap-2'>
+          <div className='flex min-w-0 items-center gap-1.5'>
+            <PriorityTag priority={t.priority} />
+            {due.state !== 'none' && (
+              <Text
+                size='micro'
+                component='span'
+                className={cn(
+                  'shrink-0 uppercase tracking-label',
+                  due.state === 'overdue'
+                    ? 'text-error'
+                    : due.state === 'today' || due.state === 'soon'
+                      ? 'text-textColor'
+                      : 'text-labelColor',
+                )}
+              >
+                {due.label}
+              </Text>
+            )}
+          </div>
+          <Avatar name={t.assignee} />
         </div>
 
-        {t.assignee ? (
-          <span
-            title={t.assignee}
-            className='flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-textColor text-[10px] leading-none text-bgColor'
-          >
-            {initials(t.assignee)}
-          </span>
-        ) : (
-          <span
-            title='unassigned'
-            className='h-5 w-5 shrink-0 rounded-full border border-dashed border-textInactiveColor'
-          />
+        {meta.length > 0 && (
+          <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
+            {meta.join(' · ')}
+          </Text>
         )}
       </div>
-
-      {meta.length > 0 && (
-        <div className='text-[10px] uppercase text-labelColor'>{meta.join(' · ')}</div>
-      )}
     </div>
   );
 }
@@ -138,8 +133,8 @@ export function SortableTaskCard({
       onClick={() => onOpen(task)}
       aria-label={`Open task: ${task.task.title}`}
       className={cn(
-        'rounded-none outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-        disabled ? 'cursor-pointer' : 'touch-none cursor-grab active:cursor-grabbing',
+        'outline-none focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
+        disabled ? 'cursor-pointer' : 'cursor-grab touch-none active:cursor-grabbing',
         isDragging && 'opacity-40',
       )}
     >

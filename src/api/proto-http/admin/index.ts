@@ -1690,6 +1690,21 @@ export type ListOrdersRequest = {
 
 export type ListOrdersResponse = {
   orders: common_Order[] | undefined;
+  total: number | undefined;
+};
+
+export type GetOrdersOverviewRequest = {
+};
+
+export type GetOrdersOverviewResponse = {
+  statusCounts: { [key: string]: number } | undefined;
+  todayOrders: number | undefined;
+  todayRevenue: MoneyByCurrency[] | undefined;
+};
+
+export type MoneyByCurrency = {
+  currency: string | undefined;
+  amount: googletype_Decimal | undefined;
 };
 
 export type GetMetricsRequest = {
@@ -2965,7 +2980,24 @@ export type AddOrderCommentRequest = {
   comment: string | undefined;
 };
 
+export type OrderComment = {
+  id: number | undefined;
+  orderUuid: string | undefined;
+  author: string | undefined;
+  body: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
 export type AddOrderCommentResponse = {
+  comment: OrderComment | undefined;
+};
+
+export type ListOrderCommentsRequest = {
+  orderUuid: string | undefined;
+};
+
+export type ListOrderCommentsResponse = {
+  comments: OrderComment[] | undefined;
 };
 
 export type CreateCustomOrderRequest = {
@@ -4549,6 +4581,11 @@ export type ListTasksRequest = {
   techCardId: number | undefined;
   productId: number | undefined;
   includeArchived: boolean | undefined;
+  orderUuid: string | undefined;
+  archiveId: number | undefined;
+  fittingId: number | undefined;
+  productionRunId: number | undefined;
+  sampleId: number | undefined;
 };
 
 export type ListTasksResponse = {
@@ -8618,6 +8655,8 @@ export interface AdminService {
   SetTrackingNumber(request: SetTrackingNumberRequest): Promise<SetTrackingNumberResponse>;
   // Retrieves orders by their status payment method or email
   ListOrders(request: ListOrdersRequest): Promise<ListOrdersResponse>;
+  // Returns whole-table order status counts plus today's order and revenue totals.
+  GetOrdersOverview(request: GetOrdersOverviewRequest): Promise<GetOrdersOverviewResponse>;
   // Processes a refund for an order
   RefundOrder(request: RefundOrderRequest): Promise<RefundOrderResponse>;
   // Marks an order as delivered
@@ -8689,6 +8728,8 @@ export interface AdminService {
   CancelOrder(request: CancelOrderRequest): Promise<CancelOrderResponse>;
   // Adds a comment to an order
   AddOrderComment(request: AddOrderCommentRequest): Promise<AddOrderCommentResponse>;
+  // Lists an order's append-only admin comment thread, oldest first.
+  ListOrderComments(request: ListOrderCommentsRequest): Promise<ListOrderCommentsResponse>;
   // Creates a custom order with bank_invoice or cash payment (admin-only, supports custom prices).
   CreateCustomOrder(request: CreateCustomOrderRequest): Promise<CreateCustomOrderResponse>;
   // Adds a new hero
@@ -10338,6 +10379,23 @@ export function createAdminServiceClient(
         method: "ListOrders",
       }) as Promise<ListOrdersResponse>;
     },
+    GetOrdersOverview(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/orders/overview`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetOrdersOverview",
+      }) as Promise<GetOrdersOverviewResponse>;
+    },
     RefundOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
         throw new Error("missing required field request.order_uuid");
@@ -10776,6 +10834,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AddOrderComment",
       }) as Promise<AddOrderCommentResponse>;
+    },
+    ListOrderComments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.orderUuid) {
+        throw new Error("missing required field request.order_uuid");
+      }
+      const path = `api/admin/orders/${request.orderUuid}/comments`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListOrderComments",
+      }) as Promise<ListOrderCommentsResponse>;
     },
     CreateCustomOrder(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/orders/custom`; // eslint-disable-line quotes
@@ -11924,6 +12002,21 @@ export function createAdminServiceClient(
       }
       if (request.includeArchived) {
         queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      if (request.orderUuid) {
+        queryParams.push(`orderUuid=${encodeURIComponent(request.orderUuid.toString())}`)
+      }
+      if (request.archiveId) {
+        queryParams.push(`archiveId=${encodeURIComponent(request.archiveId.toString())}`)
+      }
+      if (request.fittingId) {
+        queryParams.push(`fittingId=${encodeURIComponent(request.fittingId.toString())}`)
+      }
+      if (request.productionRunId) {
+        queryParams.push(`productionRunId=${encodeURIComponent(request.productionRunId.toString())}`)
+      }
+      if (request.sampleId) {
+        queryParams.push(`sampleId=${encodeURIComponent(request.sampleId.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {

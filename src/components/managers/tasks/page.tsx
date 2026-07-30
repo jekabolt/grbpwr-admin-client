@@ -2,9 +2,17 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { SectionHeader } from 'ui/components/section-header';
+import {
+  SideRail,
+  SideRailGroup,
+  SideRailItem,
+  SideRailLayout,
+} from 'ui/components/side-rail';
 import Text from 'ui/components/text';
+import { Toolbar } from 'ui/components/toolbar';
 import { emptyFormValues, TaskBoard, TaskFormValues, TaskStatus } from './api/types';
 import { Board } from './components/board';
 import { BoardSkeleton } from './components/board-skeleton';
@@ -30,13 +38,14 @@ export function Tasks() {
   const canView = !resolved || canRead(SECTION.tasks);
   const writable = canWrite(SECTION.tasks);
 
+  // tskTabs v2 — the board is chosen from a left rail, persisted as before.
   const [activeBoard, setActiveBoard] = useState<TaskBoard>(
     () => (localStorage.getItem(ACTIVE_BOARD_KEY) as TaskBoard) || BOARDS[0],
   );
   useEffect(() => localStorage.setItem(ACTIVE_BOARD_KEY, activeBoard), [activeBoard]);
 
-  // Archived view: fetch with include_archived and show only archived cards
-  // (read-only — restore happens on the detail page). Persisted across nav.
+  // tskArchive v3 — archived is a filter, not a mode. On = include_archived so the
+  // board shows active + archived (the cards dim themselves); off = active only.
   const [showArchived, setShowArchived] = useState(
     () => sessionStorage.getItem(ARCHIVED_KEY) === '1',
   );
@@ -48,6 +57,19 @@ export function Tasks() {
   );
   const { data, isLoading, isError, error, refetch } = useTasks(filter);
   const tasks = data?.tasks ?? [];
+
+  // Per-board open-task counts for the rail — one all-boards, active-only read.
+  const countsFilter = useMemo(() => ({}), []);
+  const { data: countsData } = useTasks(countsFilter);
+  const counts = useMemo(() => {
+    const m = new Map<TaskBoard, number>();
+    for (const b of BOARDS) m.set(b, 0);
+    for (const t of countsData?.tasks ?? []) {
+      if (t.archivedAt) continue;
+      m.set(t.board, (m.get(t.board) ?? 0) + 1);
+    }
+    return m;
+  }, [countsData]);
 
   // Persist filters across navigation (opening a task detail unmounts the board).
   const [filters, setFilters] = useState<TaskFilters>(() => {
@@ -61,12 +83,11 @@ export function Tasks() {
   useEffect(() => sessionStorage.setItem(FILTERS_KEY, JSON.stringify(filters)), [filters]);
 
   const active = filtersActive(filters);
-  const visible = useMemo(() => {
-    // Keep active and archived boards cleanly separated regardless of what the
-    // server returns for the include_archived flag.
-    const scoped = tasks.filter((t) => (showArchived ? !!t.archivedAt : !t.archivedAt));
-    return applyFilters(scoped, filters, account?.username);
-  }, [tasks, filters, account?.username, showArchived]);
+  // The include_archived flag already scopes the read; the chip cards dim themselves.
+  const visible = useMemo(
+    () => applyFilters(tasks, filters, account?.username),
+    [tasks, filters, account?.username],
+  );
 
   // The create modal; `null` = closed. Column seeds the new card's status.
   const [creating, setCreating] = useState<TaskStatus | null>(null);
@@ -87,13 +108,18 @@ export function Tasks() {
     }
   }
 
+  function clearFilters() {
+    setFilters(emptyFilters);
+    setShowArchived(false);
+  }
+
   if (!canView) {
     return (
-      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textInactiveColor p-10 text-center'>
+      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-borderColor bg-bgColor p-10 text-center'>
         <Text variant='uppercase' size='large'>
           tasks
         </Text>
-        <Text variant='label' size='small'>
+        <Text size='micro' variant='label'>
           You don’t have access to this section. Ask a super admin to grant it.
         </Text>
       </div>
@@ -102,108 +128,81 @@ export function Tasks() {
 
   return (
     <div className='flex w-full flex-col gap-4 pb-10'>
-      {/* Header */}
-      <div className='flex flex-wrap items-end justify-between gap-3'>
-        <div className='flex flex-col gap-1'>
-          <Text variant='uppercase' size='large'>
-            tasks
-          </Text>
-          <Text variant='label' size='small'>
-            {showArchived
-              ? 'Archived cards, read-only. Open one to restore it to the board.'
-              : 'Track work across departments. Drag a card between columns to change its status.'}
-          </Text>
-        </div>
-        <div className='flex flex-wrap items-center gap-2'>
-          <button
-            type='button'
-            onClick={() => setShowArchived((v) => !v)}
-            aria-pressed={showArchived}
-            className={cn(
-              'border px-3 py-2 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-              showArchived
-                ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-textInactiveColor text-textColor hover:bg-textColor hover:text-bgColor',
-            )}
-          >
-            {showArchived ? 'exit archive' : 'archived'}
-          </button>
-          {writable && !showArchived && (
-            <Button variant='main' size='lg' onClick={() => setCreating('TASK_STATUS_TODO')}>
+      <SectionHeader
+        title='tasks'
+        question='what is each department working on — and what needs a hand?'
+        action={
+          writable && (
+            <Button variant='main' size='sm' onClick={() => setCreating('TASK_STATUS_TODO')}>
               + new task
             </Button>
+          )
+        }
+      />
+
+      <SideRailLayout
+        rail={
+          <SideRail>
+            <SideRailGroup flush>boards</SideRailGroup>
+            {BOARDS.map((board) => (
+              <SideRailItem
+                key={board}
+                label={BOARD_LABEL[board]}
+                count={counts.get(board) ?? 0}
+                selected={board === activeBoard}
+                onClick={() => setActiveBoard(board)}
+              />
+            ))}
+          </SideRail>
+        }
+      >
+        <div className='flex min-w-0 flex-col gap-3'>
+          <Toolbar>
+            <FiltersBar
+              filters={filters}
+              onChange={setFilters}
+              showMine={!!account?.username}
+              showArchived={showArchived}
+              onToggleArchived={() => setShowArchived((v) => !v)}
+              onClear={clearFilters}
+            />
+          </Toolbar>
+
+          {isLoading ? (
+            <BoardSkeleton />
+          ) : isError ? (
+            <div className='flex items-center gap-3'>
+              <Text size='micro' variant='error' tracking='label' component='span'>
+                {error instanceof Error ? error.message : 'failed to load tasks'}
+              </Text>
+              <Button variant='underline' size='xs' onClick={() => refetch()}>
+                retry
+              </Button>
+            </div>
+          ) : (
+            <>
+              {active && visible.length === 0 && (
+                <CalloutBox className='flex flex-wrap items-baseline gap-1.5'>
+                  <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
+                    no tasks match
+                  </Text>
+                  <Button variant='underline' size='xs' onClick={clearFilters} className='ml-auto'>
+                    clear filters
+                  </Button>
+                </CalloutBox>
+              )}
+              <Board
+                tasks={visible}
+                filter={filter}
+                filtered={active}
+                canWrite={writable}
+                onOpen={(task) => navigate(`${ROUTES.tasks}/${task.id}`)}
+                onAdd={(status) => setCreating(status)}
+              />
+            </>
           )}
         </div>
-      </div>
-
-      {/* Board tabs */}
-      <div className='flex gap-2 overflow-x-auto border-b border-textInactiveColor pb-2'>
-        {BOARDS.map((board) => (
-          <button
-            key={board}
-            type='button'
-            onClick={() => setActiveBoard(board)}
-            aria-pressed={board === activeBoard}
-            className={cn(
-              'shrink-0 border px-3 py-1 text-textBaseSize uppercase transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-              board === activeBoard
-                ? 'border-textColor bg-textColor text-bgColor'
-                : 'border-textInactiveColor text-labelColor hover:border-textInactiveColor hover:text-textColor',
-            )}
-          >
-            {BOARD_LABEL[board]}
-          </button>
-        ))}
-      </div>
-
-      {/* Filters */}
-      <FiltersBar filters={filters} onChange={setFilters} showMine={!!account?.username} />
-
-      {/* Content */}
-      {isLoading ? (
-        <BoardSkeleton />
-      ) : isError ? (
-        <div className='flex flex-col items-start gap-2 border border-textInactiveColor p-4'>
-          <Text variant='error' size='small'>
-            {error instanceof Error ? error.message : 'Failed to load tasks'}
-          </Text>
-          <Button variant='secondary' size='lg' onClick={() => refetch()}>
-            retry
-          </Button>
-        </div>
-      ) : (
-        <>
-          {showArchived && !active && visible.length === 0 && (
-            <div className='border border-textInactiveColor p-3'>
-              <Text variant='label' size='small'>
-                No archived tasks on this board.
-              </Text>
-            </div>
-          )}
-          {active && visible.length === 0 && (
-            <div className='flex flex-wrap items-center gap-3 border border-textInactiveColor p-3'>
-              <Text variant='label' size='small'>
-                No tasks match your filters.
-              </Text>
-              <button
-                type='button'
-                onClick={() => setFilters(emptyFilters)}
-                className='text-textBaseSize uppercase underline hover:text-textColor'
-              >
-                clear filters
-              </button>
-            </div>
-          )}
-          <Board
-            tasks={visible}
-            filter={filter}
-            filtered={active || showArchived}
-            canWrite={writable && !showArchived}
-            onOpen={(task) => navigate(`${ROUTES.tasks}/${task.id}`)}
-            onAdd={(status) => setCreating(status)}
-          />
-        </>
-      )}
+      </SideRailLayout>
 
       <TaskFormModal
         open={creating !== null}

@@ -139,6 +139,27 @@ body {
     --color-pageBg: #ffffff;
     --color-bgZebra: #ffffff;
   }
+
+  /* Print ONE region, in place.
+     A `window.print()` from inside the app otherwise puts the whole admin on paper — the nav rail,
+     the tab bar, the buttons — and the operator throws the first three pages away. Marking a region
+     with `data-print-region` hides its siblings all the way up the tree, so the region prints
+     alone without being portalled or duplicated into a hidden print-only copy that can drift from
+     what is on screen.
+
+     Body copy stays black on white: a swatch key drawn in greys must survive a mono laser, so the
+     browser is told to keep the fills it was given. */
+  body:has([data-print-region]) *:not(:has([data-print-region])):not([data-print-region] *) {
+    display: none !important;
+  }
+  [data-print-region] {
+    border: 0 !important;
+    padding: 0 !important;
+  }
+  [data-print-region] * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
 }
 
 @layer utilities {

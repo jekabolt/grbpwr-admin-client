@@ -234,7 +234,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
 
       <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
         <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-2/5'>
-          <section>
+          <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader
               title='sketch — assembly map'
               question='— hovering an operation lights its pin, and the other way round'
@@ -251,7 +251,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
 
         <div className='flex w-full flex-col gap-2.5 lg:w-3/5'>
           <ConstructionField />
-          <section>
+          <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader
               title='operations — assembly order'
               question='— zone, seam type, allowance, stitch density, needle, thread, SAM'

@@ -6,6 +6,7 @@ import { Button } from 'ui/components/button';
 import Checkbox from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+import { money, toNum } from '../money';
 
 // Maps the free-text refund reasons to the structured RefundReason enum, which drives the
 // return-analysis breakdown. Anything unmapped falls back to OTHER.
@@ -45,7 +46,8 @@ export function RefundConfirmation({
   const [selectedReason, setSelectedReason] = useState('');
   const [refundShipping, setRefundShipping] = useState(false);
 
-  // Units selected for partial refund, grouped per order line (qty = how many of that item).
+  // Units selected for partial refund, grouped per order line (qty = how many of that item),
+  // each carrying the line's refundable amount (unit sale price × qty).
   const selectedSummary = useMemo(() => {
     const counts = new Map<number, number>();
     selectedUnitKeys.forEach((k) => {
@@ -54,7 +56,13 @@ export function RefundConfirmation({
     });
     return Array.from(counts.entries()).map(([id, qty]) => {
       const item = orderDetails?.orderItems?.find((oi) => oi.id === id);
-      return { id, qty, name: item?.translations?.[0]?.name ?? `item ${id}` };
+      const unitPrice = toNum(item?.productPriceWithSale);
+      return {
+        id,
+        qty,
+        name: item?.translations?.[0]?.name ?? `item ${id}`,
+        amount: unitPrice * qty,
+      };
     });
   }, [selectedUnitKeys, orderDetails?.orderItems]);
 
@@ -83,9 +91,22 @@ export function RefundConfirmation({
   const currency = order?.currency ?? '';
   const total = order?.totalPrice?.value;
   const unitCount = selectedUnitKeys.length;
+  const shippingFee = toNum(orderDetails?.shipment?.cost?.value);
+
+  // ordRefund v2 — amount preview. There is no PreviewRefund RPC, so the figure is summed
+  // client-side: full refund = the order total; partial = the selected units' sale prices,
+  // plus the shipping fee only when the operator ticks it in.
+  const itemsAmount = useMemo(
+    () => selectedSummary.reduce((sum, s) => sum + s.amount, 0),
+    [selectedSummary],
+  );
+  const previewAmount = isFullRefund
+    ? toNum(total)
+    : itemsAmount + (refundShipping ? shippingFee : 0);
+  const previewLabel = money(previewAmount, currency);
   const confirmLabel = isFullRefund
-    ? `refund whole order${total ? ` · ${total} ${currency}` : ''}`
-    : `refund ${unitCount} unit${unitCount === 1 ? '' : 's'}`;
+    ? `refund whole order · ${previewLabel}`
+    : `refund ${unitCount} unit${unitCount === 1 ? '' : 's'} · ${previewLabel}`;
 
   return (
     <ConfirmationModal
@@ -98,6 +119,16 @@ export function RefundConfirmation({
       confirmDisabled={!canConfirm}
     >
       <div className='flex flex-col gap-4 lg:w-[420px]'>
+        {/* ordRefund v2 — the amount is the first thing you read */}
+        <div className='flex items-baseline justify-between gap-4 border border-textColor px-3 py-2'>
+          <Text variant='uppercase' size='micro' component='span' className='tracking-label'>
+            refund amount
+          </Text>
+          <Text component='span' size='statBig'>
+            {previewLabel}
+          </Text>
+        </div>
+
         {/* Scope — full refund is loud, partial lists exactly what's affected */}
         {isFullRefund ? (
           <div className='space-y-1 border border-error p-3'>
@@ -118,10 +149,22 @@ export function RefundConfirmation({
             <div className='space-y-1'>
               {selectedSummary.map((s) => (
                 <div key={s.id} className='flex items-center justify-between gap-3'>
-                  <Text size='small'>{s.name}</Text>
-                  <Text size='small'>×{s.qty}</Text>
+                  <Text size='small'>
+                    {s.name} <span className='text-labelColor'>×{s.qty}</span>
+                  </Text>
+                  <Text size='small' className='tabular-nums'>
+                    {money(s.amount, currency)}
+                  </Text>
                 </div>
               ))}
+              {refundShipping && (
+                <div className='flex items-center justify-between gap-3 border-t border-borderColor pt-1'>
+                  <Text size='small'>+ shipping</Text>
+                  <Text size='small' className='tabular-nums'>
+                    {money(shippingFee, currency)}
+                  </Text>
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -111,7 +111,9 @@ type TabId = (typeof TABS)[number]['id'];
 // Tabs grouped into lifecycle bands so the rail reads at a glance (R-2): DESIGN what it is,
 // DEVELOP how it's made, SPEC what ships. History stands alone.
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
-  { band: 'design', tabs: ['header', 'sketch', 'moodboard', 'patterns'] },
+  // Moodboard before sketch: the reference comes first and the technical drawing is derived from
+  // it, so the rail follows the order the work actually happens in.
+  { band: 'design', tabs: ['header', 'moodboard', 'sketch', 'patterns'] },
   { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'pieces', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   { band: '', tabs: ['history'] },
@@ -174,7 +176,11 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className={`space-y-2.5 ${className ?? ''}`}>
+    // Each logical block is a white card (bg-bgColor + border) on the gray page ground; the gap
+    // between cards is the gray divider. Without a fill the block floats bare on gray.
+    <section
+      className={`space-y-2.5 border border-borderColor bg-bgColor p-4 ${className ?? ''}`}
+    >
       <SectionHeader title={title} question={question} />
       {children}
     </section>

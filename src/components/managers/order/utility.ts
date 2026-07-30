@@ -112,10 +112,9 @@ export const useOrderDetails = (uuid: string) => {
     }
   }
 
+  // Confirmation now lives in the order header's ConfirmationModal (ordActions v2), so
+  // this is a direct write — no window.confirm, which the redesign has no vocabulary for.
   async function markAsDelivered() {
-    const confirmed = window.confirm('Are you sure you want to mark this order as delivered?');
-    if (!confirmed) return;
-
     try {
       await adminService.DeliveredOrder({
         orderUuid: state.orderDetails?.order?.uuid,
@@ -124,6 +123,21 @@ export const useOrderDetails = (uuid: string) => {
       showMessage('Order marked as delivered successfully', 'success');
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Failed to mark as delivered';
+      showMessage(msg, 'error');
+    }
+  }
+
+  // Pre-fulfilment escape hatch — releases reserved stock and stops fulfilment. Confirmed
+  // in the header modal; does NOT move money (a paid order is refunded, not cancelled).
+  async function cancelOrder() {
+    try {
+      await adminService.CancelOrder({
+        orderUuid: state.orderDetails?.order?.uuid,
+      });
+      fetchOrderDetails();
+      showMessage('Order cancelled', 'success');
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Failed to cancel order';
       showMessage(msg, 'error');
     }
   }
@@ -189,6 +203,7 @@ export const useOrderDetails = (uuid: string) => {
     toggleTrackNumber,
     handleTrackingNumberChange,
     markAsDelivered,
+    cancelOrder,
     refundOrder,
     setShipmentActualCost,
     toggleOrderItemsSelection,

@@ -139,6 +139,11 @@ export const tasksService: TasksService = {
         orderFactor: undefined,
         techCardId: filter.techCardId,
         productId: filter.productId,
+        orderUuid: filter.orderUuid ?? '',
+        archiveId: filter.archiveId ?? 0,
+        fittingId: filter.fittingId ?? 0,
+        productionRunId: filter.productionRunId ?? 0,
+        sampleId: filter.sampleId ?? 0,
         includeArchived: filter.includeArchived,
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),

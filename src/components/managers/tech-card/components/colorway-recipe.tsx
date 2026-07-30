@@ -1393,7 +1393,7 @@ function ColorwayRecipeEditor({
   const derived = useMemo(() => deriveComposition(usages, bomItems), [usages, bomItems]);
 
   return (
-    <div className='flex flex-col gap-2'>
+    <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
       <SectionHeader
         title={`${title} · рецепт`}
         question={[colorway.baseSku, `${usages.length} material${usages.length === 1 ? '' : 's'}`]
@@ -1577,7 +1577,7 @@ function CreateColorwayForm({
   };
 
   return (
-    <div className='flex flex-col gap-2'>
+    <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
       <SectionHeader
         title='новый колорвей'
         question='a DRAFT colourway — colour only, so its recipe can be edited here; media, price and the rest come from the product manager afterwards'

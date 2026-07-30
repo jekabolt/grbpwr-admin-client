@@ -1,11 +1,14 @@
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
-import FieldsGroupContainer from 'ui/components/fields-group';
+import { GroupLabel } from 'ui/components/group-label';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { getUniqueCountries } from '../utility/constant';
 
+// custFlow v2 — the delivery address plus carrier/cost, as a plain field stack (no accordion stage).
+// Buyer name moved to contact and the payment method to its own section; this step is purely "where
+// it ships and how".
 export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
   const { dictionary } = useDictionary();
   const { watch, setValue } = useFormContext();
@@ -40,40 +43,27 @@ export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
   }, [shipmentCarrierId, dictionary?.shipmentCarriers, dictionary?.baseCurrency, setValue]);
 
   return (
-    <FieldsGroupContainer stage='2/3' isOpen title='shipping address/delivery method'>
-      <div className='space-y-6'>
-        <div className='grid grid-cols-2 gap-6'>
-          <div className='col-span-1'>
-            <InputField name='buyer.firstName' label='first name' />
-          </div>
-          <div className='col-span-1'>
-            <InputField name='buyer.lastName' label='last name' />
-          </div>
-        </div>
-        <InputField name={`${prefix}Address.addressLineOne`} label='street and house number' />
+    <div className='flex flex-col gap-4 border border-borderColor bg-bgColor p-3'>
+      <InputField name={`${prefix}Address.addressLineOne`} label='street and house number' />
+      <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
         <SelectField name={`${prefix}Address.country`} label='country' items={countryItems} />
         <InputField name={`${prefix}Address.state`} label='state' />
         <InputField name={`${prefix}Address.city`} label='city' />
-        <InputField name={`${prefix}Address.addressLineTwo`} label='additional address' />
-        <InputField name={`${prefix}Address.company`} label='company' />
-        <InputField name='buyer.phone' label='phone' />
         <InputField name={`${prefix}Address.postalCode`} label='postal code' />
-        <SelectField
-          name='paymentMethod'
-          label='payment method'
-          items={[
-            { value: 'PAYMENT_METHOD_NAME_ENUM_BANK_INVOICE', label: 'Bank invoice' },
-            { value: 'PAYMENT_METHOD_NAME_ENUM_CASH', label: 'Cash' },
-          ]}
-        />
+      </div>
+      <InputField name={`${prefix}Address.addressLineTwo`} label='additional address' />
+      <InputField name={`${prefix}Address.company`} label='company' />
+
+      <GroupLabel>delivery</GroupLabel>
+      <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
         <SelectField
           name='shipmentCarrierId'
-          label='Shipment carrier'
+          label='shipment carrier'
           items={carrierItems}
           valueAsNumber
         />
-        <InputField name='shipmentCost.value' label='Shipment cost' placeholder='0.00' />
+        <InputField name='shipmentCost.value' label='shipment cost' placeholder='0.00' />
       </div>
-    </FieldsGroupContainer>
+    </div>
   );
 }

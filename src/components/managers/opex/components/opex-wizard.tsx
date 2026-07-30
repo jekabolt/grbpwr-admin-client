@@ -15,12 +15,11 @@ import {
 } from '../utils/hooks';
 import {
   currentMonth,
-  formatMoney,
   isRecurringLine,
   latestRateToBase,
+  money,
   monthLabelShort,
   opexCategoryLabel,
-  opexCurrencySymbol,
   shiftMonth,
 } from '../utils/options';
 import { AmountInput, CategorySelect, CurrencySelect, Field, fieldCls, MonthInput } from './fields';
@@ -271,13 +270,17 @@ export function OpexWizard({
     <DialogPrimitives.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitives.Portal>
         <DialogPrimitives.Overlay className='fixed inset-0 z-[var(--z-modal)] h-screen bg-overlay' />
-        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
-          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
-            <DialogPrimitives.Title className='text-lg uppercase'>add opex</DialogPrimitives.Title>
+        <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-[var(--z-modal)] flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textColor bg-bgColor text-textColor shadow-[var(--shadow-modal)] lg:inset-x-auto lg:left-1/2 lg:w-[480px] lg:-translate-x-1/2'>
+          <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+            <DialogPrimitives.Title asChild>
+              <Text size='micro' variant='uppercase' tracking='group' component='span' className='font-bold'>
+                add opex
+              </Text>
+            </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
-              <Button type='button' className='shrink-0 cursor-pointer'>
-                [x]
-              </Button>
+              <button type='button' aria-label='close' className='ml-auto text-labelColor'>
+                ✕
+              </button>
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
@@ -285,21 +288,21 @@ export function OpexWizard({
           </DialogPrimitives.Description>
 
           {/* step indicator */}
-          <div className='flex items-center gap-1 border-b border-textInactiveColor px-4 py-2'>
+          <div className='flex items-center gap-1 border-b border-borderColor px-4 py-2'>
             {steps.map((s, i) => (
               <div key={s.key} className='flex items-center gap-1'>
                 <span
-                  className={`text-small uppercase ${
+                  className={`text-micro uppercase tracking-label ${
                     i === stepIndex
-                      ? 'text-textColor'
+                      ? 'font-bold text-textColor'
                       : i < stepIndex
-                        ? 'text-textColor/60'
-                        : 'text-textInactiveColor'
+                        ? 'text-labelColor'
+                        : 'text-labelColor'
                   }`}
                 >
                   {i + 1}. {s.label}
                 </span>
-                {i < steps.length - 1 && <span className='text-textInactiveColor'>›</span>}
+                {i < steps.length - 1 && <span className='text-labelColor'>›</span>}
               </div>
             ))}
           </div>
@@ -307,7 +310,7 @@ export function OpexWizard({
           <div className='flex flex-col gap-3 p-4'>
             {step === 'type' && (
               <>
-                <Text size='small' variant='inactive'>
+                <Text size='small' variant='label'>
                   What kind of cost is this?
                 </Text>
                 <KindCard
@@ -412,14 +415,11 @@ export function OpexWizard({
 
             {step === 'review' && (
               <div className='flex flex-col gap-3'>
-                <div className='border border-textInactiveColor'>
+                <div className='border border-borderColor'>
                   <ReviewRow label='kind' value={kind === 'oneoff' ? 'one-off' : 'recurring'} />
                   <ReviewRow label='category' value={opexCategoryLabel(d.category)} />
                   <ReviewRow label='label' value={d.label.trim() || '—'} />
-                  <ReviewRow
-                    label='amount'
-                    value={`${opexCurrencySymbol(d.currency)}${formatMoney(amountNum)} ${d.currency}`}
-                  />
+                  <ReviewRow label='amount' value={money(amountNum, d.currency)} />
                   {kind === 'oneoff' ? (
                     <ReviewRow label='month' value={monthLabelShort(d.month)} />
                   ) : (
@@ -435,7 +435,7 @@ export function OpexWizard({
 
                 {/* base-currency fold preview */}
                 {sameCurrency ? (
-                  <Text size='small' variant='inactive'>
+                  <Text size='small' variant='label'>
                     Booked in the base currency ({base}).
                   </Text>
                 ) : willBeUncosted ? (
@@ -446,16 +446,14 @@ export function OpexWizard({
                   </Text>
                 ) : (
                   basePreview != null && (
-                    <Text size='small' variant='inactive'>
-                      ≈ {opexCurrencySymbol(base)}
-                      {formatMoney(basePreview)} {base} (folded on save at the current {d.currency}{' '}
-                      rate)
+                    <Text size='small' variant='label'>
+                      ≈ {money(basePreview, base)} (folded on save at the current {d.currency} rate)
                     </Text>
                   )
                 )}
 
                 {kind === 'recurring' && (
-                  <Text size='small' variant='inactive'>
+                  <Text size='small' variant='label'>
                     {recurringMonths > 0
                       ? `Books ${recurringMonths} month(s) now (${monthLabelShort(d.activeFrom)} → ${monthLabelShort(currentMonth())}), then one line each new month.`
                       : `Starts in the future — books its first line in ${monthLabelShort(d.activeFrom)}.`}
@@ -463,7 +461,7 @@ export function OpexWizard({
                 )}
 
                 {collisionChecking && (
-                  <Text variant='inactive' size='small'>
+                  <Text variant='label' size='small'>
                     Checking for a conflicting line this month…
                   </Text>
                 )}
@@ -480,13 +478,13 @@ export function OpexWizard({
           </div>
 
           {/* footer nav */}
-          <div className='sticky bottom-0 flex items-center justify-between gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
+          <div className='sticky bottom-0 flex items-center justify-between gap-2 border-t border-borderColor bg-bgColor px-2.5 py-1.5'>
             <div>
               {step !== 'type' && (
                 <Button
                   type='button'
                   variant='secondary'
-                  size='lg'
+                  size='sm'
                   onClick={() => setStep(step === 'review' ? 'details' : 'type')}
                 >
                   back
@@ -498,7 +496,7 @@ export function OpexWizard({
                 <Button
                   type='button'
                   variant='main'
-                  size='lg'
+                  size='sm'
                   disabled={!!detailsError}
                   onClick={() => setStep('review')}
                 >
@@ -509,7 +507,7 @@ export function OpexWizard({
                 <Button
                   type='button'
                   variant='main'
-                  size='lg'
+                  size='sm'
                   disabled={busy || !!collision || collisionChecking}
                   onClick={submit}
                 >
@@ -539,16 +537,16 @@ function KindCard({
     <button
       type='button'
       onClick={onClick}
-      className='group flex flex-col gap-1 border border-textInactiveColor p-3 text-left transition-colors hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
+      className='group flex flex-col gap-1 border border-borderColor p-3 text-left transition-colors hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-textColor'
     >
       <div className='flex items-center justify-between'>
-        <Text variant='uppercase'>{title}</Text>
-        <span className='text-textInactiveColor transition-colors group-hover:text-textColor'>
-          ›
-        </span>
+        <Text variant='uppercase' component='span' className='font-bold'>
+          {title}
+        </Text>
+        <span className='text-labelColor transition-colors group-hover:text-textColor'>›</span>
       </div>
       <Text size='small'>{desc}</Text>
-      <Text size='small' variant='inactive'>
+      <Text size='small' variant='label'>
         {example}
       </Text>
     </button>
@@ -557,11 +555,11 @@ function KindCard({
 
 function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className='flex items-start justify-between gap-3 border-b border-textInactiveColor/40 px-3 py-1.5 last:border-b-0'>
-      <Text size='small' variant='inactive' className='uppercase'>
+    <div className='flex items-start justify-between gap-3 border-b border-hairline px-3 py-1.5 last:border-b-0'>
+      <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
         {label}
       </Text>
-      <Text size='small' className='text-right'>
+      <Text size='small' component='span' className='text-right tabular-nums'>
         {value}
       </Text>
     </div>

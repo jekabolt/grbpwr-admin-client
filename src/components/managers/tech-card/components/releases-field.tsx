@@ -282,7 +282,7 @@ export function ReleasesField({ techCardId, gate }: { techCardId: number; gate?:
   };
 
   return (
-    <div className='flex flex-col'>
+    <div className='flex flex-col border border-borderColor bg-bgColor p-3'>
       <SectionHeader
         title='frozen snapshots the factory reads'
         question='— each release freezes the whole spec; the factory may be building from Rev.2 while you edit Rev.3'

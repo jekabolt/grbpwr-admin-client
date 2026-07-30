@@ -328,7 +328,7 @@ export function IssuesField() {
   };
 
   return (
-    <div className='flex flex-col'>
+    <div className='flex flex-col border border-borderColor bg-bgColor p-3'>
       <SectionHeader
         title='maker flags'
         question='— each issue can point at an operation and a sketch callout; open ones block the release'

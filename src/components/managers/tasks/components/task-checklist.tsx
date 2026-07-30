@@ -23,21 +23,23 @@ export function TaskChecklist({
   const remove = useDeleteChecklistItem(taskId);
 
   return (
-    <ChecklistEditor
-      label='checklist'
-      items={items}
-      canWrite={canWrite}
-      adding={add.isPending}
-      addPlaceholder='Add a subtask…'
-      emptyLabel='No checklist items.'
-      onAdd={(content) =>
-        add
-          .mutateAsync(content)
-          .then(() => undefined)
-          .catch(() => undefined)
-      }
-      onToggle={(id, isDone) => toggle.mutate({ id, isDone })}
-      onDelete={(id) => remove.mutate(id)}
-    />
+    <div className='border border-borderColor bg-bgColor p-3'>
+      <ChecklistEditor
+        label='checklist'
+        items={items}
+        canWrite={canWrite}
+        adding={add.isPending}
+        addPlaceholder='Add a subtask…'
+        emptyLabel='No checklist items.'
+        onAdd={(content) =>
+          add
+            .mutateAsync(content)
+            .then(() => undefined)
+            .catch(() => undefined)
+        }
+        onToggle={(id, isDone) => toggle.mutate({ id, isDone })}
+        onDelete={(id) => remove.mutate(id)}
+      />
+    </div>
   );
 }

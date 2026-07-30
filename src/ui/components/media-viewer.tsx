@@ -3,7 +3,7 @@ import { ChevronLeftIcon, ChevronRightIcon, Cross2Icon } from '@radix-ui/react-i
 import type { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useImageAnnotate, useMediaStageGestures, ZoomDrawToolbar } from './media-viewer-zoom';
 
 // One normalized shape the viewer understands. Every call site maps its own data
@@ -36,6 +36,12 @@ export function resolveViewerType(item: MediaViewerItem): 'image' | 'video' {
   return item.type ?? (isVideo(item.src) ? 'video' : 'image');
 }
 
+/** `…/sketch-front.jpg` -> `sketch-front-annotated.png`, so a folder of exports stays readable. */
+function annotatedFileName(src: string): string {
+  const base = src.split('?')[0]?.split('/').pop() || 'image';
+  return `${base.replace(/\.[^.]+$/, '') || 'image'}-annotated.png`;
+}
+
 /** Small controller so a gallery can open the viewer at a given index with one call. */
 export function useMediaViewer() {
   const [open, setOpen] = useState(false);
@@ -53,9 +59,26 @@ interface MediaViewerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onIndexChange: (index: number) => void;
+  /**
+   * Anything to lay over the picture, in its own coordinate space — the callout pins of the
+   * surface that opened the viewer. Rendered inside the transformed stage at `size`, so it pans
+   * and zooms with the image, and gated behind a toolbar toggle (the pins are exactly what you
+   * sometimes zoom in to get OUT of the way). Omitted = no toggle is offered.
+   */
+  renderOverlay?: (ctx: { index: number; size: { w: number; h: number }; scale: number }) => ReactNode;
+  /** Label for the overlay toggle, e.g. 'callouts'. */
+  overlayLabel?: string;
 }
 
-export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }: MediaViewerProps) {
+export function MediaViewer({
+  items,
+  index,
+  open,
+  onOpenChange,
+  onIndexChange,
+  renderOverlay,
+  overlayLabel = 'callouts',
+}: MediaViewerProps) {
   const count = items.length;
   const hasMany = count > 1;
   // Clamp defensively — the list can shrink (a delete) while the viewer is open.
@@ -91,6 +114,9 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
   const resetKey = `${open ? 1 : 0}:${safeIndex}:${current?.src ?? ''}`;
   const gestures = useMediaStageGestures({ active: isImage, resetKey, hasMany, onSwipe: go });
   const annotate = useImageAnnotate({ resetKey, baseSize: gestures.baseSize });
+  // Callouts start visible — you open the viewer on an annotated sketch to read them. The toggle
+  // is there to get them off the picture, which is what you want before drawing on it.
+  const [showOverlay, setShowOverlay] = useState(true);
 
   // Close only when the click lands on the empty ground (not the media or a control),
   // and not as the tail of a swipe.
@@ -137,6 +163,22 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
             <span className='text-textBaseSize uppercase tabular-nums'>
               {hasMany ? label : ' '}
             </span>
+            {renderOverlay && isImage && (
+              <button
+                type='button'
+                aria-pressed={showOverlay}
+                onClick={() => setShowOverlay((v) => !v)}
+                className={cn(
+                  'ml-auto shrink-0 border px-2 py-1.5 text-micro uppercase leading-none tracking-label transition-colors',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
+                  showOverlay
+                    ? 'border-bgColor bg-bgColor text-textColor'
+                    : 'border-bgColor/40 text-bgColor hover:bg-bgColor hover:text-textColor',
+                )}
+              >
+                {showOverlay ? `hide ${overlayLabel}` : `show ${overlayLabel}`}
+              </button>
+            )}
             <Dialog.Close
               aria-label='Close viewer'
               className='flex size-8 items-center justify-center border border-bgColor/40 transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
@@ -184,6 +226,21 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
                       !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
                     )}
                   />
+                  {/* Callout layer, sized to the displayed image so normalised pin positions map
+                      1:1 — and painted BEFORE the canvas, so draw mode always has the top surface
+                      and a stroke is never swallowed by a pin. */}
+                  {renderOverlay && showOverlay && gestures.baseSize.w > 0 && (
+                    <div
+                      style={{ width: gestures.baseSize.w, height: gestures.baseSize.h }}
+                      className='absolute left-0 top-0'
+                    >
+                      {renderOverlay({
+                        index: safeIndex,
+                        size: gestures.baseSize,
+                        scale: gestures.scale,
+                      })}
+                    </div>
+                  )}
                   {annotate.drawMode && (
                     <canvas
                       ref={annotate.canvasRef}
@@ -230,9 +287,14 @@ export function MediaViewer({ items, index, open, onOpenChange, onIndexChange }:
                 color={annotate.color}
                 onColorChange={annotate.setColor}
                 colors={annotate.colors}
+                width={annotate.width}
+                onWidthChange={annotate.setWidth}
+                widths={annotate.widths}
                 hasStrokes={annotate.hasStrokes}
                 onUndo={annotate.undo}
                 onClear={annotate.clear}
+                saving={annotate.saving}
+                onSave={() => void annotate.saveImage(current.src, annotatedFileName(current.src))}
               />
             )}
           </div>
