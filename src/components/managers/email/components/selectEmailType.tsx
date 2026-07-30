@@ -57,6 +57,11 @@ export const SelectEmailType: FC<SelectEmailTypeProps> = ({
 
   const q = query.trim().toLowerCase();
   const matches = (value: EmailBlockType) => {
+    // EMAIL_BLOCK_TYPE_GROUPS still lists the types the palette deliberately retires
+    // (two_column / social_links / video_thumb) so legacy campaigns keep their labels.
+    // They must not reach the groups, the match count or the Enter shortcut — only
+    // types present in emailBlockTypes are offerable.
+    if (!EMAIL_TYPE_BY_VALUE[value]) return false;
     if (excludeTypes.includes(value)) return false;
     if (!q) return true;
     const label = EMAIL_TYPE_BY_VALUE[value]?.label ?? '';

@@ -50,15 +50,32 @@ export function StatTile({
 }
 
 // Number formatting shared across dispatch/metrics surfaces.
-export function fmtInt(n: number | undefined): string {
-  if (typeof n !== 'number' || Number.isNaN(n)) return '0';
-  return Math.round(n).toLocaleString();
+//
+// The counts are int64 in the proto (CampaignMetricCounts, fan-out cursors), and
+// grpc-gateway's protojson marshaler emits int64 as a JSON STRING ("1234") — the TS
+// client types them as `number` but the wire value is a string, so a `typeof ===
+// 'number'` gate would render every count as 0. Coerce first, exactly like
+// epochSecondsToRfc3339 does for the *_at fields.
+export function toNumber(v: number | string | undefined | null): number | undefined {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
+export function fmtInt(n: number | string | undefined): string {
+  const v = toNumber(n);
+  if (v === undefined) return '0';
+  return Math.round(v).toLocaleString();
 }
 
 // Backend rates are fractions in [0,1]; render as a percentage. Defensive against a
 // backend that ever hands back 0–100 already (values > 1.5 are treated as percents).
-export function fmtRate(r: number | undefined): string {
-  if (typeof r !== 'number' || Number.isNaN(r)) return '—';
-  const pct = r > 1.5 ? r : r * 100;
+export function fmtRate(r: number | string | undefined): string {
+  const v = toNumber(r);
+  if (v === undefined) return '—';
+  const pct = v > 1.5 ? v : v * 100;
   return `${pct.toFixed(1)}%`;
 }

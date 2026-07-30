@@ -21,7 +21,6 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { v4 as uuidv4 } from 'uuid';
-import { ReleaseDateField } from '../../hero/components/release-date-field';
 import { useProductSelection } from '../../hero/components/useProductSelection';
 import { ABPanel } from './ab-panel';
 import { BlockEditorModal } from './block-editor-modal';
@@ -40,7 +39,8 @@ import { useAutoTranslateCampaign, useCampaign, useSaveCampaign } from './useCam
  * Email-campaign builder (route :id). Fork of hero/components/index.tsx MINUS the
  * H9 snapshot/revert + H4 carry-forward; the singleton publish-overwrite is
  * replaced by per-campaign UpsertEmailCampaign (id from route, id=0 for new).
- * Editing is gated read-only unless the status is DRAFT/PAUSED.
+ * Editing is gated read-only unless the status is DRAFT (see EDITABLE_STATUSES —
+ * the upsert RPC and the store both refuse anything but a draft).
  */
 export function CampaignBuilder() {
   const { id: idParam } = useParams<{ id: string }>();
@@ -63,6 +63,9 @@ export function CampaignBuilder() {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [testOpen, setTestOpen] = useState(false);
   const isResettingRef = useRef(false);
+  // Which campaign id the form has already been hydrated from — the first load must
+  // always win, later refetches must not clobber unsaved edits (see the load effect).
+  const loadedForRef = useRef<number | null>(null);
 
   const currentStatus: common_EmailCampaignStatus =
     campaignData?.status || 'EMAIL_CAMPAIGN_STATUS_DRAFT';
@@ -71,12 +74,36 @@ export function CampaignBuilder() {
 
   const zResolver = useMemo(() => zodResolver(campaignSchema) as any, []);
   const form = useForm<CampaignSchema>({
+    // Soft-deleted blocks are excluded from validation (they never reach the upsert),
+    // but zod then keys body errors by FILTERED position while the rail badge and the
+    // editor's `body.${index}` field paths use the UNFILTERED field-array position —
+    // so map the indices back before handing the errors to RHF, otherwise a deleted
+    // row above an incomplete block steals its "!" badge and its inline messages.
     resolver: async (values, ctx, opts) => {
-      const filtered: CampaignSchema = {
-        ...values,
-        body: (values.body || []).filter((b: any) => !deletedIndicesRef.current.has(b._uid)),
-      };
-      return zResolver(filtered, ctx, opts);
+      const all = (values.body || []) as any[];
+      const livePositions: number[] = [];
+      const body = all.filter((b: any, i: number) => {
+        if (deletedIndicesRef.current.has(b?._uid)) return false;
+        livePositions.push(i);
+        return true;
+      });
+      const result = await zResolver({ ...values, body } as CampaignSchema, ctx, opts);
+      const bodyErrors = result?.errors?.body;
+      if (!bodyErrors || livePositions.every((pos, filteredIdx) => pos === filteredIdx)) {
+        return result;
+      }
+      // Keep the array-ish container zodResolver builds; non-numeric keys (root /
+      // message / type carried on the array itself) ride through untouched.
+      const remapped: any = [];
+      Object.keys(bodyErrors).forEach((key) => {
+        const filteredIdx = Number(key);
+        if (Number.isInteger(filteredIdx) && livePositions[filteredIdx] !== undefined) {
+          remapped[livePositions[filteredIdx]] = bodyErrors[key];
+        } else {
+          remapped[key] = bodyErrors[key];
+        }
+      });
+      return { ...result, errors: { ...result.errors, body: remapped } };
     },
     defaultValues: defaultCampaign,
     mode: 'onTouched',
@@ -84,9 +111,16 @@ export function CampaignBuilder() {
 
   useBlockNavigation(hasUserMadeChanges);
 
-  // Load an existing campaign into the form.
+  // Load an existing campaign into the form. Every background refetch (save
+  // invalidation, auto-translate, window remount) re-runs this, so a reset would
+  // silently overwrite whatever the operator has typed since — after the FIRST load
+  // for this id we only reset while the form is clean. Dirty edits win; they stay
+  // flagged as "unsaved changes" until the operator saves them.
   useEffect(() => {
     if (routeId > 0 && campaignData) {
+      const firstLoad = loadedForRef.current !== routeId;
+      if (!firstLoad && form.formState.isDirty) return;
+      loadedForRef.current = routeId;
       isResettingRef.current = true;
       const { productIdsByBlockUid, productsByBlockUid, ...formValues } =
         mapCampaignFullToForm(campaignData);
@@ -134,8 +168,11 @@ export function CampaignBuilder() {
     const liveBody = (values.body || []).filter(
       (b: any) => !deletedIndicesRef.current.has(b._uid),
     );
-    return mapFormToCampaignInsert({ ...values, body: liveBody }, currentStatus);
-  }, [form, currentStatus]);
+    // status is server-owned (the upsert accepts drafts only), so the mapper always
+    // declares DRAFT — never echo currentStatus back or every save of a
+    // paused/scheduled campaign is rejected with "campaign status is server-owned".
+    return mapFormToCampaignInsert({ ...values, body: liveBody });
+  }, [form]);
 
   const handleSave = useCallback(async () => {
     // Surface incomplete-block flags in the rail, but drafts may be saved partial.
@@ -160,6 +197,19 @@ export function CampaignBuilder() {
       // error toast surfaced by useSaveCampaign.onError
     }
   }, [form, buildInsert, saveCampaign, routeId, navigate, showMessage]);
+
+  // Auto-translate runs server-side over the LAST SAVED copy and then refetches the
+  // campaign, so firing it with unsaved edits would translate stale copy and pull a
+  // server payload over the editor. Refuse and ask for a save instead of silently
+  // discarding work (the load effect also refuses to reset a dirty form).
+  const handleAutoTranslate = useCallback(() => {
+    if (!routeId || readOnly) return;
+    if (hasUserMadeChanges || form.formState.isDirty) {
+      showMessage('save your changes first — auto-translate runs on the saved campaign', 'error');
+      return;
+    }
+    autoTranslate.mutate({ id: routeId });
+  }, [routeId, readOnly, hasUserMadeChanges, form, autoTranslate, showMessage]);
 
   // Cmd/Ctrl+S saves (when editable and no sub-modal is open).
   useEffect(() => {
@@ -230,15 +280,20 @@ export function CampaignBuilder() {
               variant='secondary'
               size='lg'
               className='uppercase'
-              onClick={() => routeId && autoTranslate.mutate({ id: routeId })}
+              onClick={handleAutoTranslate}
               disabled={
                 !canWrite(SECTION.marketing) ||
                 !routeId ||
+                readOnly ||
                 autoTranslate.isPending ||
                 saveCampaign.isPending
               }
               loading={autoTranslate.isPending}
-              title='Fill the other languages from English via AI (save first). Review before sending.'
+              title={
+                readOnly
+                  ? 'auto-translate can only run on a draft.'
+                  : 'Fill the other languages from English via AI — translates the SAVED copy, so save first. Review before sending.'
+              }
             >
               auto-translate
             </Button>
@@ -270,7 +325,7 @@ export function CampaignBuilder() {
           <div className='mb-4 border border-warning p-2'>
             <Text size='small' variant='uppercase' className='text-warning'>
               read-only — this campaign is {STATUS_LABELS[currentStatus as keyof typeof STATUS_LABELS]}. only
-              DRAFT / PAUSED campaigns can be edited.
+              DRAFT campaigns can be edited; the content of a scheduled or sent campaign is frozen.
             </Text>
           </div>
         )}
@@ -329,11 +384,20 @@ export function CampaignBuilder() {
               />
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
                 <SegmentPanel name='segmentId' />
-                <ReleaseDateField
-                  name='scheduleAt'
-                  value={form.watch('scheduleAt')}
-                  label='schedule at (optional)'
-                />
+                {/* Scheduling is NOT a saved field: UpsertEmailCampaign resets
+                    schedule_at to NULL and only the ScheduleCampaign RPC (dispatch
+                    panel) can set it, so the envelope points at the real control
+                    instead of offering an input whose value is thrown away. */}
+                <div className='flex flex-col gap-1'>
+                  <Text variant='label' size='small'>
+                    schedule
+                  </Text>
+                  <Text variant='inactive' size='small'>
+                    {routeId > 0
+                      ? 'scheduling is a dispatch action — set the send time in the dispatch panel above.'
+                      : 'save the campaign first, then schedule it from the dispatch panel.'}
+                  </Text>
+                </div>
               </div>
               <ABPanel campaign={campaignData} />
               {routeId > 0 && (

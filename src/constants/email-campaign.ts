@@ -120,12 +120,13 @@ export const STATUS_LABELS: Record<EmailCampaignStatus, string> = {
   EMAIL_CAMPAIGN_STATUS_CANCELLED: 'cancelled',
 };
 
-// Statuses in which the builder stays editable (DRAFT/PAUSED). SCHEDULED/SENDING/
-// SENT/CANCELLED are read-only to avoid corrupting an in-flight dispatch.
-export const EDITABLE_STATUSES: EmailCampaignStatus[] = [
-  'EMAIL_CAMPAIGN_STATUS_DRAFT',
-  'EMAIL_CAMPAIGN_STATUS_PAUSED',
-];
+// Statuses in which the builder stays editable — DRAFT ONLY, mirroring the backend
+// contract: UpsertEmailCampaign rejects any other status ("campaign status is
+// server-owned; drafts only") and the store's INSERT/UPDATE touch only rows
+// WHERE status='draft'. A PAUSED campaign therefore cannot persist a single edit
+// (pause sets status='paused'), so it renders read-only like SCHEDULED/SENDING/
+// SENT/CANCELLED instead of advertising an edit that always fails.
+export const EDITABLE_STATUSES: EmailCampaignStatus[] = ['EMAIL_CAMPAIGN_STATUS_DRAFT'];
 
 // Select items for the envelope topic picker.
 export const EMAIL_TOPIC_OPTIONS: { value: EmailCampaignTopic; label: string }[] = [

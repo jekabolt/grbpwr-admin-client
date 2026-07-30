@@ -5,8 +5,8 @@ import {
 } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { fmtInt, fmtRate, StatTile } from './stat-tile';
-import { useCampaignMetrics } from './useCampaign';
+import { fmtInt, fmtRate, StatTile, toNumber } from './stat-tile';
+import { useCampaignMetrics, useDispatchStatus } from './useCampaign';
 
 // Metrics exist only once recipients have been materialized & attempted.
 const METRICS_STATUSES: common_EmailCampaignStatus[] = [
@@ -120,8 +120,21 @@ export function CampaignMetrics({
   status: common_EmailCampaignStatus;
   winnerVariantId?: number;
 }) {
-  const enabled = campaignId > 0 && METRICS_STATUSES.includes(status);
-  const { data: metrics, isLoading, isError, refetch } = useCampaignMetrics(campaignId, enabled);
+  // The campaign detail (where `status` comes from) is not polled, so read the live
+  // dispatch status the DispatchPanel is already polling — piggy-backing on its cache
+  // (enabled: false = subscribe, never fetch) so the metrics poll below starts when the
+  // fan-out starts and stops as soon as it finishes.
+  const liveStatus = useDispatchStatus(campaignId, false).data?.status as
+    | common_EmailCampaignStatus
+    | undefined;
+  const effectiveStatus = liveStatus || status;
+  const enabled = campaignId > 0 && METRICS_STATUSES.includes(effectiveStatus);
+  const {
+    data: metrics,
+    isLoading,
+    isError,
+    refetch,
+  } = useCampaignMetrics(campaignId, enabled, effectiveStatus);
 
   if (!enabled) {
     return (
@@ -184,18 +197,18 @@ export function CampaignMetrics({
             <StatTile
               label='bounced'
               value={fmtInt(counts?.bounced)}
-              tone={(counts?.bounced || 0) > 0 ? 'error' : 'muted'}
+              tone={(toNumber(counts?.bounced) ?? 0) > 0 ? 'error' : 'muted'}
             />
             <StatTile
               label='complained'
               value={fmtInt(counts?.complained)}
-              tone={(counts?.complained || 0) > 0 ? 'error' : 'muted'}
+              tone={(toNumber(counts?.complained) ?? 0) > 0 ? 'error' : 'muted'}
             />
             <StatTile label='unsubscribed' value={fmtInt(counts?.unsubscribed)} tone='muted' />
             <StatTile
               label='failed'
               value={fmtInt(counts?.failed)}
-              tone={(counts?.failed || 0) > 0 ? 'error' : 'muted'}
+              tone={(toNumber(counts?.failed) ?? 0) > 0 ? 'error' : 'muted'}
             />
           </div>
 

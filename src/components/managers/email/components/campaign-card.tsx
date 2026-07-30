@@ -42,9 +42,10 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const deleteCampaign = useDeleteCampaign();
   const status = (campaign.status || 'EMAIL_CAMPAIGN_STATUS_UNKNOWN') as common_EmailCampaignStatus;
-  // A sending campaign is mid-dispatch — deleting it would orphan its recipient ledger, so hide
-  // the action for that state only.
-  const deletable = status !== 'EMAIL_CAMPAIGN_STATUS_SENDING';
+  // Only drafts are deletable: the store deletes WHERE status='draft' and maps 0 rows to
+  // NotFound, so offering delete on a scheduled/paused/sent/cancelled card produced a
+  // misleading "email campaign not found" for a campaign that plainly exists.
+  const deletable = status === 'EMAIL_CAMPAIGN_STATUS_DRAFT';
   const subject =
     campaign.variants?.[0]?.subjectI18n?.find((s) => s?.languageId === 1)?.subject ||
     campaign.variants?.[0]?.subjectI18n?.[0]?.subject ||

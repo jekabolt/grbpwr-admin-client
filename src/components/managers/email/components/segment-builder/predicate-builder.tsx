@@ -79,11 +79,14 @@ function LeafRow({
   onChange,
   onRemove,
   disabled,
+  issue,
 }: {
   node: LeafNode;
   onChange: (n: LeafNode) => void;
   onRemove: () => void;
   disabled?: boolean;
+  /** Set when this condition is incomplete and the operator has tried to save/preview. */
+  issue?: string;
 }) {
   const fieldDef = getFieldDef(node.field) ?? FIELDS[0];
   const ops = operatorsForField(node.field);
@@ -97,50 +100,62 @@ function LeafRow({
   };
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor bg-bgColor p-2 lg:flex-row lg:items-start'>
-      <div className='shrink-0 lg:w-[190px]'>
-        <Select
-          name={`field-${node.id}`}
-          items={FIELD_ITEMS}
-          value={node.field}
-          onValueChange={onFieldChange}
-          placeholder='field'
-          readOnly={disabled}
-          fullWidth
-        />
+    <div className='flex flex-col gap-1'>
+      <div
+        className={cn(
+          'flex flex-col gap-2 border bg-bgColor p-2 lg:flex-row lg:items-start',
+          issue ? 'border-error' : 'border-textInactiveColor',
+        )}
+      >
+        <div className='shrink-0 lg:w-[190px]'>
+          <Select
+            name={`field-${node.id}`}
+            items={FIELD_ITEMS}
+            value={node.field}
+            onValueChange={onFieldChange}
+            placeholder='field'
+            readOnly={disabled}
+            fullWidth
+          />
+        </div>
+        <div className='shrink-0 lg:w-[150px]'>
+          <Select
+            name={`op-${node.id}`}
+            items={ops.map((op) => ({ value: op, label: operatorLabel(op, fieldDef.kind) }))}
+            value={node.operator}
+            onValueChange={onOperatorChange}
+            placeholder='operator'
+            readOnly={disabled}
+            fullWidth
+          />
+        </div>
+        <div className='min-w-0 flex-1'>
+          <ValueInputs
+            fieldDef={fieldDef}
+            operator={node.operator}
+            values={node.values}
+            onChange={(values) => onChange({ ...node, values })}
+            disabled={disabled}
+            name={`val-${node.id}`}
+          />
+        </div>
+        {!disabled && (
+          <button
+            type='button'
+            onClick={onRemove}
+            aria-label='remove condition'
+            className='shrink-0 self-start leading-none lg:pt-1'
+          >
+            <Text size='small' variant='inactive'>
+              [x]
+            </Text>
+          </button>
+        )}
       </div>
-      <div className='shrink-0 lg:w-[150px]'>
-        <Select
-          name={`op-${node.id}`}
-          items={ops.map((op) => ({ value: op, label: operatorLabel(op, fieldDef.kind) }))}
-          value={node.operator}
-          onValueChange={onOperatorChange}
-          placeholder='operator'
-          readOnly={disabled}
-          fullWidth
-        />
-      </div>
-      <div className='min-w-0 flex-1'>
-        <ValueInputs
-          fieldDef={fieldDef}
-          operator={node.operator}
-          values={node.values}
-          onChange={(values) => onChange({ ...node, values })}
-          disabled={disabled}
-          name={`val-${node.id}`}
-        />
-      </div>
-      {!disabled && (
-        <button
-          type='button'
-          onClick={onRemove}
-          aria-label='remove condition'
-          className='shrink-0 self-start leading-none lg:pt-1'
-        >
-          <Text size='small' variant='inactive'>
-            [x]
-          </Text>
-        </button>
+      {issue && (
+        <Text size='small' variant='error'>
+          {issue}
+        </Text>
       )}
     </div>
   );
@@ -153,6 +168,7 @@ function GroupNodeCard({
   onChange,
   onRemove,
   disabled,
+  issues,
 }: {
   node: GroupNode;
   depth: number;
@@ -160,6 +176,8 @@ function GroupNodeCard({
   onChange: (n: GroupNode) => void;
   onRemove?: () => void;
   disabled?: boolean;
+  /** Incomplete-leaf messages by node id (see validateTree). */
+  issues?: Record<string, string>;
 }) {
   const canNestDeeper = depth < MAX_DEPTH;
 
@@ -207,6 +225,7 @@ function GroupNodeCard({
                 onChange={(n) => replaceChild(child.id, n)}
                 onRemove={() => removeChild(child.id)}
                 disabled={disabled}
+                issue={issues?.[child.id]}
               />
             ) : (
               <GroupNodeCard
@@ -216,6 +235,7 @@ function GroupNodeCard({
                 onChange={(n) => replaceChild(child.id, n)}
                 onRemove={() => removeChild(child.id)}
                 disabled={disabled}
+                issues={issues}
               />
             ),
           )}
@@ -256,10 +276,22 @@ export function PredicateBuilder({
   value,
   onChange,
   disabled,
+  issues,
 }: {
   value: GroupNode;
   onChange: (root: GroupNode) => void;
   disabled?: boolean;
+  /** Incomplete-leaf messages by node id — pass only once the operator has acted. */
+  issues?: Record<string, string>;
 }) {
-  return <GroupNodeCard node={value} depth={1} isRoot onChange={onChange} disabled={disabled} />;
+  return (
+    <GroupNodeCard
+      node={value}
+      depth={1}
+      isRoot
+      onChange={onChange}
+      disabled={disabled}
+      issues={issues}
+    />
+  );
 }

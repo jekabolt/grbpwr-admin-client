@@ -5,7 +5,6 @@ import {
   common_EmailBlockTranslation,
   common_EmailCampaignFull,
   common_EmailCampaignInsert,
-  common_EmailCampaignStatus,
 } from 'api/proto-http/admin';
 import { LANGUAGES } from 'constants/constants';
 import { EMAIL_BG_DEFAULT } from 'constants/email-campaign';
@@ -170,10 +169,7 @@ function toAbConfig(a: any): common_ABConfig | undefined {
 // variant (B) is emitted so the campaign carries ≥2 variants (the backend requires
 // it, and for the SUBJECT dimension the subjects must differ). Content-dimension B
 // shares A's subject and inherits the campaign body (empty body = inherit).
-export function mapFormToCampaignInsert(
-  f: CampaignSchema,
-  status: common_EmailCampaignStatus = 'EMAIL_CAMPAIGN_STATUS_DRAFT',
-): common_EmailCampaignInsert {
+export function mapFormToCampaignInsert(f: CampaignSchema): common_EmailCampaignInsert {
   const abEnabled = !!f.abConfig?.enabled;
   const subjectDimension = f.abConfig?.dimension === 'AB_DIMENSION_SUBJECT';
 
@@ -214,10 +210,15 @@ export function mapFormToCampaignInsert(
     fromName: f.fromName,
     fromEmail: f.fromEmail,
     replyTo: f.replyTo || '',
+    // Both fields below are SERVER-OWNED on the upsert path: UpsertEmailCampaign
+    // accepts only UNKNOWN/DRAFT ("campaign status is server-owned; drafts only"),
+    // forces status='draft' and resets schedule_at to NULL. Scheduling happens
+    // through the ScheduleCampaign RPC (the dispatch panel), never through a save —
+    // so always declare DRAFT here and treat schedule_at as read-back-only.
     scheduleAt: rfc3339ToEpochSeconds(f.scheduleAt),
     abConfig: toAbConfig(f.abConfig),
     variants,
-    status,
+    status: 'EMAIL_CAMPAIGN_STATUS_DRAFT',
     segmentId: f.segmentId || 0,
   };
 }

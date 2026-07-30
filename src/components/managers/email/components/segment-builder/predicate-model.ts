@@ -14,7 +14,14 @@
 
 import { common_SegmentNode, common_SegmentPredicate } from 'api/proto-http/admin';
 import { v4 as uuidv4 } from 'uuid';
-import { defaultOperatorForField, FIELDS, operatorsForField } from './catalog';
+import {
+  arityForOperator,
+  defaultOperatorForField,
+  FIELDS,
+  getFieldDef,
+  Operator,
+  operatorsForField,
+} from './catalog';
 
 export type BoolOp = 'AND' | 'OR';
 
@@ -105,6 +112,48 @@ export function toPredicate(root: PredicateNode): common_SegmentPredicate {
 // True when the tree carries no effective conditions (serializes to "everyone").
 export function isEmptyPredicate(root: PredicateNode): boolean {
   return nodeToProto(root) === undefined;
+}
+
+// ── leaf completeness ─────────────────────────────────────────────────────────
+// Mirror of the backend compiler's per-leaf checks: it rejects a value count that
+// doesn't match the operator's arity (ErrArity "wrong number of values for
+// operator") and blank values (ErrBadValue '"" is not a decimal'), but the failure
+// comes back as ONE opaque error for the whole tree. Walking the leaves here lets
+// the editor block the call and point at the condition that is actually incomplete.
+
+export type LeafIssue = { id: string; message: string };
+
+function leafIssue(leaf: LeafNode): string | undefined {
+  if (!getFieldDef(leaf.field)) return 'pick a field';
+  if (!(operatorsForField(leaf.field) as string[]).includes(leaf.operator)) {
+    return 'pick a condition';
+  }
+  const filled = leaf.values.filter((v) => (v ?? '').trim() !== '');
+  switch (arityForOperator(leaf.operator as Operator)) {
+    case 0:
+      return undefined;
+    case 1:
+      return filled.length === 1 ? undefined : 'enter a value';
+    case 2:
+      return filled.length === 2 ? undefined : 'enter both ends of the range';
+    default:
+      return filled.length > 0 ? undefined : 'add at least one value';
+  }
+}
+
+// Every incomplete leaf in the tree, in document order (empty = safe to send).
+export function validateTree(root: PredicateNode): LeafIssue[] {
+  const issues: LeafIssue[] = [];
+  const walk = (node: PredicateNode) => {
+    if (node.kind === 'group') {
+      node.children.forEach(walk);
+      return;
+    }
+    const message = leafIssue(node);
+    if (message) issues.push({ id: node.id, message });
+  };
+  walk(root);
+  return issues;
 }
 
 // ── deserialize: proto -> local model ─────────────────────────────────────────

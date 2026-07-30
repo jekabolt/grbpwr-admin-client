@@ -166,7 +166,15 @@ export function useDispatchStatus(id: number, enabled = true) {
 
 // GetCampaignMetrics -> { metrics: CampaignMetrics }. Compute-on-read aggregates;
 // refetch on a slow cadence while sending so open/click rates trend in near-real time.
-export function useCampaignMetrics(id: number, enabled = true) {
+// The app disables refetch-on-focus globally (src/index.tsx), so without an explicit
+// interval a SENDING campaign's numbers would sit frozen at first load.
+const METRICS_POLL_MS = 30000;
+
+export function useCampaignMetrics(
+  id: number,
+  enabled = true,
+  status?: common_EmailCampaignStatus,
+) {
   return useQuery({
     queryKey: emailCampaignKeys.metrics(id),
     queryFn: async (): Promise<common_CampaignMetrics | null> => {
@@ -175,6 +183,7 @@ export function useCampaignMetrics(id: number, enabled = true) {
     },
     enabled: enabled && id > 0,
     staleTime: 30 * 1000,
+    refetchInterval: status === 'EMAIL_CAMPAIGN_STATUS_SENDING' ? METRICS_POLL_MS : false,
     retry: 1,
   });
 }
@@ -294,20 +303,17 @@ export function useCancelCampaign() {
   );
 }
 
-// Ф2 (segment builder) is deferred — the SegmentNode tree editor is not built yet.
-// This is wired to the real ListEmailSegments RPC so the envelope picker can offer
-// any segments that already exist, but resilient: on error it yields [] so the
-// builder degrades to "no segment / everyone" rather than breaking.
+// ListEmailSegments — feeds both the segments list page and the campaign envelope's
+// segment picker. Errors are NOT swallowed: a caught-and-emptied queryFn made isError
+// unreachable, so an outage rendered "no segments yet." as if the account had none.
+// Consumers degrade on their own terms — the list page shows its retry state, and
+// SegmentPanel keeps the campaign's saved segment id with an "(unavailable)" label.
 export function useSegments() {
   return useQuery({
     queryKey: emailCampaignKeys.segments,
     queryFn: async (): Promise<common_EmailSegment[]> => {
-      try {
-        const res = await adminService.ListEmailSegments({});
-        return res?.segments ?? [];
-      } catch {
-        return [];
-      }
+      const res = await adminService.ListEmailSegments({});
+      return res?.segments ?? [];
     },
     staleTime: 5 * 60 * 1000,
     retry: 0,

@@ -17,9 +17,12 @@ function formatCount(n: number | undefined): string | undefined {
   return typeof n === 'number' ? n.toLocaleString() : undefined;
 }
 
-function formatWhen(epochSeconds: number | undefined): string | undefined {
-  if (!epochSeconds) return undefined;
-  const d = new Date(epochSeconds * 1000);
+// last_count_at is int64, which the grpc-gateway marshaler emits as a JSON string
+// (and as "0" — not omitted — for a segment whose count has never been run).
+function formatWhen(epochSeconds: number | string | undefined): string | undefined {
+  const n = typeof epochSeconds === 'string' ? Number(epochSeconds) : epochSeconds;
+  if (!n || Number.isNaN(n) || n <= 0) return undefined;
+  const d = new Date(n * 1000);
   if (Number.isNaN(d.getTime())) return undefined;
   return d.toLocaleDateString();
 }
@@ -34,8 +37,11 @@ function SegmentCard({
   onDelete: (s: common_EmailSegment) => void;
 }) {
   const navigate = useNavigate();
-  const count = formatCount(segment.lastCount);
+  // last_count is only meaningful once a preview has actually run — the store writes
+  // last_count and last_count_at together, and an un-run segment reports 0/0 rather
+  // than an absent field, so the timestamp is the "has been counted" signal.
   const when = formatWhen(segment.lastCountAt);
+  const count = when ? formatCount(segment.lastCount) : undefined;
 
   return (
     <div className='flex flex-col justify-between gap-3 border border-textInactiveColor p-4 transition-colors hover:border-textColor'>

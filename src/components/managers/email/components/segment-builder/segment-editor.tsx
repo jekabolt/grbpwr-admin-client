@@ -7,7 +7,7 @@
 import { common_EmailSegment } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
@@ -17,7 +17,14 @@ import Textarea from 'ui/components/text-area';
 import Text from 'ui/components/text';
 import { useDeleteSegment, useSegment, useUpsertSegment } from '../useCampaign';
 import { PredicateBuilder } from './predicate-builder';
-import { fromPredicate, GroupNode, isEmptyPredicate, newRootGroup, toPredicate } from './predicate-model';
+import {
+  fromPredicate,
+  GroupNode,
+  isEmptyPredicate,
+  newRootGroup,
+  toPredicate,
+  validateTree,
+} from './predicate-model';
 import { usePreviewSegmentCount } from './usePreviewSegmentCount';
 
 function formatCount(n: number | undefined): string | undefined {
@@ -43,6 +50,9 @@ export function SegmentEditor() {
   const [root, setRoot] = useState<GroupNode>(() => newRootGroup());
   const [nameTouched, setNameTouched] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Incomplete conditions are only marked once the operator tries to save/preview —
+  // a freshly-added condition starts empty and shouldn't shout before it's been filled.
+  const [treeTouched, setTreeTouched] = useState(false);
 
   // Hydrate the editor from a loaded segment (edit route).
   useEffect(() => {
@@ -56,12 +66,32 @@ export function SegmentEditor() {
   const nameError = nameTouched && name.trim() === '';
   const empty = isEmptyPredicate(root);
 
+  // The backend compiler rejects a leaf whose values don't match its operator's arity
+  // and reports it as one opaque error for the whole tree, so check locally first and
+  // mark the offending rows instead of letting the operator guess which one broke.
+  const leafIssues = useMemo(() => validateTree(root), [root]);
+  const issueMap = useMemo(
+    () => Object.fromEntries(leafIssues.map((i) => [i.id, i.message])),
+    [leafIssues],
+  );
+
+  const treeComplete = () => {
+    setTreeTouched(true);
+    if (leafIssues.length === 0) return true;
+    showMessage(
+      `${leafIssues.length} condition${leafIssues.length === 1 ? ' is' : 's are'} incomplete — see the highlighted row${leafIssues.length === 1 ? '' : 's'}`,
+      'error',
+    );
+    return false;
+  };
+
   const handleSave = async () => {
     setNameTouched(true);
     if (name.trim() === '') {
       showMessage('segment name is required', 'error');
       return;
     }
+    if (!treeComplete()) return;
     const seg: common_EmailSegment = {
       id: routeId || undefined,
       name: name.trim(),
@@ -212,7 +242,12 @@ export function SegmentEditor() {
             build a tree of conditions. groups combine their conditions with AND (match all) or OR
             (match any); an empty tree targets everyone.
           </Text>
-          <PredicateBuilder value={root} onChange={setRoot} disabled={!canEdit} />
+          <PredicateBuilder
+            value={root}
+            onChange={setRoot}
+            disabled={!canEdit}
+            issues={treeTouched ? issueMap : undefined}
+          />
         </div>
 
         {/* audience-count preview seam */}
@@ -223,7 +258,11 @@ export function SegmentEditor() {
             size='lg'
             className='uppercase'
             onClick={() => {
-              if (preview.available) preview.mutate({ predicate: toPredicate(root) });
+              if (!preview.available) return;
+              if (!treeComplete()) return;
+              // Passing the saved id lets the backend cache the count on the segment
+              // (last_count / last_count_at) — with id=0 (new segment) it just counts.
+              preview.mutate({ id: routeId, predicate: toPredicate(root) });
             }}
             disabled={!preview.available || preview.isPending}
             loading={preview.isPending}
