@@ -5491,6 +5491,10 @@ export type Member = {
   birthDate: wellKnownTimestamp | undefined;
   createdAt: wellKnownTimestamp | undefined;
   lastOrderDate: wellKnownTimestamp | undefined;
+  // email_language is the recipient locale this member's emails render in — the
+  // effective value (explicit email_language, else default_language), canonicalized
+  // (cn→zh, kr→ko). Empty means the account has no preference and falls back to en.
+  emailLanguage: string | undefined;
 };
 
 export type ListMembersRequest = {

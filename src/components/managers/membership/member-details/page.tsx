@@ -1,4 +1,5 @@
 import { Member } from 'api/proto-http/admin';
+import { localeLabel } from 'constants/constants';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -72,6 +73,7 @@ export function MemberDetails() {
               <InfoRow label='Date of birth' value={formatDateShort(member.birthDate)} />
               <InfoRow label='Registered' value={formatDateShort(member.createdAt)} />
               <InfoRow label='Last order' value={formatDateShort(member.lastOrderDate)} />
+              <InfoRow label='Email language' value={localeLabel(member.emailLanguage)} />
               <InfoRow label='Newsletter' value={boolLabel(member.subscribeNewsletter)} />
               <InfoRow label='New arrivals' value={boolLabel(member.subscribeNewArrivals)} />
               <InfoRow label='Events' value={boolLabel(member.subscribeEvents)} />
