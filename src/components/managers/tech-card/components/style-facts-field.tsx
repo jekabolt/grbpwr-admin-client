@@ -1,10 +1,9 @@
 import { adminService } from 'api/api';
 import { useModel } from 'components/managers/models/components/useModelQuery';
-import { CarePicker } from 'components/managers/product/components/care/care-picker';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
@@ -21,34 +20,8 @@ const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped',
 );
 
 const ORIGIN_LABEL = 'TECH_CARD_LABEL_TYPE_ORIGIN';
+const CARE_LABEL = 'TECH_CARD_LABEL_TYPE_CARE';
 const HEIGHT = 'BODY_MEASUREMENT_NAME_HEIGHT';
-
-// Render the picked care codes as symbol + text chips (the "symbols + text" view the wizard
-// produces), so the constructor reads the actual instructions, not a raw "MWN,DNB" code string.
-function CareSummary({ name }: { name: string }) {
-  const vocabulary = useCareVocabulary();
-  const value = (useWatch({ name }) as string) || '';
-  const codes = value
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  if (codes.length === 0) return null;
-  return (
-    <div className='flex flex-wrap gap-1'>
-      {codes.map((code) => {
-        const m = vocabulary.byCode[code];
-        return (
-          <span key={code} className='flex items-center gap-1 border border-borderColor px-1.5'>
-            {m?.img ? <img src={m.img} alt='' className='size-5' /> : null}
-            <Text size='micro' component='span'>
-              {m?.name ?? code}
-            </Text>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
 
 // What the storefront will actually print from these fields. It is the same copy, built from the
 // same values — the care line is worded by the care dictionary, the same rows the storefront
@@ -132,9 +105,36 @@ function StorefrontPreview() {
 // Composition is NOT edited here: it is derived from the BOM's shell-fabric materials (composition_
 // entries, shown read-only on the BOM tab), never hand-entered.
 export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdit: boolean }) {
-  const { getValues, control, resetField } = useFormContext<TechCardFormData>();
+  const { getValues, control, resetField, setValue } = useFormContext<TechCardFormData>();
   const [saving, setSaving] = useState(false);
   const staging = useTechCardStaging();
+
+  // Care is now authored once, on the LABELS tab (the care label). The style-level careInstructions
+  // (what the storefront + the preview below read) mirrors that single source, so removing the old
+  // header care picker never drops the storefront care. Reconciled without dirtying on mount — and a
+  // legacy card that authored care in the old header keeps it until a care label is actually filled,
+  // so nothing is silently wiped.
+  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
+    labelType?: string;
+    content?: string;
+  }>;
+  const careFromLabel = labels.find((l) => l.labelType === CARE_LABEL)?.content?.trim() ?? '';
+  const firstCareSync = useRef(true);
+  useEffect(() => {
+    const cur = (getValues('careInstructions') || '').trim();
+    if (firstCareSync.current) {
+      firstCareSync.current = false;
+      // On mount only adopt a care label that actually carries symbols — never clear a stored value
+      // just because no care label exists yet.
+      if (careFromLabel && careFromLabel !== cur) {
+        setValue('careInstructions', careFromLabel, { shouldDirty: false });
+      }
+      return;
+    }
+    if (careFromLabel !== cur) {
+      setValue('careInstructions', careFromLabel, { shouldDirty: true });
+    }
+  }, [careFromLabel, getValues, setValue]);
   // Both fields live in the card's RHF form, so "dirty" here is exactly RHF's own answer: they moved
   // off the loaded card's defaults. That is also what makes the header's label a FACT — it names the
   // fields that actually changed rather than guessing "style facts".
@@ -210,15 +210,11 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
     <div className='grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2'>
       <div className='space-y-2.5'>
         <Text size='micro' variant='label'>
-          Fit and care are style facts shared by every colourway. Composition is not entered here —
-          it is derived from the BOM’s shell-fabric materials (see the composition on the BOM tab).
+          Fit is a style fact shared by every colourway. Care is entered once on the LABELS tab (the
+          care label) and mirrors here automatically; composition is derived from the BOM’s
+          shell-fabric materials (see the composition on the BOM tab).
         </Text>
         <SelectField name='fit' label='fit' items={FIT_OPTIONS} readOnly={!canEdit} />
-        {/* Structured care wizard (ISO 3758: washing / bleaching / tumble-dry / ironing /
-            professional care) — reuses the app's CarePicker instead of a free-form textarea, so
-            care is pickable symbols that render on labels and the storefront, not typed prose. */}
-        <CarePicker name='careInstructions' label='care instructions' editMode={canEdit} />
-        <CareSummary name='careInstructions' />
         {canEdit && changed.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>
             <Pill tone='attention'>{saving ? 'saving…' : 'staged for save'}</Pill>
