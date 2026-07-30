@@ -1145,7 +1145,7 @@ export function TechCardForm({
                       canEdit={canWrite(SECTION.techCards) && !frozen}
                     />
                   </Section>
-                  <Section title='packaging recipe (materials per order / item · dust bag)'>
+                  <Section title='packaging recipe'>
                     <PackagingRecipeField
                       techCardId={numId}
                       canEdit={canWrite(SECTION.techCards) && !frozen}
