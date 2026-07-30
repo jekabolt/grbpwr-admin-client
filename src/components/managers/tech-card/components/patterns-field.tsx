@@ -10,6 +10,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { PatternUploadButton } from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
@@ -61,6 +62,8 @@ export function PatternsField() {
 
   const [dragSize, setDragSize] = useState<number | null>(null);
   const [busySize, setBusySize] = useState<number | null>(null);
+  // The pattern sheet open in the in-app viewer (null = closed).
+  const [viewing, setViewing] = useState<PatternRow | null>(null);
 
   const rowsBySize = useMemo(() => {
     const m = new Map<number, Array<{ row: PatternRow; index: number }>>();
@@ -155,15 +158,35 @@ export function PatternsField() {
     const uploadedOn = uploaded === '—' ? null : uploaded;
 
     const media = has ? (
-      <a
-        href={primary?.url || '#'}
-        target='_blank'
-        rel='noopener noreferrer'
-        title={primary?.filename}
-        className='block'
+      <button
+        type='button'
+        onClick={() => primary && setViewing(primary)}
+        title={`посмотреть ${primary?.filename ?? 'PDF'}`}
+        className='relative block w-full cursor-pointer'
       >
-        <Placeholder aspect='3/4' label={busy ? 'uploading…' : 'PDF'} />
-      </a>
+        {busy ? (
+          <Placeholder aspect='3/4' label='uploading…' />
+        ) : (
+          <>
+            {/* First-page preview via the browser's own PDF renderer — no extra dependency. It is
+                non-interactive (the tile owns the click → opens the viewer); if the storage host
+                blocks framing, the fallback placeholder shows and the viewer's "open in new tab"
+                still works. */}
+            <object
+              data={`${primary?.url ?? ''}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+              type='application/pdf'
+              aria-label={primary?.filename}
+              tabIndex={-1}
+              className='pointer-events-none block aspect-[3/4] w-full border border-borderColor bg-bgColor'
+            >
+              <Placeholder aspect='3/4' label='PDF' />
+            </object>
+            <span className='pointer-events-none absolute bottom-0 left-0 bg-textColor px-1 py-px text-nano uppercase leading-none tracking-label text-bgColor'>
+              view
+            </span>
+          </>
+        )}
+      </button>
     ) : (
       <Placeholder aspect='3/4' dashed tone='error' label={busy ? 'uploading…' : 'drop'} />
     );
@@ -218,15 +241,14 @@ export function PatternsField() {
         >
           {files.map(({ row, index }) => (
             <div key={index} className='mt-1 flex items-center gap-1'>
-              <a
-                href={row.url || '#'}
-                target='_blank'
-                rel='noopener noreferrer'
-                title={row.filename}
-                className='min-w-0 flex-1 truncate text-micro underline hover:opacity-70'
+              <button
+                type='button'
+                onClick={() => setViewing(row)}
+                title={`посмотреть ${row.filename ?? 'PDF'}`}
+                className='min-w-0 flex-1 truncate text-left text-micro underline hover:opacity-70'
               >
                 {row.filename || '(без имени)'}
-              </a>
+              </button>
               <Button
                 type='button'
                 variant='secondary'
@@ -282,6 +304,38 @@ export function PatternsField() {
         {orphans.length > 0 &&
           ` · ${orphans.length} ${orphans.length === 1 ? 'file set is' : 'file sets are'} attached to a size that left the range`}
       </Text>
+
+      {/* In-app PDF viewer: the browser renders the sheet inside the modal; a fallback link opens it
+          in a new tab if the storage host refuses to be framed. */}
+      <ConfirmationModal
+        open={viewing != null}
+        onOpenChange={(o) => {
+          if (!o) setViewing(null);
+        }}
+        onConfirm={() => setViewing(null)}
+        title={viewing?.filename || 'выкройка'}
+        width='lg'
+        hideActions
+      >
+        <div className='space-y-2'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text size='micro' variant='label' component='span' className='min-w-0 flex-1 truncate'>
+              {viewing?.filename}
+              {viewing?.sizeBytes ? ` · ${formatBytes(viewing.sizeBytes)}` : ''}
+            </Text>
+            <Button asChild variant='secondary' size='xs'>
+              <a href={viewing?.url || '#'} target='_blank' rel='noopener noreferrer'>
+                open in new tab
+              </a>
+            </Button>
+          </div>
+          <iframe
+            src={viewing?.url}
+            title={viewing?.filename || 'выкройка'}
+            className='h-[75vh] w-full border border-borderColor bg-bgColor'
+          />
+        </div>
+      </ConfirmationModal>
     </div>
   );
 }
