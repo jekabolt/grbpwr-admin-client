@@ -2,6 +2,8 @@ import { common_Material, common_TechCardBomSection } from 'api/proto-http/admin
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   composeArticleFromMaterial,
+  materialCompositionCode,
+  materialCompositionText,
   materialSpec,
 } from 'components/managers/materials/components/material-code';
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
@@ -166,7 +168,11 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     put('section', m.section);
     put('supplier', m.supplier);
     put('supplierRef', m.supplierRef);
-    put('composition', m.composition);
+    // The blend as the parseable JSON the CompositionPicker + care generator read — derived from the
+    // material's STRUCTURED fibre entries when it has no legacy free-text `composition`, so a line
+    // linked to a structurally-composed material carries a composition that generates the care label
+    // (was copying the empty legacy string → "composition not set" → care-gen blocked).
+    put('composition', materialCompositionCode(m));
     put('spec', m.spec);
     put('unit', m.unit);
     put('fabricWidth', materialFabricWidth(m));
@@ -291,12 +297,13 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
                     mirror(linkedMaterial?.spec, 'spec'),
                   ) || '—'}
                 </Text>
-                {/* M1: the material's `composition` string is legacy plain text — shown as-is,
-                    never parsed. The style's STRUCTURED fibre composition is the typed
-                    composition_entries projection. */}
+                {/* The material's fibre composition — the readable projection of its STRUCTURED
+                    entries (#37), falling back to the legacy free-text `composition`. Read off the
+                    linked material itself so it shows even for a line whose composition string was
+                    snapshotted before the structured blend existed. */}
                 {compositionAnchor(
                   <Text variant='label' size='micro' className='truncate'>
-                    {mirror(linkedMaterial?.composition, 'composition')?.trim() ||
+                    {(linkedMaterial ? materialCompositionText(linkedMaterial) : '') ||
                       'composition not set'}
                   </Text>,
                 )}

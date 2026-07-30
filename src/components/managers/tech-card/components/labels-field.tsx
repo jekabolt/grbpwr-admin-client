@@ -1,7 +1,10 @@
+import { common_Material } from 'api/proto-http/admin';
 import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
 import { careCodes } from 'components/managers/product/components/care/care-codes';
 import { CarePicker } from 'components/managers/product/components/care/care-picker';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
+import { materialCompositionCode } from 'components/managers/materials/components/material-code';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardLabelTypeOptions } from 'constants/filter';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
@@ -18,7 +21,7 @@ import SelectField from 'ui/form/fields/select-field';
 import { generateCareLabel, hasAnyComposition } from 'utils/care-label';
 import { LabelPlacementBadge } from './label-placement-pictogram';
 import { LabelsChecklist } from './labels-checklist';
-import { TechCardFormData } from './schema';
+import { TechCardFormData, wireInt } from './schema';
 import { labelAttachmentOptions, labelPlacementOptions } from './tech-card-options';
 
 const CARE = 'TECH_CARD_LABEL_TYPE_CARE';
@@ -116,6 +119,22 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   );
 }
 
+type BomComp = { section?: string; composition?: string; materialId?: number };
+
+// Backfill a BOM line's composition from its linked material when the line itself carries none. A
+// line linked to a structurally-composed material before its blend existed (or snapshotted from an
+// empty legacy string) has a blank composition string, which would leave care generation and the
+// preview empty even though the material's fibres are set — this reads the material's derived
+// composition code (structured entries → parseable JSON) as the fallback.
+function withMaterialComposition<T extends BomComp>(bomItems: T[], materials: common_Material[]): T[] {
+  return bomItems.map((b) => {
+    if (b.composition?.trim() || !b.materialId) return b;
+    const m = materials.find((mm) => wireInt(mm.id) === b.materialId);
+    const derived = m ? materialCompositionCode(m) : '';
+    return derived ? { ...b, composition: derived } : b;
+  });
+}
+
 // A live printed-label preview, composed from the SAME react-hook-form data the checklist reads
 // (bomItems + labels), so it can never word the tag differently from the spec. Nothing here writes:
 // it recomposes on every keystroke in the BOM, the CarePicker or the origin label, which is what
@@ -123,10 +142,9 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
 function LabelPreview() {
   const { control } = useFormContext<TechCardFormData>();
   const vocabulary = useCareVocabulary();
-  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
-    section?: string;
-    composition?: string;
-  }>;
+  const { data: materialsData } = useMaterials('', true);
+  const bomItemsRaw = (useWatch({ control, name: 'bomItems' }) ?? []) as BomComp[];
+  const bomItems = withMaterialComposition(bomItemsRaw, materialsData?.materials ?? []);
   const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
     labelType?: string;
     content?: string;
@@ -228,6 +246,7 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'labels' });
   const { showMessage } = useSnackBarStore();
+  const { data: materialsData } = useMaterials('', true);
 
   // Which row the checklist just sent us to. `nonce` re-arms the effect when the SAME row is asked
   // for twice, so a second click scrolls again instead of sitting silent.
@@ -261,10 +280,12 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
   };
 
   const generateCare = () => {
-    const bomItems = (getValues('bomItems') ?? []) as Array<{
-      section?: string;
-      composition?: string;
-    }>;
+    // Backfill each line's composition from its linked material so a structurally-composed material
+    // generates its care label even when the line's own composition string is still blank.
+    const bomItems = withMaterialComposition(
+      (getValues('bomItems') ?? []) as BomComp[],
+      materialsData?.materials ?? [],
+    );
     const labels = (getValues('labels') ?? []) as Array<{ labelType?: string; content?: string }>;
     const origin = labels.find((l) => l.labelType === ORIGIN)?.content?.trim();
     const text = generateCareLabel(bomItems, origin);

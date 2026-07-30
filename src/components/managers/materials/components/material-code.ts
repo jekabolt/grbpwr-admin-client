@@ -57,8 +57,56 @@ export function materialSpec(m: common_Material): string {
     }
   }
   if (m.spec?.trim()) parts.push(m.spec.trim());
-  if (m.composition?.trim()) parts.push(m.composition.trim());
+  const composition = materialCompositionText(m);
+  if (composition) parts.push(composition);
   return parts.join(' · ');
+}
+
+// One fibre share of a material's blend, normalised off the structured entries the material modal
+// writes (#37): a resolved dictionary display name and a numeric percent.
+type MaterialFibre = { name: string; percent: number };
+
+function materialFibres(m: common_Material): MaterialFibre[] {
+  return (m.compositionEntries ?? [])
+    .map((e) => ({
+      // `name` is the fibres-dictionary label resolved server-side; fall back to the raw code so an
+      // unresolved entry still reads as something rather than vanishing.
+      name: (e.name ?? '').trim() || (e.fiberCode ?? '').trim(),
+      percent: Number(decimalToInput(e.percent)) || 0,
+    }))
+    .filter((f) => f.name && f.percent > 0);
+}
+
+// A material's fibre composition as a readable line ("60% Cotton, 40% Polyester"), derived from the
+// structured entries, falling back to the legacy free-text `composition`. '' when it has neither.
+// Shared by the pickers, the catalogue and the BOM catalog-article plate so "composition not set"
+// never shows for a material whose blend was entered structurally.
+export function materialCompositionText(m: common_Material): string {
+  const fibres = materialFibres(m);
+  if (fibres.length) {
+    return fibres
+      .slice()
+      .sort((a, b) => b.percent - a.percent)
+      .map((f) => `${f.percent}% ${f.name}`)
+      .join(', ');
+  }
+  return m.composition?.trim() ?? '';
+}
+
+// The same composition as the { part: [{ code, percent }] } JSON the CompositionPicker edits and the
+// care-label generator parses — so a BOM line snapshotted off this material carries a composition
+// that BOTH round-trips in the picker AND generates the care / composition label. The fibre NAME is
+// written into the code slot on purpose: a material's fibres come from the fibres dictionary, a
+// different code space than care-label's garment-composition table, so encoding the resolved name
+// makes the generator print the authoritative fibre name (its `codeToName[code] ?? code` falls
+// through to it) instead of an unresolved code. Legacy plain-text `composition` (older materials)
+// passes through untouched — parseComposition reads that shape too. '' when the material has neither.
+export function materialCompositionCode(m: common_Material): string {
+  const legacy = m.composition?.trim();
+  if (legacy) return legacy;
+  const fibres = materialFibres(m);
+  if (!fibres.length) return '';
+  return JSON.stringify({ fibre: fibres.map((f) => ({ code: f.name, percent: f.percent })) });
 }
 
 const CLASS_PREFIX: Record<string, string> = {
