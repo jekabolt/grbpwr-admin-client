@@ -319,7 +319,7 @@ const bomItemSchema = z
     if ((item.materialId ?? 0) === 0 && !item.name?.trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'Material name is required',
+        message: 'укажите роль (название) — у строки без артикула имени взять неоткуда',
         path: ['name'],
       });
     }
