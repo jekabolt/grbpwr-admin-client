@@ -44,6 +44,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { sectionShort } from './bom-line-picker';
+import { normalizeRole } from './bom-roles';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { wireInt } from './schema';
 import {
@@ -852,6 +853,20 @@ function SlotSelect({
   const eligible = slots.filter(
     (slot) => allowedSections.has(slot.section ?? '') || slot.lineKey === value,
   );
+  // The slot's display identity is its ROLE; a blank role falls back to the default article's name —
+  // the same fallback the server applies on read — so a legacy line never renders «без названия»
+  // when there is anything better to say.
+  const roleLabel = (slot: BomLine) =>
+    slot.name?.trim() || slot.material?.name?.trim() || 'без названия';
+  // Legacy cards can carry same-named slots (advisory, never blocked). When two ELIGIBLE options
+  // would render identically, append each slot's default article so the operator has something real
+  // to choose by; the ordinal prefix keeps options unique even when the articles match too.
+  const labelCounts = new Map<string, number>();
+  eligible.forEach((slot) => {
+    const k = `${sectionShort(slot.section)} ${normalizeRole(roleLabel(slot))}`;
+    labelCounts.set(k, (labelCounts.get(k) ?? 0) + 1);
+  });
+  const ordinalByKey = new Map(slots.map((slot, i) => [slot.lineKey, i + 1]));
   return (
     <select
       className={cell}
@@ -862,16 +877,25 @@ function SlotSelect({
     >
       {!value && <option value=''>— выбрать слот —</option>}
       {value && !selected && <option value={value}>(unknown / removed slot)</option>}
-      {eligible.map((slot) => (
-        <option
-          key={slot.lineKey}
-          value={slot.lineKey}
-          disabled={slot.lineKey !== value && usedKeys.has(slot.lineKey ?? '')}
-        >
-          {sectionShort(slot.section)} · {slot.name?.trim() || 'без названия'}
-          {!allowedSections.has(slot.section ?? '') ? ' (не для этой группы)' : ''}
-        </option>
-      ))}
+      {eligible.map((slot) => {
+        const label = roleLabel(slot);
+        const dup =
+          (labelCounts.get(`${sectionShort(slot.section)} ${normalizeRole(label)}`) ?? 0) > 1;
+        const article = slot.material?.name?.trim();
+        return (
+          <option
+            key={slot.lineKey}
+            value={slot.lineKey}
+            disabled={slot.lineKey !== value && usedKeys.has(slot.lineKey ?? '')}
+          >
+            {ordinalByKey.get(slot.lineKey)}. {sectionShort(slot.section)} · {label}
+            {dup && article && normalizeRole(article) !== normalizeRole(label)
+              ? ` — ${article}`
+              : ''}
+            {!allowedSections.has(slot.section ?? '') ? ' (не для этой группы)' : ''}
+          </option>
+        );
+      })}
     </select>
   );
 }
