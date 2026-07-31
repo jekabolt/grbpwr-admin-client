@@ -113,8 +113,8 @@ export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }
         action={
           <Button
             type='button'
-            variant='main'
-            size='lg'
+            variant='secondary'
+            size='sm'
             className='uppercase'
             onClick={() => setIsCollapsed((prev) => !prev)}
           >

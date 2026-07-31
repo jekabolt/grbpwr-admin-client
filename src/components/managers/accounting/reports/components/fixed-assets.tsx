@@ -81,16 +81,16 @@ export function FixedAssetsPanel({ from, to }: Props) {
         <div className='flex flex-wrap gap-2'>
           <Button
             variant='secondary'
-            size='lg'
+            size='sm'
             onClick={() => postDepreciation.mutate({ upTo: lastDayOfRange(to) })}
             disabled={postDepreciation.isPending}
           >
             {postDepreciation.isPending ? 'posting…' : 'post depreciation'}
           </Button>
-          <Button variant='secondary' size='lg' onClick={() => setCtOpen(true)}>
+          <Button variant='secondary' size='sm' onClick={() => setCtOpen(true)}>
             accrue corporation tax
           </Button>
-          <Button variant='main' size='lg' onClick={() => setAddOpen(true)}>
+          <Button variant='main' size='sm' onClick={() => setAddOpen(true)}>
             add asset
           </Button>
         </div>

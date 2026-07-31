@@ -122,7 +122,7 @@ export function LifecycleControls({
               <Button
                 type='button'
                 variant='main'
-                size='lg'
+                size='sm'
                 className='uppercase'
                 disabled={busy}
                 onClick={publish}
@@ -134,7 +134,7 @@ export function LifecycleControls({
               <Button
                 type='button'
                 variant='secondary'
-                size='lg'
+                size='sm'
                 className='uppercase'
                 disabled={busy}
                 onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway hidden')}
@@ -146,7 +146,7 @@ export function LifecycleControls({
               <Button
                 type='button'
                 variant='secondary'
-                size='lg'
+                size='sm'
                 className='uppercase'
                 disabled={busy}
                 onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_ACTIVE', 'Colorway shown')}
@@ -158,7 +158,7 @@ export function LifecycleControls({
               <Button
                 type='button'
                 variant='secondary'
-                size='lg'
+                size='sm'
                 className='uppercase'
                 disabled={busy}
                 onClick={() => setConfirmArchive(true)}
@@ -172,7 +172,7 @@ export function LifecycleControls({
           <Button
             type='button'
             variant='main'
-            size='lg'
+            size='sm'
             className='uppercase'
             disabled={busy}
             onClick={restore}
