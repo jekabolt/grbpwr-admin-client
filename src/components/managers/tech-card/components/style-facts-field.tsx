@@ -205,14 +205,17 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
         mask.push('collection');
       }
       if (dirty.season) {
-        // The wire field is the season CODE alone (SeasonEnum). The year is not in StylePatch and
-        // the store's season fragment preserves it (COALESCE), so SS25 → FW25 lands and SS25 → SS26
-        // cannot — the header says so next to the field. Sent anyway: dropping it silently, which
-        // is what happened before, loses the half that does work. An unrecognised label parses to
-        // no code and is skipped rather than written as UNKNOWN.
-        const code = parseSeasonToSku(getValues('season') || '')?.code;
-        if (code && code !== 'SEASON_ENUM_UNKNOWN') {
-          patch.season = code;
+        // Code AND year: sku_season is one fact, and both travel under the single "season" mask
+        // path. The form holds a label ("SS26"); parseSeasonToSku is the same parser the style
+        // number is minted from, so what is saved is what the label says. An unrecognised label
+        // parses to nothing and is skipped rather than written as UNKNOWN — the operator's typo
+        // must not re-mint every colourway's SKU under a blank season.
+        const sku = parseSeasonToSku(getValues('season') || '');
+        if (sku?.code && sku.code !== 'SEASON_ENUM_UNKNOWN') {
+          patch.season = sku.code;
+          // 0 is "keep the stored year" server-side, so a label carrying no year changes only the
+          // code — which is exactly what a label like "Resort" means.
+          patch.seasonYear = sku.year ?? 0;
           mask.push('season');
         }
       }

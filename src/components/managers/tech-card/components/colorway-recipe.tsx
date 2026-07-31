@@ -1875,28 +1875,32 @@ function ColorwayRecipeEditor({
             </Text>
           </CalloutBox>
         ) : (
-          pieces.map((piece) => {
-            const rows = usagesByPiece.get(piece.lineKey) ?? [];
-            return (
-              <PieceRecipeCard
-                key={piece.lineKey}
-                piece={piece}
-                rows={rows}
-                bomItems={bomItems}
-                materials={materials}
-                sizeIds={sizeIds}
-                sizeQuantities={sizeQuantities}
-                sizeNameById={sizeNameById}
-                canEdit={canEdit}
-                canAdd={canAddTo(PIECE_SECTIONS, rows)}
-                onAdd={() =>
-                  addUsage(piece.lineKey, piece.name?.trim() || '', PIECE_SECTIONS, rows)
-                }
-                onChange={patchUsage}
-                onRemove={removeUsage}
-              />
-            );
-          })
+          // Wider than the block's 10px stack on purpose: each card is itself a dense ruled group,
+          // so at stack spacing one piece's last row and the next piece's label read as one list.
+          <div className='flex flex-col gap-5'>
+            {pieces.map((piece) => {
+              const rows = usagesByPiece.get(piece.lineKey) ?? [];
+              return (
+                <PieceRecipeCard
+                  key={piece.lineKey}
+                  piece={piece}
+                  rows={rows}
+                  bomItems={bomItems}
+                  materials={materials}
+                  sizeIds={sizeIds}
+                  sizeQuantities={sizeQuantities}
+                  sizeNameById={sizeNameById}
+                  canEdit={canEdit}
+                  canAdd={canAddTo(PIECE_SECTIONS, rows)}
+                  onAdd={() =>
+                    addUsage(piece.lineKey, piece.name?.trim() || '', PIECE_SECTIONS, rows)
+                  }
+                  onChange={patchUsage}
+                  onRemove={removeUsage}
+                />
+              );
+            })}
+          </div>
         )}
 
         <CompositionBar {...derived} />
