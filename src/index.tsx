@@ -264,7 +264,6 @@ root.render(
                   <Route path={ROUTES.singleProduct} element={<Product />} />
                   <Route path={ROUTES.product} element={<ProductsCatalog />} />
                   <Route path={ROUTES.addProduct} element={<Product />} />
-                  <Route path={`${ROUTES.copyProduct}/:id`} element={<Product />} />
                   <Route path={ROUTES.hero} element={<Hero />} />
                   <Route path={ROUTES.promo} element={<Promo />} />
                   <Route path={ROUTES.emailCampaign} element={<CampaignBuilder />} />

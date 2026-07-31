@@ -29,7 +29,6 @@ import { buildColorwayUpdateMask, buildColorwayWrite, mapProductFullToFormData }
 type Props = {
   isEditMode: boolean;
   isAddingProduct: boolean;
-  isCopyMode: boolean;
   product: common_ColorwayFull | undefined;
   costInfo?: ColorwayCostInfo;
   productId?: string;
@@ -40,7 +39,6 @@ type Props = {
 export function ProductForm({
   isEditMode = false,
   isAddingProduct = false,
-  isCopyMode,
   product,
   costInfo,
   productId,
@@ -58,7 +56,7 @@ export function ProductForm({
   const customsRef = useRef<ProductCustomsHandle>(null);
 
   const initialValues =
-    product && (!isAddingProduct || isCopyMode) ? mapProductFullToFormData(product) : defaultData;
+    product && !isAddingProduct ? mapProductFullToFormData(product) : defaultData;
 
   // #65: a DRAFT colourway (and every create) validates with the lenient schema — partial prices, no
   // media/translation/size completeness gate — so it can be created and completed incrementally.
@@ -78,7 +76,7 @@ export function ProductForm({
   }, [form.formState.isDirty]);
 
   useEffect(() => {
-    if (product && !isAddingProduct && !isCopyMode) {
+    if (product && !isAddingProduct) {
       const values = mapProductFullToFormData(product);
       form.reset({ ...form.getValues(), sizeMeasurements: values.sizeMeasurements });
     }
@@ -102,9 +100,7 @@ export function ProductForm({
         setIsFormChanged(false);
         form.reset(data, { keepValues: true });
         showMessage('Draft colourway created', 'success');
-        if (isCopyMode) {
-          navigate(ROUTES.product, { replace: true });
-        } else if (res.colorwayId) {
+        if (res.colorwayId) {
           // Open the fresh DRAFT so the operator can add variants, the size chart, then publish.
           navigate(generatePath(ROUTES.singleProduct, { id: String(res.colorwayId) }));
         } else {
@@ -184,9 +180,7 @@ export function ProductForm({
 
   const display = product?.colorway?.display;
   const headerTitle = isAddingProduct
-    ? isCopyMode
-      ? 'copy product'
-      : 'new product'
+    ? 'new product'
     : `[${product?.colorway?.id ?? productId ?? ''}] ${display?.merchandising?.brand ?? ''} ${
         display?.translations?.[0]?.name ?? ''
       }`.trim();
@@ -213,8 +207,8 @@ export function ProductForm({
     },
     { id: 'sec-cost', label: 'cost', show: canReadCosting || canWriteCosting },
     { id: 'sec-sizes', label: 'sizes & stock', show: true },
-    { id: 'sec-fittings', label: 'fittings', show: !!productId && !isCopyMode },
-    { id: 'sec-customs', label: 'customs', show: !!productId && !isCopyMode },
+    { id: 'sec-fittings', label: 'fittings', show: !!productId },
+    { id: 'sec-customs', label: 'customs', show: !!productId },
   ]
     .filter((i) => i.show)
     .map(({ id, label }) => ({ id, label }));
@@ -245,7 +239,7 @@ export function ProductForm({
 
         {/* R6: stored lifecycle — publish/hide/unhide/archive act on the persisted colourway,
             independent of the form's edit state. Only for existing (saved) colourways. */}
-        {productId && !isCopyMode && !isAddingProduct && product?.colorway?.id != null && (
+        {productId && !isAddingProduct && product?.colorway?.id != null && (
           <LifecycleControls
             colorwayId={product.colorway.id}
             status={product.colorway.status}
@@ -309,7 +303,6 @@ export function ProductForm({
               <Tags
                 isAddingProduct={isAddingProduct}
                 isEditMode={isEditMode}
-                isCopyMode={isCopyMode}
                 editMode={editMode}
               />
             </Section>
@@ -358,13 +351,13 @@ export function ProductForm({
             />
           </Section>
 
-          {productId && !isCopyMode && (
+          {productId && (
             <Section title='fittings' id='sec-fittings'>
               <FittingsReadonlyList productId={Number(productId)} />
             </Section>
           )}
 
-          {productId && !isCopyMode && (
+          {productId && (
             <Section title='customs' id='sec-customs'>
               <ProductCustomsSection
                 ref={customsRef}
@@ -414,7 +407,7 @@ export function ProductForm({
                   loading={form.formState.isSubmitting}
                   onClick={submitForm}
                 >
-                  {isAddingProduct ? (isCopyMode ? 'create copy' : 'create') : 'save'}
+                  {isAddingProduct ? 'create' : 'save'}
                 </Button>
               </>
             )}

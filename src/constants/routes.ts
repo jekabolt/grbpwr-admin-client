@@ -56,7 +56,6 @@ export enum ROUTES {
   addProduct = '/add-product',
   product = '/products',
   singleProduct = '/products/:id',
-  copyProduct = '/copy',
   hero = '/hero',
   addHero = '/add-hero',
   getHero = '/get-hero',

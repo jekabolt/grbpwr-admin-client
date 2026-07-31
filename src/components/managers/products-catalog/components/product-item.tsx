@@ -92,14 +92,6 @@ export function ProductItem({
     navigate(`${ROUTES.product}/${id}`, { replace: true });
   };
 
-  const handleCopyProduct = (id: number | undefined, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const confirmed = confirm('Are you sure you want to copy this product?');
-    if (confirmed) {
-      navigate(`${ROUTES.copyProduct}/${id}`);
-    }
-  };
-
   const handleToggleSelect = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (product.id != null) onToggleSelect?.(product.id);
@@ -162,16 +154,6 @@ export function ProductItem({
             )}
           >
             {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
-          </Button>
-        )}
-        {!selectionMode && canEdit && !isArchived && (
-          <Button
-            size='lg'
-            className='absolute bottom-0 left-0 z-30'
-            variant='main'
-            onClick={(e: React.MouseEvent) => handleCopyProduct(product.id, e)}
-          >
-            copy
           </Button>
         )}
         {/* #60: an archived colourway is read-only, but can be restored (→ hidden) from here. */}

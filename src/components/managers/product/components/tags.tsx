@@ -11,12 +11,10 @@ import { ProductFormData } from '../utility/schema';
 export function Tags({
   isAddingProduct,
   isEditMode,
-  isCopyMode,
   editMode,
 }: {
   isAddingProduct: boolean;
   isEditMode: boolean;
-  isCopyMode: boolean;
   editMode: boolean;
 }) {
   const {
@@ -43,14 +41,12 @@ export function Tags({
   // key leaked an abandoned draft's tags onto the next, unrelated new product; dictionary tags
   // already provide cross-session suggestions.
   const [localTags, setLocalTags] = useState<string[]>([]);
-  const [copiedTags, setCopiedTags] = useState<string[]>([]);
   const [editedTags, setEditedTags] = useState<string[]>([]);
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [showAddTagField, setShowAddTagField] = useState(false);
-  const [hasCopiedTagsUpdated, setHasCopiedTagsUpdated] = useState(false);
 
   useEffect(() => {
-    if (isAddingProduct && !isCopyMode) {
+    if (isAddingProduct) {
       setValue(
         'tags',
         selectedTags.map((tag) => ({ tag })),
@@ -58,17 +54,6 @@ export function Tags({
       );
     }
   }, [isAddingProduct, selectedTags, setValue]);
-
-  useEffect(() => {
-    if (isCopyMode && values && values.tags && values.tags?.length > 0 && !hasCopiedTagsUpdated) {
-      const copiedTagsFromValues =
-        values.tags.map((tag) => tag?.tag).filter((tag): tag is string => tag !== undefined) || [];
-
-      setCopiedTags(copiedTagsFromValues);
-      setSelectedTags(copiedTagsFromValues);
-      setHasCopiedTagsUpdated(true);
-    }
-  }, [isCopyMode, values.tags, hasCopiedTagsUpdated]);
 
   useEffect(() => {
     if (isEditMode && values.tags && values.tags.length > 0) {
@@ -87,9 +72,6 @@ export function Tags({
     const newTags = [...localTags, trimmedTag];
     if (isAddingProduct) {
       setLocalTags(newTags);
-    }
-    if (isCopyMode) {
-      setCopiedTags((prevCopiedTags) => [...prevCopiedTags, trimmedTag]);
     }
     if (isEditMode) {
       setEditedTags((prevTags) => [...prevTags, trimmedTag]);
@@ -116,11 +98,6 @@ export function Tags({
       setEditedTags(updatedEditedTags);
       updatedTags = updatedEditedTags;
     }
-    if (isCopyMode) {
-      const updatedCopiedTags = copiedTags.filter((t) => t !== tagToDelete);
-      setCopiedTags(updatedCopiedTags);
-      updatedTags = updatedCopiedTags;
-    }
 
     setSelectedTags((prevSelectedTags) => prevSelectedTags.filter((t) => t !== tagToDelete));
 
@@ -141,34 +118,33 @@ export function Tags({
   };
 
   useEffect(() => {
-    if (isEditMode || isCopyMode) {
+    if (isEditMode) {
       setValue(
         'tags',
         selectedTags.map((tag) => ({ tag })),
         { shouldDirty: true },
       );
     }
-  }, [isAddingProduct, isCopyMode, isEditMode, selectedTags, setValue]);
+  }, [isAddingProduct, isEditMode, selectedTags, setValue]);
 
   const displayedTags = useMemo(() => {
     return (
-      (isCopyMode && copiedTags) ||
       (isAddingProduct && localTags) ||
       (isEditMode && editedTags) ||
       (!isEditMode &&
         values.tags?.map((tag) => tag?.tag).filter((tag): tag is string => tag !== undefined)) ||
       []
     );
-  }, [isCopyMode, copiedTags, isAddingProduct, localTags, editedTags, isEditMode, values.tags]);
+  }, [isAddingProduct, localTags, editedTags, isEditMode, values.tags]);
 
   return (
     <div className='grid items-center gap-2'>
-      {(isAddingProduct || isCopyMode) && !showAddTagField && !isEditMode && (
+      {isAddingProduct && !showAddTagField && !isEditMode && (
         <Button size='lg' onClick={() => setShowAddTagField(true)}>
           add new tag
         </Button>
       )}
-      {(isEditMode || (showAddTagField && (isAddingProduct || isCopyMode))) && (
+      {(isEditMode || (showAddTagField && isAddingProduct)) && (
         <div className='flex items-center border-b border-textInactiveColor w-full'>
           <div className='flex-1'>
             <Input
@@ -221,12 +197,10 @@ export function Tags({
               'border-3': selectedTags.includes(tag || ''),
               'hover:cursor-pointer': isEditMode || isAddingProduct,
             })}
-            onClick={() =>
-              (isEditMode || isAddingProduct || isCopyMode) && handleTagClick(tag || '')
-            }
+            onClick={() => (isEditMode || isAddingProduct) && handleTagClick(tag || '')}
           >
             <Text>{tag}</Text>
-            {(isEditMode || isAddingProduct || isCopyMode) && (
+            {(isEditMode || isAddingProduct) && (
               <Button
                 type='button'
                 className='lg:hidden lg:group-hover:block'
