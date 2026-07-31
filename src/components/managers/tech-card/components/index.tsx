@@ -85,6 +85,7 @@ import {
   techCardDefaultData,
   techCardSchema,
   toPurposeEnum,
+  wireInt,
 } from './schema';
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
@@ -339,6 +340,8 @@ export function TechCardForm({
   // write-only ColorwayDevelopmentInsert), and the readiness RPC now scores it server-side.
   const bomItemsW = (useWatch({ control: form.control, name: 'bomItems' }) ?? []) as Array<{
     materialId?: number;
+    id?: number;
+    lineKey?: string;
   }>;
   // ONE release-blocker list, rendered three ways (header chips, the blockers modal, the
   // ReleasesField gate). Its spine is now the SERVER's release checklist — `releaseRequirements`
@@ -367,12 +370,31 @@ export function TechCardForm({
       label: `resolve ${openIssues} open issue${openIssues > 1 ? 's' : ''}`,
       tab: 'issues',
     });
-  // #64: every BOM article must link a catalog material before the card can be released — moved
-  // here (was a hard zod error on every save; see schema.ts superRefine) so a legacy free-text BOM
-  // line no longer blocks routine saves / sign-off recording, only release. The server scores this
-  // one on the PP stage checklist, not on release, so it stays a client rule and is no duplicate.
-  if (bomItemsW.some((b) => !(b.materialId && b.materialId > 0)))
-    releaseBlockers.push({ label: 'link a catalog material on every BOM line', tab: 'bom' });
+  // #64 under slots: a slot needs an ARTICLE to be releasable — its own default, or a pin in EVERY
+  // live (non-archived) colourway. Mirrors the server's bom_linked rule word-for-word; that rule
+  // sits on the PP stage checklist, not on release, so this stays a client rule and no duplicate.
+  // The old blanket "link a material on every line" wrongly blocked a role-only slot that every
+  // colourway pins — under the slot model that slot is fully specified.
+  const releaseLiveColorways = (techCard?.colorways ?? []).filter(
+    (c) => c.status !== 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED',
+  );
+  const slotCovered = (b: { materialId?: number; id?: number; lineKey?: string }) => {
+    if ((b.materialId ?? 0) > 0) return true;
+    if (releaseLiveColorways.length === 0) return false;
+    return releaseLiveColorways.every((c) =>
+      (c.usages ?? []).some(
+        (u) =>
+          ((wireInt(u.bomItemId) > 0 && wireInt(u.bomItemId) === wireInt(b.id)) ||
+            (!!b.lineKey && u.bomLineKey === b.lineKey)) &&
+          wireInt(u.materialId) > 0,
+      ),
+    );
+  };
+  if (bomItemsW.some((b) => !slotCovered(b)))
+    releaseBlockers.push({
+      label: 'every BOM slot needs an article — a default, or a pin in every live colourway',
+      tab: 'bom',
+    });
   // Sign-offs are the one rule both sides know, and the server states it better ("2 of 5 sign-offs
   // are not approved"). The form-derived check survives ONLY as the fallback for a checklist that
   // has not arrived (in flight, or the call failed): an advisory RPC must never WIDEN the gate.
