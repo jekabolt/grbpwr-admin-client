@@ -17,6 +17,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import { GroupLabel } from 'ui/components/group-label';
+import { Row, RowTotal } from 'ui/components/row';
 import { Section } from 'ui/components/section';
 import { SkeletonBlocks } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
@@ -219,23 +220,10 @@ export function FulfillmentCardDetail() {
         {/* 1 — pick list */}
         <Section title='pick list' className='min-w-0'>
           <OrderTable orderDetails={order} />
-          <div className='flex flex-col gap-1'>
-            <div className='flex items-center justify-between gap-4'>
-              <Text size='micro' variant='label' component='span'>
-                shipping
-              </Text>
-              <Text size='micro' component='span' className='tabular-nums'>
-                {formatMoney(order.shipment?.cost?.value, currency)}
-              </Text>
-            </div>
-            <div className='flex items-center justify-between gap-4 border-t border-hairline pt-1.5'>
-              <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
-                total
-              </Text>
-              <Text component='span' className='font-bold tabular-nums'>
-                {formatMoney(o?.totalPrice?.value, currency)}
-              </Text>
-            </div>
+          {/* The ledger vocabulary: hairline rows closed by a full-weight total. */}
+          <div>
+            <Row label='shipping' value={formatMoney(order.shipment?.cost?.value, currency)} />
+            <RowTotal label='total' value={formatMoney(o?.totalPrice?.value, currency)} />
           </div>
         </Section>
 

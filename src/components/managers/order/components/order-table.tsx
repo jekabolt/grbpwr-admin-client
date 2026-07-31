@@ -144,12 +144,12 @@ export function OrderTable({
   return (
     <div className='w-full'>
       <div className='overflow-x-auto w-full bg-bgColor'>
-        <table className='w-full border-collapse border border-borderColor min-w-max print:border-separate print:border-spacing-0 print:[border:1px_solid_currentColor]'>
-          <thead className='bg-textInactiveColor h-10'>
-            <tr className='border-b border-textInactiveColor'>
+        <table className='w-full border-collapse min-w-max print:border-separate print:border-spacing-0'>
+          <thead className='bg-bgZebra'>
+            <tr>
               {showPartialRefundCheckboxes && (
-                <th className='text-center w-10 border border-r border-textInactiveColor px-2'>
-                  <Text variant='uppercase' className='leading-none'>
+                <th className='w-10 border-b border-borderColor px-1.5 py-1 text-center'>
+                  <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                     refund
                   </Text>
                 </th>
@@ -158,12 +158,11 @@ export function OrderTable({
                 <th
                   key={col.label}
                   className={cn(
-                    'text-center w-auto lg:min-w-26 border border-r border-textInactiveColor px-2',
-                    'print:[border:1px_solid_currentColor]',
+                    'w-auto border-b border-borderColor px-1.5 py-1 text-center lg:min-w-26',
                     col.className,
                   )}
                 >
-                  <Text variant='uppercase' className='leading-none'>
+                  <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
                     {col.label}
                   </Text>
                 </th>
@@ -200,12 +199,12 @@ export function OrderTable({
                 return (
                   <tr
                     key={unitKey ?? idx}
-                    className={cn('border-b border-textInactiveColor last:border-b-0', {
+                    className={cn('border-b border-hairline last:border-b-0', {
                       'bg-highlightColor/10': isSelected,
                     })}
                   >
                     {showPartialRefundCheckboxes && (
-                      <td className='border border-textInactiveColor text-center px-2 w-10'>
+                      <td className='w-10 border-b border-hairline px-1.5 py-1 text-center'>
                         <input
                           type='checkbox'
                           checked={isSelected}
@@ -221,14 +220,13 @@ export function OrderTable({
                         <td
                           key={col.label}
                           className={cn(
-                            'border border-textInactiveColor text-center px-2 w-16 lg:w-auto',
-                            'print:[border:1px_solid_currentColor]',
+                            'w-16 border-b border-hairline px-1.5 py-1 text-center lg:w-auto',
                             col.className,
                             isRefunded &&
                               isDataCell &&
                               'relative after:content-[""] after:absolute after:left-0 after:right-0 after:top-1/2 after:h-px after:bg-current',
                             {
-                              'bg-textInactiveColor/80': orderDetails?.refundedOrderItems?.some(
+                              'bg-bgZebra': orderDetails?.refundedOrderItems?.some(
                                 (refundedItem) => refundedItem.id === orderItemId,
                               ),
                             },
