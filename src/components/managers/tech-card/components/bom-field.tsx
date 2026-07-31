@@ -32,6 +32,7 @@ import {
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
@@ -152,7 +153,7 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
   // Warehouse balance for the plate's "· 41.6 m on hand". Only fetched once a line is actually
-  // linked AND expanded (this row only mounts when its tile is open).
+  // linked AND being edited (this row only mounts inside the open editor dialog).
   const onHand = useMaterialOnHand(linked);
 
   // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained). Fabric
@@ -420,20 +421,20 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
 }
 
 // #33: one BOM article as a square, photo-forward TILE — a square material photo over section/тип
-// pills, the article name, its self-describing code, spec line and price — that expands in place to
-// the editor. An expanded tile spans the full grid width so the two-column editor never gets
-// crushed in a column.
+// pills, the article name, its self-describing code, spec line and price. Clicking it opens the
+// editor in the app's modal shell: the editor is a two-column form, and unfolding that inside the
+// tile grid pushed every following article a screen down and left the operator scrolling to find
+// where the row they opened had gone.
 function BomTile({
   index,
   onRemove,
-  highlight,
+  onOpen,
 }: {
   index: number;
   onRemove: () => void;
-  highlight?: boolean;
+  onOpen: () => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
-  const [open, setOpen] = useState(false);
   const row = (useWatch({ control, name: `bomItems.${index}` }) ?? {}) as {
     name?: string;
     section?: string;
@@ -443,11 +444,6 @@ function BomTile({
     currency?: string;
     materialId?: number;
   };
-  // Open the tile when the labels tab deep-links here to fill a missing composition, so the pulsed
-  // field is actually visible (it lives inside the collapsed editor).
-  useEffect(() => {
-    if (highlight) setOpen(true);
-  }, [highlight]);
 
   const linked = (row.materialId ?? 0) > 0;
   const { data } = useMaterials('', false);
@@ -455,18 +451,14 @@ function BomTile({
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === row.materialId)
     : undefined;
 
-  // A red underline inside a COLLAPSED tile is invisible, so the tile itself has to carry the
-  // error — otherwise a blocked save points at a row the operator can't see is broken.
+  // A red underline inside the editor is invisible while the editor is a closed modal, so the tile
+  // itself has to carry the error — otherwise a blocked save points at a row the operator can't see
+  // is broken. The tile names the offending fields; clicking it opens them.
   const { errors } = useFormState({ control, name: `bomItems.${index}` });
   const rowErrors = flattenFieldErrors(
     (errors.bomItems as FieldErrors[] | undefined)?.[index] as FieldErrors | undefined,
   );
   const hasError = rowErrors.length > 0;
-  // Expand a broken row so its fields are reachable and visibly red. Keyed on the transition, so
-  // the operator can still collapse it again while the error stands.
-  useEffect(() => {
-    if (hasError) setOpen(true);
-  }, [hasError]);
 
   const price = row.unitPrice?.trim();
   const priceLabel = price
@@ -492,12 +484,11 @@ function BomTile({
   );
 
   return (
-    // relative so the remove ✕ can sit at the card's top-right OUTSIDE the toggle button — inside
-    // it, the ✕ would grow the square tile and steal clicks meant for expand.
+    // relative so the remove ✕ can sit at the card's top-right OUTSIDE the open button — inside
+    // it, the ✕ would grow the square tile and steal clicks meant for the editor.
     <div
       className={cn(
         'relative border bg-bgColor',
-        open && 'col-span-full',
         linked && !hasError ? 'border-borderColor' : 'border-error',
       )}
     >
@@ -514,19 +505,13 @@ function BomTile({
 
       <button
         type='button'
-        onClick={() => setOpen((o) => !o)}
+        onClick={onOpen}
         className='flex w-full flex-col gap-1 p-1.5 text-left'
-        aria-expanded={open}
+        aria-haspopup='dialog'
       >
-        {/* The square material photo — full-bleed on the collapsed grid tile, but capped small once
-            the tile is open (col-span-full), or a w-full square would blow past the viewport. */}
+        {/* The square material photo, full-bleed across the tile. */}
         {imageUrl ? (
-          <span
-            className={cn(
-              'relative block aspect-square overflow-hidden border border-borderColor',
-              open ? 'w-28' : 'w-full',
-            )}
-          >
+          <span className='relative block aspect-square w-full overflow-hidden border border-borderColor'>
             <Media
               src={imageUrl}
               alt={row.name?.trim() || 'material'}
@@ -535,7 +520,7 @@ function BomTile({
             />
           </span>
         ) : (
-          <Placeholder aspect='square' label='no photo' className={open ? 'w-28' : 'w-full'} />
+          <Placeholder aspect='square' label='no photo' className='w-full' />
         )}
 
         {/* секция / тип. The class pill is dropped when it just repeats the section — the enums
@@ -568,27 +553,16 @@ function BomTile({
           </Text>
         ) : null}
 
-        <div className='mt-0.5 flex min-w-0 items-center gap-1'>
-          {priceStatus}
-          <Text component='span' variant='inactive' className='ml-auto shrink-0'>
-            {open ? '▴' : '▾'}
-          </Text>
-        </div>
+        <div className='mt-0.5 flex min-w-0 items-center gap-1'>{priceStatus}</div>
       </button>
 
       {/* Same idea as the "! link a material" marker, for anything BLOCKING the save: name the
-          offending fields on the tile so a collapsed row is diagnosable at a glance. */}
+          offending fields on the tile so a row whose editor is closed is diagnosable at a glance. */}
       {hasError && (
         <div className='border-t border-hairline px-2 py-1'>
           <Text size='micro' variant='error' className='truncate'>
             {rowErrors.map((e) => `! ${e.path}: ${e.message}`).join(' · ')}
           </Text>
-        </div>
-      )}
-
-      {open && (
-        <div className='border-t border-hairline p-2'>
-          <BomItemRow index={index} highlight={highlight} />
         </div>
       )}
     </div>
@@ -602,25 +576,37 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     composition?: string;
+    name?: string;
+    section?: string;
   }>;
+  // The article whose editor is open. ONE dialog for the whole grid, keyed by index — a modal per
+  // tile would mean twenty dialog roots mounted to show at most one.
+  const [editing, setEditing] = useState<number | null>(null);
   const [highlightActive, setHighlightActive] = useState(false);
 
-  // When the labels tab asks for composition (care-gen with empty composition), jump here:
-  // scroll the first article missing composition into view and pulse the empty fields.
+  // When the labels tab asks for composition (care-gen with empty composition), jump here: open the
+  // first article missing composition and pulse its empty field.
   useEffect(() => {
-    if (!highlightComposition) return;
-    setHighlightActive(true);
+    if (!highlightComposition || !bomWatch.length) return;
     const firstEmpty = bomWatch.findIndex((b) => !b.composition?.trim());
-    const target = firstEmpty >= 0 ? firstEmpty : 0;
-    requestAnimationFrame(() => {
-      document
-        .getElementById(`bom-composition-${target}`)
-        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
+    setEditing(firstEmpty >= 0 ? firstEmpty : 0);
+    setHighlightActive(true);
     const t = setTimeout(() => setHighlightActive(false), 2600);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightComposition]);
+
+  // The pulsed field lives inside the dialog, so it can only be scrolled to once that content has
+  // mounted into its portal — a frame after `editing` is set, not in the effect above.
+  useEffect(() => {
+    if (!highlightActive || editing === null) return;
+    const t = setTimeout(() => {
+      document
+        .getElementById(`bom-composition-${editing}`)
+        ?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+    return () => clearTimeout(t);
+  }, [highlightActive, editing]);
 
   // Stable line_key (§2.3): downstream refs point at the article's key, not its position — so
   // removing an article NEVER renumbers anything. We only clear refs that pointed AT the removed
@@ -654,6 +640,9 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
         });
       });
     }
+    // Indices shift under an open editor once a row above it is gone; close it rather than let it
+    // repoint at whatever slid into that slot.
+    setEditing(null);
     remove(bi);
   };
 
@@ -676,10 +665,29 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
               key={f.id}
               index={index}
               onRemove={() => removeArticle(index)}
-              highlight={highlightActive && !bomWatch[index]?.composition?.trim()}
+              onOpen={() => setEditing(index)}
             />
           ))}
         </Tiles>
+      )}
+
+      {/* The editor, in the app's one modal shell. No footer: nothing here is committed separately —
+          the fields write straight into the card's form state, and the card's own save button is
+          what persists them. Closing is ✕ / Esc / the overlay. */}
+      {editing !== null && (
+        <ConfirmationModal
+          open
+          onOpenChange={(v) => !v && setEditing(null)}
+          onConfirm={() => setEditing(null)}
+          width='lg'
+          hideActions
+          title={join(
+            bomWatch[editing]?.name?.trim() || `артикул ${editing + 1}`,
+            sectionShort(bomWatch[editing]?.section),
+          )}
+        >
+          <BomItemRow index={editing} highlight={highlightActive} />
+        </ConfirmationModal>
       )}
 
       <Button
