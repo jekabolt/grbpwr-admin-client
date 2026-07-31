@@ -635,12 +635,11 @@ export function BomField({
   // RPC, one write per colourway — so this form can neither see them in its own state nor clear
   // them as part of its save.
   //
-  // Matched on bom_item_id FIRST, and only then on line_key. A line_key the server issued in its
-  // own format (BOM-FABRIC-1785511792 — the one in the error that started this) does not survive
-  // mapBomItemToForm, which keeps a key only when it is a ULID and mints a fresh one otherwise: the
-  // form's key for such an article is a ULID no usage has ever referenced, so a key-only check
-  // would silently pass every article the server is about to refuse. The id is the same number on
-  // both sides. A never-saved article has id 0 and no colourway can reference it yet.
+  // Matched on bom_item_id, with line_key only as a fallback — not the other way round. The read
+  // does not emit bom_line_key on a usage at all (ConvertRecipeUsagesToPb sets piece_line_key and
+  // the resolved bom_item_id, and nothing else), which is also how the recipe editor resolves a
+  // usage back to its BOM line: by id, then to that line's key. It is the same FK the server's
+  // RESTRICT fires on. A never-saved article has id 0 and no colourway can reference it yet.
   const colorwayUsers = (lineKey: string, bomItemId: number): BlockingUser[] =>
     (colorways ?? [])
       .filter((c) =>

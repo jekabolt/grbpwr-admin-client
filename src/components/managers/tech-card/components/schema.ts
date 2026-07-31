@@ -27,7 +27,7 @@ import {
 import { TechCardLabDipStatus as common_TechCardLabDipStatus } from 'api/proto-http/common';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
-import { isUlid, ulid } from 'utils/ulid';
+import { ulid } from 'utils/ulid';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { z } from 'zod';
 
@@ -42,7 +42,6 @@ export function toPurposeEnum(value?: string): string {
     ? 'TECH_CARD_PURPOSE_AUXILIARY'
     : 'TECH_CARD_PURPOSE_SELLABLE';
 }
-
 
 // Tech-card form. Covers the full TechCardInsert: header ("Титул"), sketch media
 // (moodboard + technical) + callouts, size range + patterns, linked products, colourways
@@ -731,18 +730,29 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     // the save of any card with a linked line. Same trap as sizeBytes above.
     materialId: wireInt(b.materialId),
     id: wireInt(b.id),
-    lineKey: b.lineKey && isUlid(b.lineKey) ? b.lineKey : ulid(),
+    // Keep whatever key the row already has; mint one ONLY when there is none. The old test was
+    // `isUlid(key) ? key : ulid()`, which threw away every key this client did not mint itself —
+    // the LEGACY0000000000000000NN keys migration 0159 backfilled (the ULID charset has no L), and
+    // the bom-fabric-… keys the beta seeder writes. The server reconciles the BOM BY line_key: a
+    // re-minted key reads as "the old line vanished, delete it", and the delete then hits the FK
+    // RESTRICT held by any colourway recipe that cuts it. That made such a card unsavable — no
+    // deletion by the operator involved, merely opening it and pressing Save.
+    lineKey: b.lineKey?.trim() || ulid(),
   };
 }
 
 export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
   const insert = techCard.techCard;
   // Resolve BOM line identities up front (§2.3) so downstream refs can be keyed by stable line_key.
-  // A legacy line saved before line_key existed gets a fresh key on read (persists on next save).
+  // A line saved before line_key existed has none and gets a fresh key on read (persists on next
+  // save); a line that HAS one keeps it, whatever shape it is.
   const bomItemsForm = (insert?.bomItems ?? []).map(mapBomItemToForm);
   const bomKeyByIndex = bomItemsForm.map((b) => b.lineKey);
   const refKey = (bomLineKey?: string, bomItemIndex?: number): string => {
-    if (bomLineKey && isUlid(bomLineKey)) return bomLineKey;
+    // Any non-blank key is the reference — same reason as mapBomItemToForm above. Demanding a ULID
+    // here silently dropped a legacy/seeded ref to the positional fallback below, which is wrong the
+    // moment the BOM is reordered.
+    if (bomLineKey?.trim()) return bomLineKey;
     if (
       typeof bomItemIndex === 'number' &&
       bomItemIndex >= 0 &&
@@ -842,7 +852,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       })),
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
-      lineKey: p.lineKey && isUlid(p.lineKey) ? p.lineKey : ulid(),
+      // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
+      // backfilled them with the same LEGACY… keys the ULID test rejects.
+      lineKey: p.lineKey?.trim() || ulid(),
       name: p.name || '',
       piecesPerGarment: p.piecesPerGarment ?? 1,
       mirrored: p.mirrored ?? false,
@@ -1104,7 +1116,8 @@ export function mapFormToTechCardInsert(
   // consistent positional bomItemIndex for the legacy/transition path.
   const bomLines = (data.bomItems ?? []).map((b) => ({
     ...b,
-    lineKey: isUlid(b.lineKey) ? b.lineKey : ulid(),
+    // Keep, never re-mint: the key that came off the read IS the row's identity server-side.
+    lineKey: b.lineKey?.trim() || ulid(),
   }));
   const bomIndexByKey = new Map<string, number>();
   bomLines.forEach((b, i) => bomIndexByKey.set(b.lineKey, i));
@@ -1183,7 +1196,7 @@ export function mapFormToTechCardInsert(
     pieces: (data.pieces ?? [])
       .filter((p) => !isBlankPiece(p))
       .map((p) => ({
-        lineKey: isUlid(p.lineKey) ? p.lineKey : ulid(),
+        lineKey: p.lineKey?.trim() || ulid(),
         name: p.name?.trim() || '',
         // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
         // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
