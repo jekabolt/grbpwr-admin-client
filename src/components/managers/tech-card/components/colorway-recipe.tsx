@@ -743,7 +743,10 @@ function RecipeMaterialCard({
 }) {
   const url = materialImageUrl(material);
   const section = sectionShort(slot?.section);
-  const klass = materialClassLabel(material?.materialClass);
+  // A fabric-class article in a fabric slot would badge "fabric fabric" — the class earns a pill
+  // only when it says something the section doesn't (e.g. a thread-class article on a trim slot).
+  const rawKlass = materialClassLabel(material?.materialClass);
+  const klass = rawKlass === section ? '' : rawKlass;
   const name = material?.name?.trim() || (materialId ? `артикул #${materialId}` : 'нет артикула');
   const code = material ? composeArticleFromMaterial(material, true) : '';
   const spec = material
@@ -1001,14 +1004,15 @@ function SlotUsageRow({
         <RecipeMaterialCard slot={slot} material={material} materialId={materialId} />
       </div>
       <div className='flex min-w-0 flex-1 flex-col gap-2.5'>
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          {slot?.section ? <Pill tone='mut'>{sectionShort(slot.section)}</Pill> : <span />}
-          {canEdit && (
+        {/* The section already badges the article card to the left — repeating it here made every
+            fabric row open with three FABRIC chips. This row is just the action now. */}
+        {canEdit && (
+          <div className='flex items-center justify-end'>
             <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
               unlink
             </Button>
-          )}
-        </div>
+          </div>
+        )}
 
         <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
           <label className='flex min-w-0 flex-col gap-1'>
