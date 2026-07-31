@@ -55,12 +55,12 @@ export function BoardColumn({
         )}
         {action && <div className='ml-auto'>{action}</div>}
       </div>
-      <div className='flex-1 bg-black/[0.02]'>{children}</div>
+      <div className='flex flex-1 flex-col gap-1.5 bg-black/[0.02] p-1.5'>{children}</div>
     </div>
   );
 }
 
-/** One card in a lane. Hairline-separated, lifts on hover like the reference. */
+/** One card in a lane: a bordered white card on the lane's ground, lifting on hover. */
 export function BoardCard({
   onClick,
   children,
@@ -77,7 +77,7 @@ export function BoardCard({
     <div
       {...(onClick ? { role: 'button', tabIndex: 0, onClick } : {})}
       className={cn(
-        'border-b border-hairline bg-bgColor px-2 py-1.5',
+        'border border-borderColor bg-bgColor px-2 py-1.5',
         onClick && 'cursor-pointer hover:-translate-y-px hover:shadow-[2px_2px_0_0_var(--color-textColor)]',
         dimmed && 'opacity-60',
         className,

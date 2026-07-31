@@ -6,6 +6,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Section } from 'ui/components/section';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 
 // R6: the colourway lifecycle is a stored status with server-validated transitions, driven by
@@ -14,25 +15,25 @@ import Text from 'ui/components/text';
 //   ARCHIVED --Restore--> HIDDEN (#60 — archiving is reversible, not terminal).
 // Publish enforces preconditions server-side; on FAILED_PRECONDITION we surface the reasons.
 
-type StatusMeta = { label: string; className: string };
+type StatusMeta = { label: string; tone: 'ok' | 'warn' | 'attention' | 'mut' | 'ink' };
 
+// Lifecycle status uses the system's own colour semantics, not a pastel fill:
+//   draft    — blue, mid-flight, waiting on a human to publish
+//   active   — green, live
+//   hidden   — ink, deliberately set and deliberately off the storefront
+//   archived — grey, retired / not applicable
+// Each also carries its word, so the state survives a monochrome or colour-blind read.
 const STATUS_META: Record<string, StatusMeta> = {
-  COLORWAY_LIFECYCLE_STATUS_DRAFT: { label: 'draft', className: 'bg-yellow-200 text-black' },
-  COLORWAY_LIFECYCLE_STATUS_ACTIVE: { label: 'active', className: 'bg-green-300 text-black' },
-  COLORWAY_LIFECYCLE_STATUS_HIDDEN: { label: 'hidden', className: 'bg-textColor text-bgColor' },
-  COLORWAY_LIFECYCLE_STATUS_ARCHIVED: { label: 'archived', className: 'bg-red-300 text-black' },
+  COLORWAY_LIFECYCLE_STATUS_DRAFT: { label: 'draft', tone: 'attention' },
+  COLORWAY_LIFECYCLE_STATUS_ACTIVE: { label: 'active', tone: 'ok' },
+  COLORWAY_LIFECYCLE_STATUS_HIDDEN: { label: 'hidden', tone: 'ink' },
+  COLORWAY_LIFECYCLE_STATUS_ARCHIVED: { label: 'archived', tone: 'mut' },
 };
 
 export function StatusBadge({ status }: { status?: common_ColorwayLifecycleStatus }) {
   const meta = status ? STATUS_META[status] : undefined;
   if (!meta) return null; // UNKNOWN / unset → fail closed, show nothing
-  return (
-    <span className={`px-1.5 py-0.5 ${meta.className}`}>
-      <Text size='small' variant='uppercase'>
-        {meta.label}
-      </Text>
-    </span>
-  );
+  return <Pill tone={meta.tone}>{meta.label}</Pill>;
 }
 
 // Split a backend precondition message into individual reasons so the operator sees a checklist of
@@ -114,72 +115,74 @@ export function LifecycleControls({
   return (
     <Section
       title='lifecycle'
-      question={<StatusBadge status={status} />}
       action={
-        canWrite && !isArchived ? (
-          <div className='flex flex-wrap items-center gap-2'>
-            {isDraft && (
-              <Button
-                type='button'
-                variant='main'
-                size='sm'
-                className='uppercase'
-                disabled={busy}
-                onClick={publish}
-              >
-                publish
-              </Button>
-            )}
-            {isActive && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='sm'
-                className='uppercase'
-                disabled={busy}
-                onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway hidden')}
-              >
-                hide
-              </Button>
-            )}
-            {isHidden && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='sm'
-                className='uppercase'
-                disabled={busy}
-                onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_ACTIVE', 'Colorway shown')}
-              >
-                unhide
-              </Button>
-            )}
-            {(isActive || isHidden) && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='sm'
-                className='uppercase'
-                disabled={busy}
-                onClick={() => setConfirmArchive(true)}
-              >
-                archive
-              </Button>
-            )}
-          </div>
-        ) : canWrite && isArchived ? (
-          // #60: an archived colourway can be restored (→ hidden) instead of being permanently stuck.
-          <Button
-            type='button'
-            variant='main'
-            size='sm'
-            className='uppercase'
-            disabled={busy}
-            onClick={restore}
-          >
-            restore
-          </Button>
-        ) : undefined
+        <div className='flex flex-wrap items-center gap-2'>
+          <StatusBadge status={status} />
+          {canWrite && !isArchived ? (
+            <>
+              {isDraft && (
+                <Button
+                  type='button'
+                  variant='main'
+                  size='sm'
+                  className='uppercase'
+                  disabled={busy}
+                  onClick={publish}
+                >
+                  publish
+                </Button>
+              )}
+              {isActive && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  className='uppercase'
+                  disabled={busy}
+                  onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway hidden')}
+                >
+                  hide
+                </Button>
+              )}
+              {isHidden && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  className='uppercase'
+                  disabled={busy}
+                  onClick={() => transition('COLORWAY_LIFECYCLE_STATUS_ACTIVE', 'Colorway shown')}
+                >
+                  unhide
+                </Button>
+              )}
+              {(isActive || isHidden) && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  className='uppercase'
+                  disabled={busy}
+                  onClick={() => setConfirmArchive(true)}
+                >
+                  archive
+                </Button>
+              )}
+            </>
+          ) : canWrite && isArchived ? (
+            // #60: an archived colourway can be restored (→ hidden) instead of being permanently stuck.
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              className='uppercase'
+              disabled={busy}
+              onClick={restore}
+            >
+              restore
+            </Button>
+          ) : null}
+        </div>
       }
     >
       {isArchived && (

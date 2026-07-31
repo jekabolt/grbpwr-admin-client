@@ -107,9 +107,14 @@ export function FittingCardList() {
             const photos = fitting.media?.length ?? 0;
             const openChanges = insert?.changeRequests?.filter((cr) => !cr.resolved).length ?? 0;
             const thumb = fitting.media?.[0]?.media?.thumbnail?.mediaUrl;
+            // Only state earns a pill; everything descriptive goes to the meta line. With four
+            // pills (and `outcome` being free text) the row wrapped to two or three lines, so a
+            // card's height — and with it the thumbnail's position — moved with its content.
             const meta = [
               modelName(insert?.modelId),
               formatFittingDate(insert?.fittingDate),
+              insert?.roundNumber ? `round ${insert.roundNumber}` : '',
+              insert?.outcome ? insert.outcome.replace(/_/g, ' ') : '',
               photos ? `${photos} photo${photos > 1 ? 's' : ''}` : '',
             ]
               .filter(Boolean)
@@ -133,12 +138,8 @@ export function FittingCardList() {
                   onClick={() => navigate(`/fittings/${id}`)}
                   className='h-full w-full'
                 >
-                  <div className='mt-1 flex flex-wrap items-center gap-1'>
+                  <div className='mt-1 flex items-center gap-1 overflow-hidden'>
                     <Pill tone='mut'>{statusLabel(insert?.status)}</Pill>
-                    {insert?.roundNumber ? <Pill tone='mut'>round {insert.roundNumber}</Pill> : null}
-                    {insert?.outcome ? (
-                      <Pill tone='mut'>{insert.outcome.replace('_', ' ')}</Pill>
-                    ) : null}
                     {openChanges > 0 && <Pill tone='warn'>{openChanges} open</Pill>}
                   </div>
                   {meta && (

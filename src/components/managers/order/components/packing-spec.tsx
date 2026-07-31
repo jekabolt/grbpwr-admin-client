@@ -1,11 +1,13 @@
 import { useOrderPackingSpec } from 'components/managers/tech-card/components/useAssemblyPacking';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 const TH =
   'border border-borderColor bg-bgZebra px-2 py-1 text-left text-micro uppercase tracking-label';
-const TD = 'border border-borderColor px-2 py-1 align-top text-micro';
+const TD = 'border border-hairline px-2 py-1 align-top text-micro';
 
 // An empty tick box the packer marks off by hand once the line is picked/verified. Printed
 // as a real square so a paper copy is usable.
@@ -34,32 +36,33 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
   const packaging = data?.packaging ?? [];
 
   return (
-    <section className='space-y-3 border border-borderColor bg-bgColor p-3'>
-      <div className='flex items-center justify-between gap-2'>
-        <button
-          type='button'
-          onClick={() => setOpen((o) => !o)}
-          className='flex items-center gap-2'
-          aria-expanded={open}
-        >
-          <Text variant='uppercase' tracking='group' className='font-bold'>
-            pick list
-          </Text>
-          <Text component='span' variant='label'>
-            {open ? '▴' : '▾'}
-          </Text>
-        </button>
-        {open && items.length + packaging.length > 0 && (
+    <Section
+      title='pick list'
+      action={
+        <>
+          {open && items.length + packaging.length > 0 && (
+            <Button
+              variant='secondary'
+              size='xs'
+              className='uppercase print:hidden'
+              onClick={() => window.print()}
+            >
+              print
+            </Button>
+          )}
           <Button
+            type='button'
             variant='secondary'
             size='xs'
             className='uppercase print:hidden'
-            onClick={() => window.print()}
+            aria-expanded={open}
+            onClick={() => setOpen((o) => !o)}
           >
-            print
+            {open ? '− hide' : '+ show'}
           </Button>
-        )}
-      </div>
+        </>
+      }
+    >
 
       {open && (
         <div className='space-y-4'>
@@ -86,16 +89,19 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
                 {items.map((it) => {
                   const assembly = it.assembly ?? [];
                   return (
-                    <div key={it.orderItemId} className='space-y-2 border border-borderColor p-2.5'>
-                      <div className='flex flex-wrap items-center gap-2'>
-                        <Tick />
-                        <Text component='span' className='font-bold uppercase'>
+                    <div key={it.orderItemId} className='space-y-2'>
+                      <GroupLabel
+                        action={
+                          <Text component='span' size='micro' variant='label'>
+                            {it.sku} · {it.sizeName} · qty {it.quantity?.value ?? '0'}
+                          </Text>
+                        }
+                      >
+                        <span className='inline-flex items-center gap-2'>
+                          <Tick />
                           {it.styleName || `style #${it.styleId}`}
-                        </Text>
-                        <Text component='span' size='micro' variant='label'>
-                          {it.sku} · {it.sizeName} · qty {it.quantity?.value ?? '0'}
-                        </Text>
-                      </div>
+                        </span>
+                      </GroupLabel>
                       {assembly.length === 0 ? (
                         <Text variant='label' size='micro'>
                           no assembly items
@@ -140,10 +146,8 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
                 })}
               </div>
 
-              <div className='space-y-2 border-t border-borderColor pt-3'>
-                <Text variant='uppercase' size='micro' tracking='label'>
-                  packaging materials
-                </Text>
+              <div className='space-y-2'>
+                <GroupLabel>packaging materials</GroupLabel>
                 {packaging.length === 0 ? (
                   <Text variant='label' size='micro'>
                     no packaging materials
@@ -179,6 +183,6 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
           )}
         </div>
       )}
-    </section>
+    </Section>
   );
 }

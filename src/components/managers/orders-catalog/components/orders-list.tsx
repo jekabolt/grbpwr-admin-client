@@ -102,7 +102,7 @@ export function OrdersList({ orders, isLoading, activeFilters, onClearFilters }:
             className='cursor-pointer transition-colors hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor [&:last-child>div]:border-b-0'
           >
             <Row
-              className='items-start px-2 py-1.5'
+              className='items-start px-2 py-2.5'
               label={
                 <span className='flex min-w-0 flex-col gap-0.5'>
                   <span className='flex flex-wrap items-center gap-1.5'>
@@ -175,7 +175,7 @@ function OrdersSkeleton({ rows = 6 }: { rows?: number }) {
         <div
           key={i}
           aria-hidden
-          className='flex items-start justify-between gap-2.5 border-b border-hairline px-2 py-1.5 last:border-b-0'
+          className='flex items-start justify-between gap-2.5 border-b border-hairline px-2 py-2.5 last:border-b-0'
         >
           <span className='flex w-full min-w-0 max-w-96 flex-col gap-1'>
             <SkeletonLine width={160} />
