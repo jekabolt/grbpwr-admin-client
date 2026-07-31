@@ -1061,11 +1061,12 @@ export function OperationsField({
     setValue(`operations.${index}.pieceLineKeys`, [...cur, lineKey], { shouldDirty: true });
   };
 
+  // Cut pieces are the first section of the colorways tab (they used to have their own).
   const goToPiecesTab = () => {
     const next = new URLSearchParams(params);
-    next.set('tab', 'pieces');
+    next.set('tab', 'colorways');
     setParams(next, { replace: true });
-    // the pieces tab is a sibling `hidden` panel, so it is already mounted — one frame is enough
+    // that tab is a sibling `hidden` panel, so it is already mounted — one frame is enough
     window.setTimeout(() => revealField('pieces.add'), 120);
   };
 

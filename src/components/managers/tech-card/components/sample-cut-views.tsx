@@ -202,7 +202,8 @@ function NoPieces({ what }: { what: string }) {
   return (
     <CalloutBox tone='note'>
       <Text size='micro'>
-        this card has no cut pieces yet — add them on the pieces tab and {what} fills in on its own
+        this card has no cut pieces yet — add them on the colorways tab and {what} fills in on its
+        own
       </Text>
     </CalloutBox>
   );

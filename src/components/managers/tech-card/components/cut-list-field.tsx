@@ -17,11 +17,10 @@ import { useStyleCutList } from './useStyleReadViews';
 // colourway, which fabric (and optional fusing) BOM line it's cut from. NOT costing-gated —
 // this is pattern/production data, not money.
 // #42: this table is a CALCULATED projection, not an editable list — there is nothing to "add"
-// here. It is derived (GetStyleCutList) from the cut-pieces on the pieces tab × their mirror flag ×
-// each colourway's fabric mapping. To change a row: edit the piece (pieces tab above) or its
-// per-colourway fabric/fusing mapping (colorways tab) — this view just reflects the result.
+// here. It is derived (GetStyleCutList) from the cut-pieces × their mirror flag × each colourway's
+// fabric mapping — both of which live on the colorways tab. This view just reflects the result.
 const INTRO =
-  'Calculated, not editable: pieces × mirror × each colourway’s fabric mapping. Add / edit pieces on the pieces tab above and their fabric per colourway on the colorways tab — this table just shows the result.';
+  'Calculated, not editable: pieces × mirror × each colourway’s fabric mapping. Add / edit the pieces and their fabric per colourway on the colorways tab — this table just shows the result.';
 
 const SHELL_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_FABRIC',
@@ -160,7 +159,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
     return (
       <CalloutBox tone='note'>
         <Text size='micro'>
-          {INTRO} No cut pieces yet — add one on the pieces tab above and it will appear here.
+          {INTRO} No cut pieces yet — add one on the colorways tab and it will appear here.
         </Text>
       </CalloutBox>
     );
@@ -266,8 +265,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
                           ) ??
                           usages.find(
                             (u) =>
-                              wireInt(u.bomItemId) === wireInt(f.bomItemId) &&
-                              !wireInt(u.pieceId),
+                              wireInt(u.bomItemId) === wireInt(f.bomItemId) && !wireInt(u.pieceId),
                           );
                         const pin = wireInt(usage?.materialId);
                         const bom = techCard?.techCard?.bomItems?.find(
@@ -280,7 +278,8 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
                             : undefined);
                         return (
                           <Text key={fi} size='micro' variant='label' component='span'>
-                            colourway #{f.colorwayId}: {article || f.fabricName || `#${f.bomItemId}`}
+                            colourway #{f.colorwayId}:{' '}
+                            {article || f.fabricName || `#${f.bomItemId}`}
                             {f.fusingName ? ` · fusing: ${f.fusingName}` : ''}
                           </Text>
                         );

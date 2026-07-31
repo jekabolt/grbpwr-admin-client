@@ -1194,9 +1194,7 @@ function OrphanRecipeCard({
   onKeep: () => void;
   onUnlink: () => void;
 }) {
-  const slot = draft.bomLineKey
-    ? bomItems.find((b) => b.lineKey === draft.bomLineKey)
-    : undefined;
+  const slot = draft.bomLineKey ? bomItems.find((b) => b.lineKey === draft.bomLineKey) : undefined;
   const material = effectiveMaterial(draft, slot, materials);
   const materialId = effectiveMaterialId(draft, slot);
   const consumption =
@@ -1747,9 +1745,7 @@ function ColorwayRecipeEditor({
   }, [usages, pieceKeySet]);
   const garmentUsages = useMemo<IndexedUsage[]>(
     () =>
-      usages
-        .map((draft, index) => ({ draft, index }))
-        .filter(({ draft }) => !draft.pieceLineKey),
+      usages.map((draft, index) => ({ draft, index })).filter(({ draft }) => !draft.pieceLineKey),
     [usages],
   );
   const orphans = useMemo(
@@ -1920,12 +1916,7 @@ function ColorwayRecipeEditor({
                 canEdit={canEdit}
                 canAdd={canAddTo(PIECE_SECTIONS, rows)}
                 onAdd={() =>
-                  addUsage(
-                    piece.lineKey,
-                    piece.name?.trim() || '',
-                    PIECE_SECTIONS,
-                    rows,
-                  )
+                  addUsage(piece.lineKey, piece.name?.trim() || '', PIECE_SECTIONS, rows)
                 }
                 onChange={patchUsage}
                 onRemove={removeUsage}
@@ -2277,9 +2268,14 @@ export function ColorwayRecipes({
 
   return (
     <div className='flex flex-col gap-2.5'>
+      {/* This half shares the tab with the cut-piece table above it, so it has to announce itself —
+          an unlabelled swatch grid under «детали кроя» reads as part of that block. */}
+      <SectionHeader
+        title='колорвеи'
+        question='— which catalog article goes on each part, in what colour and at what consumption'
+      />
       <Text size='micro' variant='label'>
-        Which catalog article goes on each part, and how much. Each colourway is its own write, and
-        every one you edit goes out with the card’s Save.
+        Each colourway is its own write, and every one you edit goes out with the card’s Save.
       </Text>
 
       <Tiles min={120}>
