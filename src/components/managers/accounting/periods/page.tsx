@@ -227,14 +227,14 @@ export function AcctPeriodsPage() {
             <Loader />
           </div>
         ) : isError ? (
-          <div className='border border-error p-4 text-center'>
+          <div className='border border-error bg-bgColor p-4 text-center'>
             <Text className='mb-3 text-error'>Failed to load periods</Text>
             <Button variant='secondary' size='lg' onClick={() => refetch()}>
               retry
             </Button>
           </div>
         ) : periods.length === 0 ? (
-          <div className='min-h-40 border border-textInactiveColor p-4 text-center'>
+          <div className='min-h-40 border border-borderColor bg-bgColor p-4 text-center'>
             <Text variant='inactive' size='small'>
               no periods yet — they appear with the first posting
             </Text>

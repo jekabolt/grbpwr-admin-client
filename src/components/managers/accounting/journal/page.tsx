@@ -193,14 +193,14 @@ export function AcctJournalPage() {
             <Loader />
           </div>
         ) : isError ? (
-          <div className='border border-error p-4 text-center'>
+          <div className='border border-error bg-bgColor p-4 text-center'>
             <Text className='mb-3 text-error'>Failed to load entries</Text>
             <Button variant='secondary' size='lg' onClick={() => refetch()}>
               retry
             </Button>
           </div>
         ) : entries.length === 0 ? (
-          <div className='flex min-h-40 flex-col items-center justify-center gap-3 border border-textInactiveColor p-6 text-center'>
+          <div className='flex min-h-40 flex-col items-center justify-center gap-3 border border-borderColor bg-bgColor p-6 text-center'>
             <Text variant='inactive'>
               {searchTerm
                 ? 'nothing matches the search in this range — try "all time" or another query'

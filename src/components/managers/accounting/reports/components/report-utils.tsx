@@ -175,7 +175,7 @@ export function ReportState({
   }
   if (isError) {
     return (
-      <div className='flex min-h-[200px] flex-col items-center justify-center gap-3 border border-error p-4 text-center'>
+      <div className='flex min-h-[200px] flex-col items-center justify-center gap-3 border border-error bg-bgColor p-4 text-center'>
         <Text className='text-error'>Failed to load — the request did not complete</Text>
         <Button variant='secondary' size='lg' onClick={onRetry}>
           retry
@@ -185,7 +185,7 @@ export function ReportState({
   }
   if (isEmpty) {
     return (
-      <div className='flex min-h-[200px] items-center justify-center border border-textInactiveColor p-4 text-center'>
+      <div className='flex min-h-[200px] items-center justify-center border border-borderColor bg-bgColor p-4 text-center'>
         <Text variant='inactive' size='small'>
           {emptyHint}
         </Text>

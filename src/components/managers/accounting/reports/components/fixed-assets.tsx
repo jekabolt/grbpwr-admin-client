@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import DecimalField from 'ui/form/fields/decimal-field';
@@ -74,11 +75,9 @@ export function FixedAssetsPanel({ from, to }: Props) {
   const assets = data?.assets ?? [];
 
   return (
-    <section className='flex flex-col gap-4 border-t border-textColor pt-6'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <Text variant='uppercase' className='font-medium'>
-          fixed assets &amp; tax
-        </Text>
+    <Section
+      title='fixed assets & tax'
+      action={
         <div className='flex flex-wrap gap-2'>
           <Button
             variant='secondary'
@@ -95,8 +94,8 @@ export function FixedAssetsPanel({ from, to }: Props) {
             add asset
           </Button>
         </div>
-      </div>
-
+      }
+    >
       <Note className='mt-0'>
         depreciation posts monthly straight-line charges up to {lastDayOfRange(to)}; corporation tax
         is accrued on the pre-tax profit of the selected range. Both are idempotent — re-running only
@@ -125,7 +124,7 @@ export function FixedAssetsPanel({ from, to }: Props) {
 
       <AddFixedAssetModal open={addOpen} onOpenChange={setAddOpen} />
       <AccrueCorporationTaxModal open={ctOpen} onOpenChange={setCtOpen} from={from} to={to} />
-    </section>
+    </Section>
   );
 }
 

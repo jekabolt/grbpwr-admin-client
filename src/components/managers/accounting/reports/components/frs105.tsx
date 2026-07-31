@@ -1,4 +1,5 @@
 import { googletype_Decimal } from 'api/proto-http/admin';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { AmountCell } from '../../components/amount-cell';
 import { Callout, GroupHeader, RowLine, StatGrid, StatTile, Verdict } from '../../components/kit';
@@ -62,63 +63,70 @@ export function Frs105Tab({ from, to }: Props) {
   const madeLoss = isNegative(data?.profitForYear);
 
   return (
-    <div className='flex flex-col gap-6'>
-      <ReportState isLoading={isLoading} isError={isError} onRetry={() => refetch()} isEmpty={!data}>
-        <div className='flex flex-col gap-6'>
-          <div>
-            <Verdict>
-              The company {madeLoss ? 'made a loss of' : 'made'}{' '}
-              {formatBase(data?.profitForYear)} this year and is worth{' '}
-              {formatBase(data?.netAssets)}.
-            </Verdict>
-            <StatGrid>
-              <StatTile
-                label='Turnover'
-                value={formatBase(data?.turnover)}
-                sub={`figures in ${data?.currency ?? '—'}`}
+    <SectionStack>
+      <Section>
+        <ReportState
+          isLoading={isLoading}
+          isError={isError}
+          onRetry={() => refetch()}
+          isEmpty={!data}
+        >
+          <div className='flex flex-col gap-6'>
+            <div>
+              <Verdict>
+                The company {madeLoss ? 'made a loss of' : 'made'}{' '}
+                {formatBase(data?.profitForYear)} this year and is worth{' '}
+                {formatBase(data?.netAssets)}.
+              </Verdict>
+              <StatGrid>
+                <StatTile
+                  label='Turnover'
+                  value={formatBase(data?.turnover)}
+                  sub={`figures in ${data?.currency ?? '—'}`}
+                />
+                <StatTile
+                  label='Profit for the year'
+                  value={formatBase(data?.profitForYear)}
+                  tone={madeLoss ? 'down' : 'up'}
+                  sub='after tax'
+                />
+                <StatTile
+                  label='Net assets'
+                  value={formatBase(data?.netAssets)}
+                  sub='assets minus liabilities'
+                />
+              </StatGrid>
+            </div>
+
+            <Callout>
+              <Text variant='uppercase' size='small' className='font-medium'>
+                draft — for accountant finalisation
+              </Text>
+              <div className='mt-1'>
+                <CaveatsNote caveats={data?.caveats ?? []} />
+              </div>
+            </Callout>
+
+            <div className='flex flex-col gap-2'>
+              <GroupHeader className='mt-0'>Statutory format (for filing)</GroupHeader>
+              <div className='flex justify-end'>
+                <CopyTableButton headers={copyHeaders} rows={copyRows} filename='frs105-accounts' />
+              </div>
+              <Frs105Statement
+                title={`Income statement · figures in ${data?.currency ?? ''}`}
+                lines={income}
               />
-              <StatTile
-                label='Profit for the year'
-                value={formatBase(data?.profitForYear)}
-                tone={madeLoss ? 'down' : 'up'}
-                sub='after tax'
+              <Frs105Statement
+                title='Statement of financial position · as at end of period'
+                lines={position}
               />
-              <StatTile
-                label='Net assets'
-                value={formatBase(data?.netAssets)}
-                sub='assets minus liabilities'
-              />
-            </StatGrid>
+            </div>
           </div>
-
-          <Callout>
-            <Text variant='uppercase' size='small' className='font-medium'>
-              draft — for accountant finalisation
-            </Text>
-            <div className='mt-1'>
-              <CaveatsNote caveats={data?.caveats ?? []} />
-            </div>
-          </Callout>
-
-          <section className='flex flex-col gap-2'>
-            <GroupHeader className='mt-0'>Statutory format (for filing)</GroupHeader>
-            <div className='flex justify-end'>
-              <CopyTableButton headers={copyHeaders} rows={copyRows} filename='frs105-accounts' />
-            </div>
-            <Frs105Statement
-              title={`Income statement · figures in ${data?.currency ?? ''}`}
-              lines={income}
-            />
-            <Frs105Statement
-              title='Statement of financial position · as at end of period'
-              lines={position}
-            />
-          </section>
-        </div>
-      </ReportState>
+        </ReportState>
+      </Section>
 
       <FixedAssetsPanel from={from} to={to} />
-    </div>
+    </SectionStack>
   );
 }
 

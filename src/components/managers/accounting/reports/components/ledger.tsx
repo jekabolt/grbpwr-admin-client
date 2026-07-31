@@ -61,7 +61,7 @@ export function LedgerTab({ code, from, to }: Props) {
 
   if (!code) {
     return (
-      <div className='flex min-h-[200px] items-center justify-center border border-textInactiveColor p-4 text-center'>
+      <div className='flex min-h-[200px] items-center justify-center border border-borderColor bg-bgColor p-4 text-center'>
         <Text variant='inactive' size='small'>
           select an account above to view its ledger — or click any row in trial balance, P&amp;L or
           the balance sheet

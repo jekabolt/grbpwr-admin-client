@@ -319,7 +319,7 @@ function SuppliersSection() {
             const balance = s.id != null ? balanceBySupplier.get(s.id) : undefined;
             const owes = parseFloat(balance?.value ?? '') > 0;
             return (
-              <div key={s.id} className='flex flex-col gap-1 border border-textInactiveColor p-3'>
+              <div key={s.id} className='flex flex-col gap-1 border border-borderColor bg-bgColor p-3'>
                 <div className='flex items-start justify-between gap-2'>
                   <Text className='font-bold'>{s.name || `supplier #${s.id}`}</Text>
                   {owes && <Pill tone='warn'>open</Pill>}
@@ -357,7 +357,7 @@ function SuppliersSection() {
           <button
             type='button'
             onClick={() => setCreateOpen(true)}
-            className='flex min-h-24 items-center justify-center border border-textInactiveColor p-3 text-textBaseSize uppercase text-labelColor transition-colors hover:text-textColor'
+            className='flex min-h-24 items-center justify-center border border-borderColor bg-bgColor p-3 text-textBaseSize uppercase text-labelColor transition-colors hover:text-textColor'
           >
             + new supplier
           </button>

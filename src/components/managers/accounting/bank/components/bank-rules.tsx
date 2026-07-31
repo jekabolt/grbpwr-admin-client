@@ -80,7 +80,7 @@ export function BankRules({
     );
 
   return (
-    <div id='bank-rules' className='flex flex-col gap-3 border border-textInactiveColor p-3'>
+    <div id='bank-rules' className='flex flex-col gap-3 border border-borderColor bg-bgColor p-3'>
       <button
         type='button'
         className='flex w-fit items-center gap-2 text-textBaseSize uppercase underline underline-offset-4 hover:opacity-70'

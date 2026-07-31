@@ -2,6 +2,7 @@ import { AcctCashFlowSection, googletype_Decimal } from 'api/proto-http/admin';
 import { useCashFlow } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
 import { CheckStrip, Verdict, Waterfall, WaterfallRow } from '../../components/kit';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { formatBase } from '../../utils/format';
 import { CopyTableButton } from './copy-table-button';
@@ -171,7 +172,7 @@ export function CashFlowTab({ from, to, onDrill, onOpenPnl }: Props) {
       onRetry={() => refetch()}
       isEmpty={isEmpty}
     >
-      <div className='flex flex-col gap-4'>
+      <Section>
         <CaveatsNote caveats={caveats} />
         <Verdict>
           {`Cash ${grew ? 'grew' : 'fell'} ${Math.abs(netChange).toLocaleString('en-US', {
@@ -245,7 +246,7 @@ export function CashFlowTab({ from, to, onDrill, onOpenPnl }: Props) {
           <SectionBreakdown section={data?.investing} title='investing' onDrill={onDrill} />
           <SectionBreakdown section={data?.financing} title='financing' onDrill={onDrill} />
         </div>
-      </div>
+      </Section>
     </ReportState>
   );
 }

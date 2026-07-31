@@ -1,8 +1,9 @@
 import { adminService } from 'api/api';
 import { googletype_Decimal } from 'api/proto-http/admin';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { AmountCell } from '../../components/amount-cell';
-import { Callout, CheckStrip, GroupHeader, RowLine } from '../../components/kit';
+import { CheckStrip, GroupHeader, RowLine } from '../../components/kit';
 import { formatBase } from '../../utils/format';
 import { useOssReturn, useUkVatReturn, useVatReturnPL } from '../../utils/hooks';
 import { CopyTableButton } from './copy-table-button';
@@ -233,11 +234,8 @@ export function VatTab({ from }: Props) {
   ]);
 
   return (
-    <div className='flex flex-col gap-8'>
-      <section className='flex flex-col gap-3'>
-        <GroupHeader className='mt-0'>
-          Poland — JPK_VAT (the Polish VAT return) · {formatMonthLabel(month)}
-        </GroupHeader>
+    <SectionStack>
+      <Section title={`Poland — JPK_VAT (the Polish VAT return) · ${formatMonthLabel(month)}`}>
         <ReportState
           isLoading={vat.isLoading}
           isError={vat.isError}
@@ -254,28 +252,25 @@ export function VatTab({ from }: Props) {
               />
               <CopyTableButton headers={vatCopyHeaders} rows={vatCopyRows} filename='vat-return' />
             </div>
-            <Callout className='text-textColor'>
-              {plRows.map((r) => (
-                <RowLine key={r.label} label={lineLabel(r)} value={<AmountCell as='span' value={r.value} />} total={r.total} />
-              ))}
-              <GroupHeader>Declared for information — settled on other returns</GroupHeader>
-              {plInfoRows.map((r) => (
-                <RowLine key={r.label} label={lineLabel(r)} value={<AmountCell as='span' value={r.value} />} />
-              ))}
-              <CheckStrip
-                tone='bad'
-                label={`file + pay by ${jpkDeadline(month)} (JPK_V7M)`}
-                value={formatBase(ret?.netPayable)}
-              />
-            </Callout>
+            {plRows.map((r) => (
+              <RowLine key={r.label} label={lineLabel(r)} value={<AmountCell as='span' value={r.value} />} total={r.total} />
+            ))}
+            <GroupHeader>Declared for information — settled on other returns</GroupHeader>
+            {plInfoRows.map((r) => (
+              <RowLine key={r.label} label={lineLabel(r)} value={<AmountCell as='span' value={r.value} />} />
+            ))}
+            <CheckStrip
+              tone='bad'
+              label={`file + pay by ${jpkDeadline(month)} (JPK_V7M)`}
+              value={formatBase(ret?.netPayable)}
+            />
           </div>
         </ReportState>
-      </section>
+      </Section>
 
-      <section className='flex flex-col gap-3'>
-        <GroupHeader className='mt-0'>
-          EU OSS (one EU return for cross-border consumer sales) · {formatQuarterLabel(quarter)}
-        </GroupHeader>
+      <Section
+        title={`EU OSS (one EU return for cross-border consumer sales) · ${formatQuarterLabel(quarter)}`}
+      >
         <ReportState
           isLoading={oss.isLoading}
           isError={oss.isError}
@@ -291,64 +286,59 @@ export function VatTab({ from }: Props) {
               />
               <CopyTableButton headers={ossCopyHeaders} rows={ossCopyRows} filename='oss-return' />
             </div>
-            <Callout className='text-textColor'>
-              <div className='overflow-x-auto'>
-                <table className='w-full min-w-max border-collapse'>
-                  <thead className='border-b border-textColor'>
-                    <tr>
-                      <th className='px-2 py-2 text-left text-textBaseSize uppercase'>country</th>
-                      <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>
-                        rate %
-                      </th>
-                      <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>
-                        net
-                      </th>
-                      <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>
-                        vat
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ossRows.map((r, i) => (
-                      <tr key={r.country ?? i} className='border-b border-textInactiveColor'>
-                        <td className='whitespace-nowrap px-2 py-1'>{r.country}</td>
-                        <td className='w-32 min-w-32 whitespace-nowrap px-2 py-1 text-right tabular-nums'>
-                          {formatPercent(r.ratePct)}
-                        </td>
-                        <AmountCell value={r.net} />
-                        <AmountCell value={r.vat} />
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <td className='border-t border-textColor px-2 py-1 font-medium'>
-                        total VAT to pay
-                        <span className='ml-1 text-[11px] font-normal text-labelColor'>
-                          (one payment covers every EU country above)
-                        </span>
+            <div className='overflow-x-auto'>
+              <table className='w-full min-w-max border-collapse'>
+                <thead className='border-b border-textColor'>
+                  <tr>
+                    <th className='px-2 py-2 text-left text-textBaseSize uppercase'>country</th>
+                    <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>
+                      rate %
+                    </th>
+                    <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>
+                      net
+                    </th>
+                    <th className='min-w-32 px-2 py-2 text-right text-textBaseSize uppercase'>
+                      vat
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ossRows.map((r, i) => (
+                    <tr key={r.country ?? i} className='border-b border-textInactiveColor'>
+                      <td className='whitespace-nowrap px-2 py-1'>{r.country}</td>
+                      <td className='w-32 min-w-32 whitespace-nowrap px-2 py-1 text-right tabular-nums'>
+                        {formatPercent(r.ratePct)}
                       </td>
-                      <td className='border-t border-textColor' />
-                      <AmountCell value={oss.data?.totalNet} bold />
-                      <AmountCell value={oss.data?.totalVat} bold />
+                      <AmountCell value={r.net} />
+                      <AmountCell value={r.vat} />
                     </tr>
-                  </tfoot>
-                </table>
-              </div>
-              <CheckStrip
-                tone='bad'
-                label={`file + pay by ${ossDeadline(quarter)} (OSS)`}
-                value={formatBase(oss.data?.totalVat)}
-              />
-            </Callout>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td className='border-t border-textColor px-2 py-1 font-medium'>
+                      total VAT to pay
+                      <span className='ml-1 text-[11px] font-normal text-labelColor'>
+                        (one payment covers every EU country above)
+                      </span>
+                    </td>
+                    <td className='border-t border-textColor' />
+                    <AmountCell value={oss.data?.totalNet} bold />
+                    <AmountCell value={oss.data?.totalVat} bold />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <CheckStrip
+              tone='bad'
+              label={`file + pay by ${ossDeadline(quarter)} (OSS)`}
+              value={formatBase(oss.data?.totalVat)}
+            />
           </div>
         </ReportState>
-      </section>
+      </Section>
 
-      <section className='flex flex-col gap-3'>
-        <GroupHeader className='mt-0'>
-          UK VAT (9-box return to HMRC) · {formatQuarterLabel(quarter)}
-        </GroupHeader>
+      <Section title={`UK VAT (9-box return to HMRC) · ${formatQuarterLabel(quarter)}`}>
         <ReportState
           isLoading={ukvat.isLoading}
           isError={ukvat.isError}
@@ -363,33 +353,31 @@ export function VatTab({ from }: Props) {
             <div className='flex justify-end'>
               <CopyTableButton headers={ukCopyHeaders} rows={ukCopyRows} filename='uk-vat-return' />
             </div>
-            <Callout className='text-textColor'>
-              {ukBoxes.map((b) => (
-                <RowLine
-                  key={b.box}
-                  label={
-                    <>
-                      <span className='font-normal text-labelColor'>Box {b.box}</span> — {b.label}
-                      {b.plain ? (
-                        <span className='ml-1 text-[11px] font-normal text-labelColor'>
-                          ({b.plain})
-                        </span>
-                      ) : null}
-                    </>
-                  }
-                  value={<AmountCell as='span' value={b.value} />}
-                  total={b.total}
-                />
-              ))}
-              <CheckStrip
-                tone='bad'
-                label={`file + pay by ${ukDeadline(quarter)} (HMRC, via MTD)`}
-                value={formatBase(uk?.box5NetVat)}
+            {ukBoxes.map((b) => (
+              <RowLine
+                key={b.box}
+                label={
+                  <>
+                    <span className='font-normal text-labelColor'>Box {b.box}</span> — {b.label}
+                    {b.plain ? (
+                      <span className='ml-1 text-[11px] font-normal text-labelColor'>
+                        ({b.plain})
+                      </span>
+                    ) : null}
+                  </>
+                }
+                value={<AmountCell as='span' value={b.value} />}
+                total={b.total}
               />
-            </Callout>
+            ))}
+            <CheckStrip
+              tone='bad'
+              label={`file + pay by ${ukDeadline(quarter)} (HMRC, via MTD)`}
+              value={formatBase(uk?.box5NetVat)}
+            />
           </div>
         </ReportState>
-      </section>
-    </div>
+      </Section>
+    </SectionStack>
   );
 }

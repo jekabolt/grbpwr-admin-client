@@ -1,5 +1,6 @@
 import { AcctBalanceSheetRow, AcctBalanceSheetSection, googletype_Decimal } from 'api/proto-http/admin';
 import { useBalanceSheet } from '../../utils/hooks';
+import { Section } from 'ui/components/section';
 import { CheckStrip, TAccount, TColumn, TLine, Verdict } from '../../components/kit';
 import { CopyTableButton } from './copy-table-button';
 import { formatBase, isNegative } from '../../utils/format';
@@ -71,7 +72,7 @@ export function BalanceSheetTab({ asOf, onDrill }: Props) {
 
   return (
     <ReportState isLoading={isLoading} isError={isError} onRetry={() => refetch()} isEmpty={isEmpty}>
-      <div className='flex flex-col gap-4'>
+      <Section>
         <CaveatsNote caveats={caveats} />
         <Verdict>{`The business is worth ${formatBase(data?.totalEquity)} to you (what you own minus what you owe).`}</Verdict>
         <div className='flex justify-end'>
@@ -111,7 +112,7 @@ export function BalanceSheetTab({ asOf, onDrill }: Props) {
             }
           />
         </div>
-      </div>
+      </Section>
     </ReportState>
   );
 }

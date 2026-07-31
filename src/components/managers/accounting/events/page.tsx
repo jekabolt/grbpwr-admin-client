@@ -82,7 +82,7 @@ export function AcctEventsPage() {
             </Link>
           </Callout>
 
-          <div className='border border-textInactiveColor'>
+          <div className='border border-borderColor bg-bgColor'>
             {events.map((e: AcctEvent) => {
               const id = e.id;
               const rowBusy = id != null && (reprocessingId === id || resolvingId === id);

@@ -1,5 +1,6 @@
 import { googletype_Decimal } from 'api/proto-http/admin';
 import { Fragment } from 'react';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { useProfitLoss } from '../../utils/hooks';
 import { AmountCell } from '../../components/amount-cell';
@@ -124,7 +125,7 @@ export function ProfitLossTab({ from, to, onDrill }: Props) {
       onRetry={() => refetch()}
       isEmpty={months.length === 0}
     >
-      <div className='flex flex-col gap-3'>
+      <Section>
         <CaveatsNote caveats={caveats} />
 
         {pRevenue > 0 && (
@@ -211,7 +212,7 @@ export function ProfitLossTab({ from, to, onDrill }: Props) {
             </tfoot>
           </table>
         </div>
-      </div>
+      </Section>
     </ReportState>
   );
 }

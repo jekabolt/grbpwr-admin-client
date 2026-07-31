@@ -83,7 +83,7 @@ export function AcctAccountsPage() {
             <Loader />
           </div>
         ) : isError ? (
-          <div className='border border-error p-4 text-center'>
+          <div className='border border-error bg-bgColor p-4 text-center'>
             <Text className='mb-3 text-error'>Failed to load accounts</Text>
             <Button variant='secondary' size='lg' onClick={() => refetch()}>
               retry

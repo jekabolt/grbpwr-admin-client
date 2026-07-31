@@ -93,12 +93,14 @@ export function Note({ children, className }: { children: ReactNode; className?:
   );
 }
 
-// Auto-fit tile grid (.stats) — one bordered outer box, cells add the interior hairlines.
+// Auto-fit tile grid (.stats) — one bordered, filled outer box (the Filled-Block Rule — a
+// bordered box with no bg-bgColor lets the grey page ground show through the tiles); cells add
+// the interior edge-toned rules (DESIGN.md's Stat Grid: "a table, not a row of nested cards").
 export function StatGrid({ children, className }: { children: ReactNode; className?: string }) {
   return (
     <div
       className={cn(
-        'grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] border border-textInactiveColor',
+        'grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] border border-borderColor bg-bgColor',
         className,
       )}
     >
