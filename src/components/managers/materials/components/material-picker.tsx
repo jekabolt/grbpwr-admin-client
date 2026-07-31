@@ -451,6 +451,9 @@ export function MaterialPickerDialog({
   includeArchived = false,
   title,
   confirmLabel,
+  header,
+  confirmDisabled,
+  onPendingChange,
   onPick,
   onClose,
   onCreate,
@@ -461,6 +464,9 @@ export function MaterialPickerDialog({
   includeArchived?: boolean;
   title?: string;
   confirmLabel?: string;
+  header?: React.ReactNode;
+  confirmDisabled?: boolean;
+  onPendingChange?: (material?: common_Material) => void;
   onPick: (material?: common_Material) => void;
   onClose: () => void;
   onCreate?: () => void;
@@ -475,6 +481,9 @@ export function MaterialPickerDialog({
       section={section}
       title={title}
       confirmLabel={confirmLabel}
+      header={header}
+      confirmDisabled={confirmDisabled}
+      onPendingChange={onPendingChange}
       onPick={onPick}
       onClose={onClose}
       onCreate={onCreate}
@@ -491,6 +500,9 @@ function MaterialGridDialog({
   section,
   title,
   confirmLabel,
+  header,
+  confirmDisabled,
+  onPendingChange,
   onPick,
   onClose,
   onCreate,
@@ -502,6 +514,16 @@ function MaterialGridDialog({
   // Overrides the link/unlink commit label — the "add BOM article" flow creates a line rather than
   // relinking one, so "unlink" is not a thing it can mean.
   confirmLabel?: string;
+  // Caller-owned content between the filter row and the swatch grid. The BOM's add flow renders
+  // its role question here, so picking the article and naming its slot stay ONE dialog — a second
+  // modal hop invites cancelling half of one decision.
+  header?: React.ReactNode;
+  // ADDITIONAL commit gate OR'd with the built-in "picked nothing new" one, so a caller can hold
+  // the commit until its own header inputs are answered.
+  confirmDisabled?: boolean;
+  // Fires on every staged (not yet committed) pick, so a caller's header can react to the armed
+  // article — prefill a suggestion, warn about a duplicate — before "link"/"add" is pressed.
+  onPendingChange?: (m?: common_Material) => void;
   onPick: (m?: common_Material) => void;
   onClose: () => void;
   onCreate?: () => void;
@@ -509,7 +531,11 @@ function MaterialGridDialog({
   const [q, setQ] = useState('');
   const [inStockOnly, setInStockOnly] = useState(false);
   const [supplier, setSupplier] = useState('');
-  const [pending, setPending] = useState(numId(value));
+  const [pending, setPendingRaw] = useState(numId(value));
+  const setPending = (id: number) => {
+    setPendingRaw(id);
+    onPendingChange?.(materials.find((m) => numId(m.id) === id));
+  };
   const onHand = useMaterialOnHand();
 
   const suppliers = useMemo(
@@ -547,7 +573,7 @@ function MaterialGridDialog({
       width='lg'
       title={`${title ?? 'link a material'}${section ? ` · ${sectionShortLabel(section)}` : ''}`}
       confirmLabel={confirmLabel ?? (pending ? 'link' : 'unlink')}
-      confirmDisabled={pending === numId(value)}
+      confirmDisabled={(confirmDisabled ?? false) || pending === numId(value)}
     >
       <div className='flex flex-col gap-2.5'>
         <div className='flex flex-wrap items-center gap-2'>
@@ -588,6 +614,8 @@ function MaterialGridDialog({
             </Button>
           ) : null}
         </div>
+
+        {header}
 
         {filtered.length === 0 ? (
           <Text variant='label' size='micro'>
