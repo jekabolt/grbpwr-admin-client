@@ -727,8 +727,20 @@ export function BomField({
     if (removedKey) {
       const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
       (operations ?? []).forEach((o, oi) => {
-        if (o.bomLineKey === removedKey) {
-          setValue(`operations.${oi}.bomLineKey`, '', { shouldDirty: true });
+        // The LIST is the reference. `operations.N.bomLineKey` is vestigial in the form — the read
+        // folds it into bomLineKeys (mergeLegacyBomKey) and the write derives it back from
+        // bomLineKeys[0] — so clearing only the singular, as this did, was overwritten by the very
+        // next save and the removed key shipped anyway. The server deletes operations before it
+        // drops the BOM line, so the delete succeeded and resolveBomRef then failed the whole
+        // transaction on a key that no longer exists: a card nothing in the UI could rescue, since
+        // the operation's chip row only offers BOM lines that still exist.
+        const keys = (o.bomLineKeys ?? []).filter(Boolean);
+        if (keys.includes(removedKey)) {
+          setValue(
+            `operations.${oi}.bomLineKeys`,
+            keys.filter((k) => k !== removedKey),
+            { shouldDirty: true },
+          );
         }
       });
       const pieces = (getValues('pieces') ?? []) as TechCardFormData['pieces'];
