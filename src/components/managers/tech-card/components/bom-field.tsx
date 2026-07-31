@@ -662,16 +662,15 @@ export function BomField({
   const warnNoPrice = useNoPriceWarning();
   const [params, setParams] = useSearchParams();
   const [blocked, setBlocked] = useState<{ name: string; users: BlockingUser[] } | null>(null);
-  // "add BOM article" IS the catalog picker: an article is chosen first and the line is created
-  // already linked. Appending a blank line instead left an unnamed, unlinked row that failed the
-  // card's validation from the moment it appeared. The dialog also asks for the slot's ROLE —
-  // that is what the new line is named after, never the article (see materialLineFields).
+  // "add BOM article" is TWO steps in two stacked dialogs: the catalog picker first, then — on its
+  // "add" — a small role modal OVER it. The article answers "what is it", the role answers "what is
+  // it FOR» («основная ткань», «подкладка»…), and the line is created linked AND role-named, never
+  // named after the article (see materialLineFields). Cancelling the role modal falls back to the
+  // still-open picker with the selection intact — half a decision is never silently committed.
   const [adding, setAdding] = useState(false);
+  // The picked article awaiting its role — the role modal is open exactly while this is set.
+  const [addMaterial, setAddMaterial] = useState<common_Material | undefined>(undefined);
   const [addRole, setAddRole] = useState('');
-  // Once the operator has typed, an armed article stops repainting the role — a prefill must never
-  // fight a deliberate answer.
-  const [addRoleTouched, setAddRoleTouched] = useState(false);
-  const [addPending, setAddPending] = useState<common_Material | undefined>(undefined);
   const [createOpen, setCreateOpen] = useState(false);
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
@@ -738,78 +737,45 @@ export function BomField({
         sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
       }));
 
-  // One new slot, straight from the catalog: the ROLE the operator answered in the dialog header,
-  // the picked article as its default. The picker commits with "add" and does not close itself
-  // (closeOnConfirm is off there), so the close happens here.
-  const addFromMaterial = (m?: common_Material) => {
-    setAdding(false);
-    const materialId = wireInt(m?.id);
-    if (!m || !materialId) return;
-    // The dialog's commit is gated on a non-empty role; the fallback covers the "+ create" path,
-    // where the material modal may return before a role was ever typed.
-    const role = addRole.trim() || defaultRoleFor(m.section);
-    append({ ...emptyBomItem, ...materialLineFields(m), name: role, materialId, lineKey: ulid() });
-    warnNoPrice(m);
-  };
-
-  // The armed (staged, not yet committed) article drives the header: prefill the section's natural
-  // first role — but ONLY when this card has no slot in that section yet. A second fabric gets an
-  // empty required field: naming the new role is the deliberate answer this dialog exists to ask.
-  const onAddPending = (m?: common_Material) => {
-    setAddPending(m);
-    if (!addRoleTouched && m) {
-      const sectionHasSlots = bomWatch.some((b) => b.section === m.section);
-      setAddRole(sectionHasSlots ? '' : defaultRoleFor(m.section));
+  // Step 1 → step 2: the picker's "add" stages the article and opens the role modal over it. The
+  // picker stays open underneath (it does not close itself on confirm), so cancelling the role
+  // question returns to the swatch grid with the selection still armed. Prefill answers the easy
+  // case only: the section's natural first role when this card has no slot in that section yet. A
+  // second fabric gets an empty required field — naming the new role IS the deliberate answer, and
+  // the exact moment «добавить ту же ткань ещё раз» turns into either «ткань капюшона» or a pin on
+  // the colorways tab.
+  const stageAdd = (m?: common_Material) => {
+    if (!m || !wireInt(m.id)) {
+      setAdding(false);
+      return;
     }
+    const sectionHasSlots = bomWatch.some((b) => b.section === m.section);
+    setAddRole(sectionHasSlots ? '' : defaultRoleFor(m.section));
+    setAddMaterial(m);
   };
 
-  // Both advisory — they explain, they do not block. The commit is gated only on an empty role.
-  const addCollision = roleCollision(bomWatch, addRole);
-  const addExistingSlotIdx = addPending
-    ? bomWatch.findIndex((b) => (b.materialId ?? 0) > 0 && b.materialId === wireInt(addPending.id))
-    : -1;
+  // Step 2 commit: one new slot — the answered role, the picked article as its default.
+  const commitAdd = () => {
+    const m = addMaterial;
+    const materialId = wireInt(m?.id);
+    if (!m || !materialId || !addRole.trim()) return;
+    append({
+      ...emptyBomItem,
+      ...materialLineFields(m),
+      name: addRole.trim(),
+      materialId,
+      lineKey: ulid(),
+    });
+    warnNoPrice(m);
+    setAddMaterial(undefined);
+    setAdding(false);
+  };
 
-  const addHeader = (
-    <div className='space-y-1'>
-      <div className='max-w-sm'>
-        <Text variant='label' size='micro' tracking='label' className='uppercase'>
-          роль в изделии *
-        </Text>
-        <div className='mt-1'>
-          <Input
-            name='bom-add-role'
-            value={addRole}
-            autoComplete='off'
-            list='bom-add-role-suggestions'
-            placeholder='основная ткань / подкладка / молния…'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-              setAddRoleTouched(true);
-              setAddRole(e.target.value);
-            }}
-          />
-          <datalist id='bom-add-role-suggestions'>
-            {roleSuggestions(addPending?.section).map((r) => (
-              <option key={r} value={r} />
-            ))}
-          </datalist>
-        </div>
-      </div>
-      {addExistingSlotIdx >= 0 && (
-        <Text variant='label' size='micro'>
-          этот артикул уже стоит в слоте «
-          {bomWatch[addExistingSlotIdx]?.name?.trim() || `слот ${addExistingSlotIdx + 1}`}» — новый
-          слот нужен только для другой роли. Другой цвет/артикул в колорвее задаётся пином на
-          вкладке colorways, не вторым слотом.
-        </Text>
-      )}
-      {addCollision >= 0 && (
-        <Text size='micro' variant='error'>
-          роль «{addRole.trim()}» уже есть на этой карточке — одинаковые роли неразличимы в рецептах
-          колорвеев и в плане закупки
-        </Text>
-      )}
-    </div>
-  );
+  // Both advisory — they explain, they never block. The commit is gated only on an empty role.
+  const addCollision = roleCollision(bomWatch, addRole);
+  const addExistingSlotIdx = addMaterial
+    ? bomWatch.findIndex((b) => (b.materialId ?? 0) > 0 && b.materialId === wireInt(addMaterial.id))
+    : -1;
 
   // Land on the offending recipe itself, not merely on the colorways tab: ?colorway= selects the
   // swatch, so the usage to remove is on screen instead of two clicks away.
@@ -997,27 +963,23 @@ export function BomField({
         variant='main'
         size='sm'
         onClick={() => {
-          // Fresh dialog every time — a role typed for the previous slot must not leak into this one.
+          // Fresh flow every time — a role typed for the previous slot must not leak into this one.
           setAddRole('');
-          setAddRoleTouched(false);
-          setAddPending(undefined);
+          setAddMaterial(undefined);
           setAdding(true);
         }}
       >
         add BOM article
       </Button>
 
-      {/* The catalog as swatches + the role question, ONE dialog. "+ create" hands off to the
-          material form and comes back through the same append path, so an article made on the spot
-          lands as a linked, role-named line too. */}
+      {/* Step 1: the catalog as swatches. Its "add" stages the pick and opens the role modal on
+          top (stageAdd). "+ create" hands off to the material form and re-enters the same staged
+          flow, so an article made on the spot gets asked for its role too. */}
       <MaterialPickerDialog
         open={adding}
         title='add BOM article'
         confirmLabel='add'
-        header={addHeader}
-        confirmDisabled={!addRole.trim()}
-        onPendingChange={onAddPending}
-        onPick={addFromMaterial}
+        onPick={stageAdd}
         onClose={() => setAdding(false)}
         onCreate={() => {
           setAdding(false);
@@ -1027,8 +989,79 @@ export function BomField({
       <MaterialModal
         open={createOpen}
         onOpenChange={setCreateOpen}
-        onCreated={(_id, m) => addFromMaterial(m)}
+        onCreated={(_id, m) => stageAdd(m)}
       />
+
+      {/* Step 2: the role question, stacked over the still-open picker (both portal to body; the
+          later dialog renders above). Cancel falls back to the picker with the selection intact. */}
+      {addMaterial && (
+        <ConfirmationModal
+          open
+          onOpenChange={(v) => !v && setAddMaterial(undefined)}
+          width='sm'
+          title='роль в изделии'
+          confirmLabel='add'
+          confirmDisabled={!addRole.trim()}
+          closeOnConfirm={false}
+          onConfirm={commitAdd}
+        >
+          <div className='flex flex-col gap-2'>
+            {/* What was just picked, so the question reads in context. */}
+            <div className='flex items-center gap-2'>
+              <MaterialThumb material={addMaterial} size='md' />
+              <div className='min-w-0 flex-1'>
+                <Text size='micro' className='truncate font-bold'>
+                  {addMaterial.name?.trim() || `#${wireInt(addMaterial.id)}`}
+                </Text>
+                <Text variant='label' size='micro' className='truncate'>
+                  {sectionShort(addMaterial.section) || '—'}
+                </Text>
+              </div>
+            </div>
+            <div>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                роль в изделии *
+              </Text>
+              <div className='mt-1'>
+                <Input
+                  name='bom-add-role'
+                  value={addRole}
+                  autoComplete='off'
+                  autoFocus
+                  list='bom-add-role-suggestions'
+                  placeholder='основная ткань / подкладка / молния…'
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddRole(e.target.value)}
+                  onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                    if (e.key === 'Enter' && addRole.trim()) {
+                      e.preventDefault();
+                      commitAdd();
+                    }
+                  }}
+                />
+                <datalist id='bom-add-role-suggestions'>
+                  {roleSuggestions(addMaterial.section).map((r) => (
+                    <option key={r} value={r} />
+                  ))}
+                </datalist>
+              </div>
+            </div>
+            {addExistingSlotIdx >= 0 && (
+              <Text variant='label' size='micro'>
+                этот артикул уже стоит в слоте «
+                {bomWatch[addExistingSlotIdx]?.name?.trim() || `слот ${addExistingSlotIdx + 1}`}» —
+                новый слот нужен только для другой роли. Другой цвет/артикул в колорвее задаётся
+                пином на вкладке colorways, не вторым слотом.
+              </Text>
+            )}
+            {addCollision >= 0 && (
+              <Text size='micro' variant='error'>
+                роль «{addRole.trim()}» уже есть на этой карточке — одинаковые роли неразличимы в
+                рецептах колорвеев и в плане закупки
+              </Text>
+            )}
+          </div>
+        </ConfirmationModal>
+      )}
     </div>
   );
 }
