@@ -7,6 +7,9 @@ import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
+import { Row } from 'ui/components/row';
+import { Section } from 'ui/components/section';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../orders-catalog/components/utility';
@@ -72,22 +75,18 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
   };
 
   return (
-    <div className='flex flex-col gap-6 p-4 border border-textInactiveColor bg-bgColor'>
-      <div className='flex items-center justify-between'>
-        <Text variant='uppercase' size='large'>
-          ticket #{currentTicket.id} &mdash; {currentTicket.caseNumber}
-        </Text>
+    <Section
+      title={`ticket #${currentTicket.id} — ${currentTicket.caseNumber}`}
+      action={
         <Button variant='secondary' size='lg' onClick={onClose}>
           Close
         </Button>
-      </div>
-
+      }
+    >
       <div className='grid grid-cols-1 md:grid-cols-2 gap-6'>
         {/* Customer info */}
-        <div className='flex flex-col gap-3 border border-textInactiveColor p-4'>
-          <Text variant='uppercase' size='default'>
-            Customer Information
-          </Text>
+        <div className='flex flex-col gap-3'>
+          <GroupLabel flush>customer information</GroupLabel>
           <InfoRow
             label='Name'
             value={`${insert?.civility ?? ''} ${insert?.firstName ?? ''} ${insert?.lastName ?? ''}`.trim()}
@@ -111,7 +110,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
               <Text variant='inactive' size='small'>
                 Customer Notes
               </Text>
-              <div className='p-2 border border-textInactiveColor bg-white whitespace-pre-wrap'>
+              <div className='p-2 border border-borderColor bg-bgColor whitespace-pre-wrap'>
                 <Text>{insert.notes}</Text>
               </div>
             </div>
@@ -119,10 +118,8 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
         </div>
 
         {/* Ticket management */}
-        <div className='flex flex-col gap-3 border border-textInactiveColor p-4'>
-          <Text variant='uppercase' size='default'>
-            Ticket Management
-          </Text>
+        <div className='flex flex-col gap-3'>
+          <GroupLabel flush>ticket management</GroupLabel>
 
           <InfoRow label='Created' value={formatDateShort(currentTicket.createdAt, true)} />
           <InfoRow label='Updated' value={formatDateShort(currentTicket.updatedAt, true)} />
@@ -185,7 +182,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
               value={category}
               onChange={(e) => setCategory(e.target.value)}
               placeholder='e.g. shipping, billing, product'
-              className='w-full border-b border-textInactiveColor bg-bgColor text-textBaseSize focus:outline-none'
+              className='w-full border-b border-borderColor bg-bgColor text-textBaseSize focus:outline-none'
             />
           </div>
 
@@ -197,7 +194,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
               value={internalNotes}
               onChange={(e) => setInternalNotes(e.target.value)}
               rows={4}
-              className='w-full resize-none border border-textInactiveColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
+              className='w-full resize-none border border-borderColor bg-bgColor p-2 text-textBaseSize focus:outline-none'
             />
           </div>
 
@@ -213,7 +210,7 @@ export function TicketDetail({ ticket, onClose }: TicketDetailProps) {
           )}
         </div>
       </div>
-    </div>
+    </Section>
   );
 }
 
@@ -227,17 +224,17 @@ function InfoRow({
   href?: string;
 }) {
   return (
-    <div className='flex gap-2'>
-      <Text variant='inactive' size='small' className='min-w-28 shrink-0'>
-        {label}
-      </Text>
-      {href ? (
-        <Link to={href} className='underline underline-offset-2 hover:opacity-70'>
-          <Text size='small'>{value}</Text>
-        </Link>
-      ) : (
-        <Text size='small'>{value || '-'}</Text>
-      )}
-    </div>
+    <Row
+      label={label}
+      value={
+        href ? (
+          <Link to={href} className='underline underline-offset-2 hover:opacity-70'>
+            {value}
+          </Link>
+        ) : (
+          value || '-'
+        )
+      }
+    />
   );
 }

@@ -1,6 +1,7 @@
 import { AccessLevel, AdminPermission, AdminSectionInfo } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import { ACCESS } from '../utils/hooks';
 
@@ -83,13 +84,13 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
 
   if (loading) {
     return (
-      <div className='border border-textInactiveColor'>
+      <div className='border border-borderColor'>
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}
             className={cn(
               'h-12 animate-pulse bg-textInactiveColor/40',
-              i > 0 && 'border-t border-textInactiveColor',
+              i > 0 && 'border-t border-hairline',
             )}
           />
         ))}
@@ -99,11 +100,11 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
 
   if (sections.length === 0) {
     return (
-      <div className='border border-textInactiveColor p-4'>
+      <CalloutBox tone='note'>
         <Text variant='label' size='small'>
           no grantable sections
         </Text>
-      </div>
+      </CalloutBox>
     );
   }
 
@@ -132,7 +133,7 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
         </div>
       </div>
 
-      <div className='border border-textInactiveColor'>
+      <div className='border border-borderColor'>
         {sections.map((s, i) => {
           const key = s.key ?? '';
           const current = levelFor(key);
@@ -142,7 +143,7 @@ export function PermissionPicker({ sections, value, onChange, disabled, loading 
               key={key}
               className={cn(
                 'flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-3',
-                i > 0 && 'border-t border-textInactiveColor',
+                i > 0 && 'border-t border-hairline',
                 granted && 'bg-textInactiveColor/20',
               )}
             >

@@ -1,6 +1,7 @@
 import { AdminAccount } from 'api/proto-http/admin';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import { AccountFormModal } from './components/account-form-modal';
 import { AccountsTable } from './components/accounts-table';
@@ -29,14 +30,17 @@ export function Accounts() {
 
   if (!canView) {
     return (
-      <div className='mx-auto flex max-w-md flex-col items-center gap-2 border border-textInactiveColor p-10 text-center'>
+      <CalloutBox
+        tone='note'
+        className='mx-auto flex max-w-md flex-col items-center gap-2 p-10 text-center'
+      >
         <Text variant='uppercase' size='large'>
           admin accounts
         </Text>
         <Text variant='label' size='small'>
           You don’t have access to this section. Ask a super admin to grant it.
         </Text>
-      </div>
+      </CalloutBox>
     );
   }
 

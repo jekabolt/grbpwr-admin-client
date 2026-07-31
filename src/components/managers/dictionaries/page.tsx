@@ -6,6 +6,7 @@ import { cn } from 'lib/utility';
 import { FC, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import {
   archiveCollection,
@@ -40,10 +41,10 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'countries', label: 'countries' },
 ];
 
-const th = 'border border-textInactiveColor px-2 py-1 text-left uppercase';
-const td = 'border border-textInactiveColor px-2 py-1';
+const th = 'border border-borderColor bg-bgSecondary px-2 py-1 text-left uppercase';
+const td = 'border border-borderColor px-2 py-1';
 const inputCls =
-  'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
+  'w-full border border-borderColor bg-bgColor px-2 py-1 text-textBaseSize disabled:opacity-50';
 
 export const Dictionaries: FC = () => {
   const { dictionary, loading, refetch } = useDictionary();
@@ -251,12 +252,12 @@ export const Dictionaries: FC = () => {
 
   return (
     <div className='flex flex-col gap-6 px-2 pt-2 pb-24 lg:px-6'>
-      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor pb-3'>
+      <div className='flex flex-wrap items-center justify-between gap-3 border-b border-borderColor pb-3'>
         <Text variant='uppercase' size='large'>
           dictionaries
         </Text>
         {dictionary?.skuContractVersion && (
-          <span className='border border-textInactiveColor px-1.5 py-0.5'>
+          <span className='border border-borderColor px-1.5 py-0.5'>
             <Text variant='inactive' size='small'>
               sku contract {dictionary.skuContractVersion}
             </Text>
@@ -311,7 +312,7 @@ export const Dictionaries: FC = () => {
                 <span className='flex items-center gap-2'>
                   {c.hex && (
                     <span
-                      className='inline-block h-4 w-4 border border-textInactiveColor'
+                      className='inline-block h-4 w-4 border border-borderColor'
                       style={{ backgroundColor: c.hex }}
                     />
                   )}
@@ -548,7 +549,7 @@ export const Dictionaries: FC = () => {
                 <div className='flex items-center gap-2'>
                   <input
                     type='color'
-                    className='h-8 w-10 shrink-0 cursor-pointer border border-textInactiveColor bg-bgColor disabled:opacity-50'
+                    className='h-8 w-10 shrink-0 cursor-pointer border border-borderColor bg-bgColor disabled:opacity-50'
                     disabled={busy}
                     value={/^#[0-9a-fA-F]{6}$/.test(colorForm.hex) ? colorForm.hex : '#000000'}
                     onChange={(e) => setColorForm((f) => ({ ...f, hex: e.target.value }))}
@@ -644,7 +645,7 @@ export const Dictionaries: FC = () => {
                 <div className='flex items-center gap-2'>
                   <input
                     type='color'
-                    className='h-8 w-10 shrink-0 cursor-pointer border border-textInactiveColor bg-bgColor disabled:opacity-50'
+                    className='h-8 w-10 shrink-0 cursor-pointer border border-borderColor bg-bgColor disabled:opacity-50'
                     disabled={busy}
                     value={/^#[0-9a-fA-F]{6}$/.test(editState.hex) ? editState.hex : '#000000'}
                     onChange={(e) => setEditState({ ...editState, hex: e.target.value })}
@@ -723,8 +724,11 @@ function Table({
       </Text>
     );
   }
+  // The table's own bordered cells carried no fill, so the grey page ground showed straight
+  // through every row — the headline bug. Fixed the same way as the StatGrid pattern: fill white
+  // ONCE at the surrounding block (Section) and let the 1px cell rules stay as internal grid lines.
   return (
-    <div className='overflow-x-auto'>
+    <Section className='overflow-x-auto'>
       <table className='w-full border-collapse text-textBaseSize'>
         <thead>
           <tr>
@@ -749,20 +753,20 @@ function Table({
           ))}
         </tbody>
       </table>
-    </div>
+    </Section>
   );
 }
 
 function StatusCell({ archived, active }: { archived?: boolean; active?: boolean }) {
   if (active !== undefined) {
     return (
-      <Text variant='inactive' size='small' className={active ? '!text-green-600' : undefined}>
+      <Text variant='inactive' size='small' className={active ? '!text-success' : undefined}>
         {active ? 'active' : 'inactive'}
       </Text>
     );
   }
   return (
-    <Text variant='inactive' size='small' className={archived ? '!text-red-600' : undefined}>
+    <Text variant='inactive' size='small' className={archived ? '!text-error' : undefined}>
       {archived ? 'archived' : 'active'}
     </Text>
   );

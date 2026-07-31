@@ -6,7 +6,9 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { Section } from 'ui/components/section';
 import { SkeletonLine } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
@@ -212,10 +214,11 @@ export function MonthlyContent({
               )}
             </CalloutBox>
           ) : (
-            <div className='flex flex-col gap-2.5'>
-              {groups.map(([category, catLines]) => (
-                <CategoryCard
+            <Section>
+              {groups.map(([category, catLines], i) => (
+                <CategoryGroup
                   key={category}
+                  flush={i === 0}
                   category={category}
                   lines={catLines}
                   base={base}
@@ -225,7 +228,7 @@ export function MonthlyContent({
                   onDelete={setDeleting}
                 />
               ))}
-            </div>
+            </Section>
           )}
         </>
       )}
@@ -274,9 +277,10 @@ export function MonthlyContent({
 }
 
 
-// opxLines v1 — one category as a bordered card: a zebra header (name · count · folded total) over
-// hairline-separated line rows.
-function CategoryCard({
+// opxLines v1 — one category as a GroupLabel (name · count · folded total) over hairline-separated
+// line rows, all inside the month's ONE ledger block (Section) rather than a card per category.
+function CategoryGroup({
+  flush,
   category,
   lines,
   base,
@@ -285,6 +289,7 @@ function CategoryCard({
   onEdit,
   onDelete,
 }: {
+  flush?: boolean;
   category: string;
   lines: OpexLine[];
   base: string;
@@ -295,25 +300,22 @@ function CategoryCard({
 }) {
   const { total, uncosted } = sumBase(lines);
   return (
-    <div className='border border-borderColor bg-bgColor'>
-      <div className='flex items-center justify-between gap-2 border-b border-borderColor bg-bgZebra px-2.5 py-1.5'>
-        <span className='flex items-baseline gap-1.5'>
-          <Text size='micro' variant='label' tracking='group' component='span' className='font-bold uppercase'>
-            {opexCategoryLabel(category)}
+    <div>
+      <GroupLabel
+        flush={flush}
+        action={
+          <Text
+            size='micro'
+            component='span'
+            className={cn('tabular-nums', uncosted > 0 ? 'text-error' : undefined)}
+          >
+            {money(total, base, canRead)}
           </Text>
-          <Text size='micro' variant='label' component='span'>
-            · {lines.length}
-            {uncosted > 0 ? ` · ${uncosted} uncosted` : ''}
-          </Text>
-        </span>
-        <Text
-          size='micro'
-          component='span'
-          className={cn('tabular-nums', uncosted > 0 ? 'text-error' : undefined)}
-        >
-          {money(total, base, canRead)}
-        </Text>
-      </div>
+        }
+      >
+        {opexCategoryLabel(category)} · {lines.length}
+        {uncosted > 0 ? ` · ${uncosted} uncosted` : ''}
+      </GroupLabel>
       <div className='flex flex-col'>
         {lines.map((l) => (
           <LineRow
@@ -356,7 +358,7 @@ function LineRow({
   const hasVat = !!line.vatAmount?.value;
 
   return (
-    <div className='flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-2.5 py-1.5 last:border-b-0'>
+    <div className='flex flex-wrap items-center justify-between gap-2 border-b border-hairline py-1.5 last:border-b-0'>
       <div className='flex min-w-0 flex-col gap-0.5'>
         <div className='flex items-center gap-1.5'>
           {recurring && (

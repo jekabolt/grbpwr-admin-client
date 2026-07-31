@@ -16,6 +16,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Section } from 'ui/components/section';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AuxRunPlan } from './components/aux-run-plan';
@@ -146,7 +147,7 @@ export function ProductionRunDetail() {
 
       {/* Identity — what this run is, at a glance: id + lifecycle status, its tech card, and a
           one-line description of what it produces. Actions live beside it, not buried below. */}
-      <div className='-mx-2.5 flex flex-wrap items-start justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2.5 py-3'>
+      <div className='-mx-2.5 flex flex-wrap items-start justify-between gap-3 border-b border-borderColor bg-bgColor px-2.5 py-3'>
         <div className='flex flex-col gap-1.5'>
           <div className='flex flex-wrap items-center gap-2'>
             <Text variant='uppercase' size='large'>
@@ -232,9 +233,9 @@ export function ProductionRunDetail() {
 
       {/* Quantity is not money — shown to anyone who can open the run, matching the lines grid
           below (which is likewise never costing-gated). */}
-      <div className='grid grid-cols-2 gap-3 sm:grid-cols-3'>
-        <StatTile label='planned qty' value={String(plannedQtyTotal)} />
-        <StatTile
+      <StatGrid>
+        <Stat label='planned qty' value={String(plannedQtyTotal)} />
+        <Stat
           label='received qty'
           value={hasReceivedAny ? String(receivedQtyTotal) : '—'}
           sub={
@@ -243,7 +244,7 @@ export function ProductionRunDetail() {
               : undefined
           }
         />
-        <StatTile
+        <Stat
           label='defect'
           value={hasReceivedAny ? String(defectQtyTotal) : '—'}
           sub={
@@ -251,9 +252,9 @@ export function ProductionRunDetail() {
               ? `${defectPct.toFixed(1)}% of received`
               : undefined
           }
-          subClassName={defectQtyTotal > 0 ? 'text-warning' : undefined}
+          tone={defectQtyTotal > 0 ? 'down' : undefined}
         />
-      </div>
+      </StatGrid>
 
       {canReadCosting ? <CostSummary run={run} actuals={actuals} /> : null}
 
@@ -296,15 +297,10 @@ export function ProductionRunDetail() {
       ) : null}
 
       {/* Audit trail, not a planning step — collapsed by default (memory: collapse rarely-used
-          content behind <details>), same pattern as the tech card's packaging spec / provenance. */}
-      <details className='border border-textInactiveColor'>
-        <summary className='cursor-pointer select-none px-3 py-2 text-textBaseSize uppercase hover:bg-highlightColor/5'>
-          material movements
-        </summary>
-        <div className='border-t border-textInactiveColor p-3'>
-          <MovementsList filter={{ productionRunId: run.id }} />
-        </div>
-      </details>
+          content), same pattern as the tech card's packaging spec / provenance. */}
+      <Section title='material movements' collapsible defaultOpen={false}>
+        <MovementsList filter={{ productionRunId: run.id }} />
+      </Section>
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal
@@ -335,7 +331,7 @@ type GuidanceTone = 'neutral' | 'warning' | 'success' | 'error';
 type Guidance = { tone: GuidanceTone; text: string; href?: string; linkLabel?: string };
 
 const GUIDANCE_BOX: Record<GuidanceTone, string> = {
-  neutral: 'border-textInactiveColor',
+  neutral: 'border-borderColor',
   warning: 'border-warning bg-warning/10',
   success: 'border-success bg-success/10',
   error: 'border-error bg-error/10',
@@ -397,46 +393,15 @@ function nextStepGuidance({
   };
 }
 
-// One number, scannable — label / value / an optional coloured note. Mirrors the KPI-tile idiom
-// used on the analytics dashboard (PersistentKpiBar) so a run's headline numbers read the same way
-// as the rest of the admin.
-function StatTile({
-  label,
-  value,
-  sub,
-  subClassName,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  subClassName?: string;
-}) {
-  return (
-    <div className='flex min-w-0 flex-col gap-1 border border-textInactiveColor p-3'>
-      <Text variant='uppercase' size='small' className='text-textInactiveColor'>
-        {label}
-      </Text>
-      <Text size='large' className='font-bold'>
-        {value}
-      </Text>
-      {sub ? (
-        <Text variant='uppercase' size='small' className={subClassName}>
-          {sub}
-        </Text>
-      ) : null}
-    </div>
-  );
-}
-
 // A numbered card around one step of the run's workflow: a title, a one-line "why", then the
 // existing editor (LinesGrid / AuxRunPlan / MaterialPlan / RunCosts) unchanged inside.
 // Cost variance is actual − plan: spending MORE than planned is bad (red), LESS is good (green) —
 // the inverse of a revenue/KPI delta, where up is good. Kept as one helper so both cost tiles
 // (unit and total) agree on the sign convention.
-function varianceTone(d?: googletype_Decimal): string | undefined {
+function varianceTone(d?: googletype_Decimal): 'up' | 'down' | undefined {
   const n = Number(d?.value);
   if (!d?.value || !Number.isFinite(n) || n === 0) return undefined;
-  return n > 0 ? 'text-error' : 'text-success';
+  return n > 0 ? 'down' : 'up';
 }
 function varianceSub(d?: googletype_Decimal): string | undefined {
   const n = Number(d?.value);
@@ -471,8 +436,8 @@ function CostSummary({
 
   return (
     <div className='flex flex-col gap-3'>
-      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
-        <StatTile
+      <StatGrid>
+        <Stat
           label='unit cost · plan'
           value={
             run.plannedUnitCost?.value
@@ -480,7 +445,7 @@ function CostSummary({
               : '—'
           }
         />
-        <StatTile
+        <Stat
           label='unit cost · actual'
           value={
             actuals?.actualUnitCost?.value
@@ -488,9 +453,9 @@ function CostSummary({
               : '— until received'
           }
           sub={varianceSub(actuals?.unitCostVariance)}
-          subClassName={varianceTone(actuals?.unitCostVariance)}
+          tone={varianceTone(actuals?.unitCostVariance)}
         />
-        <StatTile
+        <Stat
           label='total cost · plan'
           value={
             actuals?.plannedTotalBase?.value
@@ -498,7 +463,7 @@ function CostSummary({
               : '—'
           }
         />
-        <StatTile
+        <Stat
           label='total cost · actual'
           value={
             actuals?.actualTotalBase?.value
@@ -506,9 +471,9 @@ function CostSummary({
               : '— until received'
           }
           sub={varianceSub(actuals?.totalVariance)}
-          subClassName={varianceTone(actuals?.totalVariance)}
+          tone={varianceTone(actuals?.totalVariance)}
         />
-      </div>
+      </StatGrid>
 
       {actuals?.materialsFromStockBase?.value ? (
         <Text variant='inactive' size='small'>
@@ -554,10 +519,10 @@ function ColorwayCostBlock({
   const unattributed = actuals.unattributedMaterialsBase;
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
-      <Text variant='uppercase' size='small'>
-        materials by colourway
-      </Text>
+    <Section
+      title='materials by colourway'
+      question='only stock-issued materials are split here; manual cost articles stay run-level — attribute an issue to a colourway from its “issue…” action to move it out of unattributed.'
+    >
       <div className='overflow-x-auto'>
         <table className='border-collapse'>
           <thead>
@@ -602,10 +567,6 @@ function ColorwayCostBlock({
           </tbody>
         </table>
       </div>
-      <Text variant='inactive' size='small'>
-        only stock-issued materials are split here; manual cost articles stay run-level. Attribute
-        an issue to a colourway from its “issue…” action to move it out of unattributed.
-      </Text>
-    </div>
+    </Section>
   );
 }

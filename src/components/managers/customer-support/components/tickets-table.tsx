@@ -3,6 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useMemo } from 'react';
 import { Link } from 'react-router-dom';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { Filter } from './filter';
@@ -113,17 +114,20 @@ export function TicketsTable({
   return (
     <div className='w-full flex flex-col gap-4'>
       <Filter filters={filters} onFiltersChange={onFiltersChange} isLoading={isLoading} />
-      <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor h-10'>
-            <tr className='border-b border-textInactiveColor'>
+      {/* One filled block (Section), not a bordered table with no fill — the grey page ground
+          used to show straight through every cell. The cell rules stay as internal grid lines,
+          matching the StatGrid table convention. */}
+      <Section className='w-full overflow-x-auto'>
+        <table className='w-full min-w-max border-collapse'>
+          <thead className='h-10'>
+            <tr className='border-b border-borderColor'>
               {COLUMNS.map((col) => (
                 <th
                   key={col.key}
                   className={cn(
-                    'text-center h-10 min-w-20 border border-r border-textInactiveColor px-2',
+                    'h-10 min-w-20 border border-r border-borderColor bg-bgSecondary px-2 text-center',
                     {
-                      'sticky left-0 bg-textInactiveColor z-10': col.key === 'id',
+                      'sticky left-0 z-10': col.key === 'id',
                     },
                   )}
                 >
@@ -143,13 +147,13 @@ export function TicketsTable({
               tickets.map((t) => (
                 <tr
                   key={t.id}
-                  className='group border-b border-text last:border-b-0 h-10 hover:bg-highlightColor/20 cursor-pointer transition-colors'
+                  className='group h-10 border-b border-borderColor last:border-b-0 hover:bg-highlightColor/20 cursor-pointer transition-colors'
                   onClick={() => onSelectTicket(t)}
                 >
                   {COLUMNS.map((col) => (
                     <td
                       key={col.key}
-                      className={cn('border border-r border-textInactiveColor text-center px-2', {
+                      className={cn('border border-r border-borderColor text-center px-2', {
                         'sticky left-0 bg-bgColor group-hover:bg-highlightColor/20 z-10':
                           col.key === 'id',
                       })}
@@ -162,7 +166,7 @@ export function TicketsTable({
             )}
           </tbody>
         </table>
-      </div>
+      </Section>
     </div>
   );
 }

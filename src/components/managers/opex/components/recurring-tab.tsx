@@ -8,6 +8,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Pill } from 'ui/components/pill';
+import { Section } from 'ui/components/section';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
@@ -184,10 +185,11 @@ export function RecurringTab({
           )}
         </CalloutBox>
       ) : (
-        <div className='grid grid-cols-1 gap-2.5 lg:grid-cols-2'>
-          {rows.map((r) => (
-            <RecurringCard
+        <Section>
+          {rows.map((r, i) => (
+            <RecurringRow
               key={r.id}
+              flush={i === 0}
               row={r}
               base={base}
               fxRates={fxRates}
@@ -200,7 +202,7 @@ export function RecurringTab({
               onArchive={() => setArchiving(r)}
             />
           ))}
-        </div>
+        </Section>
       )}
 
       <OpexWizard open={wizardOpen} onOpenChange={setWizardOpen} defaultKind='recurring' />
@@ -230,7 +232,10 @@ export function RecurringTab({
   );
 }
 
-function RecurringCard({
+// opxRec v2 — one template as a hairline-separated row inside the ONE ledger block (Section)
+// rather than a card of its own, matching the monthly tab's ledger grammar.
+function RecurringRow({
+  flush,
   row,
   base,
   fxRates,
@@ -240,6 +245,7 @@ function RecurringCard({
   onEdit,
   onArchive,
 }: {
+  flush?: boolean;
   row: OpexRecurring;
   base: string;
   fxRates: CostingFxRate[];
@@ -257,7 +263,13 @@ function RecurringCard({
   const future = !row.archived && toMonth(ins?.activeFrom) > currentMonth();
 
   return (
-    <div className={cn('flex flex-col gap-2 border border-borderColor bg-bgColor p-2.5', row.archived && 'opacity-60')}>
+    <div
+      className={cn(
+        'flex flex-col gap-2 border-b border-hairline py-2.5 last:border-b-0',
+        flush && 'pt-0',
+        row.archived && 'opacity-60',
+      )}
+    >
       <div className='flex items-start justify-between gap-2'>
         <div className='flex min-w-0 flex-col gap-1'>
           <Text component='span' className='truncate font-medium'>

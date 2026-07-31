@@ -27,21 +27,21 @@ export function PromoEditRow({ form, onSubmit, onCancel, allowed }: Props) {
   return (
     <Form {...form}>
       <tr className='bg-bgColor'>
-        <td className='border border-r border-textInactiveColor px-0'>
+        <td className='border border-r border-borderColor px-0'>
           <div className='flex justify-center'>
             <Text variant='inactive' size='small'>
               {allowed ? 'allowed' : 'disabled'}
             </Text>
           </div>
         </td>
-        <td className='border border-r border-textInactiveColor text-center px-2'>
+        <td className='border border-r border-borderColor text-center px-2'>
           <div className='flex justify-center'>
             <Text variant='inactive' size='small'>
               {form.watch('code')}
             </Text>
           </div>
         </td>
-        <td className='border border-r border-textInactiveColor px-2'>
+        <td className='border border-r border-borderColor px-2'>
           <InputField
             name='start'
             type='date'
@@ -50,7 +50,7 @@ export function PromoEditRow({ form, onSubmit, onCancel, allowed }: Props) {
             className='w-full text-center border-none'
           />
         </td>
-        <td className='border border-r border-textInactiveColor px-2'>
+        <td className='border border-r border-borderColor px-2'>
           <InputField
             name='expiration'
             type='date'
@@ -59,7 +59,7 @@ export function PromoEditRow({ form, onSubmit, onCancel, allowed }: Props) {
             className='w-full text-center border-none'
           />
         </td>
-        <td className='border border-r border-textInactiveColor px-2'>
+        <td className='border border-r border-borderColor px-2'>
           <div className='flex items-center justify-center gap-1'>
             <InputField
               name='discount'
@@ -74,7 +74,7 @@ export function PromoEditRow({ form, onSubmit, onCancel, allowed }: Props) {
           </div>
         </td>
         <td
-          className='border border-r border-textInactiveColor px-0'
+          className='border border-r border-borderColor px-0'
           title='Free shipping: the order ships at no cost to the customer when this code is applied.'
         >
           <div className='flex justify-center'>
@@ -82,14 +82,14 @@ export function PromoEditRow({ form, onSubmit, onCancel, allowed }: Props) {
           </div>
         </td>
         <td
-          className='border border-r border-textInactiveColor px-0'
+          className='border border-r border-borderColor px-0'
           title="Voucher: marks the code as a voucher — it's labeled 'voucher' on the order and invoice instead of a standard promo code."
         >
           <div className='flex justify-center'>
             <CheckboxField name='voucher' />
           </div>
         </td>
-        <td className='border border-r border-textInactiveColor' colSpan={2}>
+        <td className='border border-r border-borderColor' colSpan={2}>
           <div className='flex justify-center gap-1'>
             <Button
               size='lg'

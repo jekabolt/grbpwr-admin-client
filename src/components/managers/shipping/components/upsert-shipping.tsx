@@ -10,7 +10,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { SubmitHandler, useForm } from 'react-hook-form';
-import Text from 'ui/components/text';
+import { GroupLabel } from 'ui/components/group-label';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import TextareaField from 'ui/form/fields/textarea-field';
@@ -97,9 +97,7 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
               <InputField name='carrier' label='Carrier *' />
               <TextareaField name='description' label='Description' />
               <div className='flex gap-4 flex-col'>
-                <Text variant='uppercase' className='leading-none'>
-                  Expected Delivery Time
-                </Text>
+                <GroupLabel flush>expected delivery time</GroupLabel>
                 <div className='flex gap-4 items-end'>
                   <InputField name='from' type='number' min='0' placeholder='from' />
                   <InputField name='to' type='number' min='0' placeholder='to' />
@@ -107,9 +105,7 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
               </div>
               <InputField name='trackingUrl' label='Tracking URL' />
               <div className='flex flex-col gap-4'>
-                <Text variant='uppercase' className='leading-none'>
-                  Auto-tracking (AfterShip)
-                </Text>
+                <GroupLabel flush>auto-tracking (aftership)</GroupLabel>
                 <InputField
                   name='aftershipSlug'
                   label='AfterShip Slug'
@@ -125,9 +121,7 @@ export function UpsertShipping({ id, open, onOpenChange }: UpsertShippingProps) 
             </div>
             <div className='flex flex-col gap-6'>
               <div className='space-y-1'>
-                <Text variant='uppercase' className='leading-none'>
-                  status
-                </Text>
+                <GroupLabel flush>status</GroupLabel>
                 <ToggleField name='allowed' label='Allowed' />
               </div>
               <ToggleGroupField

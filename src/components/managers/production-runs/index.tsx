@@ -226,8 +226,8 @@ function RunCard({
   const receivable = isRunReceivable(ins?.status);
 
   return (
-    <div className='border border-textInactiveColor'>
-      <div className='flex flex-wrap items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-3 py-2'>
+    <div className='border border-borderColor bg-bgColor'>
+      <div className='flex flex-wrap items-center justify-between gap-2 border-b border-borderColor px-3 py-2'>
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='small'>
             <Link to={runDetailPath(run.id ?? 0)} className='underline'>
@@ -320,7 +320,7 @@ function RunCard({
       </div>
 
       {ins?.notes ? (
-        <div className='border-t border-textInactiveColor px-3 py-2'>
+        <div className='border-t border-hairline px-3 py-2'>
           <Text variant='inactive' size='small'>
             {ins.notes}
           </Text>

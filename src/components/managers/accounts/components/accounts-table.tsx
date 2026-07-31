@@ -2,6 +2,7 @@ import { AdminAccount } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../orders-catalog/components/utility';
@@ -15,10 +16,7 @@ const ACCESS_ABBR: Record<string, string> = {
 function StatusBadge({ disabled }: { disabled?: boolean }) {
   return (
     <span
-      className={cn(
-        'shrink-0 border px-1.5 py-0.5',
-        disabled ? 'border-error' : 'border-textInactiveColor',
-      )}
+      className={cn('shrink-0 border px-1.5 py-0.5', disabled ? 'border-error' : 'border-borderColor')}
     >
       <Text variant={disabled ? 'error' : 'uppercase'} size='small'>
         {disabled ? 'disabled' : 'active'}
@@ -48,10 +46,7 @@ function AccessChips({ account }: { account: AdminAccount }) {
   return (
     <div className='flex flex-wrap gap-1'>
       {perms.map((p) => (
-        <span
-          key={p.section}
-          className='whitespace-nowrap border border-textInactiveColor px-1.5 py-0.5'
-        >
+        <span key={p.section} className='whitespace-nowrap border border-borderColor px-1.5 py-0.5'>
           <Text size='small' className='uppercase'>
             {p.section}
             <span className='text-labelColor'> {ACCESS_ABBR[p.access ?? ''] ?? '?'}</span>
@@ -85,13 +80,13 @@ export function AccountsTable({
 
   if (isLoading) {
     return (
-      <div className='border border-textInactiveColor'>
+      <div className='border border-borderColor bg-bgColor'>
         {[0, 1, 2].map((i) => (
           <div
             key={i}
             className={cn(
               'h-24 animate-pulse bg-textInactiveColor/30',
-              i > 0 && 'border-t border-textInactiveColor',
+              i > 0 && 'border-t border-hairline',
             )}
           />
         ))}
@@ -101,27 +96,24 @@ export function AccountsTable({
 
   if (accounts.length === 0) {
     return (
-      <div className='flex flex-col items-center gap-1 border border-textInactiveColor p-10 text-center'>
+      <CalloutBox tone='note' className='flex flex-col items-center gap-1 p-10 text-center'>
         <Text variant='uppercase'>no accounts yet</Text>
         <Text variant='label' size='small'>
           create the first admin account to grant scoped or full access.
         </Text>
-      </div>
+      </CalloutBox>
     );
   }
 
   return (
     <>
-      <div className='border border-textInactiveColor'>
+      <div className='border border-borderColor bg-bgColor'>
         {accounts.map((a, i) => {
           const isSelf = !!currentUsername && a.username === currentUsername;
           return (
             <div
               key={a.username}
-              className={cn(
-                'flex flex-col gap-3 p-3 sm:p-4',
-                i > 0 && 'border-t border-textInactiveColor',
-              )}
+              className={cn('flex flex-col gap-3 p-3 sm:p-4', i > 0 && 'border-t border-hairline')}
             >
               <div className='flex flex-wrap items-center justify-between gap-2'>
                 <div className='flex items-baseline gap-2'>
@@ -139,7 +131,7 @@ export function AccountsTable({
 
               <AccessChips account={a} />
 
-              <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-textInactiveColor pt-2'>
+              <div className='flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline pt-2'>
                 <Text variant='label' size='small'>
                   created {formatDateShort(a.createdAt)} · updated {formatDateShort(a.updatedAt)}
                 </Text>

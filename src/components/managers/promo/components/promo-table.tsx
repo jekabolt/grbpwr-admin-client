@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import CheckboxCommon from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { PromoCreateRow } from './promo-create-row';
 import { PromoEditRow } from './promo-edit-row';
@@ -183,14 +184,18 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
           </Button>
         </div>
       )}
-      <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor h-7 overflow-x-scroll'>
-            <tr className='border-b border-textInactiveColor'>
+      {/* The table's own bordered cells carried no fill, so the grey page ground showed straight
+          through every row — the same headline bug as the dictionaries/shipping tables. Fixed the
+          same way: fill white ONCE at the surrounding block (Section) and let the 1px cell rules
+          stay as internal grid lines, matching the StatGrid table convention. */}
+      <Section className='w-full overflow-x-auto'>
+        <table className='w-full min-w-max border-collapse'>
+          <thead className='h-7'>
+            <tr className='border-b border-borderColor'>
               {visibleColumns.map((col) => (
                 <th
                   key={col.label}
-                  className='text-center min-w-1 border border-r border-textInactiveColor'
+                  className='min-w-1 border border-r border-borderColor bg-bgSecondary text-center'
                 >
                   <Text variant='uppercase'>{col.label}</Text>
                 </th>
@@ -221,13 +226,13 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
                   key={code}
                   className={cn(
                     !allowed && 'bg-textInactiveColor',
-                    allowed && expired && 'text-textInactiveColor',
+                    allowed && expired && 'text-labelColor',
                   )}
                 >
                   {visibleColumns.map((col) => (
                     <td
                       key={col.label}
-                      className={cn('border border-r border-textInactiveColor text-center px-2', {
+                      className={cn('border border-r border-borderColor text-center px-2', {
                         'px-0': col.label === 'Delete' || col.label === 'Edit',
                       })}
                     >
@@ -239,7 +244,7 @@ export function PromoTable({ promos }: { promos: Promo[] }) {
             })}
           </tbody>
         </table>
-      </div>
+      </Section>
     </div>
   );
 }

@@ -32,14 +32,14 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             disabled+hardcoded true on submit regardless of what it showed — a
             new code is always created allowed, so this is a static label, not a
             dead control pretending to be live. */}
-        <td className='border border-r border-textInactiveColor px-0'>
+        <td className='border border-r border-borderColor px-0'>
           <div className='flex justify-center'>
             <Text variant='inactive' size='small'>
               new
             </Text>
           </div>
         </td>
-        <td className='border border-r border-textInactiveColor text-center px-2'>
+        <td className='border border-r border-borderColor text-center px-2'>
           <div className='flex items-center gap-1'>
             <InputField
               name='code'
@@ -71,7 +71,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             </Text>
           )}
         </td>
-        <td className='border border-r border-textInactiveColor px-2'>
+        <td className='border border-r border-borderColor px-2'>
           <InputField
             name='start'
             type='date'
@@ -80,7 +80,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             className='w-full text-center border-none'
           />
         </td>
-        <td className='border border-r border-textInactiveColor px-2'>
+        <td className='border border-r border-borderColor px-2'>
           <InputField
             name='expiration'
             type='date'
@@ -89,7 +89,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
             className='w-full text-center border-none'
           />
         </td>
-        <td className='border border-r border-textInactiveColor px-2'>
+        <td className='border border-r border-borderColor px-2'>
           <div className='flex items-center justify-center gap-1'>
             <InputField
               name='discount'
@@ -104,7 +104,7 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
           </div>
         </td>
         <td
-          className='border border-r border-textInactiveColor px-0'
+          className='border border-r border-borderColor px-0'
           title='Free shipping: the order ships at no cost to the customer when this code is applied.'
         >
           <div className='flex justify-center'>
@@ -112,14 +112,14 @@ export function PromoCreateRow({ form, onSubmit, onCancel }: Props) {
           </div>
         </td>
         <td
-          className='border border-r border-textInactiveColor px-0'
+          className='border border-r border-borderColor px-0'
           title="Voucher: marks the code as a voucher — it's labeled 'voucher' on the order and invoice instead of a standard promo code."
         >
           <div className='flex justify-center'>
             <CheckboxField name='voucher' />
           </div>
         </td>
-        <td className='border border-r border-textInactiveColor' colSpan={2}>
+        <td className='border border-r border-borderColor' colSpan={2}>
           <div className='flex justify-center gap-1'>
             <Button
               size='lg'

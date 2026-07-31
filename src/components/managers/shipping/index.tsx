@@ -7,6 +7,7 @@ import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
+import { Section } from 'ui/components/section';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { UpsertShipping } from './components/upsert-shipping';
@@ -92,15 +93,18 @@ export function Shipping() {
           </Button>
         )}
       </div>
-      <div className='overflow-x-auto w-full'>
-        <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
-          <thead className='bg-textInactiveColor h-10'>
-            <tr className='border-b border-textInactiveColor'>
+      {/* One filled block (Section), not a bordered table with no fill — the grey page ground
+          used to show straight through every cell. The cell rules stay as internal grid lines,
+          matching the StatGrid table convention. */}
+      <Section className='w-full overflow-x-auto'>
+        <table className='w-full min-w-max border-collapse'>
+          <thead className='h-10'>
+            <tr className='border-b border-borderColor'>
               {COLUMNS.map((col) => (
                 <th
                   key={col.label}
                   className={cn(
-                    'text-center h-10 border border-r border-textInactiveColor px-2',
+                    'h-10 border border-r border-borderColor bg-bgSecondary px-2 text-center',
                     col.width ?? 'min-w-26',
                   )}
                 >
@@ -129,7 +133,7 @@ export function Shipping() {
                 <tr
                   key={carrier.id}
                   className={cn(
-                    'border-b border-text last:border-b-0 h-10',
+                    'h-10 border-b border-borderColor last:border-b-0',
                     isAllowed
                       ? 'cursor-pointer hover:bg-textInactiveColor/20'
                       : 'cursor-default bg-textInactiveColor/60',
@@ -140,7 +144,7 @@ export function Shipping() {
                     <td
                       key={col.label}
                       className={cn(
-                        'border border-textInactiveColor px-2 align-middle',
+                        'border border-borderColor px-2 align-middle',
                         col.width ?? 'min-w-26',
                         col.scroll && 'overflow-hidden p-0',
                       )}
@@ -168,7 +172,7 @@ export function Shipping() {
             })}
           </tbody>
         </table>
-      </div>
+      </Section>
       <UpsertShipping id={editingCarrierId} open={upsertOpen} onOpenChange={setUpsertOpen} />
     </div>
   );

@@ -581,7 +581,7 @@ function EmployeeCard({
         </Text>
       )}
 
-      <div className='mt-auto flex items-end justify-between gap-3 border-t border-borderColor pt-2'>
+      <div className='mt-auto flex items-end justify-between gap-3 border-t border-hairline pt-2'>
         <span className='flex flex-col gap-0.5'>
           <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
             employment
@@ -891,7 +891,7 @@ function EmployeeFormModal({
         </Field>
 
         {isEdit && (
-          <div className='flex flex-col gap-1.5 border-t border-borderColor pt-2.5'>
+          <div className='flex flex-col gap-1.5 border-t border-hairline pt-2.5'>
             <Text
               size='micro'
               variant='label'
@@ -944,7 +944,7 @@ function EmployeeFormModal({
         )}
 
         {isEdit && existing && (
-          <div className='flex items-center gap-3 border-t border-borderColor pt-2.5'>
+          <div className='flex items-center gap-3 border-t border-hairline pt-2.5'>
             {!alreadyLeft && (
               <Button
                 type='button'
