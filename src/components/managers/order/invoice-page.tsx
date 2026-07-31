@@ -58,10 +58,22 @@ export function OrderInvoicePrint() {
   const orderStatus = getOrderStatusName(dictionary, orderDetails?.order?.orderStatusId);
   const backTo = uuid ? `${ROUTES.orders}/${uuid}` : ROUTES.orders;
 
-  // Language is offered only when the dictionary actually carries alternatives to switch between.
+  // Language is offered only when THIS ORDER's items actually carry alternatives to switch
+  // between — which is what the dictionary alone cannot tell us. Filtering on `isActive` offered
+  // every active language (seven on beta) while every product had exactly one translation, so six
+  // of the seven options provably did nothing: InvoiceDocument's pickName found no match for them
+  // and fell back to the same name. A control that cannot change anything must not be offered.
   // 'default' is a sentinel, not '' — a Radix Select.Item cannot hold an empty-string value.
   const DEFAULT_LANG = 'default';
-  const languages = (dictionary?.languages ?? []).filter((l) => l.isActive && l.id != null);
+  const translatedLanguageIds = new Set(
+    (orderDetails?.orderItems ?? [])
+      .flatMap((item) => item.translations ?? [])
+      .map((t) => t.languageId)
+      .filter((id): id is number => id != null),
+  );
+  const languages = (dictionary?.languages ?? []).filter(
+    (l) => l.isActive && l.id != null && translatedLanguageIds.has(l.id),
+  );
   const languageItems = [
     { value: DEFAULT_LANG, label: 'default' },
     ...languages.map((l) => ({ value: String(l.id), label: l.name || l.code || String(l.id) })),
@@ -141,7 +153,9 @@ export function OrderInvoicePrint() {
               )}
             </ChipRow>
 
-            {languages.length > 0 && (
+            {/* Two or more: with a single translated language, 'default' and that language are the
+                same name, so the control would still be a no-op. */}
+            {languages.length > 1 && (
               <label className='flex flex-col gap-1'>
                 <Text
                   size='micro'
