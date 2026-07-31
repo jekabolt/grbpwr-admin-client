@@ -3,7 +3,9 @@ import { common_ColorwayLifecycleStatus } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 // R6: the colourway lifecycle is a stored status with server-validated transitions, driven by
@@ -110,15 +112,11 @@ export function LifecycleControls({
     transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway restored — now hidden');
 
   return (
-    <div className='flex flex-col gap-2 border border-textInactiveColor px-3 py-2'>
-      <div className='flex flex-wrap items-center justify-between gap-3'>
-        <div className='flex items-center gap-2'>
-          <Text variant='uppercase' size='small'>
-            lifecycle
-          </Text>
-          <StatusBadge status={status} />
-        </div>
-        {canWrite && !isArchived && (
+    <Section
+      title='lifecycle'
+      question={<StatusBadge status={status} />}
+      action={
+        canWrite && !isArchived ? (
           <div className='flex flex-wrap items-center gap-2'>
             {isDraft && (
               <Button
@@ -169,9 +167,8 @@ export function LifecycleControls({
               </Button>
             )}
           </div>
-        )}
-        {/* #60: an archived colourway can be restored (→ hidden) instead of being permanently stuck. */}
-        {canWrite && isArchived && (
+        ) : canWrite && isArchived ? (
+          // #60: an archived colourway can be restored (→ hidden) instead of being permanently stuck.
           <Button
             type='button'
             variant='main'
@@ -182,9 +179,9 @@ export function LifecycleControls({
           >
             restore
           </Button>
-        )}
-      </div>
-
+        ) : undefined
+      }
+    >
       {isArchived && (
         <Text variant='inactive' size='small'>
           archived — removed from the storefront. restore brings it back as hidden.
@@ -198,20 +195,18 @@ export function LifecycleControls({
       )}
 
       {publishReasons.length > 0 && (
-        <div className='flex flex-col gap-1 border border-red-300 bg-red-50 p-2'>
-          <Text size='small' variant='uppercase' className='!text-red-700'>
-            cannot publish yet
+        <CalloutBox tone='error'>
+          <Text size='small' variant='uppercase' className='font-bold'>
+            <b>cannot publish yet</b>
           </Text>
           <ul className='list-disc pl-5'>
             {publishReasons.map((r, i) => (
               <li key={i}>
-                <Text size='small' className='!text-red-700'>
-                  {r}
-                </Text>
+                <Text size='small'>{r}</Text>
               </li>
             ))}
           </ul>
-        </div>
+        </CalloutBox>
       )}
 
       <ConfirmationModal
@@ -228,6 +223,6 @@ export function LifecycleControls({
           (it comes back hidden).
         </Text>
       </ConfirmationModal>
-    </div>
+    </Section>
   );
 }

@@ -2,6 +2,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useImperativeHandle, useState, type Ref } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import {
@@ -131,18 +132,13 @@ export function ProductCustomsSection({
       </Text>
 
       {missingRequired && (
-        <div
-          role='alert'
-          className={`border px-2 py-1 ${
-            isLive ? 'border-error text-error' : 'border-textInactiveColor'
-          }`}
-        >
+        <CalloutBox tone={isLive ? 'error' : 'note'}>
           <Text size='small' variant={isLive ? 'error' : 'label'} component='span'>
             {isLive
               ? 'This colourway is LIVE but customs is incomplete. International shipping labels will be rejected until it has an HS code (below) and a country of origin (set in Details).'
               : 'Customs is incomplete. An HS code (below) and country of origin (set in Details) are required before this ships internationally.'}
           </Text>
-        </div>
+        </CalloutBox>
       )}
 
       <div className='grid grid-cols-1 gap-3 lg:grid-cols-2'>

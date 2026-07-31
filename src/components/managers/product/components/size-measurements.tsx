@@ -4,6 +4,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import FieldsGroupContainer from 'ui/components/fields-group';
 import Text from 'ui/components/text';
@@ -219,11 +220,11 @@ export function SizeMeasurements({
           (VariantsPanel is gated on productId). Cue the operator that they come after the first
           save, so the collapsed read-only chart below doesn't read as the whole story. */}
       {editMode && productId == null && (
-        <div className='border border-textInactiveColor px-2 py-1'>
+        <CalloutBox tone='note'>
           <Text variant='label' size='small'>
             save the product first, then add sellable sizes & stock
           </Text>
-        </div>
+        </CalloutBox>
       )}
       {/* The size chart and its stock are read-only here — the chart is style-owned (tech card) and
           stock is managed per-variant in the sellable-sizes panel above. Collapsed by default so the

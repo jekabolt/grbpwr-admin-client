@@ -10,7 +10,8 @@ import { useEffect, useRef, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
 import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
+import { CalloutBox } from 'ui/components/callout-box';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
@@ -259,8 +260,8 @@ export function ProductForm({
         {canReadCosting &&
           !isAddingProduct &&
           (!costInfo?.costPrice?.value || Number(costInfo.costPrice.value) <= 0) && (
-            <div className='border border-warning bg-warning/10 p-3'>
-              <Text className='text-warning text-textBaseSize'>
+            <CalloutBox tone='warning'>
+              <Text size='small'>
                 No unit cost set for this colorway — margin, contribution and profit cannot be
                 computed for it, and it lowers store-wide cost coverage in analytics.{' '}
                 <a href='#sec-cost' className='underline'>
@@ -268,110 +269,112 @@ export function ProductForm({
                 </a>{' '}
                 in the Cost section below.
               </Text>
-            </div>
+            </CalloutBox>
           )}
 
         <SectionNav items={sectionNavItems} />
 
-        <div className='flex flex-col lg:flex-row lg:items-start gap-6'>
-          <Section title='media' id='sec-media' className='w-full lg:w-1/2'>
-            <div className='flex flex-row gap-5'>
-              <Thumbnail
+        <SectionStack>
+          <SectionStack row>
+            <Section title='media' id='sec-media' className='w-full lg:w-1/2'>
+              <div className='flex flex-row gap-5'>
+                <Thumbnail
+                  product={product}
+                  control={form.control}
+                  variant='primary'
+                  editMode={editMode}
+                />
+                <Thumbnail
+                  product={product}
+                  control={form.control}
+                  variant='secondary'
+                  editMode={editMode}
+                />
+              </div>
+              <MediaAds
                 product={product}
                 control={form.control}
-                variant='primary'
+                clearKey={mediaClearKey}
                 editMode={editMode}
               />
-              <Thumbnail
-                product={product}
-                control={form.control}
-                variant='secondary'
+            </Section>
+
+            <Section title='details' id='sec-details' className='w-full lg:w-1/2'>
+              {isAddingProduct && <StylePicker name='styleId' disabled={!editMode} />}
+              <BodyFields
                 editMode={editMode}
+                isAddingProduct={isAddingProduct}
+                styleId={product?.colorway?.styleId}
+              />
+              <Tags
+                isAddingProduct={isAddingProduct}
+                isEditMode={isEditMode}
+                isCopyMode={isCopyMode}
+                editMode={editMode}
+              />
+            </Section>
+          </SectionStack>
+
+          {/* R4: style facts (brand, season, collection, gender, fit, categories, composition, care,
+              model-wears) are shared by every colourway of the style and save through UpdateStyle under
+              their own optimistic lock — isolated here so a blocked season change (frozen siblings) does
+              not fail the colourway save. Shown outside editMode too (read-only) so model-wears stays
+              visible without entering edit — not gated on editMode the way the rest of this form is;
+              <StyleSection/> derives its own canEdit from the editMode prop instead. Never shown in
+              add-mode: there is no created colourway yet for this section's own Save to attach to. */}
+          {!isAddingProduct && product?.colorway?.styleId != null && (
+            <div id='sec-model' className='scroll-mt-20'>
+              <StyleSection
+                styleId={product.colorway.styleId}
+                lockVersion={product.colorway.lockVersion}
+                canWrite={canWrite(SECTION.products)}
+                editMode={editMode}
+                onChanged={onStockUpdated}
               />
             </div>
-            <MediaAds
-              product={product}
-              control={form.control}
-              clearKey={mediaClearKey}
-              editMode={editMode}
-            />
-          </Section>
+          )}
 
-          <Section title='details' id='sec-details' className='w-full lg:w-1/2'>
-            {isAddingProduct && <StylePicker name='styleId' disabled={!editMode} />}
-            <BodyFields
+          {(canReadCosting || canWriteCosting) && (
+            <Section title='cost' id='sec-cost'>
+              <ProductCostSection
+                editMode={editMode}
+                costInfo={costInfo}
+                productId={productId}
+                lockVersion={product?.colorway?.lockVersion}
+                isAddingProduct={isAddingProduct}
+                onCostSynced={onStockUpdated}
+              />
+            </Section>
+          )}
+
+          <Section title='sizes & stock' id='sec-sizes'>
+            <SizeMeasurements
               editMode={editMode}
-              isAddingProduct={isAddingProduct}
+              productId={productId ? Number(productId) : undefined}
               styleId={product?.colorway?.styleId}
-            />
-            <Tags
-              isAddingProduct={isAddingProduct}
-              isEditMode={isEditMode}
-              isCopyMode={isCopyMode}
-              editMode={editMode}
-            />
-          </Section>
-        </div>
-
-        {/* R4: style facts (brand, season, collection, gender, fit, categories, composition, care,
-            model-wears) are shared by every colourway of the style and save through UpdateStyle under
-            their own optimistic lock — isolated here so a blocked season change (frozen siblings) does
-            not fail the colourway save. Shown outside editMode too (read-only) so model-wears stays
-            visible without entering edit — not gated on editMode the way the rest of this form is;
-            <StyleSection/> derives its own canEdit from the editMode prop instead. Never shown in
-            add-mode: there is no created colourway yet for this section's own Save to attach to. */}
-        {!isAddingProduct && product?.colorway?.styleId != null && (
-          <div id='sec-model' className='scroll-mt-20'>
-            <StyleSection
-              styleId={product.colorway.styleId}
-              lockVersion={product.colorway.lockVersion}
-              canWrite={canWrite(SECTION.products)}
-              editMode={editMode}
-              onChanged={onStockUpdated}
-            />
-          </div>
-        )}
-
-        {(canReadCosting || canWriteCosting) && (
-          <Section title='cost' id='sec-cost'>
-            <ProductCostSection
-              editMode={editMode}
-              costInfo={costInfo}
-              productId={productId}
               lockVersion={product?.colorway?.lockVersion}
-              isAddingProduct={isAddingProduct}
-              onCostSynced={onStockUpdated}
+              variants={product?.variants}
+              onStockUpdated={onStockUpdated}
             />
           </Section>
-        )}
 
-        <Section title='sizes & stock' id='sec-sizes'>
-          <SizeMeasurements
-            editMode={editMode}
-            productId={productId ? Number(productId) : undefined}
-            styleId={product?.colorway?.styleId}
-            lockVersion={product?.colorway?.lockVersion}
-            variants={product?.variants}
-            onStockUpdated={onStockUpdated}
-          />
-        </Section>
+          {productId && !isCopyMode && (
+            <Section title='fittings' id='sec-fittings'>
+              <FittingsReadonlyList productId={Number(productId)} />
+            </Section>
+          )}
 
-        {productId && !isCopyMode && (
-          <Section title='fittings' id='sec-fittings'>
-            <FittingsReadonlyList productId={Number(productId)} />
-          </Section>
-        )}
-
-        {productId && !isCopyMode && (
-          <Section title='customs' id='sec-customs'>
-            <ProductCustomsSection
-              ref={customsRef}
-              productId={Number(productId)}
-              canWrite={canWrite(SECTION.products)}
-              isLive={product?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'}
-            />
-          </Section>
-        )}
+          {productId && !isCopyMode && (
+            <Section title='customs' id='sec-customs'>
+              <ProductCustomsSection
+                ref={customsRef}
+                productId={Number(productId)}
+                canWrite={canWrite(SECTION.products)}
+                isLive={product?.colorway?.status === 'COLORWAY_LIFECYCLE_STATUS_ACTIVE'}
+              />
+            </Section>
+          )}
+        </SectionStack>
       </form>
 
       {/* Sticky action bar */}

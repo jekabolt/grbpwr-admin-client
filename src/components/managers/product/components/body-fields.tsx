@@ -3,6 +3,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 import CountryList from 'react-select-country-list';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
@@ -89,13 +90,8 @@ export function BodyFields({
           by every colourway of the style and edited on the tech card — shown here as clean read-only
           facts, not as inert-but-editable-looking inputs. Only the colourway's own attributes stay
           editable below. */}
-      <section className='space-y-3 border border-textInactiveColor p-4'>
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          <Text variant='uppercase' size='small'>
-            style facts · read-only
-          </Text>
-          <TechCardLink styleId={styleId} />
-        </div>
+      <div className='space-y-3'>
+        <GroupLabel action={<TechCardLink styleId={styleId} />}>style facts · read-only</GroupLabel>
 
         {isAddingProduct && !hasStyleFacts ? (
           <Text variant='inactive' size='small'>
@@ -117,7 +113,7 @@ export function BodyFields({
             <Care />
           </>
         )}
-      </section>
+      </div>
 
       {/* Colourway-owned attributes — editable on this form. */}
       <div className='space-y-3'>
