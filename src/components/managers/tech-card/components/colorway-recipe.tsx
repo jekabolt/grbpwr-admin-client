@@ -44,7 +44,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { sectionShort } from './bom-line-picker';
-import { PieceRef } from './piece-picker';
+import { PieceRef, useFormPieces } from './piece-picker';
 import { wireInt } from './schema';
 import {
   createColorwayErrorMessage,
@@ -2179,19 +2179,25 @@ export function ColorwayRecipes({
 }) {
   const { dictionary } = useDictionary();
   const colorways = techCard?.colorways ?? [];
-  // The card's cut pieces, for the placement picker. Only pieces that already carry a stable
-  // line_key are offered: a piece minted in this session but not yet saved has none, and pointing a
-  // norm at it would resolve to nothing server-side.
+  // The card's cut pieces, LIVE from form state — the same source every other piece picker reads —
+  // so a piece added seconds ago in the table above appears in each recipe immediately, without a
+  // save round-trip. addPiece mints the stable lineKey up front, and under the card's one save the
+  // body (which creates the piece server-side, keyed by that lineKey) commits before any recipe
+  // write (COMMIT_ORDER), so a usage pointed at a fresh piece resolves. The server id — needed only
+  // to resolve legacy usages that carry piece_id instead of piece_line_key — still comes off the
+  // read, merged by lineKey; a piece not yet saved simply has none.
+  const formPieces = useFormPieces();
+  const serverPieceIdByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const p of techCard?.techCard?.pieces ?? []) {
+      const key = p.lineKey?.trim();
+      if (key) m.set(key, wireInt((p as unknown as { id?: unknown }).id));
+    }
+    return m;
+  }, [techCard?.techCard?.pieces]);
   const pieces = useMemo<RecipePiece[]>(
-    () =>
-      (techCard?.techCard?.pieces ?? [])
-        .filter((p) => !!p.lineKey?.trim())
-        .map((p) => ({
-          id: wireInt((p as unknown as { id?: unknown }).id),
-          lineKey: p.lineKey as string,
-          name: p.name ?? '',
-        })),
-    [techCard?.techCard?.pieces],
+    () => formPieces.map((p) => ({ ...p, id: serverPieceIdByKey.get(p.lineKey) ?? 0 })),
+    [formPieces, serverPieceIdByKey],
   );
   // The catalog materials the BOM lines link to (materialId) — loaded once for the whole tab so each
   // recipe usage can render the SAME square article card the BOM tab shows (photo · code · spec).
