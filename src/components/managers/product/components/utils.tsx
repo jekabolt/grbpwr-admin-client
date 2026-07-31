@@ -88,13 +88,15 @@ export function buildColorwayUpdateMask(data: ProductFormData): string {
   return paths.join(',');
 }
 
-// Style facts — the SOLE writer is UpdateStyle. season here is the SeasonEnum code (the sku_season
-// year lives on the tech card / CloneStyleForSeason, not this patch).
+// Style facts — the SOLE writer is UpdateStyle. season here is the SeasonEnum code; the colourway
+// card edits no season YEAR, so 0 is sent, which the server reads as "keep the stored year". The
+// year is authored on the tech card, where sku_season belongs.
 export function buildStylePatch(data: ProductFormData): StylePatch {
   const b = data.product.productBodyInsert;
   return {
     brand: b.brand,
     season: (b.season as common_SeasonEnum) || undefined,
+    seasonYear: 0,
     collection: b.collection,
     targetGender: b.targetGender as common_GenderEnum,
     fit: b.fit,
