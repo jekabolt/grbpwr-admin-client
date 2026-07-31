@@ -93,19 +93,21 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const { dictionary } = useDictionary();
   const techCardId = techCard?.id;
 
-  const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
-    usages?: Array<{ consumption?: string; sizeConsumptions?: Array<{ consumption?: string }> }>;
-  }>;
-
   // A usage costs at order-scale when it has per-size consumption; at per-garment scale when
   // it uses the single consumption. Mixing both in one card mixes scales in the total.
-  const allUsages = colorways.flatMap((c) => c.usages ?? []);
+  //
+  // Read off techCard.colorways — the same source this file already uses fifteen lines down for the
+  // cost rollup's labels. It used to reduce over the RHF `colorways` array, permanently empty since
+  // colourways became products, so both flags were always false and the warning could never fire on
+  // the very cards it exists for.
+  const allUsages = (techCard?.colorways ?? []).flatMap((c) => c.usages ?? []);
   const hasPerSize = allUsages.some((u) =>
-    (u.sizeConsumptions ?? []).some((sc) => sc.consumption?.trim()),
+    (u.sizeConsumptions ?? []).some((sc) => sc.consumption?.value?.trim()),
   );
   const hasPerGarment = allUsages.some(
     (u) =>
-      !(u.sizeConsumptions ?? []).some((sc) => sc.consumption?.trim()) && u.consumption?.trim(),
+      !(u.sizeConsumptions ?? []).some((sc) => sc.consumption?.value?.trim()) &&
+      u.consumption?.value?.trim(),
   );
   const mixedScale = hasPerSize && hasPerGarment;
 
