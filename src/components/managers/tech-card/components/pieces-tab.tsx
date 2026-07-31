@@ -206,7 +206,27 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
   // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
   // form-state renumbering loop was dead. Just drop the piece row here.
-  const removePiece = (pi: number) => remove(pi);
+  // Release the piece's referrers before dropping it, the same contract the BOM's removeArticle
+  // keeps. An operation still naming a deleted piece fails the save server-side
+  // (operations[N].piece_line_key: no cut-piece "…" in this style) and rolls the whole transaction
+  // back — on a key the operator cannot see, from a row they did not touch.
+  const removePiece = (pi: number) => {
+    const removedKey = (getValues(`pieces.${pi}.lineKey`) as string) || '';
+    if (removedKey) {
+      const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
+      (operations ?? []).forEach((o, oi) => {
+        const keys = (o.pieceLineKeys ?? []).filter(Boolean);
+        if (keys.includes(removedKey)) {
+          setValue(
+            `operations.${oi}.pieceLineKeys`,
+            keys.filter((k) => k !== removedKey),
+            { shouldDirty: true },
+          );
+        }
+      });
+    }
+    remove(pi);
+  };
 
   // Duplicate CODE / NAME rows, case-insensitively. A piece name is how a human addresses the part
   // in the operation picker, the recipe norm and the factory sheet, so two rows called «полочка»
@@ -440,7 +460,6 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
           </div>
         )}
       </section>
-
     </div>
   );
 }
