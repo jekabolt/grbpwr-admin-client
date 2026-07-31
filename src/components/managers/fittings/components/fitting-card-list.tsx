@@ -7,8 +7,10 @@ import { useInView } from 'react-intersection-observer';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import Media from 'ui/components/media';
+import { Pill } from 'ui/components/pill';
+import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
+import { Tile, Tiles } from 'ui/components/tiles';
 import { useDeleteFitting, useInfiniteFittings } from './useFittingQuery';
 import { useModelsByIds, useSamplesByIds, useTechCardsByIds } from './useResolvers';
 import { formatFittingDate, statusLabel } from './utils';
@@ -92,60 +94,80 @@ export function FittingCardList() {
           </Text>
         </div>
       ) : (
-        <div className='grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4'>
+        // Same card as the tech-cards list: the Tile primitive, a pill row for state and one
+        // grey meta line. The delete control is rendered OUTSIDE the Tile â the Tile itself is a
+        // <button>, so nesting another button in it is invalid and was swallowing clicks.
+        <Tiles min={160}>
           {fittings.map((fitting) => {
             const id = fitting.id ?? 0;
             const insert = fitting.fitting;
             const sample = sampleName(insert?.sampleId);
+            const title =
+              [techCardLabel(insert?.techCardId), sample].filter(Boolean).join(' · ') || '—';
+            const photos = fitting.media?.length ?? 0;
+            const openChanges = insert?.changeRequests?.filter((cr) => !cr.resolved).length ?? 0;
+            const thumb = fitting.media?.[0]?.media?.thumbnail?.mediaUrl;
+            const meta = [
+              modelName(insert?.modelId),
+              formatFittingDate(insert?.fittingDate),
+              photos ? `${photos} photo${photos > 1 ? 's' : ''}` : '',
+            ]
+              .filter(Boolean)
+              .join(' · ');
             return (
-              <div
-                key={id}
-                role='button'
-                tabIndex={0}
-                onClick={() => navigate(`/fittings/${id}`)}
-                onKeyDown={(e) => e.key === 'Enter' && navigate(`/fittings/${id}`)}
-                className='group relative flex cursor-pointer flex-col overflow-hidden border border-textInactiveColor transition-colors hover:bg-highlightColor/5'
-              >
-                <Media
-                  src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
-                  alt={`fitting #${id}`}
-                  aspectRatio='3/4'
-                  fit='cover'
-                />
-                <div className='flex flex-col gap-1 p-2'>
-                  <Text>
-                    {techCardLabel(insert?.techCardId) ?? '—'}
-                    {sample ? ` · ${sample}` : ''}
-                  </Text>
-                  <Text variant='inactive' size='small'>
-                    {modelName(insert?.modelId)} · {formatFittingDate(insert?.fittingDate)}
-                  </Text>
-                  <Text variant='inactive' size='small'>
-                    {statusLabel(insert?.status)} · {fitting.media?.length ?? 0} photo(s)
-                    {insert?.roundNumber ? ` · round ${insert.roundNumber}` : ''}
-                    {insert?.outcome ? ` · ${insert.outcome.replace('_', ' ')}` : ''}
-                    {insert?.changeRequests?.length
-                      ? ` · ${insert.changeRequests.filter((cr) => !cr.resolved).length}/${insert.changeRequests.length} changes open`
-                      : ''}
-                  </Text>
-                </div>
+              <div key={id} className='relative'>
+                <Tile
+                  media={
+                    thumb ? (
+                      <img
+                        src={thumb}
+                        alt=''
+                        loading='lazy'
+                        className='aspect-[3/4] w-full border border-borderColor object-cover'
+                      />
+                    ) : (
+                      <Placeholder aspect='3/4' label='fitting' />
+                    )
+                  }
+                  name={title}
+                  onClick={() => navigate(`/fittings/${id}`)}
+                  className='h-full w-full'
+                >
+                  <div className='mt-1 flex flex-wrap items-center gap-1'>
+                    <Pill tone='mut'>{statusLabel(insert?.status)}</Pill>
+                    {insert?.roundNumber ? <Pill tone='mut'>round {insert.roundNumber}</Pill> : null}
+                    {insert?.outcome ? (
+                      <Pill tone='mut'>{insert.outcome.replace('_', ' ')}</Pill>
+                    ) : null}
+                    {openChanges > 0 && <Pill tone='warn'>{openChanges} open</Pill>}
+                  </div>
+                  {meta && (
+                    <Text size='nano' variant='label' className='mt-1 truncate uppercase'>
+                      {meta}
+                    </Text>
+                  )}
+                </Tile>
                 {canEdit && (
-                  <Button
-                    type='button'
-                    aria-label='delete fitting'
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      setPendingDelete({ id });
-                    }}
-                    className='absolute right-1 top-1 z-20 border border-textInactiveColor bg-bgColor px-1.5 leading-none opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100'
-                  >
-                    ✕
-                  </Button>
+                  <div className='absolute top-1 right-1'>
+                    <Button
+                      type='button'
+                      size='xs'
+                      variant='secondary'
+                      aria-label='delete fitting'
+                      className='bg-bgColor'
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        setPendingDelete({ id });
+                      }}
+                    >
+                      ✕
+                    </Button>
+                  </div>
                 )}
               </div>
             );
           })}
-        </div>
+        </Tiles>
       )}
 
       {hasNextPage && (

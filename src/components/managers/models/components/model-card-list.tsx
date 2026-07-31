@@ -9,9 +9,11 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
-import Media from 'ui/components/media';
+import { Pill } from 'ui/components/pill';
+import { Placeholder } from 'ui/components/placeholder';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
+import { Tile, Tiles } from 'ui/components/tiles';
 import { useDeleteModel, useInfiniteModels } from './useModelQuery';
 
 const ALL = 'ALL';
@@ -112,47 +114,67 @@ export function ModelCardList() {
           </Text>
         </div>
       ) : (
-        <div className='grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4'>
-          {models.map((model) => {
-            const id = model.id ?? 0;
-            const insert = model.model;
-            const thumb = model.thumbnail?.media?.thumbnail?.mediaUrl || '';
+        <Tiles min={160}>
+          {models.map((m) => {
+            const id = m.id ?? 0;
+            const insert = m.model;
+            const thumb = m.media?.[0]?.media?.thumbnail?.mediaUrl || '';
+            const meta = [
+              genderLabel(insert?.gender),
+              `sizes ${sizesLabel(insert?.defaultSizeIds)}`,
+              `${insert?.measurements?.length ?? 0} meas.`,
+            ]
+              .filter(Boolean)
+              .join(' · ');
             return (
-              <div
-                key={id}
-                role='button'
-                tabIndex={0}
-                onClick={() => navigate(`/models/${id}`)}
-                onKeyDown={(e) => e.key === 'Enter' && navigate(`/models/${id}`)}
-                className='group relative flex cursor-pointer flex-col overflow-hidden border border-textInactiveColor transition-colors hover:bg-highlightColor/5'
-              >
-                <Media src={thumb} alt={insert?.name || 'model'} aspectRatio='3/4' fit='cover' />
-                <div className='flex flex-col gap-1 p-2'>
-                  <Text>
-                    {insert?.name || '—'} <span className='text-textInactiveColor'>#{id}</span>
-                  </Text>
-                  <Text variant='inactive' size='small'>
-                    {genderLabel(insert?.gender)} · sizes {sizesLabel(insert?.defaultSizeIds)} ·{' '}
-                    {insert?.measurements?.length ?? 0} meas.
-                  </Text>
-                </div>
+              <div key={id} className='relative'>
+                <Tile
+                  media={
+                    thumb ? (
+                      <img
+                        src={thumb}
+                        alt=''
+                        loading='lazy'
+                        className='aspect-[3/4] w-full border border-borderColor object-cover'
+                      />
+                    ) : (
+                      <Placeholder aspect='3/4' label='model' />
+                    )
+                  }
+                  name={insert?.name || `model #${id}`}
+                  onClick={() => navigate(`/models/${id}`)}
+                  className='h-full w-full'
+                >
+                  <div className='mt-1 flex flex-wrap items-center gap-1'>
+                    <Pill tone='mut'>#{id}</Pill>
+                  </div>
+                  {meta && (
+                    <Text size='nano' variant='label' className='mt-1 truncate uppercase'>
+                      {meta}
+                    </Text>
+                  )}
+                </Tile>
                 {canEdit && (
-                  <Button
-                    type='button'
-                    aria-label='delete model'
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      setPendingDelete({ id, name: insert?.name || `model ${id}` });
-                    }}
-                    className='absolute right-1 top-1 z-20 border border-textInactiveColor bg-bgColor px-1.5 leading-none opacity-100 transition-opacity lg:opacity-0 lg:group-hover:opacity-100'
-                  >
-                    ✕
-                  </Button>
+                  <div className='absolute top-1 right-1'>
+                    <Button
+                      type='button'
+                      size='xs'
+                      variant='secondary'
+                      aria-label='delete model'
+                      className='bg-bgColor'
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation();
+                        setPendingDelete({ id, name: insert?.name || `model ${id}` });
+                      }}
+                    >
+                      ✕
+                    </Button>
+                  </div>
                 )}
               </div>
             );
           })}
-        </div>
+        </Tiles>
       )}
 
       {hasNextPage && (

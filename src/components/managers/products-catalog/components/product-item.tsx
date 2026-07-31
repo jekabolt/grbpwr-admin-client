@@ -10,7 +10,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
-import Text from 'ui/components/text';
+import { Tile } from 'ui/components/tiles';
 import {
   CatalogCommerceTags,
   CatalogStateBadge,
@@ -98,88 +98,93 @@ export function ProductItem({
   };
 
   return (
-    <div className='space-y-1 cursor-pointer' onClick={() => handleProductClick(product.id)}>
-      <div className='relative w-full h-full group'>
-        <div
-          className={cn(
-            'transition-opacity duration-200 motion-reduce:transition-none',
-            mediaTreatment,
-          )}
-        >
-          <Media
-            src={thumbnail || ''}
-            alt='prod item'
-            type={isVideo(thumbnail) ? 'video' : 'image'}
-            controls={isVideo(thumbnail)}
-          />
-        </div>
-
-        {/* Primary state marker — top-left. */}
-        <span className='absolute top-1 left-1 z-30'>
-          <CatalogStateBadge status={product.status} />
-        </span>
-
-        {/* Secondary commerce markers — bottom-right, subordinate to the state badge. */}
-        <span className='absolute bottom-1 right-1 z-30 flex flex-wrap items-center justify-end gap-1'>
-          <CatalogCommerceTags product={product} />
-        </span>
-
-        {/* Selection checkbox — top-right, only in selection mode (explicit affordance). */}
-        {selectionMode && (
-          <button
-            type='button'
-            aria-pressed={selected}
-            aria-label={selected ? 'deselect product' : 'select product'}
-            onClick={handleToggleSelect}
-            className='absolute top-0 right-0 z-40 p-1.5 cursor-pointer'
-          >
-            <span
+    // Same card as the tech-cards list: the Tile primitive carries the border, the fill and the
+    // bold name; state pills ride on the thumbnail; every control sits OUTSIDE the Tile, which is
+    // itself a <button>. Media keeps its native 4/5 catalogue ratio rather than the tech card's
+    // 3/4 â the tiles match in construction, not in crop.
+    <div className='relative'>
+      <Tile
+        media={
+          <div className='relative'>
+            <div
               className={cn(
-                'flex h-5 w-5 items-center justify-center border border-textColor',
-                selected ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
+                'transition-opacity duration-200 motion-reduce:transition-none',
+                mediaTreatment,
               )}
             >
-              {selected && <CheckIcon />}
+              <Media
+                src={thumbnail || ''}
+                alt=''
+                type={isVideo(thumbnail) ? 'video' : 'image'}
+                controls={isVideo(thumbnail)}
+              />
+            </div>
+            <span className='absolute top-1 left-1 z-10'>
+              <CatalogStateBadge status={product.status} />
             </span>
-          </button>
-        )}
+            <span className='absolute right-1 bottom-1 z-10 flex flex-wrap items-center justify-end gap-1'>
+              <CatalogCommerceTags product={product} />
+            </span>
+          </div>
+        }
+        name={description}
+        selected={selected}
+        onClick={() => handleProductClick(product.id)}
+        className='h-full w-full'
+      />
 
-        {/* Per-card actions are hidden in selection mode to avoid competing affordances. */}
-        {!selectionMode && canEdit && !isArchived && (
-          <Button
-            onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
+      {/* Selection checkbox â explicit affordance, never the card click. */}
+      {selectionMode && (
+        <button
+          type='button'
+          aria-pressed={selected}
+          aria-label={selected ? 'deselect product' : 'select product'}
+          onClick={handleToggleSelect}
+          className='absolute top-1 right-1 z-40 cursor-pointer'
+        >
+          <span
             className={cn(
-              'absolute top-1 right-1 z-30 border border-textInactiveColor bg-bgColor px-1 leading-none block md:hidden md:group-hover:block',
-              { '!block !bg-textColor !text-bgColor': confirmDelete === product.id },
+              'flex h-5 w-5 items-center justify-center border border-textColor',
+              selected ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
             )}
+          >
+            {selected && <CheckIcon />}
+          </span>
+        </button>
+      )}
+
+      {/* Per-card actions are hidden in selection mode to avoid competing affordances. */}
+      {!selectionMode && canEdit && !isArchived && (
+        <div className='absolute top-1 right-1 z-30'>
+          <Button
+            type='button'
+            size='xs'
+            variant='secondary'
+            aria-label='archive product'
+            className={cn('bg-bgColor', {
+              '!bg-textColor !text-bgColor': confirmDelete === product.id,
+            })}
+            onClick={(e: React.MouseEvent) => handleDeleteItem(product.id, e)}
           >
             {confirmDelete === product.id ? <CheckIcon /> : '[x]'}
           </Button>
-        )}
-        {/* #60: an archived colourway is read-only, but can be restored (→ hidden) from here. */}
-        {!selectionMode && canEdit && isArchived && (
+        </div>
+      )}
+
+      {/* #60: an archived colourway is read-only, but can be restored (→ hidden) from here. */}
+      {!selectionMode && canEdit && isArchived && (
+        <div className='absolute top-1 right-1 z-30'>
           <Button
-            size='lg'
-            className='absolute bottom-0 left-0 z-30'
+            type='button'
+            size='xs'
             variant='main'
             disabled={restoring}
             onClick={(e: React.MouseEvent) => handleRestore(product.id, e)}
           >
             {restoring ? 'restoring…' : 'restore'}
           </Button>
-        )}
-
-        {/* Selected frame. */}
-        {selected && (
-          <div
-            className='pointer-events-none absolute inset-0 z-30 border-2 border-textColor'
-            aria-hidden
-          />
-        )}
-      </div>
-      <Text className='w-full break-words' variant='underLineWithColor'>
-        {description}
-      </Text>
+        </div>
+      )}
     </div>
   );
 }

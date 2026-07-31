@@ -63,11 +63,11 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
     <div className='w-full'>
       {/* Desktop table */}
       <div className='hidden w-full overflow-x-auto lg:block'>
-        <table className='w-full border-collapse border border-textInactiveColor'>
+        <table className='w-full border-collapse border border-borderColor'>
           <thead className='bg-textInactiveColor'>
             <tr>
               {headers.map((h, i) => (
-                <th key={i} className='border border-textInactiveColor px-2 py-1 text-left'>
+                <th key={i} className='border border-borderColor px-2 py-1 text-left'>
                   <Text variant='uppercase' size='small'>
                     {h}
                   </Text>
@@ -86,13 +86,13 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                   tabIndex={0}
                   onClick={() => navigate(`/fittings/${id}`)}
                   onKeyDown={(e) => e.key === 'Enter' && navigate(`/fittings/${id}`)}
-                  className='cursor-pointer border-b border-textInactiveColor transition-colors hover:bg-highlightColor/5'
+                  className='cursor-pointer border-b border-borderColor transition-colors hover:bg-bgZebra'
                 >
-                  <td className='border border-textInactiveColor px-2 py-1'>
+                  <td className='border border-borderColor px-2 py-1'>
                     <Text>{formatFittingDate(insert?.fittingDate)}</Text>
                   </td>
                   {showProduct && (
-                    <td className='border border-textInactiveColor px-2 py-1'>
+                    <td className='border border-borderColor px-2 py-1'>
                       {insert?.productId ? (
                         <Link
                           to={`/products/${insert.productId}`}
@@ -107,7 +107,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                     </td>
                   )}
                   {showModel && (
-                    <td className='border border-textInactiveColor px-2 py-1'>
+                    <td className='border border-borderColor px-2 py-1'>
                       {insert?.modelId ? (
                         <Link
                           to={`/models/${insert.modelId}`}
@@ -121,20 +121,20 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                       )}
                     </td>
                   )}
-                  <td className='border border-textInactiveColor px-2 py-1'>
+                  <td className='border border-borderColor px-2 py-1'>
                     <Text>{statusLabel(insert?.status)}</Text>
                   </td>
-                  <td className='border border-textInactiveColor px-2 py-1'>
+                  <td className='border border-borderColor px-2 py-1'>
                     <Text>{verdictLabel(insert?.verdict)}</Text>
                   </td>
-                  <td className='border border-textInactiveColor px-2 py-1'>
+                  <td className='border border-borderColor px-2 py-1'>
                     <Text>{insert?.sizes?.length ?? 0}</Text>
                   </td>
-                  <td className='border border-textInactiveColor px-2 py-1'>
+                  <td className='border border-borderColor px-2 py-1'>
                     <div className='flex items-center gap-2'>
                       {/* Same thumbnail treatment as FittingCardList — a photo count alone
                           wasn't scannable for what's fundamentally visual QA data. */}
-                      <div className='h-10 w-8 shrink-0 overflow-hidden border border-textInactiveColor'>
+                      <div className='h-10 w-8 shrink-0 overflow-hidden border border-borderColor'>
                         <Media
                           src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
                           alt={`fitting #${id}`}
@@ -145,7 +145,7 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
                       <Text>{fitting.media?.length ?? 0}</Text>
                     </div>
                   </td>
-                  <td className='border border-textInactiveColor px-2 py-1 text-right'>
+                  <td className='border border-borderColor px-2 py-1 text-right'>
                     <Text variant='underlined'>open</Text>
                   </td>
                 </tr>
@@ -167,10 +167,10 @@ export function FittingsReadonlyList({ productId, modelId }: Props) {
               tabIndex={0}
               onClick={() => navigate(`/fittings/${id}`)}
               onKeyDown={(e) => e.key === 'Enter' && navigate(`/fittings/${id}`)}
-              className='flex cursor-pointer items-center gap-3 border border-textInactiveColor p-3'
+              className='flex cursor-pointer items-center gap-3 border border-borderColor p-3'
             >
               {/* Same thumbnail treatment as FittingCardList. */}
-              <div className='h-14 w-11 shrink-0 overflow-hidden border border-textInactiveColor'>
+              <div className='h-14 w-11 shrink-0 overflow-hidden border border-borderColor'>
                 <Media
                   src={fitting.media?.[0]?.media?.thumbnail?.mediaUrl || ''}
                   alt={`fitting #${id}`}
