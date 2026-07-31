@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from 'react';
 import { FieldErrors, useForm } from 'react-hook-form';
 import { generatePath, Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { defaultData, draftProductSchema, ProductFormData, productSchema } from '../utility/schema';
@@ -418,30 +419,6 @@ export function ProductForm({
         )}
       </div>
     </Form>
-  );
-}
-
-function Section({
-  title,
-  className,
-  id,
-  children,
-}: {
-  title: string;
-  className?: string;
-  id?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section
-      id={id}
-      className={`scroll-mt-20 space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}
-    >
-      <Text variant='uppercase' size='large'>
-        {title}
-      </Text>
-      {children}
-    </section>
   );
 }
 

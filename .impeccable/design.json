@@ -1,0 +1,221 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-07-31T00:00:00Z",
+  "title": "Design System: GRBPWR Admin",
+  "extensions": {
+    "colorMeta": {
+      "ink": {
+        "role": "primary",
+        "displayName": "Ink",
+        "canonical": "#000000",
+        "tonalRamp": ["#000000", "#1a1a1a", "#333333", "#4d4d4d", "#666666", "#999999", "#cccccc", "#f2f2f2"]
+      },
+      "ground": {
+        "role": "neutral",
+        "displayName": "Ground",
+        "canonical": "#f2f2f2",
+        "tonalRamp": ["#000000", "#333333", "#666666", "#999999", "#cccccc", "#e6e6e6", "#f2f2f2", "#ffffff"]
+      },
+      "block": {
+        "role": "neutral",
+        "displayName": "Block White",
+        "canonical": "#ffffff",
+        "tonalRamp": ["#666666", "#999999", "#cccccc", "#e2e2e2", "#e6e6e6", "#ededed", "#fafafa", "#ffffff"]
+      },
+      "edge": {
+        "role": "neutral",
+        "displayName": "Edge Grey (outer outline)",
+        "canonical": "#cccccc",
+        "tonalRamp": ["#333333", "#4d4d4d", "#666666", "#999999", "#cccccc", "#e6e6e6", "#f2f2f2", "#ffffff"]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Hairline (inner rule)",
+        "canonical": "#e6e6e6",
+        "tonalRamp": ["#4d4d4d", "#666666", "#999999", "#cccccc", "#dcdcdc", "#e6e6e6", "#f2f2f2", "#ffffff"]
+      },
+      "label": {
+        "role": "neutral",
+        "displayName": "Label Grey",
+        "canonical": "#666666",
+        "tonalRamp": ["#000000", "#1a1a1a", "#333333", "#4d4d4d", "#666666", "#999999", "#cccccc", "#e6e6e6"]
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel Tint",
+        "canonical": "#ededed",
+        "tonalRamp": ["#666666", "#999999", "#cccccc", "#e2e2e2", "#e6e6e6", "#ededed", "#fafafa", "#ffffff"]
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "Blocking Red",
+        "canonical": "#ff0000",
+        "tonalRamp": ["#330000", "#660000", "#990000", "#cc0000", "#ff0000", "#ff4d4d", "#ff9999", "#ffe5e5"]
+      },
+      "blue": {
+        "role": "secondary",
+        "displayName": "Mid-Flight Blue",
+        "canonical": "#2323ff",
+        "tonalRamp": ["#07076b", "#0e0e99", "#1515c7", "#1c1ce5", "#2323ff", "#6666ff", "#a3a3ff", "#e5e5ff"]
+      },
+      "green": {
+        "role": "secondary",
+        "displayName": "Cleared Green",
+        "canonical": "#0f7a34",
+        "tonalRamp": ["#031a0b", "#062f14", "#09491f", "#0c6129", "#0f7a34", "#3fa763", "#7fc998", "#e0f2e6"]
+      },
+      "purple": {
+        "role": "tertiary",
+        "displayName": "Link Purple",
+        "canonical": "#311eee",
+        "tonalRamp": ["#0c0740", "#150c66", "#1e128f", "#2718c2", "#311eee", "#6a5bf3", "#a49bf8", "#e4e1fd"]
+      }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Login splash and hero only. Never inside the app shell." },
+      "headline": { "displayName": "Headline", "purpose": "Page-level titles. The only large size in the product." },
+      "title": { "displayName": "Section Title", "purpose": "The bold uppercase text sitting on the 2px rule that opens a block." },
+      "body": { "displayName": "Body", "purpose": "Field values, table cells, running text. The working size of the whole product." },
+      "control": { "displayName": "Control", "purpose": "Chips, buttons, tabs, option labels." },
+      "label": { "displayName": "Label", "purpose": "Field labels, pills, table headers, hints, group titles." },
+      "stat": { "displayName": "Stat", "purpose": "KPI values inside a stat cell. Bold and tabular." }
+    },
+    "shadows": [
+      { "name": "modal", "value": "0 6px 22px rgba(0,0,0,0.22)", "purpose": "Dialogs only." },
+      { "name": "popover", "value": "0 4px 14px rgba(0,0,0,0.18)", "purpose": "Selects, date pickers, entity pickers, tooltips." },
+      { "name": "card-lift", "value": "2px 2px 0 0 #000000", "purpose": "Board card on hover. Hard offset, zero blur: a sheet pushed sideways, not a glow." }
+    ],
+    "motion": [
+      { "name": "nav-dropdown-in", "value": "150ms ease-out", "purpose": "Top-bar nav dropdown opening (4px drop + fade)." },
+      { "name": "nav-dropdown-out", "value": "120ms ease-in", "purpose": "Top-bar nav dropdown closing." },
+      { "name": "drawer-in", "value": "180ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Right-docked drawer sliding in from its own edge." },
+      { "name": "media-viewer-stage", "value": "200ms cubic-bezier(0.22, 1, 0.36, 1)", "purpose": "Lightbox stage zoom, replayed per navigation." },
+      { "name": "reduced-motion", "value": "animation: none", "purpose": "Every animation above is switched off under prefers-reduced-motion. Not optional." }
+    ],
+    "zIndex": [
+      { "name": "sticky", "value": 20, "purpose": "Sticky page chrome." },
+      { "name": "nav", "value": 45, "purpose": "Top nav bar and its dropdowns." },
+      { "name": "modal", "value": 50, "purpose": "Dialogs." },
+      { "name": "popover", "value": 60, "purpose": "Selects and pickers opened inside a modal." },
+      { "name": "toast", "value": 70, "purpose": "Snackbar." }
+    ],
+    "breakpoints": [
+      { "name": "lg", "value": "1024px" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Block",
+      "kind": "card",
+      "refersTo": "block",
+      "description": "The unit the whole product is built from: one logical block, cut from white stock, on the grey ground. The gap to the next block is the divider.",
+      "html": "<div class=\"ds-ground\"><section class=\"ds-block\"><div class=\"ds-section-header\"><h3>identification</h3><span>— what this style is</span></div><div class=\"ds-rowline\"><span>style number</span><b>GP-24-0117</b></div><div class=\"ds-rowline\"><span>season</span><b>AW26</b></div><div class=\"ds-rowline ds-rowline-total\"><span>pieces</span><b>7</b></div></section><section class=\"ds-block\"><div class=\"ds-section-header\"><h3>classification</h3></div><div class=\"ds-rowline\"><span>purpose</span><b>sellable</b></div></section></div>",
+      "css": ".ds-ground { background: #f2f2f2; padding: 24px; display: flex; flex-direction: column; gap: 24px; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; font-size: 12px; line-height: 1.5; color: #000; } .ds-block { background: #fff; border: 1px solid #ccc; border-radius: 0; padding: 16px; display: flex; flex-direction: column; gap: 10px; } .ds-section-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; border-bottom: 2px solid #000; padding-bottom: 4px; margin: 0 0 2px; } .ds-section-header h3 { margin: 0; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; } .ds-section-header span { font-size: 10px; color: #666; } .ds-rowline { display: flex; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px solid #e6e6e6; } .ds-rowline b { font-weight: 400; font-variant-numeric: tabular-nums; } .ds-rowline-total { border-bottom: 1px solid #000; font-weight: 700; }"
+    },
+    {
+      "name": "Rule Ladder",
+      "kind": "custom",
+      "refersTo": "block",
+      "description": "The four ruled weights that express hierarchy inside a block. This is what replaces nesting: there is never a second border+fill inside a block.",
+      "html": "<div class=\"ds-ladder\"><div class=\"ds-lad ds-lad-1\">section title — 2px ink</div><div class=\"ds-lad ds-lad-2\">sub-group — 1px #ccc</div><div class=\"ds-lad ds-lad-3\">list row — 1px #e6e6e6</div><div class=\"ds-lad ds-lad-4\">closing total — 1px ink</div></div>",
+      "css": ".ds-ladder { background: #fff; border: 1px solid #ccc; padding: 16px; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: #000; } .ds-lad { padding: 6px 0; } .ds-lad-1 { border-bottom: 2px solid #000; font-weight: 700; letter-spacing: 0.06em; } .ds-lad-2 { border-bottom: 1px solid #ccc; color: #666; font-size: 10px; letter-spacing: 0.05em; font-weight: 700; } .ds-lad-3 { border-bottom: 1px solid #e6e6e6; text-transform: none; letter-spacing: normal; font-size: 12px; } .ds-lad-4 { border-bottom: 1px solid #000; font-weight: 700; text-transform: none; letter-spacing: normal; font-size: 12px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-main",
+      "description": "Page-level actions only: Save, Release, Create. Ink fill that inverts on hover; disabled becomes an outline, never a grey slab.",
+      "html": "<button class=\"ds-btn-main\">SAVE</button> <button class=\"ds-btn-main\" disabled>SAVE</button>",
+      "css": ".ds-btn-main { display: inline-block; background: #000; color: #fff; border: 1px solid #000; border-radius: 0; padding: 10px 16px; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; font-size: 12px; line-height: 1rem; text-align: center; cursor: pointer; transition: background 0.15s, color 0.15s; } .ds-btn-main:hover:not(:disabled) { background: #fff; color: #000; } .ds-btn-main:focus-visible { outline: 2px solid #000; outline-offset: 2px; } .ds-btn-main:disabled { background: #fff; color: #ccc; border-color: #ccc; cursor: not-allowed; }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Everything inside a panel. Outlined at rest, fills solid ink on hover.",
+      "html": "<button class=\"ds-btn-secondary\">PDF</button> <button class=\"ds-btn-secondary\">DISMISS</button>",
+      "css": ".ds-btn-secondary { display: inline-block; background: #fff; color: #000; border: 1px solid #ccc; border-radius: 0; padding: 4px 10px; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; font-size: 10px; line-height: 1rem; text-transform: uppercase; letter-spacing: 0.04em; cursor: pointer; transition: background 0.15s, color 0.15s; } .ds-btn-secondary:hover:not(:disabled) { background: #000; color: #fff; } .ds-btn-secondary:focus-visible { outline: 2px solid #000; outline-offset: 2px; } .ds-btn-secondary:disabled { color: #ccc; border-color: #ccc; cursor: not-allowed; }"
+    },
+    {
+      "name": "Text Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "1px edge border on white. Focus darkens the border to ink — no ring, no glow, no colour shift.",
+      "html": "<label class=\"ds-field\"><span>style number *</span><input class=\"ds-input\" value=\"GP-24-0117\" /></label>",
+      "css": ".ds-field { display: flex; flex-direction: column; gap: 2px; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; max-width: 260px; } .ds-field > span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; } .ds-input { display: block; width: 100%; min-height: 22px; background: #fff; color: #000; border: 1px solid #ccc; border-radius: 0; padding: 3px 7px; font-family: inherit; font-size: 12px; appearance: none; transition: border-color 0.15s; } .ds-input::placeholder { color: #ccc; } .ds-input:focus { border-color: #000; outline: none; } .ds-input[aria-invalid='true'] { border-color: #f00; }"
+    },
+    {
+      "name": "Pill and Chip",
+      "kind": "chip",
+      "refersTo": "pill",
+      "description": "Same shape, different contract: a Pill is read-only status, a Chip is clickable. A selected Chip fills solid ink.",
+      "html": "<div class=\"ds-chiprow\"><span class=\"ds-pill ds-pill-ok\">ready to release</span><span class=\"ds-pill ds-pill-warn\">missing bom</span><span class=\"ds-pill ds-pill-attention\">in review</span><span class=\"ds-pill ds-pill-mut\">not started</span><button class=\"ds-chip\">front</button><button class=\"ds-chip ds-chip-selected\">back</button></div>",
+      "css": ".ds-chiprow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; } .ds-pill { display: inline-flex; align-items: center; white-space: nowrap; background: transparent; border: 1px solid #ccc; border-radius: 0; padding: 1px 7px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; } .ds-pill-ok { border-color: #0f7a34; color: #0f7a34; } .ds-pill-warn { border-color: #f00; color: #f00; } .ds-pill-attention { border-color: #2323ff; color: #2323ff; } .ds-pill-mut { border-color: #ccc; color: #666; } .ds-chip { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; background: #fff; color: #666; border: 1px solid #ccc; border-radius: 0; padding: 1px 7px; font-family: inherit; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; cursor: pointer; transition: color 0.15s, background 0.15s; } .ds-chip:hover { color: #000; } .ds-chip:focus-visible { outline: 2px solid #000; outline-offset: 2px; } .ds-chip-selected { background: #000; border-color: #000; color: #fff; } .ds-chip-selected:hover { color: #fff; }"
+    },
+    {
+      "name": "Stat Grid",
+      "kind": "custom",
+      "refersTo": "stat-cell",
+      "description": "KPI strip. Fills white ONCE at the container and rules internally with 1px lines — a table, not a row of nested cards. A cell with no data renders an em dash, never zero.",
+      "html": "<div class=\"ds-stats\"><div class=\"ds-stat\"><span class=\"ds-stat-label\">operations</span><span class=\"ds-stat-value\">14</span></div><div class=\"ds-stat\"><span class=\"ds-stat-label\">total SAM</span><span class=\"ds-stat-value\">38.5 мин</span><span class=\"ds-stat-sub\">feeds costing</span></div><div class=\"ds-stat\"><span class=\"ds-stat-label\">zones covered</span><span class=\"ds-stat-value\">3 / 4</span></div><div class=\"ds-stat\"><span class=\"ds-stat-label\">unpinned ops</span><span class=\"ds-stat-value ds-stat-down\">2</span><span class=\"ds-stat-sub\">no sketch pin</span></div></div>",
+      "css": ".ds-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); background: #fff; border: 1px solid #ccc; border-radius: 0; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; } .ds-stat { display: flex; flex-direction: column; border-right: 1px solid #ccc; border-bottom: 1px solid #ccc; padding: 8px 10px; } .ds-stat-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #666; } .ds-stat-value { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: #000; } .ds-stat-sub { font-size: 10px; text-transform: uppercase; color: #666; } .ds-stat-down { color: #f00; }"
+    },
+    {
+      "name": "Board Column",
+      "kind": "nav",
+      "refersTo": "board-column-header",
+      "description": "A lane on the kanban / fulfilment board. Panel-tinted header strip, cards hairline-separated, and the one signature hover lift: a hard 2px offset with zero blur.",
+      "html": "<div class=\"ds-kbcol\"><div class=\"ds-kbhead\"><b>in progress</b><span>3</span></div><div class=\"ds-kbbody\"><div class=\"ds-kbcard\">GP-24-0117 · lining swap</div><div class=\"ds-kbcard\">GP-24-0203 · size run</div><div class=\"ds-kbempty\">+ add</div></div></div>",
+      "css": ".ds-kbcol { display: flex; flex-direction: column; width: 288px; max-width: 85vw; background: #fff; border: 1px solid #ccc; border-radius: 0; font-family: 'FeatureMono', Inter, 'Helvetica Neue', Arial, sans-serif; } .ds-kbhead { display: flex; align-items: center; gap: 6px; background: #ededed; border-bottom: 1px solid #ccc; padding: 4px 8px; } .ds-kbhead b { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; } .ds-kbhead span { font-size: 10px; color: #666; font-variant-numeric: tabular-nums; } .ds-kbbody { flex: 1; background: rgba(0,0,0,0.02); } .ds-kbcard { background: #fff; border-bottom: 1px solid #e6e6e6; padding: 6px 8px; font-size: 12px; cursor: pointer; transition: transform 0.12s, box-shadow 0.12s; } .ds-kbcard:hover { transform: translateY(-1px); box-shadow: 2px 2px 0 0 #000; } .ds-kbempty { padding: 12px 8px; margin: 8px; text-align: center; font-size: 10px; text-transform: uppercase; letter-spacing: 0.03em; color: #666; border: 1px dashed #ccc; cursor: pointer; } .ds-kbempty:hover { color: #000; } @media (prefers-reduced-motion: reduce) { .ds-kbcard { transition: none; } .ds-kbcard:hover { transform: none; } }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Machine Console",
+    "overview": "This is not an app that decorates data; it is an instrument panel that admits what it knows. Operators run long, focused content-ops sessions and read hundreds of values per screen, so density is a feature and every pixel of ornament is a tax. The surface is black ink on white stock, ruled with hard 1px lines, set in uppercase mono, and controlled with literal glyphs. Nothing is rounded, nothing floats, nothing glows.\n\nThe system's whole spatial logic is one inversion: white is not the background, it is the material. The page ground is grey (#f2f2f2). White is the stock a logical block is cut from, and the grey showing through between blocks IS the divider. You never draw a separator between two blocks; you leave a gap and let the ground do it. Everything else follows: a bordered box must be filled or the ground bleeds through its contents, a block never contains another block, and structure inside a block is drawn with ruled lines at four distinct weights rather than with nested containers.\n\nWhat this explicitly rejects, in PRODUCT.md's own words: rounded, pastel, card-heavy consumer SaaS dashboards (Notion/Linear-lite clones), and gradient accents, drop shadows, glassmorphism, playful illustration. It also rejects wizard-style over-explanation; these are expert users and the path is never padded.",
+    "keyCharacteristics": [
+      "Grey ground, white blocks, zero corner radius, zero inline shadow.",
+      "The gap between blocks is the divider. Separators are subtractive, not drawn.",
+      "One border per logical block. Box-in-box is prohibited.",
+      "Hierarchy inside a block comes from four ruled weights, not from fills or nesting.",
+      "Monochrome by default; colour only ever carries state, never decoration.",
+      "Uppercase mono labels at 9–12px; body text tops out at 12px."
+    ],
+    "rules": [
+      { "name": "The Ground Rule", "body": "#f2f2f2 is the canvas and only layout may touch it. No layout container is ever allowed to paint white over it — the moment a wrapper does, every divider on the page disappears at once and the design collapses into a white sheet.", "section": "colors" },
+      { "name": "The Gap-Is-The-Divider Rule", "body": "The separator between two blocks is the gutter, not a line. Never add border-t between stacked blocks: both neighbours already carry their own outline, so a drawn line in the gutter renders as a triple rule.", "section": "colors" },
+      { "name": "The Filled-Block Rule", "body": "A bordered block always carries the white fill. border without background is transparent, the ground shows through the content, and data stops reading as data.", "section": "colors" },
+      { "name": "The Two-Greys Rule", "body": "#cccccc is the OUTER outline of a box. #e6e6e6 is the INNER line between rows. Swapping them is the single most visible way to miss this system, and it is not a matter of taste.", "section": "colors" },
+      { "name": "The Monochrome Rule", "body": "Red, blue, green and purple carry state and nothing else — never a mood, never a category, never a decorative accent. And state is never carried by colour alone: unsaved is a worded badge, incomplete is a ! glyph, blocked is a labelled chip.", "section": "colors" },
+      { "name": "The Twelve-Pixel Ceiling Rule", "body": "Body text is 12px and the chrome sizes go down from there (11 / 10 / 9), never up. The only sizes above 12 are the 18px page headline and the two stat sizes. A screen that needs a bigger font to establish hierarchy has a layout problem, not a type problem.", "section": "typography" },
+      { "name": "The No-Hand-Tracking Rule", "body": "Letter-spacing is baked into the four tracking tokens (pill 0.03em, label 0.04em, group 0.05em, section 0.06em) and applied through the Text primitive. No screen sets letter-spacing, font-size in px, or tabular-nums by hand. Outside src/ui, writing text-[Npx] is prohibited.", "section": "typography" },
+      { "name": "The Uppercase-Is-A-Label Rule", "body": "Uppercase marks a label, a control or a section title — things of four words or fewer. Sentences and hints stay sentence case at label colour.", "section": "typography" },
+      { "name": "The Flat-By-Default Rule", "body": "If an element is in the document flow, it has no shadow. A shadow is a claim that something is floating above the page, and in this system only three things ever are: a modal, a popover, and a card being dragged.", "section": "elevation" },
+      { "name": "The Zero-Radius Rule", "body": "border-radius: 0 everywhere, including buttons, inputs, chips, pills, avatars and images. There are no pill-shaped controls. If it looks like a 2014 app, the corners got rounded and a shadow got soft.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do build every screen out of white blocks (border border-borderColor bg-bgColor p-4) sitting on the grey ground, separated by a 24px gutter.",
+      "Do reach for SectionHeader / GroupLabel / Row / RowTotal to express hierarchy. Four ruled weights, in that order, cover every case.",
+      "Do keep #cccccc on the outside of boxes and #e6e6e6 on the inside between rows.",
+      "Do fill a bordered block with white. Always.",
+      "Do write the question clause on section headers, so a block says what it is for and not only what it is called.",
+      "Do use src/ui primitives (Text, Button, Pill, Chip, Row, StatGrid, CalloutBox) instead of hand-rolling div + Tailwind. Type sizes, tracking and tabular numerals are baked in there on purpose.",
+      "Do render an em dash for missing data. An empty strip that reads as zero cost is worse than one that admits it has nothing.",
+      "Do pair every colour signal with a word or a glyph, so the UI survives monochrome and colour-blind reading.",
+      "Do give every interactive control a visible focus-visible outline and honour prefers-reduced-motion."
+    ],
+    "donts": [
+      "Don't paint bg-bgColor on a layout container, a page wrapper or a tab panel. It swallows the ground and deletes every divider on the screen at once.",
+      "Don't nest a block inside a block. One border per logical block; a sub-section is a GroupLabel and a rule, never a second border + bg pair.",
+      "Don't draw a border-t or an <hr> between two stacked blocks. The gutter is the divider.",
+      "Don't ship a bordered box without a fill.",
+      "Don't round anything. No rounded-* utilities, no pill-shaped buttons, no circular avatars.",
+      "Don't put a shadow on anything in the document flow. Modals, popovers and the dragged board card are the entire list.",
+      "Don't use textInactiveColor (#ccc, ~1.6:1) for readable text. Secondary text is labelColor (#666, ~5.7:1). #ccc is for borders, disabled states and placeholders only.",
+      "Don't introduce a second font family, a font size above 12px in ordinary UI, or a hand-written letter-spacing.",
+      "Don't use colour decoratively. No categorical colour coding, no tinted section backgrounds, no accent-per-feature. Red / blue / green mean broken / mid-flight / done, and nothing else.",
+      "Don't 'fix' the blue warning tone to amber or orange. Mid-flight states are blue in this system by decision.",
+      "Don't reproduce the anti-references from PRODUCT.md: rounded, pastel, card-heavy consumer SaaS dashboards (Notion/Linear-lite clones), gradient accents, drop shadows, glassmorphism, playful illustration, or wizard-style over-explained flows.",
+      "Don't use arbitrary z-index values. The semantic scale (sticky 20 / nav 45 / modal 50 / popover 60 / toast 70) covers every layer that exists."
+    ]
+  }
+}

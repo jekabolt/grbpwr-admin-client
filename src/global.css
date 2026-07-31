@@ -55,6 +55,17 @@
   --color-trackBg: #f0f0f0; /* bar tracks */
   --color-progressBg: #e2e2e2;
 
+  /* SPACING — the block grammar. See DESIGN.md → "5. Components → The Block".
+     gutter — the grey gap BETWEEN blocks. It is the divider; never draw a line instead.
+     block  — padding inside a block.
+     stack  — gap between a block's own children.
+     These exist as named tokens because the gutter is load-bearing: it had already
+     drifted across gap-2.5 / gap-3 / gap-4 / gap-6 in nearly every manager, which reads
+     as four different divider weights on four different screens. */
+  --spacing-gutter: 24px;
+  --spacing-block: 16px;
+  --spacing-stack: 10px;
+
   /* Accents */
   --color-red: #ff0000;
   --color-error: #ff0000; /* == red */

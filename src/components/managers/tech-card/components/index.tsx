@@ -36,6 +36,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { Pill } from 'ui/components/pill';
+import { Section, SectionStack } from 'ui/components/section';
 import { SectionHeader } from 'ui/components/section-header';
 import { GroupLabel } from 'ui/components/group-label';
 import { Row } from 'ui/components/row';
@@ -162,33 +163,6 @@ const RELEASE_BLOCKER_TAB: Record<string, TabId> = {
 const RELEASED = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 const DRAFT = 'TECH_CARD_APPROVAL_STATE_DRAFT';
 const SIGNOFF_APPROVED = 'TECH_CARD_SIGNOFF_STATE_APPROVED';
-
-// A section is a RULE, not a box. The old version wrapped every block in
-// `border p-4` + a large title, which nested a box inside the page's own panel and
-// was the single biggest visual difference from the reference. Blocks whose child
-// component now renders its own <SectionHeader> are not wrapped at all.
-function Section({
-  title,
-  question,
-  className,
-  children,
-}: {
-  title: string;
-  question?: React.ReactNode;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    // Each logical block is a white card (bg-bgColor + border) on the gray page ground; the gap
-    // between cards is the gray divider. Without a fill the block floats bare on gray.
-    <section
-      className={`space-y-2.5 border border-borderColor bg-bgColor p-4 ${className ?? ''}`}
-    >
-      <SectionHeader title={title} question={question} />
-      {children}
-    </section>
-  );
-}
 
 function PreSaveTile({ label }: { label: string }) {
   return (
@@ -1001,8 +975,8 @@ export function TechCardForm({
         <form className='min-w-0 pb-24' onSubmit={form.handleSubmit(doSubmit, onInvalid)}>
           <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
             {/* HEADER */}
-            <div hidden={activeTab !== 'header'} className='flex flex-col gap-6'>
-              <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+            <SectionStack hidden={activeTab !== 'header'}>
+              <SectionStack row>
                 <Section title='identification' className='w-full lg:w-1/2'>
                   <StyleNumberField isIdea={isIdea} />
                   {isIdea && (
@@ -1049,7 +1023,7 @@ export function TechCardForm({
                     items={techCardMeasurementUnitOptions}
                   />
                 </Section>
-              </div>
+              </SectionStack>
 
               {isEditMode && numId && (
                 <Section title='responsible roles'>
@@ -1108,7 +1082,7 @@ export function TechCardForm({
                   <ProductIdsField />
                 </Section>
               )}
-            </div>
+            </SectionStack>
 
             {/* SKETCH */}
             <div hidden={activeTab !== 'sketch'}>
@@ -1120,7 +1094,7 @@ export function TechCardForm({
             </div>
 
             {/* PATTERNS (size range + per-size PDF выкройки) */}
-            <div hidden={activeTab !== 'patterns'} className='flex flex-col gap-6'>
+            <SectionStack hidden={activeTab !== 'patterns'}>
               <Section title='size range'>
                 <SizeIdsField />
                 <div className='space-y-2 border-t border-textInactiveColor pt-3'>
@@ -1136,7 +1110,7 @@ export function TechCardForm({
               <Section title='выкройки (PDF) — по размерам'>
                 <PatternsField />
               </Section>
-            </div>
+            </SectionStack>
 
             {/* BOM */}
             <div hidden={activeTab !== 'bom'}>
@@ -1173,14 +1147,14 @@ export function TechCardForm({
             </div>
 
             {/* PIECES — cut-piece details + fabric map (NF-05) + production cut-list projection */}
-            <div hidden={activeTab !== 'pieces'} className='flex flex-col gap-6'>
+            <SectionStack hidden={activeTab !== 'pieces'}>
               <PiecesTab techCard={techCard} />
               {isEditMode && numId && (
                 <Section title='cut list (production projection — mirror ×2 folded)'>
                   <CutListField techCardId={numId} />
                 </Section>
               )}
-            </div>
+            </SectionStack>
 
             {/* CONSTRUCTION */}
             <div hidden={activeTab !== 'construction'}>
@@ -1188,15 +1162,15 @@ export function TechCardForm({
             </div>
 
             {/* LABELS & PACKAGING */}
-            <div hidden={activeTab !== 'labels'} className='flex flex-col gap-6'>
-              <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+            <SectionStack hidden={activeTab !== 'labels'}>
+              <SectionStack row>
                 <Section title='labels' className='w-full lg:w-1/2'>
                   <LabelsField onMissingComposition={goToBomComposition} />
                 </Section>
                 <Section title='packaging' className='w-full lg:w-1/2'>
                   <PackagingField />
                 </Section>
-              </div>
+              </SectionStack>
               {/* Assembly bill + packaging recipe are per-style, managed via their own RPCs — they
                 need a saved card id. For a brand-new card, prompt to Save (which lands back here)
                 instead of silently hiding them, so the user is never left wondering. */}
@@ -1225,11 +1199,11 @@ export function TechCardForm({
                   />
                 </Section>
               )}
-            </div>
+            </SectionStack>
 
             {/* COSTING — mounted only with costing:read (field-shaped) */}
             {canReadCosting && (
-              <div hidden={activeTab !== 'costing'} className='flex flex-col gap-6'>
+              <SectionStack hidden={activeTab !== 'costing'}>
                 <Section title='costing'>
                   {/* Costing gap at the point of action. The tech-card payload only carries the plan
                     costing rollup (not each colorway's product cost_price), so this is a style-level
@@ -1268,7 +1242,7 @@ export function TechCardForm({
                     </Text>
                   )}
                 </Section>
-              </div>
+              </SectionStack>
             )}
 
             {/* ISSUES */}
@@ -1286,7 +1260,7 @@ export function TechCardForm({
             </div>
 
             {/* HISTORY */}
-            <div hidden={activeTab !== 'history'} className='flex flex-col gap-6'>
+            <SectionStack hidden={activeTab !== 'history'}>
               <div>
                 {isEditMode && numId ? (
                   <TechCardFittings techCardId={numId} />
@@ -1323,7 +1297,7 @@ export function TechCardForm({
                   </Text>
                 )}
               </div>
-            </div>
+            </SectionStack>
           </fieldset>
 
           {/* SAMPLES — edit-mode only (needs a saved card id). OUTSIDE the frozen fieldset: a

@@ -10,6 +10,7 @@ import { useMemo, useState } from 'react';
 import { useForm, type FieldErrors } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ToggleSwitch } from 'ui/components/toggle-switch';
 import { Form } from 'ui/form';
@@ -25,31 +26,6 @@ import {
   transformDictionaryToSettings,
 } from './utility/schema';
 
-function Section({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className='space-y-4 border border-textInactiveColor p-4'>
-      <div className='space-y-1'>
-        <Text variant='uppercase' size='large'>
-          {title}
-        </Text>
-        {description && (
-          <Text variant='inactive' size='small'>
-            {description}
-          </Text>
-        )}
-      </div>
-      {children}
-    </section>
-  );
-}
 
 export function Settings() {
   const { dictionary, refetch } = useDictionary();
@@ -172,7 +148,7 @@ export function Settings() {
         {canRead(SECTION.techCards) && (
           <Section
             title='currency / FX rates'
-            description='Costing FX rates fold multi-currency tech-card BOM lines into the base currency and power the per-currency margin view. Shared across every tech card.'
+            question='Costing FX rates fold multi-currency tech-card BOM lines into the base currency and power the per-currency margin view. Shared across every tech card.'
           >
             <Text variant='label' size='small'>
               Base currency is {baseCurrency}. FX rates update automatically every day from the ECB
@@ -197,7 +173,7 @@ export function Settings() {
 
         <Section
           title='processing fees'
-          description='estimated fee per payment method — feeds contribution margin for non-Stripe methods'
+          question='estimated fee per payment method — feeds contribution margin for non-Stripe methods'
         >
           <PaymentFeesEditor
             methods={(paymentMethods ?? []).map((m) => m.paymentMethod ?? '')}
@@ -212,7 +188,7 @@ export function Settings() {
 
         <Section
           title='complimentary shipping'
-          description='threshold per currency above which shipping is free'
+          question='threshold per currency above which shipping is free'
         >
           <CarrierPrices basePath='complimentaryShippingPrices' />
         </Section>

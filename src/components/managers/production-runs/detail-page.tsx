@@ -15,6 +15,7 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AuxRunPlan } from './components/aux-run-plan';
@@ -265,9 +266,8 @@ export function ProductionRunDetail() {
       {/* The run's own three-step workflow: plan quantities, cover the materials they need, then
           log what it actually cost. Numbered so "what do I do next" has one obvious answer. */}
       <Section
-        step={1}
-        title='what to produce'
-        hint='Plan how many of each colour-model × size this run makes.'
+        title='step 1 · what to produce'
+        question='Plan how many of each colour-model × size this run makes.'
       >
         {isAux ? (
           <AuxRunPlan
@@ -283,15 +283,14 @@ export function ProductionRunDetail() {
       </Section>
 
       <Section
-        step={2}
-        title='materials needed'
-        hint="Estimated requirement against warehouse stock, from the tech card's material norms."
+        title='step 2 · materials needed'
+        question="Estimated requirement against warehouse stock, from the tech card's material norms."
       >
         <MaterialPlan run={run} canEdit={canEdit} />
       </Section>
 
       {canReadCosting ? (
-        <Section step={3} title='actual costs' hint='Log the real costs incurred once known.'>
+        <Section title='step 3 · actual costs' question='Log the real costs incurred once known.'>
           <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} />
         </Section>
       ) : null}
@@ -431,41 +430,6 @@ function StatTile({
 
 // A numbered card around one step of the run's workflow: a title, a one-line "why", then the
 // existing editor (LinesGrid / AuxRunPlan / MaterialPlan / RunCosts) unchanged inside.
-function Section({
-  step,
-  title,
-  hint,
-  children,
-}: {
-  step?: number;
-  title: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className='border border-textInactiveColor'>
-      <div className='flex flex-wrap items-baseline gap-x-2 border-b border-textInactiveColor bg-bgColor px-3 py-2'>
-        {step ? (
-          <Text variant='uppercase' size='small' className='text-textInactiveColor'>
-            step {step}
-          </Text>
-        ) : null}
-        <Text variant='uppercase' size='small'>
-          {title}
-        </Text>
-      </div>
-      <div className='flex flex-col gap-2 p-3'>
-        {hint ? (
-          <Text variant='inactive' size='small'>
-            {hint}
-          </Text>
-        ) : null}
-        {children}
-      </div>
-    </div>
-  );
-}
-
 // Cost variance is actual − plan: spending MORE than planned is bad (red), LESS is good (green) —
 // the inverse of a revenue/KPI delta, where up is good. Kept as one helper so both cost tiles
 // (unit and total) agree on the sign convention.

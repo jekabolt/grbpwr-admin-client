@@ -12,6 +12,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
@@ -27,25 +28,6 @@ import {
   modelDefaultData,
   modelSchema,
 } from './schema';
-
-function Section({
-  title,
-  className,
-  children,
-}: {
-  title: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className={`space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}>
-      <Text variant='uppercase' size='large'>
-        {title}
-      </Text>
-      {children}
-    </section>
-  );
-}
 
 export function ModelForm({
   isEditMode,

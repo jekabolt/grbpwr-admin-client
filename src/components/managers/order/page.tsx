@@ -6,8 +6,8 @@ import { useEffect, useState } from 'react';
 import { FormProvider, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
 import { Placeholder } from 'ui/components/placeholder';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Buyer } from './components/buyer';
 import { Comment } from './components/comment';
@@ -36,23 +36,6 @@ const DISPLAY_REFUND_BUTTON_STATUSES = [
 ];
 
 /** A bordered panel with an uppercase group label — the redesign's section grammar. */
-function Panel({
-  title,
-  className,
-  children,
-}: {
-  title?: string;
-  className?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className={cn('space-y-2 border border-borderColor bg-bgColor p-3', className)}>
-      {title && <GroupLabel>{title}</GroupLabel>}
-      {children}
-    </section>
-  );
-}
-
 function SummaryRow({
   label,
   value,
@@ -169,7 +152,7 @@ export function OrderDetails() {
             <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
               {/* Left — items + summary + comment */}
               <div className='w-full space-y-4 lg:flex-1'>
-                <Panel title='items'>
+                <Section title='items'>
                   {canPartialRefund && (
                     <Text size='micro' variant='label' className='uppercase print:hidden'>
                       select units to refund, or leave all unselected to refund the whole order
@@ -183,11 +166,11 @@ export function OrderDetails() {
                     selectedUnitKeys={selectedUnitKeys}
                     onToggleOrderItems={toggleOrderItemsSelection}
                   />
-                </Panel>
+                </Section>
 
                 {/* ordSummary v2 — charged (what the customer paid) vs settled (our costs) */}
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                  <Panel title='charged'>
+                  <Section title='charged'>
                     <SummaryRow
                       label='items + shipping'
                       value={
@@ -220,10 +203,10 @@ export function OrderDetails() {
                     {order?.refundReason && (
                       <SummaryRow label='refund reason' value={order.refundReason} />
                     )}
-                  </Panel>
+                  </Section>
 
                   {canReadCosting && (
-                    <Panel title={`settled · carrier (${baseCurrency})`} className='print:hidden'>
+                    <Section title={`settled · carrier (${baseCurrency})`} className='print:hidden'>
                       <SummaryRow
                         label='actual carrier cost'
                         value={
@@ -246,26 +229,26 @@ export function OrderDetails() {
                           {actualShipmentCost ? 'edit carrier cost' : 'record carrier cost'}
                         </Button>
                       )}
-                    </Panel>
+                    </Section>
                   )}
                 </div>
 
-                <Panel title='comment' className='print:hidden'>
+                <Section title='comment' className='print:hidden'>
                   <Comment orderDetails={orderDetails} canEdit={canEditOrder} />
-                </Panel>
+                </Section>
               </div>
 
               {/* Right — customer / shipping / payment / tracking */}
               <div className='w-full space-y-4 lg:w-[360px]'>
-                <Panel title='customer'>
+                <Section title='customer'>
                   <Buyer
                     buyer={orderDetails?.buyer?.buyerInsert}
                     locale={orderDetails?.order?.locale}
                     isPrinting={isPrinting}
                   />
-                </Panel>
+                </Section>
 
-                <Panel title='payment' className='print:hidden'>
+                <Section title='payment' className='print:hidden'>
                   <Payment
                     orderDetails={orderDetails}
                     stripeDetails={stripeDetails}
@@ -273,22 +256,22 @@ export function OrderDetails() {
                     isRefunded={isRefunded}
                     isPrinting={isPrinting}
                   />
-                </Panel>
+                </Section>
 
                 {canEditOrder && !orderDetails?.shipment?.trackingCode && (
-                  <Panel title='tracking' className='print:hidden'>
+                  <Section title='tracking' className='print:hidden'>
                     <NewTrackCode
                       isPrinting={isPrinting}
                       trackingNumber={trackingNumber}
                       handleTrackingNumberChange={handleTrackingNumberChange}
                       saveTrackingNumber={saveTrackingNumber}
                     />
-                  </Panel>
+                  </Section>
                 )}
               </div>
             </div>
 
-            <Panel title='shipping & billing'>
+            <Section title='shipping & billing'>
               <ShippingBillingToggle
                 orderDetails={orderDetails}
                 isPrinting={isPrinting}
@@ -300,7 +283,7 @@ export function OrderDetails() {
                 handleTrackingNumberChange={handleTrackingNumberChange}
                 saveTrackingNumber={saveTrackingNumber}
               />
-            </Panel>
+            </Section>
           </>
         )}
 

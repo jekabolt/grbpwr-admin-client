@@ -17,13 +17,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { ChangeRequestsFields } from './change-requests-fields';
-import { useDisclosure } from './disclosure';
 import { FittingCallouts } from './fitting-callouts';
 import { FittingMedia } from './fitting-media';
 import { PatternsFields } from './patterns-fields';
@@ -48,50 +48,6 @@ const fittingOutcomeOptions = [
   { value: 'new_round', label: 'new round' },
   { value: 'dropped', label: 'dropped' },
 ];
-
-function Section({
-  title,
-  className,
-  children,
-  collapsible = false,
-  defaultOpen = true,
-}: {
-  title: string;
-  className?: string;
-  children: React.ReactNode;
-  // Advanced/secondary sections can start collapsed to keep the long form scannable (task 6).
-  // defaultOpen is re-derived live by the caller (e.g. "open while there's data in it") but a
-  // manual toggle always wins once the user has touched it — see useDisclosure.
-  collapsible?: boolean;
-  defaultOpen?: boolean;
-}) {
-  const [open, toggle] = useDisclosure(defaultOpen);
-  const isOpen = !collapsible || open;
-  return (
-    <section className={`space-y-4 border border-textInactiveColor p-4 ${className ?? ''}`}>
-      {collapsible ? (
-        <button
-          type='button'
-          onClick={toggle}
-          aria-expanded={isOpen}
-          className='flex w-full cursor-pointer items-center justify-between gap-2 text-left'
-        >
-          <Text variant='uppercase' size='large'>
-            {title}
-          </Text>
-          <Text variant='inactive' size='small' className='uppercase'>
-            {isOpen ? '− hide' : '+ show'}
-          </Text>
-        </button>
-      ) : (
-        <Text variant='uppercase' size='large'>
-          {title}
-        </Text>
-      )}
-      {isOpen && children}
-    </section>
-  );
-}
 
 export function FittingForm({
   isEditMode,
