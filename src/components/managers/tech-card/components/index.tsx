@@ -103,7 +103,6 @@ const TABS = [
   { id: 'samples', label: 'samples' },
   { id: 'bom', label: 'BOM' },
   { id: 'colorways', label: 'colorways' },
-  { id: 'pieces', label: 'pieces' },
   { id: 'construction', label: 'construction' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
@@ -119,10 +118,19 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // Moodboard before sketch: the reference comes first and the technical drawing is derived from
   // it, so the rail follows the order the work actually happens in.
   { band: 'design', tabs: ['header', 'moodboard', 'sketch', 'patterns'] },
-  { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'pieces', 'construction'] },
+  // Cut pieces live on the colorways tab: a piece and the article each colourway cuts it from are
+  // one question answered in two places, and the recipe editor's placement picker offers exactly
+  // the pieces the table above it defines. Splitting them meant editing a piece, switching tab,
+  // and re-finding the colourway to point at it.
+  { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   { band: '', tabs: ['history'] },
 ];
+
+// Tabs that were folded into another one keep their deep links working: ?tab=dev became a costing
+// section, ?tab=pieces the first section of colorways. A shared link or a bookmark still lands on
+// the right place, and the address bar is rewritten to match what is rendered.
+const FOLDED_TABS: Record<string, TabId> = { dev: 'costing', pieces: 'colorways' };
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
@@ -134,7 +142,7 @@ const ERROR_TAB: Record<string, TabId> = {
   sizeQuantities: 'patterns',
   bomItems: 'bom',
   colorways: 'colorways',
-  pieces: 'pieces',
+  pieces: 'colorways',
   details: 'header',
   construction: 'construction',
   operations: 'construction',
@@ -265,10 +273,8 @@ export function TechCardForm({
 
   // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
   // filter) can be set in the same navigation (spine deep links).
-  // The old R&D-cost tab folded into costing (dev-expenses is now a costing section) — resolve a
-  // legacy ?tab=dev link straight to costing so shared links still land on the right place.
   const rawTab = params.get('tab');
-  const tabParam = rawTab === 'dev' ? 'costing' : rawTab;
+  const tabParam = rawTab ? FOLDED_TABS[rawTab] ?? rawTab : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
@@ -417,7 +423,6 @@ export function TechCardForm({
   const moodboardMedia = useWatch({ control: form.control, name: 'moodboardMedia' });
   const technicalMedia = useWatch({ control: form.control, name: 'technicalMedia' });
   const sizeIdsW = useWatch({ control: form.control, name: 'sizeIds' });
-  const piecesW = useWatch({ control: form.control, name: 'pieces' });
   const operationsW = useWatch({ control: form.control, name: 'operations' });
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
@@ -428,8 +433,10 @@ export function TechCardForm({
     patterns: len(sizeIdsW) > 0,
     bom: len(bomItemsW) > 0,
     // colourways are products, read from techCard.colorways (the RHF `colorways` array is always []).
+    // The cut pieces this tab now also owns are deliberately NOT part of the test: no release gate
+    // requires them, so a style that genuinely has none (an accessory) would be pegged below 100%
+    // for good. Its own half-empty table says so on the tab.
     colorways: (techCard?.colorways?.length ?? 0) > 0,
-    pieces: len(piecesW) > 0,
     construction: len(operationsW) > 0,
     labels: len(labelsW) > 0,
     // "filled" = actually signed off, not merely present — 7 REJECTED rows must not read as done (M10).
@@ -460,10 +467,11 @@ export function TechCardForm({
     if (t === 'samples' && !isEditMode) return false;
     return true;
   };
-  // Rewrite a legacy ?tab=dev to ?tab=costing so the URL matches the folded tab (the alias above
-  // already renders costing; this cleans the address bar / a bookmarked deep link).
+  // Rewrite a legacy ?tab=dev / ?tab=pieces to the tab that absorbed it, so the URL matches what is
+  // rendered (the alias above already resolves it; this cleans the address bar / a bookmark).
   useEffect(() => {
-    if (rawTab === 'dev') navTo('costing');
+    const folded = rawTab ? FOLDED_TABS[rawTab] : undefined;
+    if (folded) navTo(folded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawTab]);
   // If the open tab becomes hidden (switching a card to IDEA while on the BOM tab, or permissions
@@ -1131,8 +1139,12 @@ export function TechCardForm({
               </Section>
             </div>
 
-            {/* COLORWAYS — рецепты: какой артикул на какую часть, цвет и расход (colourway-owned) */}
-            <div hidden={activeTab !== 'colorways'}>
+            {/* COLORWAYS — the cut pieces first (what the garment is made OF), then, per colourway,
+                which article each piece is cut from, in what colour and at what consumption. The
+                recipe editor's placement picker offers exactly the pieces defined above it, so the
+                two read top to bottom as one question. */}
+            <SectionStack hidden={activeTab !== 'colorways'}>
+              <PiecesTab techCard={techCard} />
               <div>
                 {isEditMode && numId ? (
                   <ColorwayRecipes
@@ -1147,22 +1159,18 @@ export function TechCardForm({
                   </Text>
                 )}
               </div>
-            </div>
+            </SectionStack>
 
-            {/* PIECES — cut-piece details + fabric map (NF-05) + production cut-list projection */}
-            <SectionStack hidden={activeTab !== 'pieces'}>
-              <PiecesTab techCard={techCard} />
+            {/* CONSTRUCTION — how it's made: operations, then the cut list the cutting room works
+                from (a calculated projection, not an editable list). */}
+            <SectionStack hidden={activeTab !== 'construction'}>
+              <ConstructionTab techCard={techCard} />
               {isEditMode && numId && (
                 <Section title='cut list (production projection — mirror ×2 folded)'>
                   <CutListField techCardId={numId} />
                 </Section>
               )}
             </SectionStack>
-
-            {/* CONSTRUCTION */}
-            <div hidden={activeTab !== 'construction'}>
-              <ConstructionTab techCard={techCard} />
-            </div>
 
             {/* LABELS & PACKAGING */}
             <SectionStack hidden={activeTab !== 'labels'}>
