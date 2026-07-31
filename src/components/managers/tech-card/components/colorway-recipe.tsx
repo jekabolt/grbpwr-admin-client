@@ -12,13 +12,11 @@ import {
 } from 'api/proto-http/admin';
 import {
   composeArticleFromMaterial,
+  materialCompositionCode,
   materialSpec,
   parseCompositionCode,
 } from 'components/managers/materials/components/material-code';
-import {
-  MaterialThumb,
-  materialImageUrl,
-} from 'components/managers/materials/components/material-thumb';
+import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -38,6 +36,7 @@ import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import GenericPopover from 'ui/components/popover';
 import { Row, RowTotal } from 'ui/components/row';
+import { Section, SectionStack } from 'ui/components/section';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
@@ -45,6 +44,7 @@ import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef } from './piece-picker';
+import { wireInt } from './schema';
 import {
   createColorwayErrorMessage,
   recipeSaveErrorMessage,
@@ -82,6 +82,22 @@ const MEASURED_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_INTERLINING',
   'TECH_CARD_BOM_SECTION_INSULATION',
   'TECH_CARD_BOM_SECTION_THREAD',
+  'TECH_CARD_BOM_SECTION_TRIM',
+]);
+
+const PIECE_SECTIONS = new Set([
+  'TECH_CARD_BOM_SECTION_FABRIC',
+  'TECH_CARD_BOM_SECTION_LINING',
+  'TECH_CARD_BOM_SECTION_INTERLINING',
+  'TECH_CARD_BOM_SECTION_INSULATION',
+]);
+
+const GARMENT_SECTIONS = new Set([
+  'TECH_CARD_BOM_SECTION_THREAD',
+  'TECH_CARD_BOM_SECTION_HARDWARE',
+  'TECH_CARD_BOM_SECTION_TRIM',
+  'TECH_CARD_BOM_SECTION_DECORATION',
+  'TECH_CARD_BOM_SECTION_INTERLINING',
 ]);
 
 type BomLine = {
@@ -104,6 +120,7 @@ type BomLine = {
 
 type UsageDraft = {
   bomLineKey: string;
+  materialId: number;
   placement: string;
   color: string;
   pantone: string;
@@ -129,7 +146,7 @@ type LabDipDraft = {
 };
 
 // What the grid tile needs to know about a recipe that is only fully known inside its editor: the
-// LIVE material count (including rows added but not yet saved) and whether anything here is waiting
+// LIVE usage-row count (including rows added but not yet saved) and whether anything here is waiting
 // on the card's Save.
 type RecipeStatus = { count: number; staged: boolean };
 
@@ -160,18 +177,17 @@ async function readColorwayVersion(
   return ref?.lockVersion ?? res.techCard?.lockVersion ?? fallback;
 }
 
-// How many recipe lines this draft actually changes against what the server returned. The header's
-// label has to be a FACT, and the write is a FULL REPLACE — counting every line it sends would claim
-// work nobody did. Re-derived over the PIECE MODEL: a line is identified by the piece it sits on
-// (piece-bound), or by its fabric when its piece is gone (an orphan). Blank piece cards carry no
-// fabric, are not lines, and are never counted — so poking a piece and leaving it empty stages
-// nothing.
-function changedLines(base: UsageDraft[], next: UsageDraft[], pieceKeys: Set<string>): number {
-  const key = (u: UsageDraft) =>
-    pieceKeys.has(u.pieceLineKey) ? `p:${u.pieceLineKey}` : `o:${u.bomLineKey}`;
+// How many recipe rows this draft actually changes against what the server returned. The write is a
+// FULL REPLACE, but identity is the durable pair (piece_line_key || '', bom_line_key): the same slot
+// may be used on several pieces, and per-garment rows deliberately carry an empty piece key.
+function usageKey(u: Pick<UsageDraft, 'pieceLineKey' | 'bomLineKey'>): string {
+  return `${u.pieceLineKey || ''}\u0000${u.bomLineKey}`;
+}
+
+function changedLines(base: UsageDraft[], next: UsageDraft[]): number {
   const sig = (u: UsageDraft) => JSON.stringify(toWire(u));
-  const before = new Map(base.filter((u) => u.bomLineKey).map((u) => [key(u), sig(u)]));
-  const after = new Map(next.filter((u) => u.bomLineKey).map((u) => [key(u), sig(u)]));
+  const before = new Map(base.map((u) => [usageKey(u), sig(u)]));
+  const after = new Map(next.map((u) => [usageKey(u), sig(u)]));
   let n = 0;
   // added (no such key before) or edited (same key, different payload)
   for (const [k, s] of after) if (before.get(k) !== s) n += 1;
@@ -401,9 +417,11 @@ function measured(section?: string): boolean {
 // Resolve a stored usage into a draft. bom_line_key is the durable ref; fall back to resolving the
 // server bom_item_id against the saved BOM lines so a legacy usage still points at the right line.
 function fromRead(u: common_TechCardColorwayUsage, bomItems: BomLine[]): UsageDraft {
-  const byId = u.bomItemId ? bomItems.find((b) => b.id === u.bomItemId)?.lineKey : undefined;
+  const bomItemId = wireInt(u.bomItemId);
+  const byId = bomItemId ? bomItems.find((b) => b.id === bomItemId)?.lineKey : undefined;
   return {
     bomLineKey: u.bomLineKey || byId || '',
+    materialId: wireInt(u.materialId),
     placement: u.placement || '',
     color: u.color || '',
     pantone: u.pantone || '',
@@ -425,6 +443,10 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
     bomLineKey: d.bomLineKey || '',
     bomItemIndex: undefined,
     bomItemId: undefined,
+    // Presence is intentional: 0 clears a pin and means “inherit the slot default”. Omitting this
+    // on a full-replace write would preserve an old pin server-side instead of round-tripping the
+    // editor's current state.
+    materialId: d.materialId || 0,
     placement: d.placement.trim(),
     color: d.color.trim(),
     pantone: d.pantone.trim(),
@@ -491,12 +513,18 @@ const FIBRE_NAME_BY_CODE: Record<string, string> = (() => {
 function deriveComposition(
   usages: UsageDraft[],
   bomItems: BomLine[],
+  materials: common_Material[],
 ): { fibers: { name: string; percent: number }[]; skipped: number } {
   const totals = new Map<string, number>();
   let skipped = 0;
   for (const u of usages) {
     if (!u.bomLineKey) continue;
-    const line = bomItems.find((b) => b.lineKey === u.bomLineKey);
+    const slot = bomItems.find((b) => b.lineKey === u.bomLineKey);
+    const line = articleForUsage(
+      slot,
+      effectiveMaterial(u, slot, materials),
+      effectiveMaterialId(u, slot),
+    );
     const weight = Number(u.consumption) > 0 ? Number(u.consumption) : 1;
     const shares = parseCompositionCode(line?.composition);
     if (shares.length === 0) {
@@ -691,15 +719,21 @@ function materialClassLabel(c?: string): string {
 }
 
 // The material rendered as the SAME square article card the BOM tab shows — identical fields in the
-// same order (photo · section+тип pills · name · code · spec+colour) so a usage reads as the article
-// it points at, not as a dropdown value. For a legacy/unlinked line (no catalog material) it degrades
-// to the placeholder photo + the BOM line's own name, so the card still stands in for the article.
-function RecipeMaterialCard({ article }: { article?: BomLine }) {
-  const material = article?.material;
+// same order (photo · section+тип pills · name · code · spec+colour) so a usage reads as the concrete
+// effective article, never as the slot's role name. An unresolved id stays visible as `артикул #ID`.
+function RecipeMaterialCard({
+  slot,
+  material,
+  materialId,
+}: {
+  slot?: BomLine;
+  material?: common_Material;
+  materialId?: number;
+}) {
   const url = materialImageUrl(material);
-  const section = sectionShort(article?.section);
+  const section = sectionShort(slot?.section);
   const klass = materialClassLabel(material?.materialClass);
-  const name = material?.name?.trim() || article?.name?.trim() || 'new material';
+  const name = material?.name?.trim() || (materialId ? `артикул #${materialId}` : 'нет артикула');
   const code = material ? composeArticleFromMaterial(material, true) : '';
   const spec = material
     ? [materialSpec(material), material.color?.trim()].filter(Boolean).join(' · ')
@@ -737,182 +771,139 @@ function RecipeMaterialCard({ article }: { article?: BomLine }) {
   );
 }
 
-// The line's identifying CODE for the fabric picker: the linked catalog material's article code (or
-// its name), so a fabric reads by what it IS, not by a BOM row number. Falls back to the BOM line's
-// own name for a legacy/unlinked line.
-function fabricCode(b: BomLine): string {
-  const m = b.material;
-  if (m) return composeArticleFromMaterial(m, true) || m.name?.trim() || b.name?.trim() || 'material';
-  return b.name?.trim() || 'unnamed';
+function materialLabel(material: common_Material): string {
+  const code = material.code?.trim() || composeArticleFromMaterial(material, true);
+  return [material.name?.trim() || `#${wireInt(material.id)}`, code].filter(Boolean).join(' · ');
 }
 
-// The spec line under the code: the material's own spec (gsm · width · finish · tex …) plus its
-// colour. Empty for a legacy/unlinked line that has no catalog material behind it.
-function fabricSpecLine(b: BomLine): string {
-  const m = b.material;
-  if (!m) return '';
-  return [materialSpec(m), m.color?.trim()].filter(Boolean).join(' · ');
+function effectiveMaterialId(draft: UsageDraft, slot?: BomLine): number {
+  return draft.materialId || slot?.materialId || 0;
 }
 
-// The fabric chooser. Replaces the native <select> — a select can render only text, and a fabric is
-// picked by its photo + spec, not a row number. A field-box trigger (the shared `cell` box, so it
-// reads as a form field) shows the current pick as a thumbnail + code + spec; the menu is the app's
-// one popover shell (GenericPopover → Radix Popover: portalled so it escapes the card's overflow,
-// focus-trapped, Esc to close, click-outside to dismiss, focus restored to the trigger). Each option
-// is a real <button role="option"> — Tab reaches it, Enter/Space activates it. Respects canEdit by
-// disabling the trigger (a disabled Radix trigger cannot open).
-function FabricPicker({
+function effectiveMaterial(
+  draft: UsageDraft,
+  slot: BomLine | undefined,
+  materials: common_Material[],
+): common_Material | undefined {
+  const id = effectiveMaterialId(draft, slot);
+  return id ? materials.find((m) => wireInt(m.id) === id) : undefined;
+}
+
+// Cost/composition previews must follow the effective concrete article, not the slot's default
+// snapshot. Costing-gated price data can be absent; in that case the server remains authoritative.
+function articleForUsage(
+  slot: BomLine | undefined,
+  material: common_Material | undefined,
+  materialId: number,
+): BomLine | undefined {
+  if (!slot) return undefined;
+  if (!material) {
+    const pinnedOutsideCatalog = materialId > 0 && materialId !== slot.materialId;
+    return {
+      ...slot,
+      material: undefined,
+      unitPrice: pinnedOutsideCatalog ? '' : slot.unitPrice,
+      currency: pinnedOutsideCatalog ? '' : slot.currency,
+      composition: pinnedOutsideCatalog ? '' : slot.composition,
+    };
+  }
+  const isDefault = wireInt(material.id) === slot.materialId;
+  return {
+    ...slot,
+    material,
+    materialId: wireInt(material.id),
+    unit: material.unit?.trim() || slot.unit,
+    unitPrice: decimalToInput(material.latestPrice?.price) || (isDefault ? slot.unitPrice : ''),
+    currency: material.latestPrice?.currency || (isDefault ? slot.currency : ''),
+    composition: materialCompositionCode(material) || (isDefault ? slot.composition : ''),
+  };
+}
+
+function SlotSelect({
   value,
-  bomItems,
+  slots,
+  allowedSections,
+  usedKeys,
   canEdit,
   onChange,
 }: {
   value: string;
-  bomItems: BomLine[];
+  slots: BomLine[];
+  allowedSections: Set<string>;
+  usedKeys: Set<string>;
   canEdit: boolean;
-  onChange: (patch: Partial<UsageDraft>) => void;
+  onChange: (bomLineKey: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const selected = value ? bomItems.find((b) => b.lineKey === value) : undefined;
-  // A stored key that no longer resolves to a live BOM line. Kept visible AND kept as the selection
-  // (we never rewrite draft.bomLineKey unless the operator picks something), so a save never silently
-  // drops it — the same guarantee the old <select>'s "(unknown / removed material)" option gave.
-  const unknown = !!value && !selected;
-
-  const pick = (bomLineKey: string) => {
-    onChange({ bomLineKey });
-    setOpen(false);
-  };
-
+  const selected = value ? slots.find((slot) => slot.lineKey === value) : undefined;
+  const eligible = slots.filter(
+    (slot) => allowedSections.has(slot.section ?? '') || slot.lineKey === value,
+  );
   return (
-    <GenericPopover
-      open={open && canEdit}
-      onOpenChange={setOpen}
-      noTail
-      title='ткань'
-      className='w-[280px]'
-      triggerProps={{
-        disabled: !canEdit,
-        'aria-label': 'ткань',
-        className: cn(cell, 'flex items-center gap-2 text-left'),
-      }}
-      openElement={(isOpen) => (
-        <>
-          {selected ? (
-            <MaterialThumb material={selected.material} size='sm' className='h-5 w-5' />
-          ) : null}
-          <span className='min-w-0 flex-1'>
-            {selected ? (
-              <>
-                <Text
-                  component='span'
-                  size='control'
-                  className='block truncate font-mono tabular-nums'
-                >
-                  {fabricCode(selected)}
-                </Text>
-                {fabricSpecLine(selected) && (
-                  <Text component='span' size='micro' variant='label' className='block truncate'>
-                    {fabricSpecLine(selected)}
-                  </Text>
-                )}
-              </>
-            ) : (
-              <Text component='span' variant='label' className='block truncate'>
-                {unknown ? '(unknown / removed material)' : '— выбрать ткань —'}
-              </Text>
-            )}
-          </span>
-          <Text component='span' variant='inactive' className='shrink-0'>
-            {isOpen ? '▴' : '▾'}
-          </Text>
-        </>
-      )}
+    <select
+      className={cell}
+      value={value}
+      disabled={!canEdit}
+      aria-label='слот'
+      onChange={(e) => onChange(e.target.value)}
     >
-      {/* full-bleed list inside the popover body's px-2 py-1.5 padding */}
-      <div role='listbox' aria-label='ткань' className='-mx-2 -my-1.5'>
-        {/* clear — this piece takes no fabric */}
-        <button
-          type='button'
-          role='option'
-          aria-selected={!value}
-          onClick={() => pick('')}
-          className={cn(
-            'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left text-labelColor',
-            !value && 'bg-bgZebra',
-          )}
+      {!value && <option value=''>— выбрать слот —</option>}
+      {value && !selected && <option value={value}>(unknown / removed slot)</option>}
+      {eligible.map((slot) => (
+        <option
+          key={slot.lineKey}
+          value={slot.lineKey}
+          disabled={slot.lineKey !== value && usedKeys.has(slot.lineKey ?? '')}
         >
-          <span className='flex h-8 w-8 shrink-0 items-center justify-center'>✕</span>
-          <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-            — no fabric yet —
-          </Text>
-        </button>
+          {sectionShort(slot.section)} · {slot.name?.trim() || 'без названия'}
+          {!allowedSections.has(slot.section ?? '') ? ' (не для этой группы)' : ''}
+        </option>
+      ))}
+    </select>
+  );
+}
 
-        {/* the stored-but-removed material, surfaced as the current selection so it is never dropped */}
-        {unknown && (
-          <div
-            role='option'
-            aria-selected
-            className='flex w-full items-center gap-2 border-b border-hairline bg-bgZebra px-2 py-1 text-left'
-          >
-            <MaterialThumb size='sm' className='h-8 w-8' />
-            <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-              (unknown / removed material)
-            </Text>
-            <Text component='span' variant='inactive' className='shrink-0'>
-              ✓
-            </Text>
-          </div>
-        )}
-
-        {bomItems.length === 0 ? (
-          <div className='px-2 py-2.5'>
-            <Text variant='label' size='micro'>
-              no fabric lines on this tech card
-            </Text>
-          </div>
-        ) : (
-          bomItems.map((b) => {
-            const current = value === b.lineKey;
-            const spec = fabricSpecLine(b);
-            return (
-              <button
-                key={b.lineKey}
-                type='button'
-                role='option'
-                aria-selected={current}
-                onClick={() => pick(b.lineKey ?? '')}
-                className={cn(
-                  'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
-                  current && 'bg-bgZebra',
-                )}
-              >
-                <MaterialThumb material={b.material} size='sm' className='h-8 w-8' />
-                <span className='min-w-0 flex-1'>
-                  <Text
-                    component='span'
-                    size='control'
-                    className='block truncate font-mono tabular-nums'
-                  >
-                    {fabricCode(b)}
-                  </Text>
-                  {spec && (
-                    <Text component='span' size='micro' variant='label' className='block truncate'>
-                      {spec}
-                    </Text>
-                  )}
-                </span>
-                {current && (
-                  <Text component='span' variant='inactive' className='shrink-0'>
-                    ✓
-                  </Text>
-                )}
-              </button>
-            );
-          })
-        )}
-      </div>
-    </GenericPopover>
+function ArticlePinSelect({
+  draft,
+  slot,
+  materials,
+  canEdit,
+  onChange,
+}: {
+  draft: UsageDraft;
+  slot?: BomLine;
+  materials: common_Material[];
+  canEdit: boolean;
+  onChange: (materialId: number) => void;
+}) {
+  const filtered = materials.filter(
+    (material) =>
+      material.section === slot?.section &&
+      (!material.archived || wireInt(material.id) === draft.materialId),
+  );
+  const pinned = draft.materialId
+    ? materials.find((material) => wireInt(material.id) === draft.materialId)
+    : undefined;
+  const missingPin = draft.materialId > 0 && !pinned;
+  const pinOutsideSection = !!pinned && pinned.section !== slot?.section;
+  return (
+    <select
+      className={cell}
+      value={draft.materialId}
+      disabled={!canEdit || !slot}
+      aria-label='артикул колорвея'
+      onChange={(e) => onChange(wireInt(e.target.value))}
+    >
+      <option value={0}>default — {slot?.material?.name?.trim() || 'нет'}</option>
+      {missingPin && <option value={draft.materialId}>(unknown / removed article)</option>}
+      {pinned && pinOutsideSection && (
+        <option value={draft.materialId}>{materialLabel(pinned)} (не для секции)</option>
+      )}
+      {filtered.map((material) => (
+        <option key={wireInt(material.id)} value={wireInt(material.id)}>
+          {materialLabel(material)}
+        </option>
+      ))}
+    </select>
   );
 }
 
@@ -921,6 +912,7 @@ function FabricPicker({
 function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
   return {
     bomLineKey: '',
+    materialId: 0,
     placement,
     color: '',
     pantone: '',
@@ -933,118 +925,237 @@ function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
   };
 }
 
-// Stable-enough identity for an orphan usage in the session keep-set: its fabric, else its dead
-// piece key.
-const orphanKey = (u: UsageDraft) => u.bomLineKey || u.pieceLineKey || '∅';
+// Orphan triage follows the same durable row identity as dirty tracking. A removed piece can still
+// carry several slots, so neither the piece key nor the BOM key is unique by itself.
+const orphanKey = (u: UsageDraft) => usageKey(u);
 
-// ONE CARD PER DECLARED CUT PIECE. The header NAMES the piece and is fixed — the recipe assigns a
-// fabric TO a piece, it never chooses which piece (that is the PIECES tab). A piece takes exactly one
-// fabric, so the picker is a single select whose options carry the material's own meta; the chosen
-// article renders as the same square BOM card the catalogue shows, and the consumption controls
-// below are the measured/counted pair, unchanged.
-function PieceRecipeCard({
-  piece,
+type IndexedUsage = { draft: UsageDraft; index: number };
+
+function SlotUsageRow({
   draft,
   bomItems,
+  allowedSections,
+  usedKeys,
+  materials,
   sizeIds,
   sizeQuantities,
   sizeNameById,
   canEdit,
   onChange,
+  onRemove,
 }: {
-  piece: PieceRef;
   draft: UsageDraft;
   bomItems: BomLine[];
+  allowedSections: Set<string>;
+  usedKeys: Set<string>;
+  materials: common_Material[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
   onChange: (patch: Partial<UsageDraft>) => void;
+  onRemove: () => void;
 }) {
-  const article = draft.bomLineKey
-    ? bomItems.find((b) => b.lineKey === draft.bomLineKey)
+  const slot = draft.bomLineKey
+    ? bomItems.find((item) => item.lineKey === draft.bomLineKey)
     : undefined;
-  const isMeasured = measured(article?.section);
-  const unit = article?.unit?.trim() || '';
-  const hasFabric = !!draft.bomLineKey;
+  const material = effectiveMaterial(draft, slot, materials);
+  const materialId = effectiveMaterialId(draft, slot);
+  const article = articleForUsage(slot, material, materialId);
+  const isMeasured = measured(slot?.section);
+  const unit = article?.unit?.trim() || slot?.unit?.trim() || '';
+  const missingArticle = !!slot && materialId === 0;
 
   return (
-    <div className='flex flex-col gap-2 border border-borderColor p-2.5'>
-      {/* HEADER — the cut piece, fixed. No piece picker: this card IS that piece's line. */}
-      <div className='flex items-center justify-between gap-2'>
-        <Text size='control' component='span' className='min-w-0 truncate font-bold uppercase'>
-          {piece.name?.trim() || 'без названия'}
-        </Text>
-        {!hasFabric && <Pill tone='mut'>no fabric yet</Pill>}
+    <div className='flex flex-col gap-3 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-start'>
+      <div className='w-full sm:w-28 sm:shrink-0'>
+        <RecipeMaterialCard slot={slot} material={material} materialId={materialId} />
       </div>
-
-      <div className='flex flex-col gap-3 sm:flex-row sm:items-start'>
-        {/* LEFT — the chosen fabric AS the square BOM article card (photo · section/тип · name · code ·
-            spec+colour), read-only. It shows WHAT this piece is cut from; the picker that changes it
-            now lives on the right, with the rest of the controls. */}
-        <div className='w-full sm:w-40 sm:shrink-0'>
-          <RecipeMaterialCard article={article} />
-        </div>
-
-        {/* RIGHT — every picker for this piece. First WHICH catalog fabric it is cut from (a proper
-            popover picker showing each option's photo + code + spec, which a native select cannot),
-            then HOW MUCH of it: measured articles cost by a rate (per-size gradable), counted ones by
-            a flat quantity (M14) — the consumption controls are unchanged. */}
-        <div className='flex min-w-0 flex-1 flex-col gap-3'>
-          <div className='flex flex-col gap-1'>
-            <FieldLabel>ткань</FieldLabel>
-            <FabricPicker
-              value={draft.bomLineKey}
-              bomItems={bomItems}
-              canEdit={canEdit}
-              onChange={onChange}
-            />
-          </div>
-
-          {isMeasured ? (
-            <UsagePerSizeLocal
-              draft={draft}
-              sizeIds={sizeIds}
-              sizeQuantities={sizeQuantities}
-              article={article}
-              canEdit={canEdit}
-              sizeNameById={sizeNameById}
-              onChange={onChange}
-            />
-          ) : (
-            <label className='flex flex-col gap-1'>
-              <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
-              <input
-                className={cell}
-                inputMode='decimal'
-                disabled={!canEdit}
-                value={draft.quantity}
-                onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
+      <div className='flex min-w-0 flex-1 flex-col gap-2.5'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          {slot?.section ? <Pill tone='mut'>{sectionShort(slot.section)}</Pill> : <span />}
+          {canEdit && (
+            <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
+              unlink
+            </Button>
           )}
         </div>
-      </div>
 
-      {/* server-computed spend — present only with costing:read (stripped otherwise) */}
-      {(draft.lineTotal || draft.sizeRunTotal) && (
-        <Text size='micro' variant='label'>
-          {draft.lineTotal ? `per garment ${draft.lineTotal}` : ''}
-          {draft.lineTotal && draft.sizeRunTotal ? ' · ' : ''}
-          {draft.sizeRunTotal ? `run ${draft.sizeRunTotal}` : ''}
-        </Text>
+        <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
+          <label className='flex min-w-0 flex-col gap-1'>
+            <FieldLabel>слот</FieldLabel>
+            <SlotSelect
+              value={draft.bomLineKey}
+              slots={bomItems}
+              allowedSections={allowedSections}
+              usedKeys={usedKeys}
+              canEdit={canEdit}
+              onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0 })}
+            />
+          </label>
+          <label className='flex min-w-0 flex-col gap-1'>
+            <FieldLabel>артикул колорвея</FieldLabel>
+            <ArticlePinSelect
+              draft={draft}
+              slot={slot}
+              materials={materials}
+              canEdit={canEdit}
+              onChange={(materialId) => onChange({ materialId })}
+            />
+          </label>
+        </div>
+
+        {missingArticle && <Pill tone='warn'>нет артикула — блокер производства</Pill>}
+
+        <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
+          <label className='flex min-w-0 flex-col gap-1'>
+            <FieldLabel>placement</FieldLabel>
+            <input
+              className={cell}
+              disabled={!canEdit}
+              value={draft.placement}
+              onChange={(e) => onChange({ placement: e.target.value })}
+            />
+          </label>
+          <label className='flex min-w-0 flex-col gap-1'>
+            <FieldLabel>colour</FieldLabel>
+            <input
+              className={cell}
+              disabled={!canEdit}
+              value={draft.color}
+              onChange={(e) => onChange({ color: e.target.value })}
+            />
+          </label>
+          <label className='flex min-w-0 flex-col gap-1'>
+            <FieldLabel>pantone</FieldLabel>
+            <input
+              className={cell}
+              disabled={!canEdit}
+              value={draft.pantone}
+              onChange={(e) => onChange({ pantone: e.target.value })}
+            />
+          </label>
+        </div>
+
+        {isMeasured ? (
+          <UsagePerSizeLocal
+            draft={draft}
+            sizeIds={sizeIds}
+            sizeQuantities={sizeQuantities}
+            article={article}
+            canEdit={canEdit}
+            sizeNameById={sizeNameById}
+            onChange={onChange}
+          />
+        ) : (
+          <label className='flex flex-col gap-1'>
+            <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
+            <input
+              className={cell}
+              inputMode='decimal'
+              disabled={!canEdit}
+              value={draft.quantity}
+              onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
+            />
+          </label>
+        )}
+
+        {(draft.lineTotal || draft.sizeRunTotal) && (
+          <Text size='micro' variant='label'>
+            {draft.lineTotal ? `per garment ${draft.lineTotal}` : ''}
+            {draft.lineTotal && draft.sizeRunTotal ? ' · ' : ''}
+            {draft.sizeRunTotal ? `run ${draft.sizeRunTotal}` : ''}
+          </Text>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// One ruled group per declared cut piece. The group owns any number of distinct slot usages; rows
+// are separated by #e6e6e6 hairlines, while the piece label uses the heavier subgroup rule.
+function PieceRecipeCard({
+  piece,
+  rows,
+  bomItems,
+  materials,
+  sizeIds,
+  sizeQuantities,
+  sizeNameById,
+  canEdit,
+  canAdd,
+  onAdd,
+  onChange,
+  onRemove,
+}: {
+  piece: PieceRef;
+  rows: IndexedUsage[];
+  bomItems: BomLine[];
+  materials: common_Material[];
+  sizeIds: number[];
+  sizeQuantities: { sizeId?: number; orderQty?: number }[];
+  sizeNameById: Map<number, string>;
+  canEdit: boolean;
+  canAdd: boolean;
+  onAdd: () => void;
+  onChange: (index: number, patch: Partial<UsageDraft>) => void;
+  onRemove: (index: number) => void;
+}) {
+  const usedKeys = new Set(rows.map(({ draft }) => draft.bomLineKey).filter(Boolean));
+
+  return (
+    <div>
+      <GroupLabel
+        action={
+          canEdit ? (
+            <Button type='button' variant='secondary' size='xs' disabled={!canAdd} onClick={onAdd}>
+              + добавить материал к детали
+            </Button>
+          ) : undefined
+        }
+      >
+        {piece.name?.trim() || 'без названия'}
+      </GroupLabel>
+      {rows.length === 0 ? (
+        <Row
+          tone='label'
+          label={
+            <Text size='micro' variant='label' component='span'>
+              материалы не назначены
+            </Text>
+          }
+        />
+      ) : (
+        <div className='divide-y divide-hairline'>
+          {rows.map(({ draft, index }) => (
+            <SlotUsageRow
+              key={usageKey(draft)}
+              draft={draft}
+              bomItems={bomItems}
+              allowedSections={PIECE_SECTIONS}
+              usedKeys={usedKeys}
+              materials={materials}
+              sizeIds={sizeIds}
+              sizeQuantities={sizeQuantities}
+              sizeNameById={sizeNameById}
+              canEdit={canEdit}
+              onChange={(patch) => onChange(index, patch)}
+              onRemove={() => onRemove(index)}
+            />
+          ))}
+        </div>
       )}
     </div>
   );
 }
 
-// A usage whose piece is no longer declared (removed on the PIECES tab, a legacy/empty pieceLineKey,
-// or a duplicate of a piece that already has a card). Surfaced rather than silently dropped: KEEP
-// retains it in the full-replace save exactly as it is, UNLINK removes it from the recipe. Read-only
-// — this is triage, not editing.
+// A usage whose non-empty piece key no longer resolves on the PIECES tab. Empty piece keys belong in
+// «на изделие», and additional slots on a live piece belong in that piece's list. KEEP retains the
+// orphan in the full-replace save exactly as-is; UNLINK removes it.
 function OrphanRecipeCard({
   draft,
   bomItems,
+  materials,
   canEdit,
   kept,
   onKeep,
@@ -1052,14 +1163,17 @@ function OrphanRecipeCard({
 }: {
   draft: UsageDraft;
   bomItems: BomLine[];
+  materials: common_Material[];
   canEdit: boolean;
   kept: boolean;
   onKeep: () => void;
   onUnlink: () => void;
 }) {
-  const article = draft.bomLineKey
+  const slot = draft.bomLineKey
     ? bomItems.find((b) => b.lineKey === draft.bomLineKey)
     : undefined;
+  const material = effectiveMaterial(draft, slot, materials);
+  const materialId = effectiveMaterialId(draft, slot);
   const consumption =
     draft.sizeConsumptions.length > 0
       ? 'per-size consumption'
@@ -1070,7 +1184,7 @@ function OrphanRecipeCard({
           : '';
 
   return (
-    <div className='flex flex-col gap-2 border border-borderColor p-2.5'>
+    <div className='flex flex-col gap-2 border-b border-hairline py-2 last:border-b-0'>
       <div className='flex items-center justify-between gap-2'>
         <Text size='micro' variant='label' component='span' className='min-w-0 truncate uppercase'>
           {draft.placement?.trim() || 'unassigned'}
@@ -1079,11 +1193,11 @@ function OrphanRecipeCard({
       </div>
       <div className='flex flex-col gap-3 sm:flex-row sm:items-start'>
         <div className='w-full sm:w-40 sm:shrink-0'>
-          <RecipeMaterialCard article={article} />
+          <RecipeMaterialCard slot={slot} material={material} materialId={materialId} />
         </div>
         <div className='flex min-w-0 flex-1 flex-col gap-2'>
           <Text size='micro' variant='label'>
-            This fabric points at a cut piece that is no longer on the PIECES tab.
+            This slot points at a cut piece that is no longer on the PIECES tab.
           </Text>
           {consumption && (
             <Text size='micro' variant='label'>
@@ -1537,6 +1651,7 @@ function CompositionBar({ fibers, skipped }: ReturnType<typeof deriveComposition
 function ColorwayRecipeEditor({
   colorway,
   bomItems,
+  materials,
   pieces,
   sizeIds,
   sizeQuantities,
@@ -1549,6 +1664,7 @@ function ColorwayRecipeEditor({
 }: {
   colorway: common_AdminColorwayRef;
   bomItems: BomLine[];
+  materials: common_Material[];
   pieces: PieceRef[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
@@ -1591,47 +1707,49 @@ function ColorwayRecipeEditor({
     setDirty(true);
   }, [staging, colorwayId, stagingKey]);
 
-  // The recipe is now PIECE-DRIVEN: one card per declared cut piece, its usage matched by
-  // pieceLineKey. pieceKeySet is the membership test that classifies every draft as piece-bound or
-  // orphaned.
+  // A declared piece claims EVERY usage that names it. Empty piece_line_key is a first-class
+  // per-garment usage; only a non-empty key that no longer resolves is orphaned.
   const pieceKeySet = useMemo(() => new Set(pieces.map((p) => p.lineKey)), [pieces]);
-  // The FIRST usage that names each declared piece owns that piece's card. A second usage naming the
-  // same piece (legacy dup) falls through to the orphan group rather than being silently re-saved
-  // behind a card that never shows it.
-  const usageIndexByPiece = useMemo(() => {
-    const m = new Map<string, number>();
+  const usagesByPiece = useMemo(() => {
+    const m = new Map<string, IndexedUsage[]>();
     usages.forEach((u, i) => {
-      if (u.pieceLineKey && pieceKeySet.has(u.pieceLineKey) && !m.has(u.pieceLineKey))
-        m.set(u.pieceLineKey, i);
+      if (!u.pieceLineKey || !pieceKeySet.has(u.pieceLineKey)) return;
+      const rows = m.get(u.pieceLineKey) ?? [];
+      rows.push({ draft: u, index: i });
+      m.set(u.pieceLineKey, rows);
     });
     return m;
   }, [usages, pieceKeySet]);
-  const boundIndices = useMemo(() => new Set(usageIndexByPiece.values()), [usageIndexByPiece]);
-  // Usages no declared piece claims: a piece removed on the PIECES tab, a legacy/empty pieceLineKey,
-  // or a duplicate. Surfaced, never dropped.
+  const garmentUsages = useMemo<IndexedUsage[]>(
+    () =>
+      usages
+        .map((draft, index) => ({ draft, index }))
+        .filter(({ draft }) => !draft.pieceLineKey),
+    [usages],
+  );
   const orphans = useMemo(
-    () => usages.map((u, i) => ({ u, i })).filter(({ i }) => !boundIndices.has(i)),
-    [usages, boundIndices],
+    () =>
+      usages
+        .map((u, i) => ({ u, i }))
+        .filter(({ u }) => !!u.pieceLineKey && !pieceKeySet.has(u.pieceLineKey)),
+    [usages, pieceKeySet],
   );
 
-  // What a save actually sends: every usage that names a fabric. A piece with no fabric emits
-  // nothing — the full-replace simply omits it.
-  const saveUsages = useMemo(() => usages.filter((u) => u.bomLineKey), [usages]);
+  // Full replace means full round-trip: no read usage is filtered out. New rows are created with the
+  // first unused eligible slot, so the editor never manufactures an empty bom_line_key itself.
+  const saveUsages = usages;
 
   // Dirty says a control was touched; STAGED says the recipe would actually write something else, and
   // `lines` is what the header's label counts — re-derived over the piece model. Typing a value and
   // typing it back must not leave the header claiming work that is not there.
-  const lines = useMemo(
-    () => changedLines(baseline, usages, pieceKeySet),
-    [baseline, usages, pieceKeySet],
-  );
+  const lines = useMemo(() => changedLines(baseline, usages), [baseline, usages]);
   const staged = dirty && lines > 0;
   // Memoised so re-staging for an unrelated reason (a lock version, a title) hands the store the SAME
   // snapshot object and it can skip the re-render — the whole draft list travels, so blank piece
   // cards and kept orphans both survive a tab refresh.
   const snapshot = useMemo<RecipeSnapshot>(() => ({ usages }), [usages]);
 
-  // Feed the grid tile: how many pieces have a fabric, and whether anything here is waiting on the Save.
+  // Feed the grid tile: total usage rows and whether anything here is waiting on the Save.
   useEffect(() => {
     onStatus(colorwayId, { count: saveUsages.length, staged: staged || labDipStaged });
   }, [colorwayId, saveUsages.length, staged, labDipStaged, onStatus]);
@@ -1640,15 +1758,27 @@ function ColorwayRecipeEditor({
   // the save either way — this only dismisses the keep/unlink prompt.
   const [keptKeys, setKeptKeys] = useState<Set<string>>(() => new Set());
 
-  // Write a piece's card back into the flat draft list, CREATING the usage on first touch so a piece
-  // that had no usage becomes one the moment a fabric (or a consumption) is set.
-  const patchPiece = (piece: PieceRef, patch: Partial<UsageDraft>) => {
+  const patchUsage = (index: number, patch: Partial<UsageDraft>) => {
     setDirty(true);
-    setUsages((prev) => {
-      const i = prev.findIndex((u) => u.pieceLineKey === piece.lineKey);
-      if (i >= 0) return prev.map((u, idx) => (idx === i ? { ...u, ...patch } : u));
-      return [...prev, { ...blankDraft(piece.lineKey, piece.name?.trim() || ''), ...patch }];
-    });
+    setUsages((prev) => prev.map((usage, i) => (i === index ? { ...usage, ...patch } : usage)));
+  };
+  const addUsage = (
+    pieceLineKey: string,
+    placement: string,
+    allowedSections: Set<string>,
+    rows: IndexedUsage[],
+  ) => {
+    const used = new Set(rows.map(({ draft }) => draft.bomLineKey).filter(Boolean));
+    const slot = bomItems.find(
+      (item) =>
+        !!item.lineKey && allowedSections.has(item.section ?? '') && !used.has(item.lineKey),
+    );
+    if (!slot?.lineKey) return;
+    setDirty(true);
+    setUsages((prev) => [
+      ...prev,
+      { ...blankDraft(pieceLineKey, placement), bomLineKey: slot.lineKey ?? '' },
+    ]);
   };
   const removeUsage = (i: number) => {
     setDirty(true);
@@ -1658,9 +1788,8 @@ function ColorwayRecipeEditor({
 
   // The panel's mutation, unwrapped: it THROWS instead of toasting, because the header's one save is
   // what reports the outcome now — it needs the rejection to name this panel in the partial-failure
-  // banner and to keep everything queued after it staged (19.3). A blank piece card carries no fabric
-  // and is simply not part of `saveUsages`, so there is no half-filled row to refuse — a piece with
-  // no fabric is a valid state, not an error.
+  // banner and to keep everything queued after it staged (19.3). Every read row is round-tripped;
+  // add actions create rows on an eligible slot immediately, so the client adds no blank refs.
   async function commitRecipe() {
     if (!colorwayId) return;
     try {
@@ -1710,94 +1839,154 @@ function ColorwayRecipeEditor({
     techCardId,
   ]);
 
-  const derived = useMemo(() => deriveComposition(usages, bomItems), [usages, bomItems]);
+  const derived = useMemo(
+    () => deriveComposition(usages, bomItems, materials),
+    [usages, bomItems, materials],
+  );
+  const garmentUsedKeys = new Set(
+    garmentUsages.map(({ draft }) => draft.bomLineKey).filter(Boolean),
+  );
+  const canAddTo = (allowedSections: Set<string>, rows: IndexedUsage[]) => {
+    const used = new Set(rows.map(({ draft }) => draft.bomLineKey).filter(Boolean));
+    return bomItems.some(
+      (item) =>
+        !!item.lineKey && allowedSections.has(item.section ?? '') && !used.has(item.lineKey),
+    );
+  };
 
   return (
-    <div className='flex flex-col gap-4'>
-      <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
-      <SectionHeader
-        title={`${title} · рецепт`}
+    <SectionStack>
+      <Section
+        title={`${title} · детали`}
         question={[
           colorway.baseSku,
           `${pieces.length} ${pieces.length === 1 ? 'piece' : 'pieces'}`,
-          `${saveUsages.length} with fabric`,
+          `${saveUsages.length} material rows`,
         ]
           .filter(Boolean)
           .join(' · ')}
         action={staged ? <Pill tone='attention'>staged</Pill> : undefined}
-      />
-
-      {bomItems.length === 0 && (
-        <Text size='micro' variant='label'>
-          add BOM articles on the BOM tab first — then assign one to each piece here
-        </Text>
-      )}
-
-      {pieces.length === 0 ? (
-        <CalloutBox tone='note'>
-          <Text size='micro' component='span'>
-            Declare cut pieces on the PIECES tab — the recipe assigns a fabric to each piece.
+      >
+        {bomItems.length === 0 && (
+          <Text size='micro' variant='label'>
+            add BOM slots on the BOM tab first, then assign them to pieces or the whole garment here
           </Text>
-        </CalloutBox>
-      ) : (
-        <div className='flex flex-col gap-1.5'>
-          {pieces.map((piece) => {
-            const idx = usageIndexByPiece.get(piece.lineKey);
-            const draft =
-              idx != null ? usages[idx] : blankDraft(piece.lineKey, piece.name?.trim() || '');
+        )}
+
+        {pieces.length === 0 ? (
+          <CalloutBox tone='note'>
+            <Text size='micro' component='span'>
+              Declare cut pieces on the PIECES tab to assign piece-level material slots.
+            </Text>
+          </CalloutBox>
+        ) : (
+          pieces.map((piece) => {
+            const rows = usagesByPiece.get(piece.lineKey) ?? [];
             return (
               <PieceRecipeCard
                 key={piece.lineKey}
                 piece={piece}
-                draft={draft}
+                rows={rows}
                 bomItems={bomItems}
+                materials={materials}
                 sizeIds={sizeIds}
                 sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}
                 canEdit={canEdit}
-                onChange={(patch) => patchPiece(piece, patch)}
+                canAdd={canAddTo(PIECE_SECTIONS, rows)}
+                onAdd={() =>
+                  addUsage(
+                    piece.lineKey,
+                    piece.name?.trim() || '',
+                    PIECE_SECTIONS,
+                    rows,
+                  )
+                }
+                onChange={patchUsage}
+                onRemove={removeUsage}
               />
             );
-          })}
-        </div>
-      )}
+          })
+        )}
+
+        <CompositionBar {...derived} />
+
+        {canEdit && staged && (
+          <Text size='micro' variant='label'>
+            {save.isPending ? 'saving…' : 'staged'} · included in the card’s Save
+          </Text>
+        )}
+      </Section>
+
+      <Section
+        title={`${title} · на изделие`}
+        question='thread, hardware, trim, decoration and whole-garment interlining'
+        action={
+          canEdit ? (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              disabled={!canAddTo(GARMENT_SECTIONS, garmentUsages)}
+              onClick={() => addUsage('', '', GARMENT_SECTIONS, garmentUsages)}
+            >
+              + добавить материал на изделие
+            </Button>
+          ) : undefined
+        }
+      >
+        {garmentUsages.length === 0 ? (
+          <Row
+            tone='label'
+            label={
+              <Text size='micro' variant='label' component='span'>
+                материалы на изделие не назначены
+              </Text>
+            }
+          />
+        ) : (
+          <div className='divide-y divide-hairline'>
+            {garmentUsages.map(({ draft, index }) => (
+              <SlotUsageRow
+                key={usageKey(draft)}
+                draft={draft}
+                bomItems={bomItems}
+                allowedSections={GARMENT_SECTIONS}
+                usedKeys={garmentUsedKeys}
+                materials={materials}
+                sizeIds={sizeIds}
+                sizeQuantities={sizeQuantities}
+                sizeNameById={sizeNameById}
+                canEdit={canEdit}
+                onChange={(patch) => patchUsage(index, patch)}
+                onRemove={() => removeUsage(index)}
+              />
+            ))}
+          </div>
+        )}
+      </Section>
 
       {orphans.length > 0 && (
-        <div className='flex flex-col gap-1.5'>
-          <GroupLabel>unassigned · piece removed</GroupLabel>
-          <Text size='micro' variant='label'>
-            These fabrics point at a cut piece that is no longer declared — keep them in the recipe or
-            unlink them.
-          </Text>
+        <Section
+          title={`${title} · unassigned`}
+          question='piece removed, keep the usage as-is or unlink it'
+        >
           {orphans.map(({ u, i }) => (
             <OrphanRecipeCard
-              key={`orphan-${i}`}
+              key={usageKey(u)}
               draft={u}
               bomItems={bomItems}
+              materials={materials}
               canEdit={canEdit}
               kept={keptKeys.has(orphanKey(u))}
               onKeep={() => keepOrphan(u)}
               onUnlink={() => removeUsage(i)}
             />
           ))}
-        </div>
+        </Section>
       )}
 
-      <CompositionBar {...derived} />
-
-      {/* No save button of its own any more: the recipe write is queued behind the card's one Save,
-          which is what reports whether it landed. */}
-      {canEdit && staged && (
-        <Text size='micro' variant='label'>
-          {save.isPending ? 'saving…' : 'staged'} · included in the card’s Save
-        </Text>
-      )}
-      </div>
-
-      {/* Dye approval is a SEPARATE concern from the material recipe — its OWN card and its own RPC,
-          staged separately so a lab-dip verdict and a recipe edit are two lines in the header. */}
-      <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-4'>
-        <SectionHeader title={`${title} · dye · lab-dip`} question={colorway.baseSku} />
+      <Section title={`${title} · dye · lab-dip`} question={colorway.baseSku}>
         <LabDipTimeline
           colorway={colorway}
           techCardId={techCardId}
@@ -1806,8 +1995,8 @@ function ColorwayRecipeEditor({
           swatchHex={swatchHex}
           onStagedChange={setLabDipStaged}
         />
-      </div>
-    </div>
+      </Section>
+    </SectionStack>
   );
 }
 
@@ -1816,21 +2005,18 @@ function ColorwayRecipeEditor({
 function ColorwayTile({
   colorway,
   hex,
-  bomCount,
   status,
   selected,
   onSelect,
 }: {
   colorway: common_AdminColorwayRef;
   hex?: string;
-  bomCount: number;
   status?: RecipeStatus;
   selected: boolean;
   onSelect: () => void;
 }) {
   const code = colorwayTitle(colorway);
   const count = status?.count ?? colorway.usages?.length ?? 0;
-  const completeness = bomCount > 0 ? `${count}/${bomCount}` : String(count);
 
   return (
     <Tile
@@ -1850,10 +2036,10 @@ function ColorwayTile({
         {/* A colourway with no recipe is red right here in the grid — you should never have to open
             one to find out it is empty. */}
         {count === 0 ? (
-          <Pill tone='warn'>{completeness}</Pill>
+          <Pill tone='warn'>0</Pill>
         ) : (
           <Text size='micro' variant='label' component='span' className='tabular-nums'>
-            {completeness}
+            {count}
           </Text>
         )}
         {status?.staged && <Pill tone='attention'>staged</Pill>}
@@ -1990,11 +2176,12 @@ export function ColorwayRecipes({
   // recipe usage can render the SAME square article card the BOM tab shows (photo · code · spec).
   // section '' = all sections; includeArchived so a line linked to an archived material still resolves.
   const { data: materialsData } = useMaterials('', true);
+  const materials = useMemo(() => materialsData?.materials ?? [], [materialsData?.materials]);
   const materialById = useMemo(() => {
     const m = new Map<number, common_Material>();
-    for (const mat of materialsData?.materials ?? []) if (mat.id != null) m.set(Number(mat.id), mat);
+    for (const mat of materials) if (wireInt(mat.id)) m.set(wireInt(mat.id), mat);
     return m;
-  }, [materialsData?.materials]);
+  }, [materials]);
   // Enrich BOM lines with the fields the recipe editor now needs: price/wastage/unit for the run-cost
   // preview (per-size grading), the composition cell for the derived-composition summary,
   // and the linked catalog material so each usage renders as the square article card.
@@ -2003,9 +2190,9 @@ export function ColorwayRecipes({
       (techCard?.techCard?.bomItems ?? [])
         .filter((b) => !!b.lineKey)
         .map((b) => {
-          const materialId = Number(b.materialId) || 0;
+          const materialId = wireInt(b.materialId);
           return {
-            id: b.id,
+            id: wireInt(b.id),
             lineKey: b.lineKey,
             name: b.name,
             section: b.section,
@@ -2072,7 +2259,6 @@ export function ColorwayRecipes({
             key={cw.colorwayId}
             colorway={cw}
             hex={hexByCode.get(cw.colorCode ?? '')}
-            bomCount={bomItems.length}
             status={statuses[cw.colorwayId ?? 0]}
             selected={activeId === cw.colorwayId}
             onSelect={() => setSelected(cw.colorwayId ?? null)}
@@ -2110,6 +2296,7 @@ export function ColorwayRecipes({
           <ColorwayRecipeEditor
             colorway={cw}
             bomItems={bomItems}
+            materials={materials}
             pieces={pieces}
             sizeIds={sizeIds}
             sizeQuantities={sizeQuantities}

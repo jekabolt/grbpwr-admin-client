@@ -2277,6 +2277,12 @@ export type TechCardColorwayUsage = {
   // Preferred over the positional piece_index (kept for the transition). piece_id is the resolved FK.
   pieceLineKey: string | undefined;
   pieceId: number | undefined;
+  // material_id pins the CONCRETE catalog article this colourway takes for the slot (the BOM line
+  // is the role — «основная молния»; the pin is the article — YKK 5VS silver). Unset/0 = inherit
+  // the slot's default article (TechCardBomItem.material_id). `optional` is load-bearing: a client
+  // that predates this field OMITS it on the full-replace recipe write, and the store must then
+  // PRESERVE the existing pin (absent ≠ explicit clear; an explicit 0 clears).
+  materialId?: number;
 };
 
 // TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM

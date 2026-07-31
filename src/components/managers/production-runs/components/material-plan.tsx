@@ -1,10 +1,17 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { MaterialPlanRow, common_ProductionRun, googletype_Decimal } from 'api/proto-http/admin';
+import {
+  MaterialPlanBlocker,
+  MaterialPlanContribution,
+  MaterialPlanRow,
+  common_ProductionRun,
+  googletype_Decimal,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   IssueStockModal,
   MovementTarget,
 } from 'components/managers/materials/components/movement-modals';
+import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -12,11 +19,13 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
+import { DataTable, EmptyCell } from 'ui/components/data-table';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { productionRunKeys, useMaterialPlan } from './useProductionRuns';
 
-const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 const num = (d?: googletype_Decimal) => decimalToInput(d) || '0';
 const isShort = (r: MaterialPlanRow) => Number(r.shortage?.value) > 0;
 // issued_variance (gap-04): signed issued − required. Blank until anything is issued; a material
@@ -28,9 +37,24 @@ const variance = (d?: googletype_Decimal, issued?: googletype_Decimal) => {
   return `${n > 0 ? '+' : ''}${Number(n.toFixed(3))}`;
 };
 
-// Estimated material requirement of the run against warehouse stock (NF-06). Shortage is the ready
-// purchase order (copy it — R-9); [issue…] opens the shared warehouse Issue modal locked to this
-// run and prefilled with the shortage quantity so the fabric can be booked out in one step.
+// One slot's contributions, grouped for the breakdown. Keys pass through wireInt — the generated
+// types say number but grpc-gateway serializes int64 as a JSON string.
+type SlotGroup = {
+  key: string;
+  slotName: string;
+  section: string;
+  rows: MaterialPlanContribution[];
+};
+
+const sectionLabel = (s?: string) =>
+  (s ?? '').replace('TECH_CARD_BOM_SECTION_', '').toLowerCase().replace('unknown', '');
+
+// Estimated material requirement of the run against warehouse stock (NF-06). Two layers with
+// distinct jobs (mirroring the response): the ARTICLES table is the only carrier of stock figures
+// (an article shared by two slots has ONE pile of stock, counted once); the BY-SLOT breakdown is
+// the factory spec — which role, which colourway, which article, how much — with no stock columns.
+// Blockers (slot × colourway the plan could NOT count) surface first: a plan that silently drops a
+// slot reads as "no shortage" and the run sews the wrong zip.
 export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canEdit: boolean }) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
@@ -43,6 +67,22 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
   const { data, isLoading, isError, refetch, isFetching } = useMaterialPlan(runId, runId > 0);
   const rows = data?.rows ?? [];
   const caveats = data?.caveats ?? [];
+  const blockers: MaterialPlanBlocker[] = data?.blockers ?? [];
+  const contributions: MaterialPlanContribution[] = data?.contributions ?? [];
+
+  const slotGroups = useMemo<SlotGroup[]>(() => {
+    const bySlot = new Map<string, SlotGroup>();
+    for (const c of contributions) {
+      const key = String(wireInt(c.bomItemId)) + ':' + (c.slotName ?? '');
+      let g = bySlot.get(key);
+      if (!g) {
+        g = { key, slotName: c.slotName || '—', section: sectionLabel(c.section), rows: [] };
+        bySlot.set(key, g);
+      }
+      g.rows.push(c);
+    }
+    return [...bySlot.values()];
+  }, [contributions]);
 
   // The run's colourways (products) so an issue can be attributed to the one it was cut for
   // (gap-07 v2 C). R1: a colourway is a product; useTechCard's live AdminColorwayRef[] is the
@@ -114,85 +154,143 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
         </div>
       </div>
 
+      {blockers.length > 0 ? (
+        <CalloutBox tone='warning' className='flex flex-col gap-1'>
+          <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
+            not counted — the plan is incomplete
+          </Text>
+          {blockers.map((b, i) => (
+            <Text key={i} size='small'>
+              {b.slotName || 'slot'} · {b.colorwayName || `#${b.colorwayId}`} — {b.plannedQty} pcs:{' '}
+              {b.reason}
+            </Text>
+          ))}
+          <Text variant='inactive' size='small'>
+            fix the recipe on the{' '}
+            <Link to={`${ROUTES.techCards}/${techCardId}`} className='underline'>
+              tech card ↗
+            </Link>
+          </Text>
+        </CalloutBox>
+      ) : null}
+
       {isLoading ? (
         <Text size='small'>loading…</Text>
       ) : isError ? (
         <Text size='small'>Material plan is unavailable.</Text>
-      ) : rows.length === 0 ? (
+      ) : rows.length === 0 && blockers.length === 0 ? (
         <Text variant='inactive' size='small'>
           no material requirement — the card's colourways have no linked materials with norms ·{' '}
           <Link to={`${ROUTES.techCards}/${techCardId}`} className='underline'>
             open tech card ↗
           </Link>
         </Text>
-      ) : (
-        <div className='overflow-x-auto'>
-          <table className='border-collapse'>
-            <thead>
-              <tr>
-                <th className={`${cell} text-left uppercase`}>material</th>
-                <th className={`${cell} text-right uppercase`}>required</th>
-                <th className={`${cell} text-right uppercase`}>on hand</th>
-                <th className={`${cell} text-right uppercase`}>issued</th>
-                <th className={`${cell} text-right uppercase`}>Δ vs plan</th>
-                <th className={`${cell} text-right uppercase`}>shortage</th>
-                {canIssue ? <th className={cell} /> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.materialId}>
-                  <td className={cell}>
-                    {r.materialName}
-                    {r.hasSizeNorms === false ? (
-                      <Text variant='inactive' size='small'>
-                        per-garment norm (rough)
-                      </Text>
-                    ) : null}
-                  </td>
-                  <td className={`${cell} text-right`}>
-                    {num(r.required)} {r.unit}
-                  </td>
-                  <td className={`${cell} text-right`}>{num(r.onHand)}</td>
-                  <td className={`${cell} text-right`}>{num(r.issued)}</td>
-                  <td
-                    className={`${cell} text-right`}
-                    title='issued − required: >0 over-issued (scrap/overuse), <0 leftover'
-                  >
-                    {variance(r.issuedVariance, r.issued)}
-                  </td>
-                  <td className={`${cell} text-right ${isShort(r) ? 'font-bold' : ''}`}>
-                    {isShort(r) ? '! ' : ''}
-                    {num(r.shortage)}
-                  </td>
-                  {canIssue ? (
-                    <td className={cell}>
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        className='uppercase'
-                        onClick={() =>
-                          setIssue({
-                            target: {
-                              materialId: r.materialId ?? 0,
-                              materialLabel: r.materialName ?? `#${r.materialId}`,
-                              unit: r.unit ?? '',
-                              onHand: decimalToInput(r.onHand) || '0',
-                            },
-                            qty: isShort(r) ? num(r.shortage) : '',
-                          })
-                        }
-                      >
-                        issue…
-                      </Button>
-                    </td>
+      ) : rows.length === 0 ? null : (
+        <DataTable>
+          <thead>
+            <tr>
+              <th>material</th>
+              <th>required</th>
+              <th>on hand</th>
+              <th>issued</th>
+              <th>Δ vs plan</th>
+              <th>shortage</th>
+              {canIssue ? <th /> : null}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={wireInt(r.materialId)}>
+                <td>
+                  {r.materialName}
+                  {r.hasSizeNorms === false ? (
+                    <Text variant='inactive' size='small'>
+                      per-garment norm (rough)
+                    </Text>
                   ) : null}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                </td>
+                <td>
+                  {num(r.required)} {r.unit}
+                </td>
+                <td>{num(r.onHand)}</td>
+                <td>{num(r.issued)}</td>
+                <td title='issued − required: >0 over-issued (scrap/overuse), <0 leftover'>
+                  {variance(r.issuedVariance, r.issued)}
+                </td>
+                <td className={isShort(r) ? 'font-bold' : ''}>
+                  {isShort(r) ? '! ' : ''}
+                  {num(r.shortage)}
+                </td>
+                {canIssue ? (
+                  <td>
+                    <Button
+                      type='button'
+                      variant='secondary'
+                      className='uppercase'
+                      onClick={() =>
+                        setIssue({
+                          target: {
+                            materialId: wireInt(r.materialId),
+                            materialLabel: r.materialName ?? `#${r.materialId}`,
+                            unit: r.unit ?? '',
+                            onHand: decimalToInput(r.onHand) || '0',
+                          },
+                          qty: isShort(r) ? num(r.shortage) : '',
+                        })
+                      }
+                    >
+                      issue…
+                    </Button>
+                  </td>
+                ) : null}
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
       )}
+
+      {slotGroups.length > 0 ? (
+        <div className='flex flex-col'>
+          <GroupLabel>by slot — the factory spec (no stock figures here)</GroupLabel>
+          {slotGroups.map((g) => (
+            <div key={g.key} className='mb-1'>
+              <Text size='small' className='font-bold'>
+                {g.slotName}
+                {g.section ? (
+                  <Text variant='inactive' size='micro' component='span' className='uppercase'>
+                    {' '}
+                    · {g.section}
+                  </Text>
+                ) : null}
+              </Text>
+              <DataTable>
+                <tbody>
+                  {g.rows.map((c, i) => (
+                    <tr key={`${wireInt(c.colorwayId)}-${wireInt(c.materialId)}-${i}`}>
+                      <td className='w-1/3'>{c.colorwayName || `#${c.colorwayId}`}</td>
+                      <td className='text-left'>
+                        {c.materialName || <EmptyCell />}
+                        {c.pinned ? (
+                          ''
+                        ) : (
+                          <Text variant='inactive' size='micro' component='span'>
+                            {' '}
+                            (default)
+                          </Text>
+                        )}
+                      </td>
+                      <td>
+                        {num(c.required)} {c.unit}
+                        {c.hasSizeNorms === false ? ' ~' : ''}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       {caveats.length > 0 ? (
         <div className='flex flex-col gap-0.5'>

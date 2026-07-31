@@ -1,7 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_TechCardColorwayUsage } from 'api/proto-http/admin';
+import { productionRunKeys } from 'components/managers/production-runs/components/useProductionRuns';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { styleReadViewKeys } from './useStyleReadViews';
 
 // Colourway-owned recipe write (H1/§2.3): UpdateColorwayRecipe FULL-REPLACES a colourway's usages,
 // keyed by bom_line_key, under the shared tech_card.lock_version. Invalidate the tech-card detail so
@@ -18,7 +20,16 @@ export function useUpdateColorwayRecipe(techCardId: number) {
       expectedColorwayVersion: number;
       usages: common_TechCardColorwayUsage[];
     }) => adminService.UpdateColorwayRecipe({ colorwayId, expectedColorwayVersion, usages }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
+    onSuccess: (_data, variables) =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
+        qc.invalidateQueries({
+          queryKey: styleReadViewKeys.costEstimate(techCardId, variables.colorwayId),
+        }),
+        // Run detail carries colourway cost actuals; material plans are nested beneath the same
+        // productionRuns root key, so one prefix invalidation refreshes both projections.
+        qc.invalidateQueries({ queryKey: productionRunKeys.all }),
+      ]),
   });
 }
 
