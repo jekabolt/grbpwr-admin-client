@@ -19,7 +19,7 @@ import {
   techCardApprovalStateOptions,
   techCardGenderOptions,
   techCardMeasurementUnitOptions,
-  techCardPurposeOptions,
+  techCardPurposeFormOptions,
   techCardStageOptions,
 } from 'constants/filter';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -84,6 +84,7 @@ import {
   mapTechCardToForm,
   techCardDefaultData,
   techCardSchema,
+  toPurposeEnum,
 } from './schema';
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
@@ -384,10 +385,12 @@ export function TechCardForm({
 
   // NF-07 auxiliary items: an aux card produces a packaging material, links no products, and needs
   // an output material set before its first run.
-  const purpose = (useWatch({ control: form.control, name: 'purpose' }) ?? 'sellable') as string;
+  const purpose = toPurposeEnum(
+    useWatch({ control: form.control, name: 'purpose' }) as string | undefined,
+  );
   const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
     0) as number;
-  const isAux = purpose === 'auxiliary';
+  const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
 
   // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
@@ -998,7 +1001,7 @@ export function TechCardForm({
                 </Section>
 
                 <Section title='classification' className='w-full lg:w-1/2'>
-                  <SelectField name='purpose' label='purpose' items={techCardPurposeOptions} />
+                  <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
                   {/* Purpose is mutually exclusive with the other side's links and the save is a
                     full replace — flag the destruction BEFORE it happens, it's not reversible. */}
                   {isAux && productCount > 0 && (

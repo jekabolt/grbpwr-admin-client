@@ -31,6 +31,19 @@ import { isUlid, ulid } from 'utils/ulid';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { z } from 'zod';
 
+// TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
+// the bare entity word. The generated client types both as `string`, so swapping them compiles
+// cleanly and fails silently: the gateway reads an unknown enum as UNKNOWN and the backend then
+// keeps its own default, which is how every card saved as auxiliary came back sellable.
+// Read tolerates either shape — a locally restored draft (useTechCardDraft persists raw form
+// values) can still carry the old bare word.
+export function toPurposeEnum(value?: string): string {
+  return value === 'auxiliary' || value === 'TECH_CARD_PURPOSE_AUXILIARY'
+    ? 'TECH_CARD_PURPOSE_AUXILIARY'
+    : 'TECH_CARD_PURPOSE_SELLABLE';
+}
+
+
 // Tech-card form. Covers the full TechCardInsert: header ("Титул"), sketch media
 // (moodboard + technical) + callouts, size range + patterns, linked products, colourways
 // (recipe = usages), BOM (article catalog), construction, operations, labels, packaging,
@@ -486,7 +499,7 @@ const techCardObject = z.object({
   // NF-07 auxiliary items: purpose is 'sellable' (default) or 'auxiliary' (produces a packaging
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
-  purpose: z.string().optional().default('sellable'),
+  purpose: z.string().optional().default('TECH_CARD_PURPOSE_SELLABLE'),
   outputMaterialId: z.number().optional().default(0),
   // Cut-piece details + per-colourway fabric map (NF-05). Positional refs (nf05-01).
   // Names are unique per card (case-insensitive, trimmed): a piece name is how a human addresses the
@@ -575,7 +588,7 @@ export const techCardDefaultData: TechCardFormData = {
   sizeQuantities: [],
   patterns: [],
   productIds: [],
-  purpose: 'sellable',
+  purpose: 'TECH_CARD_PURPOSE_SELLABLE',
   outputMaterialId: 0,
   pieces: [],
   moodboardMedia: [],
@@ -780,7 +793,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     // TODO(final-bump): productIds is no longer on TechCardInsert — a colourway now carries
     // its own product link.
     productIds: [],
-    purpose: insert?.purpose || 'sellable',
+    purpose: toPurposeEnum(insert?.purpose),
     outputMaterialId: insert?.outputMaterialId || 0,
     ...splitSketchMedia(insert),
     callouts: (insert?.callouts ?? []).map((c) => ({
@@ -1149,8 +1162,11 @@ export function mapFormToTechCardInsert(
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
-    purpose: data.purpose || 'sellable',
-    outputMaterialId: data.purpose === 'auxiliary' ? data.outputMaterialId || 0 : 0,
+    purpose: toPurposeEnum(data.purpose),
+    outputMaterialId:
+      toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY'
+        ? data.outputMaterialId || 0
+        : 0,
     moodboardMedia: (data.moodboardMedia ?? []).map(mapMediaItemOut),
     technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
     callouts: (data.callouts ?? []).map((c) => ({

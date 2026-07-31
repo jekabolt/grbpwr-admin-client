@@ -99,9 +99,28 @@ export const techCardStageOptions: Array<{ value: common_TechCardStage; label: s
 
 // NF-07: a card is either a sellable garment or an auxiliary item (dust bag, shopper…) that
 // produces a packaging material instead of a product. Raw string values per the contract.
+// One concept, two contracts — and mixing them up fails silently, which is how a saved
+// "auxiliary" card kept coming back as sellable:
+//   ListTechCards.purpose  is a plain string filter ("sellable" | "auxiliary"), lower-cased and
+//                          validated server-side against the entity values.
+//   TechCardInsert.purpose is the common.TechCardPurpose ENUM. Send the bare word there and the
+//                          gateway reads UNKNOWN, so the backend keeps its own default.
+// The generated client types both as `string`, so nothing catches the swap at compile time.
+const PURPOSE_LABEL = {
+  sellable: 'sellable garment',
+  auxiliary: 'auxiliary (packaging item)',
+} as const;
+
+/** Filter options for ListTechCards — the bare entity words. */
 export const techCardPurposeOptions: Array<{ value: string; label: string }> = [
-  { value: 'sellable', label: 'sellable garment' },
-  { value: 'auxiliary', label: 'auxiliary (packaging item)' },
+  { value: 'sellable', label: PURPOSE_LABEL.sellable },
+  { value: 'auxiliary', label: PURPOSE_LABEL.auxiliary },
+];
+
+/** Form options for TechCardInsert — the proto enum. */
+export const techCardPurposeFormOptions: Array<{ value: string; label: string }> = [
+  { value: 'TECH_CARD_PURPOSE_SELLABLE', label: PURPOSE_LABEL.sellable },
+  { value: 'TECH_CARD_PURPOSE_AUXILIARY', label: PURPOSE_LABEL.auxiliary },
 ];
 
 // Tech-card release gate, orthogonal to stage (server defaults UNKNOWN→DRAFT).
