@@ -44,7 +44,7 @@ function SegmentCard({
   const count = when ? formatCount(segment.lastCount) : undefined;
 
   return (
-    <div className='flex flex-col justify-between gap-3 border border-textInactiveColor p-4 transition-colors hover:border-textColor'>
+    <div className='flex flex-col justify-between gap-3 border border-borderColor bg-bgColor p-4 transition-colors hover:border-textColor'>
       <button
         type='button'
         onClick={() => navigate(`${ROUTES.emailSegments}/${segment.id}`)}
@@ -64,7 +64,7 @@ function SegmentCard({
         )}
       </button>
 
-      <div className='flex items-center justify-between gap-2 border-t border-textInactiveColor pt-2'>
+      <div className='flex items-center justify-between gap-2 border-t border-hairline pt-2'>
         <Text size='small' variant='inactive'>
           {count != null ? `≈ ${count} recipients${when ? ` · ${when}` : ''}` : 'count not run yet'}
         </Text>

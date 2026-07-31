@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
@@ -337,7 +338,7 @@ export function CampaignBuilder() {
           </div>
         )}
 
-        <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+        <SectionStack row>
           <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-20 lg:w-[260px]'>
             <BlockRail
               entityRefs={entityRefs}
@@ -350,10 +351,9 @@ export function CampaignBuilder() {
             />
           </div>
 
-          <div className='min-w-0 flex-1 space-y-6'>
+          <SectionStack className='min-w-0 flex-1'>
             {/* ── envelope ─────────────────────────────────────────────── */}
-            <div className='space-y-4 border border-textInactiveColor p-4'>
-              <Text variant='uppercase'>campaign details</Text>
+            <Section title='campaign details'>
               <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
                 <InputField name='name' label='name' placeholder='internal campaign name' />
                 <SelectField name='topic' label='topic' items={EMAIL_TOPIC_OPTIONS} />
@@ -399,15 +399,16 @@ export function CampaignBuilder() {
                   </Text>
                 </div>
               </div>
-              <ABPanel campaign={campaignData} />
-              {routeId > 0 && (
-                <CampaignMetrics
-                  campaignId={routeId}
-                  status={currentStatus}
-                  winnerVariantId={campaignData?.abConfig?.winnerVariantId}
-                />
-              )}
-            </div>
+            </Section>
+
+            <ABPanel campaign={campaignData} />
+            {routeId > 0 && (
+              <CampaignMetrics
+                campaignId={routeId}
+                status={currentStatus}
+                winnerVariantId={campaignData?.abConfig?.winnerVariantId}
+              />
+            )}
 
             {/* ── live preview ─────────────────────────────────────────── */}
             <CampaignPreviewPanel
@@ -416,8 +417,8 @@ export function CampaignBuilder() {
               deletedUids={deletedIndicesRef.current}
               deletedVersion={deletedVersion}
             />
-          </div>
-        </div>
+          </SectionStack>
+        </SectionStack>
 
         <BlockEditorModal
           editingUid={editingUid}

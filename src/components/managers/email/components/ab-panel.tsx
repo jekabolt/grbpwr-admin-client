@@ -7,6 +7,8 @@ import {
   AB_TEST_PCT_MIN,
 } from 'constants/email-campaign';
 import { useFormContext } from 'react-hook-form';
+import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
@@ -42,12 +44,7 @@ export function ABPanel({ campaign }: { campaign?: common_EmailCampaignFull | nu
   })();
 
   return (
-    <div className='space-y-4 border border-textInactiveColor p-4'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <Text variant='uppercase'>A/B testing</Text>
-        <ToggleField name='abConfig.enabled' label='enable A/B test' />
-      </div>
-
+    <Section title='A/B testing' action={<ToggleField name='abConfig.enabled' label='enable A/B test' />}>
       {!enabled ? (
         <Text variant='label' size='small'>
           send one version to everyone. enable to test two variants on a slice of the audience and
@@ -85,10 +82,8 @@ export function ABPanel({ campaign }: { campaign?: common_EmailCampaignFull | nu
           </Text>
 
           {dimension === 'AB_DIMENSION_SUBJECT' && (
-            <div className='space-y-2 border border-textInactiveColor p-3'>
-              <Text variant='uppercase' size='small'>
-                variant B subject
-              </Text>
+            <div className='space-y-2'>
+              <GroupLabel>variant B subject</GroupLabel>
               <UnifiedTranslationFields
                 fieldPrefix='variantB'
                 fields={[{ name: 'subject', label: 'variant B subject line' }]}
@@ -102,10 +97,8 @@ export function ABPanel({ campaign }: { campaign?: common_EmailCampaignFull | nu
           )}
 
           {winner && (
-            <div className='border border-textColor p-3'>
-              <Text variant='uppercase' size='small'>
-                winner: {winner.label || `#${winner.id}`}
-              </Text>
+            <div className='space-y-1'>
+              <GroupLabel>winner: {winner.label || `#${winner.id}`}</GroupLabel>
               <Text variant='label' size='small'>
                 per-variant engagement is in the metrics panel below.
               </Text>
@@ -113,6 +106,6 @@ export function ABPanel({ campaign }: { campaign?: common_EmailCampaignFull | nu
           )}
         </div>
       )}
-    </div>
+    </Section>
   );
 }

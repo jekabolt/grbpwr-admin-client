@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { GroupLabel } from 'ui/components/group-label';
 import CheckboxField from 'ui/form/fields/checkbox-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
@@ -16,7 +17,8 @@ export function BillingFieldsGroup() {
   );
 
   return (
-    <div className='flex flex-col gap-4 border border-borderColor bg-bgColor p-3'>
+    <div className='flex flex-col gap-4'>
+      <GroupLabel>billing address</GroupLabel>
       <InputField name='buyerVatId' label='VAT ID (B2B)' />
       <CheckboxField name='billingSameAsShipping' label='billing address same as shipping' />
       {!billingSameAsShipping && (

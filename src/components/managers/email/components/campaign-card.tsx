@@ -92,7 +92,7 @@ export function CampaignCard({ campaign }: { campaign: common_EmailCampaignFull 
       <button
         type='button'
         onClick={() => navigate(`${ROUTES.emailCampaigns}/${campaign.id}`)}
-        className='group flex h-full w-full flex-col gap-3 border border-textInactiveColor p-4 text-left transition-colors hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
+        className='group flex h-full w-full flex-col gap-3 border border-borderColor bg-bgColor p-4 text-left transition-colors hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
       >
       <div className='flex items-start justify-between gap-2'>
         <Text variant='uppercase' className='truncate group-hover:text-bgColor'>

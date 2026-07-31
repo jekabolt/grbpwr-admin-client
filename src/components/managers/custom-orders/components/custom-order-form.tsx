@@ -17,7 +17,7 @@ import { SubmitHandler, useForm } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
-import { SectionHeader } from 'ui/components/section-header';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Toolbar } from 'ui/components/toolbar';
 import { Form } from 'ui/form';
@@ -172,10 +172,10 @@ export function CustomOrderForm({
   return (
     <div className='mx-auto w-full max-w-3xl px-2.5 pb-28 lg:px-0'>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(onSubmit)} className='flex flex-col gap-10'>
-          {/* 1 — products (basket first) */}
-          <section className='flex flex-col gap-3'>
-            <SectionHeader
+        <form onSubmit={form.handleSubmit(onSubmit)}>
+          <SectionStack>
+            {/* 1 — products (basket first) */}
+            <Section
               title='1 · products'
               question='what is being made — pick colourways, then set size, qty and price per line'
               action={
@@ -185,80 +185,73 @@ export function CustomOrderForm({
                   </Text>
                 ) : undefined
               }
-            />
-
-            {productCount === 0 ? (
-              <CalloutBox tone='note' className='flex flex-col items-start gap-2 border-dashed'>
-                <Text
-                  size='micro'
-                  variant='label'
-                  tracking='label'
-                  component='span'
-                  className='font-bold uppercase'
-                >
-                  no products yet
-                </Text>
-                <Text size='micro' variant='label' component='span'>
-                  Add colourways to build the order. Each line gets its own size, quantity and price.
-                </Text>
-                {productPickerProps && (
-                  <ProductPicker
-                    products={productPickerProps.products}
-                    selectedProducts={selectedProducts}
-                    handleSaveProducts={productPickerProps.handleSaveProducts}
-                    loadMore={productPickerProps.loadMore}
-                    hasMore={productPickerProps.hasMore}
-                    triggerClassName='mt-1'
-                  />
-                )}
-              </CalloutBox>
-            ) : (
-              <>
-                <div className='divide-y divide-borderColor border border-borderColor bg-bgColor'>
-                  {items.map((item, idx) => (
-                    <SelectedProduct
-                      key={item.productId}
-                      product={selectedProducts.find((p) => p.id === item.productId)}
-                      itemIdx={idx}
-                      currency={currency}
-                      onRemove={() => removeProduct(item.productId)}
+            >
+              {productCount === 0 ? (
+                <CalloutBox tone='note' className='flex flex-col items-start gap-2 border-dashed'>
+                  <Text
+                    size='micro'
+                    variant='label'
+                    tracking='label'
+                    component='span'
+                    className='font-bold uppercase'
+                  >
+                    no products yet
+                  </Text>
+                  <Text size='micro' variant='label' component='span'>
+                    Add colourways to build the order. Each line gets its own size, quantity and
+                    price.
+                  </Text>
+                  {productPickerProps && (
+                    <ProductPicker
+                      products={productPickerProps.products}
+                      selectedProducts={selectedProducts}
+                      handleSaveProducts={productPickerProps.handleSaveProducts}
+                      loadMore={productPickerProps.loadMore}
+                      hasMore={productPickerProps.hasMore}
+                      triggerClassName='mt-1'
                     />
-                  ))}
-                </div>
-                {productPickerProps && (
-                  <ProductPicker
-                    products={productPickerProps.products}
-                    selectedProducts={selectedProducts}
-                    handleSaveProducts={productPickerProps.handleSaveProducts}
-                    loadMore={productPickerProps.loadMore}
-                    hasMore={productPickerProps.hasMore}
-                    triggerClassName='self-start'
-                  />
-                )}
-              </>
-            )}
-          </section>
+                  )}
+                </CalloutBox>
+              ) : (
+                <>
+                  <div className='divide-y divide-hairline'>
+                    {items.map((item, idx) => (
+                      <SelectedProduct
+                        key={item.productId}
+                        product={selectedProducts.find((p) => p.id === item.productId)}
+                        itemIdx={idx}
+                        currency={currency}
+                        onRemove={() => removeProduct(item.productId)}
+                      />
+                    ))}
+                  </div>
+                  {productPickerProps && (
+                    <ProductPicker
+                      products={productPickerProps.products}
+                      selectedProducts={selectedProducts}
+                      handleSaveProducts={productPickerProps.handleSaveProducts}
+                      loadMore={productPickerProps.loadMore}
+                      hasMore={productPickerProps.hasMore}
+                      triggerClassName='self-start'
+                    />
+                  )}
+                </>
+              )}
+            </Section>
 
-          {/* 2 — contact */}
-          <section className='flex flex-col gap-3'>
-            <SectionHeader title='2 · contact' question='who the order is for' />
-            <ContactFieldsGroup />
-          </section>
+            {/* 2 — contact */}
+            <Section title='2 · contact' question='who the order is for'>
+              <ContactFieldsGroup />
+            </Section>
 
-          {/* 3 — shipping & billing */}
-          <section className='flex flex-col gap-3'>
-            <SectionHeader
-              title='3 · shipping & billing'
-              question='where it ships, and who is invoiced'
-            />
-            <ShippingFieldsGroup prefix='shipping' />
-            <BillingFieldsGroup />
-          </section>
+            {/* 3 — shipping & billing */}
+            <Section title='3 · shipping & billing' question='where it ships, and who is invoiced'>
+              <ShippingFieldsGroup prefix='shipping' />
+              <BillingFieldsGroup />
+            </Section>
 
-          {/* 4 — payment */}
-          <section className='flex flex-col gap-3'>
-            <SectionHeader title='4 · payment' question='how this order is settled' />
-            <div className='border border-borderColor bg-bgColor p-3'>
+            {/* 4 — payment */}
+            <Section title='4 · payment' question='how this order is settled'>
               <div className='max-w-xs'>
                 <SelectField
                   name='paymentMethod'
@@ -269,29 +262,29 @@ export function CustomOrderForm({
                   ]}
                 />
               </div>
-            </div>
-          </section>
+            </Section>
 
-          {/* action bar — sticky chrome, not a floating slab */}
-          {canCreate && (
-            <Toolbar sticky className='sticky bottom-2 justify-between'>
-              <Text size='micro' variant='label' component='span' className='uppercase'>
-                {productCount === 0
-                  ? 'add a product to begin'
-                  : `${productCount} product${productCount !== 1 ? 's' : ''} · items ${money(subtotal)}`}
-              </Text>
-              <Button
-                type='submit'
-                variant='main'
-                size='lg'
-                className='uppercase'
-                loading={isSubmitting}
-                disabled={isSubmitting || productCount === 0}
-              >
-                create order
-              </Button>
-            </Toolbar>
-          )}
+            {/* action bar — sticky chrome, not a floating slab */}
+            {canCreate && (
+              <Toolbar sticky className='sticky bottom-2 justify-between'>
+                <Text size='micro' variant='label' component='span' className='uppercase'>
+                  {productCount === 0
+                    ? 'add a product to begin'
+                    : `${productCount} product${productCount !== 1 ? 's' : ''} · items ${money(subtotal)}`}
+                </Text>
+                <Button
+                  type='submit'
+                  variant='main'
+                  size='lg'
+                  className='uppercase'
+                  loading={isSubmitting}
+                  disabled={isSubmitting || productCount === 0}
+                >
+                  create order
+                </Button>
+              </Toolbar>
+            )}
+          </SectionStack>
         </form>
       </Form>
     </div>

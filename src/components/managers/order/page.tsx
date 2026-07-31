@@ -7,7 +7,7 @@ import { FormProvider, useForm } from 'react-hook-form';
 import { useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { Placeholder } from 'ui/components/placeholder';
-import { Section } from 'ui/components/section';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Buyer } from './components/buyer';
 import { Comment } from './components/comment';
@@ -130,7 +130,7 @@ export function OrderDetails() {
 
   return (
     <FormProvider {...form}>
-      <div className='flex w-full flex-col gap-4 pb-16'>
+      <SectionStack className='w-full pb-16'>
         {/* ordHdr v2 + ordActions v2 — identity, state row and the actions, no floating bar */}
         <OrderHeader
           orderDetails={orderDetails}
@@ -149,9 +149,9 @@ export function OrderDetails() {
           <Placeholder label='loading order…' className='py-20' />
         ) : (
           <>
-            <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+            <SectionStack row>
               {/* Left — items + summary + comment */}
-              <div className='w-full space-y-4 lg:flex-1'>
+              <SectionStack className='w-full lg:flex-1'>
                 <Section title='items'>
                   {canPartialRefund && (
                     <Text size='micro' variant='label' className='uppercase print:hidden'>
@@ -169,8 +169,8 @@ export function OrderDetails() {
                 </Section>
 
                 {/* ordSummary v2 — charged (what the customer paid) vs settled (our costs) */}
-                <div className='grid grid-cols-1 gap-4 lg:grid-cols-2'>
-                  <Section title='charged'>
+                <SectionStack row>
+                  <Section title='charged' className='w-full lg:w-1/2'>
                     <SummaryRow
                       label='items + shipping'
                       value={
@@ -206,7 +206,10 @@ export function OrderDetails() {
                   </Section>
 
                   {canReadCosting && (
-                    <Section title={`settled · carrier (${baseCurrency})`} className='print:hidden'>
+                    <Section
+                      title={`settled · carrier (${baseCurrency})`}
+                      className='w-full lg:w-1/2 print:hidden'
+                    >
                       <SummaryRow
                         label='actual carrier cost'
                         value={
@@ -231,15 +234,15 @@ export function OrderDetails() {
                       )}
                     </Section>
                   )}
-                </div>
+                </SectionStack>
 
                 <Section title='comment' className='print:hidden'>
                   <Comment orderDetails={orderDetails} canEdit={canEditOrder} />
                 </Section>
-              </div>
+              </SectionStack>
 
               {/* Right — customer / shipping / payment / tracking */}
-              <div className='w-full space-y-4 lg:w-[360px]'>
+              <SectionStack className='w-full lg:w-[360px]'>
                 <Section title='customer'>
                   <Buyer
                     buyer={orderDetails?.buyer?.buyerInsert}
@@ -268,8 +271,8 @@ export function OrderDetails() {
                     />
                   </Section>
                 )}
-              </div>
-            </div>
+              </SectionStack>
+            </SectionStack>
 
             <Section title='shipping & billing'>
               <ShippingBillingToggle
@@ -305,7 +308,7 @@ export function OrderDetails() {
           onOpenChange={setIsRefundModalOpen}
           refundOrder={refundOrder}
         />
-      </div>
+      </SectionStack>
     </FormProvider>
   );
 }

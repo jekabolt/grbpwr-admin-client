@@ -16,6 +16,8 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
+import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import { SkeletonBlocks } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
 import { FulfillmentAnnotation } from '../components/fulfillment-annotation';
@@ -215,8 +217,7 @@ export function FulfillmentCardDetail() {
       {/* Pack-first body */}
       <div className='grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)]'>
         {/* 1 — pick list */}
-        <section className='flex min-w-0 flex-col gap-3 border border-borderColor bg-bgColor p-3'>
-          <ColHead>pick list</ColHead>
+        <Section title='pick list' className='min-w-0'>
           <OrderTable orderDetails={order} />
           <div className='flex flex-col gap-1'>
             <div className='flex items-center justify-between gap-4'>
@@ -227,7 +228,7 @@ export function FulfillmentCardDetail() {
                 {formatMoney(order.shipment?.cost?.value, currency)}
               </Text>
             </div>
-            <div className='flex items-center justify-between gap-4 border-t border-borderColor pt-1.5'>
+            <div className='flex items-center justify-between gap-4 border-t border-hairline pt-1.5'>
               <Text size='micro' component='span' className='font-bold uppercase tracking-label'>
                 total
               </Text>
@@ -236,18 +237,17 @@ export function FulfillmentCardDetail() {
               </Text>
             </div>
           </div>
-        </section>
+        </Section>
 
         {/* 2 — packing overlay */}
-        <aside className='flex min-w-0 flex-col gap-3 border border-borderColor bg-bgColor p-3 lg:h-fit'>
-          <ColHead>packing</ColHead>
+        <Section title='packing' className='min-w-0 lg:h-fit'>
           <FulfillmentAnnotation annotation={annotation} canWrite={canWrite} />
-        </aside>
+        </Section>
 
         {/* 3 — shipping */}
-        <aside className='flex min-w-0 flex-col gap-4 border border-borderColor bg-bgColor p-3 lg:h-fit'>
+        <Section title='shipping' className='min-w-0 lg:h-fit'>
           <div className='flex flex-col gap-2'>
-            <ColHead>ship to</ColHead>
+            <GroupLabel flush>ship to</GroupLabel>
             <AddressBlock address={order.shipping?.addressInsert} />
             {trackingCode && (
               <div className='flex items-center gap-1 pt-1'>
@@ -260,12 +260,12 @@ export function FulfillmentCardDetail() {
           </div>
 
           <div className='flex flex-col gap-2 border-t border-borderColor pt-3'>
-            <ColHead>customer</ColHead>
+            <GroupLabel flush>customer</GroupLabel>
             <Buyer buyer={order.buyer?.buyerInsert} isPrinting={false} />
           </div>
 
           {canReadCosting && <SettlementCompact stripeDetails={stripeDetails} />}
-        </aside>
+        </Section>
       </div>
 
       <ShipLabelModal

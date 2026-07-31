@@ -2,6 +2,7 @@ import { formatDistanceToNow } from 'date-fns';
 import { useState } from 'react';
 import { Avatar } from 'ui/components/avatar';
 import { Button } from 'ui/components/button';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { useAddComment, useTaskComments } from '../hooks/useTasks';
@@ -25,11 +26,7 @@ export function TaskComments({ taskId }: { taskId: number }) {
   }
 
   return (
-    <div className='flex flex-col gap-3 border border-borderColor bg-bgColor p-3'>
-      <Text size='micro' variant='label' tracking='group' component='span' className='font-bold uppercase'>
-        comments{comments.length ? ` · ${comments.length}` : ''}
-      </Text>
-
+    <Section title={`comments${comments.length ? ` · ${comments.length}` : ''}`}>
       <div className='flex flex-col gap-2.5'>
         {isLoading ? (
           <Text size='micro' variant='label' component='span'>
@@ -82,6 +79,6 @@ export function TaskComments({ taskId }: { taskId: number }) {
           comment
         </Button>
       </div>
-    </div>
+    </Section>
   );
 }

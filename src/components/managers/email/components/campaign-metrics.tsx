@@ -4,6 +4,8 @@ import {
   common_EmailCampaignStatus,
 } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { fmtInt, fmtRate, StatTile, toNumber } from './stat-tile';
 import { useCampaignMetrics, useDispatchStatus } from './useCampaign';
@@ -48,9 +50,7 @@ function VariantComparison({
 }) {
   return (
     <div className='space-y-2'>
-      <Text variant='uppercase' size='small'>
-        A/B variant comparison
-      </Text>
+      <GroupLabel>A/B variant comparison</GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full min-w-[560px] border-collapse text-left'>
           <thead>
@@ -138,14 +138,11 @@ export function CampaignMetrics({
 
   if (!enabled) {
     return (
-      <div className='space-y-1 border border-dashed border-textInactiveColor p-3'>
-        <Text variant='uppercase' size='small'>
-          metrics
-        </Text>
+      <Section title='metrics'>
         <Text variant='label' size='small'>
           engagement metrics appear once the campaign starts sending.
         </Text>
-      </div>
+      </Section>
     );
   }
 
@@ -153,16 +150,16 @@ export function CampaignMetrics({
   const variants = metrics?.variants ?? [];
 
   return (
-    <div className='space-y-4 border border-textInactiveColor p-4'>
-      <div className='flex items-center justify-between gap-2'>
-        <Text variant='uppercase'>metrics</Text>
-        {isLoading && (
+    <Section
+      title='metrics'
+      action={
+        isLoading && (
           <Text variant='inactive' size='small' className='animate-pulse'>
             loading…
           </Text>
-        )}
-      </div>
-
+        )
+      }
+    >
       {isError ? (
         <div className='flex items-center gap-2'>
           <Text variant='error' size='small'>
@@ -217,6 +214,6 @@ export function CampaignMetrics({
           )}
         </>
       )}
-    </div>
+    </Section>
   );
 }

@@ -14,6 +14,8 @@ import {
 import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { fmtInt, StatTile, StatTone } from './stat-tile';
@@ -115,16 +117,16 @@ export function DispatchPanel({
   if (id <= 0) return null;
 
   return (
-    <div className='space-y-4 border border-textInactiveColor p-4'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <Text variant='uppercase'>dispatch</Text>
-        <span className='border border-textInactiveColor px-1.5 py-0.5 leading-none'>
+    <Section
+      title='dispatch'
+      action={
+        <span className='border border-borderColor px-1.5 py-0.5 leading-none'>
           <Text size='small' variant='uppercase'>
             {STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status}
           </Text>
         </span>
-      </div>
-
+      }
+    >
       {/* dispatch error banner */}
       {ds?.dispatchError ? (
         <div className='border border-error p-2'>
@@ -202,7 +204,7 @@ export function DispatchPanel({
 
           {/* schedule row */}
           {canSchedule && (
-            <div className='flex flex-col gap-2 border border-textInactiveColor p-3'>
+            <div className='flex flex-col gap-2'>
               <Text variant='label' size='small'>
                 schedule for later (rejected if in the past; requires a default-language
                 subject &amp; a configured unsubscribe)
@@ -307,7 +309,7 @@ export function DispatchPanel({
           this can&apos;t be undone.
         </Text>
       </ConfirmationModal>
-    </div>
+    </Section>
   );
 }
 
@@ -333,34 +335,35 @@ function RecipientsTable({ id }: { id: number }) {
   );
 
   return (
-    <div className='space-y-2 border-t border-textInactiveColor pt-4'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <Text variant='uppercase' size='small'>
-          recipients
-        </Text>
-        <div className='flex flex-wrap items-center gap-2'>
-          <div className='w-40'>
-            <Select
-              name='recipient-status-filter'
-              items={RECIPIENT_STATUS_FILTER_OPTIONS}
-              value={statusFilter}
-              onValueChange={(v: string) => setStatusFilter(v || RECIPIENT_FILTER_ALL)}
-              placeholder='all statuses'
-              fullWidth
-            />
+    <div className='space-y-2'>
+      <GroupLabel
+        action={
+          <div className='flex flex-wrap items-center gap-2'>
+            <div className='w-40'>
+              <Select
+                name='recipient-status-filter'
+                items={RECIPIENT_STATUS_FILTER_OPTIONS}
+                value={statusFilter}
+                onValueChange={(v: string) => setStatusFilter(v || RECIPIENT_FILTER_ALL)}
+                placeholder='all statuses'
+                fullWidth
+              />
+            </div>
+            <div className='w-40'>
+              <Select
+                name='recipient-cohort-filter'
+                items={COHORT_FILTER_OPTIONS}
+                value={cohortFilter}
+                onValueChange={(v: string) => setCohortFilter(v || RECIPIENT_FILTER_ALL)}
+                placeholder='all cohorts'
+                fullWidth
+              />
+            </div>
           </div>
-          <div className='w-40'>
-            <Select
-              name='recipient-cohort-filter'
-              items={COHORT_FILTER_OPTIONS}
-              value={cohortFilter}
-              onValueChange={(v: string) => setCohortFilter(v || RECIPIENT_FILTER_ALL)}
-              placeholder='all cohorts'
-              fullWidth
-            />
-          </div>
-        </div>
-      </div>
+        }
+      >
+        recipients
+      </GroupLabel>
 
       <Text variant='inactive' size='small'>
         filters apply to loaded rows only — the ledger RPC paginates by keyset (no server-side

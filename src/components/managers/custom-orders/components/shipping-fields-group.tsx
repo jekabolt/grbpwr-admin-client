@@ -43,7 +43,8 @@ export function ShippingFieldsGroup({ prefix }: { prefix: string }) {
   }, [shipmentCarrierId, dictionary?.shipmentCarriers, dictionary?.baseCurrency, setValue]);
 
   return (
-    <div className='flex flex-col gap-4 border border-borderColor bg-bgColor p-3'>
+    <div className='flex flex-col gap-4'>
+      <GroupLabel flush>shipping address</GroupLabel>
       <InputField name={`${prefix}Address.addressLineOne`} label='street and house number' />
       <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
         <SelectField name={`${prefix}Address.country`} label='country' items={countryItems} />

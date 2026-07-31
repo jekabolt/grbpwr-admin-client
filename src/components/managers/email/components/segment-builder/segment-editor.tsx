@@ -13,6 +13,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
+import { Section, SectionStack } from 'ui/components/section';
 import Textarea from 'ui/components/text-area';
 import Text from 'ui/components/text';
 import { useDeleteSegment, useSegment, useUpsertSegment } from '../useCampaign';
@@ -185,10 +186,9 @@ export function SegmentEditor() {
         </div>
       </div>
 
-      <div className='mx-auto flex w-full max-w-[900px] flex-col gap-6'>
+      <SectionStack className='mx-auto w-full max-w-[900px]'>
         {/* details */}
-        <div className='flex flex-col gap-4 border border-textInactiveColor p-4'>
-          <Text variant='uppercase'>segment details</Text>
+        <Section title='segment details'>
           <div className='flex flex-col gap-1'>
             <Text variant='label' size='small'>
               name
@@ -221,69 +221,69 @@ export function SegmentEditor() {
               }
               disabled={!canEdit}
               placeholder='what this audience is / when to use it'
-              className='mb-0 min-h-20 border border-textInactiveColor px-3 py-2'
+              className='mb-0 min-h-20 border border-borderColor px-3 py-2'
             />
           </div>
-        </div>
+        </Section>
 
         {/* predicate builder */}
-        <div className='flex flex-col gap-3 border border-textInactiveColor p-4'>
-          <div className='flex flex-wrap items-center justify-between gap-2'>
-            <Text variant='uppercase'>audience rules</Text>
-            {empty && (
-              <span className='border border-textInactiveColor px-1.5 py-0.5 leading-none'>
+        <Section
+          title='audience rules'
+          question='build a tree of conditions. groups combine their conditions with AND (match all) or OR (match any); an empty tree targets everyone.'
+          action={
+            empty && (
+              <span className='border border-borderColor px-1.5 py-0.5 leading-none'>
                 <Text size='small' variant='uppercase'>
                   everyone
                 </Text>
               </span>
-            )}
-          </div>
-          <Text variant='label' size='small'>
-            build a tree of conditions. groups combine their conditions with AND (match all) or OR
-            (match any); an empty tree targets everyone.
-          </Text>
+            )
+          }
+        >
           <PredicateBuilder
             value={root}
             onChange={setRoot}
             disabled={!canEdit}
             issues={treeTouched ? issueMap : undefined}
           />
-        </div>
+        </Section>
 
         {/* audience-count preview seam */}
-        <div className='flex flex-wrap items-center gap-3 border border-textInactiveColor p-4'>
-          <Button
-            type='button'
-            variant='secondary'
-            size='lg'
-            className='uppercase'
-            onClick={() => {
-              if (!preview.available) return;
-              if (!treeComplete()) return;
-              // Passing the saved id lets the backend cache the count on the segment
-              // (last_count / last_count_at) — with id=0 (new segment) it just counts.
-              preview.mutate({ id: routeId, predicate: toPredicate(root) });
-            }}
-            disabled={!preview.available || preview.isPending}
-            loading={preview.isPending}
-            title={preview.available ? undefined : 'live count available after deploy'}
-          >
-            preview audience count
-          </Button>
-          {!preview.available ? (
-            <Text size='small' variant='inactive'>
-              live count available after deploy
-            </Text>
-          ) : preview.data != null ? (
-            <Text size='small'>≈ {formatCount(preview.data)} recipients</Text>
-          ) : null}
-          {lastCount && (
-            <Text size='small' variant='inactive'>
-              last known: {lastCount}
-            </Text>
-          )}
-        </div>
-      </div>
+        <Section>
+          <div className='flex flex-wrap items-center gap-3'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              onClick={() => {
+                if (!preview.available) return;
+                if (!treeComplete()) return;
+                // Passing the saved id lets the backend cache the count on the segment
+                // (last_count / last_count_at) — with id=0 (new segment) it just counts.
+                preview.mutate({ id: routeId, predicate: toPredicate(root) });
+              }}
+              disabled={!preview.available || preview.isPending}
+              loading={preview.isPending}
+              title={preview.available ? undefined : 'live count available after deploy'}
+            >
+              preview audience count
+            </Button>
+            {!preview.available ? (
+              <Text size='small' variant='inactive'>
+                live count available after deploy
+              </Text>
+            ) : preview.data != null ? (
+              <Text size='small'>≈ {formatCount(preview.data)} recipients</Text>
+            ) : null}
+            {lastCount && (
+              <Text size='small' variant='inactive'>
+                last known: {lastCount}
+              </Text>
+            )}
+          </div>
+        </Section>
+      </SectionStack>
 
       <ConfirmationModal
         open={deleteOpen}

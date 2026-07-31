@@ -8,8 +8,8 @@ import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { GroupLabel } from 'ui/components/group-label';
 import { Placeholder } from 'ui/components/placeholder';
+import { Section, SectionStack } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { InvoiceDocument } from './components/invoice-document';
@@ -101,74 +101,71 @@ export function OrderInvoicePrint() {
       </div>
 
       {/* Options rail — print:hidden AND `.invoice-toolbar` so the print CSS strips it either way */}
-      <aside className='invoice-toolbar flex w-full flex-col gap-4 print:hidden lg:sticky lg:top-4 lg:w-[264px] lg:shrink-0'>
-        <div className='flex flex-col gap-2 border border-borderColor bg-bgColor p-3'>
-          <GroupLabel flush>invoice #{orderDetails?.order?.id ?? '—'}</GroupLabel>
-          <Button
-            variant='main'
-            size='lg'
-            className='w-full uppercase'
-            disabled={!orderDetails}
-            onClick={() => window.print()}
-          >
-            save as pdf
-          </Button>
-          <Text size='micro' variant='label' component='span'>
-            choose “save as PDF” as the destination
-          </Text>
-          <Button asChild variant='underline' size='xs'>
-            <Link to={backTo}>← back to order</Link>
-          </Button>
-        </div>
-
-        <div className='flex flex-col gap-2.5 border border-borderColor bg-bgColor p-3'>
-          <GroupLabel flush>document options</GroupLabel>
-          <Text size='micro' variant='label' component='span'>
-            a filled chip prints on the sheet
-          </Text>
-          <ChipRow>
-            <Chip
-              selected={showUnitPrices}
-              pressed={showUnitPrices}
-              onClick={() => setShowUnitPrices((v) => !v)}
+      <aside className='invoice-toolbar w-full print:hidden lg:sticky lg:top-4 lg:w-[264px] lg:shrink-0'>
+        <SectionStack>
+          <Section title={`invoice #${orderDetails?.order?.id ?? '—'}`}>
+            <Button
+              variant='main'
+              size='lg'
+              className='w-full uppercase'
+              disabled={!orderDetails}
+              onClick={() => window.print()}
             >
-              unit prices
-            </Chip>
-            {hasVatNote && (
-              <Chip
-                selected={showVatNote}
-                pressed={showVatNote}
-                onClick={() => setShowVatNote((v) => !v)}
-              >
-                vat note
-              </Chip>
-            )}
-          </ChipRow>
+              save as pdf
+            </Button>
+            <Text size='micro' variant='label' component='span'>
+              choose “save as PDF” as the destination
+            </Text>
+            <Button asChild variant='underline' size='xs'>
+              <Link to={backTo}>← back to order</Link>
+            </Button>
+          </Section>
 
-          {languages.length > 0 && (
-            <label className='flex flex-col gap-1'>
-              <Text
-                size='micro'
-                variant='label'
-                tracking='label'
-                component='span'
-                className='uppercase'
+          <Section title='document options' question='a filled chip prints on the sheet'>
+            <ChipRow>
+              <Chip
+                selected={showUnitPrices}
+                pressed={showUnitPrices}
+                onClick={() => setShowUnitPrices((v) => !v)}
               >
-                product language
-              </Text>
-              <SelectComponent
-                name='invoice-language'
-                placeholder='default'
-                fullWidth
-                items={languageItems}
-                value={languageId != null ? String(languageId) : DEFAULT_LANG}
-                onValueChange={(v: string) =>
-                  setLanguageId(v === DEFAULT_LANG ? undefined : Number(v))
-                }
-              />
-            </label>
-          )}
-        </div>
+                unit prices
+              </Chip>
+              {hasVatNote && (
+                <Chip
+                  selected={showVatNote}
+                  pressed={showVatNote}
+                  onClick={() => setShowVatNote((v) => !v)}
+                >
+                  vat note
+                </Chip>
+              )}
+            </ChipRow>
+
+            {languages.length > 0 && (
+              <label className='flex flex-col gap-1'>
+                <Text
+                  size='micro'
+                  variant='label'
+                  tracking='label'
+                  component='span'
+                  className='uppercase'
+                >
+                  product language
+                </Text>
+                <SelectComponent
+                  name='invoice-language'
+                  placeholder='default'
+                  fullWidth
+                  items={languageItems}
+                  value={languageId != null ? String(languageId) : DEFAULT_LANG}
+                  onValueChange={(v: string) =>
+                    setLanguageId(v === DEFAULT_LANG ? undefined : Number(v))
+                  }
+                />
+              </label>
+            )}
+          </Section>
+        </SectionStack>
       </aside>
     </div>
   );
