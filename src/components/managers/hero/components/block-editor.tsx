@@ -1,6 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useCallback } from 'react';
 import { useFormContext } from 'react-hook-form';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import ToggleField from 'ui/form/fields/toggle-field';
@@ -195,9 +196,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_VIDEO':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              video
-            </Text>
+            <GroupLabel flush>video</GroupLabel>
             <div className='flex flex-col gap-4 sm:flex-row sm:items-start'>
               <div className='w-full space-y-1 sm:w-auto'>
                 <Text variant='label' size='small'>
@@ -278,9 +277,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_MARQUEE':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              marquee
-            </Text>
+            <GroupLabel flush>marquee</GroupLabel>
             <div className='space-y-4'>
               <LinkField name={`entities.${index}.marquee.link`} label='link (optional)' />
               <InputField
@@ -302,9 +299,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_STATEMENT':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              statement
-            </Text>
+            <GroupLabel flush>statement</GroupLabel>
             <MediaPairField
               prefix={`entities.${index}.statement`}
               landscapeUrl={entity.statement?.mediaLandscapeUrl || ''}
@@ -343,9 +338,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_NEWSLETTER':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              newsletter
-            </Text>
+            <GroupLabel flush>newsletter</GroupLabel>
             <MediaPairField
               prefix={`entities.${index}.newsletter`}
               landscapeUrl={entity.newsletter?.mediaLandscapeUrl || ''}
@@ -374,9 +367,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_EMBED':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              embed
-            </Text>
+            <GroupLabel flush>embed</GroupLabel>
             <InputField
               name={`entities.${index}.embed.embedUrl`}
               label='embed URL'
@@ -414,9 +405,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_DROP':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              drop
-            </Text>
+            <GroupLabel flush>drop</GroupLabel>
             <MediaPairField
               prefix={`entities.${index}.drop`}
               landscapeUrl={entity.drop?.mediaLandscapeUrl || ''}
@@ -466,9 +455,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_LAST_CHANCE':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              last chance
-            </Text>
+            <GroupLabel flush>last chance</GroupLabel>
             <Text variant='label' size='small'>
               products are filled automatically from stock — no manual selection.
             </Text>
@@ -520,9 +507,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_NEW_ARRIVALS':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              new arrivals
-            </Text>
+            <GroupLabel flush>new arrivals</GroupLabel>
             <Text variant='label' size='small'>
               products are filled automatically from the newest arrivals.
             </Text>
@@ -567,9 +552,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_SLIDESHOW':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              slideshow
-            </Text>
+            <GroupLabel flush>slideshow</GroupLabel>
             <SlideListField
               name={`entities.${index}.slideshow.slides`}
               itemLabel='slide'
@@ -596,9 +579,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_MOSAIC':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              mosaic
-            </Text>
+            <GroupLabel flush>mosaic</GroupLabel>
             <SlideListField
               name={`entities.${index}.mosaic.tiles`}
               itemLabel='tile'
@@ -627,9 +608,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_LOOKBOOK':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              lookbook
-            </Text>
+            <GroupLabel flush>lookbook</GroupLabel>
             <SlideListField
               name={`entities.${index}.lookbook.frames`}
               itemLabel='frame'
@@ -663,9 +642,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_SPLIT':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              split
-            </Text>
+            <GroupLabel flush>split</GroupLabel>
             <ToggleField name={`entities.${index}.split.mediaLeft`} label='media on the left' />
             <MediaPairField
               prefix={`entities.${index}.split.media`}
@@ -717,9 +694,7 @@ export function BlockEditor({ index, entity, featuredProducts }: BlockEditorProp
       case 'HERO_TYPE_PRODUCT_SPOTLIGHT':
         return (
           <div className='space-y-5 p-3 lg:p-4'>
-            <Text className='font-bold leading-none' variant='uppercase' size='large'>
-              product spotlight
-            </Text>
+            <GroupLabel flush>product spotlight</GroupLabel>
             <div className='space-y-2'>
               <Text variant='label' size='small'>
                 product

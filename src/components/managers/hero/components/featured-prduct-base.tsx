@@ -1,5 +1,6 @@
 import { ProductPickerModal } from 'components/managers/hero/components/productPickerModal';
 import { useFormContext } from 'react-hook-form';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { LinkField } from './link-field';
 import { TagPicker } from './tag-picker';
@@ -50,9 +51,7 @@ export function FeaturedProductBase({
 
   return (
     <div className='space-y-5 p-3 lg:p-4'>
-      <Text className='font-bold leading-none' variant='uppercase' size='large'>
-        {title}
-      </Text>
+      <GroupLabel flush>{title}</GroupLabel>
       {prefix?.includes('featuredProductsTag') && (
         <TagPicker
           value={tag || ''}

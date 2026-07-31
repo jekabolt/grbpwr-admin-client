@@ -18,6 +18,7 @@ import { cn } from 'lib/utility';
 import { FC, useCallback, useEffect, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import { ARCHIVE_ITEM_TYPE_LABEL } from './item-types';
@@ -168,7 +169,7 @@ export const BlockRail: FC<BlockRailProps> = ({
   const liveCount = items.filter((e: any) => !deletedIndices.has(e._uid)).length;
 
   return (
-    <div className='flex flex-col gap-2'>
+    <Section title='blocks' question='drag to reorder'>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -311,6 +312,6 @@ export const BlockRail: FC<BlockRailProps> = ({
       >
         + add block
       </Button>
-    </div>
+    </Section>
   );
 };

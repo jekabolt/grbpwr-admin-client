@@ -1,5 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { UnifiedTranslationFields } from 'ui/form/fields/unified-translation-fields';
 import { MediaPreviewWithSelector } from '../../media/components/media-preview-with-selector';
@@ -42,10 +43,8 @@ function DoubleHalf({ side, prefix }: { side: 'left' | 'right'; prefix: string }
   };
 
   return (
-    <div className='space-y-4 border border-textInactiveColor p-3'>
-      <Text variant='uppercase' size='small' className='font-bold'>
-        {side}
-      </Text>
+    <div className='space-y-4'>
+      <GroupLabel flush>{side}</GroupLabel>
 
       <div className='space-y-1'>
         <Text variant='label' size='small'>
@@ -85,9 +84,7 @@ export function DoubleEditor({ index }: { index: number }) {
   return (
     <div className='space-y-5 p-3 lg:p-4'>
       <div className='space-y-1'>
-        <Text className='font-bold leading-none' variant='uppercase' size='large'>
-          double
-        </Text>
+        <GroupLabel flush>double</GroupLabel>
         <Text variant='label' size='small'>
           two square blocks shown side by side on the storefront — fill in both.
         </Text>

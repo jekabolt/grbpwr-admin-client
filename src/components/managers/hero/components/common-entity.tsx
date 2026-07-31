@@ -1,4 +1,5 @@
 import { useFormContext } from 'react-hook-form';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { LinkField } from './link-field';
 import { MediaModifierToggles } from './media-modifier-toggles';
@@ -71,11 +72,7 @@ export function CommonEntity({
 
   return (
     <div className='p-3 lg:p-4 space-y-5'>
-      {title && (
-        <Text className='font-bold leading-none' variant='uppercase' size='large'>
-          {title}
-        </Text>
-      )}
+      {title && <GroupLabel flush>{title}</GroupLabel>}
 
       {/* Media row — both previews share one height, widths derive from their ratio */}
       {!isDoubleAd ? (

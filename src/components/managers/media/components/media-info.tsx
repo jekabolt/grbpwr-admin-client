@@ -1,13 +1,16 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
-import Text from 'ui/components/text';
+import { GroupLabel } from 'ui/components/group-label';
+import { Row } from 'ui/components/row';
 
 const MEDIA_TYPES = ['fullSize', 'compressed', 'thumbnail'] as const;
 
+// Rendered inside the PreviewMedia dialog, which is already the surface — so this
+// stays a rule (GroupLabel + Row), not a second bordered box.
 export function MediaInfo({ media }: { media: common_MediaFull }) {
   return (
-    <div className='flex items-center justify-center gap-x-5 w-full'>
+    <div className='flex flex-wrap items-start justify-center gap-x-8 gap-y-4 w-full'>
       {MEDIA_TYPES.map((t) => {
         const info = media.media?.[t];
         const url = info?.mediaUrl;
@@ -17,30 +20,11 @@ export function MediaInfo({ media }: { media: common_MediaFull }) {
         if (!url) return null;
 
         return (
-          <div key={t} className='flex flex-col gap-2 border p-2'>
-            <Text variant='uppercase' className='leading-none'>
-              {t}
-            </Text>
-            <div className='flex flex-col gap-1'>
-              <div className='flex items-center gap-2 '>
-                <Text variant='uppercase' className='leading-none'>
-                  type:
-                </Text>
-                <Text className='leading-none'>{mediaType}</Text>
-              </div>
-              <div className='flex items-center gap-2 '>
-                <Text variant='uppercase' className='leading-none'>
-                  url:
-                </Text>
-                <CopyToClipboard text={url} cutText={true} />
-              </div>
-              <div className='flex items-center gap-2'>
-                <Text variant='uppercase' className='leading-none'>
-                  size:
-                </Text>
-                <Text className='leading-none'>{dimensions}</Text>
-              </div>
-            </div>
+          <div key={t} className='min-w-48'>
+            <GroupLabel flush>{t}</GroupLabel>
+            <Row label='type' value={mediaType} />
+            <Row label='url' value={<CopyToClipboard text={url} cutText={true} />} />
+            <Row label='size' value={dimensions} />
           </div>
         );
       })}

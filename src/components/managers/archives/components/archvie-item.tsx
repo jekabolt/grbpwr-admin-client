@@ -51,9 +51,13 @@ export function ArchiveItem({ archive }: ArchiveItemProps) {
     }
   };
   return (
+    // The card is white stock on the grey ground: without the fill, the caption strip below the
+    // thumbnail was transparent and the page ground showed through the text. Hover is the system's
+    // card lift (a hard 2px offset, zero blur — see ui/components/board), not a purple wash:
+    // colour in this design carries state, never decoration.
     <div
       onClick={handleArchiveClick}
-      className='group relative flex cursor-pointer flex-col overflow-hidden border border-textInactiveColor transition-colors hover:bg-highlightColor/5'
+      className='group relative flex cursor-pointer flex-col overflow-hidden border border-borderColor bg-bgColor hover:-translate-y-px hover:shadow-[2px_2px_0_0_var(--color-textColor)]'
     >
       <div className='aspect-[4/5] w-full overflow-hidden border-b border-textInactiveColor bg-bgColor'>
         {archive.thumbnail?.media?.fullSize?.mediaUrl && (

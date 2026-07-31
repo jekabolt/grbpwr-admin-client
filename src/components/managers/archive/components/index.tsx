@@ -10,6 +10,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
@@ -26,23 +27,6 @@ import { mapArchiveFullToForm } from './map-full-to-form';
 import { mapFormToArchiveInsert } from './map-form-to-insert';
 import { ArchiveFormData, defaultData, schema } from './schema';
 import { SelectItemType } from './select-item-type';
-
-// One header treatment shared by every section on the page: an uppercase title
-// over a full-width rule, with an optional right-aligned hint.
-function SectionHeader({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <div className='flex flex-wrap items-baseline justify-between gap-2 border-b border-textInactiveColor pb-2'>
-      <Text variant='uppercase' size='large'>
-        {title}
-      </Text>
-      {hint && (
-        <Text variant='label' size='small'>
-          {hint}
-        </Text>
-      )}
-    </div>
-  );
-}
 
 export function ArchiveForm({
   isEditMode,
@@ -259,7 +243,7 @@ export function ArchiveForm({
   return (
     <Form {...form}>
       <form
-        className='flex flex-col gap-6 px-2 pt-0 pb-12 lg:px-6'
+        className='flex flex-col gap-gutter px-2 pt-0 pb-12 lg:px-6'
         onSubmit={form.handleSubmit(handleSubmit, onError)}
       >
         <div className='sticky top-0 z-10 -mx-2 flex flex-wrap items-center justify-between gap-3 border-b border-textInactiveColor bg-bgColor px-2 py-3 lg:-mx-6 lg:px-6'>
@@ -296,9 +280,8 @@ export function ArchiveForm({
           )}
         </div>
 
-        <section className='space-y-4'>
-          <SectionHeader title='card' hint='how this entry appears in the timeline list' />
-          <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
+        <Section title='card' question='how this entry appears in the timeline list'>
+          <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
             <div className='w-full space-y-4 lg:w-2/3'>
               <UnifiedTranslationFields
                 fieldPrefix='translations'
@@ -319,9 +302,9 @@ export function ArchiveForm({
               <ArchiveThumbnail />
             </div>
           </div>
-        </section>
+        </Section>
 
-        <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+        <div className='flex flex-col gap-gutter lg:flex-row lg:items-start'>
           <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-20 lg:w-[240px]'>
             <BlockRail
               entityRefs={entityRefs}

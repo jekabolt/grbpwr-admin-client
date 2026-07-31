@@ -10,6 +10,7 @@ import { useFieldArray, useForm } from 'react-hook-form';
 import { v4 as uuidv4 } from 'uuid';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import { BlockEditorModal } from './block-editor-modal';
@@ -459,7 +460,7 @@ export function Hero() {
             </Button>
           </div>
         ) : (
-          <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
+          <SectionStack row>
             <div className='max-h-[50vh] shrink-0 overflow-y-auto lg:max-h-none lg:overflow-visible lg:sticky lg:top-20 lg:w-[240px]'>
               <BlockRail
                 entityRefs={entityRefs}
@@ -480,7 +481,7 @@ export function Hero() {
                 onBlockClick={handlePreviewBlockClick}
               />
             </div>
-          </div>
+          </SectionStack>
         )}
 
         <BlockEditorModal

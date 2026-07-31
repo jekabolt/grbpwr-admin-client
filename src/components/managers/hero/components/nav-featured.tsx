@@ -3,6 +3,7 @@ import { common_HeroFullWithTranslations } from 'api/proto-http/frontend';
 import { useEffect, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import InputField from 'ui/form/fields/input-field';
 import { TranslationField } from 'ui/form/fields/translation-field';
@@ -51,9 +52,7 @@ function GenderSection({ gender, hero, onOpenArchivePicker }: GenderSectionProps
 
   return (
     <div className='w-full flex flex-col gap-4'>
-      <Text className='text-lg font-bold leading-none' variant='uppercase'>
-        {gender}
-      </Text>
+      <GroupLabel flush>{gender}</GroupLabel>
       <div className='flex flex-col lg:flex-row gap-4'>
         <div className='w-full lg:w-1/4'>
           <MediaPreviewWithSelector
@@ -108,21 +107,23 @@ export function NavFeatured({ hero }: { hero?: common_HeroFullWithTranslations }
   };
 
   return (
-    <div className='border-2 border-textInactiveColor p-4 space-y-6'>
-      <div className='flex items-center justify-between'>
-        <Text variant='uppercase' className='text-lg font-bold leading-none'>
-          navigation featured
-        </Text>
-        <Button
-          type='button'
-          variant='main'
-          size='lg'
-          className='uppercase'
-          onClick={() => setIsCollapsed((prev) => !prev)}
-        >
-          {isCollapsed ? 'expand' : 'collapse'}
-        </Button>
-      </div>
+    <div className='space-y-6'>
+      <GroupLabel
+        flush
+        action={
+          <Button
+            type='button'
+            variant='main'
+            size='lg'
+            className='uppercase'
+            onClick={() => setIsCollapsed((prev) => !prev)}
+          >
+            {isCollapsed ? 'expand' : 'collapse'}
+          </Button>
+        }
+      >
+        navigation featured
+      </GroupLabel>
 
       {!isCollapsed && (
         <div className='flex flex-col gap-10'>
