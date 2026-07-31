@@ -55,7 +55,10 @@ function ToastItem({
       >
         {alert.severity === 'error' ? 'error' : 'ok'}
       </span>
-      <span className='flex-1 uppercase'>{alert.message ?? ''}</span>
+      {/* The ERROR / OK label is a label and stays uppercase; the message is the one part of a toast
+          that is arbitrary-length prose — a server sentence naming what is still referenced and what
+          to do about it. Set in caps, that arrived as a 250-character wall nobody reads. */}
+      <span className='flex-1'>{alert.message ?? ''}</span>
       {alert.action ? (
         <button
           type='button'

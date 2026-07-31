@@ -1135,7 +1135,9 @@ export function TechCardForm({
                     />
                   </div>
                 )}
-                <BomField highlightComposition={bomHighlight} />
+                {/* The colourways as READ: their recipes are the one reference to a BOM article
+                    this form cannot clear itself, so the delete has to check them first. */}
+                <BomField highlightComposition={bomHighlight} colorways={techCard?.colorways} />
               </Section>
             </div>
 

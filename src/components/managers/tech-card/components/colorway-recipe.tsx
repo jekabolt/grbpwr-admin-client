@@ -26,6 +26,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button, buttonVariants } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -2253,6 +2254,22 @@ export function ColorwayRecipes({
   // falls back to the first colourway so the tab is never a grid over dead space).
   const [selected, setSelected] = useState<number | 'new' | null>(null);
   const activeId = selected === 'new' ? null : selected ?? colorways[0]?.colorwayId ?? null;
+
+  // ?colorway=<id> opens one colourway's recipe directly. Sent by the BOM tab when a delete is
+  // blocked by this colourway's recipe, so «which usage do I remove» lands on screen rather than
+  // on a grid the operator has to search. The param is consumed, not kept: leaving it set would
+  // re-select this colourway every time the tab is reopened.
+  const [params, setParams] = useSearchParams();
+  const deepLinked = params.get('colorway');
+  useEffect(() => {
+    if (!deepLinked) return;
+    const id = Number(deepLinked);
+    if (Number.isFinite(id) && id > 0) setSelected(id);
+    const next = new URLSearchParams(params);
+    next.delete('colorway');
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinked]);
 
   // Live per-colourway recipe state, reported up by each editor so the grid can badge it — including
   // the colourways whose editor is currently hidden, which is the point: a staged edit two swatches
