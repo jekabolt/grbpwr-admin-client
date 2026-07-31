@@ -54,7 +54,13 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
-import { defaultRoleFor, looksLikeArticleName, normalizeRole, roleCollision, roleSuggestions } from './bom-roles';
+import {
+  defaultRoleFor,
+  looksLikeArticleName,
+  normalizeRole,
+  roleCollision,
+  roleSuggestions,
+} from './bom-roles';
 import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 
@@ -863,6 +869,22 @@ export function BomField({
           }
         });
       });
+      // Labels reference a BOM line by resolved ID, not by key, and no screen renders that link —
+      // the card reads it, carries it, and sends it back untouched (§2.8 label ↔ physical label
+      // material). Nothing sets it today, so this is a landmine rather than a live bug: the moment
+      // something does, deleting that article fails the save with a bare FK error, because the
+      // server re-inserts the labels AFTER the BOM upsert has dropped the line. An invisible
+      // referrer is exactly the kind that has to be released here — there is no other screen to do
+      // it on.
+      const removedId = wireInt(getValues(`bomItems.${bi}.id`));
+      if (removedId > 0) {
+        const labels = (getValues('labels') ?? []) as Array<{ bomItemId?: number }>;
+        labels.forEach((l, li) => {
+          if (wireInt(l.bomItemId) === removedId) {
+            setValue(`labels.${li}.bomItemId`, 0, { shouldDirty: true });
+          }
+        });
+      }
       // No colourway pass here. The RHF `colorways` array has been permanently empty since
       // colourways became products (mapTechCardToForm maps over []), so the loop that used to sit
       // here cleared nothing while reading as if it handled the case — which is exactly how a
