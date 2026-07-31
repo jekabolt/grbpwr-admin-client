@@ -46,6 +46,14 @@ type SlotGroup = {
   rows: MaterialPlanContribution[];
 };
 
+type BlockerGroup = {
+  key: number;
+  slotName: string;
+  colorwayCount: number;
+  plannedQty: number;
+  reasons: string[];
+};
+
 const sectionLabel = (s?: string) =>
   (s ?? '').replace('TECH_CARD_BOM_SECTION_', '').toLowerCase().replace('unknown', '');
 
@@ -69,6 +77,48 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
   const caveats = data?.caveats ?? [];
   const blockers: MaterialPlanBlocker[] = data?.blockers ?? [];
   const contributions: MaterialPlanContribution[] = data?.contributions ?? [];
+
+  const blockerGroups = useMemo<BlockerGroup[]>(() => {
+    const bySlot = new Map<
+      number,
+      {
+        slotName: string;
+        colorways: Set<string>;
+        plannedQty: number;
+        reasons: Set<string>;
+      }
+    >();
+    for (const blocker of blockers) {
+      const key = wireInt(blocker.bomItemId);
+      let group = bySlot.get(key);
+      if (!group) {
+        group = {
+          slotName: blocker.slotName?.trim() || 'slot',
+          colorways: new Set<string>(),
+          plannedQty: 0,
+          reasons: new Set<string>(),
+        };
+        bySlot.set(key, group);
+      } else if (group.slotName === 'slot' && blocker.slotName?.trim()) {
+        group.slotName = blocker.slotName.trim();
+      }
+      const colorwayId = wireInt(blocker.colorwayId);
+      group.colorways.add(
+        colorwayId ? `id:${colorwayId}` : `name:${blocker.colorwayName?.trim() || 'unknown'}`,
+      );
+      group.plannedQty += Number(blocker.plannedQty) || 0;
+      if (blocker.reason?.trim()) group.reasons.add(blocker.reason.trim());
+    }
+    return [...bySlot.entries()].map(([key, group]) => ({
+      key,
+      slotName: group.slotName,
+      colorwayCount: group.colorways.size,
+      plannedQty: group.plannedQty,
+      reasons: [...group.reasons],
+    }));
+  }, [blockers]);
+  const visibleBlockerGroups = blockerGroups.slice(0, 8);
+  const hiddenBlockerGroups = blockerGroups.length - visibleBlockerGroups.length;
 
   const slotGroups = useMemo<SlotGroup[]>(() => {
     const bySlot = new Map<string, SlotGroup>();
@@ -159,12 +209,18 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
           <Text size='micro' variant='label' tracking='label' component='span' className='font-bold uppercase'>
             not counted — the plan is incomplete
           </Text>
-          {blockers.map((b, i) => (
-            <Text key={i} size='small'>
-              {b.slotName || 'slot'} · {b.colorwayName || `#${b.colorwayId}`} — {b.plannedQty} pcs:{' '}
-              {b.reason}
+          {visibleBlockerGroups.map((group) => (
+            <Text key={group.key} size='small'>
+              {group.slotName} — {group.colorwayCount}{' '}
+              {group.colorwayCount === 1 ? 'colourway' : 'colourways'}, {group.plannedQty} pcs:{' '}
+              {group.reasons.join('; ') || 'not counted'}
             </Text>
           ))}
+          {hiddenBlockerGroups > 0 ? (
+            <Text size='small' variant='label'>
+              +{hiddenBlockerGroups} more
+            </Text>
+          ) : null}
           <Text variant='inactive' size='small'>
             fix the recipe on the{' '}
             <Link to={`${ROUTES.techCards}/${techCardId}`} className='underline'>

@@ -164,7 +164,11 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     const put = (field: string, val?: string) => {
       if (val) setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
     };
-    put('name', m.name);
+    // Slots: the line's name is the ROLE («основная молния»), and the read path now keeps it over
+    // the linked article's catalog name. Stamp the article name only into an EMPTY name — a role
+    // the operator already typed must survive linking a default article, or no role name can ever
+    // exist on a linked line.
+    if (!String(getValues(`bomItems.${index}.name`) ?? '').trim()) put('name', m.name);
     put('section', m.section);
     put('supplier', m.supplier);
     put('supplierRef', m.supplierRef);

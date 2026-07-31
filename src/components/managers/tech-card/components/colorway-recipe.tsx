@@ -118,6 +118,8 @@ type BomLine = {
   material?: common_Material;
 };
 
+type RecipePiece = PieceRef & { id: number };
+
 type UsageDraft = {
   bomLineKey: string;
   materialId: number;
@@ -416,9 +418,14 @@ function measured(section?: string): boolean {
 
 // Resolve a stored usage into a draft. bom_line_key is the durable ref; fall back to resolving the
 // server bom_item_id against the saved BOM lines so a legacy usage still points at the right line.
-function fromRead(u: common_TechCardColorwayUsage, bomItems: BomLine[]): UsageDraft {
+function fromRead(
+  u: common_TechCardColorwayUsage,
+  bomItems: BomLine[],
+  pieces: RecipePiece[],
+): UsageDraft {
   const bomItemId = wireInt(u.bomItemId);
   const byId = bomItemId ? bomItems.find((b) => b.id === bomItemId)?.lineKey : undefined;
+  const piecesById = new Map(pieces.filter((piece) => piece.id).map((piece) => [piece.id, piece]));
   return {
     bomLineKey: u.bomLineKey || byId || '',
     materialId: wireInt(u.materialId),
@@ -431,7 +438,7 @@ function fromRead(u: common_TechCardColorwayUsage, bomItems: BomLine[]): UsageDr
       sizeId: s.sizeId,
       consumption: decimalToInput(s.consumption),
     })),
-    pieceLineKey: u.pieceLineKey || '',
+    pieceLineKey: u.pieceLineKey || piecesById.get(wireInt(u.pieceId))?.lineKey || '',
     lineTotal: decimalToInput(u.lineTotal),
     sizeRunTotal: decimalToInput(u.sizeRunTotal),
   };
@@ -875,16 +882,20 @@ function ArticlePinSelect({
   canEdit: boolean;
   onChange: (materialId: number) => void;
 }) {
-  const filtered = materials.filter(
+  const sameSection = materials.filter(
     (material) =>
       material.section === slot?.section &&
       (!material.archived || wireInt(material.id) === draft.materialId),
+  );
+  const otherSections = materials.filter(
+    (material) => material.section !== slot?.section && !material.archived,
   );
   const pinned = draft.materialId
     ? materials.find((material) => wireInt(material.id) === draft.materialId)
     : undefined;
   const missingPin = draft.materialId > 0 && !pinned;
-  const pinOutsideSection = !!pinned && pinned.section !== slot?.section;
+  const archivedPinOutsideSection =
+    !!pinned && !!pinned.archived && pinned.section !== slot?.section;
   return (
     <select
       className={cell}
@@ -895,14 +906,23 @@ function ArticlePinSelect({
     >
       <option value={0}>default — {slot?.material?.name?.trim() || 'нет'}</option>
       {missingPin && <option value={draft.materialId}>(unknown / removed article)</option>}
-      {pinned && pinOutsideSection && (
+      {pinned && archivedPinOutsideSection && (
         <option value={draft.materialId}>{materialLabel(pinned)} (не для секции)</option>
       )}
-      {filtered.map((material) => (
+      {sameSection.map((material) => (
         <option key={wireInt(material.id)} value={wireInt(material.id)}>
           {materialLabel(material)}
         </option>
       ))}
+      {otherSections.length > 0 && (
+        <optgroup label='другие секции'>
+          {otherSections.map((material) => (
+            <option key={wireInt(material.id)} value={wireInt(material.id)}>
+              {materialLabel(material)} · {sectionShort(material.section) || 'unknown'}
+            </option>
+          ))}
+        </optgroup>
+      )}
     </select>
   );
 }
@@ -963,6 +983,11 @@ function SlotUsageRow({
   const materialId = effectiveMaterialId(draft, slot);
   const article = articleForUsage(slot, material, materialId);
   const isMeasured = measured(slot?.section);
+  const legacyCountedMeasured =
+    isMeasured &&
+    !!draft.quantity.trim() &&
+    !draft.consumption.trim() &&
+    draft.sizeConsumptions.length === 0;
   const unit = article?.unit?.trim() || slot?.unit?.trim() || '';
   const missingArticle = !!slot && materialId === 0;
 
@@ -1037,7 +1062,7 @@ function SlotUsageRow({
           </label>
         </div>
 
-        {isMeasured ? (
+        {isMeasured && !legacyCountedMeasured ? (
           <UsagePerSizeLocal
             draft={draft}
             sizeIds={sizeIds}
@@ -1129,7 +1154,7 @@ function PieceRecipeCard({
         <div className='divide-y divide-hairline'>
           {rows.map(({ draft, index }) => (
             <SlotUsageRow
-              key={usageKey(draft)}
+              key={`${usageKey(draft)}:${index}`}
               draft={draft}
               bomItems={bomItems}
               allowedSections={PIECE_SECTIONS}
@@ -1665,7 +1690,7 @@ function ColorwayRecipeEditor({
   colorway: common_AdminColorwayRef;
   bomItems: BomLine[];
   materials: common_Material[];
-  pieces: PieceRef[];
+  pieces: RecipePiece[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -1686,8 +1711,8 @@ function ColorwayRecipeEditor({
   // CRITICAL (full-replace): the draft starts from the LIVE read (colorway.usages), never from empty.
   // This is also the baseline the header's line count is measured against.
   const baseline = useMemo(
-    () => (colorway.usages ?? []).map((u) => fromRead(u, bomItems)),
-    [colorway.usages, bomItems],
+    () => (colorway.usages ?? []).map((u) => fromRead(u, bomItems, pieces)),
+    [colorway.usages, bomItems, pieces],
   );
   const [usages, setUsages] = useState<UsageDraft[]>(baseline);
   // Re-sync when the read changes (after a save's refetch) unless the user has uncommitted edits.
@@ -1735,9 +1760,9 @@ function ColorwayRecipeEditor({
     [usages, pieceKeySet],
   );
 
-  // Full replace means full round-trip: no read usage is filtered out. New rows are created with the
-  // first unused eligible slot, so the editor never manufactures an empty bom_line_key itself.
-  const saveUsages = usages;
+  // A usage whose stored BOM reference no longer resolves can read back without bom_line_key. Do not
+  // send that as an all-NULL slot: the recipe write validates every submitted row.
+  const saveUsages = useMemo(() => usages.filter((usage) => usage.bomLineKey), [usages]);
 
   // Dirty says a control was touched; STAGED says the recipe would actually write something else, and
   // `lines` is what the header's label counts — re-derived over the piece model. Typing a value and
@@ -1948,7 +1973,7 @@ function ColorwayRecipeEditor({
           <div className='divide-y divide-hairline'>
             {garmentUsages.map(({ draft, index }) => (
               <SlotUsageRow
-                key={usageKey(draft)}
+                key={`${usageKey(draft)}:${index}`}
                 draft={draft}
                 bomItems={bomItems}
                 allowedSections={GARMENT_SECTIONS}
@@ -1973,7 +1998,7 @@ function ColorwayRecipeEditor({
         >
           {orphans.map(({ u, i }) => (
             <OrphanRecipeCard
-              key={usageKey(u)}
+              key={`${usageKey(u)}:${i}`}
               draft={u}
               bomItems={bomItems}
               materials={materials}
@@ -2165,11 +2190,15 @@ export function ColorwayRecipes({
   // The card's cut pieces, for the placement picker. Only pieces that already carry a stable
   // line_key are offered: a piece minted in this session but not yet saved has none, and pointing a
   // norm at it would resolve to nothing server-side.
-  const pieces = useMemo<PieceRef[]>(
+  const pieces = useMemo<RecipePiece[]>(
     () =>
       (techCard?.techCard?.pieces ?? [])
         .filter((p) => !!p.lineKey?.trim())
-        .map((p) => ({ lineKey: p.lineKey as string, name: p.name ?? '' })),
+        .map((p) => ({
+          id: wireInt((p as unknown as { id?: unknown }).id),
+          lineKey: p.lineKey as string,
+          name: p.name ?? '',
+        })),
     [techCard?.techCard?.pieces],
   );
   // The catalog materials the BOM lines link to (materialId) — loaded once for the whole tab so each

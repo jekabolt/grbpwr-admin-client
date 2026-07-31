@@ -616,7 +616,9 @@ export function TechPackDocument({
                       ) : (
                         <div className='flex flex-col gap-0.5'>
                           {materials.map((m, j) => {
-                            const cw = colorways.find((c) => c.colorwayId === m.colorwayId);
+                            const cw = colorways.find(
+                              (c) => wireInt(c.colorwayId) === wireInt(m.colorwayId),
+                            );
                             const fabricName = resolveUsageArt(m)?.name || '';
                             const fusingName =
                               resolveUsageArt({
@@ -981,7 +983,9 @@ export function TechPackDocument({
                 {(tc.costing.colorwayCosts ?? []).map((cc, i) => {
                   // colorway_id is a real FK (product id), not a positional index into
                   // `colorways` — resolve by id, not by array offset.
-                  const cw = colorways.find((c) => c.colorwayId === cc.colorwayId);
+                  const cw = colorways.find(
+                    (c) => wireInt(c.colorwayId) === wireInt(cc.colorwayId),
+                  );
                   return (
                     <tr key={i} className='break-inside-avoid'>
                       <td className={TD}>{cw ? colorwayLabel(cw) : `#${cc.colorwayId ?? '—'}`}</td>

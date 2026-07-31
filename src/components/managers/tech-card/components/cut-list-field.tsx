@@ -255,13 +255,20 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
                     <div className='flex flex-col gap-0.5'>
                       {fabrics.map((f, fi) => {
                         const cw = techCard?.colorways?.find(
-                          (c) => c.colorwayId === f.colorwayId,
+                          (c) => wireInt(c.colorwayId) === wireInt(f.colorwayId),
                         );
-                        const usage = cw?.usages?.find(
-                          (u) =>
-                            wireInt(u.bomItemId) === wireInt(f.bomItemId) &&
-                            (!wireInt(u.pieceId) || wireInt(u.pieceId) === wireInt(p.pieceId)),
-                        );
+                        const usages = cw?.usages ?? [];
+                        const usage =
+                          usages.find(
+                            (u) =>
+                              wireInt(u.bomItemId) === wireInt(f.bomItemId) &&
+                              wireInt(u.pieceId) === wireInt(p.pieceId),
+                          ) ??
+                          usages.find(
+                            (u) =>
+                              wireInt(u.bomItemId) === wireInt(f.bomItemId) &&
+                              !wireInt(u.pieceId),
+                          );
                         const pin = wireInt(usage?.materialId);
                         const bom = techCard?.techCard?.bomItems?.find(
                           (b) => wireInt(b.id) === wireInt(f.bomItemId),
