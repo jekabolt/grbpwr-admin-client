@@ -4,9 +4,11 @@ import {
   common_AdminColorwayRef,
   common_Category,
   common_Color,
+  common_Material,
   common_MediaFull,
   common_TechCard,
   common_TechCardBomItem,
+  common_TechCardColorwayUsage,
   common_TechCardReleaseMeta,
   googletype_Decimal,
   PackagingRecipeLine,
@@ -36,6 +38,7 @@ import {
   techCardSignoffStateOptions,
 } from 'constants/filter';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useMemo } from 'react';
@@ -188,6 +191,18 @@ export function TechPackDocument({
     return m;
   }, [dictionary?.colors]);
 
+  // The materials catalog, for the colourways sheet: the printed colour is the EFFECTIVE article's
+  // (usage pin, else the slot default) own colour/pantone — the usage-level color/pantone inputs
+  // are gone from the recipe editor and survive only on legacy rows. Archived included: a pinned
+  // article that was later archived must still print its colour.
+  const { data: materialsData } = useMaterials('', true);
+  const materialById = useMemo(() => {
+    const m = new Map<number, common_Material>();
+    for (const mat of materialsData?.materials ?? [])
+      if (wireInt(mat.id)) m.set(wireInt(mat.id), mat);
+    return m;
+  }, [materialsData?.materials]);
+
   if (!tc) return null;
 
   // Responsible people come from the role-assignment table now (Q5), not free-text header fields.
@@ -232,6 +247,36 @@ export function TechPackDocument({
       if (byKey) return byKey;
     }
     return u.bomItemIndex != null && u.bomItemIndex >= 0 ? items[u.bomItemIndex] : undefined;
+  };
+  // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
+  // free-text placement survives only on legacy rows, and an unlinked row is per-garment.
+  const resolveUsagePart = (u: common_TechCardColorwayUsage): string => {
+    const pieces = tc.pieces ?? [];
+    const piece =
+      (u.pieceLineKey ? pieces.find((p) => p.lineKey === u.pieceLineKey) : undefined) ??
+      (wireInt(u.pieceId)
+        ? pieces.find(
+            (p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId),
+          )
+        : undefined);
+    return piece?.name?.trim() || u.placement?.trim() || 'на изделие';
+  };
+  // The "colour" column: the effective article's own colour/pantone (pin, else slot default),
+  // then the legacy usage-level text, then the slot's colour snapshot.
+  const resolveUsageColour = (
+    u: common_TechCardColorwayUsage,
+    art?: common_TechCardBomItem,
+  ): string => {
+    const effId = wireInt(u.materialId) || wireInt(art?.materialId);
+    const m = effId ? materialById.get(effId) : undefined;
+    return (
+      m?.color?.trim() ||
+      m?.pantone?.trim() ||
+      u.color?.trim() ||
+      u.pantone?.trim() ||
+      art?.color?.trim() ||
+      ''
+    );
   };
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
@@ -687,10 +732,10 @@ export function TechPackDocument({
                             dec(u.quantity) ||
                             dec(u.consumption) ||
                             (has(u.sizeConsumptions) ? 'по размерам' : '');
-                          const colour = u.color || u.pantone || '—';
+                          const colour = resolveUsageColour(u, art) || '—';
                           return (
                             <tr key={j} className='break-inside-avoid'>
-                              <td className={TD}>{u.placement || '—'}</td>
+                              <td className={TD}>{resolveUsagePart(u)}</td>
                               <td className={TD}>{art?.name || '—'}</td>
                               <td className={TD}>{colour}</td>
                               <td className={`${TD} whitespace-nowrap text-right`}>
