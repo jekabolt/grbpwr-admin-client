@@ -10,7 +10,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { ContextProvider } from 'context';
 import { DictionaryProvider } from 'lib/providers/dictionary-provider';
-import { lazy, StrictMode, Suspense } from 'react';
+import { lazy, StrictMode, Suspense, type ComponentType } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ErrorBoundary, type FallbackProps } from 'react-error-boundary';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
@@ -18,153 +18,209 @@ import { TooltipProvider } from 'ui/components/tooltip';
 import { Layout } from 'ui/layout';
 import './global.css';
 
+// A deploy replaces every hashed chunk, so a tab that was already open asks for a file that is no
+// longer there. vercel.json rewrites anything unmatched to /index.html, so the 404 comes back as
+// HTML and the browser refuses it: "'text/html' is not a valid JavaScript MIME type". Nothing is
+// broken — the tab is stale, and it only surfaces on a route that had not been visited yet, which
+// is why it reads as "this page is broken" rather than "reload me".
+//
+// The error boundary could not fix it either: resetErrorBoundary re-renders and asks for the SAME
+// dead URL, so "Try again" fails identically every time.
+const RELOAD_STAMP = 'chunk-reload-at';
+
+// Reload once to pick up the new manifest. A timestamp rather than a flag: a tab left open across
+// two separate deploys deserves its one reload each time, but a chunk error that repeats within
+// seconds of a reload is a real failure and belongs in the boundary, not in a reload loop.
+// The constraint mirrors React.lazy's own (ComponentType<any>) rather than narrowing it: anything
+// tighter is not assignable to what lazy() accepts, and narrowing here would only re-type the 44
+// routes this wraps.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function lazyRoute<T extends ComponentType<any>>(factory: () => Promise<{ default: T }>) {
+  return lazy(() =>
+    factory().catch((err) => {
+      // Storage is behind try/catch on purpose: this is the recovery path, and a sessionStorage
+      // that throws (locked-down privacy mode) must not be what turns a stale chunk into a crash.
+      // Unreadable storage means "no reload recorded", so the one reload still happens.
+      let last = 0;
+      try {
+        last = Number(sessionStorage.getItem(RELOAD_STAMP) ?? 0);
+      } catch {
+        /* storage unavailable */
+      }
+      if (isStaleChunkError(err) && Date.now() - last > 10_000) {
+        try {
+          sessionStorage.setItem(RELOAD_STAMP, String(Date.now()));
+        } catch {
+          /* storage unavailable — the reload below still happens, just unguarded */
+        }
+        window.location.reload();
+        // Never resolves — the reload takes over before React can render anything from it.
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw err;
+    }),
+  );
+}
+
+// The same failure is worded differently by every engine, and none of them use an error code.
+function isStaleChunkError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  return /dynamically imported module|MIME type|module script failed|Loading chunk|error loading/i.test(
+    msg,
+  );
+}
+
 // Lazy load routes for code splitting
-const Hero = lazy(() =>
+const Hero = lazyRoute(() =>
   import('components/managers/hero/components').then((m) => ({ default: m.Hero })),
 );
-const EmailManager = lazy(() =>
+const EmailManager = lazyRoute(() =>
   import('components/managers/email/email-manager').then((m) => ({ default: m.EmailManager })),
 );
-const CampaignBuilder = lazy(() =>
+const CampaignBuilder = lazyRoute(() =>
   import('components/managers/email/components').then((m) => ({ default: m.CampaignBuilder })),
 );
-const SegmentEditor = lazy(() =>
+const SegmentEditor = lazyRoute(() =>
   import('components/managers/email/components/segment-builder/segment-editor').then((m) => ({
     default: m.SegmentEditor,
   })),
 );
-const MediaManager = lazy(() =>
+const MediaManager = lazyRoute(() =>
   import('components/managers/media').then((m) => ({ default: m.MediaManager })),
 );
-const OrderDetails = lazy(() =>
+const OrderDetails = lazyRoute(() =>
   import('components/managers/order/page').then((m) => ({ default: m.OrderDetails })),
 );
-const OrdersCatalog = lazy(() =>
+const OrdersCatalog = lazyRoute(() =>
   import('components/managers/orders-catalog/page').then((m) => ({ default: m.OrdersCatalog })),
 );
-const CustomOrders = lazy(() =>
+const CustomOrders = lazyRoute(() =>
   import('components/managers/custom-orders').then((m) => ({ default: m.CustomOrders })),
 );
-const Analitic = lazy(() =>
+const Analitic = lazyRoute(() =>
   import('components/managers/page/index').then((m) => ({ default: m.Analitic })),
 );
-const Product = lazy(() =>
+const Product = lazyRoute(() =>
   import('components/managers/product/page').then((m) => ({ default: m.Product })),
 );
-const ProductsCatalog = lazy(() => import('components/managers/products-catalog/page'));
-const Promo = lazy(() => import('components/managers/promo').then((m) => ({ default: m.Promo })));
-const Settings = lazy(() =>
+const ProductsCatalog = lazyRoute(() => import('components/managers/products-catalog/page'));
+const Promo = lazyRoute(() =>
+  import('components/managers/promo').then((m) => ({ default: m.Promo })),
+);
+const Settings = lazyRoute(() =>
   import('components/managers/settings').then((m) => ({ default: m.Settings })),
 );
-const Dictionaries = lazy(() =>
+const Dictionaries = lazyRoute(() =>
   import('components/managers/dictionaries/page').then((m) => ({ default: m.Dictionaries })),
 );
-const Members = lazy(() =>
+const Members = lazyRoute(() =>
   import('components/managers/membership/members/page').then((m) => ({ default: m.Members })),
 );
-const MemberDetails = lazy(() =>
+const MemberDetails = lazyRoute(() =>
   import('components/managers/membership/member-details/page').then((m) => ({
     default: m.MemberDetails,
   })),
 );
-const TierConfig = lazy(() =>
+const TierConfig = lazyRoute(() =>
   import('components/managers/membership/tier-config/page').then((m) => ({
     default: m.TierConfig,
   })),
 );
-const HackerManager = lazy(() =>
+const HackerManager = lazyRoute(() =>
   import('components/managers/membership/hacker/page').then((m) => ({ default: m.HackerManager })),
 );
-const TierAudit = lazy(() =>
+const TierAudit = lazyRoute(() =>
   import('components/managers/membership/audit/page').then((m) => ({ default: m.TierAudit })),
 );
-const Models = lazy(() =>
+const Models = lazyRoute(() =>
   import('components/managers/models').then((m) => ({ default: m.Models })),
 );
-const Model = lazy(() =>
+const Model = lazyRoute(() =>
   import('components/managers/model/page').then((m) => ({ default: m.Model })),
 );
-const Fittings = lazy(() =>
+const Fittings = lazyRoute(() =>
   import('components/managers/fittings').then((m) => ({ default: m.Fittings })),
 );
-const Fitting = lazy(() =>
+const Fitting = lazyRoute(() =>
   import('components/managers/fitting/page').then((m) => ({ default: m.Fitting })),
 );
-const TechCards = lazy(() =>
+const TechCards = lazyRoute(() =>
   import('components/managers/tech-cards').then((m) => ({ default: m.TechCards })),
 );
-const TechCard = lazy(() =>
+const TechCard = lazyRoute(() =>
   import('components/managers/tech-card/page').then((m) => ({ default: m.TechCard })),
 );
-const TechCardPrint = lazy(() =>
+const TechCardPrint = lazyRoute(() =>
   import('components/managers/tech-card/print-page').then((m) => ({ default: m.TechCardPrint })),
 );
-const OrderInvoicePrint = lazy(() =>
+const OrderInvoicePrint = lazyRoute(() =>
   import('components/managers/order/invoice-page').then((m) => ({ default: m.OrderInvoicePrint })),
 );
-const Materials = lazy(() =>
+const Materials = lazyRoute(() =>
   import('components/managers/materials').then((m) => ({ default: m.Materials })),
 );
-const ProductionRuns = lazy(() =>
+const ProductionRuns = lazyRoute(() =>
   import('components/managers/production-runs').then((m) => ({ default: m.ProductionRuns })),
 );
-const ProductionRunDetail = lazy(() =>
+const ProductionRunDetail = lazyRoute(() =>
   import('components/managers/production-runs/detail-page').then((m) => ({
     default: m.ProductionRunDetail,
   })),
 );
-const Accounts = lazy(() =>
+const Accounts = lazyRoute(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
-const Tasks = lazy(() => import('components/managers/tasks').then((m) => ({ default: m.Tasks })));
-const Opex = lazy(() =>
+const Tasks = lazyRoute(() =>
+  import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
+);
+const Opex = lazyRoute(() =>
   import('components/managers/opex/page').then((m) => ({ default: m.OpexPage })),
 );
-const AcctJournal = lazy(() =>
+const AcctJournal = lazyRoute(() =>
   import('components/managers/accounting/journal/page').then((m) => ({
     default: m.AcctJournalPage,
   })),
 );
-const AcctAccounts = lazy(() =>
+const AcctAccounts = lazyRoute(() =>
   import('components/managers/accounting/accounts/page').then((m) => ({
     default: m.AcctAccountsPage,
   })),
 );
-const AcctReports = lazy(() =>
+const AcctReports = lazyRoute(() =>
   import('components/managers/accounting/reports/page').then((m) => ({
     default: m.AcctReportsPage,
   })),
 );
-const AcctBank = lazy(() =>
+const AcctBank = lazyRoute(() =>
   import('components/managers/accounting/bank/page').then((m) => ({
     default: m.AcctBankPage,
   })),
 );
-const AcctSubledgers = lazy(() =>
+const AcctSubledgers = lazyRoute(() =>
   import('components/managers/accounting/subledgers/page').then((m) => ({
     default: m.AcctSubledgersPage,
   })),
 );
-const AcctPeriods = lazy(() =>
+const AcctPeriods = lazyRoute(() =>
   import('components/managers/accounting/periods/page').then((m) => ({
     default: m.AcctPeriodsPage,
   })),
 );
-const AcctEvents = lazy(() =>
+const AcctEvents = lazyRoute(() =>
   import('components/managers/accounting/events/page').then((m) => ({
     default: m.AcctEventsPage,
   })),
 );
-const Employees = lazy(() =>
+const Employees = lazyRoute(() =>
   import('components/managers/employees').then((m) => ({ default: m.Employees })),
 );
-const TaskDetail = lazy(() =>
+const TaskDetail = lazyRoute(() =>
   import('components/managers/tasks/task-detail/page').then((m) => ({ default: m.TaskDetail })),
 );
-const Fulfillment = lazy(() =>
+const Fulfillment = lazyRoute(() =>
   import('components/managers/fulfillment').then((m) => ({ default: m.Fulfillment })),
 );
-const FulfillmentCardDetail = lazy(() =>
+const FulfillmentCardDetail = lazyRoute(() =>
   import('components/managers/fulfillment/card-detail/page').then((m) => ({
     default: m.FulfillmentCardDetail,
   })),
@@ -184,18 +240,29 @@ const queryClient = new QueryClient({
   },
 });
 
-// Error fallback component
-const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => (
-  <div style={{ padding: '2rem', textAlign: 'center' }}>
-    <h2>Something went wrong</h2>
-    <pre style={{ color: 'red', marginTop: '1rem' }}>
-      {error instanceof Error ? error.message : String(error)}
-    </pre>
-    <button onClick={resetErrorBoundary} style={{ marginTop: '1rem', padding: '0.5rem 1rem' }}>
-      Try again
-    </button>
-  </div>
-);
+// Error fallback component. A stale chunk gets its own wording and its own button: retrying the
+// render asks for the same missing file, so "Try again" is the one thing that cannot work here.
+const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
+  const stale = isStaleChunkError(error);
+  return (
+    <div style={{ padding: '2rem', textAlign: 'center' }}>
+      <h2>{stale ? 'This tab is running an old version' : 'Something went wrong'}</h2>
+      <pre style={{ color: 'red', marginTop: '1rem' }}>
+        {stale
+          ? 'The app was updated while this tab was open. Reload to get the current version.'
+          : error instanceof Error
+            ? error.message
+            : String(error)}
+      </pre>
+      <button
+        onClick={stale ? () => window.location.reload() : resetErrorBoundary}
+        style={{ marginTop: '1rem', padding: '0.5rem 1rem' }}
+      >
+        {stale ? 'Reload' : 'Try again'}
+      </button>
+    </div>
+  );
+};
 
 // Loading fallback
 const LoadingFallback = () => (
