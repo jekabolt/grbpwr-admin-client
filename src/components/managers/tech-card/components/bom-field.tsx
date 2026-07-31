@@ -13,6 +13,7 @@ import {
 import { MaterialModal } from 'components/managers/materials/components/material-modal';
 import {
   MaterialPicker,
+  MaterialPickerDialog,
   useMaterialOnHand,
 } from 'components/managers/materials/components/material-picker';
 import {
@@ -87,6 +88,50 @@ function materialFabricWeight(m?: common_Material): string | undefined {
   return m?.fabricAttrs?.weightGsm?.value || m?.fabricWeightGsm?.value;
 }
 
+// The catalog facts a BOM line snapshots off the article it links (S23: the line stays
+// self-contained). ONE helper, so creating a line FROM the picker and linking an article onto an
+// existing line can never disagree about what a linked line ends up carrying.
+function materialLineFields(m: common_Material) {
+  return {
+    // A linked line must always come out NAMED. `name` is required on any line the server cannot
+    // resolve a name for, and a linked line renders no name input to fix it in — an empty one is a
+    // save blocked by a field that is nowhere on screen. Falls back to the code, then the id.
+    name: m.name?.trim() || m.code?.trim() || `#${wireInt(m.id)}`,
+    section: m.section || emptyBomItem.section,
+    supplier: m.supplier || '',
+    supplierRef: m.supplierRef || '',
+    // The blend as the parseable JSON the CompositionPicker + care generator read — derived from the
+    // material's STRUCTURED fibre entries when it has no legacy free-text `composition`, so a line
+    // linked to a structurally-composed material carries a composition that generates the care label.
+    composition: materialCompositionCode(m),
+    spec: m.spec || '',
+    unit: m.unit || '',
+    fabricWidth: materialFabricWidth(m) || '',
+    fabricWeightGsm: materialFabricWeight(m) || '',
+    // latest_price is costing-gated (absent without access) — seeds price only when present.
+    unitPrice: m.latestPrice?.price?.value || '',
+    currency: m.latestPrice?.currency || '',
+  };
+}
+
+// A price-less article zeroes the whole costing chain downstream (BOM estimate → style cost →
+// COGS), so it is worth saying out loud — but it no longer REFUSES the link. Refusing left the line
+// unlinked and unnamed, and a nameless line blocks the entire card's save with the offending field
+// rendered nowhere. Warn, link, and let the "no price" markers on the tile and the catalog plate
+// carry it from there. Only warnable when this user can SEE prices: latest_price is costing-gated,
+// so for a non-costing account every article would look price-less.
+function useNoPriceWarning() {
+  const { canReadCosting } = usePermissions();
+  const { showMessage } = useSnackBarStore();
+  return (m: common_Material) => {
+    if (!canReadCosting || m.latestPrice?.price?.value) return;
+    showMessage(
+      `${m.name || 'этот материал'} без закупочной цены — костинг будет считать 0, пока цену не добавят в materials → prices`,
+      'error',
+    );
+  };
+}
+
 const join = (...parts: Array<string | undefined>) => parts.filter((p) => !!p?.trim()).join(' · ');
 const widthLabel = (v?: string) => (v?.trim() ? `${v.trim()} cm` : '');
 const weightLabel = (v?: string) => (v?.trim() ? `${v.trim()} g/m²` : '');
@@ -138,8 +183,7 @@ function ThisStyleFields({ index }: { index: number }) {
 // operator's.
 function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const { canReadCosting } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  const warnNoPrice = useNoPriceWarning();
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
@@ -167,45 +211,25 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     // saying `number`. Writing it raw put a string into the form, which z.number() then rejected
     // as "Invalid input" on bomItems.N.materialId — an unsavable card, right after linking.
     setValue(`bomItems.${index}.materialId`, wireInt(m.id), { shouldDirty: true });
-    const put = (field: string, val?: string) => {
-      if (val) setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
-    };
     // Slots: the line's name is the ROLE («основная молния»), and the read path now keeps it over
     // the linked article's catalog name. Stamp the article name only into an EMPTY name — a role
     // the operator already typed must survive linking a default article, or no role name can ever
     // exist on a linked line.
-    if (!String(getValues(`bomItems.${index}.name`) ?? '').trim()) put('name', m.name);
-    put('section', m.section);
-    put('supplier', m.supplier);
-    put('supplierRef', m.supplierRef);
-    // The blend as the parseable JSON the CompositionPicker + care generator read — derived from the
-    // material's STRUCTURED fibre entries when it has no legacy free-text `composition`, so a line
-    // linked to a structurally-composed material carries a composition that generates the care label
-    // (was copying the empty legacy string → "composition not set" → care-gen blocked).
-    put('composition', materialCompositionCode(m));
-    put('spec', m.spec);
-    put('unit', m.unit);
-    put('fabricWidth', materialFabricWidth(m));
-    put('fabricWeightGsm', materialFabricWeight(m));
-    // latest_price is costing-gated (absent without access) — seed price only when present.
-    put('unitPrice', m.latestPrice?.price?.value);
-    put('currency', m.latestPrice?.currency);
+    const keepName = !!String(getValues(`bomItems.${index}.name`) ?? '').trim();
+    Object.entries(materialLineFields(m)).forEach(([field, val]) => {
+      // Only non-empty values are written: linking must never CLEAR a supplier / width / price the
+      // operator typed on the line while it was still free-text.
+      if (!val || (field === 'name' && keepName)) return;
+      setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
+    });
   };
 
   const pick = (id: number, m?: common_Material) => {
-    // A price-less material breaks the whole costing chain downstream (BOM estimate → style cost →
-    // COGS), so linking one is blocked — add the purchase price in materials → prices first, then
-    // link. Only enforceable when this user can SEE prices: latest_price is costing-gated, so for
-    // a non-costing user every material would look price-less and nothing could ever be linked.
-    if (id && m && canReadCosting && !m.latestPrice?.price?.value) {
-      showMessage(
-        `${m.name || 'this material'} has no purchase price — add it in materials → prices first (costing and COGS depend on it)`,
-        'error',
-      );
-      return;
-    }
     setValue(`bomItems.${index}.materialId`, wireInt(id), { shouldDirty: true });
-    if (id && m) snapshotFrom(m);
+    if (id && m) {
+      snapshotFrom(m);
+      warnNoPrice(m);
+    }
   };
 
   // Prefer the live catalog value; fall back to whatever this line already holds (the linked
@@ -594,8 +618,15 @@ export function BomField({
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
+  const warnNoPrice = useNoPriceWarning();
   const [params, setParams] = useSearchParams();
   const [blocked, setBlocked] = useState<{ name: string; users: BlockingUser[] } | null>(null);
+  // "add BOM article" IS the catalog picker: an article is chosen first and the line is created
+  // already linked and named. Appending a blank line instead left an unnamed, unlinked row that
+  // failed the card's validation from the moment it appeared — and its name field only exists while
+  // the line is unlinked, so linking one on the spot left nothing on screen able to clear the error.
+  const [adding, setAdding] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     composition?: string;
@@ -653,6 +684,17 @@ export function BomField({
         colorwayId: c.colorwayId ?? 0,
         sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
       }));
+
+  // One new article, straight from the catalog: linked, named and priced off the material before it
+  // ever reaches the grid. The picker commits with "link" and does not close itself (closeOnConfirm
+  // is off there), so the close happens here.
+  const addFromMaterial = (m?: common_Material) => {
+    setAdding(false);
+    const materialId = wireInt(m?.id);
+    if (!m || !materialId) return;
+    append({ ...emptyBomItem, ...materialLineFields(m), materialId, lineKey: ulid() });
+    warnNoPrice(m);
+  };
 
   // Land on the offending recipe itself, not merely on the colorways tab: ?colorway= selects the
   // swatch, so the usage to remove is on screen instead of two clicks away.
@@ -806,14 +848,28 @@ export function BomField({
         </ConfirmationModal>
       )}
 
-      <Button
-        type='button'
-        variant='main'
-        size='sm'
-        onClick={() => append({ ...emptyBomItem, lineKey: ulid() })}
-      >
+      <Button type='button' variant='main' size='sm' onClick={() => setAdding(true)}>
         add BOM article
       </Button>
+
+      {/* The catalog as swatches. "+ create" hands off to the material form and comes back through
+          the same append path, so an article made on the spot lands as a linked line too. */}
+      <MaterialPickerDialog
+        open={adding}
+        title='add BOM article'
+        confirmLabel='add'
+        onPick={addFromMaterial}
+        onClose={() => setAdding(false)}
+        onCreate={() => {
+          setAdding(false);
+          setCreateOpen(true);
+        }}
+      />
+      <MaterialModal
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={(_id, m) => addFromMaterial(m)}
+      />
     </div>
   );
 }
