@@ -170,7 +170,13 @@ export function MaterialPicker({
     if (focusTrigger) requestAnimationFrame(() => triggerRef.current?.focus());
   };
   const choose = (m?: common_Material) => {
-    onChange(m?.id ?? 0, m);
+    // numId, not the raw m.id: Material.id is int64, so grpc-gateway sends it as a STRING while the
+    // generated type says `number`. This file has coerced on every INTERNAL comparison since it was
+    // written (see numId's own comment) — but handed the raw value OUT, so every caller received
+    // "42" typed as 42. Callers that re-wrapped in wireInt were fine; the rest silently broke on a
+    // === against a number, a Set/Map keyed by id, or a z.number() that rejected the string and
+    // blocked the save. Coerce at the boundary so no caller has to know.
+    onChange(numId(m?.id), m);
     closeMenu();
   };
 
