@@ -1114,7 +1114,9 @@ export function TechCardForm({
             {/* PATTERNS (size range + per-size PDF выкройки) */}
             <SectionStack hidden={activeTab !== 'patterns'}>
               <Section title='size range'>
-                <SizeIdsField />
+                {/* The colourways AS READ: their recipes grade per-size consumption, and that is
+                    what makes removing a size destructive beyond this form. */}
+                <SizeIdsField colorways={techCard?.colorways} />
                 <div className='space-y-2 border-t border-textInactiveColor pt-3'>
                   <Text variant='uppercase' size='small'>
                     size run (order qty)

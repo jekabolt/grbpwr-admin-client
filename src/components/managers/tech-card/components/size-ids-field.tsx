@@ -1,3 +1,4 @@
+import { common_AdminColorwayRef } from 'api/proto-http/admin';
 import { SizePickerModal } from 'components/managers/model/components/size-picker-modal';
 import {
   useSizeNames,
@@ -20,10 +21,12 @@ import { TechCardFormData } from './schema';
 // glance and the common case needs no overlay at all. The popover behind "more systems" only
 // carries what the category filtered out.
 //
-// Per-size patterns, per-size usage consumption (in colourways) and the size run all reference ids
-// from this set — so removing a size prunes its patterns / consumption / order qty. That is
-// confirmed first, with the real counts, because the data is gone once it goes.
-export function SizeIdsField() {
+// Per-size patterns, the size run and the colourways' per-size consumption all reference ids from
+// this set. Removing a size prunes what this form owns (patterns, order qty) and is confirmed first,
+// with the real counts, because that data is gone once it goes. The colourway norms are NOT this
+// form's to prune — they are colourway-owned, saved by their own RPC — so they are counted and
+// named, not silently promised.
+export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRef[] }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
 
@@ -38,9 +41,6 @@ export function SizeIdsField() {
   const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{ sizeId?: number }>;
   const sizeQuantities = (useWatch({ control, name: 'sizeQuantities' }) ?? []) as Array<{
     sizeId?: number;
-  }>;
-  const colorways = (useWatch({ control, name: 'colorways' }) ?? []) as Array<{
-    usages?: Array<{ sizeConsumptions?: Array<{ sizeId?: number }> }>;
   }>;
 
   const [pendingRemove, setPendingRemove] = useState<number | null>(null);
@@ -57,9 +57,12 @@ export function SizeIdsField() {
   const selected = new Set(sizeIds);
 
   const patternCount = (id: number) => patterns.filter((p) => p.sizeId === id).length;
-  // number of colourway usages that grade this size's consumption
+  // Number of colourway usages that grade this size's consumption, read from the colourways AS READ.
+  // It used to reduce over the RHF `colorways` array, which has been permanently empty since
+  // colourways became products: the count was always 0, so a size graded only by recipe norms was
+  // removed with no confirmation at all.
   const usageLineCount = (id: number) =>
-    colorways.reduce(
+    (colorways ?? []).reduce(
       (n, c) =>
         n +
         (c.usages ?? []).filter((u) => (u.sizeConsumptions ?? []).some((sc) => sc.sizeId === id))
@@ -91,22 +94,10 @@ export function SizeIdsField() {
         { shouldDirty: true },
       );
     }
-    // prune the size's per-size consumption from every colourway usage
-    const cws = (getValues('colorways') ?? []) as TechCardFormData['colorways'];
-    (cws ?? []).forEach((c, ci) => {
-      (c.usages ?? []).forEach((u, ui) => {
-        const sc = u.sizeConsumptions ?? [];
-        if (sc.some((x) => x.sizeId === id)) {
-          setValue(
-            `colorways.${ci}.usages.${ui}.sizeConsumptions`,
-            sc.filter((x) => x.sizeId !== id) as NonNullable<
-              NonNullable<TechCardFormData['colorways']>[number]['usages']
-            >[number]['sizeConsumptions'],
-            { shouldDirty: true },
-          );
-        }
-      });
-    });
+    // No colourway pass. It used to walk the RHF `colorways` array and prune each usage's
+    // sizeConsumptions — over a permanently empty array, so it pruned nothing while reading as if
+    // it handled the case. Those norms belong to the colourway's own recipe write; the confirmation
+    // says so instead of promising a deletion that never happened.
   };
 
   const toggle = (id: number) => {
@@ -211,11 +202,11 @@ export function SizeIdsField() {
           setPendingRemove(null);
         }}
         title='удалить размер?'
-        confirmLabel='удалить размер и данные'
+        confirmLabel='удалить размер'
         cancelLabel='отмена'
       >
         <Text size='micro' variant='label' className='mb-2'>
-          Размер {pendingName} используется. Удаление размера удалит:
+          Размер {pendingName} используется. Из карточки будет удалено:
         </Text>
         <Row
           label='выкройки (PDF)'
