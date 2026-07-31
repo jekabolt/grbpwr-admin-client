@@ -6,6 +6,7 @@ import {
   common_Color,
   common_MediaFull,
   common_TechCard,
+  common_TechCardBomItem,
   common_TechCardReleaseMeta,
   googletype_Decimal,
   PackagingRecipeLine,
@@ -13,6 +14,7 @@ import {
 } from 'api/proto-http/admin';
 import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
 import { formatCompositionEntries } from './composition-entries';
+import { wireInt } from './schema';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
@@ -211,8 +213,26 @@ export function TechPackDocument({
       dc?.name?.trim() || cw.colorCode?.trim() || cw.baseSku?.trim() || `#${cw.colorwayId ?? ''}`
     );
   };
-  const bomLabel = (idx?: number): string =>
-    idx != null && idx >= 0 ? (tc.bomItems ?? [])[idx]?.name || '' : '';
+  // Mirrors the backend's resolveUsageBom ladder: durable FK, then stable line_key, then the legacy
+  // positional index. A line_key-authored usage round-trips with bomItemIndex unset, so resolving
+  // positionally alone printed "—" in the material column for every recipe saved by this client.
+  const resolveUsageArt = (u: {
+    bomItemId?: number;
+    bomLineKey?: string;
+    bomItemIndex?: number;
+  }): common_TechCardBomItem | undefined => {
+    const items = tc.bomItems ?? [];
+    const id = wireInt(u.bomItemId);
+    if (id > 0) {
+      const byId = items.find((b) => wireInt(b.id) === id);
+      if (byId) return byId;
+    }
+    if (u.bomLineKey) {
+      const byKey = items.find((b) => b.lineKey === u.bomLineKey);
+      if (byKey) return byKey;
+    }
+    return u.bomItemIndex != null && u.bomItemIndex >= 0 ? items[u.bomItemIndex] : undefined;
+  };
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
     common_TechCardReleaseMeta | undefined
@@ -596,9 +616,16 @@ export function TechPackDocument({
                       ) : (
                         <div className='flex flex-col gap-0.5'>
                           {materials.map((m, j) => {
-                            const cw = colorways.find((c) => c.colorwayId === m.colorwayId);
-                            const fabricName = bomLabel(m.bomItemIndex);
-                            const fusingName = bomLabel(m.fusingBomItemIndex);
+                            const cw = colorways.find(
+                              (c) => wireInt(c.colorwayId) === wireInt(m.colorwayId),
+                            );
+                            const fabricName = resolveUsageArt(m)?.name || '';
+                            const fusingName =
+                              resolveUsageArt({
+                                bomItemId: m.fusingBomItemId,
+                                bomLineKey: m.fusingBomLineKey,
+                                bomItemIndex: m.fusingBomItemIndex,
+                              })?.name || '';
                             return (
                               <div key={j}>
                                 <span className='font-medium'>{colorwayLabel(cw)}</span>:{' '}
@@ -655,8 +682,7 @@ export function TechPackDocument({
                       </thead>
                       <tbody>
                         {usages.map((u, j) => {
-                          const bi = u.bomItemIndex ?? -1;
-                          const art = bi >= 0 ? (tc.bomItems ?? [])[bi] : undefined;
+                          const art = resolveUsageArt(u);
                           const cons =
                             dec(u.quantity) ||
                             dec(u.consumption) ||
@@ -665,7 +691,7 @@ export function TechPackDocument({
                           return (
                             <tr key={j} className='break-inside-avoid'>
                               <td className={TD}>{u.placement || '—'}</td>
-                              <td className={TD}>{art?.name || (bi >= 0 ? `#${bi + 1}` : '—')}</td>
+                              <td className={TD}>{art?.name || '—'}</td>
                               <td className={TD}>{colour}</td>
                               <td className={`${TD} whitespace-nowrap text-right`}>
                                 {cons ? `${cons} ${art?.unit ?? ''}`.trim() : '—'}
@@ -723,7 +749,7 @@ export function TechPackDocument({
                   // Compact secondary line instead of 4 more raw columns (thread/attachment/
                   // stitches-per-cm/BOM-material) — an 11-column table doesn't fit A4, and this
                   // mirrors the seam-type secondary line already used below.
-                  const bomMaterial = bomLabel(o.bomItemIndex);
+                  const bomMaterial = resolveUsageArt(o)?.name || '';
                   const detail = [
                     o.thread && `thread: ${o.thread}`,
                     o.attachment && `attach: ${o.attachment}`,
@@ -957,7 +983,9 @@ export function TechPackDocument({
                 {(tc.costing.colorwayCosts ?? []).map((cc, i) => {
                   // colorway_id is a real FK (product id), not a positional index into
                   // `colorways` — resolve by id, not by array offset.
-                  const cw = colorways.find((c) => c.colorwayId === cc.colorwayId);
+                  const cw = colorways.find(
+                    (c) => wireInt(c.colorwayId) === wireInt(cc.colorwayId),
+                  );
                   return (
                     <tr key={i} className='break-inside-avoid'>
                       <td className={TD}>{cw ? colorwayLabel(cw) : `#${cc.colorwayId ?? '—'}`}</td>

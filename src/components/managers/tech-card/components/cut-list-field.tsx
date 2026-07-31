@@ -1,4 +1,6 @@
 import { common_TechCardColorwayUsage } from 'api/proto-http/admin';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useMemo } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -62,6 +64,19 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
   // the per-garment consumption the fabric projection needs, and they are colourway-owned, so they
   // are not in the RHF form.
   const { data: techCard } = useTechCard(techCardId);
+  // Slots: the fabric column names the ARTICLE a colourway actually cuts — its pin
+  // (usage.material_id) first, else the slot's default article — not the slot's role name,
+  // which is identical across colourways and would erase exactly the difference the cutter
+  // needs. Archived included: a pinned article that was later archived must still name itself.
+  const { data: materialsData } = useMaterials('', true);
+  const materialNameById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const mat of materialsData?.materials ?? []) {
+      const id = wireInt(mat.id);
+      if (id) m.set(id, mat.name ?? '');
+    }
+    return m;
+  }, [materialsData]);
   const { control } = useFormContext<TechCardFormData>();
   const sizeQuantities = (useWatch({ control, name: 'sizeQuantities' }) ?? []) as Array<{
     sizeId?: number;
@@ -238,12 +253,38 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
                     <EmptyCell />
                   ) : (
                     <div className='flex flex-col gap-0.5'>
-                      {fabrics.map((f, fi) => (
-                        <Text key={fi} size='micro' variant='label' component='span'>
-                          colourway #{f.colorwayId}: {f.fabricName || `#${f.bomItemId}`}
-                          {f.fusingName ? ` · fusing: ${f.fusingName}` : ''}
-                        </Text>
-                      ))}
+                      {fabrics.map((f, fi) => {
+                        const cw = techCard?.colorways?.find(
+                          (c) => wireInt(c.colorwayId) === wireInt(f.colorwayId),
+                        );
+                        const usages = cw?.usages ?? [];
+                        const usage =
+                          usages.find(
+                            (u) =>
+                              wireInt(u.bomItemId) === wireInt(f.bomItemId) &&
+                              wireInt(u.pieceId) === wireInt(p.pieceId),
+                          ) ??
+                          usages.find(
+                            (u) =>
+                              wireInt(u.bomItemId) === wireInt(f.bomItemId) &&
+                              !wireInt(u.pieceId),
+                          );
+                        const pin = wireInt(usage?.materialId);
+                        const bom = techCard?.techCard?.bomItems?.find(
+                          (b) => wireInt(b.id) === wireInt(f.bomItemId),
+                        );
+                        const article =
+                          (pin ? materialNameById.get(pin) : undefined) ??
+                          (wireInt(bom?.materialId)
+                            ? materialNameById.get(wireInt(bom?.materialId))
+                            : undefined);
+                        return (
+                          <Text key={fi} size='micro' variant='label' component='span'>
+                            colourway #{f.colorwayId}: {article || f.fabricName || `#${f.bomItemId}`}
+                            {f.fusingName ? ` · fusing: ${f.fusingName}` : ''}
+                          </Text>
+                        );
+                      })}
                     </div>
                   )}
                 </td>

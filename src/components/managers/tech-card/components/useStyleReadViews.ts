@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 
-// Read-only style projections — no mutations, so no cache invalidation is needed. Each is keyed
-// off the tech card and, for the cost estimate, the colourway being priced.
-const styleReadViewKeys = {
+// Read-only style projections. Keys are exported so writes that change their inputs (notably a
+// colourway article pin) can invalidate the exact cached projection.
+export const styleReadViewKeys = {
   costEstimate: (techCardId: number, colorwayId: number) =>
     ['styleCostEstimate', techCardId, colorwayId] as const,
   cutList: (techCardId: number) => ['styleCutList', techCardId] as const,

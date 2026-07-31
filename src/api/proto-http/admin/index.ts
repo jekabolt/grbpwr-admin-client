@@ -581,6 +581,12 @@ export type common_TechCardColorwayUsage = {
   // Preferred over the positional piece_index (kept for the transition). piece_id is the resolved FK.
   pieceLineKey: string | undefined;
   pieceId: number | undefined;
+  // material_id pins the CONCRETE catalog article this colourway takes for the slot (the BOM line
+  // is the role — «основная молния»; the pin is the article — YKK 5VS silver). Unset/0 = inherit
+  // the slot's default article (TechCardBomItem.material_id). `optional` is load-bearing: a client
+  // that predates this field OMITS it on the full-replace recipe write, and the store must then
+  // PRESERVE the existing pin (absent ≠ explicit clear; an explicit 0 clears).
+  materialId?: number;
 };
 
 // TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
@@ -7250,9 +7256,41 @@ export type MaterialPlanRow = {
   issuedVariance: googletype_Decimal | undefined;
 };
 
+// MaterialPlanContribution is one slot × colourway share of the plan — the factory-spec breakdown
+// of a rollup row's `required`. Stock figures (on_hand / issued / shortage) live ONLY on the
+// material-keyed rows above: two contributions resolving to the same article share ONE pile of
+// stock, so repeating stock here would double-count it.
+export type MaterialPlanContribution = {
+  bomItemId: number | undefined;
+  slotName: string | undefined;
+  section: common_TechCardBomSection | undefined;
+  colorwayId: number | undefined;
+  colorwayName: string | undefined;
+  materialId: number | undefined;
+  materialName: string | undefined;
+  pinned: boolean | undefined;
+  unit: string | undefined;
+  required: googletype_Decimal | undefined;
+  hasSizeNorms: boolean | undefined;
+};
+
+// MaterialPlanBlocker is a slot × colourway the plan could NOT count — a missing article (no pin,
+// no slot default) or a colourway with no norm for the slot. A separate list, not a sentinel row:
+// it has no material_id to key stock or an issue action on.
+export type MaterialPlanBlocker = {
+  bomItemId: number | undefined;
+  slotName: string | undefined;
+  colorwayId: number | undefined;
+  colorwayName: string | undefined;
+  plannedQty: number | undefined;
+  reason: string | undefined;
+};
+
 export type GetProductionRunMaterialPlanResponse = {
   rows: MaterialPlanRow[] | undefined;
   caveats: string[] | undefined;
+  contributions: MaterialPlanContribution[] | undefined;
+  blockers: MaterialPlanBlocker[] | undefined;
 };
 
 export type ReceiveMaterialStockRequest = {
