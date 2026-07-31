@@ -434,6 +434,48 @@ export function MaterialPicker({
   );
 }
 
+// The same swatch dialog on its own, opened by the CALLER's own button instead of by a trigger
+// field. The BOM's "add BOM article" opens this: an article is chosen from the catalog first and
+// the line is created already linked, rather than appending a blank line the operator then has to
+// find the link control inside.
+export function MaterialPickerDialog({
+  open,
+  section = '',
+  value = 0,
+  includeArchived = false,
+  title,
+  confirmLabel,
+  onPick,
+  onClose,
+  onCreate,
+}: {
+  open: boolean;
+  section?: string;
+  value?: number;
+  includeArchived?: boolean;
+  title?: string;
+  confirmLabel?: string;
+  onPick: (material?: common_Material) => void;
+  onClose: () => void;
+  onCreate?: () => void;
+}) {
+  // Only fetched while open — the caller mounts this permanently next to its button.
+  const { data } = useMaterials(section, includeArchived, open);
+  if (!open) return null;
+  return (
+    <MaterialGridDialog
+      materials={data?.materials ?? []}
+      value={value}
+      section={section}
+      title={title}
+      confirmLabel={confirmLabel}
+      onPick={onPick}
+      onClose={onClose}
+      onCreate={onCreate}
+    />
+  );
+}
+
 // The BOM's link dialog (11.3): the same catalog, but as swatches you can actually read a fabric
 // off. Selection is STAGED — a tile click only arms the pick, "link" commits it — so a mis-click in
 // a grid never silently rewrites a BOM line.
@@ -441,6 +483,8 @@ function MaterialGridDialog({
   materials,
   value,
   section,
+  title,
+  confirmLabel,
   onPick,
   onClose,
   onCreate,
@@ -448,6 +492,10 @@ function MaterialGridDialog({
   materials: common_Material[];
   value: number;
   section: string;
+  title?: string;
+  // Overrides the link/unlink commit label — the "add BOM article" flow creates a line rather than
+  // relinking one, so "unlink" is not a thing it can mean.
+  confirmLabel?: string;
   onPick: (m?: common_Material) => void;
   onClose: () => void;
   onCreate?: () => void;
@@ -491,8 +539,8 @@ function MaterialGridDialog({
       onConfirm={commit}
       closeOnConfirm={false}
       width='lg'
-      title={`link a material${section ? ` · ${sectionShortLabel(section)}` : ''}`}
-      confirmLabel={pending ? 'link' : 'unlink'}
+      title={`${title ?? 'link a material'}${section ? ` · ${sectionShortLabel(section)}` : ''}`}
+      confirmLabel={confirmLabel ?? (pending ? 'link' : 'unlink')}
       confirmDisabled={pending === numId(value)}
     >
       <div className='flex flex-col gap-2.5'>
