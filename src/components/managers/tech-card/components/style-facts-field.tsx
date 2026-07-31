@@ -10,6 +10,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
 import { TechCardFormData } from './schema';
+import { parseSeasonToSku } from './season-util';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
 
 // One set of style facts per card, so one staging key.
@@ -138,10 +139,23 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
   // Both fields live in the card's RHF form, so "dirty" here is exactly RHF's own answer: they moved
   // off the loaded card's defaults. That is also what makes the header's label a FACT — it names the
   // fields that actually changed rather than guessing "style facts".
-  const { dirtyFields } = useFormState({ control, name: ['fit', 'careInstructions'] });
+  // brand / collection / targetGender are edited in the card HEADER, not in this panel — but they
+  // are style catalogue facts, so UpdateStyle is their only writer. UpdateTechCard deliberately
+  // excludes them (R4/§14.7, "no fact is written by two paths"), while the card kept sending them
+  // in its insert and reporting success: the operator changed the brand, saw "saved", reloaded, and
+  // got the old value back. They ride this panel's staged UpdateStyle now, because that is the RPC
+  // that owns them. Season rides along too, but only half of it can land — see commitFacts.
+  const { dirtyFields } = useFormState({
+    control,
+    name: ['fit', 'careInstructions', 'brand', 'collection', 'season', 'targetGender'],
+  });
   const changed = [
     dirtyFields.fit ? 'фасон' : '',
     dirtyFields.careInstructions ? 'уход' : '',
+    dirtyFields.brand ? 'бренд' : '',
+    dirtyFields.collection ? 'коллекция' : '',
+    dirtyFields.season ? 'сезон' : '',
+    dirtyFields.targetGender ? 'пол' : '',
   ].filter(Boolean);
 
   // The panel's mutation, unwrapped: it THROWS on failure instead of toasting, because the header's
@@ -154,9 +168,16 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
   // backend explicitly keeps — would then reject a fit-only edit with unknown_care_code on a field the
   // operator never touched. Which fields moved is decided at STAGING time, not here: the card body
   // commits first and its form.reset() clears the dirty flags before this runs.
-  async function commitFacts(dirty: { fit: boolean; care: boolean }) {
+  async function commitFacts(dirty: {
+    fit: boolean;
+    care: boolean;
+    brand: boolean;
+    collection: boolean;
+    season: boolean;
+    targetGender: boolean;
+  }) {
     if (!styleId) return;
-    if (!dirty.fit && !dirty.care) return;
+    if (!Object.values(dirty).some(Boolean)) return;
     setSaving(true);
     try {
       // The chart read is the cheapest way to read the fresh shared lock (it echoes
@@ -174,6 +195,33 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
       if (dirty.care) {
         patch.careInstructions = getValues('careInstructions') || '';
         mask.push('careInstructions');
+      }
+      if (dirty.brand) {
+        patch.brand = getValues('brand') || '';
+        mask.push('brand');
+      }
+      if (dirty.collection) {
+        patch.collection = getValues('collection') || '';
+        mask.push('collection');
+      }
+      if (dirty.season) {
+        // The wire field is the season CODE alone (SeasonEnum). The year is not in StylePatch and
+        // the store's season fragment preserves it (COALESCE), so SS25 → FW25 lands and SS25 → SS26
+        // cannot — the header says so next to the field. Sent anyway: dropping it silently, which
+        // is what happened before, loses the half that does work. An unrecognised label parses to
+        // no code and is skipped rather than written as UNKNOWN.
+        const code = parseSeasonToSku(getValues('season') || '')?.code;
+        if (code && code !== 'SEASON_ENUM_UNKNOWN') {
+          patch.season = code;
+          mask.push('season');
+        }
+      }
+      if (dirty.targetGender) {
+        // The form holds the GenderEnum string the header's select writes, which is what the patch
+        // wants — no mapping. An unmasked enum is replaced by a placeholder server-side, so naming
+        // it in the mask is what makes it real.
+        patch.targetGender = getValues('targetGender') as StylePatch['targetGender'];
+        mask.push('targetGender');
       }
       await adminService.UpdateStyle({
         styleId,
@@ -200,7 +248,14 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
     // The dirty set is FROZEN into the commit here, from the same render that computed the label —
     // so the two can never disagree, and the card body's form.reset() (which runs between staging and
     // committing whenever the body was dirty too) cannot widen the mask back onto untouched care.
-    const dirty = { fit: !!dirtyFields.fit, care: !!dirtyFields.careInstructions };
+    const dirty = {
+      fit: !!dirtyFields.fit,
+      care: !!dirtyFields.careInstructions,
+      brand: !!dirtyFields.brand,
+      collection: !!dirtyFields.collection,
+      season: !!dirtyFields.season,
+      targetGender: !!dirtyFields.targetGender,
+    };
     staging.stage({
       key: STAGING_KEY,
       label: `${changed.join('/')} — ${changed.length} ${changed.length === 1 ? 'field' : 'fields'}`,
@@ -213,12 +268,26 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
         const v = getValues();
         resetField('fit', { defaultValue: v.fit });
         resetField('careInstructions', { defaultValue: v.careInstructions });
+        resetField('brand', { defaultValue: v.brand });
+        resetField('collection', { defaultValue: v.collection });
+        resetField('season', { defaultValue: v.season });
+        resetField('targetGender', { defaultValue: v.targetGender });
       },
     });
     // commitFacts/settle are redefined every render by design (they read current form state);
     // depending on them here would restage on every keystroke for no gain.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [staging, styleId, canEdit, dirtyFields.fit, dirtyFields.careInstructions]);
+  }, [
+    staging,
+    styleId,
+    canEdit,
+    dirtyFields.fit,
+    dirtyFields.careInstructions,
+    dirtyFields.brand,
+    dirtyFields.collection,
+    dirtyFields.season,
+    dirtyFields.targetGender,
+  ]);
 
   if (!styleId) {
     return (

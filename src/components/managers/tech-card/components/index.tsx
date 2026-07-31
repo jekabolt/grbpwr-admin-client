@@ -998,6 +998,13 @@ export function TechCardForm({
                   )}
                   <InputField name='name' label='name *' placeholder='название изделия' />
                   <SeasonField />
+                  {isEditMode && (
+                    <Text variant='label' size='micro'>
+                      Сезон меняет только КОД (SS → FW) и перевыпускает SKU всех незамороженных
+                      колорвеев. Год задаётся при создании и здесь не меняется — другой год это
+                      другой стиль (clone for season).
+                    </Text>
+                  )}
                   <CollectionField />
                   {/* brand sits inline with the rest of the card's identity rather than behind a
                     disclosure: it is pre-filled with GRBPWR (techCardDefaultData) and is almost

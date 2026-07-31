@@ -124,6 +124,9 @@ type RecipePiece = PieceRef & { id: number };
 type UsageDraft = {
   bomLineKey: string;
   materialId: number;
+  // placement/color/pantone predate article pinning and are round-tripped for legacy rows only —
+  // no input renders them: the colour/pantone live on the effective article, the "where" on the
+  // piece link. placement is still primed to the piece name on add for the PDF and legacy readers.
   placement: string;
   color: string;
   pantone: string;
@@ -1032,36 +1035,6 @@ function SlotUsageRow({
         </div>
 
         {missingArticle && <Pill tone='warn'>нет артикула — блокер производства</Pill>}
-
-        <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
-          <label className='flex min-w-0 flex-col gap-1'>
-            <FieldLabel>placement</FieldLabel>
-            <input
-              className={cell}
-              disabled={!canEdit}
-              value={draft.placement}
-              onChange={(e) => onChange({ placement: e.target.value })}
-            />
-          </label>
-          <label className='flex min-w-0 flex-col gap-1'>
-            <FieldLabel>colour</FieldLabel>
-            <input
-              className={cell}
-              disabled={!canEdit}
-              value={draft.color}
-              onChange={(e) => onChange({ color: e.target.value })}
-            />
-          </label>
-          <label className='flex min-w-0 flex-col gap-1'>
-            <FieldLabel>pantone</FieldLabel>
-            <input
-              className={cell}
-              disabled={!canEdit}
-              value={draft.pantone}
-              onChange={(e) => onChange({ pantone: e.target.value })}
-            />
-          </label>
-        </div>
 
         {isMeasured && !legacyCountedMeasured ? (
           <UsagePerSizeLocal
