@@ -1,4 +1,8 @@
-import { common_Material, common_TechCardBomSection } from 'api/proto-http/admin';
+import {
+  common_AdminColorwayRef,
+  common_Material,
+  common_TechCardBomSection,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   composeArticleFromMaterial,
@@ -29,7 +33,7 @@ import {
   useWatch,
   type FieldErrors,
 } from 'react-hook-form';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -569,10 +573,29 @@ function BomTile({
   );
 }
 
+// A colourway whose recipe still cuts the article the operator is trying to delete. The server
+// refuses that delete; this is what the refusal is turned into on the way in.
+type BlockingUser = { colorwayId: number; sku: string };
+
 // Bill of materials = catalog of all material articles used by this style. Recipe (which
 // article on which part, colour, consumption) lives per colourway on the colorways tab.
-export function BomField({ highlightComposition = 0 }: { highlightComposition?: number }) {
+export function BomField({
+  highlightComposition = 0,
+  colorways,
+}: {
+  highlightComposition?: number;
+  /**
+   * The style's colourways as READ (techCard.colorways) — NOT the RHF `colorways` array, which is
+   * permanently empty since colourways stopped being style-owned. Their recipes are the one class
+   * of reference to a BOM article this form cannot clear on its own, so they are the one thing
+   * that has to be checked before a delete rather than fixed up after it.
+   */
+  colorways?: common_AdminColorwayRef[];
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
+  const { showMessage } = useSnackBarStore();
+  const [params, setParams] = useSearchParams();
+  const [blocked, setBlocked] = useState<{ name: string; users: BlockingUser[] } | null>(null);
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     composition?: string;
@@ -608,11 +631,58 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
     return () => clearTimeout(t);
   }, [highlightActive, editing]);
 
+  // Which colourways cut a given article. Their recipes are colourway-owned — saved by their own
+  // RPC, one write per colourway — so this form can neither see them in its own state nor clear
+  // them as part of its save.
+  //
+  // Matched on bom_item_id FIRST, and only then on line_key. A line_key the server issued in its
+  // own format (BOM-FABRIC-1785511792 — the one in the error that started this) does not survive
+  // mapBomItemToForm, which keeps a key only when it is a ULID and mints a fresh one otherwise: the
+  // form's key for such an article is a ULID no usage has ever referenced, so a key-only check
+  // would silently pass every article the server is about to refuse. The id is the same number on
+  // both sides. A never-saved article has id 0 and no colourway can reference it yet.
+  const colorwayUsers = (lineKey: string, bomItemId: number): BlockingUser[] =>
+    (colorways ?? [])
+      .filter((c) =>
+        (c.usages ?? []).some(
+          (u) =>
+            (bomItemId > 0 && wireInt(u.bomItemId) === bomItemId) ||
+            (!!lineKey && u.bomLineKey === lineKey),
+        ),
+      )
+      .map((c) => ({
+        colorwayId: c.colorwayId ?? 0,
+        sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
+      }));
+
+  // Land on the offending recipe itself, not merely on the colorways tab: ?colorway= selects the
+  // swatch, so the usage to remove is on screen instead of two clicks away.
+  const goToColorway = (colorwayId: number) => {
+    setBlocked(null);
+    const next = new URLSearchParams(params);
+    next.set('tab', 'colorways');
+    if (colorwayId) next.set('colorway', String(colorwayId));
+    setParams(next, { replace: true });
+    showMessage('уберите этот артикул из рецепта колорвея и сохраните его', 'success');
+  };
+
   // Stable line_key (§2.3): downstream refs point at the article's key, not its position — so
   // removing an article NEVER renumbers anything. We only clear refs that pointed AT the removed
   // article (its key is gone); refs to other articles are untouched. Kills the S2/S3 renumbering.
   const removeArticle = (bi: number) => {
     const removedKey = (getValues(`bomItems.${bi}.lineKey`) as string) || '';
+    // Refuse here rather than let the save carry it to a server that answers with a wall of
+    // uppercase naming a line_key the operator has never seen. Operation and piece references are
+    // cleared below and go out with the same save; colourway recipes are the one thing this form
+    // does not own, so they are the one thing that can block.
+    const users = colorwayUsers(removedKey, wireInt(getValues(`bomItems.${bi}.id`)));
+    if (users.length > 0) {
+      setBlocked({
+        name: (getValues(`bomItems.${bi}.name`) as string)?.trim() || `артикул ${bi + 1}`,
+        users,
+      });
+      return;
+    }
     if (removedKey) {
       const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
       (operations ?? []).forEach((o, oi) => {
@@ -631,14 +701,11 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
           }
         });
       });
-      const colorways = (getValues('colorways') ?? []) as TechCardFormData['colorways'];
-      (colorways ?? []).forEach((c, ci) => {
-        (c.usages ?? []).forEach((u, ui) => {
-          if (u.bomLineKey === removedKey) {
-            setValue(`colorways.${ci}.usages.${ui}.bomLineKey`, '', { shouldDirty: true });
-          }
-        });
-      });
+      // No colourway pass here. The RHF `colorways` array has been permanently empty since
+      // colourways became products (mapTechCardToForm maps over []), so the loop that used to sit
+      // here cleared nothing while reading as if it handled the case — which is exactly how a
+      // referenced article reached the server and came back as an error about a line_key. The
+      // guard above is what actually handles it.
     }
     // Indices shift under an open editor once a row above it is gone; close it rather than let it
     // repoint at whatever slid into that slot.
@@ -687,6 +754,56 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
           )}
         >
           <BomItemRow index={editing} highlight={highlightActive} />
+        </ConfirmationModal>
+      )}
+
+      {/* Why the delete did not happen, named in the operator's terms: not a line_key, but the
+          colourways that still cut this article, each one a link to the recipe that releases it. */}
+      {blocked && (
+        <ConfirmationModal
+          open
+          onOpenChange={(v) => !v && setBlocked(null)}
+          width='sm'
+          title='артикул ещё используется'
+          cancelLabel='close'
+          confirmLabel={blocked.users[0] ? `открыть ${blocked.users[0].sku} →` : 'close'}
+          closeOnConfirm={false}
+          onConfirm={() =>
+            blocked.users[0] ? goToColorway(blocked.users[0].colorwayId) : setBlocked(null)
+          }
+        >
+          <div className='flex flex-col gap-2'>
+            <Text size='micro'>
+              «{blocked.name}» стоит в рецептах этих колорвеев. Уберите его оттуда — тогда артикул
+              можно будет удалить.
+            </Text>
+            <div className='flex flex-col'>
+              {blocked.users.map((u) => (
+                <button
+                  key={u.colorwayId}
+                  type='button'
+                  onClick={() => goToColorway(u.colorwayId)}
+                  className='flex items-center gap-2 border-b border-hairline py-1 text-left last:border-b-0 hover:bg-bgZebra'
+                >
+                  <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                    {u.sku}
+                  </Text>
+                  <Text
+                    size='micro'
+                    variant='label'
+                    component='span'
+                    className='shrink-0 underline'
+                  >
+                    → colorways
+                  </Text>
+                </button>
+              ))}
+            </div>
+            <Text size='micro' variant='label'>
+              Рецепт колорвея сохраняется отдельно от карточки, поэтому его нельзя почистить этим же
+              сохранением.
+            </Text>
+          </div>
         </ConfirmationModal>
       )}
 
