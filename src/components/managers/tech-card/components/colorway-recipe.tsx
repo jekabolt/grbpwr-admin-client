@@ -16,7 +16,10 @@ import {
   materialSpec,
   parseCompositionCode,
 } from 'components/managers/materials/components/material-code';
-import { materialImageUrl } from 'components/managers/materials/components/material-thumb';
+import {
+  MaterialThumb,
+  materialImageUrl,
+} from 'components/managers/materials/components/material-thumb';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -44,7 +47,6 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { sectionShort } from './bom-line-picker';
-import { normalizeRole } from './bom-roles';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { wireInt } from './schema';
 import {
@@ -834,7 +836,32 @@ function articleForUsage(
   };
 }
 
-function SlotSelect({
+// The slot's identifying CODE for the picker: the default article's code (or its name), so a slot
+// reads by what it IS, not by a row number. Falls back to the slot's own role for an article-less
+// line — same rule the master fabric picker used.
+function slotCode(b: BomLine): string {
+  const m = b.material;
+  if (m)
+    return composeArticleFromMaterial(m, true) || m.name?.trim() || b.name?.trim() || 'material';
+  return b.name?.trim() || 'без названия';
+}
+
+// The meta line under the code: the ROLE first (it is what tells two slots with the same default
+// article apart), then the material's own spec + colour.
+function slotSpecLine(b: BomLine): string {
+  const m = b.material;
+  const role = b.name?.trim();
+  return [role, m ? materialSpec(m) : '', m?.color?.trim()].filter(Boolean).join(' · ');
+}
+
+// The slot chooser — the master fabric picker, carried over to slots. Replaces the native <select>:
+// a select can render only text, and a slot is picked by its article's photo + spec + role, not by
+// a row label. A field-box trigger (the shared `cell` box) shows the current pick as thumbnail +
+// code + meta; the menu is the app's one popover shell (portalled, focus-trapped, Esc to close).
+// Options already used in this recipe group are disabled with «уже в рецепте»; the current pick
+// stays visible even when the section filter (or its removal from the BOM) would hide it, so a
+// save never silently drops a stored reference.
+function SlotPicker({
   value,
   slots,
   allowedSections,
@@ -849,54 +876,136 @@ function SlotSelect({
   canEdit: boolean;
   onChange: (bomLineKey: string) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const selected = value ? slots.find((slot) => slot.lineKey === value) : undefined;
+  const unknown = !!value && !selected;
   const eligible = slots.filter(
     (slot) => allowedSections.has(slot.section ?? '') || slot.lineKey === value,
   );
-  // The slot's display identity is its ROLE; a blank role falls back to the default article's name —
-  // the same fallback the server applies on read — so a legacy line never renders «без названия»
-  // when there is anything better to say.
-  const roleLabel = (slot: BomLine) =>
-    slot.name?.trim() || slot.material?.name?.trim() || 'без названия';
-  // Legacy cards can carry same-named slots (advisory, never blocked). When two ELIGIBLE options
-  // would render identically, append each slot's default article so the operator has something real
-  // to choose by; the ordinal prefix keeps options unique even when the articles match too.
-  const labelCounts = new Map<string, number>();
-  eligible.forEach((slot) => {
-    const k = `${sectionShort(slot.section)} ${normalizeRole(roleLabel(slot))}`;
-    labelCounts.set(k, (labelCounts.get(k) ?? 0) + 1);
-  });
-  const ordinalByKey = new Map(slots.map((slot, i) => [slot.lineKey, i + 1]));
+
+  const pick = (bomLineKey: string) => {
+    onChange(bomLineKey);
+    setOpen(false);
+  };
+
   return (
-    <select
-      className={cell}
-      value={value}
-      disabled={!canEdit}
-      aria-label='слот'
-      onChange={(e) => onChange(e.target.value)}
+    <GenericPopover
+      open={open && canEdit}
+      onOpenChange={setOpen}
+      noTail
+      title='слот'
+      className='w-[280px]'
+      triggerProps={{
+        disabled: !canEdit,
+        'aria-label': 'слот',
+        className: cn(cell, 'flex items-center gap-2 text-left'),
+      }}
+      openElement={(isOpen) => (
+        <>
+          {selected ? (
+            <MaterialThumb material={selected.material} size='sm' className='h-5 w-5' />
+          ) : null}
+          <span className='min-w-0 flex-1'>
+            {selected ? (
+              <>
+                <Text
+                  component='span'
+                  size='control'
+                  className='block truncate font-mono tabular-nums'
+                >
+                  {slotCode(selected)}
+                </Text>
+                {slotSpecLine(selected) && (
+                  <Text component='span' size='micro' variant='label' className='block truncate'>
+                    {slotSpecLine(selected)}
+                  </Text>
+                )}
+              </>
+            ) : (
+              <Text component='span' variant='label' className='block truncate'>
+                {unknown ? '(unknown / removed slot)' : '— выбрать слот —'}
+              </Text>
+            )}
+          </span>
+          <Text component='span' variant='inactive' className='shrink-0'>
+            {isOpen ? '▴' : '▾'}
+          </Text>
+        </>
+      )}
     >
-      {!value && <option value=''>— выбрать слот —</option>}
-      {value && !selected && <option value={value}>(unknown / removed slot)</option>}
-      {eligible.map((slot) => {
-        const label = roleLabel(slot);
-        const dup =
-          (labelCounts.get(`${sectionShort(slot.section)} ${normalizeRole(label)}`) ?? 0) > 1;
-        const article = slot.material?.name?.trim();
-        return (
-          <option
-            key={slot.lineKey}
-            value={slot.lineKey}
-            disabled={slot.lineKey !== value && usedKeys.has(slot.lineKey ?? '')}
+      {/* full-bleed list inside the popover body's px-2 py-1.5 padding */}
+      <div role='listbox' aria-label='слот' className='-mx-2 -my-1.5'>
+        {/* the stored-but-removed slot, surfaced as the current selection so it is never dropped */}
+        {unknown && (
+          <div
+            role='option'
+            aria-selected
+            className='flex w-full items-center gap-2 border-b border-hairline bg-bgZebra px-2 py-1 text-left'
           >
-            {ordinalByKey.get(slot.lineKey)}. {sectionShort(slot.section)} · {label}
-            {dup && article && normalizeRole(article) !== normalizeRole(label)
-              ? ` — ${article}`
-              : ''}
-            {!allowedSections.has(slot.section ?? '') ? ' (не для этой группы)' : ''}
-          </option>
-        );
-      })}
-    </select>
+            <MaterialThumb size='sm' className='h-8 w-8' />
+            <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
+              (unknown / removed slot)
+            </Text>
+            <Text component='span' variant='inactive' className='shrink-0'>
+              ✓
+            </Text>
+          </div>
+        )}
+
+        {eligible.length === 0 && !unknown ? (
+          <div className='px-2 py-2.5'>
+            <Text variant='label' size='micro'>
+              нет подходящих слотов в BOM
+            </Text>
+          </div>
+        ) : (
+          eligible.map((b) => {
+            const current = value === b.lineKey;
+            const used = !current && usedKeys.has(b.lineKey ?? '');
+            const offGroup = !allowedSections.has(b.section ?? '');
+            const spec = slotSpecLine(b);
+            return (
+              <button
+                key={b.lineKey}
+                type='button'
+                role='option'
+                aria-selected={current}
+                disabled={used}
+                onClick={() => pick(b.lineKey ?? '')}
+                className={cn(
+                  'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
+                  current && 'bg-bgZebra',
+                  used && 'cursor-not-allowed text-labelColor',
+                )}
+              >
+                <MaterialThumb material={b.material} size='sm' className='h-8 w-8' />
+                <span className='min-w-0 flex-1'>
+                  <Text
+                    component='span'
+                    size='control'
+                    className='block truncate font-mono tabular-nums'
+                  >
+                    {slotCode(b)}
+                  </Text>
+                  {(spec || used || offGroup) && (
+                    <Text component='span' size='micro' variant='label' className='block truncate'>
+                      {[spec, used ? 'уже в рецепте' : '', offGroup ? 'не для этой группы' : '']
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  )}
+                </span>
+                {current && (
+                  <Text component='span' variant='inactive' className='shrink-0'>
+                    ✓
+                  </Text>
+                )}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </GenericPopover>
   );
 }
 
@@ -1022,10 +1131,52 @@ function SlotUsageRow({
   const unit = article?.unit?.trim() || slot?.unit?.trim() || '';
   const missingArticle = !!slot && materialId === 0;
 
+  // The colourway PIN — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — demoted from a second
+  // always-on select to a small popover on the article card: one visible picker per row (the slot),
+  // exactly like the master fabric picker; pinning is the exception, not a parallel question.
+  const pinned = draft.materialId > 0;
+  const [pinOpen, setPinOpen] = useState(false);
+
   return (
     <div className='flex flex-col gap-3 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-start'>
       <div className='w-full sm:w-28 sm:shrink-0'>
         <RecipeMaterialCard slot={slot} material={material} materialId={materialId} />
+        {canEdit && slot && (
+          <div className='mt-1'>
+            <GenericPopover
+              open={pinOpen}
+              onOpenChange={setPinOpen}
+              noTail
+              title='артикул колорвея'
+              className='w-[280px]'
+              triggerProps={{
+                'aria-label': 'артикул колорвея',
+                className: cn(
+                  buttonVariants({ variant: 'secondary', size: 'xs' }),
+                  'w-full justify-center',
+                ),
+              }}
+              openElement={pinned ? 'пин ✎' : 'другой артикул…'}
+            >
+              <div className='flex flex-col gap-1.5'>
+                <ArticlePinSelect
+                  draft={draft}
+                  slot={slot}
+                  materials={materials}
+                  canEdit={canEdit}
+                  onChange={(materialId) => {
+                    onChange({ materialId });
+                    setPinOpen(false);
+                  }}
+                />
+                <Text size='micro' variant='label'>
+                  Переопределяет артикул слота только в этом колорвее. «default» возвращает артикул
+                  из BOM.
+                </Text>
+              </div>
+            </GenericPopover>
+          </div>
+        )}
       </div>
       <div className='flex min-w-0 flex-1 flex-col gap-2.5'>
         {/* The section already badges the article card to the left — repeating it here made every
@@ -1038,30 +1189,21 @@ function SlotUsageRow({
           </div>
         )}
 
-        <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
-          <label className='flex min-w-0 flex-col gap-1'>
-            <FieldLabel>слот</FieldLabel>
-            <SlotSelect
-              value={draft.bomLineKey}
-              slots={bomItems}
-              allowedSections={allowedSections}
-              usedKeys={usedKeys}
-              canEdit={canEdit}
-              onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0 })}
-            />
-          </label>
-          <label className='flex min-w-0 flex-col gap-1'>
-            <FieldLabel>артикул колорвея</FieldLabel>
-            <ArticlePinSelect
-              draft={draft}
-              slot={slot}
-              materials={materials}
-              canEdit={canEdit}
-              onChange={(materialId) => onChange({ materialId })}
-            />
-          </label>
-        </div>
+        <label className='flex min-w-0 flex-col gap-1 lg:max-w-sm'>
+          <FieldLabel>слот</FieldLabel>
+          <SlotPicker
+            value={draft.bomLineKey}
+            slots={bomItems}
+            allowedSections={allowedSections}
+            usedKeys={usedKeys}
+            canEdit={canEdit}
+            onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0 })}
+          />
+        </label>
 
+        {pinned && (
+          <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
+        )}
         {missingArticle && <Pill tone='warn'>нет артикула — блокер производства</Pill>}
 
         {isMeasured && !legacyCountedMeasured ? (
