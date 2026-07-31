@@ -37,6 +37,7 @@ import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
+import { Tiles } from 'ui/components/tiles';
 import ComboField from 'ui/form/fields/combo-field';
 import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
@@ -472,6 +473,7 @@ function BomTile({
     ? `${price}${row.currency?.trim() ? ` ${row.currency.trim()}` : ''}${row.unit?.trim() ? ` / ${row.unit.trim()}` : ''}`
     : '';
   const imageUrl = materialImageUrl(material);
+  const section = sectionShort(row.section);
   const cls = classShort(material?.materialClass);
   // грамматура · ширина · мат/сатин/блеск · состав · цвет — the identifying spec line, with the
   // colour appended. Empty on an unlinked line, which has no catalog material behind it yet.
@@ -536,13 +538,15 @@ function BomTile({
           <Placeholder aspect='square' label='no photo' className={open ? 'w-28' : 'w-full'} />
         )}
 
-        {/* секция / тип */}
+        {/* секция / тип. The class pill is dropped when it just repeats the section — the enums
+            overlap word-for-word (fabric/hardware/thread/packaging), so a fabric article read
+            «fabric fabric». It earns its place only when the two differ (lining + fabric). */}
         <div className='flex flex-wrap items-center gap-1'>
-          <Pill tone='mut'>{sectionShort(row.section) || 'section?'}</Pill>
-          {cls ? <Pill tone='mut'>{cls}</Pill> : null}
+          <Pill tone='mut'>{section || 'section?'}</Pill>
+          {cls && cls !== section ? <Pill tone='mut'>{cls}</Pill> : null}
         </div>
 
-        <Text component='span' className='min-w-0 truncate font-bold'>
+        <Text component='span' size='micro' className='min-w-0 truncate font-bold uppercase'>
           {row.name?.trim() || `артикул ${index + 1}`}
         </Text>
 
@@ -663,7 +667,10 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
       {fields.length === 0 ? (
         <Placeholder label='no BOM articles yet' className='h-16' />
       ) : (
-        <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4'>
+        // Same auto-filling tile grid as the models list (Tiles min=160) — fixed column counts
+        // made a BOM article a quarter of the page wide on a desktop, so four articles filled a
+        // screen the models list fits a dozen into.
+        <Tiles min={160}>
           {fields.map((f, index) => (
             <BomTile
               key={f.id}
@@ -672,7 +679,7 @@ export function BomField({ highlightComposition = 0 }: { highlightComposition?: 
               highlight={highlightActive && !bomWatch[index]?.composition?.trim()}
             />
           ))}
-        </div>
+        </Tiles>
       )}
 
       <Button
