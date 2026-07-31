@@ -1,6 +1,7 @@
 import { common_ArchiveFull } from 'api/proto-http/frontend';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ARCHIVE_PREVIEW } from './preview-contract';
 import { useArchivePreview } from './use-archive-preview';
@@ -86,50 +87,49 @@ export function ArchivePreview({
   const scale = containerWidth ? Math.min(1, containerWidth / logicalWidth) : 1;
 
   return (
-    <div className='flex flex-col gap-3 border-2 border-textInactiveColor'>
-      <div className='flex flex-col gap-2 border-b border-textInactiveColor px-3 py-2'>
-        <div className='flex flex-wrap items-center justify-between gap-2'>
-          <Text variant='uppercase' size='large'>
-            live preview
-          </Text>
-          <div className='flex items-center gap-2'>
-            <Button
-              type='button'
-              variant={view === 'desktop' ? 'main' : 'secondary'}
-              className='cursor-pointer px-2 py-1'
-              onClick={() => setView('desktop')}
-            >
-              desktop
-            </Button>
-            <Button
-              type='button'
-              variant={view === 'mobile' ? 'main' : 'secondary'}
-              className='cursor-pointer px-2 py-1'
-              onClick={() => setView('mobile')}
-            >
-              mobile
-            </Button>
-          </div>
+    // Same shape as hero's live preview: the chrome around the frame is a block, the frame
+    // itself is a viewport onto the real storefront and keeps its own vocabulary.
+    <Section
+      title='live preview'
+      action={
+        <div className='flex items-center gap-2'>
+          <Button
+            type='button'
+            variant={view === 'desktop' ? 'main' : 'secondary'}
+            className='cursor-pointer px-2 py-1'
+            onClick={() => setView('desktop')}
+          >
+            desktop
+          </Button>
+          <Button
+            type='button'
+            variant={view === 'mobile' ? 'main' : 'secondary'}
+            className='cursor-pointer px-2 py-1'
+            onClick={() => setView('mobile')}
+          >
+            mobile
+          </Button>
         </div>
-        <div className='flex flex-wrap items-center gap-1'>
-          {PREVIEW_LOCALES.map((l) => (
-            <Button
-              key={l.code}
-              type='button'
-              variant={locale === l.code ? 'main' : 'secondary'}
-              className='cursor-pointer px-2 py-1'
-              aria-pressed={locale === l.code}
-              onClick={() => setLocale(l.code)}
-            >
-              {l.label}
-            </Button>
-          ))}
-        </div>
+      }
+    >
+      <div className='flex flex-wrap items-center gap-1'>
+        {PREVIEW_LOCALES.map((l) => (
+          <Button
+            key={l.code}
+            type='button'
+            variant={locale === l.code ? 'main' : 'secondary'}
+            className='cursor-pointer px-2 py-1'
+            aria-pressed={locale === l.code}
+            onClick={() => setLocale(l.code)}
+          >
+            {l.label}
+          </Button>
+        ))}
       </div>
 
-      <div ref={containerRef} className='w-full px-3 pb-3'>
+      <div ref={containerRef} className='w-full'>
         <div
-          className='relative mx-auto overflow-hidden border border-textInactiveColor bg-bgColor'
+          className='relative mx-auto overflow-hidden border border-borderColor bg-bgColor'
           style={{ width: logicalWidth * scale, height: logicalHeight * scale }}
         >
           <iframe
@@ -154,6 +154,6 @@ export function ArchivePreview({
           )}
         </div>
       </div>
-    </div>
+    </Section>
   );
 }

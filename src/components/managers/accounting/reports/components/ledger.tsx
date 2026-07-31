@@ -115,7 +115,7 @@ export function LedgerTab({ code, from, to }: Props) {
           </StatGrid>
 
           <div className='overflow-x-auto'>
-            <table className='w-full min-w-max border-collapse border-2 border-textInactiveColor'>
+            <table className='w-full min-w-max border-collapse border border-borderColor'>
               <thead className='sticky top-0 z-10 bg-bgColor'>
                 <tr className='border-b border-textColor'>
                   <th className='px-2 py-2 text-left text-textBaseSize uppercase'>date</th>

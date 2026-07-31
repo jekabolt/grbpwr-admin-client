@@ -104,7 +104,7 @@ export function EntryDetailModal({ entryId, onOpenChange, actions }: Props) {
                 </div>
 
                 <div className='overflow-x-auto'>
-                  <table className='w-full min-w-max border-collapse border-2 border-textInactiveColor'>
+                  <table className='w-full min-w-max border-collapse border border-borderColor'>
                     <thead className='h-10 bg-textInactiveColor'>
                       <tr className='border-b border-textInactiveColor'>
                         <th className='px-2 text-left text-textBaseSize uppercase'>account</th>

@@ -255,7 +255,7 @@ export const ProductPickerModal: FC<ProductsPickerData> = ({
           />
         </div>
         <div className='overflow-auto w-full max-h-[min(70vh,500px)]'>
-          <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
+          <table className='w-full border-collapse border border-borderColor min-w-max'>
             <thead className='bg-textInactiveColor h-10'>
               <tr className='border-b border-textInactiveColor'>
                 {COLUMNS.map((col) => (

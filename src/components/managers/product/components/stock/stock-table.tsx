@@ -66,7 +66,7 @@ export function StockTable({ changes = [], isLoading, sizes = [] }: StockTablePr
 
   return (
     <div className='min-h-0 w-full flex-1 overflow-auto'>
-      <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
+      <table className='w-full border-collapse border border-borderColor min-w-max'>
         <thead className='sticky top-0 z-20 h-10'>
           <tr className='border-b border-textInactiveColor bg-textInactiveColor'>
             {COLUMNS.map((col, i) => (

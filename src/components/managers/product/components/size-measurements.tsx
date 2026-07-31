@@ -236,7 +236,7 @@ export function SizeMeasurements({
         headerContentGapClass='space-y-3'
       >
         <div className='overflow-x-auto'>
-          <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
+          <table className='w-full border-collapse border border-borderColor min-w-max'>
             <thead className='bg-textInactiveColor'>
               <tr className='border-b border-text'>
                 <th className={cn(cellClass, 'sticky left-0 bg-textInactiveColor z-10')}>

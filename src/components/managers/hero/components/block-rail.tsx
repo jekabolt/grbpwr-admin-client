@@ -271,9 +271,12 @@ export const BlockRail: FC<BlockRailProps> = ({
                         style={style}
                         className={cn(
                           'flex items-center gap-1.5 bg-bgColor px-1.5 py-1.5 scroll-mt-4',
+                          // Selection reads as INK, the way `Chip selected` does — not as a
+                          // thicker grey. Keeping both states at 1px also stops the row
+                          // reflowing by a pixel the moment you select it.
                           isSelected
-                            ? 'border-2 border-textInactiveColor'
-                            : 'border border-textInactiveColor',
+                            ? 'border border-textColor'
+                            : 'border border-borderColor',
                         )}
                       >
                         <button

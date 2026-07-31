@@ -71,7 +71,7 @@ export function MembersTable({ members, isLoading }: MembersTableProps) {
 
   return (
     <div className='overflow-x-auto w-full'>
-      <table className='w-full border-collapse border-2 border-textInactiveColor min-w-max'>
+      <table className='w-full border-collapse border border-borderColor min-w-max'>
         <thead className='bg-textInactiveColor h-10'>
           <tr className='border-b border-textInactiveColor'>
             {COLUMNS.map((col) => (
