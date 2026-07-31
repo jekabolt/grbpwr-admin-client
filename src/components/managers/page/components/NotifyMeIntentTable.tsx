@@ -1,5 +1,6 @@
 import type { NotifyMeIntentRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
@@ -11,10 +12,8 @@ interface NotifyMeIntentTableProps {
 export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeIntent }) => {
   if (!notifyMeIntent || notifyMeIntent.length === 0) {
     return (
-      <div className='border border-textInactiveColor p-4'>
-        <Text variant='uppercase' className='font-bold mb-4 block'>
-          Notify me intent
-        </Text>
+      <div>
+        <GroupLabel flush>Notify me intent</GroupLabel>
         <div className='py-8 text-center'>
           <Text className='text-labelColor'>No restock demand signals in this period</Text>
         </div>
@@ -53,14 +52,12 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
     .slice(0, 20);
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Notify me intent
-      </Text>
+    <div>
+      <GroupLabel flush>Notify me intent</GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Product
@@ -80,7 +77,7 @@ export const NotifyMeIntentTable: FC<NotifyMeIntentTableProps> = ({ notifyMeInte
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+              <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                 <td className='p-2'>
                   <ProductNameLink
                     productId={row.productId}

@@ -1,6 +1,8 @@
 import type { GetDashboardResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { type FC, type ReactNode } from 'react';
+import { Section, SectionStack } from 'ui/components/section';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import {
   DeliveryPanel,
@@ -12,11 +14,8 @@ import {
   ProfitabilityPanel,
   PromoBars,
   RevenueWaterfall,
-  SectionHead,
-  StatGrid,
   TimeSeriesChart,
 } from '../components';
-import type { StatCell } from '../components/StatGrid';
 import type { WaterfallStep } from '../components/RevenueWaterfall';
 import { orderCancellationSharePercent } from '../executiveAlerts';
 import {
@@ -41,6 +40,13 @@ interface RevenueTabProps {
 const COVERAGE_FLOOR_FOR_PCT = 80;
 // Rate over fewer orders than this is inside its own error band — show the raw count instead.
 const MIN_ORDERS_FOR_RATE = 30;
+
+interface StatCell {
+  label: ReactNode;
+  value: ReactNode;
+  sub?: ReactNode;
+  big?: boolean;
+}
 
 /** Compact good/bad delta vs the comparison period, in the shared arrow grammar. */
 const Delta: FC<{
@@ -258,50 +264,54 @@ export function RevenueTab({
   const hasPromos = (commerce?.revenueByPromo?.length ?? 0) > 0;
 
   return (
-    <div className='space-y-8'>
+    <SectionStack>
       {/* MONEY HEADLINE — revenue waterfall + two KPI grids (config: Headline=waterfall + two). */}
-      <section className='space-y-3'>
-        <SectionHead title='Money headline' sub="— how much came in, what's left" />
-        <StatGrid cells={kpiPrimary} />
-        <StatGrid cells={kpiSecondary} />
+      <Section title='Money headline' question="— how much came in, what's left">
+        <StatGrid min={130}>
+          {kpiPrimary.map((cell, index) => (
+            <Stat key={index} {...cell} />
+          ))}
+        </StatGrid>
+        <StatGrid min={130}>
+          {kpiSecondary.map((cell, index) => (
+            <Stat key={index} {...cell} />
+          ))}
+        </StatGrid>
         <div className='space-y-1.5 pt-1'>
           <Muted>Revenue → contribution</Muted>
           <RevenueWaterfall steps={waterfallSteps} />
         </div>
-      </section>
+      </Section>
 
       {/* P&L / PROFITABILITY — waterfall + unit economics (config: PL=waterfall). Costing-gated:
           without costing:read the server nulls the money fields, so hide the whole section. */}
       {canReadCosting && (
-        <section className='space-y-3'>
-          <SectionHead
-            title='P&L / profitability'
-            sub='— costs down to operating result + unit economics'
-          />
+        <Section
+          title='P&L / profitability'
+          question='— costs down to operating result + unit economics'
+        >
           <ProfitabilityPanel
             profitability={metricsResponse.profitability}
             compareEnabled={compareEnabled}
             operatingResultChangePct={dashboard?.compare?.operatingResultChangePct}
           />
           <OperatingResultStrip dashboard={dashboard} />
-        </section>
+        </Section>
       )}
 
       {/* OVER TIME — two line charts (config: Trend=twolines). */}
-      <section className='space-y-3'>
-        <SectionHead title='Over time' sub='— revenue & order trend across the period' />
+      <Section title='Over time' question='— revenue & order trend across the period'>
         <div className='grid gap-4 md:grid-cols-2'>
           <TimeSeriesChart title='Net revenue / day' data={revByDay} />
           <TimeSeriesChart title='Gross revenue / day' data={grossRevByDay} />
         </div>
-      </section>
+      </Section>
 
       {/* ORDER VALUE — revenue-share bars + verdict (config: Bands=bars). */}
       {bands.length > 0 && (
-        <section className='space-y-3'>
-          <SectionHead title='Order value' sub='— do a few big baskets carry the revenue?' />
+        <Section title='Order value' question='— do a few big baskets carry the revenue?'>
           {bigRevShare > 0 && verdictBands.length > 0 ? (
-            <Text className='text-[13px] font-bold leading-snug'>
+            <Text className='font-bold leading-snug'>
               {bigRevShare}% of revenue comes from the {bigOrdShare}% of orders {bandThreshold}.
             </Text>
           ) : (
@@ -310,16 +320,12 @@ export function RevenueTab({
             </Text>
           )}
           <OrderValueBandsBars bands={bands} />
-        </section>
+        </Section>
       )}
 
       {/* PURCHASE FUNNEL — drop-off + biggest leak (config: Funnel=dropoff). */}
       {metricsResponse.funnel?.aggregate && (
-        <section className='space-y-3'>
-          <SectionHead
-            title='Purchase funnel'
-            sub='— where browsers drop off on the way to buying'
-          />
+        <Section title='Purchase funnel' question='— where browsers drop off on the way to buying'>
           <FunnelDropoff funnel={metricsResponse.funnel} />
           <details>
             <summary className='cursor-pointer text-textBaseSize text-labelColor'>
@@ -329,13 +335,12 @@ export function RevenueTab({
               <FunnelChart funnel={metricsResponse.funnel} />
             </div>
           </details>
-        </section>
+        </Section>
       )}
 
       {/* PAYMENTS & PROMO — mix bars (config: PayPromo=bars). */}
       {(hasPayments || hasPromos) && (
-        <section className='space-y-3'>
-          <SectionHead title='Payments & promo' sub='— method mix & promo-driven revenue' />
+        <Section title='Payments & promo' question='— method mix & promo-driven revenue'>
           <div className='grid gap-6 md:grid-cols-2'>
             {hasPayments && (
               <div className='space-y-2'>
@@ -350,39 +355,43 @@ export function RevenueTab({
               </div>
             )}
           </div>
-        </section>
+        </Section>
       )}
 
       {/* SHIPPING & DELIVERY — ops detail, collapsed (not a headline metric). */}
-      <details className='border border-textInactiveColor'>
-        <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>
-          <span className='text-textBaseSize font-bold uppercase'>Shipping &amp; Delivery</span>
-          {deliverySummary && (
-            <span className='text-textBaseSize text-labelColor normal-case'>{deliverySummary}</span>
-          )}
-        </summary>
-        <div className='space-y-6 p-4'>
-          <DeliveryPanel delivery={delivery} />
-          <div className='grid gap-4 md:grid-cols-2'>
-            <TimeSeriesChart
-              title='Units sold'
-              data={coarsenTimeSeries(commerce?.unitsSoldByDay)}
-              valueFormat='number'
-            />
-            <TimeSeriesChart
-              title='Shipped'
-              data={coarsenTimeSeries(commerce?.shippedByDay)}
-              valueFormat='number'
-            />
-            <TimeSeriesChart
-              title='Delivered'
-              data={coarsenTimeSeries(commerce?.deliveredByDay)}
-              valueFormat='number'
-            />
-            <TimeSeriesChart title='Refunds' data={coarsenTimeSeries(commerce?.refundsByDay)} />
+      <Section className='p-0'>
+        <details>
+          <summary className='flex cursor-pointer select-none flex-wrap items-center justify-between gap-2 bg-bgSecondary/30 px-4 py-3 hover:bg-bgSecondary/50'>
+            <span className='text-textBaseSize font-bold uppercase'>Shipping &amp; Delivery</span>
+            {deliverySummary && (
+              <span className='text-textBaseSize text-labelColor normal-case'>
+                {deliverySummary}
+              </span>
+            )}
+          </summary>
+          <div className='space-y-6 p-4'>
+            <DeliveryPanel delivery={delivery} />
+            <div className='grid gap-4 md:grid-cols-2'>
+              <TimeSeriesChart
+                title='Units sold'
+                data={coarsenTimeSeries(commerce?.unitsSoldByDay)}
+                valueFormat='number'
+              />
+              <TimeSeriesChart
+                title='Shipped'
+                data={coarsenTimeSeries(commerce?.shippedByDay)}
+                valueFormat='number'
+              />
+              <TimeSeriesChart
+                title='Delivered'
+                data={coarsenTimeSeries(commerce?.deliveredByDay)}
+                valueFormat='number'
+              />
+              <TimeSeriesChart title='Refunds' data={coarsenTimeSeries(commerce?.refundsByDay)} />
+            </div>
           </div>
-        </div>
-      </details>
-    </div>
+        </details>
+      </Section>
+    </SectionStack>
   );
 }

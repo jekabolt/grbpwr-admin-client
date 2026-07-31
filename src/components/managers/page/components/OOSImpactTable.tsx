@@ -1,5 +1,6 @@
 import type { OOSImpactMetric } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
@@ -49,14 +50,12 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
   if (topOOS.length === 0) return null;
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Out-of-stock demand
-      </Text>
+    <div>
+      <GroupLabel flush>Out-of-stock demand</GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Product
@@ -81,7 +80,7 @@ export const OOSImpactTable: FC<OOSImpactTableProps> = ({ oosImpact }) => {
           </thead>
           <tbody>
             {topOOS.map((row, idx) => (
-              <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+              <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                 <td className='p-2'>
                   <ProductNameLink
                     productId={row.productId}

@@ -1,5 +1,6 @@
 import type { InventoryHealthRow } from 'api/proto-http/admin';
 import { FC, useMemo } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { DAYS_ON_HAND_NO_SALES_SENTINEL, formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
@@ -32,14 +33,12 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
   if (rows.length === 0) return null;
 
   return (
-    <div className='border-2 border-warning/60 p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Reorder now ({rows.length})
-      </Text>
+    <div>
+      <GroupLabel flush>Reorder now ({rows.length})</GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Product
@@ -74,7 +73,7 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
           </thead>
           <tbody>
             {rows.map((row, idx) => (
-              <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+              <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                 <td className='p-2'>
                   <ProductNameLink
                     productId={row.productId}
@@ -89,9 +88,7 @@ export const ReorderTable: FC<ReorderTableProps> = ({ inventoryHealth }) => {
                   <Text className='font-bold'>{formatNumber(row.quantity || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
-                  <Text className='text-labelColor'>
-                    {formatNumber(row.reorderPoint || 0)}
-                  </Text>
+                  <Text className='text-labelColor'>{formatNumber(row.reorderPoint || 0)}</Text>
                 </td>
                 <td className='p-2 text-right'>
                   <Text>{daysOfCover(row)}</Text>

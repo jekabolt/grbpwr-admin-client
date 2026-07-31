@@ -1,5 +1,6 @@
 import type { SizeRunEfficiencyRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
@@ -32,14 +33,12 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
   if (sorted.length === 0) return null;
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-4 block'>
-        Which sizes are selling
-      </Text>
+    <div>
+      <GroupLabel flush>Which sizes are selling</GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Product
@@ -75,7 +74,7 @@ export const SizeRunEfficiencyTable: FC<SizeRunEfficiencyTableProps> = ({ sizeRu
               // Low sell-through on a wide run = real overbuy; single-digit runs are too small to judge.
               const isPoor = pct < 50 && totalSizes >= 4;
               return (
-                <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}

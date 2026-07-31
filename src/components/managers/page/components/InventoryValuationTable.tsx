@@ -1,5 +1,7 @@
 import type { InventoryValuation, InventoryValuationRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
@@ -8,29 +10,13 @@ interface InventoryValuationTableProps {
   inventoryValuation: InventoryValuation | undefined;
 }
 
-const Stat: FC<{ label: string; value: string; hint?: string }> = ({ label, value, hint }) => (
-  <div className='space-y-1'>
-    <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-      {label}
-    </Text>
-    <Text className='font-bold text-lg'>{value}</Text>
-    {hint && (
-      <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
-        {hint}
-      </Text>
-    )}
-  </div>
-);
-
 const RowTable: FC<{ title: string; rows: InventoryValuationRow[] }> = ({ title, rows }) => (
   <div>
-    <Text variant='uppercase' size='small' className='font-bold mb-2 block'>
-      {title}
-    </Text>
+    <GroupLabel flush>{title}</GroupLabel>
     <div className='overflow-x-auto'>
       <table className='w-full text-textBaseSize'>
         <thead>
-          <tr className='border-b border-textInactiveColor'>
+          <tr className='border-b border-hairline'>
             <th className='text-left p-2'>Product</th>
             <th className='text-right p-2'>On hand</th>
             <th className='text-right p-2'>Unit cost</th>
@@ -40,10 +26,7 @@ const RowTable: FC<{ title: string; rows: InventoryValuationRow[] }> = ({ title,
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr
-              key={r.productId}
-              className='border-b border-textInactiveColor hover:bg-bgSecondary'
-            >
+            <tr key={r.productId} className='border-b border-hairline hover:bg-bgSecondary'>
               <td className='p-2'>
                 <ProductNameLink
                   productId={r.productId}
@@ -78,33 +61,31 @@ export const InventoryValuationTable: FC<InventoryValuationTableProps> = ({
   const coverage = iv.coveragePct ?? 0;
 
   return (
-    <div className='border border-textInactiveColor p-4 space-y-6'>
-      <Text variant='uppercase' className='font-bold block'>
-        Inventory valuation
-      </Text>
+    <div className='space-y-6'>
+      <GroupLabel flush>Inventory valuation</GroupLabel>
 
-      <div className='grid grid-cols-2 md:grid-cols-4 gap-3'>
+      <StatGrid min={130}>
         <Stat
           label='Stock value'
           value={formatCurrency(parseDecimal(iv.totalStockValue))}
-          hint={`${coverage.toFixed(0)}% of units costed`}
+          sub={`${coverage.toFixed(0)}% of units costed`}
         />
         <Stat
           label='On hand'
           value={formatNumber(iv.totalOnHandUnits ?? 0)}
-          hint={`${formatNumber(iv.costedOnHandUnits ?? 0)} costed`}
+          sub={`${formatNumber(iv.costedOnHandUnits ?? 0)} costed`}
         />
         <Stat
           label='Uncosted stock'
           value={formatNumber(iv.uncostedStockUnits ?? 0)}
-          hint={`${formatNumber(iv.uncostedStockProducts ?? 0)} products`}
+          sub={`${formatNumber(iv.uncostedStockProducts ?? 0)} products`}
         />
         <Stat
           label='Write-offs'
           value={formatCurrency(parseDecimal(iv.writeOffsValue))}
-          hint={`${formatNumber(iv.writeOffsUnits ?? 0)} units`}
+          sub={`${formatNumber(iv.writeOffsUnits ?? 0)} units`}
         />
-      </div>
+      </StatGrid>
 
       {topByValue.length > 0 && <RowTable title='Top by value' rows={topByValue.slice(0, 15)} />}
       {deadStock.length > 0 && (

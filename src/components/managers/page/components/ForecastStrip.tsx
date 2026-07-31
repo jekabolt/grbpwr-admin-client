@@ -1,6 +1,7 @@
 import type { RevenueForecast } from 'api/proto-http/admin';
 import { format, subYears } from 'date-fns';
 import { FC } from 'react';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { formatCurrency, formatCurrencyWhole, parseDecimal } from '../utils';
 
@@ -46,9 +47,7 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
   const monthDate = forecast.month ? new Date(forecast.month) : null;
   const monthLabel = monthDate ? format(monthDate, 'MMMM yyyy') : '';
   const lyLabel = monthDate ? format(subYears(monthDate, 1), 'MMMM yyyy') : 'last year';
-  const methodLabel = forecast.method
-    ? (METHOD_LABEL[forecast.method] ?? forecast.method)
-    : null;
+  const methodLabel = forecast.method ? METHOD_LABEL[forecast.method] ?? forecast.method : null;
 
   // The solid "already real" figure: for a closed month that's the final total; mid-month it's MTD.
   const actual = isClosed ? projected : mtd;
@@ -80,18 +79,14 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
       )} so far, day ${elapsed} of ${totalDays}${ly > 0 ? `, last year ${formatCurrencyWhole(ly)}` : ''}`;
 
   return (
-    <div className='border-2 border-textInactiveColor/40 bg-bgSecondary/30 p-4 space-y-3'>
-      <div className='flex flex-wrap items-baseline justify-between gap-2'>
-        <Text variant='uppercase' className='font-bold'>
-          {headerLabel} · {monthLabel}
-        </Text>
-        {methodLabel && (
-          <Text className='text-labelColor text-textBaseSize lowercase'>
-            method: {methodLabel}
-          </Text>
-        )}
-      </div>
-
+    <Section
+      title={`${headerLabel} · ${monthLabel}`}
+      action={
+        methodLabel ? (
+          <Text className='text-labelColor text-textBaseSize lowercase'>method: {methodLabel}</Text>
+        ) : undefined
+      }
+    >
       <div className='flex flex-wrap items-baseline gap-x-3 gap-y-1'>
         <Text className='font-bold text-lg'>{formatCurrencyWhole(projected)}</Text>
         <Text variant='uppercase' className='text-labelColor text-textBaseSize'>
@@ -105,11 +100,7 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
       </div>
 
       {/* Bullet bar: interval band (faint) · projected remainder (hatched) · actual (solid) · LY tick. */}
-      <div
-        className='relative mt-4 h-3 w-full bg-bgSecondary/60'
-        role='img'
-        aria-label={ariaLabel}
-      >
+      <div className='relative mt-4 h-3 w-full bg-bgSecondary/60' role='img' aria-label={ariaLabel}>
         {!isClosed && high > low && (
           <div
             className='absolute inset-y-0 bg-textColor/10'
@@ -122,7 +113,10 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
             style={{ left: `${p(actual)}%`, width: `${Math.max(0, p(projected) - p(actual))}%` }}
           />
         )}
-        <div className='absolute inset-y-0 left-0 bg-textColor' style={{ width: `${p(actual)}%` }} />
+        <div
+          className='absolute inset-y-0 left-0 bg-textColor'
+          style={{ width: `${p(actual)}%` }}
+        />
         {ly > 0 && (
           <div
             className='absolute -inset-y-1 w-px bg-labelColor'
@@ -165,6 +159,6 @@ export const ForecastStrip: FC<ForecastStripProps> = ({ forecast }) => {
           calendar month · independent of the selected range
         </Text>
       </div>
-    </div>
+    </Section>
   );
 };

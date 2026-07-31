@@ -1,6 +1,8 @@
 import type { GetChannelRoasSettledResponse, GetMetricsResponse } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FC, ReactNode } from 'react';
+import { Section, SectionStack } from 'ui/components/section';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import {
   CampaignAttributionTable,
@@ -10,11 +12,8 @@ import {
   CrossSellTable,
   GeographyCharts,
   NewVsReturningPanel,
-  StatGrid,
   TrafficCharts,
 } from '../components';
-import type { StatCell } from '../components/StatGrid';
-import { ProductSection } from '../components/ProductSection';
 import { countryDisplay } from '../countries';
 import {
   formatAvgDaysBetweenOrders,
@@ -32,21 +31,28 @@ interface GrowthTabProps {
 // Break-even ROAS at a typical apparel margin — the line a channel must clear to pay for itself.
 const BREAK_EVEN_ROAS = 1.8;
 
+interface StatCell {
+  label: ReactNode;
+  value: ReactNode;
+  sub?: ReactNode;
+  big?: boolean;
+}
+
 const channelLabel = (s?: string, m?: string, c?: string) =>
   [s || '(direct)', m, c].filter(Boolean).join(' / ');
 
 /** Collapsed drill-down holding the full tables, matching the app's <details> idiom. */
 const Drill: FC<{ summary: string; children: ReactNode }> = ({ summary, children }) => (
-  <details className='border border-textInactiveColor'>
-    <summary className='cursor-pointer bg-bgSecondary/30 px-4 py-3 text-textBaseSize font-bold uppercase select-none hover:bg-bgSecondary/50'>
+  <details className='border-t border-borderColor'>
+    <summary className='cursor-pointer py-2 text-textBaseSize font-bold uppercase select-none'>
       {summary}
     </summary>
-    <div className='space-y-4 p-4'>{children}</div>
+    <div className='space-y-4 pt-2'>{children}</div>
   </details>
 );
 
 /**
- * Where growth comes from — decision-first, matching the approved stub grammar (ProductSection):
+ * Where growth comes from — decision-first, matching the approved section grammar:
  * repeat economics (DB-true) → what to bundle → channels/ROAS → geography. GA4/channel signals stay
  * flagged directional; full tables move into drill-downs.
  */
@@ -126,19 +132,18 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
   const hasGeo = econ.length > 0 || (metricsResponse.geography?.byCountry?.length ?? 0) > 0;
 
   return (
-    <div className='space-y-8'>
+    <SectionStack>
       {hasRepeat && (
-        <ProductSection
-          title='Repeat economics'
-          subtitle='— do buyers come back? the cheapest growth'
-          verdict={`Repeat rate ${repeatRate.value.toFixed(0)}%${
-            newShare != null
-              ? newShare >= 50
-                ? ', growth still new-led'
-                : ', repeat carries the revenue'
-              : ''
-          }.`}
-        >
+        <Section title='Repeat economics' question='— do buyers come back? the cheapest growth'>
+          <Text className='block font-bold leading-snug'>
+            {`Repeat rate ${repeatRate.value.toFixed(0)}%${
+              newShare != null
+                ? newShare >= 50
+                  ? ', growth still new-led'
+                  : ', repeat carries the revenue'
+                : ''
+            }.`}
+          </Text>
           {sampleSize > 0 && sampleSize < 30 && (
             <div className='mb-3 border border-warning bg-bgSecondary p-2'>
               <Text className='text-warning text-textBaseSize'>
@@ -146,7 +151,11 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
               </Text>
             </div>
           )}
-          <StatGrid minCol={150} cells={repeatStats} />
+          <StatGrid min={150}>
+            {repeatStats.map((cell, index) => (
+              <Stat key={index} {...cell} />
+            ))}
+          </StatGrid>
           {split && (
             <div className='mt-3 space-y-2'>
               <div className='flex h-[30px] border border-textColor'>
@@ -179,19 +188,18 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
               <NewVsReturningPanel split={split} />
             </Drill>
           </div>
-        </ProductSection>
+        </Section>
       )}
 
       {topPairs.length > 0 && (
-        <ProductSection
-          title='Bought together'
-          subtitle='— what to bundle / recommend'
-          verdict={`Bundle ${topPairs[0].productAName} + ${topPairs[0].productBName}${
-            topPairs[0].lift != null
-              ? ` — bought together ${topPairs[0].lift.toFixed(1)}× more than chance`
-              : ''
-          }.`}
-        >
+        <Section title='Bought together' question='— what to bundle / recommend'>
+          <Text className='block font-bold leading-snug'>
+            {`Bundle ${topPairs[0].productAName} + ${topPairs[0].productBName}${
+              topPairs[0].lift != null
+                ? ` — bought together ${topPairs[0].lift.toFixed(1)}× more than chance`
+                : ''
+            }.`}
+          </Text>
           <div className='flex flex-wrap gap-2'>
             {topPairs.map((p, i) => (
               <span
@@ -211,53 +219,29 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
               <CrossSellTable metrics={metrics} />
             </Drill>
           </div>
-        </ProductSection>
+        </Section>
       )}
 
       {hasChannels && (
-        <ProductSection
-          title='Channels & spend'
-          subtitle='— is paid making money back? (settled revenue)'
-          verdict={
-            mer != null
+        <Section title='Channels & spend' question='— is paid making money back? (settled revenue)'>
+          <Text className='block font-bold leading-snug'>
+            {mer != null
               ? `Blended MER ${mer.toFixed(1)}× — ${mer >= BREAK_EVEN_ROAS ? 'paid is making money back' : 'paid is below break-even'}.`
-              : 'Enter ad spend to see ROAS / MER.'
-          }
-        >
+              : 'Enter ad spend to see ROAS / MER.'}
+          </Text>
           <div className='mb-3 flex justify-end'>
             <ChannelSpendForm />
           </div>
-          <div className='grid grid-cols-3 border border-textInactiveColor bg-bgSecondary/30'>
-            <div className='border-r border-textInactiveColor px-3 py-2'>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                Blended MER
-              </Text>
-              <Text
-                className={`text-lg font-bold tabular-nums ${mer != null && mer >= BREAK_EVEN_ROAS ? 'text-success' : ''}`}
-              >
-                {mer != null ? `${mer.toFixed(1)}×` : '—'}
-              </Text>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                revenue / ad spend
-              </Text>
-            </div>
-            <div className='border-r border-textInactiveColor px-3 py-2'>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                Ad spend
-              </Text>
-              <Text className='text-lg font-bold tabular-nums'>
-                {formatCurrencyCompact(totalSpend, currency)}
-              </Text>
-            </div>
-            <div className='px-3 py-2'>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                Paid revenue
-              </Text>
-              <Text className='text-lg font-bold tabular-nums'>
-                {formatCurrencyCompact(paidRevenue, currency)}
-              </Text>
-            </div>
-          </div>
+          <StatGrid min={130}>
+            <Stat
+              label='Blended MER'
+              value={mer != null ? `${mer.toFixed(1)}×` : '—'}
+              sub='revenue / ad spend'
+              tone={mer != null && mer >= BREAK_EVEN_ROAS ? 'up' : 'default'}
+            />
+            <Stat label='Ad spend' value={formatCurrencyCompact(totalSpend, currency)} />
+            <Stat label='Paid revenue' value={formatCurrencyCompact(paidRevenue, currency)} />
+          </StatGrid>
           {roasBars.length > 0 && (
             <div className='mt-3 space-y-1'>
               {roasBars.map((b, i) => (
@@ -289,23 +273,20 @@ export function GrowthTab({ metricsResponse, channelRoas }: GrowthTabProps) {
             gaps, bots and last-click attribution make daily lines and micro-conversion rates
             unreliable, so only channel mix, spend/ROAS and DB revenue-by-country are shown.
           </Text>
-        </ProductSection>
+        </Section>
       )}
 
       {hasGeo && (
-        <ProductSection
-          title='Geography'
-          subtitle='— top markets by real (DB) revenue'
-          verdict={geoVerdict}
-        >
+        <Section title='Geography' question='— top markets by real (DB) revenue'>
+          <Text className='block font-bold leading-snug'>{geoVerdict}</Text>
           <CountryMatrix geography={metricsResponse.geography} canReadCosting={canReadCosting} />
           <div className='mt-3'>
             <Drill summary='Traffic & geography charts'>
               <GeographyCharts metrics={metrics} geography={metricsResponse.geography} />
             </Drill>
           </div>
-        </ProductSection>
+        </Section>
       )}
-    </div>
+    </SectionStack>
   );
 }

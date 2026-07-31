@@ -53,10 +53,10 @@ const Th: FC<{ children: ReactNode; right?: boolean }> = ({ children, right }) =
 );
 
 const TableShell: FC<{ head: ReactNode; children: ReactNode }> = ({ head, children }) => (
-  <div className='overflow-x-auto border border-textInactiveColor'>
+  <div className='overflow-x-auto border border-borderColor'>
     <table className='w-full text-textBaseSize'>
       <thead>
-        <tr className='border-b border-textInactiveColor'>{head}</tr>
+        <tr className='border-b border-hairline'>{head}</tr>
       </thead>
       <tbody>{children}</tbody>
     </table>
@@ -95,7 +95,7 @@ const EconomicsView: FC<{ rows: CountryEconomicsRow[] }> = ({ rows }) => {
           const marginTrusted = coverage >= COVERAGE_FLOOR_FOR_PCT;
           const ltvSample = r.ltvSample ?? 0;
           return (
-            <tr key={`${r.country ?? 'x'}-${i}`} className='border-b border-textInactiveColor'>
+            <tr key={`${r.country ?? 'x'}-${i}`} className='border-b border-hairline'>
               <td className='p-2'>
                 <CountryCell code={r.country} />
               </td>
@@ -126,9 +126,7 @@ const EconomicsView: FC<{ rows: CountryEconomicsRow[] }> = ({ rows }) => {
               <td className='p-2 text-right'>
                 {formatCurrency(parseDecimal(r.contributionMargin))}
               </td>
-              <td
-                className={`p-2 text-right font-bold ${profitPerOrder < 0 ? 'text-error' : ''}`}
-              >
+              <td className={`p-2 text-right font-bold ${profitPerOrder < 0 ? 'text-error' : ''}`}>
                 {formatCurrency(profitPerOrder)}
               </td>
               <td className='p-2 text-right'>
@@ -172,7 +170,7 @@ const LogisticsView: FC<{ rows: CountryLogisticsRow[] }> = ({ rows }) => {
         const refundOrders = r.refundOrders ?? 0;
         const refundBad = refundRate >= REFUND_RATE_FLAG_PCT && refundOrders >= REFUND_ORDERS_FLAG;
         return (
-          <tr key={`${r.country ?? 'x'}-${i}`} className='border-b border-textInactiveColor'>
+          <tr key={`${r.country ?? 'x'}-${i}`} className='border-b border-hairline'>
             <td className='p-2'>
               <CountryCell code={r.country} />
             </td>
@@ -238,16 +236,14 @@ const DemandView: FC<{ rows: CountryDemandRow[] }> = ({ rows }) => {
             )
             .join(' · ');
           return (
-            <tr key={`${r.country ?? 'x'}-${i}`} className='border-b border-textInactiveColor'>
+            <tr key={`${r.country ?? 'x'}-${i}`} className='border-b border-hairline'>
               <td className='p-2'>
                 <CountryCell
                   code={r.country}
                   sub={underserved ? 'demand without conversion' : undefined}
                 />
               </td>
-              <td className='p-2 text-right'>
-                {sessions > 0 ? formatNumber(sessions) : '—'}
-              </td>
+              <td className='p-2 text-right'>{sessions > 0 ? formatNumber(sessions) : '—'}</td>
               <td className='p-2 text-right'>{formatNumber(r.orders ?? 0)}</td>
               <td className='p-2 text-right' title={r.caveat || undefined}>
                 {sessions > 0 ? `${conv.toFixed(1)}%` : '—'}
@@ -301,16 +297,14 @@ export const CountryMatrix: FC<CountryMatrixProps> = ({ geography, canReadCostin
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <h3 className='text-textBaseSize font-bold uppercase'>Countries</h3>
         {views.length > 1 && (
-          <div className='flex border border-textInactiveColor'>
+          <div className='flex border border-borderColor'>
             {views.map((v) => (
               <button
                 key={v}
                 type='button'
                 onClick={() => setActive(v)}
                 className={`px-3 py-1.5 text-textBaseSize uppercase transition-colors ${
-                  v === view
-                    ? 'bg-textColor text-bgColor'
-                    : 'text-labelColor hover:text-textColor'
+                  v === view ? 'bg-textColor text-bgColor' : 'text-labelColor hover:text-textColor'
                 }`}
               >
                 {VIEW_LABEL[v]}

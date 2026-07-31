@@ -35,7 +35,10 @@ const Stage: FC<{
 );
 
 const Arrow: FC = () => (
-  <div className='hidden shrink-0 items-center self-stretch text-textInactiveColor sm:flex' aria-hidden>
+  <div
+    className='hidden shrink-0 items-center self-stretch text-textInactiveColor sm:flex'
+    aria-hidden
+  >
     →
   </div>
 );
@@ -97,7 +100,7 @@ export const DeliveryPanel: FC<DeliveryPanelProps> = ({ delivery }) => {
 
   return (
     <div className='space-y-4'>
-      <div className='flex flex-wrap items-stretch gap-3 border border-textInactiveColor p-4 bg-bgSecondary/20'>
+      <div className='flex flex-wrap items-stretch gap-3'>
         <Stage
           label='Placed → shipped'
           value={fmtDays(toShip)}

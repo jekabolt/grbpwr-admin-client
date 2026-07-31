@@ -1,5 +1,6 @@
 import type { CampaignAttributionRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import Text from 'ui/components/text';
 
@@ -55,10 +56,8 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
   const anySpend = topCampaigns.some((r) => r.spend > 0);
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold mb-1 block'>
-        Campaign attribution
-      </Text>
+    <div>
+      <GroupLabel flush>Campaign attribution</GroupLabel>
       <Text className='text-labelColor text-textBaseSize leading-relaxed mb-3 block'>
         UTM source / medium / campaign. Last-click GA4 attribution — directional, and won't tie out
         to DB revenue exactly.{' '}
@@ -67,7 +66,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Source
@@ -115,7 +114,7 @@ export const CampaignAttributionTable: FC<CampaignAttributionTableProps> = ({
               const conversionRate = row.sessions > 0 ? (row.conversions / row.sessions) * 100 : 0;
               const roas = row.spend > 0 ? row.revenue / row.spend : null;
               return (
-                <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                   <td className='p-2'>
                     <Text>{row.utmSource || '-'}</Text>
                   </td>

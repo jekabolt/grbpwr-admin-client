@@ -2,6 +2,7 @@ import type { MarginByStyleRow } from 'api/proto-http/admin';
 import { ROUTES } from 'constants/routes';
 import { FC, useState } from 'react';
 import { generatePath, Link } from 'react-router-dom';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { StyleEconomicsModal } from './StyleEconomicsModal';
@@ -23,14 +24,12 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
   const anyCosted = rows.some((r) => r.hasCost);
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold block mb-4'>
-        Margin by style
-      </Text>
+    <div>
+      <GroupLabel flush>Margin by style</GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>Style</th>
               <th className='text-right p-2'>Revenue</th>
               <th className='text-right p-2'>Units</th>
@@ -46,7 +45,7 @@ export const MarginByStyleTable: FC<MarginByStyleTableProps> = ({ marginByStyle 
             {rows.map((r, idx) => (
               <tr
                 key={r.techCardId ?? r.styleNumber ?? idx}
-                className='border-b border-textInactiveColor hover:bg-bgSecondary'
+                className='border-b border-hairline hover:bg-bgSecondary'
               >
                 <td className='p-2'>
                   {r.techCardId ? (

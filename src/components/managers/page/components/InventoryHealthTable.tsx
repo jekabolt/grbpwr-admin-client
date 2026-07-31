@@ -1,5 +1,6 @@
 import type { InventoryHealthRow } from 'api/proto-http/admin';
 import { FC, useMemo, useState } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { DAYS_ON_HAND_NO_SALES_SENTINEL, formatDaysOnHand, formatNumber } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
@@ -31,23 +32,25 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
 
   if (atRisk.length === 0) {
     return (
-      <div className='border border-textInactiveColor p-4'>
-        <div className='flex flex-wrap items-center justify-between gap-2 mb-4'>
-          <Text variant='uppercase' className='font-bold block'>
-            Overstock — slow to clear
-          </Text>
-          {sentinelAtRiskCount > 0 && (
-            <button
-              type='button'
-              onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
-              className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
-            >
-              {includeNoSalesInPeriod
-                ? 'Hide no-sales-in-period SKUs'
-                : `Include no-sales-in-period SKUs (${sentinelAtRiskCount})`}
-            </button>
-          )}
-        </div>
+      <div>
+        <GroupLabel
+          flush
+          action={
+            sentinelAtRiskCount > 0 ? (
+              <button
+                type='button'
+                onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
+                className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
+              >
+                {includeNoSalesInPeriod
+                  ? 'Hide no-sales-in-period SKUs'
+                  : `Include no-sales-in-period SKUs (${sentinelAtRiskCount})`}
+              </button>
+            ) : undefined
+          }
+        >
+          Overstock — slow to clear
+        </GroupLabel>
         <p className='text-textBaseSize text-labelColor'>
           No rows in this view — all at-risk SKUs have no sales in the period (infinite days on
           hand). Use &quot;Include no-sales-in-period&quot; to list them.
@@ -57,27 +60,29 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
   }
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <div className='flex flex-wrap items-center justify-between gap-2 mb-4'>
-        <Text variant='uppercase' className='font-bold block'>
-          Inventory health (at risk)
-        </Text>
-        {sentinelAtRiskCount > 0 && (
-          <button
-            type='button'
-            onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
-            className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
-          >
-            {includeNoSalesInPeriod
-              ? 'Hide no-sales-in-period SKUs'
-              : `Include no-sales-in-period SKUs (${sentinelAtRiskCount})`}
-          </button>
-        )}
-      </div>
+    <div>
+      <GroupLabel
+        flush
+        action={
+          sentinelAtRiskCount > 0 ? (
+            <button
+              type='button'
+              onClick={() => setIncludeNoSalesInPeriod((v) => !v)}
+              className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
+            >
+              {includeNoSalesInPeriod
+                ? 'Hide no-sales-in-period SKUs'
+                : `Include no-sales-in-period SKUs (${sentinelAtRiskCount})`}
+            </button>
+          ) : undefined
+        }
+      >
+        Inventory health (at risk)
+      </GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Product
@@ -110,7 +115,7 @@ export const InventoryHealthTable: FC<InventoryHealthTableProps> = ({ inventoryH
               const daysOnHand = row.daysOnHand ?? 0;
               const isVeryHigh = daysOnHand > 90 && daysOnHand < DAYS_ON_HAND_NO_SALES_SENTINEL;
               return (
-                <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}

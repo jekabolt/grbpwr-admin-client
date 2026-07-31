@@ -1,8 +1,8 @@
 import type { SellThroughByDropRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
-import { ProductSection } from './ProductSection';
 
 interface DropVerdictTableProps {
   sellThroughByDrop: SellThroughByDropRow[] | undefined;
@@ -32,17 +32,14 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
       : 'Per-release sell-through — how much of each drop cleared.';
 
   return (
-    <ProductSection
-      title='Drops'
-      subtitle='— which releases to reprint, hold, or kill'
-      verdict={verdictText}
-    >
+    <Section title='Drops' question='— which releases to reprint, hold, or kill'>
+      <Text className='block font-bold leading-snug'>{verdictText}</Text>
       <Text className='text-textBaseSize text-labelColor mb-3 block'>
         Whole-drop sell-through, so the read is decision-grade even when a single day is only a
         handful of orders.
       </Text>
       <div
-        className='grid gap-3'
+        className='grid border border-borderColor'
         style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}
       >
         {rows.map((row, idx) => {
@@ -53,7 +50,7 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
           const action = pct >= 75 ? 'Reprint' : pct >= 40 ? 'Hold' : 'Cut';
           const barCls = pct >= 75 ? 'bg-success' : pct >= 40 ? 'bg-textColor' : 'bg-error';
           return (
-            <div key={idx} className='border border-textInactiveColor p-3'>
+            <div key={idx} className='border-r border-b border-borderColor p-3'>
               <div className='flex items-baseline justify-between gap-2'>
                 <Text className='truncate font-bold'>{row.collection || 'Untagged'}</Text>
                 <Text variant='uppercase' className={`text-textBaseSize font-bold ${v.cls}`}>
@@ -82,6 +79,6 @@ export const DropVerdictTable: FC<DropVerdictTableProps> = ({ sellThroughByDrop 
           below (cut).{!anyCosted && ' Set product costs to see per-drop margin.'}
         </Text>
       </div>
-    </ProductSection>
+    </Section>
   );
 };

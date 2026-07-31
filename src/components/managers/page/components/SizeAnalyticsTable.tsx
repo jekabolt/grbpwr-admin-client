@@ -5,6 +5,7 @@ import type {
   TooltipComponentFormatterCallbackParams,
 } from 'echarts';
 import { FC, useMemo } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import {
   ChartCard,
@@ -169,10 +170,8 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
 
   if (products.length === 0) {
     return (
-      <div className='border border-textInactiveColor p-4'>
-        <Text variant='uppercase' className='font-bold mb-2 block'>
-          Size distribution
-        </Text>
+      <div>
+        <GroupLabel flush>Size distribution</GroupLabel>
         <Text className='text-textBaseSize text-labelColor'>
           No product sold {MIN_UNITS_FOR_SIZE_MIX}+ units this period — too few to read a size mix.
           Widen the date range.
@@ -238,10 +237,8 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
   };
 
   return (
-    <div className='border border-textInactiveColor p-4 space-y-6'>
-      <Text variant='uppercase' className='font-bold block'>
-        Size distribution
-      </Text>
+    <div className='space-y-6'>
+      <GroupLabel flush>Size distribution</GroupLabel>
 
       {/* 100% stacked bar chart */}
       {hasChart && <EChart option={option} height={Math.max(280, products.length * 32 + 40)} />}
@@ -250,7 +247,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Product
@@ -285,7 +282,7 @@ export const SizeAnalyticsTable: FC<SizeAnalyticsTableProps> = ({ sizeAnalytics 
                   pctRowKey(row.productId, row.sizeId, row.sizeName),
                 ) ?? 0;
               return (
-                <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+                <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                   <td className='p-2'>
                     <ProductNameLink
                       productId={row.productId}

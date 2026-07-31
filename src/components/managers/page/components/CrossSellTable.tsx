@@ -1,5 +1,6 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { ProductNameLink } from './ProductNameLink';
 
@@ -33,13 +34,11 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
 
   return (
     <div className='space-y-4'>
-      <Text variant='uppercase' className='font-bold'>
-        Frequently bought together
-      </Text>
-      <div className='border border-textInactiveColor overflow-x-auto'>
+      <GroupLabel flush>Frequently bought together</GroupLabel>
+      <div className='overflow-x-auto border border-borderColor'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2 uppercase'>Product A</th>
               <th className='text-left p-2 uppercase'>Product B</th>
               <th className='text-right p-2 uppercase'>Together</th>
@@ -54,7 +53,7 @@ export const CrossSellTable: FC<CrossSellTableProps> = ({ metrics }) => {
               const liftClass =
                 lift >= 1.5 ? 'text-success font-bold' : lift > 1 ? 'font-bold' : '';
               return (
-                <tr key={i} className='border-b border-textInactiveColor last:border-0'>
+                <tr key={i} className='border-b border-hairline last:border-0'>
                   <td className='p-2'>
                     <ProductNameLink productId={p.productAId} productName={p.productAName} />
                   </td>

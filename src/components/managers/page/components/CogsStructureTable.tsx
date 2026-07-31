@@ -1,5 +1,6 @@
 import type { CogsStructureRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatCurrency, parseDecimal } from '../utils';
 
@@ -24,10 +25,8 @@ export const CogsStructureTable: FC<CogsStructureTableProps> = ({ cogsStructure 
   const rows = [...cogsStructure].sort((a, b) => parseDecimal(b.amount) - parseDecimal(a.amount));
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <Text variant='uppercase' className='font-bold block mb-4'>
-        COGS structure
-      </Text>
+    <div>
+      <GroupLabel flush>COGS structure</GroupLabel>
       <div className='space-y-2'>
         {rows.map((r) => {
           const pct = Math.max(0, Math.min(100, r.pct ?? 0));

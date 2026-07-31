@@ -1,15 +1,13 @@
 import { FC, ReactNode } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
 
 /** Column header for the two-up verdict lists (stub `.col-h`): 11px uppercase, underlined;
  *  red when it flags a problem (losing margin / sold-out sizes). */
 export const ColHead: FC<{ children: ReactNode; crit?: boolean }> = ({ children, crit }) => (
-  <div
-    className={`mb-1 border-b border-textInactiveColor pb-[3px] text-[11px] uppercase tracking-wide ${
-      crit ? 'text-error' : 'text-labelColor'
-    }`}
-  >
+  <GroupLabel flush className={crit ? 'border-error' : undefined}>
     {children}
-  </div>
+  </GroupLabel>
 );
 
 /** Small bordered action / amount pill (stub `.act`): green (good), red (crit), or ink (neutral). */
@@ -17,30 +15,19 @@ export const ActPill: FC<{ children: ReactNode; tone?: 'good' | 'crit' | 'neutra
   children,
   tone = 'neutral',
 }) => {
-  const cls =
-    tone === 'good'
-      ? 'border-success text-success'
-      : tone === 'crit'
-        ? 'border-error text-error'
-        : 'border-textColor text-textColor';
+  const cls = tone === 'good' ? 'ok' : tone === 'crit' ? 'warn' : 'ink';
   return (
-    <span
-      className={`shrink-0 whitespace-nowrap border px-[7px] py-0.5 text-[11px] font-bold uppercase tabular-nums ${cls}`}
-    >
+    <Pill tone={cls} className='shrink-0 font-bold'>
       {children}
-    </span>
+    </Pill>
   );
 };
 
 /** Tiny inline badge (stub `.pill`): gray, or red border+text when crit. */
 export const MiniPill: FC<{ children: ReactNode; crit?: boolean }> = ({ children, crit }) => (
-  <span
-    className={`mr-1 inline-block whitespace-nowrap border px-1.5 py-px text-[10px] uppercase tabular-nums ${
-      crit ? 'border-error text-error' : 'border-textInactiveColor text-labelColor'
-    }`}
-  >
+  <Pill tone={crit ? 'warn' : 'mut'} className='mr-1 inline-block'>
     {children}
-  </span>
+  </Pill>
 );
 
 /** One verdict row (stub `ul.rows li`): bold 12px name, optional gray reason, right-aligned
@@ -50,7 +37,7 @@ export const VerdictRow: FC<{ name: ReactNode; why?: ReactNode; act?: ReactNode 
   why,
   act,
 }) => (
-  <li className='flex flex-wrap items-baseline justify-between gap-x-2.5 gap-y-1 border-b border-textInactiveColor/50 py-1.5 last:border-0'>
+  <li className='flex flex-wrap items-baseline justify-between gap-x-2.5 gap-y-1 border-b border-hairline py-1.5 last:border-0'>
     <span className='min-w-0 flex-[1_1_40%] truncate text-textBaseSize font-bold'>{name}</span>
     {why != null && <span className='text-labelColor flex-[1_1_34%] text-textBaseSize'>{why}</span>}
     {act}

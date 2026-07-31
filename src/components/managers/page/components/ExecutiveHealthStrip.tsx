@@ -1,9 +1,9 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { type FC } from 'react';
 import { Link } from 'react-router-dom';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { computeExecutiveAlerts, deriveHealthStatus, type HealthStatus } from '../executiveAlerts';
-import { SectionHead } from './SectionHead';
 
 const STATUS_LABEL: Record<HealthStatus, string> = {
   needs_attention: 'Needs attention',
@@ -45,16 +45,18 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
   const status = deriveHealthStatus(alerts, metrics, compareEnabled);
 
   return (
-    <section className='space-y-2.5'>
-      <SectionHead title='Health / act now' sub='— what needs a decision this period' />
-
+    <Section title='Health / act now' question='— what needs a decision this period'>
       <div className='flex flex-wrap items-center gap-3'>
-        <span
-          className={`inline-flex items-center border px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide ${STATUS_SHELL[status]}`}
+        <Text
+          component='span'
+          size='control'
+          variant='uppercase'
+          tracking='label'
+          className={`inline-flex items-center border px-2.5 py-1 font-bold ${STATUS_SHELL[status]}`}
         >
           {STATUS_LABEL[status]}
-        </span>
-        <Text variant='uppercase' className='text-labelColor text-[11px]'>
+        </Text>
+        <Text size='control' variant='label' tracking='label' className='uppercase'>
           {alerts.length === 0
             ? 'Nothing needs action this period'
             : `${alerts.length} thing${alerts.length === 1 ? '' : 's'} to act on`}
@@ -68,7 +70,7 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
       )}
 
       {alerts.length > 0 && (
-        <ul className='divide-y divide-textInactiveColor/50 border-t border-textInactiveColor/50'>
+        <ul className='divide-y divide-hairline border-t border-hairline'>
           {alerts.map((a, i) => (
             <li key={`${a.title}-${i}`} className='py-2 text-textBaseSize leading-snug'>
               <span className={`font-bold ${ALERT_TITLE_CLASS[a.severity]}`}>{a.title}</span>
@@ -88,6 +90,6 @@ export const ExecutiveHealthStrip: FC<ExecutiveHealthStripProps> = ({
           ))}
         </ul>
       )}
-    </section>
+    </Section>
   );
 };

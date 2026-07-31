@@ -1,5 +1,6 @@
 import type { GetChannelRoasSettledResponse } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 
@@ -27,21 +28,23 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
   );
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <div className='mb-3 flex flex-wrap items-baseline justify-between gap-2'>
-        <Text variant='uppercase' className='font-bold'>
-          Channel ROAS · settled revenue
-        </Text>
-        {data?.baseCurrency && (
-          <Text variant='label' size='small'>
-            {data.baseCurrency}
-          </Text>
-        )}
-      </div>
+    <div>
+      <GroupLabel
+        flush
+        action={
+          data?.baseCurrency ? (
+            <Text variant='label' size='small'>
+              {data.baseCurrency}
+            </Text>
+          ) : undefined
+        }
+      >
+        Channel ROAS · settled revenue
+      </GroupLabel>
       <div className='overflow-x-auto'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='text-left p-2'>Channel (UTM)</th>
               <th className='text-right p-2'>Revenue</th>
               <th className='text-right p-2'>Orders</th>
@@ -53,7 +56,7 @@ export const ChannelRoasTable: FC<ChannelRoasTableProps> = ({ data }) => {
           </thead>
           <tbody>
             {sorted.map((r, i) => (
-              <tr key={i} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+              <tr key={i} className='border-b border-hairline hover:bg-bgSecondary'>
                 <td className='p-2'>{channelLabel(r.utmSource, r.utmMedium, r.utmCampaign)}</td>
                 <td className='p-2 text-right'>
                   {formatCurrency(parseDecimal(r.settledRevenue), currency)}

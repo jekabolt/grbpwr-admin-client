@@ -1,5 +1,6 @@
 import type { FunnelSection } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatNumber } from '../utils';
 
@@ -29,10 +30,8 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
 
   if (purchaseUsers < MIN_PURCHASE_USERS) {
     return (
-      <div className='border border-textInactiveColor p-4'>
-        <Text variant='uppercase' className='font-bold block mb-1'>
-          Conversion funnel
-        </Text>
+      <div>
+        <GroupLabel flush>Conversion funnel</GroupLabel>
         <Text className='text-textBaseSize text-labelColor leading-relaxed'>
           Only {formatNumber(purchaseUsers)} purchases this period — too few to read step drop-off
           reliably. Widen the date range to see the funnel.
@@ -42,18 +41,11 @@ export const FunnelChart: FC<FunnelChartProps> = ({ funnel }) => {
   }
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <div className='mb-4'>
-        <Text variant='uppercase' className='font-bold block'>
-          Conversion funnel
-        </Text>
-      </div>
+    <div>
+      <GroupLabel flush>Conversion funnel</GroupLabel>
       {caveat && (
-        <div className='mb-4 border-b border-textInactiveColor/40 pb-3'>
-          <Text
-            className='text-textBaseSize italic text-labelColor leading-snug'
-            title={caveat}
-          >
+        <div className='mb-4 border-b border-hairline pb-3'>
+          <Text className='text-textBaseSize italic text-labelColor leading-snug' title={caveat}>
             {caveat}
           </Text>
         </div>

@@ -6,8 +6,10 @@ import type {
 } from 'api/proto-http/admin';
 import { FC, useMemo } from 'react';
 import { Link, useLocation } from 'react-router-dom';
+import { Section, SectionStack } from 'ui/components/section';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
-import { ExecutiveHealthStrip, ForecastStrip, SectionHead } from '../components';
+import { ExecutiveHealthStrip, ForecastStrip } from '../components';
 import { ProductNameLink } from '../components/ProductNameLink';
 import type { MetricsPeriod } from '../useMetricsQuery';
 import {
@@ -51,7 +53,7 @@ const VsPreviousStrip: FC<{
   ];
 
   return (
-    <div className='grid grid-cols-2 border-l border-t border-textInactiveColor md:grid-cols-4'>
+    <StatGrid min={130}>
       {cells.map((c) => {
         const prev = c.cmp.compareValue;
         const show = compareEnabled && prev !== undefined && prev !== 0;
@@ -62,21 +64,22 @@ const VsPreviousStrip: FC<{
           dir === 'flat' ? 'text-labelColor' : dir === 'up' ? 'text-success' : 'text-error';
         const arrow = dir === 'up' ? '↑ ' : dir === 'down' ? '↓ ' : '';
         return (
-          <div key={c.label} className='border-r border-b border-textInactiveColor px-3 py-2.5'>
-            <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-              {c.label}
-            </Text>
-            <Text className='block font-bold text-lg tabular-nums'>{c.fmt(c.cmp.value)}</Text>
-            {show && (
-              <Text variant='uppercase' className={`block text-[10px] tabular-nums ${color}`}>
-                {arrow}
-                {Math.abs(pct).toFixed(0)}% vs {c.fmt(prev as number)}
-              </Text>
-            )}
-          </div>
+          <Stat
+            key={c.label}
+            label={c.label}
+            value={c.fmt(c.cmp.value)}
+            sub={
+              show ? (
+                <Text size='micro' variant='uppercase' className={`block ${color}`}>
+                  {arrow}
+                  {Math.abs(pct).toFixed(0)}% vs {c.fmt(prev as number)}
+                </Text>
+              ) : undefined
+            }
+          />
         );
       })}
-    </div>
+    </StatGrid>
   );
 };
 
@@ -130,9 +133,9 @@ const TopMoverCards: FC<{
   products: TopProduct[];
   source: { name: string; sessions: number } | null;
 }> = ({ products, source }) => (
-  <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+  <div className='grid grid-cols-2 border border-borderColor sm:grid-cols-4'>
     {products.map((p, idx) => (
-      <div key={idx} className='border border-textInactiveColor p-3'>
+      <div key={idx} className='border-r border-b border-borderColor p-3'>
         <ProductNameLink productId={p.productId} productName={p.productName} maxWidth='100%' />
         <Text className='mt-1 block font-bold text-lg tabular-nums'>
           {formatCurrency(p.revenue)}
@@ -144,7 +147,7 @@ const TopMoverCards: FC<{
       </div>
     ))}
     {source && (
-      <div className='border border-textInactiveColor p-3'>
+      <div className='border-r border-b border-borderColor p-3'>
         <Text variant='uppercase' className='text-labelColor block text-[10px]'>
           Top source
         </Text>
@@ -246,7 +249,7 @@ export function ThisWeekTab({
   const hasTopMovers = top3Products.length > 0 || topTrafficSource != null;
 
   return (
-    <div className='space-y-6'>
+    <SectionStack>
       {/* HEALTH / ACT NOW — status pill + act-now list (config: Health=pill). */}
       <ExecutiveHealthStrip
         metrics={metrics}
@@ -271,44 +274,41 @@ export function ThisWeekTab({
       <ForecastStrip forecast={metricsResponse.revenueForecast} />
 
       {/* HOW THE PERIOD IS GOING — vs-previous stats grid (config: Trend=vsprev). */}
-      <div className='space-y-3'>
-        <SectionHead title='How the period is going' sub='— trend & movement vs previous' />
+      <Section title='How the period is going' question='— trend & movement vs previous'>
         <VsPreviousStrip commerce={commerce} compareEnabled={compareEnabled} />
-      </div>
+      </Section>
 
       {/* NEW VS RETURNING — split bar + verdict (config: Acq=split). */}
       {commerce?.newVsReturning && (
-        <div className='space-y-3'>
-          <SectionHead title='New vs returning' sub='— are we growing on new or repeat?' />
+        <Section title='New vs returning' question='— are we growing on new or repeat?'>
           <NewReturningSplit split={commerce.newVsReturning} repeatRatePct={repeatRatePct} />
-        </div>
+        </Section>
       )}
 
       {/* TOP MOVERS — product + source cards (config: Top=cards). */}
-      <div className='space-y-3'>
-        <SectionHead
-          title='Top movers'
-          sub='— best products & traffic source'
-          right={
-            <Link
-              to={productsHref}
-              replace
-              className='text-textBaseSize text-labelColor underline underline-offset-2 hover:text-textColor'
-            >
-              View all →
-            </Link>
-          }
-        />
+      <Section
+        title='Top movers'
+        question='— best products & traffic source'
+        action={
+          <Link
+            to={productsHref}
+            replace
+            className='text-textBaseSize text-labelColor underline underline-offset-2 hover:text-textColor'
+          >
+            View all →
+          </Link>
+        }
+      >
         {hasTopMovers ? (
           <TopMoverCards products={top3Products} source={topTrafficSource} />
         ) : (
-          <div className='border border-textInactiveColor p-4 text-center'>
+          <div className='p-4 text-center'>
             <Text className='text-labelColor text-textBaseSize'>
               No product or traffic data for this period.
             </Text>
           </div>
         )}
-      </div>
-    </div>
+      </Section>
+    </SectionStack>
   );
 }

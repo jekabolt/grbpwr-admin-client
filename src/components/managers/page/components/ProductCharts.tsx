@@ -8,6 +8,7 @@ import type {
 } from 'echarts';
 import { FC } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import {
   categoryAxis,
@@ -168,9 +169,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
 
   return (
     <div className='space-y-6'>
-      <Text variant='uppercase' className='font-bold'>
-        Products & categories
-      </Text>
+      <GroupLabel flush>Products &amp; categories</GroupLabel>
       <div className='grid gap-4 md:grid-cols-2 lg:grid-cols-3'>
         {revenueData.length > 0 && (
           <ChartCard title='Top products by revenue'>
@@ -198,21 +197,23 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
       </div>
 
       {revenueMarginRows.length > 0 && (
-        <div className='border border-textInactiveColor p-4'>
-          <div className='flex flex-wrap items-center justify-between gap-2 mb-3'>
-            <Text variant='uppercase' className='font-bold block'>
-              Top products — revenue vs margin
-            </Text>
-            {!anyCosted && (
-              <Text variant='label' size='small'>
-                add product cost to see margin
-              </Text>
-            )}
-          </div>
+        <div>
+          <GroupLabel
+            flush
+            action={
+              !anyCosted ? (
+                <Text variant='label' size='small'>
+                  add product cost to see margin
+                </Text>
+              ) : undefined
+            }
+          >
+            Top products — revenue vs margin
+          </GroupLabel>
           <div className='overflow-x-auto'>
             <table className='w-full text-textBaseSize'>
               <thead>
-                <tr className='border-b border-textInactiveColor'>
+                <tr className='border-b border-hairline'>
                   <th className='text-left p-2'>
                     <Text variant='uppercase' className='text-textBaseSize'>
                       Product
@@ -237,7 +238,7 @@ export const ProductCharts: FC<ProductChartsProps> = ({ metrics }) => {
               </thead>
               <tbody>
                 {revenueMarginRows.map((row, idx) => (
-                  <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+                  <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                     <td className='p-2'>
                       <ProductNameLink
                         productId={row.productId}

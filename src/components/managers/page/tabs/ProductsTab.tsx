@@ -1,6 +1,7 @@
 import type { GetMetricsResponse } from 'api/proto-http/admin';
 import { FC, ReactNode, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import { Section, SectionStack } from 'ui/components/section';
 import {
   ClearList,
   CogsStructureTable,
@@ -30,12 +31,14 @@ const has = (n?: number) => (n ?? 0) > 0;
 
 /** Collapsed full-table drill-down under a decision block — the raw rows stay one click away. */
 const Drilldown: FC<{ summary: string; children: ReactNode }> = ({ summary, children }) => (
-  <details className='border border-textInactiveColor'>
-    <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-2 text-textBaseSize font-bold uppercase text-labelColor hover:bg-bgSecondary/50'>
-      {summary}
-    </summary>
-    <div className='space-y-6 p-4'>{children}</div>
-  </details>
+  <Section className='p-0'>
+    <details>
+      <summary className='cursor-pointer select-none bg-bgSecondary/30 px-4 py-2 text-textBaseSize font-bold uppercase text-labelColor hover:bg-bgSecondary/50'>
+        {summary}
+      </summary>
+      <div className='space-y-6 p-4'>{children}</div>
+    </details>
+  </Section>
 );
 
 export function ProductsTab({ metricsResponse: r }: ProductsTabProps) {
@@ -84,65 +87,73 @@ export function ProductsTab({ metricsResponse: r }: ProductsTabProps) {
 
   if (!hasAnyProductData) {
     return (
-      <div className='border border-textInactiveColor p-8 text-center'>
+      <Section className='p-8 text-center'>
         <span className='text-labelColor'>
           No product performance data available for this period. Data appears when there are orders
           and product sales.
         </span>
-      </div>
+      </Section>
     );
   }
 
   return (
-    <div className='space-y-8'>
+    <SectionStack>
       {/* REORDER — what to restock. */}
       {hasReorderData && (
-        <section id='reorder' className='space-y-3'>
-          <ReorderList metricsResponse={r} />
-          <Drilldown summary='Full reorder & inventory-health tables'>
-            <div className='flex justify-end'>
-              <InventoryTargetForm />
-            </div>
-            <ReorderTable inventoryHealth={r.inventoryHealth} />
-            <InventoryHealthTable inventoryHealth={r.inventoryHealth} />
-            <NotifyMeIntentTable notifyMeIntent={r.notifyMeIntent} />
-            <OOSImpactTable oosImpact={r.oosImpact} />
-          </Drilldown>
+        <section id='reorder'>
+          <SectionStack>
+            <ReorderList metricsResponse={r} />
+            <Drilldown summary='Full reorder & inventory-health tables'>
+              <div className='flex justify-end'>
+                <InventoryTargetForm />
+              </div>
+              <ReorderTable inventoryHealth={r.inventoryHealth} />
+              <InventoryHealthTable inventoryHealth={r.inventoryHealth} />
+              <NotifyMeIntentTable notifyMeIntent={r.notifyMeIntent} />
+              <OOSImpactTable oosImpact={r.oosImpact} />
+            </Drilldown>
+          </SectionStack>
         </section>
       )}
 
       {/* CLEAR — where cash is frozen. */}
       {hasClearData && (
-        <section id='clear' className='space-y-3'>
-          <ClearList metricsResponse={r} />
-          <Drilldown summary='Full slow-mover & dead-stock tables'>
-            <SlowMoversTable slowMovers={r.slowMovers} />
-            <DeadStockTable deadStock={r.deadStock} />
-          </Drilldown>
+        <section id='clear'>
+          <SectionStack>
+            <ClearList metricsResponse={r} />
+            <Drilldown summary='Full slow-mover & dead-stock tables'>
+              <SlowMoversTable slowMovers={r.slowMovers} />
+              <DeadStockTable deadStock={r.deadStock} />
+            </Drilldown>
+          </SectionStack>
         </section>
       )}
 
       {/* MONEY — cash in stock & margin by style. */}
       {hasMoneyData && (
-        <section id='money' className='space-y-3'>
-          <MoneySummary metricsResponse={r} />
-          <Drilldown summary='Full margin, COGS & valuation tables'>
-            {hasProductCharts && <ProductCharts metrics={r.business} />}
-            <MarginByStyleTable marginByStyle={r.marginByStyle} />
-            <CogsStructureTable cogsStructure={r.cogsStructure} />
-            <InventoryValuationTable inventoryValuation={r.inventoryValuation} />
-          </Drilldown>
+        <section id='money'>
+          <SectionStack>
+            <MoneySummary metricsResponse={r} />
+            <Drilldown summary='Full margin, COGS & valuation tables'>
+              {hasProductCharts && <ProductCharts metrics={r.business} />}
+              <MarginByStyleTable marginByStyle={r.marginByStyle} />
+              <CogsStructureTable cogsStructure={r.cogsStructure} />
+              <InventoryValuationTable inventoryValuation={r.inventoryValuation} />
+            </Drilldown>
+          </SectionStack>
         </section>
       )}
 
       {/* SIZES — buy verdict, not a bar chart. */}
       {hasSizeData && (
-        <section id='sizes' className='space-y-3'>
-          <SizeVerdict sizeRunEfficiency={r.sizeRunEfficiency} />
-          <Drilldown summary='Full size tables'>
-            <SizeRunEfficiencyTable sizeRunEfficiency={r.sizeRunEfficiency} />
-            <SizeAnalyticsTable sizeAnalytics={r.sizeAnalytics} />
-          </Drilldown>
+        <section id='sizes'>
+          <SectionStack>
+            <SizeVerdict sizeRunEfficiency={r.sizeRunEfficiency} />
+            <Drilldown summary='Full size tables'>
+              <SizeRunEfficiencyTable sizeRunEfficiency={r.sizeRunEfficiency} />
+              <SizeAnalyticsTable sizeAnalytics={r.sizeAnalytics} />
+            </Drilldown>
+          </SectionStack>
         </section>
       )}
 
@@ -152,6 +163,6 @@ export function ProductsTab({ metricsResponse: r }: ProductsTabProps) {
           <DropVerdictTable sellThroughByDrop={r.sellThroughByDrop} />
         </section>
       )}
-    </div>
+    </SectionStack>
   );
 }

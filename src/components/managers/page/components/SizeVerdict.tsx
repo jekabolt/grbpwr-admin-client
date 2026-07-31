@@ -1,8 +1,9 @@
 import type { SizeRunEfficiencyRow } from 'api/proto-http/admin';
 import { FC } from 'react';
+import { Section } from 'ui/components/section';
+import Text from 'ui/components/text';
 import { sizeVerdict } from '../productSignals';
 import { ProductNameLink } from './ProductNameLink';
-import { ProductSection } from './ProductSection';
 import { ActPill, ColHead, VerdictColumns, VerdictList, VerdictRow } from './VerdictList';
 
 function soldPct(row: SizeRunEfficiencyRow): number {
@@ -26,11 +27,8 @@ export const SizeVerdict: FC<{ sizeRunEfficiency: SizeRunEfficiencyRow[] | undef
         : 'Some sizes are over-bought and stuck — buy them shallower.';
 
   return (
-    <ProductSection
-      title='Sizes'
-      subtitle='— which sizes to buy deeper vs shallower next run'
-      verdict={verdict}
-    >
+    <Section title='Sizes' question='— which sizes to buy deeper vs shallower next run'>
+      <Text className='block font-bold leading-snug'>{verdict}</Text>
       <VerdictColumns>
         {under.length > 0 && (
           <div>
@@ -75,6 +73,6 @@ export const SizeVerdict: FC<{ sizeRunEfficiency: SizeRunEfficiencyRow[] | undef
           </div>
         )}
       </VerdictColumns>
-    </ProductSection>
+    </Section>
   );
 };

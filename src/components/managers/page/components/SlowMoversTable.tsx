@@ -1,5 +1,6 @@
 import type { SlowMoverRow } from 'api/proto-http/admin';
 import { FC, useMemo, useState } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { formatCurrency, formatNumber, parseDecimal } from '../utils';
 import { ProductNameLink } from './ProductNameLink';
@@ -31,23 +32,25 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
   const anyCosted = useMemo(() => topSlowMovers.some((r) => r.hasCost), [topSlowMovers]);
 
   return (
-    <div className='border border-textInactiveColor p-4'>
-      <div className='flex flex-wrap items-center justify-between gap-2 mb-4'>
-        <Text variant='uppercase' className='font-bold block'>
-          Slow movers
-        </Text>
-        {hiddenGhostCount > 0 && (
-          <button
-            type='button'
-            onClick={() => setShowNoSalesProducts((v) => !v)}
-            className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
-          >
-            {showNoSalesProducts
-              ? 'Hide products with no sales'
-              : `Show products with no sales (${hiddenGhostCount})`}
-          </button>
-        )}
-      </div>
+    <div>
+      <GroupLabel
+        flush
+        action={
+          hiddenGhostCount > 0 ? (
+            <button
+              type='button'
+              onClick={() => setShowNoSalesProducts((v) => !v)}
+              className='text-textBaseSize underline underline-offset-2 text-labelColor hover:text-textColor'
+            >
+              {showNoSalesProducts
+                ? 'Hide products with no sales'
+                : `Show products with no sales (${hiddenGhostCount})`}
+            </button>
+          ) : undefined
+        }
+      >
+        Slow movers
+      </GroupLabel>
       {topSlowMovers.length === 0 ? (
         <p className='text-textBaseSize text-labelColor'>
           No slow movers in this merchandising view (all rows are products with no recorded sales).
@@ -57,7 +60,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
         <div className='overflow-x-auto'>
           <table className='w-full text-textBaseSize'>
             <thead>
-              <tr className='border-b border-textInactiveColor'>
+              <tr className='border-b border-hairline'>
                 <th className='text-left p-2'>
                   <Text variant='uppercase' className='text-textBaseSize'>
                     Product
@@ -97,7 +100,7 @@ export const SlowMoversTable: FC<SlowMoversTableProps> = ({ slowMovers }) => {
                   ? lastSaleDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                   : 'Never';
                 return (
-                  <tr key={idx} className='border-b border-textInactiveColor hover:bg-bgSecondary'>
+                  <tr key={idx} className='border-b border-hairline hover:bg-bgSecondary'>
                     <td className='p-2'>
                       <ProductNameLink
                         productId={row.productId}

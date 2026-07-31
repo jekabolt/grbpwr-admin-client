@@ -23,12 +23,10 @@ export const OperatingResultStrip: FC<Ga4CoverageNoteProps> = ({ dashboard }) =>
   if (!showGa4) return null;
 
   return (
-    <div className='border border-textInactiveColor p-4'>
+    <div>
       <Text size='small'>
         GA4 tracked <span className='font-bold'>{(coverage ?? 0).toFixed(0)}%</span> of DB revenue
-        {ga4Revenue?.value
-          ? ` (${formatCurrency(parseDecimal(ga4Revenue))} of GA4 purchases)`
-          : ''}
+        {ga4Revenue?.value ? ` (${formatCurrency(parseDecimal(ga4Revenue))} of GA4 purchases)` : ''}
       </Text>
       {(coverage ?? 100) < GA4_COVERAGE_HINT_FLOOR && (
         <Text variant='label' size='small' className='mt-1 block'>

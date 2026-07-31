@@ -1,4 +1,5 @@
 import { FC, ReactNode } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 
 interface ChartCardProps {
@@ -16,9 +17,8 @@ interface ChartCardProps {
 }
 
 /**
- * The shared bordered frame every dashboard chart sits in — extracted from the
- * `border border-textInactiveColor p-4` + uppercase title pattern that was
- * copy-pasted across ~12 chart components.
+ * Chart sub-structure inside a dashboard block. The owning analytics section supplies the
+ * block surface; chart titles use the next rung in the shared rule ladder.
  */
 export const ChartCard: FC<ChartCardProps> = ({
   title,
@@ -30,32 +30,27 @@ export const ChartCard: FC<ChartCardProps> = ({
   children,
 }) => {
   return (
-    <div
-      className={`flex min-h-[280px] flex-col border border-textInactiveColor p-4 ${className ?? ''}`}
-    >
+    <div className={`flex min-h-[280px] flex-col ${className ?? ''}`}>
       {(title || action) && (
-        <div className='mb-1 flex items-start justify-between gap-2'>
-          <div>
-            {title && (
-              <Text variant='uppercase' className='block font-bold'>
-                {title}
-              </Text>
-            )}
-            {subtitle && (
-              <Text className='mt-0.5 block text-[10px] text-labelColor'>{subtitle}</Text>
-            )}
-          </div>
-          {action}
-        </div>
+        <GroupLabel flush action={action}>
+          {title}
+        </GroupLabel>
+      )}
+      {subtitle && (
+        <Text size='micro' variant='label' className='mb-1 block'>
+          {subtitle}
+        </Text>
       )}
       {warning && (
-        <Text className='mb-3 block text-[10px] text-warning' title={warning}>
+        <Text size='micro' className='mb-3 block text-warning' title={warning}>
           ⚠ {warning}
         </Text>
       )}
       {emptyMessage ? (
         <div className='flex flex-1 items-center justify-center'>
-          <Text className='text-[11px] text-labelColor'>{emptyMessage}</Text>
+          <Text size='small' variant='label'>
+            {emptyMessage}
+          </Text>
         </div>
       ) : (
         <div className='min-h-0 flex-1'>{children}</div>

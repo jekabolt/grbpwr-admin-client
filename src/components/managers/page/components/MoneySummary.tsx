@@ -2,10 +2,11 @@ import type { GetMetricsResponse, MarginByStyleRow } from 'api/proto-http/admin'
 import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 import { generatePath, Link } from 'react-router-dom';
+import { Section } from 'ui/components/section';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { marginExtremes, valuationSummary } from '../productSignals';
 import { formatCurrency, formatCurrencyCompact, parseDecimal } from '../utils';
-import { ProductSection } from './ProductSection';
 import { ActPill, ColHead, VerdictColumns, VerdictList, VerdictRow } from './VerdictList';
 
 /** Style name → tech-card link (bold 12px, matches stub `.nm`), or plain text with a reason when
@@ -41,52 +42,32 @@ export const MoneySummary: FC<{ metricsResponse: GetMetricsResponse }> = ({ metr
         : 'Which styles make vs lose money after costs.';
 
   return (
-    <ProductSection
-      title='Money'
-      subtitle='— cash in stock & which styles make vs lose margin'
-      verdict={verdict}
-    >
+    <Section title='Money' question='— cash in stock & which styles make vs lose margin'>
+      <Text className='block font-bold leading-snug'>{verdict}</Text>
       <div className='space-y-3'>
         {val && (
-          <div className='grid grid-cols-3 border border-textInactiveColor'>
-            <div className='border-r border-textInactiveColor px-3 py-2'>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                Cash in stock
-              </Text>
-              <Text className='block font-bold text-[17px] tabular-nums'>
-                {formatCurrencyCompact(val.total)}
-              </Text>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                at cost{val.uncostedProducts > 0 ? ` · ${val.uncostedProducts} uncosted` : ''}
-              </Text>
-            </div>
-            <div className='border-r border-textInactiveColor px-3 py-2'>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                In dead stock
-              </Text>
-              <Text
-                className={`block font-bold text-[17px] tabular-nums ${val.deadValue > 0 ? 'text-error' : ''}`}
-              >
-                {formatCurrency(val.deadValue)}
-              </Text>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                {val.total > 0
+          <StatGrid min={130}>
+            <Stat
+              label='Cash in stock'
+              value={formatCurrencyCompact(val.total)}
+              sub={`at cost${val.uncostedProducts > 0 ? ` · ${val.uncostedProducts} uncosted` : ''}`}
+            />
+            <Stat
+              label='In dead stock'
+              value={formatCurrency(val.deadValue)}
+              sub={
+                val.total > 0
                   ? `${((val.deadValue / val.total) * 100).toFixed(0)}% of it`
-                  : 'unsold'}
-              </Text>
-            </div>
-            <div className='px-3 py-2'>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                Concentration
-              </Text>
-              <Text className='block font-bold text-[17px] tabular-nums'>
-                {val.top3Share > 0 ? `${val.top3Share.toFixed(0)}%` : '—'}
-              </Text>
-              <Text variant='uppercase' className='text-labelColor block text-[10px]'>
-                top 3 products
-              </Text>
-            </div>
-          </div>
+                  : 'unsold'
+              }
+              tone={val.deadValue > 0 ? 'down' : 'default'}
+            />
+            <Stat
+              label='Concentration'
+              value={val.top3Share > 0 ? `${val.top3Share.toFixed(0)}%` : '—'}
+              sub='top 3 products'
+            />
+          </StatGrid>
         )}
 
         {anyCosted && (
@@ -128,6 +109,6 @@ export const MoneySummary: FC<{ metricsResponse: GetMetricsResponse }> = ({ metr
           </VerdictColumns>
         )}
       </div>
-    </ProductSection>
+    </Section>
   );
 };

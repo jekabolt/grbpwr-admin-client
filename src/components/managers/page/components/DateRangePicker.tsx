@@ -107,7 +107,7 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
     : compareModeHintLine(compareMode, period, customFrom, customTo);
 
   return (
-    <div className='flex flex-wrap items-start gap-4 pb-6'>
+    <div className='flex flex-wrap items-start gap-4'>
       <div className='flex flex-col gap-1'>
         <Text variant='uppercase' className='text-labelColor'>
           period
@@ -210,9 +210,7 @@ export const DateRangePicker: FC<MetricsPeriodPickerProps> = ({
           )}
         </div>
         {compareHint && (
-          <Text className='text-[10px] text-labelColor leading-snug mt-0.5'>
-            {compareHint}
-          </Text>
+          <Text className='text-[10px] text-labelColor leading-snug mt-0.5'>{compareHint}</Text>
         )}
       </div>
     </div>

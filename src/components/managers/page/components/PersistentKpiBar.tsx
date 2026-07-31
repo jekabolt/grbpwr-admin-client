@@ -1,6 +1,7 @@
 import type { BusinessMetrics } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { type FC } from 'react';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import {
   formatCurrencyDelta,
@@ -110,7 +111,7 @@ function getKpiMetrics(
   ];
 }
 
-function KpiMetricCard({ metric }: { metric: KpiMetric }) {
+function KpiMetricStat({ metric }: { metric: KpiMetric }) {
   // Flat/no-compare reads as neutral secondary ink, not full black (which would compete
   // with the value); up/down carry the status green/red.
   const deltaColor =
@@ -128,27 +129,28 @@ function KpiMetricCard({ metric }: { metric: KpiMetric }) {
         : '';
 
   return (
-    <div className='flex min-w-0 flex-col gap-1 border border-textInactiveColor bg-bgSecondary/40 p-3'>
-      <Text variant='uppercase' className='text-[11px] tracking-wide text-labelColor'>
-        {metric.label}
-      </Text>
-      <Text
-        className={`font-bold tabular-nums leading-none ${metric.emphasis ? 'text-2xl' : 'text-lg'}`}
-      >
-        {metric.display}
-      </Text>
-      {metric.delta && (
-        <Text variant='uppercase' className={`text-[11px] tabular-nums ${deltaColor}`}>
-          {arrow}
-          {metric.delta.text}
-        </Text>
-      )}
-      {metric.note && (
-        <Text variant='uppercase' className='text-[11px] text-labelColor'>
-          {metric.note}
-        </Text>
-      )}
-    </div>
+    <Stat
+      label={metric.label}
+      value={metric.display}
+      big={metric.emphasis}
+      sub={
+        metric.delta || metric.note ? (
+          <>
+            {metric.delta && (
+              <Text size='micro' variant='uppercase' className={`block ${deltaColor}`}>
+                {arrow}
+                {metric.delta.text}
+              </Text>
+            )}
+            {metric.note && (
+              <Text size='micro' variant='label' className='block uppercase'>
+                {metric.note}
+              </Text>
+            )}
+          </>
+        ) : undefined
+      }
+    />
   );
 }
 
@@ -159,10 +161,10 @@ export const PersistentKpiBar: FC<PersistentKpiBarProps> = ({ metrics, compareEn
   if (kpiMetrics.length === 0) return null;
 
   return (
-    <div className='grid grid-cols-2 items-stretch gap-3 md:grid-cols-4'>
+    <StatGrid min={130}>
       {kpiMetrics.map((metric, idx) => (
-        <KpiMetricCard key={idx} metric={metric} />
+        <KpiMetricStat key={idx} metric={metric} />
       ))}
-    </div>
+    </StatGrid>
   );
 };

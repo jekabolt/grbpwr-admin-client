@@ -3,6 +3,7 @@ import { ROUTES } from 'constants/routes';
 import { FC } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
 // Deep-links by DashboardAlert.code (06-implementation-order.md §Шаг 6b). An unknown/new code
@@ -41,10 +42,7 @@ export const BackendAlerts: FC<BackendAlertsProps> = ({ alerts }) => {
   if (list.length === 0) return null;
 
   return (
-    <div className='flex flex-col gap-2 border-2 border-textInactiveColor/15 bg-bgSecondary/20 p-4'>
-      <Text variant='uppercase' className='text-textBaseSize font-semibold text-textInactiveColor'>
-        Backend alerts
-      </Text>
+    <Section title='Backend alerts'>
       <ul className='flex flex-col gap-2'>
         {list.map((a, i) => {
           const href = a.code ? ALERT_LINKS[a.code] : undefined;
@@ -55,9 +53,7 @@ export const BackendAlerts: FC<BackendAlertsProps> = ({ alerts }) => {
                 {a.title || a.code || 'Alert'}
               </span>
               {a.detail && (
-                <Text className='mt-0.5 block text-textBaseSize text-textInactiveColor'>
-                  {a.detail}
-                </Text>
+                <Text className='mt-0.5 block text-textBaseSize text-labelColor'>{a.detail}</Text>
               )}
               {href && (
                 <Link
@@ -71,6 +67,6 @@ export const BackendAlerts: FC<BackendAlertsProps> = ({ alerts }) => {
           );
         })}
       </ul>
-    </div>
+    </Section>
   );
 };

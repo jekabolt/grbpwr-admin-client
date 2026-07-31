@@ -160,9 +160,9 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
 
   return (
     <div className='space-y-2'>
-      <div className='grid gap-4 border-2 border-textInactiveColor/20 bg-bgSecondary/30 p-4 md:grid-cols-2'>
+      <div className='grid gap-4 md:grid-cols-2'>
         {/* Left: the P&L waterfall */}
-        <div className='space-y-0 md:border-r md:border-textInactiveColor/40 md:pr-4'>
+        <div className='space-y-0 md:border-r md:border-hairline md:pr-4'>
           <WLine
             label='Gross margin'
             value={formatCurrency(grossMargin.value)}
@@ -207,7 +207,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
 
           {hasAssembly &&
             (coverage <= 0 ? (
-              <div className='mt-1 border-t border-textInactiveColor pt-1'>
+              <div className='mt-1 border-t border-textColor pt-1'>
                 <WLine label='= Operating result' value='—' strong valueTone='text-labelColor' />
                 <div className='mt-2 border border-warning bg-bgSecondary p-2'>
                   <Text className='text-textBaseSize text-textColor'>
@@ -233,7 +233,7 @@ export const ProfitabilityPanel: FC<ProfitabilityPanelProps> = ({
                 )}
                 <WLine label='− OPEX (fixed, pro-rated)' value={`−${formatCurrency(opex)}`} />
                 <WLine label='− Marketing spend' value={`−${formatCurrency(marketing)}`} />
-                <div className='mt-1 border-t border-textInactiveColor pt-1'>
+                <div className='mt-1 border-t border-textColor pt-1'>
                   <WLine
                     label={fullyCosted ? '= Operating result' : '= Operating result (estimate)'}
                     value={formatCurrency(estOperating)}

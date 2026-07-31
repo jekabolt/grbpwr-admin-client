@@ -54,8 +54,7 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
   const lowSample = totalOrders > 0 && totalOrders < MIN_ORDERS;
 
   // AOV punchline: returning baskets bigger than new by a clear margin is the retention case.
-  const aovLift =
-    newAov.value > 0 ? ((retAov.value - newAov.value) / newAov.value) * 100 : null;
+  const aovLift = newAov.value > 0 ? ((retAov.value - newAov.value) / newAov.value) * 100 : null;
   const showAovLift = aovLift != null && aovLift >= AOV_LIFT_PP;
 
   const newDays = coarsenTimeSeries(split.newRevenueByDay) ?? [];
@@ -63,7 +62,9 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
   const showChart = newDays.length >= 3 || retDays.length >= 3;
 
   const chartDates = (retDays.length >= newDays.length ? retDays : newDays).map((p) =>
-    p.date ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '',
+    p.date
+      ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+      : '',
   );
 
   const chartOption: EChartsOption = {
@@ -75,7 +76,10 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
         const items = Array.isArray(raw) ? raw : [raw];
         const label = items[0]?.name ?? '';
         const rows = items
-          .map((it) => `${it.marker ?? ''}${it.seriesName}: <b>${formatCurrency(Number(it.value ?? 0))}</b>`)
+          .map(
+            (it) =>
+              `${it.marker ?? ''}${it.seriesName}: <b>${formatCurrency(Number(it.value ?? 0))}</b>`,
+          )
           .join('<br/>');
         return `<div style="font-size:11px;line-height:1.6">${label}<br/>${rows}</div>`;
       },
@@ -139,10 +143,10 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
         </div>
       )}
 
-      <div className='overflow-x-auto border border-textInactiveColor'>
+      <div className='overflow-x-auto border border-borderColor'>
         <table className='w-full text-textBaseSize'>
           <thead>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <th className='p-2 text-left'>
                 <Text variant='uppercase' className='text-textBaseSize'>
                   Segment
@@ -166,7 +170,7 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
             </tr>
           </thead>
           <tbody>
-            <tr className='border-b border-textInactiveColor'>
+            <tr className='border-b border-hairline'>
               <td className='p-2'>New</td>
               <GridCell value={newOrders.value.toLocaleString()} />
               <GridCell value={formatCurrency(newRevenue.value)} />

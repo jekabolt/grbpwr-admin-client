@@ -5,6 +5,7 @@ import { subDays } from 'date-fns';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { BackendAlerts, DateRangePicker, PersistentKpiBar } from './components';
 import { AlertSettingsModal } from './components/alert-settings-modal';
@@ -148,8 +149,8 @@ export function Analitic() {
   });
 
   return (
-    <div className='flex flex-col gap-8 pb-16'>
-      <div className='flex flex-col gap-4'>
+    <SectionStack className='pb-16'>
+      <Section>
         <div className='flex flex-wrap items-center justify-between gap-3'>
           <Text variant='uppercase' className='text-lg font-bold'>
             Analytics Dashboard
@@ -197,11 +198,12 @@ export function Analitic() {
           onCustomRangeChange={handleCustomRangeChange}
           onCompareBaselineChange={handleCompareBaselineChange}
         />
-        <PersistentKpiBar metrics={metricsResponse?.business} compareEnabled={compareEnabled} />
-        <BackendAlerts alerts={dashboard?.alerts} />
-      </div>
+      </Section>
 
-      <div className='border-b border-textInactiveColor'>
+      <PersistentKpiBar metrics={metricsResponse?.business} compareEnabled={compareEnabled} />
+      <BackendAlerts alerts={dashboard?.alerts} />
+
+      <Section className='p-0'>
         <nav className='flex gap-1 overflow-x-auto' aria-label='Metrics tabs'>
           {TAB_IDS.map((tabId) => (
             <button
@@ -218,7 +220,7 @@ export function Analitic() {
             </button>
           ))}
         </nav>
-      </div>
+      </Section>
 
       {isLoading && (
         <div className='space-y-6' aria-busy='true'>
@@ -242,16 +244,16 @@ export function Analitic() {
       )}
 
       {isError && (
-        <div className='border border-error p-8 text-center'>
+        <Section className='border-error p-8 text-center'>
           <Text className='text-error mb-4'>Failed to load metrics</Text>
           <Button variant='main' onClick={() => refetch()}>
             Retry
           </Button>
-        </div>
+        </Section>
       )}
 
       {!isLoading && !isError && metricsResponse && (
-        <div className='space-y-6'>
+        <>
           {activeTab === 'this-week' && (
             <ThisWeekTab
               metricsResponse={metricsResponse}
@@ -273,8 +275,8 @@ export function Analitic() {
           {activeTab === 'growth' && (
             <GrowthTab metricsResponse={metricsResponse} channelRoas={channelRoas} />
           )}
-        </div>
+        </>
       )}
-    </div>
+    </SectionStack>
   );
 }
