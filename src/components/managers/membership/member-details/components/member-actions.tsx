@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
+import { Section } from 'ui/components/section';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import {
@@ -53,11 +54,7 @@ export function MemberActions({ member }: { member: Member }) {
   };
 
   return (
-    <div className='flex flex-col gap-5 border border-textInactiveColor p-4'>
-      <Text variant='uppercase' size='default'>
-        Actions
-      </Text>
-
+    <Section title='actions'>
       {isErased && <Text variant='inactive'>This account is erased. Actions are disabled.</Text>}
 
       {/* Manual tier override */}
@@ -207,6 +204,6 @@ export function MemberActions({ member }: { member: Member }) {
           <Text>I understand this is permanent</Text>
         </label>
       </ConfirmationModal>
-    </div>
+    </Section>
   );
 }

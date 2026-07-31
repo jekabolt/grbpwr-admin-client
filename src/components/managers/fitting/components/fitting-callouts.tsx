@@ -1,6 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { Controller, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import TextareaField from 'ui/form/fields/textarea-field';
@@ -57,7 +58,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
       </button>
 
       {open && (
-        <div className='mt-3 space-y-3'>
+        <div className='mt-3 flex flex-col gap-3'>
           {fields.length === 0 ? (
             <Text variant='inactive' size='small'>
               no fit notes — click a photo above to pin one
@@ -66,21 +67,24 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
             fields.map((f, index) => {
               const pinnedTo = (f as FormCallout).mediaId ?? 0;
               return (
-                <div key={f.id} className='space-y-2 border border-textInactiveColor p-3'>
-                  <div className='flex items-center justify-between'>
-                    <Text variant='uppercase' size='small'>
-                      fit note {index + 1}
-                      {pinnedTo > 0 ? ` · photo #${viewIndex(pinnedTo)}` : ' · unanchored'}
-                    </Text>
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      aria-label='remove fit note'
-                      onClick={() => remove(index)}
-                    >
-                      ✕
-                    </Button>
-                  </div>
+                <div key={f.id} className='flex flex-col gap-2'>
+                  <GroupLabel
+                    flush={index === 0}
+                    action={
+                      <Button
+                        type='button'
+                        variant='secondary'
+                        aria-label='remove fit note'
+                        onClick={() => remove(index)}
+                      >
+                        ✕
+                      </Button>
+                    }
+                  >
+                    {`fit note ${index + 1}${
+                      pinnedTo > 0 ? ` · photo #${viewIndex(pinnedTo)}` : ' · unanchored'
+                    }`}
+                  </GroupLabel>
                   <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
                     {/* Auto-assigned (max existing number + 1) and a cross-reference target
                         (changeRequests.calloutNumber) — read-only so hand-edits can't collide

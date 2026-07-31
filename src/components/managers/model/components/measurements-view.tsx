@@ -1,4 +1,5 @@
 import { common_ModelMeasurement } from 'api/proto-http/admin';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { BODY_MEASUREMENT_GROUPS } from './measurements';
 
@@ -23,22 +24,14 @@ export function ModelMeasurementsView({
   }
 
   return (
-    <div className='space-y-6 border border-textInactiveColor bg-bgColor p-3'>
-      <Text variant='uppercase' size='small'>
-        model measurements · mm
-      </Text>
+    <div className='space-y-6'>
+      <GroupLabel flush>model measurements · mm</GroupLabel>
       {BODY_MEASUREMENT_GROUPS.map((group) => {
         const present = group.measurements.filter((m) => values.has(m.name));
         if (present.length === 0) return null;
         return (
           <div key={group.title} className='space-y-2'>
-            <Text
-              variant='uppercase'
-              size='small'
-              className='border-b border-textInactiveColor pb-1'
-            >
-              {group.title}
-            </Text>
+            <GroupLabel flush>{group.title}</GroupLabel>
             <div className='grid grid-cols-2 gap-x-10 gap-y-2 sm:grid-cols-3'>
               {present.map((m) => (
                 <div key={m.name} className='flex items-baseline justify-between gap-2'>

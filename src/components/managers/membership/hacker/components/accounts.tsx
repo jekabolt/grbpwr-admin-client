@@ -2,6 +2,7 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import { useHackerAccounts, useRevokeHackerStatus } from '../../utils/hooks';
@@ -16,11 +17,7 @@ export function HackerAccounts() {
   const members = data?.members ?? [];
 
   return (
-    <div className='flex flex-col gap-4 border border-textInactiveColor p-4'>
-      <Text variant='uppercase' size='default'>
-        Hacker accounts {members.length > 0 && `(${members.length})`}
-      </Text>
-
+    <Section title={`hacker accounts${members.length > 0 ? ` (${members.length})` : ''}`}>
       <div className='overflow-x-auto w-full'>
         <table className='w-full border-collapse border border-textInactiveColor min-w-max'>
           <thead className='bg-textInactiveColor h-9'>
@@ -84,6 +81,6 @@ export function HackerAccounts() {
           </tbody>
         </table>
       </div>
-    </div>
+    </Section>
   );
 }

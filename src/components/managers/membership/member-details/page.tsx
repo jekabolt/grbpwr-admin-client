@@ -3,6 +3,7 @@ import { localeLabel } from 'constants/constants';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { useMember, useTierHistory } from '../utils/hooks';
@@ -59,13 +60,9 @@ export function MemberDetails() {
       )}
 
       {member && (
-        <>
-          <div className='grid grid-cols-1 lg:grid-cols-2 gap-4'>
-            {/* Profile */}
-            <div className='flex flex-col gap-2 border border-textInactiveColor p-4'>
-              <Text variant='uppercase' size='default'>
-                Profile
-              </Text>
+        <SectionStack>
+          <SectionStack row>
+            <Section title='profile' className='w-full lg:w-1/2'>
               <InfoRow label='User ID' value={member.userId} />
               <InfoRow label='Name' value={member.name} />
               <InfoRow label='Email' value={member.email} />
@@ -77,13 +74,9 @@ export function MemberDetails() {
               <InfoRow label='Newsletter' value={boolLabel(member.subscribeNewsletter)} />
               <InfoRow label='New arrivals' value={boolLabel(member.subscribeNewArrivals)} />
               <InfoRow label='Events' value={boolLabel(member.subscribeEvents)} />
-            </div>
+            </Section>
 
-            {/* Membership */}
-            <div className='flex flex-col gap-2 border border-textInactiveColor p-4'>
-              <Text variant='uppercase' size='default'>
-                Membership
-              </Text>
+            <Section title='membership' className='w-full lg:w-1/2'>
               <InfoRow
                 label='Current tier'
                 value={
@@ -106,8 +99,8 @@ export function MemberDetails() {
               />
               <InfoRow label='Tier upgrade date' value={formatDateShort(member.tierUpgradeDate)} />
               <InfoRow label='Next review' value={formatDateShort(member.nextReviewDate)} />
-            </div>
-          </div>
+            </Section>
+          </SectionStack>
 
           <MemberActions member={member} />
 
@@ -117,7 +110,7 @@ export function MemberDetails() {
             </Text>
             <TierHistoryTable entries={historyData?.entries ?? []} />
           </div>
-        </>
+        </SectionStack>
       )}
     </div>
   );

@@ -1,4 +1,5 @@
 import { useController, useFormContext, useWatch } from 'react-hook-form';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import Tooltip, { TooltipProvider } from 'ui/components/tooltip';
 import { MeasurementPictogram } from './measurement-pictograms';
@@ -79,9 +80,7 @@ export function MeasurementsFields() {
         </Text>
         {BODY_MEASUREMENT_GROUPS.map((group) => (
           <div key={group.title} className='space-y-2'>
-            <Text variant='uppercase' className='border-b border-textInactiveColor pb-1'>
-              {group.title}
-            </Text>
+            <GroupLabel flush>{group.title}</GroupLabel>
             <div className='grid grid-cols-1 gap-x-10 gap-y-1 sm:grid-cols-2'>
               {group.measurements.map((m) => (
                 <MeasurementInput

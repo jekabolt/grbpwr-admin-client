@@ -27,7 +27,7 @@ export function SampleSizeInfo({
       <Text variant='uppercase' size='small'>
         size
       </Text>
-      <div className='border-b border-textInactiveColor py-1.5'>
+      <div className='border-b border-hairline py-1.5'>
         {!sampleId ? (
           <Text variant='inactive' size='small'>
             pick a sample to see its size

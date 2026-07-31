@@ -14,6 +14,8 @@ import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
+import { GroupLabel } from 'ui/components/group-label';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
@@ -124,14 +126,19 @@ function buildSpecRows(m: common_Material): SpecRow[] {
 
 function DetailRow({ k, v }: { k: string; v: string }) {
   return (
-    <div className='flex items-center justify-between gap-4 border-b border-borderColor py-1'>
-      <Text size='small' variant='label'>
-        {k}
-      </Text>
-      <Text size='small' className='text-right tabular-nums'>
-        {v}
-      </Text>
-    </div>
+    <Row
+      className='gap-4'
+      label={
+        <Text size='small' variant='label'>
+          {k}
+        </Text>
+      }
+      value={
+        <Text size='small' className='text-right'>
+          {v}
+        </Text>
+      }
+    />
   );
 }
 
@@ -524,14 +531,16 @@ export function CatalogTab() {
         <div className='flex flex-col gap-5'>
           {groups.map(({ sec, items }) => (
             <div key={sec || 'none'} className='flex flex-col gap-2'>
-              <div className='flex items-baseline gap-2 border-b border-borderColor pb-0.5'>
-                <Text size='micro' variant='label' tracking='group' className='font-bold uppercase'>
-                  {sectionLabel(sec)}
-                </Text>
-                <Text size='micro' variant='label'>
-                  {items.length}
-                </Text>
-              </div>
+              <GroupLabel
+                flush
+                action={
+                  <Text size='micro' variant='label'>
+                    {items.length}
+                  </Text>
+                }
+              >
+                {sectionLabel(sec)}
+              </GroupLabel>
               <Tiles min={140}>
                 {items.map((m) => {
                   const id = Number(m.id);

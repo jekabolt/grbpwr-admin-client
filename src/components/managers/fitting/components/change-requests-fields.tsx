@@ -11,6 +11,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { FittingCarryOver } from './carry-over';
@@ -195,20 +196,22 @@ function CreateModeList({
         </Text>
       ) : (
         fields.map((f, index) => (
-          <div key={f.id} className='space-y-2 border border-textInactiveColor p-3'>
-            <div className='flex items-center justify-between'>
-              <Text variant='uppercase' size='small'>
-                change #{index + 1}
-              </Text>
-              <Button
-                type='button'
-                variant='secondary'
-                aria-label='remove change request'
-                onClick={() => remove(index)}
-              >
-                ✕
-              </Button>
-            </div>
+          <div key={f.id} className='flex flex-col gap-2'>
+            <GroupLabel
+              flush={index === 0}
+              action={
+                <Button
+                  type='button'
+                  variant='secondary'
+                  aria-label='remove change request'
+                  onClick={() => remove(index)}
+                >
+                  ✕
+                </Button>
+              }
+            >
+              {`change #${index + 1}`}
+            </GroupLabel>
             <CRFields
               value={items[index] ?? {}}
               pieceOptions={pieceOptions}
@@ -255,6 +258,7 @@ function EditableCR({
   onDelete,
   saving,
   isNew,
+  index,
 }: {
   initial: CRValue;
   pieceOptions: PieceOption[];
@@ -262,6 +266,7 @@ function EditableCR({
   onDelete?: () => void;
   saving: boolean;
   isNew?: boolean;
+  index?: number;
 }) {
   const [v, setV] = useState<CRValue>(initial);
   const [dirty, setDirty] = useState(false);
@@ -270,7 +275,10 @@ function EditableCR({
     setV((prev) => ({ ...prev, ...patch }));
   };
   return (
-    <div className='space-y-2 border border-textInactiveColor p-3'>
+    <div className='flex flex-col gap-2'>
+      {!isNew && index != null && (
+        <GroupLabel flush={index === 0}>{`change #${index + 1}`}</GroupLabel>
+      )}
       {v.carriedFromId ? (
         <Text variant='inactive' size='small'>
           ↳ carried from a previous round (#{v.carriedFromId})
@@ -346,9 +354,10 @@ function EditModeList({
           нет замечаний — добавьте первый
         </Text>
       ) : (
-        serverChangeRequests.map((cr) => (
+        serverChangeRequests.map((cr, index) => (
           <EditableCR
             key={cr.id}
+            index={index}
             saving={update.isPending || del.isPending}
             pieceOptions={pieceOptions}
             initial={{

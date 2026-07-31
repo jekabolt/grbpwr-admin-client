@@ -3,8 +3,10 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { CopyToClipboard } from 'ui/components/copyToClipboard';
 import Input from 'ui/components/input';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../../orders-catalog/components/utility';
 import {
@@ -42,11 +44,7 @@ export function HackerInvites() {
   };
 
   return (
-    <div className='flex flex-col gap-4 border border-textInactiveColor p-4'>
-      <Text variant='uppercase' size='default'>
-        Invites
-      </Text>
-
+    <Section title='invites'>
       {/* Generate */}
       {canWrite(SECTION.members) && (
         <div className='flex flex-wrap gap-3 items-end'>
@@ -84,7 +82,7 @@ export function HackerInvites() {
       )}
 
       {lastGenerated && (
-        <div className='flex flex-col gap-1 border border-textInactiveColor bg-highlightColor/10 p-3'>
+        <CalloutBox tone='note' className='flex flex-col gap-1 bg-highlightColor/10'>
           <Text variant='inactive' size='small'>
             One-time invite link (copy now — token is shown only once):
           </Text>
@@ -95,7 +93,7 @@ export function HackerInvites() {
           <Text variant='inactive' size='small'>
             Expires {formatDateShort(lastGenerated.expiresAt, true)}
           </Text>
-        </div>
+        </CalloutBox>
       )}
 
       {/* List */}
@@ -177,6 +175,6 @@ export function HackerInvites() {
           </tbody>
         </table>
       </div>
-    </div>
+    </Section>
   );
 }

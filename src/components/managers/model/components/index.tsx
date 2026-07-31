@@ -12,7 +12,7 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
@@ -86,35 +86,37 @@ export function ModelForm({
           </div>
         </div>
 
-        <div className='flex flex-col gap-6 lg:flex-row lg:items-start'>
-          <Section title='details' className='w-full lg:w-1/2'>
-            <InputField name='name' label='name' placeholder='enter model name' />
-            <SelectField
-              name='gender'
-              label='gender (optional)'
-              items={genderOptions}
-              placeholder='select gender'
-            />
-            <DefaultSizesField />
-            <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={1000} />
-            <div className='space-y-1'>
-              <Text variant='uppercase' size='small'>
-                photos
-              </Text>
-              <ModelMedia model={model} />
-            </div>
-          </Section>
+        <SectionStack>
+          <SectionStack row>
+            <Section title='details' className='w-full lg:w-1/2'>
+              <InputField name='name' label='name' placeholder='enter model name' />
+              <SelectField
+                name='gender'
+                label='gender (optional)'
+                items={genderOptions}
+                placeholder='select gender'
+              />
+              <DefaultSizesField />
+              <TextareaField name='comment' label='comment (optional)' rows={4} maxLength={1000} />
+              <div className='space-y-1'>
+                <Text variant='uppercase' size='small'>
+                  photos
+                </Text>
+                <ModelMedia model={model} />
+              </div>
+            </Section>
 
-          <Section title='measurements' className='w-full lg:w-1/2'>
-            <MeasurementsFields />
-          </Section>
-        </div>
+            <Section title='measurements' className='w-full lg:w-1/2'>
+              <MeasurementsFields />
+            </Section>
+          </SectionStack>
 
-        {isEditMode && id && (
-          <Section title='fittings'>
-            <FittingsReadonlyList modelId={parseInt(id, 10)} />
-          </Section>
-        )}
+          {isEditMode && id && (
+            <Section title='fittings'>
+              <FittingsReadonlyList modelId={parseInt(id, 10)} />
+            </Section>
+          )}
+        </SectionStack>
       </form>
 
       <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>

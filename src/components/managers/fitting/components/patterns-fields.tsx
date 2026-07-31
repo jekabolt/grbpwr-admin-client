@@ -74,7 +74,7 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
             return (
               <li
                 key={f.id}
-                className='flex flex-wrap items-end gap-2 border border-textInactiveColor p-2'
+                className='flex flex-wrap items-end gap-2 border-b border-hairline pb-2'
               >
                 <a
                   href={row.url || '#'}

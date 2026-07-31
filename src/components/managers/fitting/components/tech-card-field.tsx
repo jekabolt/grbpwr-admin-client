@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useController, useFormContext } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { FittingFormData } from './schema';
 
@@ -94,18 +95,22 @@ export function TechCardField() {
   return (
     <div className='space-y-2' ref={boxRef}>
       {selected ? (
-        <div className='flex items-center justify-between gap-3 border border-textInactiveColor p-2'>
-          <div className='min-w-0'>
-            <Text>{label(selected)}</Text>
-            <Text variant='inactive' size='small'>
-              #{selected.id}
-              {selected.stage ? ` · ${stageLabel(selected.stage)}` : ''}
-            </Text>
-          </div>
-          <Button type='button' variant='secondary' aria-label='clear tech card' onClick={clear}>
-            ✕
-          </Button>
-        </div>
+        <Row
+          label={
+            <div className='min-w-0'>
+              <Text>{label(selected)}</Text>
+              <Text variant='inactive' size='small'>
+                #{selected.id}
+                {selected.stage ? ` · ${stageLabel(selected.stage)}` : ''}
+              </Text>
+            </div>
+          }
+          value={
+            <Button type='button' variant='secondary' aria-label='clear tech card' onClick={clear}>
+              ✕
+            </Button>
+          }
+        />
       ) : (
         <Text variant='inactive' size='small'>
           no tech card linked

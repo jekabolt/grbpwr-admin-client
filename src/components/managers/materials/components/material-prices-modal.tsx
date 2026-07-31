@@ -4,6 +4,7 @@ import { EXPENSE_CURRENCIES } from 'constants/constants';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { useAddMaterialPrice, useMaterialPrices } from './useMaterials';
@@ -118,15 +119,20 @@ export function MaterialPricesModal({
                 </Text>
               ) : (
                 prices.map((p, i) => (
-                  <div key={i} className='flex justify-between border border-textInactiveColor p-2'>
-                    <Text size='small'>
-                      {decimalToInput(p.price)} {p.currency}
-                    </Text>
-                    <Text variant='inactive' size='small'>
-                      {p.validFrom ? p.validFrom.slice(0, 10) : '—'} · {p.source || 'manual'}
-                      {p.note ? ` · ${p.note}` : ''}
-                    </Text>
-                  </div>
+                  <Row
+                    key={i}
+                    label={
+                      <Text size='small'>
+                        {decimalToInput(p.price)} {p.currency}
+                      </Text>
+                    }
+                    value={
+                      <Text variant='inactive' size='small'>
+                        {p.validFrom ? p.validFrom.slice(0, 10) : '—'} · {p.source || 'manual'}
+                        {p.note ? ` · ${p.note}` : ''}
+                      </Text>
+                    }
+                  />
                 ))
               )}
             </div>

@@ -7,6 +7,7 @@ import {
 import { zoneOptions } from 'components/managers/tech-card/components/operation-options';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import { fieldErrorSummary } from 'utils/field-errors';
 
@@ -65,9 +66,10 @@ export function FittingCarryOver({
         Открытые пункты прошлых раундов — отметьте resolved (сделано) или перенесите в этот раунд.
       </Text>
       {items.map((cr) => (
-        <div
+        <CalloutBox
           key={cr.id}
-          className='flex flex-wrap items-center justify-between gap-2 border border-warning p-2'
+          tone='warning'
+          className='flex flex-wrap items-center justify-between gap-2'
         >
           <div className='flex min-w-0 flex-col'>
             <Text size='small' className='truncate'>
@@ -117,7 +119,7 @@ export function FittingCarryOver({
               carry over
             </Button>
           </div>
-        </div>
+        </CalloutBox>
       ))}
     </div>
   );

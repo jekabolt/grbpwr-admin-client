@@ -17,7 +17,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { Section } from 'ui/components/section';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Form } from 'ui/form';
 import InputField from 'ui/form/fields/input-field';
@@ -196,6 +196,7 @@ export function FittingForm({
           </div>
         </div>
 
+        <SectionStack>
         {/* Change requests are the actionable output of a fitting (what to fix, carried into the next
             round and the tech card) — surfaced full-width at the top, not buried below the fold. */}
         <Section title='change requests (что доработать) — главный итог примерки'>
@@ -278,7 +279,7 @@ export function FittingForm({
               <Text variant='uppercase' size='small'>
                 round
               </Text>
-              <div className='border-b border-textInactiveColor py-1.5'>
+              <div className='border-b border-hairline py-1.5'>
                 <Text>
                   {selectedSampleId
                     ? `round ${sampleRoundNumber || '—'} · from sample #${
@@ -305,6 +306,7 @@ export function FittingForm({
         <Section title='выкройка (что мерили)' collapsible defaultOpen={patternsCount > 0}>
           <PatternsFields sampleSizeId={sampleSizeId} />
         </Section>
+        </SectionStack>
       </form>
 
       <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>

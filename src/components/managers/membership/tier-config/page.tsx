@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
+import { Section, SectionStack } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { useTierConfig, useUpdateTierConfig } from '../utils/hooks';
 import { formatTierLabel } from '../utils/tier-utils';
@@ -52,23 +53,19 @@ export function TierConfig() {
         <Text variant='error'>{error instanceof Error ? error.message : 'Failed to load'}</Text>
       )}
 
-      <div className='flex flex-col gap-4'>
+      <SectionStack>
         {entries.map((entry, index) => (
-          <div
+          <Section
             key={entry.tierCode ?? index}
-            className='flex flex-col gap-3 border border-textInactiveColor p-4'
-          >
-            <div className='flex items-center gap-2'>
-              <Text variant='uppercase' size='default'>
-                {formatTierLabel(entry.tierCode, entry.displayName)}
-              </Text>
-              {entry.isInviteOnly && (
+            title={formatTierLabel(entry.tierCode, entry.displayName)}
+            action={
+              entry.isInviteOnly ? (
                 <span className='inline-block px-1.5 py-0.5 bg-black text-white'>
                   <Text className='!text-white'>invite-only</Text>
                 </span>
-              )}
-            </div>
-
+              ) : undefined
+            }
+          >
             <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3'>
               <div className='flex flex-col gap-1'>
                 <Text variant='inactive' size='small'>
@@ -144,9 +141,9 @@ export function TierConfig() {
                 </div>
               )}
             </div>
-          </div>
+          </Section>
         ))}
-      </div>
+      </SectionStack>
 
       {canWrite(SECTION.members) && entries.length > 0 && (
         <div className='fixed inset-x-0 bottom-0 z-40 flex items-center justify-between gap-3 border-t border-textInactiveColor bg-bgColor px-3 py-2'>
