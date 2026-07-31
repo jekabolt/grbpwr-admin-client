@@ -53,6 +53,7 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
+import { looksLikeArticleName, normalizeRole, roleSuggestions } from './bom-roles';
 import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 
@@ -93,10 +94,10 @@ function materialFabricWeight(m?: common_Material): string | undefined {
 // existing line can never disagree about what a linked line ends up carrying.
 function materialLineFields(m: common_Material) {
   return {
-    // A linked line must always come out NAMED. `name` is required on any line the server cannot
-    // resolve a name for, and a linked line renders no name input to fix it in — an empty one is a
-    // save blocked by a field that is nowhere on screen. Falls back to the code, then the id.
-    name: m.name?.trim() || m.code?.trim() || `#${wireInt(m.id)}`,
+    // NO `name` here — the line's name is the slot ROLE («основная молния»), owned by the operator
+    // and never derived from the article. Stamping the article name in was the regression that made
+    // duplicate-looking slots and printed «YKK → YKK» in the production material plan (SlotName vs
+    // MaterialName). An empty role is legal: the server falls back to the article name on read.
     section: m.section || emptyBomItem.section,
     supplier: m.supplier || '',
     supplierRef: m.supplierRef || '',
@@ -140,6 +141,31 @@ const weightLabel = (v?: string) => (v?.trim() ? `${v.trim()} g/m²` : '');
 // "тип" pill beside the section on a linked article tile.
 const classShort = (c?: string) =>
   c && c !== 'MATERIAL_CLASS_UNKNOWN' ? c.replace('MATERIAL_CLASS_', '').toLowerCase() : '';
+
+// The slot's identity — its ROLE in the garment and its section — editable on EVERY line, linked
+// or not. The role is the one field a linked line used to render nowhere, which made a wrong or
+// article-borrowed role permanently uncorrectable. Section is editable on a linked line too: the
+// article keeps its own catalog section on the plate, and a deliberate divergence (a jersey
+// article serving a LINING slot) must be expressible.
+function SlotIdentityFields({ index }: { index: number }) {
+  const { control } = useFormContext<TechCardFormData>();
+  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
+  return (
+    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+      <ComboField
+        name={`bomItems.${index}.name`}
+        label='роль в изделии *'
+        options={roleSuggestions(rowSection)}
+        placeholder='основная ткань / подкладка / молния…'
+      />
+      <SelectField
+        name={`bomItems.${index}.section`}
+        label='секция *'
+        items={techCardBomSectionOptions}
+      />
+    </div>
+  );
+}
 
 // This style's use of the article — the ONLY three controls a linked line owns. Everything else on
 // a linked line is a catalog fact, rendered as a plate (below) rather than as disabled inputs.
@@ -189,10 +215,6 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
     | common_TechCardBomSection
     | undefined;
-  // `name` is watched rather than read through getValues so linking a material repaints the plate
-  // immediately. The server resolves a linked line's name from the material by link rather than
-  // storing a copy, so the value RHF already holds IS the resolved one.
-  const nameValue = useWatch({ control, name: `bomItems.${index}.name` }) as string | undefined;
   const [createOpen, setCreateOpen] = useState(false);
 
   const linked = materialId > 0;
@@ -211,15 +233,12 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     // saying `number`. Writing it raw put a string into the form, which z.number() then rejected
     // as "Invalid input" on bomItems.N.materialId — an unsavable card, right after linking.
     setValue(`bomItems.${index}.materialId`, wireInt(m.id), { shouldDirty: true });
-    // Slots: the line's name is the ROLE («основная молния»), and the read path now keeps it over
-    // the linked article's catalog name. Stamp the article name only into an EMPTY name — a role
-    // the operator already typed must survive linking a default article, or no role name can ever
-    // exist on a linked line.
-    const keepName = !!String(getValues(`bomItems.${index}.name`) ?? '').trim();
+    // The role (`name`) is deliberately NOT in materialLineFields: linking an article describes
+    // the slot's default material, it does not rename the slot.
     Object.entries(materialLineFields(m)).forEach(([field, val]) => {
       // Only non-empty values are written: linking must never CLEAR a supplier / width / price the
       // operator typed on the line while it was still free-text.
-      if (!val || (field === 'name' && keepName)) return;
+      if (!val) return;
       setValue(`bomItems.${index}.${field}` as never, val as never, { shouldDirty: true });
     });
   };
@@ -285,6 +304,7 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
   if (linked) {
     return (
       <div className='space-y-2.5'>
+        <SlotIdentityFields index={index} />
         <div className='grid grid-cols-1 gap-2.5 lg:grid-cols-2'>
           {/* CATALOG ARTICLE — a plate, not fields. Zebra ground + no input chrome, so nothing on
               this half can be mistaken for something editable here. */}
@@ -310,11 +330,11 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
               <MaterialThumb material={linkedMaterial} size='md' />
               <div className='min-w-0 flex-1 space-y-0.5'>
                 <div className='flex flex-wrap items-center gap-1.5'>
-                  <Pill tone='mut'>
-                    {sectionShort(mirror(linkedMaterial?.section, 'section')) || 'section?'}
-                  </Pill>
+                  <Pill tone='mut'>{sectionShort(linkedMaterial?.section) || 'section?'}</Pill>
+                  {/* The ARTICLE's catalog name — under a "catalog article" header the role would
+                      be a lie (the role names the slot, this plate names its default material). */}
                   <Text component='span' className='min-w-0 truncate font-bold'>
-                    {nameValue?.trim() || `артикул ${index + 1}`}
+                    {linkedMaterial?.name?.trim() || `артикул #${materialId}`}
                   </Text>
                 </div>
                 <Text variant='label' size='micro' className='truncate'>
@@ -370,15 +390,10 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
 
   return (
     <div className='space-y-2.5'>
-      {/* Section is chosen FIRST so the picker below is scoped to the right family — hardware for
-          пуговицы / молнии / кнопки, trim, thread… not only fabric. */}
-      <div className='max-w-xs'>
-        <SelectField
-          name={`bomItems.${index}.section`}
-          label='секция *'
-          items={techCardBomSectionOptions}
-        />
-      </div>
+      {/* Role + section come FIRST: they are the slot's identity, and the section also scopes the
+          picker below to the right family — hardware for пуговицы / молнии / кнопки, trim, thread…
+          not only fabric. */}
+      <SlotIdentityFields index={index} />
       <div>
         <Text variant='label' size='micro' tracking='label' className='uppercase'>
           catalog material *
@@ -417,7 +432,6 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
       <div>
         <GroupLabel>material details</GroupLabel>
         <div className='grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'>
-          <InputField name={`bomItems.${index}.name`} label='name *' />
           <ComboField
             name={`bomItems.${index}.unit`}
             label='unit'
@@ -455,10 +469,15 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
 // where the row they opened had gone.
 function BomTile({
   index,
+  roleDuplicate,
   onRemove,
   onOpen,
 }: {
   index: number;
+  // Another slot on this card carries the same normalized role — computed by the parent (a tile
+  // only watches its own row). Advisory: duplicates stay savable, they are just indistinguishable
+  // in every slot select and in the production material plan, so the tile says so.
+  roleDuplicate?: boolean;
   onRemove: () => void;
   onOpen: () => void;
 }) {
@@ -559,20 +578,26 @@ function BomTile({
           {cls && cls !== section ? <Pill tone='mut'>{cls}</Pill> : null}
         </div>
 
+        {/* The ROLE, bold — the slot's identity. The article is the line below it. */}
         <Text component='span' size='micro' className='min-w-0 truncate font-bold uppercase'>
-          {row.name?.trim() || `артикул ${index + 1}`}
+          {row.name?.trim() || `слот ${index + 1}`}
         </Text>
 
-        {/* the self-describing article code, only once a catalog material is linked */}
+        {/* the default article: catalog name + self-describing code, once a material is linked */}
         {linked && material ? (
-          <Text
-            component='span'
-            variant='label'
-            size='micro'
-            className='min-w-0 truncate font-mono tabular-nums'
-          >
-            {composeArticleFromMaterial(material, true)}
-          </Text>
+          <>
+            <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
+              {material.name?.trim() || `#${row.materialId}`}
+            </Text>
+            <Text
+              component='span'
+              variant='label'
+              size='micro'
+              className='min-w-0 truncate font-mono tabular-nums'
+            >
+              {composeArticleFromMaterial(material, true)}
+            </Text>
+          </>
         ) : null}
 
         {specLine ? (
@@ -581,7 +606,16 @@ function BomTile({
           </Text>
         ) : null}
 
-        <div className='mt-0.5 flex min-w-0 items-center gap-1'>{priceStatus}</div>
+        <div className='mt-0.5 flex min-w-0 flex-wrap items-center gap-1'>
+          {priceStatus}
+          {/* Advisory role health: a blank role reads as the article name everywhere (the server
+              falls back on read), and a role that IS the article name is the tell of the fixed
+              picker bug — both mean nobody has named the slot's place in the garment yet. */}
+          {!row.name?.trim() || (linked && looksLikeArticleName(row.name, material?.name)) ? (
+            <Pill tone='attention'>роль не задана</Pill>
+          ) : null}
+          {roleDuplicate ? <Pill tone='attention'>дубль роли</Pill> : null}
+        </div>
       </button>
 
       {/* Same idea as the "! link a material" marker, for anything BLOCKING the save: name the
@@ -633,6 +667,12 @@ export function BomField({
     name?: string;
     section?: string;
   }>;
+  // Duplicate-role detection for the tiles (advisory, never a save rule): normalized role → count.
+  const roleCounts = new Map<string, number>();
+  bomWatch.forEach((b) => {
+    const n = normalizeRole(b.name);
+    if (n) roleCounts.set(n, (roleCounts.get(n) ?? 0) + 1);
+  });
   // The article whose editor is open. ONE dialog for the whole grid, keyed by index — a modal per
   // tile would mean twenty dialog roots mounted to show at most one.
   const [editing, setEditing] = useState<number | null>(null);
@@ -784,6 +824,7 @@ export function BomField({
             <BomTile
               key={f.id}
               index={index}
+              roleDuplicate={(roleCounts.get(normalizeRole(bomWatch[index]?.name)) ?? 0) > 1}
               onRemove={() => removeArticle(index)}
               onOpen={() => setEditing(index)}
             />
@@ -802,7 +843,7 @@ export function BomField({
           width='lg'
           hideActions
           title={join(
-            bomWatch[editing]?.name?.trim() || `артикул ${editing + 1}`,
+            bomWatch[editing]?.name?.trim() || `слот ${editing + 1}`,
             sectionShort(bomWatch[editing]?.section),
           )}
         >

@@ -108,10 +108,7 @@ function TechCardGallery({
   const kindOptions = techCardMediaKindOptions.filter((o) => kinds.includes(o.value));
   const defaultKind: common_TechCardMediaKind = kinds[0];
 
-  const myMediaIds = useMemo(
-    () => new Set(mediaFA.fields.map((f) => f.mediaId)),
-    [mediaFA.fields],
-  );
+  const myMediaIds = useMemo(() => new Set(mediaFA.fields.map((f) => f.mediaId)), [mediaFA.fields]);
 
   // Which sheet a callout counts against — the same rule `CalloutsList` filters by, so the two can
   // never disagree about who owns a number. An unpinned callout falls to the technical sheet.
@@ -123,12 +120,32 @@ function TechCardGallery({
   // instead of being perforated by notes stuck on a swatch photo.
   //
   // max+1, not length+1: after a mid-list delete, length+1 collides with an existing number.
+  //
+  // The max is taken over the live callouts AND over everything still pointing at a number, because
+  // deleting a callout does not clear its referrers. Delete the highest sketch callout and the next
+  // one added would take its number back — and the server derives a cut piece's NAME from the
+  // callout it is pinned to, by number (calloutSync.apply), so an unrelated new callout silently
+  // renamed a piece that still carried the old one. A number that is still referenced is not free.
+  //
+  // Sketch only: pieces, operations and issues point at SKETCH callouts, and folding their numbers
+  // into the moodboard's sequence would push moodboard notes up for no reason — the two documents
+  // number independently on purpose.
+  const referencedNumbers = () => {
+    if (isMoodboard) return [];
+    const v = getValues();
+    return [
+      ...(v.pieces ?? []).map((p) => p.calloutNumber ?? 0),
+      ...(v.operations ?? []).map((o) => o.calloutNumber ?? 0),
+      ...(v.issues ?? []).map((i) => i.calloutNumber ?? 0),
+    ].filter((n) => Number.isFinite(n) && n > 0);
+  };
   const nextNumber = () =>
     Math.max(
       0,
       ...calloutValues
         .filter(isMine)
         .map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0)),
+      ...referencedNumbers(),
     ) + 1;
 
   // Commit a media pick: dedupe against BOTH lists (ids are unique across technical ∪ moodboard),
@@ -416,9 +433,7 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
                 <SelectField
                   name={`callouts.${index}.part`}
                   label='part (код детали)'
-                  placeholder={
-                    pieceOptions.length ? 'pick a piece…' : 'no pieces on this card yet'
-                  }
+                  placeholder={pieceOptions.length ? 'pick a piece…' : 'no pieces on this card yet'}
                   items={partOptionsFor(callouts[index]?.part)}
                 />
                 <SelectField
