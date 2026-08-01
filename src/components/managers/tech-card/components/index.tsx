@@ -1167,7 +1167,11 @@ export function TechCardForm({
                     who is on this card (Q5) — admin accounts, saved immediately, not part of the
                     card’s draft.
                   </Text>
-                  <RolesField techCardId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
+                  <RolesField
+                    techCardId={numId}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                    initialAssignments={techCard?.roleAssignments}
+                  />
                 </Section>
               )}
 

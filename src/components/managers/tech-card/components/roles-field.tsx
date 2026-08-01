@@ -132,8 +132,17 @@ function RoleRow({
 // managed via their own RPCs, so they never ride the tech-card save.
 // Phase 19 exception (19.5): this panel saves INSTANTLY on change and deliberately does NOT stage
 // into the card's one save — assigning a person is an act, not a draft edit.
-export function RolesField({ techCardId, canEdit }: { techCardId: number; canEdit: boolean }) {
-  const { data, isLoading } = useRoleAssignments(techCardId);
+export function RolesField({
+  techCardId,
+  canEdit,
+  initialAssignments,
+}: {
+  techCardId: number;
+  canEdit: boolean;
+  /** The card read's own `roleAssignments` — seeds the cache so mount costs no RPC (see useRoles). */
+  initialAssignments?: common_TechCardRoleAssignment[];
+}) {
+  const { data, isLoading } = useRoleAssignments(techCardId, initialAssignments);
   const assignments = data?.assignments ?? [];
 
   if (isLoading)
