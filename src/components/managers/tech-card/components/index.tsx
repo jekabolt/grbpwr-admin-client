@@ -1179,7 +1179,17 @@ export function TechCardForm({
                 <StyleFactsField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
               </Section>
 
-              <Section title='construction description'>
+              <Section title='concept & construction description'>
+                {/* concept → details → notes is the order the tech pack's description sheet prints
+                  them in, so the editor reads the same way. Concept is the one prose field an IDEA
+                  card is really about, and until now nothing in this admin could write it. */}
+                <TextareaField
+                  name='concept'
+                  label='concept (design intent)'
+                  rows={3}
+                  maxLength={2000}
+                  placeholder='что это за вещь — идея, референс, назначение'
+                />
                 <DetailsEditor techCard={techCard} />
                 <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
               </Section>

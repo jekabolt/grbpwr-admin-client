@@ -510,6 +510,9 @@ const techCardObject = z.object({
   stage: z.string().optional().default(DEFAULT_STAGE),
   approvalState: z.string().optional().default(DEFAULT_APPROVAL_STATE),
   measurementUnit: z.string().optional().default(DEFAULT_MEASUREMENT_UNIT),
+  // The design intent in prose — what this style IS, before any construction detail. Printed at
+  // the head of the tech pack's description sheet, above the details and the notes.
+  concept: z.string().optional().default(''),
   notes: z.string().optional().default(''),
   // children
   sizeIds: z.array(z.number()).default([]),
@@ -621,6 +624,7 @@ export const techCardDefaultData: TechCardFormData = {
   stage: DEFAULT_STAGE,
   approvalState: DEFAULT_APPROVAL_STATE,
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
+  concept: '',
   notes: '',
   sizeIds: [],
   sizeQuantities: [],
@@ -824,6 +828,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     stage: stageOrDefault(insert?.stage),
     approvalState: approvalStateOrDefault(insert?.approvalState),
     measurementUnit: measurementUnitOrDefault(insert?.measurementUnit),
+    concept: insert?.concept || '',
     notes: insert?.notes || '',
     sizeIds: insert?.sizeIds ?? [],
     sizeQuantities: (insert?.sizeQuantities ?? []).map((q) => ({
@@ -1195,6 +1200,7 @@ export function mapFormToTechCardInsert(
       'TECH_CARD_APPROVAL_STATE_UNKNOWN') as common_TechCardApprovalState,
     measurementUnit: (data.measurementUnit ||
       'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN') as common_TechCardMeasurementUnit,
+    concept: data.concept?.trim() || '',
     notes: data.notes?.trim() || '',
     // children edited here — override the echoed `original` values
     sizeIds: data.sizeIds ?? [],
