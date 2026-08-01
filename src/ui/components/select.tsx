@@ -17,7 +17,9 @@ export default function SelectComponent({
   ...props
 }: {
   name: string;
-  items: { value: string | number; label: string }[];
+  // `disabled` marks an option that is real but not choosable YET — the label is expected to say
+  // why. SelectItem already carries the greyed-out styling for it (data-[disabled]).
+  items: { value: string | number; label: string; disabled?: boolean }[];
   className?: string;
   customWidth?: number;
   fullWidth?: boolean;
@@ -49,7 +51,7 @@ export default function SelectComponent({
       </SelectTrigger>
       <SelectContent fullWidth={fullWidth} customWidth={customWidth}>
         {items.map((item) => (
-          <SelectItem key={item.value} value={String(item.value)}>
+          <SelectItem key={item.value} value={String(item.value)} disabled={item.disabled}>
             {item.label}
           </SelectItem>
         ))}
