@@ -2,6 +2,7 @@ import {
   common_GenderEnum,
   common_TechCard,
   common_TechCardApprovalState,
+  common_TechCardAuxSubtype,
   common_TechCardBomSection,
   common_TechCardConstruction,
   common_TechCardConstructionZone,
@@ -55,6 +56,7 @@ const DEFAULT_STAGE: common_TechCardStage = 'TECH_CARD_STAGE_PROTO';
 const DEFAULT_APPROVAL_STATE: common_TechCardApprovalState = 'TECH_CARD_APPROVAL_STATE_DRAFT';
 const DEFAULT_MEASUREMENT_UNIT: common_TechCardMeasurementUnit = 'TECH_CARD_MEASUREMENT_UNIT_MM';
 const UNSET_GENDER: common_GenderEnum = 'GENDER_ENUM_UNKNOWN';
+const UNSET_AUX_SUBTYPE: common_TechCardAuxSubtype = 'TECH_CARD_AUX_SUBTYPE_UNKNOWN';
 
 // Reads a numeric id off the WIRE. grpc-gateway serialises proto int64 as a JSON STRING while the
 // generated TS type declares it `number`, so the compiler cannot catch the mismatch and a bare
@@ -518,6 +520,10 @@ const techCardObject = z.object({
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
   purpose: z.string().optional().default('TECH_CARD_PURPOSE_SELLABLE'),
+  // WS7: which KIND of auxiliary item an auxiliary card produces (brand label, care label, dust
+  // bag, box…). Only meaningful with purpose=auxiliary — the backend validates the pairing, so the
+  // save mapper forces it back to UNSET whenever the card is sellable.
+  auxSubtype: z.string().optional().default(UNSET_AUX_SUBTYPE),
   outputMaterialId: z.number().optional().default(0),
   // Cut-piece details + per-colourway fabric map (NF-05). Positional refs (nf05-01).
   // Names are unique per card (case-insensitive, trimmed): a piece name is how a human addresses the
@@ -621,6 +627,7 @@ export const techCardDefaultData: TechCardFormData = {
   patterns: [],
   productIds: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
+  auxSubtype: UNSET_AUX_SUBTYPE,
   outputMaterialId: 0,
   pieces: [],
   moodboardMedia: [],
@@ -837,6 +844,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     // its own product link.
     productIds: [],
     purpose: toPurposeEnum(insert?.purpose),
+    auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
     outputMaterialId: insert?.outputMaterialId || 0,
     ...splitSketchMedia(insert),
     callouts: (insert?.callouts ?? []).map((c) => ({
@@ -1213,6 +1221,11 @@ export function mapFormToTechCardInsert(
       toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY'
         ? data.outputMaterialId || 0
         : 0,
+    // Same exclusivity, one field over: the dto rejects a subtype on a sellable card, so a purpose
+    // flip must clear it here rather than send a pairing the server refuses.
+    auxSubtype: (toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY'
+      ? data.auxSubtype || UNSET_AUX_SUBTYPE
+      : UNSET_AUX_SUBTYPE) as common_TechCardAuxSubtype,
     moodboardMedia: (data.moodboardMedia ?? []).map(mapMediaItemOut),
     technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
     callouts: (data.callouts ?? []).map((c) => ({

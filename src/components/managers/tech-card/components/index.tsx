@@ -17,6 +17,7 @@ import { MaterialModal } from 'components/managers/materials/components/material
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import {
   techCardApprovalStateOptions,
+  techCardAuxSubtypeFormOptions,
   techCardGenderOptions,
   techCardMeasurementUnitOptions,
   techCardPurposeFormOptions,
@@ -418,6 +419,8 @@ export function TechCardForm({
   );
   const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
     0) as number;
+  const auxSubtype = (useWatch({ control: form.control, name: 'auxSubtype' }) ??
+    'TECH_CARD_AUX_SUBTYPE_UNKNOWN') as string;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
 
@@ -1123,6 +1126,27 @@ export function TechCardForm({
                     <Text variant='error' size='small'>
                       ! saving as sellable clears the output material
                     </Text>
+                  )}
+                  {/* WS7: what KIND of auxiliary item this card makes. Auxiliary-only — the dto
+                    rejects a subtype on a sellable card, and the save mapper clears it on a purpose
+                    flip, so hiding the control is not hiding a value that survives. Left
+                    unclassified, every consumer that groups by subtype (the assembly bill's
+                    component type, the labels/packaging pickers' type filter) can only file this
+                    card under "unknown". */}
+                  {isAux && (
+                    <>
+                      <SelectField
+                        name='auxSubtype'
+                        label='auxiliary type'
+                        items={techCardAuxSubtypeFormOptions}
+                      />
+                      {auxSubtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN' && (
+                        <Text variant='label' size='micro'>
+                          unclassified — the assembly bill and the labels/packaging pickers file this
+                          card under «unknown» until a type is set
+                        </Text>
+                      )}
+                    </>
                   )}
                   <SelectField
                     name='targetGender'
