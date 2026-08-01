@@ -221,7 +221,9 @@ export function MediaViewer({
                     draggable={false}
                     onDoubleClick={gestures.onImageDoubleClick}
                     className={cn(
-                      'max-h-[calc(100vh-11rem)] max-w-full select-none object-contain',
+                      // White ground behind the picture: transparent PNGs (background-removed
+                      // product shots, sketches) are unreadable on the near-black overlay.
+                      'max-h-[calc(100vh-11rem)] max-w-full select-none bg-bgColor object-contain',
                       gestures.isZoomed && 'cursor-grab active:cursor-grabbing',
                       !gestures.isZoomed && !annotate.drawMode && 'cursor-zoom-in',
                     )}
@@ -330,7 +332,7 @@ export function MediaViewer({
                       <img
                         src={item.thumbnail || item.src}
                         alt=''
-                        className='size-full object-cover'
+                        className='size-full bg-bgColor object-cover'
                       />
                     )}
                     {itemIsVideo && (
