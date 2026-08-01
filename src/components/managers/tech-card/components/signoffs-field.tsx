@@ -1,3 +1,4 @@
+import { common_TechCardInsert } from 'api/proto-http/admin';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { techCardSignoffSectionOptions, techCardSignoffStateOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
@@ -56,6 +57,27 @@ const SECTION_WATCH_FIELDS: Record<string, (keyof TechCardFormData)[]> = {
   TECH_CARD_SIGNOFF_SECTION_COSTING: ['costing'],
 };
 
+// Which sign-off sections a row stored WITHOUT a stable line_key can invalidate. Server-side each
+// section's fingerprint hashes those keys (dto/techcard_section_digest.go): materialsProjection
+// hashes every BOM line's line_key, colourProjection hashes each cut piece's line_key plus the BOM
+// keys its fabric map points at, constructionProjection hashes the piece keys and the keys each
+// operation references. A keyless row gets a fresh ULID minted on READ (schema.ts mapBomItemToForm /
+// the pieces mapper) and the key CANNOT be suppressed — every downstream reference, from an
+// operation's piece list to a colourway recipe, is keyed by it. So the first save of such a card
+// writes identity the stored approval digest never covered, and the section flips to «changed after
+// approval» with no operator edit behind it. Naming the cause is all this client can honestly do.
+function legacyKeyedSections(insert?: common_TechCardInsert): Set<string> {
+  const bomKeyless = (insert?.bomItems ?? []).some((b) => !b.lineKey?.trim());
+  const pieceKeyless = (insert?.pieces ?? []).some((p) => !p.lineKey?.trim());
+  const out = new Set<string>();
+  if (bomKeyless) out.add('TECH_CARD_SIGNOFF_SECTION_MATERIALS');
+  if (bomKeyless || pieceKeyless) {
+    out.add('TECH_CARD_SIGNOFF_SECTION_COLOUR');
+    out.add('TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION');
+  }
+  return out;
+}
+
 // One canonical section (Sheet «Титул» coordination — one row per section, unique per card, per
 // the schema comment). Bound to its row when one exists; otherwise a dashed "not started" card.
 // Approve/reject/reset are explicit actions rather than a bare state dropdown so the "changed
@@ -73,6 +95,7 @@ function SignoffSectionCard({
   index,
   snapshot,
   currentDigest,
+  legacyKeys,
   onStart,
   onRemove,
   onChangedReport,
@@ -82,6 +105,8 @@ function SignoffSectionCard({
   index: number; // -1 = no row yet for this section
   snapshot: string;
   currentDigest: string;
+  // This section's content includes rows the server stored with no line_key — see legacyKeyedSections.
+  legacyKeys: boolean;
   onStart: () => void;
   onRemove: () => void;
   onChangedReport: (section: string, changed: boolean) => void;
@@ -217,6 +242,15 @@ function SignoffSectionCard({
         </Button>
       </div>
 
+      {/* Advisory, never blocking: the mint is unavoidable and the save is legitimate — what would
+          otherwise be inexplicable is the section turning red for it. */}
+      {legacyKeys && state === APPROVED && (
+        <Text size='micro' variant='label'>
+          ! legacy rows here carry no stable line key — the first save mints one, and that counts as
+          a content change against this approval
+        </Text>
+      )}
+
       <div className='grid grid-cols-1 gap-1.5 sm:grid-cols-3'>
         <InputField name={`signoffs.${index}.signedBy`} label='signed by' />
         <InputField name={`signoffs.${index}.signedAt`} type='date' label='signed at' />
@@ -247,6 +281,12 @@ export function SignoffsField() {
     for (const d of techCard?.sectionDigests ?? []) m.set(d.section ?? '', d.digest ?? '');
     return m;
   }, [techCard?.sectionDigests]);
+  // Read from the card AS THE SERVER SENT IT — the form copy is useless here, the mint has already
+  // happened by the time mapTechCardToForm has run.
+  const legacySections = useMemo(
+    () => legacyKeyedSections(techCard?.techCard),
+    [techCard?.techCard],
+  );
 
   // One useWatch per top-level section this tab can flag as "changed since sign-off" (see
   // SECTION_WATCH_FIELDS) — called individually, not from a dynamic list, so the hook order never
@@ -369,6 +409,7 @@ export function SignoffsField() {
             index={indexBySection.get(opt.value) ?? -1}
             snapshot={sectionSnapshot[opt.value] ?? ''}
             currentDigest={currentDigests.get(opt.value) ?? ''}
+            legacyKeys={legacySections.has(opt.value)}
             onStart={() => append({ ...emptySignoff, section: opt.value })}
             onRemove={() => {
               const idx = indexBySection.get(opt.value);
