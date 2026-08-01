@@ -29,6 +29,7 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button, buttonVariants } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -48,7 +49,7 @@ import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
-import { wireInt } from './schema';
+import { TechCardFormData, wireInt } from './schema';
 import {
   createColorwayErrorMessage,
   recipeSaveErrorMessage,
@@ -1205,6 +1206,13 @@ function SlotUsageRow({
           <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
         )}
         {missingArticle && <Pill tone='warn'>нет артикула — блокер производства</Pill>}
+        {/* The slot list is live form state now, so a slot can be deleted on the BOM tab while a
+            recipe row still points at it — the BOM tab's delete guard only sees recipes the SERVER
+            has, and this row may never have been saved. Say so here rather than let the save fail
+            on a line_key the server cannot resolve. */}
+        {!!draft.bomLineKey && !slot && (
+          <Pill tone='warn'>слот удалён на вкладке BOM — выберите другой</Pill>
+        )}
 
         {isMeasured && !legacyCountedMeasured ? (
           <UsagePerSizeLocal
@@ -2356,30 +2364,53 @@ export function ColorwayRecipes({
     for (const mat of materials) if (wireInt(mat.id)) m.set(wireInt(mat.id), mat);
     return m;
   }, [materials]);
+  // The card's BOM slots, LIVE from form state — for the same reason the pieces above are: a slot
+  // added on the BOM tab a moment ago has to be assignable here immediately, instead of only after
+  // a save and a refetch. It is safe for a usage to point at a slot the server has never seen,
+  // because COMMIT_ORDER puts the card body (which creates the line, keyed by that same lineKey)
+  // ahead of every recipe write — that ordering exists for exactly this case.
+  //
+  // The server `id` still comes off the read, merged by lineKey: it is needed only to resolve a
+  // LEGACY usage that carries bom_item_id instead of bom_line_key (see fromRead). A slot not yet
+  // saved simply has none, and nothing legacy can point at it.
+  //
+  // The values here are already input-shaped strings (mapBomItemToForm ran decimalToInput on the
+  // way in), so unlike the read path they are used as-is.
+  const formBom = (useWatch<TechCardFormData>({ name: 'bomItems' }) ??
+    []) as TechCardFormData['bomItems'];
+  const serverBomIdByKey = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of techCard?.techCard?.bomItems ?? []) {
+      const key = b.lineKey?.trim();
+      if (key) m.set(key, wireInt(b.id));
+    }
+    return m;
+  }, [techCard?.techCard?.bomItems]);
   // Enrich BOM lines with the fields the recipe editor now needs: price/wastage/unit for the run-cost
   // preview (per-size grading), the composition cell for the derived-composition summary,
   // and the linked catalog material so each usage renders as the square article card.
   const bomItems = useMemo<BomLine[]>(
     () =>
-      (techCard?.techCard?.bomItems ?? [])
-        .filter((b) => !!b.lineKey)
+      (formBom ?? [])
+        .filter((b) => !!b.lineKey?.trim())
         .map((b) => {
           const materialId = wireInt(b.materialId);
+          const lineKey = b.lineKey as string;
           return {
-            id: wireInt(b.id),
-            lineKey: b.lineKey,
+            id: serverBomIdByKey.get(lineKey) ?? 0,
+            lineKey,
             name: b.name,
             section: b.section,
             unit: b.unit,
-            unitPrice: decimalToInput(b.unitPrice),
+            unitPrice: b.unitPrice,
             currency: b.currency,
-            wastagePercent: decimalToInput(b.wastagePercent),
+            wastagePercent: b.wastagePercent,
             composition: b.composition,
             materialId,
             material: materialId > 0 ? materialById.get(materialId) : undefined,
           };
         }),
-    [techCard?.techCard?.bomItems, materialById],
+    [formBom, serverBomIdByKey, materialById],
   );
   const sizeIds = (techCard?.techCard?.sizeIds ?? []) as number[];
   const sizeQuantities = (techCard?.techCard?.sizeQuantities ?? []) as {
