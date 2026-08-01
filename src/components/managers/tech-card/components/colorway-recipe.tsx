@@ -144,8 +144,10 @@ type UsageDraft = {
   sizeRunTotal: string;
 };
 
-// Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields and PERSISTED through
-// UpdateColorway's development submessage under LAB_DIP_UPDATE_MASK — see LabDipTimeline.
+// Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields; only the three
+// WRITABLE leaves below travel back through UpdateColorway under LAB_DIP_UPDATE_MASK — see LabDipTimeline.
+// submittedAt / decidedAt / decidedBy are READ-ONLY MIRRORS of the server's own audit stamps: they are
+// carried here so the panel can show and reason about them, never mutated and never sent.
 type LabDipDraft = {
   labDipStatus: string;
   labDipRound: string;
@@ -154,6 +156,10 @@ type LabDipDraft = {
   labDipDecidedBy: string;
   labDipRejectReason: string;
 };
+
+// The subset this client may actually change. `set` takes only these, so the read-only mirrors above
+// cannot be written back into the draft by accident — the compiler is the guard, not a comment.
+type LabDipWritable = Pick<LabDipDraft, 'labDipStatus' | 'labDipRound' | 'labDipRejectReason'>;
 
 // What the grid tile needs to know about a recipe that is only fully known inside its editor: the
 // LIVE usage-row count (including rows added but not yet saved) and whether anything here is waiting
@@ -205,38 +211,32 @@ function changedLines(base: UsageDraft[], next: UsageDraft[]): number {
   return n;
 }
 
-// UpdateColorway is a field-masked write. This mask lists ONLY the six lab-dip leaves INSIDE `development`,
-// so a save touches exactly those columns and nothing else on the colourway. Everything else in the
-// development submessage (devCode / name / pantone / pantoneSystem / devHex / swatchMediaId / usages /
+// UpdateColorway is a field-masked write. This mask lists ONLY the three WRITABLE lab-dip leaves INSIDE
+// `development`, so a save touches exactly those columns and nothing else on the colourway. Everything else
+// in the development submessage (devCode / name / pantone / pantoneSystem / devHex / swatchMediaId / usages /
 // displayOrder) is left intact by the backend even though it is sent undefined here — that subpath mask is
 // precisely what prevents clobbering. It also means no read-merge is needed (and none is possible: no read
 // path returns those dev identity fields). `usages` stays owned by UpdateColorwayRecipe — never sent here.
 // The paths are camelCase on purpose: that is the form the server matches, so do not "correct" them to the
 // proto's snake_case — a mask it cannot match silently degrades into writing nothing.
+//
+// labDipSubmittedAt / labDipDecidedAt / labDipDecidedBy are DELIBERATELY ABSENT: the backend stamps those
+// itself and discards whatever the client sends, so naming them here only promised the operator an edit that
+// the very next refetch rubbed out. This list is a CONSTANT of three, never a diff of what changed — so the
+// mask a save carries is always non-empty and always valid. The complementary half of that guarantee lives
+// in LabDipTimeline: a draft whose only difference is in the read-only mirrors never stages a write at all.
 const LAB_DIP_UPDATE_MASK = [
   'development.labDipStatus',
   'development.labDipRound',
-  'development.labDipSubmittedAt',
-  'development.labDipDecidedAt',
-  'development.labDipDecidedBy',
   'development.labDipRejectReason',
 ].join(',');
 
-// protobuf Timestamp (RFC 3339) <-> <input type="date"> (YYYY-MM-DD). The 0001-01-01 zero value is "unset".
-const ZERO_TS = '0001-01-01T00:00:00Z';
+// protobuf Timestamp (RFC 3339) -> YYYY-MM-DD, for display only. The 0001-01-01 zero value is "unset".
+// There is no inverse any more: the lab-dip dates are read from the server and never written back to it.
 function tsToDateInput(ts?: string): string {
   if (!ts || ts.startsWith('0001-01-01')) return '';
   const m = /^(\d{4}-\d{2}-\d{2})/.exec(ts);
   return m ? m[1] : '';
-}
-function dateInputToTs(v: string): string {
-  if (!v) return ZERO_TS;
-  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? `${v}T00:00:00.000Z` : v;
-}
-function todayInput(): string {
-  const d = new Date();
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 const MONTHS = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
@@ -332,9 +332,12 @@ function buildLabDipRequest(
     devHex: undefined,
     swatchMediaId: undefined,
     labDipRound: parseInt(draft.labDipRound, 10) || 0,
-    labDipSubmittedAt: dateInputToTs(draft.labDipSubmittedAt),
-    labDipDecidedAt: dateInputToTs(draft.labDipDecidedAt),
-    labDipDecidedBy: draft.labDipDecidedBy.trim(),
+    // The audit trail is the SERVER's: it stamps submitted_at / decided_at / decided_by from the write
+    // itself and ignores anything sent for them. Left undefined and out of the mask, same as every other
+    // field this call does not own — sending them would be a lie the operator can see revert.
+    labDipSubmittedAt: undefined,
+    labDipDecidedAt: undefined,
+    labDipDecidedBy: undefined,
     // Only meaningful when rejected; cleared otherwise so a stale reason never lingers.
     labDipRejectReason: draft.labDipStatus === REJECTED ? draft.labDipRejectReason.trim() : '',
     usages: undefined, // recipe is owned by UpdateColorwayRecipe — never write it through here.
@@ -355,6 +358,20 @@ function buildLabDipRequest(
     countryCode: undefined,
     translations: undefined,
   };
+}
+
+// EXACTLY what buildLabDipRequest would put on the wire, as one comparable string — the three writable
+// leaves in the normalised form the request sends them in. Two drafts with the same signature produce a
+// byte-identical write, so comparing signatures instead of the whole draft answers the only question the
+// header cares about: would saving this change anything? It ignores the read-only audit mirrors (the
+// server owns those), collapses '' against '0' rounds and untrimmed reject reasons, and drops a reason
+// that a non-rejected status would blank out anyway.
+function labDipWire(d: LabDipDraft): string {
+  return JSON.stringify([
+    d.labDipStatus,
+    String(parseInt(d.labDipRound, 10) || 0),
+    d.labDipStatus === REJECTED ? d.labDipRejectReason.trim() : '',
+  ]);
 }
 
 const labDipStatusLabel = new Map<common_TechCardLabDipStatus, string>(
@@ -393,6 +410,26 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
     <Text size='micro' variant='label' component='span' className='block leading-none uppercase'>
       {children}
     </Text>
+  );
+}
+
+// One server-owned fact, stated rather than offered for editing: label left, value right, the same
+// label/value row the auto-journal uses for the rest of the card's audit trail.
+function AuditRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Row
+      className='py-0.5'
+      label={
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          {label}
+        </Text>
+      }
+      value={
+        <Text size='micro' variant={value ? 'default' : 'label'} component='span'>
+          {value || '—'}
+        </Text>
+      }
+    />
   );
 }
 
@@ -1407,13 +1444,20 @@ function OrphanRecipeCard({
 // exactly that rather than inventing an R1 out of a PENDING baseline.
 //
 // PERSISTENCE: UpdateColorway's `development` submessage under LAB_DIP_UPDATE_MASK, a field mask naming
-// ONLY the six lab-dip leaves. That subpath mask keeps the rest of `development` (devCode / name / pantone
-// / devHex / swatch / usages) intact, so no read-merge is needed (and none is possible — no read path
-// returns those dev identity fields). That write now REACHES THE DATABASE: the server used to ignore
+// ONLY the three writable lab-dip leaves. That subpath mask keeps the rest of `development` (devCode / name
+// / pantone / devHex / swatch / usages) intact, so no read-merge is needed (and none is possible — no read
+// path returns those dev identity fields). That write now REACHES THE DATABASE: the server used to ignore
 // UpdateColorway's `development` entirely, so every save this panel made was a no-op that still reported
 // success. If you are wondering why the panel suddenly works, that is why — nothing changed on this side.
 // The server keys each write by round_number, so saving round 3 leaves rounds 1-2 standing and the journal
 // grows one entry per round.
+//
+// WHO OWNS WHAT: this panel writes status, round and reject reason. submitted_at / decided_at / decided_by
+// are stamped BY THE SERVER off the write itself and it discards anything the client sends for them, so
+// they are shown here as facts (AuditRow) and never as fields. They used to be date inputs — the operator
+// typed one, got a success toast, and watched the refetch put the old value back. For the same reason the
+// three verdict buttons move only the writable leaves: a locally invented date would draw a round the save
+// does not actually send.
 //
 // Phase 19: the RPC is still this panel's, but the BUTTON is not. There is one save on the card and this
 // panel STAGES into it (key `labDip:<colorwayId>`, COMMIT_ORDER.labDip). The action buttons only move the
@@ -1461,20 +1505,33 @@ function LabDipTimeline({
     if (!staging || !colorwayId) return;
     const snap = staging.takeSnapshot(stagingKey) as LabDipDraft | undefined;
     if (!snap) return;
-    setDraft(snap);
+    // Only the three writable leaves come back. The audit mirrors stay whatever the server says NOW —
+    // they were never the operator's to restore, and a snapshot taken before a colleague's save would
+    // otherwise resurrect a superseded stamp on screen.
+    setDraft((d) => ({
+      ...d,
+      labDipStatus: snap.labDipStatus,
+      labDipRound: snap.labDipRound,
+      labDipRejectReason: snap.labDipRejectReason,
+    }));
     setDirty(true);
   }, [staging, colorwayId, stagingKey]);
 
-  // Dirty says a control was touched; STAGED says the six values would actually write something else.
-  // Poking a status and putting it back must not leave the header counting a change that writes nothing.
-  const changed = useMemo(() => JSON.stringify(draft) !== JSON.stringify(stored), [draft, stored]);
+  // Dirty says a control was touched; STAGED says the write would actually change something. Compared on
+  // the WIRE form, so it counts only what the request carries: poking a status and putting it back writes
+  // nothing, and neither does a draft that differs solely in the server-owned audit mirrors — that one
+  // would otherwise queue an RPC the backend discards, report success, and revert on the refetch, which is
+  // exactly the round trip this panel is meant to stop promising.
+  const changed = useMemo(() => labDipWire(draft) !== labDipWire(stored), [draft, stored]);
   const staged = dirty && changed;
 
   useEffect(() => {
     onStagedChange(staged);
   }, [staged, onStagedChange]);
 
-  const set = (patch: Partial<LabDipDraft>) => {
+  // Narrowed to the writable leaves on purpose: the audit mirrors are the server's copy, and making them
+  // unsettable here is what keeps that true no matter what a later edit to this component tries.
+  const set = (patch: Partial<LabDipWritable>) => {
     setDirty(true);
     setDraft((d) => ({ ...d, ...patch }));
   };
@@ -1542,33 +1599,35 @@ function LabDipTimeline({
   const rounds = useMemo<TimelineRound[]>(() => {
     if (!staged || !hasLabDipRound(draft)) return recorded;
     const n = round || 1;
+    const at = recorded.findIndex((r) => r.round === n);
+    const base = at < 0 ? undefined : recorded[at];
     const pending: TimelineRound = {
       key: `staged-${n}`,
       round: n,
       status: draft.labDipStatus,
-      submittedAt: draft.labDipSubmittedAt,
-      decidedAt: draft.labDipDecidedAt,
-      decidedBy: draft.labDipDecidedBy,
+      // Dates and decider come off the journal entry this draft is editing, never off the draft: the
+      // server stamps them and the staged write does not carry them, so a locally minted date would be a
+      // preview of something that is not being saved. A round the journal has not seen yet simply has
+      // none until the save lands. The draft has no comment field either, so that stays the recorded one
+      // rather than blanking on screen.
+      submittedAt: base?.submittedAt ?? '',
+      decidedAt: base?.decidedAt ?? '',
+      decidedBy: base?.decidedBy ?? '',
       rejectReason: draft.labDipRejectReason,
-      comment: '',
+      comment: base?.comment ?? '',
       staged: true,
     };
-    const at = recorded.findIndex((r) => r.round === n);
     if (at < 0) return [...recorded, pending];
-    // The draft carries no comment field, so keep the recorded one rather than blanking it on screen.
     const next = [...recorded];
-    next[at] = { ...pending, comment: recorded[at].comment };
+    next[at] = pending;
     return next;
   }, [recorded, staged, draft, round]);
 
-  const approve = () =>
-    set({ labDipStatus: APPROVED, labDipDecidedAt: todayInput(), labDipRejectReason: '' });
+  // The three verdict actions move only the writable leaves. `decided at` and `decided by` follow from
+  // the save itself, stamped server-side — this panel states the verdict and lets the backend date it.
+  const approve = () => set({ labDipStatus: APPROVED, labDipRejectReason: '' });
   const confirmReject = () => {
-    set({
-      labDipStatus: REJECTED,
-      labDipDecidedAt: todayInput(),
-      labDipRejectReason: reasonDraft.trim(),
-    });
+    set({ labDipStatus: REJECTED, labDipRejectReason: reasonDraft.trim() });
     setRejectOpen(false);
   };
   // Highest round anyone knows about: the journal's last entry, or the draft when it runs ahead of it.
@@ -1577,14 +1636,12 @@ function LabDipTimeline({
     (m, r) => Math.max(m, r.round),
     Math.max(round, hasLabDipRound(draft) ? 1 : 0),
   );
-  // Opens the round after it, with no verdict yet.
+  // Opens the round after it, with no verdict yet. Its submission date is the server's to stamp when the
+  // card's Save actually sends this round, so the staged row carries the number and the status only.
   const newRound = () =>
     set({
       labDipRound: String(highestRound + 1),
       labDipStatus: SUBMITTED,
-      labDipSubmittedAt: todayInput(),
-      labDipDecidedAt: '',
-      labDipDecidedBy: '',
       labDipRejectReason: '',
     });
 
@@ -1696,9 +1753,9 @@ function LabDipTimeline({
             </div>
           </GenericPopover>
 
-          {/* The scalars the timeline derives but cannot express — a corrected date, who decided, or
-              a status the three actions don't produce. Kept reachable so nothing the old form could
-              set became unreachable. */}
+          {/* The scalars the timeline derives but cannot express: the round number and a status the
+              three actions don't produce. Underneath them, the server's own audit stamps — stated, not
+              offered, because the backend sets those itself and ignores anything sent for them. */}
           <GenericPopover
             title='round details'
             className='w-64'
@@ -1730,32 +1787,14 @@ function LabDipTimeline({
                   onChange={(e) => set({ labDipRound: e.target.value })}
                 />
               </label>
-              <label className='flex flex-col gap-1'>
-                <FieldLabel>submitted</FieldLabel>
-                <input
-                  className={cell}
-                  type='date'
-                  value={draft.labDipSubmittedAt}
-                  onChange={(e) => set({ labDipSubmittedAt: e.target.value })}
-                />
-              </label>
-              <label className='flex flex-col gap-1'>
-                <FieldLabel>decided</FieldLabel>
-                <input
-                  className={cell}
-                  type='date'
-                  value={draft.labDipDecidedAt}
-                  onChange={(e) => set({ labDipDecidedAt: e.target.value })}
-                />
-              </label>
-              <label className='flex flex-col gap-1'>
-                <FieldLabel>decided by</FieldLabel>
-                <input
-                  className={cell}
-                  value={draft.labDipDecidedBy}
-                  onChange={(e) => set({ labDipDecidedBy: e.target.value })}
-                />
-              </label>
+              <div className='flex flex-col gap-0.5 pt-1'>
+                <FieldLabel>stamped by the server</FieldLabel>
+                {/* Straight off `stored`, i.e. the colourway as the backend last returned it — never off
+                    the draft, which cannot change these and must not appear to. */}
+                <AuditRow label='submitted' value={stored.labDipSubmittedAt} />
+                <AuditRow label='decided' value={stored.labDipDecidedAt} />
+                <AuditRow label='decided by' value={stored.labDipDecidedBy} />
+              </div>
             </div>
           </GenericPopover>
 
