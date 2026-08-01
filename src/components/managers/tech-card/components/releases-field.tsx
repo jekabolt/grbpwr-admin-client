@@ -179,8 +179,7 @@ function ReleaseSnapshot({
   return (
     <div className='border border-borderColor p-2'>
       <GroupLabel className='mt-0'>
-        Rev.{head?.releaseNumber ?? '—'}
-        {head?.version ? ` · ${head.version}` : ''} · frozen {formatTechCardDate(head?.createdAt)} ·{' '}
+        Rev.{head?.releaseNumber ?? '—'} · frozen {formatTechCardDate(head?.createdAt)} ·{' '}
         {head?.releasedBy || '—'}
       </GroupLabel>
 

@@ -223,9 +223,12 @@ export function ProductionRunModal({
                   onChange={(e) => set({ releaseId: Number(e.target.value) || 0 })}
                 >
                   <option value={0}>— latest tech card —</option>
+                  {/* A release's identity is its releaseNumber — `version` is a reserved field the
+                      backend no longer emits, so labelling by it rendered every entry as a bare "v"
+                      and two releases at the same unit cost became indistinguishable. */}
                   {releases.map((r) => (
                     <option key={r.id} value={r.id}>
-                      v{r.version}
+                      Rev.{r.releaseNumber ?? '—'}
                       {r.unitCost?.value
                         ? ` · ${decimalToInput(r.unitCost)} ${r.currency || ''}`
                         : ''}

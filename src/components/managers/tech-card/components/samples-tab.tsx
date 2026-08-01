@@ -1158,7 +1158,6 @@ function SampleEditor({
                     {releases.map((r) => (
                       <option key={r.id} value={r.id}>
                         Rev.{r.releaseNumber ?? '—'}
-                        {r.version ? ` · ${r.version}` : ''}
                       </option>
                     ))}
                   </select>
