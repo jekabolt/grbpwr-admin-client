@@ -143,7 +143,6 @@ const ERROR_TAB: Record<string, TabId> = {
   sizeIds: 'patterns',
   sizeQuantities: 'patterns',
   bomItems: 'bom',
-  colorways: 'colorways',
   pieces: 'colorways',
   details: 'header',
   construction: 'construction',
@@ -410,8 +409,6 @@ export function TechCardForm({
   const canRelease = releaseBlockers.length === 0;
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
     '') as string;
-  const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
-
   // NF-07 auxiliary items: an aux card produces a packaging material, links no products, and needs
   // an output material set before its first run.
   const purpose = toPurposeEnum(
@@ -1114,14 +1111,10 @@ export function TechCardForm({
 
                 <Section title='classification' className='w-full lg:w-1/2'>
                   <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
-                  {/* Purpose is mutually exclusive with the other side's links and the save is a
-                    full replace — flag the destruction BEFORE it happens, it's not reversible. */}
-                  {isAux && productCount > 0 && (
-                    <Text variant='error' size='small'>
-                      ! saving as auxiliary permanently unlinks {productCount} linked product
-                      {productCount > 1 ? 's' : ''}
-                    </Text>
-                  )}
+                  {/* Purpose is mutually exclusive with the output material and the save is a full
+                    replace — flag the destruction BEFORE it happens, it's not reversible. There is
+                    no matching warning for the other direction: a colourway links itself to a style
+                    (R1), so switching to auxiliary unlinks nothing this save could destroy. */}
                   {!isAux && outputMaterialId > 0 && (
                     <Text variant='error' size='small'>
                       ! saving as sellable clears the output material

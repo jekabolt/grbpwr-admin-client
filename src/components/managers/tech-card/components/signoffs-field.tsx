@@ -51,7 +51,11 @@ const SECTION_WATCH_FIELDS: Record<string, (keyof TechCardFormData)[]> = {
   TECH_CARD_SIGNOFF_SECTION_DESIGN: ['moodboardMedia', 'technicalMedia', 'callouts', 'details'],
   TECH_CARD_SIGNOFF_SECTION_CONSTRUCTION: ['construction', 'operations', 'pieces'],
   TECH_CARD_SIGNOFF_SECTION_MATERIALS: ['bomItems'],
-  TECH_CARD_SIGNOFF_SECTION_COLOUR: ['colorways'],
+  // COLOUR watched the RHF `colorways` array, which has been permanently empty since a colourway
+  // became a product — so this section could never light pre-save. Its content in the form is the
+  // cut pieces' per-colourway fabric map, which is also what the server's colour projection hashes
+  // (piece line_keys + the BOM keys the map points at).
+  TECH_CARD_SIGNOFF_SECTION_COLOUR: ['pieces'],
   TECH_CARD_SIGNOFF_SECTION_LABELS: ['labels'],
   TECH_CARD_SIGNOFF_SECTION_PACKAGING: ['packaging'],
   TECH_CARD_SIGNOFF_SECTION_COSTING: ['costing'],
@@ -299,7 +303,6 @@ export function SignoffsField() {
   const operations = useWatch({ control, name: 'operations' });
   const pieces = useWatch({ control, name: 'pieces' });
   const bomItems = useWatch({ control, name: 'bomItems' });
-  const colorways = useWatch({ control, name: 'colorways' });
   const labels = useWatch({ control, name: 'labels' });
   const packaging = useWatch({ control, name: 'packaging' });
   const costing = useWatch({ control, name: 'costing' });
@@ -315,7 +318,6 @@ export function SignoffsField() {
     operations,
     pieces,
     bomItems,
-    colorways,
     labels,
     packaging,
     costing,
@@ -336,7 +338,6 @@ export function SignoffsField() {
     operations,
     pieces,
     bomItems,
-    colorways,
     labels,
     packaging,
     costing,

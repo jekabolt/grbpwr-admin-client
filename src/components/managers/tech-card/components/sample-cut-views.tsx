@@ -65,8 +65,8 @@ type FormPiece = {
   calloutNumber?: number;
   note?: string;
   lineKey?: string;
-  // NOTE: `colorwayIndex` carries a colourway ID, not an index — the proto field was renamed and
-  // the form key still has not been (see schema.ts TODO(final-bump)).
+  // NOTE: `colorwayIndex` carries a colourway ID, not an index — the proto field was renamed to
+  // colorwayId and the form key was deliberately left alone (see mapTechCardToForm in schema.ts).
   materials?: Array<{ colorwayIndex?: number; bomLineKey?: string; fusingBomLineKey?: string }>;
 };
 

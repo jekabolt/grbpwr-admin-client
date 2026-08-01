@@ -17,6 +17,7 @@ import {
 import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
 import { formatCompositionEntries } from './composition-entries';
 import { wireInt } from './schema';
+import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useMeasurements } from 'components/managers/product/utility/useMeasurements';
@@ -320,8 +321,11 @@ export function TechPackDocument({
               </div>
               <div className='text-sm'>
                 style <span className='font-semibold'>{tc.styleNumber || '—'}</span>
+                {/* Season is `skuSeason` (the structured SkuSeason) since the R1 merge — the flat
+                    `season` string this header used to print is gone, which left the printed pack
+                    without the one fact its style number encodes. */}
+                {skuToSeasonLabel(tc.skuSeason) ? ` · ${skuToSeasonLabel(tc.skuSeason)}` : ''}
                 {tc.collection ? ` · ${tc.collection}` : ''}
-                {/* TODO(final-bump): season no longer on TechCardInsert (moved to skuSeason). */}
               </div>
             </div>
           </div>

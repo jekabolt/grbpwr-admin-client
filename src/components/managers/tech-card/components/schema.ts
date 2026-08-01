@@ -21,11 +21,7 @@ import {
   common_TechCardSignoffState,
   common_TechCardStage,
   common_StyleNumberSource,
-  googletype_Decimal,
 } from 'api/proto-http/admin';
-// TODO(final-bump): TechCardLabDipStatus is no longer re-exported from 'api/proto-http/admin'
-// in the intermediate contract — import it from common directly.
-import { TechCardLabDipStatus as common_TechCardLabDipStatus } from 'api/proto-http/common';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
@@ -92,18 +88,10 @@ function hasContent(values: Array<string | number | undefined>): boolean {
 
 const DEFAULT_MEDIA_KIND: common_TechCardMediaKind = 'TECH_CARD_MEDIA_KIND_FRONT';
 const DEFAULT_BOM_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_FABRIC';
-const DEFAULT_LAB_DIP: common_TechCardLabDipStatus = 'TECH_CARD_LAB_DIP_STATUS_PENDING';
 
 const sizeQuantitySchema = z.object({
   sizeId: z.number().optional().default(0), // ∈ size_ids
   orderQty: z.number().optional().default(0),
-});
-
-// Per-size consumption (норма расхода) of a measured material in a colourway usage —
-// different sizes consume different amounts of fabric. sizeId ∈ size_ids. Decimal string.
-const sizeConsumptionSchema = z.object({
-  sizeId: z.number().optional().default(0),
-  consumption: z.string().optional().default(''), // decimal as string
 });
 
 // A downloadable PDF выкройка (cut pattern) for one size. url/filename/sizeBytes are
@@ -163,28 +151,6 @@ const calloutSchema = z.object({
   mediaId: z.number().optional().default(0), // pinned sketch (0 = unanchored)
   posX: z.string().optional().default(''), // carried (v2; normalised 0..1 marker pos)
   posY: z.string().optional().default(''), // carried (v2)
-});
-
-// One usage line of a colourway's "recipe": which catalog article (bomItemIndex) goes on
-// which garment part (placement), the colour it takes in THIS colourway, and how much is
-// consumed (per-garment and/or per-size). lineTotal/sizeRunTotal are output-only.
-const colorwayUsageSchema = z.object({
-  // BOM reference by stable line_key (§2.3); '' = none.
-  bomLineKey: z.string().optional().default(''),
-  placement: z.string().optional().default(''),
-  color: z.string().optional().default(''),
-  pantone: z.string().optional().default(''),
-  consumption: z.string().optional().default(''), // per-garment rate, decimal as string
-  quantity: z.string().optional().default(''), // count (countable trims), decimal as string
-  // per-size grading of a measured material's consumption. When set, the size-run cost
-  // folds these against the size run; `consumption` above is the per-garment fallback.
-  sizeConsumptions: z.array(sizeConsumptionSchema).default([]),
-  // 0-based index into `pieces` this norm is about; -1 = whole garment (informational, NF-05).
-  // Positional — renumbered when a piece is removed (nf05-01). UI select lands in W4.4.
-  pieceIndex: z.number().optional().default(-1),
-  // OUTPUT-ONLY: server-computed spend per garment / over the whole size run.
-  lineTotal: z.string().optional().default(''),
-  sizeRunTotal: z.string().optional().default(''),
 });
 
 // One cut-piece detail (деталь кроя) + its per-colourway fabric mapping (NF-05). materials is a
@@ -276,26 +242,6 @@ const pieceSchema = z
       }
     });
   });
-
-const colorwaySchema = z.object({
-  code: z.string().optional().default(''),
-  name: z.string().min(1, 'Colourway name is required'),
-  labDipStatus: z.string().optional().default(DEFAULT_LAB_DIP),
-  productId: z.number().optional().default(0), // FK product(id); 0 = not yet published
-  comment: z.string().optional().default(''),
-  // lab-dip lifecycle / headline colour identity (swatch), independent of usage colours
-  pantone: z.string().optional().default(''),
-  pantoneSystem: z.string().optional().default(''),
-  hex: z.string().optional().default(''),
-  swatchMediaId: z.number().optional().default(0),
-  labDipRound: z.number().optional().default(0),
-  labDipSubmittedAt: z.string().optional().default(''), // YYYY-MM-DD in the UI
-  labDipDecidedAt: z.string().optional().default(''),
-  labDipDecidedBy: z.string().optional().default(''),
-  labDipRejectReason: z.string().optional().default(''),
-  // the colour's material recipe
-  usages: z.array(colorwayUsageSchema).default([]),
-});
 
 // One BOM article — a pure material-catalog entry. The per-colourway colour, placement and
 // consumption live on colourway usages, not here.
@@ -518,7 +464,6 @@ const techCardObject = z.object({
   sizeIds: z.array(z.number()).default([]),
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
   patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
-  productIds: z.array(z.number()).default([]),
   // NF-07 auxiliary items: purpose is 'sellable' (default) or 'auxiliary' (produces a packaging
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
@@ -556,7 +501,6 @@ const techCardObject = z.object({
   moodboardMedia: z.array(mediaItemSchema).default([]),
   technicalMedia: z.array(mediaItemSchema).default([]),
   callouts: z.array(calloutSchema).default([]),
-  colorways: z.array(colorwaySchema).default([]),
   bomItems: z.array(bomItemSchema).default([]),
   details: z.array(detailSchema).default([]), // construction-description aspects (text + images)
   construction: constructionSchema,
@@ -629,7 +573,6 @@ export const techCardDefaultData: TechCardFormData = {
   sizeIds: [],
   sizeQuantities: [],
   patterns: [],
-  productIds: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
   auxSubtype: UNSET_AUX_SUBTYPE,
   outputMaterialId: 0,
@@ -637,7 +580,6 @@ export const techCardDefaultData: TechCardFormData = {
   moodboardMedia: [],
   technicalMedia: [],
   callouts: [],
-  colorways: [],
   bomItems: [],
   details: [],
   construction: { ...emptyConstruction },
@@ -710,40 +652,6 @@ function splitSketchMedia(insert?: common_TechCardInsert): {
   }
   return { moodboardMedia: mood, technicalMedia: tech };
 }
-
-// TODO(final-bump): common_TechCardInsert no longer carries `colorways` (R1 merge — a
-// colourway is now a product, referenced by colorwayId). This shape lets the form-mapping
-// below keep compiling against an always-empty source; source real colourway data from
-// GetColorwaysPaged by style / AdminColorwayRef instead.
-type LegacyColorwaySource = {
-  code?: string;
-  name?: string;
-  labDipStatus?: common_TechCardLabDipStatus;
-  productId?: number;
-  comment?: string;
-  pantone?: string;
-  pantoneSystem?: string;
-  hex?: string;
-  swatchMediaId?: number;
-  labDipRound?: number;
-  labDipSubmittedAt?: string;
-  labDipDecidedAt?: string;
-  labDipDecidedBy?: string;
-  labDipRejectReason?: string;
-  usages?: {
-    bomItemIndex?: number;
-    bomLineKey?: string;
-    placement?: string;
-    color?: string;
-    pantone?: string;
-    consumption?: googletype_Decimal;
-    quantity?: googletype_Decimal;
-    sizeConsumptions?: { sizeId?: number; consumption?: googletype_Decimal }[];
-    pieceIndex?: number;
-    lineTotal?: googletype_Decimal;
-    sizeRunTotal?: googletype_Decimal;
-  }[];
-};
 
 // One BOM line → form row. Mints a stable line_key for a legacy line that has none, so downstream
 // refs can be keyed by it immediately (it persists on the next save).
@@ -845,9 +753,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       version: p.version || 0,
       uploadedAt: p.uploadedAt ?? '',
     })),
-    // TODO(final-bump): productIds is no longer on TechCardInsert — a colourway now carries
-    // its own product link.
-    productIds: [],
     purpose: toPurposeEnum(insert?.purpose),
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
     outputMaterialId: insert?.outputMaterialId || 0,
@@ -861,42 +766,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       posX: decimalToInput(c.posX),
       posY: decimalToInput(c.posY),
     })),
-    // TODO(final-bump): insert.colorways is gone (see LegacyColorwaySource above) — this map
-    // is now permanently over an empty array.
-    colorways: ([] as LegacyColorwaySource[]).map((c) => ({
-      code: c.code || '',
-      name: c.name || '',
-      labDipStatus:
-        c.labDipStatus && c.labDipStatus !== 'TECH_CARD_LAB_DIP_STATUS_UNKNOWN'
-          ? c.labDipStatus
-          : DEFAULT_LAB_DIP,
-      productId: wireInt(c.productId),
-      comment: c.comment || '',
-      pantone: c.pantone || '',
-      pantoneSystem: c.pantoneSystem || '',
-      hex: c.hex || '',
-      swatchMediaId: c.swatchMediaId || 0,
-      labDipRound: c.labDipRound || 0,
-      labDipSubmittedAt: timestampToDateInput(c.labDipSubmittedAt),
-      labDipDecidedAt: timestampToDateInput(c.labDipDecidedAt),
-      labDipDecidedBy: c.labDipDecidedBy || '',
-      labDipRejectReason: c.labDipRejectReason || '',
-      usages: (c.usages ?? []).map((u) => ({
-        bomLineKey: refKey(u.bomLineKey, u.bomItemIndex),
-        placement: u.placement || '',
-        color: u.color || '',
-        pantone: u.pantone || '',
-        consumption: decimalToInput(u.consumption),
-        quantity: decimalToInput(u.quantity),
-        sizeConsumptions: (u.sizeConsumptions ?? []).map((sc) => ({
-          sizeId: sc.sizeId || 0,
-          consumption: decimalToInput(sc.consumption),
-        })),
-        pieceIndex: u.pieceIndex ?? -1,
-        lineTotal: decimalToInput(u.lineTotal),
-        sizeRunTotal: decimalToInput(u.sizeRunTotal),
-      })),
-    })),
     pieces: (insert?.pieces ?? []).map((p) => ({
       // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
       // backfilled them with the same LEGACY… keys the ULID test rejects.
@@ -909,7 +778,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       calloutNumber: p.calloutNumber ?? 0,
       note: p.note || '',
       materials: (p.materials ?? []).map((m) => ({
-        // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
+        // NOTE: the FORM key is `colorwayIndex`, the proto field is `colorwayId` — the rename
+        // landed on the wire and the form key was deliberately left alone (it is read by
+        // pieces-tab, sample-cut-views and the print doc). It holds a colourway ID, never an index.
         // colorway_id is int64 on the wire and grpc-gateway serialises int64 as a STRING, so this
         // must be coerced or z.number() rejects it as "Invalid input" — same trap as materialId.
         colorwayIndex: wireInt(m.colorwayId),
@@ -1186,9 +1057,8 @@ export function mapFormToTechCardInsert(
       : 'STYLE_NUMBER_SOURCE_GENERATED') as common_StyleNumberSource,
     name: data.name.trim(),
     brand: data.brand?.trim() || '',
-    // TODO(final-bump): season/productIds/colorways moved off the style write path (R1
-    // merge) — season lives on skuSeason (not yet surfaced in this form), productIds/
-    // colorways are managed per-colourway (product), not on TechCardInsert.
+    // No season here on purpose: sku_season is a style catalogue fact and UpdateStyle is its only
+    // writer (StyleFactsField stages it) — the stored value rides back untouched in `...original`.
     collection: data.collection?.trim() || '',
     status: data.status?.trim() || '',
     categoryId: data.categoryId || 0,
@@ -1269,7 +1139,8 @@ export function mapFormToTechCardInsert(
             const fabric = outBomRef(m.bomLineKey);
             const fusing = outBomRef(m.fusingBomLineKey);
             return {
-              // TODO(final-bump): proto field renamed colorwayIndex -> colorwayId.
+              // form key `colorwayIndex` → proto field `colorwayId`; it has held an ID, not an
+              // index, since colourways became products (see mapTechCardToForm).
               colorwayId: m.colorwayIndex || 0,
               // durable line_key refs (§2.3) + a consistent positional index for the transition path.
               bomLineKey: fabric.bomLineKey,
