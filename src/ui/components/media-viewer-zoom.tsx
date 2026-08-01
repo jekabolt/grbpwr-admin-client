@@ -523,6 +523,10 @@ export function useImageAnnotate(params: { resetKey: unknown; baseSize: Size }) 
         out.height = h;
         const ctx = out.getContext('2d');
         if (!ctx) return;
+        // The viewer stages transparent media on white — flatten onto the same
+        // ground so the exported file matches what was on screen when drawing.
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
         ctx.save();
         ctx.scale(w / (baseSize.w || w), h / (baseSize.h || h));
