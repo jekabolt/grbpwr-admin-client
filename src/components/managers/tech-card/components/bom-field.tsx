@@ -448,10 +448,15 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
           <InputField name={`bomItems.${index}.supplier`} label='supplier' />
           <InputField name={`bomItems.${index}.supplierRef`} label='supplier ref' />
           <InputField name={`bomItems.${index}.color`} label='base color (ref)' />
-          {/* No free-text `spec` input: it duplicated the structured width (cm) + weight (g/m²)
-              fields below. The value is preserved — it still round-trips (schema `spec` + map
-              in/out), renders on a linked line's catalog plate, and prints to the release
-              snapshot — only this hand-typed input is removed. */}
+          {/* `spec` lives ONLY on this unlinked branch. It was dropped entirely once as a duplicate
+              of the structured width + weight below — true for a fabric, false for everything else:
+              a zip, a thread or a button has no width and no gsm, and spec is the only descriptor
+              it gets ("YKK 5CN, 18 cm"). The value round-trips either way, renders on a linked
+              line's catalog plate and prints into the frozen release snapshot (releases-field), so
+              with no input a free-text line held a spec no one in this admin could author or
+              correct. A LINKED line still has none: there the article's catalog spec is the truth,
+              mirrored read-only on the plate. */}
+          <InputField name={`bomItems.${index}.spec`} label='spec (free text)' />
           <DecimalField name={`bomItems.${index}.fabricWidth`} label='width (cm)' />
           <DecimalField name={`bomItems.${index}.fabricWeightGsm`} label='weight (g/m²)' />
           <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
