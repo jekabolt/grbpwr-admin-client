@@ -254,6 +254,25 @@ const pieceSchema = z
         path: ['name'],
       });
     }
+    // A fabric-map cell addresses its colourway by id (colorwayIndex holds colorway_id on the wire),
+    // and the server rejects a cell whose id is <= 0 with a pathless error that blocks the whole
+    // card — which is why the save mapper used to DROP such a cell. But this admin no longer edits
+    // that map at all: the cells are round-tripped data written by another surface, so dropping one
+    // silently deletes a fabric / fusing / note the operator never saw and cannot restore. Raise it
+    // here instead, on an addressable path (`pieces.N.materials.M.colorwayIndex` → the colourways
+    // tab), so the save stops with something to point at. A cell with NO content is still dropped by
+    // the mapper — that one carries nothing to lose.
+    (piece.materials ?? []).forEach((m, mi) => {
+      const carries = !!m.bomLineKey?.trim() || !!m.fusingBomLineKey?.trim() || !!m.note?.trim();
+      if (carries && (m.colorwayIndex ?? 0) <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            'эта ячейка кроя не привязана к колорвею — сохранение стёрло бы её материал/заметку',
+          path: ['materials', mi, 'colorwayIndex'],
+        });
+      }
+    });
   });
 
 const colorwaySchema = z.object({
@@ -548,6 +567,20 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
       code: z.ZodIssueCode.custom,
       message: 'Style number is required',
       path: ['styleNumber'],
+    });
+  }
+  // The season is stored as the structured SkuSeason { code, year }; the form holds a free-text
+  // label and parseSeasonToSku maps between them, returning undefined for anything it cannot read.
+  // Undefined is silent in both directions: the card body sends skuSeason unset (which on CREATE
+  // takes the whole season with it, the write being a full replace) and the staged UpdateStyle
+  // simply omits `season` from its mask, so a season EDIT reports success and does not happen. The
+  // SeasonField picker only ever writes parseable labels, so this can fire on hand-typed entry
+  // alone — and there it must, because a typo is not a reason to drop the season silently.
+  if (data.season?.trim() && !parseSeasonToSku(data.season)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'сезон не распознан — SS25 / FW26 / PF26 / Resort 25 (Holiday не поддерживается)',
+      path: ['season'],
     });
   }
   // #64: every BOM article should link a catalog material — enforced as a RELEASE blocker
@@ -1208,12 +1241,11 @@ export function mapFormToTechCardInsert(
         note: p.note?.trim() || '',
         materials: (p.materials ?? [])
           // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
-          // a note-only cell (written by another client) must survive an unrelated save
+          // a note-only cell (written by another client) must survive an unrelated save.
+          // A cell that CARRIES something but resolves no colourway is NOT dropped here: the schema
+          // blocks the save on it (pieceSchema's superRefine), because dropping it deleted content
+          // this admin has no editor for and the operator never saw.
           .filter((m) => !!m.bomLineKey?.trim() || !!m.fusingBomLineKey?.trim() || !!m.note?.trim())
-          // A cell whose colourway never resolved (colorwayId missing upstream -> 0) is rejected by
-          // the server with a pathless error that blocks the whole card. Drop it instead: the cell
-          // could not have addressed a real colourway anyway.
-          .filter((m) => (m.colorwayIndex ?? 0) > 0)
           .map((m) => {
             const fabric = outBomRef(m.bomLineKey);
             const fusing = outBomRef(m.fusingBomLineKey);
