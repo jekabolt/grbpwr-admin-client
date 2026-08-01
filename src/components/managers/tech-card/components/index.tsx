@@ -532,6 +532,75 @@ export function TechCardForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget]);
 
+  // After a body save the server owns values this form cannot compute, and `data` — the payload
+  // that just went over the wire — still carries the pre-save placeholder for each of them.
+  // Resetting the form to it leaves the card lying about itself, and for ONE of those fields the lie
+  // is destructive: «approve» blanks a sign-off's signedDigest precisely because an EMPTY digest on
+  // the wire MEANS "approve this now". Left blank in form state it is re-sent by every LATER save in
+  // the same page session, silently re-blessing the section against whatever it has become since —
+  // approve the BOM once and every subsequent save re-approves it against the new content.
+  //
+  // Deliberately a MERGE into what was sent rather than a wholesale reset to mapTechCardToForm(fresh):
+  // the staged sub-panels commit AFTER this (styleFacts writes fit / brand / collection / season via
+  // UpdateStyle, order 10), so their form fields are still unsaved at this point and a wholesale
+  // reset would revert them to the server's pre-commit values — losing exactly the edits the staged
+  // queue is about to write. Only the three server-assigned lists are taken. Cut pieces have nothing
+  // to re-seed: their identity is the client-minted lineKey, not a server id.
+  async function withServerAssignedValues(sent: TechCardFormData): Promise<TechCardFormData> {
+    if (!numId) return sent;
+    let fresh: common_TechCard | undefined;
+    try {
+      const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
+      fresh = res.techCard;
+    } catch {
+      // Not fatal — the save itself landed. Fall back to what was sent; useUpdateTechCard's own
+      // invalidation still refetches the card, and a reload re-seeds the form from the server.
+      return sent;
+    }
+    if (!fresh) return sent;
+    // Prime the cache with the read we already paid for, so the detail this reset is built from is
+    // the same one the NEXT save reads its expectedLockVersion from.
+    queryClient.setQueryData(techCardKeys.detail(numId), fresh);
+    const server = mapTechCardToForm(fresh);
+
+    // Sign-off digests, by section. A section normally holds one row; a duplicate ("other entries")
+    // takes the NEXT server row for that section rather than a copy of the first.
+    const serverDigests = new Map<string, string[]>();
+    for (const s of server.signoffs ?? []) {
+      const sec = s.section ?? '';
+      serverDigests.set(sec, [...(serverDigests.get(sec) ?? []), s.signedDigest ?? '']);
+    }
+    const seenSection = new Map<string, number>();
+    const signoffs = (sent.signoffs ?? []).map((s) => {
+      const sec = s.section ?? '';
+      const nth = seenSection.get(sec) ?? 0;
+      seenSection.set(sec, nth + 1);
+      const digest = serverDigests.get(sec)?.[nth];
+      return digest === undefined ? s : { ...s, signedDigest: digest };
+    });
+
+    // Pattern revisions: a freshly uploaded sheet goes out as version 0 and the server assigns
+    // MAX+1 for its size, so the form would otherwise keep asking for a new number on every save.
+    // uploadedAt is server-owned as well (never sent, only displayed).
+    const patternKey = (p: { sizeId?: number; url?: string }) =>
+      `${p.sizeId ?? 0}|${(p.url ?? '').trim()}`;
+    const serverPatterns = new Map((server.patterns ?? []).map((p) => [patternKey(p), p]));
+    const patterns = (sent.patterns ?? []).map((p) => {
+      const sp = serverPatterns.get(patternKey(p));
+      return sp ? { ...p, version: sp.version ?? 0, uploadedAt: sp.uploadedAt ?? '' } : p;
+    });
+
+    // BOM primary keys, matched on the durable line_key: a row added in this session went out with
+    // id 0 and comes back with the PK the insert assigned.
+    const serverBomIds = new Map((server.bomItems ?? []).map((b) => [b.lineKey ?? '', b.id ?? 0]));
+    const bomItems = (sent.bomItems ?? []).map((b) => {
+      const id = serverBomIds.get(b.lineKey ?? '');
+      return id === undefined ? b : { ...b, id };
+    });
+
+    return { ...sent, signoffs, patterns, bomItems };
+  }
+
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
     setStagingError(null);
@@ -557,7 +626,10 @@ export function TechCardForm({
           // Spent: the write moved the server's version on, and useUpdateTechCard's invalidation
           // brings the new one back. Holding it would 409 the save after next.
           lockOverride.current = null;
-          form.reset(data);
+          // Reset to what the SERVER now holds, not to what we sent — above all so a sign-off that
+          // was just approved carries its stamped digest instead of the blank that MEANS "approve
+          // now" (see withServerAssignedValues).
+          form.reset(await withServerAssignedValues(data));
         }
         // Then the staged sub-panels, in commit order. These are separate RPCs — there is NO
         // transaction, and the banner below deliberately does not pretend otherwise.
