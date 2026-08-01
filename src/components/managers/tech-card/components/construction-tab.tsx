@@ -40,8 +40,13 @@ type SummaryOp = { calloutNumber?: number; timeNorm?: string; zone?: string };
 // costing.cmt_cost is a per-GARMENT CMT figure, so the derived number is the implied €/min rather
 // than a stored rate. Read-only, and rendered only when that cost exists (it is nulled on read for
 // an account without costing:read, so this line simply does not appear for them).
-function ConstructionSummary({ operations }: { operations: SummaryOp[] }) {
+//
+// It subscribes to the whole `operations` array ITSELF rather than taking it as a prop: that array
+// changes on every keystroke in the assembly editor, and holding the subscription in the tab
+// re-rendered the sketch, the legend and the entire operations rail along with it.
+function ConstructionSummary() {
   const { control } = useFormContext<TechCardFormData>();
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
   const cmtCost = (useWatch({ control, name: 'costing.cmtCost' }) ?? '') as string;
   const currency = (useWatch({ control, name: 'costing.currency' }) ?? '') as string;
 
@@ -96,16 +101,21 @@ type FormCallout = {
 // every pin off the detail it names.
 function ConstructionSketch({
   mediaById,
-  usedPins,
   activePin,
   onActivePinChange,
 }: {
   mediaById: Map<number, common_MediaFull>;
-  usedPins: Set<number>;
   activePin: number | null;
   onActivePinChange: (n: number | null) => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
+  // Which pins an operation actually claims — computed here, for the same reason the summary
+  // watches its own array: this subscription must not sit in the tab above the operations editor.
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
+  const usedPins = useMemo(
+    () => new Set(operations.map((o) => o.calloutNumber || 0).filter((n) => n > 0)),
+    [operations],
+  );
   // Assembly map draws on the technical sketches (front/back/detail), not the moodboard.
   const media = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
     mediaId: number;
@@ -206,18 +216,14 @@ function ConstructionSketch({
 // together, without switching tabs. Colourway / material selection lives on the colorways tab;
 // this tab is about HOW the garment goes together, not which fabric or colour.
 export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
-  const { control } = useFormContext<TechCardFormData>();
-  const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
+  // Deliberately NOT watching `operations` here. The summary and the sketch each hold their own
+  // subscription, so a keystroke in the assembly editor re-renders those two leaves instead of
+  // this whole workspace (and with it every row of the sequence rail).
 
   // Sketch pin ↔ operation and BOM line ↔ operation are the same mechanism, so both come from the
   // shared hook the pieces tab reuses for its mini-diagram.
   const pin = useCrossHighlight<number>();
   const bom = useCrossHighlight<string>();
-
-  const usedPins = useMemo(
-    () => new Set(operations.map((o) => o.calloutNumber || 0).filter((n) => n > 0)),
-    [operations],
-  );
 
   // The assembly map pins onto the technical sketches (callouts live there).
   const mediaById = useMemo(() => {
@@ -230,10 +236,13 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
 
   return (
     <div className='flex flex-col gap-3.5'>
-      <ConstructionSummary operations={operations} />
+      <ConstructionSummary />
 
+      {/* The sketch is a reference, not the work: a fixed 320px column reads it fine and leaves the
+          assembly sequence the rest of the screen. At 2/5 the drawing was 640px wide on a 1600px
+          display with ~3000px of empty ground under it, while the operations were squeezed. */}
       <div className='flex flex-col gap-3.5 lg:flex-row lg:items-start'>
-        <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-2/5'>
+        <div className='w-full space-y-2.5 lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
           <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader
               title='sketch — assembly map'
@@ -241,7 +250,6 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
             />
             <ConstructionSketch
               mediaById={mediaById}
-              usedPins={usedPins}
               activePin={pin.active}
               onActivePinChange={pin.setActive}
             />
@@ -249,7 +257,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
           <PieceLegend />
         </div>
 
-        <div className='flex w-full flex-col gap-2.5 lg:w-3/5'>
+        <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
           <ConstructionField />
           <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader
