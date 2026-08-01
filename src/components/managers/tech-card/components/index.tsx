@@ -1180,7 +1180,11 @@ export function TechCardForm({
               </Section>
 
               <Section title='style facts — fit / care (shared by all colourways)'>
-                <StyleFactsField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
+                <StyleFactsField
+                  styleId={numId}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                  careEntries={techCard?.careEntries}
+                />
               </Section>
 
               <Section title='concept & construction description'>
