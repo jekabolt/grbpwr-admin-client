@@ -136,6 +136,9 @@ export const techCardAuxSubtypeFormOptions: Array<{ value: string; label: string
   { value: 'TECH_CARD_AUX_SUBTYPE_HANGTAG', label: 'hangtag' },
   { value: 'TECH_CARD_AUX_SUBTYPE_STICKER', label: 'sticker' },
   { value: 'TECH_CARD_AUX_SUBTYPE_DUST_BAG', label: 'dust bag (пыльник)' },
+  // Its own kind, not a dust bag: a кофр is cut and sewn as its own item, and the assembly bill has
+  // to be able to say which of the two a style ships with.
+  { value: 'TECH_CARD_AUX_SUBTYPE_GARMENT_CASE', label: 'garment case (кофр)' },
   { value: 'TECH_CARD_AUX_SUBTYPE_BOX', label: 'box' },
   { value: 'TECH_CARD_AUX_SUBTYPE_INSERT', label: 'insert' },
   { value: 'TECH_CARD_AUX_SUBTYPE_HANGER', label: 'hanger' },
