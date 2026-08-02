@@ -17,6 +17,7 @@ import { MaterialModal } from 'components/managers/materials/components/material
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import {
   techCardApprovalStateOptions,
+  techCardAuxSubtypeFormOptions,
   techCardGenderOptions,
   techCardMeasurementUnitOptions,
   techCardPurposeFormOptions,
@@ -142,7 +143,6 @@ const ERROR_TAB: Record<string, TabId> = {
   sizeIds: 'patterns',
   sizeQuantities: 'patterns',
   bomItems: 'bom',
-  colorways: 'colorways',
   pieces: 'colorways',
   details: 'header',
   construction: 'construction',
@@ -409,8 +409,6 @@ export function TechCardForm({
   const canRelease = releaseBlockers.length === 0;
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
     '') as string;
-  const productCount = (useWatch({ control: form.control, name: 'productIds' }) ?? []).length;
-
   // NF-07 auxiliary items: an aux card produces a packaging material, links no products, and needs
   // an output material set before its first run.
   const purpose = toPurposeEnum(
@@ -418,6 +416,8 @@ export function TechCardForm({
   );
   const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
     0) as number;
+  const auxSubtype = (useWatch({ control: form.control, name: 'auxSubtype' }) ??
+    'TECH_CARD_AUX_SUBTYPE_UNKNOWN') as string;
   const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
 
@@ -532,6 +532,75 @@ export function TechCardForm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusTarget]);
 
+  // After a body save the server owns values this form cannot compute, and `data` — the payload
+  // that just went over the wire — still carries the pre-save placeholder for each of them.
+  // Resetting the form to it leaves the card lying about itself, and for ONE of those fields the lie
+  // is destructive: «approve» blanks a sign-off's signedDigest precisely because an EMPTY digest on
+  // the wire MEANS "approve this now". Left blank in form state it is re-sent by every LATER save in
+  // the same page session, silently re-blessing the section against whatever it has become since —
+  // approve the BOM once and every subsequent save re-approves it against the new content.
+  //
+  // Deliberately a MERGE into what was sent rather than a wholesale reset to mapTechCardToForm(fresh):
+  // the staged sub-panels commit AFTER this (styleFacts writes fit / brand / collection / season via
+  // UpdateStyle, order 10), so their form fields are still unsaved at this point and a wholesale
+  // reset would revert them to the server's pre-commit values — losing exactly the edits the staged
+  // queue is about to write. Only the three server-assigned lists are taken. Cut pieces have nothing
+  // to re-seed: their identity is the client-minted lineKey, not a server id.
+  async function withServerAssignedValues(sent: TechCardFormData): Promise<TechCardFormData> {
+    if (!numId) return sent;
+    let fresh: common_TechCard | undefined;
+    try {
+      const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
+      fresh = res.techCard;
+    } catch {
+      // Not fatal — the save itself landed. Fall back to what was sent; useUpdateTechCard's own
+      // invalidation still refetches the card, and a reload re-seeds the form from the server.
+      return sent;
+    }
+    if (!fresh) return sent;
+    // Prime the cache with the read we already paid for, so the detail this reset is built from is
+    // the same one the NEXT save reads its expectedLockVersion from.
+    queryClient.setQueryData(techCardKeys.detail(numId), fresh);
+    const server = mapTechCardToForm(fresh);
+
+    // Sign-off digests, by section. A section normally holds one row; a duplicate ("other entries")
+    // takes the NEXT server row for that section rather than a copy of the first.
+    const serverDigests = new Map<string, string[]>();
+    for (const s of server.signoffs ?? []) {
+      const sec = s.section ?? '';
+      serverDigests.set(sec, [...(serverDigests.get(sec) ?? []), s.signedDigest ?? '']);
+    }
+    const seenSection = new Map<string, number>();
+    const signoffs = (sent.signoffs ?? []).map((s) => {
+      const sec = s.section ?? '';
+      const nth = seenSection.get(sec) ?? 0;
+      seenSection.set(sec, nth + 1);
+      const digest = serverDigests.get(sec)?.[nth];
+      return digest === undefined ? s : { ...s, signedDigest: digest };
+    });
+
+    // Pattern revisions: a freshly uploaded sheet goes out as version 0 and the server assigns
+    // MAX+1 for its size, so the form would otherwise keep asking for a new number on every save.
+    // uploadedAt is server-owned as well (never sent, only displayed).
+    const patternKey = (p: { sizeId?: number; url?: string }) =>
+      `${p.sizeId ?? 0}|${(p.url ?? '').trim()}`;
+    const serverPatterns = new Map((server.patterns ?? []).map((p) => [patternKey(p), p]));
+    const patterns = (sent.patterns ?? []).map((p) => {
+      const sp = serverPatterns.get(patternKey(p));
+      return sp ? { ...p, version: sp.version ?? 0, uploadedAt: sp.uploadedAt ?? '' } : p;
+    });
+
+    // BOM primary keys, matched on the durable line_key: a row added in this session went out with
+    // id 0 and comes back with the PK the insert assigned.
+    const serverBomIds = new Map((server.bomItems ?? []).map((b) => [b.lineKey ?? '', b.id ?? 0]));
+    const bomItems = (sent.bomItems ?? []).map((b) => {
+      const id = serverBomIds.get(b.lineKey ?? '');
+      return id === undefined ? b : { ...b, id };
+    });
+
+    return { ...sent, signoffs, patterns, bomItems };
+  }
+
   async function doSubmit(data: TechCardFormData) {
     setConflict(false);
     setStagingError(null);
@@ -557,7 +626,10 @@ export function TechCardForm({
           // Spent: the write moved the server's version on, and useUpdateTechCard's invalidation
           // brings the new one back. Holding it would 409 the save after next.
           lockOverride.current = null;
-          form.reset(data);
+          // Reset to what the SERVER now holds, not to what we sent — above all so a sign-off that
+          // was just approved carries its stamped digest instead of the blank that MEANS "approve
+          // now" (see withServerAssignedValues).
+          form.reset(await withServerAssignedValues(data));
         }
         // Then the staged sub-panels, in commit order. These are separate RPCs — there is NO
         // transaction, and the banner below deliberately does not pretend otherwise.
@@ -1039,18 +1111,35 @@ export function TechCardForm({
 
                 <Section title='classification' className='w-full lg:w-1/2'>
                   <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
-                  {/* Purpose is mutually exclusive with the other side's links and the save is a
-                    full replace — flag the destruction BEFORE it happens, it's not reversible. */}
-                  {isAux && productCount > 0 && (
-                    <Text variant='error' size='small'>
-                      ! saving as auxiliary permanently unlinks {productCount} linked product
-                      {productCount > 1 ? 's' : ''}
-                    </Text>
-                  )}
+                  {/* Purpose is mutually exclusive with the output material and the save is a full
+                    replace — flag the destruction BEFORE it happens, it's not reversible. There is
+                    no matching warning for the other direction: a colourway links itself to a style
+                    (R1), so switching to auxiliary unlinks nothing this save could destroy. */}
                   {!isAux && outputMaterialId > 0 && (
                     <Text variant='error' size='small'>
                       ! saving as sellable clears the output material
                     </Text>
+                  )}
+                  {/* WS7: what KIND of auxiliary item this card makes. Auxiliary-only — the dto
+                    rejects a subtype on a sellable card, and the save mapper clears it on a purpose
+                    flip, so hiding the control is not hiding a value that survives. Left
+                    unclassified, every consumer that groups by subtype (the assembly bill's
+                    component type, the labels/packaging pickers' type filter) can only file this
+                    card under "unknown". */}
+                  {isAux && (
+                    <>
+                      <SelectField
+                        name='auxSubtype'
+                        label='auxiliary type'
+                        items={techCardAuxSubtypeFormOptions}
+                      />
+                      {auxSubtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN' && (
+                        <Text variant='label' size='micro'>
+                          unclassified — the assembly bill and the labels/packaging pickers file this
+                          card under «unknown» until a type is set
+                        </Text>
+                      )}
+                    </>
                   )}
                   <SelectField
                     name='targetGender'
@@ -1071,7 +1160,11 @@ export function TechCardForm({
                     who is on this card (Q5) — admin accounts, saved immediately, not part of the
                     card’s draft.
                   </Text>
-                  <RolesField techCardId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
+                  <RolesField
+                    techCardId={numId}
+                    canEdit={canWrite(SECTION.techCards) && !frozen}
+                    initialAssignments={techCard?.roleAssignments}
+                  />
                 </Section>
               )}
 
@@ -1080,10 +1173,24 @@ export function TechCardForm({
               </Section>
 
               <Section title='style facts — fit / care (shared by all colourways)'>
-                <StyleFactsField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
+                <StyleFactsField
+                  styleId={numId}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                  careEntries={techCard?.careEntries}
+                />
               </Section>
 
-              <Section title='construction description'>
+              <Section title='concept & construction description'>
+                {/* concept → details → notes is the order the tech pack's description sheet prints
+                  them in, so the editor reads the same way. Concept is the one prose field an IDEA
+                  card is really about, and until now nothing in this admin could write it. */}
+                <TextareaField
+                  name='concept'
+                  label='concept (design intent)'
+                  rows={3}
+                  maxLength={2000}
+                  placeholder='что это за вещь — идея, референс, назначение'
+                />
                 <DetailsEditor techCard={techCard} />
                 <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
               </Section>

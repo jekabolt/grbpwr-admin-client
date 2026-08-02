@@ -1,5 +1,7 @@
 import { adminService } from 'api/api';
+import { common_CareEntry } from 'api/proto-http/admin';
 import { useModel } from 'components/managers/models/components/useModelQuery';
+import { CareSymbol } from 'components/managers/product/components/care/care-card';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -98,6 +100,32 @@ function StorefrontPreview() {
   );
 }
 
+// The care symbols AS THE SERVER RESOLVED THEM (TechCard.care_entries) — the structured projection
+// of the stored code string, already in canonical print order (wash, bleach, dry, iron,
+// professional) and named by the same care_symbol dictionary the label generator and the storefront
+// read. Read-only by contract: care is written as the code string, on the labels tab.
+//
+// It is not a duplicate of the picker's own rendering. The picker shows what someone TYPED; this
+// shows what the backend made of it after the last save — a stored token the vocabulary does not
+// know simply has no entry here, which is the only place in this admin where that is visible at all.
+function ResolvedCareEntries({ entries }: { entries?: common_CareEntry[] }) {
+  const rows = (entries ?? []).filter((e) => e.code?.trim());
+  if (rows.length === 0) return null;
+  return (
+    <div>
+      <GroupLabel>care — resolved on the last save</GroupLabel>
+      <div className='flex flex-wrap items-start gap-1'>
+        {rows.map((e) => (
+          <CareSymbol key={e.code} code={e.code as string} />
+        ))}
+      </div>
+      <Text size='micro' variant='label' className='mt-1'>
+        {rows.map((e) => e.name?.trim() || e.code).join(' · ')}
+      </Text>
+    </div>
+  );
+}
+
 // StyleFactsField edits the style catalogue facts fit / care at the tech-card level — they belong to
 // the style (shared by every colourway), so they are authored here and shown read-only on each
 // colourway card. They are stored on tech_card but written via UpdateStyle (not the tech-card write:
@@ -105,7 +133,16 @@ function StorefrontPreview() {
 // these two so no other style fact is touched.
 // Composition is NOT edited here: it is derived from the BOM's shell-fabric materials (composition_
 // entries, shown read-only on the BOM tab), never hand-entered.
-export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdit: boolean }) {
+export function StyleFactsField({
+  styleId,
+  canEdit,
+  careEntries,
+}: {
+  styleId?: number;
+  canEdit: boolean;
+  /** Server-resolved care symbols off the card read — display only, never written from here. */
+  careEntries?: common_CareEntry[];
+}) {
   const { getValues, control, resetField, setValue } = useFormContext<TechCardFormData>();
   const [saving, setSaving] = useState(false);
   const staging = useTechCardStaging();
@@ -309,6 +346,7 @@ export function StyleFactsField({ styleId, canEdit }: { styleId?: number; canEdi
           shell-fabric materials (see the composition on the BOM tab).
         </Text>
         <SelectField name='fit' label='fit' items={FIT_OPTIONS} readOnly={!canEdit} />
+        <ResolvedCareEntries entries={careEntries} />
         {canEdit && changed.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>
             <Pill tone='attention'>{saving ? 'saving…' : 'staged for save'}</Pill>

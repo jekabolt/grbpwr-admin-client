@@ -66,7 +66,7 @@ export function RevisionsField({ revisions }: { revisions?: common_TechCardRevis
               }
               value={
                 <Text size='micro' variant='label' component='span'>
-                  {formatTechCardDate(r.createdAt || r.revisionDate)}
+                  {formatTechCardDate(r.createdAt)}
                 </Text>
               }
             />

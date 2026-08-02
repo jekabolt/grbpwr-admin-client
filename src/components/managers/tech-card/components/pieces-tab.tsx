@@ -5,6 +5,7 @@ import { Button } from 'ui/components/button';
 import { Canvas, Pin } from 'ui/components/canvas';
 import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
+import { Pill } from 'ui/components/pill';
 import GenericPopover from 'ui/components/popover';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
@@ -245,6 +246,21 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     );
   }, [pieces]);
 
+  // `detached` is OUTPUT-ONLY (S8 orphan control): the store raises it when a piece's
+  // callout_number stops resolving to a callout on the card — the sketch callout it was pinned to
+  // was deleted. The piece survives on purpose rather than being dropped, which is exactly why it
+  // has to be VISIBLE here: until now it only appeared on the printed tech pack, so the one screen
+  // that can re-pin it was the one screen that never mentioned it. Keyed by lineKey, off the SAVED
+  // card — a row added since the last save has no server verdict yet and simply carries none.
+  const detachedKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of techCard?.techCard?.pieces ?? []) {
+      const key = p.lineKey?.trim();
+      if (key && p.detached) set.add(key);
+    }
+    return set;
+  }, [techCard?.techCard?.pieces]);
+
   // Which callout numbers the pieces reference, and what to call each pin in its tooltip.
   const pinnedNumbers = useMemo(
     () => new Set(pieces.map((p) => p.calloutNumber || 0).filter((n) => n > 0)),
@@ -361,6 +377,16 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                           <Text size='micro' variant='error'>
                             такая деталь уже есть — имя должно быть уникальным
                           </Text>
+                        )}
+                        {detachedKeys.has((p.lineKey ?? '').trim()) && (
+                          <div className='mt-0.5'>
+                            <Pill
+                              tone='attention'
+                              title='выноска, на которую ссылалась деталь, удалена со скетча — проставьте callout # заново на вкладке sketch'
+                            >
+                              откреплена от выноски
+                            </Pill>
+                          </div>
                         )}
                       </td>
                       <td>

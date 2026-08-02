@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -36,6 +36,11 @@ function buildSeason(t: SeasonType, year: number): string {
 export function SeasonField({ name = 'season' }: { name?: string }) {
   const { setValue } = useFormContext();
   const value = (useWatch({ name }) as string) || '';
+  // The control is hand-rolled (a read-only Input + a picker), so it gets none of ui/form's error
+  // plumbing for free: read the message and stamp the [data-field] anchor by hand, or a season the
+  // schema rejects would block the save with nothing on screen to explain it.
+  const { errors } = useFormState({ name });
+  const error = (errors as Record<string, { message?: string } | undefined>)[name];
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<SeasonType | null>(null);
   const [manual, setManual] = useState('');
@@ -54,10 +59,16 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
   };
 
   return (
-    <div className='space-y-px'>
+    <div className='space-y-px' data-field={name}>
       <FormLabel>season</FormLabel>
       <div className='flex items-center gap-1.5'>
-        <Input value={value} readOnly placeholder='— сезон —' className='flex-1' />
+        <Input
+          value={value}
+          readOnly
+          placeholder='— сезон —'
+          className='flex-1'
+          aria-invalid={!!error}
+        />
         <Button
           type='button'
           variant='secondary'
@@ -71,6 +82,11 @@ export function SeasonField({ name = 'season' }: { name?: string }) {
           выбрать
         </Button>
       </div>
+      {error?.message && (
+        <Text size='micro' variant='error'>
+          {error.message}
+        </Text>
+      )}
 
       <ConfirmationModal
         open={open}

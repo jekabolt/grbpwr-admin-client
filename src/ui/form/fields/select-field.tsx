@@ -13,6 +13,8 @@ type Props = {
   items: {
     label: string;
     value: string | number;
+    // Listed but not choosable yet (the label says why) — see ui/components/select.
+    disabled?: boolean;
   }[];
   [k: string]: any;
 };

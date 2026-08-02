@@ -1,7 +1,9 @@
 import { common_ColorwayPrice, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { useTechCardVatScenario } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { WaterfallRow } from 'ui/components/bar-row';
@@ -10,6 +12,7 @@ import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
+import Select from 'ui/components/select';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import CurrencySelect from 'ui/form/fields/currency-select';
@@ -19,6 +22,9 @@ import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { useDevExpenses } from './dev-expenses-field';
 import { TechCardFormData } from './schema';
 import { useSamples } from './useSamples';
+
+// "no country picked" for the VAT-scenario select — '' cannot be a Radix Select.Item value.
+const DOMESTIC = '__domestic__';
 
 const num = (s?: string) => {
   const n = parseDecimalNumber(s);
@@ -93,6 +99,23 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const { dictionary } = useDictionary();
   const techCardId = techCard?.id;
 
+  // WHICH MARKET this margin is for. GetTechCardRequest.vat_country_code was never sent, so the tab
+  // always showed the domestic rate while presenting it as "the" margin — the one thing the netting
+  // contract says is not true ("one gross price is sold into as many rates as there are
+  // destinations"). '' keeps the page's own read, i.e. the domestic country; picking a country
+  // fetches the same card netted at that country's rate, as a scenario beside the default.
+  const [vatScenarioCountry, setVatScenarioCountry] = useState('');
+  const { data: vatScenario, isFetching: vatScenarioLoading } = useTechCardVatScenario(
+    techCardId,
+    vatScenarioCountry,
+  );
+  // Everything except the VAT context and the net retail is rate-independent (a unit cost carries no
+  // VAT), so the rollup below stays the page's — only these two reads follow the scenario.
+  const vatCard = vatScenarioCountry && vatScenario ? vatScenario : techCard;
+  const countryItems = (dictionary?.countries ?? [])
+    .filter((c) => c.active && c.code)
+    .map((c) => ({ value: c.code as string, label: `${c.code} — ${c.name ?? ''}` }));
+
   // A usage costs at order-scale when it has per-size consumption; at per-garment scale when
   // it uses the single consumption. Mixing both in one card mixes scales in the total.
   //
@@ -158,13 +181,17 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const hasCosting =
     materials > 0 || articlesSubtotal > 0 || num(decimalToInput(rollup?.unitCost)) > 0;
 
-  const { gross: grossRetail, net: netRetail, reason: retailReason } = useRetail(techCard, cur);
+  const { gross: grossRetail, net: netRetail, reason: retailReason } = useRetail(vatCard, cur);
   // The margin is drawn against NET retail, because unit_cost carries no VAT. Gross is kept only to
   // show what the old number was while the target is re-anchored — never to compute against.
   const retail = netRetail ?? grossRetail;
   const netted = netRetail != null;
-  const vatCountry = rollup?.vatCountryCode || '';
-  const vatRate = num(decimalToInput(rollup?.vatRatePct));
+  // The country the figures above were actually netted at, as the SERVER reports it — not the
+  // dropdown. An unknown code comes back echoed with no rate, and saying which country produced a
+  // number is the whole point of the control.
+  const vatContext = vatCard?.techCard?.costing;
+  const vatCountry = vatContext?.vatCountryCode || '';
+  const vatRate = num(decimalToInput(vatContext?.vatRatePct));
 
   const marginBase = netRetail;
   const grossMargin = marginBase != null ? marginBase - unitCost : undefined;
@@ -265,6 +292,38 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         NOT each product’s stored cost_price. Per-colourway precision lives in the cost estimate
         below and on each product’s detail page. R&D is in the dev base currency.
       </Text>
+
+      {/* WHICH MARKET the margin above is for. Catalogue prices are VAT-inclusive, so the net
+          retail — and therefore the margin — depends entirely on the destination's rate. The list
+          is the country dictionary; an empty dictionary hides the control rather than offering an
+          empty select, and the domestic default still stands. */}
+      {countryItems.length > 0 && (
+        <div className='flex flex-wrap items-end gap-3'>
+          <label className='flex min-w-56 flex-col gap-1'>
+            <Text size='micro' variant='label' tracking='label' className='uppercase'>
+              margin for market (VAT)
+            </Text>
+            {/* DOMESTIC is a sentinel, not ''. A Radix Select.Item throws on an empty-string
+                value, so "no country picked" needs a real token on the way in and out. */}
+            <Select
+              name='costing-vat-country'
+              fullWidth
+              value={vatScenarioCountry || DOMESTIC}
+              items={[{ value: DOMESTIC, label: 'domestic (default)' }, ...countryItems]}
+              onValueChange={(v: string) => setVatScenarioCountry(v === DOMESTIC ? '' : v)}
+            />
+          </label>
+          <Text size='micro' variant='label' className='min-w-0 flex-1 pb-0.5'>
+            {vatScenarioLoading
+              ? 're-reading the card at that country’s rate…'
+              : vatCountry
+                ? vatRate > 0
+                  ? `net retail and margin above are computed at ${vatRate.toFixed(0)}% ${vatCountry} VAT${vatScenarioCountry ? '' : ' — the company’s domestic rate'}.`
+                  : `no VAT rate on file for ${vatCountry} — nothing is netted, so the margin above is the gross-price one.`
+                : 'the company’s domestic rate. Pick a destination to see the margin that market actually leaves.'}
+          </Text>
+        </div>
+      )}
 
       {mixedScale && (
         <CalloutBox tone='warning'>

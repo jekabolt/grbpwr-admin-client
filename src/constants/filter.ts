@@ -123,6 +123,25 @@ export const techCardPurposeFormOptions: Array<{ value: string; label: string }>
   { value: 'TECH_CARD_PURPOSE_AUXILIARY', label: PURPOSE_LABEL.auxiliary },
 ];
 
+// WS7: which kind of non-sold item an AUXILIARY card produces. Only valid with
+// purpose=auxiliary — the dto rejects the pairing otherwise — so the header only offers it on an
+// auxiliary card and the save mapper clears it on a sellable one. UNKNOWN is offered as the
+// explicit "not classified yet" value: it is what the backend stores as NULL, and the assembly
+// field reads it as the unclassified component.
+export const techCardAuxSubtypeFormOptions: Array<{ value: string; label: string }> = [
+  { value: 'TECH_CARD_AUX_SUBTYPE_UNKNOWN', label: '— not classified —' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_BRAND_LABEL', label: 'brand label' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_CARE_LABEL', label: 'care label' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_SIZE_LABEL', label: 'size label' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_HANGTAG', label: 'hangtag' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_STICKER', label: 'sticker' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_DUST_BAG', label: 'dust bag (пыльник)' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_BOX', label: 'box' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_INSERT', label: 'insert' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_HANGER', label: 'hanger' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_OTHER', label: 'other' },
+];
+
 // Tech-card release gate, orthogonal to stage (server defaults UNKNOWN→DRAFT).
 export const techCardApprovalStateOptions: Array<{
   value: common_TechCardApprovalState;

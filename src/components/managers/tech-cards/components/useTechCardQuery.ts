@@ -103,6 +103,25 @@ export function useTechCard(id: number | undefined) {
   });
 }
 
+// The SAME card read again, netted at another country's VAT rate — a pricing scenario, not the
+// card. Deliberately its own query key rather than a parameter on useTechCard: that read is what
+// seeds the whole editing form (mapTechCardToForm), and re-keying it on a dropdown would remount
+// the page and re-seed a form the operator may be halfway through editing. This one is read by the
+// costing tab alone, for `costing.vat_*` and `colorways[].net_prices`, and only fires once a
+// country is actually picked — the domestic figures already come with the page.
+// Nested UNDER detail(id) so every mutation that invalidates the card detail invalidates it too.
+export function useTechCardVatScenario(id: number | undefined, vatCountryCode: string) {
+  return useQuery({
+    queryKey: [...techCardKeys.detail(id ?? 0), 'vat', vatCountryCode],
+    queryFn: async () => {
+      const response = await adminService.GetTechCard({ id: id!, vatCountryCode });
+      return response.techCard;
+    },
+    enabled: !!id && !!vatCountryCode,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // Fittings anchored to this tech card (ListFittings filtered by tech_card_id). Used for
 // the read-only "fittings" block and the POM actuals fitting picker.
 export function useTechCardFittings(techCardId?: number) {

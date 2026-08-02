@@ -19,6 +19,7 @@ import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import { generateCareLabel, hasAnyComposition } from 'utils/care-label';
+import { useBomItemIdOptions } from './bom-line-picker';
 import { LabelsChecklist } from './labels-checklist';
 import { TechCardFormData, wireInt } from './schema';
 import { labelAttachmentOptions, labelPlacementOptions } from './tech-card-options';
@@ -37,6 +38,9 @@ const emptyLabel = {
   attachment: '',
   size: '',
   note: '',
+  // 0 = not linked to a BOM line. Present so a freshly appended row starts on the picker's
+  // "— not linked —" option instead of an empty trigger (the field is only defaulted by the schema).
+  bomItemId: 0,
 };
 
 // Labels carry no image, so the "thumbnail" is a typographic square badge of the label type — it
@@ -59,6 +63,12 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
   const { control } = useFormContext<TechCardFormData>();
   const labelType = useWatch({ control, name: `labels.${index}.labelType` }) as string;
   const isCare = labelType === CARE;
+  // Which BOM article this label is printed on (§2.8). The wire carries the BOM line's server id,
+  // so the picker offers ids — never a number the operator has to know, and never one belonging to
+  // another card, which the backend now rejects outright.
+  const bomItemId =
+    (useWatch({ control, name: `labels.${index}.bomItemId` }) as number | undefined) ?? 0;
+  const { options: bomItemOptions, dangling: bomItemDangling } = useBomItemIdOptions(bomItemId);
 
   return (
     <div id={`label-row-${index}`} className='border border-borderColor bg-bgColor p-2'>
@@ -107,6 +117,19 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
         />
         <InputField name={`labels.${index}.size`} label='size' />
         <InputField name={`labels.${index}.note`} label={isCare ? 'состав / care text' : 'note'} />
+        <div>
+          <SelectField
+            name={`labels.${index}.bomItemId`}
+            label='материал (BOM)'
+            items={bomItemOptions}
+            valueAsNumber
+          />
+          {bomItemDangling && (
+            <Text size='micro' className='text-error'>
+              строки BOM больше нет — сохранение будет отклонено, выберите другую или «not linked»
+            </Text>
+          )}
+        </div>
       </div>
     </div>
   );

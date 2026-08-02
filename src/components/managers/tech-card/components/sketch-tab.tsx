@@ -1,5 +1,5 @@
 import { common_MediaFull, common_TechCard, common_TechCardMediaKind } from 'api/proto-http/admin';
-import { techCardMediaKindOptions } from 'constants/filter';
+import { techCardMeasurementUnitOptions, techCardMediaKindOptions } from 'constants/filter';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Accordion } from 'ui/components/accordion';
@@ -11,6 +11,7 @@ import { Pill } from 'ui/components/pill';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { TechCardFormData } from './schema';
@@ -364,6 +365,13 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
     return items;
   };
 
+  // The card's geometry unit exists exactly to say what a callout's dimensions are measured in
+  // (techCardMeasurementUnitOptions), so the field names it rather than leaving the operator to
+  // guess whether "12" is cm or mm.
+  const measurementUnit = (useWatch({ control, name: 'measurementUnit' }) ?? '') as string;
+  const unitLabel =
+    techCardMeasurementUnitOptions.find((o) => o.value === measurementUnit)?.label ?? '';
+
   const pinOptions = [
     { value: 0, label: '(unpinned)' },
     ...media.map((m, i) => ({
@@ -441,6 +449,14 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
                   label='pinned to'
                   items={pinOptions}
                   valueAsNumber
+                />
+                {/* The measurement the callout carries (ширина кармана, длина планки…). It
+                    round-trips and prints on the tech pack, but nothing in this editor could
+                    write it — a callout could only ever be described in prose. */}
+                <InputField
+                  name={`callouts.${index}.dimensions`}
+                  label={`dimensions${unitLabel ? ` (${unitLabel})` : ''}`}
+                  placeholder='e.g. 14 × 16'
                 />
               </div>
               <TextareaField

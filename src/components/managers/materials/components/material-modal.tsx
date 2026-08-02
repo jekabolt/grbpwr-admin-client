@@ -487,6 +487,7 @@ export function MaterialModal({
       fiberCode: r.fiberCode,
       name: undefined,
       percent: inputToDecimal(r.percent),
+      source: undefined,
     }));
     const payload: common_Material = {
       id: material?.id ?? 0,

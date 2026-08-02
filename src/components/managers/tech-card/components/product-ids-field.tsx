@@ -12,11 +12,10 @@ function productName(product?: common_Colorway): string {
 // Catalog products linked to this tech card — read-only. Post R1-merge, a colourway IS a
 // product (its `styleId` points at this tech card, not the other way around), so "linked
 // products" is a projection of techCard.colorways, not an independently editable list. This
-// field used to read/write a `productIds` RHF field that is a total phantom: mapTechCardToForm
-// always resets it to `[]` (schema.ts) and mapFormToTechCardInsert never writes it back —
-// common_TechCardInsert carries no productIds at all anymore (grepped: the only other reader was
-// index.tsx's "unlinks N products" warning, which the same phantom field also leaves permanently
-// dead). There is no RPC to attach/detach a colourway from here, so this renders what's real
+// field used to read/write a `productIds` RHF field that was a phantom — common_TechCardInsert
+// carries no productIds at all anymore, so the key has since been deleted from the form schema
+// along with index.tsx's "unlinks N products" warning, its only other reader.
+// There is no RPC to attach/detach a colourway from here, so this renders what's real
 // (techCard.colorways) and points to where a link is actually made (the colourways tab). Fetches
 // its own copy of the tech card since this field receives no props from its caller — react-query
 // dedupes against the page-level load, so this is effectively free once the tab has loaded.
