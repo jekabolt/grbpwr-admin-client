@@ -6318,7 +6318,10 @@ export type common_TechCardAuxSubtype =
   | "TECH_CARD_AUX_SUBTYPE_BOX"
   | "TECH_CARD_AUX_SUBTYPE_INSERT"
   | "TECH_CARD_AUX_SUBTYPE_HANGER"
-  | "TECH_CARD_AUX_SUBTYPE_OTHER";
+  | "TECH_CARD_AUX_SUBTYPE_OTHER"
+  // кофр — the carrier a garment travels/hangs in. Its own sub-type rather than a dust bag: it is
+  // cut, sewn and costed as its own item, and an assembly bill names which of the two ships.
+  | "TECH_CARD_AUX_SUBTYPE_GARMENT_CASE";
 export type CreateTechCardResponse = {
   id: number | undefined;
 };
