@@ -1111,6 +1111,15 @@ export function TechCardForm({
 
                 <Section title='classification' className='w-full lg:w-1/2'>
                   <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
+                  {/* NF-07: the server refuses a purpose flip once the card has runs, colourways or
+                    assembly usage. Colourways are the one arm the client can see (they come back on
+                    the card), so say it here rather than let the operator discover it by failing the
+                    save. The other two arms are only known server-side — that refusal names itself. */}
+                  {(techCard?.colorways?.length ?? 0) > 0 && (
+                    <Text variant='error' size='small'>
+                      ! purpose is locked: {techCard?.colorways?.length} colourway(s) linked
+                    </Text>
+                  )}
                   {/* Purpose is mutually exclusive with the output material and the save is a full
                     replace — flag the destruction BEFORE it happens, it's not reversible. There is
                     no matching warning for the other direction: a colourway links itself to a style
