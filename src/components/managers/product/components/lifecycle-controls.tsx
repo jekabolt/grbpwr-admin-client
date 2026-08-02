@@ -107,10 +107,11 @@ export function LifecycleControls({
       'Colorway archived',
     ).catch(() => {});
 
-  // #60: archiving is reversible. Restore brings a retired colourway back as HIDDEN (kept off the
-  // storefront until it's explicitly unhidden/published).
-  const restore = () =>
-    transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway restored — now hidden');
+  // #60: archiving is reversible. The SERVER picks where it lands — HIDDEN for something that was
+  // published, DRAFT for a discarded draft, which must not be handed a publication it never earned.
+  // The requested target stays HIDDEN because that is the RPC's "unarchive" edge; the message stays
+  // neutral because the outcome is the server's call.
+  const restore = () => transition('COLORWAY_LIFECYCLE_STATUS_HIDDEN', 'Colorway restored');
 
   return (
     <Section
@@ -156,7 +157,12 @@ export function LifecycleControls({
                   unhide
                 </Button>
               )}
-              {(isActive || isHidden) && (
+              {/* A DRAFT can be archived too — that is how a colourway created by mistake is
+                discarded. Without it a draft was a dead end (publish or nothing) and it kept
+                pinning its style: a style with any live colourway cannot change purpose, and
+                there is no delete. The verb differs because the consequence does — nothing
+                public is being retired. */}
+              {(isDraft || isActive || isHidden) && (
                 <Button
                   type='button'
                   variant='secondary'
@@ -165,7 +171,7 @@ export function LifecycleControls({
                   disabled={busy}
                   onClick={() => setConfirmArchive(true)}
                 >
-                  archive
+                  {isDraft ? 'discard' : 'archive'}
                 </Button>
               )}
             </>
@@ -187,7 +193,8 @@ export function LifecycleControls({
     >
       {isArchived && (
         <Text variant='inactive' size='small'>
-          archived — removed from the storefront. restore brings it back as hidden.
+          archived — removed from the storefront. restore brings it back as hidden, or as a draft if
+          it was never published.
         </Text>
       )}
 
@@ -222,8 +229,9 @@ export function LifecycleControls({
         onCancel={() => setConfirmArchive(false)}
       >
         <Text variant='uppercase' className='font-bold'>
-          archive this colourway? it will be removed from the storefront. you can restore it later
-          (it comes back hidden).
+          {isDraft
+            ? 'discard this colourway? it was never published, so nothing leaves the storefront. you can restore it later (it comes back as a draft).'
+            : 'archive this colourway? it will be removed from the storefront. you can restore it later (it comes back hidden).'}
         </Text>
       </ConfirmationModal>
     </Section>
