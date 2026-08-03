@@ -1,12 +1,18 @@
 import { common_ColorwayPrice, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { useTechCardVatScenario } from 'components/managers/tech-cards/components/useTechCardQuery';
+import {
+  useCostingMigrationExceptions,
+  useRepriceTechCardBom,
+  useTechCardVatScenario,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { WaterfallRow } from 'ui/components/bar-row';
+import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
@@ -19,6 +25,7 @@ import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { operationMinutes, SummaryOp } from './construction-tab';
 import { useDevExpenses } from './dev-expenses-field';
 import { TechCardFormData } from './schema';
 import { useSamples } from './useSamples';
@@ -239,6 +246,52 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const hasTarget = targetPct > 0;
   const onTarget = marginPct != null && hasTarget && marginPct >= targetPct;
 
+  // --- Phase 3 (plan 11): provenance-band inputs ---
+  const isDraft = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_DRAFT';
+  const { showMessage } = useSnackBarStore();
+  const reprice = useRepriceTechCardBom();
+  // The Phase 2 migration report for THIS card — empty for every cleanly-migrated card, so the
+  // banner below simply never renders in the common case.
+  const { data: migrationExceptions = [] } = useCostingMigrationExceptions(techCardId);
+
+  // Implied labour rate, moved here from the construction tab: cmt_cost is a per-GARMENT quote, so
+  // beside the input the derived money-per-minute reads against the construction total SAM
+  // (smv-else-sam, exactly the server's operationMinutes rule).
+  const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
+  const totalSam = operations.reduce((sum, o) => sum + operationMinutes(o), 0);
+  const impliedPerMinute = cmt > 0 && totalSam > 0 ? cmt / totalSam : undefined;
+
+  // Read-only cutting-wastage context for the reject rate (plan 10): the per-line wastage% already
+  // grosses the material lines, so reject% must not re-price the same losses. Read from the SAVED
+  // card (the rollup's own inputs), not the form.
+  const bomLines = techCard?.techCard?.bomItems ?? [];
+  const bomWastages = bomLines
+    .map((b) => num(decimalToInput(b.wastagePercent)))
+    .filter((w) => w > 0);
+  const avgWastage = bomWastages.length
+    ? bomWastages.reduce((a, b) => a + b, 0) / bomWastages.length
+    : undefined;
+  const rejectNoWastage = defectPct > 10 && bomLines.length > 0 && bomWastages.length === 0;
+
+  const catalogLinkedLines = bomLines.filter((b) => (b.materialId ?? 0) > 0).length;
+  const onReprice = () => {
+    if (!techCardId) return;
+    reprice.mutate(techCardId, {
+      onSuccess: (r) => {
+        const lines = r.lines ?? [];
+        const changed = lines.filter((l) => l.changed).length;
+        const noPrice = lines.filter((l) => !l.newPrice).length;
+        showMessage(
+          `цены из каталога: изменено ${changed} из ${lines.length}` +
+            (noPrice ? `, без каталожной цены: ${noPrice}` : '') +
+            ((r.skippedUnlinked ?? 0) > 0 ? `, без привязки к каталогу: ${r.skippedUnlinked}` : ''),
+          'success',
+        );
+      },
+      onError: () => showMessage('не удалось обновить цены из каталога', 'error'),
+    });
+  };
+
   // R&D is a period style cost, deliberately outside the unit COGS — it lands in the strip as
   // "what developing this cost" and as the amount the unit margin has to earn back.
   const { data: devData } = useDevExpenses(techCardId);
@@ -319,6 +372,22 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
 
   return (
     <div className='flex flex-col gap-3'>
+      {/* Plan identity (plan 11 header): whose numbers these are and whether they are complete —
+          answered before a single figure is read, not deduced from footnotes 300 lines down. */}
+      <div className='flex flex-wrap items-center gap-1.5'>
+        <Pill tone={isDraft ? 'mut' : 'attention'}>{isDraft ? 'draft план' : 'released'}</Pill>
+        {cur && <Pill tone='mut'>{cur}</Pill>}
+        {hasCosting &&
+          (rollup?.hasUnpriced || rollup?.hasUnconvertedCurrencies ? (
+            <Pill tone='warn'>неполный</Pill>
+          ) : (
+            <Pill tone='mut'>полный</Pill>
+          ))}
+        <Text size='micro' variant='label'>
+          плановая себестоимость · пересчитывается при сохранении карты
+        </Text>
+      </div>
+
       {/* BLOCKING, so it sits ABOVE the strip it invalidates rather than beside the FX note at the
           bottom. An uncostable line joins NO currency bucket, so hasUnconvertedCurrencies never
           catches it and every figure below renders plausible-but-short by a whole material — the
@@ -404,7 +473,208 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         </CalloutBox>
       )}
 
-      {/* WHICH MARKET the margin above is for. Catalogue prices are VAT-inclusive, so the net
+      {/* Phase 2 migration debt for THIS card: hardware/packaging money the scalar→BOM migration
+          refused to move mechanically. Renders only when rows exist — a cleanly migrated card
+          (the overwhelmingly common case) never sees this. */}
+      {migrationExceptions.length > 0 && (
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            <b>Деньги ждут ручного переноса в BOM.</b> Миграция «hardware/packaging → BOM» не смогла
+            перенести эти суммы автоматически:
+          </Text>
+          {migrationExceptions.map((e, i) => (
+            <Text size='micro' key={i}>
+              {`· ${e.article}: ${e.amount?.value ?? '—'} ${e.currency || ''} — ${
+                e.kind === 'not_draft'
+                  ? 'карта была released (перенесите при пере-релизе)'
+                  : e.kind === 'zero_colorways'
+                    ? 'нет колорвеев, некуда повесить usage'
+                    : 'в секции уже была строка с ценой (double-count; BOM победил)'
+              }`}
+            </Text>
+          ))}
+          <Text size='micro' variant='label'>
+            Перенос: строка BOM с этой суммой + usage на каждый колорвей. Отчёт исторический
+            (зафиксирован миграцией) и не самоочищается — он напоминание, а не текущее состояние
+            BOM.
+          </Text>
+        </CalloutBox>
+      )}
+
+      {/* ═══ COMPUTED · материалы — the system's own numbers, from BOM × colourway recipes.
+          Everything in this band is computed server-side on save; nothing here is typed. */}
+      <GroupLabel>COMPUTED · материалы — из BOM × рецепты колорвеев</GroupLabel>
+      {colorwayCosts.length > 0 && (
+        <DataTable>
+          <thead>
+            <tr>
+              <th>colourway</th>
+              <th>materials / unit</th>
+              <th>unit cost</th>
+              <th>qty</th>
+              <th>order cost</th>
+            </tr>
+          </thead>
+          <tbody>
+            {colorwayCosts.map((cc, i) => (
+              // An uncostable line blocks THIS colourway's own cost seed, so the figures are
+              // muted to stop them being read as the answer — the name stays at full weight
+              // because it is what you have to go and fix.
+              <tr
+                key={i}
+                className={cc.hasUnpriced ? '[&>td:not(:first-child)]:text-labelColor' : undefined}
+              >
+                <td>
+                  <span className='flex flex-wrap items-center gap-1'>
+                    {colorwayLabel(cc.colorwayId)}
+                    {cc.colorwayId === 0 && <Pill tone='mut'>основной</Pill>}
+                    {cc.hasUnconvertedCurrencies && <Pill tone='warn'>no FX</Pill>}
+                    {cc.hasUnpriced && (
+                      <Pill tone='warn' title='в рецепте есть строка, которую нельзя посчитать'>
+                        строка без цены
+                      </Pill>
+                    )}
+                  </span>
+                </td>
+                <td>{decimalToInput(cc.materialsPerUnit) || <EmptyCell />}</td>
+                <td>{decimalToInput(cc.unitCost) || <EmptyCell />}</td>
+                <td>{cc.orderQty || <EmptyCell />}</td>
+                <td>{decimalToInput(cc.orderCost) || <EmptyCell />}</td>
+              </tr>
+            ))}
+          </tbody>
+        </DataTable>
+      )}
+      {materialsTotal.length > 0 && (
+        <div>
+          {materialsTotal.map((line, i) => (
+            <Row
+              key={i}
+              label={`materials · ${line.currency || 'no currency'}`}
+              value={decimalToInput(line.amount) || '—'}
+            />
+          ))}
+        </div>
+      )}
+      {colorwayCosts.length === 0 && materialsTotal.length === 0 && (
+        <Text size='micro' variant='label'>
+          материалов пока нет — заполните BOM и рецепты колорвеев, суммы посчитаются при
+          сохранении. Источник и дату каждой цены видно в «cost estimate» ниже и на строках BOM.
+        </Text>
+      )}
+      {/* Reprice: the one write this band owns. Server-side, draft-only, catalog-linked lines only —
+          the same CATALOG_LATEST price the estimate table shows as the fallback. */}
+      {canWriteCosting && isDraft && catalogLinkedLines > 0 && (
+        <div className='flex flex-wrap items-center gap-3'>
+          <Button
+            type='button'
+            size='sm'
+            variant='secondary'
+            disabled={reprice.isPending}
+            onClick={onReprice}
+          >
+            {reprice.isPending ? 'обновляю цены…' : 'обновить цены из каталога'}
+          </Button>
+          <Text size='micro' variant='label' className='min-w-0 flex-1'>
+            перезапишет unit price у {catalogLinkedLines} привязанных к каталогу строк BOM текущей
+            каталожной ценой и пометит их источник «catalog»; подписанный MATERIALS sign-off станет
+            устаревшим — цены документа реально изменились.
+          </Text>
+        </div>
+      )}
+      {/* Costing FX rates are global (shared across all cards) and live in Settings — here we
+          only note the fold + link out, keeping the hard "unconverted" warning. */}
+      <Text size='micro' variant='label'>
+        Multi-currency BOM lines fold into the base currency
+        {rollup?.baseCurrency ? ` (${rollup.baseCurrency})` : ''} via the global costing FX rates,
+        which also seed the product’s cost price.{' '}
+        <Link to={ROUTES.settings} className='underline hover:text-textColor'>
+          Manage FX rates in Settings
+        </Link>
+        .
+      </Text>
+      {rollup?.hasUnconvertedCurrencies && (
+        <CalloutBox tone='error'>
+          <Text size='micro'>
+            <b>Some BOM lines are in another currency</b>, so they are excluded from the
+            costing-currency total — the unit cost above is understated.{' '}
+            <Link to={ROUTES.settings} className='underline'>
+              Add a costing FX rate in Settings
+            </Link>{' '}
+            to get a complete <b>base-currency</b> cost (unit cost base): the headline above stays
+            in the costing currency and still will not include those lines.
+          </Text>
+        </CalloutBox>
+      )}
+      {/* The note used to hang off `!hasCosting` — i.e. it appeared only when there was no rollup
+          at all and therefore nothing that could be stale, and stayed hidden on exactly the cards
+          where the rollup CAN lag behind the BOM. Inverted: a card that has a rollup is a card
+          whose rollup was computed at some earlier save. */}
+      {hasCosting && (
+        <Text size='micro' variant='label'>
+          the materials rollup above is computed from the BOM on SAVE — edits to the BOM, to a
+          colourway’s usages or to a material’s price are not in these figures until the card is
+          saved and re-read.
+        </Text>
+      )}
+
+      {/* ═══ QUOTED · работа — the factory's CMT quote per garment. The one money figure a human
+          brings from outside; the implied rate ties it back to the construction minutes. */}
+      <GroupLabel>QUOTED · работа (CMT)</GroupLabel>
+      <fieldset disabled={!canWriteCosting} className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'>
+        <DecimalField name='costing.cmtCost' label='CMT cost / изделие (квота фабрики)' />
+      </fieldset>
+      {impliedPerMinute != null && (
+        <Text size='micro' variant='label'>
+          {`total SAM ${totalSam.toFixed(1)} мин (конструктив) → CMT ${cmt.toFixed(2)} ${cur} ≈ ${impliedPerMinute.toFixed(2)} ${cur}/мин — производная ставка, не хранится; сверьте с обычной ставкой фабрики.`}
+        </Text>
+      )}
+
+      {/* ═══ ENTERED · прочие прямые — manual because nothing in the system can derive them. */}
+      <GroupLabel>ENTERED · прочие прямые</GroupLabel>
+      <fieldset
+        disabled={!canWriteCosting}
+        className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
+      >
+        <DecimalField name='costing.logisticsCost' label='logistics / изделие' />
+        <DecimalField name='costing.overheadCost' label='overhead / изделие' />
+        <CurrencySelect name='costing.currency' label='currency' />
+      </fieldset>
+      <Text size='micro' variant='label'>
+        За 1 изделие, в валюте костинга (единой для всех ручных статей). Вводятся вручную, потому
+        что данных для вывода нет. Материалы сюда не входят — они выше, из BOM. Ценообразование
+        (наценка/опт/розница) живёт на опубликованном продукте, не здесь.
+      </Text>
+      <fieldset disabled={!canWriteCosting} className='border-0 p-0'>
+        <TextareaField name='costing.notes' label='notes' rows={2} maxLength={2000} />
+      </fieldset>
+
+      {/* ═══ RATES — percentages, with the adjacent figure each one must NOT double-count. */}
+      <GroupLabel>RATES</GroupLabel>
+      <fieldset
+        disabled={!canWriteCosting}
+        className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
+      >
+        <DecimalField name='costing.defectPercent' label='reject rate % (готовые изделия)' />
+      </fieldset>
+      <Text size='micro' variant='label'>
+        {avgWastage != null
+          ? `Кроёные потери уже в материалах: средний cutting wastage по BOM-строкам ${avgWastage.toFixed(1)}% (${bomWastages.length} строк с wastage). Reject % — только брак ГОТОВЫХ изделий, не потери кроя.`
+          : 'Reject % — брак ГОТОВЫХ изделий. Потери кроя задаются per-строчно в BOM (wastage %) и уже заложены в материалы.'}
+      </Text>
+      {rejectNoWastage && (
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            <b>{`Reject ${defectPct.toFixed(0)}% при нулевом wastage на всех ${bomLines.length} строках BOM`}</b>
+            {' — похоже, в reject свалены и потери кроя. Раздельно честнее: wastage на строках материалов, reject — только на готовые изделия.'}
+          </Text>
+        </CalloutBox>
+      )}
+
+      {/* ═══ RESULT — the commercial read: what the market leaves after the production cost above.
+          Deliberately separated from the cost bands: margin is a pricing fact, not a cost fact. */}
+      <GroupLabel>RESULT · retail → margin</GroupLabel>
+      {/* WHICH MARKET the margin is for. Catalogue prices are VAT-inclusive, so the net
           retail — and therefore the margin — depends entirely on the destination's rate. The list
           is the country dictionary; an empty dictionary hides the control rather than offering an
           empty select, and the domestic default still stands. */}
@@ -429,40 +699,26 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
               ? 're-reading the card at that country’s rate…'
               : vatCountry
                 ? vatRate > 0
-                  ? `net retail and margin above are computed at ${vatRate.toFixed(0)}% ${vatCountry} VAT${vatScenarioCountry ? '' : ' — the company’s domestic rate'}.`
-                  : `no VAT rate on file for ${vatCountry} — nothing is netted, so the margin above is the gross-price one.`
+                  ? `net retail and margin are computed at ${vatRate.toFixed(0)}% ${vatCountry} VAT${vatScenarioCountry ? '' : ' — the company’s domestic rate'}.`
+                  : `no VAT rate on file for ${vatCountry} — nothing is netted, so the margin is the gross-price one.`
                 : 'the company’s domestic rate. Pick a destination to see the margin that market actually leaves.'}
           </Text>
         </div>
       )}
-
       <fieldset
         disabled={!canWriteCosting}
         className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
       >
-        <DecimalField name='costing.cmtCost' label='CMT cost / изделие' />
-        <DecimalField name='costing.logisticsCost' label='logistics / изделие' />
-        <DecimalField name='costing.overheadCost' label='overhead / изделие' />
-        <DecimalField name='costing.defectPercent' label='defect %' />
         {/* This style's own target. Left empty it falls back to the house default, which the server
             resolves onto the read — so an empty field is not "no target", it is "the usual one". */}
         <DecimalField
           name='costing.targetMarginPct'
           label={`target margin %${hasTarget && !num(costing.targetMarginPct) ? ` (house ${targetPct.toFixed(0)})` : ''}`}
         />
-        <CurrencySelect name='costing.currency' label='currency' />
-      </fieldset>
-      <Text size='micro' variant='label'>
-        Все статьи — на 1 изделие, в одной валюте. Материалы приходят из BOM, не набираются руками.
-        Ценообразование (наценка/опт/розница) живёт на опубликованном продукте, не здесь.
-      </Text>
-      <fieldset disabled={!canWriteCosting} className='border-0 p-0'>
-        <TextareaField name='costing.notes' label='notes' rows={2} maxLength={2000} />
       </fieldset>
 
       {/* 16.1 — where the retail price goes. Same inputs as above, but each one is a bar you can
           see the size of, and margin lands at the bottom. */}
-      <GroupLabel>{retail != null ? 'retail → gross margin' : 'unit cost composition'}</GroupLabel>
       {!hasCosting ? (
         <Text size='micro' variant='label'>
           nothing to draw yet — add materials to the BOM or type a cost article above and the
@@ -512,104 +768,6 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           {netted
             ? `retail read from the colourways’ ${cur} price and netted of ${vatRate.toFixed(0)}% ${vatCountry} VAT — catalogue prices are VAT-inclusive, and unit cost is not, so the margin above is drawn against the net figure. Gross margin at the list price is ${grossMarginPct != null ? `${grossMarginPct.toFixed(1)}%` : '—'}; that is the number this tab used to show, and the target still needs re-anchoring against the net one.`
             : `retail read from the colourways’ ${cur} price. No VAT rate on file for ${vatCountry || 'the selected country'}, so nothing was netted — for an export destination that is correct, otherwise set the rate in the accounting VAT settings or the margin above is overstated.`}
-        </Text>
-      )}
-
-      {/* Per-colourway material cost — the one figure the estimate tab can only show one
-          colourway at a time, so it stays on the roll-up. */}
-      {colorwayCosts.length > 0 && (
-        <>
-          <GroupLabel>cost by colourway (computed server-side)</GroupLabel>
-          <DataTable>
-            <thead>
-              <tr>
-                <th>colourway</th>
-                <th>materials / unit</th>
-                <th>unit cost</th>
-                <th>qty</th>
-                <th>order cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {colorwayCosts.map((cc, i) => (
-                // An uncostable line blocks THIS colourway's own cost seed, so the figures are
-                // muted to stop them being read as the answer — the name stays at full weight
-                // because it is what you have to go and fix.
-                <tr
-                  key={i}
-                  className={cc.hasUnpriced ? '[&>td:not(:first-child)]:text-labelColor' : undefined}
-                >
-                  <td>
-                    <span className='flex flex-wrap items-center gap-1'>
-                      {colorwayLabel(cc.colorwayId)}
-                      {cc.colorwayId === 0 && <Pill tone='mut'>основной</Pill>}
-                      {cc.hasUnconvertedCurrencies && <Pill tone='warn'>no FX</Pill>}
-                      {cc.hasUnpriced && (
-                        <Pill tone='warn' title='в рецепте есть строка, которую нельзя посчитать'>
-                          строка без цены
-                        </Pill>
-                      )}
-                    </span>
-                  </td>
-                  <td>{decimalToInput(cc.materialsPerUnit) || <EmptyCell />}</td>
-                  <td>{decimalToInput(cc.unitCost) || <EmptyCell />}</td>
-                  <td>{cc.orderQty || <EmptyCell />}</td>
-                  <td>{decimalToInput(cc.orderCost) || <EmptyCell />}</td>
-                </tr>
-              ))}
-            </tbody>
-          </DataTable>
-        </>
-      )}
-
-      {materialsTotal.length > 0 && (
-        <>
-          <GroupLabel>materials by currency · primary colourway</GroupLabel>
-          <div>
-            {materialsTotal.map((line, i) => (
-              <Row
-                key={i}
-                label={line.currency || 'no currency'}
-                value={decimalToInput(line.amount) || '—'}
-              />
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Costing FX rates are global (shared across all cards) and live in Settings — here we
-          only note the fold + link out, keeping the hard "unconverted" warning. */}
-      <Text size='micro' variant='label'>
-        Multi-currency BOM lines fold into the base currency
-        {rollup?.baseCurrency ? ` (${rollup.baseCurrency})` : ''} via the global costing FX rates,
-        which also seed the product’s cost price.{' '}
-        <Link to={ROUTES.settings} className='underline hover:text-textColor'>
-          Manage FX rates in Settings
-        </Link>
-        .
-      </Text>
-      {rollup?.hasUnconvertedCurrencies && (
-        <CalloutBox tone='error'>
-          <Text size='micro'>
-            <b>Some BOM lines are in another currency</b>, so they are excluded from the
-            costing-currency total — the unit cost above is understated.{' '}
-            <Link to={ROUTES.settings} className='underline'>
-              Add a costing FX rate in Settings
-            </Link>{' '}
-            to get a complete <b>base-currency</b> cost (unit cost base): the headline above stays
-            in the costing currency and still will not include those lines.
-          </Text>
-        </CalloutBox>
-      )}
-      {/* The note used to hang off `!hasCosting` — i.e. it appeared only when there was no rollup
-          at all and therefore nothing that could be stale, and stayed hidden on exactly the cards
-          where the rollup CAN lag behind the BOM. Inverted: a card that has a rollup is a card
-          whose rollup was computed at some earlier save. */}
-      {hasCosting && (
-        <Text size='micro' variant='label'>
-          the materials rollup above is computed from the BOM on SAVE — edits to the BOM, to a
-          colourway’s usages or to a material’s price are not in these figures until the card is
-          saved and re-read.
         </Text>
       )}
     </div>

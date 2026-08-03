@@ -2460,6 +2460,12 @@ export type TechCardBomItem = {
   // a real FK instead of a fragile positional index.
   id: number | undefined;
   lineKey: string | undefined;
+  // Stored price provenance (production-costing Phase 3, plan 11). READ-ONLY — the server stamps
+  // both on write and ignores anything a client sends here. price_source is 'manual' (the operator
+  // typed/edited unit_price through a card save), 'catalog' (the reprice action pulled it from the
+  // material catalog), or '' for a pre-provenance row whose origin is honestly unknown.
+  priceSource: string | undefined;
+  priceSnapshotAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
