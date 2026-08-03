@@ -7236,6 +7236,10 @@ export type common_ProductionRun = {
   // UpdateProductionRunRequest.expected_lock_version so a list→edit needs no extra GET (mirrors
   // TechCard.lock_version).
   lockVersion: number | undefined;
+  // The run's receiving events (Phase 4, receipt v1), oldest first. Populated on the single-run
+  // read (GetProductionRun); list reads leave it empty to keep them light. Money on each receipt is
+  // stripped without costing:read.
+  receipts: common_ProductionRunReceipt[] | undefined;
 };
 
 // ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
@@ -7283,6 +7287,35 @@ export type common_ProductionRunColorwayCost = {
   hasUncosted: boolean | undefined;
 };
 
+// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1): who
+// received what and when, at what frozen valuation. v1 is final-only (one receipt closes the run);
+// partial receipts are a later phase on this same shape. unit_cost_base/base_currency are money and
+// are stripped without costing:read; has_base false means the valuation was not computable at
+// receipt time (uncosted issues / unfolded cost articles) and unit_cost_base is unset.
+export type common_ProductionRunReceipt = {
+  id: number | undefined;
+  runId: number | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  adminUsername: string | undefined;
+  note: string | undefined;
+  unitCostBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  hasBase: boolean | undefined;
+  lines: common_ProductionRunReceiptLine[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// ProductionRunReceiptLine is one counted plan line of a receipt: which line (by its stable
+// line_key), what was booked as good stock and what was counted as defect. product_id/size_id are
+// snapshots of the plan line at receipt time; size_id 0 means the line has no size (auxiliary runs).
+export type common_ProductionRunReceiptLine = {
+  lineKey: string | undefined;
+  productId: number | undefined;
+  sizeId: number | undefined;
+  goodQty: number | undefined;
+  defectQty: number | undefined;
+};
+
 export type ListProductionRunsRequest = {
   techCardId: number | undefined;
   status: string | undefined;
@@ -7322,6 +7355,39 @@ export type ReceiveProductionRunRequest = {
 
 export type ReceiveProductionRunResponse = {
   costPriceUpdated: boolean | undefined;
+};
+
+// PostProductionRunReceiptLineInput is one counted line of the receipt command, addressed by the
+// plan line's stable line_key (never by (product, size) — the whole point of 0230). good_qty is
+// what gets POSTED TO STOCK; defect_qty is a disjoint count that is recorded, never stocked.
+export type PostProductionRunReceiptLineInput = {
+  lineKey: string | undefined;
+  goodQty: number | undefined;
+  defectQty: number | undefined;
+};
+
+export type PostProductionRunReceiptRequest = {
+  runId: number | undefined;
+  lines: PostProductionRunReceiptLineInput[] | undefined;
+  // Client-minted command identity: exactly 26 characters of [0-9A-Z] (an uppercase Crockford ULID
+  // fits), minted once per user intent (per modal open, NOT per attempt) so a network retry replays
+  // instead of double-booking.
+  idempotencyKey: string | undefined;
+  // The lock_version the operator counted against (from the run read). >0 and stale → Aborted:
+  // someone edited the run between the count and the post. 0 opts out (legacy shim path).
+  expectedLockVersion: number | undefined;
+  note: string | undefined;
+  // Seed every received product's cost_price from the frozen actual unit cost (costing:write).
+  updateCostPrice: boolean | undefined;
+};
+
+export type PostProductionRunReceiptResponse = {
+  receiptId: number | undefined;
+  costPriceUpdated: boolean | undefined;
+  // true when this response was replayed from the idempotency record (the command had already
+  // executed) rather than executed now.
+  replayed: boolean | undefined;
+  run: common_ProductionRun | undefined;
 };
 
 export type GetProductionRunMaterialPlanRequest = {
@@ -9078,7 +9144,22 @@ export interface AdminService {
   // ReceiveProductionRun receives a run into a linked product's stock (by received_qty per size),
   // transitions the run to `received`, and optionally sets the product's cost_price from the run's
   // actual unit cost. It is guarded against a double receipt.
+  // DEPRECATED (Phase 4, receipt v1): a thin shim over PostProductionRunReceipt that synthesizes
+  // the receipt from the run's STORED received_qty/defect_qty counts — kept for one release so an
+  // old client (which stamps counts via UpdateProductionRun first) keeps working. New callers use
+  // PostProductionRunReceipt: quantities travel IN the command, one atomic transaction, idempotent.
   ReceiveProductionRun(request: ReceiveProductionRunRequest): Promise<ReceiveProductionRunResponse>;
+  // PostProductionRunReceipt is the atomic receiving command (Phase 4, receipt v1, final-only): in
+  // ONE transaction it records the immutable receipt (with per-line counts referenced by the plan
+  // lines' line_key), books the good units into each line's product stock (or the output material
+  // for an auxiliary run), freezes the run's actual unit cost on the receipt, optionally seeds each
+  // product's cost_price, transitions the run to `received`, and writes the idempotency record the
+  // accounting worker posts from. Идемпотентность = replay: a retry with the same idempotency_key
+  // and identical payload returns the original success (replayed=true); the same key with a
+  // DIFFERENT payload is rejected with AlreadyExists. An all-scrap receipt (0 good, >0 defect) is
+  // valid: nothing is stocked, the run still closes with the defect recorded.
+  // Requires production:write AND products:write (it moves sellable stock).
+  PostProductionRunReceipt(request: PostProductionRunReceiptRequest): Promise<PostProductionRunReceiptResponse>;
   // GetProductionRunMaterialPlan estimates the fabric/notion requirement of a run from its lines'
   // colourway norms × planned qty × (1 + wastage), against on-hand and already-issued stock (NF-06).
   // It is a plan-estimate before the marker; the real consumption comes from stock issues.
@@ -13132,6 +13213,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ReceiveProductionRun",
       }) as Promise<ReceiveProductionRunResponse>;
+    },
+    PostProductionRunReceipt(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      const path = `api/admin/production-runs/${request.runId}/receipts`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostProductionRunReceipt",
+      }) as Promise<PostProductionRunReceiptResponse>;
     },
     GetProductionRunMaterialPlan(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {
