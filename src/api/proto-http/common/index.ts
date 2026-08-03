@@ -3367,6 +3367,35 @@ export type ProductionRunColorwayCost = {
   hasUncosted: boolean | undefined;
 };
 
+// ProductionRunReceiptLine is one counted plan line of a receipt: which line (by its stable
+// line_key), what was booked as good stock and what was counted as defect. product_id/size_id are
+// snapshots of the plan line at receipt time; size_id 0 means the line has no size (auxiliary runs).
+export type ProductionRunReceiptLine = {
+  lineKey: string | undefined;
+  productId: number | undefined;
+  sizeId: number | undefined;
+  goodQty: number | undefined;
+  defectQty: number | undefined;
+};
+
+// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1): who
+// received what and when, at what frozen valuation. v1 is final-only (one receipt closes the run);
+// partial receipts are a later phase on this same shape. unit_cost_base/base_currency are money and
+// are stripped without costing:read; has_base false means the valuation was not computable at
+// receipt time (uncosted issues / unfolded cost articles) and unit_cost_base is unset.
+export type ProductionRunReceipt = {
+  id: number | undefined;
+  runId: number | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  adminUsername: string | undefined;
+  note: string | undefined;
+  unitCostBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  hasBase: boolean | undefined;
+  lines: ProductionRunReceiptLine[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
 // ProductionRunMarker is one imported nesting marker (раскладка / lay) of a run (gap-07 v2 E): the
 // CAD source, the fabric width and lay length it was nested on, the units it yields, its
 // fabric-utilisation %, an optional fabric/size, and a reference URL to the exported marker file.
@@ -3432,6 +3461,10 @@ export type ProductionRun = {
   // UpdateProductionRunRequest.expected_lock_version so a list→edit needs no extra GET (mirrors
   // TechCard.lock_version).
   lockVersion: number | undefined;
+  // The run's receiving events (Phase 4, receipt v1), oldest first. Populated on the single-run
+  // read (GetProductionRun); list reads leave it empty to keep them light. Money on each receipt is
+  // stripped without costing:read.
+  receipts: ProductionRunReceipt[] | undefined;
 };
 
 // SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style

@@ -8,16 +8,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
+import { ulid } from 'utils/ulid';
 import { materialLabel } from './aux-run-plan';
-import {
-  updateRunErrorMessage,
-  useReceiveProductionRun,
-  useUpdateRunSection,
-} from './useProductionRuns';
+import { receiptErrorMessage, usePostRunReceipt } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 
 type Row = {
+  lineKey: string;
   productId: number;
   sizeId: number;
   plannedQty: number;
@@ -25,12 +23,15 @@ type Row = {
   defect: string;
 };
 
-// Receiving is two steps against the contract: persist received/defect on each run LINE
-// (UpdateProductionRun), then post stock into each line's own product + optionally set its
-// cost_price (ReceiveProductionRun — NF-06, no run-level product).
-// Auxiliary runs (NF-07 / B-3) reuse the same two steps, but the single product-less line's
-// received qty is booked into the tech card's output_material_id in the MATERIAL warehouse: no
-// per-product grouping, no orphan guard, and cost_price is a no-op (there is no product).
+// Receiving is ONE atomic command now (Phase 4, receipt v1): the counted good/defect quantities
+// travel in PostProductionRunReceipt per line (by the plan lines' stable line_key), and the server
+// records the receipt, posts stock, freezes the valuation and closes the run in a single
+// transaction. The old two-step (stamp counts, then receive) could leave counts saved with no stock
+// posted; that state is no longer reachable. The idempotency key is minted per modal open, so a
+// network retry of the same count REPLAYS the original success instead of double-booking.
+// Auxiliary runs (NF-07 / B-3) go through the same command; the single product-less line's good
+// qty is booked into the tech card's output_material_id in the MATERIAL warehouse, and cost_price
+// is a no-op (there is no product).
 export function ReceiveModal({
   open,
   onOpenChange,
@@ -49,13 +50,15 @@ export function ReceiveModal({
   const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
   const { canWriteCosting } = usePermissions();
-  const update = useUpdateRunSection();
-  const receive = useReceiveProductionRun();
+  const receive = usePostRunReceipt();
 
   const [rows, setRows] = useState<Row[]>([]);
   // Setting cost_price is a costing write — off (and disabled) without costing:write.
   const [updateCostPrice, setUpdateCostPrice] = useState(false);
-  const busy = update.isPending || receive.isPending;
+  // The command's identity: one key per USER INTENT (per modal open), not per attempt — a retry of
+  // the same count must replay, a fresh open is a fresh intent.
+  const [idempotencyKey, setIdempotencyKey] = useState('');
+  const busy = receive.isPending;
 
   // Group rows by product (colour-model) for display, keeping each row's flat index for handlers.
   const groups = useMemo(() => {
@@ -92,6 +95,7 @@ export function ReceiveModal({
     setRows(
       (run?.run?.lines ?? [])
         .map((l) => ({
+          lineKey: l.lineKey ?? '',
           productId: l.productId ?? 0,
           sizeId: l.sizeId ?? 0,
           plannedQty: l.plannedQty ?? 0,
@@ -101,6 +105,7 @@ export function ReceiveModal({
         .sort((a, b) => a.productId - b.productId || a.sizeId - b.sizeId),
     );
     setUpdateCostPrice(canWriteCosting);
+    setIdempotencyKey(ulid());
   }, [run, open, canWriteCosting]);
 
   const submit = async () => {
@@ -113,8 +118,8 @@ export function ReceiveModal({
         return;
       }
     } else {
-      // NF-06: a line with received > 0 is booked into its own product — it must have one. Publish
-      // the colour-model as a product (or zero its received qty) before receiving.
+      // NF-06: a line with GOOD units is booked into its own product — it must have one. A
+      // defect-only count on an unpublished colour-model is fine (recorded, never stocked).
       const orphans = rows.filter((r) => (Number(r.received) || 0) > 0 && !r.productId);
       if (orphans.length > 0) {
         showMessage(
@@ -135,64 +140,50 @@ export function ReceiveModal({
         return;
       }
     }
-    // The receive RPC requires at least one GOOD unit — an all-scrap receipt (0 good, N defect) is
-    // not representable until the receipt rework lands. Catch it before step 1 stamps quantities on
-    // a run that then can't be received.
-    if (!rows.some((r) => (Number(r.received) || 0) > 0)) {
-      showMessage(
-        'Нет годных единиц — приёмка, где весь выпуск брак, пока не поддерживается (нечего постить в сток)',
-        'error',
-      );
+    // Only counted lines carry a receipt fact. Nothing counted at all = nothing to receive.
+    const counted = rows
+      .filter((r) => (Number(r.received) || 0) > 0 || (Number(r.defect) || 0) > 0)
+      .map((r) => ({
+        lineKey: r.lineKey,
+        goodQty: Number(r.received) || 0,
+        defectQty: Number(r.defect) || 0,
+      }));
+    if (counted.length === 0) {
+      showMessage('Ничего не посчитано — введите годные и/или брак хотя бы по одной строке', 'error');
       return;
     }
-    // Step 1 persists counts via read-modify-write like every other section: merge this
-    // modal's received/defect into the FRESHLY fetched lines by (product, size) — the `run`
-    // prop can be a stale list-cache snapshot and a full-replace from it would silently
-    // undo lines/costs/marker edits saved after that snapshot. The lock version, in contrast,
-    // MUST be the stale snapshot's: it is what the operator counted against, so a run edited
-    // since is refused (409 → «обновите страницу») rather than counted onto someone else's grid.
-    const counted = new Map(rows.map((r) => [`${r.productId}:${r.sizeId}`, r]));
-    try {
-      await update.mutateAsync({
-        id: run.id,
-        lockVersion: run.lockVersion ?? 0,
-        patch: {},
-        mergeLines: (freshLines) =>
-          freshLines.map((l) => {
-            const r = counted.get(`${l.productId ?? 0}:${l.sizeId ?? 0}`);
-            return r
-              ? { ...l, receivedQty: Number(r.received) || 0, defectQty: Number(r.defect) || 0 }
-              : l;
-          }),
-      });
-    } catch (e) {
-      showMessage(updateRunErrorMessage(e), 'error');
+    if (counted.some((l) => !l.lineKey)) {
+      // Every stored line carries a key since 0230; a keyless row means a stale pre-deploy read.
+      showMessage('Партия прочитана до обновления — обновите страницу и попробуйте снова', 'error');
       return;
     }
+    // All-scrap is a real outcome now: the run closes with the defect recorded and NOTHING posted
+    // to stock. Say it plainly instead of refusing.
+    const allScrap = counted.every((l) => l.goodQty === 0);
     try {
-      // Step 2 posts stock into each line's product (or the output material for aux) + optionally
-      // sets cost_price (no-op for aux).
+      // ONE command: counts + stock + valuation + status in a single transaction, idempotent by
+      // the per-open key. The lock version is the one the operator counted against — a run edited
+      // since is refused (409 → «обновите страницу») rather than counted onto someone else's grid.
       const res = await receive.mutateAsync({
         runId: run.id,
+        lines: counted,
+        idempotencyKey,
+        expectedLockVersion: run.lockVersion ?? 0,
         updateCostPrice: isAux ? false : updateCostPrice,
       });
       showMessage(
         isAux
           ? 'Run received · material stock posted'
-          : res.costPriceUpdated
-            ? 'Run received · product cost updated'
-            : 'Run received · stock posted',
+          : allScrap
+            ? 'Партия принята: весь выпуск брак, сток не пополнялся'
+            : res.costPriceUpdated
+              ? 'Run received · product cost updated'
+              : 'Run received · stock posted',
         'success',
       );
       onOpenChange(false);
     } catch (e) {
-      // The counts from step 1 ARE saved — say so, or the user can't tell what state the run is in.
-      showMessage(
-        `Counts saved, but stock was NOT posted: ${
-          e instanceof Error ? e.message : 'receive failed'
-        } — fix and press receive again`,
-        'error',
-      );
+      showMessage(receiptErrorMessage(e), 'error');
     }
   };
 
@@ -340,8 +331,8 @@ export function ReceiveModal({
 
             <Text variant='inactive' size='small'>
               {isAux
-                ? 'Receiving posts the GOOD quantity into the material warehouse (the defect count is recorded, not stocked) and moves this run to received — after that it cannot be deleted.'
-                : 'Receiving posts the GOOD quantity of each line into its own product (the defect count is recorded, not stocked) and moves this run to received — after that it cannot be deleted.'}
+                ? 'Receiving posts the GOOD quantity into the material warehouse (the defect count is recorded, not stocked) and moves this run to received in one atomic step — after that it cannot be deleted.'
+                : 'Receiving posts the GOOD quantity of each line into its own product (the defect count is recorded, not stocked) and moves this run to received in one atomic step — after that it cannot be deleted. Если весь выпуск брак — партия закроется приёмкой брака, сток не изменится.'}
             </Text>
           </div>
 

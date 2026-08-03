@@ -154,22 +154,51 @@ export function useDeleteProductionRun() {
   });
 }
 
-// Receive posts each line's received_qty into that line's own product (NF-06 — no run-level
-// product) and optionally sets each product's cost_price from the run's actual unit cost.
-// received/defect quantities must already be persisted on the run's lines (via UpdateProductionRun)
-// before calling this — the receive RPC itself carries no quantities.
-export function useReceiveProductionRun() {
+// The atomic receiving command (Phase 4, receipt v1): the counted quantities travel IN the call,
+// per line by the plan lines' stable line_key — the old two-step (stamp counts via
+// UpdateProductionRun, then a quantity-less receive) is gone, and with it the state where counts
+// were saved but stock was not posted. idempotencyKey is minted once per user intent (per modal
+// open), so a network retry REPLAYS the original success instead of double-booking.
+export function usePostRunReceipt() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: { runId: number; updateCostPrice: boolean }) =>
-      adminService.ReceiveProductionRun(input),
-    onSuccess: () => {
+    mutationFn: (input: {
+      runId: number;
+      lines: { lineKey: string; goodQty: number; defectQty: number }[];
+      idempotencyKey: string;
+      expectedLockVersion: number;
+      note?: string;
+      updateCostPrice: boolean;
+    }) =>
+      adminService.PostProductionRunReceipt({
+        runId: input.runId,
+        lines: input.lines,
+        idempotencyKey: input.idempotencyKey,
+        expectedLockVersion: input.expectedLockVersion,
+        note: input.note ?? '',
+        updateCostPrice: input.updateCostPrice,
+      }),
+    onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });
-      // Receive posts stock (and possibly cost_price) into each line's PRODUCT — the
+      qc.invalidateQueries({ queryKey: productionRunKeys.detail(v.runId) });
+      // The receipt posts stock (and possibly cost_price) into each line's PRODUCT — the
       // product stock-history views must not keep pre-receive data for 5 minutes.
       qc.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });
     },
   });
+}
+
+// Friendly copy for the receipt command's refusals. 409 (Aborted) = the run changed under the
+// count; 412/400 (FailedPrecondition) = already received / cancelled / nothing counted;
+// AlreadyExists (409 via grpc-gateway is Conflict too, so match the message) = an idempotency key
+// reused with a different payload — a client bug worth naming.
+export function receiptErrorMessage(e: unknown): string {
+  const status = (e as { status?: number } | undefined)?.status;
+  const msg = e instanceof Error ? e.message : '';
+  if (msg.includes('idempotency key')) return 'Эта приёмка уже была проведена с другими цифрами — обновите страницу';
+  if (status === 409) return 'Партия изменена в другом окне — обновите страницу и пересчитайте';
+  if (status === 412 || status === 400) return msg || 'Приёмка невозможна в текущем статусе партии';
+  return msg || 'Не удалось провести приёмку';
 }
 
 // Friendly copy for the delete guard. FAILED_PRECONDITION (received/closed) → 400; NOT_FOUND → 404.
