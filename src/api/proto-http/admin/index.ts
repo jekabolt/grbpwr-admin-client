@@ -5923,9 +5923,6 @@ export type common_TechCardBomItem = {
   // a real FK instead of a fragile positional index.
   id: number | undefined;
   lineKey: string | undefined;
-  // material_snapshot is a read-only JSON snapshot of the linked material's descriptive fields at
-  // save time (S23), so the document is self-contained.
-  materialSnapshot: string | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -6091,12 +6088,6 @@ export type common_TechCardPackaging = {
 export type common_TechCardCosting = {
   // manual per-unit cost articles (per ONE garment), all in `currency`.
   cmtCost: googletype_Decimal | undefined;
-  // фурнитура ВНЕ BOM, за 1 изделие. Hardware is also a first-class BOM section priced through the
-  // recipe, so this article and a hardware BOM line are mutually exclusive: a write carrying both is
-  // rejected (costing.hardware_cost FieldViolation) because it would double-count in every unit-cost
-  // rollup. Enforced on WRITE only — a card saved with both before the rule existed still reads back.
-  hardwareCost: googletype_Decimal | undefined;
-  packagingCost: googletype_Decimal | undefined;
   logisticsCost: googletype_Decimal | undefined;
   overheadCost: googletype_Decimal | undefined;
   defectPercent: googletype_Decimal | undefined;
@@ -7094,7 +7085,6 @@ export type common_ProductionRunInsert = {
   costs: common_ProductionRunCost[] | undefined;
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
-  markers: common_ProductionRunMarker[] | undefined;
   // Run ACTUAL cutting wastage % (0..100), entered per run once the marker/lay is known. When set it
   // OVERRIDES the BOM line's estimate wastage_percent in the run's cost calc (planned-cost snapshot +
   // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
@@ -7165,32 +7155,6 @@ export type common_ProductionRunCostKind =
   | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
   | "PRODUCTION_RUN_COST_KIND_DUTY"
   | "PRODUCTION_RUN_COST_KIND_OTHER";
-// ProductionRunMarker is one imported nesting marker (раскладка / lay) of a run (gap-07 v2 E): the
-// CAD source, the fabric width and lay length it was nested on, the units it yields, its
-// fabric-utilisation %, an optional fabric/size, and a reference URL to the exported marker file.
-// It is planning / traceability data — nothing here feeds the run's actual cost or cost_price.
-export type common_ProductionRunMarker = {
-  source: common_ProductionMarkerSource | undefined;
-  markerName: string | undefined;
-  sizeId: number | undefined;
-  materialId: number | undefined;
-  markerWidth: googletype_Decimal | undefined;
-  layLength: googletype_Decimal | undefined;
-  unitsPerMarker: number | undefined;
-  efficiencyPct: googletype_Decimal | undefined;
-  markerFileUrl: string | undefined;
-  notes: string | undefined;
-};
-
-// ProductionMarkerSource is the CAD/nesting software (or hand entry) a marker record came from.
-export type common_ProductionMarkerSource =
-  | "PRODUCTION_MARKER_SOURCE_UNKNOWN"
-  | "PRODUCTION_MARKER_SOURCE_GERBER"
-  | "PRODUCTION_MARKER_SOURCE_OPTITEX"
-  | "PRODUCTION_MARKER_SOURCE_LECTRA"
-  | "PRODUCTION_MARKER_SOURCE_AUDACES"
-  | "PRODUCTION_MARKER_SOURCE_MANUAL"
-  | "PRODUCTION_MARKER_SOURCE_OTHER";
 export type CreateProductionRunResponse = {
   id: number | undefined;
 };

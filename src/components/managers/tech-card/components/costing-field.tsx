@@ -38,8 +38,6 @@ const num = (s?: string) => {
 // itself is read back from the server-resolved effective_target_margin_pct.)
 const COSTING_COST_KEYS = [
   'cmtCost',
-  'hardwareCost',
-  'packagingCost',
   'logisticsCost',
   'overheadCost',
   'defectPercent',
@@ -161,8 +159,6 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
 
   const costing = (useWatch({ control, name: 'costing' }) ?? {}) as {
     cmtCost?: string;
-    hardwareCost?: string;
-    packagingCost?: string;
     logisticsCost?: string;
     overheadCost?: string;
     defectPercent?: string;
@@ -184,12 +180,12 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   // never typed — they come from the server rollup (BOM-derived).
   const materials = num(decimalToInput(rollup?.materialsPerUnit));
   const cmt = num(costing.cmtCost);
-  const hardware = num(costing.hardwareCost);
-  const packaging = num(costing.packagingCost);
   const logistics = num(costing.logisticsCost);
   const overhead = num(costing.overheadCost);
   const defectPct = num(costing.defectPercent);
-  const articlesSubtotal = cmt + hardware + packaging + logistics + overhead;
+  // hardware/packaging are BOM-priced since Phase 2 — they arrive inside the server's materials
+  // figure, never as typed articles.
+  const articlesSubtotal = cmt + logistics + overhead;
   const beforeDefect = materials + articlesSubtotal;
 
   // #7 — WHOSE unit cost this strip shows. It used to be this file's own JS-float re-derivation,
@@ -298,10 +294,11 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   // Waterfall geometry: the track is the full retail price (or, with no retail, the unit cost),
   // and each article bar sits where the running total lands — so the descent reads as money
   // leaving the price rather than as five unrelated bars.
+  // hardware · packaging have no bar of their own since Phase 2: they are BOM lines now, priced
+  // per colourway, and arrive inside the materials figure.
   const steps = [
     { label: 'materials (BOM)', amount: materials },
     { label: 'CMT', amount: cmt },
-    { label: 'hardware · packaging', amount: hardware + packaging },
     { label: 'logistics · overhead', amount: logistics + overhead },
     { label: `defect ${defectPct}%`, amount: defectAmount },
     // ≥ 0.005, not > 0: the server rounds unit_cost and materials_per_unit to 2dp independently,
@@ -444,8 +441,6 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         className='grid grid-cols-2 gap-3 border-0 p-0 lg:grid-cols-3'
       >
         <DecimalField name='costing.cmtCost' label='CMT cost / изделие' />
-        <DecimalField name='costing.hardwareCost' label='hardware / изделие' />
-        <DecimalField name='costing.packagingCost' label='packaging / изделие' />
         <DecimalField name='costing.logisticsCost' label='logistics / изделие' />
         <DecimalField name='costing.overheadCost' label='overhead / изделие' />
         <DecimalField name='costing.defectPercent' label='defect %' />

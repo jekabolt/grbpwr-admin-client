@@ -376,10 +376,10 @@ const packagingSchema = z.object({
 
 // Manual per-unit cost articles (per ONE garment), all in a single `currency`. Pricing
 // (markup/wholesale/retail) was removed from the tech card — it lives on the published product.
+// hardwareCost/packagingCost left this schema in Phase 2: both are BOM sections priced per
+// colourway now, so the costing block carries only the genuinely manual articles.
 const costingSchema = z.object({
   cmtCost: z.string().optional().default(''),
-  hardwareCost: z.string().optional().default(''),
-  packagingCost: z.string().optional().default(''),
   logisticsCost: z.string().optional().default(''),
   overheadCost: z.string().optional().default(''),
   defectPercent: z.string().optional().default(''),
@@ -416,8 +416,6 @@ export const emptyPackaging: z.input<typeof packagingSchema> = {
 
 export const emptyCosting: z.input<typeof costingSchema> = {
   cmtCost: '',
-  hardwareCost: '',
-  packagingCost: '',
   logisticsCost: '',
   overheadCost: '',
   defectPercent: '',
@@ -872,8 +870,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     costing: insert?.costing
       ? {
           cmtCost: decimalToInput(insert.costing.cmtCost),
-          hardwareCost: decimalToInput(insert.costing.hardwareCost),
-          packagingCost: decimalToInput(insert.costing.packagingCost),
           logisticsCost: decimalToInput(insert.costing.logisticsCost),
           overheadCost: decimalToInput(insert.costing.overheadCost),
           defectPercent: decimalToInput(insert.costing.defectPercent),
@@ -975,8 +971,6 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
   if (
     !hasContent([
       c?.cmtCost,
-      c?.hardwareCost,
-      c?.packagingCost,
       c?.logisticsCost,
       c?.overheadCost,
       c?.defectPercent,
@@ -989,8 +983,6 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
   }
   return {
     cmtCost: inputToDecimal(c?.cmtCost),
-    hardwareCost: inputToDecimal(c?.hardwareCost),
-    packagingCost: inputToDecimal(c?.packagingCost),
     logisticsCost: inputToDecimal(c?.logisticsCost),
     overheadCost: inputToDecimal(c?.overheadCost),
     // Empty = no style target; the server then resolves the house default into
@@ -1182,11 +1174,9 @@ export function mapFormToTechCardInsert(
         'TECH_CARD_FABRIC_DIRECTION_UNKNOWN') as common_TechCardFabricDirection,
       wastagePercent: inputToDecimal(b.wastagePercent),
       materialId: b.materialId || 0,
-      // Stable identity (§2.3): keep the server PK + the resolved line_key. material_snapshot is
-      // server-managed (read-only) — never sent.
+      // Stable identity (§2.3): keep the server PK + the resolved line_key.
       id: b.id || 0,
       lineKey: b.lineKey,
-      materialSnapshot: undefined,
     })),
     details: (data.details ?? [])
       .map((d) => ({
