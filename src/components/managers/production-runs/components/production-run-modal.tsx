@@ -172,7 +172,6 @@ export function ProductionRunModal({
           costs: [],
           markerEfficiencyPct: undefined,
           markerNotes: undefined,
-          markers: [],
           actualWastagePercent: inputToDecimal(d.actualWastagePercent),
         },
       },
