@@ -7161,7 +7161,11 @@ export type common_ProductionRunStatus =
   | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
   | "PRODUCTION_RUN_STATUS_RECEIVED"
   | "PRODUCTION_RUN_STATUS_CLOSED"
-  | "PRODUCTION_RUN_STATUS_CANCELLED";
+  | "PRODUCTION_RUN_STATUS_CANCELLED"
+  // At least one partial receipt is booked and the operator has not yet declared the run complete
+  // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
+  // writable through UpdateProductionRun.
+  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -7302,11 +7306,11 @@ export type common_ProductionRunColorwayCost = {
   hasUncosted: boolean | undefined;
 };
 
-// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1): who
-// received what and when, at what frozen valuation. v1 is final-only (one receipt closes the run);
-// partial receipts are a later phase on this same shape. unit_cost_base/base_currency are money and
-// are stripped without costing:read; has_base false means the valuation was not computable at
-// receipt time (uncosted issues / unfolded cost articles) and unit_cost_base is unset.
+// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1; Phase 5
+// allows several per run): who received what and when, at what frozen valuation.
+// unit_cost_base/base_currency are money and are stripped without costing:read; has_base false
+// means the valuation was not computable at receipt time (uncosted issues / unfolded cost
+// articles) and unit_cost_base is unset.
 export type common_ProductionRunReceipt = {
   id: number | undefined;
   runId: number | undefined;
@@ -7318,6 +7322,13 @@ export type common_ProductionRunReceipt = {
   hasBase: boolean | undefined;
   lines: common_ProductionRunReceiptLine[] | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // The receipt that declared the run complete and flipped it to RECEIVED (Phase 5). Every
+  // pre-Phase-5 receipt is final by construction.
+  final: boolean | undefined;
+  // Accounting outbox state of this receipt: 'pending' | 'posted' | 'dead_letter'. Read-only
+  // operational fact (the posting worker owns it); visible without costing:read — it carries no
+  // amounts.
+  postingStatus: string | undefined;
 };
 
 // ProductionRunReceiptLine is one counted plan line of a receipt: which line (by its stable
@@ -7394,6 +7405,12 @@ export type PostProductionRunReceiptRequest = {
   note: string | undefined;
   // Seed every received product's cost_price from the frozen actual unit cost (costing:write).
   updateCostPrice: boolean | undefined;
+  // Phase 5: true books THIS delivery's counts without declaring the run complete — the run moves
+  // to PARTIALLY_RECEIVED and further receipts stay possible. False (the default, and what every
+  // pre-Phase-5 client sends implicitly) is a FINAL receipt: it declares the run complete and
+  // flips it to RECEIVED. The flag is part of the idempotency request hash — the same key with a
+  // flipped flag is a different intent and is rejected, never replayed.
+  partial: boolean | undefined;
 };
 
 export type PostProductionRunReceiptResponse = {

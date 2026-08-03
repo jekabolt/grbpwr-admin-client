@@ -169,6 +169,9 @@ export function usePostRunReceipt() {
       expectedLockVersion: number;
       note?: string;
       updateCostPrice: boolean;
+      // Phase 5: true books this delivery WITHOUT declaring the run complete (the run moves to
+      // partially received). Omitted/false = FINAL, exactly what every pre-Phase-5 build sent.
+      partial?: boolean;
     }) =>
       adminService.PostProductionRunReceipt({
         runId: input.runId,
@@ -177,6 +180,7 @@ export function usePostRunReceipt() {
         expectedLockVersion: input.expectedLockVersion,
         note: input.note ?? '',
         updateCostPrice: input.updateCostPrice,
+        partial: input.partial ?? false,
       }),
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });

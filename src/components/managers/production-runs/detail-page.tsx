@@ -339,6 +339,69 @@ export function ProductionRunDetail() {
         </Section>
       ) : null}
 
+      {/* Receiving history (Phase 5): every booked delivery of this run, oldest first — what
+          arrived when, whether it closed the series, and whether accounting has posted it. Renders
+          only once something was received; money on receipts is server-stripped without
+          costing:read, so the list is safe for every reader. */}
+      {((run.receipts?.length ?? 0) > 0) ? (
+        <Section title='приёмки' question='Каждая поставка — отдельная квитанция; финальная закрывает серию.'>
+          <div className='flex flex-col'>
+            {(run.receipts ?? []).map((rc) => {
+              const good = (rc.lines ?? []).reduce(
+                (s: number, l: { goodQty?: number }) => s + (l.goodQty ?? 0),
+                0,
+              );
+              const defect = (rc.lines ?? []).reduce(
+                (s: number, l: { defectQty?: number }) => s + (l.defectQty ?? 0),
+                0,
+              );
+              return (
+                <div
+                  key={rc.id}
+                  className='flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
+                >
+                  <Text size='small'>#{rc.id}</Text>
+                  <Text size='small'>{runDate(rc.receivedAt) || '—'}</Text>
+                  <Text size='small'>
+                    {good} годных{defect > 0 ? ` · ${defect} брак` : ''}
+                  </Text>
+                  {rc.final ? (
+                    <span className='inline-block border border-textColor px-1.5 py-0.5 text-textBaseSize uppercase'>
+                      финальная
+                    </span>
+                  ) : (
+                    <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                      частичная
+                    </span>
+                  )}
+                  <Text
+                    size='small'
+                    variant='inactive'
+                    title='статус проводки в бухгалтерии; pending — воркер ещё не запостил'
+                  >
+                    {rc.postingStatus === 'posted'
+                      ? 'проведена'
+                      : rc.postingStatus === 'dead_letter'
+                        ? 'постинг завис — см. бухгалтерию'
+                        : 'ждёт постинга'}
+                  </Text>
+                  {canReadCosting && rc.hasBase && rc.unitCostBase?.value ? (
+                    <Text size='small' variant='inactive'>
+                      unit cost {decimalToInput(rc.unitCostBase)} {rc.baseCurrency || ''}
+                    </Text>
+                  ) : null}
+                  {rc.note ? (
+                    <Text size='small' variant='inactive'>
+                      {rc.note}
+                    </Text>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </Section>
+      ) : null}
+
       {/* Audit trail, not a planning step — collapsed by default (memory: collapse rarely-used
           content), same pattern as the tech card's packaging spec / provenance. */}
       <Section title='material movements' collapsible defaultOpen={false}>
@@ -404,6 +467,12 @@ function nextStepGuidance({
     return {
       tone: 'neutral',
       text: 'Closed — this is the final record of this run. Nothing on it can be edited any more.',
+    };
+  }
+  if (status === 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED') {
+    return {
+      tone: 'warning',
+      text: 'Частично принята: поставки бронируются на склад, серия открыта. Следующая поставка — той же кнопкой receive; финальная приёмка (галочка в модалке) закроет партию, остаток объявится непришедшим.',
     };
   }
   if (status === 'PRODUCTION_RUN_STATUS_RECEIVED') {

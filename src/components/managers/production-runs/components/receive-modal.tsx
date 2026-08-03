@@ -19,6 +19,10 @@ type Row = {
   productId: number;
   sizeId: number;
   plannedQty: number;
+  // Cumulative rollups over the run's EARLIER receipts (server-maintained since Phase 5) — shown
+  // as context; the inputs below count THIS delivery only.
+  alreadyGood: number;
+  alreadyDefect: number;
   received: string;
   defect: string;
 };
@@ -55,6 +59,9 @@ export function ReceiveModal({
   const [rows, setRows] = useState<Row[]>([]);
   // Setting cost_price is a costing write — off (and disabled) without costing:write.
   const [updateCostPrice, setUpdateCostPrice] = useState(false);
+  // Phase 5: checked = this receipt DECLARES THE RUN COMPLETE (the Phase 4 semantics, and the
+  // default); unchecked books a partial delivery and leaves the run open for further receipts.
+  const [finalReceipt, setFinalReceipt] = useState(true);
   // The command's identity: one key per USER INTENT (per modal open), not per attempt — a retry of
   // the same count must replay, a fresh open is a fresh intent.
   const [idempotencyKey, setIdempotencyKey] = useState('');
@@ -70,6 +77,17 @@ export function ReceiveModal({
     });
     return out;
   }, [rows]);
+
+  // What stays undelivered if THIS delivery lands as entered — the final-receipt hint names it.
+  const remainderAfterThis = useMemo(
+    () =>
+      rows.reduce(
+        (sum, r) =>
+          sum + Math.max(0, r.plannedQty - r.alreadyGood - (Number(r.received) || 0)),
+        0,
+      ),
+    [rows],
+  );
 
   // The aux run is a single product-less line; find its flat index for the received/defect inputs.
   const auxIdx = useMemo(() => {
@@ -90,21 +108,29 @@ export function ReceiveModal({
     }
     if (wasOpen.current) return;
     wasOpen.current = true;
-    // Sort by product then size so lines group contiguously by colour-model; received defaults
-    // to planned ("everything came in" is one click).
+    // Sort by product then size so lines group contiguously by colour-model. The inputs count
+    // THIS delivery: they default to the REMAINDER (planned − already received across earlier
+    // receipts) — on a virgin run that IS the plan, so "everything came in" stays one click, and
+    // on a partially received run the cumulative rollup is context, never a pre-filled double-book.
     setRows(
       (run?.run?.lines ?? [])
-        .map((l) => ({
-          lineKey: l.lineKey ?? '',
-          productId: l.productId ?? 0,
-          sizeId: l.sizeId ?? 0,
-          plannedQty: l.plannedQty ?? 0,
-          received: l.receivedQty != null ? String(l.receivedQty) : String(l.plannedQty ?? 0),
-          defect: l.defectQty != null ? String(l.defectQty) : '0',
-        }))
+        .map((l) => {
+          const alreadyGood = l.receivedQty ?? 0;
+          return {
+            lineKey: l.lineKey ?? '',
+            productId: l.productId ?? 0,
+            sizeId: l.sizeId ?? 0,
+            plannedQty: l.plannedQty ?? 0,
+            alreadyGood,
+            alreadyDefect: l.defectQty ?? 0,
+            received: String(Math.max(0, (l.plannedQty ?? 0) - alreadyGood)),
+            defect: '0',
+          };
+        })
         .sort((a, b) => a.productId - b.productId || a.sizeId - b.sizeId),
     );
     setUpdateCostPrice(canWriteCosting);
+    setFinalReceipt(true);
     setIdempotencyKey(ulid());
   }, [run, open, canWriteCosting]);
 
@@ -148,7 +174,10 @@ export function ReceiveModal({
         goodQty: Number(r.received) || 0,
         defectQty: Number(r.defect) || 0,
       }));
-    if (counted.length === 0) {
+    const isPartiallyReceived = run.run.status === 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED';
+    if (counted.length === 0 && !(finalReceipt && isPartiallyReceived)) {
+      // The one legal empty receipt is the FINAL short-close of a partially received run — the
+      // operator declares the series complete without a last delivery.
       showMessage('Ничего не посчитано — введите годные и/или брак хотя бы по одной строке', 'error');
       return;
     }
@@ -170,15 +199,20 @@ export function ReceiveModal({
         idempotencyKey,
         expectedLockVersion: run.lockVersion ?? 0,
         updateCostPrice: isAux ? false : updateCostPrice,
+        partial: !finalReceipt,
       });
       showMessage(
-        isAux
-          ? 'Run received · material stock posted'
-          : allScrap
-            ? 'Партия принята: весь выпуск брак, сток не пополнялся'
-            : res.costPriceUpdated
-              ? 'Run received · product cost updated'
-              : 'Run received · stock posted',
+        !finalReceipt
+          ? 'Поставка принята: партия остаётся открытой для следующих приёмок'
+          : isAux
+            ? 'Run received · material stock posted'
+            : counted.length === 0
+              ? 'Партия закрыта: остаток объявлен непришедшим'
+              : allScrap
+                ? 'Партия принята: весь выпуск брак, сток не пополнялся'
+                : res.costPriceUpdated
+                  ? 'Run received · product cost updated'
+                  : 'Run received · stock posted',
         'success',
       );
       onOpenChange(false);
@@ -291,6 +325,8 @@ export function ReceiveModal({
                         key={`${r.productId}-${r.sizeId}`}
                         label={String(findInDictionary(dictionary, r.sizeId, 'size') || r.sizeId)}
                         planned={r.plannedQty}
+                        alreadyGood={r.alreadyGood}
+                        alreadyDefect={r.alreadyDefect}
                         received={r.received}
                         defect={r.defect}
                         onReceived={(v) =>
@@ -313,6 +349,28 @@ export function ReceiveModal({
                 </div>
               ))}
 
+            {/* Phase 5: partial vs final. Checked (default) = the Phase 4 semantics — this receipt
+                declares the run complete. Unchecked books this delivery and keeps the run open. */}
+            <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
+              <input
+                type='checkbox'
+                checked={finalReceipt}
+                onChange={(e) => setFinalReceipt(e.target.checked)}
+              />
+              <Text size='small'>
+                финальная приёмка — партия объявляется полностью принятой
+                {finalReceipt && remainderAfterThis > 0
+                  ? ` (остаток ${remainderAfterThis} шт. будет закрыт как непришедший)`
+                  : ''}
+              </Text>
+            </label>
+            {!finalReceipt ? (
+              <Text variant='inactive' size='small'>
+                частичная приёмка: эта поставка бронируется на склад, партия останется открытой —
+                следующие поставки принимаются той же кнопкой, финальная приёмка закроет серию.
+              </Text>
+            ) : null}
+
             {!isAux && canWriteCosting && (
               <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
                 <input
@@ -331,8 +389,8 @@ export function ReceiveModal({
 
             <Text variant='inactive' size='small'>
               {isAux
-                ? 'Receiving posts the GOOD quantity into the material warehouse (the defect count is recorded, not stocked) and moves this run to received in one atomic step — after that it cannot be deleted.'
-                : 'Receiving posts the GOOD quantity of each line into its own product (the defect count is recorded, not stocked) and moves this run to received in one atomic step — after that it cannot be deleted. Если весь выпуск брак — партия закроется приёмкой брака, сток не изменится.'}
+                ? 'Receiving posts the GOOD quantity into the material warehouse (the defect count is recorded, not stocked) in one atomic step.'
+                : 'Receiving posts the GOOD quantity of each line into its own product (the defect count is recorded, not stocked) in one atomic step. Финальная приёмка переводит партию в received — после этого её нельзя удалить. Если весь выпуск брак — партия закроется приёмкой брака, сток не изменится.'}
             </Text>
           </div>
 
@@ -347,7 +405,7 @@ export function ReceiveModal({
               disabled={busy || rows.length === 0}
               onClick={submit}
             >
-              {busy ? 'receiving…' : 'receive'}
+              {busy ? 'receiving…' : finalReceipt ? 'receive' : 'принять поставку'}
             </Button>
           </div>
         </DialogPrimitives.Content>
@@ -359,6 +417,8 @@ export function ReceiveModal({
 function RowInputs({
   label,
   planned,
+  alreadyGood = 0,
+  alreadyDefect = 0,
   received,
   defect,
   onReceived,
@@ -366,6 +426,8 @@ function RowInputs({
 }: {
   label: string;
   planned: number;
+  alreadyGood?: number;
+  alreadyDefect?: number;
   received: string;
   defect: string;
   onReceived: (v: string) => void;
@@ -374,7 +436,13 @@ function RowInputs({
   return (
     <>
       <Text size='small'>
-        {label} <span className='text-textInactiveColor'>· plan {planned}</span>
+        {label}{' '}
+        <span className='text-textInactiveColor'>
+          · plan {planned}
+          {alreadyGood > 0 || alreadyDefect > 0
+            ? ` · уже принято ${alreadyGood}${alreadyDefect > 0 ? ` (+${alreadyDefect} брак)` : ''} · осталось ${Math.max(0, planned - alreadyGood)}`
+            : ''}
+        </span>
       </Text>
       {/* Whole units only — sanitize to digits like the lines grid; a typed "1.5" would
           otherwise pass the >= 0 guard and 400 on the integer proto field mid-flow. */}

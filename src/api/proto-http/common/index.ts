@@ -3265,7 +3265,11 @@ export type ProductionRunStatus =
   | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
   | "PRODUCTION_RUN_STATUS_RECEIVED"
   | "PRODUCTION_RUN_STATUS_CLOSED"
-  | "PRODUCTION_RUN_STATUS_CANCELLED";
+  | "PRODUCTION_RUN_STATUS_CANCELLED"
+  // At least one partial receipt is booked and the operator has not yet declared the run complete
+  // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
+  // writable through UpdateProductionRun.
+  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED";
 // ProductionRunCostKind is the article category of an actual production-run cost.
 export type ProductionRunCostKind =
   | "PRODUCTION_RUN_COST_KIND_UNKNOWN"
@@ -3366,11 +3370,11 @@ export type ProductionRunReceiptLine = {
   defectQty: number | undefined;
 };
 
-// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1): who
-// received what and when, at what frozen valuation. v1 is final-only (one receipt closes the run);
-// partial receipts are a later phase on this same shape. unit_cost_base/base_currency are money and
-// are stripped without costing:read; has_base false means the valuation was not computable at
-// receipt time (uncosted issues / unfolded cost articles) and unit_cost_base is unset.
+// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1; Phase 5
+// allows several per run): who received what and when, at what frozen valuation.
+// unit_cost_base/base_currency are money and are stripped without costing:read; has_base false
+// means the valuation was not computable at receipt time (uncosted issues / unfolded cost
+// articles) and unit_cost_base is unset.
 export type ProductionRunReceipt = {
   id: number | undefined;
   runId: number | undefined;
@@ -3382,6 +3386,13 @@ export type ProductionRunReceipt = {
   hasBase: boolean | undefined;
   lines: ProductionRunReceiptLine[] | undefined;
   createdAt: wellKnownTimestamp | undefined;
+  // The receipt that declared the run complete and flipped it to RECEIVED (Phase 5). Every
+  // pre-Phase-5 receipt is final by construction.
+  final: boolean | undefined;
+  // Accounting outbox state of this receipt: 'pending' | 'posted' | 'dead_letter'. Read-only
+  // operational fact (the posting worker owns it); visible without costing:read — it carries no
+  // amounts.
+  postingStatus: string | undefined;
 };
 
 // ProductionRunInsert is the writable payload for a run (header + colour-model × size lines).

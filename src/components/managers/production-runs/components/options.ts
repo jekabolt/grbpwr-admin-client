@@ -20,6 +20,8 @@ export const runStatusLabel = (s?: common_ProductionRunStatus | string): string 
       return 'planned';
     case 'PRODUCTION_RUN_STATUS_IN_PROGRESS':
       return 'in progress';
+    case 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED':
+      return 'partially received';
     case 'PRODUCTION_RUN_STATUS_RECEIVED':
       return 'received';
     case 'PRODUCTION_RUN_STATUS_CLOSED':
@@ -40,6 +42,10 @@ export const runStatusTone = (s?: common_ProductionRunStatus | string): string =
   switch (s) {
     case 'PRODUCTION_RUN_STATUS_IN_PROGRESS':
       return 'border-warning text-warning bg-warning/10';
+    // Between in-flight and done: deliveries are landing but the series is still open — the
+    // "keep an eye on it" tone, not the done-green.
+    case 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED':
+      return 'border-warning text-warning bg-warning/10';
     case 'PRODUCTION_RUN_STATUS_RECEIVED':
       return 'border-success text-success bg-success/10';
     case 'PRODUCTION_RUN_STATUS_CLOSED':
@@ -58,7 +64,9 @@ export const isRunLocked = (s?: common_ProductionRunStatus | string): boolean =>
   s === 'PRODUCTION_RUN_STATUS_RECEIVED' || s === 'PRODUCTION_RUN_STATUS_CLOSED';
 
 export const isRunReceivable = (s?: common_ProductionRunStatus | string): boolean =>
-  s === 'PRODUCTION_RUN_STATUS_PLANNED' || s === 'PRODUCTION_RUN_STATUS_IN_PROGRESS';
+  s === 'PRODUCTION_RUN_STATUS_PLANNED' ||
+  s === 'PRODUCTION_RUN_STATUS_IN_PROGRESS' ||
+  s === 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED';
 
 // A run is OPEN while it is still expected to produce something. Same two statuses as receivable —
 // named separately because "can I still receive it" and "is it still outstanding" are different
