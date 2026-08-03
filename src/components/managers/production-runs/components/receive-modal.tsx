@@ -124,23 +124,25 @@ export function ReceiveModal({
         return;
       }
     }
-    // Guard the counts: no negatives, and defects can't exceed what was received.
+    // Guard the counts: no negatives. There is deliberately NO `defect <= good` rule — the two are
+    // disjoint counts (2 good + 8 defective is a legitimate outcome of a bad batch), and the server
+    // imposes no such constraint either (its rate is defect / (good + defect)).
     for (const r of rows) {
       const rec = Number(r.received);
       const def = Number(r.defect);
       if (!Number.isFinite(rec) || rec < 0 || !Number.isFinite(def) || def < 0) {
-        showMessage('Received / defect quantities must be zero or more', 'error');
-        return;
-      }
-      if (def > rec) {
-        showMessage('Defect quantity cannot exceed received quantity', 'error');
+        showMessage('Количества «принято годных» / «брак» должны быть нулём или больше', 'error');
         return;
       }
     }
-    // The receive RPC requires at least one counted unit — catch it before step 1
-    // stamps quantities on a run that then can't be received.
+    // The receive RPC requires at least one GOOD unit — an all-scrap receipt (0 good, N defect) is
+    // not representable until the receipt rework lands. Catch it before step 1 stamps quantities on
+    // a run that then can't be received.
     if (!rows.some((r) => (Number(r.received) || 0) > 0)) {
-      showMessage('Nothing to receive — every received quantity is 0', 'error');
+      showMessage(
+        'Нет годных единиц — приёмка, где весь выпуск брак, пока не поддерживается (нечего постить в сток)',
+        'error',
+      );
       return;
     }
     // Step 1 persists counts via read-modify-write like every other section: merge this
@@ -207,13 +209,28 @@ export function ReceiveModal({
             </DialogPrimitives.Close>
           </div>
           <DialogPrimitives.Description className='sr-only'>
-            Count received and defect units per line, then post stock into each line's product.
+            Count the GOOD units and the defective ones per line, then post the good ones as stock
+            into each line's product.
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
             {rows.length === 0 ? (
               <Text variant='inactive' size='small'>
                 no lines planned — plan quantities on the run page first
+              </Text>
+            ) : null}
+
+            {/* The two columns mean different things to the server and the old neutral headings
+                («received» / «defect») invited the reading "received = everything that arrived,
+                of which N are bad". It is not: received_qty is what gets POSTED TO STOCK, and a
+                defect count entered on top of a received count that already included it inflates
+                the warehouse by exactly the defective units. Say so where the numbers are typed. */}
+            {rows.length > 0 ? (
+              <Text variant='inactive' size='small'>
+                «принято годных» — единицы, которые уйдут на склад и в продажу; именно это число
+                постится в сток. «брак (не попадёт на склад)» — отдельный счётчик, он НЕ входит в
+                годные: сервер считает процент брака как брак / (годные + брак), а стоимость брака
+                поглощается себестоимостью годных единиц.
               </Text>
             ) : null}
 
@@ -228,10 +245,10 @@ export function ReceiveModal({
                     quantity
                   </Text>
                   <Text variant='uppercase' size='small'>
-                    received
+                    принято годных
                   </Text>
-                  <Text variant='uppercase' size='small'>
-                    defect
+                  <Text variant='uppercase' size='small' title='не попадёт на склад'>
+                    брак
                   </Text>
                   <RowInputs
                     label={auxUnit || 'units'}
@@ -270,10 +287,10 @@ export function ReceiveModal({
                       size
                     </Text>
                     <Text variant='uppercase' size='small'>
-                      received
+                      принято годных
                     </Text>
-                    <Text variant='uppercase' size='small'>
-                      defect
+                    <Text variant='uppercase' size='small' title='не попадёт на склад'>
+                      брак
                     </Text>
                     {g.items.map(({ r, i }) => (
                       <RowInputs
@@ -320,8 +337,8 @@ export function ReceiveModal({
 
             <Text variant='inactive' size='small'>
               {isAux
-                ? 'Receiving posts the output into the material warehouse and moves this run to received — after that it cannot be deleted.'
-                : 'Receiving posts stock for each line into its own product and moves this run to received — after that it cannot be deleted.'}
+                ? 'Receiving posts the GOOD quantity into the material warehouse (the defect count is recorded, not stocked) and moves this run to received — after that it cannot be deleted.'
+                : 'Receiving posts the GOOD quantity of each line into its own product (the defect count is recorded, not stocked) and moves this run to received — after that it cannot be deleted.'}
             </Text>
           </div>
 
