@@ -99,7 +99,23 @@ export function ProductionRunDetail() {
   const hasReceivedAny = lines.some((l) => l.receivedQty != null);
   const receivedQtyTotal = lines.reduce((s, l) => s + (l.receivedQty ?? 0), 0);
   const defectQtyTotal = lines.reduce((s, l) => s + (l.defectQty ?? 0), 0);
-  const defectPct = receivedQtyTotal > 0 ? (defectQtyTotal / receivedQtyTotal) * 100 : 0;
+  // #9 — ONE defect formula. This page used to divide defect by received, the run LIST renders the
+  // server's `defect_pct_actual`, and the server computes defect / (received + defect): three
+  // screens, three percentages for one run. `received_qty` is the count of GOOD units (it is what
+  // gets posted to stock); the defective ones are a separate count, so the denominator is what came
+  // off the line, not what passed. The server's figure is authoritative and survives the costing
+  // strip (stripProductionRunActualsCosting keeps the quantity totals and defect_pct_actual), so it
+  // is available to every account that can open the run. The local fallback below exists only for a
+  // payload with no actuals at all — and it uses the SERVER's formula, not the old one.
+  const producedQtyTotal = receivedQtyTotal + defectQtyTotal;
+  const serverDefectPct = actuals?.defectPctActual?.value
+    ? Number(actuals.defectPctActual.value)
+    : NaN;
+  const defectPct = Number.isFinite(serverDefectPct)
+    ? serverDefectPct
+    : producedQtyTotal > 0
+      ? (defectQtyTotal / producedQtyTotal) * 100
+      : 0;
 
   // A one-line answer to "what IS this run", for the header: an auxiliary run banks a material
   // into the warehouse; a normal run is a set of colour-models that become sellable products.
@@ -235,8 +251,11 @@ export function ProductionRunDetail() {
           below (which is likewise never costing-gated). */}
       <StatGrid>
         <Stat label='planned qty' value={String(plannedQtyTotal)} />
+        {/* received = GOOD units — the count that is posted to stock. Defective units are a
+            separate count that never reaches the warehouse, so they are not inside this number and
+            the defect rate below is measured against received + defect, the way the server does. */}
         <Stat
-          label='received qty'
+          label='received (good)'
           value={hasReceivedAny ? String(receivedQtyTotal) : '—'}
           sub={
             hasReceivedAny && plannedQtyTotal > 0
@@ -245,11 +264,11 @@ export function ProductionRunDetail() {
           }
         />
         <Stat
-          label='defect'
+          label='defect (not stocked)'
           value={hasReceivedAny ? String(defectQtyTotal) : '—'}
           sub={
             hasReceivedAny && defectQtyTotal > 0
-              ? `${defectPct.toFixed(1)}% of received`
+              ? `${defectPct.toFixed(1)}% of ${producedQtyTotal} produced`
               : undefined
           }
           tone={defectQtyTotal > 0 ? 'down' : undefined}
