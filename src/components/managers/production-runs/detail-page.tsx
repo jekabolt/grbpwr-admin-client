@@ -22,7 +22,14 @@ import { decimalToInput } from 'utils/decimal';
 import { AuxRunPlan } from './components/aux-run-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
-import { isRunLocked, isRunReceivable, runStatusLabel, runStatusTone } from './components/options';
+import {
+  isRunLocked,
+  isRunReceivable,
+  overdueDays,
+  runDate,
+  runStatusLabel,
+  runStatusTone,
+} from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import { RunCosts } from './components/run-costs';
@@ -83,6 +90,7 @@ export function ProductionRunDetail() {
 
   const locked = isRunLocked(ins?.status);
   const receivable = isRunReceivable(ins?.status);
+  const late = overdueDays(ins?.promisedAt, ins?.status);
   // Lines planned but not yet tied to a product can't be booked on receive (NF-06) — hint it.
   // Auxiliary lines legitimately carry no product (they book into a material), so never flag them.
   const unassignedPlanned = isAux
@@ -182,6 +190,14 @@ export function ProductionRunDetail() {
             </Link>
             {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''}
             {ins?.startedAt ? ` · started ${ins.startedAt.slice(0, 10)}` : ''}
+          </Text>
+          {/* The planning window beside the identity: an operator asking "is this batch late" should
+              not have to open the edit modal to find the date it was promised for. */}
+          <Text variant='inactive' size='small'>
+            план {runDate(ins?.plannedStartAt) || '—'} → обещано {runDate(ins?.promisedAt) || '—'}
+            {late > 0 ? (
+              <span className='ml-2 uppercase text-error'>опаздывает {late} дн</span>
+            ) : null}
           </Text>
           <Text size='small'>{runTypeLabel}</Text>
         </div>
@@ -306,12 +322,16 @@ export function ProductionRunDetail() {
         title='step 2 · materials needed'
         question="Estimated requirement against warehouse stock, from the tech card's material norms."
       >
-        <MaterialPlan run={run} canEdit={canEdit} />
+        {/* `locked` is not decoration: a material issue needs an OPEN run (checkRunOpen), so on a
+            received/closed run the issue button could only ever produce a rejection. */}
+        <MaterialPlan run={run} canEdit={canEdit} locked={locked} />
       </Section>
 
       {canReadCosting ? (
         <Section title='step 3 · actual costs' question='Log the real costs incurred once known.'>
-          <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} />
+          {/* Same reason: UpdateProductionRun refuses a received/closed run, and cost articles are
+              written through it. The editor stays readable, the save is gone. */}
+          <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} locked={locked} />
         </Section>
       ) : null}
 
@@ -377,12 +397,20 @@ function nextStepGuidance({
     return { tone: 'error', text: 'Cancelled — this run will not be received.' };
   }
   if (status === 'PRODUCTION_RUN_STATUS_CLOSED') {
-    return { tone: 'neutral', text: 'Closed — this is the final record of this run.' };
+    return {
+      tone: 'neutral',
+      text: 'Closed — this is the final record of this run. Nothing on it can be edited any more.',
+    };
   }
   if (status === 'PRODUCTION_RUN_STATUS_RECEIVED') {
+    // This used to promise that "costs and materials can still be adjusted". They cannot:
+    // UpdateProductionRun refuses a received/closed run outright (ErrProductionRunReceivedImmutable)
+    // and material issues require an OPEN run (checkRunOpen). The page rendered a cost-save and an
+    // issue button the backend was guaranteed to reject, which is the worst kind of affordance —
+    // it teaches the operator that the app is broken rather than that the run is finished.
     return {
       tone: 'success',
-      text: 'Received — stock has been posted. Quantities are now locked; costs and materials can still be adjusted.',
+      text: 'Received — stock has been posted. The run is now a closed record: quantities, costs and material issues are all locked. Book a correction as a new run.',
     };
   }
   if (auxNoMaterial) {

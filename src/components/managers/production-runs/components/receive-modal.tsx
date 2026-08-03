@@ -148,11 +148,14 @@ export function ReceiveModal({
     // Step 1 persists counts via read-modify-write like every other section: merge this
     // modal's received/defect into the FRESHLY fetched lines by (product, size) — the `run`
     // prop can be a stale list-cache snapshot and a full-replace from it would silently
-    // undo lines/costs/marker edits saved after that snapshot.
+    // undo lines/costs/marker edits saved after that snapshot. The lock version, in contrast,
+    // MUST be the stale snapshot's: it is what the operator counted against, so a run edited
+    // since is refused (409 → «обновите страницу») rather than counted onto someone else's grid.
     const counted = new Map(rows.map((r) => [`${r.productId}:${r.sizeId}`, r]));
     try {
       await update.mutateAsync({
         id: run.id,
+        lockVersion: run.lockVersion ?? 0,
         patch: {},
         mergeLines: (freshLines) =>
           freshLines.map((l) => {

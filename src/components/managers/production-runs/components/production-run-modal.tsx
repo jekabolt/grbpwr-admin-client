@@ -24,6 +24,11 @@ type Draft = {
   releaseId: number;
   status: common_ProductionRunStatus;
   startedAt: string;
+  // Planning dates (production cockpit): when the batch is MEANT to start and the date it is
+  // promised for. Distinct from startedAt, which records when work actually began — the plan and
+  // the fact are separate columns precisely so a miss is visible.
+  plannedStartAt: string;
+  promisedAt: string;
   notes: string;
   // Run ACTUAL cutting wastage % (0..100) as a plain decimal string; blank = unset (fall back to
   // the BOM estimate). Sent as a google.type.Decimal via inputToDecimal, like markerEfficiencyPct.
@@ -35,6 +40,8 @@ const emptyDraft: Draft = {
   releaseId: 0,
   status: 'PRODUCTION_RUN_STATUS_PLANNED',
   startedAt: '',
+  plannedStartAt: '',
+  promisedAt: '',
   notes: '',
   actualWastagePercent: '',
 };
@@ -73,6 +80,8 @@ export function ProductionRunModal({
             releaseId: ins.releaseId ?? 0,
             status: ins.status ?? 'PRODUCTION_RUN_STATUS_PLANNED',
             startedAt: isoToDate(ins.startedAt),
+            plannedStartAt: isoToDate(ins.plannedStartAt),
+            promisedAt: isoToDate(ins.promisedAt),
             notes: ins.notes ?? '',
             actualWastagePercent: decimalToInput(ins.actualWastagePercent),
           }
@@ -128,10 +137,13 @@ export function ProductionRunModal({
       update.mutate(
         {
           id: run.id,
+          lockVersion: run.lockVersion ?? 0,
           patch: {
             releaseId: d.releaseId || undefined,
             status: d.status,
             startedAt: dateToIso(d.startedAt),
+            plannedStartAt: dateToIso(d.plannedStartAt),
+            promisedAt: dateToIso(d.promisedAt),
             notes: d.notes.trim(),
             // Run-level ACTUAL cutting wastage %; blank → undefined clears it (back to BOM estimate).
             actualWastagePercent: inputToDecimal(d.actualWastagePercent),
@@ -155,6 +167,8 @@ export function ProductionRunModal({
           releaseId: d.releaseId || undefined,
           status: d.status,
           startedAt: dateToIso(d.startedAt),
+          plannedStartAt: dateToIso(d.plannedStartAt),
+          promisedAt: dateToIso(d.promisedAt),
           receivedAt: undefined,
           notes: d.notes.trim(),
           lines: [],
@@ -265,6 +279,31 @@ export function ProductionRunModal({
                   value={d.startedAt}
                   onChange={(e) => set({ startedAt: e.target.value })}
                 />
+                <Text variant='label' size='small'>
+                  when work actually began — the fact, not the plan
+                </Text>
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text size='small'>planned start</Text>
+                <input
+                  className={cell}
+                  type='date'
+                  value={d.plannedStartAt}
+                  onChange={(e) => set({ plannedStartAt: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text size='small'>promised (обещано)</Text>
+                <input
+                  className={cell}
+                  type='date'
+                  value={d.promisedAt}
+                  onChange={(e) => set({ promisedAt: e.target.value })}
+                />
+                <Text variant='label' size='small'>
+                  the delivery date this batch is committed to; an open run past it reads as
+                  «опаздывает»
+                </Text>
               </label>
               <label className='flex flex-col gap-1'>
                 <Text size='small'>actual cutting wastage %</Text>
