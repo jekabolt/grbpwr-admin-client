@@ -89,7 +89,15 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
   // read for an account without costing:read, and this panel is costing:read-gated anyway, so the
   // fetch is skipped for them rather than returning a card with an empty costing block.
   const techCardId = costInfo?.primaryTechCardId ?? 0;
-  const { data: styleCard } = useTechCard(canReadCosting && techCardId ? techCardId : undefined);
+  const styleCardEnabled = !!(canReadCosting && techCardId);
+  const { data: styleCard, isLoading: styleCardLoading } = useTechCard(
+    styleCardEnabled ? techCardId : undefined,
+  );
+  // While the style is in flight, vatRate would read as 0 and every margin would render GROSS —
+  // flashing the exact figure this netting exists to remove, under a footnote claiming no rate is
+  // on file. Hold the panel until the answer is known; a product with no owning style has no rate
+  // to wait for and renders (gross, explained) immediately.
+  const vatResolved = !styleCardEnabled || !styleCardLoading;
   const vatCountry = styleCard?.techCard?.costing?.vatCountryCode ?? '';
   const vatRate = parseDecimal(styleCard?.techCard?.costing?.vatRatePct);
   const netted = vatRate > 0;
@@ -173,6 +181,7 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
   // Margin is confidential derived data — costing:read only (a write-only account gets the cost
   // input but never the read-side margin). Hooks above run unconditionally.
   if (!canReadCosting) return null;
+  if (!vatResolved) return null;
 
   const baseRow = rows.find((r) => r.currency === BASE_CURRENCY);
   const anyMissingRate = rows.some((r) => !r.exact && r.eur == null);

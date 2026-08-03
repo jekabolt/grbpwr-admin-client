@@ -124,23 +124,25 @@ export function ReceiveModal({
         return;
       }
     }
-    // Guard the counts: no negatives, and defects can't exceed what was received.
+    // Guard the counts: no negatives. There is deliberately NO `defect <= good` rule — the two are
+    // disjoint counts (2 good + 8 defective is a legitimate outcome of a bad batch), and the server
+    // imposes no such constraint either (its rate is defect / (good + defect)).
     for (const r of rows) {
       const rec = Number(r.received);
       const def = Number(r.defect);
       if (!Number.isFinite(rec) || rec < 0 || !Number.isFinite(def) || def < 0) {
-        showMessage('Received / defect quantities must be zero or more', 'error');
-        return;
-      }
-      if (def > rec) {
-        showMessage('Defect quantity cannot exceed received quantity', 'error');
+        showMessage('Количества «принято годных» / «брак» должны быть нулём или больше', 'error');
         return;
       }
     }
-    // The receive RPC requires at least one counted unit — catch it before step 1
-    // stamps quantities on a run that then can't be received.
+    // The receive RPC requires at least one GOOD unit — an all-scrap receipt (0 good, N defect) is
+    // not representable until the receipt rework lands. Catch it before step 1 stamps quantities on
+    // a run that then can't be received.
     if (!rows.some((r) => (Number(r.received) || 0) > 0)) {
-      showMessage('Nothing to receive — every received quantity is 0', 'error');
+      showMessage(
+        'Нет годных единиц — приёмка, где весь выпуск брак, пока не поддерживается (нечего постить в сток)',
+        'error',
+      );
       return;
     }
     // Step 1 persists counts via read-modify-write like every other section: merge this

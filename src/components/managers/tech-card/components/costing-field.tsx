@@ -259,29 +259,35 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   //     currency + unit_cost_base, the same rollup that seeds cost_price). Unavailable (no base
   //     price on the colourways, no FX rate so unit_cost_base is unset, or unsaved edits that
   //     unit_cost_base does not know about) → «н/д», never a cross-currency quotient.
+  // rollup.baseCurrency is NOT a bare "company base currency" field — the server assigns it only
+  // when EVERY component folded to base (base_currency == '' ⟺ unit_cost_base unset, see
+  // techCardCostingToPb). An empty value therefore means "FX incomplete", not "cross-currency":
+  // an EUR costing with one rate-less BOM line must say so, not pretend the card is foreign.
   const baseCur = rollup?.baseCurrency || '';
+  const fxIncomplete = hasCosting && !baseCur;
   const sameCurrency = !!cur && !!baseCur && cur === baseCur;
   const baseRetail = useRetail(vatCard, !sameCurrency && baseCur ? baseCur : '');
+  const helpSub = (label: string) => (
+    <span title={BREAK_EVEN_NO_FX} className='cursor-help underline decoration-dotted'>
+      {label}
+    </span>
+  );
   const breakEven = ((): { value: string; sub: React.ReactNode } => {
     if (!(devTotal > 0)) return { value: '—', sub: 'needs margin + R&D' };
+    if (fxIncomplete) return { value: 'н/д', sub: helpSub('нет курсов — база не вычислена') };
     if (sameCurrency) {
       if (grossMargin == null) return { value: '—', sub: 'needs a net retail price' };
       if (!(grossMargin > 0)) return { value: '—', sub: 'margin is not positive' };
       return { value: String(Math.ceil(devTotal / grossMargin)), sub: 'units to recover R&D' };
     }
-    const marginInBase =
-      !costingDirty && baseRetail.net != null && serverUnitCostBase > 0
-        ? baseRetail.net - serverUnitCostBase
-        : undefined;
-    if (marginInBase == null)
-      return {
-        value: 'н/д',
-        sub: (
-          <span title={BREAK_EVEN_NO_FX} className='cursor-help underline decoration-dotted'>
-            нет курса
-          </span>
-        ),
-      };
+    // Cross-currency: fold both sides through the server's base figures. Each unavailable input
+    // has its OWN message — «нет курса» used to stand in for all three, sending people to the FX
+    // settings when the actual gap was a missing base-currency price or just unsaved edits.
+    if (costingDirty) return { value: 'н/д', sub: 'черновик — сохраните для пересчёта' };
+    if (!(serverUnitCostBase > 0)) return { value: 'н/д', sub: helpSub('нет курса') };
+    if (baseRetail.net == null)
+      return { value: 'н/д', sub: helpSub(`нет розницы в ${baseCur}`) };
+    const marginInBase = baseRetail.net - serverUnitCostBase;
     if (!(marginInBase > 0)) return { value: '—', sub: `margin is not positive (${baseCur})` };
     return {
       value: String(Math.ceil(devTotal / marginInBase)),
@@ -298,7 +304,9 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     { label: 'hardware · packaging', amount: hardware + packaging },
     { label: 'logistics · overhead', amount: logistics + overhead },
     { label: `defect ${defectPct}%`, amount: defectAmount },
-  ].filter((s) => s.amount > 0);
+    // ≥ 0.005, not > 0: the server rounds unit_cost and materials_per_unit to 2dp independently,
+    // so with defect 0% the residual plug can be ±0.005 — a phantom «defect 0% · −0.00» bar.
+  ].filter((s) => s.amount >= 0.005);
   const scale = retail ?? unitCost;
   let running = scale;
   const stepRows = steps.map((s) => {
@@ -555,13 +563,13 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       {rollup?.hasUnconvertedCurrencies && (
         <CalloutBox tone='error'>
           <Text size='micro'>
-            <b>Some BOM lines are in another currency with no FX rate</b>, so they are excluded from
-            the total and no base-currency cost can be computed — the unit cost above is
-            understated.{' '}
+            <b>Some BOM lines are in another currency</b>, so they are excluded from the
+            costing-currency total — the unit cost above is understated.{' '}
             <Link to={ROUTES.settings} className='underline'>
               Add a costing FX rate in Settings
             </Link>{' '}
-            so they fold into the base cost instead of silently lowering it.
+            to get a complete <b>base-currency</b> cost (unit cost base): the headline above stays
+            in the costing currency and still will not include those lines.
           </Text>
         </CalloutBox>
       )}
