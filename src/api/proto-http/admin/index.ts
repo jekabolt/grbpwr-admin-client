@@ -7132,12 +7132,14 @@ export type common_ProductionRunLine = {
   plannedQty: number | undefined;
   receivedQty?: number;
   defectQty?: number;
-  // Stable identity of this line, minted by the client (a 26-character Crockford ULID, exactly like
-  // a tech-card BOM line's line_key) and echoed back on read. The store diffs the submitted grid by
-  // it instead of delete+reinserting the whole grid, so the row's database id survives an edit —
-  // which is what lets receipt lines hold a real foreign key to it. Empty on the way in means "new
-  // line, mint me one"; a legacy row backfilled by migration 0230 reads back as a non-ULID key,
-  // so echo whatever arrives rather than validating its shape.
+  // Stable identity of this line, echoed back on read. The store diffs the submitted grid by it
+  // instead of delete+reinserting the whole grid, so the row's database id survives an edit — which
+  // is what lets receipt lines hold a real foreign key to it. Contract: empty on the way in means
+  // "new line, the server mints one" (its fallback is standard base32 — 26 characters of [A-Z2-7]);
+  // anything non-empty must be EXACTLY 26 characters of [0-9A-Z] or the save is rejected with
+  // InvalidArgument. The admin client mints uppercase Crockford ULIDs (like a tech-card BOM line's
+  // line_key) and migration 0230 backfilled 'LEGACY'-prefixed keys onto pre-existing rows; both fit
+  // that shape. NEVER regenerate a key the server handed out — that retires the row it names.
   lineKey: string | undefined;
 };
 
