@@ -1419,6 +1419,11 @@ export function TechCardForm({
                   style dev cost, deliberately NOT part of the product COGS. Edit-mode only (its own
                   RPC needs a saved card id). */}
                 <Section title='R&D development cost'>
+                  {/* Plan 11 band 6: the one label that stops R&D being priced into garments. */}
+                  <Text size='micro' variant='label'>
+                    периодные затраты разработки стиля — НЕ входят в unit cost / COGS; выше они
+                    только как «сколько маржа должна отбить» (break-even).
+                  </Text>
                   {isEditMode && numId ? (
                     <DevExpensesField techCardId={numId} />
                   ) : (

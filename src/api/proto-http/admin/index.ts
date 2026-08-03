@@ -5923,6 +5923,12 @@ export type common_TechCardBomItem = {
   // a real FK instead of a fragile positional index.
   id: number | undefined;
   lineKey: string | undefined;
+  // Stored price provenance (production-costing Phase 3, plan 11). READ-ONLY — the server stamps
+  // both on write and ignores anything a client sends here. price_source is 'manual' (the operator
+  // typed/edited unit_price through a card save), 'catalog' (the reprice action pulled it from the
+  // material catalog), or '' for a pre-provenance row whose origin is honestly unknown.
+  priceSource: string | undefined;
+  priceSnapshotAt: wellKnownTimestamp | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -6971,6 +6977,51 @@ export type ListMaterialPricesRequest = {
 
 export type ListMaterialPricesResponse = {
   prices: common_MaterialPrice[] | undefined;
+};
+
+// RepriceTechCardBom (production-costing Phase 3, plan 11).
+export type RepriceTechCardBomRequest = {
+  techCardId: number | undefined;
+};
+
+// One catalog-linked BOM line the reprice action visited. `changed` is false when the catalog price
+// already matched the line (provenance still restamped 'catalog' — the price is now provably the
+// catalog's). A line with no resolvable catalog price is reported with new_price unset.
+export type RepricedBomLine = {
+  lineKey: string | undefined;
+  name: string | undefined;
+  section: string | undefined;
+  oldPrice: googletype_Decimal | undefined;
+  oldCurrency: string | undefined;
+  newPrice: googletype_Decimal | undefined;
+  newCurrency: string | undefined;
+  changed: boolean | undefined;
+};
+
+export type RepriceTechCardBomResponse = {
+  lines: RepricedBomLine[] | undefined;
+  skippedUnlinked: number | undefined;
+};
+
+// Phase 2 scalar→BOM migration exception report (read-only).
+export type CostingMigrationException = {
+  techCardId: number | undefined;
+  styleNumber: string | undefined;
+  techCardName: string | undefined;
+  article: string | undefined;
+  kind: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  approvalState: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+export type ListCostingMigrationExceptionsRequest = {
+  techCardId: number | undefined;
+};
+
+export type ListCostingMigrationExceptionsResponse = {
+  exceptions: CostingMigrationException[] | undefined;
 };
 
 // Tech-card release snapshots (task 11).
@@ -9090,6 +9141,21 @@ export interface AdminService {
   ListMaterials(request: ListMaterialsRequest): Promise<ListMaterialsResponse>;
   AddMaterialPrice(request: AddMaterialPriceRequest): Promise<AddMaterialPriceResponse>;
   ListMaterialPrices(request: ListMaterialPricesRequest): Promise<ListMaterialPricesResponse>;
+  // RepriceTechCardBom re-pulls the current material-catalog price into every catalog-linked BOM
+  // line of a mutable (non-released) card (production-costing Phase 3, plan 11): unit_price/currency are overwritten
+  // with the same CATALOG_LATEST resolution the style cost estimate uses (costing currency, else
+  // base currency, else a sole unambiguous catalog currency), and price_source/price_snapshot_at
+  // are stamped 'catalog'/now. Released cards are frozen (FAILED_PRECONDITION) — re-release is the
+  // path that reprices them. Changing prices legitimately stales an approved MATERIALS sign-off.
+  // Requires tech-card write + costing:write.
+  RepriceTechCardBom(request: RepriceTechCardBomRequest): Promise<RepriceTechCardBomResponse>;
+  // ListCostingMigrationExceptions reads the Phase 2 scalar→BOM migration's exception report
+  // (tech_card_costing_migration_exception): hardware/packaging money the migration refused to move
+  // mechanically (double-counted / zero-colourway / non-draft cards), waiting for manual transfer
+  // into the BOM. Read-only; tech_card_id 0 lists all cards. Requires tech-cards read; the AMOUNT
+  // additionally needs costing:read and comes back stripped without it (structure — card, article,
+  // kind, currency — is visible to any tech-cards reader).
+  ListCostingMigrationExceptions(request: ListCostingMigrationExceptionsRequest): Promise<ListCostingMigrationExceptionsResponse>;
   // Tech-card release snapshots (task 11): the immutable frozen spec + planned cost per release.
   ListTechCardReleases(request: ListTechCardReleasesRequest): Promise<ListTechCardReleasesResponse>;
   GetTechCardRelease(request: GetTechCardReleaseRequest): Promise<GetTechCardReleaseResponse>;
@@ -12948,6 +13014,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListMaterialPrices",
       }) as Promise<ListMaterialPricesResponse>;
+    },
+    RepriceTechCardBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/bom/reprice`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RepriceTechCardBom",
+      }) as Promise<RepriceTechCardBomResponse>;
+    },
+    ListCostingMigrationExceptions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/costing-migration-exceptions`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCostingMigrationExceptions",
+      }) as Promise<ListCostingMigrationExceptionsResponse>;
     },
     ListTechCardReleases(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
