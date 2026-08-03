@@ -2,6 +2,7 @@ import { ColorwayCostInfo } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { StyleEconomicsModal } from 'components/managers/page/components/StyleEconomicsModal';
 import { formatCurrency, parseDecimal } from 'components/managers/page/utils';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { currencySymbols, SELLING_CURRENCIES } from 'constants/constants';
 import { useMemo, useState } from 'react';
 import { useFormContext } from 'react-hook-form';
@@ -54,13 +55,14 @@ function median(xs: number[]): number | null {
 
 type MarginRow = {
   currency: string;
-  full: number; // full local selling price
-  effective: number; // sale-adjusted local price (== full when no sale)
-  eur: number | null; // effective price expressed in base currency; null when no FX rate
+  full: number; // full local selling price, VAT-INCLUSIVE (the catalogue price, as entered)
+  effective: number; // sale-adjusted local price (== full when no sale), still VAT-inclusive
+  eur: number | null; // effective price NET OF VAT, in base currency; null when no FX rate
   marginEur: number | null;
-  marginPct: number | null; // margin over the effective (sale) price
+  marginPct: number | null; // margin over the effective (sale) price, net of VAT
   markupPct: number | null; // margin over cost
   fullMarginPct: number | null; // margin at full price (for the muted secondary when a sale is on)
+  grossMarginPct: number | null; // the pre-fix figure: margin over the VAT-INCLUSIVE price
   exact: boolean; // base currency — no FX approximation
 };
 
@@ -68,11 +70,41 @@ type MarginRow = {
 // The confidential COGS lives in base currency; each non-base price is converted to base via the
 // costing FX rates (auto-updated from ECB) so its margin is honest even when markets are priced
 // independently. A currency whose margin deviates materially from the reference is flagged.
+//
+// Catalogue prices are VAT-INCLUSIVE everywhere in this system — the order snapshot extracts VAT
+// out of them, accounting derives output VAT from them, the margin-by-style report and the tech
+// card's costing tab both divide by (1 + rate) before comparing to cost — and cost_price carries no
+// VAT. This panel used to compare the two directly, so the SAME garment showed a margin a whole VAT
+// rate higher here than on the tech card two clicks away, and the flattering one was the one people
+// priced against. The rate comes from the owning style's costing read (TechCardCosting.vat_rate_pct
+// / vat_country_code), i.e. the company's domestic rate — exactly the default the tech-card tab
+// shows, resolved server-side from the same `vat_rate` table.
 export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }) {
   const { canReadCosting } = usePermissions();
   const { watch } = useFormContext();
   const [ecoOpen, setEcoOpen] = useState(false);
   const { data: fxData } = useCostingFxRates(canReadCosting);
+
+  // The owning style, for its VAT context only. Costing (and with it vat_rate_pct) is nulled on the
+  // read for an account without costing:read, and this panel is costing:read-gated anyway, so the
+  // fetch is skipped for them rather than returning a card with an empty costing block.
+  const techCardId = costInfo?.primaryTechCardId ?? 0;
+  const styleCardEnabled = !!(canReadCosting && techCardId);
+  const { data: styleCard, isLoading: styleCardLoading } = useTechCard(
+    styleCardEnabled ? techCardId : undefined,
+  );
+  // While the style is in flight, vatRate would read as 0 and every margin would render GROSS —
+  // flashing the exact figure this netting exists to remove, under a footnote claiming no rate is
+  // on file. Hold the panel until the answer is known; a product with no owning style has no rate
+  // to wait for and renders (gross, explained) immediately.
+  const vatResolved = !styleCardEnabled || !styleCardLoading;
+  const vatCountry = styleCard?.techCard?.costing?.vatCountryCode ?? '';
+  const vatRate = parseDecimal(styleCard?.techCard?.costing?.vatRatePct);
+  const netted = vatRate > 0;
+  // net = gross × 100 / (100 + rate) — the same extraction the order snapshot, the accounting VAT
+  // engine and metrics.netOfVat use. No rate on file (an export destination, or no style linked)
+  // means there is nothing to remove: 100/100 leaves the figures gross, and the panel says so.
+  const vatDenominator = netted ? 100 + vatRate : 100;
 
   const pricesRaw = (watch('prices') as PriceEntry[] | undefined) ?? [];
   const saleRaw = watch('product.productBodyInsert.salePercentage.value') as string | undefined;
@@ -119,13 +151,18 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
       const isBase = c.value === BASE_CURRENCY;
       const rate = rateMap.get(c.value);
       const toBase = (v: number): number | null => (isBase ? v : rate != null ? v * rate : null);
-      const eur = toBase(effective);
-      const fullEur = toBase(full);
+      // Netting and the sale discount are both proportional, so the order does not matter; netting
+      // last keeps `full`/`effective` as the prices actually shown to the operator.
+      const eur = toBase((effective * 100) / vatDenominator);
+      const fullEur = toBase((full * 100) / vatDenominator);
+      const grossEur = toBase(effective);
       const marginEur = eur != null ? eur - cost : null;
       const marginPct = eur != null && eur > 0 ? ((eur - cost) / eur) * 100 : null;
       const markupPct = marginEur != null && cost > 0 ? (marginEur / cost) * 100 : null;
       const fullMarginPct =
         fullEur != null && fullEur > 0 ? ((fullEur - cost) / fullEur) * 100 : null;
+      const grossMarginPct =
+        grossEur != null && grossEur > 0 ? ((grossEur - cost) / grossEur) * 100 : null;
       return {
         currency: c.value,
         full,
@@ -135,16 +172,17 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
         marginPct,
         markupPct,
         fullMarginPct,
+        grossMarginPct,
         exact: isBase,
       };
     }).filter((r) => r.full > 0);
-  }, [pricesRaw, sale, cost, rateMap]);
+  }, [pricesRaw, sale, cost, rateMap, vatDenominator]);
 
   // Margin is confidential derived data — costing:read only (a write-only account gets the cost
   // input but never the read-side margin). Hooks above run unconditionally.
   if (!canReadCosting) return null;
+  if (!vatResolved) return null;
 
-  const techCardId = costInfo?.primaryTechCardId ?? 0;
   const baseRow = rows.find((r) => r.currency === BASE_CURRENCY);
   const anyMissingRate = rows.some((r) => !r.exact && r.eur == null);
   const hasCost = cost > 0;
@@ -173,6 +211,7 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
         </Text>
         <Text variant='inactive' size='small'>
           {sale > 0 ? `at sale price · −${sale}%` : 'at retail price'}
+          {netted ? ` · net of ${vatRate.toFixed(0)}% ${vatCountry} VAT` : ''}
           {hasCost ? ` · vs cost ${baseSym}${cost.toFixed(2)}/unit` : ''}
         </Text>
       </div>
@@ -203,6 +242,13 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
               {sale > 0 && baseRow.fullMarginPct != null && (
                 <Text variant='inactive' size='small'>
                   {fmtPct(baseRow.fullMarginPct)} at full price
+                </Text>
+              )}
+              {/* The number this panel showed before the VAT fix, kept visible while people
+                  re-anchor whatever they had calibrated against it. Never computed against. */}
+              {netted && baseRow.grossMarginPct != null && (
+                <Text variant='inactive' size='small'>
+                  {fmtPct(baseRow.grossMarginPct)} gross of VAT
                 </Text>
               )}
             </div>
@@ -265,6 +311,17 @@ export function ProductMarginPanel({ costInfo }: { costInfo?: ColorwayCostInfo }
               </div>
             ))}
           </div>
+
+          {/* WHICH price the margins above are drawn against. Catalogue prices are VAT-inclusive
+              and cost_price is not, so this sentence is the difference between agreeing with the
+              tech card's costing tab and disagreeing with it by a whole VAT rate. */}
+          <Text variant='inactive' size='small'>
+            {netted
+              ? `Prices are entered VAT-inclusive, so each one is netted at ${vatRate.toFixed(0)}% ${vatCountry} VAT (the company’s domestic rate — the same default the tech card’s costing tab shows) before it is compared to cost. One gross price sells into as many rates as there are destinations, so this is a scenario, not a fact; the tech card lets you model another market.`
+              : techCardId
+                ? `No VAT rate on file for ${vatCountry || 'the company’s country'}, so nothing was netted and the margins above are drawn against the VAT-INCLUSIVE catalogue price. For an export destination that is correct; otherwise set the rate in the accounting VAT settings, or these figures overstate the margin by roughly that rate.`
+                : 'This product has no owning tech card, so no VAT rate could be read: the margins above are drawn against the VAT-INCLUSIVE catalogue price and overstate the real margin by roughly the destination’s rate.'}
+          </Text>
 
           {anyMissingRate && (
             <Text variant='inactive' size='small'>

@@ -4,7 +4,7 @@ import { useTechCardVatScenario } from 'components/managers/tech-cards/component
 import { ROUTES } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { WaterfallRow } from 'ui/components/bar-row';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -30,6 +30,27 @@ const num = (s?: string) => {
   const n = parseDecimalNumber(s);
   return Number.isFinite(n) ? n : 0;
 };
+
+// The form fields the SERVER's unit_cost is built from. While none of them is dirty, the rollup on
+// the last read still describes what is in the form, so the strip below shows the server's own
+// figures; touch one and it degrades to a labelled browser-side preview until the card is saved.
+// (target_margin_pct and notes are deliberately absent: neither moves the unit cost, and the target
+// itself is read back from the server-resolved effective_target_margin_pct.)
+const COSTING_COST_KEYS = [
+  'cmtCost',
+  'hardwareCost',
+  'packagingCost',
+  'logisticsCost',
+  'overheadCost',
+  'defectPercent',
+  'currency',
+] as const;
+const COSTING_COST_PATHS = COSTING_COST_KEYS.map((k) => `costing.${k}` as const);
+
+const BREAK_EVEN_NO_FX =
+  'R&D учитывается в базовой валюте, а маржа выше — в валюте костинга. Пересчитать нечем: ' +
+  'нужна нетто-розница в базовой валюте и серверный unit_cost_base (он появляется, когда для ' +
+  'всех валют BOM есть курс). Делить базовую сумму на маржу в другой валюте нельзя.';
 
 /**
  * The retail the waterfall descends from, and — the part that used to be missing — whether it is
@@ -116,23 +137,12 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     .filter((c) => c.active && c.code)
     .map((c) => ({ value: c.code as string, label: `${c.code} — ${c.name ?? ''}` }));
 
-  // A usage costs at order-scale when it has per-size consumption; at per-garment scale when
-  // it uses the single consumption. Mixing both in one card mixes scales in the total.
-  //
-  // Read off techCard.colorways — the same source this file already uses fifteen lines down for the
-  // cost rollup's labels. It used to reduce over the RHF `colorways` array, permanently empty since
-  // colourways became products, so both flags were always false and the warning could never fire on
-  // the very cards it exists for.
-  const allUsages = (techCard?.colorways ?? []).flatMap((c) => c.usages ?? []);
-  const hasPerSize = allUsages.some((u) =>
-    (u.sizeConsumptions ?? []).some((sc) => sc.consumption?.value?.trim()),
-  );
-  const hasPerGarment = allUsages.some(
-    (u) =>
-      !(u.sizeConsumptions ?? []).some((sc) => sc.consumption?.value?.trim()) &&
-      u.consumption?.value?.trim(),
-  );
-  const mixedScale = hasPerSize && hasPerGarment;
+  // NOTE (Phase 0b #17): there used to be a "part of the materials are graded per size, part per
+  // garment — the total mixes scales" warning here. It was FALSE. The server normalises a size-only
+  // usage to a per-garment figure by dividing it by the total order qty before it ever reaches
+  // materials_per_unit (see TechCardCosting's own contract comment, entity/techcard.go), so the two
+  // ways of grading a usage do NOT mix scales in the rollup. The callout only frightened people off
+  // per-size grading, which is the more precise of the two. Removed, not fixed.
 
   const rollup = techCard?.techCard?.costing;
   const colorwayCosts = rollup?.colorwayCosts ?? [];
@@ -159,12 +169,19 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     targetMarginPct?: string;
     currency?: string;
   };
+  // Are the article inputs still what the server computed the rollup from? RHF's dirty state is
+  // measured against the defaultValues the card was loaded (and re-reset after every save) with, so
+  // this is exactly the question "does the form still match the last read".
+  const { dirtyFields } = useFormState({ control, name: COSTING_COST_PATHS });
+  const costingDirty = COSTING_COST_KEYS.some(
+    (k) => !!(dirtyFields.costing as Record<string, boolean> | undefined)?.[k],
+  );
+
   const cur = costing.currency || rollup?.baseCurrency || '';
   const money = (n: number) => `${cur ? `${cur} ` : ''}${n.toFixed(2)}`;
 
-  // Live recompute: materials come from the server rollup (BOM-derived, not typed), every other
-  // article is read straight off the form so the waterfall moves as you type. On reload the
-  // server's own unit_cost replaces this preview — the formula is the same one it uses.
+  // The article inputs, read off the form so the waterfall bars move as you type. Materials are
+  // never typed — they come from the server rollup (BOM-derived).
   const materials = num(decimalToInput(rollup?.materialsPerUnit));
   const cmt = num(costing.cmtCost);
   const hardware = num(costing.hardwareCost);
@@ -174,12 +191,26 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const defectPct = num(costing.defectPercent);
   const articlesSubtotal = cmt + hardware + packaging + logistics + overhead;
   const beforeDefect = materials + articlesSubtotal;
-  const defectAmount = (beforeDefect * defectPct) / 100;
-  const unitCost = beforeDefect + defectAmount;
+
+  // #7 — WHOSE unit cost this strip shows. It used to be this file's own JS-float re-derivation,
+  // always, with the server's `unit_cost` demoted to a truthiness test and `unit_cost_base` read by
+  // nobody at all. That made the headline a second implementation of a decimal.Decimal calculation
+  // that seeds cost_price: it agreed with the server only by luck, and every understatement the
+  // server's own rollup carries (an FX-less BOM line dropped from materials_per_unit, a size-graded
+  // usage normalised by order qty) was re-derived here into margins and a waterfall that read as
+  // authoritative. Now: unchanged form → the SERVER's figure; unsaved edits → the local preview,
+  // labelled as a draft so nobody prices against a number the server has never seen.
+  const serverUnitCost = num(decimalToInput(rollup?.unitCost));
+  const serverUnitCostBase = num(decimalToInput(rollup?.unitCostBase));
+  const usingServerCost = !costingDirty && serverUnitCost > 0;
+  const unitCost = usingServerCost ? serverUnitCost : beforeDefect * (1 + defectPct / 100);
+  // The defect step closes the waterfall ONTO whichever unit cost is on show, so the bars always
+  // sum to the headline instead of to a second, differently-rounded number.
+  const defectAmount = Math.max(0, unitCost - beforeDefect);
   // An untouched card must read `—`, never a confident 0.00 — an empty strip that looks like
   // zero cost is worse than one that admits it has nothing.
-  const hasCosting =
-    materials > 0 || articlesSubtotal > 0 || num(decimalToInput(rollup?.unitCost)) > 0;
+  const hasCosting = materials > 0 || articlesSubtotal > 0 || serverUnitCost > 0;
+  const draftPreview = hasCosting && !usingServerCost;
 
   const { gross: grossRetail, net: netRetail, reason: retailReason } = useRetail(vatCard, cur);
   // The margin is drawn against NET retail, because unit_cost carries no VAT. Gross is kept only to
@@ -218,10 +249,51 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const devTotal = num(decimalToInput(devData?.summary?.totalBase));
   const { data: samplesData } = useSamples(techCardId);
   const samplesCount = samplesData?.samples?.length ?? 0;
-  const breakEvenUnits =
-    devTotal > 0 && grossMargin != null && grossMargin > 0
-      ? Math.ceil(devTotal / grossMargin)
-      : undefined;
+
+  // #8 — break-even used to be `ceil(devTotal / grossMargin)` flat: a BASE-currency R&D total
+  // divided by a COSTING-currency margin. With a PLN costing and a EUR base that produced a
+  // confident whole number out of two different monies, and nothing on screen said so. Now the
+  // division only happens inside ONE currency:
+  //   • costing currency == base currency → the strip's own margin already is a base margin;
+  //   • otherwise → fold both sides with the SERVER's base figures (net retail read in the base
+  //     currency + unit_cost_base, the same rollup that seeds cost_price). Unavailable (no base
+  //     price on the colourways, no FX rate so unit_cost_base is unset, or unsaved edits that
+  //     unit_cost_base does not know about) → «н/д», never a cross-currency quotient.
+  // rollup.baseCurrency is NOT a bare "company base currency" field — the server assigns it only
+  // when EVERY component folded to base (base_currency == '' ⟺ unit_cost_base unset, see
+  // techCardCostingToPb). An empty value therefore means "FX incomplete", not "cross-currency":
+  // an EUR costing with one rate-less BOM line must say so, not pretend the card is foreign.
+  const baseCur = rollup?.baseCurrency || '';
+  const fxIncomplete = hasCosting && !baseCur;
+  const sameCurrency = !!cur && !!baseCur && cur === baseCur;
+  const baseRetail = useRetail(vatCard, !sameCurrency && baseCur ? baseCur : '');
+  const helpSub = (label: string) => (
+    <span title={BREAK_EVEN_NO_FX} className='cursor-help underline decoration-dotted'>
+      {label}
+    </span>
+  );
+  const breakEven = ((): { value: string; sub: React.ReactNode } => {
+    if (!(devTotal > 0)) return { value: '—', sub: 'needs margin + R&D' };
+    if (fxIncomplete) return { value: 'н/д', sub: helpSub('нет курсов — база не вычислена') };
+    if (sameCurrency) {
+      if (grossMargin == null) return { value: '—', sub: 'needs a net retail price' };
+      if (!(grossMargin > 0)) return { value: '—', sub: 'margin is not positive' };
+      return { value: String(Math.ceil(devTotal / grossMargin)), sub: 'units to recover R&D' };
+    }
+    // Cross-currency: fold both sides through the server's base figures. Each unavailable input
+    // has its OWN message — «нет курса» used to stand in for all three, sending people to the FX
+    // settings when the actual gap was a missing base-currency price or just unsaved edits.
+    if (costingDirty) return { value: 'н/д', sub: 'черновик — сохраните для пересчёта' };
+    if (!(serverUnitCostBase > 0)) return { value: 'н/д', sub: helpSub('нет курса') };
+    if (baseRetail.net == null)
+      return { value: 'н/д', sub: helpSub(`нет розницы в ${baseCur}`) };
+    const marginInBase = baseRetail.net - serverUnitCostBase;
+    if (!(marginInBase > 0)) return { value: '—', sub: `margin is not positive (${baseCur})` };
+    return {
+      value: String(Math.ceil(devTotal / marginInBase)),
+      sub: `units to recover R&D · ${baseCur}`,
+    };
+  })();
 
   // Waterfall geometry: the track is the full retail price (or, with no retail, the unit cost),
   // and each article bar sits where the running total lands — so the descent reads as money
@@ -232,7 +304,9 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     { label: 'hardware · packaging', amount: hardware + packaging },
     { label: 'logistics · overhead', amount: logistics + overhead },
     { label: `defect ${defectPct}%`, amount: defectAmount },
-  ].filter((s) => s.amount > 0);
+    // ≥ 0.005, not > 0: the server rounds unit_cost and materials_per_unit to 2dp independently,
+    // so with defect 0% the residual plug can be ±0.005 — a phantom «defect 0% · −0.00» bar.
+  ].filter((s) => s.amount >= 0.005);
   const scale = retail ?? unitCost;
   let running = scale;
   const stepRows = steps.map((s) => {
@@ -253,12 +327,21 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           here.) The `style economics` modal it replaces still serves the analytics page. */}
       <StatGrid min={130}>
         <Stat
-          label='unit cost'
+          label={
+            <span className='inline-flex items-center gap-1.5'>
+              unit cost
+              {draftPreview && <Pill tone='attention'>черновик</Pill>}
+            </span>
+          }
           big
           value={hasCosting ? money(unitCost) : '—'}
           sub={
             hasCosting && unitCost > 0 && materials > 0
-              ? `materials ${Math.round((materials / unitCost) * 100)}%`
+              ? `materials ${Math.round((materials / unitCost) * 100)}%${
+                  usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
+                    ? ` · base ${baseCur} ${serverUnitCostBase.toFixed(2)}`
+                    : ''
+                }`
               : 'per garment'
           }
         />
@@ -276,11 +359,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 : `net of ${vatRate.toFixed(0)}% ${vatCountry} VAT`
           }
         />
-        <Stat
-          label='break-even'
-          value={breakEvenUnits != null ? String(breakEvenUnits) : '—'}
-          sub={breakEvenUnits != null ? 'units to recover R&D' : 'needs margin + R&D'}
-        />
+        <Stat label='break-even' value={breakEven.value} sub={breakEven.sub} />
         <Stat
           label='R&D spent (base)'
           value={devTotal > 0 ? devTotal.toFixed(2) : '—'}
@@ -292,6 +371,19 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         NOT each product’s stored cost_price. Per-colourway precision lives in the cost estimate
         below and on each product’s detail page. R&D is in the dev base currency.
       </Text>
+
+      {/* #7 — the strip is either the server's arithmetic or a preview of yours, and it says which.
+          A draft figure is the one thing that must never be mistaken for the number that seeds
+          cost_price. */}
+      {draftPreview && (
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            <b>Черновик — сохраните для пересчёта.</b> unit cost, маржа, break-even и waterfall
+            посчитаны в браузере по несохранённым правкам статей. Итоговую цифру считает сервер (из
+            BOM + FX-курсов), и именно она уходит в cost_price продукта.
+          </Text>
+        </CalloutBox>
+      )}
 
       {/* WHICH MARKET the margin above is for. Catalogue prices are VAT-inclusive, so the net
           retail — and therefore the margin — depends entirely on the destination's rate. The list
@@ -323,16 +415,6 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 : 'the company’s domestic rate. Pick a destination to see the margin that market actually leaves.'}
           </Text>
         </div>
-      )}
-
-      {mixedScale && (
-        <CalloutBox tone='warning'>
-          <Text size='micro'>
-            Внимание: часть материалов задана поразмерно (стоимость партии), часть — на изделие.
-            Итог смешивает масштабы. По возможности задавайте расход всех измеряемых материалов
-            одним способом.
-          </Text>
-        </CalloutBox>
       )}
 
       <fieldset
@@ -481,19 +563,25 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       {rollup?.hasUnconvertedCurrencies && (
         <CalloutBox tone='error'>
           <Text size='micro'>
-            <b>Some BOM lines are in another currency with no FX rate</b>, so they are excluded from
-            the total and no base-currency cost can be computed — the unit cost above is
-            understated.{' '}
+            <b>Some BOM lines are in another currency</b>, so they are excluded from the
+            costing-currency total — the unit cost above is understated.{' '}
             <Link to={ROUTES.settings} className='underline'>
               Add a costing FX rate in Settings
             </Link>{' '}
-            so they fold into the base cost instead of silently lowering it.
+            to get a complete <b>base-currency</b> cost (unit cost base): the headline above stays
+            in the costing currency and still will not include those lines.
           </Text>
         </CalloutBox>
       )}
-      {!hasCosting && (
+      {/* The note used to hang off `!hasCosting` — i.e. it appeared only when there was no rollup
+          at all and therefore nothing that could be stale, and stayed hidden on exactly the cards
+          where the rollup CAN lag behind the BOM. Inverted: a card that has a rollup is a card
+          whose rollup was computed at some earlier save. */}
+      {hasCosting && (
         <Text size='micro' variant='label'>
-          the materials rollup is computed from the BOM on save; reload to refresh it.
+          the materials rollup above is computed from the BOM on SAVE — edits to the BOM, to a
+          colourway’s usages or to a material’s price are not in these figures until the card is
+          saved and re-read.
         </Text>
       )}
     </div>

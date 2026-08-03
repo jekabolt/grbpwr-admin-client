@@ -150,7 +150,6 @@ export function ProductionRunModal({
     // Create an empty run, then jump to its detail to plan lines / marker / costs.
     create.mutate(
       {
-        id: 0,
         run: {
           techCardId: d.techCardId,
           releaseId: d.releaseId || undefined,
