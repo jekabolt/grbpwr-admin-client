@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { ulid } from 'utils/ulid';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const input = 'w-32 border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -72,6 +73,9 @@ export function AuxRunPlan({
               plannedQty: planned,
               receivedQty: line?.receivedQty,
               defectQty: line?.defectQty,
+              // Keep the stored line's stable identity so re-planning UPDATEs that row in place
+              // instead of retiring it and its id; mint one only for a run that has no line yet.
+              lineKey: line?.lineKey || ulid(),
             },
           ],
         },

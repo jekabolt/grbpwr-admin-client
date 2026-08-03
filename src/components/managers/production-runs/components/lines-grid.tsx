@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { ulid } from 'utils/ulid';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
@@ -176,6 +177,11 @@ export function LinesGrid({
           plannedQty: planned,
           receivedQty: prev?.receivedQty,
           defectQty: prev?.defectQty,
+          // The line's stable identity. Carried over from the stored line so the backend UPDATEs
+          // that row in place (its id is what receipt lines will reference) instead of dropping and
+          // reinserting it; minted only for a cell that has no line yet. Never regenerate a key that
+          // came from the server — that would silently retire the row it names.
+          lineKey: prev?.lineKey || ulid(),
         });
       }
     }

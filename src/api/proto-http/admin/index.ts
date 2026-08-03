@@ -7132,6 +7132,13 @@ export type common_ProductionRunLine = {
   plannedQty: number | undefined;
   receivedQty?: number;
   defectQty?: number;
+  // Stable identity of this line, minted by the client (a 26-character Crockford ULID, exactly like
+  // a tech-card BOM line's line_key) and echoed back on read. The store diffs the submitted grid by
+  // it instead of delete+reinserting the whole grid, so the row's database id survives an edit —
+  // which is what lets receipt lines hold a real foreign key to it. Empty on the way in means "new
+  // line, mint me one"; a legacy row backfilled by migration 0230 reads back as a non-ULID key,
+  // so echo whatever arrives rather than validating its shape.
+  lineKey: string | undefined;
 };
 
 // ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in
