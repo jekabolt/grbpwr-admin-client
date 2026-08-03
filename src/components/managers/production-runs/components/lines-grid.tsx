@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import { ulid } from 'utils/ulid';
 import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
@@ -158,6 +159,16 @@ export function LinesGrid({
 
   const save = async () => {
     const next: common_ProductionRunLine[] = [];
+    // Stored "(unassigned)" lines whose row is gone from the grid. The one edit that legitimately
+    // MOVES a line to a new (product, size) slot is attaching the colour-model that was still
+    // unpublished at planning time — in this grid that is "remove the unassigned row, add the real
+    // product's row". Re-deriving identity purely by slot would mint fresh keys there and retire
+    // the stored rows (the very churn line_key exists to prevent), so a product cell with no line
+    // of its own adopts the orphan of its size and the backend updates that row in place.
+    const orphans = rows.some((r) => r.productId === 0)
+      ? []
+      : lines.filter((l) => !(l.productId ?? 0));
+    const usedKeys = new Set<string>();
     for (const r of rows) {
       for (const s of columns) {
         const raw = qty[key(r.productId, s)];
@@ -167,15 +178,29 @@ export function LinesGrid({
         if (!raw?.trim() || !Number.isFinite(planned) || planned <= 0) {
           // A blanked cell normally drops the line — but never one that already carries
           // counted received/defect quantities; keep it with plan 0 instead.
-          if (hasCounts && prev) next.push({ ...prev, plannedQty: 0 });
+          if (hasCounts && prev) {
+            if (prev.lineKey) usedKeys.add(prev.lineKey);
+            next.push({ ...prev, plannedQty: 0 });
+          }
           continue;
         }
+        const carrier =
+          prev ??
+          (r.productId > 0
+            ? orphans.find((l) => l.sizeId === s && !!l.lineKey && !usedKeys.has(l.lineKey))
+            : undefined);
+        if (carrier?.lineKey) usedKeys.add(carrier.lineKey);
         next.push({
           productId: r.productId,
           sizeId: s,
           plannedQty: planned,
-          receivedQty: prev?.receivedQty,
-          defectQty: prev?.defectQty,
+          receivedQty: carrier?.receivedQty,
+          defectQty: carrier?.defectQty,
+          // The line's stable identity. Carried over from the stored line so the backend UPDATEs
+          // that row in place (its id is what receipt lines will reference) instead of dropping and
+          // reinserting it; minted only for a cell that has no line yet. Never regenerate a key that
+          // came from the server — that would silently retire the row it names.
+          lineKey: carrier?.lineKey || ulid(),
         });
       }
     }
