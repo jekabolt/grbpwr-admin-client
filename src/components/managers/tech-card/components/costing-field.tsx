@@ -120,7 +120,7 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
 // 🔒 costing: the tab is hidden without costing:read; the fieldsets below are disabled without
 // costing:write. The waterfall is still drawn read-only in that case.
 export function CostingField({ techCard }: { techCard?: common_TechCard }) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { canWriteCosting } = usePermissions();
   const { dictionary } = useDictionary();
   const techCardId = techCard?.id;
@@ -279,6 +279,20 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     reprice.mutate(techCardId, {
       onSuccess: (r) => {
         const lines = r.lines ?? [];
+        // The form is seeded at mount and deliberately never wholesale-reset on refetch, so the
+        // live BOM rows still hold the pre-reprice prices — and the NEXT save would write those
+        // stale numbers back (restamped 'manual'), silently undoing the reprice it just confirmed.
+        // Sync the returned per-line results into the form by lineKey.
+        const rows = (getValues('bomItems') ?? []) as { lineKey?: string }[];
+        for (const l of lines) {
+          if (!l.newPrice?.value || !l.lineKey) continue;
+          const i = rows.findIndex((b) => b.lineKey === l.lineKey);
+          if (i < 0) continue;
+          setValue(`bomItems.${i}.unitPrice`, decimalToInput(l.newPrice), { shouldDirty: true });
+          if (l.newCurrency) {
+            setValue(`bomItems.${i}.currency`, l.newCurrency, { shouldDirty: true });
+          }
+        }
         const changed = lines.filter((l) => l.changed).length;
         const noPrice = lines.filter((l) => !l.newPrice).length;
         showMessage(
