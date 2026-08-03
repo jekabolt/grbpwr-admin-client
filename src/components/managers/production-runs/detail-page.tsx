@@ -221,15 +221,19 @@ export function ProductionRunDetail() {
                 receive
               </Button>
             )}
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={() => setEditOpen(true)}
-            >
-              edit
-            </Button>
+            {/* A received/closed run rejects every update before the payload is examined
+                (ErrProductionRunReceivedImmutable), so the edit modal on it can only fail. */}
+            {!locked && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='lg'
+                className='uppercase'
+                onClick={() => setEditOpen(true)}
+              >
+                edit
+              </Button>
+            )}
             {!locked && (
               <Button
                 type='button'

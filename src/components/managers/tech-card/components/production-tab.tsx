@@ -1,6 +1,10 @@
 import { common_ProductionRun, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { daysPast, overdueDays } from 'components/managers/production-runs/components/options';
+import {
+  daysPast,
+  isRunOpen,
+  overdueDays,
+} from 'components/managers/production-runs/components/options';
 import { RunCard } from 'components/managers/production-runs/components/run-card';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -44,7 +48,9 @@ export function ProductionTab({
   // date; the factory coordinator books the runs.
   const { canWrite } = usePermissions();
   const canPlanRuns = canWrite(SECTION.production);
-  const { data, isLoading, isError } = useProductionRuns(techCardId, '', 0, false);
+  // enabled only with a real card id: techCardId 0 is sent as undefined and would list EVERY
+  // run in the system as this style's batches.
+  const { data, isLoading, isError } = useProductionRuns(techCardId, '', 0, false, techCardId > 0);
   const runs: common_ProductionRun[] = data?.runs ?? [];
 
   const summary = summarise(runs);
@@ -95,13 +101,17 @@ export function ProductionTab({
               )}
             />
           </label>
+          {/* A past drop date on a shipped style is history, not an alarm — «просрочен» forever on
+              every old card would train people to ignore the one place it matters (open batches). */}
           <Text variant='inactive' size='small'>
             {!dropDate
               ? 'дата дропа не задана — партиям не с чем сверяться'
               : dropIn == null
                 ? '—'
                 : dropIn > 0
-                  ? `просрочен на ${dropIn} дн`
+                  ? runs.some((r) => isRunOpen(r.run?.status))
+                    ? `дроп просрочен на ${dropIn} дн, партии ещё открыты`
+                    : `дроп прошёл ${dropIn} дн назад`
                   : dropIn === 0
                     ? 'дроп сегодня'
                     : `до дропа ${-dropIn} дн`}
@@ -219,14 +229,18 @@ function summarise(runs: common_ProductionRun[]) {
 
   for (const r of runs) {
     const a = r.actuals;
-    plannedQty += a?.plannedQtyTotal ?? 0;
+    // A cancelled batch is not unmet demand: counting its plan made «принято N% плана» read as a
+    // production shortfall on styles where nothing was short. Its received/defect stay counted —
+    // goods that DID arrive before a cancel are real.
+    if (r.run?.status !== 'PRODUCTION_RUN_STATUS_CANCELLED') {
+      plannedQty += a?.plannedQtyTotal ?? 0;
+    }
     const recv = a?.receivedQtyTotal ?? 0;
     const defect = a?.defectQtyTotal ?? 0;
     receivedQty += recv;
     defectQty += defect;
     if (recv > 0 || defect > 0) anyReceived = true;
     if (overdueDays(r.run?.promisedAt, r.run?.status) > 0) overdue += 1;
-    if (a?.baseCurrency) baseCurrency = a.baseCurrency;
 
     // plannedTotalBase is emitted only when planned_unit_cost is in the base currency AND the run
     // received something; hasBase false means some article could not be folded, so the actual total
@@ -238,6 +252,8 @@ function summarise(runs: common_ProductionRun[]) {
       comparableQty += recv;
       planTotal += Number(planned);
       factTotal += Number(actual);
+      // The currency label must come from a run that is actually IN the average above.
+      if (a?.baseCurrency) baseCurrency = a.baseCurrency;
     }
   }
 

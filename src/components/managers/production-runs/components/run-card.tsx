@@ -82,7 +82,9 @@ export function RunCard({
               receive
             </Button>
           )}
-          {canEdit && onEdit && (
+          {/* A received/closed run rejects EVERY update server-side (immutability guard fires
+              before the payload is looked at), so an edit button on it is a guaranteed error. */}
+          {canEdit && !locked && onEdit && (
             <Button
               type='button'
               variant='secondary'

@@ -8,7 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
-import { isRunLocked, runDetailPath, runStatusLabel, runStatusOptions } from './options';
+import { runDetailPath, runStatusLabel, runStatusOptions } from './options';
 import {
   updateRunErrorMessage,
   useSaveProductionRun,
@@ -119,13 +119,10 @@ export function ProductionRunModal({
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
 
-  // A received/closed run has stock (and possibly cost_price) posted — downgrading it to
-  // planned would re-offer the receive button and double-post stock, and un-hide delete.
-  // Only the forward move received → closed stays available.
-  const statusLocked = isEdit && isRunLocked(run?.run?.status);
-  const statusOptions = statusLocked
-    ? runStatusOptions.filter((o) => o.value === 'PRODUCTION_RUN_STATUS_CLOSED')
-    : runStatusOptions;
+  // The modal can no longer be OPENED on a received/closed run (the edit affordances are hidden —
+  // the server rejects any update on such a run before it even reads the status, so the
+  // received → closed move this dropdown used to offer was unreachable and every save failed).
+  const statusOptions = runStatusOptions;
 
   const submit = () => {
     if (!d.techCardId) {
@@ -265,11 +262,6 @@ export function ProductionRunModal({
                     </option>
                   ))}
                 </select>
-                {statusLocked ? (
-                  <Text variant='inactive' size='small'>
-                    stock is posted — status can only move forward to closed
-                  </Text>
-                ) : null}
               </label>
               <label className='flex flex-col gap-1'>
                 <Text size='small'>started at</Text>
