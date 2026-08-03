@@ -3015,6 +3015,13 @@ export type TechCardInsert = {
   skuSeason: SkuSeason | undefined;
   // WS7: sub-classifies an auxiliary card (UNKNOWN=unset). Ignored / must be UNKNOWN for a sellable card.
   auxSubtype: TechCardAuxSubtype | undefined;
+  // Planning date for the overdue view (production cockpit): the calendar day this style is planned
+  // to drop, the anchor a run's promised_at is judged against ("до дропа N дней / просрочен"). Owner-
+  // set intent, not a workflow stamp like approved_at/released_at — unset means no drop planned.
+  // Only the DATE part is persisted (tech_card.target_drop_date is a DATE column); any time of day
+  // sent on the wire is dropped. NOTE: a RELEASED card is frozen for edits (ErrTechCardReleased), so
+  // this planning date is only settable while the card is draft/approved — see the store's freeze check.
+  targetDropDate: wellKnownTimestamp | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -3391,6 +3398,15 @@ export type ProductionRunInsert = {
   // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
   // cost still derives from real material issues.
   actualWastagePercent: googletype_Decimal | undefined;
+  // Planning dates for the overdue view (production cockpit). Client-writable, unlike started_at's
+  // sibling received_at: they are INTENT, not a stamped fact, so nothing downstream books stock or
+  // accrues cost from them.
+  // planned_start_at — when the batch is planned to go into work (started_at is the real transition).
+  // promised_at      — дата, к которой партия обещана. An open run (planned/in_progress) whose
+  // promised_at is in the past is overdue; that is exactly what
+  // ListProductionRunsRequest.overdue_only filters on.
+  plannedStartAt: wellKnownTimestamp | undefined;
+  promisedAt: wellKnownTimestamp | undefined;
 };
 
 // ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen

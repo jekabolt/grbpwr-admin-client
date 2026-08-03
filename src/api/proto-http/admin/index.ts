@@ -5822,6 +5822,13 @@ export type common_TechCardInsert = {
   skuSeason: common_SkuSeason | undefined;
   // WS7: sub-classifies an auxiliary card (UNKNOWN=unset). Ignored / must be UNKNOWN for a sellable card.
   auxSubtype: common_TechCardAuxSubtype | undefined;
+  // Planning date for the overdue view (production cockpit): the calendar day this style is planned
+  // to drop, the anchor a run's promised_at is judged against ("до дропа N дней / просрочен"). Owner-
+  // set intent, not a workflow stamp like approved_at/released_at — unset means no drop planned.
+  // Only the DATE part is persisted (tech_card.target_drop_date is a DATE column); any time of day
+  // sent on the wire is dropped. NOTE: a RELEASED card is frozen for edits (ErrTechCardReleased), so
+  // this planning date is only settable while the card is draft/approved — see the store's freeze check.
+  targetDropDate: wellKnownTimestamp | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -7093,6 +7100,15 @@ export type common_ProductionRunInsert = {
   // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
   // cost still derives from real material issues.
   actualWastagePercent: googletype_Decimal | undefined;
+  // Planning dates for the overdue view (production cockpit). Client-writable, unlike started_at's
+  // sibling received_at: they are INTENT, not a stamped fact, so nothing downstream books stock or
+  // accrues cost from them.
+  // planned_start_at — when the batch is planned to go into work (started_at is the real transition).
+  // promised_at      — дата, к которой партия обещана. An open run (planned/in_progress) whose
+  // promised_at is in the past is overdue; that is exactly what
+  // ListProductionRunsRequest.overdue_only filters on.
+  plannedStartAt: wellKnownTimestamp | undefined;
+  promisedAt: wellKnownTimestamp | undefined;
 };
 
 // ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
@@ -7267,6 +7283,11 @@ export type ListProductionRunsRequest = {
   // (the same rule as the stale_open_production_run dashboard alert). Server-side so the attention
   // filter/strip does not client-scan the two status pages (#10). 0 = no staleness filter.
   staleDays: number | undefined;
+  // true: return only OVERDUE runs — still open (planned/in_progress) with a promised_at that has
+  // already passed. Server-side so the production cockpit's «опаздывает» filter does not page the
+  // whole list to count. Runs with no promised_at are never overdue. Combined with an explicit
+  // status filter it just intersects (e.g. status=received + overdue_only yields nothing).
+  overdueOnly: boolean | undefined;
 };
 
 export type ListProductionRunsResponse = {
@@ -13066,6 +13087,9 @@ export function createAdminServiceClient(
       }
       if (request.staleDays) {
         queryParams.push(`staleDays=${encodeURIComponent(request.staleDays.toString())}`)
+      }
+      if (request.overdueOnly) {
+        queryParams.push(`overdueOnly=${encodeURIComponent(request.overdueOnly.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
