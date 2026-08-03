@@ -322,6 +322,28 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
 
   return (
     <div className='flex flex-col gap-3'>
+      {/* BLOCKING, so it sits ABOVE the strip it invalidates rather than beside the FX note at the
+          bottom. An uncostable line joins NO currency bucket, so hasUnconvertedCurrencies never
+          catches it and every figure below renders plausible-but-short by a whole material — the
+          server refuses to seed product.cost_price from it, and until this banner existed the tab
+          could not say why. */}
+      {rollup?.hasUnpriced && (
+        <CalloutBox tone='error'>
+          <Text size='micro'>
+            <b>Unit cost неполный и НЕ сеется в cost_price.</b> В рецепте есть строка, которую
+            невозможно посчитать: нет цены в BOM или в каталоге, пин на артикул с несовпадающей
+            единицей измерения, не задана норма расхода, либо норма задана по размерам, а размерные
+            количества не заполнены. Такая строка не попадает ни в один валютный итог, поэтому цифры
+            ниже выглядят правдоподобно, но занижены на целый материал. Найдите строку на вкладках
+            BOM / colorways
+            {colorwayCosts.some((cc) => cc.hasUnpriced)
+              ? ' — проблемный colourway отмечен ниже, в «cost by colourway»'
+              : ''}
+            .
+          </Text>
+        </CalloutBox>
+      )}
+
       {/* 16.2 — economics as a header strip: always visible, always current, no click anywhere.
           (This component is the first thing the costing tab renders, so "top of the tab" is
           here.) The `style economics` modal it replaces still serves the analytics page. */}
@@ -515,12 +537,23 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
             </thead>
             <tbody>
               {colorwayCosts.map((cc, i) => (
-                <tr key={i}>
+                // An uncostable line blocks THIS colourway's own cost seed, so the figures are
+                // muted to stop them being read as the answer — the name stays at full weight
+                // because it is what you have to go and fix.
+                <tr
+                  key={i}
+                  className={cc.hasUnpriced ? '[&>td:not(:first-child)]:text-labelColor' : undefined}
+                >
                   <td>
                     <span className='flex flex-wrap items-center gap-1'>
                       {colorwayLabel(cc.colorwayId)}
                       {cc.colorwayId === 0 && <Pill tone='mut'>основной</Pill>}
                       {cc.hasUnconvertedCurrencies && <Pill tone='warn'>no FX</Pill>}
+                      {cc.hasUnpriced && (
+                        <Pill tone='warn' title='в рецепте есть строка, которую нельзя посчитать'>
+                          строка без цены
+                        </Pill>
+                      )}
                     </span>
                   </td>
                   <td>{decimalToInput(cc.materialsPerUnit) || <EmptyCell />}</td>

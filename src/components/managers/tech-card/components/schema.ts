@@ -998,6 +998,7 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     orderQty: undefined,
     orderCost: undefined,
     hasUnconvertedCurrencies: undefined,
+    hasUnpriced: undefined,
     totalSam: undefined,
     colorwayCosts: undefined,
     // Base-currency roll-up (server-folded via costing FX rates) — output-only.

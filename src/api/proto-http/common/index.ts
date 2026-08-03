@@ -2786,6 +2786,11 @@ export type TechCardColorwayCost = {
   orderQty: number | undefined;
   orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one authored usage of THIS colourway could not be costed at all
+  // (no price / unresolvable pin / no norm / per-size norms without order qty); such a line
+  // contributes to NO currency bucket, so unit_cost is withheld from cost seeding for this
+  // colourway and should not be trusted as complete.
+  hasUnpriced: boolean | undefined;
 };
 
 // TechCardCosting holds the manually-entered per-unit cost articles (Sheet «Калькуляция»).
@@ -2824,6 +2829,11 @@ export type TechCardCosting = {
   orderQty: number | undefined;
   orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one authored usage of the PRIMARY colourway could not be costed
+  // at all (no price / unresolvable pin / no norm / per-size norms without order qty); such a line
+  // contributes to NO currency bucket, so unit_cost/unit_cost_base are withheld from cost seeding
+  // and should not be trusted as complete.
+  hasUnpriced: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: TechCardColorwayCost[] | undefined;
   // OUTPUT-ONLY base-currency rollup. The unit/order cost of the primary colourway folded into
@@ -3366,6 +3376,9 @@ export type ProductionRunInsert = {
   releaseId: number | undefined;
   status: ProductionRunStatus | undefined;
   startedAt: wellKnownTimestamp | undefined;
+  // server-owned since Phase 0a; a client-sent value is ignored. received_at is the timestamp of a
+  // physical receipt, stamped only by the receive flow beside the stock it books — a client-writable
+  // one let an open run be back-dated into the accounting scan with no stock movement behind it.
   receivedAt: wellKnownTimestamp | undefined;
   notes: string | undefined;
   lines: ProductionRunLine[] | undefined;
