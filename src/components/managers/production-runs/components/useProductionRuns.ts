@@ -91,15 +91,32 @@ export function useMaterialPlan(runId: number, enabled: boolean) {
   });
 }
 
-// Create (id = 0) or update. planned_unit_cost is snapshotted server-side from the tech card
-// / release; actuals are computed on read — we only ever send the ProductionRunInsert.
+// Create (no id) or update (id + the lock version that came WITH the run being edited).
+// planned_unit_cost is snapshotted server-side from the tech card / release; actuals are computed
+// on read — we only ever send the ProductionRunInsert.
+//
+// The update arm used to hardcode `expectedLockVersion: 0`, which the contract documents as the
+// explicit OPT-OUT of the optimistic lock ("0 keeps the legacy last-write-wins behaviour"): an edit
+// through this hook would silently overwrite whatever another window had saved in the meantime,
+// while every other run write on the page was locked. The version is now part of the input type, so
+// it cannot be dropped again, and it must be the one read alongside the run — refetching it here
+// would only re-read the value we are trying to detect a change in. `common_ProductionRun.
+// lock_version` rides on the list and detail payloads for exactly this reason.
+export type SaveProductionRunInput =
+  | { id?: undefined; lockVersion?: undefined; run: common_ProductionRunInsert }
+  | { id: number; lockVersion: number; run: common_ProductionRunInsert };
+
 export function useSaveProductionRun() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, run }: { id: number; run: common_ProductionRunInsert }) =>
-      id
-        ? adminService.UpdateProductionRun({ id, run, expectedLockVersion: 0 })
-        : adminService.CreateProductionRun({ run }),
+    mutationFn: (input: SaveProductionRunInput) =>
+      input.id
+        ? adminService.UpdateProductionRun({
+            id: input.id,
+            run: input.run,
+            expectedLockVersion: input.lockVersion,
+          })
+        : adminService.CreateProductionRun({ run: input.run }),
     onSuccess: () => qc.invalidateQueries({ queryKey: productionRunKeys.all }),
   });
 }
