@@ -247,7 +247,20 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const onTarget = marginPct != null && hasTarget && marginPct >= targetPct;
 
   // --- Phase 3 (plan 11): provenance-band inputs ---
-  const isDraft = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_DRAFT';
+  const approvalState = techCard?.techCard?.approvalState;
+  const isDraft = approvalState === 'TECH_CARD_APPROVAL_STATE_DRAFT';
+  // Only RELEASED freezes content (the server's RequireMutableTechCard rule): in_review/approved
+  // cards are price-editable through a normal save, so they reprice too.
+  const isReleased = approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
+  const stateLabel = isDraft
+    ? 'draft план'
+    : approvalState === 'TECH_CARD_APPROVAL_STATE_IN_REVIEW'
+      ? 'in review'
+      : approvalState === 'TECH_CARD_APPROVAL_STATE_APPROVED'
+        ? 'approved'
+        : approvalState === 'TECH_CARD_APPROVAL_STATE_OBSOLETE'
+          ? 'obsolete'
+          : 'released';
   const { showMessage } = useSnackBarStore();
   const reprice = useRepriceTechCardBom();
   // The Phase 2 migration report for THIS card — empty for every cleanly-migrated card, so the
@@ -389,7 +402,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       {/* Plan identity (plan 11 header): whose numbers these are and whether they are complete —
           answered before a single figure is read, not deduced from footnotes 300 lines down. */}
       <div className='flex flex-wrap items-center gap-1.5'>
-        <Pill tone={isDraft ? 'mut' : 'attention'}>{isDraft ? 'draft план' : 'released'}</Pill>
+        <Pill tone={isReleased ? 'attention' : 'mut'}>{stateLabel}</Pill>
         {cur && <Pill tone='mut'>{cur}</Pill>}
         {hasCosting &&
           (rollup?.hasUnpriced || rollup?.hasUnconvertedCurrencies ? (
@@ -573,12 +586,13 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       {colorwayCosts.length === 0 && materialsTotal.length === 0 && (
         <Text size='micro' variant='label'>
           материалов пока нет — заполните BOM и рецепты колорвеев, суммы посчитаются при
-          сохранении. Источник и дату каждой цены видно в «cost estimate» ниже и на строках BOM.
+          сохранении. Источник и дату каждой цены видно в таблице «cost estimate».
         </Text>
       )}
-      {/* Reprice: the one write this band owns. Server-side, draft-only, catalog-linked lines only —
+      {/* Reprice: the one write this band owns. Server-side, frozen only for RELEASED cards,
+          catalog-linked lines only —
           the same CATALOG_LATEST price the estimate table shows as the fallback. */}
-      {canWriteCosting && isDraft && catalogLinkedLines > 0 && (
+      {canWriteCosting && !isReleased && catalogLinkedLines > 0 && (
         <div className='flex flex-wrap items-center gap-3'>
           <Button
             type='button'

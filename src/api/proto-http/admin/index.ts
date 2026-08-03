@@ -9142,7 +9142,7 @@ export interface AdminService {
   AddMaterialPrice(request: AddMaterialPriceRequest): Promise<AddMaterialPriceResponse>;
   ListMaterialPrices(request: ListMaterialPricesRequest): Promise<ListMaterialPricesResponse>;
   // RepriceTechCardBom re-pulls the current material-catalog price into every catalog-linked BOM
-  // line of a DRAFT card (production-costing Phase 3, plan 11): unit_price/currency are overwritten
+  // line of a mutable (non-released) card (production-costing Phase 3, plan 11): unit_price/currency are overwritten
   // with the same CATALOG_LATEST resolution the style cost estimate uses (costing currency, else
   // base currency, else a sole unambiguous catalog currency), and price_source/price_snapshot_at
   // are stamped 'catalog'/now. Released cards are frozen (FAILED_PRECONDITION) — re-release is the
@@ -9152,8 +9152,9 @@ export interface AdminService {
   // ListCostingMigrationExceptions reads the Phase 2 scalar→BOM migration's exception report
   // (tech_card_costing_migration_exception): hardware/packaging money the migration refused to move
   // mechanically (double-counted / zero-colourway / non-draft cards), waiting for manual transfer
-  // into the BOM. Read-only; tech_card_id 0 lists all cards. Requires costing:read (amounts are
-  // confidential cost data).
+  // into the BOM. Read-only; tech_card_id 0 lists all cards. Requires tech-cards read; the AMOUNT
+  // additionally needs costing:read and comes back stripped without it (structure — card, article,
+  // kind, currency — is visible to any tech-cards reader).
   ListCostingMigrationExceptions(request: ListCostingMigrationExceptionsRequest): Promise<ListCostingMigrationExceptionsResponse>;
   // Tech-card release snapshots (task 11): the immutable frozen spec + planned cost per release.
   ListTechCardReleases(request: ListTechCardReleasesRequest): Promise<ListTechCardReleasesResponse>;
