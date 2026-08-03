@@ -455,6 +455,11 @@ const techCardObject = z.object({
   careInstructions: z.string().optional().default(''),
   stage: z.string().optional().default(DEFAULT_STAGE),
   approvalState: z.string().optional().default(DEFAULT_APPROVAL_STATE),
+  // The drop this style is being made for, as a YYYY-MM-DD input string ('' = no drop planned). The
+  // production tab measures each batch's promised date against it. Planning intent set by the owner,
+  // not a workflow stamp like approvedAt/releasedAt — but it still travels on the tech-card write, so
+  // a RELEASED (frozen) card rejects a change to it along with everything else.
+  targetDropDate: z.string().optional().default(''),
   measurementUnit: z.string().optional().default(DEFAULT_MEASUREMENT_UNIT),
   // The design intent in prose — what this style IS, before any construction detail. Printed at
   // the head of the tech pack's description sheet, above the details and the notes.
@@ -567,6 +572,7 @@ export const techCardDefaultData: TechCardFormData = {
   careInstructions: '',
   stage: DEFAULT_STAGE,
   approvalState: DEFAULT_APPROVAL_STATE,
+  targetDropDate: '',
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
   concept: '',
   notes: '',
@@ -735,6 +741,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     careInstructions: techCard.careInstructions || '',
     stage: stageOrDefault(insert?.stage),
     approvalState: approvalStateOrDefault(insert?.approvalState),
+    targetDropDate: timestampToDateInput(insert?.targetDropDate),
     measurementUnit: measurementUnitOrDefault(insert?.measurementUnit),
     concept: insert?.concept || '',
     notes: insert?.notes || '',
@@ -1069,6 +1076,9 @@ export function mapFormToTechCardInsert(
     stage: (data.stage || 'TECH_CARD_STAGE_UNKNOWN') as common_TechCardStage,
     approvalState: (data.approvalState ||
       'TECH_CARD_APPROVAL_STATE_UNKNOWN') as common_TechCardApprovalState,
+    // Blank clears the date: dateInputToTimestamp maps '' to the proto zero instant, which the
+    // backend converter reads as NULL (the same round-trip every other optional date here uses).
+    targetDropDate: dateInputToTimestamp(data.targetDropDate),
     measurementUnit: (data.measurementUnit ||
       'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN') as common_TechCardMeasurementUnit,
     concept: data.concept?.trim() || '',

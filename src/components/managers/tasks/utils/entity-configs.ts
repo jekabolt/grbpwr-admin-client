@@ -260,6 +260,7 @@ export const runConfig: EntityConfig = {
       limit: 100,
       offset: undefined,
       staleDays: undefined,
+      overdueOnly: undefined,
     });
     return (r.runs ?? []).map(runOption);
   },

@@ -4,34 +4,47 @@ import { common_ProductionRunInsert, common_ProductionRunLine } from 'api/proto-
 import { stockChangeHistoryKeys } from 'components/managers/product/components/stock/useStockChangeHistory';
 import { runStatusToDbFilter } from './options';
 
-// Read-modify-write a single section of a run's insert (R-17). Each detail-page section
-// (lines / marker / costs) re-fetches the latest run immediately before saving and overrides
-// ONLY its own keys — a marker edit can't clobber concurrently-saved lines, and vice versa.
-// #9: the fetched run's lock_version is now echoed back as expected_lock_version, so the server
-// rejects (Aborted → HTTP 409) if a concurrent writer bumped it in the fetch→save gap instead of
-// silently last-write-winning. A run predating the field reads lock_version 0 → legacy behaviour.
-// `mergeLines` derives the new lines FROM the fresh ones (receive uses it to stamp counted
-// quantities per (product, size) without replacing concurrently-edited lines wholesale).
+// Read-modify-write a single section of a run's insert (R-17). UpdateProductionRun is a full
+// replace, so each detail-page section (lines / marker / costs) re-fetches the run immediately
+// before saving and overrides ONLY its own keys — that fetch is what stops a marker edit from
+// sending stale lines back over concurrently-saved ones. `mergeLines` derives the new lines FROM
+// the fresh ones (receive uses it to stamp counted quantities per (product, size)).
+//
+// `lockVersion` is the CALLER's, and that is the whole point. This hook used to send the version it
+// had just read one line earlier — the value the lock exists to compare AGAINST the caller's view of
+// the run. It therefore always matched, and every save on this path was a last-write-wins that
+// merely looked locked. The version has to come from the payload the operator was actually looking
+// at when they made the edit (`run.lockVersion`, which rides on both the list and detail payloads);
+// a concurrent writer is then caught (Aborted → HTTP 409) instead of silently overwritten. A run
+// predating the field reads 0, which the backend documents as the explicit opt-out — unchanged.
 export function useUpdateRunSection() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({
       id,
+      lockVersion,
       patch,
       mergeLines,
     }: {
       id: number;
+      lockVersion: number;
       patch: Partial<common_ProductionRunInsert>;
       mergeLines?: (fresh: common_ProductionRunLine[]) => common_ProductionRunLine[];
     }) => {
       const fresh = await adminService.GetProductionRun({ id });
       const base = (fresh.run?.run ?? {}) as common_ProductionRunInsert;
-      const expectedLockVersion = fresh.run?.lockVersion ?? 0;
       const run = { ...base, ...patch };
       if (mergeLines) run.lines = mergeLines(base.lines ?? []);
-      return adminService.UpdateProductionRun({ id, run, expectedLockVersion });
+      return adminService.UpdateProductionRun({ id, run, expectedLockVersion: lockVersion });
     },
     onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: productionRunKeys.all });
+      qc.invalidateQueries({ queryKey: productionRunKeys.detail(v.id) });
+    },
+    // A rejected save leaves the screen showing the version the server just refused. Refetch on
+    // failure too, so "обновите страницу" lands on a page that is already reloading itself instead
+    // of one the operator must reload by hand before a retry can succeed.
+    onError: (_e, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });
       qc.invalidateQueries({ queryKey: productionRunKeys.detail(v.id) });
     },
@@ -43,24 +56,35 @@ export function useUpdateRunSection() {
 // silently retrying would re-introduce the last-write-wins the lock exists to prevent.
 export function updateRunErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
-  if (status === 409)
-    return 'This run was changed in another window — refresh the page and try again';
+  if (status === 409) return 'Партия изменена в другом окне — обновите страницу';
   return e instanceof Error ? e.message : 'Could not save the run changes';
 }
 
 export const productionRunKeys = {
   all: ['productionRuns'] as const,
-  list: (techCardId: number, status: string, staleDays = 0) =>
-    [...productionRunKeys.all, 'list', techCardId, status, staleDays] as const,
+  list: (techCardId: number, status: string, staleDays = 0, overdueOnly = false) =>
+    [...productionRunKeys.all, 'list', techCardId, status, staleDays, overdueOnly] as const,
   detail: (id: number) => [...productionRunKeys.all, 'detail', id] as const,
 };
 
 // #10: stale_days > 0 asks the backend for only the non-terminal runs that have sat at least that
 // long (the "stale" set the attention strip counts), replacing a client scan of two full status
 // pages. 0 = no staleness filter.
-export function useProductionRuns(techCardId: number, status: string, staleDays = 0) {
+// overdueOnly asks the backend for only the OPEN runs past their promised date — the same predicate
+// the card badge renders. Server-side because the client holds one page: a local filter would answer
+// "late among the first N", which is a different and quietly wrong question.
+// `enabled` exists for the tech card, which asks for one style's runs and must not fire the query
+// while the card is unsaved: techCardId 0 is sent as `undefined`, i.e. "every run in the system".
+export function useProductionRuns(
+  techCardId: number,
+  status: string,
+  staleDays = 0,
+  overdueOnly = false,
+  enabled = true,
+) {
   return useQuery({
-    queryKey: productionRunKeys.list(techCardId, status, staleDays),
+    enabled,
+    queryKey: productionRunKeys.list(techCardId, status, staleDays, overdueOnly),
     queryFn: () =>
       adminService.ListProductionRuns({
         techCardId: techCardId || undefined,
@@ -69,6 +93,7 @@ export function useProductionRuns(techCardId: number, status: string, staleDays 
         limit: 200,
         offset: 0,
         staleDays: staleDays || undefined,
+        overdueOnly: overdueOnly || undefined,
       }),
   });
 }

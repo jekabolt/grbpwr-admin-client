@@ -57,6 +57,7 @@ export function AttentionBadge() {
         limit: 200,
         offset: 0,
         staleDays,
+        overdueOnly: undefined,
       }),
     enabled: canRuns && !alertSettings.isLoading,
   });

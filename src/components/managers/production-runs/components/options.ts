@@ -60,6 +60,47 @@ export const isRunLocked = (s?: common_ProductionRunStatus | string): boolean =>
 export const isRunReceivable = (s?: common_ProductionRunStatus | string): boolean =>
   s === 'PRODUCTION_RUN_STATUS_PLANNED' || s === 'PRODUCTION_RUN_STATUS_IN_PROGRESS';
 
+// A run is OPEN while it is still expected to produce something. Same two statuses as receivable —
+// named separately because "can I still receive it" and "is it still outstanding" are different
+// questions that happen to share an answer, and the overdue rule below is about the second one.
+export const isRunOpen = isRunReceivable;
+
+// The proto zero instant. grpc-gateway serialises an unset google.protobuf.Timestamp as this rather
+// than omitting it, so every date read here has to treat it as "no date" or the UI dates every
+// unplanned run to the year 1.
+const ZERO_TIMESTAMP = '0001-01-01T00:00:00Z';
+
+// A wire timestamp as a bare YYYY-MM-DD, or '' when unset. The backend stores these dates at UTC
+// midnight, so slicing is exact — no local-timezone reinterpretation that could shift the day.
+export const runDate = (ts?: string): string =>
+  !ts || ts === ZERO_TIMESTAMP ? '' : ts.slice(0, 10);
+
+// Whole days between a wire date and today, positive when the date is in the PAST. Both sides are
+// reduced to a UTC calendar day first: comparing instants would make a run promised for today read
+// as one day late from 00:01 local time onwards.
+export function daysPast(ts?: string): number | undefined {
+  const d = runDate(ts);
+  if (!d) return undefined;
+  const then = Date.parse(`${d}T00:00:00Z`);
+  if (Number.isNaN(then)) return undefined;
+  const now = new Date();
+  const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return Math.round((today - then) / 86_400_000);
+}
+
+// How many days late a run is: >0 only for an OPEN run whose promised date has passed. This is the
+// client half of ListProductionRunsRequest.overdue_only — same predicate, so the badge and the
+// server-side filter can never disagree about which runs are late. A run with no promised date was
+// never promised anything and is therefore never late.
+export function overdueDays(
+  promisedAt?: string,
+  status?: common_ProductionRunStatus | string,
+): number {
+  if (!isRunOpen(status)) return 0;
+  const past = daysPast(promisedAt);
+  return past != null && past > 0 ? past : 0;
+}
+
 export const runCostKindOptions: { value: common_ProductionRunCostKind; label: string }[] = [
   { value: 'PRODUCTION_RUN_COST_KIND_MATERIALS', label: 'materials' },
   { value: 'PRODUCTION_RUN_COST_KIND_CMT', label: 'CMT (cut-make-trim)' },

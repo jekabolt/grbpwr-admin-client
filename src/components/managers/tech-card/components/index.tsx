@@ -88,6 +88,8 @@ import {
   toPurposeEnum,
   wireInt,
 } from './schema';
+import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
+import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
 import { SizeIdsField } from './size-ids-field';
 import { SizeChartField } from './size-chart-field';
@@ -108,6 +110,7 @@ const TABS = [
   { id: 'construction', label: 'construction' },
   { id: 'labels', label: 'labels & pkg' },
   { id: 'costing', label: 'costing' },
+  { id: 'production', label: 'production' },
   { id: 'issues', label: 'issues' },
   { id: 'signoff', label: 'sign-off' },
   { id: 'history', label: 'history' },
@@ -126,6 +129,9 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // and re-finding the colourway to point at it.
   { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
+  // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
+  // `spec` would break the rail's lifecycle reading — the bands are the story of the card, in order.
+  { band: 'produce', tabs: ['production'] },
   { band: '', tabs: ['history'] },
 ];
 
@@ -334,6 +340,17 @@ export function TechCardForm({
   // The server's readiness checklist. The lifecycle strip reads the SAME cached query for its stage
   // rows; this call is here for `releaseRequirements`, which is a second, independent list.
   const { data: readiness } = useTechCardReadiness(isEditMode ? numId : undefined);
+  // The style's batches. Read here as well as inside the production tab so the rail's completion
+  // glyph knows whether the tab has content — React Query serves both from ONE cached list, keyed by
+  // the same arguments, so this is not a second request.
+  const { data: productionRunsData } = useProductionRuns(
+    numId ?? 0,
+    '',
+    0,
+    false,
+    isEditMode && !!numId,
+  );
+  const productionRunCount = productionRunsData?.runs?.length ?? 0;
   // Release freezes the card as the factory-facing spec, so what it takes is stated once, below.
   // The old M8/M3 gap note is gone with the guesswork it described: colourway lab-dip approval could
   // never be gated here (the read model exposes no labDipStatus — the field lives only on the
@@ -463,6 +480,9 @@ export function TechCardForm({
     labels: len(labelsW) > 0,
     // "filled" = actually signed off, not merely present — 7 REJECTED rows must not read as done (M10).
     signoff: signoffsApproved,
+    // A style has "production" once at least one batch of it exists. Read off the runs query rather
+    // than the form — runs are not part of the tech-card payload.
+    production: productionRunCount > 0,
   };
   const isFilled = (t: TabId) => sectionFilled[t] === true;
 
@@ -487,6 +507,11 @@ export function TechCardForm({
     if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
     if (t === 'costing' && !canReadCosting) return false;
     if (t === 'samples' && !isEditMode) return false;
+    // Production needs a saved card (the runs query is keyed by its id). Deliberately NOT gated on
+    // costing:read, unlike costing above: the server strips money out of a run payload but keeps the
+    // quantities and the defect rate, so a warehouse role gets a coherent view rather than an empty
+    // tab — and receiving stock is precisely that role's job.
+    if (t === 'production' && !isEditMode) return false;
     return true;
   };
   // Rewrite a legacy ?tab=dev / ?tab=pieces to the tab that absorbed it, so the URL matches what is
@@ -1474,6 +1499,22 @@ export function TechCardForm({
                   canReadCosting={canReadCosting}
                 />
               </div>
+            </div>
+          ) : null}
+
+          {/* PRODUCTION — outside the frozen fieldset for the same reason samples is: a RELEASED
+            card is exactly when batches get planned, and the disabled fieldset would kill the
+            create-run link along with every other native control. The one field here that the
+            server's freeze really does govern (the drop date) is gated explicitly instead. */}
+          {isEditMode && numId ? (
+            <div hidden={activeTab !== 'production'}>
+              <ProductionTab
+                techCardId={numId}
+                techCard={techCard}
+                canEdit={canWrite(SECTION.techCards)}
+                canReadCosting={canReadCosting}
+                frozen={frozen}
+              />
             </div>
           ) : null}
         </form>

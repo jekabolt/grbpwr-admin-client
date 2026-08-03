@@ -34,13 +34,19 @@ export function RunCosts({
   run,
   canEdit,
   canReadCosting,
+  locked = false,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
   canReadCosting: boolean;
+  // A received/closed run is immutable server-side (ErrProductionRunReceivedImmutable), and cost
+  // articles are written through UpdateProductionRun — so every edit control here would produce a
+  // guaranteed rejection. The list stays readable; only the writes go away.
+  locked?: boolean;
 }) {
   const { showMessage } = useSnackBarStore();
   const update = useUpdateRunSection();
+  const canEditCosts = canEdit && !locked;
   const [costs, setCosts] = useState<CostDraft[]>([]);
   // Sibling saves refetch the run — don't let that resync wipe an in-progress draft.
   const [dirty, setDirty] = useState(false);
@@ -109,7 +115,11 @@ export function RunCosts({
         };
       });
     try {
-      await update.mutateAsync({ id: run.id!, patch: { costs: next } });
+      await update.mutateAsync({
+        id: run.id!,
+        lockVersion: run.lockVersion ?? 0,
+        patch: { costs: next },
+      });
       setDirty(false);
       showMessage('Costs saved', 'success');
     } catch (e) {
@@ -123,8 +133,11 @@ export function RunCosts({
         <Text variant='uppercase' size='small'>
           actual costs
           {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
+          {locked ? (
+            <span className='ml-2 lowercase text-labelColor'>· закрыто, правки невозможны</span>
+          ) : null}
         </Text>
-        {canEdit && (
+        {canEditCosts && (
           <div className='flex items-center gap-2'>
             <Button
               type='button'
@@ -158,7 +171,7 @@ export function RunCosts({
           <div key={i} className='grid grid-cols-2 gap-2 sm:grid-cols-6'>
             <select
               className={cell}
-              disabled={!canEdit}
+              disabled={!canEditCosts}
               value={c.kind}
               onChange={(e) => patchCost(i, { kind: e.target.value })}
             >
@@ -171,7 +184,7 @@ export function RunCosts({
             <input
               className={`${cell} sm:col-span-2`}
               placeholder='description'
-              disabled={!canEdit}
+              disabled={!canEditCosts}
               value={c.description}
               onChange={(e) => patchCost(i, { description: e.target.value })}
             />
@@ -179,13 +192,13 @@ export function RunCosts({
               className={cell}
               inputMode='decimal'
               placeholder='amount'
-              disabled={!canEdit}
+              disabled={!canEditCosts}
               value={c.amount}
               onChange={(e) => patchCost(i, { amount: sanitizeDecimal(e.target.value) })}
             />
             <select
               className={cell}
-              disabled={!canEdit}
+              disabled={!canEditCosts}
               value={c.currency}
               onChange={(e) => patchCost(i, { currency: e.target.value })}
             >
@@ -199,11 +212,11 @@ export function RunCosts({
               <input
                 className={cell}
                 type='date'
-                disabled={!canEdit}
+                disabled={!canEditCosts}
                 value={c.incurredAt}
                 onChange={(e) => patchCost(i, { incurredAt: e.target.value })}
               />
-              {canEdit ? (
+              {canEditCosts ? (
                 <Button
                   type='button'
                   variant='secondary'

@@ -180,7 +180,11 @@ export function LinesGrid({
       }
     }
     try {
-      await update.mutateAsync({ id: run.id!, patch: { lines: next } });
+      await update.mutateAsync({
+        id: run.id!,
+        lockVersion: run.lockVersion ?? 0,
+        patch: { lines: next },
+      });
       setDirty(false);
       showMessage('Lines saved', 'success');
     } catch (e) {

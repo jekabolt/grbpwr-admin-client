@@ -63,14 +63,25 @@ const sectionLabel = (s?: string) =>
 // the factory spec — which role, which colourway, which article, how much — with no stock columns.
 // Blockers (slot × colourway the plan could NOT count) surface first: a plan that silently drops a
 // slot reads as "no shortage" and the run sews the wrong zip.
-export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canEdit: boolean }) {
+export function MaterialPlan({
+  run,
+  canEdit,
+  locked = false,
+}: {
+  run: common_ProductionRun;
+  canEdit: boolean;
+  // A material issue requires an OPEN run (planned/in_progress — checkRunOpen). On a received or
+  // closed run the backend rejects every issue, so the button is withheld rather than offered and
+  // then refused. The plan itself stays readable: it is still the record of what the run needed.
+  locked?: boolean;
+}) {
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
   // Issuing stock is a warehouse write — gate on the same section the warehouse module uses,
   // or a production-only account gets a button that 403s at submit.
   const { canWrite } = usePermissions();
-  const canIssue = canEdit && canWrite(SECTION.techCards);
+  const canIssue = canEdit && !locked && canWrite(SECTION.techCards);
   const runId = run.id ?? 0;
   const { data, isLoading, isError, refetch, isFetching } = useMaterialPlan(runId, runId > 0);
   const rows = data?.rows ?? [];
@@ -178,6 +189,11 @@ export function MaterialPlan({ run, canEdit }: { run: common_ProductionRun; canE
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
           material plan
+          {locked ? (
+            <span className='ml-2 lowercase text-labelColor'>
+              · партия закрыта — выдача материалов невозможна
+            </span>
+          ) : null}
         </Text>
         <div className='flex items-center gap-2'>
           {rows.some(isShort) ? (

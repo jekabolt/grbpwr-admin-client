@@ -63,6 +63,7 @@ export function AuxRunPlan({
     try {
       await update.mutateAsync({
         id: run.id!,
+        lockVersion: run.lockVersion ?? 0,
         patch: {
           lines: [
             {
