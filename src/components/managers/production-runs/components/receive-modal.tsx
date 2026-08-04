@@ -25,6 +25,9 @@ type Row = {
   alreadyDefect: number;
   received: string;
   defect: string;
+  // Phase 7: where this line's defect units go — 'scrap' (default; recorded, cost resolved by the
+  // ledger) or 'seconds' (booked into the product's B-grade stock at zero cost, not sellable yet).
+  disposition: string;
 };
 
 // Receiving is ONE atomic command now (Phase 4, receipt v1): the counted good/defect quantities
@@ -82,8 +85,7 @@ export function ReceiveModal({
   const remainderAfterThis = useMemo(
     () =>
       rows.reduce(
-        (sum, r) =>
-          sum + Math.max(0, r.plannedQty - r.alreadyGood - (Number(r.received) || 0)),
+        (sum, r) => sum + Math.max(0, r.plannedQty - r.alreadyGood - (Number(r.received) || 0)),
         0,
       ),
     [rows],
@@ -125,6 +127,7 @@ export function ReceiveModal({
             alreadyDefect: l.defectQty ?? 0,
             received: String(Math.max(0, (l.plannedQty ?? 0) - alreadyGood)),
             defect: '0',
+            disposition: 'scrap',
           };
         })
         .sort((a, b) => a.productId - b.productId || a.sizeId - b.sizeId),
@@ -173,12 +176,17 @@ export function ReceiveModal({
         lineKey: r.lineKey,
         goodQty: Number(r.received) || 0,
         defectQty: Number(r.defect) || 0,
+        // The disposition matters only with defects; scrap is the server default either way.
+        defectDisposition: Number(r.defect) > 0 ? r.disposition || 'scrap' : 'scrap',
       }));
     const isPartiallyReceived = run.run.status === 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED';
     if (counted.length === 0 && !(finalReceipt && isPartiallyReceived)) {
       // The one legal empty receipt is the FINAL short-close of a partially received run — the
       // operator declares the series complete without a last delivery.
-      showMessage('Ничего не посчитано — введите годные и/или брак хотя бы по одной строке', 'error');
+      showMessage(
+        'Ничего не посчитано — введите годные и/или брак хотя бы по одной строке',
+        'error',
+      );
       return;
     }
     if (counted.some((l) => !l.lineKey)) {
@@ -238,7 +246,9 @@ export function ReceiveModal({
           </div>
           <DialogPrimitives.Description className='sr-only'>
             Count the GOOD units and the defective ones per line, then post the good ones as stock
-            into each line's product.
+            into each line's product. Брак НЕ списывает материалы второй раз — ткань уже в стоимости
+            партии; scrap разрешается учётом при закрытии серии, seconds уходят в B-сток той же
+            модели.
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
@@ -310,15 +320,22 @@ export function ReceiveModal({
                       ? `#${g.productId}`
                       : '(unassigned — publish a product to book stock)'}
                   </Text>
-                  <div className='grid grid-cols-[1fr_auto_auto] items-center gap-2'>
+                  <div className='grid grid-cols-[1fr_auto_auto_auto] items-center gap-2'>
                     <Text variant='uppercase' size='small'>
                       size
                     </Text>
                     <Text variant='uppercase' size='small'>
                       принято годных
                     </Text>
-                    <Text variant='uppercase' size='small' title='не попадёт на склад'>
+                    <Text variant='uppercase' size='small' title='не попадёт в A-сток'>
                       брак
+                    </Text>
+                    <Text
+                      variant='uppercase'
+                      size='small'
+                      title='scrap — списание по правилу учёта; seconds — B-сток той же модели (уценка, пока не продаётся)'
+                    >
+                      судьба брака
                     </Text>
                     {g.items.map(({ r, i }) => (
                       <RowInputs
@@ -340,6 +357,14 @@ export function ReceiveModal({
                           setRows((prev) => {
                             const next = [...prev];
                             next[i] = { ...next[i], defect: v };
+                            return next;
+                          })
+                        }
+                        disposition={r.disposition}
+                        onDisposition={(v) =>
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], disposition: v };
                             return next;
                           })
                         }
@@ -423,6 +448,8 @@ function RowInputs({
   defect,
   onReceived,
   onDefect,
+  disposition,
+  onDisposition,
 }: {
   label: string;
   planned: number;
@@ -432,6 +459,8 @@ function RowInputs({
   defect: string;
   onReceived: (v: string) => void;
   onDefect: (v: string) => void;
+  disposition?: string;
+  onDisposition?: (v: string) => void;
 }) {
   return (
     <>
@@ -458,6 +487,20 @@ function RowInputs({
         value={defect}
         onChange={(e) => onDefect(e.target.value.replace(/[^0-9]/g, ''))}
       />
+      {onDisposition ? (
+        // Enabled only when defects are counted; scrap is the default and the only choice the
+        // ledger resolves on its own (seconds need a published product+size — the server refuses
+        // otherwise with an actionable message).
+        <select
+          className={`${cell} w-28`}
+          value={disposition || 'scrap'}
+          disabled={(Number(defect) || 0) === 0}
+          onChange={(e) => onDisposition(e.target.value)}
+        >
+          <option value='scrap'>scrap</option>
+          <option value='seconds'>seconds → B</option>
+        </select>
+      ) : null}
     </>
   );
 }

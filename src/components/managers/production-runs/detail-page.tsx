@@ -367,6 +367,12 @@ export function ProductionRunDetail() {
                 (s: number, l: { defectQty?: number }) => s + (l.defectQty ?? 0),
                 0,
               );
+              // Phase 7: how many of the defects were recovered as B-grade seconds.
+              const seconds = (rc.lines ?? []).reduce(
+                (s: number, l: { defectQty?: number; defectDisposition?: string }) =>
+                  s + (l.defectDisposition === 'seconds' ? l.defectQty ?? 0 : 0),
+                0,
+              );
               // Phase 6: a reversal row documents the undo of another receipt; a reversed receipt
               // stays in the history greyed out — its units and money left every rollup.
               const isReversalRow = (rc.reversalOf ?? 0) > 0;
@@ -385,7 +391,10 @@ export function ProductionRunDetail() {
                   ) : (
                     <>
                       <Text size='small'>
-                        {good} годных{defect > 0 ? ` · ${defect} брак` : ''}
+                        {good} годных
+                        {defect > 0
+                          ? ` · ${defect} брак${seconds > 0 ? ` (${seconds} → B-сток)` : ''}`
+                          : ''}
                       </Text>
                       {rc.final ? (
                         <span className='inline-block border border-textColor px-1.5 py-0.5 text-textBaseSize uppercase'>
@@ -693,6 +702,20 @@ function CostSummary({
           tone={varianceTone(actuals?.totalVariance)}
         />
       </StatGrid>
+
+      {(() => {
+        // Phase 7 explicitness: the actual unit cost divides the run's whole cost by the GOOD
+        // units, so scrapped units silently raise it — say so instead of looking like an error.
+        // Count only (the exact absorbed money is the ledger's split at posting; recomputing it
+        // client-side in floats is exactly the class of bug the audit banned).
+        const absorbed = actuals?.defectQtyTotal ?? 0;
+        return absorbed > 0 && actuals?.actualUnitCost?.value ? (
+          <Text variant='inactive' size='small'>
+            unit cost поглощает {absorbed} бракованных единиц (нормальная потеря капитализируется в
+            годные; сверхнормативная списывается учётом при закрытии серии)
+          </Text>
+        ) : null;
+      })()}
 
       {actuals?.materialsFromStockBase?.value ? (
         <Text variant='inactive' size='small'>

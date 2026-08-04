@@ -164,7 +164,7 @@ export function usePostRunReceipt() {
   return useMutation({
     mutationFn: (input: {
       runId: number;
-      lines: { lineKey: string; goodQty: number; defectQty: number }[];
+      lines: { lineKey: string; goodQty: number; defectQty: number; defectDisposition?: string }[];
       idempotencyKey: string;
       expectedLockVersion: number;
       note?: string;
@@ -175,7 +175,11 @@ export function usePostRunReceipt() {
     }) =>
       adminService.PostProductionRunReceipt({
         runId: input.runId,
-        lines: input.lines,
+        // The generated type requires the field; scrap is the server default for old payload shapes.
+        lines: input.lines.map((l) => ({
+          ...l,
+          defectDisposition: l.defectDisposition ?? 'scrap',
+        })),
         idempotencyKey: input.idempotencyKey,
         expectedLockVersion: input.expectedLockVersion,
         note: input.note ?? '',
