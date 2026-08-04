@@ -192,6 +192,45 @@ export function usePostRunReceipt() {
   });
 }
 
+// Reversal of one receipt (Phase 6): stock back out, scoped accounting compensation, cost_price
+// rollback, run status recompute — one transaction server-side. The reason is mandatory; the
+// server refuses when reversed units were already sold (with the exact shortfall in the message).
+export function useReverseRunReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      runId: number;
+      receiptId: number;
+      reason: string;
+      expectedLockVersion: number;
+    }) =>
+      adminService.ReverseProductionRunReceipt({
+        runId: input.runId,
+        receiptId: input.receiptId,
+        reason: input.reason,
+        expectedLockVersion: input.expectedLockVersion,
+      }),
+    onSuccess: (_d, v) => {
+      qc.invalidateQueries({ queryKey: productionRunKeys.all });
+      qc.invalidateQueries({ queryKey: productionRunKeys.detail(v.runId) });
+      // The reversal moves product stock back out (and possibly cost_price) — same cache blast
+      // radius as the receipt itself.
+      qc.invalidateQueries({ queryKey: stockChangeHistoryKeys.all });
+    },
+  });
+}
+
+// Friendly copy for the reversal's refusals: the server's FailedPrecondition messages are already
+// operator-facing (shortfall list, closed period, already reversed) — surface them verbatim.
+export function reversalErrorMessage(e: unknown): string {
+  const status = (e as { status?: number } | undefined)?.status;
+  const msg = e instanceof Error ? e.message : '';
+  if (status === 409) return 'Партия изменена в другом окне — обновите страницу и повторите';
+  if (status === 412 || status === 400)
+    return msg || 'Реверс невозможен в текущем состоянии квитанции';
+  return msg || 'Не удалось отменить приёмку';
+}
+
 // Friendly copy for the receipt command's refusals. 409 (Aborted) = the run changed under the
 // count; 412/400 (FailedPrecondition) = already received / cancelled / nothing counted;
 // AlreadyExists (409 via grpc-gateway is Conflict too, so match the message) = an idempotency key
@@ -199,7 +238,8 @@ export function usePostRunReceipt() {
 export function receiptErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
   const msg = e instanceof Error ? e.message : '';
-  if (msg.includes('idempotency key')) return 'Эта приёмка уже была проведена с другими цифрами — обновите страницу';
+  if (msg.includes('idempotency key'))
+    return 'Эта приёмка уже была проведена с другими цифрами — обновите страницу';
   if (status === 409) return 'Партия изменена в другом окне — обновите страницу и пересчитайте';
   if (status === 412 || status === 400) return msg || 'Приёмка невозможна в текущем статусе партии';
   return msg || 'Не удалось провести приёмку';

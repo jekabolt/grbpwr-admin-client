@@ -35,8 +35,10 @@ import { ReceiveModal } from './components/receive-modal';
 import { RunCosts } from './components/run-costs';
 import {
   deleteRunErrorMessage,
+  reversalErrorMessage,
   useDeleteProductionRun,
   useProductionRun,
+  useReverseRunReceipt,
 } from './components/useProductionRuns';
 
 export function ProductionRunDetail() {
@@ -44,7 +46,7 @@ export function ProductionRunDetail() {
   const runId = Number(id) || 0;
   const navigate = useNavigate();
   const { showMessage } = useSnackBarStore();
-  const { canWrite, canReadCosting } = usePermissions();
+  const { canWrite, canReadCosting, canWriteCosting } = usePermissions();
   const canEdit = canWrite(SECTION.production);
   const { dictionary } = useDictionary();
 
@@ -87,6 +89,13 @@ export function ProductionRunDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // Phase 6: reversing a receipt needs a mandatory reason — the dialog carries it. null = closed.
+  const [reverseTarget, setReverseTarget] = useState<number | null>(null);
+  const [reverseReason, setReverseReason] = useState('');
+  const reverse = useReverseRunReceipt();
+  // The server demands production:write + products:write + costing:write (it moves stock and
+  // rolls back cost_price); the client gates on the two it can see.
+  const canReverse = canEdit && canWriteCosting;
 
   const locked = isRunLocked(ins?.status);
   const receivable = isRunReceivable(ins?.status);
@@ -343,8 +352,11 @@ export function ProductionRunDetail() {
           arrived when, whether it closed the series, and whether accounting has posted it. Renders
           only once something was received; money on receipts is server-stripped without
           costing:read, so the list is safe for every reader. */}
-      {((run.receipts?.length ?? 0) > 0) ? (
-        <Section title='приёмки' question='Каждая поставка — отдельная квитанция; финальная закрывает серию.'>
+      {(run.receipts?.length ?? 0) > 0 ? (
+        <Section
+          title='приёмки'
+          question='Каждая поставка — отдельная квитанция; финальная закрывает серию.'
+        >
           <div className='flex flex-col'>
             {(run.receipts ?? []).map((rc) => {
               const good = (rc.lines ?? []).reduce(
@@ -355,36 +367,55 @@ export function ProductionRunDetail() {
                 (s: number, l: { defectQty?: number }) => s + (l.defectQty ?? 0),
                 0,
               );
+              // Phase 6: a reversal row documents the undo of another receipt; a reversed receipt
+              // stays in the history greyed out — its units and money left every rollup.
+              const isReversalRow = (rc.reversalOf ?? 0) > 0;
+              const isReversed = (rc.reversedBy ?? 0) > 0;
               return (
                 <div
                   key={rc.id}
-                  className='flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
+                  className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0 ${isReversed ? 'opacity-50' : ''}`}
                 >
                   <Text size='small'>#{rc.id}</Text>
                   <Text size='small'>{runDate(rc.receivedAt) || '—'}</Text>
-                  <Text size='small'>
-                    {good} годных{defect > 0 ? ` · ${defect} брак` : ''}
-                  </Text>
-                  {rc.final ? (
-                    <span className='inline-block border border-textColor px-1.5 py-0.5 text-textBaseSize uppercase'>
-                      финальная
+                  {isReversalRow ? (
+                    <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                      реверс квитанции #{rc.reversalOf}
                     </span>
                   ) : (
-                    <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
-                      частичная
-                    </span>
+                    <>
+                      <Text size='small'>
+                        {good} годных{defect > 0 ? ` · ${defect} брак` : ''}
+                      </Text>
+                      {rc.final ? (
+                        <span className='inline-block border border-textColor px-1.5 py-0.5 text-textBaseSize uppercase'>
+                          финальная
+                        </span>
+                      ) : (
+                        <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                          частичная
+                        </span>
+                      )}
+                    </>
                   )}
-                  <Text
-                    size='small'
-                    variant='inactive'
-                    title='статус проводки в бухгалтерии; pending — воркер ещё не запостил'
-                  >
-                    {rc.postingStatus === 'posted'
-                      ? 'проведена'
-                      : rc.postingStatus === 'dead_letter'
-                        ? 'постинг завис — см. бухгалтерию'
-                        : 'ждёт постинга'}
-                  </Text>
+                  {isReversed ? (
+                    <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                      реверснута · #{rc.reversedBy}
+                    </span>
+                  ) : null}
+                  {!isReversalRow ? (
+                    <Text
+                      size='small'
+                      variant='inactive'
+                      title='статус проводки в бухгалтерии; pending — воркер ещё не запостил'
+                    >
+                      {rc.postingStatus === 'posted'
+                        ? 'проведена'
+                        : rc.postingStatus === 'dead_letter'
+                          ? 'постинг завис — см. бухгалтерию'
+                          : 'ждёт постинга'}
+                    </Text>
+                  ) : null}
                   {canReadCosting && rc.hasBase && rc.unitCostBase?.value ? (
                     <Text size='small' variant='inactive'>
                       unit cost {decimalToInput(rc.unitCostBase)} {rc.baseCurrency || ''}
@@ -395,12 +426,80 @@ export function ProductionRunDetail() {
                       {rc.note}
                     </Text>
                   ) : null}
+                  {canReverse &&
+                  !isReversalRow &&
+                  !isReversed &&
+                  ins?.status !== 'PRODUCTION_RUN_STATUS_CLOSED' ? (
+                    <Button
+                      type='button'
+                      size='xs'
+                      variant='simpleReverseWithBorder'
+                      className='ml-auto'
+                      onClick={() => {
+                        setReverseReason('');
+                        setReverseTarget(rc.id ?? 0);
+                      }}
+                    >
+                      отменить
+                    </Button>
+                  ) : null}
                 </div>
               );
             })}
           </div>
         </Section>
       ) : null}
+
+      {/* Phase 6: the reversal dialog. The reason is MANDATORY server-side (it lands on the
+          reversal row, every stock-journal decrement and the run event), so the confirm stays
+          disabled until one is typed. closeOnConfirm=false — a refusal (units already sold, closed
+          period) must keep the dialog and its reason on screen. */}
+      <ConfirmationModal
+        open={reverseTarget != null}
+        onOpenChange={(o) => {
+          if (!o) setReverseTarget(null);
+        }}
+        title={`отменить квитанцию #${reverseTarget ?? ''}`}
+        confirmLabel={reverse.isPending ? 'отмена…' : 'реверсировать'}
+        confirmDisabled={reverse.isPending || reverseReason.trim() === ''}
+        closeOnConfirm={false}
+        onConfirm={() => {
+          if (reverseTarget == null) return;
+          reverse.mutate(
+            {
+              runId,
+              receiptId: reverseTarget,
+              reason: reverseReason.trim(),
+              expectedLockVersion: run?.lockVersion ?? 0,
+            },
+            {
+              onSuccess: () => {
+                setReverseTarget(null);
+                showMessage(
+                  'Квитанция реверсирована: сток снят, деньги возвращены в WIP',
+                  'success',
+                );
+              },
+              onError: (e) => showMessage(reversalErrorMessage(e), 'error'),
+            },
+          );
+        }}
+      >
+        <div className='flex flex-col gap-2'>
+          <Text size='small' variant='inactive'>
+            Годные единицы этой квитанции снимутся со склада (нехватка из-за продаж заблокирует
+            реверс), FG-часть проводки вернётся в WIP, cost_price откатится к оценке тех-карты.
+            Выданные материалы НЕ возвращаются автоматически.
+          </Text>
+          <textarea
+            className='w-full border border-borderColor bg-bgColor p-2 text-textBaseSize outline-none'
+            rows={3}
+            placeholder='причина реверса (обязательно)'
+            value={reverseReason}
+            onChange={(e) => setReverseReason(e.target.value)}
+          />
+        </div>
+      </ConfirmationModal>
 
       {/* Audit trail, not a planning step — collapsed by default (memory: collapse rarely-used
           content), same pattern as the tech card's packaging spec / provenance. */}
