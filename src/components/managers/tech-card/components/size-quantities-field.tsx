@@ -88,7 +88,7 @@ export function SizeQuantitiesField() {
                       name={`sizeQuantities.${index}.orderQty`}
                       type='number'
                       valueAsNumber
-                      label='order qty'
+                      label='типовой тираж (калькуляция)'
                       srLabel
                       className='text-right'
                     />
@@ -129,7 +129,7 @@ export function SizeQuantitiesField() {
               key={id}
               dashed
               onClick={() => append({ sizeId: id, orderQty: 0 })}
-              title={`set an order quantity for ${formatSizeName(sizeById.get(id) ?? `#${id}`)}`}
+              title={`типовой калькуляционный тираж для ${formatSizeName(sizeById.get(id) ?? `#${id}`)} — НЕ реальная партия (её план живёт на ране)`}
             >
               + {formatSizeName(sizeById.get(id) ?? `#${id}`)}
             </Chip>

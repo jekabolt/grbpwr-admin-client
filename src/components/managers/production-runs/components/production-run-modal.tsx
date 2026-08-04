@@ -167,6 +167,7 @@ export function ProductionRunModal({
           plannedStartAt: dateToIso(d.plannedStartAt),
           promisedAt: dateToIso(d.promisedAt),
           receivedAt: undefined,
+          supplierId: 0, // factory linkage (Phase 9) — contract field, editor comes with vendor reports
           notes: d.notes.trim(),
           lines: [],
           costs: [],

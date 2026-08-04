@@ -1354,6 +1354,30 @@ export type ListStockChangesRequest = {
   orderFactor?: common_OrderFactor;
   sizeId?: number;
   sortByDirection?: common_StockAdjustmentDirection;
+  // Optional (Phase 8, plan 04 §4.3): narrow to one production run's whole reference family — the
+  // run itself plus every one of its receipts (receive AND reversal rows).
+  productionRunId?: number;
+};
+
+export type ListProductWaitlistRequest = {
+  productId?: number;
+  limit: number | undefined;
+  offset: number | undefined;
+};
+
+export type ProductWaitlistEntry = {
+  id: number | undefined;
+  productId: number | undefined;
+  sizeId: number | undefined;
+  email: string | undefined;
+  firstName: string | undefined;
+  lastName: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+export type ListProductWaitlistResponse = {
+  entries: ProductWaitlistEntry[] | undefined;
+  total: number | undefined;
 };
 
 export type StockChangeRow = {
@@ -2969,6 +2993,12 @@ export type RefundOrderRequest = {
   // Optional structured reason. When set, it drives the return-analysis breakdown exactly
   // (the free-text reason is only bucketed heuristically). Additive to reason (field 3).
   reasonCode: RefundReason | undefined;
+  // What physically happens to the returned units (Phase 8, plan 13 §5). Empty = restock.
+  // restock  — inspected fine: back to sellable A stock (previous unconditional behaviour);
+  // writeoff — worn/damaged: nothing restocks, the sale's COGS stays expensed;
+  // seconds  — sellable as a discounted second: restocked into the product's B-grade variant
+  // at zero carried cost (not sellable until B pricing lands).
+  disposition: string | undefined;
 };
 
 export type RefundOrderResponse = {
@@ -6193,7 +6223,10 @@ export type common_TechCardIssueStatus =
   | "TECH_CARD_ISSUE_STATUS_OPEN"
   | "TECH_CARD_ISSUE_STATUS_RESOLVED"
   | "TECH_CARD_ISSUE_STATUS_WONTFIX";
-// TechCardSizeQuantity is the production order quantity for a size (size run).
+// TechCardSizeQuantity is the TYPICAL calculation batch for a size — «типовой тираж для
+// калькуляции» (plan 13 §2). It amortises development cost and prefills a new run's grid; it is
+// NOT a real production batch — the run's own plan lines are the batch (a run may be bigger,
+// smaller, or split differently, and the UI must warn instead of silently multiplying).
 export type common_TechCardSizeQuantity = {
   sizeId: number | undefined;
   orderQty: number | undefined;
@@ -6857,6 +6890,11 @@ export type common_Material = {
   // purpose (#40) marks whether the material is used for samples, production, or both. Defaults to
   // BOTH on write when UNKNOWN, so the admin can mark and filter materials.
   purpose: common_MaterialPurpose | undefined;
+  // Procurement quick wins (Phase 9, plan 13 §1 — the PO entity was cut): supplier_id links to the
+  // supplier CATALOG (the free-text `supplier` field stays legacy), lead_time_days is the typical
+  // order-to-door time. 0 = unset for both.
+  supplierId: number | undefined;
+  leadTimeDays: number | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -7150,6 +7188,9 @@ export type common_ProductionRunInsert = {
   // ListProductionRunsRequest.overdue_only filters on.
   plannedStartAt: wellKnownTimestamp | undefined;
   promisedAt: wellKnownTimestamp | undefined;
+  // The factory running the batch (Phase 9, plan 12.1): FK to the supplier catalog; 0 = none.
+  // Unlocks per-vendor variance/defect reporting.
+  supplierId: number | undefined;
 };
 
 // ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
@@ -7198,6 +7239,14 @@ export type common_ProductionRunCost = {
   currency: string | undefined;
   amountBase: googletype_Decimal | undefined;
   incurredAt: wellKnownTimestamp | undefined;
+  // Cost-document fields (plan 12.3, columns landed in 0234): who invoices this article, under
+  // which document, with what VAT, and where the payable stands. They are what lets the UI say
+  // "оплачено" instead of only "начислено". All optional.
+  supplierId: number | undefined;
+  documentRef: string | undefined;
+  vatRate: googletype_Decimal | undefined;
+  vatAmount: googletype_Decimal | undefined;
+  apStatus: string | undefined;
 };
 
 // ProductionRunCostKind is the article category of an actual production-run cost.
@@ -7259,6 +7308,13 @@ export type common_ProductionRun = {
   // read (GetProductionRun); list reads leave it empty to keep them light. Money on each receipt is
   // stripped without costing:read.
   receipts: common_ProductionRunReceipt[] | undefined;
+  // The run's append-only lifecycle audit trail (Phase 8), oldest first. Single-run read only.
+  // receipt_posted / receipt_reversed events REFERENCE their receipt in the JSON payload — they
+  // never duplicate its data.
+  events: common_ProductionRunEvent[] | undefined;
+  // Server-side "expected vs booked" cross-checks over the run's journals (plan 04 §4.2 / 12.5).
+  // Single-run read only; every failed check carries an operator-facing detail sentence.
+  recon: common_ProductionRunReconCheck[] | undefined;
 };
 
 // ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
@@ -7348,6 +7404,27 @@ export type common_ProductionRunReceiptLine = {
   // Where the defect units went (Phase 7): "scrap" (recorded fact + posting-rule resolution) or
   // "seconds" (booked into the product's B-grade variant stock).
   defectDisposition: string | undefined;
+};
+
+// ProductionRunEvent is one row of the run's append-only audit trail: who did what to the run,
+// when, why, with a JSON payload describing the effects (references, never duplicated data).
+export type common_ProductionRunEvent = {
+  id: number | undefined;
+  eventType: string | undefined;
+  actor: string | undefined;
+  reason: string | undefined;
+  payload: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// ProductionRunReconCheck is one typed cross-check of the run's derived state against its
+// journals. ok=false means the two disagree; detail says what to look at.
+export type common_ProductionRunReconCheck = {
+  key: string | undefined;
+  expected: string | undefined;
+  actual: string | undefined;
+  ok: boolean | undefined;
+  detail: string | undefined;
 };
 
 export type ListProductionRunsRequest = {
@@ -7523,6 +7600,9 @@ export type ReceiveMaterialStockRequest = {
   inputVatAmount: googletype_Decimal | undefined;
   inputVatRegime: string | undefined;
   supplierId: number | undefined;
+  // When this delivery was promised to arrive (Phase 9), YYYY-MM-DD; empty = not tracked. Recorded
+  // on the receipt so lateness (occurred_at vs expected_at) is a queryable fact without a PO.
+  expectedAt: string | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
@@ -7552,6 +7632,9 @@ export type common_MaterialMovement = {
   createdAt: wellKnownTimestamp | undefined;
   productId: number | undefined;
   lotId: number | undefined;
+  // When a purchase receipt was promised to arrive (Phase 9); unset = not tracked. Lateness =
+  // occurred_at vs expected_at, no PO entity needed.
+  expectedAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
@@ -8871,6 +8954,10 @@ export interface AdminService {
   ListStockChangeHistory(request: ListStockChangeHistoryRequest): Promise<ListStockChangeHistoryResponse>;
   // Lists stock changes with simplified format for reporting.
   ListStockChanges(request: ListStockChangesRequest): Promise<ListStockChangesResponse>;
+  // ListProductWaitlist reads the back-in-stock waitlist the storefront has been writing since
+  // 0010 (Phase 9, plan 13 §6 — until now no admin surface read it). Optional product filter,
+  // newest first, capped pagination. Demand signal only — it drives no automation.
+  ListProductWaitlist(request: ListProductWaitlistRequest): Promise<ListProductWaitlistResponse>;
   ListColors(request: ListColorsRequest): Promise<ListColorsResponse>;
   CreateColor(request: CreateColorRequest): Promise<CreateColorResponse>;
   UpdateColor(request: UpdateColorRequest): Promise<UpdateColorResponse>;
@@ -10203,6 +10290,9 @@ export function createAdminServiceClient(
       if (request.sortByDirection) {
         queryParams.push(`sortByDirection=${encodeURIComponent(request.sortByDirection.toString())}`)
       }
+      if (request.productionRunId) {
+        queryParams.push(`productionRunId=${encodeURIComponent(request.productionRunId.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -10215,6 +10305,32 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListStockChanges",
       }) as Promise<ListStockChangesResponse>;
+    },
+    ListProductWaitlist(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/waitlist`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.productId) {
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListProductWaitlist",
+      }) as Promise<ListProductWaitlistResponse>;
     },
     ListColors(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes

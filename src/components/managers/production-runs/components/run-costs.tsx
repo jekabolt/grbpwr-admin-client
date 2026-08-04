@@ -22,6 +22,10 @@ type CostDraft = {
   amount: string;
   currency: string;
   incurredAt: string;
+  // Cost-document fields (Phase 9): the invoice behind the accrual. document_ref + ap_status are
+  // editable; supplier/vat ride read-only through orig until a vendor picker lands.
+  documentRef: string;
+  apStatus: string;
   // The stored article this draft came from, if any — used to carry its server-folded
   // amountBase through an untouched save (see save()).
   orig?: common_ProductionRunCost;
@@ -60,6 +64,8 @@ export function RunCosts({
         amount: decimalToInput(c.amount),
         currency: c.currency ?? 'EUR',
         incurredAt: isoToDate(c.incurredAt),
+        documentRef: c.documentRef ?? '',
+        apStatus: c.apStatus ?? '',
         orig: c,
       })),
     );
@@ -82,6 +88,8 @@ export function RunCosts({
         amount: '',
         currency: 'EUR',
         incurredAt: '',
+        documentRef: '',
+        apStatus: '',
       },
     ]);
   };
@@ -112,6 +120,12 @@ export function RunCosts({
           currency: c.currency,
           amountBase: untouched ? c.orig?.amountBase : undefined, // unset → server folds via FX
           incurredAt: dateToIso(c.incurredAt),
+          documentRef: c.documentRef.trim(),
+          apStatus: c.apStatus,
+          // Supplier/VAT ride through unchanged until their editors land (vendor picker, VAT calc).
+          supplierId: c.orig?.supplierId ?? 0,
+          vatRate: c.orig?.vatRate,
+          vatAmount: c.orig?.vatAmount,
         };
       });
     try {
@@ -131,7 +145,7 @@ export function RunCosts({
     <div className='flex flex-col gap-2'>
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='small'>
-          actual costs
+          actual costs · начислено
           {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
           {locked ? (
             <span className='ml-2 lowercase text-labelColor'>· закрыто, правки невозможны</span>
@@ -168,7 +182,7 @@ export function RunCosts({
         </Text>
       ) : (
         costs.map((c, i) => (
-          <div key={i} className='grid grid-cols-2 gap-2 sm:grid-cols-6'>
+          <div key={i} className='grid grid-cols-2 gap-2 sm:grid-cols-8'>
             <select
               className={cell}
               disabled={!canEditCosts}
@@ -207,6 +221,25 @@ export function RunCosts({
                   {cur.value}
                 </option>
               ))}
+            </select>
+            <input
+              className={cell}
+              placeholder='№ счёта / документа'
+              disabled={!canEditCosts}
+              value={c.documentRef}
+              onChange={(e) => patchCost(i, { documentRef: e.target.value })}
+              title='документ поставщика за этой статьёй — шаг от «начислено» к «оплачено»'
+            />
+            <select
+              className={cell}
+              disabled={!canEditCosts}
+              value={c.apStatus}
+              onChange={(e) => patchCost(i, { apStatus: e.target.value })}
+              title='статус оплаты: начислено — счёта ещё нет; получен счёт; оплачено'
+            >
+              <option value=''>начислено</option>
+              <option value='invoiced'>получен счёт</option>
+              <option value='paid'>оплачено</option>
             </select>
             <div className='flex items-center gap-1'>
               <input

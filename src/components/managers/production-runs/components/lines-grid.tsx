@@ -149,6 +149,13 @@ export function LinesGrid({
       );
       return q;
     });
+    // Типовой тираж — калькуляционная величина карты, не заказ (plan 13 §2): скажи это вслух,
+    // чтобы префилл не читался как «система знает, сколько шить».
+    const typicalTotal = sizeQuantities.reduce((sum, sq) => sum + (sq.orderQty ?? 0), 0);
+    showMessage(
+      `Префилл из типового тиража карты (${typicalTotal} шт на колор-модель) — это калькуляционная величина, не заказ; проверьте план партии`,
+      'success',
+    );
   };
 
   const rowTotal = (productId: number) =>

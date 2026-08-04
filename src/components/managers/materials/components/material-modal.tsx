@@ -497,6 +497,10 @@ export function MaterialModal({
       section: derivedSection(d.materialClass) ?? d.section,
       supplier: d.supplier.trim(),
       supplierRef: d.supplierRef.trim(),
+      // Supplier-catalog linkage + lead time (Phase 9) are contract fields without an editor yet —
+      // echo the stored values so an ordinary save never wipes them.
+      supplierId: material?.supplierId ?? 0,
+      leadTimeDays: material?.leadTimeDays ?? 0,
       // Legacy free-text `composition` is superseded by the structured entries below — echo it back
       // unedited so this modal never wipes an old material's legacy text; the entries are authoritative.
       composition: material?.composition ?? '',
@@ -643,524 +647,524 @@ export function MaterialModal({
             class, composition, warehouse); disclosures, validation + submit payload unchanged.
             Only the image + the article/code affordance move to the preview pane on the right. */}
         <div className='flex min-w-0 flex-col gap-2'>
-        {/* ---- IDENTITY -------------------------------------------------------------------- */}
-        <GroupLabel>identity</GroupLabel>
-        <div className={grid}>
-          <label className='sm:col-span-2 flex flex-col gap-1'>
-            <Text variant='label' size='micro' tracking='label' className='uppercase'>
-              name *
-            </Text>
-            <input
-              className={cell}
-              value={d.name}
-              onChange={(e) => set({ name: e.target.value })}
-            />
-          </label>
-          <label className='flex flex-col gap-1'>
-            <Text variant='label' size='micro' tracking='label' className='uppercase'>
-              material class
-            </Text>
-            <select
-              className={cell}
-              value={d.materialClass}
-              onChange={(e) => changeClass(e.target.value as common_MaterialClass)}
-            >
-              {materialClassOptions.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          {/* section is only asked for when it's ambiguous: FABRIC (fabric/lining/interlining/
-              insulation) and OTHER (trim/label). For hardware/thread/packaging it's derived 1:1 from
-              the class (see changeClass + submit), so the control is hidden but the field persists. */}
-          {!derivedSection(d.materialClass) && (
+          {/* ---- IDENTITY -------------------------------------------------------------------- */}
+          <GroupLabel>identity</GroupLabel>
+          <div className={grid}>
+            <label className='sm:col-span-2 flex flex-col gap-1'>
+              <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                name *
+              </Text>
+              <input
+                className={cell}
+                value={d.name}
+                onChange={(e) => set({ name: e.target.value })}
+              />
+            </label>
             <label className='flex flex-col gap-1'>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                section
+                material class
               </Text>
               <select
                 className={cell}
-                value={d.section}
-                onChange={(e) => set({ section: e.target.value as common_TechCardBomSection })}
+                value={d.materialClass}
+                onChange={(e) => changeClass(e.target.value as common_MaterialClass)}
               >
-                {techCardBomSectionOptions.map((o) => (
+                {materialClassOptions.map((o) => (
                   <option key={o.value} value={o.value}>
                     {o.label}
                   </option>
                 ))}
               </select>
             </label>
-          )}
-          <label className='flex flex-col gap-1'>
-            <Text variant='label' size='micro' tracking='label' className='uppercase'>
-              unit
-            </Text>
-            <input
-              className={cell}
-              placeholder='m / pcs / kg'
-              value={d.unit}
-              onChange={(e) => set({ unit: e.target.value })}
-            />
-          </label>
-          <label className='flex flex-col gap-1'>
-            <Text variant='label' size='micro' tracking='label' className='uppercase'>
-              supplier
-            </Text>
-            <input
-              className={cell}
-              value={d.supplier}
-              onChange={(e) => set({ supplier: e.target.value })}
-            />
-          </label>
-        </div>
-
-        {/* ---- SOURCING (collapsible) — edge fields lifted out of the identity block -------- */}
-        <GroupLabel
-          action={
-            <Button
-              type='button'
-              size='xs'
-              variant='underline'
-              onClick={() => setSourcingOpen((v) => !v)}
-            >
-              {sourcingOpen ? 'hide' : 'show'}
-            </Button>
-          }
-        >
-          sourcing
-        </GroupLabel>
-        {sourcingOpen && (
-          <div className={grid}>
-            <label className='sm:col-span-2 flex flex-col gap-1'>
+            {/* section is only asked for when it's ambiguous: FABRIC (fabric/lining/interlining/
+              insulation) and OTHER (trim/label). For hardware/thread/packaging it's derived 1:1 from
+              the class (see changeClass + submit), so the control is hidden but the field persists. */}
+            {!derivedSection(d.materialClass) && (
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  section
+                </Text>
+                <select
+                  className={cell}
+                  value={d.section}
+                  onChange={(e) => set({ section: e.target.value as common_TechCardBomSection })}
+                >
+                  {techCardBomSectionOptions.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className='flex flex-col gap-1'>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                supplier ref
+                unit
               </Text>
               <input
                 className={cell}
-                value={d.supplierRef}
-                onChange={(e) => set({ supplierRef: e.target.value })}
+                placeholder='m / pcs / kg'
+                value={d.unit}
+                onChange={(e) => set({ unit: e.target.value })}
               />
             </label>
-            {/* #40: sample vs production vs both — persisted on common_Material.purpose (defaults to
-                BOTH; a legacy/unset value round-trips as BOTH via resolveMaterialPurpose). */}
-            <div className='sm:col-span-2 flex flex-col gap-1'>
+            <label className='flex flex-col gap-1'>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                purpose
+                supplier
               </Text>
-              <div className='flex gap-2'>
-                {materialPurposeOptions.map((o) => (
-                  <Button
-                    key={o.value}
-                    type='button'
-                    variant={purpose === o.value ? 'main' : 'secondary'}
-                    size='sm'
-                    onClick={() => setPurpose(o.value)}
-                  >
-                    {o.label}
-                  </Button>
-                ))}
+              <input
+                className={cell}
+                value={d.supplier}
+                onChange={(e) => set({ supplier: e.target.value })}
+              />
+            </label>
+          </div>
+
+          {/* ---- SOURCING (collapsible) — edge fields lifted out of the identity block -------- */}
+          <GroupLabel
+            action={
+              <Button
+                type='button'
+                size='xs'
+                variant='underline'
+                onClick={() => setSourcingOpen((v) => !v)}
+              >
+                {sourcingOpen ? 'hide' : 'show'}
+              </Button>
+            }
+          >
+            sourcing
+          </GroupLabel>
+          {sourcingOpen && (
+            <div className={grid}>
+              <label className='sm:col-span-2 flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  supplier ref
+                </Text>
+                <input
+                  className={cell}
+                  value={d.supplierRef}
+                  onChange={(e) => set({ supplierRef: e.target.value })}
+                />
+              </label>
+              {/* #40: sample vs production vs both — persisted on common_Material.purpose (defaults to
+                BOTH; a legacy/unset value round-trips as BOTH via resolveMaterialPurpose). */}
+              <div className='sm:col-span-2 flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  purpose
+                </Text>
+                <div className='flex gap-2'>
+                  {materialPurposeOptions.map((o) => (
+                    <Button
+                      key={o.value}
+                      type='button'
+                      variant={purpose === o.value ? 'main' : 'secondary'}
+                      size='sm'
+                      onClick={() => setPurpose(o.value)}
+                    >
+                      {o.label}
+                    </Button>
+                  ))}
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* ---- ATTRIBUTES ------------------------------------------------------------------ */}
-        <GroupLabel>attributes</GroupLabel>
-        {d.materialClass === 'MATERIAL_CLASS_FABRIC' && (
-          <div className='flex flex-col gap-2'>
-            <div className={grid}>
-              <label className='flex flex-col gap-1'>
-                <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                  width (cm)
-                </Text>
-                <input
-                  className={cell}
-                  inputMode='decimal'
-                  value={d.fabric.widthCm}
-                  onChange={(e) => setFabric({ widthCm: sanitizeDecimal(e.target.value) })}
-                />
-              </label>
-              <label className='flex flex-col gap-1'>
-                <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                  weight (gsm)
-                </Text>
-                <input
-                  className={cell}
-                  inputMode='decimal'
-                  value={d.fabric.weightGsm}
-                  onChange={(e) => setFabric({ weightGsm: sanitizeDecimal(e.target.value) })}
-                />
-              </label>
-            </div>
-            {/* direction / shrinkage / roll length behind a disclosure so width + gsm stay the
-                primary fabric fields; all three still persist on fabricAttrs regardless of state. */}
-            <Button
-              type='button'
-              size='xs'
-              variant='underline'
-              className='w-fit'
-              onClick={() => setFabricAdvancedOpen((v) => !v)}
-            >
-              {fabricAdvancedOpen ? 'hide advanced specs' : 'advanced fabric specs'}
-            </Button>
-            {fabricAdvancedOpen && (
+          {/* ---- ATTRIBUTES ------------------------------------------------------------------ */}
+          <GroupLabel>attributes</GroupLabel>
+          {d.materialClass === 'MATERIAL_CLASS_FABRIC' && (
+            <div className='flex flex-col gap-2'>
               <div className={grid}>
                 <label className='flex flex-col gap-1'>
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                    fabric direction
-                  </Text>
-                  <select
-                    className={cell}
-                    value={d.fabric.fabricDirection}
-                    onChange={(e) => setFabric({ fabricDirection: e.target.value })}
-                  >
-                    {fabricDirectionOptions.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className='flex flex-col gap-1'>
-                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                    shrinkage (%)
+                    width (cm)
                   </Text>
                   <input
                     className={cell}
                     inputMode='decimal'
-                    value={d.fabric.shrinkagePct}
-                    onChange={(e) => setFabric({ shrinkagePct: sanitizeDecimal(e.target.value) })}
+                    value={d.fabric.widthCm}
+                    onChange={(e) => setFabric({ widthCm: sanitizeDecimal(e.target.value) })}
                   />
                 </label>
                 <label className='flex flex-col gap-1'>
                   <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                    roll length (m)
+                    weight (gsm)
                   </Text>
                   <input
                     className={cell}
                     inputMode='decimal'
-                    value={d.fabric.rollLengthM}
-                    onChange={(e) => setFabric({ rollLengthM: sanitizeDecimal(e.target.value) })}
+                    value={d.fabric.weightGsm}
+                    onChange={(e) => setFabric({ weightGsm: sanitizeDecimal(e.target.value) })}
                   />
                 </label>
               </div>
-            )}
-          </div>
-        )}
-
-        {d.materialClass === 'MATERIAL_CLASS_HARDWARE' && (
-          <div className={grid}>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                diameter (mm)
-              </Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.hardware.diameterMm}
-                onChange={(e) => setHardware({ diameterMm: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                dimensions
-              </Text>
-              <input
-                className={cell}
-                value={d.hardware.dimensions}
-                onChange={(e) => setHardware({ dimensions: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                finish
-              </Text>
-              <input
-                className={cell}
-                value={d.hardware.finish}
-                onChange={(e) => setHardware({ finish: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                base material
-              </Text>
-              <input
-                className={cell}
-                value={d.hardware.baseMaterial}
-                onChange={(e) => setHardware({ baseMaterial: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                weight (g)
-              </Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.hardware.weightG}
-                onChange={(e) => setHardware({ weightG: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-          </div>
-        )}
-
-        {d.materialClass === 'MATERIAL_CLASS_THREAD' && (
-          <div className={grid}>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                ticket / tex
-              </Text>
-              <input
-                className={cell}
-                value={d.thread.ticketTex}
-                onChange={(e) => setThread({ ticketTex: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                length per cone (m)
-              </Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.thread.lengthPerConeM}
-                onChange={(e) => setThread({ lengthPerConeM: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                needle reco
-              </Text>
-              <input
-                className={cell}
-                value={d.thread.needleReco}
-                onChange={(e) => setThread({ needleReco: e.target.value })}
-              />
-            </label>
-          </div>
-        )}
-
-        {d.materialClass === 'MATERIAL_CLASS_PACKAGING' && (
-          <div className={grid}>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                substrate
-              </Text>
-              <input
-                className={cell}
-                value={d.packaging.substrate}
-                onChange={(e) => setPackaging({ substrate: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                dimensions
-              </Text>
-              <input
-                className={cell}
-                value={d.packaging.dimensions}
-                onChange={(e) => setPackaging({ dimensions: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                gsm
-              </Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                value={d.packaging.gsm}
-                onChange={(e) => setPackaging({ gsm: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                print method
-              </Text>
-              <input
-                className={cell}
-                value={d.packaging.printMethod}
-                onChange={(e) => setPackaging({ printMethod: e.target.value })}
-              />
-            </label>
-          </div>
-        )}
-
-        {/* #39: MATERIAL_CLASS_OTHER — typed key/value rows. The editable raw-JSON hatch is gone; a
-            legacy non-object value the rows can't represent is shown read-only (never dropped). */}
-        {d.materialClass === 'MATERIAL_CLASS_OTHER' && (
-          <div className='flex flex-col gap-2'>
-            {d.otherAttrsMode === 'kv' ? (
-              <>
-                {d.otherAttrsRows.length === 0 ? (
-                  <Text variant='inactive' size='small'>
-                    e.g. finish → matte · gsm → 180 · country → IT
-                  </Text>
-                ) : (
-                  d.otherAttrsRows.map((r, i) => (
-                    <div key={i} className='flex items-center gap-2'>
-                      <input
-                        className={`${cell} min-w-0 flex-1`}
-                        placeholder='name'
-                        value={r.key}
-                        onChange={(e) => setKvRow(i, { key: e.target.value })}
-                      />
-                      <input
-                        className={`${cell} min-w-0 flex-1`}
-                        placeholder='value'
-                        value={r.value}
-                        onChange={(e) => setKvRow(i, { value: e.target.value })}
-                      />
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        size='xs'
-                        className='shrink-0'
-                        aria-label='remove attribute'
-                        onClick={() => removeKvRow(i)}
-                      >
-                        ✕
-                      </Button>
-                    </div>
-                  ))
-                )}
-                <div>
-                  <Button type='button' variant='secondary' size='sm' onClick={addKvRow}>
-                    + field
-                  </Button>
+              {/* direction / shrinkage / roll length behind a disclosure so width + gsm stay the
+                primary fabric fields; all three still persist on fabricAttrs regardless of state. */}
+              <Button
+                type='button'
+                size='xs'
+                variant='underline'
+                className='w-fit'
+                onClick={() => setFabricAdvancedOpen((v) => !v)}
+              >
+                {fabricAdvancedOpen ? 'hide advanced specs' : 'advanced fabric specs'}
+              </Button>
+              {fabricAdvancedOpen && (
+                <div className={grid}>
+                  <label className='flex flex-col gap-1'>
+                    <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                      fabric direction
+                    </Text>
+                    <select
+                      className={cell}
+                      value={d.fabric.fabricDirection}
+                      onChange={(e) => setFabric({ fabricDirection: e.target.value })}
+                    >
+                      {fabricDirectionOptions.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className='flex flex-col gap-1'>
+                    <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                      shrinkage (%)
+                    </Text>
+                    <input
+                      className={cell}
+                      inputMode='decimal'
+                      value={d.fabric.shrinkagePct}
+                      onChange={(e) => setFabric({ shrinkagePct: sanitizeDecimal(e.target.value) })}
+                    />
+                  </label>
+                  <label className='flex flex-col gap-1'>
+                    <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                      roll length (m)
+                    </Text>
+                    <input
+                      className={cell}
+                      inputMode='decimal'
+                      value={d.fabric.rollLengthM}
+                      onChange={(e) => setFabric({ rollLengthM: sanitizeDecimal(e.target.value) })}
+                    />
+                  </label>
                 </div>
-              </>
-            ) : (
-              // Legacy non-object JSON — can't be split into name/value rows, so it's shown read-only
-              // and round-trips unchanged on save (buildOtherAttrs returns otherAttrsRaw for raw mode).
-              <div className='flex flex-col gap-1'>
-                <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                  legacy value — read-only
-                </Text>
-                <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-bgZebra px-[7px] py-[3px] text-micro text-labelColor'>
-                  {d.otherAttrsRaw}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* ---- COMPOSITION (#37) — guided wizard ------------------------------------------- */}
-        <GroupLabel
-          action={
-            compFilled.length > 0 ? (
-              <Pill tone={compValid ? 'ok' : 'warn'}>{Number(compTotal.toFixed(2))}%</Pill>
-            ) : undefined
-          }
-        >
-          composition
-        </GroupLabel>
-        <div className='flex flex-col gap-2'>
-          {legacyComposition && (
-            <Text variant='inactive' size='small'>
-              legacy text: “{legacyComposition}” — re-enter as structured fibres in the wizard
-            </Text>
-          )}
-          {compFilled.length > 0 ? (
-            <div className='flex flex-wrap gap-1'>
-              {compFilled.map((r, i) => (
-                <Pill key={i} tone='ink'>
-                  {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : '—'}
-                </Pill>
-              ))}
+              )}
             </div>
-          ) : (
-            <Text variant='inactive' size='small'>
-              {d.materialClass === 'MATERIAL_CLASS_FABRIC'
-                ? 'no fibre blend yet — recommended for fabrics'
-                : 'no fibre blend yet (optional)'}
-            </Text>
           )}
-          {compFilled.length > 0 && !compValid && (
-            <Text variant='error' size='small'>
-              composition must sum to 100% — open the wizard to fix
-            </Text>
+
+          {d.materialClass === 'MATERIAL_CLASS_HARDWARE' && (
+            <div className={grid}>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  diameter (mm)
+                </Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  value={d.hardware.diameterMm}
+                  onChange={(e) => setHardware({ diameterMm: sanitizeDecimal(e.target.value) })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  dimensions
+                </Text>
+                <input
+                  className={cell}
+                  value={d.hardware.dimensions}
+                  onChange={(e) => setHardware({ dimensions: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  finish
+                </Text>
+                <input
+                  className={cell}
+                  value={d.hardware.finish}
+                  onChange={(e) => setHardware({ finish: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  base material
+                </Text>
+                <input
+                  className={cell}
+                  value={d.hardware.baseMaterial}
+                  onChange={(e) => setHardware({ baseMaterial: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  weight (g)
+                </Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  value={d.hardware.weightG}
+                  onChange={(e) => setHardware({ weightG: sanitizeDecimal(e.target.value) })}
+                />
+              </label>
+            </div>
           )}
-          <div>
-            <Button type='button' variant='secondary' size='sm' onClick={() => setCompOpen(true)}>
-              {compFilled.length > 0 ? 'edit composition' : '＋ add composition'}
-            </Button>
+
+          {d.materialClass === 'MATERIAL_CLASS_THREAD' && (
+            <div className={grid}>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  ticket / tex
+                </Text>
+                <input
+                  className={cell}
+                  value={d.thread.ticketTex}
+                  onChange={(e) => setThread({ ticketTex: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  length per cone (m)
+                </Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  value={d.thread.lengthPerConeM}
+                  onChange={(e) => setThread({ lengthPerConeM: sanitizeDecimal(e.target.value) })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  needle reco
+                </Text>
+                <input
+                  className={cell}
+                  value={d.thread.needleReco}
+                  onChange={(e) => setThread({ needleReco: e.target.value })}
+                />
+              </label>
+            </div>
+          )}
+
+          {d.materialClass === 'MATERIAL_CLASS_PACKAGING' && (
+            <div className={grid}>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  substrate
+                </Text>
+                <input
+                  className={cell}
+                  value={d.packaging.substrate}
+                  onChange={(e) => setPackaging({ substrate: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  dimensions
+                </Text>
+                <input
+                  className={cell}
+                  value={d.packaging.dimensions}
+                  onChange={(e) => setPackaging({ dimensions: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  gsm
+                </Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  value={d.packaging.gsm}
+                  onChange={(e) => setPackaging({ gsm: sanitizeDecimal(e.target.value) })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  print method
+                </Text>
+                <input
+                  className={cell}
+                  value={d.packaging.printMethod}
+                  onChange={(e) => setPackaging({ printMethod: e.target.value })}
+                />
+              </label>
+            </div>
+          )}
+
+          {/* #39: MATERIAL_CLASS_OTHER — typed key/value rows. The editable raw-JSON hatch is gone; a
+            legacy non-object value the rows can't represent is shown read-only (never dropped). */}
+          {d.materialClass === 'MATERIAL_CLASS_OTHER' && (
+            <div className='flex flex-col gap-2'>
+              {d.otherAttrsMode === 'kv' ? (
+                <>
+                  {d.otherAttrsRows.length === 0 ? (
+                    <Text variant='inactive' size='small'>
+                      e.g. finish → matte · gsm → 180 · country → IT
+                    </Text>
+                  ) : (
+                    d.otherAttrsRows.map((r, i) => (
+                      <div key={i} className='flex items-center gap-2'>
+                        <input
+                          className={`${cell} min-w-0 flex-1`}
+                          placeholder='name'
+                          value={r.key}
+                          onChange={(e) => setKvRow(i, { key: e.target.value })}
+                        />
+                        <input
+                          className={`${cell} min-w-0 flex-1`}
+                          placeholder='value'
+                          value={r.value}
+                          onChange={(e) => setKvRow(i, { value: e.target.value })}
+                        />
+                        <Button
+                          type='button'
+                          variant='secondary'
+                          size='xs'
+                          className='shrink-0'
+                          aria-label='remove attribute'
+                          onClick={() => removeKvRow(i)}
+                        >
+                          ✕
+                        </Button>
+                      </div>
+                    ))
+                  )}
+                  <div>
+                    <Button type='button' variant='secondary' size='sm' onClick={addKvRow}>
+                      + field
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                // Legacy non-object JSON — can't be split into name/value rows, so it's shown read-only
+                // and round-trips unchanged on save (buildOtherAttrs returns otherAttrsRaw for raw mode).
+                <div className='flex flex-col gap-1'>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    legacy value — read-only
+                  </Text>
+                  <div className='overflow-x-auto whitespace-pre-wrap break-words border border-borderColor bg-bgZebra px-[7px] py-[3px] text-micro text-labelColor'>
+                    {d.otherAttrsRaw}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ---- COMPOSITION (#37) — guided wizard ------------------------------------------- */}
+          <GroupLabel
+            action={
+              compFilled.length > 0 ? (
+                <Pill tone={compValid ? 'ok' : 'warn'}>{Number(compTotal.toFixed(2))}%</Pill>
+              ) : undefined
+            }
+          >
+            composition
+          </GroupLabel>
+          <div className='flex flex-col gap-2'>
+            {legacyComposition && (
+              <Text variant='inactive' size='small'>
+                legacy text: “{legacyComposition}” — re-enter as structured fibres in the wizard
+              </Text>
+            )}
+            {compFilled.length > 0 ? (
+              <div className='flex flex-wrap gap-1'>
+                {compFilled.map((r, i) => (
+                  <Pill key={i} tone='ink'>
+                    {fiberName(r.fiberCode)} {r.percent.trim() ? `${r.percent}%` : '—'}
+                  </Pill>
+                ))}
+              </div>
+            ) : (
+              <Text variant='inactive' size='small'>
+                {d.materialClass === 'MATERIAL_CLASS_FABRIC'
+                  ? 'no fibre blend yet — recommended for fabrics'
+                  : 'no fibre blend yet (optional)'}
+              </Text>
+            )}
+            {compFilled.length > 0 && !compValid && (
+              <Text variant='error' size='small'>
+                composition must sum to 100% — open the wizard to fix
+              </Text>
+            )}
+            <div>
+              <Button type='button' variant='secondary' size='sm' onClick={() => setCompOpen(true)}>
+                {compFilled.length > 0 ? 'edit composition' : '＋ add composition'}
+              </Button>
+            </div>
           </div>
-        </div>
 
-        <CompositionWizard
-          open={compOpen}
-          onOpenChange={setCompOpen}
-          initialEntries={d.compositionEntries}
-          onSave={(entries) => set({ compositionEntries: entries })}
-        />
+          <CompositionWizard
+            open={compOpen}
+            onOpenChange={setCompOpen}
+            initialEntries={d.compositionEntries}
+            onSave={(entries) => set({ compositionEntries: entries })}
+          />
 
-        {/* ---- WAREHOUSE (collapsible, #51) ------------------------------------------------ */}
-        <GroupLabel
-          action={
-            <Button
-              type='button'
-              size='xs'
-              variant='underline'
-              onClick={() => setWarehouseOpen((v) => !v)}
-            >
-              {warehouseOpen ? 'hide' : 'show'}
-            </Button>
-          }
-        >
-          warehouse
-        </GroupLabel>
-        {warehouseOpen && (
-          <div className={grid}>
-            {/* #68: the material `code` (the article) is edited in the preview pane on the right —
+          {/* ---- WAREHOUSE (collapsible, #51) ------------------------------------------------ */}
+          <GroupLabel
+            action={
+              <Button
+                type='button'
+                size='xs'
+                variant='underline'
+                onClick={() => setWarehouseOpen((v) => !v)}
+              >
+                {warehouseOpen ? 'hide' : 'show'}
+              </Button>
+            }
+          >
+            warehouse
+          </GroupLabel>
+          {warehouseOpen && (
+            <div className={grid}>
+              {/* #68: the material `code` (the article) is edited in the preview pane on the right —
                 backend-generated by default, "customize" there reveals a manual override. */}
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                min stock ({d.unit.trim() || 'unit'})
-              </Text>
-              <input
-                className={cell}
-                inputMode='decimal'
-                placeholder='low-stock alert'
-                value={d.minStock}
-                onChange={(e) => set({ minStock: sanitizeDecimal(e.target.value) })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                color
-              </Text>
-              <input
-                className={cell}
-                value={d.color}
-                onChange={(e) => set({ color: e.target.value })}
-              />
-            </label>
-            <label className='flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                pantone
-              </Text>
-              <input
-                className={cell}
-                value={d.pantone}
-                onChange={(e) => set({ pantone: e.target.value })}
-              />
-            </label>
-            <label className='sm:col-span-2 flex flex-col gap-1'>
-              <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                notes
-              </Text>
-              <input
-                className={cell}
-                value={d.notes}
-                onChange={(e) => set({ notes: e.target.value })}
-              />
-            </label>
-          </div>
-        )}
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  min stock ({d.unit.trim() || 'unit'})
+                </Text>
+                <input
+                  className={cell}
+                  inputMode='decimal'
+                  placeholder='low-stock alert'
+                  value={d.minStock}
+                  onChange={(e) => set({ minStock: sanitizeDecimal(e.target.value) })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  color
+                </Text>
+                <input
+                  className={cell}
+                  value={d.color}
+                  onChange={(e) => set({ color: e.target.value })}
+                />
+              </label>
+              <label className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  pantone
+                </Text>
+                <input
+                  className={cell}
+                  value={d.pantone}
+                  onChange={(e) => set({ pantone: e.target.value })}
+                />
+              </label>
+              <label className='sm:col-span-2 flex flex-col gap-1'>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  notes
+                </Text>
+                <input
+                  className={cell}
+                  value={d.notes}
+                  onChange={(e) => set({ notes: e.target.value })}
+                />
+              </label>
+            </div>
+          )}
         </div>
         {/* end LEFT pane */}
 

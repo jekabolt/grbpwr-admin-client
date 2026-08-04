@@ -45,6 +45,7 @@ export function RefundConfirmation({
     reason: string;
     refundShipping?: boolean;
     reasonCode?: RefundReason;
+    disposition?: string;
   }) => void;
 }) {
   const isFullRefund = !selectedUnitKeys.length;
@@ -58,6 +59,9 @@ export function RefundConfirmation({
   const existingReason = orderDetails?.order?.refundReason ?? '';
   const [selectedReason, setSelectedReason] = useState('');
   const [refundShipping, setRefundShipping] = useState(false);
+  // What physically happens to the returned units (Phase 8). Default restock = the historical
+  // behaviour; writeoff/seconds stop a worn return from silently becoming sellable A stock.
+  const [disposition, setDisposition] = useState('restock');
 
   // Units selected for partial refund, grouped per order line (qty = how many of that item),
   // each carrying the line's refundable amount (unit sale price × qty).
@@ -143,7 +147,12 @@ export function RefundConfirmation({
     const reasonCode = reasonCodeFor(selectedReason);
     // refundShipping is meaningful on every scope the backend reads it for; the whole-payment
     // case overrides it to true server-side, so sending the checkbox value verbatim is correct.
-    refundOrder({ reason: selectedReason, refundShipping: includesShipping, reasonCode });
+    refundOrder({
+      reason: selectedReason,
+      refundShipping: includesShipping,
+      reasonCode,
+      disposition,
+    });
   };
 
   const fullRefundScope = isWholePaymentRefund
@@ -172,6 +181,31 @@ export function RefundConfirmation({
           <Text component='span' size='statBig'>
             {previewLabel}
           </Text>
+        </div>
+
+        {/* Судьба возвращённых единиц (Phase 8): restock — на полку; writeoff — списание
+            (изделие изношено/повреждено, в продажу не возвращается); seconds — B-сток той же
+            модели (уценка, пока не продаётся). */}
+        <div className='space-y-1'>
+          <Text variant='uppercase' size='micro' className='tracking-label'>
+            судьба возврата
+          </Text>
+          <select
+            className='w-full border border-borderColor bg-bgColor p-2 text-textBaseSize outline-none'
+            value={disposition}
+            onChange={(e) => setDisposition(e.target.value)}
+          >
+            <option value='restock'>restock — годен, обратно в продажу</option>
+            <option value='writeoff'>writeoff — изношен/повреждён, списать</option>
+            <option value='seconds'>seconds — уценка, в B-сток</option>
+          </select>
+          {disposition !== 'restock' ? (
+            <Text size='small' variant='inactive'>
+              {disposition === 'writeoff'
+                ? 'Единицы НЕ вернутся на склад; их себестоимость остаётся списанной в COGS.'
+                : 'Единицы вернутся B-стоком той же модели с нулевой стоимостью (продажа B — после решения по цене).'}
+            </Text>
+          ) : null}
         </div>
 
         {/* Scope — full refund is loud, partial lists exactly what's affected */}

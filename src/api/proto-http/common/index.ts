@@ -2547,6 +2547,11 @@ export type Material = {
   // purpose (#40) marks whether the material is used for samples, production, or both. Defaults to
   // BOTH on write when UNKNOWN, so the admin can mark and filter materials.
   purpose: MaterialPurpose | undefined;
+  // Procurement quick wins (Phase 9, plan 13 §1 — the PO entity was cut): supplier_id links to the
+  // supplier CATALOG (the free-text `supplier` field stays legacy), lead_time_days is the typical
+  // order-to-door time. 0 = unset for both.
+  supplierId: number | undefined;
+  leadTimeDays: number | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -2635,7 +2640,10 @@ export type TechCardDevCostSummary = {
   daysToApproval: number | undefined;
 };
 
-// TechCardSizeQuantity is the production order quantity for a size (size run).
+// TechCardSizeQuantity is the TYPICAL calculation batch for a size — «типовой тираж для
+// калькуляции» (plan 13 §2). It amortises development cost and prefills a new run's grid; it is
+// NOT a real production batch — the run's own plan lines are the batch (a run may be bigger,
+// smaller, or split differently, and the UI must warn instead of silently multiplying).
 export type TechCardSizeQuantity = {
   sizeId: number | undefined;
   orderQty: number | undefined;
@@ -3168,6 +3176,9 @@ export type MaterialMovement = {
   createdAt: wellKnownTimestamp | undefined;
   productId: number | undefined;
   lotId: number | undefined;
+  // When a purchase receipt was promised to arrive (Phase 9); unset = not tracked. Lateness =
+  // occurred_at vs expected_at, no PO entity needed.
+  expectedAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialLot is a received batch (roll / dye-lot) of a material (gap-07 v2 D): a supplier lot code
@@ -3312,6 +3323,14 @@ export type ProductionRunCost = {
   currency: string | undefined;
   amountBase: googletype_Decimal | undefined;
   incurredAt: wellKnownTimestamp | undefined;
+  // Cost-document fields (plan 12.3, columns landed in 0234): who invoices this article, under
+  // which document, with what VAT, and where the payable stands. They are what lets the UI say
+  // "оплачено" instead of only "начислено". All optional.
+  supplierId: number | undefined;
+  documentRef: string | undefined;
+  vatRate: googletype_Decimal | undefined;
+  vatAmount: googletype_Decimal | undefined;
+  apStatus: string | undefined;
 };
 
 // ProductionRunCostByKind is the base-currency total of actual costs of one kind.
@@ -3434,6 +3453,9 @@ export type ProductionRunInsert = {
   // ListProductionRunsRequest.overdue_only filters on.
   plannedStartAt: wellKnownTimestamp | undefined;
   promisedAt: wellKnownTimestamp | undefined;
+  // The factory running the batch (Phase 9, plan 12.1): FK to the supplier catalog; 0 = none.
+  // Unlocks per-vendor variance/defect reporting.
+  supplierId: number | undefined;
 };
 
 // ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
@@ -3454,6 +3476,34 @@ export type ProductionRun = {
   // read (GetProductionRun); list reads leave it empty to keep them light. Money on each receipt is
   // stripped without costing:read.
   receipts: ProductionRunReceipt[] | undefined;
+  // The run's append-only lifecycle audit trail (Phase 8), oldest first. Single-run read only.
+  // receipt_posted / receipt_reversed events REFERENCE their receipt in the JSON payload — they
+  // never duplicate its data.
+  events: ProductionRunEvent[] | undefined;
+  // Server-side "expected vs booked" cross-checks over the run's journals (plan 04 §4.2 / 12.5).
+  // Single-run read only; every failed check carries an operator-facing detail sentence.
+  recon: ProductionRunReconCheck[] | undefined;
+};
+
+// ProductionRunEvent is one row of the run's append-only audit trail: who did what to the run,
+// when, why, with a JSON payload describing the effects (references, never duplicated data).
+export type ProductionRunEvent = {
+  id: number | undefined;
+  eventType: string | undefined;
+  actor: string | undefined;
+  reason: string | undefined;
+  payload: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// ProductionRunReconCheck is one typed cross-check of the run's derived state against its
+// journals. ok=false means the two disagree; detail says what to look at.
+export type ProductionRunReconCheck = {
+  key: string | undefined;
+  expected: string | undefined;
+  actual: string | undefined;
+  ok: boolean | undefined;
+  detail: string | undefined;
 };
 
 // SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style

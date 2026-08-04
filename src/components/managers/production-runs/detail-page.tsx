@@ -11,6 +11,8 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
+import { useQuery } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -510,11 +512,87 @@ export function ProductionRunDetail() {
         </div>
       </ConfirmationModal>
 
+      {/* Сверка «ожидаемое vs проведённое» (Phase 8): три server-side чека — квитанции против
+          сток-журнала, posted-квитанции против живых проводок, статьи затрат против
+          капитализированных клеймов. Рендерится только когда что-то расходится ИЛИ есть
+          квитанции — пустой зелёный блок на плановом ране был бы шумом. */}
+      {(run.recon ?? []).some((c) => !c.ok) || (run.receipts?.length ?? 0) > 0 ? (
+        <Section
+          title='сверка'
+          question='Каждая цифра рана обязана сходиться с журналами; расхождение — сигнал, не косметика.'
+        >
+          <div className='flex flex-col'>
+            {(run.recon ?? []).map((c) => (
+              <div
+                key={c.key}
+                className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
+              >
+                <Text size='small' className={c.ok ? '' : 'font-bold text-error'}>
+                  {c.ok ? '✓' : '✗'}{' '}
+                  {c.key === 'units_receipts_vs_stock_journal'
+                    ? 'единицы: квитанции ↔ сток-журнал'
+                    : c.key === 'money_posted_vs_entries'
+                      ? 'проводки: posted-квитанции ↔ живые записи'
+                      : 'затраты: начислено ↔ капитализировано'}
+                </Text>
+                <Text size='small' variant='inactive' className='tabular-nums'>
+                  {c.expected} ↔ {c.actual}
+                </Text>
+                {!c.ok && c.detail ? (
+                  <Text size='small' variant='inactive' className='w-full'>
+                    {c.detail}
+                  </Text>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
+      {/* Журнал жизни рана (Phase 8): кто и когда создал/запустил/принял/реверснул/закрыл.
+          Append-only; receipt-события ссылаются на квитанции, не дублируют их. */}
+      {(run.events?.length ?? 0) > 0 ? (
+        <Section title='журнал рана' collapsible defaultOpen={false}>
+          <div className='flex flex-col'>
+            {(run.events ?? []).map((e) => (
+              <div
+                key={e.id}
+                className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
+              >
+                <Text size='small' variant='inactive'>
+                  {runDate(e.createdAt) || '—'}
+                </Text>
+                <Text size='small'>{e.eventType}</Text>
+                {e.actor ? (
+                  <Text size='small' variant='inactive'>
+                    {e.actor}
+                  </Text>
+                ) : null}
+                {e.reason ? (
+                  <Text size='small' variant='inactive'>
+                    {e.reason}
+                  </Text>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
+
       {/* Audit trail, not a planning step — collapsed by default (memory: collapse rarely-used
           content), same pattern as the tech card's packaging spec / provenance. */}
       <Section title='material movements' collapsible defaultOpen={false}>
         <MovementsList filter={{ productionRunId: run.id }} />
       </Section>
+
+      {/* Продуктовый сток-журнал рана (Phase 8): все движения его reference-семейства — приёмки
+          (production_run:<id>) и реверсы (receipt:<id>). Дополняет материальные движения выше:
+          там — ткань, тут — готовые изделия. */}
+      {(run.receipts?.length ?? 0) > 0 ? (
+        <Section title='движения готовых изделий' collapsible defaultOpen={false}>
+          <RunStockChanges runId={run.id ?? 0} createdAt={run.createdAt} />
+        </Section>
+      ) : null}
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal
@@ -810,5 +888,54 @@ function ColorwayCostBlock({
         </table>
       </div>
     </Section>
+  );
+}
+
+// RunStockChanges renders the run's slice of the product-stock journal (Phase 8): the server
+// filters by the run's whole reference family, the window spans the run's life.
+function RunStockChanges({ runId, createdAt }: { runId: number; createdAt?: string }) {
+  const query = useQuery({
+    queryKey: ['run-stock-changes', runId],
+    enabled: runId > 0,
+    queryFn: () =>
+      adminService.ListStockChanges({
+        from: createdAt ?? new Date(Date.now() - 365 * 24 * 3600 * 1000).toISOString(),
+        to: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+        productionRunId: runId,
+        limit: 200,
+        offset: 0,
+        colorwayId: undefined,
+        sizeId: undefined,
+        source: undefined,
+        orderFactor: undefined,
+        sortByDirection: undefined,
+      }),
+  });
+  const rows = query.data?.changes ?? [];
+  if (query.isLoading) return <Text size='small'>загрузка…</Text>;
+  if (!rows.length) return <Text size='small'>движений нет</Text>;
+  return (
+    <div className='flex flex-col'>
+      {rows.map((r, i) => (
+        <div
+          key={i}
+          className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
+        >
+          <Text size='small' variant='inactive'>
+            {runDate(r.date) || '—'}
+          </Text>
+          <Text size='small'>{r.sku || '—'}</Text>
+          <Text size='small' className='tabular-nums'>
+            {r.amountChanged?.value ?? ''}
+          </Text>
+          <Text size='small' variant='inactive'>
+            {r.source}
+          </Text>
+          <Text size='small' variant='inactive'>
+            {r.reference}
+          </Text>
+        </div>
+      ))}
+    </div>
   );
 }
