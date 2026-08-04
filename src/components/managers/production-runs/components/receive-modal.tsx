@@ -361,6 +361,7 @@ export function ReceiveModal({
                           })
                         }
                         disposition={r.disposition}
+                        canSeconds={!!r.productId && !!r.sizeId}
                         onDisposition={(v) =>
                           setRows((prev) => {
                             const next = [...prev];
@@ -449,6 +450,7 @@ function RowInputs({
   onReceived,
   onDefect,
   disposition,
+  canSeconds,
   onDisposition,
 }: {
   label: string;
@@ -460,6 +462,7 @@ function RowInputs({
   onReceived: (v: string) => void;
   onDefect: (v: string) => void;
   disposition?: string;
+  canSeconds?: boolean;
   onDisposition?: (v: string) => void;
 }) {
   return (
@@ -498,7 +501,9 @@ function RowInputs({
           onChange={(e) => onDisposition(e.target.value)}
         >
           <option value='scrap'>scrap</option>
-          <option value='seconds'>seconds → B</option>
+          {/* seconds books B-grade stock — impossible on a product-less planning line; hiding the
+              option beats the server's opaque refusal (final-review) */}
+          {canSeconds ? <option value='seconds'>seconds → B</option> : null}
         </select>
       ) : null}
     </>
