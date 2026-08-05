@@ -2,6 +2,7 @@ import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http/admin';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -90,7 +91,11 @@ export function ProductionRunModal({
   }, [run, open, initialTechCardId]);
 
   const { data: tcData } = useQuery({
-    queryKey: ['techCardsForRun'],
+    // Keyed UNDER techCardKeys.lists() rather than off on its own string, so every tech-card
+    // mutation's existing invalidation reaches it. Standing outside the factory meant this dropdown
+    // could keep serving a 5-minute-stale card list — a card created or re-purposed a moment ago
+    // was simply absent from the picker with no way to refresh but waiting.
+    queryKey: [...techCardKeys.lists(), 'forRun'],
     queryFn: () =>
       adminService.ListTechCards({
         limit: 200,

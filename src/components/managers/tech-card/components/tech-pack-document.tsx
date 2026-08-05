@@ -942,8 +942,16 @@ export function TechPackDocument({
                     <div className='font-medium'>
                       {a.componentName || `#${a.componentTechCardId}`}
                     </div>
-                    {a.outputMaterialName && (
-                      <div className='text-labelColor'>→ {a.outputMaterialName}</div>
+                    {/* Same rule as the assembly tile: a per-colour component has no single
+                        destination, so the pack reports the count rather than one bucket. */}
+                    {(a.outputVariantCount ?? 0) > 0 ? (
+                      <div className='text-labelColor'>
+                        → {a.outputVariantCount} {a.outputVariantCount === 1 ? 'colour' : 'colours'}
+                      </div>
+                    ) : (
+                      a.outputMaterialName && (
+                        <div className='text-labelColor'>→ {a.outputMaterialName}</div>
+                      )
                     )}
                   </td>
                   <td className={TD}>{auxSubtypeLabel(a.componentAuxSubtype) || '—'}</td>

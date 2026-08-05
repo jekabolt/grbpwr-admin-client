@@ -1,5 +1,9 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
-import { common_Material, common_ProductionRun } from 'api/proto-http/admin';
+import {
+  common_Material,
+  common_ProductionRun,
+  common_TechCardOutputVariant,
+} from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -9,7 +13,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
-import { materialLabel } from './aux-run-plan';
+import { isVariantRun, materialLabel } from './aux-run-plan';
 import { receiptErrorMessage, usePostRunReceipt } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
@@ -18,6 +22,9 @@ type Row = {
   lineKey: string;
   productId: number;
   sizeId: number;
+  // 0252: the AUX colour this line produces, 0 on a legacy single-output line. The server resolves
+  // the destination bucket itself from the card's registry — the client never names a material.
+  outputVariantId: number;
   plannedQty: number;
   // Cumulative rollups over the run's EARLIER receipts (server-maintained since Phase 5) — shown
   // as context; the inputs below count THIS delivery only.
@@ -46,6 +53,7 @@ export function ReceiveModal({
   isAux = false,
   outputMaterialId = 0,
   outputMaterial,
+  outputVariants = [],
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -53,6 +61,8 @@ export function ReceiveModal({
   isAux?: boolean;
   outputMaterialId?: number;
   outputMaterial?: common_Material;
+  /** The card's registered colours, for naming each variant line's destination. */
+  outputVariants?: common_TechCardOutputVariant[];
 }) {
   const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
@@ -68,6 +78,10 @@ export function ReceiveModal({
   // Storefront side effect: checked fires the back-in-stock email to customers waitlisted on any
   // variant this receipt takes 0→in-stock. Default unchecked — the operator opts in per receipt.
   const [notifyWaitlist, setNotifyWaitlist] = useState(false);
+  // An auxiliary receipt is FINAL-ONLY server-side (ErrProductionRunAuxPartial). The toggle was a
+  // trap the moment aux runs stopped being rare: unchecking it produced a refusal after the count
+  // was typed. Aux never asks the question and always sends a final receipt.
+  const isFinal = isAux || finalReceipt;
   // The command's identity: one key per USER INTENT (per modal open), not per attempt — a retry of
   // the same count must replay, a fresh open is a fresh intent.
   const [idempotencyKey, setIdempotencyKey] = useState('');
@@ -102,6 +116,29 @@ export function ReceiveModal({
   const auxDest = materialLabel(outputMaterial, outputMaterialId);
   const auxUnit = outputMaterial?.unit?.trim();
 
+  // 0252: the SAME union the store and the handler use — the card has a live colour, or the run
+  // already carries one. Deriving it from the run's lines alone diverged in exactly the case that
+  // matters: a colourless run planned before the card gained colours reads as legacy here, so its
+  // remainder-seeded colourless line becomes the default submit, and the server rejects it as a
+  // concurrent modification behind a «обновите страницу» that is not what went wrong.
+  const variantMode = isAux && isVariantRun(outputVariants, run?.run?.lines ?? []);
+  const variantById = useMemo(() => {
+    const m = new Map<number, common_TechCardOutputVariant>();
+    for (const v of outputVariants) if ((v.id ?? 0) > 0) m.set(v.id ?? 0, v);
+    return m;
+  }, [outputVariants]);
+  const hexByCode = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of dictionary?.colors ?? []) if (c.code && c.hex) m.set(c.code, c.hex);
+    return m;
+  }, [dictionary?.colors]);
+  // EVERY aux row, with its flat index — not just the colour ones. `counted` below is built from
+  // all rows and each is seeded with its remainder, so a row this grid failed to render would still
+  // be submitted, unseen, at a quantity nobody typed. The server refuses to PLAN a run that mixes a
+  // legacy line with colour ones, so the stray case should not exist; rendering it anyway is what
+  // keeps "should not exist" from becoming a silent write.
+  const variantRows = useMemo(() => rows.map((r, i) => ({ r, i })), [rows]);
+
   // Reset per-run state on the CLOSED → OPEN transition only. The naive [run, open] deps
   // re-ran mid-flow — step 1's own invalidation refetches `run` on the detail page and the
   // reset silently re-checked updateCostPrice against the user's explicit choice.
@@ -117,37 +154,69 @@ export function ReceiveModal({
     // THIS delivery: they default to the REMAINDER (planned − already received across earlier
     // receipts) — on a virgin run that IS the plan, so "everything came in" stays one click, and
     // on a partially received run the cumulative rollup is context, never a pre-filled double-book.
+    // Colour order matches the plan editor exactly — active colours in the card's own registry
+    // order, retired after them, anything unrecognised next, and a colourless line last. Two
+    // screens listing the same run's colours in two different orders is a counting error waiting
+    // to happen.
+    const rank = (r: Row) => {
+      if (!variantMode) return 0;
+      if (r.outputVariantId === 0) return 3_000_000;
+      const i = outputVariants.findIndex((v) => v.id === r.outputVariantId);
+      if (i < 0) return 2_000_000 + r.outputVariantId;
+      return (outputVariants[i].active ? 0 : 1_000_000) + i;
+    };
     setRows(
       (run?.run?.lines ?? [])
         .map((l) => {
           const alreadyGood = l.receivedQty ?? 0;
+          // A colourless line on a colour-mode run cannot be received (the server refuses the mix).
+          // Seed it at 0 so the default submit is not the one that fails; the guard below stops it
+          // outright if the operator types into it.
+          const stray = variantMode && (l.outputVariantId ?? 0) === 0;
           return {
             lineKey: l.lineKey ?? '',
             productId: l.productId ?? 0,
             sizeId: l.sizeId ?? 0,
+            outputVariantId: l.outputVariantId ?? 0,
             plannedQty: l.plannedQty ?? 0,
             alreadyGood,
             alreadyDefect: l.defectQty ?? 0,
-            received: String(Math.max(0, (l.plannedQty ?? 0) - alreadyGood)),
+            received: stray ? '0' : String(Math.max(0, (l.plannedQty ?? 0) - alreadyGood)),
             defect: '0',
             disposition: 'scrap',
           };
         })
-        .sort((a, b) => a.productId - b.productId || a.sizeId - b.sizeId),
+        .sort((a, b) => rank(a) - rank(b) || a.productId - b.productId || a.sizeId - b.sizeId),
     );
     setUpdateCostPrice(canWriteCosting);
     setFinalReceipt(true);
     setNotifyWaitlist(false);
     setIdempotencyKey(ulid());
-  }, [run, open, canWriteCosting]);
+  }, [run, open, canWriteCosting, variantMode, outputVariants]);
 
   const submit = async () => {
     if (!run?.id || !run.run) return;
     if (isAux) {
-      // NF-07: aux receive books into output_material_id — the card must name one, or the RPC
-      // fails with FailedPrecondition.
-      if (!outputMaterialId) {
+      // NF-07: a legacy aux receive books into output_material_id — the card must name one, or the
+      // RPC fails with FailedPrecondition. A per-colour run needs no such check: each line's bucket
+      // comes from the card's variant registry, which the server reads inside the receipt's own
+      // transaction, so there is nothing here for the client to assert.
+      if (!variantMode && !outputMaterialId) {
         showMessage('Set an output material on the tech card before receiving', 'error');
+        return;
+      }
+      // A colour-mode run cannot receipt a colourless line — the server refuses the mix, and its
+      // refusal reads as a stale-page error, which sends the operator to reload instead of to the
+      // plan. Name the real problem and the real fix.
+      const strayCounted = rows.filter(
+        (r) =>
+          r.outputVariantId === 0 && ((Number(r.received) || 0) > 0 || (Number(r.defect) || 0) > 0),
+      );
+      if (variantMode && strayCounted.length > 0) {
+        showMessage(
+          "this run was planned before the card's colours were registered — re-plan it per colour on the run page first",
+          'error',
+        );
         return;
       }
     } else {
@@ -184,7 +253,7 @@ export function ReceiveModal({
         defectDisposition: Number(r.defect) > 0 ? r.disposition || 'scrap' : 'scrap',
       }));
     const isPartiallyReceived = run.run.status === 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED';
-    if (counted.length === 0 && !(finalReceipt && isPartiallyReceived)) {
+    if (counted.length === 0 && !(isFinal && isPartiallyReceived)) {
       // The one legal empty receipt is the FINAL short-close of a partially received run — the
       // operator declares the series complete without a last delivery.
       showMessage(
@@ -211,11 +280,11 @@ export function ReceiveModal({
         idempotencyKey,
         expectedLockVersion: run.lockVersion ?? 0,
         updateCostPrice: isAux ? false : updateCostPrice,
-        partial: !finalReceipt,
+        partial: !isFinal,
         notifyWaitlist,
       });
       showMessage(
-        !finalReceipt
+        !isFinal
           ? 'Поставка принята: партия остаётся открытой для следующих приёмок'
           : isAux
             ? 'Run received · material stock posted'
@@ -277,7 +346,68 @@ export function ReceiveModal({
               </Text>
             ) : null}
 
-            {isAux && rows.length > 0 ? (
+            {/* 0252: one row per colour. No size column and no disposition select — an aux line has
+                no size, and its defects are scrap-only (seconds book B-grade stock of a PRODUCT,
+                which a material bucket has none of). Each colour's good units go into that colour's
+                own bucket; the server resolves which from the card's registry. */}
+            {variantMode ? (
+              <div className='flex flex-col gap-1'>
+                <Text size='small'>
+                  → each colour into its own bucket · booked into the material warehouse
+                </Text>
+                <div className='grid grid-cols-[1fr_auto_auto] items-center gap-2'>
+                  <Text variant='uppercase' size='small'>
+                    colour
+                  </Text>
+                  <Text variant='uppercase' size='small'>
+                    принято годных
+                  </Text>
+                  <Text variant='uppercase' size='small' title='не попадёт на склад'>
+                    брак
+                  </Text>
+                  {variantRows.map(({ r, i }) => {
+                    const v = variantById.get(r.outputVariantId);
+                    const stray = r.outputVariantId === 0;
+                    const code = stray ? '! no colour' : v?.colorCode || `#${r.outputVariantId}`;
+                    return (
+                      <RowInputs
+                        // A keyless colourless row would otherwise key as 0 and collide.
+                        key={r.lineKey || `row-${i}`}
+                        label={code}
+                        swatchHex={stray ? undefined : hexByCode.get(v?.colorCode ?? '')}
+                        sub={
+                          stray
+                            ? 'planned before the colours were registered — re-plan this run per colour'
+                            : [v?.colorName, v?.materialName].filter(Boolean).join(' · ')
+                        }
+                        retired={v ? !v.active : false}
+                        planned={r.plannedQty}
+                        alreadyGood={r.alreadyGood}
+                        alreadyDefect={r.alreadyDefect}
+                        received={r.received}
+                        defect={r.defect}
+                        onReceived={(val) =>
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], received: val };
+                            return next;
+                          })
+                        }
+                        onDefect={(val) =>
+                          setRows((prev) => {
+                            const next = [...prev];
+                            next[i] = { ...next[i], defect: val };
+                            return next;
+                          })
+                        }
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {isAux && !variantMode && rows.length > 0 ? (
               <div className='flex flex-col gap-1'>
                 <Text size='small'>
                   → {auxDest || 'output material'}
@@ -381,21 +511,26 @@ export function ReceiveModal({
               ))}
 
             {/* Phase 5: partial vs final. Checked (default) = the Phase 4 semantics — this receipt
-                declares the run complete. Unchecked books this delivery and keeps the run open. */}
-            <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
-              <input
-                type='checkbox'
-                checked={finalReceipt}
-                onChange={(e) => setFinalReceipt(e.target.checked)}
-              />
-              <Text size='small'>
-                финальная приёмка — партия объявляется полностью принятой
-                {finalReceipt && remainderAfterThis > 0
-                  ? ` (остаток ${remainderAfterThis} шт. будет закрыт как непришедший)`
-                  : ''}
-              </Text>
-            </label>
-            {!finalReceipt ? (
+                declares the run complete. Unchecked books this delivery and keeps the run open.
+                NOT offered on an auxiliary run: the server accepts only a final aux receipt
+                (ErrProductionRunAuxPartial), so the question has exactly one legal answer and
+                asking it could only produce a refusal after the counting was done. */}
+            {!isAux ? (
+              <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
+                <input
+                  type='checkbox'
+                  checked={finalReceipt}
+                  onChange={(e) => setFinalReceipt(e.target.checked)}
+                />
+                <Text size='small'>
+                  финальная приёмка — партия объявляется полностью принятой
+                  {finalReceipt && remainderAfterThis > 0
+                    ? ` (остаток ${remainderAfterThis} шт. будет закрыт как непришедший)`
+                    : ''}
+                </Text>
+              </label>
+            ) : null}
+            {!isFinal ? (
               <Text variant='inactive' size='small'>
                 частичная приёмка: эта поставка бронируется на склад, партия останется открытой —
                 следующие поставки принимаются той же кнопкой, финальная приёмка закроет серию.
@@ -460,7 +595,7 @@ export function ReceiveModal({
               disabled={busy || rows.length === 0}
               onClick={submit}
             >
-              {busy ? 'receiving…' : finalReceipt ? 'receive' : 'принять поставку'}
+              {busy ? 'receiving…' : isFinal ? 'receive' : 'принять поставку'}
             </Button>
           </div>
         </DialogPrimitives.Content>
@@ -471,6 +606,9 @@ export function ReceiveModal({
 
 function RowInputs({
   label,
+  swatchHex,
+  sub,
+  retired,
   planned,
   alreadyGood = 0,
   alreadyDefect = 0,
@@ -483,6 +621,12 @@ function RowInputs({
   onDisposition,
 }: {
   label: string;
+  /** Colour-variant rows only: the dictionary swatch beside the code. */
+  swatchHex?: string;
+  /** Colour-variant rows only: colour name · destination bucket. */
+  sub?: string;
+  /** Colour-variant rows only: the colour was retired after this run was planned. */
+  retired?: boolean;
   planned: number;
   alreadyGood?: number;
   alreadyDefect?: number;
@@ -497,9 +641,18 @@ function RowInputs({
   return (
     <>
       <Text size='small'>
-        {label}{' '}
+        {swatchHex !== undefined || sub !== undefined ? (
+          <span
+            aria-hidden
+            title={sub || undefined}
+            className='mr-1.5 inline-block size-3 shrink-0 border border-textColor align-middle'
+            style={swatchHex ? { backgroundColor: swatchHex } : undefined}
+          />
+        ) : null}
+        {label}
+        {retired ? <span className='text-textInactiveColor'> · retired</span> : null}{' '}
         <span className='text-textInactiveColor'>
-          · plan {planned}
+          {sub ? `· ${sub} ` : ''}· plan {planned}
           {alreadyGood > 0 || alreadyDefect > 0
             ? ` · уже принято ${alreadyGood}${alreadyDefect > 0 ? ` (+${alreadyDefect} брак)` : ''} · осталось ${Math.max(0, planned - alreadyGood)}`
             : ''}
@@ -507,15 +660,19 @@ function RowInputs({
       </Text>
       {/* Whole units only — sanitize to digits like the lines grid; a typed "1.5" would
           otherwise pass the >= 0 guard and 400 on the integer proto field mid-flow. */}
+      {/* The column headings sit far from the inputs in a long grid, so each input names its own
+          row and column — without it every field reads as an unlabelled box to a screen reader. */}
       <input
         className={`${cell} w-20`}
         inputMode='numeric'
+        aria-label={`${label} принято годных`}
         value={received}
         onChange={(e) => onReceived(e.target.value.replace(/[^0-9]/g, ''))}
       />
       <input
         className={`${cell} w-20`}
         inputMode='numeric'
+        aria-label={`${label} брак`}
         value={defect}
         onChange={(e) => onDefect(e.target.value.replace(/[^0-9]/g, ''))}
       />

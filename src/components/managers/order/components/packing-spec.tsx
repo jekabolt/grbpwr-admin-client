@@ -1,7 +1,11 @@
+import { StyleAssemblyLine } from 'api/proto-http/admin';
+import { auxSubtypeLabel } from 'components/managers/tech-card/components/labels-pkg-shared';
 import { useOrderPackingSpec } from 'components/managers/tech-card/components/useAssemblyPacking';
-import { useState } from 'react';
+import { useDictionary } from 'lib/providers/dictionary-provider';
+import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 
@@ -15,10 +19,88 @@ function Tick() {
   return <span aria-hidden className='inline-block h-3 w-3 border border-textColor align-middle' />;
 }
 
-// Strip the enum prefix for a compact human label (e.g. TECH_CARD_AUX_SUBTYPE_DUST_BAG -> "dust bag").
-function auxSubtypeLabel(subtype?: string): string {
-  if (!subtype || subtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN') return '';
-  return subtype.replace('TECH_CARD_AUX_SUBTYPE_', '').replace(/_/g, ' ').toLowerCase();
+// A colour chip that survives printing: browsers drop background fills on paper unless the element
+// asks to keep them, and a pick list whose swatches vanish is a pick list that lost half its answer.
+function Swatch({ hex, title }: { hex?: string; title?: string }) {
+  return (
+    <span
+      aria-hidden
+      title={title ?? hex ?? undefined}
+      className='inline-block size-2.5 shrink-0 border border-textColor align-middle'
+      style={hex ? { backgroundColor: hex, printColorAdjust: 'exact' } : undefined}
+    />
+  );
+}
+
+// Why the spec could not name a bucket, in the words of the person holding the sheet. The server's
+// basis codes name a CAUSE; each of these names the FIX, because an unresolved line is work for
+// somebody and "NO_COLOR_MATCH" does not say whose.
+const UNRESOLVED_REASON: Record<string, string> = {
+  ASSEMBLY_RESOLUTION_BASIS_RETIRED_COLOR:
+    'colour exists but is retired — reactivate it or pick a substitute',
+  ASSEMBLY_RESOLUTION_BASIS_NO_COLOR_MATCH: 'no colour of this component matches',
+  ASSEMBLY_RESOLUTION_BASIS_ARCHIVED_MATERIAL: 'the bucket is archived',
+  ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT: 'component has no warehouse output',
+};
+
+// The colour half of one assembly line: which bucket this component ships from, or why nobody knows.
+function Resolution({
+  line,
+  garmentCode,
+  hexByCode,
+}: {
+  line: StyleAssemblyLine;
+  garmentCode: string;
+  hexByCode: Map<string, string>;
+}) {
+  if (line.unresolved) {
+    return (
+      <span className='flex flex-col items-start gap-0.5'>
+        <Pill tone='warn'>unresolved</Pill>
+        <Text component='span' variant='label' size='micro'>
+          {UNRESOLVED_REASON[line.resolutionBasis ?? ''] ??
+            'not resolved — check the component’s colours'}
+        </Text>
+      </span>
+    );
+  }
+  const code = line.resolvedColorCode?.trim() ?? '';
+  const material =
+    line.resolvedMaterialName?.trim() ||
+    (line.resolvedMaterialId ? `#${line.resolvedMaterialId}` : '');
+  // A sole-variant hit is a SUBSTITUTION, not a match: the component simply has one colour, and it
+  // happens to be shipped with every colourway. Showing it as though the colours agreed would let a
+  // genuine mismatch print as a tick — so when they differ, both are named.
+  const substituted =
+    line.resolutionBasis === 'ASSEMBLY_RESOLUTION_BASIS_SOLE_VARIANT' &&
+    !!code &&
+    !!garmentCode &&
+    code.toUpperCase() !== garmentCode.toUpperCase();
+  if (!code && !material) return <>—</>;
+  return (
+    <span className='flex flex-col items-start gap-0.5'>
+      {code ? (
+        <span className='inline-flex items-center gap-1'>
+          <Swatch hex={hexByCode.get(code)} title={line.resolvedColorName ?? undefined} />
+          <span>
+            {substituted ? (
+              <>
+                garment <span className='uppercase'>{garmentCode}</span> →{' '}
+              </>
+            ) : null}
+            <span className='uppercase'>{code}</span>
+            {line.resolvedColorName ? ` · ${line.resolvedColorName}` : ''}
+            {substituted ? ' (only colour)' : ''}
+          </span>
+        </span>
+      ) : null}
+      {material ? (
+        <Text component='span' variant='label' size='micro'>
+          {material}
+        </Text>
+      ) : null}
+    </span>
+  );
 }
 
 /**
@@ -32,8 +114,14 @@ function auxSubtypeLabel(subtype?: string): string {
 export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
   const [open, setOpen] = useState(false);
   const { data, isLoading, isError, refetch } = useOrderPackingSpec(orderUuid, open);
+  const { dictionary } = useDictionary();
   const items = data?.items ?? [];
   const packaging = data?.packaging ?? [];
+  const hexByCode = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of dictionary?.colors ?? []) if (c.code && c.hex) m.set(c.code, c.hex);
+    return m;
+  }, [dictionary?.colors]);
 
   return (
     <Section
@@ -88,6 +176,9 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
               <div className='space-y-3'>
                 {items.map((it) => {
                   const assembly = it.assembly ?? [];
+                  // The garment's own colour: what every component below is resolved AGAINST, so it
+                  // belongs in the header rather than repeated per line.
+                  const garmentCode = it.colorCode?.trim() ?? '';
                   return (
                     <div key={it.orderItemId} className='space-y-2'>
                       <GroupLabel
@@ -100,6 +191,13 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
                         <span className='inline-flex items-center gap-2'>
                           <Tick />
                           {it.styleName || `style #${it.styleId}`}
+                          {garmentCode ? (
+                            <span className='inline-flex items-center gap-1 normal-case'>
+                              <Swatch hex={hexByCode.get(garmentCode)} title={it.colorName ?? ''} />
+                              <span className='uppercase'>{garmentCode}</span>
+                              {it.colorName ? ` · ${it.colorName}` : ''}
+                            </span>
+                          ) : null}
                         </span>
                       </GroupLabel>
                       {assembly.length === 0 ? (
@@ -113,6 +211,7 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
                               <tr>
                                 <th className={TH} aria-label='checked' />
                                 <th className={TH}>component</th>
+                                <th className={TH}>colour → bucket</th>
                                 <th className={TH}>qty</th>
                                 <th className={TH}>print</th>
                                 <th className={TH}>position</th>
@@ -130,6 +229,13 @@ export function OrderPackingSpec({ orderUuid }: { orderUuid: string }) {
                                       {a.componentName || `#${a.componentTechCardId}`}
                                       {subtype ? ` · ${subtype}` : ''}
                                       {a.active === false ? ' (inactive)' : ''}
+                                    </td>
+                                    <td className={TD}>
+                                      <Resolution
+                                        line={a}
+                                        garmentCode={garmentCode}
+                                        hexByCode={hexByCode}
+                                      />
                                     </td>
                                     <td className={TD}>{a.qty?.value ?? '—'}</td>
                                     <td className={TD}>{a.printNote || '—'}</td>

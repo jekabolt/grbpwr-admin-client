@@ -39,6 +39,9 @@ type Row = {
   componentName: string; // resolved server-side; refreshed locally on pick, stale until re-save
   componentAuxSubtype: string;
   outputMaterialName: string; // resolved server-side; unknown for a not-yet-saved pick
+  // 0252: ACTIVE colours of the component. >0 means it produces one bucket PER COLOUR, so naming a
+  // single output material would be a half-truth. Read-only — never part of the save payload.
+  outputVariantCount: number;
   sizeId: number; // 0 = all sizes
   sizeName: string; // server-resolved label, kept so an out-of-range size still reads
   qty: string;
@@ -54,6 +57,7 @@ const rowFrom = (l: StyleAssemblyLine): Row => ({
   componentName: l.componentName ?? '',
   componentAuxSubtype: l.componentAuxSubtype ?? 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
   outputMaterialName: l.outputMaterialName ?? '',
+  outputVariantCount: l.outputVariantCount ?? 0,
   sizeId: l.sizeId ?? 0,
   sizeName: l.sizeName ?? '',
   qty: decimalToInput(l.qty),
@@ -69,6 +73,7 @@ const newRow = (): Row => ({
   componentName: '',
   componentAuxSubtype: 'TECH_CARD_AUX_SUBTYPE_UNKNOWN',
   outputMaterialName: '',
+  outputVariantCount: 0,
   sizeId: 0,
   sizeName: '',
   qty: '1',
@@ -190,7 +195,15 @@ function AssemblyTile({
       <Text component='span' className='min-w-0 truncate font-bold uppercase'>
         {row.componentName || `#${row.componentTechCardId}`}
       </Text>
-      {row.outputMaterialName ? (
+      {/* 0252: a component that produces per colour has no single destination to name — saying
+          "→ <one material>" for it would name whichever bucket the card happens to still carry.
+          Which colour ships is decided per ORDER ITEM (the packing spec resolves it against the
+          garment's colourway), so the bill can only honestly report how many there are. */}
+      {row.outputVariantCount > 0 ? (
+        <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
+          → {row.outputVariantCount} {row.outputVariantCount === 1 ? 'colour' : 'colours'}
+        </Text>
+      ) : row.outputMaterialName ? (
         <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
           → {row.outputMaterialName}
         </Text>

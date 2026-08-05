@@ -7,6 +7,7 @@ import {
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
+import { activeVariantCount } from 'components/managers/tech-card/components/output-variants-field';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -66,6 +67,12 @@ export function ProductionRunDetail() {
   // a plain quantity plan and the receive posts into the material warehouse.
   const isAux = techCard?.techCard?.purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const outputMaterialId = techCard?.techCard?.outputMaterialId ?? 0;
+  // 0252: an aux card may instead produce one bucket PER COLOUR. Then the run is planned and
+  // received per colour and the single output material is not the destination at all.
+  // Memoised: the plan editor keys a useMemo (and through it its dirty-guard effect) on this array,
+  // and a fresh `?? []` every render would re-seed the inputs on any parent re-render.
+  const outputVariants = useMemo(() => techCard?.outputVariants ?? [], [techCard?.outputVariants]);
+  const liveVariants = activeVariantCount(outputVariants);
   const { data: materialsData } = useMaterials('', true, isAux);
   const outputMaterial = useMemo(
     () => (materialsData?.materials ?? []).find((m) => m.id === outputMaterialId),
@@ -107,8 +114,13 @@ export function ProductionRunDetail() {
   const unassignedPlanned = isAux
     ? 0
     : (ins?.lines ?? []).filter((l) => (l.plannedQty ?? 0) > 0 && !l.productId).length;
-  // An aux run can't be received until the card names an output material (FailedPrecondition).
-  const auxNoMaterial = isAux && !outputMaterialId;
+  // An aux run can't be received until it has somewhere to book its output. Three ways to have one:
+  // the card's single output material, at least one live colour variant (each owns its own bucket),
+  // or — for a run planned before its colours were retired — the colour lines it already carries,
+  // which the server grandfathers and still receipts into their own buckets. Only a run with NONE
+  // of the three is stuck, and claiming otherwise would put a warning banner on a receivable run.
+  const auxRunHasVariantLines = (ins?.lines ?? []).some((l) => (l.outputVariantId ?? 0) > 0);
+  const auxNoMaterial = isAux && !outputMaterialId && liveVariants === 0 && !auxRunHasVariantLines;
 
   // Plan vs fact quantities, summed straight from the run's own lines rather than the
   // costing-gated `actuals` — "how many did we make" isn't money, so it should be visible to
@@ -141,8 +153,16 @@ export function ProductionRunDetail() {
   const colourModelCount =
     new Set(lines.map((l) => l.productId ?? 0).filter((pid) => pid > 0)).size ||
     (techCard?.colorways?.length ?? 0);
+  // How many colours THIS run actually plans, which is the honest number for its header — a card
+  // may have five registered variants and this run produce two of them.
+  const runColourCount = new Set(lines.map((l) => l.outputVariantId ?? 0).filter((id) => id > 0))
+    .size;
   const runTypeLabel = isAux
-    ? 'auxiliary run · produces a material for warehouse stock, not a sellable product'
+    ? runColourCount > 0 || liveVariants > 0
+      ? `auxiliary run · produces ${runColourCount || liveVariants} colour${
+          (runColourCount || liveVariants) === 1 ? '' : 's'
+        } of a material for warehouse stock, each into its own bucket`
+      : 'auxiliary run · produces a material for warehouse stock, not a sellable product'
     : colourModelCount > 0
       ? `produces ${colourModelCount} colour-model${colourModelCount === 1 ? '' : 's'} as sellable product${colourModelCount === 1 ? '' : 's'}`
       : 'no colour-models planned yet';
@@ -222,7 +242,7 @@ export function ProductionRunDetail() {
                 className='uppercase'
                 title={
                   auxNoMaterial
-                    ? 'set an output material on the tech card before receiving'
+                    ? 'set an output material or register a colour variant on the tech card before receiving'
                     : unassignedPlanned
                       ? `${unassignedPlanned} line(s) have no product — publish them or zero their received qty`
                       : undefined
@@ -327,6 +347,7 @@ export function ProductionRunDetail() {
             locked={locked}
             outputMaterialId={outputMaterialId}
             outputMaterial={outputMaterial}
+            outputVariants={outputVariants}
           />
         ) : (
           <LinesGrid run={run} canEdit={canEdit} locked={locked} />
@@ -602,6 +623,7 @@ export function ProductionRunDetail() {
         isAux={isAux}
         outputMaterialId={outputMaterialId}
         outputMaterial={outputMaterial}
+        outputVariants={outputVariants}
       />
       <ConfirmationModal
         open={deleteOpen}
@@ -675,7 +697,7 @@ function nextStepGuidance({
   if (auxNoMaterial) {
     return {
       tone: 'warning',
-      text: 'This auxiliary run has no output material set on its tech card — set one before it can be received.',
+      text: 'This auxiliary run has nowhere to book its output — set an output material or register colour variants on its tech card before it can be received.',
       href: `${ROUTES.techCards}/${techCardId}`,
       linkLabel: 'open tech card ↗',
     };

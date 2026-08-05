@@ -203,6 +203,8 @@ export function LinesGrid({
           plannedQty: planned,
           receivedQty: carrier?.receivedQty,
           defectQty: carrier?.defectQty,
+          // Sellable lines never carry a colour variant (aux-only, 0253).
+          outputVariantId: undefined,
           // The line's stable identity. Carried over from the stored line so the backend UPDATEs
           // that row in place (its id is what receipt lines will reference) instead of dropping and
           // reinserting it; minted only for a cell that has no line yet. Never regenerate a key that
