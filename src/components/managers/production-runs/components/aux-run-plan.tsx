@@ -440,9 +440,6 @@ function SingleOutputRunPlan({
               // Keep the stored line's stable identity so re-planning UPDATEs that row in place
               // instead of retiring it and its id; mint one only for a run that has no line yet.
               lineKey: line?.lineKey || ulid(),
-              // Colour-variant plumbing (aux-colorways contract): this screen predates it —
-              // preserve the stored value, 0 = legacy single-output mode.
-              outputVariantId: line?.outputVariantId ?? 0,
             },
           ],
         },
