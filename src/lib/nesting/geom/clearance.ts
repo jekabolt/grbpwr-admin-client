@@ -77,12 +77,46 @@ function pointInPoly(pt: Pt, poly: readonly Pt[]): boolean {
   return inside;
 }
 
-// Minimal boundary distance between two placed contours; 0 when they intersect or one
-// contains the other (перехлёст). Callers bbox-prefilter, so no early-outs inside.
+function polyOrientation(poly: readonly Pt[]): number {
+  let s = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    s += poly[j].x * poly[i].y - poly[i].x * poly[j].y;
+  }
+  return s >= 0 ? 1 : -1; // +1 = CCW
+}
+
+// Do the contours share INTERIOR (not just boundary)? Probe a point a hair inside a's own
+// boundary — the interior side of an edge midpoint — and ask whether it lies inside b.
+// This is the only test that separates coincident contours (the same piece dropped on
+// itself: every edge collinear, every vertex on the boundary, no proper crossing) from
+// legal edge contact.
+const PROBE_EPS = 1e-6;
+function shareInterior(a: readonly Pt[], b: readonly Pt[]): boolean {
+  const sgn = polyOrientation(a);
+  for (let i = 0; i < a.length; i++) {
+    const p1 = a[i];
+    const p2 = a[(i + 1) % a.length];
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-9) continue;
+    // Interior of a CCW polygon lies to the LEFT of the edge direction.
+    const px = (p1.x + p2.x) / 2 + ((-dy / len) * sgn * PROBE_EPS);
+    const py = (p1.y + p2.y) / 2 + ((dx / len) * sgn * PROBE_EPS);
+    if (pointInPoly({ x: px, y: py }, b)) return true;
+  }
+  return false;
+}
+
+// Minimal boundary distance between two placed contours; **-1** when they genuinely
+// intersect or one contains the other (перехлёст), 0 when boundaries touch. The sentinel
+// keeps overlap distinguishable from legal cut-on-line contact — at зазор 0 a plain 0
+// would read as compliant and the validator would pass duplicate CUT paths to the
+// plotter. Callers bbox-prefilter, so no early-outs inside.
 export function contourClearance(a: readonly Pt[], b: readonly Pt[]): number {
   // Containment: one representative point suffices once we know boundaries don't cross —
   // but crossing is checked in the same pass, so probe first (cheap vs the O(n·m) below).
-  if (pointInPoly(a[0], b) || pointInPoly(b[0], a)) return 0;
+  if (pointInPoly(a[0], b) || pointInPoly(b[0], a)) return -1;
   let min2 = Infinity;
   for (let i = 0; i < a.length; i++) {
     const a1 = a[i];
@@ -90,19 +124,23 @@ export function contourClearance(a: readonly Pt[], b: readonly Pt[]): number {
     for (let j = 0; j < b.length; j++) {
       const b1 = b[j];
       const b2 = b[(j + 1) % b.length];
-      if (segsIntersect(a1, a2, b1, b2)) return 0;
+      if (segsIntersect(a1, a2, b1, b2)) return -1;
       const d2 = Math.min(ptSegDist2(a1, b1, b2), ptSegDist2(b1, a1, a2));
       if (d2 < min2) min2 = d2;
     }
     // Endpoints of a alone under-sample long b edges; the symmetric pass above covers it.
   }
-  return Math.sqrt(min2);
+  const d = Math.sqrt(min2);
+  // Boundaries touching without a proper crossing is either legal contact (cut on the
+  // line) or fully coincident contours. Only the interior probe tells them apart.
+  if (d <= PROBE_EPS && (shareInterior(a, b) || shareInterior(b, a))) return -1;
+  return d;
 }
 
 export type Violation = {
   index: number; // placement index
   otherIndex?: number; // undefined = strip edge / margin breach
-  clearance: number; // cm; 0 = перехлёст
+  clearance: number; // cm; 0 = контуры пересекаются или касаются при ненулевом зазоре
   required: number; // cm
 };
 
@@ -147,8 +185,10 @@ export function checkLayout(args: {
       )
         continue;
       const c = contourClearance(a.poly, b.poly);
-      if (c < gapCm - eps) {
-        out.push({ index: a.index, otherIndex: b.index, clearance: c, required: gapCm });
+      // c < 0 is the genuine-overlap sentinel — a violation at ANY gap, including 0
+      // (where touching, exactly 0, stays legal: cut-on-line semantics).
+      if (c < 0 || c < gapCm - eps) {
+        out.push({ index: a.index, otherIndex: b.index, clearance: Math.max(0, c), required: gapCm });
       }
     }
   }

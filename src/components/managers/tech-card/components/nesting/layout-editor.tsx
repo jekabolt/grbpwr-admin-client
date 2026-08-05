@@ -49,6 +49,20 @@ export function LayoutEditor({
   const dragStart = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
 
   const rots: RotationDeg[] = allowCrossGrain ? [0, 90, 180, 270] : [0, 180];
+  const usableWidth = Math.max(0, widthCm - 2 * marginCm);
+
+  // Поворот предлагается только в тех положениях, где деталь помещается по ширине —
+  // то же правило, что у движка (nest/index.ts). Текущий поворот всегда остаётся в
+  // цикле: сохранённый маркер может нести 90° при allowCrossGrain=false, и кнопка не
+  // должна молча уводить деталь на 0°.
+  const rotsFor = (piece: PieceDTO, current: RotationDeg): RotationDeg[] => {
+    const fitting = rots.filter((r) => {
+      const b = rotatedBounds(piece, r);
+      return b.maxY - b.minY <= usableWidth + 1e-9;
+    });
+    if (!fitting.includes(current)) fitting.unshift(current);
+    return fitting.length > 0 ? fitting : [current];
+  };
 
   const W = widthCm;
   const L = Math.max(usedLengthCm, targetCm ?? 0, 10);
@@ -125,7 +139,9 @@ export function LayoutEditor({
     const pl = placements[selected];
     const piece = byId.get(pl.pieceId);
     if (!piece) return;
-    const rot = rots[(rots.indexOf(pl.rot) + 1) % rots.length];
+    const list = rotsFor(piece, pl.rot);
+    const rot = list[(list.indexOf(pl.rot) + 1) % list.length];
+    if (rot === pl.rot) return; // единственное допустимое положение — вращать некуда
     // Держим центр повёрнутого bbox на месте, чтобы деталь не «прыгала».
     const rb0 = rotatedBounds(piece, pl.rot);
     const rb1 = rotatedBounds(piece, rot);
@@ -147,7 +163,7 @@ export function LayoutEditor({
               ? `выбрано: ${selPiece.name}${placements[selected].rot ? ` (${placements[selected].rot}°)` : ''}`
               : 'перетащите деталь · клик — выбрать · R — поворот'}
           </Text>
-          {selected != null && (
+          {selected != null && selPiece && rotsFor(selPiece, placements[selected].rot).length > 1 && (
             <button
               type='button'
               className='text-nano uppercase underline hover:opacity-70'

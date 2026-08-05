@@ -22,7 +22,7 @@ import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
 import type { NestConfig, NestResult, Placement, PieceDTO, Unit } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
-import { checkLayout, measureLayout } from 'lib/nesting/geom/clearance';
+import { checkLayout, measureLayout, type Violation } from 'lib/nesting/geom/clearance';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
@@ -31,6 +31,17 @@ import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
 const MANUAL_NOTE_PREFIX = 'ручная правка:';
+
+// Нарушение словами. У кромочного (otherIndex отсутствует) required — это отступ, и при
+// отступе 0 «0.00 см < 0.00 см» звучало бы бессмыслицей: деталь просто вышла за полотно.
+function violationText(v: Violation): string {
+  if (v.otherIndex == null) {
+    return v.required > 0
+      ? `деталь за пределами полотна (отступ ${v.required.toFixed(2)} см)`
+      : 'деталь за пределами полотна';
+  }
+  return `зазор ${v.clearance.toFixed(2)} см < ${v.required.toFixed(2)} см`;
+}
 
 type PieceSel = Record<number, { checked: boolean; qty: number }>;
 
@@ -134,10 +145,22 @@ export function NestingModal({
   // View mode starts read-only; «редактировать» switches the stored layout into the editor.
   const [editView, setEditView] = useState(false);
   const [runConfirm, setRunConfirm] = useState(false);
+  // Everything that would DESTROY manual edits — closing, changing a run parameter,
+  // re-running — asks first. wipeConfirm holds the deferred action; without it a stray
+  // keystroke in «зазор» or an Esc silently threw away hand work.
+  const [wipeConfirm, setWipeConfirm] = useState<{ kind: 'close' | 'params'; apply: () => void } | null>(
+    null,
+  );
+  const guardManual = (apply: () => void, kind: 'close' | 'params' = 'params') => {
+    if (manual) setWipeConfirm({ kind, apply });
+    else apply();
+  };
+  const requestClose = () => guardManual(onClose, 'close');
 
   // A result computed for other parameters is stale — drop it the moment they change
   // (inputs are disabled while running, so this can only fire against a done run). Manual
-  // edits were made against that result and die with it.
+  // edits reached here only through guardManual, which clears them first; this stays as the
+  // safety net for any programmatic parameter change (e.g. a re-parse reseeding `sel`).
   useEffect(() => {
     resetRun();
     setManual(null);
@@ -187,8 +210,11 @@ export function NestingModal({
     : null;
   const manualNote =
     manual && violations.length && worstViolation
-      ? `${MANUAL_NOTE_PREFIX} ${violations.length} нарушений зазора (худший ${worstViolation.clearance.toFixed(2)} см < ${worstViolation.required.toFixed(2)} см)`
+      ? `${MANUAL_NOTE_PREFIX} ${violations.length} нарушений (худшее — ${violationText(worstViolation)})`
       : null;
+  // Overlapping by hand shrinks the used length, so the naive ratio can exceed 100% —
+  // and efficiency_pct is a 0..100 column. Clamp once, use everywhere.
+  const effPct = effective ? Math.min(100, effective.efficiency * 100) : 0;
 
   const editingActive =
     !running &&
@@ -380,7 +406,7 @@ export function NestingModal({
           allowCrossGrain: crossGrain,
           sets: setsN,
           usedLengthCm: dec(effective.usedLengthCm),
-          efficiencyPct: dec(effective.efficiency * 100),
+          efficiencyPct: dec(effPct),
           placedCount: effective.placedCount,
           totalCount: effective.totalCount,
           layout,
@@ -434,7 +460,7 @@ export function NestingModal({
           allowCrossGrain: !!s.allowCrossGrain,
           sets: s.sets ?? 1,
           usedLengthCm: dec(effective.usedLengthCm),
-          efficiencyPct: dec(effective.efficiency * 100),
+          efficiencyPct: dec(effPct),
           placedCount: s.placedCount ?? effective.placedCount,
           totalCount: s.totalCount ?? effective.totalCount,
           layout: {
@@ -467,9 +493,9 @@ export function NestingModal({
     <ConfirmationModal
       open={files != null || view != null}
       onOpenChange={(o) => {
-        if (!o) onClose();
+        if (!o) requestClose();
       }}
-      onConfirm={onClose}
+      onConfirm={requestClose}
       title={
         viewData
           ? `маркер — ${view?.summary?.name ?? ''}`
@@ -494,8 +520,9 @@ export function NestingModal({
                 min={10}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWidthRaw(e.target.value)}
                 onBlur={() => {
-                  setWidthCm(Math.max(10, numOr(widthRaw ?? '', widthCm)));
+                  const next = Math.max(10, numOr(widthRaw ?? '', widthCm));
                   setWidthRaw(null);
+                  if (next !== widthCm) guardManual(() => setWidthCm(next));
                 }}
                 disabled={running}
               />
@@ -527,9 +554,10 @@ export function NestingModal({
                 value={gapCm}
                 min={0}
                 step={0.1}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setGapCm(Math.max(0, numOr(e.target.value, gapCm)))
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const next = Math.max(0, numOr(e.target.value, gapCm));
+                  if (next !== gapCm) guardManual(() => setGapCm(next));
+                }}
                 disabled={running}
               />
             </label>
@@ -543,9 +571,10 @@ export function NestingModal({
                 value={marginCm}
                 min={0}
                 step={0.5}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setMarginCm(Math.max(0, numOr(e.target.value, marginCm)))
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const next = Math.max(0, numOr(e.target.value, marginCm));
+                  if (next !== marginCm) guardManual(() => setMarginCm(next));
+                }}
                 disabled={running}
               />
             </label>
@@ -558,9 +587,10 @@ export function NestingModal({
                 type='number'
                 value={setsN}
                 min={1}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setSetsN(Math.max(1, Math.round(numOr(e.target.value, setsN))))
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const next = Math.max(1, Math.round(numOr(e.target.value, setsN)));
+                  if (next !== setsN) guardManual(() => setSetsN(next));
+                }}
                 disabled={running}
               />
             </label>
@@ -571,7 +601,7 @@ export function NestingModal({
               <CheckboxCommon
                 name='nest-crossgrain'
                 checked={crossGrain}
-                onChange={(c: boolean) => setCrossGrain(c)}
+                onChange={(c: boolean) => guardManual(() => setCrossGrain(c))}
                 disabled={running}
               />
               <Text size='micro' component='span'>
@@ -609,7 +639,7 @@ export function NestingModal({
                 { value: 'cm', label: 'см' },
                 { value: 'in', label: 'дюймы' },
               ]}
-              onChange={(v: string | number) => setUnitOverride(String(v) as Unit)}
+              onChange={(v: string | number) => guardManual(() => setUnitOverride(String(v) as Unit))}
               disabled={running || parse.phase === 'loading'}
             />
           </div>
@@ -657,13 +687,15 @@ export function NestingModal({
                       disabled={running || fitting.length === 0}
                       className='[&>span[data-state=indeterminate]]:opacity-40'
                       onChange={(c: boolean) =>
-                        setSel((m) => {
-                          const next = { ...m };
-                          for (const p of fitting) {
-                            next[p.id] = { checked: c, qty: m[p.id]?.qty ?? 1 };
-                          }
-                          return next;
-                        })
+                        guardManual(() =>
+                          setSel((m) => {
+                            const next = { ...m };
+                            for (const p of fitting) {
+                              next[p.id] = { checked: c, qty: m[p.id]?.qty ?? 1 };
+                            }
+                            return next;
+                          }),
+                        )
                       }
                     />
                     <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
@@ -691,13 +723,15 @@ export function NestingModal({
                 <button
                   type='button'
                   className='text-nano uppercase underline hover:opacity-70'
-                  onClick={() => {
-                    const next: PieceSel = {};
-                    for (const p of pieces) {
-                      next[p.id] = { checked: !!fitsWidth.get(p.id), qty: sel[p.id]?.qty ?? 1 };
-                    }
-                    setSel(next);
-                  }}
+                  onClick={() =>
+                    guardManual(() => {
+                      const next: PieceSel = {};
+                      for (const p of pieces) {
+                        next[p.id] = { checked: !!fitsWidth.get(p.id), qty: sel[p.id]?.qty ?? 1 };
+                      }
+                      setSel(next);
+                    })
+                  }
                 >
                   выбрать все
                 </button>
@@ -711,7 +745,9 @@ export function NestingModal({
                       name={`nest-piece-${p.id}`}
                       checked={s.checked && fits}
                       disabled={!fits || running}
-                      onChange={(c: boolean) => setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } }))}
+                      onChange={(c: boolean) =>
+                        guardManual(() => setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })))
+                      }
                     />
                     <PieceThumb piece={p} />
                     <div className='min-w-0 flex-1'>
@@ -776,10 +812,8 @@ export function NestingModal({
           )}
           {violations.length > 0 && !running && (
             <CalloutBox tone='warning'>
-              нарушения зазора: {violations.length}
-              {worstViolation
-                ? ` · худший ${worstViolation.clearance.toFixed(2)} см < ${worstViolation.required.toFixed(2)} см`
-                : ''}{' '}
+              нарушения: {violations.length}
+              {worstViolation ? ` · худшее — ${violationText(worstViolation)}` : ''}{' '}
               — экспорт и сохранение не блокируются, решение за раскройщиком
             </CalloutBox>
           )}
@@ -793,7 +827,7 @@ export function NestingModal({
               />
               <Stat
                 label='эффективность'
-                value={`${(effective.efficiency * 100).toFixed(1)} %`}
+                value={`${effPct.toFixed(1)} %`}
                 sub={`ткань ${displayWidth} см`}
               />
               <Stat
@@ -932,7 +966,7 @@ export function NestingModal({
             >
               скачать DXF
             </Button>
-            <Button type='button' variant='secondary' onClick={onClose}>
+            <Button type='button' variant='secondary' onClick={requestClose}>
               закрыть
             </Button>
           </div>
@@ -1038,6 +1072,29 @@ export function NestingModal({
         <Text size='micro' component='p'>
           В раскладке есть ручные правки — новый запуск их сотрёт. Экспортируйте или
           сохраните маркер, если правки нужны.
+        </Text>
+      </ConfirmationModal>
+
+      {/* Закрытие и смена параметров тоже сносят правки — то же подтверждение. */}
+      <ConfirmationModal
+        open={wipeConfirm != null}
+        onOpenChange={(o) => {
+          if (!o) setWipeConfirm(null);
+        }}
+        onConfirm={() => {
+          const pending = wipeConfirm;
+          setWipeConfirm(null);
+          setManual(null);
+          pending?.apply();
+        }}
+        onCancel={() => setWipeConfirm(null)}
+        title={wipeConfirm?.kind === 'close' ? 'закрыть без сохранения?' : 'сбросить ручные правки?'}
+        confirmLabel={wipeConfirm?.kind === 'close' ? 'закрыть' : 'сбросить'}
+      >
+        <Text size='micro' component='p'>
+          {wipeConfirm?.kind === 'close'
+            ? 'В раскладке есть ручные правки — при закрытии они потеряются. Сохраните маркер или скачайте SVG/DXF, если правки нужны.'
+            : 'Смена параметра пересчитает раскладку с нуля — ручные правки будут потеряны.'}
         </Text>
       </ConfirmationModal>
     </ConfirmationModal>
