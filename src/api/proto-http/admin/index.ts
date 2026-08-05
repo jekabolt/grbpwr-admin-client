@@ -6007,6 +6007,13 @@ export type common_TechCardBomItem = {
   // material catalog), or '' for a pre-provenance row whose origin is honestly unknown.
   priceSource: string | undefined;
   priceSnapshotAt: wellKnownTimestamp | undefined;
+  // READ-ONLY width enrichment (0259, Ф9.1) — ignored on write, filled by the single-card read.
+  // effective_fabric_width_cm = COALESCE(this line's fabric_width, linked article's width): the
+  // width the раскладка should prefill instead of a hardcoded default. selvedge_cm is the linked
+  // article's кромка per edge; usable cutting width = effective − 2×selvedge. Both unset when the
+  // line is unlinked and carries no width of its own.
+  effectiveFabricWidthCm: googletype_Decimal | undefined;
+  selvedgeCm: googletype_Decimal | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -7071,6 +7078,9 @@ export type common_MaterialFabricAttrs = {
   fabricDirection: string | undefined;
   shrinkagePct: googletype_Decimal | undefined;
   rollLengthM: googletype_Decimal | undefined;
+  // Кромка per EDGE, cm — the unusable strip of the roll (0259). Unset/0 = none; the nesting
+  // width and the selvedge wastage component both derive from it.
+  selvedgeCm: googletype_Decimal | undefined;
 };
 
 // MaterialHardwareAttrs are the typed attributes of a hardware-class material (material_hardware_attr).
