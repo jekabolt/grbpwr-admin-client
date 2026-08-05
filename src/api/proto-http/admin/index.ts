@@ -1036,6 +1036,32 @@ export type ArchiveVariantRequest = {
 export type ArchiveVariantResponse = {
 };
 
+// B-grade seconds surface (0251). B variants live on the SAME colourway as their A siblings
+// (product_size.grade='B', '-B'-suffixed SKU, own stock) and are minted only by the production
+// receive (defect disposition = seconds) and refund (disposition = seconds) paths.
+export type ListVariantSecondsRequest = {
+  colorwayId: number | undefined;
+};
+
+// SecondsVariant is one B-grade variant with its manual price list. All rows here are grade 'B'
+// by construction; variant carries the id/size/quantity/SKU/status.
+export type SecondsVariant = {
+  variant: common_Variant | undefined;
+  prices: common_ColorwayPrice[] | undefined;
+};
+
+export type ListVariantSecondsResponse = {
+  seconds: SecondsVariant[] | undefined;
+};
+
+export type SetVariantPriceRequest = {
+  variantId: number | undefined;
+  prices: common_ColorwayPriceInsert[] | undefined;
+};
+
+export type SetVariantPriceResponse = {
+};
+
 // Style size chart (R5, full-replace). The chart is style-owned (tech_card_size_measurement) and shares
 // the style's tech_card.lock_version; there is no separate chart version.
 export type GetStyleSizeChartRequest = {
@@ -2707,6 +2733,7 @@ export type SellThroughByDropRow = {
   grossMarginPct: number | undefined;
   hasCost: boolean | undefined;
   daysTo50pct?: number;
+  costedRevenue: googletype_Decimal | undefined;
 };
 
 // MarginByStyleRow rolls the per-SKU margin breakdown up to the STYLE (tech card) a product's
@@ -8913,6 +8940,16 @@ export interface AdminService {
   // ArchiveVariant retires a variant (ACTIVE -> ARCHIVED, R2): it drops off the storefront and rejects
   // stock writes, but its id stays valid for the frozen order/stock references.
   ArchiveVariant(request: ArchiveVariantRequest): Promise<ArchiveVariantResponse>;
+  // ListVariantSeconds returns a colourway's B-grade (factory seconds) variants with their manual
+  // prices (0251). B rows never appear in GetProduct or any storefront read — this is the admin's
+  // only window into seconds stock. An empty prices list means the variant is not sellable yet.
+  ListVariantSeconds(request: ListVariantSecondsRequest): Promise<ListVariantSecondsResponse>;
+  // SetVariantPrice replaces the manual per-variant price set of a B-grade variant (0251, owner
+  // decision: seconds are priced by hand). Full replace: the request's prices become the variant's
+  // price list; an EMPTY list clears all prices and the variant stops being sellable (fail-closed).
+  // The base currency must be present in a non-empty list (order lines snapshot the base price).
+  // Refused for grade='A' variants — A prices live on the colourway (product_price).
+  SetVariantPrice(request: SetVariantPriceRequest): Promise<SetVariantPriceResponse>;
   // UpdateStyle is the SOLE writer of a style's catalogue facts (brand, sku_season, collection,
   // target_gender, fit, composition, care instructions, model-wears, categories) — R4/§14.7. It is
   // optimistically locked on expected_lock_version (stale -> ABORTED). Changing a SKU fact (season)
@@ -10040,6 +10077,46 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ArchiveVariant",
       }) as Promise<ArchiveVariantResponse>;
+    },
+    ListVariantSeconds(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/seconds`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListVariantSeconds",
+      }) as Promise<ListVariantSecondsResponse>;
+    },
+    SetVariantPrice(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.variantId) {
+        throw new Error("missing required field request.variant_id");
+      }
+      const path = `api/admin/variants/${request.variantId}/price`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetVariantPrice",
+      }) as Promise<SetVariantPriceResponse>;
     },
     UpdateStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.styleId) {

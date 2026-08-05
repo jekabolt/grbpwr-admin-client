@@ -16,6 +16,7 @@ import { useSizeMeasurementsToggle } from '../utility/useSizeMeasurementsToggle'
 import { TechCardLink } from './read-only-field';
 import { StockHistory } from './stock/stock-history';
 import { UpdateStock } from './stock/update-stock';
+import { SecondsPanel } from './seconds-panel';
 import { ToggleSizeNames } from './toggle-sizenames';
 import { VariantsPanel } from './variants-panel';
 
@@ -216,6 +217,11 @@ export function SizeMeasurements({
           onChanged={onStockUpdated}
         />
       )}
+      {/* Seconds (B-grade) pricing — same gate as VariantsPanel above: it carries a write action
+          (SetVariantPrice), so it only shows once there's a colourway to price AND the operator is
+          in edit mode (which is itself gated on canWrite). It stays silent (returns null) when the
+          colourway has no B-grade variants, which is most products. */}
+      {editMode && productId != null && <SecondsPanel colorwayId={productId} />}
       {/* On a new product there is no colourway yet for sellable sizes / stock to attach to
           (VariantsPanel is gated on productId). Cue the operator that they come after the first
           save, so the collapsed read-only chart below doesn't read as the whole story. */}
