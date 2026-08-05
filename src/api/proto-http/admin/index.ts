@@ -4219,13 +4219,19 @@ export type common_FittingSizeInsert = {
   fitNote: string | undefined;
 };
 
-// FittingPattern is one PDF выкройка iteration tried in a fitting (snapshot of the
-// uploaded file, not a live reference to a tech-card pattern).
+// FittingPattern is one выкройка iteration tried in a fitting (snapshot of the
+// uploaded file, not a live reference to a tech-card pattern). The file is a PDF or a
+// DXF; the type is carried by the url's extension (.pdf / .dxf).
 export type common_FittingPattern = {
   sizeId: number | undefined;
   url: string | undefined;
   filename: string | undefined;
   sizeBytes: number | undefined;
+  // name is an optional operator-entered display name. Same presence semantics as
+  // TechCardSizePattern.name — absent preserves the stored name for the same
+  // (size_id, url) row across the full-replace save; present (even empty) is stored as sent
+  // (empty clears). JSON null reads as absent (preserve) — clear with the empty string.
+  name?: string;
 };
 
 // FittingCallout is a numbered marker pinned to a fitting photo, noting a fit
@@ -6302,10 +6308,12 @@ export type common_TechCardSignoffState =
   | "TECH_CARD_SIGNOFF_STATE_PENDING"
   | "TECH_CARD_SIGNOFF_STATE_APPROVED"
   | "TECH_CARD_SIGNOFF_STATE_REJECTED";
-// TechCardSizePattern is a downloadable PDF выкройка (cut pattern) for one size of a
+// TechCardSizePattern is a downloadable выкройка (cut pattern) file for one size of a
 // tech card — the FINAL pattern for that size. A size can carry many patterns (pieces
-// split across sheets). The PDF is uploaded via Admin.UploadPattern, which returns the
-// url stored here; the binary lives in object storage, not the media library.
+// split across sheets). The file is a PDF or a DXF, uploaded via Admin.UploadPattern,
+// which returns the url stored here; the binary lives in object storage, not the media
+// library. The file type is carried by the url's extension (.pdf / .dxf), which the
+// server derives from the uploaded bytes — there is no separate content-type field.
 export type common_TechCardSizePattern = {
   sizeId: number | undefined;
   url: string | undefined;
@@ -6319,6 +6327,13 @@ export type common_TechCardSizePattern = {
   // patterns are a full-replace child, so the row is deleted and reinserted on every card save — the
   // server carries the original timestamp forward by matching the url rather than resetting it.
   uploadedAt: wellKnownTimestamp | undefined;
+  // name is an optional operator-entered display name for the sheet ("перед", "рукав x2").
+  // Explicit presence matters across the full-replace save. ABSENT — the server preserves the
+  // previously stored name for the same (size_id, url) row, so a stale client that does not know
+  // this field cannot wipe names it never saw. PRESENT — stored as sent, and an empty string
+  // clears the name. NOTE for JSON clients — protojson cannot tell `"name": null` from an absent
+  // field, so null also reads as "preserve"; to clear a name, send the empty string.
+  name?: string;
 };
 
 // TechCardDetail is one aspect of the construction description (Sheet «Титул», lower block)
@@ -6395,7 +6410,11 @@ export type common_TechCardAuxSubtype =
   | "TECH_CARD_AUX_SUBTYPE_OTHER"
   // кофр — the carrier a garment travels/hangs in. Its own sub-type rather than a dust bag: it is
   // cut, sewn and costed as its own item, and an assembly bill names which of the two ships.
-  | "TECH_CARD_AUX_SUBTYPE_GARMENT_CASE";
+  | "TECH_CARD_AUX_SUBTYPE_GARMENT_CASE"
+  // шоппер — the carrier the customer takes the purchase away in and keeps using. Its own sub-type
+  // rather than a dust bag: it is cut, sewn and costed as its own item, and an assembly bill names
+  // which carrier ships.
+  | "TECH_CARD_AUX_SUBTYPE_TOTE_BAG";
 export type CreateTechCardResponse = {
   id: number | undefined;
 };
@@ -9014,9 +9033,11 @@ export interface AdminService {
   UploadContentImage(request: UploadContentImageRequest): Promise<UploadContentImageResponse>;
   // UploadContentVideo uploads a video to a specific folder with a specified name.
   UploadContentVideo(request: UploadContentVideoRequest): Promise<UploadContentVideoResponse>;
-  // UploadPattern uploads a PDF выкройка (cut pattern) to object storage and returns its
-  // url. Used for both tech-card per-size patterns and fitting iteration patterns. The
-  // file is stored raw (no image processing) and is NOT added to the media library.
+  // UploadPattern uploads a выкройка (cut pattern) file to object storage and returns its
+  // url. The payload must be a PDF or a DXF (sniffed from the bytes, not the declared type);
+  // the stored object's extension (.pdf / .dxf) tells the file type. Used for both tech-card
+  // per-size patterns and fitting iteration patterns. The file is stored raw (no image
+  // processing) and is NOT added to the media library.
   UploadPattern(request: UploadPatternRequest): Promise<UploadPatternResponse>;
   // DeleteFromBucket deletes objects specified by their keys.
   DeleteFromBucket(request: DeleteFromBucketRequest): Promise<DeleteFromBucketResponse>;
