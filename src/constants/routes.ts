@@ -72,6 +72,7 @@ export enum ROUTES {
   dictionaries = '/dictionaries',
   orders = '/orders',
   orderDetails = '/orders/:uuid',
+  waitlist = '/waitlist',
   orderInvoice = '/orders/:uuid/invoice',
   fulfillment = '/fulfillment',
   fulfillmentCard = '/fulfillment/:uuid',
@@ -130,6 +131,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: 'catalog',
     items: [
       { label: 'products', route: ROUTES.product, section: SECTION.products },
+      { label: 'waitlist', route: ROUTES.waitlist, section: SECTION.products },
       { label: 'media', route: ROUTES.media, section: SECTION.media },
       { label: 'hero', route: ROUTES.hero, section: SECTION.hero },
       { label: 'promo', route: ROUTES.promo, section: SECTION.promo },

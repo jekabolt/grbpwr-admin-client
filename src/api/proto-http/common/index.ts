@@ -3086,6 +3086,36 @@ export type TechCard = {
   topCategoryId: number | undefined;
   subCategoryId: number | undefined;
   typeId: number | undefined;
+  // OUTPUT-ONLY colour variants of an AUXILIARY card's warehouse output. Empty for a sellable card
+  // and for an aux card still in legacy single-output mode (tech_card.output_material_id is then the
+  // whole answer). Written through the dedicated Upsert/DeleteTechCardOutputVariant RPCs, never
+  // through the tech-card save — a variant owns warehouse stock, so a full-replace save must not be
+  // able to re-mint or drop one.
+  outputVariants: TechCardOutputVariant[] | undefined;
+};
+
+// TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
+// colour, produces into that material". An aux card sewn from several fabrics (a кофр in black and
+// in bone) needs one stock bucket per colour — its own on-hand, its own moving average — instead of
+// the single TechCardInsert.output_material_id.
+// ZERO variants on a card is legacy single-output mode and behaves exactly as it always did; the
+// first variant switches the card over. NOT a size variant (ProductSize) and not a grade variant
+// (A/B stock) — everything here carries the output_ prefix for exactly that reason.
+export type TechCardOutputVariant = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  colorCode: string | undefined;
+  colorName: string | undefined;
+  materialId: number | undefined;
+  materialName: string | undefined;
+  // Current on-hand balance of the bucket. UNSET (not zero) when the material has no stock row at
+  // all — "no balance recorded" is not the same statement as "none left". Read-only.
+  onHand: googletype_Decimal | undefined;
+  unit: string | undefined;
+  // false retires the colour: it stops being plannable and stops counting toward the card's list
+  // totals, but keeps its bucket, its stock and its history. Deleting the variant is the harder
+  // action — it is the only way to un-pin the card's auxiliary purpose.
+  active: boolean | undefined;
 };
 
 // TechCardListItem is a lightweight tech-card header for list views.
@@ -3129,6 +3159,12 @@ export type TechCardListItem = {
   outputMaterialId: number | undefined;
   outputMaterialName: string | undefined;
   outputMaterialOnHand: googletype_Decimal | undefined;
+  // Colour variants of that output (0252), summarised for the row: how many colours the card
+  // produces and what the warehouse holds across them ("3 colours · 820 on hand"). ACTIVE variants
+  // only — the badge answers "what can I plan", not "what has ever existed". 0/unset means the card
+  // is in legacy single-output mode, where output_material_* above is the whole answer.
+  outputVariantCount: number | undefined;
+  outputVariantsOnHand: googletype_Decimal | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is

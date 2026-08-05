@@ -172,6 +172,9 @@ export function usePostRunReceipt() {
       // Phase 5: true books this delivery WITHOUT declaring the run complete (the run moves to
       // partially received). Omitted/false = FINAL, exactly what every pre-Phase-5 build sent.
       partial?: boolean;
+      // Storefront side effect: true fires the back-in-stock email to customers waitlisted on any
+      // variant this receipt takes 0→in-stock. Omitted/false sends nothing (the default).
+      notifyWaitlist?: boolean;
     }) =>
       adminService.PostProductionRunReceipt({
         runId: input.runId,
@@ -185,6 +188,7 @@ export function usePostRunReceipt() {
         note: input.note ?? '',
         updateCostPrice: input.updateCostPrice,
         partial: input.partial ?? false,
+        notifyWaitlist: input.notifyWaitlist ?? false,
       }),
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });

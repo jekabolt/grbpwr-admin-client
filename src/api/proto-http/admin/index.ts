@@ -6541,6 +6541,12 @@ export type common_TechCard = {
   topCategoryId: number | undefined;
   subCategoryId: number | undefined;
   typeId: number | undefined;
+  // OUTPUT-ONLY colour variants of an AUXILIARY card's warehouse output. Empty for a sellable card
+  // and for an aux card still in legacy single-output mode (tech_card.output_material_id is then the
+  // whole answer). Written through the dedicated Upsert/DeleteTechCardOutputVariant RPCs, never
+  // through the tech-card save — a variant owns warehouse stock, so a full-replace save must not be
+  // able to re-mint or drop one.
+  outputVariants: common_TechCardOutputVariant[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -6674,6 +6680,30 @@ export type common_TechCardSectionDigest = {
   digest: string | undefined;
 };
 
+// TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
+// colour, produces into that material". An aux card sewn from several fabrics (a кофр in black and
+// in bone) needs one stock bucket per colour — its own on-hand, its own moving average — instead of
+// the single TechCardInsert.output_material_id.
+// ZERO variants on a card is legacy single-output mode and behaves exactly as it always did; the
+// first variant switches the card over. NOT a size variant (ProductSize) and not a grade variant
+// (A/B stock) — everything here carries the output_ prefix for exactly that reason.
+export type common_TechCardOutputVariant = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  colorCode: string | undefined;
+  colorName: string | undefined;
+  materialId: number | undefined;
+  materialName: string | undefined;
+  // Current on-hand balance of the bucket. UNSET (not zero) when the material has no stock row at
+  // all — "no balance recorded" is not the same statement as "none left". Read-only.
+  onHand: googletype_Decimal | undefined;
+  unit: string | undefined;
+  // false retires the colour: it stops being plannable and stops counting toward the card's list
+  // totals, but keeps its bucket, its stock and its history. Deleting the variant is the harder
+  // action — it is the only way to un-pin the card's auxiliary purpose.
+  active: boolean | undefined;
+};
+
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
@@ -6772,6 +6802,12 @@ export type common_TechCardListItem = {
   outputMaterialId: number | undefined;
   outputMaterialName: string | undefined;
   outputMaterialOnHand: googletype_Decimal | undefined;
+  // Colour variants of that output (0252), summarised for the row: how many colours the card
+  // produces and what the warehouse holds across them ("3 colours · 820 on hand"). ACTIVE variants
+  // only — the badge answers "what can I plan", not "what has ever existed". 0/unset means the card
+  // is in legacy single-output mode, where output_material_* above is the whole answer.
+  outputVariantCount: number | undefined;
+  outputVariantsOnHand: googletype_Decimal | undefined;
 };
 
 // TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
@@ -7527,6 +7563,13 @@ export type PostProductionRunReceiptRequest = {
   // flips it to RECEIVED. The flag is part of the idempotency request hash — the same key with a
   // flipped flag is a different intent and is rejected, never replayed.
   partial: boolean | undefined;
+  // Storefront side effect (stock-write contract): when true, customers waitlisted on a variant
+  // this receipt takes 0→in-stock get the back-in-stock email — the same notification the manual
+  // stock update fires. Operator-chosen per receipt (modal checkbox); the default false sends
+  // nothing. ISR page revalidation fires regardless of this flag. Like every request field it is
+  // part of the idempotency hash; notifications themselves fire only on the ORIGINAL execution,
+  // never on a replay.
+  notifyWaitlist: boolean | undefined;
 };
 
 export type PostProductionRunReceiptResponse = {
@@ -7904,6 +7947,27 @@ export type ListStyleAssemblyRequest = {
 
 export type ListStyleAssemblyResponse = {
   items: StyleAssemblyLine[] | undefined;
+};
+
+// UpsertTechCardOutputVariantRequest writes ONE colour of an auxiliary card's warehouse output.
+export type UpsertTechCardOutputVariantRequest = {
+  techCardId: number | undefined;
+  // id=0 creates; a non-zero id must already be a colour of tech_card_id. color_code is the CHAR(3)
+  // dictionary code. material_id=0 auto-creates the bucket on create and means "keep the current
+  // bucket" on update — moving a colour to a different bucket has to name its target. The read-only
+  // fields of TechCardOutputVariant (color_name, material_name, on_hand, unit) are ignored.
+  variant: common_TechCardOutputVariant | undefined;
+};
+
+export type UpsertTechCardOutputVariantResponse = {
+  id: number | undefined;
+};
+
+export type DeleteTechCardOutputVariantRequest = {
+  id: number | undefined;
+};
+
+export type DeleteTechCardOutputVariantResponse = {
 };
 
 // OrderPackingSpecItem is one garment line in an order's packing spec: the colourway/variant, quantity,
@@ -9413,6 +9477,25 @@ export interface AdminService {
   // ListStyleAssembly returns a garment style's assembly bill, resolved with component name/aux_subtype
   // and the output material (the warehouse material consumed in production).
   ListStyleAssembly(request: ListStyleAssemblyRequest): Promise<ListStyleAssemblyResponse>;
+  // UpsertTechCardOutputVariant creates or updates ONE colour variant of an AUXILIARY card's
+  // warehouse output (0252): the stock bucket the card produces into in that colour. id=0 creates;
+  // material_id=0 on create auto-creates the bucket ("<card> — <colour>", attributes copied from the
+  // card's existing output material when it has one). Single-row on purpose, NOT a full replace — a
+  // variant owns warehouse history.
+  // A NEW colour is always created ACTIVE and the request's `active` is ignored on create: a proto3
+  // bool carries no presence, so honouring an omitted field would mint colours that pin the card's
+  // purpose while staying invisible to every ACTIVE-only reader. Deactivate with a follow-up update,
+  // which does honour `active` — that retires the colour without touching its stock.
+  // Refused with FailedPrecondition for a sellable card, a released card, a colour already on the
+  // card, a bucket another variant (or another card's single output material) owns, or a unit that
+  // disagrees with the card's other colours. An archived or unitless material is InvalidArgument.
+  UpsertTechCardOutputVariant(request: UpsertTechCardOutputVariantRequest): Promise<UpsertTechCardOutputVariantResponse>;
+  // DeleteTechCardOutputVariant removes a colour variant outright. Deactivating it (active=false) is
+  // the normal retirement; deleting is the "this colour was a mistake" action and the only way to
+  // un-pin the card's auxiliary purpose. The warehouse bucket itself survives with its stock and
+  // moving average — only this card's claim on it goes. Once runs can be planned by colour, a
+  // variant a run line references is refused with FailedPrecondition ("deactivate it instead").
+  DeleteTechCardOutputVariant(request: DeleteTechCardOutputVariantRequest): Promise<DeleteTechCardOutputVariantResponse>;
   // GetOrderPackingSpec is the packer/QC-readable composition of an order (WS7, scope 3): the garments
   // that ship, the on-garment assembly (labels/tags) to verify per line, and the packaging the whole
   // order needs (resolved from WS2 packaging_recipe). Read-only — reserves/consumes nothing.
@@ -13869,6 +13952,43 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListStyleAssembly",
       }) as Promise<ListStyleAssemblyResponse>;
+    },
+    UpsertTechCardOutputVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/output-variant/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertTechCardOutputVariant",
+      }) as Promise<UpsertTechCardOutputVariantResponse>;
+    },
+    DeleteTechCardOutputVariant(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/tech-card/output-variant/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardOutputVariant",
+      }) as Promise<DeleteTechCardOutputVariantResponse>;
     },
     GetOrderPackingSpec(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {
