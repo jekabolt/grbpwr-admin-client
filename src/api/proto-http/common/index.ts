@@ -1523,7 +1523,7 @@ export type FittingCallout = {
 };
 
 // FittingChangeRequest is one structured remark item produced by a fitting (S26, §2.7). target is the
-// change CATEGORY; zone + piece_id are the structured LOCATION (which replace the front's misuse of
+// change CATEGORY; zone + piece_ids are the structured LOCATION (which replace the front's misuse of
 // target as a free "sleeve/collar" field, A2). status (open|resolved) replaces the old boolean
 // resolved; carried_from_id links this item to the one in the PREVIOUS round it continues, giving a
 // visible carry-over history (acceptance E.15). The free fitting.comment stays a separate free note.
@@ -1533,6 +1533,9 @@ export type FittingChangeRequest = {
   note: string | undefined;
   calloutNumber: number | undefined;
   resolved: boolean | undefined;
+  // WHERE on the garment, from the FITTING zone dictionary (see FittingChangeRequestInsert.zone for
+  // the full list); "" = unspecified. This is a fitting-owned vocabulary of garment AREAS — it is no
+  // longer the tech_card_operation.zone construction-band dictionary.
   zone: string | undefined;
   pieceId: number | undefined;
   status: string | undefined;
@@ -1540,6 +1543,10 @@ export type FittingChangeRequest = {
   createdBy: string | undefined;
   fittingId: number | undefined;
   roundNumber: number | undefined;
+  // FK tech_card_piece(id): which pieces the remark is about. A remark routinely spans several
+  // («обработка низа на полочке и спинке»), so this is a set, not one pin; empty = not pinned to a
+  // piece. Order is the selection order. A deleted piece drops out of the set; the remark survives.
+  pieceIds: number[] | undefined;
 };
 
 // FittingChangeRequestInsert is the write payload for the dedicated change-request CRUD (S26). Unlike
@@ -1551,10 +1558,18 @@ export type FittingChangeRequestInsert = {
   target: string | undefined;
   note: string | undefined;
   calloutNumber: number | undefined;
+  // Optional garment AREA, from the fitting zone dictionary ("" = unspecified):
+  // outer | lining | interlining — the material band the change is in
+  // sleeve | collar | neckline | armhole | shoulder | chest | waist | hip | hem | pocket |
+  // closure | back | front — the area of the garment
+  // other, and the legacy `unknown` (equivalent to "")
+  // Tokens are lowercase; a TECH_CARD_CONSTRUCTION_ZONE_* enum name from an older client is
+  // normalised to its token rather than rejected.
   zone: string | undefined;
   pieceId: number | undefined;
   status: string | undefined;
   carriedFromId: number | undefined;
+  pieceIds: number[] | undefined;
 };
 
 // Fitting is a stored try-on session with resolved media for display.

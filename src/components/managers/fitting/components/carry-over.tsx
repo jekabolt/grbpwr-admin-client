@@ -4,14 +4,13 @@ import {
   useOpenFittingChangeRequests,
   useUpdateFittingChangeRequest,
 } from 'components/managers/fittings/components/useFittingQuery';
-import { zoneOptions } from 'components/managers/tech-card/components/operation-options';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import { fieldErrorSummary } from 'utils/field-errors';
-
-const zoneLabel = (zone?: string) => zoneOptions.find((o) => o.value === zone)?.label ?? '';
+import { crPieceIds } from './schema';
+import { fittingZoneLabel, normalizeFittingZone } from './zone-options';
 
 // Carry-over (S26/E.15): the OPEN structured remarks from a style's earlier rounds, shown when opening
 // the next round. Each can be RESOLVED (marked done) or CARRIED into this round (a new item here with
@@ -54,8 +53,9 @@ export function FittingCarryOver({
     target: cr.target || '',
     note: cr.note || '',
     calloutNumber: cr.calloutNumber || 0,
-    zone: cr.zone || '',
-    pieceId: cr.pieceId || 0,
+    zone: normalizeFittingZone(cr.zone),
+    pieceIds: crPieceIds(cr),
+    pieceId: 0, // deprecated on the wire; pieceIds is authoritative
     status: carry ? 'open' : 'resolved',
     carriedFromId: carry ? cr.id || 0 : cr.carriedFromId || 0,
   });
@@ -74,7 +74,7 @@ export function FittingCarryOver({
           <div className='flex min-w-0 flex-col'>
             <Text size='small' className='truncate'>
               round {cr.roundNumber ?? '?'} · {cr.target?.trim() || 'change'}
-              {zoneLabel(cr.zone) ? ` · ${zoneLabel(cr.zone)}` : ''}
+              {fittingZoneLabel(cr.zone) ? ` · ${fittingZoneLabel(cr.zone)}` : ''}
             </Text>
             <Text variant='inactive' size='small' className='truncate'>
               {cr.note || '—'}
