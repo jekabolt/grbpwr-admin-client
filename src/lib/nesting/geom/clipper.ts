@@ -27,6 +27,24 @@ export function fromPath64(path: Path64): Pt[] {
   return out;
 }
 
+// Coordinate-comparing consecutive dedupe (incl. the wrap pair). NOT Clipper.stripDuplicates:
+// that compares points by REFERENCE (`lastPt !== path[i]`), a no-op on freshly built paths.
+function dedupePath64(path: Path64): Path64 {
+  const out = new Path64();
+  for (const q of path) {
+    const last = out[out.length - 1];
+    if (last && last.x === q.x && last.y === q.y) continue;
+    out.push(q);
+  }
+  while (out.length > 1) {
+    const first = out[0];
+    const last = out[out.length - 1];
+    if (first.x === last.x && first.y === last.y) out.pop();
+    else break;
+  }
+  return out;
+}
+
 // De-self-intersect one loop, keep the dominant region, return it CCW.
 export function sanitizeLoop(poly: readonly Pt[]): Pt[] | null {
   const res = Clipper.Union([toPath64(poly)], undefined, FillRule.NonZero);
@@ -40,7 +58,7 @@ export function sanitizeLoop(poly: readonly Pt[]): Pt[] | null {
     }
   }
   if (!best || bestArea < 1) return null;
-  const pts = fromPath64(Clipper.stripDuplicates(best, true));
+  const pts = fromPath64(dedupePath64(best));
   return pts.length >= 3 ? pts : null;
 }
 
@@ -59,7 +77,7 @@ export function feasibleRegion(ifpRect: readonly Pt[], forbidden: Path64[]): Pt[
   const res = Clipper.Difference([toPath64(ifpRect)], forbidden, FillRule.NonZero);
   const out: Pt[][] = [];
   for (const path of res) {
-    const pts = fromPath64(Clipper.stripDuplicates(path, true));
+    const pts = fromPath64(dedupePath64(path));
     if (pts.length >= 3) out.push(pts);
   }
   return out;

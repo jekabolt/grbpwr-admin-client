@@ -442,7 +442,13 @@ export function PatternsField() {
 
       {/* Раскладка (nesting) — the whole feature is a lazy chunk; mounted only when open. */}
       {nesting && (
-        <Suspense fallback={null}>
+        <Suspense
+          fallback={
+            <Text size='micro' variant='label'>
+              загрузка модуля раскладки…
+            </Text>
+          }
+        >
           <NestingModal
             files={nesting.files}
             sizeLabel={nesting.sizeLabel}

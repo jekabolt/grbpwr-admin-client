@@ -67,15 +67,17 @@ export type NestResult = {
   efficiency: number; // Σ piece area / (width × usedLength), 0..1
   placedCount: number;
   totalCount: number;
-  // Pieces that fit the fabric width in no allowed rotation, with their widest span.
-  unplaced: Array<{ pieceId: number; spanCm: number }>;
   generation: number;
   elapsedMs: number;
+  // Non-fatal geometry notes (e.g. a degenerate contour fell back to its convex hull).
+  warnings: string[];
 };
 
 export type WorkerRequest =
+  // parseId on nest ties the job to the parse it was configured against — a nest that
+  // races a newer parse is rejected instead of silently nesting the wrong geometry.
   | { type: 'parse'; id: number; files: File[]; opts: ParseOpts }
-  | { type: 'nest'; id: number; config: NestConfig }
+  | { type: 'nest'; id: number; parseId: number; config: NestConfig }
   | { type: 'cancel'; id: number };
 
 export type WorkerResponse =
@@ -89,9 +91,12 @@ export type WorkerResponse =
   | {
       type: 'progress';
       id: number;
-      phase: 'parse' | 'nfp' | 'ga';
+      phase: 'nfp' | 'ga';
       generation?: number;
       best?: NestResult;
+      // NFP prepass progress (phase 'nfp').
+      nfpDone?: number;
+      nfpTotal?: number;
     }
   | { type: 'result'; id: number; result: NestResult }
   | { type: 'error'; id: number; message: string };

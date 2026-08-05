@@ -1,7 +1,8 @@
-// Seeded, time-boxed genetic search over (instance order, rotation per instance) —
-// SVGnest-shaped: OX crossover, adjacent-swap/rotation-reroll mutation, rank selection,
-// elitism 1. Deterministic: the PRNG seeds from a hash of the input, so the same pieces
-// and config always reproduce the same marker.
+// Seeded genetic search over (instance order, rotation per instance) — SVGnest-shaped:
+// OX crossover, adjacent-swap/rotation-reroll mutation, rank selection, elitism 1.
+// The PRIMARY stop is maxGenerations, so identical input reproduces the identical marker
+// on any machine that gets there; the wall-clock budget is the secondary stop for
+// machines that don't (determinism is then deliberately traded for responsiveness).
 import type { RotationDeg } from '../types';
 import type { NfpCache } from './nfp';
 import { placeOrder, type Gene, type PlacementResult } from './place';
@@ -39,7 +40,9 @@ export type GaOptions = {
   edgeMarginCm: number;
   lMaxCm: number;
   nfps: NfpCache;
-  timeBudgetMs: number;
+  // Absolute epoch-ms deadline (the NFP prepass has already eaten into the budget).
+  deadlineMs: number;
+  maxGenerations: number;
   seed: number;
   isCancelled: () => boolean;
   onGeneration: (p: GaProgress) => void;
@@ -48,12 +51,12 @@ export type GaOptions = {
 const POP = 10;
 const MUTATION_P = 0.1;
 
-function evaluate(ind: Individual, opts: GaOptions): PlacementResult {
+function evaluate(ind: Individual, opts: GaOptions, abort?: () => boolean): PlacementResult | null {
   // rots are indexed by GENE, not by slot — they survive order crossover intact and can
   // never assign a piece a rotation outside its own allowed set.
   const genes = ind.order.map((gi) => ({ ...opts.genesBase[gi], rot: ind.rots[gi] }));
-  const res = placeOrder(genes, opts.fabricWidthCm, opts.edgeMarginCm, opts.lMaxCm, opts.nfps);
-  ind.fitness = res.usedLengthCm;
+  const res = placeOrder(genes, opts.fabricWidthCm, opts.edgeMarginCm, opts.lMaxCm, opts.nfps, abort);
+  if (res) ind.fitness = res.usedLengthCm;
   return res;
 }
 
@@ -101,7 +104,7 @@ function pick(sorted: Individual[], rnd: () => number, skip?: Individual): Indiv
 export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; generation: number; evaluated: number }> {
   const n = opts.genesBase.length;
   const rnd = mulberry32(opts.seed);
-  const deadline = Date.now() + opts.timeBudgetMs;
+  const deadline = opts.deadlineMs;
 
   const seedInd: Individual = {
     order: opts.genesBase.map((_, i) => i),
@@ -120,10 +123,15 @@ export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; g
   let generation = 0;
   let evaluated = 0;
 
+  const abort = () => opts.isCancelled() || Date.now() > deadline;
+
   const evalPop = async (): Promise<boolean> => {
     for (const ind of pop) {
-      if (opts.isCancelled() || Date.now() > deadline) return false;
-      const res = evaluate(ind, opts);
+      if (abort()) return false;
+      // abort is also polled INSIDE placement — an individual interrupted mid-placement
+      // comes back null and is discarded rather than scored short.
+      const res = evaluate(ind, opts, abort);
+      if (!res) return false;
       evaluated++;
       if (ind.fitness < bestFitness) {
         bestFitness = ind.fitness;
@@ -138,7 +146,7 @@ export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; g
   for (;;) {
     const completed = await evalPop();
     if (best) opts.onGeneration({ generation, best, evaluated });
-    if (!completed || opts.isCancelled() || Date.now() > deadline) break;
+    if (!completed || generation + 1 >= opts.maxGenerations || abort()) break;
 
     pop.sort((a, b) => a.fitness - b.fitness);
     const next: Individual[] = [{ order: [...pop[0].order], rots: [...pop[0].rots], fitness: Infinity }];
@@ -158,8 +166,9 @@ export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; g
   }
 
   if (!best) {
-    // Budget was too small to finish even one individual — evaluate the seed synchronously.
-    best = evaluate(seedInd, opts);
+    // Budget was too small to finish even one individual — evaluate the seed without the
+    // abort so a stop always returns SOME layout (small inputs make this fast).
+    best = evaluate(seedInd, opts) as PlacementResult;
     evaluated++;
   }
   return { best, generation, evaluated };

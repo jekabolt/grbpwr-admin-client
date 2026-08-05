@@ -19,6 +19,9 @@ export type RawPiece = {
 
 function keepOutermost(loops: ClosedLoop[]): { roots: ClosedLoop[]; dropped: number } {
   const bbs = loops.map((l) => bounds(l.pts));
+  // Hoisted out of the O(n²) scan — area() itself is O(v), and a blockless file can carry
+  // hundreds of loops with hundreds of vertices each.
+  const areas = loops.map((l) => area(l.pts));
   const roots: ClosedLoop[] = [];
   let dropped = 0;
   for (let i = 0; i < loops.length; i++) {
@@ -31,7 +34,7 @@ function keepOutermost(loops: ClosedLoop[]): { roots: ClosedLoop[]; dropped: num
         bi.minX >= bj.minX - 1e-6 && bi.maxX <= bj.maxX + 1e-6 && bi.minY >= bj.minY - 1e-6 && bi.maxY <= bj.maxY + 1e-6;
       if (!bboxInside) continue;
       // Same bbox both ways = duplicate handled elsewhere; strict containment needs PIP.
-      if (area(loops[i].pts) >= area(loops[j].pts)) continue;
+      if (areas[i] >= areas[j]) continue;
       if (pointInPolygon(loops[i].pts[0], loops[j].pts)) contained = true;
     }
     if (contained) dropped++;

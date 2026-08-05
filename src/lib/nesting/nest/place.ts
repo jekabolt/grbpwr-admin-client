@@ -25,18 +25,22 @@ export type PlacementResult = {
   usedLengthCm: number;
 };
 
+// `abort` is polled per gene; a true return DISCARDS the individual (null) — a partial
+// placement would score shorter than a full one and win the GA with a fake marker.
 export function placeOrder(
   genes: readonly Gene[],
   fabricWidthCm: number,
   edgeMarginCm: number,
   lMaxCm: number,
   nfps: NfpCache,
-): PlacementResult {
+  abort?: () => boolean,
+): PlacementResult | null {
   const placed: PlacedGene[] = [];
   let usedLength = 0;
   const m = edgeMarginCm;
 
   for (const g of genes) {
+    if (abort?.()) return null;
     const b = g.piece.boundsAt[g.rot];
     const xLo = m - b.minX;
     const xHi = lMaxCm - m - b.maxX;

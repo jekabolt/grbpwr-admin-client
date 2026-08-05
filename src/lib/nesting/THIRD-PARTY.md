@@ -16,7 +16,14 @@ Empirical notes for clipper2-js@1.2.4 this code relies on (verified by harness t
 - `Clipper.MinkowskiDiff` and `Clipper.InflatePaths` are numerically BROKEN in this port
   on real polygons: the NFP came back with phantom interior holes (pieces then overlap),
   offsets came back asymmetric (60×40 rect → maxX 60.0 instead of 60.25). The NFP is
-  therefore built by convex decomposition (ear-clip triangles × convex Minkowski hulls ×
-  circumscribed gap octagon, `geom/triangulate.ts` + `geom/convex.ts`) and Clipper handles
-  only its well-conditioned cases: union of convex parts, rect-minus-paths difference.
+  therefore built by convex decomposition (ear-clip + greedy Hertel–Mehlhorn merge to
+  convex parts × convex Minkowski hulls × circumscribed gap octagon,
+  `geom/triangulate.ts` + `geom/convex.ts`) and Clipper handles only its
+  well-conditioned cases: union of convex parts, rect-minus-paths difference.
+- `Clipper.Union` degrades CATASTROPHICALLY with many overlapping inputs: 64 paths union
+  in ~3 ms, ~100 paths exhaust a 4 GB heap. Never hand it an unbatched pairwise
+  decomposition — `nest/nfp.ts` merges triangles into convex parts first (~6-25 per
+  piece) AND unions hierarchically in batches of 32 (`unionBatched`).
+- `Clipper.stripDuplicates` compares points by REFERENCE (`lastPt !== path[i]`) — a no-op
+  on freshly built paths; `geom/clipper.ts` carries its own coordinate-comparing dedupe.
 - `Clipper.getBounds` is reliable only on a single `Path64`.

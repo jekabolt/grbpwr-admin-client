@@ -2,7 +2,7 @@
 // полосе ткани в web worker'е. Ничего не пишет на бек — расчётный инструмент (расход
 // метража, вердикт «влезает ли в отрез»). Файл лениво импортируется из patterns-field,
 // так что dxf-parser/clipper2-js/воркер живут только в чанке раскладки.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
@@ -45,9 +45,12 @@ export function NestingModal({
   sizeLabel?: string;
   onClose: () => void;
 }) {
-  const { parse, run, start, stop, unitOverride, setUnitOverride } = useNesting(files);
+  const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(files);
 
   const [widthCm, setWidthCm] = useState<number>(NEST_DEFAULTS.fabricWidthCm);
+  // Raw keystrokes; the min-clamp lands on BLUR (clamping per keystroke makes 90 unreachable
+  // — typing «9» snaps to 10).
+  const [widthRaw, setWidthRaw] = useState<string | null>(null);
   const [targetCm, setTargetCm] = useState<number | ''>('');
   const [gapCm, setGapCm] = useState<number>(NEST_DEFAULTS.gapCm);
   const [marginCm, setMarginCm] = useState<number>(NEST_DEFAULTS.edgeMarginCm);
@@ -77,18 +80,31 @@ export function NestingModal({
   }, [parse]);
 
   const running = run.phase === 'running';
+  const stopping = running && run.stopping;
   const result: NestResult | null =
     run.phase === 'done' ? run.result : run.phase === 'running' ? run.best : null;
 
+  // A result computed for other parameters is stale — drop it the moment they change
+  // (inputs are disabled while running, so this can only fire against a done run).
+  useEffect(() => {
+    resetRun();
+  }, [widthCm, gapCm, marginCm, crossGrain, sel, resetRun]);
+
   const target = targetCm === '' ? undefined : targetCm;
+  // Live preview renders simplified contours (every coalesced frame re-parses the SVG);
+  // the finished layout renders exact — that's also what «скачать SVG» exports.
   const svg = useMemo(
-    () => (result ? renderLayoutSvg(result, pieces, widthCm, target) : null),
-    [result, pieces, widthCm, target],
+    () =>
+      result
+        ? renderLayoutSvg(result, pieces, widthCm, target, run.phase === 'running' ? 0.05 : 0)
+        : null,
+    [result, pieces, widthCm, target, run.phase],
   );
 
   const checkedCount = pieces.filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id)).length;
 
   const startRun = () => {
+    if (parse.phase !== 'ready') return;
     const config: NestConfig = {
       pieces: pieces
         .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
@@ -101,9 +117,16 @@ export function NestingModal({
       timeBudgetMs: budgetS * 1000,
       rdpEpsCm: NEST_DEFAULTS.rdpEpsCm,
     };
-    start(config);
+    start(parse.parseId, config);
   };
 
+  const downloadTimer = useRef<number | null>(null);
+  useEffect(
+    () => () => {
+      if (downloadTimer.current != null) window.clearTimeout(downloadTimer.current);
+    },
+    [],
+  );
   const downloadSvg = () => {
     if (!svg) return;
     const blob = new Blob([svg], { type: 'image/svg+xml' });
@@ -112,7 +135,8 @@ export function NestingModal({
     a.href = url;
     a.download = `раскладка${sizeLabel ? `-${sizeLabel}` : ''}.svg`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Deferred: Safari/Firefox may not have started the download when click() returns.
+    downloadTimer.current = window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
 
   const verdict =
@@ -144,11 +168,13 @@ export function NestingModal({
               <Input
                 name='nest-width'
                 type='number'
-                value={widthCm}
+                value={widthRaw ?? String(widthCm)}
                 min={10}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                  setWidthCm(Math.max(10, numOr(e.target.value, widthCm)))
-                }
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWidthRaw(e.target.value)}
+                onBlur={() => {
+                  setWidthCm(Math.max(10, numOr(widthRaw ?? '', widthCm)));
+                  setWidthRaw(null);
+                }}
                 disabled={running}
               />
             </label>
@@ -232,7 +258,16 @@ export function NestingModal({
               compact
               value={unitOverride}
               options={[
-                { value: 'auto', label: 'авто' },
+                {
+                  value: 'auto',
+                  // The detected unit stays visible even on 'авто' — a file whose header
+                  // lies about units is caught by the operator seeing «авто (см)» on a
+                  // sleeve that should be in mm.
+                  label:
+                    parse.phase === 'ready'
+                      ? `авто (${parse.detectedUnit === 'mm' ? 'мм' : parse.detectedUnit === 'cm' ? 'см' : 'дюймы'})`
+                      : 'авто',
+                },
                 { value: 'mm', label: 'мм' },
                 { value: 'cm', label: 'см' },
                 { value: 'in', label: 'дюймы' },
@@ -241,6 +276,12 @@ export function NestingModal({
               disabled={running || parse.phase === 'loading'}
             />
           </div>
+
+          {parse.phase === 'ready' && unitOverride !== 'auto' && unitOverride !== parse.detectedUnit && (
+            <Text size='nano' variant='label'>
+              файл заявляет {parse.detectedUnit === 'mm' ? 'мм' : parse.detectedUnit === 'cm' ? 'см' : 'дюймы'} — выбран ручной override
+            </Text>
+          )}
 
           {parse.phase === 'loading' && (
             <Text size='micro' variant='label'>
@@ -360,27 +401,28 @@ export function NestingModal({
               <Stat
                 label='поколение'
                 value={String(result.generation)}
-                sub={`${(result.elapsedMs / 1000).toFixed(1)} с`}
+                sub={`${(result.elapsedMs / 1000).toFixed(1)} с${run.phase === 'done' && run.stopped ? ' · остановлено' : ''}`}
               />
             </StatGrid>
           )}
-          {result && result.unplaced.length > 0 && (
-            <CalloutBox tone='error'>
-              <Text size='nano' component='p'>
-                шире полотна и не разложены:{' '}
-                {result.unplaced
-                  .map((u) => {
-                    const p = pieces.find((x) => x.id === u.pieceId);
-                    return `${p?.name ?? u.pieceId} (${u.spanCm.toFixed(1)} см)`;
-                  })
-                  .join(', ')}
-              </Text>
+          {result && result.warnings.length > 0 && (
+            <CalloutBox tone='note'>
+              {result.warnings.map((w, i) => (
+                <Text key={i} size='nano' component='p'>
+                  {w}
+                </Text>
+              ))}
             </CalloutBox>
           )}
 
           {/* Footer: own actions (the shell's are hidden). */}
           <div className='flex flex-wrap items-center justify-end gap-1.5 border-t border-hairline pt-2'>
-            {running && run.best && (
+            {running && run.nfp && (
+              <Text size='nano' variant='label' className='mr-auto'>
+                подготовка геометрии {run.nfp.done}/{run.nfp.total}
+              </Text>
+            )}
+            {running && !run.nfp && run.best && (
               <Text size='nano' variant='label' className='mr-auto'>
                 поколение {run.generation} · лучшая длина {run.best.usedLengthCm.toFixed(1)} см
               </Text>
@@ -393,8 +435,8 @@ export function NestingModal({
             >
               запустить
             </Button>
-            <Button type='button' variant='secondary' disabled={!running} onClick={stop}>
-              стоп
+            <Button type='button' variant='secondary' disabled={!running || stopping} onClick={stop}>
+              {stopping ? 'останавливаем…' : 'стоп'}
             </Button>
             <Button type='button' variant='secondary' disabled={!svg || running} onClick={downloadSvg}>
               скачать SVG

@@ -14,8 +14,11 @@ export type EntityGroup = {
 };
 
 type Xform = {
-  // p' = R(rotRad)·S(sx,sy)·(p − base) + pos, per AutoCAD INSERT semantics. base/pos are
-  // stored in cm — every coordinate is scaled to cm at tessellation time.
+  // p' = Flip?·[R(rotRad)·S(sx,sy)·(p − base) + pos], per AutoCAD INSERT + OCS semantics:
+  // extrusion (0,0,−1) expresses the WHOLE insert (rotation and position included) in the
+  // mirrored OCS, so the flip applies AFTER rotation and to pos too — folding it into sx
+  // yields Flip·R(−θ) and comes out rotated by 2θ on rotated mirrored inserts. base/pos
+  // are stored in cm — every coordinate is scaled to cm at tessellation time.
   baseX: number;
   baseY: number;
   posX: number;
@@ -23,6 +26,7 @@ type Xform = {
   sx: number;
   sy: number;
   rotRad: number;
+  mirror: boolean;
 };
 
 function applyXform(p: Pt, t: Xform): Pt {
@@ -30,22 +34,29 @@ function applyXform(p: Pt, t: Xform): Pt {
   const y0 = (p.y - t.baseY) * t.sy;
   const c = Math.cos(t.rotRad);
   const s = Math.sin(t.rotRad);
-  return { x: x0 * c - y0 * s + t.posX, y: x0 * s + y0 * c + t.posY };
+  const x = x0 * c - y0 * s + t.posX;
+  const y = x0 * s + y0 * c + t.posY;
+  return t.mirror ? { x: -x, y } : { x, y };
 }
 
 function insertXform(ins: IInsertEntity, block: IBlock, u: number, col: number, row: number): Xform {
-  // extrusionDirection.z === -1 mirrors about the Y axis (OCS flip) — negate X scale.
-  const mirror = ins.extrusionDirection && ins.extrusionDirection.z === -1 ? -1 : 1;
   return {
     baseX: (block.position?.x ?? 0) * u,
     baseY: (block.position?.y ?? 0) * u,
     posX: ((ins.position?.x ?? 0) + col * (ins.columnSpacing || 0)) * u,
     posY: ((ins.position?.y ?? 0) + row * (ins.rowSpacing || 0)) * u,
-    sx: (ins.xScale || 1) * mirror,
+    sx: ins.xScale || 1,
     sy: ins.yScale || 1,
     rotRad: ((ins.rotation || 0) * Math.PI) / 180,
+    mirror: !!ins.extrusionDirection && ins.extrusionDirection.z === -1,
   };
 }
+
+// Total block-instance budget per file: column/row arrays multiply at every nesting
+// level, so depth alone does not bound work (a nested 100×100 is 10⁸ instances).
+const MAX_INSTANCES = 10_000;
+
+type Budget = { left: number; warned: boolean };
 
 const MAX_DEPTH = 8;
 
@@ -58,6 +69,7 @@ function expandInto(
   group: EntityGroup,
   warnings: string[],
   depth: number,
+  budget: Budget,
 ): void {
   for (const e of entities) {
     if (e.type === 'INSERT') {
@@ -72,8 +84,16 @@ function expandInto(
       const rows = Math.max(1, ins.rowCount || 1);
       for (let ci = 0; ci < cols; ci++) {
         for (let ri = 0; ri < rows; ri++) {
+          if (budget.left <= 0) {
+            if (!budget.warned) {
+              budget.warned = true;
+              warnings.push(`слишком много вложенных вставок блоков (> ${MAX_INSTANCES}) — часть пропущена`);
+            }
+            return;
+          }
+          budget.left--;
           const t = insertXform(ins, block, u, ci, ri);
-          expandInto(block.entities, blocks, u, tolCm, [...transforms, t], group, warnings, depth + 1);
+          expandInto(block.entities, blocks, u, tolCm, [...transforms, t], group, warnings, depth + 1, budget);
         }
       }
       continue;
@@ -101,6 +121,7 @@ export function expandGroups(
 ): EntityGroup[] {
   const groups: EntityGroup[] = [];
   const loose: EntityGroup = { blockName: null, chains: [] };
+  const budget: Budget = { left: MAX_INSTANCES, warned: false };
 
   for (const e of modelEntities) {
     if (e.type === 'INSERT') {
@@ -114,8 +135,16 @@ export function expandGroups(
       const rows = Math.max(1, ins.rowCount || 1);
       for (let ci = 0; ci < cols; ci++) {
         for (let ri = 0; ri < rows; ri++) {
+          if (budget.left <= 0) {
+            if (!budget.warned) {
+              budget.warned = true;
+              warnings.push(`слишком много вставок блоков (> ${MAX_INSTANCES}) — часть пропущена`);
+            }
+            break;
+          }
+          budget.left--;
           const group: EntityGroup = { blockName: ins.name, chains: [] };
-          expandInto(block.entities, blocks, u, tolCm, [insertXform(ins, block, u, ci, ri)], group, warnings, 1);
+          expandInto(block.entities, blocks, u, tolCm, [insertXform(ins, block, u, ci, ri)], group, warnings, 1, budget);
           if (group.chains.length > 0) groups.push(group);
         }
       }

@@ -1,6 +1,6 @@
-// Worker entry: owns the parsed pieces (keyed by job) so re-nesting with new settings
-// never re-parses, and the GA runs off the main thread with cooperative yields so
-// cancel/progress messages drain mid-run.
+// Worker entry: owns the parsed pieces (keyed by parse job) so re-nesting with new
+// settings never re-parses, and the GA runs off the main thread with cooperative yields
+// so cancel/progress messages drain mid-run.
 import type { NestConfig, ParseOpts, PieceDTO, Unit, WorkerRequest, WorkerResponse } from '../types';
 import { area, bounds } from '../geom/polygon';
 import { parseFiles } from './parse-files';
@@ -10,15 +10,21 @@ const post = (msg: WorkerResponse) => {
   (self as unknown as { postMessage: (m: WorkerResponse) => void }).postMessage(msg);
 };
 
-// One live parse result at a time — the modal owns one worker, jobs supersede each other.
-let pieces: PieceDTO[] = [];
+// The live parse, keyed by its job id — a nest request must name the parse it was
+// configured against, so a job racing a newer parse is rejected instead of silently
+// nesting the wrong geometry. parseSeq guards the commit: two overlapping parses (awaits
+// interleave) resolve last-started-wins.
+let currentParse: { id: number; pieces: PieceDTO[] } | null = null;
+let parseSeq = 0;
 const cancelled = new Set<number>();
 
 async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<void> {
+  const seq = ++parseSeq;
   const warnings: string[] = [];
   const out: PieceDTO[] = [];
   let detected: Exclude<Unit, 'auto'> = 'mm';
   let nextId = 1;
+  let failedFiles = 0;
 
   for (const file of files) {
     try {
@@ -41,21 +47,42 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
         });
       }
     } catch (e) {
+      failedFiles++;
       warnings.push(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
-  pieces = out;
+  // Every file failed → that's an error, not a note with an empty piece list.
+  if (files.length > 0 && failedFiles === files.length) {
+    post({ type: 'error', id, message: warnings.join('; ') || 'не удалось разобрать DXF' });
+    return;
+  }
+
   if (out.length === 0 && warnings.length === 0) warnings.push('в файлах не нашлось замкнутых контуров деталей');
+  // Commit only when no newer parse started while this one awaited.
+  if (seq === parseSeq) currentParse = { id, pieces: out };
   post({ type: 'parsed', id, pieces: out, detectedUnit: detected, warnings });
 }
 
-async function handleNest(id: number, config: NestConfig): Promise<void> {
+async function handleNest(id: number, parseId: number, config: NestConfig): Promise<void> {
+  if (!currentParse || currentParse.id !== parseId) {
+    post({ type: 'error', id, message: 'данные деталей устарели — обновите разбор DXF' });
+    return;
+  }
   const result = await nest(
-    pieces,
+    currentParse.pieces,
     config,
     () => cancelled.has(id),
-    (p) => post({ type: 'progress', id, phase: 'ga', generation: p.generation, best: p.best }),
+    (p) =>
+      post({
+        type: 'progress',
+        id,
+        phase: p.phase,
+        generation: p.generation,
+        best: p.best,
+        nfpDone: p.nfpDone,
+        nfpTotal: p.nfpTotal,
+      }),
   );
   post({ type: 'result', id, result });
   cancelled.delete(id);
@@ -70,7 +97,7 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
       );
       break;
     case 'nest':
-      void handleNest(msg.id, msg.config).catch((e) =>
+      void handleNest(msg.id, msg.parseId, msg.config).catch((e) =>
         post({ type: 'error', id: msg.id, message: e instanceof Error ? e.message : String(e) }),
       );
       break;

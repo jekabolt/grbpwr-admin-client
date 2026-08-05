@@ -3,9 +3,19 @@
 import type { NestConfig, NestResult, ParseOpts, PieceDTO, Unit, WorkerResponse } from '../types';
 
 export type ParseOutcome = {
+  // Names this parse inside the worker — nest() must present it back (stale-parse guard).
+  parseId: number;
   pieces: PieceDTO[];
   detectedUnit: Exclude<Unit, 'auto'>;
   warnings: string[];
+};
+
+export type NestProgressMsg = {
+  phase: 'nfp' | 'ga';
+  generation?: number;
+  best?: NestResult;
+  nfpDone?: number;
+  nfpTotal?: number;
 };
 
 export class NestingWorkerClient {
@@ -53,7 +63,7 @@ export class NestingWorkerClient {
       this.handlers.set(id, {
         resolve: (msg) => {
           if (msg.type === 'parsed') {
-            resolve({ pieces: msg.pieces, detectedUnit: msg.detectedUnit, warnings: msg.warnings });
+            resolve({ parseId: id, pieces: msg.pieces, detectedUnit: msg.detectedUnit, warnings: msg.warnings });
           } else reject(new Error('unexpected worker reply'));
         },
         reject,
@@ -63,8 +73,9 @@ export class NestingWorkerClient {
   }
 
   nest(
+    parseId: number,
     config: NestConfig,
-    onProgress: (generation: number, best: NestResult) => void,
+    onProgress: (p: NestProgressMsg) => void,
   ): { id: number; done: Promise<NestResult> } {
     const id = this.nextId++;
     const w = this.spawn();
@@ -76,10 +87,16 @@ export class NestingWorkerClient {
         },
         reject,
         onProgress: (msg) => {
-          if (msg.generation != null && msg.best) onProgress(msg.generation, msg.best);
+          onProgress({
+            phase: msg.phase,
+            generation: msg.generation,
+            best: msg.best,
+            nfpDone: msg.nfpDone,
+            nfpTotal: msg.nfpTotal,
+          });
         },
       });
-      w.postMessage({ type: 'nest', id, config });
+      w.postMessage({ type: 'nest', id, parseId, config });
     });
     return { id, done };
   }

@@ -31,27 +31,37 @@ export function chainLoops(
     let pts = [...open[i].pts];
     const layer = open[i].layer;
 
-    // Greedy growth from the tail; restarting the scan after every attachment keeps the
-    // logic simple and the cost fine at CAD scale (hundreds of fragments, not millions).
+    // Greedy growth from the tail. Among ALL candidates within tolerance the NEAREST
+    // endpoint wins — first-match takes the wrong branch at a Y junction and the piece
+    // dies later as an unclosable loop.
     let grew = true;
     while (grew) {
       grew = false;
       const tail = pts[pts.length - 1];
+      let bestJ = -1;
+      let bestRev = false;
+      let bestD = Infinity;
       for (let j = 0; j < open.length; j++) {
         if (used[j]) continue;
         const cand = open[j].pts;
-        if (dist(tail, cand[0]) <= tolChain) {
-          pts = pts.concat(cand.slice(1));
-        } else if (dist(tail, cand[cand.length - 1]) <= tolChain) {
-          pts = pts.concat([...cand].reverse().slice(1));
-        } else {
-          continue;
+        const dHead = dist(tail, cand[0]);
+        if (dHead <= tolChain && dHead < bestD) {
+          bestD = dHead;
+          bestJ = j;
+          bestRev = false;
         }
-        used[j] = true;
-        grew = true;
-        break;
+        const dTail = dist(tail, cand[cand.length - 1]);
+        if (dTail <= tolChain && dTail < bestD) {
+          bestD = dTail;
+          bestJ = j;
+          bestRev = true;
+        }
       }
-      if (!grew) break;
+      if (bestJ < 0) break;
+      const cand = open[bestJ].pts;
+      pts = pts.concat(bestRev ? [...cand].reverse().slice(1) : cand.slice(1));
+      used[bestJ] = true;
+      grew = true;
       // Closed the loop? Stop growing.
       if (pts.length >= 3 && dist(pts[0], pts[pts.length - 1]) <= tolChain) break;
     }
