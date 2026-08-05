@@ -104,6 +104,9 @@ const Product = lazyRoute(() =>
   import('components/managers/product/page').then((m) => ({ default: m.Product })),
 );
 const ProductsCatalog = lazyRoute(() => import('components/managers/products-catalog/page'));
+const Waitlist = lazyRoute(() =>
+  import('components/managers/waitlist/page').then((m) => ({ default: m.Waitlist })),
+);
 const Promo = lazyRoute(() =>
   import('components/managers/promo').then((m) => ({ default: m.Promo })),
 );
@@ -330,6 +333,7 @@ root.render(
                   <Route path={ROUTES.media} element={<MediaManager disabled={true} />} />
                   <Route path={ROUTES.singleProduct} element={<Product />} />
                   <Route path={ROUTES.product} element={<ProductsCatalog />} />
+                  <Route path={ROUTES.waitlist} element={<Waitlist />} />
                   <Route path={ROUTES.addProduct} element={<Product />} />
                   <Route path={ROUTES.hero} element={<Hero />} />
                   <Route path={ROUTES.promo} element={<Promo />} />

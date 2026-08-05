@@ -65,6 +65,9 @@ export function ReceiveModal({
   // Phase 5: checked = this receipt DECLARES THE RUN COMPLETE (the Phase 4 semantics, and the
   // default); unchecked books a partial delivery and leaves the run open for further receipts.
   const [finalReceipt, setFinalReceipt] = useState(true);
+  // Storefront side effect: checked fires the back-in-stock email to customers waitlisted on any
+  // variant this receipt takes 0→in-stock. Default unchecked — the operator opts in per receipt.
+  const [notifyWaitlist, setNotifyWaitlist] = useState(false);
   // The command's identity: one key per USER INTENT (per modal open), not per attempt — a retry of
   // the same count must replay, a fresh open is a fresh intent.
   const [idempotencyKey, setIdempotencyKey] = useState('');
@@ -134,6 +137,7 @@ export function ReceiveModal({
     );
     setUpdateCostPrice(canWriteCosting);
     setFinalReceipt(true);
+    setNotifyWaitlist(false);
     setIdempotencyKey(ulid());
   }, [run, open, canWriteCosting]);
 
@@ -208,6 +212,7 @@ export function ReceiveModal({
         expectedLockVersion: run.lockVersion ?? 0,
         updateCostPrice: isAux ? false : updateCostPrice,
         partial: !finalReceipt,
+        notifyWaitlist,
       });
       showMessage(
         !finalReceipt
@@ -412,6 +417,30 @@ export function ReceiveModal({
                 </Text>
               </label>
             )}
+
+            {!isAux && (
+              <label className='flex items-center gap-2 border-t border-textInactiveColor pt-3'>
+                <input
+                  type='checkbox'
+                  checked={notifyWaitlist}
+                  onChange={(e) => {
+                    setNotifyWaitlist(e.target.checked);
+                    // The flag is deliberately NOT part of the server's idempotency hash (old
+                    // clients must keep replaying across the deploy), so flipping it must mint a
+                    // NEW key: a same-key resubmission after a successful post would REPLAY the
+                    // original receipt and silently send nothing.
+                    setIdempotencyKey(ulid());
+                  }}
+                />
+                <Text size='small'>notify waitlisted customers</Text>
+              </label>
+            )}
+            {!isAux ? (
+              <Text variant='inactive' size='small'>
+                Back-in-stock emails go to customers waitlisted on any size this receipt takes from
+                0 to in stock. Sent once — a page re-render happens regardless.
+              </Text>
+            ) : null}
 
             <Text variant='inactive' size='small'>
               {isAux
