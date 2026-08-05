@@ -7,6 +7,7 @@ import {
 import { ZERO_TIMESTAMP } from 'components/managers/fittings/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
+import { normalizeFittingZone } from './zone-options';
 
 // The per-size fit-note UI is gone; sizes is derived from the linked sample (see
 // mapFormToFittingInsert) and carries only its sizeId. fitNote lives on the proto
@@ -36,18 +37,26 @@ const fittingCalloutSchema = z.object({
 });
 
 // The structured "what to change" work list a fitting produces (S26). target is the change CATEGORY;
-// zone + pieceId are the structured LOCATION; status (open|resolved) replaces the legacy boolean;
+// zone + pieceIds are the structured LOCATION; status (open|resolved) replaces the legacy boolean;
 // carriedFromId links an item to the one in the previous round it continues.
 const fittingChangeRequestSchema = z.object({
   id: z.number().int().optional().default(0),
   target: z.string().optional().default(''),
   note: z.string().optional().default(''),
   calloutNumber: z.number().int().optional().default(0),
-  zone: z.string().optional().default('TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
-  pieceId: z.number().int().optional().default(0),
+  zone: z.string().optional().default(''),
+  pieceIds: z.array(z.number().int()).optional().default([]),
   status: z.string().optional().default('open'),
   carriedFromId: z.number().int().optional().default(0),
 });
+
+// The pieces a stored remark points at. pieceIds is authoritative; the deprecated single pieceId is
+// read as a one-element fallback so rows served by a backend older than migration 0256 (or fetched
+// from a cache primed before it) still show their pin.
+export function crPieceIds(cr: { pieceIds?: number[]; pieceId?: number }): number[] {
+  if (cr.pieceIds?.length) return cr.pieceIds.filter((id) => id > 0);
+  return cr.pieceId ? [cr.pieceId] : [];
+}
 
 export const fittingSchema = z
   .object({
@@ -186,8 +195,8 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       target: cr.target || '',
       note: cr.note || '',
       calloutNumber: cr.calloutNumber || 0,
-      zone: cr.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
-      pieceId: cr.pieceId || 0,
+      zone: normalizeFittingZone(cr.zone),
+      pieceIds: crPieceIds(cr),
       // status (open|resolved) is authoritative; fall back to the legacy boolean for old rows.
       status: cr.status || (cr.resolved ? 'resolved' : 'open'),
       carriedFromId: cr.carriedFromId || 0,
@@ -265,8 +274,9 @@ export function mapFormToFittingInsert(
               note: cr.note?.trim() || '',
               calloutNumber: cr.calloutNumber || 0,
               resolved: status === 'resolved',
-              zone: cr.zone && cr.zone !== 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN' ? cr.zone : '',
-              pieceId: cr.pieceId || 0,
+              zone: normalizeFittingZone(cr.zone),
+              pieceIds: cr.pieceIds ?? [],
+              pieceId: 0, // deprecated on the wire; pieceIds is authoritative
               status,
               carriedFromId: cr.carriedFromId || 0,
               createdBy: '',
