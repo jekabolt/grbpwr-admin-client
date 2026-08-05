@@ -16,6 +16,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
+import { MarkerConsumptionBand } from './marker-apply';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Select from 'ui/components/select';
@@ -531,6 +532,9 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       {/* ═══ COMPUTED · материалы — the system's own numbers, from BOM × colourway recipes.
           Everything in this band is computed server-side on save; nothing here is typed. */}
       <GroupLabel>COMPUTED · материалы — из BOM × рецепты колорвеев</GroupLabel>
+      {/* Ф4: measured fabric consumption from saved раскладки, beside what the recipes say.
+          Display-only — the write path is the recipe editor's «применить…». */}
+      <MarkerConsumptionBand techCard={techCard} />
       {colorwayCosts.length > 0 && (
         <DataTable>
           <thead>

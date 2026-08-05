@@ -9,6 +9,7 @@ import {
   common_TechCardColorwayUsage,
   common_TechCardLabDipStatus,
   UpdateColorwayRequest,
+  common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import {
   composeArticleFromMaterial,
@@ -47,6 +48,7 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { MarkerApplyHint } from './marker-apply';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
@@ -1139,6 +1141,7 @@ function SlotUsageRow({
   sizeQuantities,
   sizeNameById,
   canEdit,
+  markers,
   onChange,
   onRemove,
 }: {
@@ -1147,6 +1150,7 @@ function SlotUsageRow({
   allowedSections: Set<string>;
   usedKeys: Set<string>;
   materials: common_Material[];
+  markers?: common_TechCardMarkerSummary[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -1252,15 +1256,29 @@ function SlotUsageRow({
         )}
 
         {isMeasured && !legacyCountedMeasured ? (
-          <UsagePerSizeLocal
-            draft={draft}
-            sizeIds={sizeIds}
-            sizeQuantities={sizeQuantities}
-            article={article}
-            canEdit={canEdit}
-            sizeNameById={sizeNameById}
-            onChange={onChange}
-          />
+          <div className='flex flex-col gap-1.5'>
+            <UsagePerSizeLocal
+              draft={draft}
+              sizeIds={sizeIds}
+              sizeQuantities={sizeQuantities}
+              article={article}
+              canEdit={canEdit}
+              sizeNameById={sizeNameById}
+              onChange={onChange}
+            />
+            {/* Ф4: измеренный маркером расход этого слота, применяемый в ЭТОТ драфт — через
+                тот же onChange, которым staged-рецепт и живёт. */}
+            <MarkerApplyHint
+              markers={markers}
+              lineKey={draft.bomLineKey}
+              unit={unit}
+              wastagePercent={slot?.wastagePercent ?? ''}
+              sizeIds={sizeIds}
+              sizeNameById={sizeNameById}
+              canEdit={canEdit}
+              onApply={(patch) => onChange(patch)}
+            />
+          </div>
         ) : (
           <label className='flex flex-col gap-1'>
             <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
@@ -1293,6 +1311,7 @@ function PieceRecipeCard({
   rows,
   bomItems,
   materials,
+  markers,
   sizeIds,
   sizeQuantities,
   sizeNameById,
@@ -1306,6 +1325,7 @@ function PieceRecipeCard({
   rows: IndexedUsage[];
   bomItems: BomLine[];
   materials: common_Material[];
+  markers?: common_TechCardMarkerSummary[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -1349,6 +1369,7 @@ function PieceRecipeCard({
               allowedSections={PIECE_SECTIONS}
               usedKeys={usedKeys}
               materials={materials}
+              markers={markers}
               sizeIds={sizeIds}
               sizeQuantities={sizeQuantities}
               sizeNameById={sizeNameById}
@@ -1866,6 +1887,7 @@ function ColorwayRecipeEditor({
   colorway,
   bomItems,
   materials,
+  markers,
   pieces,
   sizeIds,
   sizeQuantities,
@@ -1879,6 +1901,7 @@ function ColorwayRecipeEditor({
   colorway: common_AdminColorwayRef;
   bomItems: BomLine[];
   materials: common_Material[];
+  markers?: common_TechCardMarkerSummary[];
   pieces: RecipePiece[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
@@ -2104,6 +2127,7 @@ function ColorwayRecipeEditor({
                   rows={rows}
                   bomItems={bomItems}
                   materials={materials}
+                  markers={markers}
                   sizeIds={sizeIds}
                   sizeQuantities={sizeQuantities}
                   sizeNameById={sizeNameById}
@@ -2165,6 +2189,7 @@ function ColorwayRecipeEditor({
                 allowedSections={GARMENT_SECTIONS}
                 usedKeys={garmentUsedKeys}
                 materials={materials}
+                markers={markers}
                 sizeIds={sizeIds}
                 sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}
@@ -2562,6 +2587,7 @@ export function ColorwayRecipes({
             colorway={cw}
             bomItems={bomItems}
             materials={materials}
+            markers={techCard?.markers}
             pieces={pieces}
             sizeIds={sizeIds}
             sizeQuantities={sizeQuantities}

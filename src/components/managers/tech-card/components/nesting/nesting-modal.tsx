@@ -1,7 +1,14 @@
 // Раскладка (nesting) modal: DXF выкройки одного размера → детали → авто-раскладка на
-// полосе ткани в web worker'е. Ничего не пишет на бек — расчётный инструмент (расход
-// метража, вердикт «влезает ли в отрез»). Файл лениво импортируется из patterns-field,
-// так что dxf-parser/clipper2-js/воркер живут только в чанке раскладки.
+// полосе ткани в web worker'е. Расчётный инструмент, который теперь умеет ПЕРСИСТИТЬ
+// результат: «сохранить раскладку» пишет маркер (tech_card_marker) с самодостаточной
+// геометрией, и костинг читает расход на единицу. `view` открывает сохранённый маркер без
+// воркера и без DXF. Файл лениво импортируется из patterns-field, так что
+// dxf-parser/clipper2-js/воркер живут только в чанке раскладки.
+import { useQueryClient } from '@tanstack/react-query';
+import { adminService } from 'api/api';
+import type { common_TechCardMarker } from 'api/proto-http/admin';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -12,10 +19,12 @@ import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
+import { parseDecimalNumber } from 'utils/decimal';
 import type { NestConfig, NestResult, PieceDTO, Unit } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
+import { buildMarkerLayout, dec, markerToView, type MarkerBomLine } from './marker-io';
 import { useNesting, type NestingFile } from './use-nesting';
 
 type PieceSel = Record<number, { checked: boolean; qty: number }>;
@@ -41,12 +50,25 @@ export function NestingModal({
   files,
   sizeLabel,
   onClose,
+  techCardId,
+  sizeId,
+  bomLines,
+  view,
 }: {
-  files: NestingFile[] | null; // null = closed
+  files: NestingFile[] | null; // null = closed (nest mode)
   sizeLabel?: string;
   onClose: () => void;
+  // Server context for «сохранить раскладку». Absent = compute-only (the save button hides).
+  techCardId?: number;
+  sizeId?: number;
+  // The card's fabric BOM lines (slot select of the save dialog).
+  bomLines?: MarkerBomLine[];
+  // A stored marker to DISPLAY: no worker, no DXF fetch — geometry comes from the blob.
+  // Editing a stored layout is Ф5; this mode is view + export.
+  view?: common_TechCardMarker | null;
 }) {
   const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(files);
+  const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
 
   const [widthCm, setWidthCm] = useState<number>(NEST_DEFAULTS.fabricWidthCm);
   // Raw keystrokes; the min-clamp lands on BLUR (clamping per keystroke makes 90 unreachable
@@ -95,14 +117,27 @@ export function NestingModal({
   }, [widthCm, gapCm, marginCm, crossGrain, sel, setsN, resetRun]);
 
   const target = targetCm === '' ? undefined : targetCm;
+
+  // What the right pane shows: the live run in nest mode, the stored geometry in view mode.
+  const displayPieces = viewData ? viewData.pieces : pieces;
+  const displayResult = viewData ? viewData.result : result;
+  const displayWidth = viewData ? viewData.widthCm : widthCm;
+  const displayTarget = viewData ? viewData.targetCm : target;
+
   // Live preview renders simplified contours (every coalesced frame re-parses the SVG);
   // the finished layout renders exact — that's also what «скачать SVG» exports.
   const svg = useMemo(
     () =>
-      result
-        ? renderLayoutSvg(result, pieces, widthCm, target, run.phase === 'running' ? 0.05 : 0)
+      displayResult
+        ? renderLayoutSvg(
+            displayResult,
+            displayPieces,
+            displayWidth,
+            displayTarget,
+            run.phase === 'running' ? 0.05 : 0,
+          )
         : null,
-    [result, pieces, widthCm, target, run.phase],
+    [displayResult, displayPieces, displayWidth, displayTarget, run.phase],
   );
 
   const checkedCount = pieces.filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id)).length;
@@ -159,32 +194,118 @@ export function NestingModal({
     if (svg) download(svg, 'image/svg+xml', 'svg');
   };
   // Plotter export: R12 DXF of the finished layout, true contours, cm.
+  const dxfReady = viewData != null || run.phase === 'done';
   const downloadDxf = () => {
-    if (run.phase !== 'done') return;
-    download(renderLayoutDxf(run.result, pieces, widthCm), 'application/dxf', 'dxf');
+    if (!dxfReady || !displayResult) return;
+    download(renderLayoutDxf(displayResult, displayPieces, displayWidth), 'application/dxf', 'dxf');
   };
 
   const verdict =
-    result && target != null
-      ? result.usedLengthCm <= target && result.placedCount === result.totalCount
-        ? { ok: true, text: `влезает · запас ${(target - result.usedLengthCm).toFixed(1)} см` }
-        : { ok: false, text: `не влезает · нужно ${result.usedLengthCm.toFixed(1)} см` }
+    displayResult && displayTarget != null
+      ? displayResult.usedLengthCm <= displayTarget &&
+        displayResult.placedCount === displayResult.totalCount
+        ? { ok: true, text: `влезает · запас ${(displayTarget - displayResult.usedLengthCm).toFixed(1)} см` }
+        : { ok: false, text: `не влезает · нужно ${displayResult.usedLengthCm.toFixed(1)} см` }
       : null;
+
+  // ── «сохранить раскладку» (Ф4б) ────────────────────────────────────────────────────────
+  const qc = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  const [saveOpen, setSaveOpen] = useState(false);
+  const [markerName, setMarkerName] = useState('');
+  const [nameTouched, setNameTouched] = useState(false);
+  const [slotKey, setSlotKey] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const fabricLines = bomLines ?? [];
+  const slot = fabricLines.find((b) => b.lineKey === slotKey);
+  // The prefill follows the chosen slot until the operator edits the name by hand.
+  const defaultName = `${sizeLabel ?? ''}${sizeLabel ? ' · ' : ''}${slot?.name?.trim() || `${widthCm} см`}`;
+  const nameValue = nameTouched ? markerName : defaultName;
+  const slotWidth = slot ? parseDecimalNumber(slot.fabricWidth) : NaN;
+  const widthMismatch = Number.isFinite(slotWidth) && slotWidth > 0 && Math.abs(slotWidth - widthCm) > 0.5;
+
+  const canSave =
+    !viewData &&
+    run.phase === 'done' &&
+    run.result.placedCount === run.result.totalCount &&
+    run.result.placements.length > 0 &&
+    !!techCardId &&
+    !!sizeId;
+
+  async function saveMarker() {
+    if (!canSave || run.phase !== 'done' || parse.phase !== 'ready' || !techCardId || !sizeId) return;
+    const name = nameValue.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      const perSetQty = new Map<number, number>();
+      for (const p of pieces) {
+        const s = sel[p.id];
+        if (s?.checked) perSetQty.set(p.id, Math.max(1, Math.round(s.qty)));
+      }
+      const urlBySource = new Map((files ?? []).map((f) => [f.name, f.url]));
+      const layout = buildMarkerLayout({
+        pieces,
+        perSetQty,
+        urlBySource,
+        result: run.result,
+        unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
+        config: { targetLengthCm: target, rdpEpsCm: NEST_DEFAULTS.rdpEpsCm, timeBudgetMs: budgetS * 1000 },
+        tol: NEST_DEFAULTS.tol,
+        tolChain: NEST_DEFAULTS.tolChain,
+      });
+      await adminService.SaveTechCardMarker({
+        id: 0,
+        techCardId,
+        marker: {
+          sizeId,
+          name,
+          source: 'auto',
+          bomLineKey: slotKey,
+          fabricWidthCm: dec(widthCm),
+          gapCm: dec(gapCm),
+          edgeMarginCm: dec(marginCm),
+          allowCrossGrain: crossGrain,
+          sets: setsN,
+          usedLengthCm: dec(run.result.usedLengthCm),
+          efficiencyPct: dec(run.result.efficiency * 100),
+          placedCount: run.result.placedCount,
+          totalCount: run.result.totalCount,
+          layout,
+        },
+      });
+      showMessage('маркер сохранён — расход виден в костинге', 'success');
+      qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+      setSaveOpen(false);
+      setNameTouched(false);
+      setMarkerName('');
+    } catch (e) {
+      showMessage(e instanceof Error && e.message ? e.message : 'не удалось сохранить маркер', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <ConfirmationModal
-      open={files != null}
+      open={files != null || view != null}
       onOpenChange={(o) => {
         if (!o) onClose();
       }}
       onConfirm={onClose}
-      title={`раскладка DXF${sizeLabel ? ` — ${sizeLabel}` : ''}`}
+      title={
+        viewData
+          ? `маркер — ${view?.summary?.name ?? ''}`
+          : `раскладка DXF${sizeLabel ? ` — ${sizeLabel}` : ''}`
+      }
       width='lg'
       hideActions
     >
       <div className='flex flex-col gap-2.5 lg:flex-row'>
-        {/* Left rail: material + run parameters, then the recognized piece list. */}
-        <div className='w-full shrink-0 space-y-2.5 lg:w-[300px]'>
+        {/* Left rail: material + run parameters, then the recognized piece list.
+            A stored marker has nothing to configure — the rail collapses to its piece list. */}
+        <div className={viewData ? 'hidden' : 'w-full shrink-0 space-y-2.5 lg:w-[300px]'}>
           <div className='grid grid-cols-2 gap-1.5'>
             <label className='space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
@@ -463,19 +584,26 @@ export function NestingModal({
             </div>
           )}
 
-          {result && (
+          {displayResult && (
             <StatGrid min={120}>
-              <Stat label='использовано' value={`${result.usedLengthCm.toFixed(1)} см`} />
+              <Stat label='использовано' value={`${displayResult.usedLengthCm.toFixed(1)} см`} />
               <Stat
                 label='эффективность'
-                value={`${(result.efficiency * 100).toFixed(1)} %`}
-                sub={`ткань ${widthCm} см`}
+                value={`${(displayResult.efficiency * 100).toFixed(1)} %`}
+                sub={`ткань ${displayWidth} см`}
               />
               <Stat
                 label='размещено'
-                value={`${result.placedCount}/${result.totalCount}`}
-                tone={result.placedCount === result.totalCount ? undefined : 'down'}
+                value={`${displayResult.placedCount}/${displayResult.totalCount}`}
+                tone={displayResult.placedCount === displayResult.totalCount ? undefined : 'down'}
               />
+              {viewData && view?.summary && (
+                <Stat
+                  label='расход / ед'
+                  value={`${(displayResult.usedLengthCm / Math.max(1, view.summary.sets ?? 1)).toFixed(1)} см`}
+                  sub={`комплектов: ${view.summary.sets ?? 1}`}
+                />
+              )}
               {verdict && (
                 <Stat
                   label='вердикт'
@@ -483,16 +611,18 @@ export function NestingModal({
                   sub={verdict.text}
                 />
               )}
-              <Stat
-                label='поколение'
-                value={String(result.generation)}
-                sub={`${(result.elapsedMs / 1000).toFixed(1)} с${run.phase === 'done' && run.stopped ? ' · остановлено' : ''}`}
-              />
+              {!viewData && (
+                <Stat
+                  label='поколение'
+                  value={String(displayResult.generation)}
+                  sub={`${(displayResult.elapsedMs / 1000).toFixed(1)} с${run.phase === 'done' && run.stopped ? ' · остановлено' : ''}`}
+                />
+              )}
             </StatGrid>
           )}
-          {result && result.warnings.length > 0 && (
+          {displayResult && displayResult.warnings.length > 0 && (
             <CalloutBox tone='note'>
-              {result.warnings.map((w, i) => (
+              {displayResult.warnings.map((w, i) => (
                 <Text key={i} size='nano' component='p'>
                   {w}
                 </Text>
@@ -512,24 +642,41 @@ export function NestingModal({
                 поколение {run.generation} · лучшая длина {run.best.usedLengthCm.toFixed(1)} см
               </Text>
             )}
-            <Button
-              type='button'
-              variant='main'
-              disabled={parse.phase !== 'ready' || checkedCount === 0 || running}
-              onClick={startRun}
-            >
-              запустить
-            </Button>
-            <Button type='button' variant='secondary' disabled={!running || stopping} onClick={stop}>
-              {stopping ? 'останавливаем…' : 'стоп'}
-            </Button>
+            {!viewData && (
+              <>
+                <Button
+                  type='button'
+                  variant='main'
+                  disabled={parse.phase !== 'ready' || checkedCount === 0 || running}
+                  onClick={startRun}
+                >
+                  запустить
+                </Button>
+                <Button type='button' variant='secondary' disabled={!running || stopping} onClick={stop}>
+                  {stopping ? 'останавливаем…' : 'стоп'}
+                </Button>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  disabled={!canSave}
+                  title={
+                    canSave
+                      ? 'сохранить маркер в тех-карту — расход уйдёт в костинг'
+                      : 'сохранить можно завершённую раскладку, в которую поместились все детали'
+                  }
+                  onClick={() => setSaveOpen(true)}
+                >
+                  сохранить раскладку
+                </Button>
+              </>
+            )}
             <Button type='button' variant='secondary' disabled={!svg || running} onClick={downloadSvg}>
               скачать SVG
             </Button>
             <Button
               type='button'
               variant='secondary'
-              disabled={run.phase !== 'done'}
+              disabled={!dxfReady}
               title='DXF R12 для реза — контуры на слое CUT, кромка STRIP, подписи LABELS'
               onClick={downloadDxf}
             >
@@ -541,6 +688,67 @@ export function NestingModal({
           </div>
         </div>
       </div>
+
+      {/* Save dialog: name + BOM fabric slot. Nested Radix dialogs portal independently. */}
+      <ConfirmationModal
+        open={saveOpen}
+        onOpenChange={(o) => {
+          if (!o && !saving) setSaveOpen(false);
+        }}
+        onConfirm={saveMarker}
+        onCancel={() => {
+          if (!saving) setSaveOpen(false);
+        }}
+        title='сохранить раскладку как маркер'
+        confirmLabel={saving ? 'сохраняем…' : 'сохранить'}
+        confirmDisabled={saving || !nameValue.trim()}
+        closeOnConfirm={false}
+      >
+        <div className='space-y-2'>
+          <label className='block space-y-0.5'>
+            <Text size='nano' variant='label' component='span'>
+              название маркера
+            </Text>
+            <Input
+              name='marker-name'
+              value={nameValue}
+              maxLength={191}
+              autoComplete='off'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setNameTouched(true);
+                setMarkerName(e.target.value);
+              }}
+            />
+          </label>
+          <label className='block space-y-0.5'>
+            <Text size='nano' variant='label' component='span'>
+              слот BOM (ткань) — куда пойдёт расход
+            </Text>
+            <Selector
+              label=''
+              value={slotKey}
+              options={[
+                { value: '', label: 'не привязывать' },
+                ...fabricLines.map((b) => ({
+                  value: b.lineKey,
+                  label: `${b.name || 'без названия'}${b.unit ? ` · ${b.unit}` : ''}`,
+                })),
+              ]}
+              onChange={(v: string | number) => setSlotKey(String(v))}
+            />
+          </label>
+          {widthMismatch && (
+            <CalloutBox tone='warning'>
+              ширина полотна раскладки ({widthCm} см) отличается от ширины артикула слота (
+              {slotWidth} см) — расход будет применим только к этой ширине
+            </CalloutBox>
+          )}
+          <Text size='nano' variant='label' component='p'>
+            комплектов: {setsN} · расход на единицу:{' '}
+            {run.phase === 'done' ? (run.result.usedLengthCm / Math.max(1, setsN)).toFixed(1) : '—'} см
+          </Text>
+        </div>
+      </ConfirmationModal>
     </ConfirmationModal>
   );
 }

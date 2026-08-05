@@ -3154,6 +3154,12 @@ export type TechCard = {
   // through the tech-card save — a variant owns warehouse stock, so a full-replace save must not be
   // able to re-mint or drop one.
   outputVariants: TechCardOutputVariant[] | undefined;
+  // OUTPUT-ONLY summaries of the card's saved раскладки (markers, 0257) — the measured fabric
+  // layouts costing reads consumption from. Summaries only: the layout blob is 60-100 KB per
+  // marker and travels exclusively on GetTechCardMarker. Written through the dedicated
+  // Save/DeleteTechCardMarker RPCs, never through the tech-card save (and marker writes do not
+  // bump lock_version — saving a раскладка must not 409 the operator's own open card form).
+  markers: TechCardMarkerSummary[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -3178,6 +3184,122 @@ export type TechCardOutputVariant = {
   // totals, but keeps its bucket, its stock and its history. Deleting the variant is the harder
   // action — it is the only way to un-pin the card's auxiliary purpose.
   active: boolean | undefined;
+};
+
+// TechCardMarkerSummary is the list row of a saved раскладка (marker, tech_card_marker): the
+// measured fabric layout of ONE size's pattern pieces on a strip of fabric. The heavy layout blob
+// (contours + placements) deliberately does NOT ride here — it travels only on GetTechCardMarker.
+// consumption_per_unit_cm is DERIVED (used_length_cm / sets), never stored, so it cannot drift
+// from its inputs. It is the number costing cares about: fabric per one garment of this size.
+export type TechCardMarkerSummary = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  sizeId: number | undefined;
+  name: string | undefined;
+  // Provenance of the layout geometry. "auto" = the nesting engine as it ran; "manual" = an
+  // operator adjusted placements (Ф5); "imported" reserved for external CAD markers.
+  source: string | undefined;
+  // The BOM fabric line this marker measures, as the stable wire identity of that line ("" = not
+  // linked, or the slot was deleted — the marker stays valid geometry and merely drops out of
+  // costing suggestions). Resolved server-side to tech_card_bom_item(id) with ON DELETE SET NULL.
+  bomLineKey: string | undefined;
+  bomItemName: string | undefined;
+  bomItemUnit: string | undefined;
+  fabricWidthCm: googletype_Decimal | undefined;
+  gapCm: googletype_Decimal | undefined;
+  edgeMarginCm: googletype_Decimal | undefined;
+  allowCrossGrain: boolean | undefined;
+  sets: number | undefined;
+  usedLengthCm: googletype_Decimal | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  // placed/total instance counts at save time. The server refuses to save an incomplete marker
+  // (placed < total, FailedPrecondition) — a layout that did not fit every piece is not a
+  // consumption norm — so on stored rows these are always equal; kept as two fields for honesty.
+  placedCount: number | undefined;
+  totalCount: number | undefined;
+  consumptionPerUnitCm: googletype_Decimal | undefined;
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardMarker is a full stored marker: the summary plus the self-contained layout.
+export type TechCardMarker = {
+  summary: TechCardMarkerSummary | undefined;
+  layout: TechCardMarkerLayout | undefined;
+};
+
+// TechCardMarkerLayout is the self-contained geometry of a marker, stored as an opaque proto-JSON
+// blob (idiom: tech_card_release.snapshot). schema_version guards forward evolution — readers
+// degrade gracefully on a version they do not know.
+export type TechCardMarkerLayout = {
+  schemaVersion: number | undefined;
+  params: TechCardMarkerNestParams | undefined;
+  pieces: TechCardMarkerPiece[] | undefined;
+  placements: TechCardMarkerPlacement[] | undefined;
+  warnings: string[] | undefined;
+};
+
+// TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
+// result honestly; NOT enough to re-run the nest (the contours already carry the parse outcome).
+export type TechCardMarkerNestParams = {
+  unit: string | undefined;
+  tolCm: number | undefined;
+  tolChainCm: number | undefined;
+  rdpEpsCm: number | undefined;
+  targetLengthCm: number | undefined;
+  timeBudgetS: number | undefined;
+};
+
+// TechCardMarkerPiece is one distinct pattern piece: its exact contour (cm, local origin at the
+// piece bbox corner) and how many instances ONE set cuts. Instances = quantity × marker sets.
+export type TechCardMarkerPiece = {
+  pieceId: number | undefined;
+  name: string | undefined;
+  source: string | undefined;
+  sourceUrl: string | undefined;
+  quantity: number | undefined;
+  poly: TechCardMarkerPoint[] | undefined;
+  bboxWCm: number | undefined;
+  bboxHCm: number | undefined;
+  areaCm2: number | undefined;
+};
+
+export type TechCardMarkerPoint = {
+  xCm: number | undefined;
+  yCm: number | undefined;
+};
+
+// TechCardMarkerPlacement is one placed instance: piece contour rotated by rot_deg (CCW) then
+// translated by (x_cm, y_cm) in strip coordinates — x along the fabric, y across the width.
+export type TechCardMarkerPlacement = {
+  pieceId: number | undefined;
+  instance: number | undefined;
+  rotDeg: number | undefined;
+  xCm: number | undefined;
+  yCm: number | undefined;
+};
+
+// TechCardMarkerInsert is the writable payload of SaveTechCardMarker. Geometry is SELF-CONTAINED
+// (contours inside the layout): pattern rows are a full-replace child whose CDN objects are
+// garbage-collected the moment no row references them, so a marker that stored url references
+// would go dark on the next sheet replacement. source_url inside pieces is provenance only.
+export type TechCardMarkerInsert = {
+  sizeId: number | undefined;
+  name: string | undefined;
+  source: string | undefined;
+  bomLineKey: string | undefined;
+  fabricWidthCm: googletype_Decimal | undefined;
+  gapCm: googletype_Decimal | undefined;
+  edgeMarginCm: googletype_Decimal | undefined;
+  allowCrossGrain: boolean | undefined;
+  sets: number | undefined;
+  usedLengthCm: googletype_Decimal | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  placedCount: number | undefined;
+  totalCount: number | undefined;
+  layout: TechCardMarkerLayout | undefined;
 };
 
 // TechCardListItem is a lightweight tech-card header for list views.
@@ -3227,6 +3349,10 @@ export type TechCardListItem = {
   // is in legacy single-output mode, where output_material_* above is the whole answer.
   outputVariantCount: number | undefined;
   outputVariantsOnHand: googletype_Decimal | undefined;
+  // How many saved раскладки (markers, 0257) the card carries, batched for the page like
+  // colorway_count. The COUNT only — a "latest consumption" here would be a lie without naming
+  // the size and the BOM slot it was measured for.
+  markerCount: number | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
