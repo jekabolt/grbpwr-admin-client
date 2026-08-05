@@ -65,7 +65,17 @@ function revisionOf(row: PatternRow): number | null {
 // name («перед», «рукав x2») next to its factory filename; the name is editable in place after.
 // The flat `patterns` array stays the source of truth (full-replace on save); upload appends,
 // ✕ removes.
-export function PatternsField({ techCardId }: { techCardId?: number }) {
+export function PatternsField({
+  techCardId,
+  canEdit = true,
+  savedSizeIds,
+}: {
+  techCardId?: number;
+  // Gates «сохранить раскладку» (RBAC write + not released), mirroring MarkersSection.
+  canEdit?: boolean;
+  // Server-known size range: a form-added size cannot take a marker until the card saves.
+  savedSizeIds?: number[];
+}) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
@@ -77,6 +87,9 @@ export function PatternsField({ techCardId }: { techCardId?: number }) {
   // A save's form.reset() overwrites concurrent edits and un-dirties them — freeze renames
   // for its duration.
   const { isSubmitting } = useFormState({ control });
+  // Осмысленные имена экспортов раскладки: SEASON-STYLE-размер-…
+  const season = (useWatch({ control, name: 'season' }) ?? '') as string;
+  const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
 
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
@@ -104,12 +117,14 @@ export function PatternsField({ techCardId }: { techCardId?: number }) {
     fabricWidth?: string;
     wastagePercent?: string;
     lineKey?: string;
+    id?: number;
   }>;
   const fabricBomLines = useMemo(
     () =>
       bomItems
         .filter((b) => (b.section ?? '') === 'TECH_CARD_BOM_SECTION_FABRIC' && b.lineKey)
         .map((b) => ({
+          id: b.id ?? 0,
           lineKey: b.lineKey!,
           name: b.name ?? '',
           unit: b.unit ?? '',
@@ -481,6 +496,10 @@ export function PatternsField({ techCardId }: { techCardId?: number }) {
             techCardId={techCardId}
             sizeId={nesting.sizeId}
             bomLines={fabricBomLines}
+            canEdit={canEdit}
+            savedSizeIds={savedSizeIds}
+            season={season}
+            styleNumber={styleNumber}
             onClose={() => setNesting(null)}
           />
         </Suspense>

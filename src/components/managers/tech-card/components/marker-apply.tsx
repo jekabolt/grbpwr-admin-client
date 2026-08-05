@@ -16,6 +16,7 @@
 //    inter-piece waste — the dialog warns and names the number, but never rewrites it.
 import type { common_TechCard, common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { useMemo, useState } from 'react';
+import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -24,7 +25,8 @@ import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
-import { consumptionCm, latestPerSize, markersForLine, toBomUnit } from './nesting/marker-io';
+import { consumptionCm, decNum, latestPerSize, markersForLine, newerMarker, toBomUnit } from './nesting/marker-io';
+import type { TechCardFormData } from './schema';
 
 // ── recipe-side apply ───────────────────────────────────────────────────────────────────
 
@@ -33,6 +35,7 @@ export function MarkerApplyHint({
   lineKey,
   unit,
   wastagePercent,
+  articleWidth,
   sizeIds,
   sizeNameById,
   canEdit,
@@ -42,6 +45,9 @@ export function MarkerApplyHint({
   lineKey: string;
   unit: string;
   wastagePercent: string;
+  // Effective article width, cm as the form/catalog holds it: the colourway PIN's material
+  // width first, the slot default otherwise. '' = unknown.
+  articleWidth: string;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
@@ -55,13 +61,10 @@ export function MarkerApplyHint({
   const [markerId, setMarkerId] = useState<number>(0);
   const [mode, setMode] = useState<'scalar' | 'perSize'>('scalar');
 
-  const newest = useMemo(
-    () =>
-      [...lineMarkers].sort((a, b) =>
-        String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? '')),
-      )[0],
-    [lineMarkers],
-  );
+  const newest = useMemo(() => [...lineMarkers].sort(newerMarker)[0], [lineMarkers]);
+  // The card's fit reference — a scalar norm taken from a non-base size deserves a callout.
+  const baseSampleSizeId = (useWatch<TechCardFormData>({ name: 'baseSampleSizeId' }) ??
+    0) as number;
   if (lineMarkers.length === 0 || !newest) return null;
 
   const chosen = lineMarkers.find((m) => m.id === markerId) ?? newest;
@@ -71,7 +74,28 @@ export function MarkerApplyHint({
   const wastage = parseDecimalNumber(wastagePercent);
 
   const sizeName = (id?: number) => sizeNameById.get(id ?? 0) ?? `#${id}`;
-  const preview = conv ? `${conv.value} ${conv.unit}` : `${consumptionCm(newest)} см`;
+  // Label and number from the same marker — the CHOSEN one (the hint used to number by
+  // `chosen` and label by `newest`, which diverged the moment the selector was touched).
+  const preview = conv ? `${conv.value} ${conv.unit}` : `${consumptionCm(chosen)} см`;
+
+  // Width honesty (design §1): a marker computed for another width is a different norm.
+  const artW = parseDecimalNumber(articleWidth);
+  const chosenW = decNum(chosen.fabricWidthCm);
+  const widthMismatch =
+    Number.isFinite(artW) && artW > 0 && chosenW > 0 && Math.abs(artW - chosenW) > 0.5;
+  const perSizeWidths = [...bySize.values()].map((m) => decNum(m.fabricWidthCm)).filter((w) => w > 0);
+  const mixedWidths =
+    perSizeWidths.length > 1 && Math.max(...perSizeWidths) - Math.min(...perSizeWidths) > 0.5;
+
+  // Scalar-mode spread: a flat norm silently taken from one size understates/overstates the
+  // run when sizes diverge — or when the chosen size is not the base sample size.
+  const perSizeCons = [...bySize.values()].map((m) => consumptionCm(m)).filter((c) => c > 0);
+  const spreadPct =
+    perSizeCons.length > 1
+      ? ((Math.max(...perSizeCons) - Math.min(...perSizeCons)) / Math.min(...perSizeCons)) * 100
+      : 0;
+  const offBaseSize =
+    baseSampleSizeId > 0 && (chosen.sizeId ?? 0) > 0 && chosen.sizeId !== baseSampleSizeId;
 
   const apply = () => {
     if (mode === 'scalar') {
@@ -95,7 +119,7 @@ export function MarkerApplyHint({
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
       <Text size='nano' variant='label' component='span'>
-        из раскладки: {preview} · «{newest.name}» ({sizeName(newest.sizeId)})
+        из раскладки: {preview} · «{chosen.name}» ({sizeName(chosen.sizeId)})
       </Text>
       {canEdit && (
         <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
@@ -105,12 +129,22 @@ export function MarkerApplyHint({
 
       <ConfirmationModal
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(o: boolean) => {
+          setOpen(o);
+          if (!o) {
+            setMarkerId(0);
+            setMode('scalar');
+          }
+        }}
         onConfirm={apply}
-        onCancel={() => setOpen(false)}
+        onCancel={() => {
+          setOpen(false);
+          setMarkerId(0);
+          setMode('scalar');
+        }}
         title='применить расход из раскладки'
         confirmLabel='применить'
-        confirmDisabled={mode === 'scalar' ? !conv : !fullCoverage}
+        confirmDisabled={!conv || (mode === 'perSize' && !fullCoverage)}
         closeOnConfirm={false}
       >
         <div className='space-y-2'>
@@ -144,7 +178,7 @@ export function MarkerApplyHint({
             </Chip>
           </ChipRow>
 
-          {mode === 'scalar' && !conv && (
+          {!conv && (
             <CalloutBox tone='error'>
               единица линии BOM ({unit || '—'}) не поддерживает раскладку — расход измерен в
               сантиметрах длины
@@ -160,6 +194,30 @@ export function MarkerApplyHint({
                 })
                 .join(' · ')}
             </Text>
+          )}
+          {mode === 'scalar' && widthMismatch && (
+            <CalloutBox tone='warning'>
+              маркер «{chosen.name}» посчитан для полотна {chosenW} см, артикул слота — {artW} см:
+              расход не переносится между ширинами без пересчёта
+            </CalloutBox>
+          )}
+          {mode === 'perSize' && mixedWidths && (
+            <CalloutBox tone='warning'>
+              маркеры разных размеров посчитаны на разной ширине полотна (
+              {Math.min(...perSizeWidths)}–{Math.max(...perSizeWidths)} см) — нормы смешивают
+              разные ткани
+            </CalloutBox>
+          )}
+          {mode === 'scalar' && (offBaseSize || spreadPct > 5) && (
+            <CalloutBox tone='note'>
+              {offBaseSize
+                ? `единая норма взята с размера ${sizeName(chosen.sizeId)}, а базовый размер карточки — ${sizeName(baseSampleSizeId)}`
+                : ''}
+              {offBaseSize && spreadPct > 5 ? '; ' : ''}
+              {spreadPct > 5
+                ? `расход по размерам расходится на ${spreadPct.toFixed(0)}% — рассмотрите режим «по размерам»`
+                : ''}
+            </CalloutBox>
           )}
           {Number.isFinite(wastage) && wastage > 0 && (
             <CalloutBox tone='warning'>

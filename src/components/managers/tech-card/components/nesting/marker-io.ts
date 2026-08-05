@@ -11,8 +11,11 @@ import type {
 import type { NestConfig, NestResult, PieceDTO, RotationDeg, Unit } from 'lib/nesting/types';
 
 // The BOM fabric line as the marker features need it — a projection of the card form's
-// bomItems rows (strings exactly as the form holds them).
+// bomItems rows (strings exactly as the form holds them). `id` is the server PK: 0 means
+// the row was added in the UI but the card was never saved — the backend cannot resolve
+// its line_key yet, so a marker must not link to it.
 export type MarkerBomLine = {
+  id: number;
   lineKey: string;
   name: string;
   unit: string;
@@ -21,6 +24,27 @@ export type MarkerBomLine = {
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
+
+// Newest-first comparator shared by every «latest marker» pick — one clock, one rule
+// (whole-second RFC3339 strings compare fine lexicographically; localeCompare keeps
+// same-second ties deterministic).
+export function newerMarker(
+  a: common_TechCardMarkerSummary,
+  b: common_TechCardMarkerSummary,
+): number {
+  return String(b.updatedAt ?? '').localeCompare(String(a.updatedAt ?? ''));
+}
+
+// Meaningful download name: SEASON-STYLE-размер-ткань-маркер.ext, empty segments omitted,
+// path-hostile characters replaced. Cyrillic is kept as-is (владелец: не транслитерировать).
+export function exportFileName(parts: Array<string | undefined>, ext: string): string {
+  const clean = parts
+    .map((p) => (p ?? '').trim().replace(/\.(dxf|pdf|svg)$/i, ''))
+    .filter(Boolean)
+    .map((p) => p.replace(/[\\/:*?"<>|#%\s]+/g, ' ').trim().replace(/\s+/g, '_'));
+  return `${clean.join('-') || 'раскладка'}.${ext}`;
+}
 
 // google.type.Decimal encode/decode for marker figures (2 decimals is the storage scale).
 export function dec(n: number): googletype_Decimal {
@@ -44,7 +68,9 @@ export function consumptionCm(s: common_TechCardMarkerSummary): number {
 // unambiguous (design §3: не угадывать). null = the line's unit cannot take a layout.
 export function toBomUnit(cm: number, unit?: string): { value: number; unit: string } | null {
   const u = (unit ?? '').trim().toLowerCase();
-  if (u === 'м' || u === 'm') return { value: r2(cm / 100), unit: u };
+  // 3 decimals: tech_card_colorway_usage.consumption is DECIMAL(10,3) — r2 on metres
+  // throws away a digit the column holds (4+ m lost per 1000 units).
+  if (u === 'м' || u === 'm') return { value: r3(cm / 100), unit: u };
   if (u === 'см' || u === 'cm') return { value: r2(cm), unit: u };
   return null;
 }
@@ -66,7 +92,7 @@ export function latestPerSize(
     const sid = m.sizeId ?? 0;
     if (!sid) continue;
     const prev = bySize.get(sid);
-    if (!prev || String(m.updatedAt ?? '') > String(prev.updatedAt ?? '')) bySize.set(sid, m);
+    if (!prev || newerMarker(m, prev) < 0) bySize.set(sid, m);
   }
   return bySize;
 }
@@ -84,6 +110,10 @@ export function buildMarkerLayout(args: {
   config: Pick<NestConfig, 'targetLengthCm' | 'rdpEpsCm' | 'timeBudgetMs'>;
   tol: number;
   tolChain: number;
+  // Parse-time warnings (failed fetches, unit overrides, dropped loops) — they describe
+  // the data the marker was BUILT from, so they must survive into the blob (a marker that
+  // silently omits «файл не скачался» reads as a clean complete norm).
+  parseWarnings?: string[];
 }): common_TechCardMarkerLayout {
   const { pieces, perSetQty, urlBySource, result, unit, config } = args;
   const used = new Set(result.placements.map((p) => p.pieceId));
@@ -117,7 +147,7 @@ export function buildMarkerLayout(args: {
       xCm: r2(pl.x),
       yCm: r2(pl.y),
     })),
-    warnings: result.warnings,
+    warnings: [...(args.parseWarnings ?? []), ...result.warnings],
   };
 }
 

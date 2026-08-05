@@ -1689,7 +1689,11 @@ export function TechCardForm({
                 <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
               </Section>
               <Section title='выкройки (PDF/DXF) — по размерам'>
-                <PatternsField techCardId={numId || undefined} />
+                <PatternsField
+                  techCardId={numId || undefined}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                  savedSizeIds={techCard?.techCard?.sizeIds ?? undefined}
+                />
               </Section>
               <Section title='раскладки (маркеры) — расход ткани по размерам'>
                 <MarkersSection

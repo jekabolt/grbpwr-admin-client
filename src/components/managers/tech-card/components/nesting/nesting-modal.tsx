@@ -24,7 +24,7 @@ import type { NestConfig, NestResult, PieceDTO, Unit } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
-import { buildMarkerLayout, dec, markerToView, type MarkerBomLine } from './marker-io';
+import { buildMarkerLayout, dec, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
 import { useNesting, type NestingFile } from './use-nesting';
 
 type PieceSel = Record<number, { checked: boolean; qty: number }>;
@@ -54,6 +54,10 @@ export function NestingModal({
   sizeId,
   bomLines,
   view,
+  canEdit = true,
+  savedSizeIds,
+  season,
+  styleNumber,
 }: {
   files: NestingFile[] | null; // null = closed (nest mode)
   sizeLabel?: string;
@@ -66,6 +70,15 @@ export function NestingModal({
   // A stored marker to DISPLAY: no worker, no DXF fetch — geometry comes from the blob.
   // Editing a stored layout is Ф5; this mode is view + export.
   view?: common_TechCardMarker | null;
+  // Mirrors MarkersSection's delete gate: RBAC write + not released. Default true keeps
+  // compute-only embeddings working.
+  canEdit?: boolean;
+  // The sizes the SERVER knows (a size added to the form but never saved cannot take a
+  // marker — the backend validates against the stored range).
+  savedSizeIds?: number[];
+  // Filename context: осмысленные имена экспортов (SEASON-STYLE-размер-…).
+  season?: string;
+  styleNumber?: string;
 }) {
   const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(files);
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
@@ -180,21 +193,36 @@ export function NestingModal({
     },
     [],
   );
+  // A degraded marker (unreadable blob → summary only) has no geometry to export: the
+  // buttons would emit a STRIP-rectangle-only file that a plotter would happily cut.
+  const viewDegraded =
+    viewData != null &&
+    (viewData.pieces.length === 0 || viewData.result.placements.length === 0);
+  // Осмысленное имя файла: SEASON-STYLE-размер-ткань-маркер (пустые части опускаются).
+  const fileParts = (): Array<string | undefined> => {
+    if (viewData) {
+      return [season, styleNumber, sizeLabel, view?.summary?.bomItemName, view?.summary?.name];
+    }
+    const fabric =
+      slot?.name ||
+      ((files ?? []).length === 1 ? (files ?? [])[0].name : undefined);
+    return [season, styleNumber, sizeLabel, fabric];
+  };
   const download = (content: string, mime: string, ext: string) => {
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `раскладка${sizeLabel ? `-${sizeLabel}` : ''}.${ext}`;
+    a.download = exportFileName(fileParts(), ext);
     a.click();
     // Deferred: Safari/Firefox may not have started the download when click() returns.
     downloadTimer.current = window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
   const downloadSvg = () => {
-    if (svg) download(svg, 'image/svg+xml', 'svg');
+    if (svg && !viewDegraded) download(svg, 'image/svg+xml', 'svg');
   };
   // Plotter export: R12 DXF of the finished layout, true contours, cm.
-  const dxfReady = viewData != null || run.phase === 'done';
+  const dxfReady = (viewData != null && !viewDegraded) || run.phase === 'done';
   const downloadDxf = () => {
     if (!dxfReady || !displayResult) return;
     download(renderLayoutDxf(displayResult, displayPieces, displayWidth), 'application/dxf', 'dxf');
@@ -217,16 +245,27 @@ export function NestingModal({
   const [slotKey, setSlotKey] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const fabricLines = bomLines ?? [];
+  // A slot added in the UI but never saved (id 0) cannot be linked — the server resolves
+  // bom_line_key against SAVED rows and would reject the whole marker after a paid nest.
+  const fabricLines = (bomLines ?? []).filter((b) => b.id > 0);
+  const unsavedSlots = (bomLines ?? []).length - fabricLines.length;
   const slot = fabricLines.find((b) => b.lineKey === slotKey);
   // The prefill follows the chosen slot until the operator edits the name by hand.
   const defaultName = `${sizeLabel ?? ''}${sizeLabel ? ' · ' : ''}${slot?.name?.trim() || `${widthCm} см`}`;
-  const nameValue = nameTouched ? markerName : defaultName;
+  const nameValue = nameTouched ? markerName : [...defaultName].slice(0, 191).join('');
   const slotWidth = slot ? parseDecimalNumber(slot.fabricWidth) : NaN;
   const widthMismatch = Number.isFinite(slotWidth) && slotWidth > 0 && Math.abs(slotWidth - widthCm) > 0.5;
 
+  // A failed source fetch means the run nested a SUBSET: placed==total holds (the missing
+  // pieces never parsed), but the marker would read as a clean complete norm. Block save.
+  const fetchFailed =
+    parse.phase === 'ready' && parse.warnings.some((w) => w.includes('не удалось скачать'));
+  const sizeUnsaved = savedSizeIds != null && sizeId != null && !savedSizeIds.includes(sizeId);
   const canSave =
     !viewData &&
+    canEdit &&
+    !fetchFailed &&
+    !sizeUnsaved &&
     run.phase === 'done' &&
     run.result.placedCount === run.result.totalCount &&
     run.result.placements.length > 0 &&
@@ -254,6 +293,7 @@ export function NestingModal({
         config: { targetLengthCm: target, rdpEpsCm: NEST_DEFAULTS.rdpEpsCm, timeBudgetMs: budgetS * 1000 },
         tol: NEST_DEFAULTS.tol,
         tolChain: NEST_DEFAULTS.tolChain,
+        parseWarnings: parse.warnings,
       });
       await adminService.SaveTechCardMarker({
         id: 0,
@@ -277,9 +317,12 @@ export function NestingModal({
       });
       showMessage('маркер сохранён — расход виден в костинге', 'success');
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+      // marker_count rides the list rows too.
+      qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       setSaveOpen(false);
       setNameTouched(false);
       setMarkerName('');
+      setSlotKey('');
     } catch (e) {
       showMessage(e instanceof Error && e.message ? e.message : 'не удалось сохранить маркер', 'error');
     } finally {
@@ -662,7 +705,13 @@ export function NestingModal({
                   title={
                     canSave
                       ? 'сохранить маркер в тех-карту — расход уйдёт в костинг'
-                      : 'сохранить можно завершённую раскладку, в которую поместились все детали'
+                      : !canEdit
+                        ? 'нет прав на изменение карточки, либо она released'
+                        : fetchFailed
+                          ? 'часть DXF не скачалась — раскладка неполная, такой маркер занизил бы расход'
+                          : sizeUnsaved
+                            ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
+                            : 'сохранить можно завершённую раскладку, в которую поместились все детали'
                   }
                   onClick={() => setSaveOpen(true)}
                 >
@@ -670,14 +719,24 @@ export function NestingModal({
                 </Button>
               </>
             )}
-            <Button type='button' variant='secondary' disabled={!svg || running} onClick={downloadSvg}>
+            <Button
+              type='button'
+              variant='secondary'
+              disabled={!svg || running || viewDegraded}
+              title={viewDegraded ? 'геометрия маркера нечитаема — доступна только сводка' : undefined}
+              onClick={downloadSvg}
+            >
               скачать SVG
             </Button>
             <Button
               type='button'
               variant='secondary'
               disabled={!dxfReady}
-              title='DXF R12 для реза — контуры на слое CUT, кромка STRIP, подписи LABELS'
+              title={
+                viewDegraded
+                  ? 'геометрия маркера нечитаема — доступна только сводка'
+                  : 'DXF R12 для реза — контуры на слое CUT, кромка STRIP, подписи LABELS'
+              }
               onClick={downloadDxf}
             >
               скачать DXF
@@ -737,10 +796,27 @@ export function NestingModal({
               onChange={(v: string | number) => setSlotKey(String(v))}
             />
           </label>
+          {unsavedSlots > 0 && (
+            <Text size='nano' variant='label' component='p'>
+              новые слоты BOM появятся здесь после сохранения карточки
+            </Text>
+          )}
           {widthMismatch && (
             <CalloutBox tone='warning'>
               ширина полотна раскладки ({widthCm} см) отличается от ширины артикула слота (
               {slotWidth} см) — расход будет применим только к этой ширине
+            </CalloutBox>
+          )}
+          {parse.phase === 'ready' && parse.warnings.length > 0 && (
+            <CalloutBox tone='note' className='max-h-20 space-y-0.5 overflow-y-auto'>
+              <Text size='nano' component='p'>
+                предупреждения парсинга сохранятся вместе с маркером:
+              </Text>
+              {parse.warnings.map((w, i) => (
+                <Text key={i} size='nano' component='p'>
+                  {w}
+                </Text>
+              ))}
             </CalloutBox>
           )}
           <Text size='nano' variant='label' component='p'>

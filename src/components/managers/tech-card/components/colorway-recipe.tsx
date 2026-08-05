@@ -116,6 +116,7 @@ type BomLine = {
   unitPrice?: string; // decimal string
   currency?: string;
   wastagePercent?: string; // decimal string
+  fabricWidth?: string; // decimal string, cm — the slot's default cloth width
   // structured { part: [{ code, percent }] } JSON on catalog-linked / picker-authored lines, free
   // text only on legacy rows — read it through parseCompositionCode, never with a bare regex.
   composition?: string;
@@ -1273,6 +1274,9 @@ function SlotUsageRow({
               lineKey={draft.bomLineKey}
               unit={unit}
               wastagePercent={slot?.wastagePercent ?? ''}
+              // Effective article width: the pinned/linked material's catalog width first
+              // (a colourway pin can be a different cloth), the slot's own width otherwise.
+              articleWidth={material?.fabricWidth?.value ?? slot?.fabricWidth ?? ''}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
@@ -2469,6 +2473,7 @@ export function ColorwayRecipes({
             unitPrice: b.unitPrice,
             currency: b.currency,
             wastagePercent: b.wastagePercent,
+            fabricWidth: b.fabricWidth,
             composition: b.composition,
             materialId,
             material: materialId > 0 ? materialById.get(materialId) : undefined,

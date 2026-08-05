@@ -10,12 +10,14 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useState } from 'react';
+import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { consumptionCm, decNum } from './marker-io';
+import type { TechCardFormData } from '../schema';
 
 const NestingModal = lazy(() =>
   import('./nesting-modal').then((m) => ({ default: m.NestingModal })),
@@ -38,6 +40,8 @@ export function MarkersSection({
 }) {
   const markers = techCard?.markers ?? [];
   const sizeById = useSizeNames();
+  const season = (useWatch<TechCardFormData>({ name: 'season' }) ?? '') as string;
+  const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
 
@@ -66,6 +70,7 @@ export function MarkersSection({
       await adminService.DeleteTechCardMarker({ id: deleting.id });
       showMessage('маркер удалён', 'success');
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+      qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       setDeleting(null);
     } catch (e) {
       showMessage(e instanceof Error && e.message ? e.message : 'не удалось удалить маркер', 'error');
@@ -114,10 +119,12 @@ export function MarkersSection({
                   </td>
                   <td>{formatSizeName(sizeById.get(m.sizeId ?? 0) ?? `#${m.sizeId}`)}</td>
                   <td>
-                    {m.bomLineKey ? (
-                      m.bomItemName || <Pill tone='warn'>слот удалён</Pill>
-                    ) : (
-                      <EmptyCell />
+                    {/* The wire cannot tell «never linked» from «slot deleted» (both come
+                        from the same LEFT JOIN going NULL) — one honest label, no fake pill. */}
+                    {m.bomItemName || (
+                      <Text size='nano' variant='label' component='span'>
+                        не привязан / удалён
+                      </Text>
                     )}
                   </td>
                   <td>{decNum(m.fabricWidthCm)} см</td>
@@ -167,7 +174,16 @@ export function MarkersSection({
             </Text>
           }
         >
-          <NestingModal files={null} view={view} onClose={() => setView(null)} />
+          <NestingModal
+            files={null}
+            view={view}
+            sizeLabel={formatSizeName(
+              sizeById.get(view.summary?.sizeId ?? 0) ?? `#${view.summary?.sizeId ?? 0}`,
+            )}
+            season={season}
+            styleNumber={styleNumber}
+            onClose={() => setView(null)}
+          />
         </Suspense>
       )}
 
