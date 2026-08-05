@@ -2176,6 +2176,34 @@ export type StyleNumberSource =
   | "STYLE_NUMBER_SOURCE_UNKNOWN"
   | "STYLE_NUMBER_SOURCE_GENERATED"
   | "STYLE_NUMBER_SOURCE_MANUAL";
+// AssemblyResolutionBasis records WHY the packing spec named (or refused to name) a warehouse bucket
+// for one assembly line of one order item — the difference between "this is the black bag because the
+// garment is black" and "this is the only bag there is". A packer reading a prescribed colour has to be
+// able to tell a match from a substitution, and an operator facing a refusal has to be told which
+// refusal it is, because each has a different fix.
+// The three resolved values are ordered by strength; the four unresolved ones each name their own fix.
+export type AssemblyResolutionBasis =
+  // Not attempted: a bill read on its own (ListStyleAssembly) has no order item to resolve against.
+  | "ASSEMBLY_RESOLUTION_BASIS_UNKNOWN"
+  // Resolved: an ACTIVE colour variant whose code equals the item's colourway. The real answer.
+  | "ASSEMBLY_RESOLUTION_BASIS_COLOR_MATCH"
+  // Resolved by substitution: the card has exactly ONE live colour, so there is no choice to get
+  // wrong (a single-colour dust bag ships with every colourway). Not a colour match — show it as such.
+  | "ASSEMBLY_RESOLUTION_BASIS_SOLE_VARIANT"
+  // Resolved: the card has no colours at all and its single tech_card.output_material_id stands.
+  | "ASSEMBLY_RESOLUTION_BASIS_LEGACY_OUTPUT"
+  // Unresolved: the item's colour EXISTS on this card but is RETIRED. Never auto-substituted — fix by
+  // reactivating that colour, or by deciding a substitute deliberately.
+  | "ASSEMBLY_RESOLUTION_BASIS_RETIRED_COLOR"
+  // Unresolved: the card has live colours, none of them this item's (and more than one, so no sole
+  // fallback). Fix by adding the colour.
+  | "ASSEMBLY_RESOLUTION_BASIS_NO_COLOR_MATCH"
+  // Unresolved: a bucket WAS named but its material is archived nomenclature. Fix by un-archiving it
+  // or pointing the colour at a live material.
+  | "ASSEMBLY_RESOLUTION_BASIS_ARCHIVED_MATERIAL"
+  // Unresolved: the component card has neither colours nor an output material — it was never wired to
+  // the warehouse. Fix on the card.
+  | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
 // TechCardMediaItem is a writable sketch-media reference (id + kind).
 export type TechCardMediaItem = {
   mediaId: number | undefined;
