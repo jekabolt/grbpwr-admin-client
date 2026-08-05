@@ -122,6 +122,11 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    worker: {
+      // Vite's default worker format is iife, which breaks the moment a worker chunk
+      // contains a dynamic import (the nesting worker's dependency graph does).
+      format: 'es' as const,
+    },
     build: {
       outDir: 'dist',
       sourcemap: false,

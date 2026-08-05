@@ -5,7 +5,7 @@ import {
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -17,7 +17,14 @@ import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { MAX_PATTERN_NAME, formatBytes, isDxfUrl, patternFileError } from 'utils/pattern';
+import type { NestingFile } from './nesting/use-nesting';
 import { TechCardFormData } from './schema';
+
+// The whole nesting feature (modal + worker + dxf/clipper deps) lives in a lazy chunk —
+// nothing loads until someone actually opens a раскладка.
+const NestingModal = lazy(() =>
+  import('./nesting/nesting-modal').then((m) => ({ default: m.NestingModal })),
+);
 
 type PatternRow = {
   sizeId?: number;
@@ -70,6 +77,8 @@ export function PatternsField() {
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Inline rename in progress: which row and the draft value.
   const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
+  // Раскладка modal: the DXF files of one size, pooled (null = closed).
+  const [nesting, setNesting] = useState<{ sizeLabel: string; files: NestingFile[] } | null>(null);
 
   const rowsBySize = useMemo(() => {
     const m = new Map<number, Array<{ row: PatternRow; index: number }>>();
@@ -127,6 +136,13 @@ export function PatternsField() {
     for (const x of bad) showMessage(`${x.f.name}: ${x.err}`, 'error');
     const good = files.filter((f) => !patternFileError(f));
     if (good.length > 0) setDroppedOn({ sizeId, files: good });
+  }
+
+  // The DXF rows of one size, as CDN-backed inputs for the раскладка modal.
+  function dxfFilesOf(slot: SizeSlot): NestingFile[] {
+    return slot.files
+      .filter(({ row }) => isDxfUrl(row.url) && row.url)
+      .map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
   }
 
   function commitRename(index: number, row: PatternRow, value: string) {
@@ -314,6 +330,18 @@ export function PatternsField() {
               className='mt-1 [&_button]:w-full [&_button]:px-1.5 [&_button]:py-px [&_button]:text-micro [&_button]:tracking-label'
             />
           )}
+          {dxfFilesOf(slot).length > 0 && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              className='mt-1 w-full'
+              title='авто-раскладка DXF-деталей этого размера на полосе ткани'
+              onClick={() => setNesting({ sizeLabel: label, files: dxfFilesOf(slot) })}
+            >
+              ⌗ раскладка
+            </Button>
+          )}
         </Tile>
       </div>
     );
@@ -394,6 +422,17 @@ export function PatternsField() {
         sizeBytes={viewing?.sizeBytes}
         onClose={() => setViewing(null)}
       />
+
+      {/* Раскладка (nesting) — the whole feature is a lazy chunk; mounted only when open. */}
+      {nesting && (
+        <Suspense fallback={null}>
+          <NestingModal
+            files={nesting.files}
+            sizeLabel={nesting.sizeLabel}
+            onClose={() => setNesting(null)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }

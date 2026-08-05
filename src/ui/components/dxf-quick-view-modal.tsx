@@ -1,10 +1,6 @@
+import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useEffect, useRef, useState } from 'react';
 import { formatBytes } from 'utils/pattern';
-
-// Same resolution scheme as the image cropper's proxy (see lib/features/getCropped.ts).
-const MEDIA_PROXY =
-  (import.meta.env.VITE_MEDIA_PROXY_URL as string | undefined) ||
-  (typeof window !== 'undefined' ? `${window.location.origin}/media-proxy` : '/media-proxy');
 import { Button } from './button';
 import { ConfirmationModal } from './confirmation-modal';
 import Text from './text';
@@ -37,28 +33,17 @@ export function DxfQuickViewModal({
 
     let blobUrl: string | null = null;
 
-    // dxf-viewer fetches its url itself, and the Spaces CDN serves patterns without CORS
-    // headers — so fetch the bytes here (direct first, media proxy on a CORS failure, the
-    // same dance the image cropper does) and hand the viewer a same-origin blob url.
-    async function fetchAsBlobUrl(target: string): Promise<string> {
-      let res: Response;
-      try {
-        res = await fetch(target);
-      } catch {
-        res = await fetch(`${MEDIA_PROXY}?url=${encodeURIComponent(target)}`);
-      }
-      if (!res.ok) throw new Error(`DXF fetch failed: ${res.status}`);
-      return URL.createObjectURL(await res.blob());
-    }
-
     (async () => {
       try {
-        const [{ DxfViewer }, three, fetched] = await Promise.all([
+        // dxf-viewer fetches its url itself, and the Spaces CDN serves patterns without
+        // CORS headers — fetch the bytes here (shared direct→proxy helper) and hand the
+        // viewer a same-origin blob url.
+        const [{ DxfViewer }, three, blob] = await Promise.all([
           import('dxf-viewer'),
           import('three'),
-          fetchAsBlobUrl(url),
+          fetchMediaBlob(url),
         ]);
-        blobUrl = fetched;
+        blobUrl = URL.createObjectURL(blob);
         const container = containerRef.current;
         if (!container || disposed) return;
         // Match the app surface: the canvas clears to the page's own bgColor token, and
