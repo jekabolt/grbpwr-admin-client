@@ -20,12 +20,17 @@ import Selector from 'ui/components/selector';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
-import type { NestConfig, NestResult, PieceDTO, Unit } from 'lib/nesting/types';
+import type { NestConfig, NestResult, Placement, PieceDTO, Unit } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
+import { checkLayout, measureLayout } from 'lib/nesting/geom/clearance';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
-import { buildMarkerLayout, dec, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
+import { LayoutEditor } from './layout-editor';
+import { buildMarkerLayout, dec, decNum, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
 import { useNesting, type NestingFile } from './use-nesting';
+
+// Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
+const MANUAL_NOTE_PREFIX = 'ручная правка:';
 
 type PieceSel = Record<number, { checked: boolean; qty: number }>;
 
@@ -123,10 +128,19 @@ export function NestingModal({
   const result: NestResult | null =
     run.phase === 'done' ? run.result : run.phase === 'running' ? run.best : null;
 
+  // ── ручная доводка (Ф5) ────────────────────────────────────────────────────────────────
+  // manual = hand-edited placements overriding the engine/blob result; null = untouched.
+  const [manual, setManual] = useState<Placement[] | null>(null);
+  // View mode starts read-only; «редактировать» switches the stored layout into the editor.
+  const [editView, setEditView] = useState(false);
+  const [runConfirm, setRunConfirm] = useState(false);
+
   // A result computed for other parameters is stale — drop it the moment they change
-  // (inputs are disabled while running, so this can only fire against a done run).
+  // (inputs are disabled while running, so this can only fire against a done run). Manual
+  // edits were made against that result and die with it.
   useEffect(() => {
     resetRun();
+    setManual(null);
   }, [widthCm, gapCm, marginCm, crossGrain, sel, setsN, resetRun]);
 
   const target = targetCm === '' ? undefined : targetCm;
@@ -136,22 +150,63 @@ export function NestingModal({
   const displayResult = viewData ? viewData.result : result;
   const displayWidth = viewData ? viewData.widthCm : widthCm;
   const displayTarget = viewData ? viewData.targetCm : target;
+  // Validation parameters follow the layout's own params in view mode.
+  const displayGap = viewData ? decNum(view?.summary?.gapCm) : gapCm;
+  const displayMargin = viewData ? decNum(view?.summary?.edgeMarginCm) : marginCm;
+  const displayCross = viewData ? !!view?.summary?.allowCrossGrain : crossGrain;
 
-  // Live preview renders simplified contours (every coalesced frame re-parses the SVG);
-  // the finished layout renders exact — that's also what «скачать SVG» exports.
-  const svg = useMemo(
+  // The effective layout: manual placements override, length/efficiency re-measured from
+  // true contours; untouched layouts keep the engine's own accounting verbatim.
+  const effective: NestResult | null = useMemo(() => {
+    if (!displayResult) return null;
+    if (!manual) return displayResult;
+    const m = measureLayout({
+      pieces: displayPieces,
+      placements: manual,
+      widthCm: displayWidth,
+      marginCm: displayMargin,
+    });
+    return { ...displayResult, placements: manual, usedLengthCm: m.usedLengthCm, efficiency: m.efficiency };
+  }, [displayResult, manual, displayPieces, displayWidth, displayMargin]);
+
+  // Clearance validation: once per drop/rotate (placements identity), never per drag frame
+  // and never while the GA is streaming previews.
+  const violations = useMemo(() => {
+    if (!effective || running) return [];
+    return checkLayout({
+      pieces: displayPieces,
+      placements: effective.placements,
+      widthCm: displayWidth,
+      gapCm: displayGap,
+      marginCm: displayMargin,
+    });
+  }, [effective, running, displayPieces, displayWidth, displayGap, displayMargin]);
+  const violatingIdx = useMemo(() => new Set(violations.map((v) => v.index)), [violations]);
+  const worstViolation = violations.length
+    ? violations.reduce((a, b) => (a.clearance <= b.clearance ? a : b))
+    : null;
+  const manualNote =
+    manual && violations.length && worstViolation
+      ? `${MANUAL_NOTE_PREFIX} ${violations.length} нарушений зазора (худший ${worstViolation.clearance.toFixed(2)} см < ${worstViolation.required.toFixed(2)} см)`
+      : null;
+
+  const editingActive =
+    !running &&
+    canEdit &&
+    ((viewData != null && editView) || (viewData == null && run.phase === 'done'));
+
+  // The GA's streaming preview keeps the cheap string-SVG path (simplified contours,
+  // innerHTML); a finished/stored layout renders through the interactive editor instead.
+  // «скачать SVG» always exports the EFFECTIVE layout (manual edits included), exact.
+  const liveSvg = useMemo(
     () =>
-      displayResult
-        ? renderLayoutSvg(
-            displayResult,
-            displayPieces,
-            displayWidth,
-            displayTarget,
-            run.phase === 'running' ? 0.05 : 0,
-          )
+      running && displayResult
+        ? renderLayoutSvg(displayResult, displayPieces, displayWidth, displayTarget, 0.05)
         : null,
-    [displayResult, displayPieces, displayWidth, displayTarget, run.phase],
+    [running, displayResult, displayPieces, displayWidth, displayTarget],
   );
+  const exportSvg = () =>
+    effective ? renderLayoutSvg(effective, displayPieces, displayWidth, displayTarget, 0) : null;
 
   const checkedCount = pieces.filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id)).length;
   // Total instances that will actually be nested: Σ qty × комплекты over the selection.
@@ -169,8 +224,15 @@ export function NestingModal({
     return [...m.entries()];
   }, [pieces]);
 
+  // Ручные правки живут поверх конкретного результата — новый запуск их сносит; спросим.
+  const requestRun = () => {
+    if (manual) setRunConfirm(true);
+    else startRun();
+  };
   const startRun = () => {
     if (parse.phase !== 'ready') return;
+    setManual(null);
+    setRunConfirm(false);
     const config: NestConfig = {
       pieces: pieces
         .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
@@ -219,21 +281,23 @@ export function NestingModal({
     downloadTimer.current = window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
   const downloadSvg = () => {
-    if (svg && !viewDegraded) download(svg, 'image/svg+xml', 'svg');
+    const s = exportSvg();
+    if (s && !viewDegraded && !running) download(s, 'image/svg+xml', 'svg');
   };
-  // Plotter export: R12 DXF of the finished layout, true contours, cm.
+  // Plotter export: R12 DXF of the finished layout, true contours, cm — the EFFECTIVE
+  // placements, so a hand-adjusted marker cuts exactly what the operator sees.
   const dxfReady = (viewData != null && !viewDegraded) || run.phase === 'done';
   const downloadDxf = () => {
-    if (!dxfReady || !displayResult) return;
-    download(renderLayoutDxf(displayResult, displayPieces, displayWidth), 'application/dxf', 'dxf');
+    if (!dxfReady || !effective) return;
+    download(renderLayoutDxf(effective, displayPieces, displayWidth), 'application/dxf', 'dxf');
   };
 
   const verdict =
-    displayResult && displayTarget != null
-      ? displayResult.usedLengthCm <= displayTarget &&
-        displayResult.placedCount === displayResult.totalCount
-        ? { ok: true, text: `влезает · запас ${(displayTarget - displayResult.usedLengthCm).toFixed(1)} см` }
-        : { ok: false, text: `не влезает · нужно ${displayResult.usedLengthCm.toFixed(1)} см` }
+    effective && displayTarget != null
+      ? effective.usedLengthCm <= displayTarget &&
+        effective.placedCount === effective.totalCount
+        ? { ok: true, text: `влезает · запас ${(displayTarget - effective.usedLengthCm).toFixed(1)} см` }
+        : { ok: false, text: `не влезает · нужно ${effective.usedLengthCm.toFixed(1)} см` }
       : null;
 
   // ── «сохранить раскладку» (Ф4б) ────────────────────────────────────────────────────────
@@ -274,6 +338,7 @@ export function NestingModal({
 
   async function saveMarker() {
     if (!canSave || run.phase !== 'done' || parse.phase !== 'ready' || !techCardId || !sizeId) return;
+    if (!effective) return;
     const name = nameValue.trim();
     if (!name) return;
     setSaving(true);
@@ -284,11 +349,17 @@ export function NestingModal({
         if (s?.checked) perSetQty.set(p.id, Math.max(1, Math.round(s.qty)));
       }
       const urlBySource = new Map((files ?? []).map((f) => [f.name, f.url]));
+      // The EFFECTIVE layout is saved: hand-adjusted placements, re-measured length, and an
+      // explicit warning when the operator accepted clearance violations (cutter's call —
+      // never blocked, always on the record).
       const layout = buildMarkerLayout({
         pieces,
         perSetQty,
         urlBySource,
-        result: run.result,
+        result: {
+          ...effective,
+          warnings: [...effective.warnings, ...(manualNote ? [manualNote] : [])],
+        },
         unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
         config: { targetLengthCm: target, rdpEpsCm: NEST_DEFAULTS.rdpEpsCm, timeBudgetMs: budgetS * 1000 },
         tol: NEST_DEFAULTS.tol,
@@ -301,17 +372,17 @@ export function NestingModal({
         marker: {
           sizeId,
           name,
-          source: 'auto',
+          source: manual ? 'manual' : 'auto',
           bomLineKey: slotKey,
           fabricWidthCm: dec(widthCm),
           gapCm: dec(gapCm),
           edgeMarginCm: dec(marginCm),
           allowCrossGrain: crossGrain,
           sets: setsN,
-          usedLengthCm: dec(run.result.usedLengthCm),
-          efficiencyPct: dec(run.result.efficiency * 100),
-          placedCount: run.result.placedCount,
-          totalCount: run.result.totalCount,
+          usedLengthCm: dec(effective.usedLengthCm),
+          efficiencyPct: dec(effective.efficiency * 100),
+          placedCount: effective.placedCount,
+          totalCount: effective.totalCount,
           layout,
         },
       });
@@ -325,6 +396,68 @@ export function NestingModal({
       setSlotKey('');
     } catch (e) {
       showMessage(e instanceof Error && e.message ? e.message : 'не удалось сохранить маркер', 'error');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Сохранение правок ОТКРЫТОГО маркера: id round-trip, метаданные проезжают из summary
+  // как есть (Decimal-объекты не перекодируются), геометрия — из оригинального блоба с
+  // новыми placements; прежние «ручная правка» заметки замещаются свежей.
+  const canSaveView =
+    viewData != null &&
+    editView &&
+    manual != null &&
+    canEdit &&
+    !viewDegraded &&
+    !!techCardId &&
+    !!view?.summary?.id;
+  async function updateViewMarker() {
+    if (!canSaveView || !view?.summary || !effective || !techCardId) return;
+    const s = view.summary;
+    setSaving(true);
+    try {
+      const keptWarnings = (view.layout?.warnings ?? []).filter(
+        (w) => !w.startsWith(MANUAL_NOTE_PREFIX),
+      );
+      await adminService.SaveTechCardMarker({
+        id: s.id ?? 0,
+        techCardId,
+        marker: {
+          sizeId: s.sizeId ?? 0,
+          name: s.name ?? '',
+          source: 'manual',
+          bomLineKey: s.bomLineKey ?? '',
+          fabricWidthCm: s.fabricWidthCm,
+          gapCm: s.gapCm,
+          edgeMarginCm: s.edgeMarginCm,
+          allowCrossGrain: !!s.allowCrossGrain,
+          sets: s.sets ?? 1,
+          usedLengthCm: dec(effective.usedLengthCm),
+          efficiencyPct: dec(effective.efficiency * 100),
+          placedCount: s.placedCount ?? effective.placedCount,
+          totalCount: s.totalCount ?? effective.totalCount,
+          layout: {
+            schemaVersion: view.layout?.schemaVersion ?? 1,
+            params: view.layout?.params,
+            pieces: view.layout?.pieces ?? [],
+            placements: effective.placements.map((pl) => ({
+              pieceId: pl.pieceId,
+              instance: pl.instance,
+              rotDeg: pl.rot,
+              xCm: Math.round(pl.x * 100) / 100,
+              yCm: Math.round(pl.y * 100) / 100,
+            })),
+            warnings: [...keptWarnings, ...(manualNote ? [manualNote] : [])],
+          },
+        },
+      });
+      showMessage('правки маркера сохранены', 'success');
+      qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+      qc.invalidateQueries({ queryKey: techCardKeys.lists() });
+      onClose();
+    } catch (e) {
+      showMessage(e instanceof Error && e.message ? e.message : 'не удалось сохранить правки', 'error');
     } finally {
       setSaving(false);
     }
@@ -608,12 +741,27 @@ export function NestingModal({
           )}
         </div>
 
-        {/* Right pane: the strip to scale + stats. */}
+        {/* Right pane: the strip to scale + stats. Finished/stored layouts render through
+            the interactive editor (drag/rotate when editing is allowed); the GA's streaming
+            preview keeps the cheap string-SVG path. */}
         <div className='min-w-0 flex-1 space-y-2'>
-          {svg ? (
+          {running && liveSvg ? (
             <div
               className='max-h-[56vh] w-full overflow-auto border border-borderColor bg-bgColor [&_svg]:h-auto [&_svg]:w-full'
-              dangerouslySetInnerHTML={{ __html: svg }}
+              dangerouslySetInnerHTML={{ __html: liveSvg }}
+            />
+          ) : effective && !running ? (
+            <LayoutEditor
+              pieces={displayPieces}
+              placements={effective.placements}
+              widthCm={displayWidth}
+              usedLengthCm={effective.usedLengthCm}
+              targetCm={displayTarget}
+              marginCm={displayMargin}
+              allowCrossGrain={displayCross}
+              editable={editingActive}
+              violating={violatingIdx}
+              onChange={(next) => setManual(next)}
             />
           ) : (
             <div className='flex h-[40vh] items-center justify-center border border-borderColor bg-bgColor'>
@@ -626,24 +774,37 @@ export function NestingModal({
               </Text>
             </div>
           )}
+          {violations.length > 0 && !running && (
+            <CalloutBox tone='warning'>
+              нарушения зазора: {violations.length}
+              {worstViolation
+                ? ` · худший ${worstViolation.clearance.toFixed(2)} см < ${worstViolation.required.toFixed(2)} см`
+                : ''}{' '}
+              — экспорт и сохранение не блокируются, решение за раскройщиком
+            </CalloutBox>
+          )}
 
-          {displayResult && (
+          {effective && (
             <StatGrid min={120}>
-              <Stat label='использовано' value={`${displayResult.usedLengthCm.toFixed(1)} см`} />
+              <Stat
+                label='использовано'
+                value={`${effective.usedLengthCm.toFixed(1)} см`}
+                sub={manual ? 'с ручной правкой' : undefined}
+              />
               <Stat
                 label='эффективность'
-                value={`${(displayResult.efficiency * 100).toFixed(1)} %`}
+                value={`${(effective.efficiency * 100).toFixed(1)} %`}
                 sub={`ткань ${displayWidth} см`}
               />
               <Stat
                 label='размещено'
-                value={`${displayResult.placedCount}/${displayResult.totalCount}`}
-                tone={displayResult.placedCount === displayResult.totalCount ? undefined : 'down'}
+                value={`${effective.placedCount}/${effective.totalCount}`}
+                tone={effective.placedCount === effective.totalCount ? undefined : 'down'}
               />
               {viewData && view?.summary && (
                 <Stat
                   label='расход / ед'
-                  value={`${(displayResult.usedLengthCm / Math.max(1, view.summary.sets ?? 1)).toFixed(1)} см`}
+                  value={`${(effective.usedLengthCm / Math.max(1, view.summary.sets ?? 1)).toFixed(1)} см`}
                   sub={`комплектов: ${view.summary.sets ?? 1}`}
                 />
               )}
@@ -654,7 +815,7 @@ export function NestingModal({
                   sub={verdict.text}
                 />
               )}
-              {!viewData && (
+              {!viewData && displayResult && (
                 <Stat
                   label='поколение'
                   value={String(displayResult.generation)}
@@ -685,13 +846,43 @@ export function NestingModal({
                 поколение {run.generation} · лучшая длина {run.best.usedLengthCm.toFixed(1)} см
               </Text>
             )}
+            {manual && !running && (
+              <Button
+                type='button'
+                variant='secondary'
+                title='вернуть раскладку к исходному результату'
+                onClick={() => setManual(null)}
+              >
+                сбросить правки
+              </Button>
+            )}
+            {viewData && !viewDegraded && canEdit && !editView && (
+              <Button type='button' variant='secondary' onClick={() => setEditView(true)}>
+                редактировать
+              </Button>
+            )}
+            {viewData && editView && (
+              <Button
+                type='button'
+                variant='main'
+                disabled={!canSaveView || saving}
+                title={
+                  canSaveView
+                    ? 'перезаписать маркер с ручными правками (source: manual)'
+                    : 'подвиньте или поверните деталь — сохранение включится'
+                }
+                onClick={updateViewMarker}
+              >
+                {saving ? 'сохраняем…' : 'сохранить правки'}
+              </Button>
+            )}
             {!viewData && (
               <>
                 <Button
                   type='button'
                   variant='main'
                   disabled={parse.phase !== 'ready' || checkedCount === 0 || running}
-                  onClick={startRun}
+                  onClick={requestRun}
                 >
                   запустить
                 </Button>
@@ -722,7 +913,7 @@ export function NestingModal({
             <Button
               type='button'
               variant='secondary'
-              disabled={!svg || running || viewDegraded}
+              disabled={!effective || running || viewDegraded}
               title={viewDegraded ? 'геометрия маркера нечитаема — доступна только сводка' : undefined}
               onClick={downloadSvg}
             >
@@ -819,11 +1010,35 @@ export function NestingModal({
               ))}
             </CalloutBox>
           )}
+          {manual && (
+            <CalloutBox tone={violations.length ? 'warning' : 'note'}>
+              {violations.length
+                ? `раскладка правлена вручную — ${manualNote?.replace(MANUAL_NOTE_PREFIX, 'в ней').trim()}; предупреждение сохранится в маркере`
+                : 'раскладка правлена вручную — маркер сохранится как source: manual'}
+            </CalloutBox>
+          )}
           <Text size='nano' variant='label' component='p'>
             комплектов: {setsN} · расход на единицу:{' '}
-            {run.phase === 'done' ? (run.result.usedLengthCm / Math.max(1, setsN)).toFixed(1) : '—'} см
+            {effective ? (effective.usedLengthCm / Math.max(1, setsN)).toFixed(1) : '—'} см
           </Text>
         </div>
+      </ConfirmationModal>
+
+      {/* Новый запуск сносит ручные правки — подтверждение, а не молчаливая потеря. */}
+      <ConfirmationModal
+        open={runConfirm}
+        onOpenChange={(o) => {
+          if (!o) setRunConfirm(false);
+        }}
+        onConfirm={startRun}
+        onCancel={() => setRunConfirm(false)}
+        title='перезапустить раскладку?'
+        confirmLabel='перезапустить'
+      >
+        <Text size='micro' component='p'>
+          В раскладке есть ручные правки — новый запуск их сотрёт. Экспортируйте или
+          сохраните маркер, если правки нужны.
+        </Text>
       </ConfirmationModal>
     </ConfirmationModal>
   );

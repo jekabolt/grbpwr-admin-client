@@ -1,0 +1,260 @@
+// Интерактивная панель раскладки (Ф5 — ручная доводка): те же полоса/линейка/детали, что
+// в renderLayoutSvg, но JSX + pointer events. Перетаскивание — за деталь, поворот — R или
+// кнопка тулбара; редактор только двигает Placement'ы и репортит их наверх, валидация и
+// статистика живут в модалке (пересчёт на drop, не на каждый кадр). Живёт в lazy-чанке
+// раскладки вместе с остальной геометрией.
+import { useMemo, useRef, useState } from 'react';
+import Text from 'ui/components/text';
+import type { Placement, PieceDTO, RotationDeg } from 'lib/nesting/types';
+import { rotatedBounds } from 'lib/nesting/geom/clearance';
+
+const FILL = '#f2f2f2';
+const FILL_SELECTED = '#e4e9f2';
+const STROKE = '#8a8a8a';
+const INK = '#111111';
+const RULE = '#cccccc';
+const TARGET = '#c22222';
+const BAD = '#c22222';
+
+export function LayoutEditor({
+  pieces,
+  placements,
+  widthCm,
+  usedLengthCm,
+  targetCm,
+  marginCm,
+  allowCrossGrain,
+  editable,
+  violating,
+  onChange,
+}: {
+  pieces: readonly PieceDTO[];
+  placements: readonly Placement[];
+  widthCm: number;
+  usedLengthCm: number;
+  targetCm?: number;
+  marginCm: number;
+  allowCrossGrain: boolean;
+  editable: boolean;
+  // Placement indices that violate clearances — painted red.
+  violating: ReadonlySet<number>;
+  // Fired on drop / rotate with the full new placement array.
+  onChange: (next: Placement[]) => void;
+}) {
+  const byId = useMemo(() => new Map(pieces.map((p) => [p.id, p])), [pieces]);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const [selected, setSelected] = useState<number | null>(null);
+  // Live drag: index + current translation override (committed on pointerup).
+  const [drag, setDrag] = useState<{ index: number; x: number; y: number } | null>(null);
+  const dragStart = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
+
+  const rots: RotationDeg[] = allowCrossGrain ? [0, 90, 180, 270] : [0, 180];
+
+  const W = widthCm;
+  const L = Math.max(usedLengthCm, targetCm ?? 0, 10);
+  const pad = Math.max(4, W * 0.04);
+
+  // Static per-piece point strings — dragging only changes the group transform.
+  const pointsById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const p of pieces)
+      m.set(p.id, p.poly.map((pt) => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' '));
+    return m;
+  }, [pieces]);
+
+  const toSvg = (e: { clientX: number; clientY: number }) => {
+    const svg = svgRef.current;
+    if (!svg) return { x: 0, y: 0 };
+    const pt = svg.createSVGPoint();
+    pt.x = e.clientX;
+    pt.y = e.clientY;
+    const m = svg.getScreenCTM();
+    if (!m) return { x: 0, y: 0 };
+    const loc = pt.matrixTransform(m.inverse());
+    return { x: loc.x, y: loc.y };
+  };
+
+  const clamp = (index: number, x: number, y: number, rot: RotationDeg) => {
+    const pl = placements[index];
+    const piece = byId.get(pl.pieceId);
+    if (!piece) return { x, y };
+    const rb = rotatedBounds(piece, rot);
+    // Полоса физически ограничена поперёк и слева; вправо длина открыта.
+    const minY = marginCm - rb.minY;
+    const maxY = W - marginCm - rb.maxY;
+    const minX = marginCm - rb.minX;
+    return {
+      x: Math.max(minX, x),
+      y: maxY >= minY ? Math.min(Math.max(minY, y), maxY) : y,
+    };
+  };
+
+  const startDrag = (index: number, e: React.PointerEvent<SVGGElement>) => {
+    if (!editable) return;
+    e.stopPropagation();
+    setSelected(index);
+    const pl = placements[index];
+    const p = toSvg(e);
+    dragStart.current = { px: p.x, py: p.y, x: pl.x, y: pl.y };
+    setDrag({ index, x: pl.x, y: pl.y });
+    (e.currentTarget as Element).setPointerCapture(e.pointerId);
+  };
+
+  const moveDrag = (e: React.PointerEvent<SVGGElement>) => {
+    const st = dragStart.current;
+    if (!st || !drag) return;
+    const p = toSvg(e);
+    const next = clamp(drag.index, st.x + (p.x - st.px), st.y + (p.y - st.py), placements[drag.index].rot);
+    setDrag({ index: drag.index, x: next.x, y: next.y });
+  };
+
+  const endDrag = () => {
+    if (!drag) return;
+    const { index, x, y } = drag;
+    setDrag(null);
+    dragStart.current = null;
+    const pl = placements[index];
+    if (Math.abs(pl.x - x) > 1e-6 || Math.abs(pl.y - y) > 1e-6) {
+      const next = placements.map((q, i) => (i === index ? { ...q, x, y } : q));
+      onChange(next);
+    }
+  };
+
+  const rotateSelected = () => {
+    if (!editable || selected == null) return;
+    const pl = placements[selected];
+    const piece = byId.get(pl.pieceId);
+    if (!piece) return;
+    const rot = rots[(rots.indexOf(pl.rot) + 1) % rots.length];
+    // Держим центр повёрнутого bbox на месте, чтобы деталь не «прыгала».
+    const rb0 = rotatedBounds(piece, pl.rot);
+    const rb1 = rotatedBounds(piece, rot);
+    const cx = pl.x + (rb0.minX + rb0.maxX) / 2;
+    const cy = pl.y + (rb0.minY + rb0.maxY) / 2;
+    const raw = { x: cx - (rb1.minX + rb1.maxX) / 2, y: cy - (rb1.minY + rb1.maxY) / 2 };
+    const c = clamp(selected, raw.x, raw.y, rot);
+    onChange(placements.map((q, i) => (i === selected ? { ...q, rot, x: c.x, y: c.y } : q)));
+  };
+
+  const selPiece = selected != null ? byId.get(placements[selected]?.pieceId) : undefined;
+
+  return (
+    <div className='space-y-1'>
+      {editable && (
+        <div className='flex flex-wrap items-center gap-2'>
+          <Text size='nano' variant='label' component='span'>
+            {selected != null && selPiece
+              ? `выбрано: ${selPiece.name}${placements[selected].rot ? ` (${placements[selected].rot}°)` : ''}`
+              : 'перетащите деталь · клик — выбрать · R — поворот'}
+          </Text>
+          {selected != null && (
+            <button
+              type='button'
+              className='text-nano uppercase underline hover:opacity-70'
+              onClick={rotateSelected}
+            >
+              повернуть (R)
+            </button>
+          )}
+        </div>
+      )}
+      <div
+        className='max-h-[56vh] w-full overflow-auto border border-borderColor bg-bgColor outline-none'
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if ((e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') && editable) {
+            e.preventDefault();
+            rotateSelected();
+          }
+        }}
+      >
+        <svg
+          ref={svgRef}
+          xmlns='http://www.w3.org/2000/svg'
+          viewBox={`${-pad} ${-pad} ${L + 2 * pad} ${W + 2 * pad}`}
+          fontFamily='monospace'
+          className='h-auto w-full'
+          onPointerDown={() => setSelected(null)}
+        >
+          <rect x={0} y={0} width={L} height={W} fill='#ffffff' stroke={RULE} strokeWidth={W / 300} />
+          {marginCm > 0 && (
+            <rect
+              x={marginCm}
+              y={marginCm}
+              width={Math.max(0, L - marginCm)}
+              height={Math.max(0, W - 2 * marginCm)}
+              fill='none'
+              stroke={RULE}
+              strokeWidth={W / 600}
+              strokeDasharray={`${W / 90} ${W / 120}`}
+            />
+          )}
+          {Array.from({ length: Math.floor(L / 10) + 1 }, (_, k) => k * 10).map((x) => (
+            <g key={x}>
+              <line x1={x} y1={W} x2={x} y2={W + W / 60} stroke={RULE} strokeWidth={W / 500} />
+              {x % 50 === 0 && x > 0 && (
+                <text x={x} y={W + W / 20} fontSize={W / 30} fill={STROKE} textAnchor='middle'>
+                  {x}
+                </text>
+              )}
+            </g>
+          ))}
+
+          {placements.map((pl, index) => {
+            const piece = byId.get(pl.pieceId);
+            if (!piece) return null;
+            const live = drag?.index === index ? drag : pl;
+            const bad = violating.has(index);
+            const rb = rotatedBounds(piece, pl.rot);
+            const lx = live.x + (rb.minX + rb.maxX) / 2;
+            const ly = live.y + (rb.minY + rb.maxY) / 2;
+            const label = pl.instance > 0 ? `${piece.name} ×${pl.instance + 1}` : piece.name;
+            return (
+              <g key={index}>
+                <g
+                  transform={`translate(${live.x} ${live.y}) rotate(${pl.rot})`}
+                  className={editable ? 'cursor-move' : undefined}
+                  onPointerDown={(e) => startDrag(index, e)}
+                  onPointerMove={moveDrag}
+                  onPointerUp={endDrag}
+                  onPointerCancel={endDrag}
+                >
+                  <polygon
+                    points={pointsById.get(pl.pieceId) ?? ''}
+                    fill={selected === index ? FILL_SELECTED : FILL}
+                    stroke={bad ? BAD : selected === index ? INK : STROKE}
+                    strokeWidth={bad || selected === index ? W / 250 : W / 400}
+                  />
+                </g>
+                <text
+                  x={lx}
+                  y={ly}
+                  fontSize={W / 40}
+                  fill={bad ? BAD : INK}
+                  textAnchor='middle'
+                  pointerEvents='none'
+                >
+                  {label}
+                  {pl.rot ? ` (${pl.rot}°)` : ''}
+                </text>
+              </g>
+            );
+          })}
+
+          <line x1={usedLengthCm} y1={0} x2={usedLengthCm} y2={W} stroke={INK} strokeWidth={W / 300} />
+          {targetCm != null && targetCm > 0 && (
+            <line
+              x1={targetCm}
+              y1={0}
+              x2={targetCm}
+              y2={W}
+              stroke={TARGET}
+              strokeWidth={W / 300}
+              strokeDasharray={`${W / 60} ${W / 90}`}
+            />
+          )}
+        </svg>
+      </div>
+    </div>
+  );
+}
