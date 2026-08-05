@@ -185,6 +185,9 @@ export function usePostRunReceipt() {
         note: input.note ?? '',
         updateCostPrice: input.updateCostPrice,
         partial: input.partial ?? false,
+        // Contract field from a parallel feature (waitlist notify on receipt) — no UI here yet;
+        // undefined keeps the wire payload identical to before the regen.
+        notifyWaitlist: undefined,
       }),
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });

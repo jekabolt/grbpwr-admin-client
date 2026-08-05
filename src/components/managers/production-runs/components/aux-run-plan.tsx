@@ -73,6 +73,8 @@ export function AuxRunPlan({
               plannedQty: planned,
               receivedQty: line?.receivedQty,
               defectQty: line?.defectQty,
+              // The legacy single-output line carries no colour (variant rows are the next pass).
+              outputVariantId: undefined,
               // Keep the stored line's stable identity so re-planning UPDATEs that row in place
               // instead of retiring it and its id; mint one only for a run that has no line yet.
               lineKey: line?.lineKey || ulid(),

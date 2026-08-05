@@ -7290,6 +7290,13 @@ export type common_ProductionRunLine = {
   // line_key) and migration 0230 backfilled 'LEGACY'-prefixed keys onto pre-existing rows; both fit
   // that shape. NEVER regenerate a key the server handed out — that retires the row it names.
   lineKey: string | undefined;
+  // The AUX colour this line produces (TechCardOutputVariant.id); 0 = unset. A line carries EITHER a
+  // product or a colour variant, never both — a sellable line books into product stock, a colour
+  // line into that colour's warehouse bucket. Only a run whose tech card is auxiliary AND has the
+  // colour registered as one of its own ACTIVE variants may set it; anything else is refused at
+  // save. A product-less line with no variant is the single output line of a legacy single-output
+  // aux card, and stays exactly as legal as it was. Like the aux line, a colour line needs no size.
+  outputVariantId: number | undefined;
 };
 
 // ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in
@@ -7563,6 +7570,13 @@ export type PostProductionRunReceiptRequest = {
   // flips it to RECEIVED. The flag is part of the idempotency request hash — the same key with a
   // flipped flag is a different intent and is rejected, never replayed.
   partial: boolean | undefined;
+  // Storefront side effect (stock-write contract): when true, customers waitlisted on a variant
+  // this receipt takes 0→in-stock get the back-in-stock email — the same notification the manual
+  // stock update fires. Operator-chosen per receipt (modal checkbox); the default false sends
+  // nothing. ISR page revalidation fires regardless of this flag. Like every request field it is
+  // part of the idempotency hash; notifications themselves fire only on the ORIGINAL execution,
+  // never on a replay.
+  notifyWaitlist: boolean | undefined;
 };
 
 export type PostProductionRunReceiptResponse = {
