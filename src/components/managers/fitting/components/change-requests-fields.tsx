@@ -6,16 +6,17 @@ import {
   useDeleteFittingChangeRequest,
   useUpdateFittingChangeRequest,
 } from 'components/managers/fittings/components/useFittingQuery';
-import { zoneOptions } from 'components/managers/tech-card/components/operation-options';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { FittingCarryOver } from './carry-over';
-import { FittingFormData } from './schema';
+import { crPieceIds, FittingFormData } from './schema';
+import { fittingZoneOptions, normalizeFittingZone } from './zone-options';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 const statusOptions = [
@@ -23,7 +24,7 @@ const statusOptions = [
   { value: 'resolved', label: 'resolved' },
 ];
 // target is the change CATEGORY (backend allow-list) — NOT a free "sleeve/collar" field (that
-// location role is now zone + piece, A2). Kept as a constrained select to stay aligned with the server.
+// location role is now zone + pieces, A2). Kept as a constrained select to stay aligned with the server.
 const targetOptions = [
   { value: '', label: '— category —' },
   { value: 'pattern', label: 'pattern' },
@@ -39,10 +40,78 @@ type CRValue = {
   note?: string;
   calloutNumber?: number;
   zone?: string;
-  pieceId?: number;
+  pieceIds?: number[];
   status?: string;
   carriedFromId?: number;
 };
+
+// One remark routinely covers several cut-pieces («обработка низа на полочке и спинке»), so the piece
+// picker is a toggle set, not a single select. Chips over a multi-<select> because a native multiple
+// select hides what is picked behind a scroll box and needs ⌘-click to deselect.
+function PiecePicker({
+  selected,
+  options,
+  optionsReady,
+  disabled,
+  onChange,
+}: {
+  selected: number[];
+  options: PieceOption[];
+  // False while the style's cut-list is still loading. Without it every already-pinned piece would
+  // be "not in options" for one render and flash as a red orphan chip before the list arrives.
+  optionsReady: boolean;
+  disabled?: boolean;
+  onChange: (ids: number[]) => void;
+}) {
+  const toggle = (id: number) =>
+    onChange(selected.includes(id) ? selected.filter((v) => v !== id) : [...selected, id]);
+  // Pieces pinned on the remark that the style no longer offers — a piece deleted from the card, or a
+  // carried-over item from a round whose cut-list has since changed. Shown so they can be un-pinned
+  // instead of silently riding along invisibly.
+  const orphans = optionsReady ? selected.filter((id) => !options.some((o) => o.value === id)) : [];
+
+  if (!optionsReady) {
+    return (
+      <Text variant='inactive' size='small'>
+        загрузка деталей…
+      </Text>
+    );
+  }
+  if (options.length === 0 && orphans.length === 0) {
+    return (
+      <Text variant='inactive' size='small'>
+        у этой тех карты ещё нет деталей — укажите зону
+      </Text>
+    );
+  }
+  return (
+    <ChipRow>
+      {options.map((o) => (
+        <Chip
+          key={o.value}
+          selected={selected.includes(o.value)}
+          pressed={selected.includes(o.value)}
+          disabled={disabled}
+          onClick={() => toggle(o.value)}
+        >
+          {o.label}
+        </Chip>
+      ))}
+      {orphans.map((id) => (
+        <Chip
+          key={`orphan-${id}`}
+          selected
+          tone='error'
+          disabled={disabled}
+          title='этой детали больше нет в тех карте'
+          onClick={() => toggle(id)}
+        >
+          {`#${id}`}
+        </Chip>
+      ))}
+    </ChipRow>
+  );
+}
 
 // Piece ids only surface on the wire through the cut-list projection — reuse it for the piece picker.
 function useStylePieces(techCardId?: number) {
@@ -53,22 +122,24 @@ function useStylePieces(techCardId?: number) {
   });
 }
 
-// Shared structured-remark input group (S26: category + zone + piece + status). value/onChange so it
+// Shared structured-remark input group (S26: category + zone + pieces + status). value/onChange so it
 // works both RHF-bound (create) and local-state (edit CRUD).
 function CRFields({
   value,
   onChange,
   pieceOptions,
+  piecesReady,
   disabled,
 }: {
   value: CRValue;
   onChange: (patch: Partial<CRValue>) => void;
   pieceOptions: PieceOption[];
+  piecesReady: boolean;
   disabled?: boolean;
 }) {
   return (
     <div className='flex flex-col gap-2'>
-      <div className='grid grid-cols-1 gap-2 sm:grid-cols-3'>
+      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
         <label className='flex flex-col gap-1'>
           <Text size='small'>category</Text>
           <select
@@ -89,31 +160,26 @@ function CRFields({
           <select
             className={cell}
             disabled={disabled}
-            value={value.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'}
+            value={normalizeFittingZone(value.zone)}
             onChange={(e) => onChange({ zone: e.target.value })}
           >
-            {zoneOptions.map((o) => (
+            {fittingZoneOptions.map((o) => (
               <option key={o.value} value={o.value}>
                 {o.label}
               </option>
             ))}
           </select>
         </label>
-        <label className='flex flex-col gap-1'>
-          <Text size='small'>piece</Text>
-          <select
-            className={cell}
-            disabled={disabled}
-            value={value.pieceId || 0}
-            onChange={(e) => onChange({ pieceId: Number(e.target.value) || 0 })}
-          >
-            {pieceOptions.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+      </div>
+      <div className='flex flex-col gap-1'>
+        <Text size='small'>детали</Text>
+        <PiecePicker
+          selected={value.pieceIds ?? []}
+          options={pieceOptions}
+          optionsReady={piecesReady}
+          disabled={disabled}
+          onChange={(ids) => onChange({ pieceIds: ids })}
+        />
       </div>
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-[1fr_8rem_8rem]'>
         <label className='flex flex-col gap-1'>
@@ -162,9 +228,11 @@ function CRFields({
 function CreateModeList({
   techCardId,
   pieceOptions,
+  piecesReady,
 }: {
   techCardId?: number;
   pieceOptions: PieceOption[];
+  piecesReady: boolean;
 }) {
   const { control, setValue } = useFormContext<FittingFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'changeRequests' });
@@ -183,8 +251,8 @@ function CreateModeList({
             target: src.target || '',
             note: src.note || '',
             calloutNumber: src.calloutNumber || 0,
-            zone: src.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
-            pieceId: src.pieceId || 0,
+            zone: normalizeFittingZone(src.zone),
+            pieceIds: src.pieceIds ?? [],
             status: 'open',
             carriedFromId: src.id || 0,
           })
@@ -215,6 +283,7 @@ function CreateModeList({
             <CRFields
               value={items[index] ?? {}}
               pieceOptions={pieceOptions}
+              piecesReady={piecesReady}
               onChange={(patch) => {
                 for (const [k, v] of Object.entries(patch)) {
                   setValue(`changeRequests.${index}.${k}` as never, v as never, {
@@ -236,8 +305,8 @@ function CreateModeList({
             target: '',
             note: '',
             calloutNumber: 0,
-            zone: 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
-            pieceId: 0,
+            zone: '',
+            pieceIds: [],
             status: 'open',
             carriedFromId: 0,
           })
@@ -254,6 +323,7 @@ function CreateModeList({
 function EditableCR({
   initial,
   pieceOptions,
+  piecesReady,
   onSave,
   onDelete,
   saving,
@@ -262,6 +332,7 @@ function EditableCR({
 }: {
   initial: CRValue;
   pieceOptions: PieceOption[];
+  piecesReady: boolean;
   onSave: (v: CRValue) => void;
   onDelete?: () => void;
   saving: boolean;
@@ -284,7 +355,13 @@ function EditableCR({
           ↳ carried from a previous round (#{v.carriedFromId})
         </Text>
       ) : null}
-      <CRFields value={v} onChange={onChange} pieceOptions={pieceOptions} disabled={saving} />
+      <CRFields
+        value={v}
+        onChange={onChange}
+        pieceOptions={pieceOptions}
+        piecesReady={piecesReady}
+        disabled={saving}
+      />
       <div className='flex justify-end gap-2'>
         {onDelete && (
           <Button
@@ -322,11 +399,13 @@ function EditModeList({
   techCardId,
   serverChangeRequests,
   pieceOptions,
+  piecesReady,
 }: {
   fittingId: number;
   techCardId?: number;
   serverChangeRequests: common_FittingChangeRequest[];
   pieceOptions: PieceOption[];
+  piecesReady: boolean;
 }) {
   const { showMessage } = useSnackBarStore();
   const { control } = useFormContext<FittingFormData>();
@@ -340,8 +419,9 @@ function EditModeList({
     target: v.target?.trim() || '',
     note: v.note?.trim() || '',
     calloutNumber: v.calloutNumber || 0,
-    zone: v.zone && v.zone !== 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN' ? v.zone : '',
-    pieceId: v.pieceId || 0,
+    zone: normalizeFittingZone(v.zone),
+    pieceIds: v.pieceIds ?? [],
+    pieceId: 0, // deprecated on the wire; pieceIds is authoritative
     status: v.status || 'open',
     carriedFromId: v.carriedFromId || 0,
   });
@@ -360,12 +440,13 @@ function EditModeList({
             index={index}
             saving={update.isPending || del.isPending}
             pieceOptions={pieceOptions}
+            piecesReady={piecesReady}
             initial={{
               target: cr.target || '',
               note: cr.note || '',
               calloutNumber: cr.calloutNumber || 0,
-              zone: cr.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
-              pieceId: cr.pieceId || 0,
+              zone: normalizeFittingZone(cr.zone),
+              pieceIds: crPieceIds(cr),
               status: cr.status || (cr.resolved ? 'resolved' : 'open'),
               carriedFromId: cr.carriedFromId || 0,
             }}
@@ -398,12 +479,13 @@ function EditModeList({
           isNew
           saving={add.isPending}
           pieceOptions={pieceOptions}
+          piecesReady={piecesReady}
           initial={{
             target: '',
             note: '',
             calloutNumber: 0,
-            zone: 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
-            pieceId: 0,
+            zone: '',
+            pieceIds: [],
             status: 'open',
             carriedFromId: 0,
           }}
@@ -430,14 +512,18 @@ export function ChangeRequestsFields({
   techCardId?: number;
   serverChangeRequests?: common_FittingChangeRequest[];
 }) {
-  const { data } = useStylePieces(techCardId);
-  const pieceOptions: PieceOption[] = [
-    { value: 0, label: '— piece —' },
-    ...(data?.pieces ?? []).map((p) => ({
-      value: p.pieceId ?? 0,
+  const { data, isPending } = useStylePieces(techCardId);
+  // A fitting always has a tech card, but until one is chosen the query is disabled and stays
+  // `pending` forever — treat "no card" as ready-with-no-pieces rather than a permanent spinner.
+  const piecesReady = !techCardId || !isPending;
+  // No "— piece —" placeholder entry: the picker is a toggle set, so "none selected" IS the empty
+  // state. A 0-valued option would render as a chip that pins a non-existent piece.
+  const pieceOptions: PieceOption[] = (data?.pieces ?? [])
+    .filter((p) => (p.pieceId ?? 0) > 0)
+    .map((p) => ({
+      value: p.pieceId as number,
       label: p.name?.trim() || `#${p.pieceId}`,
-    })),
-  ];
+    }));
 
   return fittingId ? (
     <EditModeList
@@ -445,8 +531,13 @@ export function ChangeRequestsFields({
       techCardId={techCardId}
       serverChangeRequests={serverChangeRequests}
       pieceOptions={pieceOptions}
+      piecesReady={piecesReady}
     />
   ) : (
-    <CreateModeList techCardId={techCardId} pieceOptions={pieceOptions} />
+    <CreateModeList
+      techCardId={techCardId}
+      pieceOptions={pieceOptions}
+      piecesReady={piecesReady}
+    />
   );
 }
