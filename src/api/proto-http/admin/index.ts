@@ -6007,6 +6007,13 @@ export type common_TechCardBomItem = {
   // material catalog), or '' for a pre-provenance row whose origin is honestly unknown.
   priceSource: string | undefined;
   priceSnapshotAt: wellKnownTimestamp | undefined;
+  // READ-ONLY width enrichment (0259, Ф9.1) — ignored on write, filled by the single-card read.
+  // effective_fabric_width_cm = COALESCE(this line's fabric_width, linked article's width): the
+  // width the раскладка should prefill instead of a hardcoded default. selvedge_cm is the linked
+  // article's кромка per edge; usable cutting width = effective − 2×selvedge. Both unset when the
+  // line is unlinked and carries no width of its own.
+  effectiveFabricWidthCm: googletype_Decimal | undefined;
+  selvedgeCm: googletype_Decimal | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -6581,6 +6588,12 @@ export type common_TechCard = {
   // through the tech-card save — a variant owns warehouse stock, so a full-replace save must not be
   // able to re-mint or drop one.
   outputVariants: common_TechCardOutputVariant[] | undefined;
+  // OUTPUT-ONLY summaries of the card's saved раскладки (markers, 0257) — the measured fabric
+  // layouts costing reads consumption from. Summaries only: the layout blob is 60-100 KB per
+  // marker and travels exclusively on GetTechCardMarker. Written through the dedicated
+  // Save/DeleteTechCardMarker RPCs, never through the tech-card save (and marker writes do not
+  // bump lock_version — saving a раскладка must not 409 the operator's own open card form).
+  markers: common_TechCardMarkerSummary[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -6738,6 +6751,44 @@ export type common_TechCardOutputVariant = {
   active: boolean | undefined;
 };
 
+// TechCardMarkerSummary is the list row of a saved раскладка (marker, tech_card_marker): the
+// measured fabric layout of ONE size's pattern pieces on a strip of fabric. The heavy layout blob
+// (contours + placements) deliberately does NOT ride here — it travels only on GetTechCardMarker.
+// consumption_per_unit_cm is DERIVED (used_length_cm / sets), never stored, so it cannot drift
+// from its inputs. It is the number costing cares about: fabric per one garment of this size.
+export type common_TechCardMarkerSummary = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  sizeId: number | undefined;
+  name: string | undefined;
+  // Provenance of the layout geometry. "auto" = the nesting engine as it ran; "manual" = an
+  // operator adjusted placements (Ф5); "imported" reserved for external CAD markers.
+  source: string | undefined;
+  // The BOM fabric line this marker measures, as the stable wire identity of that line ("" = not
+  // linked, or the slot was deleted — the marker stays valid geometry and merely drops out of
+  // costing suggestions). Resolved server-side to tech_card_bom_item(id) with ON DELETE SET NULL.
+  bomLineKey: string | undefined;
+  bomItemName: string | undefined;
+  bomItemUnit: string | undefined;
+  fabricWidthCm: googletype_Decimal | undefined;
+  gapCm: googletype_Decimal | undefined;
+  edgeMarginCm: googletype_Decimal | undefined;
+  allowCrossGrain: boolean | undefined;
+  sets: number | undefined;
+  usedLengthCm: googletype_Decimal | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  // placed/total instance counts at save time. The server refuses to save an incomplete marker
+  // (placed < total, FailedPrecondition) — a layout that did not fit every piece is not a
+  // consumption norm — so on stored rows these are always equal; kept as two fields for honesty.
+  placedCount: number | undefined;
+  totalCount: number | undefined;
+  consumptionPerUnitCm: googletype_Decimal | undefined;
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
@@ -6842,6 +6893,10 @@ export type common_TechCardListItem = {
   // is in legacy single-output mode, where output_material_* above is the whole answer.
   outputVariantCount: number | undefined;
   outputVariantsOnHand: googletype_Decimal | undefined;
+  // How many saved раскладки (markers, 0257) the card carries, batched for the page like
+  // colorway_count. The COUNT only — a "latest consumption" here would be a lie without naming
+  // the size and the BOM slot it was measured for.
+  markerCount: number | undefined;
 };
 
 // TechCardReadinessRequirement is ONE condition on a style's progress, evaluated server-side against
@@ -7023,6 +7078,9 @@ export type common_MaterialFabricAttrs = {
   fabricDirection: string | undefined;
   shrinkagePct: googletype_Decimal | undefined;
   rollLengthM: googletype_Decimal | undefined;
+  // Кромка per EDGE, cm — the unusable strip of the roll (0259). Unset/0 = none; the nesting
+  // width and the selvedge wastage component both derive from it.
+  selvedgeCm: googletype_Decimal | undefined;
 };
 
 // MaterialHardwareAttrs are the typed attributes of a hardware-class material (material_hardware_attr).
@@ -8059,6 +8117,111 @@ export type DeleteTechCardOutputVariantRequest = {
 };
 
 export type DeleteTechCardOutputVariantResponse = {
+};
+
+// SaveTechCardMarkerRequest writes ONE saved раскладка. id=0 creates; a non-zero id must already
+// be a marker of tech_card_id and is replaced whole (the layout blob has no partial update).
+export type SaveTechCardMarkerRequest = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  marker: common_TechCardMarkerInsert | undefined;
+};
+
+// TechCardMarkerInsert is the writable payload of SaveTechCardMarker. Geometry is SELF-CONTAINED
+// (contours inside the layout): pattern rows are a full-replace child whose CDN objects are
+// garbage-collected the moment no row references them, so a marker that stored url references
+// would go dark on the next sheet replacement. source_url inside pieces is provenance only.
+export type common_TechCardMarkerInsert = {
+  sizeId: number | undefined;
+  name: string | undefined;
+  source: string | undefined;
+  bomLineKey: string | undefined;
+  fabricWidthCm: googletype_Decimal | undefined;
+  gapCm: googletype_Decimal | undefined;
+  edgeMarginCm: googletype_Decimal | undefined;
+  allowCrossGrain: boolean | undefined;
+  sets: number | undefined;
+  usedLengthCm: googletype_Decimal | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  placedCount: number | undefined;
+  totalCount: number | undefined;
+  layout: common_TechCardMarkerLayout | undefined;
+};
+
+// TechCardMarkerLayout is the self-contained geometry of a marker, stored as an opaque proto-JSON
+// blob (idiom: tech_card_release.snapshot). schema_version guards forward evolution — readers
+// degrade gracefully on a version they do not know.
+export type common_TechCardMarkerLayout = {
+  schemaVersion: number | undefined;
+  params: common_TechCardMarkerNestParams | undefined;
+  pieces: common_TechCardMarkerPiece[] | undefined;
+  placements: common_TechCardMarkerPlacement[] | undefined;
+  warnings: string[] | undefined;
+};
+
+// TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
+// result honestly; NOT enough to re-run the nest (the contours already carry the parse outcome).
+export type common_TechCardMarkerNestParams = {
+  unit: string | undefined;
+  tolCm: number | undefined;
+  tolChainCm: number | undefined;
+  rdpEpsCm: number | undefined;
+  targetLengthCm: number | undefined;
+  timeBudgetS: number | undefined;
+};
+
+// TechCardMarkerPiece is one distinct pattern piece: its exact contour (cm, local origin at the
+// piece bbox corner) and how many instances ONE set cuts. Instances = quantity × marker sets.
+export type common_TechCardMarkerPiece = {
+  pieceId: number | undefined;
+  name: string | undefined;
+  source: string | undefined;
+  sourceUrl: string | undefined;
+  quantity: number | undefined;
+  poly: common_TechCardMarkerPoint[] | undefined;
+  bboxWCm: number | undefined;
+  bboxHCm: number | undefined;
+  areaCm2: number | undefined;
+};
+
+export type common_TechCardMarkerPoint = {
+  xCm: number | undefined;
+  yCm: number | undefined;
+};
+
+// TechCardMarkerPlacement is one placed instance: piece contour rotated by rot_deg (CCW) then
+// translated by (x_cm, y_cm) in strip coordinates — x along the fabric, y across the width.
+export type common_TechCardMarkerPlacement = {
+  pieceId: number | undefined;
+  instance: number | undefined;
+  rotDeg: number | undefined;
+  xCm: number | undefined;
+  yCm: number | undefined;
+};
+
+export type SaveTechCardMarkerResponse = {
+  id: number | undefined;
+};
+
+export type GetTechCardMarkerRequest = {
+  id: number | undefined;
+};
+
+export type GetTechCardMarkerResponse = {
+  marker: common_TechCardMarker | undefined;
+};
+
+// TechCardMarker is a full stored marker: the summary plus the self-contained layout.
+export type common_TechCardMarker = {
+  summary: common_TechCardMarkerSummary | undefined;
+  layout: common_TechCardMarkerLayout | undefined;
+};
+
+export type DeleteTechCardMarkerRequest = {
+  id: number | undefined;
+};
+
+export type DeleteTechCardMarkerResponse = {
 };
 
 // OrderPackingSpecItem is one garment line in an order's packing spec: the colourway/variant, quantity,
@@ -9594,6 +9757,21 @@ export interface AdminService {
   // moving average — only this card's claim on it goes. Once runs can be planned by colour, a
   // variant a run line references is refused with FailedPrecondition ("deactivate it instead").
   DeleteTechCardOutputVariant(request: DeleteTechCardOutputVariantRequest): Promise<DeleteTechCardOutputVariantResponse>;
+  // SaveTechCardMarker creates (id=0) or fully replaces (id>0) ONE saved раскладка (marker, 0257):
+  // a measured fabric layout of one size's pieces, self-contained geometry included. Last-write-wins
+  // on purpose — no lock_version of its own, and the write does NOT bump tech_card.lock_version
+  // (saving a раскладка from the nesting modal must not 409 the operator's open card form).
+  // Refused with FailedPrecondition for a released card, an incomplete layout
+  // (placed_count < total_count — not a consumption norm), or a (card, size, name) already taken;
+  // a size outside the card's range or an unknown bom_line_key is InvalidArgument.
+  SaveTechCardMarker(request: SaveTechCardMarkerRequest): Promise<SaveTechCardMarkerResponse>;
+  // GetTechCardMarker returns one marker WITH its layout blob — the only place the blob travels
+  // (summaries ride GetTechCard.markers). A stored blob the current schema cannot parse degrades
+  // to summary-only with a warning rather than failing the read (hero-v2 style).
+  GetTechCardMarker(request: GetTechCardMarkerRequest): Promise<GetTechCardMarkerResponse>;
+  // DeleteTechCardMarker removes a saved раскладка. Markers are measurements, not structural
+  // references — nothing else points at them, so delete is plain (released cards still refuse).
+  DeleteTechCardMarker(request: DeleteTechCardMarkerRequest): Promise<DeleteTechCardMarkerResponse>;
   // GetOrderPackingSpec is the packer/QC-readable composition of an order (WS7, scope 3): the garments
   // that ship, the on-garment assembly (labels/tags) to verify per line, and the packaging the whole
   // order needs (resolved from WS2 packaging_recipe). Read-only — reserves/consumes nothing.
@@ -14087,6 +14265,63 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTechCardOutputVariant",
       }) as Promise<DeleteTechCardOutputVariantResponse>;
+    },
+    SaveTechCardMarker(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/marker/save`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveTechCardMarker",
+      }) as Promise<SaveTechCardMarkerResponse>;
+    },
+    GetTechCardMarker(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/tech-card/marker/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetTechCardMarker",
+      }) as Promise<GetTechCardMarkerResponse>;
+    },
+    DeleteTechCardMarker(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/tech-card/marker/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteTechCardMarker",
+      }) as Promise<DeleteTechCardMarkerResponse>;
     },
     GetOrderPackingSpec(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {

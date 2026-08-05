@@ -92,6 +92,7 @@ const resolveMaterialClass = (m: common_Material): common_MaterialClass => {
 
 type FabricDraft = {
   widthCm: string;
+  selvedgeCm: string;
   weightGsm: string;
   fabricDirection: string;
   shrinkagePct: string;
@@ -149,6 +150,7 @@ type Draft = {
 
 const emptyFabric: FabricDraft = {
   widthCm: '',
+  selvedgeCm: '',
   weightGsm: '',
   fabricDirection: '',
   shrinkagePct: '',
@@ -227,6 +229,7 @@ const draftFromMaterial = (material: common_Material): Draft => ({
   fabric: material.fabricAttrs
     ? {
         widthCm: material.fabricAttrs.widthCm?.value ?? '',
+        selvedgeCm: material.fabricAttrs.selvedgeCm?.value ?? '',
         weightGsm: material.fabricAttrs.weightGsm?.value ?? '',
         fabricDirection: material.fabricAttrs.fabricDirection ?? '',
         shrinkagePct: material.fabricAttrs.shrinkagePct?.value ?? '',
@@ -520,6 +523,8 @@ export function MaterialModal({
         d.materialClass === 'MATERIAL_CLASS_FABRIC'
           ? {
               widthCm: inputToDecimal(d.fabric.widthCm),
+              // Кромка (selvedge): unusable strip per edge; the nesting width prefill subtracts 2×.
+              selvedgeCm: inputToDecimal(d.fabric.selvedgeCm),
               weightGsm: inputToDecimal(d.fabric.weightGsm),
               fabricDirection: d.fabric.fabricDirection,
               shrinkagePct: inputToDecimal(d.fabric.shrinkagePct),
@@ -784,6 +789,17 @@ export function MaterialModal({
                     inputMode='decimal'
                     value={d.fabric.widthCm}
                     onChange={(e) => setFabric({ widthCm: sanitizeDecimal(e.target.value) })}
+                  />
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    кромка (cm/край)
+                  </Text>
+                  <input
+                    className={cell}
+                    inputMode='decimal'
+                    value={d.fabric.selvedgeCm}
+                    onChange={(e) => setFabric({ selvedgeCm: sanitizeDecimal(e.target.value) })}
                   />
                 </label>
                 <label className='flex flex-col gap-1'>

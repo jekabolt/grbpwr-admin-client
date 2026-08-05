@@ -65,7 +65,17 @@ function revisionOf(row: PatternRow): number | null {
 // name («перед», «рукав x2») next to its factory filename; the name is editable in place after.
 // The flat `patterns` array stays the source of truth (full-replace on save); upload appends,
 // ✕ removes.
-export function PatternsField() {
+export function PatternsField({
+  techCardId,
+  canEdit = true,
+  savedSizeIds,
+}: {
+  techCardId?: number;
+  // Gates «сохранить раскладку» (RBAC write + not released), mirroring MarkersSection.
+  canEdit?: boolean;
+  // Server-known size range: a form-added size cannot take a marker until the card saves.
+  savedSizeIds?: number[];
+}) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
@@ -77,6 +87,9 @@ export function PatternsField() {
   // A save's form.reset() overwrites concurrent edits and un-dirties them — freeze renames
   // for its duration.
   const { isSubmitting } = useFormState({ control });
+  // Осмысленные имена экспортов раскладки: SEASON-STYLE-размер-…
+  const season = (useWatch({ control, name: 'season' }) ?? '') as string;
+  const styleNumber = (useWatch({ control, name: 'styleNumber' }) ?? '') as string;
 
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
@@ -91,7 +104,35 @@ export function PatternsField() {
   // Inline rename in progress: which row and the draft value.
   const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
   // Раскладка modal: the DXF files of one size, pooled (null = closed).
-  const [nesting, setNesting] = useState<{ sizeLabel: string; files: NestingFile[] } | null>(null);
+  const [nesting, setNesting] = useState<{
+    sizeLabel: string;
+    sizeId: number;
+    files: NestingFile[];
+  } | null>(null);
+  // The card's fabric BOM lines, live from form state — the save-marker dialog's slot select.
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
+    section?: string;
+    name?: string;
+    unit?: string;
+    fabricWidth?: string;
+    wastagePercent?: string;
+    lineKey?: string;
+    id?: number;
+  }>;
+  const fabricBomLines = useMemo(
+    () =>
+      bomItems
+        .filter((b) => (b.section ?? '') === 'TECH_CARD_BOM_SECTION_FABRIC' && b.lineKey)
+        .map((b) => ({
+          id: b.id ?? 0,
+          lineKey: b.lineKey!,
+          name: b.name ?? '',
+          unit: b.unit ?? '',
+          fabricWidth: b.fabricWidth ?? '',
+          wastagePercent: b.wastagePercent ?? '',
+        })),
+    [bomItems],
+  );
 
   const rowsBySize = useMemo(() => {
     const m = new Map<number, Array<{ row: PatternRow; index: number }>>();
@@ -354,7 +395,7 @@ export function PatternsField() {
               size='xs'
               className='mt-1 w-full'
               title='авто-раскладка DXF-деталей этого размера на полосе ткани'
-              onClick={() => setNesting({ sizeLabel: label, files: dxfFilesOf(slot) })}
+              onClick={() => setNesting({ sizeLabel: label, sizeId, files: dxfFilesOf(slot) })}
             >
               ⌗ раскладка
             </Button>
@@ -452,6 +493,13 @@ export function PatternsField() {
           <NestingModal
             files={nesting.files}
             sizeLabel={nesting.sizeLabel}
+            techCardId={techCardId}
+            sizeId={nesting.sizeId}
+            bomLines={fabricBomLines}
+            canEdit={canEdit}
+            savedSizeIds={savedSizeIds}
+            season={season}
+            styleNumber={styleNumber}
             onClose={() => setNesting(null)}
           />
         </Suspense>

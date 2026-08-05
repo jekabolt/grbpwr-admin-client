@@ -74,6 +74,7 @@ import {
 } from './output-variants-field';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
+import { MarkersSection } from './nesting/markers-section';
 import { PiecesTab } from './pieces-tab';
 import { ProductIdsField } from './product-ids-field';
 import { DevExpensesField } from './dev-expenses-field';
@@ -1688,7 +1689,18 @@ export function TechCardForm({
                 <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
               </Section>
               <Section title='выкройки (PDF/DXF) — по размерам'>
-                <PatternsField />
+                <PatternsField
+                  techCardId={numId || undefined}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                  savedSizeIds={techCard?.techCard?.sizeIds ?? undefined}
+                />
+              </Section>
+              <Section title='раскладки (маркеры) — расход ткани по размерам'>
+                <MarkersSection
+                  techCard={techCard}
+                  techCardId={numId || 0}
+                  canEdit={canWrite(SECTION.techCards) && !frozen}
+                />
               </Section>
             </SectionStack>
 
