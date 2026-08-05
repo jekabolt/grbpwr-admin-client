@@ -1495,13 +1495,19 @@ export type FittingInsert = {
   sampleId: number | undefined;
 };
 
-// FittingPattern is one PDF выкройка iteration tried in a fitting (snapshot of the
-// uploaded file, not a live reference to a tech-card pattern).
+// FittingPattern is one выкройка iteration tried in a fitting (snapshot of the
+// uploaded file, not a live reference to a tech-card pattern). The file is a PDF or a
+// DXF; the type is carried by the url's extension (.pdf / .dxf).
 export type FittingPattern = {
   sizeId: number | undefined;
   url: string | undefined;
   filename: string | undefined;
   sizeBytes: number | undefined;
+  // name is an optional operator-entered display name. Same presence semantics as
+  // TechCardSizePattern.name — absent preserves the stored name for the same
+  // (size_id, url) row across the full-replace save; present (even empty) is stored as sent
+  // (empty clears). JSON null reads as absent (preserve) — clear with the empty string.
+  name?: string;
 };
 
 // FittingCallout is a numbered marker pinned to a fitting photo, noting a fit
@@ -2176,6 +2182,34 @@ export type StyleNumberSource =
   | "STYLE_NUMBER_SOURCE_UNKNOWN"
   | "STYLE_NUMBER_SOURCE_GENERATED"
   | "STYLE_NUMBER_SOURCE_MANUAL";
+// AssemblyResolutionBasis records WHY the packing spec named (or refused to name) a warehouse bucket
+// for one assembly line of one order item — the difference between "this is the black bag because the
+// garment is black" and "this is the only bag there is". A packer reading a prescribed colour has to be
+// able to tell a match from a substitution, and an operator facing a refusal has to be told which
+// refusal it is, because each has a different fix.
+// The three resolved values are ordered by strength; the four unresolved ones each name their own fix.
+export type AssemblyResolutionBasis =
+  // Not attempted: a bill read on its own (ListStyleAssembly) has no order item to resolve against.
+  | "ASSEMBLY_RESOLUTION_BASIS_UNKNOWN"
+  // Resolved: an ACTIVE colour variant whose code equals the item's colourway. The real answer.
+  | "ASSEMBLY_RESOLUTION_BASIS_COLOR_MATCH"
+  // Resolved by substitution: the card has exactly ONE live colour, so there is no choice to get
+  // wrong (a single-colour dust bag ships with every colourway). Not a colour match — show it as such.
+  | "ASSEMBLY_RESOLUTION_BASIS_SOLE_VARIANT"
+  // Resolved: the card has no colours at all and its single tech_card.output_material_id stands.
+  | "ASSEMBLY_RESOLUTION_BASIS_LEGACY_OUTPUT"
+  // Unresolved: the item's colour EXISTS on this card but is RETIRED. Never auto-substituted — fix by
+  // reactivating that colour, or by deciding a substitute deliberately.
+  | "ASSEMBLY_RESOLUTION_BASIS_RETIRED_COLOR"
+  // Unresolved: the card has live colours, none of them this item's (and more than one, so no sole
+  // fallback). Fix by adding the colour.
+  | "ASSEMBLY_RESOLUTION_BASIS_NO_COLOR_MATCH"
+  // Unresolved: a bucket WAS named but its material is archived nomenclature. Fix by un-archiving it
+  // or pointing the colour at a live material.
+  | "ASSEMBLY_RESOLUTION_BASIS_ARCHIVED_MATERIAL"
+  // Unresolved: the component card has neither colours nor an output material — it was never wired to
+  // the warehouse. Fix on the card.
+  | "ASSEMBLY_RESOLUTION_BASIS_NO_OUTPUT";
 // TechCardMediaItem is a writable sketch-media reference (id + kind).
 export type TechCardMediaItem = {
   mediaId: number | undefined;
@@ -2649,10 +2683,12 @@ export type TechCardSizeQuantity = {
   orderQty: number | undefined;
 };
 
-// TechCardSizePattern is a downloadable PDF выкройка (cut pattern) for one size of a
+// TechCardSizePattern is a downloadable выкройка (cut pattern) file for one size of a
 // tech card — the FINAL pattern for that size. A size can carry many patterns (pieces
-// split across sheets). The PDF is uploaded via Admin.UploadPattern, which returns the
-// url stored here; the binary lives in object storage, not the media library.
+// split across sheets). The file is a PDF or a DXF, uploaded via Admin.UploadPattern,
+// which returns the url stored here; the binary lives in object storage, not the media
+// library. The file type is carried by the url's extension (.pdf / .dxf), which the
+// server derives from the uploaded bytes — there is no separate content-type field.
 export type TechCardSizePattern = {
   sizeId: number | undefined;
   url: string | undefined;
@@ -2666,6 +2702,13 @@ export type TechCardSizePattern = {
   // patterns are a full-replace child, so the row is deleted and reinserted on every card save — the
   // server carries the original timestamp forward by matching the url rather than resetting it.
   uploadedAt: wellKnownTimestamp | undefined;
+  // name is an optional operator-entered display name for the sheet ("перед", "рукав x2").
+  // Explicit presence matters across the full-replace save. ABSENT — the server preserves the
+  // previously stored name for the same (size_id, url) row, so a stale client that does not know
+  // this field cannot wipe names it never saw. PRESENT — stored as sent, and an empty string
+  // clears the name. NOTE for JSON clients — protojson cannot tell `"name": null` from an absent
+  // field, so null also reads as "preserve"; to clear a name, send the empty string.
+  name?: string;
 };
 
 // TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
@@ -3347,6 +3390,13 @@ export type ProductionRunLine = {
   // line_key) and migration 0230 backfilled 'LEGACY'-prefixed keys onto pre-existing rows; both fit
   // that shape. NEVER regenerate a key the server handed out — that retires the row it names.
   lineKey: string | undefined;
+  // The AUX colour this line produces (TechCardOutputVariant.id); 0 = unset. A line carries EITHER a
+  // product or a colour variant, never both — a sellable line books into product stock, a colour
+  // line into that colour's warehouse bucket. Only a run whose tech card is auxiliary AND has the
+  // colour registered as one of its own ACTIVE variants may set it; anything else is refused at
+  // save. A product-less line with no variant is the single output line of a legacy single-output
+  // aux card, and stays exactly as legal as it was. Like the aux line, a colour line needs no size.
+  outputVariantId: number | undefined;
 };
 
 // ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in

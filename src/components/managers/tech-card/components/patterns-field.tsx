@@ -1,40 +1,39 @@
-import { adminService } from 'api/api';
 import {
   useSizeNames,
   useSizeOrdering,
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
-import { getBase64File } from 'lib/features/getBase64';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { PatternUploadButton } from 'ui/components/pattern-upload-button';
+import { DxfQuickViewModal } from 'ui/components/dxf-quick-view-modal';
+import Input from 'ui/components/input';
+import { PatternUploadButton, PatternUploadModal } from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
-import {
-  MAX_PATTERN_BYTES,
-  MAX_PATTERN_FILENAME,
-  formatBytes,
-  isPdfFile,
-  patternUploadErrorMessage,
-  stripDataUrlPrefix,
-} from 'utils/pattern';
+import { MAX_PATTERN_NAME, formatBytes, isDxfUrl, patternFileError } from 'utils/pattern';
 import { TechCardFormData } from './schema';
 
 type PatternRow = {
   sizeId?: number;
   url?: string;
   filename?: string;
+  name?: string;
   sizeBytes?: number;
   version?: number;
   uploadedAt?: string;
 };
 type SizeSlot = { sizeId: number; label: string; files: Array<{ row: PatternRow; index: number }> };
+
+// What the operator calls the sheet — the display name when given, else the filename.
+function labelOf(row?: PatternRow): string {
+  return row?.name || row?.filename || '(без имени)';
+}
 
 // Rev.N of this sheet within its size, straight off the row — the server numbers a url it has not
 // seen on this card and preserves the number for one it has. 0 is not revision zero, it is a row
@@ -43,27 +42,34 @@ function revisionOf(row: PatternRow): number | null {
   return row.version && row.version > 0 ? row.version : null;
 }
 
-// Per-size PDF выкройки (§2), as a coverage grid. Driven by the card's size range: one tile per
-// declared size, each a drag-drop target. Coverage is the entire point of this panel — a size with
-// no file is a hole the factory finds, not you — so coverage is the picture: a missing size is a
-// red dashed tile, a size whose file trails the rest is blue, and sizes carrying files that are no
-// longer in the range are shown rather than quietly saved.
+// Per-size выкройки (§2), PDF or DXF, as a coverage grid. Driven by the card's size range: one
+// tile per declared size, each a drag-drop target. Coverage is the entire point of this panel — a
+// size with no file is a hole the factory finds, not you — so coverage is the picture: a missing
+// size is a red dashed tile, a size whose file trails the rest is blue, and sizes carrying files
+// that are no longer in the range are shown rather than quietly saved.
 //
+// Every upload (click or drop) passes through the naming modal, so a sheet can carry an operator
+// name («перед», «рукав x2») next to its factory filename; the name is editable in place after.
 // The flat `patterns` array stays the source of truth (full-replace on save); upload appends,
 // ✕ removes.
 export function PatternsField() {
   const { control } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
-  const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
+  const { fields, append, remove, update } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
 
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
 
   const [dragSize, setDragSize] = useState<number | null>(null);
-  const [busySize, setBusySize] = useState<number | null>(null);
-  // The pattern sheet open in the in-app viewer (null = closed).
+  // Files dropped onto a tile, staged for the naming modal (click uploads stage inside
+  // PatternUploadButton; drops land here because the modal must know the target size).
+  const [droppedOn, setDroppedOn] = useState<{ sizeId: number; files: File[] } | null>(null);
+  // The pattern sheet open in the in-app viewer (null = closed). PDF and DXF rows share this
+  // state and split into the two viewers at the bottom.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
+  // Inline rename in progress: which row and the draft value.
+  const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
 
   const rowsBySize = useMemo(() => {
     const m = new Map<number, Array<{ row: PatternRow; index: number }>>();
@@ -111,47 +117,35 @@ export function PatternsField() {
   const covered = slots.filter((s) => s.files.length > 0).length;
   const staleCount = slots.filter(isStale).length;
 
-  async function uploadTo(sizeId: number, file: File) {
-    // Mirror the guards Admin.UploadPattern enforces so a bad drop fails instantly, not after a
-    // 25 MB round-trip. Same checks PatternUploadButton runs on the click path.
-    if (!isPdfFile(file)) {
-      showMessage('PDF files only.', 'error');
-      return;
-    }
-    if (file.size > MAX_PATTERN_BYTES) {
-      showMessage('File too large — maximum size is 25 MB.', 'error');
-      return;
-    }
-    setBusySize(sizeId);
-    try {
-      const raw = stripDataUrlPrefix(await getBase64File(file));
-      const filename = file.name.slice(0, MAX_PATTERN_FILENAME);
-      const res = await adminService.UploadPattern({ raw, filename });
-      append({
-        sizeId,
-        url: res.url ?? '',
-        filename: res.filename ?? filename,
-        // size_bytes is an int64 — grpc-gateway serialises it as a STRING in JSON (despite the
-        // generated `number` type). Coerce so the form holds a real number.
-        sizeBytes: Number(res.sizeBytes ?? file.size) || 0,
-      });
-    } catch (e) {
-      showMessage(patternUploadErrorMessage(e), 'error');
-      console.error('UploadPattern failed', e);
-    } finally {
-      setBusySize(null);
-    }
+  // Drop path of the naming modal: pre-flight here (instant feedback, same guards the
+  // server enforces), then stage the good files for naming + upload.
+  function stageDrop(sizeId: number, list: FileList | null) {
+    // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
+    const files = list ? Array.from(list) : [];
+    if (files.length === 0) return;
+    const bad = files.map((f) => ({ f, err: patternFileError(f) })).filter((x) => x.err);
+    for (const x of bad) showMessage(`${x.f.name}: ${x.err}`, 'error');
+    const good = files.filter((f) => !patternFileError(f));
+    if (good.length > 0) setDroppedOn({ sizeId, files: good });
+  }
+
+  function commitRename(index: number, row: PatternRow, value: string) {
+    // '' is a legal committed value — it clears the name and the row falls back to the
+    // filename (the save path still sends name explicitly, so the clear reaches the server).
+    // Strip the RHF-generated field id so it doesn't leak into form values via update().
+    const { id: _id, ...rest } = row as PatternRow & { id?: string };
+    update(index, { ...rest, name: value.trim().slice(0, MAX_PATTERN_NAME) });
+    setEditing(null);
   }
 
   function renderSlot(slot: SizeSlot, orphan: boolean) {
     const { sizeId, label, files } = slot;
     const primary = files[files.length - 1]?.row;
     const has = files.length > 0;
-    const busy = busySize === sizeId;
     const stale = !orphan && isStale(slot);
     const v = versionOf(slot);
     const dragging = !orphan && dragSize === sizeId;
-    // When the PDF first landed, server-side and carried across saves — the age of a sheet is what
+    // When the file first landed, server-side and carried across saves — the age of a sheet is what
     // makes "behind the others" actionable. formatTechCardDate answers '—' for the unset timestamp
     // a just-uploaded row still carries; on a coverage grid that dash reads as data, so drop it.
     const uploaded = formatTechCardDate(primary?.uploadedAt);
@@ -161,34 +155,39 @@ export function PatternsField() {
       <button
         type='button'
         onClick={() => primary && setViewing(primary)}
-        title={`посмотреть ${primary?.filename ?? 'PDF'}`}
+        title={`посмотреть ${labelOf(primary)}`}
         className='relative block w-full cursor-pointer'
       >
-        {busy ? (
-          <Placeholder aspect='3/4' label='uploading…' />
-        ) : (
-          <>
-            {/* First-page preview via the browser's own PDF renderer — no extra dependency. It is
-                non-interactive (the tile owns the click → opens the viewer); if the storage host
-                blocks framing, the fallback placeholder shows and the viewer's "open in new tab"
-                still works. */}
-            <object
-              data={`${primary?.url ?? ''}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
-              type='application/pdf'
-              aria-label={primary?.filename}
-              tabIndex={-1}
-              className='pointer-events-none block aspect-[3/4] w-full border border-borderColor bg-bgColor'
-            >
-              <Placeholder aspect='3/4' label='PDF' />
-            </object>
-            <span className='pointer-events-none absolute bottom-0 left-0 bg-textColor px-1 py-px text-nano uppercase leading-none tracking-label text-bgColor'>
-              view
+        {isDxfUrl(primary?.url) ? (
+          // No native DXF renderer to borrow a first page from — a flat marked tile, the
+          // WebGL viewer is one click away.
+          <span className='flex aspect-[3/4] w-full flex-col items-center justify-center gap-1 border border-borderColor bg-bgColor'>
+            <span className='border border-textColor px-1.5 py-0.5 text-micro uppercase leading-none tracking-label'>
+              dxf
             </span>
-          </>
+            <span className='text-nano uppercase tracking-label text-labelColor'>чертёж</span>
+          </span>
+        ) : (
+          /* First-page preview via the browser's own PDF renderer — no extra dependency. It is
+             non-interactive (the tile owns the click → opens the viewer); if the storage host
+             blocks framing, the fallback placeholder shows and the viewer's "open in new tab"
+             still works. */
+          <object
+            data={`${primary?.url ?? ''}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`}
+            type='application/pdf'
+            aria-label={labelOf(primary)}
+            tabIndex={-1}
+            className='pointer-events-none block aspect-[3/4] w-full border border-borderColor bg-bgColor'
+          >
+            <Placeholder aspect='3/4' label='PDF' />
+          </object>
         )}
+        <span className='pointer-events-none absolute bottom-0 left-0 bg-textColor px-1 py-px text-nano uppercase leading-none tracking-label text-bgColor'>
+          view
+        </span>
       </button>
     ) : (
-      <Placeholder aspect='3/4' dashed tone='error' label={busy ? 'uploading…' : 'drop'} />
+      <Placeholder aspect='3/4' dashed tone='error' label='drop' />
     );
 
     // A stale tile gives its byte count up to the pill — but keeps the date, which is the fact
@@ -227,8 +226,7 @@ export function PatternsField() {
           if (orphan) return;
           e.preventDefault();
           setDragSize(null);
-          const f = e.dataTransfer.files?.[0];
-          if (f) uploadTo(sizeId, f);
+          stageDrop(sizeId, e.dataTransfer.files);
         }}
       >
         <Tile
@@ -236,35 +234,80 @@ export function PatternsField() {
           name={label}
           sub={sub}
           // while a file is over the tile the ink outline has to win, so the drop reads as aimed
-          tone={!dragging && (orphan || (!has && !busy)) ? 'error' : undefined}
+          tone={!dragging && (orphan || !has) ? 'error' : undefined}
           selected={dragging}
         >
           {files.map(({ row, index }) => (
-            <div key={index} className='mt-1 flex items-center gap-1'>
-              <button
-                type='button'
-                onClick={() => setViewing(row)}
-                title={`посмотреть ${row.filename ?? 'PDF'}`}
-                className='min-w-0 flex-1 truncate text-left text-micro underline hover:opacity-70'
-              >
-                {row.filename || '(без имени)'}
-              </button>
-              <Button
-                type='button'
-                variant='secondary'
-                size='xs'
-                aria-label='remove pattern'
-                className='shrink-0'
-                onClick={() => remove(index)}
-              >
-                ✕
-              </Button>
+            <div key={index} className='mt-1'>
+              {editing?.index === index ? (
+                <Input
+                  name={`pattern-rename-${index}`}
+                  value={editing.value}
+                  placeholder={row.filename || 'название'}
+                  maxLength={MAX_PATTERN_NAME}
+                  autoFocus
+                  autoComplete='off'
+                  className='px-1 py-0 text-micro'
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    setEditing({ index, value: e.target.value })
+                  }
+                  onBlur={() => commitRename(index, row, editing.value)}
+                  onKeyDown={(e: React.KeyboardEvent) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      commitRename(index, row, editing.value);
+                    }
+                    if (e.key === 'Escape') setEditing(null);
+                  }}
+                />
+              ) : (
+                <div className='flex items-center gap-1'>
+                  <button
+                    type='button'
+                    onClick={() => setViewing(row)}
+                    title={`посмотреть ${row.filename ?? ''}`}
+                    className='min-w-0 flex-1 truncate text-left text-micro underline hover:opacity-70'
+                  >
+                    {labelOf(row)}
+                  </button>
+                  {isDxfUrl(row.url) && (
+                    <span className='shrink-0 border border-textColor px-1 text-nano uppercase leading-snug tracking-label'>
+                      dxf
+                    </span>
+                  )}
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    aria-label='rename pattern'
+                    title='переименовать'
+                    className='shrink-0'
+                    onClick={() => setEditing({ index, value: row.name ?? '' })}
+                  >
+                    ✎
+                  </Button>
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    aria-label='remove pattern'
+                    className='shrink-0'
+                    onClick={() => remove(index)}
+                  >
+                    ✕
+                  </Button>
+                </div>
+              )}
+              {/* When a name is set the filename still matters (it is what the factory's CAD
+                  saved) — keep it readable underneath rather than only in a tooltip. */}
+              {row.name && row.filename && editing?.index !== index && (
+                <span className='block truncate text-nano text-labelColor'>{row.filename}</span>
+              )}
             </div>
           ))}
           {!orphan && (
             <PatternUploadButton
-              label='+ PDF'
-              disabled={busy}
+              label='+ PDF/DXF'
               onUploaded={(p) => append({ sizeId, ...p })}
               // PatternUploadButton renders a page-sized Button; inside a tile it has to sit at
               // control density. It exposes no `size`, so the density is applied from here.
@@ -287,9 +330,9 @@ export function PatternsField() {
   return (
     <div className='space-y-2'>
       <Text size='micro' variant='label'>
-        финальные выкройки изделия — отдельный PDF на каждый размер (можно несколько листов на
-        размер). Перетащите файл на плитку или нажмите «+ PDF». Загруженный файл сохраняется вместе
-        с тех картой.
+        финальные выкройки изделия — PDF или DXF на каждый размер (можно несколько файлов на
+        размер, у каждого своё название). Перетащите файлы на плитку или нажмите «+ PDF/DXF».
+        Загруженный файл сохраняется вместе с тех картой.
       </Text>
 
       <Tiles min={112}>
@@ -305,15 +348,22 @@ export function PatternsField() {
           ` · ${orphans.length} ${orphans.length === 1 ? 'file set is' : 'file sets are'} attached to a size that left the range`}
       </Text>
 
+      {/* Naming modal for tile drops (click uploads carry their own inside the button). */}
+      <PatternUploadModal
+        files={droppedOn?.files ?? null}
+        onClose={() => setDroppedOn(null)}
+        onUploaded={(p) => droppedOn && append({ sizeId: droppedOn.sizeId, ...p })}
+      />
+
       {/* In-app PDF viewer: the browser renders the sheet inside the modal; a fallback link opens it
           in a new tab if the storage host refuses to be framed. */}
       <ConfirmationModal
-        open={viewing != null}
+        open={viewing != null && !isDxfUrl(viewing.url)}
         onOpenChange={(o) => {
           if (!o) setViewing(null);
         }}
         onConfirm={() => setViewing(null)}
-        title={viewing?.filename || 'выкройка'}
+        title={viewing ? labelOf(viewing) : 'выкройка'}
         width='lg'
         hideActions
       >
@@ -331,11 +381,19 @@ export function PatternsField() {
           </div>
           <iframe
             src={viewing?.url}
-            title={viewing?.filename || 'выкройка'}
+            title={viewing ? labelOf(viewing) : 'выкройка'}
             className='h-[75vh] w-full border border-borderColor bg-bgColor'
           />
         </div>
       </ConfirmationModal>
+
+      {/* DXF quick view — WebGL render of the drawing, dynamically loaded. */}
+      <DxfQuickViewModal
+        url={viewing && isDxfUrl(viewing.url) ? (viewing.url ?? null) : null}
+        title={viewing ? labelOf(viewing) : undefined}
+        sizeBytes={viewing?.sizeBytes}
+        onClose={() => setViewing(null)}
+      />
     </div>
   );
 }

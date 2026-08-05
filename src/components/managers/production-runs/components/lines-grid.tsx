@@ -208,6 +208,9 @@ export function LinesGrid({
           // reinserting it; minted only for a cell that has no line yet. Never regenerate a key that
           // came from the server — that would silently retire the row it names.
           lineKey: carrier?.lineKey || ulid(),
+          // Colour-variant plumbing (aux-colorways contract): this grid predates it — preserve
+          // the stored value, 0 = legacy single-output mode.
+          outputVariantId: carrier?.outputVariantId ?? 0,
         });
       }
     }

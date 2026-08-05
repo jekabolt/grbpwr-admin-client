@@ -1,74 +1,202 @@
 import { adminService } from 'api/api';
 import { getBase64File } from 'lib/features/getBase64';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
-  MAX_PATTERN_BYTES,
   MAX_PATTERN_FILENAME,
-  isPdfFile,
+  MAX_PATTERN_NAME,
+  PATTERN_FILE_ACCEPT,
+  formatBytes,
+  isDxfFile,
+  patternFileError,
   patternUploadErrorMessage,
   stripDataUrlPrefix,
 } from 'utils/pattern';
 import { Button } from './button';
+import { ConfirmationModal } from './confirmation-modal';
+import Input from './input';
 import Text from './text';
 
-export type UploadedPattern = { url: string; filename: string; sizeBytes: number };
+export type UploadedPattern = {
+  url: string;
+  filename: string;
+  sizeBytes: number;
+  // Operator-entered display name from the naming modal. '' = deliberately unnamed — the
+  // save path still sends it explicitly (absent-on-the-wire is reserved for stale clients).
+  name: string;
+};
+
+// One picked file staged in the naming modal, with its per-file upload status.
+type StagedFile = {
+  file: File;
+  name: string;
+  status: 'pending' | 'uploading' | 'done' | 'error';
+  error?: string;
+};
+
+// The naming step (§1): every upload — click or drag-drop, one file or a batch — passes
+// through this modal so each выкройка can carry a display name (optional, may stay
+// empty; placeholder shows the filename it falls back to). Confirm uploads sequentially
+// via Admin.UploadPattern and hands each {url, filename, sizeBytes, name} to the caller;
+// cancel drops the batch. Files already uploaded when a later one fails are NOT rolled
+// back — they are in object storage and in form state, the modal reports the failure and
+// keeps the failed rows staged for retry.
+export function PatternUploadModal({
+  files,
+  onClose,
+  onUploaded,
+}: {
+  files: File[] | null; // null = closed
+  onClose: () => void;
+  onUploaded: (pattern: UploadedPattern) => void;
+}) {
+  const [staged, setStaged] = useState<StagedFile[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  // Re-stage whenever a new batch arrives. `files` is a fresh array per pick/drop, so
+  // identity is the correct trigger.
+  useEffect(() => {
+    setStaged((files ?? []).map((file) => ({ file, name: '', status: 'pending' })));
+    setBusy(false);
+  }, [files]);
+
+  const open = files != null && files.length > 0;
+
+  async function uploadAll() {
+    setBusy(true);
+    // Work on a local copy — setState is async and the loop needs the truth.
+    const rows = [...staged];
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].status === 'done') continue;
+      rows[i] = { ...rows[i], status: 'uploading', error: undefined };
+      setStaged([...rows]);
+      try {
+        const raw = stripDataUrlPrefix(await getBase64File(rows[i].file));
+        const filename = rows[i].file.name.slice(0, MAX_PATTERN_FILENAME);
+        const res = await adminService.UploadPattern({ raw, filename });
+        onUploaded({
+          url: res.url ?? '',
+          filename: res.filename ?? filename,
+          // size_bytes is an int64 — grpc-gateway serialises it as a STRING in JSON (despite
+          // the generated `number` type). Coerce so the form holds a real number (z.number()
+          // rejects a string, which silently blocks the whole save).
+          sizeBytes: Number(res.sizeBytes ?? rows[i].file.size) || 0,
+          name: rows[i].name.trim().slice(0, MAX_PATTERN_NAME),
+        });
+        rows[i] = { ...rows[i], status: 'done' };
+      } catch (e) {
+        console.error('UploadPattern failed', e);
+        rows[i] = { ...rows[i], status: 'error', error: patternUploadErrorMessage(e) };
+      }
+      setStaged([...rows]);
+    }
+    setBusy(false);
+    if (rows.every((r) => r.status === 'done')) onClose();
+  }
+
+  const doneCount = staged.filter((r) => r.status === 'done').length;
+
+  return (
+    <ConfirmationModal
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !busy) onClose();
+      }}
+      onConfirm={uploadAll}
+      onCancel={() => {
+        if (!busy) onClose();
+      }}
+      title={staged.length === 1 ? 'название выкройки' : `названия выкроек (${staged.length})`}
+      confirmLabel={doneCount > 0 ? 'повторить незагруженные' : 'загрузить'}
+      cancelLabel={doneCount > 0 ? 'закрыть' : 'отмена'}
+      confirmDisabled={busy || staged.every((r) => r.status === 'done')}
+      closeOnConfirm={false}
+    >
+      <div className='space-y-2.5'>
+        <Text size='micro' variant='label'>
+          название необязательно — пустое поле оставит только имя файла
+        </Text>
+        {staged.map((row, i) => (
+          <div key={`${row.file.name}-${i}`} className='space-y-0.5'>
+            <div className='flex items-baseline gap-1.5'>
+              <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                {row.file.name}
+              </Text>
+              {isDxfFile(row.file) && (
+                <span className='shrink-0 border border-textColor px-1 text-nano uppercase leading-snug tracking-label'>
+                  dxf
+                </span>
+              )}
+              <Text size='micro' variant='label' component='span' className='shrink-0'>
+                {formatBytes(row.file.size)}
+              </Text>
+            </div>
+            <Input
+              name={`pattern-name-${i}`}
+              value={row.name}
+              placeholder={row.file.name}
+              maxLength={MAX_PATTERN_NAME}
+              disabled={busy || row.status === 'done'}
+              autoComplete='off'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setStaged((rows) =>
+                  rows.map((r, j) => (j === i ? { ...r, name: e.target.value } : r)),
+                )
+              }
+            />
+            {row.status === 'uploading' && (
+              <Text size='micro' variant='label'>
+                загрузка…
+              </Text>
+            )}
+            {row.status === 'done' && (
+              <Text size='micro' variant='label'>
+                ✓ загружено
+              </Text>
+            )}
+            {row.status === 'error' && (
+              <Text size='micro' className='text-error'>
+                {row.error}
+              </Text>
+            )}
+          </div>
+        ))}
+      </div>
+    </ConfirmationModal>
+  );
+}
 
 type Props = {
-  // Called once the PDF is in object storage. The caller holds it as a pending entry in
-  // form state and only persists it when the parent (tech card / fitting) is saved.
+  // Called once per file as it lands in object storage. The caller holds it as a pending
+  // entry in form state and only persists it when the parent (tech card / fitting) is saved.
   onUploaded: (pattern: UploadedPattern) => void;
   label?: string;
   disabled?: boolean;
   className?: string;
 };
 
-// Shared PDF выкройка upload control (§1): pick → validate (PDF, ≤25 MB) → base64 →
-// Admin.UploadPattern → hand the {url, filename, sizeBytes} back to the caller. Errors are
-// mapped (bad file vs server) and surfaced inline + via snackbar. Stateless beyond the
-// in-flight upload — it never touches form state itself.
+// Shared выкройка upload control (§1): pick (multi-select, PDF/DXF, ≤40 MB each) → naming
+// modal → base64 → Admin.UploadPattern per file → hand each {url, filename, sizeBytes,
+// name} back to the caller. Errors are mapped (bad file vs server) and surfaced inline +
+// via snackbar. Stateless beyond the staged batch — it never touches form state itself.
 export function PatternUploadButton({ onUploaded, label, disabled, className }: Props) {
   const { showMessage } = useSnackBarStore();
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = `pattern-upload-${useId().replace(/:/g, '')}`;
-  const [uploading, setUploading] = useState(false);
+  const [picked, setPicked] = useState<File[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleFile(file: File) {
+  function handleFiles(list: FileList | null) {
     setError(null);
-
-    if (!isPdfFile(file)) {
-      setError('PDF files only.');
-      return;
-    }
-    if (file.size > MAX_PATTERN_BYTES) {
-      setError('File too large — maximum size is 25 MB.');
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const raw = stripDataUrlPrefix(await getBase64File(file));
-      const filename = file.name.slice(0, MAX_PATTERN_FILENAME);
-      const res = await adminService.UploadPattern({ raw, filename });
-      onUploaded({
-        url: res.url ?? '',
-        filename: res.filename ?? filename,
-        // size_bytes is an int64 — grpc-gateway serialises it as a STRING in JSON (despite the
-        // generated `number` type). Coerce so the form holds a real number (z.number() rejects
-        // a string, which silently blocks the whole save).
-        sizeBytes: Number(res.sizeBytes ?? file.size) || 0,
-      });
-    } catch (e) {
-      const msg = patternUploadErrorMessage(e);
-      setError(msg);
-      showMessage(msg, 'error');
-      console.error('UploadPattern failed', e);
-    } finally {
-      setUploading(false);
-      // Reset so re-picking the same file re-fires onChange.
-      if (inputRef.current) inputRef.current.value = '';
-    }
+    // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
+    const files = list ? Array.from(list) : [];
+    if (files.length === 0) return;
+    // Pre-flight the whole batch; bad files are reported and dropped, good ones proceed.
+    const bad = files.map((f) => ({ f, err: patternFileError(f) })).filter((x) => x.err);
+    for (const x of bad) showMessage(`${x.f.name}: ${x.err}`, 'error');
+    if (bad.length > 0) setError(bad.length === 1 ? bad[0].err : `отклонено файлов: ${bad.length}`);
+    const good = files.filter((f) => !patternFileError(f));
+    if (good.length > 0) setPicked(good);
   }
 
   return (
@@ -77,29 +205,31 @@ export function PatternUploadButton({ onUploaded, label, disabled, className }: 
         ref={inputRef}
         id={inputId}
         type='file'
-        accept='application/pdf,.pdf'
+        accept={PATTERN_FILE_ACCEPT}
+        multiple
         className='sr-only'
-        disabled={disabled || uploading}
+        disabled={disabled}
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) handleFile(f);
+          handleFiles(e.target.files);
+          // Reset so re-picking the same file re-fires onChange.
+          if (inputRef.current) inputRef.current.value = '';
         }}
       />
       <Button
         type='button'
         variant='secondary'
         className='uppercase'
-        loading={uploading}
-        disabled={disabled || uploading}
+        disabled={disabled}
         onClick={() => inputRef.current?.click()}
       >
-        {label ?? '+ upload PDF'}
+        {label ?? '+ PDF/DXF'}
       </Button>
       {error && (
         <Text size='small' className='mt-1 block text-error'>
           {error}
         </Text>
       )}
+      <PatternUploadModal files={picked} onClose={() => setPicked(null)} onUploaded={onUploaded} />
     </div>
   );
 }
