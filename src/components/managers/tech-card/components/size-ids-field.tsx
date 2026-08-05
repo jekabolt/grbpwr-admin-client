@@ -209,7 +209,7 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
           Размер {pendingName} используется. Из карточки будет удалено:
         </Text>
         <Row
-          label='выкройки (PDF)'
+          label='выкройки (PDF/DXF)'
           value={pendingRemove != null ? patternCount(pendingRemove) : 0}
         />
         <Row

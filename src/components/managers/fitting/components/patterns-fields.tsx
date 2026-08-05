@@ -1,28 +1,41 @@
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { useMemo } from 'react';
-import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
+import { useMemo, useState } from 'react';
+import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { DxfQuickViewModal } from 'ui/components/dxf-quick-view-modal';
+import Input from 'ui/components/input';
 import { PatternUploadButton } from 'ui/components/pattern-upload-button';
 import Text from 'ui/components/text';
 import SelectField from 'ui/form/fields/select-field';
-import { formatBytes } from 'utils/pattern';
+import { MAX_PATTERN_NAME, clampPatternName, formatBytes, isDxfUrl } from 'utils/pattern';
 import { FittingFormData } from './schema';
 
-// Iteration выкройка for a fitting (§5): the pattern actually tried on, uploaded via the
-// shared PatternUploadButton. sizeId is optional (0 = not size-specific) and sourced from
-// the linked sample's size (a fitting tries one sample, which carries one sizeId — the old
-// multi-size picker this used to read from is gone). "Скопировать из тех карты" seeds it
-// from the linked card's final patterns so an iteration can start from the current pattern.
+type Row = { id: string; url?: string; filename?: string; name?: string; sizeBytes?: number };
+
+// Iteration выкройка for a fitting (§5): the pattern actually tried on — PDF or DXF —
+// uploaded via the shared PatternUploadButton (which owns the naming modal). sizeId is
+// optional (0 = not size-specific) and sourced from the linked sample's size (a fitting
+// tries one sample, which carries one sizeId — the old multi-size picker this used to read
+// from is gone). "Скопировать из тех карты" seeds it from the linked card's final patterns
+// — names included — so an iteration can start from the current pattern.
 export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
-  const { control } = useFormContext<FittingFormData>();
+  const { control, setValue } = useFormContext<FittingFormData>();
   const { dictionary } = useDictionary();
   const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
+  // Live values: `fields` is a snapshot that misses Controller/setValue writes (the sizeId
+  // select writes through a Controller!), so rows must render from the live form state.
+  const liveRows = (useWatch({ control, name: 'patterns' }) ?? []) as Omit<Row, 'id'>[];
+  const { isSubmitting } = useFormState({ control });
 
   const techCardId = (useWatch({ control, name: 'techCardId' }) as number) || 0;
   const { data: linkedCard } = useTechCard(techCardId || undefined);
   const cardPatterns = linkedCard?.techCard?.patterns ?? [];
+
+  // DXF row open in the quick view (PDF rows keep the plain new-tab link).
+  const [viewingDxf, setViewingDxf] = useState<Row | null>(null);
+  const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
 
   const sizeById = useMemo(() => {
     const m = new Map<number, string>();
@@ -52,15 +65,27 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
         sizeId: p.sizeId || 0,
         url: p.url || '',
         filename: p.filename || '',
+        name: p.name ?? '',
         // int64 → string from grpc-gateway; coerce so z.number() doesn't block save
         sizeBytes: Number(p.sizeBytes) || 0,
       }),
     );
 
+  const commitRename = (index: number, value: string) => {
+    // '' commits as a clear — the row falls back to the filename; the save path still sends
+    // the empty name explicitly so the clear reaches the server. setValue on the nested
+    // path, NOT useFieldArray.update: update() would replace the row from the stale
+    // `fields` snapshot and revert a just-picked size (its select writes via Controller,
+    // which array snapshots never see). Byte-clamped — the server counts UTF-8 bytes.
+    setValue(`patterns.${index}.name`, clampPatternName(value), { shouldDirty: true });
+    setEditing(null);
+  };
+
   return (
     <div className='space-y-3'>
       <Text variant='inactive' size='small'>
-        выкройка, которую мерили в этой примерке (итерация). Можно несколько; размер — необязателен.
+        выкройка, которую мерили в этой примерке (итерация), PDF или DXF. Можно несколько; размер —
+        необязателен.
       </Text>
 
       {fields.length === 0 ? (
@@ -70,21 +95,72 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
       ) : (
         <ul className='space-y-2'>
           {fields.map((f, index) => {
-            const row = f as { id: string; url?: string; filename?: string; sizeBytes?: number };
+            // Structure/key from the snapshot, values live (see liveRows above).
+            const row = { ...(f as Row), ...liveRows[index] };
+            const label = row.name || row.filename || '(без имени)';
             return (
               <li
                 key={f.id}
                 className='flex flex-wrap items-end gap-2 border-b border-hairline pb-2'
               >
-                <a
-                  href={row.url || '#'}
-                  target='_blank'
-                  rel='noopener noreferrer'
-                  className='min-w-0 flex-1 truncate text-textBaseSize underline hover:opacity-70'
-                  title={row.filename}
-                >
-                  {row.filename || '(без имени)'}
-                </a>
+                <div className='min-w-0 flex-1'>
+                  {editing?.index === index ? (
+                    <Input
+                      name={`fitting-pattern-rename-${index}`}
+                      value={editing.value}
+                      placeholder={row.filename || 'название'}
+                      maxLength={MAX_PATTERN_NAME}
+                      autoFocus
+                      autoComplete='off'
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                        setEditing({ index, value: e.target.value })
+                      }
+                      onBlur={() => commitRename(index, editing.value)}
+                      onKeyDown={(e: React.KeyboardEvent) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          commitRename(index, editing.value);
+                        }
+                        if (e.key === 'Escape') setEditing(null);
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <span className='flex items-center gap-1.5'>
+                        {isDxfUrl(row.url) ? (
+                          <button
+                            type='button'
+                            onClick={() => setViewingDxf(row)}
+                            className='min-w-0 truncate text-left text-textBaseSize underline hover:opacity-70'
+                            title={row.filename}
+                          >
+                            {label}
+                          </button>
+                        ) : (
+                          <a
+                            href={row.url || '#'}
+                            target='_blank'
+                            rel='noopener noreferrer'
+                            className='min-w-0 truncate text-textBaseSize underline hover:opacity-70'
+                            title={row.filename}
+                          >
+                            {label}
+                          </a>
+                        )}
+                        {isDxfUrl(row.url) && (
+                          <span className='shrink-0 border border-textColor px-1 text-nano uppercase leading-snug tracking-label'>
+                            dxf
+                          </span>
+                        )}
+                      </span>
+                      {row.name && row.filename && (
+                        <span className='block truncate text-nano text-labelColor'>
+                          {row.filename}
+                        </span>
+                      )}
+                    </>
+                  )}
+                </div>
                 <Text variant='inactive' size='small' className='shrink-0'>
                   {formatBytes(row.sizeBytes)}
                 </Text>
@@ -96,6 +172,27 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
                     valueAsNumber
                   />
                 </div>
+                {isDxfUrl(row.url) && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    className='shrink-0'
+                    onClick={() => setViewingDxf(row)}
+                  >
+                    просмотр
+                  </Button>
+                )}
+                <Button
+                  type='button'
+                  variant='secondary'
+                  aria-label='rename pattern'
+                  title='переименовать'
+                  className='shrink-0'
+                  disabled={isSubmitting}
+                  onClick={() => setEditing({ index, value: row.name ?? '' })}
+                >
+                  ✎
+                </Button>
                 <Button
                   type='button'
                   variant='secondary'
@@ -113,7 +210,7 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
 
       <div className='flex flex-wrap items-center gap-2'>
         <PatternUploadButton
-          label='+ загрузить PDF'
+          label='+ загрузить PDF/DXF'
           onUploaded={(p) => append({ sizeId: 0, ...p })}
         />
         {cardPatterns.length > 0 && (
@@ -122,6 +219,13 @@ export function PatternsFields({ sampleSizeId }: { sampleSizeId?: number }) {
           </Button>
         )}
       </div>
+
+      <DxfQuickViewModal
+        url={viewingDxf?.url ?? null}
+        title={viewingDxf ? viewingDxf.name || viewingDxf.filename : undefined}
+        sizeBytes={viewingDxf?.sizeBytes}
+        onClose={() => setViewingDxf(null)}
+      />
     </div>
   );
 }

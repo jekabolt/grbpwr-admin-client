@@ -104,6 +104,12 @@ export default defineConfig(({ mode }) => {
         utils: path.resolve(__dirname, './src/utils'),
         styles: path.resolve(__dirname, './src/styles'),
         api: path.resolve(__dirname, './src/api'),
+        // dxf-viewer does `import opentype from "opentype.js"`, but opentype's ESM build
+        // (dist/opentype.mjs, the `module` entry rollup picks) exports only named symbols —
+        // the production build fails with "default is not exported". Point rollup at the CJS
+        // build instead; the commonjs interop then synthesises the default export. Dev
+        // (esbuild) interops either way.
+        'opentype.js': path.resolve(__dirname, 'node_modules/opentype.js/dist/opentype.js'),
       },
     },
     server: {
@@ -115,6 +121,11 @@ export default defineConfig(({ mode }) => {
           secure: false,
         },
       },
+    },
+    worker: {
+      // Vite's default worker format is iife, which breaks the moment a worker chunk
+      // contains a dynamic import (the nesting worker's dependency graph does).
+      format: 'es' as const,
     },
     build: {
       outDir: 'dist',

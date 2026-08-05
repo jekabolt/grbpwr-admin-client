@@ -548,7 +548,7 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* PATTERNS (выкройки) — per-size PDF, QR-linked for the factory */}
+      {/* PATTERNS (выкройки) — per-size PDF/DXF, QR-linked for the factory */}
       {has(tc.patterns) && (
         <Sheet title='patterns (выкройки)'>
           <div className='flex flex-wrap gap-4'>
@@ -559,6 +559,9 @@ export function TechPackDocument({
                   <PatternQR value={p.url ?? ''} />
                   <figcaption className='mt-1 text-micro uppercase'>
                     <div className='font-semibold'>{sizeName(p.sizeId)}</div>
+                    {/* The operator's name for the sheet leads; the CAD filename stays as the
+                        secondary line the factory can match against the file it receives. */}
+                    {p.name && <div className='max-w-[120px] truncate'>{p.name}</div>}
                     {p.filename && (
                       <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
                     )}
@@ -567,7 +570,7 @@ export function TechPackDocument({
               ))}
           </div>
           <p className='mt-2 text-nano text-labelColor'>
-            наведите камеру на QR, чтобы открыть PDF-выкройку этого размера
+            наведите камеру на QR, чтобы открыть выкройку этого размера (PDF/DXF)
           </p>
         </Sheet>
       )}

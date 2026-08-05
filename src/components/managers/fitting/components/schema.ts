@@ -1,3 +1,4 @@
+import { clampPatternName } from 'utils/pattern';
 import {
   common_Fitting,
   common_FittingInsert,
@@ -17,11 +18,14 @@ const fittingSizeSchema = z.object({
 });
 
 // The iteration выкройка actually tried on in this fitting (a snapshot, independent of the
-// card's final pattern). sizeId is optional here: 0 = not tied to a specific size.
+// card's final pattern), PDF or DXF by url extension. sizeId is optional here: 0 = not
+// tied to a specific size.
 const fittingPatternSchema = z.object({
   sizeId: z.number().int().optional().default(0),
   url: z.string().optional().default(''),
   filename: z.string().optional().default(''),
+  // Display name; '' = unnamed. Sent explicitly on save (see the tech-card patternSchema).
+  name: z.string().optional().default(''),
   sizeBytes: z.number().optional().default(0),
 });
 
@@ -173,6 +177,7 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       sizeId: p.sizeId || 0,
       url: p.url || '',
       filename: p.filename || '',
+      name: p.name ?? '',
       // int64 → string from grpc-gateway; coerce so z.number() doesn't block save
       sizeBytes: Number(p.sizeBytes) || 0,
     })),
@@ -239,6 +244,8 @@ export function mapFormToFittingInsert(
         sizeId: p.sizeId || 0,
         url: p.url?.trim() || '',
         filename: p.filename?.trim() || '',
+        // Explicit even when '' — absence is the stale-client signal (server keeps the old name).
+        name: clampPatternName(p.name ?? ''),
         sizeBytes: p.sizeBytes || 0,
       })),
     mediaIds: data.mediaIds ?? [],

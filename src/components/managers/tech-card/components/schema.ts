@@ -1,3 +1,4 @@
+import { clampPatternName } from 'utils/pattern';
 import {
   common_GenderEnum,
   common_TechCard,
@@ -94,12 +95,17 @@ const sizeQuantitySchema = z.object({
   orderQty: z.number().optional().default(0),
 });
 
-// A downloadable PDF выкройка (cut pattern) for one size. url/filename/sizeBytes are
-// produced by Admin.UploadPattern (never hand-typed); sizeId ∈ size_ids.
+// A downloadable выкройка (cut pattern) file — PDF or DXF, told apart by the url's
+// extension — for one size. url/filename/sizeBytes are produced by Admin.UploadPattern
+// (never hand-typed); sizeId ∈ size_ids.
 const patternSchema = z.object({
   sizeId: z.number().optional().default(0),
   url: z.string().optional().default(''),
   filename: z.string().optional().default(''),
+  // Operator-entered display name; '' = unnamed (the UI falls back to the filename). The
+  // save path sends it EXPLICITLY for every row, empty included — absent-on-the-wire is
+  // reserved for stale clients, which the server answers by preserving the stored name.
+  name: z.string().optional().default(''),
   sizeBytes: z.number().optional().default(0),
   // Rev.N of this sheet within its size. 0 = "assign one": the server numbers a url it has not seen
   // on this card before and preserves the number for one it has, so the client only ever pins a
@@ -752,6 +758,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       sizeId: p.sizeId || 0,
       url: p.url || '',
       filename: p.filename || '',
+      name: p.name ?? '',
       // size_bytes is int64 → arrives as a string from grpc-gateway; coerce to a real number
       // so the form value passes z.number() (a string would silently block save).
       sizeBytes: wireInt(p.sizeBytes),
@@ -1087,6 +1094,10 @@ export function mapFormToTechCardInsert(
         sizeId: p.sizeId || 0,
         url: p.url?.trim() || '',
         filename: p.filename?.trim() || '',
+        // ALWAYS present, empty string included — an explicit '' clears the name server-side,
+        // while an ABSENT field is the stale-client signal that preserves the stored name. Only
+        // clients that predate the field may omit it.
+        name: clampPatternName(p.name ?? ''),
         sizeBytes: p.sizeBytes || 0,
         // Round-trip the revision so a re-save does not renumber existing sheets; a freshly
         // uploaded row carries 0 and the server assigns MAX+1 for its size. uploadedAt is
