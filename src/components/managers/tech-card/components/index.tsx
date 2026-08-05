@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_TechCard } from 'api/proto-http/admin';
+import { common_AdminColorwayRef, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   techCardKeys,
@@ -278,10 +278,24 @@ export function TechCardForm({
     mode: 'onSubmit',
   });
 
+  // NF-07 auxiliary items: an aux card produces a packaging material, links no products, and needs
+  // an output material set before its first run. Read HERE, above the tab plumbing, because which
+  // tabs exist depends on it — the folded-alias resolution and isTabVisible both branch on isAux.
+  const purpose = toPurposeEnum(
+    useWatch({ control: form.control, name: 'purpose' }) as string | undefined,
+  );
+  const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
+
   // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
   // filter) can be set in the same navigation (spine deep links).
   const rawTab = params.get('tab');
-  const tabParam = rawTab ? FOLDED_TABS[rawTab] ?? rawTab : rawTab;
+  // A folded alias has to resolve to a tab that EXISTS on this card: ?tab=pieces folds into
+  // colorways, which an auxiliary card does not have — its cut-piece table lives on construction.
+  // Resolving to the hidden tab instead would bounce the deep link to header via the fallback
+  // effect, i.e. silently drop the operator somewhere they did not ask for.
+  const resolveFold = (t: TabId | undefined) =>
+    t === 'colorways' && isAux ? ('construction' as TabId) : t;
+  const tabParam = rawTab ? (resolveFold(FOLDED_TABS[rawTab]) ?? rawTab) : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
@@ -297,6 +311,33 @@ export function TechCardForm({
     );
   const setActiveTab = (id: TabId) => navTo(id);
   const [conflict, setConflict] = useState(false);
+  // A sellable→auxiliary save held back until the operator answers for the live colourways it has to
+  // retire first (NF-07 purpose lock). Carries the validated payload so «archive & switch» re-runs
+  // exactly the save that was intercepted, not whatever the form holds a few seconds later.
+  const [convert, setConvert] = useState<{
+    data: TechCardFormData;
+    colorways: common_AdminColorwayRef[];
+  } | null>(null);
+  const [converting, setConverting] = useState(false);
+  // What a half-finished convert left behind. Like stagingError this is a fact about a write that
+  // already partly happened, so it stays on screen instead of passing through a toast.
+  const [convertReport, setConvertReport] = useState<string | null>(null);
+  // Colourways THIS page archived, which the `techCard` prop does not know about yet. Without it the
+  // window between the archive loop and the refetch landing is a trap: a save that 409s, answered
+  // with «keep mine & overwrite», re-enters doSubmit against the stale prop, re-opens the convert
+  // dialog and re-archives already-ARCHIVED colourways — and archive is not idempotent (ARCHIVED has
+  // no outgoing archive edge), so the retry hard-fails and the report lies about where it stopped.
+  const archivedIds = useRef(new Set<number>());
+  // The set holds ONLY "archived by us, not yet confirmed by a read": each id drops out the moment
+  // the server's own copy says ARCHIVED. Without this it would outlive the fact — a colourway
+  // restored from its own page would stay invisible here for the rest of the session.
+  useEffect(() => {
+    if (archivedIds.current.size === 0) return;
+    for (const c of techCard?.colorways ?? []) {
+      if (c.status === 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED')
+        archivedIds.current.delete(c.colorwayId ?? 0);
+    }
+  }, [techCard?.colorways]);
   // The version the NEXT body save must claim. Null = the loaded card's, the normal case. A 409 that
   // the operator answered with «keep mine & overwrite» parks the server's CURRENT version here: the
   // techCard prop stays stale after a failed save (nothing invalidates it, and the query neither
@@ -367,7 +408,16 @@ export function TechCardForm({
   // Server rows are scored against SAVED data, so a fix made in the form counts once it is saved.
   // That is the right reading here: release freezes the saved spec as the factory-facing document.
   // Each blocker still carries the tab that fixes it, so every rendering navigates identically.
-  const serverReleaseRows = readiness?.releaseRequirements ?? [];
+  const serverReleaseRows = (readiness?.releaseRequirements ?? []).filter(
+    // The one fact the readiness RPC cannot know (same filter, same reason as lifecycle-strip.tsx:
+    // the facts query has no notion of `purpose`): an NF-07 auxiliary card produces a packaging
+    // material and links no products BY DESIGN, so `colorway_linked` — and the `lab_dip` row that
+    // only exists to score those colourways — would sit permanently unmet. Worse than merely wrong
+    // since the colourways tab became aux-hidden: both chips route to RELEASE_BLOCKER_TAB
+    // 'colorways', which for an aux card bounces straight back to header, i.e. a dead control that
+    // states an unfixable requirement. Dropped, not failed.
+    (r) => !(isAux && (r.key === 'colorway_linked' || r.key === 'lab_dip')),
+  );
   const releaseBlockers: (ReleaseBlocker & { tab: TabId })[] = serverReleaseRows
     .filter((r) => !r.met)
     .map((r) => ({
@@ -392,13 +442,19 @@ export function TechCardForm({
   // sits on the PP stage checklist, not on release, so this stays a client rule and no duplicate.
   // The old blanket "link a material on every line" wrongly blocked a role-only slot that every
   // colourway pins — under the slot model that slot is fully specified.
-  const releaseLiveColorways = (techCard?.colorways ?? []).filter(
-    (c) => c.status !== 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED',
+  // The style's LIVE colourways — archived ones are retired work. The single source for both the
+  // release gate below and the purpose lock warning on the header tab: the server's purpose lock
+  // counts `product.lifecycle_status <> archived` too, so a card whose colourways are all archived
+  // is free to flip and must not be told otherwise.
+  const liveColorways = (techCard?.colorways ?? []).filter(
+    (c) =>
+      c.status !== 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED' &&
+      !archivedIds.current.has(c.colorwayId ?? 0),
   );
   const slotCovered = (b: { materialId?: number; id?: number; lineKey?: string }) => {
     if ((b.materialId ?? 0) > 0) return true;
-    if (releaseLiveColorways.length === 0) return false;
-    return releaseLiveColorways.every((c) =>
+    if (liveColorways.length === 0) return false;
+    return liveColorways.every((c) =>
       (c.usages ?? []).some(
         (u) =>
           ((wireInt(u.bomItemId) > 0 && wireInt(u.bomItemId) === wireInt(b.id)) ||
@@ -415,7 +471,10 @@ export function TechCardForm({
   // Sign-offs are the one rule both sides know, and the server states it better ("2 of 5 sign-offs
   // are not approved"). The form-derived check survives ONLY as the fallback for a checklist that
   // has not arrived (in flight, or the call failed): an advisory RPC must never WIDEN the gate.
-  if (serverReleaseRows.length === 0 && !signoffsApproved)
+  // Tested against the RAW rows, not the aux-filtered ones — "the checklist has not arrived" and
+  // "every row in it was dropped as inapplicable" are different states, and only the first one
+  // justifies falling back to the weaker client-side rule.
+  if ((readiness?.releaseRequirements?.length ?? 0) === 0 && !signoffsApproved)
     releaseBlockers.push({
       label:
         signoffs.length === 0
@@ -426,16 +485,11 @@ export function TechCardForm({
   const canRelease = releaseBlockers.length === 0;
   const approvalState = (useWatch({ control: form.control, name: 'approvalState' }) ??
     '') as string;
-  // NF-07 auxiliary items: an aux card produces a packaging material, links no products, and needs
-  // an output material set before its first run.
-  const purpose = toPurposeEnum(
-    useWatch({ control: form.control, name: 'purpose' }) as string | undefined,
-  );
+  // `purpose` / `isAux` are read further up — the tab plumbing branches on them.
   const outputMaterialId = (useWatch({ control: form.control, name: 'outputMaterialId' }) ??
     0) as number;
   const auxSubtype = (useWatch({ control: form.control, name: 'auxSubtype' }) ??
     'TECH_CARD_AUX_SUBTYPE_UNKNOWN') as string;
-  const isAux = purpose === 'TECH_CARD_PURPOSE_AUXILIARY';
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
 
   // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
@@ -475,7 +529,10 @@ export function TechCardForm({
     // The cut pieces this tab now also owns are deliberately NOT part of the test: no release gate
     // requires them, so a style that genuinely has none (an accessory) would be pegged below 100%
     // for good. Its own half-empty table says so on the tab.
-    colorways: (techCard?.colorways?.length ?? 0) > 0,
+    // Left UNSET for an auxiliary card: it can never have a colourway, its tab is hidden
+    // (isTabVisible), and stating `false` for a section that cannot exist would be a claim about
+    // work that is not outstanding.
+    colorways: isAux ? undefined : (techCard?.colorways?.length ?? 0) > 0,
     construction: len(operationsW) > 0,
     labels: len(labelsW) > 0,
     // "filled" = actually signed off, not merely present — 7 REJECTED rows must not read as done (M10).
@@ -486,12 +543,21 @@ export function TechCardForm({
   };
   const isFilled = (t: TabId) => sectionFilled[t] === true;
 
+  // ERROR_TAB is static, but ONE of its rows moves: `pieces` errors point at the colourways tab,
+  // which an auxiliary card does not have — its cut-piece table lives on CONSTRUCTION instead. Every
+  // lookup goes through here so the rail's error dot, the failed-save tab switch and the
+  // walk-to-the-field routine all land on the tab that actually renders the field.
+  const errorTabFor = (rootKey: string): TabId => {
+    const tab = ERROR_TAB[rootKey] ?? 'header';
+    return tab === 'colorways' && isAux ? 'construction' : tab;
+  };
+
   // Full dotted paths, not root keys: `bomItems.3.name` used to collapse to `bomItems`, so the rail
   // could only ever say "something on the BOM tab is wrong" and the count was always 1 per tab.
   const flatErrors = flattenFieldErrors(form.formState.errors as FieldErrors);
   const errorCountByTab = new Map<TabId, number>();
   for (const e of flatErrors) {
-    const tab = ERROR_TAB[errorRootKey(e.path)] ?? 'header';
+    const tab = errorTabFor(errorRootKey(e.path));
     errorCountByTab.set(tab, (errorCountByTab.get(tab) ?? 0) + 1);
   }
   const errorTabs = new Set(errorCountByTab.keys());
@@ -504,6 +570,14 @@ export function TechCardForm({
   // empty tab would read as "zero cost"). R&D dev-expenses now live as a section inside it. Samples
   // need a saved card (id).
   const isTabVisible = (t: TabId) => {
+    // An auxiliary card produces a MATERIAL, not products: it has no colourways (CreateColorway
+    // refuses an aux style), so the whole tab — the colourway recipes, the lab dips, the SKU-shaped
+    // machinery — is furniture for a thing that cannot exist. The cut-piece editor that shares the
+    // tab is not: a кофр is cut and sewn like any garment, so for aux it moves onto CONSTRUCTION
+    // (same band, "how it's made") rather than disappearing with the colourways.
+    // No error escape here, unlike the IDEA rule below: errorTabFor already re-routes the one error
+    // root that pointed at this tab (`pieces`), so nothing can be filed against an invisible tab.
+    if (t === 'colorways' && isAux) return false;
     if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
     if (t === 'costing' && !canReadCosting) return false;
     if (t === 'samples' && !isEditMode) return false;
@@ -517,16 +591,18 @@ export function TechCardForm({
   // Rewrite a legacy ?tab=dev / ?tab=pieces to the tab that absorbed it, so the URL matches what is
   // rendered (the alias above already resolves it; this cleans the address bar / a bookmark).
   useEffect(() => {
-    const folded = rawTab ? FOLDED_TABS[rawTab] : undefined;
+    // Same resolution as the alias above — writing the UNresolved fold here would put ?tab=colorways
+    // in the address bar of an aux card, whose colourways tab does not exist.
+    const folded = rawTab ? resolveFold(FOLDED_TABS[rawTab]) : undefined;
     if (folded) navTo(folded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawTab]);
+  }, [rawTab, isAux]);
   // If the open tab becomes hidden (switching a card to IDEA while on the BOM tab, or permissions
   // resolving and taking the costing tab away), fall back to header so the body isn't blank.
   useEffect(() => {
     if (!isTabVisible(activeTab)) navTo('header');
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, isIdea, canReadCosting, isEditMode]);
+  }, [activeTab, isIdea, canReadCosting, isEditMode, isAux]);
 
   // Walk the user to the field a failed save flagged. This has to run AFTER the tab switch commits
   // (it's a router param update) and after any collapsed container that owns the field expands
@@ -626,10 +702,20 @@ export function TechCardForm({
     return { ...sent, signoffs, patterns, bomItems };
   }
 
-  async function doSubmit(data: TechCardFormData) {
+  // The actual write: card body first (it carries the lock version), then the staged sub-panels.
+  //
+  // Two answers, not one, because "did it all land" and "is the card's PURPOSE now auxiliary" are
+  // different questions with different consequences. A staged panel can fail AFTER the body PUT has
+  // already committed the flip — at which point the convert flow must NOT tell the operator the card
+  // is still sellable and their colourways are restorable, because an auxiliary style refuses every
+  // un-archive edge (checkOwningStyleSellable). `bodySaved` is the honest half of that answer.
+  async function writeTechCard(
+    data: TechCardFormData,
+  ): Promise<{ bodySaved: boolean; ok: boolean }> {
     setConflict(false);
     setStagingError(null);
     const techCardInsert = mapFormToTechCardInsert(data, techCard?.techCard, canWriteCosting);
+    let bodySaved = false;
     try {
       if (isEditMode) {
         // Count what this run intends to write BEFORE anything moves, so a partial-failure banner
@@ -648,6 +734,9 @@ export function TechCardForm({
             // back from the server, so that choice actually overwrites (see keepMineAndOverwrite).
             expectedLockVersion: lockOverride.current ?? techCard?.lockVersion ?? 0,
           });
+          // The body is committed server-side from here on — anything that fails below leaves the
+          // card carrying the values this PUT just wrote (see the return type's comment).
+          bodySaved = true;
           // Spent: the write moved the server's version on, and useUpdateTechCard's invalidation
           // brings the new one back. Holding it would 409 the save after next.
           lockOverride.current = null;
@@ -666,7 +755,7 @@ export function TechCardForm({
             `saved ${done} of ${planned} — «${change.label}» failed: ${techCardErrorMessage(error, 'unknown error')}. Everything not yet saved is still staged.`,
           );
           showMessage(`«${change.label}» failed — the rest is still staged`, 'error');
-          return;
+          return { bodySaved, ok: false };
         }
         // A committed panel bumps the SHARED tech_card.lock_version server-side (UpdateStyleSizeChart
         // and UpdateStyle both do), but only useUpdateTechCard invalidates this card. Without this
@@ -690,6 +779,7 @@ export function TechCardForm({
         }
       } else {
         const created = await createTechCard.mutateAsync(techCardInsert);
+        bodySaved = true;
         showMessage('tech card created', 'success');
         draft.clear();
         // If they were working on labels & pkg, land on the saved card's labels tab so the
@@ -701,6 +791,7 @@ export function TechCardForm({
           navigate(ROUTES.techCards);
         }
       }
+      return { bodySaved, ok: true };
     } catch (error) {
       if ((error as { status?: number })?.status === 409) setConflict(true);
       // Pin server field-violations (google.rpc.BadRequest) onto the exact inputs, then surface the
@@ -710,7 +801,7 @@ export function TechCardForm({
       });
       if (applied.length > 0) {
         const root = applied[0].split('.')[0];
-        setActiveTab(ERROR_TAB[root] ?? 'header');
+        setActiveTab(errorTabFor(root));
       }
       const base = techCardErrorMessage(error, 'Failed to submit tech card');
       showMessage(
@@ -718,6 +809,99 @@ export function TechCardForm({
         'error',
       );
       console.error('Failed to submit tech card', error);
+      return { bodySaved, ok: false };
+    }
+  }
+
+  // NF-07 guided convert. The server's purpose lock counts LIVE colourways, and the client already
+  // knows them — so the flip is intercepted BEFORE the request instead of coming back as a refusal
+  // the operator can do nothing with. The lock's OTHER arms (non-cancelled runs, sold colourways,
+  // assembly usage — and the registry grows) are invisible from here and stay the server's refusal;
+  // archiving cannot clear those, which is why the dialog promises only the colourway arm.
+  const flipsToAuxiliary = (data: TechCardFormData) =>
+    isEditMode &&
+    toPurposeEnum(data.purpose) === 'TECH_CARD_PURPOSE_AUXILIARY' &&
+    toPurposeEnum(techCard?.techCard?.purpose) !== 'TECH_CARD_PURPOSE_AUXILIARY';
+
+  const colorwayLabel = (c: { colorwayId?: number; colorCode?: string; baseSku?: string }) =>
+    c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`;
+
+  async function doSubmit(data: TechCardFormData) {
+    if (flipsToAuxiliary(data) && liveColorways.length > 0) {
+      setConvertReport(null);
+      setConvert({ data, colorways: liveColorways });
+      return;
+    }
+    await writeTechCard(data);
+  }
+
+  // «archive & switch»: retire every live colourway, then run the same save again. Client-guided and
+  // NOT atomic — there is no server RPC that does both — so every exit says exactly what happened.
+  // Archiving a colourway touches `product` only (it does not bump tech_card.lock_version), so the
+  // save that follows still claims the version this page loaded; a genuine 409 here is a real
+  // concurrent edit and falls through to the existing conflict modal.
+  async function confirmConvert() {
+    if (!convert || converting) return;
+    const queue = convert.colorways;
+    const data = convert.data;
+    const archived: string[] = [];
+    // Held across the archive loop AND the save that follows: this path bypasses form.handleSubmit,
+    // so `isSubmitting` never rises and the header's Save button would otherwise stay live while the
+    // flip PUT is in flight. `converting` is what disables it (see the Save button).
+    setConverting(true);
+    try {
+      try {
+        for (const c of queue) {
+          // expectedVersion is echoed per the RPC contract; the server enforces the transition on the
+          // colourway's own lifecycle_status, so a sequential loop needs no re-read between calls.
+          await adminService.ArchiveColorwayByID({
+            colorwayId: c.colorwayId,
+            expectedVersion: c.lockVersion ?? 0,
+          });
+          // Remembered before the label: this is what keeps a retry from re-archiving it.
+          archivedIds.current.add(c.colorwayId ?? 0);
+          archived.push(colorwayLabel(c));
+        }
+      } catch (error) {
+        const failed = queue[archived.length];
+        setConvert(null);
+        setConvertReport(
+          `archived ${archived.length} of ${queue.length}${
+            archived.length ? ` (${archived.join(', ')})` : ''
+          } — «${colorwayLabel(failed ?? {})}» failed: ${
+            // Deliberately NOT techCardErrorMessage: this is a COLOURWAY transition, and that helper's
+            // copy talks about the tech card ("re-open it to Draft"), which would misdirect.
+            error instanceof Error ? error.message : 'unknown error'
+          }. ` +
+            'The card is STILL SELLABLE and nothing was flipped — restore each archived colourway ' +
+            'from its own page while it stays sellable, or press save again to retry the rest.',
+        );
+        showMessage('convert stopped — the card is still sellable', 'error');
+        return;
+      }
+      // The card's colourway list drives the lock warning and the release gate; it is stale the
+      // moment the loop finishes. Refetch (don't await — the save below reads the form, not the
+      // query, and archivedIds already covers the gap).
+      if (numId) queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
+      setConvert(null);
+      const { bodySaved, ok } = await writeTechCard(data);
+      if (ok) return;
+      // Two different truths, and telling them apart is the whole point of bodySaved. If the body
+      // PUT landed, the card IS auxiliary now and those colourways can no longer be restored —
+      // promising otherwise would send the operator to a page whose restore button refuses.
+      setConvertReport(
+        bodySaved
+          ? `archived ${archived.length} colourway(s) (${archived.join(', ')}) and the switch to ` +
+              'AUXILIARY DID save — but a staged panel did not (see the banner above; what failed is ' +
+              'still staged, press Save again). The archived colourways can no longer be restored: ' +
+              'the card is auxiliary now and un-archiving is refused for an auxiliary style.'
+          : `archived ${archived.length} colourway(s) (${archived.join(', ')}) but the switch to ` +
+              'auxiliary did NOT save — see the error above. The card is still SELLABLE, so every one ' +
+              'of them can still be restored from its own page; after a successful flip that stops ' +
+              'working (an auxiliary style refuses to un-archive a colourway).',
+      );
+    } finally {
+      setConverting(false);
     }
   }
 
@@ -732,7 +916,7 @@ export function TechCardForm({
       return;
     }
     const first = flat[0];
-    const tab = ERROR_TAB[errorRootKey(first.path)] ?? 'header';
+    const tab = errorTabFor(errorRootKey(first.path));
     setActiveTab(tab);
     setFocusTarget((prev) => ({ path: first.path, nonce: (prev?.nonce ?? 0) + 1 }));
     // The toast ALWAYS carries the concrete dotted path AND the message — never just a tab name.
@@ -847,11 +1031,15 @@ export function TechCardForm({
                   variant='main'
                   size='lg'
                   className='uppercase'
+                  // `converting` as well as `saving`: the guided convert drives its re-save WITHOUT
+                  // form.handleSubmit, so isSubmitting stays false for the whole archive→flip
+                  // sequence and this button would otherwise stay live through it.
                   disabled={
                     (isEditMode && !form.formState.isDirty && staging.changes.length === 0) ||
-                    saving
+                    saving ||
+                    converting
                   }
-                  loading={saving}
+                  loading={saving || converting}
                   onClick={save}
                 >
                   {isEditMode ? 'save' : 'add'}
@@ -986,6 +1174,60 @@ export function TechCardForm({
           values straight over theirs.
         </Text>
       </ConfirmationModal>
+
+      {/* NF-07 guided convert. Intercepts the flip BEFORE the request — the 412 it would otherwise
+          come back as names the obstacle but offers no way past it. closeOnConfirm=false: the
+          handler closes this itself, after the archive loop has either finished or reported. */}
+      <ConfirmationModal
+        open={!!convert}
+        onOpenChange={(open) => !open && !converting && setConvert(null)}
+        title='switch to auxiliary?'
+        width='sm'
+        confirmLabel={converting ? 'archiving…' : 'archive & switch'}
+        cancelLabel='cancel'
+        confirmDisabled={converting}
+        closeOnConfirm={false}
+        onConfirm={confirmConvert}
+      >
+        <Row label='live colourways' value={convert?.colorways.length ?? 0} />
+        {(convert?.colorways ?? []).map((c) => (
+          <Row key={c.colorwayId} label={colorwayLabel(c)} value='→ archive' />
+        ))}
+        <Text size='micro' variant='label' className='mt-2'>
+          An auxiliary card produces a material, not products — it cannot own colourways, so all{' '}
+          {convert?.colorways.length ?? 0} are archived first, one by one, and then the card is saved
+          as auxiliary. Archiving is not deletion: the SKU stays frozen and readable and order
+          history is untouched.
+        </Text>
+        <Text size='micro' variant='label' className='mt-2'>
+          Restoring an archived colourway works while this card is still SELLABLE — after the flip
+          lands it is one-way. If a step fails, nothing is rolled back and you are told exactly where
+          it stopped.
+        </Text>
+        <Text size='micro' variant='label' className='mt-2'>
+          Live colourways are only one of the things that pin the purpose — runs, sold colourways,
+          assembly usage and anything else the card is registered in do too. Archiving clears none of
+          those; the server refuses them on its own and names what it found.
+        </Text>
+      </ConfirmationModal>
+
+      {/* Half a convert is a fact the operator has to act on — which colourways are archived, and
+          that the card did NOT flip. Stays until dismissed. */}
+      {convertReport && (
+        <CalloutBox tone='error' className='mt-2.5 flex flex-wrap items-center gap-2'>
+          <Text size='micro'>{convertReport}</Text>
+          <div className='ml-auto'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              onClick={() => setConvertReport(null)}
+            >
+              dismiss
+            </Button>
+          </div>
+        </CalloutBox>
+      )}
 
       {/* A partial save is not a toast: some of it landed, some of it did not, and the operator has
           to decide what to do about the half that failed. It stays until the next save attempt. */}
@@ -1136,13 +1378,18 @@ export function TechCardForm({
 
                 <Section title='classification' className='w-full lg:w-1/2'>
                   <SelectField name='purpose' label='purpose' items={techCardPurposeFormOptions} />
-                  {/* NF-07: the server refuses a purpose flip once the card has runs, colourways or
-                    assembly usage. Colourways are the one arm the client can see (they come back on
-                    the card), so say it here rather than let the operator discover it by failing the
-                    save. The other two arms are only known server-side — that refusal names itself. */}
-                  {(techCard?.colorways?.length ?? 0) > 0 && (
+                  {/* NF-07: the server refuses a purpose flip once the card is referenced — runs,
+                    LIVE colourways, sold colourways, assembly usage. Live colourways are the one arm
+                    the client can see (they come back on the card), so say it here rather than let
+                    the operator discover it by failing the save — and say it only about the live
+                    ones, exactly as the server counts them. The other arms are known server-side
+                    only; that refusal names itself, and techCardErrorMessage now passes the server's
+                    own text through (it arrives as a 400 — grpc-gateway maps FailedPrecondition
+                    there, not to 412). */}
+                  {liveColorways.length > 0 && (
                     <Text variant='error' size='small'>
-                      ! purpose is locked: {techCard?.colorways?.length} colourway(s) linked
+                      ! purpose is locked while {liveColorways.length} live colourway(s) are linked —
+                      saving as auxiliary offers to archive them first (archived ones do not count)
                     </Text>
                   )}
                   {/* Purpose is mutually exclusive with the output material and the save is a full
@@ -1317,27 +1564,42 @@ export function TechCardForm({
                 which article each piece is cut from, in what colour and at what consumption. The
                 recipe editor's placement picker offers exactly the pieces defined above it, so the
                 two read top to bottom as one question. */}
-            <SectionStack hidden={activeTab !== 'colorways'}>
-              <PiecesTab techCard={techCard} />
-              <div>
-                {isEditMode && numId ? (
-                  <ColorwayRecipes
-                    techCard={techCard}
-                    techCardId={numId}
-                    canEdit={canWrite(SECTION.techCards) && !frozen}
-                  />
-                ) : (
-                  <Text variant='inactive' size='small'>
-                    save the card first — colourways are products; their material recipes are edited
-                    here once the style exists.
-                  </Text>
-                )}
-              </div>
+            {/* CONDITIONAL, not merely hidden: SectionStack's `hidden` is a display:none attribute
+                and every child stays MOUNTED. Left as a hidden-only branch for an aux card this
+                would mount PiecesTab a second time — two useFieldArray('pieces') on one form and two
+                sets of [data-field] anchors, so revealField's querySelector would walk the operator
+                to the invisible copy — and keep ColorwayRecipes alive fetching the whole material
+                catalogue for a card that can never have a colourway. */}
+            <SectionStack hidden={activeTab !== 'colorways' || isAux}>
+              {!isAux && (
+                <>
+                  <PiecesTab techCard={techCard} />
+                  <div>
+                    {isEditMode && numId ? (
+                      <ColorwayRecipes
+                        techCard={techCard}
+                        techCardId={numId}
+                        canEdit={canWrite(SECTION.techCards) && !frozen}
+                      />
+                    ) : (
+                      <Text variant='inactive' size='small'>
+                        save the card first — colourways are products; their material recipes are
+                        edited here once the style exists.
+                      </Text>
+                    )}
+                  </div>
+                </>
+              )}
             </SectionStack>
 
             {/* CONSTRUCTION — how it's made: operations, then the cut list the cutting room works
                 from (a calculated projection, not an editable list). */}
             <SectionStack hidden={activeTab !== 'construction'}>
+              {/* Aux cards have no colourways tab to hold the cut pieces, and a sewn auxiliary item
+                  (кофр, dust bag) has pattern parts like anything else — so the piece table lands
+                  here, above the operations that assemble those parts. Its per-colourway fabric map
+                  simply has no columns for an aux card, which is the truth. */}
+              {isAux && <PiecesTab techCard={techCard} />}
               <ConstructionTab techCard={techCard} />
               {isEditMode && numId && (
                 <Section title='cut list (production projection — mirror ×2 folded)'>
@@ -1525,11 +1787,29 @@ export function TechCardForm({
         </form>
       </div>
 
-      {/* Create a packaging material inline for the aux output picker (prefilled section). */}
+      {/* Create a packaging material inline for the aux output picker (prefilled section). The
+          created material is selected straight into the field the button sits under — without
+          onCreated the operator filled a whole material form and landed back on an empty picker,
+          then had to search for the thing they had just made. shouldDirty so Save lights up: the
+          selection is a change to the CARD, which the material's own create did not persist.
+          `defaultSection` is only a DEFAULT — the modal's class/section controls stay live, so the
+          operator can create a fabric here. Auto-selecting that would pin an id the picker beside it
+          (filtered to packaging) cannot even render, leaving the field looking empty while holding a
+          value; so the selection is gated on what was actually created, and says why when it isn't. */}
       <MaterialModal
         open={materialModalOpen}
         onOpenChange={setMaterialModalOpen}
         defaultSection='TECH_CARD_BOM_SECTION_PACKAGING'
+        onCreated={(newId, material) => {
+          if (material.section !== 'TECH_CARD_BOM_SECTION_PACKAGING') {
+            showMessage(
+              `«${material.name || 'material'}» created, but an aux card outputs a PACKAGING material — not selected`,
+              'error',
+            );
+            return;
+          }
+          form.setValue('outputMaterialId', newId, { shouldDirty: true });
+        }}
       />
     </Form>
   );
