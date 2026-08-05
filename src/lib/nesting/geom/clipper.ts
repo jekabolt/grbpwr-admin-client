@@ -69,24 +69,5 @@ export function rdpSimplify(poly: readonly Pt[], epsCm: number): Pt[] {
   return pts.length >= 3 ? pts : [...poly];
 }
 
-// Feasible region for one placement step: IFP rectangle minus the union of translated
-// NFPs of already-placed neighbours. Returns every path (outer boundaries AND hole
-// boundaries) — the optimum sits on a vertex of either.
-export function feasibleRegion(ifpRect: readonly Pt[], forbidden: Path64[]): Pt[][] {
-  if (forbidden.length === 0) return [[...ifpRect]];
-  const res = Clipper.Difference([toPath64(ifpRect)], forbidden, FillRule.NonZero);
-  const out: Pt[][] = [];
-  for (const path of res) {
-    const pts = fromPath64(dedupePath64(path));
-    if (pts.length >= 3) out.push(pts);
-  }
-  return out;
-}
-
-export function translatePath64(path: Path64, dxCm: number, dyCm: number): Path64 {
-  const dx = Math.round(dxCm * SCALE);
-  const dy = Math.round(dyCm * SCALE);
-  const out = new Path64();
-  for (const q of path) out.push(new Point64(q.x + dx, q.y + dy));
-  return out;
-}
+// NOTE: placement no longer runs boolean geometry (see nest/place.ts) — the old
+// feasibleRegion/translatePath64 helpers are gone with it.
