@@ -125,6 +125,11 @@ export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; g
 
   const abort = () => opts.isCancelled() || Date.now() > deadline;
 
+  // Yield TIME-BASED, not per individual: chained setTimeout(0) hits the browser's 4 ms
+  // nested-timer clamp, and POP×maxGenerations awaits would burn tens of seconds of the
+  // budget on pure timers (measured 1.15 ms/await in node, ≥4 ms in a worker). ~16 ms
+  // cadence keeps cancel/progress responsive at ~1/250 of that cost.
+  let lastYield = Date.now();
   const evalPop = async (): Promise<boolean> => {
     for (const ind of pop) {
       if (abort()) return false;
@@ -137,8 +142,11 @@ export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; g
         bestFitness = ind.fitness;
         best = res;
       }
-      // Drain the message queue so cancel can land mid-generation.
-      await new Promise((r) => setTimeout(r, 0));
+      if (Date.now() - lastYield >= 16) {
+        // Drain the message queue so cancel can land mid-generation.
+        await new Promise((r) => setTimeout(r, 0));
+        lastYield = Date.now();
+      }
     }
     return true;
   };

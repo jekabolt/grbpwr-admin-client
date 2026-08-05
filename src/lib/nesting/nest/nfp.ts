@@ -16,7 +16,7 @@
 // so each unordered pair is computed once (cache keyed minId|maxId|rel).
 import { Clipper, FillRule, Path64, Point64 } from 'clipper2-js';
 import type { Pt, RotationDeg } from '../types';
-import { toPath64 } from '../geom/clipper';
+import { SCALE, toPath64 } from '../geom/clipper';
 import { gapOctagon, minkowskiSumConvex, negate } from '../geom/convex';
 
 export type PreparedPiece = {
@@ -48,7 +48,14 @@ function rotPart(part: readonly Pt[], rot: RotationDeg): Pt[] {
 }
 
 function rotPath64(paths: Path64[], rot: RotationDeg): Path64[] {
-  if (rot === 0) return paths;
+  // rot 0 still copies (points are shared, containers are not): callers receive
+  // cache-owned arrays and must never be able to mutate the canonical entry via an alias.
+  if (rot === 0)
+    return paths.map((path) => {
+      const out = new Path64();
+      for (const q of path) out.push(q);
+      return out;
+    });
   return paths.map((path) => {
     const out = new Path64();
     for (const q of path) {
@@ -68,24 +75,63 @@ function rotPath64(paths: Path64[], rot: RotationDeg): Path64[] {
   });
 }
 
-const UNION_BATCH = 32;
-
-// Hierarchical union: never hand the boolean engine more than UNION_BATCH paths at once —
-// clipper2-js's Union degrades catastrophically past ~100 overlapping inputs (measured:
-// 64 paths 3 ms, 100 paths OOM).
+// Union of many convex parts as a BINARY TREE of pairwise unions. Two invariants matter:
+//
+// 1. Never hand the boolean engine hundreds of paths at once — clipper2-js's Union
+//    degrades catastrophically past ~100 overlapping inputs (measured: 64 paths 3 ms,
+//    100 paths OOM).
+// 2. Never split an intermediate RESULT across calls. A union result is a region — outer
+//    loops plus their holes with opposite winding. Flat re-batching (the first version of
+//    this function sliced a flattened path list 32 at a time) can land a hole in one batch
+//    and its enclosing outer in another; under NonZero a stray hole then eats OTHER
+//    geometry's area, and the NFP comes out with phantom bays the placer happily uses —
+//    measured 4.4 cm² under-coverage and real piece overlap on the marker. The tree keeps
+//    each intermediate region intact as one operand.
+//
+// Because clipper2-js has already burned us twice, the result is post-checked: every
+// input part must be covered (Difference(inputs, result) empty), else fall back to the
+// slow-but-region-preserving incremental union.
 export function unionBatched(parts: Path64[]): Path64[] {
-  let layer = parts;
-  while (layer.length > UNION_BATCH) {
-    const next: Path64[] = [];
-    for (let i = 0; i < layer.length; i += UNION_BATCH) {
-      const res = Clipper.Union(layer.slice(i, i + UNION_BATCH), undefined, FillRule.NonZero) as Path64[];
-      next.push(...res);
+  if (parts.length === 0) return [];
+  let layer: Path64[][] = parts.map((p) => [p]);
+  while (layer.length > 1) {
+    const next: Path64[][] = [];
+    for (let i = 0; i < layer.length; i += 2) {
+      if (i + 1 === layer.length) {
+        next.push(layer[i]);
+        continue;
+      }
+      next.push(
+        Clipper.Union([...layer[i], ...layer[i + 1]], undefined, FillRule.NonZero) as Path64[],
+      );
     }
-    // A pathological layer that fails to shrink would loop forever — bail to one final call.
-    if (next.length >= layer.length) return Clipper.Union(next, undefined, FillRule.NonZero) as Path64[];
     layer = next;
   }
-  return Clipper.Union(layer, undefined, FillRule.NonZero) as Path64[];
+  const result = layer[0];
+  // Post-check PER PART, never one giant call — a Difference with hundreds of overlapping
+  // subjects degrades exactly like the giant Union this function exists to avoid. Each
+  // part is a small convex loop against the (few-path) result: hundreds of cheap calls.
+  // Residuals below ~0.02 cm² are integer-grid slivers, not bitten-out bays (the real
+  // failure this guards was 4.4 cm²) — they must not trip the slow path.
+  const maxResidual = 0.02 * SCALE * SCALE;
+  let covered = true;
+  for (const part of parts) {
+    const residual = Clipper.Difference([part], result, FillRule.NonZero) as Path64[];
+    let area = 0;
+    for (const r of residual) area += Math.abs(Clipper.area(r));
+    if (area > maxResidual) {
+      covered = false;
+      break;
+    }
+  }
+  if (covered) return result;
+  // Post-condition failed — rebuild one part at a time (exact, ~10× slower, still no
+  // giant single call).
+  let acc: Path64[] = [parts[0]];
+  for (let i = 1; i < parts.length; i++) {
+    acc = Clipper.Union([...acc, parts[i]], undefined, FillRule.NonZero) as Path64[];
+  }
+  return acc;
 }
 
 export class NfpCache {

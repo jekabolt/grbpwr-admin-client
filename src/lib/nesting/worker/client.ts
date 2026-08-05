@@ -109,8 +109,10 @@ export class NestingWorkerClient {
   terminate(): void {
     this.worker?.terminate();
     this.worker = null;
-    // Pieces lived in the terminated worker — pending handlers are already rejected by
-    // callers of terminate (onerror) or abandoned deliberately (modal close).
+    // Reject (never abandon) pending jobs: a cleared-but-unsettled promise pins its async
+    // closure — and the fetched DXF buffers it holds — for the page's life.
+    const err = new Error('nesting worker terminated');
+    for (const h of this.handlers.values()) h.reject(err);
     this.handlers.clear();
   }
 }

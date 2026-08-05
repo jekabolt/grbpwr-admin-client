@@ -3,7 +3,7 @@
 // (progress + cancel land between pairs); the GA then runs against a warm cache, so its
 // per-gene abort polling is cheap and the budget overshoot is bounded.
 import type { NestConfig, NestResult, PieceDTO, RotationDeg } from '../types';
-import { rdpSimplify } from '../geom/clipper';
+import { rdpSimplify, sanitizeLoop } from '../geom/clipper';
 import { bounds, ensureCCW, rotatePoly } from '../geom/polygon';
 import { convexParts } from '../geom/triangulate';
 import { hashString, runGa } from './ga';
@@ -53,7 +53,10 @@ export async function nest(
         polyAt[r] = rp;
         boundsAt[r] = bounds(rp);
       }
-      const decomp = convexParts(ensureCCW(rdpSimplify(dto.poly, config.rdpEpsCm)));
+      // Sanitize AFTER simplification: RDP can self-intersect a thin neck, and feeding
+      // that to the decomposer should be a designed path (hull fallback), not luck.
+      const simplified = rdpSimplify(dto.poly, config.rdpEpsCm);
+      const decomp = convexParts(ensureCCW(sanitizeLoop(simplified) ?? simplified));
       if (decomp.degenerate) {
         warnings.push(`«${dto.name}»: контур с дефектом — раскладка считает его с запасом (выпуклая оболочка)`);
       }
