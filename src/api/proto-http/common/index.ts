@@ -2460,9 +2460,12 @@ export type TechCardBomItem = {
   // a real FK instead of a fragile positional index.
   id: number | undefined;
   lineKey: string | undefined;
-  // material_snapshot is a read-only JSON snapshot of the linked material's descriptive fields at
-  // save time (S23), so the document is self-contained.
-  materialSnapshot: string | undefined;
+  // Stored price provenance (production-costing Phase 3, plan 11). READ-ONLY — the server stamps
+  // both on write and ignores anything a client sends here. price_source is 'manual' (the operator
+  // typed/edited unit_price through a card save), 'catalog' (the reprice action pulled it from the
+  // material catalog), or '' for a pre-provenance row whose origin is honestly unknown.
+  priceSource: string | undefined;
+  priceSnapshotAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -2544,6 +2547,11 @@ export type Material = {
   // purpose (#40) marks whether the material is used for samples, production, or both. Defaults to
   // BOTH on write when UNKNOWN, so the admin can mark and filter materials.
   purpose: MaterialPurpose | undefined;
+  // Procurement quick wins (Phase 9, plan 13 §1 — the PO entity was cut): supplier_id links to the
+  // supplier CATALOG (the free-text `supplier` field stays legacy), lead_time_days is the typical
+  // order-to-door time. 0 = unset for both.
+  supplierId: number | undefined;
+  leadTimeDays: number | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -2632,7 +2640,10 @@ export type TechCardDevCostSummary = {
   daysToApproval: number | undefined;
 };
 
-// TechCardSizeQuantity is the production order quantity for a size (size run).
+// TechCardSizeQuantity is the TYPICAL calculation batch for a size — «типовой тираж для
+// калькуляции» (plan 13 §2). It amortises development cost and prefills a new run's grid; it is
+// NOT a real production batch — the run's own plan lines are the batch (a run may be bigger,
+// smaller, or split differently, and the UI must warn instead of silently multiplying).
 export type TechCardSizeQuantity = {
   sizeId: number | undefined;
   orderQty: number | undefined;
@@ -2786,6 +2797,11 @@ export type TechCardColorwayCost = {
   orderQty: number | undefined;
   orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one authored usage of THIS colourway could not be costed at all
+  // (no price / unresolvable pin / no norm / per-size norms without order qty); such a line
+  // contributes to NO currency bucket, so unit_cost is withheld from cost seeding for this
+  // colourway and should not be trusted as complete.
+  hasUnpriced: boolean | undefined;
 };
 
 // TechCardCosting holds the manually-entered per-unit cost articles (Sheet «Калькуляция»).
@@ -2796,12 +2812,6 @@ export type TechCardColorwayCost = {
 export type TechCardCosting = {
   // manual per-unit cost articles (per ONE garment), all in `currency`.
   cmtCost: googletype_Decimal | undefined;
-  // фурнитура ВНЕ BOM, за 1 изделие. Hardware is also a first-class BOM section priced through the
-  // recipe, so this article and a hardware BOM line are mutually exclusive: a write carrying both is
-  // rejected (costing.hardware_cost FieldViolation) because it would double-count in every unit-cost
-  // rollup. Enforced on WRITE only — a card saved with both before the rule existed still reads back.
-  hardwareCost: googletype_Decimal | undefined;
-  packagingCost: googletype_Decimal | undefined;
   logisticsCost: googletype_Decimal | undefined;
   overheadCost: googletype_Decimal | undefined;
   defectPercent: googletype_Decimal | undefined;
@@ -2824,6 +2834,11 @@ export type TechCardCosting = {
   orderQty: number | undefined;
   orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one authored usage of the PRIMARY colourway could not be costed
+  // at all (no price / unresolvable pin / no norm / per-size norms without order qty); such a line
+  // contributes to NO currency bucket, so unit_cost/unit_cost_base are withheld from cost seeding
+  // and should not be trusted as complete.
+  hasUnpriced: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: TechCardColorwayCost[] | undefined;
   // OUTPUT-ONLY base-currency rollup. The unit/order cost of the primary colourway folded into
@@ -3005,6 +3020,13 @@ export type TechCardInsert = {
   skuSeason: SkuSeason | undefined;
   // WS7: sub-classifies an auxiliary card (UNKNOWN=unset). Ignored / must be UNKNOWN for a sellable card.
   auxSubtype: TechCardAuxSubtype | undefined;
+  // Planning date for the overdue view (production cockpit): the calendar day this style is planned
+  // to drop, the anchor a run's promised_at is judged against ("до дропа N дней / просрочен"). Owner-
+  // set intent, not a workflow stamp like approved_at/released_at — unset means no drop planned.
+  // Only the DATE part is persisted (tech_card.target_drop_date is a DATE column); any time of day
+  // sent on the wire is dropped. NOTE: a RELEASED card is frozen for edits (ErrTechCardReleased), so
+  // this planning date is only settable while the card is draft/approved — see the store's freeze check.
+  targetDropDate: wellKnownTimestamp | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -3154,6 +3176,9 @@ export type MaterialMovement = {
   createdAt: wellKnownTimestamp | undefined;
   productId: number | undefined;
   lotId: number | undefined;
+  // When a purchase receipt was promised to arrive (Phase 9); unset = not tracked. Lateness =
+  // occurred_at vs expected_at, no PO entity needed.
+  expectedAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialLot is a received batch (roll / dye-lot) of a material (gap-07 v2 D): a supplier lot code
@@ -3251,7 +3276,11 @@ export type ProductionRunStatus =
   | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
   | "PRODUCTION_RUN_STATUS_RECEIVED"
   | "PRODUCTION_RUN_STATUS_CLOSED"
-  | "PRODUCTION_RUN_STATUS_CANCELLED";
+  | "PRODUCTION_RUN_STATUS_CANCELLED"
+  // At least one partial receipt is booked and the operator has not yet declared the run complete
+  // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
+  // writable through UpdateProductionRun.
+  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED";
 // ProductionRunCostKind is the article category of an actual production-run cost.
 export type ProductionRunCostKind =
   | "PRODUCTION_RUN_COST_KIND_UNKNOWN"
@@ -3262,15 +3291,6 @@ export type ProductionRunCostKind =
   | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
   | "PRODUCTION_RUN_COST_KIND_DUTY"
   | "PRODUCTION_RUN_COST_KIND_OTHER";
-// ProductionMarkerSource is the CAD/nesting software (or hand entry) a marker record came from.
-export type ProductionMarkerSource =
-  | "PRODUCTION_MARKER_SOURCE_UNKNOWN"
-  | "PRODUCTION_MARKER_SOURCE_GERBER"
-  | "PRODUCTION_MARKER_SOURCE_OPTITEX"
-  | "PRODUCTION_MARKER_SOURCE_LECTRA"
-  | "PRODUCTION_MARKER_SOURCE_AUDACES"
-  | "PRODUCTION_MARKER_SOURCE_MANUAL"
-  | "PRODUCTION_MARKER_SOURCE_OTHER";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -3282,6 +3302,15 @@ export type ProductionRunLine = {
   plannedQty: number | undefined;
   receivedQty?: number;
   defectQty?: number;
+  // Stable identity of this line, echoed back on read. The store diffs the submitted grid by it
+  // instead of delete+reinserting the whole grid, so the row's database id survives an edit — which
+  // is what lets receipt lines hold a real foreign key to it. Contract: empty on the way in means
+  // "new line, the server mints one" (its fallback is standard base32 — 26 characters of [A-Z2-7]);
+  // anything non-empty must be EXACTLY 26 characters of [0-9A-Z] or the save is rejected with
+  // InvalidArgument. The admin client mints uppercase Crockford ULIDs (like a tech-card BOM line's
+  // line_key) and migration 0230 backfilled 'LEGACY'-prefixed keys onto pre-existing rows; both fit
+  // that shape. NEVER regenerate a key the server handed out — that retires the row it names.
+  lineKey: string | undefined;
 };
 
 // ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in
@@ -3294,6 +3323,14 @@ export type ProductionRunCost = {
   currency: string | undefined;
   amountBase: googletype_Decimal | undefined;
   incurredAt: wellKnownTimestamp | undefined;
+  // Cost-document fields (plan 12.3, columns landed in 0234): who invoices this article, under
+  // which document, with what VAT, and where the payable stands. They are what lets the UI say
+  // "оплачено" instead of only "начислено". All optional.
+  supplierId: number | undefined;
+  documentRef: string | undefined;
+  vatRate: googletype_Decimal | undefined;
+  vatAmount: googletype_Decimal | undefined;
+  apStatus: string | undefined;
 };
 
 // ProductionRunCostByKind is the base-currency total of actual costs of one kind.
@@ -3341,21 +3378,48 @@ export type ProductionRunColorwayCost = {
   hasUncosted: boolean | undefined;
 };
 
-// ProductionRunMarker is one imported nesting marker (раскладка / lay) of a run (gap-07 v2 E): the
-// CAD source, the fabric width and lay length it was nested on, the units it yields, its
-// fabric-utilisation %, an optional fabric/size, and a reference URL to the exported marker file.
-// It is planning / traceability data — nothing here feeds the run's actual cost or cost_price.
-export type ProductionRunMarker = {
-  source: ProductionMarkerSource | undefined;
-  markerName: string | undefined;
+// ProductionRunReceiptLine is one counted plan line of a receipt: which line (by its stable
+// line_key), what was booked as good stock and what was counted as defect. product_id/size_id are
+// snapshots of the plan line at receipt time; size_id 0 means the line has no size (auxiliary runs).
+export type ProductionRunReceiptLine = {
+  lineKey: string | undefined;
+  productId: number | undefined;
   sizeId: number | undefined;
-  materialId: number | undefined;
-  markerWidth: googletype_Decimal | undefined;
-  layLength: googletype_Decimal | undefined;
-  unitsPerMarker: number | undefined;
-  efficiencyPct: googletype_Decimal | undefined;
-  markerFileUrl: string | undefined;
-  notes: string | undefined;
+  goodQty: number | undefined;
+  defectQty: number | undefined;
+  // Where the defect units went (Phase 7): "scrap" (recorded fact + posting-rule resolution) or
+  // "seconds" (booked into the product's B-grade variant stock).
+  defectDisposition: string | undefined;
+};
+
+// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1; Phase 5
+// allows several per run): who received what and when, at what frozen valuation.
+// unit_cost_base/base_currency are money and are stripped without costing:read; has_base false
+// means the valuation was not computable at receipt time (uncosted issues / unfolded cost
+// articles) and unit_cost_base is unset.
+export type ProductionRunReceipt = {
+  id: number | undefined;
+  runId: number | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  adminUsername: string | undefined;
+  note: string | undefined;
+  unitCostBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  hasBase: boolean | undefined;
+  lines: ProductionRunReceiptLine[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // The receipt that declared the run complete and flipped it to RECEIVED (Phase 5). Every
+  // pre-Phase-5 receipt is final by construction.
+  final: boolean | undefined;
+  // Accounting outbox state of this receipt: 'pending' | 'posted' | 'dead_letter'. Read-only
+  // operational fact (the posting worker owns it); visible without costing:read — it carries no
+  // amounts.
+  postingStatus: string | undefined;
+  // Phase 6 reversal linkage. On a reversal row, reversal_of names the receipt it reversed; on a
+  // reversed receipt, reversed_by names its reversal row. 0 = not set. A reversed receipt's units
+  // and money are excluded from every rollup; the pair stays in the history for the audit trail.
+  reversalOf: number | undefined;
+  reversedBy: number | undefined;
 };
 
 // ProductionRunInsert is the writable payload for a run (header + colour-model × size lines).
@@ -3366,18 +3430,32 @@ export type ProductionRunInsert = {
   releaseId: number | undefined;
   status: ProductionRunStatus | undefined;
   startedAt: wellKnownTimestamp | undefined;
+  // server-owned since Phase 0a; a client-sent value is ignored. received_at is the timestamp of a
+  // physical receipt, stamped only by the receive flow beside the stock it books — a client-writable
+  // one let an open run be back-dated into the accounting scan with no stock movement behind it.
   receivedAt: wellKnownTimestamp | undefined;
   notes: string | undefined;
   lines: ProductionRunLine[] | undefined;
   costs: ProductionRunCost[] | undefined;
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
-  markers: ProductionRunMarker[] | undefined;
   // Run ACTUAL cutting wastage % (0..100), entered per run once the marker/lay is known. When set it
   // OVERRIDES the BOM line's estimate wastage_percent in the run's cost calc (planned-cost snapshot +
   // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
   // cost still derives from real material issues.
   actualWastagePercent: googletype_Decimal | undefined;
+  // Planning dates for the overdue view (production cockpit). Client-writable, unlike started_at's
+  // sibling received_at: they are INTENT, not a stamped fact, so nothing downstream books stock or
+  // accrues cost from them.
+  // planned_start_at — when the batch is planned to go into work (started_at is the real transition).
+  // promised_at      — дата, к которой партия обещана. An open run (planned/in_progress) whose
+  // promised_at is in the past is overdue; that is exactly what
+  // ListProductionRunsRequest.overdue_only filters on.
+  plannedStartAt: wellKnownTimestamp | undefined;
+  promisedAt: wellKnownTimestamp | undefined;
+  // The factory running the batch (Phase 9, plan 12.1): FK to the supplier catalog; 0 = none.
+  // Unlocks per-vendor variance/defect reporting.
+  supplierId: number | undefined;
 };
 
 // ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
@@ -3394,6 +3472,38 @@ export type ProductionRun = {
   // UpdateProductionRunRequest.expected_lock_version so a list→edit needs no extra GET (mirrors
   // TechCard.lock_version).
   lockVersion: number | undefined;
+  // The run's receiving events (Phase 4, receipt v1), oldest first. Populated on the single-run
+  // read (GetProductionRun); list reads leave it empty to keep them light. Money on each receipt is
+  // stripped without costing:read.
+  receipts: ProductionRunReceipt[] | undefined;
+  // The run's append-only lifecycle audit trail (Phase 8), oldest first. Single-run read only.
+  // receipt_posted / receipt_reversed events REFERENCE their receipt in the JSON payload — they
+  // never duplicate its data.
+  events: ProductionRunEvent[] | undefined;
+  // Server-side "expected vs booked" cross-checks over the run's journals (plan 04 §4.2 / 12.5).
+  // Single-run read only; every failed check carries an operator-facing detail sentence.
+  recon: ProductionRunReconCheck[] | undefined;
+};
+
+// ProductionRunEvent is one row of the run's append-only audit trail: who did what to the run,
+// when, why, with a JSON payload describing the effects (references, never duplicated data).
+export type ProductionRunEvent = {
+  id: number | undefined;
+  eventType: string | undefined;
+  actor: string | undefined;
+  reason: string | undefined;
+  payload: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// ProductionRunReconCheck is one typed cross-check of the run's derived state against its
+// journals. ok=false means the two disagree; detail says what to look at.
+export type ProductionRunReconCheck = {
+  key: string | undefined;
+  expected: string | undefined;
+  actual: string | undefined;
+  ok: boolean | undefined;
+  detail: string | undefined;
 };
 
 // SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style

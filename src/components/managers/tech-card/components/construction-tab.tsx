@@ -4,10 +4,10 @@ import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { Canvas, Pin } from 'ui/components/canvas';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { RowTotal } from 'ui/components/row';
 import { SectionHeader } from 'ui/components/section-header';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
+import { parseDecimalNumber } from 'utils/decimal';
 import { ConstructionField } from './construction-field';
 import { OperationsField } from './operations-field';
 import { PieceLegend } from './piece-legend';
@@ -30,7 +30,26 @@ const CONSTRUCTION_VIEW_KINDS = new Set([
 // The four real construction zones (UNKNOWN is the untagged default, not a zone to cover).
 const TOTAL_CONSTRUCTION_ZONES = 4;
 
-type SummaryOp = { calloutNumber?: number; timeNorm?: string; zone?: string };
+export type SummaryOp = { calloutNumber?: number; timeNorm?: string; smv?: string; zone?: string };
+
+// The minutes ONE operation contributes to total SAM, exactly as the server computes it
+// (dto.operationMinutes: SMV when the operation carries one, else the time norm). This summary
+// used to sum `timeNorm` alone, so every operation with a measured SMV was counted at its estimate
+// — or, with only an SMV entered, at nothing at all — and the implied €/min derived from it was
+// wrong in the direction that flatters the rate.
+//
+// parseDecimalNumber, not parseFloat: these fields are typed through DecimalField, which accepts a
+// comma decimal separator. parseFloat('1,8') is 1, so a card entered in the Russian layout lost
+// ~44% of every such operation's minutes here while the operations editor's own total (which
+// already used parseDecimalNumber) showed 1.8. Two totals for one column, one of them silently low.
+export function operationMinutes(o: SummaryOp): number {
+  // "Set" means parseable, exactly as SMV.Valid means non-NULL server-side — an explicit 0 SMV
+  // counts as zero minutes there and here, it does not fall back to the estimate.
+  const smv = parseDecimalNumber(o.smv);
+  if (Number.isFinite(smv)) return smv;
+  const sam = parseDecimalNumber(o.timeNorm);
+  return Number.isFinite(sam) ? sam : 0;
+}
 
 // Summary lead (config pick: Summary B) — the at-a-glance overview the tab lacked: how many
 // operations, total SAM (feeds costing), how many assembly zones are tagged, and how many steps
@@ -47,26 +66,27 @@ type SummaryOp = { calloutNumber?: number; timeNorm?: string; zone?: string };
 function ConstructionSummary() {
   const { control } = useFormContext<TechCardFormData>();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as SummaryOp[];
-  const cmtCost = (useWatch({ control, name: 'costing.cmtCost' }) ?? '') as string;
-  const currency = (useWatch({ control, name: 'costing.currency' }) ?? '') as string;
 
   const opCount = operations.length;
-  const totalSam = operations.reduce((s, o) => s + (parseFloat(o.timeNorm ?? '') || 0), 0);
+  const totalSam = operations.reduce((s, o) => s + operationMinutes(o), 0);
   const zonesCovered = new Set(
     operations.map((o) => o.zone).filter((z) => z && z !== 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
   ).size;
   const unpinned = operations.filter((o) => !(o.calloutNumber && o.calloutNumber > 0)).length;
 
-  const cmt = parseFloat(cmtCost.replace(/,/g, '.'));
-  const showMoney = Number.isFinite(cmt) && cmt > 0 && totalSam > 0;
-  const perMinute = showMoney ? cmt / totalSam : 0;
-  const cur = currency.trim();
-
+  // The SAM → money readout (implied ₽/min from cmt_cost) moved to the costing tab's labour band
+  // (Phase 3, plan 11): money reads next to the CMT input it derives from, minutes stay here.
   return (
     <div>
       <StatGrid min={130}>
         <Stat label='operations' value={opCount} />
-        <Stat label='total SAM' value={`${totalSam.toFixed(1)} мин`} sub='feeds costing' />
+        {/* The sub names the rule, because the operations rail below closes with a plain sum of the
+            SAM column and the two figures legitimately differ on any card with measured SMVs. */}
+        <Stat
+          label='total SAM'
+          value={`${totalSam.toFixed(1)} мин`}
+          sub='smv else sam · feeds costing'
+        />
         <Stat label='zones covered' value={`${zonesCovered} / ${TOTAL_CONSTRUCTION_ZONES}`} />
         <Stat
           label='unpinned ops'
@@ -75,14 +95,6 @@ function ConstructionSummary() {
           tone={unpinned > 0 ? 'down' : 'default'}
         />
       </StatGrid>
-      {showMoney && (
-        <RowTotal
-          label={`total SAM · ${opCount} операций`}
-          value={`${totalSam.toFixed(1)} мин → CMT ${cmt.toFixed(2)} ${cur} ≈ ${perMinute.toFixed(
-            2,
-          )} ${cur} / мин`}
-        />
-      )}
     </div>
   );
 }

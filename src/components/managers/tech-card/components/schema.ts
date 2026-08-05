@@ -376,10 +376,10 @@ const packagingSchema = z.object({
 
 // Manual per-unit cost articles (per ONE garment), all in a single `currency`. Pricing
 // (markup/wholesale/retail) was removed from the tech card — it lives on the published product.
+// hardwareCost/packagingCost left this schema in Phase 2: both are BOM sections priced per
+// colourway now, so the costing block carries only the genuinely manual articles.
 const costingSchema = z.object({
   cmtCost: z.string().optional().default(''),
-  hardwareCost: z.string().optional().default(''),
-  packagingCost: z.string().optional().default(''),
   logisticsCost: z.string().optional().default(''),
   overheadCost: z.string().optional().default(''),
   defectPercent: z.string().optional().default(''),
@@ -416,8 +416,6 @@ export const emptyPackaging: z.input<typeof packagingSchema> = {
 
 export const emptyCosting: z.input<typeof costingSchema> = {
   cmtCost: '',
-  hardwareCost: '',
-  packagingCost: '',
   logisticsCost: '',
   overheadCost: '',
   defectPercent: '',
@@ -455,6 +453,11 @@ const techCardObject = z.object({
   careInstructions: z.string().optional().default(''),
   stage: z.string().optional().default(DEFAULT_STAGE),
   approvalState: z.string().optional().default(DEFAULT_APPROVAL_STATE),
+  // The drop this style is being made for, as a YYYY-MM-DD input string ('' = no drop planned). The
+  // production tab measures each batch's promised date against it. Planning intent set by the owner,
+  // not a workflow stamp like approvedAt/releasedAt — but it still travels on the tech-card write, so
+  // a RELEASED (frozen) card rejects a change to it along with everything else.
+  targetDropDate: z.string().optional().default(''),
   measurementUnit: z.string().optional().default(DEFAULT_MEASUREMENT_UNIT),
   // The design intent in prose — what this style IS, before any construction detail. Printed at
   // the head of the tech pack's description sheet, above the details and the notes.
@@ -567,6 +570,7 @@ export const techCardDefaultData: TechCardFormData = {
   careInstructions: '',
   stage: DEFAULT_STAGE,
   approvalState: DEFAULT_APPROVAL_STATE,
+  targetDropDate: '',
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
   concept: '',
   notes: '',
@@ -735,6 +739,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     careInstructions: techCard.careInstructions || '',
     stage: stageOrDefault(insert?.stage),
     approvalState: approvalStateOrDefault(insert?.approvalState),
+    targetDropDate: timestampToDateInput(insert?.targetDropDate),
     measurementUnit: measurementUnitOrDefault(insert?.measurementUnit),
     concept: insert?.concept || '',
     notes: insert?.notes || '',
@@ -865,8 +870,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     costing: insert?.costing
       ? {
           cmtCost: decimalToInput(insert.costing.cmtCost),
-          hardwareCost: decimalToInput(insert.costing.hardwareCost),
-          packagingCost: decimalToInput(insert.costing.packagingCost),
           logisticsCost: decimalToInput(insert.costing.logisticsCost),
           overheadCost: decimalToInput(insert.costing.overheadCost),
           defectPercent: decimalToInput(insert.costing.defectPercent),
@@ -968,8 +971,6 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
   if (
     !hasContent([
       c?.cmtCost,
-      c?.hardwareCost,
-      c?.packagingCost,
       c?.logisticsCost,
       c?.overheadCost,
       c?.defectPercent,
@@ -982,8 +983,6 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
   }
   return {
     cmtCost: inputToDecimal(c?.cmtCost),
-    hardwareCost: inputToDecimal(c?.hardwareCost),
-    packagingCost: inputToDecimal(c?.packagingCost),
     logisticsCost: inputToDecimal(c?.logisticsCost),
     overheadCost: inputToDecimal(c?.overheadCost),
     // Empty = no style target; the server then resolves the house default into
@@ -998,6 +997,7 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     orderQty: undefined,
     orderCost: undefined,
     hasUnconvertedCurrencies: undefined,
+    hasUnpriced: undefined,
     totalSam: undefined,
     colorwayCosts: undefined,
     // Base-currency roll-up (server-folded via costing FX rates) — output-only.
@@ -1068,6 +1068,9 @@ export function mapFormToTechCardInsert(
     stage: (data.stage || 'TECH_CARD_STAGE_UNKNOWN') as common_TechCardStage,
     approvalState: (data.approvalState ||
       'TECH_CARD_APPROVAL_STATE_UNKNOWN') as common_TechCardApprovalState,
+    // Blank clears the date: dateInputToTimestamp maps '' to the proto zero instant, which the
+    // backend converter reads as NULL (the same round-trip every other optional date here uses).
+    targetDropDate: dateInputToTimestamp(data.targetDropDate),
     measurementUnit: (data.measurementUnit ||
       'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN') as common_TechCardMeasurementUnit,
     concept: data.concept?.trim() || '',
@@ -1171,11 +1174,9 @@ export function mapFormToTechCardInsert(
         'TECH_CARD_FABRIC_DIRECTION_UNKNOWN') as common_TechCardFabricDirection,
       wastagePercent: inputToDecimal(b.wastagePercent),
       materialId: b.materialId || 0,
-      // Stable identity (§2.3): keep the server PK + the resolved line_key. material_snapshot is
-      // server-managed (read-only) — never sent.
+      // Stable identity (§2.3): keep the server PK + the resolved line_key.
       id: b.id || 0,
       lineKey: b.lineKey,
-      materialSnapshot: undefined,
     })),
     details: (data.details ?? [])
       .map((d) => ({

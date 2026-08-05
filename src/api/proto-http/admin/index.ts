@@ -1036,6 +1036,32 @@ export type ArchiveVariantRequest = {
 export type ArchiveVariantResponse = {
 };
 
+// B-grade seconds surface (0251). B variants live on the SAME colourway as their A siblings
+// (product_size.grade='B', '-B'-suffixed SKU, own stock) and are minted only by the production
+// receive (defect disposition = seconds) and refund (disposition = seconds) paths.
+export type ListVariantSecondsRequest = {
+  colorwayId: number | undefined;
+};
+
+// SecondsVariant is one B-grade variant with its manual price list. All rows here are grade 'B'
+// by construction; variant carries the id/size/quantity/SKU/status.
+export type SecondsVariant = {
+  variant: common_Variant | undefined;
+  prices: common_ColorwayPrice[] | undefined;
+};
+
+export type ListVariantSecondsResponse = {
+  seconds: SecondsVariant[] | undefined;
+};
+
+export type SetVariantPriceRequest = {
+  variantId: number | undefined;
+  prices: common_ColorwayPriceInsert[] | undefined;
+};
+
+export type SetVariantPriceResponse = {
+};
+
 // Style size chart (R5, full-replace). The chart is style-owned (tech_card_size_measurement) and shares
 // the style's tech_card.lock_version; there is no separate chart version.
 export type GetStyleSizeChartRequest = {
@@ -1354,6 +1380,30 @@ export type ListStockChangesRequest = {
   orderFactor?: common_OrderFactor;
   sizeId?: number;
   sortByDirection?: common_StockAdjustmentDirection;
+  // Optional (Phase 8, plan 04 §4.3): narrow to one production run's whole reference family — the
+  // run itself plus every one of its receipts (receive AND reversal rows).
+  productionRunId?: number;
+};
+
+export type ListProductWaitlistRequest = {
+  productId?: number;
+  limit: number | undefined;
+  offset: number | undefined;
+};
+
+export type ProductWaitlistEntry = {
+  id: number | undefined;
+  productId: number | undefined;
+  sizeId: number | undefined;
+  email: string | undefined;
+  firstName: string | undefined;
+  lastName: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+export type ListProductWaitlistResponse = {
+  entries: ProductWaitlistEntry[] | undefined;
+  total: number | undefined;
 };
 
 export type StockChangeRow = {
@@ -2683,6 +2733,7 @@ export type SellThroughByDropRow = {
   grossMarginPct: number | undefined;
   hasCost: boolean | undefined;
   daysTo50pct?: number;
+  costedRevenue: googletype_Decimal | undefined;
 };
 
 // MarginByStyleRow rolls the per-SKU margin breakdown up to the STYLE (tech card) a product's
@@ -2969,6 +3020,12 @@ export type RefundOrderRequest = {
   // Optional structured reason. When set, it drives the return-analysis breakdown exactly
   // (the free-text reason is only bucketed heuristically). Additive to reason (field 3).
   reasonCode: RefundReason | undefined;
+  // What physically happens to the returned units (Phase 8, plan 13 §5). Empty = restock.
+  // restock  — inspected fine: back to sellable A stock (previous unconditional behaviour);
+  // writeoff — worn/damaged: nothing restocks, the sale's COGS stays expensed;
+  // seconds  — sellable as a discounted second: restocked into the product's B-grade variant
+  // at zero carried cost (not sellable until B pricing lands).
+  disposition: string | undefined;
 };
 
 export type RefundOrderResponse = {
@@ -5822,6 +5879,13 @@ export type common_TechCardInsert = {
   skuSeason: common_SkuSeason | undefined;
   // WS7: sub-classifies an auxiliary card (UNKNOWN=unset). Ignored / must be UNKNOWN for a sellable card.
   auxSubtype: common_TechCardAuxSubtype | undefined;
+  // Planning date for the overdue view (production cockpit): the calendar day this style is planned
+  // to drop, the anchor a run's promised_at is judged against ("до дропа N дней / просрочен"). Owner-
+  // set intent, not a workflow stamp like approved_at/released_at — unset means no drop planned.
+  // Only the DATE part is persisted (tech_card.target_drop_date is a DATE column); any time of day
+  // sent on the wire is dropped. NOTE: a RELEASED card is frozen for edits (ErrTechCardReleased), so
+  // this planning date is only settable while the card is draft/approved — see the store's freeze check.
+  targetDropDate: wellKnownTimestamp | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -5916,9 +5980,12 @@ export type common_TechCardBomItem = {
   // a real FK instead of a fragile positional index.
   id: number | undefined;
   lineKey: string | undefined;
-  // material_snapshot is a read-only JSON snapshot of the linked material's descriptive fields at
-  // save time (S23), so the document is self-contained.
-  materialSnapshot: string | undefined;
+  // Stored price provenance (production-costing Phase 3, plan 11). READ-ONLY — the server stamps
+  // both on write and ignores anything a client sends here. price_source is 'manual' (the operator
+  // typed/edited unit_price through a card save), 'catalog' (the reprice action pulled it from the
+  // material catalog), or '' for a pre-provenance row whose origin is honestly unknown.
+  priceSource: string | undefined;
+  priceSnapshotAt: wellKnownTimestamp | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -6084,12 +6151,6 @@ export type common_TechCardPackaging = {
 export type common_TechCardCosting = {
   // manual per-unit cost articles (per ONE garment), all in `currency`.
   cmtCost: googletype_Decimal | undefined;
-  // фурнитура ВНЕ BOM, за 1 изделие. Hardware is also a first-class BOM section priced through the
-  // recipe, so this article and a hardware BOM line are mutually exclusive: a write carrying both is
-  // rejected (costing.hardware_cost FieldViolation) because it would double-count in every unit-cost
-  // rollup. Enforced on WRITE only — a card saved with both before the rule existed still reads back.
-  hardwareCost: googletype_Decimal | undefined;
-  packagingCost: googletype_Decimal | undefined;
   logisticsCost: googletype_Decimal | undefined;
   overheadCost: googletype_Decimal | undefined;
   defectPercent: googletype_Decimal | undefined;
@@ -6112,6 +6173,11 @@ export type common_TechCardCosting = {
   orderQty: number | undefined;
   orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one authored usage of the PRIMARY colourway could not be costed
+  // at all (no price / unresolvable pin / no norm / per-size norms without order qty); such a line
+  // contributes to NO currency bucket, so unit_cost/unit_cost_base are withheld from cost seeding
+  // and should not be trusted as complete.
+  hasUnpriced: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: common_TechCardColorwayCost[] | undefined;
   // OUTPUT-ONLY base-currency rollup. The unit/order cost of the primary colourway folded into
@@ -6153,6 +6219,11 @@ export type common_TechCardColorwayCost = {
   orderQty: number | undefined;
   orderCost: googletype_Decimal | undefined;
   hasUnconvertedCurrencies: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one authored usage of THIS colourway could not be costed at all
+  // (no price / unresolvable pin / no norm / per-size norms without order qty); such a line
+  // contributes to NO currency bucket, so unit_cost is withheld from cost seeding for this
+  // colourway and should not be trusted as complete.
+  hasUnpriced: boolean | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -6179,7 +6250,10 @@ export type common_TechCardIssueStatus =
   | "TECH_CARD_ISSUE_STATUS_OPEN"
   | "TECH_CARD_ISSUE_STATUS_RESOLVED"
   | "TECH_CARD_ISSUE_STATUS_WONTFIX";
-// TechCardSizeQuantity is the production order quantity for a size (size run).
+// TechCardSizeQuantity is the TYPICAL calculation batch for a size — «типовой тираж для
+// калькуляции» (plan 13 §2). It amortises development cost and prefills a new run's grid; it is
+// NOT a real production batch — the run's own plan lines are the batch (a run may be bigger,
+// smaller, or split differently, and the UI must warn instead of silently multiplying).
 export type common_TechCardSizeQuantity = {
   sizeId: number | undefined;
   orderQty: number | undefined;
@@ -6843,6 +6917,11 @@ export type common_Material = {
   // purpose (#40) marks whether the material is used for samples, production, or both. Defaults to
   // BOTH on write when UNKNOWN, so the admin can mark and filter materials.
   purpose: common_MaterialPurpose | undefined;
+  // Procurement quick wins (Phase 9, plan 13 §1 — the PO entity was cut): supplier_id links to the
+  // supplier CATALOG (the free-text `supplier` field stays legacy), lead_time_days is the typical
+  // order-to-door time. 0 = unset for both.
+  supplierId: number | undefined;
+  leadTimeDays: number | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -6965,6 +7044,51 @@ export type ListMaterialPricesResponse = {
   prices: common_MaterialPrice[] | undefined;
 };
 
+// RepriceTechCardBom (production-costing Phase 3, plan 11).
+export type RepriceTechCardBomRequest = {
+  techCardId: number | undefined;
+};
+
+// One catalog-linked BOM line the reprice action visited. `changed` is false when the catalog price
+// already matched the line (provenance still restamped 'catalog' — the price is now provably the
+// catalog's). A line with no resolvable catalog price is reported with new_price unset.
+export type RepricedBomLine = {
+  lineKey: string | undefined;
+  name: string | undefined;
+  section: string | undefined;
+  oldPrice: googletype_Decimal | undefined;
+  oldCurrency: string | undefined;
+  newPrice: googletype_Decimal | undefined;
+  newCurrency: string | undefined;
+  changed: boolean | undefined;
+};
+
+export type RepriceTechCardBomResponse = {
+  lines: RepricedBomLine[] | undefined;
+  skippedUnlinked: number | undefined;
+};
+
+// Phase 2 scalar→BOM migration exception report (read-only).
+export type CostingMigrationException = {
+  techCardId: number | undefined;
+  styleNumber: string | undefined;
+  techCardName: string | undefined;
+  article: string | undefined;
+  kind: string | undefined;
+  amount: googletype_Decimal | undefined;
+  currency: string | undefined;
+  approvalState: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+export type ListCostingMigrationExceptionsRequest = {
+  techCardId: number | undefined;
+};
+
+export type ListCostingMigrationExceptionsResponse = {
+  exceptions: CostingMigrationException[] | undefined;
+};
+
 // Tech-card release snapshots (task 11).
 export type ListTechCardReleasesRequest = {
   techCardId: number | undefined;
@@ -7068,18 +7192,32 @@ export type common_ProductionRunInsert = {
   releaseId: number | undefined;
   status: common_ProductionRunStatus | undefined;
   startedAt: wellKnownTimestamp | undefined;
+  // server-owned since Phase 0a; a client-sent value is ignored. received_at is the timestamp of a
+  // physical receipt, stamped only by the receive flow beside the stock it books — a client-writable
+  // one let an open run be back-dated into the accounting scan with no stock movement behind it.
   receivedAt: wellKnownTimestamp | undefined;
   notes: string | undefined;
   lines: common_ProductionRunLine[] | undefined;
   costs: common_ProductionRunCost[] | undefined;
   markerEfficiencyPct: googletype_Decimal | undefined;
   markerNotes: string | undefined;
-  markers: common_ProductionRunMarker[] | undefined;
   // Run ACTUAL cutting wastage % (0..100), entered per run once the marker/lay is known. When set it
   // OVERRIDES the BOM line's estimate wastage_percent in the run's cost calc (planned-cost snapshot +
   // material plan); unset falls back to the BOM estimate. Refines the plan side only — the run's ACTUAL
   // cost still derives from real material issues.
   actualWastagePercent: googletype_Decimal | undefined;
+  // Planning dates for the overdue view (production cockpit). Client-writable, unlike started_at's
+  // sibling received_at: they are INTENT, not a stamped fact, so nothing downstream books stock or
+  // accrues cost from them.
+  // planned_start_at — when the batch is planned to go into work (started_at is the real transition).
+  // promised_at      — дата, к которой партия обещана. An open run (planned/in_progress) whose
+  // promised_at is in the past is overdue; that is exactly what
+  // ListProductionRunsRequest.overdue_only filters on.
+  plannedStartAt: wellKnownTimestamp | undefined;
+  promisedAt: wellKnownTimestamp | undefined;
+  // The factory running the batch (Phase 9, plan 12.1): FK to the supplier catalog; 0 = none.
+  // Unlocks per-vendor variance/defect reporting.
+  supplierId: number | undefined;
 };
 
 // ProductionRunStatus is the lifecycle state of a production run (партия). A run is planned, then
@@ -7091,7 +7229,11 @@ export type common_ProductionRunStatus =
   | "PRODUCTION_RUN_STATUS_IN_PROGRESS"
   | "PRODUCTION_RUN_STATUS_RECEIVED"
   | "PRODUCTION_RUN_STATUS_CLOSED"
-  | "PRODUCTION_RUN_STATUS_CANCELLED";
+  | "PRODUCTION_RUN_STATUS_CANCELLED"
+  // At least one partial receipt is booked and the operator has not yet declared the run complete
+  // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
+  // writable through UpdateProductionRun.
+  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -7103,6 +7245,15 @@ export type common_ProductionRunLine = {
   plannedQty: number | undefined;
   receivedQty?: number;
   defectQty?: number;
+  // Stable identity of this line, echoed back on read. The store diffs the submitted grid by it
+  // instead of delete+reinserting the whole grid, so the row's database id survives an edit — which
+  // is what lets receipt lines hold a real foreign key to it. Contract: empty on the way in means
+  // "new line, the server mints one" (its fallback is standard base32 — 26 characters of [A-Z2-7]);
+  // anything non-empty must be EXACTLY 26 characters of [0-9A-Z] or the save is rejected with
+  // InvalidArgument. The admin client mints uppercase Crockford ULIDs (like a tech-card BOM line's
+  // line_key) and migration 0230 backfilled 'LEGACY'-prefixed keys onto pre-existing rows; both fit
+  // that shape. NEVER regenerate a key the server handed out — that retires the row it names.
+  lineKey: string | undefined;
 };
 
 // ProductionRunCost is one actual cost article incurred for a run (phase 2). amount is in
@@ -7115,6 +7266,14 @@ export type common_ProductionRunCost = {
   currency: string | undefined;
   amountBase: googletype_Decimal | undefined;
   incurredAt: wellKnownTimestamp | undefined;
+  // Cost-document fields (plan 12.3, columns landed in 0234): who invoices this article, under
+  // which document, with what VAT, and where the payable stands. They are what lets the UI say
+  // "оплачено" instead of only "начислено". All optional.
+  supplierId: number | undefined;
+  documentRef: string | undefined;
+  vatRate: googletype_Decimal | undefined;
+  vatAmount: googletype_Decimal | undefined;
+  apStatus: string | undefined;
 };
 
 // ProductionRunCostKind is the article category of an actual production-run cost.
@@ -7127,32 +7286,6 @@ export type common_ProductionRunCostKind =
   | "PRODUCTION_RUN_COST_KIND_LOGISTICS"
   | "PRODUCTION_RUN_COST_KIND_DUTY"
   | "PRODUCTION_RUN_COST_KIND_OTHER";
-// ProductionRunMarker is one imported nesting marker (раскладка / lay) of a run (gap-07 v2 E): the
-// CAD source, the fabric width and lay length it was nested on, the units it yields, its
-// fabric-utilisation %, an optional fabric/size, and a reference URL to the exported marker file.
-// It is planning / traceability data — nothing here feeds the run's actual cost or cost_price.
-export type common_ProductionRunMarker = {
-  source: common_ProductionMarkerSource | undefined;
-  markerName: string | undefined;
-  sizeId: number | undefined;
-  materialId: number | undefined;
-  markerWidth: googletype_Decimal | undefined;
-  layLength: googletype_Decimal | undefined;
-  unitsPerMarker: number | undefined;
-  efficiencyPct: googletype_Decimal | undefined;
-  markerFileUrl: string | undefined;
-  notes: string | undefined;
-};
-
-// ProductionMarkerSource is the CAD/nesting software (or hand entry) a marker record came from.
-export type common_ProductionMarkerSource =
-  | "PRODUCTION_MARKER_SOURCE_UNKNOWN"
-  | "PRODUCTION_MARKER_SOURCE_GERBER"
-  | "PRODUCTION_MARKER_SOURCE_OPTITEX"
-  | "PRODUCTION_MARKER_SOURCE_LECTRA"
-  | "PRODUCTION_MARKER_SOURCE_AUDACES"
-  | "PRODUCTION_MARKER_SOURCE_MANUAL"
-  | "PRODUCTION_MARKER_SOURCE_OTHER";
 export type CreateProductionRunResponse = {
   id: number | undefined;
 };
@@ -7198,6 +7331,17 @@ export type common_ProductionRun = {
   // UpdateProductionRunRequest.expected_lock_version so a list→edit needs no extra GET (mirrors
   // TechCard.lock_version).
   lockVersion: number | undefined;
+  // The run's receiving events (Phase 4, receipt v1), oldest first. Populated on the single-run
+  // read (GetProductionRun); list reads leave it empty to keep them light. Money on each receipt is
+  // stripped without costing:read.
+  receipts: common_ProductionRunReceipt[] | undefined;
+  // The run's append-only lifecycle audit trail (Phase 8), oldest first. Single-run read only.
+  // receipt_posted / receipt_reversed events REFERENCE their receipt in the JSON payload — they
+  // never duplicate its data.
+  events: common_ProductionRunEvent[] | undefined;
+  // Server-side "expected vs booked" cross-checks over the run's journals (plan 04 §4.2 / 12.5).
+  // Single-run read only; every failed check carries an operator-facing detail sentence.
+  recon: common_ProductionRunReconCheck[] | undefined;
 };
 
 // ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
@@ -7245,6 +7389,71 @@ export type common_ProductionRunColorwayCost = {
   hasUncosted: boolean | undefined;
 };
 
+// ProductionRunReceipt is one immutable receiving event of a run (Phase 4, receipt v1; Phase 5
+// allows several per run): who received what and when, at what frozen valuation.
+// unit_cost_base/base_currency are money and are stripped without costing:read; has_base false
+// means the valuation was not computable at receipt time (uncosted issues / unfolded cost
+// articles) and unit_cost_base is unset.
+export type common_ProductionRunReceipt = {
+  id: number | undefined;
+  runId: number | undefined;
+  receivedAt: wellKnownTimestamp | undefined;
+  adminUsername: string | undefined;
+  note: string | undefined;
+  unitCostBase: googletype_Decimal | undefined;
+  baseCurrency: string | undefined;
+  hasBase: boolean | undefined;
+  lines: common_ProductionRunReceiptLine[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // The receipt that declared the run complete and flipped it to RECEIVED (Phase 5). Every
+  // pre-Phase-5 receipt is final by construction.
+  final: boolean | undefined;
+  // Accounting outbox state of this receipt: 'pending' | 'posted' | 'dead_letter'. Read-only
+  // operational fact (the posting worker owns it); visible without costing:read — it carries no
+  // amounts.
+  postingStatus: string | undefined;
+  // Phase 6 reversal linkage. On a reversal row, reversal_of names the receipt it reversed; on a
+  // reversed receipt, reversed_by names its reversal row. 0 = not set. A reversed receipt's units
+  // and money are excluded from every rollup; the pair stays in the history for the audit trail.
+  reversalOf: number | undefined;
+  reversedBy: number | undefined;
+};
+
+// ProductionRunReceiptLine is one counted plan line of a receipt: which line (by its stable
+// line_key), what was booked as good stock and what was counted as defect. product_id/size_id are
+// snapshots of the plan line at receipt time; size_id 0 means the line has no size (auxiliary runs).
+export type common_ProductionRunReceiptLine = {
+  lineKey: string | undefined;
+  productId: number | undefined;
+  sizeId: number | undefined;
+  goodQty: number | undefined;
+  defectQty: number | undefined;
+  // Where the defect units went (Phase 7): "scrap" (recorded fact + posting-rule resolution) or
+  // "seconds" (booked into the product's B-grade variant stock).
+  defectDisposition: string | undefined;
+};
+
+// ProductionRunEvent is one row of the run's append-only audit trail: who did what to the run,
+// when, why, with a JSON payload describing the effects (references, never duplicated data).
+export type common_ProductionRunEvent = {
+  id: number | undefined;
+  eventType: string | undefined;
+  actor: string | undefined;
+  reason: string | undefined;
+  payload: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// ProductionRunReconCheck is one typed cross-check of the run's derived state against its
+// journals. ok=false means the two disagree; detail says what to look at.
+export type common_ProductionRunReconCheck = {
+  key: string | undefined;
+  expected: string | undefined;
+  actual: string | undefined;
+  ok: boolean | undefined;
+  detail: string | undefined;
+};
+
 export type ListProductionRunsRequest = {
   techCardId: number | undefined;
   status: string | undefined;
@@ -7254,6 +7463,11 @@ export type ListProductionRunsRequest = {
   // (the same rule as the stale_open_production_run dashboard alert). Server-side so the attention
   // filter/strip does not client-scan the two status pages (#10). 0 = no staleness filter.
   staleDays: number | undefined;
+  // true: return only OVERDUE runs — still open (planned/in_progress) with a promised_at that has
+  // already passed. Server-side so the production cockpit's «опаздывает» filter does not page the
+  // whole list to count. Runs with no promised_at are never overdue. Combined with an explicit
+  // status filter it just intersects (e.g. status=received + overdue_only yields nothing).
+  overdueOnly: boolean | undefined;
 };
 
 export type ListProductionRunsResponse = {
@@ -7279,6 +7493,66 @@ export type ReceiveProductionRunRequest = {
 
 export type ReceiveProductionRunResponse = {
   costPriceUpdated: boolean | undefined;
+};
+
+// PostProductionRunReceiptLineInput is one counted line of the receipt command, addressed by the
+// plan line's stable line_key (never by (product, size) — the whole point of 0230). good_qty is
+// what gets POSTED TO STOCK; defect_qty is a disjoint count that is recorded, never stocked.
+export type PostProductionRunReceiptLineInput = {
+  lineKey: string | undefined;
+  goodQty: number | undefined;
+  defectQty: number | undefined;
+  // Where this line's defect units go (Phase 7): "scrap" (default when empty — recorded fact, no
+  // stock; cost resolved by the posting rule) or "seconds" (booked into the product's B-grade
+  // variant stock at zero carried cost; needs a published product+size on the line).
+  defectDisposition: string | undefined;
+};
+
+export type PostProductionRunReceiptRequest = {
+  runId: number | undefined;
+  lines: PostProductionRunReceiptLineInput[] | undefined;
+  // Client-minted command identity: exactly 26 characters of [0-9A-Z] (an uppercase Crockford ULID
+  // fits), minted once per user intent (per modal open, NOT per attempt) so a network retry replays
+  // instead of double-booking.
+  idempotencyKey: string | undefined;
+  // The lock_version the operator counted against (from the run read). >0 and stale → Aborted:
+  // someone edited the run between the count and the post. 0 opts out (legacy shim path).
+  expectedLockVersion: number | undefined;
+  note: string | undefined;
+  // Seed every received product's cost_price from the frozen actual unit cost (costing:write).
+  updateCostPrice: boolean | undefined;
+  // Phase 5: true books THIS delivery's counts without declaring the run complete — the run moves
+  // to PARTIALLY_RECEIVED and further receipts stay possible. False (the default, and what every
+  // pre-Phase-5 client sends implicitly) is a FINAL receipt: it declares the run complete and
+  // flips it to RECEIVED. The flag is part of the idempotency request hash — the same key with a
+  // flipped flag is a different intent and is rejected, never replayed.
+  partial: boolean | undefined;
+};
+
+export type PostProductionRunReceiptResponse = {
+  receiptId: number | undefined;
+  costPriceUpdated: boolean | undefined;
+  // true when this response was replayed from the idempotency record (the command had already
+  // executed) rather than executed now.
+  replayed: boolean | undefined;
+  run: common_ProductionRun | undefined;
+};
+
+export type ReverseProductionRunReceiptRequest = {
+  runId: number | undefined;
+  receiptId: number | undefined;
+  // Required, non-empty. Stored on the reversal row (note), every stock-journal decrement
+  // (comment) and the production_run_event.
+  reason: string | undefined;
+  // The lock_version the operator saw on the run. >0 and stale → Aborted (reload and retry).
+  expectedLockVersion: number | undefined;
+};
+
+export type ReverseProductionRunReceiptResponse = {
+  // The reversal row linked to the reversed receipt (reversal_of/reversed_by pair in the
+  // receipt history).
+  reversalReceiptId: number | undefined;
+  run: common_ProductionRun | undefined;
 };
 
 export type GetProductionRunMaterialPlanRequest = {
@@ -7353,6 +7627,9 @@ export type ReceiveMaterialStockRequest = {
   inputVatAmount: googletype_Decimal | undefined;
   inputVatRegime: string | undefined;
   supplierId: number | undefined;
+  // When this delivery was promised to arrive (Phase 9), YYYY-MM-DD; empty = not tracked. Recorded
+  // on the receipt so lateness (occurred_at vs expected_at) is a queryable fact without a PO.
+  expectedAt: string | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
@@ -7382,6 +7659,9 @@ export type common_MaterialMovement = {
   createdAt: wellKnownTimestamp | undefined;
   productId: number | undefined;
   lotId: number | undefined;
+  // When a purchase receipt was promised to arrive (Phase 9); unset = not tracked. Lateness =
+  // occurred_at vs expected_at, no PO entity needed.
+  expectedAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
@@ -8660,6 +8940,16 @@ export interface AdminService {
   // ArchiveVariant retires a variant (ACTIVE -> ARCHIVED, R2): it drops off the storefront and rejects
   // stock writes, but its id stays valid for the frozen order/stock references.
   ArchiveVariant(request: ArchiveVariantRequest): Promise<ArchiveVariantResponse>;
+  // ListVariantSeconds returns a colourway's B-grade (factory seconds) variants with their manual
+  // prices (0251). B rows never appear in GetProduct or any storefront read — this is the admin's
+  // only window into seconds stock. An empty prices list means the variant is not sellable yet.
+  ListVariantSeconds(request: ListVariantSecondsRequest): Promise<ListVariantSecondsResponse>;
+  // SetVariantPrice replaces the manual per-variant price set of a B-grade variant (0251, owner
+  // decision: seconds are priced by hand). Full replace: the request's prices become the variant's
+  // price list; an EMPTY list clears all prices and the variant stops being sellable (fail-closed).
+  // The base currency must be present in a non-empty list (order lines snapshot the base price).
+  // Refused for grade='A' variants — A prices live on the colourway (product_price).
+  SetVariantPrice(request: SetVariantPriceRequest): Promise<SetVariantPriceResponse>;
   // UpdateStyle is the SOLE writer of a style's catalogue facts (brand, sku_season, collection,
   // target_gender, fit, composition, care instructions, model-wears, categories) — R4/§14.7. It is
   // optimistically locked on expected_lock_version (stale -> ABORTED). Changing a SKU fact (season)
@@ -8701,6 +8991,10 @@ export interface AdminService {
   ListStockChangeHistory(request: ListStockChangeHistoryRequest): Promise<ListStockChangeHistoryResponse>;
   // Lists stock changes with simplified format for reporting.
   ListStockChanges(request: ListStockChangesRequest): Promise<ListStockChangesResponse>;
+  // ListProductWaitlist reads the back-in-stock waitlist the storefront has been writing since
+  // 0010 (Phase 9, plan 13 §6 — until now no admin surface read it). Optional product filter,
+  // newest first, capped pagination. Demand signal only — it drives no automation.
+  ListProductWaitlist(request: ListProductWaitlistRequest): Promise<ListProductWaitlistResponse>;
   ListColors(request: ListColorsRequest): Promise<ListColorsResponse>;
   CreateColor(request: CreateColorRequest): Promise<CreateColorResponse>;
   UpdateColor(request: UpdateColorRequest): Promise<UpdateColorResponse>;
@@ -9017,6 +9311,21 @@ export interface AdminService {
   ListMaterials(request: ListMaterialsRequest): Promise<ListMaterialsResponse>;
   AddMaterialPrice(request: AddMaterialPriceRequest): Promise<AddMaterialPriceResponse>;
   ListMaterialPrices(request: ListMaterialPricesRequest): Promise<ListMaterialPricesResponse>;
+  // RepriceTechCardBom re-pulls the current material-catalog price into every catalog-linked BOM
+  // line of a mutable (non-released) card (production-costing Phase 3, plan 11): unit_price/currency are overwritten
+  // with the same CATALOG_LATEST resolution the style cost estimate uses (costing currency, else
+  // base currency, else a sole unambiguous catalog currency), and price_source/price_snapshot_at
+  // are stamped 'catalog'/now. Released cards are frozen (FAILED_PRECONDITION) — re-release is the
+  // path that reprices them. Changing prices legitimately stales an approved MATERIALS sign-off.
+  // Requires tech-card write + costing:write.
+  RepriceTechCardBom(request: RepriceTechCardBomRequest): Promise<RepriceTechCardBomResponse>;
+  // ListCostingMigrationExceptions reads the Phase 2 scalar→BOM migration's exception report
+  // (tech_card_costing_migration_exception): hardware/packaging money the migration refused to move
+  // mechanically (double-counted / zero-colourway / non-draft cards), waiting for manual transfer
+  // into the BOM. Read-only; tech_card_id 0 lists all cards. Requires tech-cards read; the AMOUNT
+  // additionally needs costing:read and comes back stripped without it (structure — card, article,
+  // kind, currency — is visible to any tech-cards reader).
+  ListCostingMigrationExceptions(request: ListCostingMigrationExceptionsRequest): Promise<ListCostingMigrationExceptionsResponse>;
   // Tech-card release snapshots (task 11): the immutable frozen spec + planned cost per release.
   ListTechCardReleases(request: ListTechCardReleasesRequest): Promise<ListTechCardReleasesResponse>;
   GetTechCardRelease(request: GetTechCardReleaseRequest): Promise<GetTechCardReleaseResponse>;
@@ -9035,7 +9344,43 @@ export interface AdminService {
   // ReceiveProductionRun receives a run into a linked product's stock (by received_qty per size),
   // transitions the run to `received`, and optionally sets the product's cost_price from the run's
   // actual unit cost. It is guarded against a double receipt.
+  // DEPRECATED (Phase 4, receipt v1): a thin shim over PostProductionRunReceipt that synthesizes
+  // the receipt from the run's STORED received_qty/defect_qty counts — kept for one release so an
+  // old client (which stamps counts via UpdateProductionRun first) keeps working. New callers use
+  // PostProductionRunReceipt: quantities travel IN the command, one atomic transaction, idempotent.
   ReceiveProductionRun(request: ReceiveProductionRunRequest): Promise<ReceiveProductionRunResponse>;
+  // PostProductionRunReceipt is the atomic receiving command (Phase 4, receipt v1, final-only): in
+  // ONE transaction it records the immutable receipt (with per-line counts referenced by the plan
+  // lines' line_key), books the good units into each line's product stock (or the output material
+  // for an auxiliary run), freezes the run's actual unit cost on the receipt, optionally seeds each
+  // product's cost_price, transitions the run to `received`, and writes the idempotency record the
+  // accounting worker posts from. Идемпотентность = replay: a retry with the same idempotency_key
+  // and identical payload returns the original success (replayed=true); the same key with a
+  // DIFFERENT payload is rejected with AlreadyExists. An all-scrap receipt (0 good, >0 defect) is
+  // valid: nothing is stocked, the run still closes with the defect recorded.
+  // Requires production:write AND products:write (it moves sellable stock).
+  PostProductionRunReceipt(request: PostProductionRunReceiptRequest): Promise<PostProductionRunReceiptResponse>;
+  // ReverseProductionRunReceipt undoes ONE receipt of a run (Phase 6, plan 05): in one transaction
+  // it takes the receipt's good units back OUT of each line's product stock (refused with the exact
+  // per-variant shortfall when any unit was already sold — stock never goes negative and sold units
+  // are never silently stolen from another batch; sold-but-unshipped units already left the
+  // quantity at payment, so they block the same way), subtracts the receipt's counts from the
+  // plan-grid rollups, books the scoped accounting compensation (Dr WIP / Cr FG for what the
+  // receipt's live entry transferred — the manual/AP capitalisation deliberately stays: the
+  // supplier invoice remains payable), rolls each affected product's cost_price back to the
+  // tech-card estimate when THIS run still claims it and no live sibling receipt still stocks the
+  // product (a later manual/run source is left untouched and reported as skipped), marks the
+  // receipt reversed (a linked reversal row appears in the receipt history), recomputes the run
+  // status (a live FINAL keeps it received; otherwise partially_received while live receipts
+  // remain, in_progress when none) and records a production_run_event. Auxiliary-run receipts are
+  // refused in v1 (their output landed in the material warehouse and compounded its moving
+  // average; adjust or write off the material instead). A closed accounting period on the original
+  // entry is refused (v1). Materials issued to the run are NOT returned — reversal un-receives
+  // garments, it does not un-cut fabric. Requires production:write + products:write +
+  // costing:write and a non-empty reason. Reversing an already-reversed receipt (or a reversal
+  // row) fails with FailedPrecondition — the precondition runs under the run lock, which is also
+  // the idempotency guard.
+  ReverseProductionRunReceipt(request: ReverseProductionRunReceiptRequest): Promise<ReverseProductionRunReceiptResponse>;
   // GetProductionRunMaterialPlan estimates the fabric/notion requirement of a run from its lines'
   // colourway norms × planned qty × (1 + wastage), against on-hand and already-issued stock (NF-06).
   // It is a plan-estimate before the marker; the real consumption comes from stock issues.
@@ -9733,6 +10078,46 @@ export function createAdminServiceClient(
         method: "ArchiveVariant",
       }) as Promise<ArchiveVariantResponse>;
     },
+    ListVariantSeconds(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}/seconds`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListVariantSeconds",
+      }) as Promise<ListVariantSecondsResponse>;
+    },
+    SetVariantPrice(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.variantId) {
+        throw new Error("missing required field request.variant_id");
+      }
+      const path = `api/admin/variants/${request.variantId}/price`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetVariantPrice",
+      }) as Promise<SetVariantPriceResponse>;
+    },
     UpdateStyle(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.styleId) {
         throw new Error("missing required field request.style_id");
@@ -9982,6 +10367,9 @@ export function createAdminServiceClient(
       if (request.sortByDirection) {
         queryParams.push(`sortByDirection=${encodeURIComponent(request.sortByDirection.toString())}`)
       }
+      if (request.productionRunId) {
+        queryParams.push(`productionRunId=${encodeURIComponent(request.productionRunId.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -9994,6 +10382,32 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListStockChanges",
       }) as Promise<ListStockChangesResponse>;
+    },
+    ListProductWaitlist(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/waitlist`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.productId) {
+        queryParams.push(`productId=${encodeURIComponent(request.productId.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListProductWaitlist",
+      }) as Promise<ListProductWaitlistResponse>;
     },
     ListColors(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/dictionaries/colors`; // eslint-disable-line quotes
@@ -12861,6 +13275,46 @@ export function createAdminServiceClient(
         method: "ListMaterialPrices",
       }) as Promise<ListMaterialPricesResponse>;
     },
+    RepriceTechCardBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/bom/reprice`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RepriceTechCardBom",
+      }) as Promise<RepriceTechCardBomResponse>;
+    },
+    ListCostingMigrationExceptions(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/costing-migration-exceptions`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListCostingMigrationExceptions",
+      }) as Promise<ListCostingMigrationExceptionsResponse>;
+    },
     ListTechCardReleases(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {
         throw new Error("missing required field request.tech_card_id");
@@ -13054,6 +13508,9 @@ export function createAdminServiceClient(
       if (request.staleDays) {
         queryParams.push(`staleDays=${encodeURIComponent(request.staleDays.toString())}`)
       }
+      if (request.overdueOnly) {
+        queryParams.push(`overdueOnly=${encodeURIComponent(request.overdueOnly.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -13086,6 +13543,49 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ReceiveProductionRun",
       }) as Promise<ReceiveProductionRunResponse>;
+    },
+    PostProductionRunReceipt(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      const path = `api/admin/production-runs/${request.runId}/receipts`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PostProductionRunReceipt",
+      }) as Promise<PostProductionRunReceiptResponse>;
+    },
+    ReverseProductionRunReceipt(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      if (!request.receiptId) {
+        throw new Error("missing required field request.receipt_id");
+      }
+      const path = `api/admin/production-runs/${request.runId}/receipts/${request.receiptId}/reverse`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ReverseProductionRunReceipt",
+      }) as Promise<ReverseProductionRunReceiptResponse>;
     },
     GetProductionRunMaterialPlan(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {

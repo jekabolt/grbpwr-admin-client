@@ -146,6 +146,7 @@ export const useOrderDetails = (uuid: string) => {
     reason: string;
     refundShipping?: boolean;
     reasonCode?: RefundReason;
+    disposition?: string;
   }) {
     try {
       const isPartial = selectedUnitKeys.length > 0;
@@ -161,6 +162,9 @@ export const useOrderDetails = (uuid: string) => {
         reason: payload.reason || undefined,
         // Structured code drives the return-analysis breakdown; free-text reason is the audit note.
         reasonCode: payload.reasonCode ?? 'REFUND_REASON_UNSPECIFIED',
+        // What happens to the returned units (Phase 8): '' = restock; writeoff = consumed (COGS
+        // stays expensed); seconds = B-grade restock at zero cost.
+        disposition: payload.disposition ?? '',
         // Sent on FULL refunds too, not just partial ones: the backend reads the flag for a full
         // refund of any shipped status (delivered / pending return / refund in progress /
         // partially refunded) and only overrides it to true for a not-yet-shipped CONFIRMED

@@ -1003,8 +1003,6 @@ export function TechPackDocument({
           <div className='grid grid-cols-2 gap-x-8'>
             <div>
               <KV k='cmt' v={dec(tc.costing.cmtCost)} />
-              <KV k='hardware' v={dec(tc.costing.hardwareCost)} />
-              <KV k='packaging' v={dec(tc.costing.packagingCost)} />
               <KV k='logistics' v={dec(tc.costing.logisticsCost)} />
               <KV k='overhead' v={dec(tc.costing.overheadCost)} />
               <KV k='defect %' v={dec(tc.costing.defectPercent)} />

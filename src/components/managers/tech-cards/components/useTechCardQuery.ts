@@ -187,3 +187,35 @@ export function useDeleteTechCard() {
     },
   });
 }
+
+// Reprice (Phase 3): pull the current catalog price into every catalog-linked BOM line of a DRAFT
+// card, server-side (the same CATALOG_LATEST ladder the estimate shows). Invalidates the card
+// detail — the BOM prices, the costing rollup and the MATERIALS digest all just changed.
+export function useRepriceTechCardBom() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (techCardId: number) => adminService.RepriceTechCardBom({ techCardId }),
+    onSuccess: (_data, techCardId) => {
+      queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
+      queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
+    },
+  });
+}
+
+// The Phase 2 scalar→BOM migration's exception report for ONE card: hardware/packaging money the
+// migration refused to move mechanically, waiting for manual transfer into the BOM. Read-only;
+// empty for every card the migration handled cleanly (the overwhelmingly common case), so the
+// costing tab shows nothing unless there is genuinely something to do.
+export function useCostingMigrationExceptions(techCardId: number | undefined) {
+  return useQuery({
+    queryKey: [...techCardKeys.detail(techCardId ?? 0), 'costing-migration-exceptions'],
+    queryFn: async () => {
+      const response = await adminService.ListCostingMigrationExceptions({
+        techCardId: techCardId!,
+      });
+      return response.exceptions ?? [];
+    },
+    enabled: !!techCardId,
+    staleTime: 5 * 60 * 1000,
+  });
+}

@@ -1,24 +1,15 @@
 import { common_ProductionRun } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { findInDictionary } from 'lib/features/findInDictionary';
-import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
-import {
-  isRunLocked,
-  isRunReceivable,
-  runDetailPath,
-  runStatusLabel,
-  runStatusTone,
-} from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
+import { RunCard } from './components/run-card';
 import {
   deleteRunErrorMessage,
   useDeleteProductionRun,
@@ -83,10 +74,16 @@ export function ProductionRuns() {
   // sitting at least that long — the same server-side predicate the strip counts, so the link
   // shows exactly those runs (no client rescan of the full list).
   const staleDays = Number(searchParams.get('stale')) || 0;
+  // ?overdue=1 — only the runs that have missed their promised date. Filtered SERVER-side
+  // (overdue_only) rather than by scanning the page here: the client only ever holds one page, so a
+  // local filter would answer "late among the first 100" and quietly under-report. The badge on each
+  // card is computed from the same predicate, so the toggle and the badges always agree.
+  const overdueOnly = searchParams.get('overdue') === '1';
   const { data, isLoading, isError } = useProductionRuns(
     Number(techCardId) || 0,
     status,
     staleDays,
+    overdueOnly,
   );
   const del = useDeleteProductionRun();
   const { showMessage } = useSnackBarStore();
@@ -142,6 +139,15 @@ export function ProductionRuns() {
           value={techCardId}
           onChange={(e) => patchFilters({ techCardId: e.target.value })}
         />
+        <button
+          type='button'
+          className={`${cell} uppercase ${overdueOnly ? 'border-error text-error' : ''}`}
+          title='only runs past their promised date'
+          aria-pressed={overdueOnly}
+          onClick={() => patchFilters({ overdue: overdueOnly ? '' : '1' })}
+        >
+          опаздывает {overdueOnly ? '✕' : ''}
+        </button>
         {staleDays > 0 ? (
           <button
             type='button'
@@ -200,132 +206,6 @@ export function ProductionRuns() {
           Delete this production run? This action is irreversible. Received runs can't be deleted.
         </Text>
       </ConfirmationModal>
-    </div>
-  );
-}
-
-function RunCard({
-  run,
-  canEdit,
-  canReadCosting,
-  onEdit,
-  onReceive,
-  onDelete,
-}: {
-  run: common_ProductionRun;
-  canEdit: boolean;
-  canReadCosting: boolean;
-  onEdit: () => void;
-  onReceive: () => void;
-  onDelete: () => void;
-}) {
-  const { dictionary } = useDictionary();
-  const ins = run.run;
-  const actuals = run.actuals;
-  const locked = isRunLocked(ins?.status);
-  const receivable = isRunReceivable(ins?.status);
-
-  return (
-    <div className='border border-borderColor bg-bgColor'>
-      <div className='flex flex-wrap items-center justify-between gap-2 border-b border-borderColor px-3 py-2'>
-        <div className='flex flex-wrap items-center gap-2'>
-          <Text size='small'>
-            <Link to={runDetailPath(run.id ?? 0)} className='underline'>
-              PR-{run.id}
-            </Link>{' '}
-            · TC-{ins?.techCardId}
-            {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''}
-          </Text>
-          <span
-            className={`inline-block border px-1.5 py-0.5 text-textBaseSize uppercase ${runStatusTone(ins?.status)}`}
-          >
-            {runStatusLabel(ins?.status)}
-          </span>
-        </div>
-        <div className='flex items-center gap-2'>
-          {canEdit && receivable && (
-            <Button
-              type='button'
-              variant='main'
-              size='lg'
-              className='uppercase'
-              onClick={onReceive}
-            >
-              receive
-            </Button>
-          )}
-          {canEdit && (
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={onEdit}
-            >
-              edit
-            </Button>
-          )}
-          {canEdit && !locked && (
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              onClick={onDelete}
-            >
-              delete
-            </Button>
-          )}
-        </div>
-      </div>
-
-      <div className='grid grid-cols-1 gap-3 p-3 sm:grid-cols-2'>
-        <div className='flex flex-col gap-1'>
-          {(ins?.lines ?? []).map((l, i) => (
-            <Text key={`${l.productId}-${l.sizeId}-${i}`} size='small'>
-              #{l.productId} · {findInDictionary(dictionary, l.sizeId, 'size') || l.sizeId} · plan{' '}
-              {l.plannedQty ?? 0}
-              {l.receivedQty != null ? ` / received ${l.receivedQty}` : ' / received —'}
-              {l.defectQty ? ` · defect ${l.defectQty}` : ''}
-            </Text>
-          ))}
-        </div>
-
-        {canReadCosting && (run.plannedUnitCost?.value || actuals?.actualUnitCost?.value) ? (
-          <div className='flex flex-col gap-1'>
-            {run.plannedUnitCost?.value ? (
-              <Text size='small'>
-                plan / unit: {decimalToInput(run.plannedUnitCost)} {run.plannedCurrency || ''}
-              </Text>
-            ) : null}
-            {actuals?.actualUnitCost?.value ? (
-              <Text size='small'>
-                fact / unit: {decimalToInput(actuals.actualUnitCost)} {actuals.baseCurrency || ''}
-                {actuals.unitCostVariance?.value
-                  ? ` (Δ ${decimalToInput(actuals.unitCostVariance)})`
-                  : ''}
-              </Text>
-            ) : (
-              <Text variant='inactive' size='small'>
-                fact / unit: — until received
-              </Text>
-            )}
-            {actuals?.defectPctActual?.value ? (
-              <Text variant='inactive' size='small'>
-                defect: {decimalToInput(actuals.defectPctActual)}%
-              </Text>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-
-      {ins?.notes ? (
-        <div className='border-t border-hairline px-3 py-2'>
-          <Text variant='inactive' size='small'>
-            {ins.notes}
-          </Text>
-        </div>
-      ) : null}
     </div>
   );
 }

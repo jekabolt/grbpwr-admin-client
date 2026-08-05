@@ -142,6 +142,7 @@ export function ReceiveStockModal({
   // оверкил") — collapsed behind an opt-in toggle instead of an unconditional field.
   const [showLot, setShowLot] = useState(false);
   const [supplierDoc, setSupplierDoc] = useState('');
+  const [expectedAt, setExpectedAt] = useState('');
   const [occurredAt, setOccurredAt] = useState(todayISO());
   const [comment, setComment] = useState('');
 
@@ -185,6 +186,8 @@ export function ReceiveStockModal({
         lot: lot.trim(),
         supplierDoc: supplierDoc.trim(),
         supplierId: supplierId || undefined, // AP-by-supplier tag (phase 2, wave 4); 0 = untagged
+        // When the delivery was promised (Phase 9) — lateness becomes a fact, no PO needed.
+        expectedAt: expectedAt || '',
         occurredAt,
         comment: comment.trim(),
         // Recording input VAT is a costing write; both fields optional, sent only when set.
@@ -348,6 +351,14 @@ export function ReceiveStockModal({
           type='date'
           value={occurredAt}
           onChange={(e) => setOccurredAt(e.target.value)}
+        />
+      </Field>
+      <Field label='ожидалась к (обещанный срок)'>
+        <input
+          className={cell}
+          type='date'
+          value={expectedAt}
+          onChange={(e) => setExpectedAt(e.target.value)}
         />
       </Field>
       <Field label='comment'>
