@@ -117,6 +117,20 @@ export const techCardPurposeOptions: Array<{ value: string; label: string }> = [
   { value: 'auxiliary', label: PURPOSE_LABEL.auxiliary },
 ];
 
+/**
+ * Client-only sentinel for "don't filter by purpose". It is NOT a wire value: the RPC's contract is
+ * `purpose = ""` = no filter, and the generated builder skips a falsy purpose entirely, so the list
+ * screen sends `undefined` for this one. Kept out of `techCardPurposeOptions` on purpose — that list
+ * is the two ENTITY words, and the card editor's purpose select must never be able to offer "all".
+ */
+export const TECH_CARD_PURPOSE_ALL = 'all';
+
+/** The list chip's choices: the two entity words plus the explicit "all". */
+export const techCardPurposeFilterOptions: Array<{ value: string; label: string }> = [
+  ...techCardPurposeOptions,
+  { value: TECH_CARD_PURPOSE_ALL, label: 'all purposes' },
+];
+
 /** Form options for TechCardInsert — the proto enum. */
 export const techCardPurposeFormOptions: Array<{ value: string; label: string }> = [
   { value: 'TECH_CARD_PURPOSE_SELLABLE', label: PURPOSE_LABEL.sellable },

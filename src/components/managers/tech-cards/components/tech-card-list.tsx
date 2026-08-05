@@ -6,7 +6,12 @@ import {
   common_TechCardStage,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { SEASON_OPTIONS, techCardPurposeOptions, techCardStageOptions } from 'constants/filter';
+import {
+  SEASON_OPTIONS,
+  TECH_CARD_PURPOSE_ALL,
+  techCardPurposeFilterOptions,
+  techCardStageOptions,
+} from 'constants/filter';
 import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
@@ -72,11 +77,16 @@ export function TechCardList() {
     ? (stageParam as common_TechCardStage)
     : ALL_STAGES;
 
-  // Purpose (sellable | auxiliary) defaults to sellable so auxiliary items (dust bags, shoppers…)
-  // stay out of the main list. There is no "all" value on the RPC, so it is a two-state toggle
-  // rather than a removable filter — the chip opens a picker instead of carrying a ✕.
+  // Purpose (sellable | auxiliary | all) defaults to sellable so auxiliary items (dust bags,
+  // shoppers…) stay out of the main list. `all` is a CLIENT sentinel, not a wire value: the RPC's
+  // purpose is "" = no filter and the generated builder drops a falsy one, so "all" is sent as
+  // `undefined`. The chip is therefore always active (it always states which purpose is being
+  // shown) and opens a picker instead of carrying a ✕ — removing it would be meaningless when the
+  // absence of the param already means "sellable".
+  // URL contract, unchanged for existing links: no ?purpose= → sellable; ?purpose=auxiliary and the
+  // new ?purpose=all are explicit; anything else falls back to sellable rather than to nothing.
   const purposeParam = searchParams.get('purpose');
-  const purpose: string = techCardPurposeOptions.some((o) => o.value === purposeParam)
+  const purpose: string = techCardPurposeFilterOptions.some((o) => o.value === purposeParam)
     ? (purposeParam as string)
     : DEFAULT_PURPOSE;
 
@@ -95,7 +105,7 @@ export function TechCardList() {
       {
         name: name.trim() || undefined,
         stage: stage === ALL_STAGES ? undefined : stage,
-        purpose,
+        purpose: purpose === TECH_CARD_PURPOSE_ALL ? undefined : purpose,
         skuSeason: season,
         // One id whatever level it came from: the server matches category_id OR top/sub/type.
         categoryIds: categoryId ? [categoryId] : undefined,
@@ -170,8 +180,16 @@ export function TechCardList() {
     [dictionary?.categories, categoryId],
   );
 
-  // Purpose is a two-state toggle with no "all", so it never counts as narrowing.
-  const narrowed = !!season || !!categoryId || stage !== ALL_STAGES || !!name.trim();
+  // Purpose narrows whenever it is actually sent — which includes the DEFAULT (sellable). That is the
+  // honest reading of the empty state: with 30 auxiliary cards on file and none sellable, "no tech
+  // cards" was a lie, and "nothing matches these filters" points at the chip that is hiding them.
+  // Only `all` — the one value that filters nothing — leaves the list un-narrowed.
+  const narrowed =
+    !!season ||
+    !!categoryId ||
+    stage !== ALL_STAGES ||
+    !!name.trim() ||
+    purpose !== TECH_CARD_PURPOSE_ALL;
 
   // One request, on an explicitly destructive action: the cascade counts come off the full card.
   const pendingCard = useTechCard(pendingDelete?.id);
@@ -206,7 +224,9 @@ export function TechCardList() {
             title='purpose'
             label={purpose}
             selected
-            options={techCardPurposeOptions.map((o) => ({ value: o.value, label: o.label }))}
+            options={techCardPurposeFilterOptions.map((o) => ({ value: o.value, label: o.label }))}
+            // The default stays OUT of the URL (a clean ?-less link is the sellable list); the other
+            // two are written explicitly, so ?purpose=all survives a reload and a share.
             onSelect={(v) => setParam('purpose', v === DEFAULT_PURPOSE ? undefined : v)}
           />
           {stage === ALL_STAGES ? (
@@ -270,8 +290,14 @@ export function TechCardList() {
         </div>
       ) : techCards.length === 0 ? (
         <div className='flex justify-center py-20'>
+          {/* The purpose chip is ALWAYS set to something, so `narrowed` is true in the default view
+              too — and "nothing matches these filters" alone would read as a mystery on a genuinely
+              empty database. Naming the chip makes one sentence true in both cases: the list is
+              empty AND here is the filter that is deciding what counts. */}
           <Text variant='label' className='uppercase'>
-            {narrowed ? 'nothing matches these filters' : 'no tech cards'}
+            {narrowed
+              ? `nothing matches these filters — purpose is «${purpose}»`
+              : 'no tech cards'}
           </Text>
         </div>
       ) : (
