@@ -35,7 +35,7 @@ import { useDeleteTechCard, useInfiniteTechCards, useTechCard } from './useTechC
 
 const LIMIT = 30;
 const ALL_STAGES = 'TECH_CARD_STAGE_UNKNOWN';
-const DEFAULT_PURPOSE = 'sellable';
+const DEFAULT_PURPOSE = TECH_CARD_PURPOSE_ALL;
 
 // ?season=FW-2026. Parsed strictly — a mangled value is dropped rather than filtering to nothing.
 function parseSeason(raw: string | null): common_SkuSeason | undefined {
@@ -77,14 +77,15 @@ export function TechCardList() {
     ? (stageParam as common_TechCardStage)
     : ALL_STAGES;
 
-  // Purpose (sellable | auxiliary | all) defaults to sellable so auxiliary items (dust bags,
-  // shoppers…) stay out of the main list. `all` is a CLIENT sentinel, not a wire value: the RPC's
-  // purpose is "" = no filter and the generated builder drops a falsy one, so "all" is sent as
-  // `undefined`. The chip is therefore always active (it always states which purpose is being
-  // shown) and opens a picker instead of carrying a ✕ — removing it would be meaningless when the
-  // absence of the param already means "sellable".
-  // URL contract, unchanged for existing links: no ?purpose= → sellable; ?purpose=auxiliary and the
-  // new ?purpose=all are explicit; anything else falls back to sellable rather than to nothing.
+  // Purpose (sellable | auxiliary | all) defaults to ALL: an aux card is a full tech card now
+  // (colour variants, per-colour runs), so hiding half the catalogue behind a chip read as "the
+  // filter is missing". `all` is a CLIENT sentinel, not a wire value: the RPC's purpose is "" = no
+  // filter and the generated builder drops a falsy one, so "all" is sent as `undefined`. The chip
+  // is always active (it always states which purpose is being shown) and opens a picker instead of
+  // carrying a ✕ — removing it would be meaningless when the absence of the param already means
+  // "all".
+  // URL contract: no ?purpose= → all; ?purpose=sellable and ?purpose=auxiliary are explicit (old
+  // shared links carrying either keep their exact meaning); anything else falls back to all.
   const purposeParam = searchParams.get('purpose');
   const purpose: string = techCardPurposeFilterOptions.some((o) => o.value === purposeParam)
     ? (purposeParam as string)
@@ -225,8 +226,8 @@ export function TechCardList() {
             label={purpose}
             selected
             options={techCardPurposeFilterOptions.map((o) => ({ value: o.value, label: o.label }))}
-            // The default stays OUT of the URL (a clean ?-less link is the sellable list); the other
-            // two are written explicitly, so ?purpose=all survives a reload and a share.
+            // The default stays OUT of the URL (a clean ?-less link is the full list); sellable and
+            // auxiliary are written explicitly, so a narrowed view survives a reload and a share.
             onSelect={(v) => setParam('purpose', v === DEFAULT_PURPOSE ? undefined : v)}
           />
           {stage === ALL_STAGES ? (

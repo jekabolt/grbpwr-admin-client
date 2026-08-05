@@ -153,6 +153,7 @@ export const techCardAuxSubtypeFormOptions: Array<{ value: string; label: string
   // Its own kind, not a dust bag: a кофр is cut and sewn as its own item, and the assembly bill has
   // to be able to say which of the two a style ships with.
   { value: 'TECH_CARD_AUX_SUBTYPE_GARMENT_CASE', label: 'garment case (кофр)' },
+  { value: 'TECH_CARD_AUX_SUBTYPE_TOTE_BAG', label: 'tote bag (шоппер)' },
   { value: 'TECH_CARD_AUX_SUBTYPE_BOX', label: 'box' },
   { value: 'TECH_CARD_AUX_SUBTYPE_INSERT', label: 'insert' },
   { value: 'TECH_CARD_AUX_SUBTYPE_HANGER', label: 'hanger' },
