@@ -23,8 +23,34 @@ export function isDxfFile(file: File): boolean {
 
 // The stored object's extension carries the file type (there is no content-type field
 // anywhere in the contract) — the server names the object .pdf or .dxf from its sniff.
+// Decided on the url PATH, so a future query string (presigned/versioned urls) cannot
+// silently reroute every DXF into the PDF viewer branch.
 export function isDxfUrl(url?: string): boolean {
-  return (url ?? '').toLowerCase().endsWith('.dxf');
+  if (!url) return false;
+  try {
+    return new URL(url).pathname.toLowerCase().endsWith('.dxf');
+  } catch {
+    return url.split('?')[0].split('#')[0].toLowerCase().endsWith('.dxf');
+  }
+}
+
+// Trim to at most `maxBytes` of UTF-8 without splitting a code point — the server caps
+// name/filename by BYTES (Go len()), so a 255-char Cyrillic name is 2× over the limit and
+// would reject the whole save with an error the operator cannot attribute.
+export function clampUtf8Bytes(s: string, maxBytes: number): string {
+  const enc = new TextEncoder();
+  if (enc.encode(s).length <= maxBytes) return s;
+  let out = '';
+  for (const ch of s) {
+    if (enc.encode(out + ch).length > maxBytes) break;
+    out += ch;
+  }
+  return out;
+}
+
+// The canonical write-side normalisation for a pattern display name.
+export function clampPatternName(s: string): string {
+  return clampUtf8Bytes(s.trim(), MAX_PATTERN_NAME);
 }
 
 // Pre-flight check shared by the pick and drop paths. Returns a user-facing error, or

@@ -1,3 +1,4 @@
+import { clampPatternName } from 'utils/pattern';
 import {
   common_Fitting,
   common_FittingInsert,
@@ -235,7 +236,7 @@ export function mapFormToFittingInsert(
         url: p.url?.trim() || '',
         filename: p.filename?.trim() || '',
         // Explicit even when '' — absence is the stale-client signal (server keeps the old name).
-        name: p.name?.trim() ?? '',
+        name: clampPatternName(p.name ?? ''),
         sizeBytes: p.sizeBytes || 0,
       })),
     mediaIds: data.mediaIds ?? [],

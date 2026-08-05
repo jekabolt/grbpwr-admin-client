@@ -1,3 +1,4 @@
+import { clampPatternName } from 'utils/pattern';
 import {
   common_GenderEnum,
   common_TechCard,
@@ -1096,7 +1097,7 @@ export function mapFormToTechCardInsert(
         // ALWAYS present, empty string included — an explicit '' clears the name server-side,
         // while an ABSENT field is the stale-client signal that preserves the stored name. Only
         // clients that predate the field may omit it.
-        name: p.name?.trim() ?? '',
+        name: clampPatternName(p.name ?? ''),
         sizeBytes: p.sizeBytes || 0,
         // Round-trip the revision so a re-save does not renumber existing sheets; a freshly
         // uploaded row carries 0 and the server assigns MAX+1 for its size. uploadedAt is

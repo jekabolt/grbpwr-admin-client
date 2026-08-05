@@ -1,11 +1,13 @@
 import { adminService } from 'api/api';
 import { getBase64File } from 'lib/features/getBase64';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import {
   MAX_PATTERN_FILENAME,
   MAX_PATTERN_NAME,
   PATTERN_FILE_ACCEPT,
+  clampPatternName,
+  clampUtf8Bytes,
   formatBytes,
   isDxfFile,
   patternFileError,
@@ -54,8 +56,9 @@ export function PatternUploadModal({
   const [busy, setBusy] = useState(false);
 
   // Re-stage whenever a new batch arrives. `files` is a fresh array per pick/drop, so
-  // identity is the correct trigger.
-  useEffect(() => {
+  // identity is the correct trigger. Layout effect: with a passive one the dialog's first
+  // painted frame shows zero rows and a disabled confirm.
+  useLayoutEffect(() => {
     setStaged((files ?? []).map((file) => ({ file, name: '', status: 'pending' })));
     setBusy(false);
   }, [files]);
@@ -72,7 +75,9 @@ export function PatternUploadModal({
       setStaged([...rows]);
       try {
         const raw = stripDataUrlPrefix(await getBase64File(rows[i].file));
-        const filename = rows[i].file.name.slice(0, MAX_PATTERN_FILENAME);
+        // Byte-clamped, not char-sliced — the server counts BYTES and slice() can split a
+        // surrogate pair.
+        const filename = clampUtf8Bytes(rows[i].file.name, MAX_PATTERN_FILENAME);
         const res = await adminService.UploadPattern({ raw, filename });
         onUploaded({
           url: res.url ?? '',
@@ -81,7 +86,7 @@ export function PatternUploadModal({
           // the generated `number` type). Coerce so the form holds a real number (z.number()
           // rejects a string, which silently blocks the whole save).
           sizeBytes: Number(res.sizeBytes ?? rows[i].file.size) || 0,
-          name: rows[i].name.trim().slice(0, MAX_PATTERN_NAME),
+          name: clampPatternName(rows[i].name),
         });
         rows[i] = { ...rows[i], status: 'done' };
       } catch (e) {

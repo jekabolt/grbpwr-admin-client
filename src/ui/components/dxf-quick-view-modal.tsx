@@ -27,8 +27,12 @@ export function DxfQuickViewModal({
   useEffect(() => {
     if (!url) return;
     let disposed = false;
-    // The instance type lives inside the dynamic chunk; the cleanup only needs Destroy().
-    let viewer: { Destroy: () => void } | null = null;
+    // The instance type lives inside the dynamic chunk; the cleanup needs Destroy() and,
+    // when the build exposes it, the renderer for an explicit context loss.
+    let viewer: {
+      Destroy: () => void;
+      GetRenderer?: () => { forceContextLoss?: () => void } | null;
+    } | null = null;
     setState('loading');
 
     let blobUrl: string | null = null;
@@ -45,7 +49,13 @@ export function DxfQuickViewModal({
         ]);
         blobUrl = URL.createObjectURL(blob);
         const container = containerRef.current;
-        if (!container || disposed) return;
+        if (!container || disposed) {
+          // Cleanup already ran (or never will for this container) — it saw blobUrl=null,
+          // so revoking here is the only thing keeping a 40 MB blob from living forever.
+          URL.revokeObjectURL(blobUrl);
+          blobUrl = null;
+          return;
+        }
         // Match the app surface: the canvas clears to the page's own bgColor token, and
         // colorCorrection flips white-on-black CAD linework to stay visible on it.
         const bg =
@@ -67,8 +77,11 @@ export function DxfQuickViewModal({
 
     return () => {
       disposed = true;
-      // Frees the WebGL context and the parsed scene — modals reopen often, contexts leak fast.
+      // Free the parsed scene AND the WebGL context: renderer.dispose() alone does not
+      // lose the context (three keeps it until GC), and modals reopen often enough to trip
+      // the browser's active-context cap.
       try {
+        viewer?.GetRenderer?.()?.forceContextLoss?.();
         viewer?.Destroy();
       } catch (e) {
         console.error('DxfViewer.Destroy failed', e);

@@ -6,7 +6,7 @@ import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useMemo, useState } from 'react';
-import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
+import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DxfQuickViewModal } from 'ui/components/dxf-quick-view-modal';
@@ -16,7 +16,13 @@ import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
-import { MAX_PATTERN_NAME, formatBytes, isDxfUrl, patternFileError } from 'utils/pattern';
+import {
+  MAX_PATTERN_NAME,
+  clampPatternName,
+  formatBytes,
+  isDxfUrl,
+  patternFileError,
+} from 'utils/pattern';
 import type { NestingFile } from './nesting/use-nesting';
 import { TechCardFormData } from './schema';
 
@@ -60,10 +66,17 @@ function revisionOf(row: PatternRow): number | null {
 // The flat `patterns` array stays the source of truth (full-replace on save); upload appends,
 // ✕ removes.
 export function PatternsField() {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
-  const { fields, append, remove, update } = useFieldArray({ control, name: 'patterns' });
+  const { fields, append, remove } = useFieldArray({ control, name: 'patterns' });
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  // Live row values. `fields` is a snapshot that array actions refresh but setValue on a
+  // nested path does NOT — rename writes via setValue (a useFieldArray.update would replace
+  // the row and revert any sibling Controller-written field), so display must read live.
+  const liveRows = (useWatch({ control, name: 'patterns' }) ?? []) as PatternRow[];
+  // A save's form.reset() overwrites concurrent edits and un-dirties them — freeze renames
+  // for its duration.
+  const { isSubmitting } = useFormState({ control });
 
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
@@ -83,13 +96,15 @@ export function PatternsField() {
   const rowsBySize = useMemo(() => {
     const m = new Map<number, Array<{ row: PatternRow; index: number }>>();
     fields.forEach((f, index) => {
-      const row = f as PatternRow & { id: string };
+      // Structure (order, ids) from the array snapshot; values from the live form state so
+      // setValue-written fields (rename) show through.
+      const row = { ...(f as PatternRow & { id: string }), ...liveRows[index] };
       const sid = row.sizeId ?? 0;
       if (!m.has(sid)) m.set(sid, []);
       m.get(sid)!.push({ row, index });
     });
     return m;
-  }, [fields]);
+  }, [fields, liveRows]);
 
   const inRange = useMemo(() => new Set(sizeIds), [sizeIds]);
   const nameOf = (id: number) =>
@@ -145,12 +160,13 @@ export function PatternsField() {
       .map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
   }
 
-  function commitRename(index: number, row: PatternRow, value: string) {
+  function commitRename(index: number, value: string) {
     // '' is a legal committed value — it clears the name and the row falls back to the
     // filename (the save path still sends name explicitly, so the clear reaches the server).
-    // Strip the RHF-generated field id so it doesn't leak into form values via update().
-    const { id: _id, ...rest } = row as PatternRow & { id?: string };
-    update(index, { ...rest, name: value.trim().slice(0, MAX_PATTERN_NAME) });
+    // setValue on the nested path, NOT useFieldArray.update: update() replaces the whole
+    // row from the stale `fields` snapshot, reverting sibling fields written by other
+    // controls, and remounts the row. Byte-clamped — the server counts UTF-8 bytes.
+    setValue(`patterns.${index}.name`, clampPatternName(value), { shouldDirty: true });
     setEditing(null);
   }
 
@@ -267,11 +283,11 @@ export function PatternsField() {
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                     setEditing({ index, value: e.target.value })
                   }
-                  onBlur={() => commitRename(index, row, editing.value)}
+                  onBlur={() => commitRename(index, editing.value)}
                   onKeyDown={(e: React.KeyboardEvent) => {
                     if (e.key === 'Enter') {
                       e.preventDefault();
-                      commitRename(index, row, editing.value);
+                      commitRename(index, editing.value);
                     }
                     if (e.key === 'Escape') setEditing(null);
                   }}
@@ -298,6 +314,7 @@ export function PatternsField() {
                     aria-label='rename pattern'
                     title='переименовать'
                     className='shrink-0'
+                    disabled={isSubmitting}
                     onClick={() => setEditing({ index, value: row.name ?? '' })}
                   >
                     ✎
