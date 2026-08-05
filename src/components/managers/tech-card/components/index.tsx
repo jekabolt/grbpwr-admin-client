@@ -66,6 +66,12 @@ import { LabelsField } from './labels-field';
 import { PackagingRecipeField } from './packaging-recipe-field';
 import { LifecycleStrip } from './lifecycle-strip';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
+import {
+  activeVariantCount,
+  AdoptLegacyOutputButton,
+  OutputVariantsPanel,
+  seedColourVariants,
+} from './output-variants-field';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
 import { PiecesTab } from './pieces-tab';
@@ -322,6 +328,11 @@ export function TechCardForm({
   // What a half-finished convert left behind. Like stagingError this is a fact about a write that
   // already partly happened, so it stays on screen instead of passing through a toast.
   const [convertReport, setConvertReport] = useState<string | null>(null);
+  // 0252: offer to carry the colours over. The colourways being archived ARE the card's colour
+  // range, and re-picking them one by one afterwards is the same list typed twice. Opt-out rather
+  // than opt-in — the operator who converts a multi-colour style almost always wants the buckets —
+  // but it runs strictly AFTER the flip has landed, so a declined or failed flip seeds nothing.
+  const [seedColours, setSeedColours] = useState(true);
   // Colourways THIS page archived, which the `techCard` prop does not know about yet. Without it the
   // window between the archive loop and the refetch landing is a trap: a save that 409s, answered
   // with «keep mine & overwrite», re-enters doSubmit against the stale prop, re-opens the convert
@@ -491,6 +502,14 @@ export function TechCardForm({
   const auxSubtype = (useWatch({ control: form.control, name: 'auxSubtype' }) ??
     'TECH_CARD_AUX_SUBTYPE_UNKNOWN') as string;
   const [materialModalOpen, setMaterialModalOpen] = useState(false);
+  // 0252 colour variants. Read off the CARD, never the form: they are written by their own RPCs
+  // (a variant owns warehouse stock, so the full-replace save must not be able to re-mint or drop
+  // one), which also means they are already saved — there is nothing here for Save to carry.
+  const outputVariants = techCard?.outputVariants ?? [];
+  // ANY variant — active or retired — pins the auxiliary purpose. Only the ACTIVE ones ENABLE a
+  // run: each owns the warehouse bucket its output is booked into, so a card whose colours are all
+  // retired is back to needing the single output material before anything can be planned.
+  const liveVariants = activeVariantCount(outputVariants);
 
   // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
   // the product manager) or a hard refresh no longer loses unsaved edits — restore on return.
@@ -826,6 +845,34 @@ export function TechCardForm({
   const colorwayLabel = (c: { colorwayId?: number; colorCode?: string; baseSku?: string }) =>
     c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`;
 
+  // Which colours a convert can seed. A colour is unique per card server-side, so two colourways
+  // sharing one code would make the second a guaranteed refusal — dedup here rather than report a
+  // "failure" the operator can do nothing about. UPPERCASED because the server uppercases before
+  // its own duplicate check: 'blk' and 'BLK' are one colour there, so they must collapse into one
+  // here too or the second is sent only to be refused. A colourway with no colour code is skipped
+  // outright: there is nothing to register it under.
+  const colourCodesOf = (colorways: common_AdminColorwayRef[]) => {
+    const seen = new Set<string>();
+    for (const c of colorways) {
+      const code = c.colorCode?.trim().toUpperCase();
+      if (code) seen.add(code);
+    }
+    return [...seen];
+  };
+  // Every colour this convert has ever queued, across retries. The archive loop is resumable and
+  // `liveColorways` shrinks as it succeeds — so attempt 2's queue no longer contains the colours
+  // attempt 1 already archived, and seeding from that queue alone would silently drop them while
+  // reporting success. Accumulated BEFORE the loop runs, drained only by a colour that actually
+  // landed.
+  const seedCodes = useRef(new Set<string>());
+  // What the dialog's checkbox promises — the union of what is queued now and what an earlier
+  // attempt already archived, so the list names exactly what will be sent. Reading the ref here is
+  // safe: it is written before the dialog can re-open, and re-opening is what changes `convert`.
+  const seedableCodes = useMemo(
+    () => [...new Set([...seedCodes.current, ...colourCodesOf(convert?.colorways ?? [])])],
+    [convert],
+  );
+
   async function doSubmit(data: TechCardFormData) {
     if (flipsToAuxiliary(data) && liveColorways.length > 0) {
       setConvertReport(null);
@@ -845,6 +892,9 @@ export function TechCardForm({
     const queue = convert.colorways;
     const data = convert.data;
     const archived: string[] = [];
+    // Banked BEFORE anything can fail: whatever this attempt archives stops being a live colourway,
+    // so a later retry would never see these codes again.
+    for (const code of colourCodesOf(queue)) seedCodes.current.add(code);
     // Held across the archive loop AND the save that follows: this path bypasses form.handleSubmit,
     // so `isSubmitting` never rises and the header's Save button would otherwise stay live while the
     // flip PUT is in flight. `converting` is what disables it (see the Save button).
@@ -885,7 +935,43 @@ export function TechCardForm({
       if (numId) queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
       setConvert(null);
       const { bodySaved, ok } = await writeTechCard(data);
-      if (ok) return;
+      if (ok) {
+        // Only now: the card has to BE auxiliary before a colour variant is allowed on it (the
+        // server refuses one on a sellable card), so seeding is a follow-up to the flip, not part
+        // of it. Nothing here can un-flip the card — a failed colour is a retry from «output
+        // material», which is exactly what the report says.
+        // Every colour banked across ALL attempts, not just this queue: a resumed convert must
+        // still seed what the earlier attempt archived.
+        const codes = [...seedCodes.current];
+        if (seedColours && codes.length > 0 && numId) {
+          showMessage(`registering ${codes.length} colour(s)…`, 'success');
+          const { created, failed } = await seedColourVariants(numId, codes);
+          // Drain only what landed. A colour that failed stays banked so the next attempt retries
+          // exactly it, and one already created is never re-sent (that would refuse as a duplicate).
+          for (const code of created) seedCodes.current.delete(code);
+          // The save's own invalidation already fired BEFORE these writes existed, so the seed has
+          // to repeat it — same three keys the variants panel uses.
+          queryClient.invalidateQueries({ queryKey: techCardKeys.detail(numId) });
+          queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
+          queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
+          if (failed.length > 0) {
+            setConvertReport(
+              `the card IS auxiliary now and ${created.length} of ${codes.length} colour ` +
+                `variant(s) were registered. Not registered: ${failed
+                  .map((f) => `${f.code} — ${f.message}`)
+                  .join('; ')}. ` +
+                'Nothing else is pending — retry each one from «output material» on the header tab.',
+            );
+            showMessage('switched to auxiliary — some colours were not registered', 'error');
+          } else {
+            showMessage(
+              `switched to auxiliary · ${created.length} colour variant(s) registered`,
+              'success',
+            );
+          }
+        }
+        return;
+      }
       // Two different truths, and telling them apart is the whole point of bodySaved. If the body
       // PUT landed, the card IS auxiliary now and those colourways can no longer be restored —
       // promising otherwise would send the operator to a page whose restore button refuses.
@@ -1112,8 +1198,12 @@ export function TechCardForm({
           approvalState={approvalState}
           canEdit={canWrite(SECTION.techCards)}
           unsaved={form.formState.isDirty}
-          planRunDisabled={isAux && !outputMaterialId}
-          planRunDisabledReason='set an output material before planning an auxiliary run'
+          // An auxiliary run needs somewhere to BOOK its output, and there are now two ways to have
+          // one: the single output material, or at least one live colour variant (each colour owns
+          // its own bucket). Only a card with neither cannot be planned. Per-variant runs are no
+          // longer blocked — that refusal shipped and has since been lifted server-side.
+          planRunDisabled={isAux && !outputMaterialId && liveVariants === 0}
+          planRunDisabledReason='set an output material or register a colour variant before planning an auxiliary run'
           isAuxiliary={isAux}
           onGoTab={(t) => navTo(t as TabId)}
           onAddSample={() => navTo('samples', { sample: 'new' })}
@@ -1193,6 +1283,23 @@ export function TechCardForm({
         {(convert?.colorways ?? []).map((c) => (
           <Row key={c.colorwayId} label={colorwayLabel(c)} value='→ archive' />
         ))}
+        {/* 0252: the colours survive the flip even though the colourways do not — as warehouse
+            buckets rather than sellable articles. Offered here because this is the one moment the
+            card's colour range is still on screen. */}
+        {seedableCodes.length > 0 && (
+          <label className='mt-2 flex items-start gap-1.5'>
+            <input
+              type='checkbox'
+              checked={seedColours}
+              disabled={converting}
+              onChange={(e) => setSeedColours(e.target.checked)}
+            />
+            <Text size='micro' variant='label' component='span'>
+              register each archived colourway’s colour as a colour variant (auto-creates materials)
+              — {seedableCodes.join(', ')}
+            </Text>
+          </label>
+        )}
         <Text size='micro' variant='label' className='mt-2'>
           An auxiliary card produces a material, not products — it cannot own colourways, so all{' '}
           {convert?.colorways.length ?? 0} are archived first, one by one, and then the card is saved
@@ -1392,6 +1499,23 @@ export function TechCardForm({
                       saving as auxiliary offers to archive them first (archived ones do not count)
                     </Text>
                   )}
+                  {/* 0252: the OTHER purpose lock, and the one the operator can actually clear from
+                    here. A registered colour — active or retired — pins the card as auxiliary,
+                    because the colour owns a warehouse bucket that a sellable card has no place for.
+                    Unlike the colourway arm there is no "archive them for me" offer: deleting a
+                    variant is a stock-bearing decision (see the panel's own confirm), so it stays a
+                    deliberate trip to the header tab.
+                    NOT gated on `isAux`: that reads the FORM, so gating on it would hide this the
+                    instant the operator selects «sellable» — the one moment it is worth reading. A
+                    variant can only exist on a card the server holds as auxiliary, so its presence
+                    is the whole condition. */}
+                  {outputVariants.length > 0 && (
+                    <Text variant='error' size='small'>
+                      ! purpose is locked while {outputVariants.length} colour variant(s) are
+                      registered — delete them on the header tab first (a colour variant pins the
+                      auxiliary purpose)
+                    </Text>
+                  )}
                   {/* Purpose is mutually exclusive with the output material and the save is a full
                     replace — flag the destruction BEFORE it happens, it's not reversible. There is
                     no matching warning for the other direction: a colourway links itself to a style
@@ -1478,31 +1602,57 @@ export function TechCardForm({
 
               {isAux ? (
                 <Section title='output material'>
-                  <Text variant='inactive' size='small'>
-                    runs of this card receipt into material stock, not product stock. Pick the
-                    packaging material this card produces (required before its first run).
-                  </Text>
-                  <div className='max-w-md'>
-                    <MaterialPicker
-                      value={outputMaterialId}
-                      onChange={(mid) =>
-                        form.setValue('outputMaterialId', mid, { shouldDirty: true })
-                      }
-                      section='TECH_CARD_BOM_SECTION_PACKAGING'
-                      disabled={!canWrite(SECTION.techCards)}
-                      placeholder='search packaging material'
+                  {/* 0252: once a colour is registered the card produces one bucket PER COLOUR, and
+                      the single picker below stops being the answer — showing both would offer two
+                      contradictory places to say where the goods land. The variants are their own
+                      immediate RPC writes, so this branch needs a SAVED card; an unsaved one has no
+                      id to write against and only ever sees the legacy picker. */}
+                  {isEditMode && numId && outputVariants.length > 0 ? (
+                    <OutputVariantsPanel
+                      techCardId={numId}
+                      variants={outputVariants}
+                      canEdit={canWrite(SECTION.techCards)}
                     />
-                  </div>
-                  {canWrite(SECTION.techCards) && (
-                    <Button
-                      type='button'
-                      variant='secondary'
-                      size='lg'
-                      className='uppercase'
-                      onClick={() => setMaterialModalOpen(true)}
-                    >
-                      + create material
-                    </Button>
+                  ) : (
+                    <>
+                      <Text variant='inactive' size='small'>
+                        runs of this card receipt into material stock, not product stock. Pick the
+                        packaging material this card produces (required before its first run).
+                      </Text>
+                      <div className='max-w-md'>
+                        <MaterialPicker
+                          value={outputMaterialId}
+                          onChange={(mid) =>
+                            form.setValue('outputMaterialId', mid, { shouldDirty: true })
+                          }
+                          section='TECH_CARD_BOM_SECTION_PACKAGING'
+                          disabled={!canWrite(SECTION.techCards)}
+                          placeholder='search packaging material'
+                        />
+                      </div>
+                      {canWrite(SECTION.techCards) && (
+                        <Button
+                          type='button'
+                          variant='secondary'
+                          size='lg'
+                          className='uppercase'
+                          onClick={() => setMaterialModalOpen(true)}
+                        >
+                          + create material
+                        </Button>
+                      )}
+                      {/* The way INTO per-colour mode without stranding the balance already on the
+                          books: adopt this very material as the first colour rather than minting a
+                          second bucket beside it. Hidden until there is something to adopt, and
+                          until the card exists to hang it on. */}
+                      {isEditMode && numId ? (
+                        <AdoptLegacyOutputButton
+                          techCardId={numId}
+                          materialId={outputMaterialId}
+                          canEdit={canWrite(SECTION.techCards)}
+                        />
+                      ) : null}
+                    </>
                   )}
                 </Section>
               ) : (
