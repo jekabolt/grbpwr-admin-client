@@ -71,7 +71,6 @@ import {
   AdoptLegacyOutputButton,
   OutputVariantsPanel,
   seedColourVariants,
-  VARIANT_RUN_BLOCKED_REASON,
 } from './output-variants-field';
 import { PackagingField } from './packaging-field';
 import { PatternsField } from './patterns-field';
@@ -507,7 +506,9 @@ export function TechCardForm({
   // (a variant owns warehouse stock, so the full-replace save must not be able to re-mint or drop
   // one), which also means they are already saved — there is nothing here for Save to carry.
   const outputVariants = techCard?.outputVariants ?? [];
-  // ANY variant — active or retired — pins the auxiliary purpose. Only the ACTIVE ones block a run.
+  // ANY variant — active or retired — pins the auxiliary purpose. Only the ACTIVE ones ENABLE a
+  // run: each owns the warehouse bucket its output is booked into, so a card whose colours are all
+  // retired is back to needing the single output material before anything can be planned.
   const liveVariants = activeVariantCount(outputVariants);
 
   // Autosave the working draft to localStorage (Q9b): leaving the route (to /materials, /fitting,
@@ -1197,22 +1198,12 @@ export function TechCardForm({
           approvalState={approvalState}
           canEdit={canWrite(SECTION.techCards)}
           unsaved={form.formState.isDirty}
-          // Two different auxiliary blocks, and they must not be collapsed: a card with a LIVE
-          // colour is blocked because per-variant runs are the next backend phase (the server
-          // refuses to plan or receive one), while a card with none is blocked only until its single
-          // output material is set. A card whose colours are all RETIRED is back in single-output
-          // mode and keeps the old rule exactly.
-          // The variant arm is NOT gated on `isAux`: that reads the FORM, so selecting «sellable»
-          // without saving would un-grey plan-run while the server still refuses on the card it
-          // actually holds. A live variant can only exist on a server-side auxiliary card, so it
-          // blocks on its own. The output-material arm stays form-gated — it is a rule about what
-          // the operator is currently editing.
-          planRunDisabled={liveVariants > 0 || (isAux && !outputMaterialId)}
-          planRunDisabledReason={
-            liveVariants > 0
-              ? VARIANT_RUN_BLOCKED_REASON
-              : 'set an output material before planning an auxiliary run'
-          }
+          // An auxiliary run needs somewhere to BOOK its output, and there are now two ways to have
+          // one: the single output material, or at least one live colour variant (each colour owns
+          // its own bucket). Only a card with neither cannot be planned. Per-variant runs are no
+          // longer blocked — that refusal shipped and has since been lifted server-side.
+          planRunDisabled={isAux && !outputMaterialId && liveVariants === 0}
+          planRunDisabledReason='set an output material or register a colour variant before planning an auxiliary run'
           isAuxiliary={isAux}
           onGoTab={(t) => navTo(t as TabId)}
           onAddSample={() => navTo('samples', { sample: 'new' })}

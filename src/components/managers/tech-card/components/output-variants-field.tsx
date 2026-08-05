@@ -56,10 +56,6 @@ export function activeVariantCount(variants?: common_TechCardOutputVariant[]): n
   return (variants ?? []).filter((v) => v.active).length;
 }
 
-/** The server refuses a per-variant run until the next backend phase — say it in the operator's words. */
-export const VARIANT_RUN_BLOCKED_REASON =
-  'runs by colour variant are coming in the next release — plan runs only on single-output cards for now';
-
 // Every field of the wire type has to be present (they are `T | undefined`, not optional keys), and
 // the read-only ones (color_name, material_name, on_hand, unit) are ignored server-side. Spelling
 // them out here keeps the call sites down to the three facts a caller actually decides.
@@ -415,16 +411,6 @@ export function OutputVariantsPanel({
         own moving average. The single output material no longer applies while any colour is
         registered.
       </Text>
-
-      {/* The server refuses to plan or receive a run on a card with a live colour, so the panel says
-          so where the colours are, not only where the button is greyed out. */}
-      {liveCount > 0 && (
-        <CalloutBox tone='note'>
-          <Text size='micro' component='span'>
-            {VARIANT_RUN_BLOCKED_REASON}. Retire every colour to plan a single-output run again.
-          </Text>
-        </CalloutBox>
-      )}
 
       <GroupLabel>
         colour variants · {variants.length} ({liveCount} active)
