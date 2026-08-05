@@ -1,7 +1,11 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http/admin';
+import {
+  common_ProductionRun,
+  common_ProductionRunStatus,
+  common_TechCardListItem,
+} from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,6 +21,13 @@ import {
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
+// 0252: an auxiliary card that registered colour variants produces into one bucket PER COLOUR, and
+// the server refuses to plan or receive such a run until per-variant runs ship. Offering the card
+// here would only produce a refusal at save time, so it is disabled at the point of choice instead.
+// `outputVariantCount` counts ACTIVE variants only — a card whose colours are all retired is back in
+// legacy single-output mode and stays plannable.
+const variantMode = (t: common_TechCardListItem) =>
+  t.purpose === 'TECH_CARD_PURPOSE_AUXILIARY' && (t.outputVariantCount ?? 0) > 0;
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
 
 type Draft = {
@@ -219,8 +230,9 @@ export function ProductionRunModal({
                 >
                   <option value={0}>— select —</option>
                   {techCards.map((t) => (
-                    <option key={t.id} value={t.id}>
+                    <option key={t.id} value={t.id} disabled={variantMode(t)}>
                       TC-{t.id} · {t.styleNumber || t.name || 'untitled'}
+                      {variantMode(t) ? ' — by colour variant: next release' : ''}
                     </option>
                   ))}
                 </select>

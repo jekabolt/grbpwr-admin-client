@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_TechCardListItem } from 'api/proto-http/admin';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { cn } from 'lib/utility';
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -35,7 +36,12 @@ export function auxSubtypeLabel(subtype?: string): string {
 // tech-card header. One shared query/cache key so the two fields (same tab) never double-fetch.
 export function useAuxTechCards() {
   return useQuery({
-    queryKey: ['techCardAuxCards'],
+    // Keyed UNDER techCardKeys.lists() rather than off on its own string: this list carries the
+    // output material and (0252) the colour-variant count/on-hand that the tiles below render, so
+    // it goes stale on every tech-card write. Standing outside the factory meant no invalidation
+    // reached it — a card that had just registered its first colour kept showing the red "no output
+    // material" pill until the cache expired on its own.
+    queryKey: [...techCardKeys.lists(), 'auxCards'],
     queryFn: () =>
       adminService.ListTechCards({
         purpose: 'auxiliary',
@@ -71,15 +77,31 @@ export const auxCardThumbUrl = (c?: common_TechCardListItem): string | undefined
 //   unknown  — it HAS an output material, but the server reported no on-hand for it
 //              (output_material_on_hand absent) — a missing figure, not a missing material
 //   value    — a real on-hand figure (a decimal string, "0" included)
+//   variants — the card produces per COLOUR (0252): there is no single bucket to name, so the row
+//              reports how many colours it makes and what the warehouse holds across them. `onHand`
+//              is absent when the server reported no total (same distinction as `unknown`).
 export type AuxStock =
   | { state: 'none' }
   | { state: 'unknown'; materialId: number; materialName: string }
-  | { state: 'value'; materialId: number; materialName: string; onHand: string };
+  | { state: 'value'; materialId: number; materialName: string; onHand: string }
+  | { state: 'variants'; count: number; onHand?: string };
 
 // Read straight off the list row: ListTechCards now resolves the auxiliary output material and its
 // warehouse balance server-side, which replaced a capped N+1 (one GetTechCard per card plus a
 // shared warehouse read) that could only ever cover the first 40 cards.
 export function auxOutputStock(card: common_TechCardListItem): AuxStock {
+  // Checked FIRST: a card in per-colour mode may still carry a legacy output_material_id (the bucket
+  // it produced into before a colour adopted it), and reporting that one material's balance would
+  // understate a card that now fills three buckets. `outputVariantCount` counts ACTIVE variants
+  // only — a card whose colours are all retired falls through to the single-output answer below,
+  // which is again the whole truth for it.
+  const variantCount = Number(card.outputVariantCount) || 0;
+  if (variantCount > 0) {
+    const total = decimalToInput(card.outputVariantsOnHand);
+    return total
+      ? { state: 'variants', count: variantCount, onHand: total }
+      : { state: 'variants', count: variantCount };
+  }
   const materialId = Number(card.outputMaterialId) || 0;
   if (!materialId) return { state: 'none' };
   const materialName = card.outputMaterialName ?? '';
@@ -147,6 +169,16 @@ function StockLine({ stock, busy }: { stock: AuxStock; busy?: boolean }) {
       </Text>
     );
   if (stock.state === 'none') return <Pill tone='warn'>no output material</Pill>;
+  // Per-colour cards report the range and the total, never a single bucket — "3 colours · 820 on
+  // hand". Quiet grey: several colours is a normal shape for an aux card, not a problem, and a zero
+  // total is not blocking the way an empty single bucket is (some colours may simply be new).
+  if (stock.state === 'variants')
+    return (
+      <Text size='micro' variant='label'>
+        {stock.count} {stock.count === 1 ? 'colour' : 'colours'} ·{' '}
+        {stock.onHand ? `${stock.onHand} on hand` : 'no stock figure'}
+      </Text>
+    );
   // The material name only ever rides as a tooltip: a 140px tile has no room for it, and the
   // number is what the decision turns on.
   if (stock.state === 'unknown')
@@ -294,7 +326,8 @@ export function AuxCardPickerModal({
             <Text size='micro' component='span'>
               <b>no auxiliary cards</b>
               {subtype !== 'all' ? ` of type “${auxSubtypeLabel(subtype)}”` : ''} found — create one
-              as an auxiliary tech card (purpose = auxiliary) with an output material set.
+              as an auxiliary tech card (purpose = auxiliary) with an output material — or a colour
+              variant per colour it produces — set.
             </Text>
           </CalloutBox>
         ) : (
@@ -452,7 +485,8 @@ export function AuxCardMultiPickerModal({
             <Text size='micro' component='span'>
               <b>no auxiliary cards</b>
               {subtype !== 'all' ? ` of type “${auxSubtypeLabel(subtype)}”` : ''} found — create one
-              as an auxiliary tech card (purpose = auxiliary) with an output material set.
+              as an auxiliary tech card (purpose = auxiliary) with an output material — or a colour
+              variant per colour it produces — set.
             </Text>
           </CalloutBox>
         ) : (

@@ -393,7 +393,24 @@ export function TechCardList() {
 // neutral classification keeps it from shouting. Suppressed for auxiliary items (dust bags,
 // shoppers), which have no colourways at all, so "0" there would be noise rather than a state.
 function ColorwayBadge({ card }: { card: common_TechCardListItem }) {
-  if (card.purpose === 'TECH_CARD_PURPOSE_AUXILIARY') return null;
+  if (card.purpose === 'TECH_CARD_PURPOSE_AUXILIARY') {
+    // 0252: an aux card has no colourways, but it CAN produce in several colours — one warehouse
+    // bucket each. That is a different fact from a colourway (stock, not an article), so it gets its
+    // own word rather than being folded into "cw". Counts ACTIVE variants only, like the server:
+    // the badge answers "what can this card produce", not "what has ever existed". Zero stays
+    // suppressed — a single-output aux card is the normal case, not a state worth a badge.
+    const colours = card.outputVariantCount ?? 0;
+    if (colours === 0) return null;
+    return (
+      <Pill
+        tone='mut'
+        title='colour variants of the output'
+        className='pointer-events-none bg-bgColor'
+      >
+        {colours} {colours === 1 ? 'colour' : 'colours'}
+      </Pill>
+    );
+  }
   // proto3 omits a zero on the wire, so absent and 0 are the same fact.
   const count = card.colorwayCount ?? 0;
   return (
