@@ -419,13 +419,19 @@ export function NestingModal({
       : fabricLines.length === 1
         ? fabricLines[0]
         : undefined;
-    if (!bound) return;
+    // A lock on a not-yet-saved line cannot set the SLOT (the marker RPC only takes stored
+    // lines), but the cloth is known and its width is right there — so take the width anyway.
+    // Leaving 140 in place would make the operator re-enter a number the modal is holding.
+    const widthOnly = !bound && lockedUnsaved
+      ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey)
+      : undefined;
+    if (!bound && !widthOnly) return;
     prefilled.current = true;
-    setSlotKey(bound.lineKey);
-    const w = slotCutWidth(bound);
+    if (bound) setSlotKey(bound.lineKey);
+    const w = slotCutWidth(bound ?? widthOnly);
     if (Number.isFinite(w) && w >= 10) setWidthCm(Math.round(w * 10) / 10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fabricLines.length, viewData, lockedBomLineKey, lockedSlot]);
+  }, [fabricLines.length, viewData, lockedBomLineKey, lockedSlot, lockedUnsaved, bomLines]);
 
   // A failed source fetch means the run nested a SUBSET: placed==total holds (the missing
   // pieces never parsed), but the marker would read as a clean complete norm. Block save.
