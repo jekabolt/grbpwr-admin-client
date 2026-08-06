@@ -1,4 +1,5 @@
 import { common_TechCardBomPurpose } from 'api/proto-http/admin';
+import type { FabricDirection } from 'lib/nesting/types';
 import { sectionShort } from './bom-line-picker';
 
 // НАЗНАЧЕНИЕ — what the garment uses a roll-goods line FOR (0265). A SECOND axis beside `section`,
@@ -237,7 +238,10 @@ export type FabricScope<L extends RollGoodsLine = RollGoodsLine> = {
 // every existing marker unreproducible. So it stays its own answer, and the SAVE path is where it
 // bites (the server refuses a marker whose cloth has no direction) rather than the search.
 
-export type ScopeDirection = 'unknown' | 'any' | 'one_way' | 'two_way';
+// Deliberately an ALIAS of the engine's own type rather than a second spelling of the same four
+// words: this value is computed here and consumed by the раскладка, and two structurally identical
+// types would let them drift apart the day one of them gains a fifth value.
+export type ScopeDirection = FabricDirection;
 
 const DIRECTION_OF_ENUM: Record<string, ScopeDirection> = {
   TECH_CARD_FABRIC_DIRECTION_ANY: 'any',
