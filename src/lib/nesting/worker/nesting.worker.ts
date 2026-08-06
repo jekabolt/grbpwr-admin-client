@@ -51,6 +51,8 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
           bboxW: bb.maxX - bb.minX,
           bboxH: bb.maxY - bb.minY,
           areaCm2: area(poly),
+          originX: bb.minX,
+          originY: bb.minY,
         });
       }
     } catch (e) {

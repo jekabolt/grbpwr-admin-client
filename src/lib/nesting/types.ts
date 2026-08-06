@@ -40,6 +40,18 @@ export type PieceDTO = {
   bboxW: number; // cm
   bboxH: number; // cm
   areaCm2: number;
+  // Where the piece SAT IN THE DRAWING, cm — the bbox min corner in the file's own coordinates.
+  // The contour above is normalized to its own bbox because that is what placement needs, which
+  // throws away the sheet layout; naming pieces by hand needs it back, since «which one is this»
+  // is answered by where it lies among its neighbours, not by a name the exporter invented.
+  // DXF Y points up, so a faithful view flips it.
+  //
+  // Optional because a piece restored from a SAVED MARKER has no sheet to sit on — the blob
+  // stores a layout, not the drawing it was cut from. Absent means «this piece cannot be shown
+  // in its file»; it must never be defaulted to 0, which would pile every piece on the origin
+  // and read as a parser bug.
+  originX?: number;
+  originY?: number;
 };
 
 export type NestPieceConfig = {
