@@ -654,7 +654,7 @@ function OperationEditor({
           <Chip
             key={k}
             tone='error'
-            title={`деталь ${k} удалена на вкладке colorways — привязка потеряется при сохранении`}
+            title={`деталь ${k} удалена на вкладке patterns — привязка потеряется при сохранении`}
             onRemove={() => removePieceKey(k)}
           >
             {`#${k.slice(-6)} — деталь удалена`}

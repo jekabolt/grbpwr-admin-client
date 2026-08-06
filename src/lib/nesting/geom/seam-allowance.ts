@@ -1,0 +1,69 @@
+// Припуск на шов на уровне ДЕТАЛИ: контур наружу, всё остальное на месте.
+//
+// Живёт ЗДЕСЬ, рядом с grain-orient.ts, и ровно по той же причине. Раскладка считается в
+// воркере, у которого своя копия разобранных деталей, а через NestConfig едут только
+// идентификаторы и числа — геометрия через эту границу не ходит вовсе. Припуск, применённый на
+// главном потоке, до движка НЕ ДОЕХАЛ БЫ: детали укладывались бы по линии шва, а экран рисовал
+// бы линию кроя — ровно так когда-то уехал в прод разворот по долевой. Поэтому функция ЧИСТАЯ,
+// зовётся по обе стороны воркера на одном входе с одним числом, и обе стороны гарантированно
+// смотрят на одну геометрию. Зависит только от типов и от geom/, так что импорт её в UI не
+// тащит ни clipper, ни dxf-parser.
+//
+// ЧТО СДВИГАЕТСЯ, А ЧТО НЕТ. Наружу уходит ТОЛЬКО контур: он и есть линия кроя. Внутренняя
+// геометрия (`inner` — линия шва, надсечки, свёрла, вытачки) остаётся на своём месте
+// относительно детали и сдвигается лишь тем же вектором ренормализации, что и контур. Так
+// раскройщик и видит то, что должен: линия шва проходит ВНУТРИ линии кроя, а зазор между ними
+// и есть припуск.
+import type { PieceDTO } from '../types';
+import { offsetOutward } from './offset';
+import { area, bounds } from './polygon';
+
+export type SeamResult = {
+  pieces: PieceDTO[];
+  // Сколько контуров реально раздуто (0 при нулевом припуске).
+  offsetCount: number;
+  // Детали, у которых обход внешней грани не сошёлся и контур заменён выпуклой оболочкой:
+  // расход считается С ЗАПАСОМ, но силуэт на маркере — оболочка, а не деталь. Это нужно
+  // сказать вслух, а не спрятать.
+  hulled: string[];
+};
+
+export function applySeamAllowance(pieces: readonly PieceDTO[], allowanceCm: number): SeamResult {
+  if (!(allowanceCm > 0)) return { pieces: [...pieces], offsetCount: 0, hulled: [] };
+  const out: PieceDTO[] = [];
+  const hulled: string[] = [];
+  let offsetCount = 0;
+  for (const p of pieces) {
+    const res = offsetOutward(p.poly, allowanceCm);
+    if (res.poly === p.poly || res.poly.length < 3) {
+      out.push(p);
+      continue;
+    }
+    if (res.fallback) hulled.push(p.name);
+    // Контур раздулся во все стороны, значит его bbox уехал в минус. Размещатель ждёт деталь
+    // от собственного левого нижнего угла, поэтому нормализуем заново — И ТЕМ ЖЕ вектором
+    // двигаем внутреннюю геометрию, иначе надсечки уедут от детали на величину припуска.
+    const bb = bounds(res.poly);
+    const dx = bb.minX;
+    const dy = bb.minY;
+    const poly = res.poly.map((q) => ({ x: q.x - dx, y: q.y - dy }));
+    out.push({
+      ...p,
+      poly,
+      inner: p.inner?.map((c) => ({
+        layer: c.layer,
+        closed: c.closed,
+        pts: c.pts.map((q) => ({ x: q.x - dx, y: q.y - dy })),
+      })),
+      bboxW: bb.maxX - dx,
+      bboxH: bb.maxY - dy,
+      areaCm2: area(poly),
+      // Деталь по-прежнему лежит там же в чертеже — но её bbox сдвинулся наружу на припуск,
+      // а origin описывает именно левый нижний угол bbox'а.
+      originX: p.originX != null ? p.originX + dx : undefined,
+      originY: p.originY != null ? p.originY + dy : undefined,
+    });
+    offsetCount++;
+  }
+  return { pieces: out, offsetCount, hulled };
+}

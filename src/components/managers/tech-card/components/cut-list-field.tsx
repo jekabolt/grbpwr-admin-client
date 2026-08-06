@@ -22,9 +22,9 @@ import { useStyleCutList } from './useStyleReadViews';
 //
 // #42: this table is a CALCULATED projection, not an editable list — there is nothing to "add"
 // here. It is derived (GetStyleCutList) from the cut-pieces (patterns tab) × each colourway's
-// fabric mapping (colorways tab). This view just reflects the result.
+// fabric mapping. This view just reflects the result.
 const INTRO =
-  'Calculated, not editable: pieces × each colourway’s fabric mapping. Add / edit the pieces on the patterns tab, their fabric per colourway on the colorways tab — this table just shows the result.';
+  'Calculated, not editable: pieces × each colourway’s fabric mapping. Add / edit the pieces on the patterns tab — this table just shows the result. Столбец «ткань по колорвеям» пока НЕ заполняется: редактора карты тканей в админке нет, и рецепт колорвея пишет другую таблицу — так что пустая ячейка тут означает «негде задать», а не «забыли».';
 
 const SHELL_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_FABRIC',

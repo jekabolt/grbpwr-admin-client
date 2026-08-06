@@ -266,7 +266,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   return (
     <Section
       title='детали кроя'
-      question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев; из какой ткани — на вкладке colorways'
+      question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из какой ткани кроится каждая деталь в конкретном колорвее — редактора пока НЕТ ни на одной вкладке, столбец в cut list из-за этого пустой'
       action={
         <Button type='button' variant='main' size='sm' data-field='pieces.add' onClick={addPiece}>
           + piece
@@ -393,9 +393,9 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                         <div className='mt-0.5'>
                           <Pill
                             tone='mut'
-                            title={`долевая берётся из DXF: ${blocks.join(', ')} — раскладка разворачивает деталь по линии на слое долевой, слово здесь только печатается в тех-пак`}
+                            title={`деталь привязана к блокам DXF: ${blocks.join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае.`}
                           >
-                            долевая из DXF
+                            блок DXF привязан
                           </Pill>
                         </div>
                       )}

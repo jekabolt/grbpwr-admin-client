@@ -1784,7 +1784,7 @@ export function TechCardForm({
                   a tab every card has, so the whole special case is gone. */}
               <ConstructionTab techCard={techCard} />
               {isEditMode && numId && (
-                <Section title='cut list (production projection — mirror ×2 folded)'>
+                <Section title='cut list (production projection)'>
                   <CutListField techCardId={numId} />
                 </Section>
               )}
