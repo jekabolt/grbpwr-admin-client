@@ -72,6 +72,7 @@ export function NestingModal({
   onClose,
   techCardId,
   sizeId,
+  sizeIdByToken,
   bomLines,
   lockedBomLineKey,
   view,
@@ -86,6 +87,10 @@ export function NestingModal({
   // Server context for «сохранить раскладку». Absent = compute-only (the save button hides).
   techCardId?: number;
   sizeId?: number;
+  // Размерный токен из имён блоков → id размера карточки. Один DXF несёт весь ряд, поэтому
+  // маркер обязан сохраняться на ВЫБРАННЫЙ внутри размер, а не на тот, в чей слот файл
+  // когда-то положили: иначе он молча запишется не туда, и костинг возьмёт чужую длину.
+  sizeIdByToken?: Map<string, number>;
   // The card's fabric BOM lines (slot select of the save dialog).
   bomLines?: MarkerBomLine[];
   // The fabric these DXFs are bound to (0260). When set, the раскладка IS that cloth: the slot
@@ -523,20 +528,31 @@ export function NestingModal({
   // pieces never parsed), but the marker would read as a clean complete norm. Block save.
   const fetchFailed =
     parse.phase === 'ready' && parse.warnings.some((w) => w.includes('не удалось скачать'));
-  const sizeUnsaved = savedSizeIds != null && sizeId != null && !savedSizeIds.includes(sizeId);
+  // Размер, НА КОТОРЫЙ пишется маркер, — тот, что выбран в диалоге, а не тот, в чей слот файл
+  // когда-то положили. Один DXF несёт весь ряд, и раскладка размера XS, записанная как маркер
+  // размера M, испортила бы костинг молча: длина есть, размер не тот.
+  const bareSize = shownSize.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+  const resolvedSizeId = (bareSize ? sizeIdByToken?.get(bareSize) : undefined) ?? sizeId;
+  // Размер из файла, которого в карточке нет, сохранить нельзя — сервер проверяет ряд, и
+  // молча записать раскладку «куда-нибудь» хуже, чем отказать с объяснением.
+  const sizeUnresolved = !!bareSize && sizeIdByToken != null && !sizeIdByToken.has(bareSize);
+  const sizeUnsaved =
+    savedSizeIds != null && resolvedSizeId != null && !savedSizeIds.includes(resolvedSizeId);
   const canSave =
     !viewData &&
     canEdit &&
     !fetchFailed &&
     !sizeUnsaved &&
+    !sizeUnresolved &&
     run.phase === 'done' &&
     run.result.placedCount === run.result.totalCount &&
     run.result.placements.length > 0 &&
     !!techCardId &&
-    !!sizeId;
+    !!resolvedSizeId;
 
   async function saveMarker() {
-    if (!canSave || run.phase !== 'done' || parse.phase !== 'ready' || !techCardId || !sizeId) return;
+    if (!canSave || run.phase !== 'done' || parse.phase !== 'ready' || !techCardId || !resolvedSizeId)
+      return;
     if (!effective) return;
     const name = nameValue.trim();
     if (!name) return;
@@ -569,7 +585,7 @@ export function NestingModal({
         id: 0,
         techCardId,
         marker: {
-          sizeId,
+          sizeId: resolvedSizeId,
           name,
           source: manual ? 'manual' : 'auto',
           bomLineKey: slotKey,
@@ -1239,9 +1255,11 @@ export function NestingModal({
                         ? 'нет прав на изменение карточки, либо она released'
                         : fetchFailed
                           ? 'часть DXF не скачалась — раскладка неполная, такой маркер занизил бы расход'
-                          : sizeUnsaved
-                            ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
-                            : 'сохранить можно завершённую раскладку, в которую поместились все детали'
+                          : sizeUnresolved
+                            ? `размера «${shownSize}» нет в размерном ряду карточки — добавьте его, иначе маркер записался бы не на тот размер`
+                            : sizeUnsaved
+                              ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
+                              : 'сохранить можно завершённую раскладку, в которую поместились все детали'
                   }
                   onClick={() => setSaveOpen(true)}
                 >

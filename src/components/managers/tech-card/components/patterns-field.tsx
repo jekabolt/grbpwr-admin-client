@@ -24,6 +24,7 @@ import {
   patternFileError,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
+import { sizeTokensOf } from './nesting/block-code';
 import type { NestingFile } from './nesting/use-nesting';
 import { TechCardFormData } from './schema';
 
@@ -231,24 +232,43 @@ export function PatternsField({
     if (good.length > 0) setDroppedOn({ sizeId, files: good });
   }
 
-  // The DXF rows of one size, grouped BY FABRIC. One раскладка lays one cloth: pooling every
-  // DXF of a size into one run mixed the main fabric with the lining and measured a length that
-  // belongs to neither. A legacy row with no binding is its own group ('') so it stays usable.
-  function dxfGroupsOf(slot: SizeSlot): Array<{ bomLineKey: string; files: NestingFile[] }> {
-    const byFabric = new Map<string, NestingFile[]>();
-    for (const { row } of slot.files) {
-      if (!row.url || !isDxfUrl(row.url)) continue;
-      const key = row.bomLineKey ?? '';
-      const list = byFabric.get(key) ?? [];
-      list.push({ name: row.name || row.filename || 'выкройка.dxf', url: row.url });
-      byFabric.set(key, list);
+  // ВСЕ DXF карточки, сгруппированные по ТКАНИ — через все размерные слоты сразу.
+  //
+  // Один DXF несёт весь размерный ряд и относится к ткани, а не к размеру: подклад, карманы и
+  // основная ткань — это три файла, а не пятнадцать. Пока раскладка открывалась с плитки
+  // размера, файл, залитый в слот M, был не виден из слота XS — там просто нет строки, — и
+  // операцию приходилось повторять на каждой плитке. Размер выбирается уже ВНУТРИ диалога, по
+  // именам блоков.
+  //
+  // Слот остаётся местом ХРАНЕНИЯ строки (у выкройки на сервере есть size_id), но перестаёт
+  // быть смыслом.
+  const dxfByFabric = useMemo(() => {
+    const byFabric = new Map<string, { files: NestingFile[]; sizeIds: Set<number> }>();
+    for (const [sid, rows] of rowsBySize) {
+      for (const { row } of rows) {
+        if (!row.url || !isDxfUrl(row.url)) continue;
+        const key = row.bomLineKey ?? '';
+        const entry = byFabric.get(key) ?? { files: [], sizeIds: new Set<number>() };
+        entry.files.push({ name: row.name || row.filename || 'выкройка.dxf', url: row.url });
+        entry.sizeIds.add(sid);
+        byFabric.set(key, entry);
+      }
     }
-    // Stable order: the card's own BOM order, unbound last.
     const order = new Map(fabricBomLines.map((b, i) => [b.lineKey, i]));
     return [...byFabric.entries()]
-      .map(([bomLineKey, files]) => ({ bomLineKey, files }))
+      .map(([bomLineKey, v]) => ({ bomLineKey, ...v }))
       .sort((a, b) => (order.get(a.bomLineKey) ?? 1e9) - (order.get(b.bomLineKey) ?? 1e9));
-  }
+  }, [rowsBySize, fabricBomLines]);
+
+  // Размерный токен из имён блоков → id размера карточки. Нужен раскладке: один DXF несёт весь
+  // ряд, и маркер обязан лечь на ВЫБРАННЫЙ внутри размер, а не на тот, в чей слот файл положили.
+  const sizeIdByToken = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const id of sizeIds) {
+      for (const t of sizeTokensOf(sizeById.get(id))) if (!m.has(t)) m.set(t, id);
+    }
+    return m;
+  }, [sizeIds, sizeById]);
 
   const fabricName = (lineKey: string) =>
     fabricBomLines.find((b) => b.lineKey === lineKey)?.name?.trim() || 'без ткани';
@@ -277,7 +297,6 @@ export function PatternsField({
     const uploadedOn = uploaded === '—' ? null : uploaded;
     // Grouped once per tile: it was being recomputed on every button and every label, which
     // re-walked the whole file list several times per render.
-    const groups = dxfGroupsOf(slot);
 
     const media = has ? (
       <button
@@ -474,56 +493,6 @@ export function PatternsField({
               className='mt-1 [&_button]:w-full [&_button]:px-1.5 [&_button]:py-px [&_button]:text-micro [&_button]:tracking-label'
             />
           )}
-          {groups.map((g) => (
-            <Button
-              key={g.bomLineKey || '(none)'}
-              type='button'
-              variant='secondary'
-              size='xs'
-              className='mt-1 w-full'
-              title={`авто-раскладка DXF-деталей этого размера на полосе «${fabricName(g.bomLineKey)}»`}
-              onClick={() =>
-                setNesting({
-                  sizeLabel: label,
-                  sizeId,
-                  files: g.files,
-                  bomLineKey: g.bomLineKey,
-                })
-              }
-            >
-              ⌗ раскладка{groups.length > 1 ? ` · ${fabricName(g.bomLineKey)}` : ''}
-            </Button>
-          ))}
-          {/* Matching is per FABRIC, like the раскладка — a block name means one piece within one
-              cloth, and the same name in another cloth's file is another piece. An unbound
-              legacy group has no scope to write into, so it must get its fabric first. */}
-          {/* Matching writes an alias scoped to a fabric BOM line, and the store REFUSES a new
-              (slot, block) pair whose slot is not a live fabric line — which would fail the whole
-              card save over a row nothing in the UI can reach. So the button only appears while
-              the binding still resolves. */}
-          {canEdit &&
-            groups
-              .filter((g) => !!g.bomLineKey && liveFabricKeys.has(g.bomLineKey))
-              .map((g) => (
-                <Button
-                  key={`match-${g.bomLineKey}`}
-                  type='button'
-                  variant='secondary'
-                  size='xs'
-                  className='mt-1 w-full'
-                  title={`сопоставить блоки DXF с деталями кроя для «${fabricName(g.bomLineKey)}»`}
-                  onClick={() =>
-                    setMatching({
-                      sizeLabel: label,
-                      bomLineKey: g.bomLineKey,
-                      fabricName: fabricName(g.bomLineKey),
-                      files: g.files,
-                    })
-                  }
-                >
-                  ↔ детали{groups.length > 1 ? ` · ${fabricName(g.bomLineKey)}` : ''}
-                </Button>
-              ))}
         </Tile>
       </div>
     );
@@ -549,6 +518,77 @@ export function PatternsField({
         {slots.map((s) => renderSlot(s, false))}
         {orphans.map((s) => renderSlot(s, true))}
       </Tiles>
+
+      {/* DXF — по ТКАНИ, а не по размеру. Один чертёж несёт весь размерный ряд, а разные
+          материалы (основная, подклад, карманы) — это разные файлы. Раньше эти кнопки жили на
+          плитке размера, и файл, залитый в слот M, был не виден из слота XS: там просто нет
+          строки. Размер выбирается внутри диалога, по именам блоков. */}
+      {dxfByFabric.length > 0 && (
+        <div className='space-y-1 border border-borderColor p-2'>
+          <Text size='micro' variant='label' component='p'>
+            раскладка и детали кроя — по ткани: один DXF несёт все размеры, а размер выбирается
+            внутри
+          </Text>
+          {dxfByFabric.map((g) => {
+            const bound = !!g.bomLineKey && liveFabricKeys.has(g.bomLineKey);
+            return (
+              <div key={g.bomLineKey || '(none)'} className='flex flex-wrap items-center gap-1.5'>
+                <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                  {fabricName(g.bomLineKey)}
+                  <span className='text-labelColor'>
+                    {' '}
+                    · {g.files.length} {g.files.length === 1 ? 'файл' : 'файлов'}
+                  </span>
+                </Text>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  title={`авто-раскладка деталей «${fabricName(g.bomLineKey)}» на полосе`}
+                  onClick={() =>
+                    setNesting({
+                      // Размер тут больше ничего не решает: он выбирается внутри по именам
+                      // блоков, и маркер сохраняется на выбранный.
+                      sizeLabel: '',
+                      sizeId: [...g.sizeIds][0] ?? 0,
+                      files: g.files,
+                      bomLineKey: g.bomLineKey,
+                    })
+                  }
+                >
+                  ⌗ раскладка
+                </Button>
+                {/* Алиас пишется в скоуп ткани, и стор ОТКАЗЫВАЕТ паре (слот, блок), чей слот не
+                    является живой тканевой строкой, — это уронило бы весь сейв карточки из-за
+                    строки, до которой в интерфейсе не добраться. */}
+                {canEdit && bound && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    title={`сопоставить детали DXF с деталями кроя для «${fabricName(g.bomLineKey)}»`}
+                    onClick={() =>
+                      setMatching({
+                        sizeLabel: '',
+                        bomLineKey: g.bomLineKey,
+                        fabricName: fabricName(g.bomLineKey),
+                        files: g.files,
+                      })
+                    }
+                  >
+                    ↔ детали кроя
+                  </Button>
+                )}
+                {!bound && (
+                  <Text size='nano' component='span' className='text-error'>
+                    файлы не привязаны к ткани — привяжите на плитке размера
+                  </Text>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <Text size='micro' variant='label'>
         {slots.length > 0 && `${covered} of ${slots.length} sizes have a pattern`}
@@ -618,6 +658,7 @@ export function PatternsField({
           <NestingModal
             files={nesting.files}
             sizeLabel={nesting.sizeLabel}
+            sizeIdByToken={sizeIdByToken}
             techCardId={techCardId}
             sizeId={nesting.sizeId}
             bomLines={fabricBomLines}
