@@ -8,27 +8,23 @@
 // LABELS (color 3) — piece-name TEXT at each piece's center, ignored by plotters, read
 // by humans; INNER (color 8) — чертёж детали: линия шва, надсечки, свёрла, вытачки. INNER
 // намеренно НЕ CUT: резак режет по CUT, и линия шва с вытачками там разрезала бы деталь
-// пополам. Отдельным слоем цех их видит и решает сам, что надрезать. Coordinates are cm (declared via $INSUNITS=5), y-up exactly as the source
-// pattern DXF was authored — chirality is preserved, nothing is mirrored for display.
+// пополам. Отдельным слоем цех их видит и решает сам, что надрезать. Coordinates are cm
+// (declared via $INSUNITS=5), y-up exactly as the source pattern DXF was authored.
+//
+// ЗЕРКАЛЬНОСТЬ — ЧАСТЬ РАЗМЕЩЕНИЯ, А НЕ ОФОРМЛЕНИЯ. Прежняя редакция этой шапки обещала
+// «chirality is preserved, nothing is mirrored for display», и до Ф1.2 это была правда: движок
+// умел только поворачивать. Теперь Placement.flipped значит «контур отражён» (types.ts), и файл
+// обязан отразить его ровно так же, как экран: деталь, зеркальная на картинке и не зеркальная
+// в DXF (или наоборот), даёт крой, из которого изделие не собрать — две левые полочки. Никакого
+// зеркала «для вида» здесь по-прежнему нет: отражается только то, что размещение назвало
+// отражённым, и тем же преобразованием, что в SVG.
 //
 // Contours are the TRUE tessellated piece outlines (the same `poly` the SVG export
 // draws), not the RDP-simplified placement geometry.
-import type { NestResult, PieceDTO, Pt, RotationDeg } from '../types';
+import type { NestResult, PieceDTO, Pt } from '../types';
+import { placedPoly } from '../types';
 import { SEAM_LINE_LAYER } from '../geom/seam-allowance';
 import { DXF_CAP_PER_EM, planLayoutLabels } from './label-fit';
-
-function rotPt(p: Pt, rot: RotationDeg): Pt {
-  switch (rot) {
-    case 0:
-      return p;
-    case 90:
-      return { x: -p.y, y: p.x };
-    case 180:
-      return { x: -p.x, y: -p.y };
-    case 270:
-      return { x: p.y, y: -p.x };
-  }
-}
 
 // Fixed 4-decimal formatting keeps the file deterministic and well under every driver's
 // precision; -0.0000 is normalized so re-exports are byte-identical.
@@ -88,21 +84,15 @@ export function renderLayoutDxf(
   for (const pl of result.placements) {
     const dto = byId.get(pl.pieceId);
     if (!dto) continue;
-    const placed = dto.poly.map((p) => {
-      const r = rotPt(p, pl.rot);
-      return { x: r.x + pl.x, y: r.y + pl.y };
-    });
-    entities.push(...polylineTags('CUT', placed));
+    // ТО ЖЕ преобразование, что в render/svg.ts, из одного места (types.ts).
+    entities.push(...polylineTags('CUT', placedPoly(dto.poly, pl)));
 
     // Внутренняя геометрия детали — на СВОЙ слой INNER, не на CUT. Резак режет по CUT, и
     // отправить туда линию шва с вытачками значило бы разрезать деталь пополам. Отдельным слоем
     // цех их видит и решает сам: надсечки надрезать, линию шва пробить или проигнорировать.
     for (const c of dto.inner ?? []) {
       if (c.pts.length < 2) continue;
-      const ip = c.pts.map((p) => {
-        const r = rotPt(p, pl.rot);
-        return { x: r.x + pl.x, y: r.y + pl.y };
-      });
+      const ip = placedPoly(c.pts, pl);
       entities.push(...polylineTags(c.layer === SEAM_LINE_LAYER ? 'SEAM' : 'INNER', ip, c.closed));
     }
   }

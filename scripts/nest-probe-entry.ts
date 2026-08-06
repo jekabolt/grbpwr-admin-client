@@ -6,12 +6,18 @@
 // region agreeing with its own Difference is exactly how the last round of overlap bugs
 // stayed invisible; a probe that called place.ts's own clearance test would repeat that
 // mistake one level up.
-import type { NestConfig, NestResult, PieceDTO, Pt } from '../src/lib/nesting/types';
+import type { NestConfig, NestResult, PieceDTO, Placement, Pt } from '../src/lib/nesting/types';
 import { NEST_DEFAULTS } from '../src/lib/nesting/types';
 import { parseSheets, type SheetBytes } from '../src/lib/nesting/worker/parse-files';
 import { orientToGrain } from '../src/lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from '../src/lib/nesting/geom/seam-allowance';
 import { nest } from '../src/lib/nesting/nest';
+import { renderLayoutDxf } from '../src/lib/nesting/render/dxf';
+import { renderLayoutSvg } from '../src/lib/nesting/render/svg';
+import { NfpCache, type Flip, type PreparedPiece } from '../src/lib/nesting/nest/nfp';
+import { gapOctagon } from '../src/lib/nesting/geom/convex';
+import { NFP_SAFETY_CM } from '../src/lib/nesting/nest/nfp';
+import { SCALE } from '../src/lib/nesting/geom/clipper';
 
 export type ProbeInput = {
   sheets: SheetBytes[];
@@ -19,6 +25,10 @@ export type ProbeInput = {
   contourLayer?: string;
   // Instances per piece. 1 = one of each parsed piece.
   perPiece?: number;
+  // Сколько из них ЗЕРКАЛЬНЫЕ (парные детали). Так реальный файл меряется в том режиме, ради
+  // которого зеркало и заводилось: предпросчёт NFP растёт, и растёт он на настоящей геометрии,
+  // а не на треугольниках.
+  flippedPerPiece?: number;
   // Cap on distinct pieces (after layer filtering) — the size of the job.
   maxPieces?: number;
   config?: Partial<NestConfig>;
@@ -116,6 +126,16 @@ function rotate(poly: readonly Pt[], rot: number): Pt[] {
   }
 }
 
+// Договор о размещении, ПЕРЕПИСАННЫЙ ЗДЕСЬ ОТ РУКИ: placed(p) = R(rot)·M^flipped·p + (x,y),
+// M: (x,y) ↦ (−x,y) (см. types.ts). Звать placedPoly движка тут нельзя по той же причине, по
+// которой вся проверка ниже не зовёт его геометрию: инструмент, согласный с измеряемым по
+// построению, ничего не измеряет. Расхождение этих девяти строк с types.ts — это и есть то,
+// что все зеркальные пробы обязаны ловить.
+export function placeIndependently(poly: readonly Pt[], pl: Placement): Pt[] {
+  const mirrored = pl.flipped ? poly.map((p) => ({ x: -p.x, y: p.y })) : poly;
+  return rotate(mirrored, pl.rot).map((p) => ({ x: p.x + pl.x, y: p.y + pl.y }));
+}
+
 function hash(s: string): string {
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
@@ -141,9 +161,12 @@ export function verifyPlacements(
   cfg: { gapCm: number; fabricWidthCm: number; edgeMarginCm: number },
 ): { minClearanceCm: number; overlaps: number; shortPairs: number; outsideWidth: number } {
   const byId = new Map(pieces.map((p) => [p.id, p]));
+  // ЗЕРКАЛО учитывается здесь так же обязательно, как поворот: проверять зеркальное размещение
+  // по незеркальному контуру значит мерить не ту фигуру — и «зазор выдержан» стало бы отчётом о
+  // раскладке, которой на ткани нет.
   const placed = result.placements.map((pl) => {
     const dto = byId.get(pl.pieceId)!;
-    return rotate(dto.poly, pl.rot).map((q) => ({ x: q.x + pl.x, y: q.y + pl.y }));
+    return placeIndependently(dto.poly, pl);
   });
   let minClearanceCm = Infinity;
   let overlaps = 0;
@@ -208,8 +231,13 @@ export async function probe(input: ProbeInput): Promise<ProbeOutput> {
   const pieces = seam.pieces;
 
   const perPiece = input.perPiece ?? 1;
+  const flippedPerPiece = Math.min(input.flippedPerPiece ?? 0, perPiece);
   const config: NestConfig = {
-    pieces: pieces.map((p) => ({ pieceId: p.id, quantity: perPiece })),
+    pieces: pieces.map((p) => ({
+      pieceId: p.id,
+      quantity: perPiece,
+      flippedQuantity: flippedPerPiece,
+    })),
     fabricWidthCm: NEST_DEFAULTS.fabricWidthCm,
     gapCm: NEST_DEFAULTS.gapCm,
     edgeMarginCm: NEST_DEFAULTS.edgeMarginCm,
@@ -244,7 +272,14 @@ export async function probe(input: ProbeInput): Promise<ProbeOutput> {
 
   const blobHash = hash(
     JSON.stringify(
-      result.placements.map((p) => [p.pieceId, p.instance, p.rot, Math.round(p.x * 1000), Math.round(p.y * 1000)]),
+      result.placements.map((p) => [
+        p.pieceId,
+        p.instance,
+        p.rot,
+        p.flipped === true,
+        Math.round(p.x * 1000),
+        Math.round(p.y * 1000),
+      ]),
     ),
   );
 
@@ -284,5 +319,238 @@ export function syntheticPieces(specs: { w: number; h: number }[]): PieceDTO[] {
   }));
 }
 
-export { nest, NEST_DEFAULTS };
+// Детали из ПРОИЗВОЛЬНЫХ контуров — для зеркальных проб нужна ХИРАЛЬНАЯ фигура: у
+// прямоугольника (syntheticPieces выше) зеркало совпадает с ним самим, и любая проверка
+// зеркальности на нём проходит, ничего не проверив.
+export function syntheticPolyPieces(specs: { name: string; poly: Pt[] }[]): PieceDTO[] {
+  return specs.map((s, i) => {
+    const xs = s.poly.map((p) => p.x);
+    const ys = s.poly.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const minY = Math.min(...ys);
+    const poly = s.poly.map((p) => ({ x: p.x - minX, y: p.y - minY }));
+    let a2 = 0;
+    for (let k = 0; k < poly.length; k++) {
+      const p = poly[k];
+      const q = poly[(k + 1) % poly.length];
+      a2 += p.x * q.y - q.x * p.y;
+    }
+    return {
+      id: i + 1,
+      name: s.name,
+      blockName: `P${i + 1}`,
+      source: 'synthetic',
+      fileIndex: 0,
+      // Движок ждёт CCW-контур (так его отдаёт разбор); отрицательную площадь разворачиваем.
+      poly: a2 < 0 ? [...poly].reverse() : poly,
+      bboxW: Math.max(...xs) - minX,
+      bboxH: Math.max(...ys) - minY,
+      areaCm2: Math.abs(a2) / 2,
+    };
+  });
+}
+
+// ── честный пересчёт NFP: медленный эталон для зеркального сокращения ──────────────────
+//
+// Движок НЕ пересчитывает NFP зеркальной пары там, где его можно получить отражением готового
+// (nest/nfp.ts). Проверяется это единственным осмысленным способом: тем же NFP, посчитанным
+// ЧЕСТНО — от уже преобразованных выпуклых частей, без единого тождества. Оболочка и сумма
+// Минковского ниже написаны здесь заново; из движка берутся только ВХОДЫ, общие для обеих
+// сторон (восьмиугольник зазора и масштаб) — они не то, что проверяется.
+function hullOf(points: readonly Pt[]): Pt[] {
+  const pts = [...points].sort((p, q) => p.x - q.x || p.y - q.y);
+  if (pts.length <= 2) return pts;
+  const cross = (o: Pt, a: Pt, b: Pt) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  const lower: Pt[] = [];
+  for (const p of pts) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+      lower.pop();
+    }
+    lower.push(p);
+  }
+  const upper: Pt[] = [];
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+      upper.pop();
+    }
+    upper.push(p);
+  }
+  lower.pop();
+  upper.pop();
+  return lower.concat(upper);
+}
+
+function minkowski(a: readonly Pt[], b: readonly Pt[]): Pt[] {
+  const sums: Pt[] = [];
+  for (const p of a) for (const q of b) sums.push({ x: p.x + q.x, y: p.y + q.y });
+  return hullOf(sums);
+}
+
+function variant(poly: readonly Pt[], rot: number, flip: Flip): Pt[] {
+  return rotate(flip ? poly.map((p) => ({ x: -p.x, y: p.y })) : poly, rot);
+}
+
+// ПОДПИСЬ ВЫПУКЛОЙ ОБЛАСТИ — опорная функция h(u) = max по вершинам (v·u) на равномерном веере
+// направлений. Два выпуклых множества совпадают тогда и только тогда, когда совпадают их
+// опорные функции, поэтому подпись сравнивает ОБЛАСТИ, а не их записи: ей всё равно, с какой
+// вершины начат обход, в какую сторону он идёт и сколько на границе лишних вершин на одной
+// прямой. Последнее не придирка: восьмиугольник зазора строится через cos/sin, и его поворот на
+// 90° совпадает с ним самим лишь до последнего бита мантиссы — этого хватает, чтобы вершина,
+// ровно лежащая на ребре, то попадала в оболочку, то нет. Область при этом та же.
+const SUPPORT_DIRS = 256;
+function support(poly: readonly Pt[], scaled: boolean): number[] {
+  const out = new Array<number>(SUPPORT_DIRS);
+  for (let k = 0; k < SUPPORT_DIRS; k++) {
+    const a = (2 * Math.PI * k) / SUPPORT_DIRS;
+    const cx = Math.cos(a);
+    const cy = Math.sin(a);
+    let best = -Infinity;
+    for (const p of poly) {
+      const x = scaled ? p.x : p.x * SCALE;
+      const y = scaled ? p.y : p.y * SCALE;
+      const v = x * cx + y * cy;
+      if (v > best) best = v;
+    }
+    out[k] = best;
+  }
+  return out;
+}
+
+function deviation(a: number[], b: number[]): number {
+  let worst = 0;
+  for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i]));
+  return worst;
+}
+
+function preparedFromParts(id: number, parts: Pt[][]): PreparedPiece {
+  const mirror = parts.map((part) => part.map((p) => ({ x: -p.x, y: p.y })));
+  const all = parts.flat();
+  const bb = {
+    minX: Math.min(...all.map((p) => p.x)),
+    minY: Math.min(...all.map((p) => p.y)),
+    maxX: Math.max(...all.map((p) => p.x)),
+    maxY: Math.max(...all.map((p) => p.y)),
+  };
+  // polyAt/boundsAt кэш NFP не читает вовсе (он живёт на parts0) — заполняем габаритной рамкой,
+  // чтобы объект был честным по типу, и не притворяемся, что это контур детали.
+  const box = [
+    { x: bb.minX, y: bb.minY },
+    { x: bb.maxX, y: bb.minY },
+    { x: bb.maxX, y: bb.maxY },
+    { x: bb.minX, y: bb.maxY },
+  ];
+  const at = (flip: Flip) => {
+    const polyAt = {} as PreparedPiece['polyAt'][0];
+    const boundsAt = {} as PreparedPiece['boundsAt'][0];
+    for (const r of [0, 90, 180, 270] as const) {
+      const v = variant(box, r, flip);
+      polyAt[r] = v;
+      boundsAt[r] = {
+        minX: Math.min(...v.map((p) => p.x)),
+        minY: Math.min(...v.map((p) => p.y)),
+        maxX: Math.max(...v.map((p) => p.x)),
+        maxY: Math.max(...v.map((p) => p.y)),
+      };
+    }
+    return { polyAt, boundsAt };
+  };
+  const v0 = at(0);
+  const v1 = at(1);
+  return {
+    id,
+    polyAt: [v0.polyAt, v1.polyAt],
+    boundsAt: [v0.boundsAt, v1.boundsAt],
+    parts0: [parts, mirror],
+    areaCm2: (bb.maxX - bb.minX) * (bb.maxY - bb.minY),
+  };
+}
+
+export type NfpAuditResult = {
+  cases: number;
+  mismatched: number;
+  worstDevUnits: number;
+  // Первая расходящаяся комбинация, словами — чтобы отчёт назвал ветвь, а не «где-то не сошлось».
+  firstBad: string;
+};
+
+// Прогон ВСЕХ комбинаций (порядок id × поворот A × поворот B × хиральность A × хиральность B):
+// сокращение против честного пересчёта. Каждая ветвь get() — своя строка таблицы, и ни одна из
+// них не проверяет себя собой.
+export function nfpFlipAudit(opts: {
+  aParts: Pt[][];
+  bParts: Pt[][];
+  gapCm: number;
+  rots: number[];
+}): NfpAuditResult {
+  const gapOct = gapOctagon(opts.gapCm + NFP_SAFETY_CM);
+  const out: NfpAuditResult = { cases: 0, mismatched: 0, worstDevUnits: 0, firstBad: '' };
+  // Оба порядка id: у get() свои тождества на случай a.id > b.id, и они разные для одно- и
+  // разнохиральной пары.
+  for (const [idA, idB] of [
+    [1, 2],
+    [2, 1],
+  ]) {
+    const A = preparedFromParts(idA, opts.aParts);
+    const B = preparedFromParts(idB, opts.bParts);
+    const cache = new NfpCache(opts.gapCm);
+    for (const fa of [0, 1] as Flip[]) {
+      for (const fb of [0, 1] as Flip[]) {
+        for (const ra of opts.rots) {
+          for (const rb of opts.rots) {
+            const shortcut = cache
+              .get(A, { rot: ra as never, flip: fa }, B, { rot: rb as never, flip: fb })
+              .parts.map((path) => support([...path], true));
+            const honest: number[][] = [];
+            for (const pa of opts.aParts) {
+              for (const pb of opts.bParts) {
+                const paT = variant(pa, ra, fa);
+                const pbT = variant(pb, rb, fb);
+                const hull = minkowski(
+                  paT,
+                  pbT.map((p) => ({ x: -p.x, y: -p.y })),
+                );
+                honest.push(support(minkowski(hull, gapOct), false));
+              }
+            }
+            out.cases++;
+            const used = new Set<number>();
+            let worst = 0;
+            for (const h of honest) {
+              let best = Infinity;
+              let bestIdx = -1;
+              for (let i = 0; i < shortcut.length; i++) {
+                if (used.has(i)) continue;
+                const d = deviation(h, shortcut[i]);
+                if (d < best) {
+                  best = d;
+                  bestIdx = i;
+                }
+              }
+              if (bestIdx >= 0) used.add(bestIdx);
+              worst = Math.max(worst, best);
+            }
+            if (honest.length !== shortcut.length) worst = Infinity;
+            out.worstDevUnits = Math.max(out.worstDevUnits, Number.isFinite(worst) ? worst : 1e9);
+            // Допуск 2 целых единицы = 0.2 мкм. Столько стоит округление: движок округляет к
+            // целым единицам ДО отражения, эталон — ПОСЛЕ, а Math.round(−x) ≠ −Math.round(x)
+            // ровно на половинках. Любая ошибка в тождествах даёт сдвиг на сантиметры.
+            if (!(worst <= 2)) {
+              out.mismatched++;
+              if (!out.firstBad) {
+                out.firstBad = `id ${idA}vs${idB} fa=${fa} ra=${ra} fb=${fb} rb=${rb}: частей ${shortcut.length}/${honest.length}, расхождение ${worst}`;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+export { nest, NEST_DEFAULTS, renderLayoutDxf, renderLayoutSvg };
+// Планировщик подписей — отдельно от отрисовок: DXF и SVG зовут ЕГО ЖЕ, поэтому их согласие
+// друг с другом не заметило бы, что зеркало до него не доехало. Проба спрашивает его напрямую.
+export { planLayoutLabels } from '../src/lib/nesting/render/label-fit';
 export type { NestConfig, NestResult, PieceDTO };

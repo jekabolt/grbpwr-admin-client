@@ -1,6 +1,7 @@
 // NestResult → standalone SVG string. Used both for the live preview (innerHTML) and the
 // «скачать SVG» export, so colors are concrete monochrome values, not CSS vars.
-import type { NestResult, PieceDTO, Pt, RotationDeg } from '../types';
+import type { NestResult, PieceDTO, Pt } from '../types';
+import { placedPoly } from '../types';
 import { planLayoutLabels } from './label-fit';
 
 const FILL = '#f2f2f2';
@@ -8,19 +9,6 @@ const STROKE = '#8a8a8a';
 const INK = '#111111';
 const RULE = '#cccccc';
 const TARGET = '#c22222';
-
-function rotPt(p: Pt, rot: RotationDeg): Pt {
-  switch (rot) {
-    case 0:
-      return p;
-    case 90:
-      return { x: -p.y, y: p.x };
-    case 180:
-      return { x: -p.x, y: -p.y };
-    case 270:
-      return { x: p.y, y: -p.x };
-  }
-}
 
 function esc(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -118,20 +106,18 @@ export function renderLayoutSvg(
     const dto = byId.get(pl.pieceId);
     if (!dto) continue;
     const poly = displayPoly.get(pl.pieceId) ?? dto.poly;
-    const pts = poly.map((p) => {
-      const r = rotPt(p, pl.rot);
-      return `${(r.x + pl.x).toFixed(2)},${(r.y + pl.y).toFixed(2)}`;
-    });
+    // ОДНО преобразование на экран и на плоттер (types.ts: зеркало ДО поворота, ось Y). Своя
+    // копия здесь означала бы деталь, отзеркаленную на картинке и не отзеркаленную в файле, по
+    // которому режут, — и наоборот; сшить такое изделие нельзя, а увидеть расхождение не на чем.
+    const pts = placedPoly(poly, pl).map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`);
     parts.push(
       `<polygon points="${pts.join(' ')}" fill="${FILL}" stroke="${STROKE}" stroke-width="${W / 400}"/>`,
     );
-    // Чертёж детали: линия шва, надсечки, свёрла, вытачки — тем же поворотом и сдвигом, что и
-    // контур. Раскройщик режет по этой картинке, и силуэт без надсечек ему не годится.
+    // Чертёж детали: линия шва, надсечки, свёрла, вытачки — тем же преобразованием, что и
+    // контур (включая зеркало: надсечка на зеркальной детали живёт на другой её стороне).
+    // Раскройщик режет по этой картинке, и силуэт без надсечек ему не годится.
     for (const c of dto.inner ?? []) {
-      const ip = c.pts.map((p) => {
-        const r = rotPt(p, pl.rot);
-        return `${(r.x + pl.x).toFixed(2)},${(r.y + pl.y).toFixed(2)}`;
-      });
+      const ip = placedPoly(c.pts, pl).map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`);
       if (ip.length < 2) continue;
       const tag = c.closed ? 'polygon' : 'polyline';
       parts.push(

@@ -1,4 +1,5 @@
 import type { Pt, RotationDeg } from '../types';
+import { rotatePt, variantPoly } from '../types';
 
 export type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
 
@@ -36,18 +37,9 @@ export function ensureCCW(poly: Pt[]): Pt[] {
 }
 
 // Exact for the four axis rotations the nesting uses — no trig drift on 90° multiples.
-export function rotatePt(p: Pt, rot: RotationDeg): Pt {
-  switch (rot) {
-    case 0:
-      return p;
-    case 90:
-      return { x: -p.y, y: p.x };
-    case 180:
-      return { x: -p.x, y: -p.y };
-    case 270:
-      return { x: p.y, y: -p.x };
-  }
-}
+// Живёт в types.ts (вместе с зеркалом и договором о порядке) и переэкспортируется отсюда:
+// поворот и переворот обязаны быть ОДНОЙ реализацией на движок, экран и плоттер.
+export { rotatePt, variantPoly };
 
 export function rotatePoly(poly: readonly Pt[], rot: RotationDeg): Pt[] {
   if (rot === 0) return [...poly];

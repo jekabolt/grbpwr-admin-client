@@ -25,12 +25,20 @@
 // depends on candidate completeness — only quality does.
 import type { Placement, Pt, RotationDeg, UnplacedPiece } from '../types';
 import { SCALE } from '../geom/clipper';
-import type { NfpCache, NfpPaths, PreparedPiece } from './nfp';
+import type { Flip, NfpCache, NfpPaths, PreparedPiece, Variant } from './nfp';
 
-export type Gene = {
+// Ген несёт ВАРИАНТ детали (поворот + хиральность) прямо в себе — тем самым он структурно
+// подходит под Variant, и кэш NFP спрашивается как nfps.get(q.piece, q, g.piece, g), без
+// промежуточного объекта на каждого соседа.
+export type Gene = Variant & {
   piece: PreparedPiece;
   instance: number;
-  rot: RotationDeg;
+  // ХИРАЛЬНОСТЬ экземпляра — вход задачи, а не переменная поиска (Ф1.2). Парная деталь это
+  // ровно n левых и n правых: сколько зеркал, решает задание (NestPieceConfig.flippedQuantity),
+  // и «перевернуть ещё одну» — это не улучшение раскладки, а другой комплект кроя. К тому же
+  // менять зеркала местами между экземплярами одной детали бессмысленно: набор фигур на полосе
+  // от этого не меняется. Поэтому GA крутит порядок и повороты, а flip не трогает вовсе.
+  flip: Flip;
   // Rotations in which this piece fits the fabric width — the GA mutates within this set.
   allowedRots: readonly RotationDeg[];
 };
@@ -288,7 +296,7 @@ export function placeOrder(
 
   for (const g of genes) {
     if (abort?.()) return null;
-    const b = g.piece.boundsAt[g.rot];
+    const b = g.piece.boundsAt[g.flip][g.rot];
     const bMinX = Math.round(b.minX * SCALE);
     const bMaxX = Math.round(b.maxX * SCALE);
     const bMinY = Math.round(b.minY * SCALE);
@@ -312,7 +320,7 @@ export function placeOrder(
     }
 
     const neighbours: Neighbour[] = placed.map((q) => ({
-      nfp: nfps.get(q.piece, q.rot, g.piece, g.rot),
+      nfp: nfps.get(q.piece, q, g.piece, g),
       ox: q.x,
       oy: q.y,
     }));
@@ -320,12 +328,12 @@ export function placeOrder(
     // True-contour verifier for this gene against everything already placed (cm frame),
     // bbox-prefiltered so only genuinely near neighbours are measured.
     const gap = nfps.verifyGapCm;
-    const gPoly = g.piece.polyAt[g.rot];
+    const gPoly = g.piece.polyAt[g.flip][g.rot];
     const verify = (cx: number, cy: number): boolean => {
       const px = cx / SCALE;
       const py = cy / SCALE;
       for (const q of placed) {
-        const qb = q.piece.boundsAt[q.rot];
+        const qb = q.piece.boundsAt[q.flip][q.rot];
         const qx = q.x / SCALE;
         const qy = q.y / SCALE;
         if (
@@ -336,7 +344,7 @@ export function placeOrder(
         ) {
           continue; // bboxes farther apart than the gap — cannot violate
         }
-        if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.rot], qx, qy, gap)) return false;
+        if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.flip][q.rot], qx, qy, gap)) return false;
       }
       return true;
     };
@@ -391,6 +399,10 @@ function toResult(
       pieceId: p.piece.id,
       instance: p.instance,
       rot: p.rot,
+      // Пишется ВСЕГДА, а не только у зеркальных: результат движка полон по построению, и
+      // «поля нет» в нём не должно значить ничего. Необязательным флаг остаётся только в типе
+      // — ради тех, кто строит Placement сам (сохранённый маркер, ручной редактор).
+      flipped: p.flip === 1,
       x: p.x / SCALE,
       y: p.y / SCALE,
     })),
@@ -438,7 +450,8 @@ export async function compactPlacements(
   const L = Math.round(lMaxCm * SCALE);
   const work = genes.map((g) => ({ ...g }));
 
-  const extent = (p: PlacedGene): number => p.x + Math.round(p.piece.boundsAt[p.rot].maxX * SCALE) + m;
+  const extent = (p: PlacedGene): number =>
+    p.x + Math.round(p.piece.boundsAt[p.flip][p.rot].maxX * SCALE) + m;
 
   // Drain the message queue every ~16 ms so a posted cancel can actually be delivered. Time
   // decides only WHEN to yield, never what the pass does — see the header.
@@ -456,7 +469,7 @@ export async function compactPlacements(
       // feasible when it was written, so returning mid-pass returns a valid marker.
       if (isCancelled?.()) return finish();
       const g = work[i];
-      const b = g.piece.boundsAt[g.rot];
+      const b = g.piece.boundsAt[g.flip][g.rot];
       const bMinX = Math.round(b.minX * SCALE);
       const bMaxX = Math.round(b.maxX * SCALE);
       const bMinY = Math.round(b.minY * SCALE);
@@ -473,7 +486,7 @@ export async function compactPlacements(
         if (j === i) continue;
         const q = work[j];
         othersLen = Math.max(othersLen, extent(q));
-        neighbours.push({ nfp: nfps.get(q.piece, q.rot, g.piece, g.rot), ox: q.x, oy: q.y });
+        neighbours.push({ nfp: nfps.get(q.piece, q, g.piece, g), ox: q.x, oy: q.y });
       }
 
       const cur = {
@@ -484,14 +497,14 @@ export async function compactPlacements(
       // Same true-contour authority as placement (see placeOrder): a compaction move is
       // only accepted when the moved piece really clears every other by the promised gap.
       const gap = nfps.verifyGapCm;
-      const gPoly = g.piece.polyAt[g.rot];
+      const gPoly = g.piece.polyAt[g.flip][g.rot];
       const verify = (cx: number, cy: number): boolean => {
         const px = cx / SCALE;
         const py = cy / SCALE;
         for (let j = 0; j < work.length; j++) {
           if (j === i) continue;
           const q = work[j];
-          const qb = q.piece.boundsAt[q.rot];
+          const qb = q.piece.boundsAt[q.flip][q.rot];
           const qx = q.x / SCALE;
           const qy = q.y / SCALE;
           if (
@@ -502,7 +515,7 @@ export async function compactPlacements(
           ) {
             continue;
           }
-          if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.rot], qx, qy, gap)) return false;
+          if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.flip][q.rot], qx, qy, gap)) return false;
         }
         return true;
       };

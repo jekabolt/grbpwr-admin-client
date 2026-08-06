@@ -6,15 +6,16 @@ import type {
   NestConfig,
   NestResult,
   PieceDTO,
+  Pt,
   RotationDeg,
   UnplacedPiece,
 } from '../types';
-import { allowedRotations } from '../types';
+import { allowedRotations, allowsFlip } from '../types';
 import { SCALE, rdpSimplify, sanitizeLoop } from '../geom/clipper';
-import { bounds, ensureCCW, rotatePoly } from '../geom/polygon';
+import { bounds, ensureCCW, variantPoly, type Bounds } from '../geom/polygon';
 import { convexParts } from '../geom/triangulate';
 import { hashString, runGa } from './ga';
-import { NfpCache, type PreparedPiece } from './nfp';
+import { NfpCache, mirrorParts, type Flip, type PreparedPiece } from './nfp';
 import { compactPlacements, type Gene, type PlacedGene } from './place';
 
 export type NestProgress = {
@@ -110,6 +111,12 @@ export async function nest(
     config.fabricDirection,
     config.allowCrossGrain,
   );
+  // Тем же правилом и по той же причине: зеркало кладёт деталь против ворса ровно так же, как
+  // полуоборот (types.ts, allowsFlip). Ткань решает ОДИН предикат на оба действия.
+  const canFlip = allowsFlip(config.fabricDirection);
+  // Детали, у которых зеркальные экземпляры пришлось отклонить — для одного внятного
+  // предупреждения вместо N одинаковых.
+  const mirrorRefused = new Set<string>();
 
   const byId = new Map(allPieces.map((p) => [p.id, p]));
   const genesBase: Gene[] = [];
@@ -137,21 +144,39 @@ export async function nest(
 
     let prep = prepared.get(dto.id);
     if (!prep) {
-      const polyAt = {} as PreparedPiece['polyAt'];
-      const boundsAt = {} as PreparedPiece['boundsAt'];
-      for (const r of [0, 90, 180, 270] as const) {
-        const rp = rotatePoly(dto.poly, r);
-        polyAt[r] = rp;
-        boundsAt[r] = bounds(rp);
-      }
-      prep = { id: dto.id, polyAt, boundsAt, parts0: [], areaCm2: dto.areaCm2 };
+      // Геометрия обеих ХИРАЛЬНОСТЕЙ сразу: зеркало это не поворот, ни один из четырёх его не
+      // даёт, а размещателю нужны и контуры, и габариты именно того варианта, который лёг.
+      const variant = (flip: Flip) => {
+        const polyAt = {} as Record<RotationDeg, Pt[]>;
+        const boundsAt = {} as Record<RotationDeg, Bounds>;
+        for (const r of [0, 90, 180, 270] as const) {
+          const rp = variantPoly(dto.poly, r, flip === 1);
+          polyAt[r] = rp;
+          boundsAt[r] = bounds(rp);
+        }
+        return { polyAt, boundsAt };
+      };
+      const v0 = variant(0);
+      const v1 = variant(1);
+      prep = {
+        id: dto.id,
+        polyAt: [v0.polyAt, v1.polyAt],
+        boundsAt: [v0.boundsAt, v1.boundsAt],
+        parts0: [[], []],
+        areaCm2: dto.areaCm2,
+      };
       prepared.set(dto.id, prep);
     }
 
     // The piece participates only in rotations that fit the fabric width; the modal
     // pre-filters these, the check here is the engine's own guarantee.
+    //
+    // Считается по НЕЗЕРКАЛЬНОМУ варианту и верно для обоих: M меняет x на −x, поэтому у
+    // поворотов 0/180 поперечный габарит не трогает вовсе, а у 90/270 он равен продольному
+    // габариту, который отражение тоже сохраняет ([minX,maxX] → [−maxX,−minX]). Ширина полосы
+    // не умеет разрешить одну хиральность и запретить другую.
     const fitting = rotations.filter((r) => {
-      const b = prep!.boundsAt[r];
+      const b = prep!.boundsAt[0][r];
       return b.maxY - b.minY <= usableWidth + 1e-9;
     });
     if (fitting.length === 0) {
@@ -160,14 +185,38 @@ export async function nest(
       }
       continue;
     }
+    // Сколько экземпляров этой детали кроятся зеркально — ПОСЛЕДНИЕ flippedQuantity штук
+    // (types.ts). Обрезка обязательна: задание приходит извне, а «зеркал больше, чем деталей»
+    // не значит ничего.
+    const flippedCount = Math.min(
+      Math.max(0, Math.floor(pc.flippedQuantity ?? 0)),
+      pc.quantity,
+    );
     for (let inst = 0; inst < pc.quantity; inst++) {
+      const flip: Flip = inst >= pc.quantity - flippedCount ? 1 : 0;
+      if (flip === 1 && !canFlip) {
+        // Направленная ткань. Положить вместо зеркала обычную копию было бы ХУЖЕ, чем не
+        // положить: на маркере они неотличимы, и цех накроит одних левых полочек.
+        unplacedUpFront.push({ pieceId: dto.id, instance: inst, reason: 'mirror' });
+        mirrorRefused.add(dto.name);
+        continue;
+      }
       genesBase.push({
         piece: prep,
         instance: inst,
         rot: fitting[0],
+        flip,
         allowedRots: fitting,
       });
     }
+  }
+
+  if (mirrorRefused.size > 0) {
+    warnings.push(
+      `ткань направленная (ворс) — зеркальные экземпляры не размещены: ${[...mirrorRefused].join(', ')}. ` +
+        'Переворот на такой ткани кладёт деталь против ворса, как и полуоборот, и маркер с ним ' +
+        'не сохранить. Парные детали на ворсе кроят в два слоя лицом к лицу — это другой маркер.',
+    );
   }
 
   const totalCount = config.pieces.reduce((s, pc) => s + Math.max(0, pc.quantity), 0);
@@ -179,6 +228,25 @@ export async function nest(
     const out = new Set<RotationDeg>();
     for (const ra of a) for (const rb of b) out.add(((((rb - ra) % 360) + 360) % 360) as RotationDeg);
     return [...out].sort((x, y) => x - y);
+  };
+
+  // Какие ХИРАЛЬНОСТИ реально встречаются у экземпляров каждой детали. Пара деталей требует
+  // канона N0 (bFlip 0), если у неё бывает ОДИНАКОВАЯ хиральность, и канона X0 (bFlip 1) —
+  // если РАЗНАЯ; см. шапку nest/nfp.ts. Обычная деталь без зеркал даёт ровно то же множество
+  // записей, что и до Ф1.2, поэтому задание без парных деталей не платит за них ничего.
+  const flipsOf = new Map<number, Set<Flip>>();
+  for (const g of genesBase) {
+    let s = flipsOf.get(g.piece.id);
+    if (!s) flipsOf.set(g.piece.id, (s = new Set<Flip>()));
+    s.add(g.flip);
+  }
+  const kindsFor = (fa: Set<Flip> | undefined, fb: Set<Flip> | undefined): Flip[] => {
+    const a = fa ?? new Set<Flip>([0]);
+    const b = fb ?? new Set<Flip>([0]);
+    const out: Flip[] = [];
+    if ((a.has(0) && b.has(0)) || (a.has(1) && b.has(1))) out.push(0);
+    if ((a.has(0) && b.has(1)) || (a.has(1) && b.has(0))) out.push(1);
+    return out;
   };
 
   let telemetry: NestResult['telemetry'];
@@ -246,7 +314,15 @@ export async function nest(
           rotsOf.get(uniquePieces[i].id) ?? rotations,
           rotsOf.get(uniquePieces[j].id) ?? rotations,
         );
-        hulls += counts[i] * counts[j] * rels.length;
+        // Разнохиральная пара — ВТОРАЯ запись на ту же пару и тот же rel: её оболочки считаются
+        // заново (отражением одной детали зеркальную пару не получить). Не учесть её здесь
+        // значило бы занизить предсказание вдвое ровно на тех заданиях, где парных деталей
+        // много, — и снова получить ноль поколений после полного бюджета.
+        hulls +=
+          counts[i] *
+          counts[j] *
+          rels.length *
+          kindsFor(flipsOf.get(uniquePieces[i].id), flipsOf.get(uniquePieces[j].id)).length;
       }
     }
     effectiveEps = eps;
@@ -254,7 +330,10 @@ export async function nest(
     if (hulls <= hullCap || li === ladder.length - 1) break;
   }
   uniquePieces.forEach((p, i) => {
-    p.parts0 = decomps[i].parts;
+    // Зеркальные части — ОТРАЖЕНИЕ тех же самых, а не разложение отражённого контура: см.
+    // PreparedPiece.parts0. Считается всегда: проход по десятку выпуклых кусков стоит нисколько,
+    // а ветвление «а нужны ли они» — это состояние, которое умеет разъехаться с genesBase.
+    p.parts0 = [decomps[i].parts, mirrorParts(decomps[i].parts)];
     if (decomps[i].degenerate) {
       warnings.push(
         `«${byId.get(p.id)?.name ?? p.id}»: контур с дефектом — раскладка считает его с запасом (выпуклая оболочка)`,
@@ -277,7 +356,7 @@ export async function nest(
   // charged the unplaced penalty. The bound is free — it only sizes an unbounded strip.
   const lMax =
     genesBase.reduce((s, g) => {
-      const b = g.piece.boundsAt[0];
+      const b = g.piece.boundsAt[g.flip][0];
       return (
         s +
         Math.max(b.maxX - b.minX, b.maxY - b.minY) +
@@ -295,14 +374,17 @@ export async function nest(
   // NFP prepass: every unordered pair × reachable relative rotation, yielding between pairs
   // so progress paints and cancel lands. On cancel/deadline the loop stops early — get()
   // computes any missing entry lazily, so a partial prepass only costs GA time.
-  const pairs: Array<[PreparedPiece, PreparedPiece, RotationDeg]> = [];
+  const pairs: Array<[PreparedPiece, PreparedPiece, RotationDeg, Flip]> = [];
   for (let i = 0; i < uniquePieces.length; i++) {
     for (let j = i; j < uniquePieces.length; j++) {
       const rels = relsFor(
         rotsOf.get(uniquePieces[i].id) ?? rotations,
         rotsOf.get(uniquePieces[j].id) ?? rotations,
       );
-      for (const rel of rels) pairs.push([uniquePieces[i], uniquePieces[j], rel]);
+      const kinds = kindsFor(flipsOf.get(uniquePieces[i].id), flipsOf.get(uniquePieces[j].id));
+      for (const rel of rels) {
+        for (const kind of kinds) pairs.push([uniquePieces[i], uniquePieces[j], rel, kind]);
+      }
     }
   }
   onProgress({ phase: 'nfp', nfpDone: 0, nfpTotal: pairs.length });
@@ -313,8 +395,8 @@ export async function nest(
   let lastYield = Date.now();
   for (let k = 0; k < pairs.length; k++) {
     if (isCancelled() || Date.now() > deadline) break;
-    const [a, b, rel] = pairs[k];
-    nfps.ensure(a, b, rel);
+    const [a, b, rel, kind] = pairs[k];
+    nfps.ensure(a, b, rel, kind);
     nfpDone = k + 1;
     if (Date.now() - lastYield >= 16 || k === pairs.length - 1) {
       onProgress({ phase: 'nfp', nfpDone, nfpTotal: pairs.length });
@@ -335,6 +417,11 @@ export async function nest(
   };
   if (isCancelled()) return emptyResult(true);
 
+  // Зерно НАМЕРЕННО не знает про зеркала. Оно опознаёт ПОИСК (сколько генов, какие повороты,
+  // какая точность), а не геометрию: два задания, отличающиеся только хиральностью, обязаны
+  // идти по одному потоку случайных чисел. Это же свойство делает возможной честную проверку в
+  // probe — задание с зеркалом сравнивается ген в ген с заданием, где зеркальная деталь заведена
+  // отдельной деталью; разное зерно превратило бы сравнение в сравнение двух разных поисков.
   const seedString = JSON.stringify({
     ids: genesBase.map((g) => `${g.piece.id}:${g.instance}`),
     w: config.fabricWidthCm,

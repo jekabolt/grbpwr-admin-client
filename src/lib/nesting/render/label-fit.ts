@@ -23,7 +23,13 @@
 //
 // Все координаты — в системе Y-ВВЕРХ (как в чертеже DXF и в системе полосы). Экранный SVG
 // зеркалит Y сам, поэтому там угол берётся со знаком минус — один раз, в месте отрисовки.
-import type { NestResult, PieceDTO, Placement, Pt, RotationDeg } from '../types';
+import type { NestResult, PieceDTO, Placement, Pt } from '../types';
+// Значение, а не только тип, и это единственное исключение из «импортируются ТОЛЬКО типы» в
+// шапке: types.ts — чистые функции без зависимостей, тот самый модуль, который главному потоку
+// импортировать можно. Своя копия преобразования размещения здесь стоила бы дороже импорта:
+// подпись планируется по контуру, и планировать её по НЕзеркальному контуру зеркальной детали
+// значит поставить имя мимо детали — одинаково на экране и на плоттере, то есть незаметно.
+import { placedPoly } from '../types';
 
 // ——— метрика шрифта ————————————————————————————————————————————————————————————————————
 // Ширина знака в долях кегля. Оба SVG рисуются font-family="monospace" (0.60–0.602 у
@@ -697,19 +703,6 @@ function boxEdgeToward(box: LabelBox, from: Pt): Pt {
 
 // ——— раскладка: один план на SVG и на DXF ——————————————————————————————————————————————
 
-function rotPt(p: Pt, rot: RotationDeg): Pt {
-  switch (rot) {
-    case 0:
-      return p;
-    case 90:
-      return { x: -p.y, y: p.x };
-    case 180:
-      return { x: -p.x, y: -p.y };
-    case 270:
-      return { x: p.y, y: -p.x };
-  }
-}
-
 export type LayoutLabel = { placement: Placement; piece: PieceDTO; poly: Pt[]; plan: LabelPlan };
 
 // Подписи всей раскладки. Вызывается и из SVG (превью + экспорт), и из плоттерного DXF, на
@@ -733,10 +726,7 @@ export function planLayoutLabels(
   for (const pl of result.placements) {
     const dto = byId.get(pl.pieceId);
     if (!dto) continue;
-    const poly = dto.poly.map((p) => {
-      const r = rotPt(p, pl.rot);
-      return { x: r.x + pl.x, y: r.y + pl.y };
-    });
+    const poly = placedPoly(dto.poly, pl);
     items.push({ placement: pl, piece: dto, poly });
     space.addPolygon(poly, `${pl.pieceId}|${pl.instance}`);
   }
@@ -749,14 +739,24 @@ export function planLayoutLabels(
     // Долевая после ориентации лежит вдоль +X СВОЕЙ детали (см. geom/grain-orient.ts), значит
     // на полосе она под углом поворота. Определить, была ли деталь развёрнута, можно по тому,
     // что ориентация снимает у неё и долевую, и координаты чертежа.
+    // Зеркало на угол долевой не влияет: M меняет направление +X на обратное, но ОСЬ оставляет
+    // ту же, а подпись читается по оси (readableAngle приводит угол к (-90, 90]).
     const oriented = it.piece.grain == null && it.piece.originX == null;
     const grainDeg = oriented ? (it.placement.rot % 180 === 0 ? 0 : 90) : null;
+    // Пометка зеркала в хвосте имени. Не она делает крой правильным — режут по контуру, а он уже
+    // отражён, — но левая и правая полочки на маркере отличаются только хиральностью, и человеку,
+    // сверяющему раскладку с комплектом кроя, нужно уметь сказать какая где. Хвост отбрасывается
+    // первым при нехватке места (см. textCandidates): читаемое имя важнее пометки.
+    const marks = [
+      it.placement.rot ? `${it.placement.rot}°` : '',
+      it.placement.flipped ? 'зеркало' : '',
+    ].filter(Boolean);
     const plan = planLabel({
       poly: it.poly,
       text: it.piece.name,
       suffix:
         (it.placement.instance > 0 ? ` ×${it.placement.instance + 1}` : '') +
-        (it.placement.rot ? ` (${it.placement.rot}°)` : ''),
+        (marks.length > 0 ? ` (${marks.join(', ')})` : ''),
       fontMaxCm: font.max,
       fontMinCm: font.min,
       preferredAngleDeg: grainDeg,

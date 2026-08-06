@@ -6,7 +6,8 @@
 // pairs. Worst realistic case — two 400-vertex contours — is ~160k segment-pair distance
 // ops, well under a millisecond; a 60-piece marker prefilters to a handful of neighbours.
 import type { Placement, PieceDTO, Pt, RotationDeg } from '../types';
-import { bounds, rotatePt, type Bounds } from './polygon';
+import { placedPoly, variantPt } from '../types';
+import { bounds, type Bounds } from './polygon';
 
 export type PlacedShape = {
   // Placement array index (identity for highlighting), NOT piece id — quantities repeat ids.
@@ -15,14 +16,18 @@ export type PlacedShape = {
   b: Bounds;
 };
 
+// Контур на полосе — тем же преобразованием, что у движка и у обеих отрисовок (types.ts):
+// зеркало ДО поворота. Зеркальная деталь занимает ДРУГОЕ место, чем незеркальная, и проверка
+// зазоров, считающая её по незеркальному контуру, разрешит настоящий перехлёст.
 export function placeContour(piece: PieceDTO, pl: Placement): Pt[] {
-  return piece.poly.map((p) => {
-    const r = rotatePt(p, pl.rot);
-    return { x: r.x + pl.x, y: r.y + pl.y };
-  });
+  return placedPoly(piece.poly, pl);
 }
 
-export function rotatedBounds(piece: PieceDTO, rot: RotationDeg): Bounds {
+// `flipped` необязателен и по умолчанию false — ровно как в Placement: у сохранённого маркера
+// и у построенного вручную размещения зеркала нет. Габариты зеркального варианта отличаются от
+// незеркального СМЕЩЕНИЕМ, а не размером ([0,w] переезжает в [−w,0]), так что вызывающий,
+// который зажимает деталь в полосу этими границами, обязан передавать флаг.
+export function rotatedBounds(piece: PieceDTO, rot: RotationDeg, flipped = false): Bounds {
   // Four rotations only — rotating the two bbox corners is NOT enough (min/max swap),
   // so rotate the actual contour; cached by callers where it matters.
   let minX = Infinity;
@@ -30,7 +35,7 @@ export function rotatedBounds(piece: PieceDTO, rot: RotationDeg): Bounds {
   let maxX = -Infinity;
   let maxY = -Infinity;
   for (const p of piece.poly) {
-    const r = rotatePt(p, rot);
+    const r = variantPt(p, rot, flipped);
     if (r.x < minX) minX = r.x;
     if (r.y < minY) minY = r.y;
     if (r.x > maxX) maxX = r.x;
@@ -222,7 +227,7 @@ export function measureLayout(args: {
   for (const pl of placements) {
     const piece = byId.get(pl.pieceId);
     if (!piece) continue;
-    const rb = rotatedBounds(piece, pl.rot);
+    const rb = rotatedBounds(piece, pl.rot, pl.flipped);
     if (pl.x + rb.maxX > maxX) maxX = pl.x + rb.maxX;
     areaSum += piece.areaCm2;
   }

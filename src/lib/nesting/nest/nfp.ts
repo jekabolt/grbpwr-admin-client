@@ -18,23 +18,81 @@
 // op. Placement (nest/place.ts) never runs boolean ops either way: it reads cache-owned
 // rotated variants (paths/parts + bboxes) and tests points with integer winding math.
 //
+// «Never see a boolean op» держится на одной строке в unionBatched, и до Ф1.2 не держалось
+// вовсе: проверка покрытия отдавала те самые части в Clipper.Difference СУБЪЕКТОМ, а эта
+// библиотека ПИШЕТ В ПЕРЕДАННЫЕ ПУТИ (измерено: вершина уезжала на 1.00 см внутрь). Теперь
+// булевы операции видят только копии — подробности там же, в unionBatched.
+//
 // Cache tricks from SVGnest (MIT, algorithm only): rotation canonicalization
 //   NFP(A@a, B@b) = Rot(a)·NFP(A@0, B@(b−a))
-// plus the reflection identity
+// plus the order identity
 //   NFP(A@0, B@rel) = Rot(rel+180)·NFP(B@0, A@(360−rel))
 // so each unordered pair is computed once (cache keyed minId|maxId|rel).
+//
+// ── ЗЕРКАЛО (Ф1.2) ────────────────────────────────────────────────────────────────────
+//
+// Деталь может лечь отражённой (types.ts: placed(p) = R(rot)·M^flipped·p + t, M: x ↦ −x).
+// Прямолинейный ход — завести зеркальный двойник отдельной деталью — учетверяет предпросчёт
+// NFP: пар становится (2n)² вместо n², а именно предпросчёт и решает, дойдёт ли дело до
+// поиска вообще (см. шапку nest/index.ts: 2070 пар, 0 поколений, 51 секунда).
+//
+// Считать заново нужно НЕ ВСЁ. Минковский коммутирует с линейным отображением, а восьмиугольник
+// зазора симметричен и относительно M, и относительно поворотов на 90° (geom/convex.ts:
+// вершины на 22.5°+45k), поэтому:
+//
+//   M(A) ⊕ (−M(B)) = M(A ⊕ (−B))          ⇒  ОБЕ детали отражены — это отражение готового NFP.
+//
+// Отсюда для канонической записи (A в роли A, без зеркала, поворот 0) ровно ДВА семейства:
+//
+//   N0(a,b,r) = nfp(A,        R(r)·B)      — обе как разобраны;
+//   X0(a,b,r) = nfp(A,   R(r)·M·B)         — РАЗНОХИРАЛЬНАЯ пара, новая геометрия.
+//
+// и любой запрос сводится к одному из них (вывод в get()):
+//
+//   N(a@ra^fa, b@rb^fb) = R(ra) · M^fa · E(a, b, fa ? −rel : rel),   rel = rb − ra,
+//                          E = fa≠fb ? X0 : N0
+//
+// то есть «перейти в хиральность детали A»: когда A отражена, отражается вся система, а rel
+// меняет знак. Разнохиральную пару отражением НЕ ПОЛУЧИТЬ — M выносится только за ОБА
+// операнда сразу, — и это не мелочь: левая полочка рядом с правой это как раз она. Зато её
+// зеркальный близнец (A отражена, B нет) получается отражением из X0, поэтому из четырёх
+// комбинаций хиральностей считаются две. Итог: не ×4, а ×2, и только для тех пар, где зеркало
+// реально заказано.
+//
+// Порядок id снимается теми же двумя тождествами (одно на семейство):
+//   N0(a,b,r) = Rot(r+180)·N0(b,a,−r)        X0(a,b,r) = Rot(r+180)·M·X0(b,a,r)
+// — во втором rel НЕ меняет знак, а M остаётся. Оба проверены в probe («NFP зеркала»:
+// сравнение с честным пересчётом по уже преобразованным частям, все ветви).
 import { Clipper, FillRule, Path64, Point64 } from 'clipper2-js';
 import type { Pt, RotationDeg } from '../types';
 import { SCALE, toPath64 } from '../geom/clipper';
 import { gapOctagon, minkowskiSumConvex, negate } from '../geom/convex';
 
+// Хиральность варианта: 0 — как разобрано, 1 — зеркало (types.ts, M: x ↦ −x, ДО поворота).
+// Число, а не boolean, потому что этим индексируется геометрия варианта.
+export type Flip = 0 | 1;
+
+// Вариант детали на полосе. Gene и PlacedGene удовлетворяют ему структурно, поэтому
+// placement зовёт nfps.get(q.piece, q, g.piece, g) без единой аллокации.
+export type Variant = { readonly rot: RotationDeg; readonly flip: Flip };
+
 export type PreparedPiece = {
   id: number;
   // Uninflated contour per rotation (cm, local origin) + bounds — placement geometry.
-  polyAt: Record<RotationDeg, Pt[]>;
-  boundsAt: Record<RotationDeg, { minX: number; minY: number; maxX: number; maxY: number }>;
+  // Индекс — ХИРАЛЬНОСТЬ: [0] как разобрано, [1] зеркало. У зеркала те же габариты (ширина и
+  // высота не меняются), но ДРУГИЕ смещения: контур из [0,w] уезжает в [−w,0], и размещатель
+  // считает поля полосы именно по ним.
+  polyAt: readonly [Record<RotationDeg, Pt[]>, Record<RotationDeg, Pt[]>];
+  boundsAt: readonly [
+    Record<RotationDeg, { minX: number; minY: number; maxX: number; maxY: number }>,
+    Record<RotationDeg, { minX: number; minY: number; maxX: number; maxY: number }>,
+  ];
   // Convex decomposition of the RDP-simplified contour at rotation 0 — NFP input.
-  parts0: Pt[][];
+  // parts0[1] — ОТРАЖЕНИЕ parts0[0], а не разложение отражённого контура: отражение аффинно,
+  // выпуклость сохраняет, стоит один проход и — в отличие от повторного разложения — даёт
+  // побитово согласованную пару (Hertel–Mehlhorn на зеркальном контуре вправе выбрать другое,
+  // столь же законное разбиение, и тогда две хиральности одной детали разъехались бы в NFP).
+  parts0: readonly [Pt[][], Pt[][]];
   areaCm2: number;
 };
 
@@ -113,22 +171,37 @@ function rotPart(part: readonly Pt[], rot: RotationDeg): Pt[] {
   }
 }
 
-function rotPath64(paths: readonly Path64[], rot: RotationDeg): Path64[] {
+// Отражение выпуклой части, x ↦ −x (types.ts). Обход при этом меняется на противоположный;
+// minkowskiSumConvex прогоняет результат через выпуклую оболочку, которая нормализует его
+// обратно в CCW, так что дальше по конвейеру направление обхода не разъезжается.
+export function mirrorParts(parts: readonly Pt[][]): Pt[][] {
+  return parts.map((part) => part.map((p) => ({ x: -p.x, y: p.y })));
+}
+
+// Отражение и поворот целых путей — ЦЕЛОЧИСЛЕННЫЕ и точные (никакой тригонометрии): именно
+// поэтому тождества выше не стоят ни микрона точности.
+//
+// Отражение переворачивает обход каждой петли, включая дырки. Для теста «строго внутри»
+// (place.ts, NonZero) это безразлично: у всех петель число оборотов меняет знак разом, а
+// признак «≠ 0» от знака не зависит, и связка «внешняя петля + её дырка» сохраняется.
+function xformPath64(paths: readonly Path64[], rot: RotationDeg, flip: Flip): Path64[] {
   return paths.map((path) => {
     const out = new Path64();
     for (const q of path) {
+      const x = flip ? -q.x : q.x;
+      const y = q.y;
       switch (rot) {
         case 0:
-          out.push(q);
+          out.push(flip ? new Point64(x, y) : q);
           break;
         case 90:
-          out.push(new Point64(-q.y, q.x));
+          out.push(new Point64(-y, x));
           break;
         case 180:
-          out.push(new Point64(-q.x, -q.y));
+          out.push(new Point64(-x, -y));
           break;
         case 270:
-          out.push(new Point64(q.y, -q.x));
+          out.push(new Point64(y, -x));
           break;
       }
     }
@@ -195,13 +268,31 @@ export function unionBatched(parts: Path64[]): Path64[] {
   // region-preserving, ~10× slower — a Union-based "repair" of the bitten result was
   // tried twice and produced 258 cm² craters both times; this library's Union cannot be
   // trusted with a multi-path region plus patches).
+  //
+  // ОБА ОПЕРАНДА ЭТОЙ ПРОВЕРКИ — КОПИИ, и это не осторожность, а починка. clipper2-js ПИШЕТ В
+  // ПЕРЕДАННЫЕ ПУТИ: на 480 случайных частях реальной формы Difference испортил 123 субъекта
+  // (26 %) и 38 путей клипа (8 %), а Union — ни одного. Найдено пробой «NFP зеркала», которая
+  // сравнивает записи кэша с честным пересчётом: у части вершина уезжала на 1.00 см ВНУТРЬ, из
+  // (10.55, −6.2278) в (10.55, −5.2278).
+  //
+  // Кому это стоило правды: субъекты здесь — те самые выпуклые части Минковского, которые
+  // nest/place.ts держит АВТОРИТЕТОМ допустимости и о которых шапка этого файла обещает «never
+  // touched a boolean op»; клип — объединение, по границе которого берутся кандидаты. Перехлёста
+  // это само по себе не давало (посадка в итоге проверяется по НАСТОЯЩИМ контурам, place.ts,
+  // verify), но запретная область молча становилась меньше обещанной. На реальном файле
+  // «summer men.dxf» (45 деталей) починка дала 731.7 см вместо 763.7 при том же бюджете.
+  //
+  // Копируется ровно то, что Difference трогает, и ни путём больше: дерево объединения выше
+  // работает на оригиналах (Union по замеру не мутирует), а копирование каждой части в кэше NFP
+  // стоит времени предпросчёта — на «blazer.dxf» лишний проход копирования съедал ~20 пар из 420
+  // и выводил прогон за обещанный бюджет.
   const maxWidthUnits = 5;
   let covered = true;
   const CHECK_BATCH = 32;
   for (let i = 0; i < parts.length && covered; i += CHECK_BATCH) {
     const residual = Clipper.Difference(
-      parts.slice(i, i + CHECK_BATCH),
-      result,
+      parts.slice(i, i + CHECK_BATCH).map(clonePath64),
+      result.map(clonePath64),
       FillRule.NonZero,
     ) as Path64[];
     for (const r of residual) {
@@ -224,6 +315,13 @@ export function unionBatched(parts: Path64[]): Path64[] {
     acc = Clipper.Union([...acc, parts[i]], undefined, FillRule.NonZero) as Path64[];
   }
   return acc;
+}
+
+// Копия пути ВМЕСТЕ С ТОЧКАМИ: clipper2-js правит сами Point64, поэтому копии массива мало.
+function clonePath64(path: Path64): Path64 {
+  const out = new Path64();
+  for (const q of path) out.push(new Point64(q.x, q.y));
+  return out;
 }
 
 type CanonicalNfp = { paths: Path64[]; parts: Path64[] };
@@ -257,13 +355,21 @@ export class NfpCache {
 
   // Canonical NFP for the UNORDERED pair, at relative rotation `rel`, with the
   // lower-id piece in the A role. Everything else derives from it.
-  private canonical(a: PreparedPiece, b: PreparedPiece, rel: RotationDeg): CanonicalNfp {
-    const key = `${a.id}|${b.id}|${rel}`;
+  //
+  // `bFlip` — хиральность детали B относительно A: 0 — одинаковые (N0), 1 — разные (X0,
+  // «левая рядом с правой»). A в каноне всегда без зеркала: за неё отвечает M на выходе.
+  private canonical(
+    a: PreparedPiece,
+    b: PreparedPiece,
+    rel: RotationDeg,
+    bFlip: Flip,
+  ): CanonicalNfp {
+    const key = `${a.id}|${b.id}|${rel}|${bFlip}`;
     let entry = this.cache.get(key);
     if (!entry) {
       const parts: Path64[] = [];
-      for (const pa of a.parts0) {
-        for (const pb of b.parts0) {
+      for (const pa of a.parts0[0]) {
+        for (const pb of b.parts0[bFlip]) {
           const hull = minkowskiSumConvex(pa, negate(rotPart(pb, rel)));
           const withGap = this.gapOct.length > 1 ? minkowskiSumConvex(hull, this.gapOct) : hull;
           parts.push(toPath64(withGap));
@@ -296,40 +402,70 @@ export class NfpCache {
   }
 
   // Precompute the canonical entry (NFP prepass) — same normalization as get().
-  ensure(a: PreparedPiece, b: PreparedPiece, rel: RotationDeg): void {
+  ensure(a: PreparedPiece, b: PreparedPiece, rel: RotationDeg, bFlip: Flip = 0): void {
     if (a.id <= b.id) {
-      this.canonical(a, b, rel);
+      this.canonical(a, b, rel, bFlip);
+    } else if (bFlip === 0) {
+      this.canonical(b, a, deg(360 - rel), 0);
     } else {
-      this.canonical(b, a, ((360 - rel) % 360) as RotationDeg);
+      // X0(a,b,r) = Rot(r+180)·M·X0(b,a,r) — rel НЕ меняет знак (см. шапку).
+      this.canonical(b, a, rel, 1);
     }
   }
 
-  private rotatedVariant(canonicalKey: string, entry: CanonicalNfp, rot: RotationDeg): NfpPaths {
-    const key = `${canonicalKey}|${rot}`;
+  private rotatedVariant(
+    canonicalKey: string,
+    entry: CanonicalNfp,
+    rot: RotationDeg,
+    flip: Flip,
+  ): NfpPaths {
+    const key = `${canonicalKey}|${rot}|${flip}`;
     let v = this.rotated.get(key);
     if (!v) {
-      const rp = rotPath64(entry.paths, rot);
-      const rparts = rotPath64(entry.parts, rot);
+      const rp = xformPath64(entry.paths, rot, flip);
+      const rparts = xformPath64(entry.parts, rot, flip);
       v = { paths: rp, boxes: rp.map(boxOf), parts: rparts, partBoxes: rparts.map(boxOf) };
       this.rotated.set(key, v);
     }
     return v;
   }
 
-  // NFP of (A at rotA) vs (B at rotB): forbidden positions of B's local origin relative
-  // to A's, in the strip frame; the caller offsets candidates by A's position instead of
-  // translating paths. CACHE-OWNED and readonly — never mutate the returned arrays.
-  get(a: PreparedPiece, rotA: RotationDeg, b: PreparedPiece, rotB: RotationDeg): NfpPaths {
-    const rel = ((((rotB - rotA) % 360) + 360) % 360) as RotationDeg;
+  // NFP of (A in variant va) vs (B in variant vb): forbidden positions of B's local origin
+  // relative to A's, in the strip frame; the caller offsets candidates by A's position
+  // instead of translating paths. CACHE-OWNED and readonly — never mutate the returned
+  // arrays.
+  //
+  // Вывод (nfp(X,Y) = X ⊕ (−Y); зазор опущен — восьмиугольник симметричен относительно M и
+  // поворотов на 90°, поэтому проходит через все тождества нетронутым):
+  //
+  //   A' = R(ra)·M^fa·A = M^fa·R(±ra)·A,   B' = R(rb)·M^fb·B
+  //   fa = 0:  nfp(A',B') = R(ra)·[ A ⊕ (−R(rel)·M^fb·B) ]           = R(ra)·E(a,b,rel)
+  //   fa = 1:  nfp(A',B') = M·[ R(−ra)A ⊕ (−R(−rb)·M^(1−fb)·B) ]     = R(ra)·M·E(a,b,−rel)
+  //
+  // где E = N0 при fa=fb и X0 при fa≠fb. Обе строки — одна: «перейти в хиральность A».
+  get(a: PreparedPiece, va: Variant, b: PreparedPiece, vb: Variant): NfpPaths {
+    const rel = deg(vb.rot - va.rot);
+    const mixed: Flip = va.flip === vb.flip ? 0 : 1;
+    // Канон берётся в системе A: если A отражена, отражается вся пара, а rel меняет знак.
+    const r = va.flip ? deg(-rel) : rel;
     if (a.id <= b.id) {
-      const key = `${a.id}|${b.id}|${rel}`;
-      return this.rotatedVariant(key, this.canonical(a, b, rel), rotA);
+      const key = `${a.id}|${b.id}|${r}|${mixed}`;
+      return this.rotatedVariant(key, this.canonical(a, b, r, mixed), va.rot, va.flip);
     }
-    // Reflection identity: NFP_0(a,b,rel) = Rot(rel+180)·NFP_0(b,a,(360−rel)); the output
-    // rotation composes on top, so the total is a single exact 90°-multiple rotation.
-    const relC = ((360 - rel) % 360) as RotationDeg;
-    const total = ((((rotA + rel + 180) % 360) + 360) % 360) as RotationDeg;
-    const key = `${b.id}|${a.id}|${relC}`;
-    return this.rotatedVariant(key, this.canonical(b, a, relC), total);
+    // Порядок id. Оба тождества (см. шапку) добавляют поворот на r+180 — со знаком, который
+    // задаёт уже накопленное зеркало (M·R(θ) = R(−θ)·M), — а разнохиральное ещё и своё M,
+    // которое с M от va.flip схлопывается:
+    //   N0: ключ (b,a,−r), выход M^fa,       поворот ra ± (r+180)
+    //   X0: ключ (b,a, r), выход M^(1−fa),   поворот ra ± (r+180)
+    const outFlip: Flip = mixed ? ((1 - va.flip) as Flip) : va.flip;
+    const outRot = deg(va.rot + (va.flip ? -(r + 180) : r + 180));
+    const entryRel = mixed ? r : deg(-r);
+    const key = `${b.id}|${a.id}|${entryRel}|${mixed}`;
+    return this.rotatedVariant(key, this.canonical(b, a, entryRel, mixed), outRot, outFlip);
   }
+}
+
+// Приведение угла к 0/90/180/270 — деление по модулю, устойчивое к отрицательным.
+function deg(v: number): RotationDeg {
+  return (((v % 360) + 360) % 360) as RotationDeg;
 }
