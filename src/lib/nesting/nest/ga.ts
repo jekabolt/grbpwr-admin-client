@@ -51,19 +51,19 @@ export type GaOptions = {
 const POP = 10;
 const MUTATION_P = 0.1;
 
-// Fitness cost of ONE unplaced instance, in the same units as marker length (cm).
+// Fitness cost of ONE unplaced instance, DERIVED from the strip bound rather than asserted.
 //
-// Load-bearing, not cosmetic. Fitness is «how long is the marker», and the moment the
-// placer became able to answer «не влезло» (Ф0), a run that DROPS a piece scores SHORTER
-// than one that seats it — so the plain length would have made the search actively seek out
-// orders that lose pieces, and the winner would look like the best marker on the screen.
-// The penalty is larger than any physically possible marker (lMax is bounded by every piece
-// laid end to end), so an order that seats more instances always beats one that seats fewer,
-// and length only ever breaks ties among equally complete orders.
-const UNPLACED_PENALTY_CM = 1e7;
-
-function fitnessOf(res: PlacementResult): number {
-  return res.usedLengthCm + res.unplaced.length * UNPLACED_PENALTY_CM;
+// Load-bearing, not cosmetic. Fitness is «how long is the marker», and the moment the placer
+// became able to answer «не влезло» (Ф0), a run that DROPS a piece scores SHORTER than one
+// that seats it — so plain length would have made the search actively seek out orders that
+// lose pieces, and the winner would look like the best marker on the screen.
+//
+// lMax is every piece laid end to end, i.e. the longest marker this job can physically
+// produce, so one unplaced instance costs more than any complete layout ever can and seating
+// more instances always wins. A hard-coded constant would have been a claim about the input
+// («no marker is ever this long») that nothing checks.
+function fitnessOf(res: PlacementResult, lMaxCm: number): number {
+  return res.usedLengthCm + res.unplaced.length * (lMaxCm + 1);
 }
 
 function evaluate(ind: Individual, opts: GaOptions, abort?: () => boolean): PlacementResult | null {
@@ -71,7 +71,7 @@ function evaluate(ind: Individual, opts: GaOptions, abort?: () => boolean): Plac
   // never assign a piece a rotation outside its own allowed set.
   const genes = ind.order.map((gi) => ({ ...opts.genesBase[gi], rot: ind.rots[gi] }));
   const res = placeOrder(genes, opts.fabricWidthCm, opts.edgeMarginCm, opts.lMaxCm, opts.nfps, abort);
-  if (res) ind.fitness = fitnessOf(res);
+  if (res) ind.fitness = fitnessOf(res, opts.lMaxCm);
   return res;
 }
 
@@ -200,6 +200,13 @@ export async function runGa(
     // back null, and this line then re-ran the whole placement with the lazy NFP misses that
     // made it slow in the first place. Cancel now means cancel; the caller reports an empty
     // result as cancelled rather than as a marker.
+    //
+    // The queue is drained FIRST, and that is not decoration: in the worker `cancel` is a
+    // MESSAGE, so a stop posted while the GA was grinding has not been delivered yet, and
+    // polling the flag without yielding reads the value from before the operator pressed it.
+    // One await is the difference between honouring that stop and re-running the slowest
+    // placement in the job to answer it.
+    await new Promise((r) => setTimeout(r, 0));
     best = evaluate(seedInd, opts, () => opts.isCancelled());
     evaluated++;
   }

@@ -26,12 +26,19 @@ export function parseFiles(
   return { raws, unit: parsed.unit, unitGuessed: parsed.unitGuessed };
 }
 
-// Bytes of one uploaded sheet, decoupled from the browser's File so the same pipeline
-// runs off the main thread AND in the node probe (scripts/nest-probe.mjs). The probe is
-// the only place the engine's promises get measured against true geometry, so it has to
-// walk the code path the worker walks — a probe that rebuilt its own pieces would be
-// measuring a second implementation.
-export type SheetBytes = { name: string; buf: ArrayBuffer };
+// One uploaded sheet, decoupled from the browser's File so the same pipeline runs off the
+// main thread AND in the node probe (scripts/nest-probe.mjs). The probe is the only place
+// the engine's promises get measured against true geometry, so it has to walk the code path
+// the worker walks — a probe that rebuilt its own pieces would be measuring a second
+// implementation.
+//
+// The bytes arrive through a THUNK rather than as an ArrayBuffer, and both halves of that
+// matter. Reading them inside this function keeps a failed read as ONE failed sheet (a
+// rejected read hoisted to the caller took the whole batch down with it, where before it
+// cost one warning and the other sheets still parsed); and reading them one at a time keeps
+// worker memory at one sheet instead of all of them — these files run 0.5–1.7 MB each, and
+// nothing here needs two at once.
+export type SheetBytes = { name: string; open: () => Promise<ArrayBuffer> };
 
 export type ParsedSheets = {
   pieces: PieceDTO[];
@@ -45,7 +52,10 @@ export type ParsedSheets = {
 // Parse a batch of sheets into placement-ready pieces. Ids are minted across the batch
 // (1-based) because everything downstream — the marker blob, the cut-piece aliases, the
 // nest config — addresses a piece by that id.
-export function parseSheets(sheets: readonly SheetBytes[], opts: ParseOpts): ParsedSheets {
+export async function parseSheets(
+  sheets: readonly SheetBytes[],
+  opts: ParseOpts,
+): Promise<ParsedSheets> {
   const warnings: string[] = [];
   const pieces: PieceDTO[] = [];
   let detectedUnit: Exclude<Unit, 'auto'> = 'mm';
@@ -55,7 +65,7 @@ export function parseSheets(sheets: readonly SheetBytes[], opts: ParseOpts): Par
 
   for (const sheet of sheets) {
     try {
-      const { raws, unit, unitGuessed } = parseFiles(sheet.buf, opts, warnings);
+      const { raws, unit, unitGuessed } = parseFiles(await sheet.open(), opts, warnings);
       detectedUnit = unit;
       if (unitGuessed) warnings.push(`${sheet.name}: единицы не заданы в файле — принято ${unit}`);
       for (const raw of raws) {

@@ -8,13 +8,13 @@
 // mistake one level up.
 import type { NestConfig, NestResult, PieceDTO, Pt } from '../src/lib/nesting/types';
 import { NEST_DEFAULTS } from '../src/lib/nesting/types';
-import { parseSheets } from '../src/lib/nesting/worker/parse-files';
+import { parseSheets, type SheetBytes } from '../src/lib/nesting/worker/parse-files';
 import { orientToGrain } from '../src/lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from '../src/lib/nesting/geom/seam-allowance';
 import { nest } from '../src/lib/nesting/nest';
 
 export type ProbeInput = {
-  sheets: { name: string; buf: ArrayBuffer }[];
+  sheets: SheetBytes[];
   grainLayer?: string;
   contourLayer?: string;
   // Instances per piece. 1 = one of each parsed piece.
@@ -131,9 +131,56 @@ function hash(s: string): string {
 
 // ── the run ────────────────────────────────────────────────────────────────────────────
 
+// Verification of a finished layout against the TRUE contours, callable on any run — the
+// synthetic probes need it as much as the real-file one. Keeping it here rather than inline
+// in probe() is what stopped `yarn nest:probe` (which has no DXF to chew on) from asserting
+// no geometry at all.
+export function verifyPlacements(
+  pieces: readonly PieceDTO[],
+  result: NestResult,
+  cfg: { gapCm: number; fabricWidthCm: number; edgeMarginCm: number },
+): { minClearanceCm: number; overlaps: number; shortPairs: number; outsideWidth: number } {
+  const byId = new Map(pieces.map((p) => [p.id, p]));
+  const placed = result.placements.map((pl) => {
+    const dto = byId.get(pl.pieceId)!;
+    return rotate(dto.poly, pl.rot).map((q) => ({ x: q.x + pl.x, y: q.y + pl.y }));
+  });
+  let minClearanceCm = Infinity;
+  let overlaps = 0;
+  let shortPairs = 0;
+  for (let i = 0; i < placed.length; i++) {
+    for (let j = i + 1; j < placed.length; j++) {
+      const m = pairMeasure(placed[i], placed[j]);
+      if (m.overlap) {
+        overlaps++;
+        minClearanceCm = 0;
+        continue;
+      }
+      if (m.dist < minClearanceCm) minClearanceCm = m.dist;
+      // 1e-6 slack: the placer works in integer units of 1/1000 cm.
+      if (m.dist < cfg.gapCm - 1e-6) shortPairs++;
+    }
+  }
+  let outsideWidth = 0;
+  for (const p of placed) {
+    for (const q of p) {
+      if (q.y < cfg.edgeMarginCm - 1e-6 || q.y > cfg.fabricWidthCm - cfg.edgeMarginCm + 1e-6) {
+        outsideWidth++;
+        break;
+      }
+    }
+  }
+  return {
+    minClearanceCm: minClearanceCm === Infinity ? -1 : minClearanceCm,
+    overlaps,
+    shortPairs,
+    outsideWidth,
+  };
+}
+
 export async function probe(input: ProbeInput): Promise<ProbeOutput> {
   const opts = { unit: 'auto' as const, tol: NEST_DEFAULTS.tol, tolChain: NEST_DEFAULTS.tolChain };
-  const { pieces: parsed } = parseSheets(input.sheets, opts);
+  const { pieces: parsed } = await parseSheets(input.sheets, opts);
 
   const byLayer = new Map<string, number>();
   for (const p of parsed) byLayer.set(p.layer ?? '', (byLayer.get(p.layer ?? '') ?? 0) + 1);
@@ -185,40 +232,11 @@ export async function probe(input: ProbeInput): Promise<ProbeOutput> {
   });
 
   // ── verification against the true contours the marker promises ──
-  const byId = new Map(pieces.map((p) => [p.id, p]));
-  const placedPolys = result.placements.map((pl) => {
-    const dto = byId.get(pl.pieceId)!;
-    const r = rotate(dto.poly, pl.rot);
-    return { key: `${pl.pieceId}:${pl.instance}`, pts: r.map((q) => ({ x: q.x + pl.x, y: q.y + pl.y })) };
-  });
-
-  let minClearanceCm = Infinity;
-  let overlaps = 0;
-  let shortPairs = 0;
-  const gap = config.gapCm;
-  for (let i = 0; i < placedPolys.length; i++) {
-    for (let j = i + 1; j < placedPolys.length; j++) {
-      const m = pairMeasure(placedPolys[i].pts, placedPolys[j].pts);
-      if (m.overlap) {
-        overlaps++;
-        minClearanceCm = 0;
-        continue;
-      }
-      if (m.dist < minClearanceCm) minClearanceCm = m.dist;
-      // 1e-6 slack: the placer works in integer units of 1/1000 cm.
-      if (m.dist < gap - 1e-6) shortPairs++;
-    }
-  }
-
-  let outsideWidth = 0;
-  for (const p of placedPolys) {
-    for (const q of p.pts) {
-      if (q.y < config.edgeMarginCm - 1e-6 || q.y > config.fabricWidthCm - config.edgeMarginCm + 1e-6) {
-        outsideWidth++;
-        break;
-      }
-    }
-  }
+  const { minClearanceCm, overlaps, shortPairs, outsideWidth } = verifyPlacements(
+    pieces,
+    result,
+    config,
+  );
 
   const blobHash = hash(
     JSON.stringify(

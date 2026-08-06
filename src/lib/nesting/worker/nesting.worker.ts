@@ -21,12 +21,22 @@ const cancelled = new Set<number>();
 
 async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<void> {
   const seq = ++parseSeq;
-  const sheets: SheetBytes[] = [];
-  for (const file of files) sheets.push({ name: file.name, buf: await file.arrayBuffer() });
+  // Thunks, not buffers: parseSheets reads each sheet inside its own try, so one unreadable
+  // file stays one failed file instead of killing the batch, and only one sheet's bytes are
+  // resident at a time.
+  const sheets: SheetBytes[] = files.map((file) => ({
+    name: file.name,
+    open: () => file.arrayBuffer(),
+  }));
 
   // Same call the node probe makes (scripts/nest-probe.mjs) — the measurement has to walk
   // the pipeline the operator walks, not a second copy of it.
-  const { pieces: out, detectedUnit: detected, warnings, failedFiles } = parseSheets(sheets, opts);
+  const {
+    pieces: out,
+    detectedUnit: detected,
+    warnings,
+    failedFiles,
+  } = await parseSheets(sheets, opts);
 
   // Every file failed → that's an error, not a note with an empty piece list.
   if (files.length > 0 && failedFiles === files.length) {

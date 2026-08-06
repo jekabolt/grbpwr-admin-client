@@ -383,7 +383,22 @@ export function NestingModal({
   // marker on screen is the seed order — big-piece-first greedy — and nothing was searched.
   // The word «оптимизировано» over that number was the screen's own lie: the operator waited
   // the full budget and got the layout the engine would have produced in one pass.
-  const greedyOnly = !viewData && !running && displayResult != null && displayResult.generation === 0;
+  // Guarded on FOUR things, because generation===0 alone describes three different runs and
+  // this callout is only true of one of them. A run the operator STOPPED also has generation
+  // 0, and telling them «поиск не начинался, дайте больше времени» blames the budget for their
+  // own click — the exact species of lie this change exists to remove. A run with nothing
+  // placed has no greedy layout to describe either. And the hard-stop path (use-nesting.ts)
+  // resolves to the last progress frame, whose `cancelled` is false because progress frames
+  // are built before anyone cancelled — so `run.stopped` is the only reliable «this was
+  // stopped» signal, and both are checked.
+  const greedyOnly =
+    !viewData &&
+    !running &&
+    displayResult != null &&
+    displayResult.generation === 0 &&
+    displayResult.placements.length > 0 &&
+    !displayResult.cancelled &&
+    !(run.phase === 'done' && run.stopped);
   const simplified =
     displayResult?.telemetry && displayResult.telemetry.rdpEpsCm > displayResult.telemetry.requestedRdpEpsCm
       ? displayResult.telemetry
@@ -790,7 +805,11 @@ export function NestingModal({
         unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
         config: {
           targetLengthCm: target,
-          rdpEpsCm: NEST_DEFAULTS.rdpEpsCm,
+          // The eps the run ACTUALLY used, not the one it asked for. The engine raises it when
+          // the job is too big to precompute at the requested fidelity (Ф0), and storing the
+          // request would make params.rdpEpsCm a lie — read by exactly the person trying to
+          // reproduce this marker, who would reproduce a different one.
+          rdpEpsCm: effective?.telemetry?.rdpEpsCm ?? NEST_DEFAULTS.rdpEpsCm,
           timeBudgetMs: budgetS * 1000,
         },
         tol: NEST_DEFAULTS.tol,

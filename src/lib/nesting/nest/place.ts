@@ -298,11 +298,16 @@ export function placeOrder(
     const yLo = m - bMinY;
     const yHi = W - m - bMaxY;
     if (yLo > yHi || xLo > xHi) {
-      // Cannot fit the width in this rotation. Prep filters pieces that fit in NO rotation,
-      // so reaching here means the GA chose a rotation this piece cannot wear — the gene is
-      // reported rather than silently vanishing, which is what made placedCount drop with no
-      // reason attached.
-      unplaced.push({ pieceId: g.piece.id, instance: g.instance, reason: 'width' });
+      // Two different failures, and they must not share a word. yLo > yHi is «шире полосы в
+      // этом повороте» — prep filters pieces that fit in NO rotation, so reaching it means the
+      // GA chose a rotation this piece cannot wear. xLo > xHi is «длиннее полосы», i.e. lMax
+      // was under-budgeted; reporting that as a width problem would send the operator to look
+      // at the fabric width, which is not the thing that is wrong.
+      unplaced.push({
+        pieceId: g.piece.id,
+        instance: g.instance,
+        reason: yLo > yHi ? 'width' : 'no-space',
+      });
       continue;
     }
 
@@ -406,10 +411,20 @@ function toResult(
 // left this the longest uninterruptible tail in the engine: «стоп» was checked once BEFORE
 // compaction and never again, so a stop pressed at second 3 of a 40-second compaction was
 // answered at second 40 (in the UI, by killing the worker after 1.5 s and throwing the run
-// away). A cancelled run returns what it has and says so; a run nobody cancelled walks
-// exactly the passes it walked before, so the determinism the clock argument protects is
-// untouched.
-export function compactPlacements(
+// away).
+//
+// The function is ASYNC for one reason, and it is the whole reason: in the worker `cancel`
+// arrives as a MESSAGE, and a message cannot be dispatched while the worker sits inside
+// synchronous code. A cancel flag polled from a synchronous loop is therefore invariantly
+// false no matter how often it is polled — the first version of this fix polled 390 times
+// per run and could not have observed a single cancel. The queue has to be drained, so the
+// loop yields, and only then does the poll mean anything.
+//
+// Yielding cannot move the RESULT: nothing in here reads a clock, so a run nobody cancelled
+// walks exactly the passes it walked before and produces the same marker. That is precisely
+// the distinction the "no wall-clock deadline" rule above is protecting — truncating by TIME
+// makes output machine-dependent; pausing and resuming does not.
+export async function compactPlacements(
   genes: readonly PlacedGene[],
   fabricWidthCm: number,
   edgeMarginCm: number,
@@ -417,7 +432,7 @@ export function compactPlacements(
   nfps: NfpCache,
   maxPasses = 3,
   isCancelled?: () => boolean,
-): PlacementResult {
+): Promise<PlacementResult> {
   const m = Math.round(edgeMarginCm * SCALE);
   const W = Math.round(fabricWidthCm * SCALE);
   const L = Math.round(lMaxCm * SCALE);
@@ -425,10 +440,17 @@ export function compactPlacements(
 
   const extent = (p: PlacedGene): number => p.x + Math.round(p.piece.boundsAt[p.rot].maxX * SCALE) + m;
 
+  // Drain the message queue every ~16 ms so a posted cancel can actually be delivered. Time
+  // decides only WHEN to yield, never what the pass does — see the header.
+  let lastYield = Date.now();
   for (let pass = 0; pass < maxPasses; pass++) {
     let moved = false;
     const order = work.map((_, i) => i).sort((i, j) => work[i].x - work[j].x || i - j);
     for (const i of order) {
+      if (isCancelled && Date.now() - lastYield >= 16) {
+        await new Promise((r) => setTimeout(r, 0));
+        lastYield = Date.now();
+      }
       // Polled per piece, not per pass: one pass over 130 instances is seconds long, and a
       // stop must not have to wait for it. Every piece in `work` holds a position that was
       // feasible when it was written, so returning mid-pass returns a valid marker.

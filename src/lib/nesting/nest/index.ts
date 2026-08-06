@@ -207,6 +207,11 @@ export async function nest(
   const rotsOf = new Map<number, Gene['allowedRots']>();
   for (const g of genesBase) if (!rotsOf.has(g.piece.id)) rotsOf.set(g.piece.id, g.allowedRots);
 
+  // Timed from HERE, not from the first NFP pair: the ladder below decomposes every unique
+  // piece at every rung it tries, finest first, and those are the most expensive
+  // decompositions in the job. That time is spent preparing geometry and belongs in the
+  // number the screen attributes to preparing geometry.
+  const prepassStarted = Date.now();
   const hullCap = Math.max(1, config.timeBudgetMs * PREPASS_SHARE * HULLS_PER_MS);
   const ladder = [config.rdpEpsCm, ...EPS_LADDER.filter((e) => e > config.rdpEpsCm)];
   let effectiveEps = config.rdpEpsCm;
@@ -245,10 +250,21 @@ export async function nest(
   }
 
   // Length never limits placement: bound = every piece end-to-end plus gaps and margins.
+  //
+  // Budgeted against the WORST seat, which is the frontier fallback in placeOrder: it costs a
+  // piece's own width plus TWO edge margins (`x = usedLength + m - bMinX` ⇒ usedLength grows by
+  // w + 2m), and the old `max(w,h) + gap` per gene under-budgeted that by ~2·margin each. With
+  // a 2 cm margin and 45 instances the under-budget was ~157 cm against ~14 cm of slack, and
+  // overflowing it no longer merely wasted a slot: since Ф0 an overflowing piece is DROPPED and
+  // charged the unplaced penalty. The bound is free — it only sizes an unbounded strip.
   const lMax =
     genesBase.reduce((s, g) => {
       const b = g.piece.boundsAt[0];
-      return s + Math.max(b.maxX - b.minX, b.maxY - b.minY) + config.gapCm;
+      return (
+        s +
+        Math.max(b.maxX - b.minX, b.maxY - b.minY) +
+        Math.max(config.gapCm, 2 * config.edgeMarginCm)
+      );
     }, 0) +
     2 * config.edgeMarginCm +
     10;
@@ -271,7 +287,6 @@ export async function nest(
       for (const rel of rels) pairs.push([uniquePieces[i], uniquePieces[j], rel]);
     }
   }
-  const prepassStarted = Date.now();
   onProgress({ phase: 'nfp', nfpDone: 0, nfpTotal: pairs.length });
   let nfpDone = 0;
   // Yield on a TIME cadence rather than every 4 pairs: a pair ranges from 0.8 ms to 50 ms
@@ -321,12 +336,12 @@ export async function nest(
     maxGenerations: MAX_GENERATIONS,
     seed: hashString(seedString),
     isCancelled,
-    onGeneration: (p) =>
-      onProgress({
-        phase: 'ga',
-        generation: p.generation,
-        best: finalize(p.best, p.generation, false),
-      }),
+    onGeneration: (p) => {
+      // evaluated is reported LIVE rather than only at the end: a telemetry field that reads 0
+      // on every streamed frame is a wrong number, not a missing one.
+      if (telemetry) telemetry = { ...telemetry, evaluated: p.evaluated };
+      onProgress({ phase: 'ga', generation: p.generation, best: finalize(p.best, p.generation, false) });
+    },
   });
   telemetry = { ...telemetry, evaluated };
 
@@ -349,7 +364,7 @@ export async function nest(
     // No wall-clock deadline: the pass cap alone bounds the cost, and a clock-truncated
     // compaction made same-seed results machine-dependent for a ≤0.008 cm gain. Cancel is
     // a different question and IS honoured (see compactPlacements).
-    const compacted = compactPlacements(
+    const compacted = await compactPlacements(
       placedGenes,
       config.fabricWidthCm,
       config.edgeMarginCm,

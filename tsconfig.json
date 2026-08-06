@@ -16,6 +16,10 @@
     "skipLibCheck": true,
     "noEmit": true
   },
-  "include": ["src", "global.d.ts", "vite.config.ts"],
+  // scripts/ is in here for one file: the раскладка probe. esbuild bundles it by stripping
+  // types WITHOUT checking them, so before this the only measuring instrument the engine has
+  // was the only code the repo's only gate did not cover — it would have rotted against a
+  // NestResult change and surfaced as a runtime `undefined` in the middle of a measurement.
+  "include": ["src", "scripts", "global.d.ts", "vite.config.ts"],
   "exclude": ["node_modules", "dist"]
 }
