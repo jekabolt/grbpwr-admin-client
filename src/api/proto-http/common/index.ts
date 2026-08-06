@@ -2565,15 +2565,23 @@ export type TechCardBomItem = {
   // interlining, insulation): those are the four families cloth is measured and laid out by, and a
   // purpose on a thread or a button would be data no screen ever shows and the later pattern-binding
   // work would have to un-pick. UNSET is legal everywhere and is what an unsorted line carries.
-  purpose: TechCardBomPurpose | undefined;
+  // OPTIONAL, и это несущее. Админка — SPA на Vercel, вкладки живут через деплои, а карточка
+  // сохраняется целиком. Без явного присутствия старый бандл, который про эти поля не знает,
+  // прислал бы proto3-дефолты — UNSET и false, — и сохранение стёрло бы назначение у ВСЕХ строк
+  // карточки. Стирание было бы вдобавок бесследным: этих полей нет в дайджесте подписи, а NULL
+  // неотличим от «ещё не разложили». Отсутствие поля означает «не трогай», а не «очисти».
+  purpose?: TechCardBomPurpose;
   // Free-text explanation, accepted ONLY when purpose is OTHER (rejected otherwise, and the DB
   // agrees via chk_bom_item_purpose_note). Optional even then: "другое" without an explanation is a
   // real answer, and demanding one just farms junk text.
-  purposeNote: string | undefined;
+  // Optional по той же причине, что и purpose — отсутствие означает «не трогай».
+  purposeNote?: string;
   // Семпловая: this line is the yardage the SAMPLE is sewn from. A flag, not a ninth purpose — a
   // sample is assembled from a sample MAIN plus a sample LINING, and as a purpose value both would
   // collapse into one bucket and lose the role that makes them useful.
-  isSample: boolean | undefined;
+  // Optional по той же причине: голый bool от старого бандла приходит как false и снял бы признак
+  // со всех строк карточки разом.
+  isSample?: boolean;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).

@@ -659,7 +659,7 @@ function BomTile({
           {/* Семпловая rides INSIDE its purpose group as a badge, never as a group of its own: a
               sample is a sample MAIN plus a sample LINING, and a «семплы» heading would put those
               two in one bucket and throw away the roles that make them useful. */}
-          {row.isSample ? <Pill tone='attention'>семпл</Pill> : null}
+          {row.isSample ? <Pill tone='ink'>семпл</Pill> : null}
         </div>
 
         {/* The ROLE, bold — the slot's identity. The article is the line below it. */}
@@ -1011,9 +1011,9 @@ export function BomField({
                   not a category, and nothing filled it in automatically on purpose. */}
               {g.unsorted && (
                 <Text variant='label' size='micro'>
-                  Эти ткани заведены до появления назначения — ничего не проставлялось
-                  автоматически, потому что «основная / карманка / контраст» отличаются только тем,
-                  зачем они в изделии. Откройте карточку и выберите назначение.
+                  У этих тканей назначение не задано. Автоматически оно не проставляется:
+                  «основная / карманка / контраст» отличаются только тем, зачем они в изделии, и
+                  угадать это по секции нельзя. Откройте карточку и выберите назначение.
                 </Text>
               )}
               <Tiles min={160}>
