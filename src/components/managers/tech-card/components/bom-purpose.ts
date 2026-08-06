@@ -178,3 +178,152 @@ export function groupBomLines(lines: GroupableLine[]): BomGroup[] {
   });
   return groups;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// FABRIC SCOPE (0267) — what a выкройка and a cut-piece alias are bound to.
+//
+// They used to name a concrete BOM LINE. They now name a НАЗНАЧЕНИЕ, because at card level
+// everything a градалка draws is a CLASS: «это лекало основной ткани», «эта деталь кроится из
+// подкладки». The concrete line matters only where the ARTICLE matters — the раскладка (width and
+// selvedge come off the article the colourway pins) and the production run — and neither of those
+// is a property of the sheet.
+//
+// The transition is ADDITIVE and this is the whole of it: existing cards have NO purposes (0265
+// deliberately back-filled nothing, because section=fabric is exactly where карманка, контраст and
+// сетка hide and a guess would label all three «основной материал» confidently and wrongly), so a
+// sheet bound to line L cannot migrate — L has no purpose to move to. Both fields coexist, and
+// resolution is always:
+//
+//     purpose first, else the legacy line.
+//
+// Mirrors internal/entity/fabric_scope.go. The two sides spell a purpose differently (the enum name
+// here, the lowercase stored value there), so the KEYS differ — but the PARTITION they induce is
+// identical, and the partition is the only thing either side reasons about.
+
+/** A cloth line of the card, as the bindings see it. `purpose` empty = not sorted yet. */
+export type RollGoodsLine = {
+  lineKey: string;
+  purpose?: string;
+  name?: string;
+  section?: string;
+};
+
+/**
+ * One binding target. A purpose scope owns EVERY line sorted into it (several is the norm — that is
+ * the point of назначение); an unsorted line is its own scope, which is exactly how the whole panel
+ * behaved before 0267 and is why an unsorted card is untouched by any of this.
+ */
+export type FabricScope<L extends RollGoodsLine = RollGoodsLine> = {
+  /** COALESCE(purpose, lineKey) — the uniqueness bucket, mirroring the DB's generated scope_key. */
+  key: string;
+  byPurpose: boolean;
+  /** Generic in the line type so callers keep the extra per-line facts (width, кромка) they carry. */
+  lines: L[];
+};
+
+/** THE rule, pure half: no BOM needed, so the dedupe checks can run anywhere. */
+export function fabricScopeKey(purpose?: string, bomLineKey?: string): string {
+  const p = (purpose ?? '').trim();
+  if (p && p !== UNSET_PURPOSE) return p;
+  return (bomLineKey ?? '').trim();
+}
+
+/** The scope an alias row files under. */
+export function aliasScopeKey(a: { fabricPurpose?: string; bomLineKey?: string }): string {
+  return fabricScopeKey(a.fabricPurpose, a.bomLineKey);
+}
+
+/**
+ * Fold the card's cloth lines into the scopes the panel groups by: one per назначение present, in
+ * the owner's order, then one per UNSORTED line in BOM order.
+ *
+ * An unsorted line trailing its own group rather than being folded into MAIN is the same choice
+ * groupBomLines makes on the BOM tab, and for the same reason: «not sorted yet» must stay visibly
+ * different from «sorted, and the answer is основной материал».
+ */
+export function fabricScopes<L extends RollGoodsLine>(lines: L[]): FabricScope<L>[] {
+  const byPurpose = new Map<string, L[]>();
+  const loose: FabricScope<L>[] = [];
+  for (const l of lines) {
+    if (!l.lineKey) continue;
+    const p = l.purpose && l.purpose !== UNSET_PURPOSE ? l.purpose : '';
+    if (!p) {
+      loose.push({ key: l.lineKey, byPurpose: false, lines: [l] });
+      continue;
+    }
+    byPurpose.set(p, [...(byPurpose.get(p) ?? []), l]);
+  }
+  const ordered: FabricScope<L>[] = [];
+  const known = new Set<string>(bomPurposeOrder as string[]);
+  bomPurposeOrder.forEach((p) => {
+    const ls = byPurpose.get(p);
+    if (ls?.length) ordered.push({ key: p, byPurpose: true, lines: ls });
+  });
+  // A purpose this build does not know (a card saved by a newer client) still has to render its
+  // sheets — under its raw value rather than vanishing from the panel that claims to list them.
+  [...byPurpose.keys()]
+    .filter((p) => !known.has(p))
+    .sort()
+    .forEach((p) => ordered.push({ key: p, byPurpose: true, lines: byPurpose.get(p)! }));
+  return [...ordered, ...loose];
+}
+
+/**
+ * Resolution for DISPLAY: which scope does a STORED binding belong to? This is the case that
+ * usually breaks mid-sort, so it is worth stating plainly — a sheet bound to line L, whose L has
+ * SINCE been sorted into назначение P, belongs to P's group. Matching the sheet's raw scope key
+ * against the group keys would strand it as «без материала» the moment the operator sorted the BOM,
+ * which is precisely the "you sorted and lost your work" outcome the additive design exists to avoid.
+ *
+ * Returns '' when nothing resolves — a genuinely loose sheet (uploaded before 0260, or its line was
+ * deleted/reclassified).
+ */
+export function scopeKeyOfBinding(
+  purpose: string | undefined,
+  bomLineKey: string | undefined,
+  scopes: FabricScope<RollGoodsLine>[],
+): string {
+  const p = (purpose ?? '').trim();
+  if (p && p !== UNSET_PURPOSE) {
+    return scopes.some((s) => s.key === p) ? p : '';
+  }
+  const line = (bomLineKey ?? '').trim();
+  if (!line) return '';
+  return scopes.find((s) => s.lines.some((l) => l.lineKey === line))?.key ?? '';
+}
+
+/**
+ * What to WRITE for a scope. The compatibility line rides along only when the scope owns exactly
+ * ONE line: with several there is no single honest answer, and inventing one is how a class quietly
+ * becomes an article — which is the confusion this whole change exists to remove. An unsorted scope
+ * writes the line and no purpose, i.e. byte-for-byte what the panel wrote before 0267.
+ */
+export function bindingForScope<L extends RollGoodsLine>(
+  scope: FabricScope<L>,
+): { fabricPurpose: string; bomLineKey: string } {
+  if (!scope.byPurpose) return { fabricPurpose: '', bomLineKey: scope.key };
+  return {
+    fabricPurpose: scope.key,
+    bomLineKey: scope.lines.length === 1 ? scope.lines[0].lineKey : '',
+  };
+}
+
+/**
+ * Does a STORED alias belong to this scope? The mid-sort question again, and the one that decides
+ * whether «детали кроя» shows a card's existing work or silently offers to redo it.
+ *
+ * An alias written before the card was sorted carries the LINE. Once that line is sorted into
+ * назначение P, the alias still belongs to P's group — comparing raw scope keys would say otherwise
+ * and the dialog would offer every already-mapped block again, minting a second alias for the same
+ * physical piece.
+ */
+export function aliasInScope<L extends RollGoodsLine>(
+  a: { fabricPurpose?: string; bomLineKey?: string },
+  scope: FabricScope<L>,
+): boolean {
+  const p = (a.fabricPurpose ?? '').trim();
+  if (p && p !== UNSET_PURPOSE) return scope.byPurpose && scope.key === p;
+  const line = (a.bomLineKey ?? '').trim();
+  if (!line) return false;
+  return scope.lines.some((l) => l.lineKey === line);
+}

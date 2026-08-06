@@ -18,7 +18,11 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
-import { PatternUploadButton, PatternUploadModal } from 'ui/components/pattern-upload-button';
+import {
+  PatternUploadButton,
+  PatternUploadModal,
+  type UploadedPattern,
+} from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
@@ -30,6 +34,13 @@ import {
   patternFileError,
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
+import {
+  type FabricScope,
+  bindingForScope,
+  bomPurposeLabel,
+  fabricScopes,
+  scopeKeyOfBinding,
+} from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
 import { markerColorways } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
@@ -74,8 +85,28 @@ type PatternRow = {
   uploadedAt?: string;
   lineKey?: string;
   bomLineKey?: string;
+  // НАЗНАЧЕНИЕ this sheet is cut from (0267). Resolved BEFORE bomLineKey everywhere — see
+  // bom-purpose.ts for why both exist and why neither may be read alone.
+  fabricPurpose?: string;
 };
 type Entry = { row: PatternRow; index: number };
+
+// Одна рулонная строка BOM, как её видит панель выкроек: идентичность, роль по секции, назначение
+// (0267) и read-only обогащение 0259, из которого раскладка берёт полезную ширину.
+type FabricLine = {
+  id: number;
+  lineKey: string;
+  name: string;
+  section: string;
+  purpose: string;
+  role: string;
+  unit: string;
+  fabricWidth: string;
+  wastagePercent: string;
+  effectiveFabricWidthCm: string;
+  selvedgeCm: string;
+  order: number;
+};
 
 // What the operator calls the sheet — the display name when given, else the filename.
 function labelOf(row?: PatternRow): string {
@@ -199,7 +230,7 @@ export function PatternsField({
   const [dragKey, setDragKey] = useState<string | null>(null);
   // Files dropped onto a material group, staged for the naming modal (click uploads stage inside
   // PatternUploadButton; drops land here because the modal must know which cloth was aimed at).
-  const [droppedOn, setDroppedOn] = useState<{ bomLineKey: string; files: File[] } | null>(null);
+  const [droppedOn, setDroppedOn] = useState<{ scopeKey: string; files: File[] } | null>(null);
   // The pattern sheet open in the in-app viewer (null = closed). Legacy PDF and DXF rows share
   // this state and split into the two viewers at the bottom.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
@@ -213,14 +244,17 @@ export function PatternsField({
   const [nesting, setNesting] = useState<{
     sizeId: number;
     files: NestingFile[];
-    // The fabric these sheets are bound to; '' for legacy unbound DXFs, which the modal then
-    // asks about as before.
+    // The concrete BOM LINE these sheets lay out on, which is a DIFFERENT question from what the
+    // panel groups by. A раскладка measures cloth: its width and кромка come off the article the
+    // colourway pins to ONE line, so a class («основной материал») does not determine it. Filled
+    // only when the scope owns exactly one line; '' otherwise — for a назначение spanning two
+    // articles, and for legacy unbound DXFs, the modal asks, exactly as it already did.
     bomLineKey: string;
   } | null>(null);
   // «сопоставить детали»: the same DXF set, opened against the cut-piece list instead of the
   // nesting engine (null = closed).
   const [matching, setMatching] = useState<{
-    bomLineKey: string;
+    scope: FabricScope<FabricLine>;
     fabricName: string;
     files: NestingFile[];
   } | null>(null);
@@ -235,6 +269,7 @@ export function PatternsField({
     effectiveFabricWidthCm?: string;
     selvedgeCm?: string;
     lineKey?: string;
+    purpose?: string;
     id?: number;
   }>;
   const fabricBomLines = useMemo(
@@ -246,6 +281,7 @@ export function PatternsField({
           lineKey: b.lineKey!,
           name: b.name ?? '',
           section: b.section ?? '',
+          purpose: b.purpose ?? '',
           role: ROLE_OF_SECTION.get(b.section ?? '') ?? '',
           unit: b.unit ?? '',
           fabricWidth: b.fabricWidth ?? '',
@@ -265,18 +301,32 @@ export function PatternsField({
         ),
     [bomItems],
   );
-  // Every fabric line of the card, saved or not. The card save upserts the BOM BEFORE it
-  // reconciles patterns and aliases (techcard.go: bom at :1185, aliases :1198, patterns :1223),
-  // so a line added on the BOM tab a moment ago resolves by the time its key is used. Filtering
-  // on a server id would have left a brand-new card with no slot control at all — and therefore
-  // no binding, no per-fabric раскладка and no matching — until after a save and a return trip.
-  const uploadSlots = useMemo(
-    () => fabricBomLines.map((b) => ({ lineKey: b.lineKey, name: b.name, role: b.role })),
-    [fabricBomLines],
-  );
-  const liveFabricKeys = useMemo(
-    () => new Set(fabricBomLines.map((b) => b.lineKey)),
-    [fabricBomLines],
+  // Скоупы — то, к чему выкройка привязывается с 0267: одна группа на НАЗНАЧЕНИЕ и одна на каждую
+  // ещё не разложенную строку. У неразобранной карточки назначений нет вовсе, поэтому каждая
+  // строка остаётся своей группой — то есть панель ведёт себя ровно как до 0267, без единого
+  // действия оператора. Разложил BOM по назначениям — группы схлопнулись сами.
+  //
+  // Строки берутся из формы, сохранённые и нет. Сейв карточки апсертит BOM ДО того, как сверяет
+  // выкройки и алиасы (techcard.go: bom :1185, aliases :1198, patterns :1223), так что строка,
+  // заведённая на вкладке BOM минуту назад, резолвится к моменту использования ключа.
+  const scopes = useMemo(() => fabricScopes(fabricBomLines), [fabricBomLines]);
+  // Подпись скоупа. У назначения — само назначение и артикулы, которые в него разложены: «основной
+  // материал · Твил 1, Твил 2». Одно назначение законно владеет несколькими строками, и оператору
+  // всё ещё нужно видеть, какими именно. У неразобранной строки — «роль · название», как и было.
+  const scopeLabel = (s: FabricScope<FabricLine>): string => {
+    if (!s.byPurpose) {
+      const l = s.lines[0];
+      return [l?.role, l?.name.trim()].filter(Boolean).join(' · ') || 'без названия';
+    }
+    const names = s.lines
+      .map((l) => l.name.trim())
+      .filter(Boolean)
+      .join(', ');
+    return [bomPurposeLabel(s.key), names].filter(Boolean).join(' · ');
+  };
+  const uploadScopes = useMemo(
+    () => scopes.map((s) => ({ key: s.key, label: scopeLabel(s) })),
+    [scopes],
   );
 
   // Structure (order, ids) from the array snapshot; values from the live form state so
@@ -307,32 +357,31 @@ export function PatternsField({
   // перестала рисовать, исчезла бы с карточки при первом же сохранении — молча.
   const pdfEntries = useMemo(() => entries.filter((e) => !isDxfUrl(e.row.url)), [entries]);
 
-  const dxfByFabric = useMemo(() => {
+  // Лист раскладывается по РАЗРЕШЁННОМУ скоупу, а не по тому, что записано в строке. Это и есть
+  // место, которое ломается на полуразобранной карточке: лист привязан к строке L, L потом
+  // разложили в назначение P — и если сопоставлять сырой ключ с ключами групп, лист вываливается в
+  // «без материала» ровно в момент, когда оператор навёл порядок в BOM. scopeKeyOfBinding ведёт его
+  // за своей строкой в группу назначения, поэтому разбор BOM ничего не теряет.
+  const dxfByScope = useMemo(() => {
     const m = new Map<string, Entry[]>();
     for (const e of dxfEntries) {
-      const key = e.row.bomLineKey ?? '';
+      const key = scopeKeyOfBinding(e.row.fabricPurpose, e.row.bomLineKey, scopes);
       const list = m.get(key) ?? [];
       list.push(e);
       m.set(key, list);
     }
     return m;
-  }, [dxfEntries]);
+  }, [dxfEntries, scopes]);
 
-  // Один блок на материал, в порядке ролей. Материал без файлов остаётся в списке: пустая
-  // строка «нет DXF» — это и есть дыра, а не повод не рисовать материал.
-  const materialGroups = useMemo(
-    () => fabricBomLines.map((b) => ({ ...b, entries: dxfByFabric.get(b.lineKey) ?? [] })),
-    [fabricBomLines, dxfByFabric],
+  // Один блок на скоуп. Скоуп без файлов остаётся в списке: пустая строка «нет DXF» — это и есть
+  // дыра, а не повод не рисовать материал.
+  const scopeGroups = useMemo(
+    () => scopes.map((s) => ({ scope: s, entries: dxfByScope.get(s.key) ?? [] })),
+    [scopes, dxfByScope],
   );
   // DXF без живой привязки: залитые до 0260 (ключа нет вовсе) и те, чью строку BOM удалили или
   // переклассифицировали. Раскладка для них — догадка, поэтому они собраны отдельно и с ошибкой.
-  const looseDxf = useMemo(
-    () =>
-      [...dxfByFabric.entries()]
-        .filter(([key]) => !key || !liveFabricKeys.has(key))
-        .flatMap(([, list]) => list),
-    [dxfByFabric, liveFabricKeys],
-  );
+  const looseDxf = useMemo(() => dxfByScope.get('') ?? [], [dxfByScope]);
 
   const filesOf = (list: Entry[]): NestingFile[] =>
     list.map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
@@ -348,14 +397,19 @@ export function PatternsField({
     return m;
   }, [sizeIds, sizeById]);
 
-  // Подпись слота в выпадающих списках: «подкладка · Cupro 90». Одна и та же «Cupro 90» может
-  // стоять и подкладкой, и карманкой — по имени они неразличимы, так что роль выводится рядом.
-  const slotLabel = (s: { name: string; role: string }) =>
-    [s.role, s.name.trim()].filter(Boolean).join(' · ') || 'без названия';
-  const slotLabelByKey = useMemo(
-    () => new Map(fabricBomLines.map((b) => [b.lineKey, slotLabel(b)])),
-    [fabricBomLines],
-  );
+  // Подпись скоупа по его ключу — чтобы подсказка «по другой ткани» в диалоге сопоставления могла
+  // сказать, ПО КАКОЙ. Ключи здесь и в сохранённых алиасах могут не совпадать на полуразобранной
+  // карточке (алиас лежит на строке, группа уже на назначении), поэтому в карту кладутся ОБА: ключ
+  // скоупа и ключ каждой его строки. Иначе подсказка молча теряла бы имя и читалась бы как факт.
+  const scopeLabelByKey = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of scopes) {
+      const label = scopeLabel(s);
+      m.set(s.key, label);
+      for (const l of s.lines) if (!m.has(l.lineKey)) m.set(l.lineKey, label);
+    }
+    return m;
+  }, [scopes]);
 
   // Размеры карточки, которых в разобранных файлах не оказалось. Считается КАЖДЫЙ РАЗ, а не
   // хранится: ряд правится на этой же вкладке, прямо над панелью.
@@ -371,35 +425,41 @@ export function PatternsField({
   // бы неопровергаемым: снять его можно только залив тот же файл вторым объектом, что удваивает
   // скачивание и разводит скоуп алиасов. Заменять счётчик, который занижал, на индикатор, который
   // завышает, — не улучшение.
-  const isMainFabric = (g: { section: string }) => g.section === 'TECH_CARD_BOM_SECTION_FABRIC';
-  const materialsWithoutDxf = materialGroups.filter(
-    (g) => g.entries.length === 0 && isMainFabric(g),
-  );
-  const rollGoodsWithoutOwnDxf = materialGroups.filter(
-    (g) => g.entries.length === 0 && !isMainFabric(g),
+  // «Раскроить нечем» — красный флаг ТОЛЬКО у основного материала. У неразобранной строки это
+  // по-прежнему section=fabric (ровно как до 0267), у разобранной — назначение «основной
+  // материал». Это и есть выигрыш от разбора: карманка и контраст сегодня тоже section=fabric и
+  // получают красный флаг, которого не заслуживают; разложи их — и флаг сам уйдёт туда, где ему
+  // место, потому что назначение говорит роль, а секция — только вид товара.
+  const isMainScope = (g: { scope: FabricScope<FabricLine> }) =>
+    g.scope.byPurpose
+      ? g.scope.key === 'TECH_CARD_BOM_PURPOSE_MAIN'
+      : g.scope.lines[0]?.section === 'TECH_CARD_BOM_SECTION_FABRIC';
+  const materialsWithoutDxf = scopeGroups.filter((g) => g.entries.length === 0 && isMainScope(g));
+  const rollGoodsWithoutOwnDxf = scopeGroups.filter(
+    (g) => g.entries.length === 0 && !isMainScope(g),
   );
   // Строки, чей size_id вне ряда карточки. Размер — артефакт хранения, но сервер всё равно
   // сверяет его с размерным рядом и отвергает такую строку, роняя ВЕСЬ сейв карточки.
   const outOfRange = entries.filter((e) => !inRange.has(e.row.sizeId ?? 0));
-  const missingSizeNotes = materialGroups.flatMap((g) => {
+  const missingSizeNotes = scopeGroups.flatMap((g) => {
     if (g.entries.length === 0) return [];
     const missing = missingIn(audits[sigOf(g.entries)]);
     if (missing.length === 0) return [];
-    return [`${slotLabel(g)} — нет ${missing.map(nameOf).join(', ')}`];
+    return [`${scopeLabel(g.scope)} — нет ${missing.map(nameOf).join(', ')}`];
   });
 
-  const canUpload = canEdit && uploadSlots.length > 0 && sizeIds.length > 0;
+  const canUpload = canEdit && uploadScopes.length > 0 && sizeIds.length > 0;
 
   // Drop path of the naming modal: pre-flight here (instant feedback, same guards the
   // server enforces), then stage the good files for naming + upload.
-  function stageDrop(bomLineKey: string, list: FileList | null) {
+  function stageDrop(scopeKey: string, list: FileList | null) {
     // Array.from, not spread — FileList iteration needs lib dom.iterable, which tsconfig omits.
     const files = list ? Array.from(list) : [];
     if (files.length === 0) return;
     const checked = files.map((f) => ({ f, err: patternFileError(f, { dxfOnly: true }) }));
     for (const x of checked) if (x.err) showMessage(`${x.f.name}: ${x.err}`, 'error');
     const good = checked.filter((x) => !x.err).map((x) => x.f);
-    if (good.length > 0) setDroppedOn({ bomLineKey, files: good });
+    if (good.length > 0) setDroppedOn({ scopeKey, files: good });
   }
 
   async function runAudit(list: Entry[]) {
@@ -422,6 +482,18 @@ export function PatternsField({
     }
   }
 
+  // Загрузчик возвращает НЕПРОЗРАЧНЫЙ ключ скоупа: контрол живёт в ui/ и не обязан знать ни про
+  // назначения, ни про строки BOM. Разворачивает его в два поля провода здесь — в одном месте, тем
+  // же bindingForScope, которым пользуется и селект в строке.
+  function toRow(p: UploadedPattern): Omit<UploadedPattern, 'scopeKey'> & {
+    fabricPurpose: string;
+    bomLineKey: string;
+  } {
+    const { scopeKey, ...rest } = p;
+    const picked = scopes.find((x) => x.key === scopeKey);
+    return { ...rest, ...(picked ? bindingForScope(picked) : { fabricPurpose: '', bomLineKey: '' }) };
+  }
+
   function commitRename(index: number, value: string) {
     // '' is a legal committed value — it clears the name and the row falls back to the
     // filename (the save path still sends name explicitly, so the clear reaches the server).
@@ -441,6 +513,9 @@ export function PatternsField({
     const uploaded = formatTechCardDate(row.uploadedAt);
     const uploadedOn = uploaded === '—' ? null : uploaded;
     const stray = !inRange.has(row.sizeId ?? 0);
+    // Разрешённый скоуп строки: сначала назначение, иначе строка BOM — и с поправкой на то, что
+    // строка могла с тех пор попасть в назначение. '' = ни к чему живому не ведёт.
+    const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
 
     return (
       <div key={row.lineKey || `row-${index}`} className='border-b border-hairline py-1'>
@@ -542,30 +617,41 @@ export function PatternsField({
             )}
           </div>
         )}
-        {/* Fabric binding, editable in place. It has to be reachable after upload too:
-            every DXF uploaded before 0260 has none, and without this the раскладка for
-            those rows would stay a guess forever. Legacy PDFs are left alone — a sheet a human
-            reads is not cut from anything. */}
-        {dxf && uploadSlots.length > 0 && editing?.index !== index && (
+        {/* Cloth binding, editable in place. It has to be reachable after upload too: every DXF
+            uploaded before 0260 has none, and without this the раскладка for those rows would stay
+            a guess forever. Legacy PDFs are left alone — a sheet a human reads is not cut from
+            anything.
+
+            Пишутся ОБА поля разом, через bindingForScope: назначение — то, чем лист привязан, а
+            строка едет рядом только когда назначение владеет ровно одной. Записать одно и оставить
+            другое как было — это и есть способ получить лист, который в панели лежит в одной ткани,
+            а на сервере разрешается в другую. */}
+        {dxf && uploadScopes.length > 0 && editing?.index !== index && (
           <select
             className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
             aria-label={`материал для ${labelOf(row)}`}
-            value={row.bomLineKey ?? ''}
+            value={rowScope}
             disabled={isSubmitting || !canEdit}
-            onChange={(e) =>
-              setValue(`patterns.${index}.bomLineKey`, e.target.value, { shouldDirty: true })
-            }
+            onChange={(e) => {
+              const picked = scopes.find((x) => x.key === e.target.value);
+              const b = picked ? bindingForScope(picked) : { fabricPurpose: '', bomLineKey: '' };
+              setValue(`patterns.${index}.fabricPurpose`, b.fabricPurpose, { shouldDirty: true });
+              setValue(`patterns.${index}.bomLineKey`, b.bomLineKey, { shouldDirty: true });
+            }}
           >
-            <option value=''>материал не выбран</option>
-            {/* A binding whose line was deleted or reclassified still EXISTS in form state.
-                Without an option for it the controlled select paints empty and reads as
-                «unbound», so "fixing" it would rebind a sheet the operator thought was free. */}
-            {!!row.bomLineKey && !liveFabricKeys.has(row.bomLineKey) && (
-              <option value={row.bomLineKey}>строка удалена из BOM — выберите заново</option>
-            )}
-            {uploadSlots.map((s) => (
-              <option key={s.lineKey} value={s.lineKey}>
-                {slotLabel(s)}
+            {/* ОДНА пустая опция, с разным текстом. Строка, чью привязку удалили или
+                переклассифицировали, всё ещё несёт её в форме, и селект показывает пустое — но
+                «материал не выбран» здесь читалось бы как «оператор не выбирал», а выбирал:
+                выбор просто перестал на что-то указывать, и это разные новости. Две опции с одним
+                value были бы хуже пустого текста — вторая недостижима, React берёт первую. */}
+            <option value=''>
+              {!rowScope && (!!row.bomLineKey || !!row.fabricPurpose)
+                ? 'привязка потеряна — выберите заново'
+                : 'материал не выбран'}
+            </option>
+            {uploadScopes.map((s) => (
+              <option key={s.key} value={s.key}>
+                {s.label}
               </option>
             ))}
           </select>
@@ -630,26 +716,33 @@ export function PatternsField({
     );
   }
 
-  // Один материал: заголовок с ролью и названием, действия, строки файлов. Вся зона — цель
-  // перетаскивания: вопрос «в какую ткань» единственный, который вообще есть смысл задавать.
-  function renderMaterial(g: (typeof materialGroups)[number]) {
+  // Одна ткань: заголовок с назначением (или ролью нераспределённой строки), действия, строки
+  // файлов. Вся зона — цель перетаскивания: вопрос «в какую ткань» единственный, который вообще
+  // есть смысл задавать.
+  function renderScope(g: (typeof scopeGroups)[number]) {
     const has = g.entries.length > 0;
-    const dragging = dragKey === g.lineKey;
+    const key = g.scope.key;
+    const label = scopeLabel(g.scope);
+    const dragging = dragKey === key;
+    // Раскладка мерит КОНКРЕТНЫЙ артикул: ширина и кромка приходят с пина колорвея на одну строку.
+    // Поэтому запереть её на строку можно только когда назначение владеет ровно одной; иначе
+    // модалка спрашивает сама — ровно как она уже делает для DXF без привязки.
+    const soleLine = g.scope.lines.length === 1 ? g.scope.lines[0].lineKey : '';
     return (
       <div
-        key={g.lineKey}
+        key={key}
         className={dragging ? 'outline outline-2 outline-textColor' : undefined}
         onDragOver={(e) => {
           if (!canUpload) return;
           e.preventDefault();
-          setDragKey(g.lineKey);
+          setDragKey(key);
         }}
-        onDragLeave={() => setDragKey((k) => (k === g.lineKey ? null : k))}
+        onDragLeave={() => setDragKey((k) => (k === key ? null : k))}
         onDrop={(e) => {
           if (!canUpload) return;
           e.preventDefault();
           setDragKey(null);
-          stageDrop(g.lineKey, e.dataTransfer.files);
+          stageDrop(key, e.dataTransfer.files);
         }}
       >
         <GroupLabel
@@ -661,7 +754,7 @@ export function PatternsField({
                   type='button'
                   variant='secondary'
                   size='xs'
-                  title={`авто-раскладка деталей «${g.name || 'без материала'}» на полосе`}
+                  title={`авто-раскладка деталей «${label}» на полосе`}
                   onClick={() =>
                     setNesting({
                       // Размер тут ничего не решает: он выбирается внутри по именам блоков, и
@@ -669,7 +762,7 @@ export function PatternsField({
                       // чей хвост не опознался.
                       sizeId: g.entries[0]?.row.sizeId ?? storageSizeId,
                       files: filesOf(g.entries),
-                      bomLineKey: g.lineKey,
+                      bomLineKey: soleLine,
                     })
                   }
                 >
@@ -684,11 +777,11 @@ export function PatternsField({
                   type='button'
                   variant='secondary'
                   size='xs'
-                  title={`сопоставить детали DXF с деталями кроя для «${g.name || 'без материала'}»`}
+                  title={`сопоставить детали DXF с деталями кроя для «${label}»`}
                   onClick={() =>
                     setMatching({
-                      bomLineKey: g.lineKey,
-                      fabricName: g.name || 'без материала',
+                      scope: g.scope,
+                      fabricName: label,
                       files: filesOf(g.entries),
                     })
                   }
@@ -700,9 +793,9 @@ export function PatternsField({
                 <PatternUploadButton
                   label='+ DXF'
                   dxfOnly
-                  fabricSlots={uploadSlots}
-                  defaultBomLineKey={g.lineKey}
-                  onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...p })}
+                  fabricScopes={uploadScopes}
+                  defaultScopeKey={key}
+                  onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
                   // PatternUploadButton renders a page-sized Button; in a group header it has to
                   // sit at control density. It exposes no `size`, so density is applied here.
                   className='[&_button]:px-1.5 [&_button]:py-px [&_button]:text-nano [&_button]:tracking-label'
@@ -711,7 +804,7 @@ export function PatternsField({
             </div>
           }
         >
-          {g.role} · {g.name.trim() || 'без названия'}
+          {label}
         </GroupLabel>
         {has ? (
           g.entries.map(renderRow)
@@ -719,16 +812,16 @@ export function PatternsField({
           <div className='space-y-0.5'>
             <Placeholder
               dashed
-              tone={isMainFabric(g) ? 'error' : undefined}
+              tone={isMainScope(g) ? 'error' : undefined}
               label='нет dxf'
               className='py-3'
             />
             <Text
               size='nano'
               component='p'
-              className={isMainFabric(g) ? 'text-error' : 'text-labelColor'}
+              className={isMainScope(g) ? 'text-error' : 'text-labelColor'}
             >
-              {isMainFabric(g)
+              {isMainScope(g)
                 ? 'раскроить этот материал нечем'
                 : 'своего DXF нет — возможно, детали лежат в файле основной ткани'}
               {canUpload ? ' — перетащите DXF сюда или нажмите «+ DXF»' : ''}
@@ -769,13 +862,13 @@ export function PatternsField({
           <div className='space-y-0.5'>
             {materialsWithoutDxf.length > 0 && (
               <Text size='micro' component='p'>
-                <b>без DXF:</b> {materialsWithoutDxf.map(slotLabel).join('; ')}
+                <b>без DXF:</b> {materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}
               </Text>
             )}
             {rollGoodsWithoutOwnDxf.length > 0 && (
               <Text size='micro' variant='label' component='p'>
                 своего DXF нет (возможно, в файле основной ткани):{' '}
-                {rollGoodsWithoutOwnDxf.map(slotLabel).join('; ')}
+                {rollGoodsWithoutOwnDxf.map((g) => scopeLabel(g.scope)).join('; ')}
               </Text>
             )}
             {missingSizeNotes.map((n) => (
@@ -813,7 +906,7 @@ export function PatternsField({
           подкладку/бортовку/утеплитель, если они есть) на вкладке BOM.
         </Text>
       ) : (
-        materialGroups.map(renderMaterial)
+        scopeGroups.map(renderScope)
       )}
 
       {sizeIds.length === 0 && fabricBomLines.length > 0 && (
@@ -852,9 +945,9 @@ export function PatternsField({
       <PatternUploadModal
         files={droppedOn?.files ?? null}
         onClose={() => setDroppedOn(null)}
-        onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...p })}
-        fabricSlots={uploadSlots}
-        defaultBomLineKey={droppedOn?.bomLineKey}
+        onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
+        fabricScopes={uploadScopes}
+        defaultScopeKey={droppedOn?.scopeKey}
         dxfOnly
       />
 
@@ -942,9 +1035,9 @@ export function PatternsField({
         >
           <PieceMatchModal
             files={matching.files}
-            bomLineKey={matching.bomLineKey}
+            scope={matching.scope}
             fabricName={matching.fabricName}
-            slotLabelByKey={slotLabelByKey}
+            scopeLabelByKey={scopeLabelByKey}
             sizeLabel=''
             onClose={() => setMatching(null)}
           />

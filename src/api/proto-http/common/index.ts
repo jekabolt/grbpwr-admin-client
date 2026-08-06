@@ -2811,7 +2811,21 @@ export type TechCardSizePattern = {
   // A non-empty value must name a fabric-section BOM line of this card, except when it round-trips
   // the row's stored value unchanged (the slot may have been deleted — the binding then reads as
   // «слот удалён» rather than blocking the save).
+  // LEGACY HALF since 0267 — resolve through fabric_purpose first, never read this alone. It cannot
+  // be migrated away: a sheet bound to line L has no purpose to move to until L is sorted, and 0265
+  // deliberately guessed a purpose for nobody.
   bomLineKey?: string;
+  // fabric_purpose binds the sheet to a НАЗНАЧЕНИЕ (0265) rather than to one BOM line, which is what
+  // a выкройка actually is at card level: «это лекало основной ткани» is a CLASS. The concrete line
+  // matters only where the ARTICLE does — the раскладка (width/selvedge come off the colourway's
+  // pinned article) and the production run — and neither is stored on this row.
+  // Resolution, everywhere, is: fabric_purpose, else bom_line_key. Both coexist deliberately, so a
+  // card nobody has sorted keeps working untouched and migrates itself when somebody sorts it.
+  // Explicit presence, same rules as `bom_line_key`: ABSENT — the server preserves the stored value;
+  // PRESENT — stored as sent, UNSET clearing it. A value other than UNSET must be a назначение
+  // carried by at least one roll-goods BOM line of this card, except when it round-trips the row's
+  // stored value unchanged.
+  fabricPurpose?: TechCardBomPurpose;
 };
 
 // TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
@@ -3065,9 +3079,18 @@ export type TechCardPieceColorwayMaterial = {
 // fabric's files (all its size DXFs) resolves to one piece. The DB UNIQUE is case-insensitive per
 // (card, slot, block).
 export type TechCardPieceDxfAlias = {
+  // bom_line_key is the LEGACY scope, and on a purpose-scoped row it is compatibility: the writer
+  // records the line here too when the purpose owns exactly ONE line, and leaves it empty when the
+  // purpose owns several (there is no single honest answer then). Required only when fabric_purpose
+  // is UNSET — one of the two must name something.
   bomLineKey: string | undefined;
   blockName: string | undefined;
   pieceLineKey: string | undefined;
+  // fabric_purpose is the scope proper (UNSET = not purpose-scoped; the row falls back to
+  // bom_line_key). Since 0267 the DB UNIQUE is per (card, scope, block) where scope =
+  // COALESCE(fabric_purpose, bom_line_key), so two lines sorted into ONE назначение collapse their
+  // same-named blocks onto ONE alias — the case the client must warn about BEFORE saving.
+  fabricPurpose: TechCardBomPurpose | undefined;
 };
 
 // TechCardPieceDxfAliasSet is a presence wrapper: proto3 cannot distinguish an EMPTY repeated field

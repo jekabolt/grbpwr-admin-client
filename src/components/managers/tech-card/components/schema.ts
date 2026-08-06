@@ -27,7 +27,12 @@ import {
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
-import { UNSET_PURPOSE, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
+import {
+  UNSET_PURPOSE,
+  fabricScopeKey,
+  isOtherPurpose,
+  isRollGoodsSection,
+} from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { z } from 'zod';
 
@@ -124,7 +129,13 @@ const patternSchema = z.object({
   // Which fabric BOM line this sheet is cut from — the binding a раскладка needs to know which
   // cloth (and therefore which width and кромка) a DXF belongs to. '' = unbound: legal for a PDF,
   // and legal for legacy DXF rows uploaded before this existed.
+  //
+  // LEGACY HALF since 0267: resolve through fabricPurpose first (fabricScopeKey). It stays because
+  // it cannot be migrated — a sheet bound to line L has no purpose to move to until L is sorted.
   bomLineKey: z.string().optional().default(''),
+  // The НАЗНАЧЕНИЕ this sheet is cut from (0267) — the honest statement at card level, where no
+  // article is in play. '' = not purpose-bound; the row falls back to bomLineKey.
+  fabricPurpose: z.string().optional().default(''),
 });
 
 const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity = 'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
@@ -525,10 +536,15 @@ const techCardObject = z.object({
   // the same generic block name («полочка») in the main-fabric file and the lining file is two
   // different pieces, which a card-level mapping could not express. Written as a full-replace
   // set alongside the card body.
+  // Since 0267 the scope is the НАЗНАЧЕНИЕ where the card has been sorted and the legacy line where
+  // it has not: scope = fabricPurpose, else bomLineKey. The DB UNIQUE moved with it, so two lines
+  // sorted into ONE назначение collapse their same-named blocks onto ONE alias — see the collapse
+  // guard in techCardSchema's superRefine.
   pieceDxfAliases: z
     .array(
       z.object({
         bomLineKey: z.string().optional().default(''),
+        fabricPurpose: z.string().optional().default(''),
         blockName: z.string().optional().default(''),
         pieceLineKey: z.string().optional().default(''),
       }),
@@ -611,6 +627,46 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
   // blocked the whole main insert (notes/season/labels/sign-offs/…) for any card carrying a
   // legacy free-text BOM line, which loads with materialId: 0 (mapBomItemToForm) — see wave-2a
   // P0 fix. The BOM tile still shows a soft red "! link a material" hint per unlinked line.
+
+  // ALIAS COLLAPSE (0267) — the sharp edge of binding by назначение instead of by line.
+  //
+  // Two BOM lines sorted into ONE назначение merge their DXF alias sets. If both held a block of
+  // the same name — «полочка» in the shell file and «полочка» in the second shell's file — the
+  // merged set has TWO rows under one scope, and the server's UNIQUE (card, scope, block) refuses
+  // the pair by failing the WHOLE card save: not the aliases, the card. Everything the operator
+  // typed on nine other tabs bounces with it.
+  //
+  // So it is caught here, on the client, before the save leaves — a named block and a named pair of
+  // pieces the operator can actually act on, instead of a server refusal after the fact. The path
+  // routes to the PATTERNS tab (ERROR_TAB.pieceDxfAliases), where «детали кроя» lives.
+  //
+  // Only an ACTUAL duplicate scope key is flagged. Two LINE-scoped aliases whose lines happen to
+  // share a назначение are not a problem and must not nag: the server files them under their own
+  // line scopes exactly as it always did, which is the whole point of the additive shape.
+  const aliasSeen = new Map<string, { index: number; piece: string }>();
+  (data.pieceDxfAliases ?? []).forEach((a, index) => {
+    const block = a.blockName?.trim() ?? '';
+    const piece = a.pieceLineKey?.trim() ?? '';
+    if (!block || !piece) return;
+    const key = `${fabricScopeKey(a.fabricPurpose, a.bomLineKey).toLowerCase()}|${block.toLowerCase()}`;
+    const prev = aliasSeen.get(key);
+    if (!prev) {
+      aliasSeen.set(key, { index, piece });
+      return;
+    }
+    if (prev.piece === piece) return; // the same answer twice is harmless; the wire set dedupes it
+    const nameOf = (k: string) =>
+      (data.pieces ?? []).find((p) => p.lineKey?.trim() === k)?.name?.trim() || k;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        `блок «${block}» уже сопоставлен с деталью «${nameOf(prev.piece)}» в этом же назначении — ` +
+        `две детали кроя на один блок сервер не примет и отклонит сохранение всей карты. ` +
+        `Откройте «детали кроя» на вкладке ВЫКРОЙКИ и оставьте одну связь ` +
+        `(сейчас спорят «${nameOf(prev.piece)}» и «${nameOf(piece)}»).`,
+      path: ['pieceDxfAliases', index, 'blockName'],
+    });
+  });
 });
 
 export type TechCardFormData = z.input<typeof techCardObject>;
@@ -837,10 +893,14 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // never re-mints an existing row's key (see patternSchema).
       lineKey: p.lineKey ?? '',
       bomLineKey: p.bomLineKey ?? '',
+      // The server always states presence on read, so UNSET arrives as a real value — normalise it
+      // to '' here so every reader can test the field with a plain truthiness check.
+      fabricPurpose: p.fabricPurpose && p.fabricPurpose !== UNSET_PURPOSE ? p.fabricPurpose : '',
     })),
     // The wrapper is always present on read, so `items` is the authoritative stored set.
     pieceDxfAliases: (insert?.pieceDxfAliases?.items ?? []).map((a) => ({
       bomLineKey: a.bomLineKey ?? '',
+      fabricPurpose: a.fabricPurpose && a.fabricPurpose !== UNSET_PURPOSE ? a.fabricPurpose : '',
       blockName: a.blockName ?? '',
       pieceLineKey: a.pieceLineKey ?? '',
     })),
@@ -1196,6 +1256,11 @@ export function mapFormToTechCardInsert(
         // preserves the stored binding, so a client that owns the field must send '' to unbind
         // rather than fall into carry-forward.
         bomLineKey: p.bomLineKey?.trim() || '',
+        // Same contract on the назначение half (0267): stated on every row, UNSET being the explicit
+        // unbind. Omitting it would put this client in the stale-client lane and make an unbind
+        // silently impossible.
+        fabricPurpose: (p.fabricPurpose?.trim() ||
+          UNSET_PURPOSE) as common_TechCardBomPurpose,
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
@@ -1268,13 +1333,23 @@ export function mapFormToTechCardInsert(
     // piece_line_key with a field violation, which would block the whole save over a row the
     // operator deleted on the pieces tab and never connected to a DXF in their head.
     pieceDxfAliases: {
-      items: (data.pieceDxfAliases ?? []).filter(
-        (a) =>
-          !!a.bomLineKey?.trim() &&
-          !!a.blockName?.trim() &&
-          !!a.pieceLineKey?.trim() &&
-          livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()),
-      ),
+      items: (data.pieceDxfAliases ?? [])
+        .filter(
+          (a) =>
+            // One of the two halves must name something — a row naming neither would file under the
+            // empty scope, where every unbound alias of the card would collide with every other.
+            (!!a.bomLineKey?.trim() || !!a.fabricPurpose?.trim()) &&
+            !!a.blockName?.trim() &&
+            !!a.pieceLineKey?.trim() &&
+            livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()),
+        )
+        .map((a) => ({
+          bomLineKey: a.bomLineKey?.trim() || '',
+          blockName: a.blockName!.trim(),
+          pieceLineKey: a.pieceLineKey!.trim(),
+          fabricPurpose: (a.fabricPurpose?.trim() ||
+            UNSET_PURPOSE) as common_TechCardBomPurpose,
+        })),
     },
     bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,

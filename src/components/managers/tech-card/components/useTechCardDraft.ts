@@ -144,22 +144,53 @@ export function useTechCardDraft(
       // definition from a build whose schema had no lineKey at all. Keying the map by lineKey
       // alone therefore missed every single row it existed to match — the fallback was dead code
       // for exactly its own case, and the merge silently unbound the whole card.
-      const bindingByKey = new Map<string, string>();
+      const bindingByKey = new Map<string, { bomLineKey: string; fabricPurpose: string }>();
       for (const p of loaded.patterns) {
-        if (!p.bomLineKey) continue;
+        if (!p.bomLineKey && !p.fabricPurpose) continue;
+        const binding = { bomLineKey: p.bomLineKey ?? '', fabricPurpose: p.fabricPurpose ?? '' };
         const lk = p.lineKey?.trim();
-        if (lk) bindingByKey.set(lk, p.bomLineKey);
-        bindingByKey.set(`${p.sizeId ?? 0}|${p.url ?? ''}`, p.bomLineKey);
+        if (lk) bindingByKey.set(lk, binding);
+        bindingByKey.set(`${p.sizeId ?? 0}|${p.url ?? ''}`, binding);
       }
       data.patterns = data.patterns.map((p) => {
-        // A current-build draft carries the field, and '' there is a deliberate unbind.
-        if (typeof p.bomLineKey === 'string') return p;
+        // ОБЕ половины привязки, а не одна. С 0267 выкройка ведёт на НАЗНАЧЕНИЕ, а строка
+        // осталась совместимостью. Черновик, снятый до 0267, несёт bomLineKey и НЕ несёт
+        // fabricPurpose — прежняя проверка «поле есть, значит черновик свежий» пропускала такую
+        // строку как есть, zod подставлял '', и сохранение читало это как «очистить назначение».
+        // На карточке, которую с тех пор разложили, это стирало привязку у всех выкроек разом.
+        const hasPurpose = typeof p.fabricPurpose === 'string';
+        const hasLine = typeof p.bomLineKey === 'string';
+        if (hasPurpose && hasLine) return p;
         const lk = p.lineKey?.trim();
         const carried =
           (lk ? bindingByKey.get(lk) : undefined) ??
-          bindingByKey.get(`${p.sizeId ?? 0}|${p.url ?? ''}`) ??
-          '';
-        return { ...p, bomLineKey: carried };
+          bindingByKey.get(`${p.sizeId ?? 0}|${p.url ?? ''}`);
+        return {
+          ...p,
+          bomLineKey: hasLine ? p.bomLineKey : (carried?.bomLineKey ?? ''),
+          fabricPurpose: hasPurpose ? p.fabricPurpose : (carried?.fabricPurpose ?? ''),
+        };
+      });
+    }
+    // Алиасы деталей — тот же перенос, и он ВАЖНЕЕ. Набор алиасов пишется полной заменой, а
+    // строка, у которой пусты обе половины привязки, ОТБРАСЫВАЕТСЯ фильтром на сохранении —
+    // то есть у алиаса, привязанного к назначению с несколькими строками, восстановление
+    // черновика не «отвязывало» бы его, а удаляло с сервера.
+    if (Array.isArray(data.pieceDxfAliases) && Array.isArray(loaded.pieceDxfAliases)) {
+      const scopeByBlock = new Map<string, { bomLineKey: string; fabricPurpose: string }>();
+      for (const a of loaded.pieceDxfAliases) {
+        const block = (a.blockName ?? '').trim().toLowerCase();
+        if (!block) continue;
+        scopeByBlock.set(`${a.bomLineKey ?? ''}|${block}`, {
+          bomLineKey: a.bomLineKey ?? '',
+          fabricPurpose: a.fabricPurpose ?? '',
+        });
+      }
+      data.pieceDxfAliases = data.pieceDxfAliases.map((a) => {
+        if (typeof a.fabricPurpose === 'string') return a;
+        const block = (a.blockName ?? '').trim().toLowerCase();
+        const carried = scopeByBlock.get(`${a.bomLineKey ?? ''}|${block}`);
+        return { ...a, fabricPurpose: carried?.fabricPurpose ?? '' };
       });
     }
     form.reset(data, { keepDefaultValues: true });

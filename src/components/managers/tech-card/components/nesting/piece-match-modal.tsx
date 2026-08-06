@@ -1,12 +1,24 @@
-// «детали кроя из DXF» — DXF block → cut piece, for ONE fabric (design §2.2).
+// «детали кроя из DXF» — DXF block → cut piece, for ONE cloth (design §2.2).
 //
 // The problem this exists for, in the owner's words: block names drift between files, and the
 // same generic name («полочка») means different pieces in the main-fabric file and the lining
-// file. So the mapping is stored SCOPED BY FABRIC (0262, uniq on (card, bom_line_key,
-// block_name)) and the name in the file is never the identity — `tech_card_piece.line_key` is.
-// Once a block is mapped, renaming the piece is a one-place edit and every marker and DXF that
-// mentions the block follows. The same scoping is why a SECOND SIZE of the same fabric needs no
-// work at all: its blocks carry the same names, so they arrive already mapped.
+// file. So the mapping is stored SCOPED BY CLOTH and the name in the file is never the identity —
+// `tech_card_piece.line_key` is. Once a block is mapped, renaming the piece is a one-place edit and
+// every marker and DXF that mentions the block follows. The same scoping is why a SECOND SIZE of
+// the same cloth needs no work at all: its blocks carry the same names, so they arrive already
+// mapped.
+//
+// SINCE 0267 THE SCOPE IS A НАЗНАЧЕНИЕ where the card has been sorted, and the legacy BOM line
+// where it has not (uniq on (card, COALESCE(fabric_purpose, bom_line_key), block_name)). Two
+// consequences run through this whole file:
+//
+//   • «уже сопоставлено» has to be resolved, not raw-keyed. An alias written on line L before the
+//     card was sorted belongs to L's назначение now. Comparing stored keys to the group's key would
+//     offer every mapped block again and mint a second alias for the same physical piece.
+//   • Two lines sorted into ONE назначение MERGE their alias sets, and if both held a «полочка»
+//     the merge has two answers for one block. The server refuses that pair by failing the WHOLE
+//     card save, so it is surfaced HERE, before anything is written, as a choice the operator makes
+//     rather than a refusal they receive.
 //
 // Ф10.1 — the sheet is the primary surface, the list is the index. A block name is whatever the
 // exporter minted («PERED_S», «Block_17»); nobody can tell which piece that is by reading it.
@@ -34,6 +46,13 @@ import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes } from 'utils/pattern';
 import type { TechCardFormData } from '../schema';
+import {
+  type FabricScope,
+  type RollGoodsLine,
+  aliasInScope,
+  aliasScopeKey,
+  bindingForScope,
+} from '../bom-purpose';
 import { splitBlockSize } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
@@ -121,17 +140,21 @@ const MAX_PIECE_NAME = 255;
 
 export function PieceMatchModal({
   files,
-  bomLineKey,
+  scope,
   fabricName,
-  slotLabelByKey,
+  scopeLabelByKey,
   sizeLabel,
   onClose,
 }: {
   files: NestingFile[] | null; // null = closed
-  bomLineKey: string;
+  // The cloth this pass is about: a назначение with every line sorted into it, or a single line
+  // nobody has sorted yet. Both halves matter — the KEY is what gets written, the LINES are what
+  // decides which stored aliases already belong here.
+  scope: FabricScope<RollGoodsLine>;
   fabricName: string;
-  // Подпись слота по его ключу — чтобы подсказка «по другой ткани» могла сказать, ПО КАКОЙ.
-  slotLabelByKey?: Map<string, string>;
+  // Подпись скоупа по его ключу — чтобы подсказка «по другой ткани» могла сказать, ПО КАКОЙ.
+  // Ключи строк тоже есть в карте: подсказка может прийти с алиаса, лежащего ещё на строке.
+  scopeLabelByKey?: Map<string, string>;
   sizeLabel?: string;
   onClose: () => void;
 }) {
@@ -284,16 +307,56 @@ export function PieceMatchModal({
     () => new Set(pieceOptions.map((p) => p.lineKey.toLowerCase())),
     [pieceOptions],
   );
-  const mineByBlock = useMemo(() => {
-    const m = new Map<string, string>();
+  // Blocks the operator has chosen a winner for, among the collapse conflicts below (ci → pieceKey).
+  const [collapseChoice, setCollapseChoice] = useState<Record<string, string>>({});
+
+  // What this scope already maps, and where two stored aliases disagree.
+  //
+  // Membership is RESOLVED (aliasInScope), not raw-keyed: a card sorted a minute ago still has its
+  // aliases on the LINES, and they belong to this назначение now. The collapse falls out of the same
+  // pass — the moment two of them claim one block for two different pieces, the merged set the
+  // server would receive is invalid, and nothing further can be written until a human picks.
+  // STORED half — depends only on what is on the card, never on what the operator is choosing right
+  // now. That separation is load-bearing: the proposal effect below keys off «is this block already
+  // mapped», and folding the live choice into the same memo gave it a new identity on every pick,
+  // re-running the effect and wiping every row choice made above it.
+  const stored = useMemo(() => {
+    const first = new Map<string, string>();
+    const spelling = new Map<string, string>();
+    const conflict = new Map<string, { block: string; pieceKeys: string[] }>();
     for (const a of aliases ?? []) {
-      if ((a.bomLineKey ?? '') !== bomLineKey) continue;
+      if (!aliasInScope(a, scope)) continue;
       const pk = (a.pieceLineKey ?? '').trim();
       if (!livePieceKeys.has(pk.toLowerCase())) continue;
-      m.set(identityOf(a.blockName ?? '').toLowerCase(), pk);
+      const block = identityOf(a.blockName ?? '');
+      const ci = block.toLowerCase();
+      if (!spelling.has(ci)) spelling.set(ci, block);
+      const prev = first.get(ci);
+      if (prev === undefined) {
+        first.set(ci, pk);
+        continue;
+      }
+      if (prev.toLowerCase() === pk.toLowerCase()) continue;
+      const c = conflict.get(ci) ?? { block, pieceKeys: [prev] };
+      if (!c.pieceKeys.some((k) => k.toLowerCase() === pk.toLowerCase())) c.pieceKeys.push(pk);
+      conflict.set(ci, c);
+    }
+    return { first, spelling, collapses: conflict };
+  }, [aliases, scope, livePieceKeys, split]);
+  const mineSpelling = stored.spelling;
+  const collapses = stored.collapses;
+  // A resolved conflict answers as its winner everywhere — sheet, list and write — so the dialog
+  // never shows one thing and saves another. WHICH block is mapped never changes here, only WHICH
+  // PIECE it maps to, so the proposal effect can keep reading the stable map.
+  const mineByBlock = useMemo(() => {
+    if (collapses.size === 0) return stored.first;
+    const m = new Map(stored.first);
+    for (const [ci, chosen] of Object.entries(collapseChoice)) {
+      if (chosen && collapses.has(ci)) m.set(ci, chosen);
     }
     return m;
-  }, [aliases, bomLineKey, livePieceKeys, split]);
+  }, [stored, collapses, collapseChoice]);
+  const unresolvedCollapses = [...collapses.keys()].filter((ci) => !collapseChoice[ci]);
   // Блок с тем же именем, уже сопоставленный на ДРУГОМ слоте. Подсказка полезная, но с тех пор
   // как выкройка привязывается к любой рулонной строке, «другой слот» может быть другой РОЛЬЮ:
   // градалка называет полочку подкладки ровно так же, как полочку верха, а это разные детали
@@ -302,13 +365,17 @@ export function PieceMatchModal({
   const otherFabricByBlock = useMemo(() => {
     const m = new Map<string, { pieceKey: string; fromSlot: string }>();
     for (const a of aliases ?? []) {
-      const from = a.bomLineKey ?? '';
-      if (from === bomLineKey) continue;
+      if (aliasInScope(a, scope)) continue;
+      // The SOURCE key as the alias itself carries it — a назначение when it has one, its line
+      // otherwise. That is what scopeLabelByKey is keyed on both ways, so a hint coming off a
+      // not-yet-sorted line can still name where it came from instead of degrading to «по другой
+      // ткани», which reads as a fact rather than as a guess.
+      const from = aliasScopeKey(a);
       const k = loose(identityOf(a.blockName ?? ''));
       if (!m.has(k)) m.set(k, { pieceKey: a.pieceLineKey ?? '', fromSlot: from });
     }
     return m;
-  }, [aliases, bomLineKey, split]);
+  }, [aliases, scope, split]);
 
   // Rebuild the proposal whenever a parse lands. Blocks this fabric already maps are left out —
   // the dialog is for what is NOT yet answered.
@@ -367,7 +434,7 @@ export function PieceMatchModal({
       // "Already mapped" is tested on the SERVER's key, not on loose(): loose() strips all
       // punctuation, so «полочка 1» stored would have hidden a genuinely distinct «полочка-1»
       // from the dialog with no way to ever map it.
-      if (mineByBlock.has(ci)) continue;
+      if (stored.first.has(ci)) continue;
       let suggested = '';
       let basis: BlockRow['basis'] = 'none';
       let fromSlot = '';
@@ -405,7 +472,7 @@ export function PieceMatchModal({
     }
     next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
     setRows(next);
-  }, [parse, split, contourPieces, pieceOptions, mineByBlock, otherFabricByBlock]);
+  }, [parse, split, contourPieces, pieceOptions, stored, otherFabricByBlock]);
 
   const decided = rows.filter((r) => r.choice).length;
   const alreadyMapped = mineByBlock.size;
@@ -417,19 +484,13 @@ export function PieceMatchModal({
     return [...mineByBlock.entries()]
       .map(([ci, pieceKey]) => ({
         ci,
-        // Matched on the IDENTITY, like `mineByBlock` itself: a stored alias may still spell the
-        // size out, and comparing raw names would miss it and fall back to the bare key.
-        block: identityOf(
-          (aliases ?? []).find(
-            (a) =>
-              (a.bomLineKey ?? '') === bomLineKey &&
-              identityOf(a.blockName ?? '').toLowerCase() === ci,
-          )?.blockName ?? ci,
-        ),
+        // The spelling is remembered on the IDENTITY as the aliases are read: a stored alias may
+        // still spell the size out, and comparing raw names would miss it and fall back to the key.
+        block: mineSpelling.get(ci) ?? ci,
         pieceName: nameByKey.get(pieceKey.toLowerCase()) ?? '—',
       }))
       .sort((a, b) => a.block.localeCompare(b.block, 'ru'));
-  }, [mineByBlock, aliases, bomLineKey, pieceOptions, split]);
+  }, [mineByBlock, mineSpelling, pieceOptions]);
   const toUnmap = unmapped.length;
 
   // ── the sheet ─────────────────────────────────────────────────────────────────────────
@@ -609,16 +670,27 @@ export function PieceMatchModal({
       }
 
       // Rebuilt rather than appended to, so the set this dialog hands over is deduped under the
-      // server's own identity: a second alias for the same (fabric, block) fails the whole card
+      // server's own identity: a second alias for the same (scope, block) fails the whole card
       // save, and nothing else in the app can see or delete the offender.
       //
-      // The slot half is NOT case-folded: it is an opaque ULID, so folding buys nothing and would
-      // merge two fabrics' mappings if slot keys ever stopped being single-case.
-      const aliasKey = (slot: string, block: string) => `${slot}|${normBlock(block).toLowerCase()}`;
-      const byKey = new Map<string, { bomLineKey: string; blockName: string; pieceLineKey: string }>();
+      // The scope half is NOT case-folded: a ULID is opaque and a назначение is a fixed enum name,
+      // so folding buys nothing and would merge two cloths' mappings if either ever stopped being
+      // single-case.
+      const aliasKey = (scopeKey: string, block: string) =>
+        `${scopeKey}|${normBlock(block).toLowerCase()}`;
+      const byKey = new Map<
+        string,
+        { bomLineKey: string; fabricPurpose: string; blockName: string; pieceLineKey: string }
+      >();
+      // Everything this dialog writes is filed under THIS scope's binding — назначение when the card
+      // has been sorted, the line when it has not, with the compatibility line riding along only
+      // when the назначение owns exactly one. That is also what MIGRATES a card sorted a moment ago:
+      // its line-scoped aliases are re-filed here, in one save, without anyone re-doing the work.
+      const bind = bindingForScope(scope);
       const liveKeys = new Set(
         live.map((p) => p.lineKey?.trim().toLowerCase()).filter(Boolean) as string[],
       );
+      // 1. Aliases of OTHER cloths ride through untouched, under their own scopes.
       for (const a of aliases ?? []) {
         // An alias whose piece was deleted is DROPPED, not carried over. The server resolves
         // piece_line_key against this card's pieces and answers `not_found` for one it cannot
@@ -626,6 +698,7 @@ export function PieceMatchModal({
         // dangling alias is excluded from `mineByBlock` so its block can be mapped again). The
         // full-set write makes dropping it the repair.
         if (!liveKeys.has((a.pieceLineKey ?? '').trim().toLowerCase())) continue;
+        if (aliasInScope(a, scope)) continue;
         // Свёрнуто к ИДЕНТИЧНОСТИ и на записи тоже. Читающая сторона (mineByBlock, mappedRows,
         // ciOf, unmapped) вся работает по идентичности, и пока эта петля переносила сырое имя,
         // ключи двух сторон не совпадали: «снять связь» удаляла ключ «B1|bp_1», а алиас лежал
@@ -633,15 +706,26 @@ export function PieceMatchModal({
         // не было. Хуже того, следующее сопоставление того же блока добавляло ВТОРОЙ алиас на
         // ту же физическую деталь, невидимый и неудаляемый ничем, кроме удаления самой детали.
         const ident = identityOf(a.blockName ?? '');
-        byKey.set(aliasKey(a.bomLineKey ?? '', ident), {
+        byKey.set(aliasKey(aliasScopeKey(a), ident), {
           bomLineKey: a.bomLineKey ?? '',
+          fabricPurpose: a.fabricPurpose ?? '',
           blockName: ident,
           pieceLineKey: a.pieceLineKey ?? '',
         });
       }
+      // 2. This scope's own mapping, re-filed under the scope binding. mineByBlock has already
+      // collapsed any conflicting pair onto the winner the operator picked, so this loop writes
+      // exactly one row per block — which is what the UNIQUE index is asking for.
+      for (const [ci, pieceLineKey] of mineByBlock) {
+        byKey.set(aliasKey(scope.key, mineSpelling.get(ci) ?? ci), {
+          ...bind,
+          blockName: mineSpelling.get(ci) ?? ci,
+          pieceLineKey,
+        });
+      }
       // Unmapping is a first-class action: a wrong mapping assigns the wrong cloth to a piece on
       // the cutting floor, and before this the only exit was deleting the target piece.
-      for (const b of unmapped) byKey.delete(aliasKey(bomLineKey, b));
+      for (const b of unmapped) byKey.delete(aliasKey(scope.key, b));
       for (const r of rows) {
         if (!r.choice) continue;
         let pieceLineKey = r.choice;
@@ -669,8 +753,8 @@ export function PieceMatchModal({
             });
           }
         }
-        byKey.set(aliasKey(bomLineKey, r.block), {
-          bomLineKey,
+        byKey.set(aliasKey(scope.key, r.block), {
+          ...bind,
           blockName: r.block,
           pieceLineKey,
         });
@@ -717,7 +801,7 @@ export function PieceMatchModal({
     if (!r.suggested) return null;
     if (r.basis === 'similar') return <Pill tone='warn'>предложено по похожести</Pill>;
     if (r.basis === 'other-fabric') {
-      const from = r.fromSlot ? slotLabelByKey?.get(r.fromSlot) : '';
+      const from = r.fromSlot ? scopeLabelByKey?.get(r.fromSlot) : '';
       return <Pill tone='warn'>{from ? `по «${from}»` : 'по другой ткани'}</Pill>;
     }
     return null;
@@ -735,7 +819,14 @@ export function PieceMatchModal({
       confirmLabel={
         toUnmap > 0 ? `применить (${decided} ↔, ${toUnmap} снять)` : `сопоставить (${decided})`
       }
-      confirmDisabled={saving || (decided === 0 && toUnmap === 0)}
+      // Пока хоть один спор не разрешён, применять НЕЧЕГО: набор, который ушёл бы на сервер, для
+      // него невалиден, и он отклонит сохранение ВСЕЙ карты. Кнопка гаснет вместе с объяснением
+      // выше — это и есть «предупредить до сохранения, а не после».
+      confirmDisabled={
+        saving ||
+        unresolvedCollapses.length > 0 ||
+        (decided === 0 && toUnmap === 0 && collapses.size === 0)
+      }
       width='lg'
       closeOnConfirm={false}
     >
@@ -746,6 +837,46 @@ export function PieceMatchModal({
           </Text>
         )}
         {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
+
+        {/* СХЛОПЫВАНИЕ АЛИАСОВ (0267). Две строки BOM, разложенные в ОДНО назначение, сливают свои
+            наборы связей — и если в обеих лежал блок с одним именем, на один блок оказывается два
+            ответа. Сервер такую пару не примет и отклонит сохранение ВСЕЙ карты, поэтому спор
+            показывается здесь, до записи, и решает его человек: имя блока ничего не говорит о том,
+            какая из двух деталей верна, а угадать за оператора — это ровно та ошибка, из-за которой
+            назначения вообще не бэкфилились. */}
+        {collapses.size > 0 && (
+          <CalloutBox tone='error'>
+            <div className='space-y-1'>
+              <Text size='micro' component='p'>
+                <b>один блок — две детали кроя.</b> В это назначение разложено несколько строк BOM, и
+                их связи объединились. Выберите, какая деталь остаётся за блоком: вторая связь будет
+                снята. Пока спор не решён, сохранять нечего — сервер отклонит карту целиком.
+              </Text>
+              {[...collapses.entries()].map(([ci, c]) => (
+                <div key={ci} className='flex flex-wrap items-center gap-1.5'>
+                  <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                    {c.block}
+                  </Text>
+                  <select
+                    className='h-7 min-w-0 flex-1 border border-borderColor bg-bgColor px-1 text-micro'
+                    aria-label={`деталь кроя для спорного блока ${c.block}`}
+                    value={collapseChoice[ci] ?? ''}
+                    onChange={(e) =>
+                      setCollapseChoice((prev) => ({ ...prev, [ci]: e.target.value }))
+                    }
+                  >
+                    <option value=''>выберите деталь…</option>
+                    {c.pieceKeys.map((k) => (
+                      <option key={k} value={k}>
+                        {nameByPieceKey.get(k.toLowerCase()) ?? k}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+            </div>
+          </CalloutBox>
+        )}
 
         {/* Parse warnings were never rendered here (the nesting modal has always shown them).
             That was survivable while the surface was a table of names; it is not now that the
@@ -1023,9 +1154,12 @@ export function PieceMatchModal({
                 </div>
               )}
               <Text size='nano' variant='label' component='p'>
-                связь хранится по ТКАНИ и ведёт на деталь кроя, а не на имя: имена блоков гуляют
-                от файла к файлу. Поэтому следующий размер этой же ткани приходит уже
-                сопоставленным, и деталей кроя от него не прибавляется.
+                связь хранится по {scope.byPurpose ? 'НАЗНАЧЕНИЮ' : 'ТКАНИ'} и ведёт на деталь кроя,
+                а не на имя: имена блоков гуляют от файла к файлу. Поэтому следующий размер этой же
+                ткани приходит уже сопоставленным, и деталей кроя от него не прибавляется.
+                {scope.byPurpose && scope.lines.length > 1
+                  ? ' В это назначение разложено несколько артикулов — связь общая для всех: лекало одно, различается только полотно.'
+                  : ''}
               </Text>
               <Text size='nano' variant='label' component='p'>
                 связи и новые детали уйдут при сохранении карточки.

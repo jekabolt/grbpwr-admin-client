@@ -27,22 +27,25 @@ export type UploadedPattern = {
   // Operator-entered display name from the naming modal. '' = deliberately unnamed — the
   // save path still sends it explicitly (absent-on-the-wire is reserved for stale clients).
   name: string;
-  // Fabric BOM line this sheet is cut from, picked in the modal. '' when the caller offers no
-  // slots (fittings have no BOM) or the operator left a PDF unbound.
-  bomLineKey: string;
+  // The cloth this sheet is cut from, as an OPAQUE scope key picked in the modal. '' when the
+  // caller offers no scopes (fittings have no BOM) or the operator left a PDF unbound.
+  //
+  // Opaque on purpose: since 0267 the tech card binds a выкройка to a НАЗНАЧЕНИЕ where the card has
+  // been sorted and to a BOM line where it has not, and this control lives in ui/ — it must not
+  // learn either shape. It hands the key back and the caller translates it into the two wire fields.
+  scopeKey: string;
 };
 
-// A fabric slot the sheet can be bound to. Deliberately minimal — this control lives in ui/ and
-// must not learn the tech-card's BOM shape. `role` is a caller-rendered word («подкладка»), not a
-// section enum, for the same reason: two lines can carry the SAME material name in different
-// roles, and without it the select shows two identical options.
-export type PatternFabricSlot = { lineKey: string; name: string; role?: string };
+// A cloth the sheet can be bound to: an opaque key and the fully composed label to show for it.
+// The caller owns the wording precisely because it owns the meaning — «основной материал · Твил 1,
+// Твил 2» for a назначение, «подкладка · Cupro 90» for a line nobody has sorted yet.
+export type PatternScopeOption = { key: string; label: string };
 
 // One picked file staged in the naming modal, with its per-file upload status.
 type StagedFile = {
   file: File;
   name: string;
-  bomLineKey: string;
+  scopeKey: string;
   status: 'pending' | 'uploading' | 'done' | 'error';
   error?: string;
 };
@@ -58,36 +61,36 @@ export function PatternUploadModal({
   files,
   onClose,
   onUploaded,
-  fabricSlots,
-  defaultBomLineKey,
+  fabricScopes,
+  defaultScopeKey,
   dxfOnly,
 }: {
   files: File[] | null; // null = closed
   onClose: () => void;
   onUploaded: (pattern: UploadedPattern) => void;
-  // Fabric slots to bind sheets to. Omitted entirely by callers that have none (fittings), and
-  // then no slot control renders and every sheet uploads unbound — the binding is a tech-card
-  // concept, not a property of uploading a file.
-  fabricSlots?: PatternFabricSlot[];
-  // Slot to preselect when the caller already knows which cloth the sheet belongs to — the
-  // tech card's panel is organised BY material, so dropping a file into the «подкладка» group
-  // has already answered the question. Still editable here; ignored when it names no live slot.
-  defaultBomLineKey?: string;
+  // Cloths to bind sheets to. Omitted entirely by callers that have none (fittings), and then no
+  // control renders and every sheet uploads unbound — the binding is a tech-card concept, not a
+  // property of uploading a file.
+  fabricScopes?: PatternScopeOption[];
+  // Scope to preselect when the caller already knows which cloth the sheet belongs to — the tech
+  // card's panel is organised BY cloth, so dropping a file into the «подкладка» group has already
+  // answered the question. Still editable here; ignored when it names no live scope.
+  defaultScopeKey?: string;
   // Restrict the pick to DXF. Opt-in, not the default: fittings legitimately attach PDF sheets.
   dxfOnly?: boolean;
 }) {
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const slots = fabricSlots ?? [];
-  // The slot a new sheet starts on: the caller's stated one when it is real, else the card's only
-  // fabric (with one cloth there is nothing to ask). With two or more and no stated default the
-  // modal must not guess — which cloth a sheet is cut from is exactly the fact being captured.
+  const slots = fabricScopes ?? [];
+  // The scope a new sheet starts on: the caller's stated one when it is real, else the card's only
+  // cloth (with one there is nothing to ask). With two or more and no stated default the modal must
+  // not guess — which cloth a sheet is cut from is exactly the fact being captured.
   const presetSlot =
-    defaultBomLineKey && slots.some((s) => s.lineKey === defaultBomLineKey)
-      ? defaultBomLineKey
+    defaultScopeKey && slots.some((s) => s.key === defaultScopeKey)
+      ? defaultScopeKey
       : slots.length === 1
-        ? slots[0].lineKey
+        ? slots[0].key
         : '';
 
   // Re-stage whenever a new batch arrives. `files` is a fresh array per pick/drop, so
@@ -100,7 +103,7 @@ export function PatternUploadModal({
         name: '',
         // A PDF is a sheet a human reads, not a thing cut from a cloth: it gets no fabric
         // control and no binding. Only DXFs carry one.
-        bomLineKey: isDxfFile(file) ? presetSlot : '',
+        scopeKey: isDxfFile(file) ? presetSlot : '',
         status: 'pending',
       })),
     );
@@ -114,7 +117,7 @@ export function PatternUploadModal({
   // reads does not need a cloth.
   const missingSlot =
     slots.length > 0 &&
-    staged.some((r) => r.status !== 'done' && isDxfFile(r.file) && !r.bomLineKey);
+    staged.some((r) => r.status !== 'done' && isDxfFile(r.file) && !r.scopeKey);
 
   async function uploadAll() {
     setBusy(true);
@@ -138,7 +141,7 @@ export function PatternUploadModal({
           // rejects a string, which silently blocks the whole save).
           sizeBytes: Number(res.sizeBytes ?? rows[i].file.size) || 0,
           name: clampPatternName(rows[i].name),
-          bomLineKey: rows[i].bomLineKey,
+          scopeKey: rows[i].scopeKey,
         });
         rows[i] = { ...rows[i], status: 'done' };
       } catch (e) {
@@ -210,18 +213,18 @@ export function PatternUploadModal({
               <select
                 className='h-8 w-full border border-borderColor bg-bgColor px-1.5 text-micro'
                 aria-label={`материал для ${row.file.name}`}
-                value={row.bomLineKey}
+                value={row.scopeKey}
                 disabled={busy || row.status === 'done'}
                 onChange={(e) =>
                   setStaged((rows) =>
-                    rows.map((r, j) => (j === i ? { ...r, bomLineKey: e.target.value } : r)),
+                    rows.map((r, j) => (j === i ? { ...r, scopeKey: e.target.value } : r)),
                   )
                 }
               >
                 <option value=''>выберите материал…</option>
                 {slots.map((s) => (
-                  <option key={s.lineKey} value={s.lineKey}>
-                    {[s.role, s.name.trim()].filter(Boolean).join(' · ') || 'без названия'}
+                  <option key={s.key} value={s.key}>
+                    {s.label}
                   </option>
                 ))}
               </select>
@@ -256,8 +259,8 @@ type Props = {
   disabled?: boolean;
   className?: string;
   // Forwarded to the naming modal; see PatternUploadModal.
-  fabricSlots?: PatternFabricSlot[];
-  defaultBomLineKey?: string;
+  fabricScopes?: PatternScopeOption[];
+  defaultScopeKey?: string;
   // Accept DXF only. OPT-IN — the tech card's выкройки are cut geometry and a PDF there is a
   // dead end, but a fitting sheet is a document a human reads and PDF stays legitimate for it.
   // Hard-coding the restriction in this shared control would have broken that call site.
@@ -273,8 +276,8 @@ export function PatternUploadButton({
   label,
   disabled,
   className,
-  fabricSlots,
-  defaultBomLineKey,
+  fabricScopes,
+  defaultScopeKey,
   dxfOnly,
 }: Props) {
   const { showMessage } = useSnackBarStore();
@@ -332,8 +335,8 @@ export function PatternUploadButton({
         files={picked}
         onClose={() => setPicked(null)}
         onUploaded={onUploaded}
-        fabricSlots={fabricSlots}
-        defaultBomLineKey={defaultBomLineKey}
+        fabricScopes={fabricScopes}
+        defaultScopeKey={defaultScopeKey}
         dxfOnly={dxfOnly}
       />
     </div>
