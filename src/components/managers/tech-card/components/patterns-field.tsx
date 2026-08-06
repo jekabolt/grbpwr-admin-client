@@ -116,6 +116,8 @@ export function PatternsField({
     unit?: string;
     fabricWidth?: string;
     wastagePercent?: string;
+    effectiveFabricWidthCm?: string;
+    selvedgeCm?: string;
     lineKey?: string;
     id?: number;
   }>;
@@ -130,6 +132,10 @@ export function PatternsField({
           unit: b.unit ?? '',
           fabricWidth: b.fabricWidth ?? '',
           wastagePercent: b.wastagePercent ?? '',
+          // read-only enrichment (0259) the card read filled; the раскладка prefills its
+          // cutting width from these instead of the 140 cm default.
+          effectiveFabricWidthCm: b.effectiveFabricWidthCm ?? '',
+          selvedgeCm: b.selvedgeCm ?? '',
         })),
     [bomItems],
   );

@@ -25,7 +25,15 @@ import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
-import { consumptionCm, decNum, latestPerSize, markersForLine, newerMarker, toBomUnit } from './nesting/marker-io';
+import {
+  consumptionCm,
+  decNum,
+  latestPerSize,
+  markersForLine,
+  markerWasteDecomposition,
+  newerMarker,
+  toBomUnit,
+} from './nesting/marker-io';
 import type { TechCardFormData } from './schema';
 
 // ── recipe-side apply ───────────────────────────────────────────────────────────────────
@@ -54,6 +62,10 @@ export function MarkerApplyHint({
   onApply: (patch: {
     consumption?: string;
     sizeConsumptions?: { sizeId: number; consumption: string }[];
+    // Wastage provenance (0261) — always sent with the number so the two can never drift.
+    consumptionSource?: string;
+    wasteSelvedgePct?: string;
+    wasteCutPct?: string;
   }) => void;
 }) {
   const lineMarkers = markersForLine(markers, lineKey);
@@ -97,21 +109,42 @@ export function MarkerApplyHint({
   const offBaseSize =
     baseSampleSizeId > 0 && (chosen.sizeId ?? 0) > 0 && chosen.sizeId !== baseSampleSizeId;
 
+  // Provenance stamped with the number (0261): «marker» tells costing this figure ALREADY
+  // contains the cutting waste, so the article's wastage_percent must not gross it up a second
+  // time. The decomposition is display only. In per-size mode the applied norms come from
+  // several markers, so the split is their plain mean — the components are near-identical
+  // across a size run (same geometry, same cloth) and the number is never multiplied by
+  // anything; a marker with no recorded efficiency contributes nothing and the split stays
+  // blank rather than invented.
+  const provenance = (used: common_TechCardMarkerSummary[]) => {
+    const parts = used.map(markerWasteDecomposition).filter((d) => d != null);
+    if (parts.length === 0) return { consumptionSource: 'marker', wasteSelvedgePct: '', wasteCutPct: '' };
+    const mean = (pick: (d: { selvedgePct: number; cutPct: number }) => number) =>
+      String(Math.round((parts.reduce((s, d) => s + pick(d!), 0) / parts.length) * 100) / 100);
+    return {
+      consumptionSource: 'marker',
+      wasteSelvedgePct: mean((d) => d.selvedgePct),
+      wasteCutPct: mean((d) => d.cutPct),
+    };
+  };
+
   const apply = () => {
     if (mode === 'scalar') {
       if (!conv) return;
       // The scalar mode CLEARS per-size grading (trap №1): a lone per-size row would make
       // the server ignore this very scalar.
-      onApply({ consumption: String(conv.value), sizeConsumptions: [] });
+      onApply({ consumption: String(conv.value), sizeConsumptions: [], ...provenance([chosen]) });
     } else {
       const rows: { sizeId: number; consumption: string }[] = [];
+      const used: common_TechCardMarkerSummary[] = [];
       for (const id of sizeIds) {
         const m = bySize.get(id);
         const c = m ? toBomUnit(consumptionCm(m), unit) : null;
-        if (!c) return;
+        if (!c || !m) return;
         rows.push({ sizeId: id, consumption: String(c.value) });
+        used.push(m);
       }
-      onApply({ sizeConsumptions: rows });
+      onApply({ sizeConsumptions: rows, ...provenance(used) });
     }
     setOpen(false);
   };
@@ -220,12 +253,34 @@ export function MarkerApplyHint({
             </CalloutBox>
           )}
           {Number.isFinite(wastage) && wastage > 0 && (
-            <CalloutBox tone='warning'>
-              линия несёт {wastage}% отходов сверху, а длина раскладки уже включает межлекальные
-              выпады — проверьте, что процент покрывает только концы рулона и брак полотна, иначе
-              отходы посчитаются дважды
+            <CalloutBox tone='note'>
+              у линии стоит {wastage}% отходов, но на применённой из раскладки норме костинг их
+              НЕ начисляет: измеренная длина уже содержит и межлекальные выпады, и кромку. Процент
+              снова начнёт работать, если норму перебить вручную
             </CalloutBox>
           )}
+          {(() => {
+            const used = mode === 'scalar' ? [chosen] : [...bySize.values()];
+            const parts = used.map(markerWasteDecomposition).filter((d) => d != null);
+            if (parts.length === 0) {
+              return (
+                <Text size='nano' variant='label' component='p'>
+                  раскладка без записанной эффективности — отходы не разложить на кромку и выпады
+                </Text>
+              );
+            }
+            const avg = (pick: (d: { selvedgePct: number; cutPct: number }) => number) =>
+              parts.reduce((s, d) => s + pick(d!), 0) / parts.length;
+            const sv = avg((d) => d.selvedgePct);
+            const cut = avg((d) => d.cutPct);
+            return (
+              <Text size='nano' variant='label' component='p'>
+                в норме уже сидят отходы: кромка {sv.toFixed(1)}% + межлекальные выпады{' '}
+                {cut.toFixed(1)}% (от площади деталей)
+                {sv === 0 ? ' — кромка артикула не задана' : ''}
+              </Text>
+            );
+          })()}
           <Text size='nano' variant='label' component='p'>
             запись уйдёт при сохранении карточки (рецепт колорвея staged-сейвом)
           </Text>

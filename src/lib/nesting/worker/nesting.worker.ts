@@ -39,6 +39,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
         out.push({
           id: nextId++,
           name: raw.name === 'модель' ? `деталь ${nextId - 1}` : raw.name,
+          blockName: raw.name === 'модель' ? '' : raw.name,
           source: file.name,
           poly,
           bboxW: bb.maxX - bb.minX,

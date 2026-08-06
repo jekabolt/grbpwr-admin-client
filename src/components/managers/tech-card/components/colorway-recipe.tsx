@@ -145,7 +145,25 @@ type UsageDraft = {
   // display-only (server-computed, stripped without costing:read).
   lineTotal: string;
   sizeRunTotal: string;
+  // Wastage provenance (0261). 'marker' = the norm came from a saved раскладка and its measured
+  // length ALREADY contains the cutting waste, so costing must not gross it up again; '' /
+  // 'manual' = typed by hand and the article's wastage_percent applies as before. The two pcts
+  // are the display decomposition of a marker norm's waste (кромка / межлекальные выпады) and
+  // are NEVER multiplied into a cost — they only explain where the length went.
+  consumptionSource: string;
+  wasteSelvedgePct: string;
+  wasteCutPct: string;
 };
+
+// The provenance triple travels together: a norm is either marker-measured (with its
+// decomposition) or hand-typed (with none). Retyping a number by hand makes it manual — leaving
+// it marked «marker» would keep costing from applying the article's wastage to a figure that no
+// longer contains any.
+const MANUAL_PROVENANCE = {
+  consumptionSource: '',
+  wasteSelvedgePct: '',
+  wasteCutPct: '',
+} as const;
 
 // Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields; only the three
 // WRITABLE leaves below travel back through UpdateColorway under LAB_DIP_UPDATE_MASK — see LabDipTimeline.
@@ -489,6 +507,9 @@ function fromRead(
     pieceLineKey: u.pieceLineKey || piecesById.get(wireInt(u.pieceId))?.lineKey || '',
     lineTotal: decimalToInput(u.lineTotal),
     sizeRunTotal: decimalToInput(u.sizeRunTotal),
+    consumptionSource: u.consumptionSource || '',
+    wasteSelvedgePct: decimalToInput(u.wasteSelvedgePct),
+    wasteCutPct: decimalToInput(u.wasteCutPct),
   };
 }
 
@@ -513,6 +534,13 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
     pieceLineKey: d.pieceLineKey || '',
     pieceId: undefined,
     pieceIndex: undefined,
+    // Wastage provenance (0261). This client OWNS the triple now, so it is always sent: the
+    // presence of consumption_source is what tells the store «write what I say» instead of
+    // «preserve what you stored» (the carry-forward path exists for clients that predate the
+    // field). Sending '' with empty pcts is therefore a deliberate reset to manual.
+    consumptionSource: d.consumptionSource || '',
+    wasteSelvedgePct: inputToDecimal(d.wasteSelvedgePct),
+    wasteCutPct: inputToDecimal(d.wasteCutPct),
     // output-only — never sent
     lineTotal: undefined,
     sizeRunTotal: undefined,
@@ -630,15 +658,23 @@ function UsagePerSizeLocal({
   const orderQtyBySize = new Map<number, number>();
   for (const q of sizeQuantities) if (q.sizeId) orderQtyBySize.set(q.sizeId, q.orderQty ?? 0);
 
+  // Every hand edit of the NUMBER drops the marker provenance (see MANUAL_PROVENANCE): the
+  // decomposition described a length this figure no longer is, and costing must go back to
+  // grossing the article's wastage on top. Switching the grading MODE counts too — «по
+  // размерам» seeds cells from a scalar the marker measured for one size only.
+  const manual = <T extends Partial<UsageDraft>>(patch: T) => ({ ...patch, ...MANUAL_PROVENANCE });
+
   const enablePerSize = () => {
     if (perSize) return;
     const prior = new Map(lastPerSize.current.map((e) => [e.sizeId, e.consumption]));
-    onChange({
-      sizeConsumptions: sizeIds.map((id) => ({
-        sizeId: id,
-        consumption: prior.get(id) ?? draft.consumption ?? '',
-      })),
-    });
+    onChange(
+      manual({
+        sizeConsumptions: sizeIds.map((id) => ({
+          sizeId: id,
+          consumption: prior.get(id) ?? draft.consumption ?? '',
+        })),
+      }),
+    );
   };
   const disablePerSize = () => {
     if (!perSize) return;
@@ -646,7 +682,7 @@ function UsagePerSizeLocal({
       sizeId: e.sizeId ?? 0,
       consumption: e.consumption ?? '',
     }));
-    onChange({ sizeConsumptions: [] });
+    onChange(manual({ sizeConsumptions: [] }));
   };
   const setSizeCell = (sizeId: number, value: string) => {
     const clean = sanitizeDecimal(value);
@@ -654,7 +690,7 @@ function UsagePerSizeLocal({
     const i = next.findIndex((x) => x.sizeId === sizeId);
     if (i >= 0) next[i] = { sizeId, consumption: clean };
     else next.push({ sizeId, consumption: clean });
-    onChange({ sizeConsumptions: next });
+    onChange(manual({ sizeConsumptions: next }));
   };
 
   const preview = runTotalPreview(
@@ -693,7 +729,7 @@ function UsagePerSizeLocal({
           placeholder='per garment'
           aria-label={`consumption per garment${unit ? ` (${unit})` : ''}`}
           value={draft.consumption}
-          onChange={(e) => onChange({ consumption: sanitizeDecimal(e.target.value) })}
+          onChange={(e) => onChange(manual({ consumption: sanitizeDecimal(e.target.value) }))}
         />
       ) : (
         <div className='flex flex-col gap-1.5'>
@@ -1123,6 +1159,7 @@ function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
     pieceLineKey,
     lineTotal: '',
     sizeRunTotal: '',
+    ...MANUAL_PROVENANCE,
   };
 }
 
@@ -1294,6 +1331,21 @@ function SlotUsageRow({
               onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
             />
           </label>
+        )}
+
+        {/* Provenance of the norm (0261): a marker-measured figure is priced WITHOUT the
+            article's wastage gross-up, and that is a costing-visible difference the operator
+            must be able to see on the row that causes it. */}
+        {draft.consumptionSource === 'marker' && (
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Pill tone='mut'>из раскладки</Pill>
+            <Text size='nano' variant='label' component='span'>
+              {draft.wasteSelvedgePct || draft.wasteCutPct
+                ? `отходы уже внутри: кромка ${draft.wasteSelvedgePct || '0'}% + выпады ${draft.wasteCutPct || '0'}%`
+                : 'отходы уже внутри нормы; разложение не записано'}
+              {slot?.wastagePercent?.trim() ? ` · ${slot.wastagePercent}% слота не начисляются` : ''}
+            </Text>
+          </div>
         )}
 
         {(draft.lineTotal || draft.sizeRunTotal) && (

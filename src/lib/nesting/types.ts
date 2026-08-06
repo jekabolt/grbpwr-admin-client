@@ -24,6 +24,10 @@ export type PieceDTO = {
   id: number;
   // Block name from the DXF when the file is AAMA-shaped, else «деталь N».
   name: string;
+  // The RAW DXF block name, kept apart from the display name above: '' when the file carried
+  // no per-piece block (a lone «модель» entity) and the display name is a synthetic «деталь N».
+  // This is the key markers and cut-piece aliases match on, so it must never be a fallback.
+  blockName?: string;
   // Which uploaded file the piece came from (display).
   source: string;
   // Outer contour, CCW, cm, origin at the piece's bbox min corner.

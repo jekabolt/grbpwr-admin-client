@@ -21,6 +21,11 @@ export type MarkerBomLine = {
   unit: string;
   fabricWidth: string;
   wastagePercent: string;
+  // READ-ONLY enrichment from the card read (0259). effectiveFabricWidthCm is the FULL roll
+  // width to prefill; selvedgeCm is the кромка per edge, snapshotted onto the marker so the
+  // waste decomposition stays auditable after the material changes. '' = unknown.
+  effectiveFabricWidthCm: string;
+  selvedgeCm: string;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -75,6 +80,35 @@ export function toBomUnit(cm: number, unit?: string): { value: number; unit: str
   return null;
 }
 
+// Waste decomposition of a marker-measured norm, in percent OF THE PIECE AREA (0261) — the
+// scale the wire and the costing display use. Both components are explanation, never a
+// multiplier: the marker's own length already paid for them.
+//
+//   piece area   = efficiency × W × L        (W = cutting width, L = used length)
+//   inter-piece  = W×L − piece area          → 1/efficiency − 1
+//   кромка       = 2×selvedge × L            → 2×selvedge / (efficiency × W)
+//
+// null when the marker records no efficiency (a hand-built or imported layout): the norm is
+// still marker-sourced — costing must still skip the gross-up — we just cannot say how the
+// length splits, and inventing a split would be worse than leaving it blank.
+export function markerWasteDecomposition(
+  m: common_TechCardMarkerSummary,
+): { selvedgePct: number; cutPct: number } | null {
+  const eff = decNum(m.efficiencyPct) / 100;
+  const w = decNum(m.fabricWidthCm);
+  if (!(eff > 0) || !(w > 0)) return null;
+  const selvedge = decNum(m.selvedgeCm);
+  // Both components legitimately exceed 100% — the cut component is 1/efficiency − 1, so any
+  // раскладка under 50% wastes more cloth than it turns into pieces. The server's ceiling is
+  // 1000% (0263) and it REJECTS the whole recipe save above it, so clamp here rather than let a
+  // nonsense width take the operator's save down with it.
+  const clamp = (v: number) => (v < 0 ? 0 : v > 1000 ? 1000 : r2(v));
+  return {
+    selvedgePct: clamp(((2 * selvedge) / (eff * w)) * 100),
+    cutPct: clamp((1 / eff - 1) * 100),
+  };
+}
+
 export function markersForLine(
   markers: common_TechCardMarkerSummary[] | undefined,
   lineKey: string,
@@ -114,11 +148,17 @@ export function buildMarkerLayout(args: {
   // the data the marker was BUILT from, so they must survive into the blob (a marker that
   // silently omits «файл не скачался» reads as a clean complete norm).
   parseWarnings?: string[];
+  // Cut-piece identity per parsed piece id (schema v2): the resolved TechCardPiece.line_key,
+  // so the marker survives a piece rename. Absent/'' = unresolved, and the reader falls back
+  // to the block name saved on the piece.
+  pieceLineKeyById?: Map<number, string>;
 }): common_TechCardMarkerLayout {
   const { pieces, perSetQty, urlBySource, result, unit, config } = args;
   const used = new Set(result.placements.map((p) => p.pieceId));
   return {
-    schemaVersion: 1,
+    // v2 = pieces carry piece_line_key/block_name. Emitted unconditionally: the block name is
+    // always known at parse time, and a v1 blob would drop it.
+    schemaVersion: 2,
     params: {
       unit,
       tolCm: args.tol,
@@ -139,6 +179,11 @@ export function buildMarkerLayout(args: {
         bboxWCm: r2(p.bboxW),
         bboxHCm: r2(p.bboxH),
         areaCm2: r2(p.areaCm2),
+        // v2 identity: the DXF block name as the file spells it, and the cut-piece it resolved
+        // to. Both may be '' — a marker whose pieces are unresolved is still a valid norm, it
+        // just displays by the name it saved.
+        blockName: p.blockName ?? '',
+        pieceLineKey: args.pieceLineKeyById?.get(p.id) ?? '',
       })),
     placements: result.placements.map((pl) => ({
       pieceId: pl.pieceId,
@@ -168,6 +213,9 @@ export function markerToView(marker: common_TechCardMarker): {
   const pieces: PieceDTO[] = (l.pieces ?? []).map((p) => ({
     id: p.pieceId ?? 0,
     name: p.name || `деталь ${p.pieceId ?? 0}`,
+    // v1 blobs have no block_name; '' keeps the round-trip honest instead of re-deriving one
+    // from the display name (which may already be the synthetic «деталь N»).
+    blockName: p.blockName || '',
     source: p.source || '',
     poly: (p.poly ?? []).map((pt) => ({ x: pt.xCm ?? 0, y: pt.yCm ?? 0 })),
     bboxW: p.bboxWCm ?? 0,

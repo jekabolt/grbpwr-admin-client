@@ -99,6 +99,9 @@ export function NestingModal({
   const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(files);
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
 
+  // The CUTTING width the layout runs on — roll width minus the кромка on both edges. The
+  // selvedge is real consumed cloth, so it is not laid on and not forgotten either: it rides
+  // the marker as selvedge_cm and shows up as its own component of the waste decomposition.
   const [widthCm, setWidthCm] = useState<number>(NEST_DEFAULTS.fabricWidthCm);
   // Raw keystrokes; the min-clamp lands on BLUR (clamping per keystroke makes 90 unreachable
   // — typing «9» snaps to 10).
@@ -343,8 +346,51 @@ export function NestingModal({
   // The prefill follows the chosen slot until the operator edits the name by hand.
   const defaultName = `${sizeLabel ?? ''}${sizeLabel ? ' · ' : ''}${slot?.name?.trim() || `${widthCm} см`}`;
   const nameValue = nameTouched ? markerName : [...defaultName].slice(0, 191).join('');
-  const slotWidth = slot ? parseDecimalNumber(slot.fabricWidth) : NaN;
+  // Раскройная ширина артикула слота: рулон − 2×кромка (0259). Сравниваем раскладку именно с
+  // ней — с полной шириной рулона расхождение было бы ложным на каждой ткани с кромкой.
+  const slotCutWidth = (b?: MarkerBomLine): number => {
+    if (!b) return NaN;
+    const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
+    if (!Number.isFinite(roll) || roll <= 0) return NaN;
+    const sel = parseDecimalNumber(b.selvedgeCm);
+    const cut = roll - 2 * (Number.isFinite(sel) && sel > 0 ? sel : 0);
+    return cut > 0 ? cut : NaN;
+  };
+  const slotSelvedge = (b?: MarkerBomLine): number => {
+    const s = b ? parseDecimalNumber(b.selvedgeCm) : NaN;
+    return Number.isFinite(s) && s > 0 ? s : 0;
+  };
+  const slotWidth = slotCutWidth(slot);
   const widthMismatch = Number.isFinite(slotWidth) && slotWidth > 0 && Math.abs(slotWidth - widthCm) > 0.5;
+
+  // Prefill (Ф9.1): a card with exactly ONE fabric slot has an unambiguous cutting width, so
+  // the раскладка starts on the real article instead of the 140 cm default. Fires once per
+  // open and only in nest mode — a later edit by the operator is never overridden, and with
+  // two or more fabrics the modal does not guess (that binding is chosen per DXF file).
+  // Under the width input: where the number came from, so «140» is never mistaken for the
+  // article's real cutting width.
+  const widthSource = (() => {
+    if (viewData || fabricLines.length !== 1) return '';
+    const b = fabricLines[0];
+    const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
+    if (!Number.isFinite(roll) || roll <= 0) return '';
+    const sv = slotSelvedge(b);
+    return sv > 0
+      ? `рулон ${roll} см − кромка 2×${sv} см`
+      : `рулон ${roll} см, кромка не задана`;
+  })();
+
+  const prefilled = useRef(false);
+  useEffect(() => {
+    if (prefilled.current || viewData) return;
+    if (fabricLines.length !== 1) return;
+    const w = slotCutWidth(fabricLines[0]);
+    if (!Number.isFinite(w) || w < 10) return;
+    prefilled.current = true;
+    setWidthCm(Math.round(w * 10) / 10);
+    setSlotKey(fabricLines[0].lineKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fabricLines.length, viewData]);
 
   // A failed source fetch means the run nested a SUBSET: placed==total holds (the missing
   // pieces never parsed), but the marker would read as a clean complete norm. Block save.
@@ -403,6 +449,10 @@ export function NestingModal({
           fabricWidthCm: dec(widthCm),
           gapCm: dec(gapCm),
           edgeMarginCm: dec(marginCm),
+          // Снимок кромки эффективного артикула на момент сохранения: разложение отходов
+          // (кромка / межлекальные выпады) должно оставаться проверяемым и после того, как
+          // материал слота отредактируют.
+          selvedgeCm: dec(slotSelvedge(slot)),
           allowCrossGrain: crossGrain,
           sets: setsN,
           usedLengthCm: dec(effective.usedLengthCm),
@@ -419,7 +469,9 @@ export function NestingModal({
       setSaveOpen(false);
       setNameTouched(false);
       setMarkerName('');
-      setSlotKey('');
+      // Back to the prefilled slot, not to «не привязывать»: on a single-fabric card the next
+      // save in this session would otherwise silently offer an unlinked marker.
+      setSlotKey(fabricLines.length === 1 ? fabricLines[0].lineKey : '');
     } catch (e) {
       showMessage(e instanceof Error && e.message ? e.message : 'не удалось сохранить маркер', 'error');
     } finally {
@@ -457,6 +509,8 @@ export function NestingModal({
           fabricWidthCm: s.fabricWidthCm,
           gapCm: s.gapCm,
           edgeMarginCm: s.edgeMarginCm,
+          // Правка геометрии не пересчитывает кромку: она снимок момента сохранения.
+          selvedgeCm: s.selvedgeCm,
           allowCrossGrain: !!s.allowCrossGrain,
           sets: s.sets ?? 1,
           usedLengthCm: dec(effective.usedLengthCm),
@@ -511,7 +565,7 @@ export function NestingModal({
           <div className='grid grid-cols-2 gap-1.5'>
             <label className='space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
-                ширина полотна, см
+                ширина раскроя, см
               </Text>
               <Input
                 name='nest-width'
@@ -526,6 +580,11 @@ export function NestingModal({
                 }}
                 disabled={running}
               />
+              {widthSource && (
+                <Text size='nano' variant='label' component='span'>
+                  {widthSource}
+                </Text>
+              )}
             </label>
             <label className='space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
@@ -1028,8 +1087,16 @@ export function NestingModal({
           )}
           {widthMismatch && (
             <CalloutBox tone='warning'>
-              ширина полотна раскладки ({widthCm} см) отличается от ширины артикула слота (
-              {slotWidth} см) — расход будет применим только к этой ширине
+              ширина раскроя ({widthCm} см) отличается от раскройной ширины артикула слота (
+              {slotWidth} см
+              {slotSelvedge(slot) > 0 ? `, кромка 2×${slotSelvedge(slot)} см уже вычтена` : ''}) —
+              расход будет применим только к этой ширине
+            </CalloutBox>
+          )}
+          {slot && slotSelvedge(slot) === 0 && (
+            <CalloutBox tone='note'>
+              у артикула слота не задана кромка — отходы кромки посчитаются как ноль; задайте её
+              в карточке материала, чтобы разложение отходов было полным
             </CalloutBox>
           )}
           {parse.phase === 'ready' && parse.warnings.length > 0 && (

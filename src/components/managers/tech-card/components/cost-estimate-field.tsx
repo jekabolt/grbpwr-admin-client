@@ -104,7 +104,24 @@ function MaterialsTable({
                 )}
               </span>
             </td>
-            <td>{decimalToInput(m.wastagePct) || <EmptyCell />}</td>
+            {/* Wastage tells two different stories now (0261). On a bom_estimate line the
+                percent is a MULTIPLIER the line total already carries. On a marker line
+                nothing is multiplied — the measured length paid for the waste — and the
+                percent is the decomposition of what that length contains. Rendering both as a
+                bare number made a marker row read as an uplift it never received. */}
+            <td>
+              {m.wastageSource === 'marker' ? (
+                <span className='flex flex-col items-end gap-0.5'>
+                  <Pill tone='mut'>из раскладки</Pill>
+                  <Text size='micro' variant='label' component='span'>
+                    кромка {decimalToInput(m.wastageSelvedgePct) || '0'}% + выпады{' '}
+                    {decimalToInput(m.wastageCutPct) || '0'}% — уже в норме
+                  </Text>
+                </span>
+              ) : (
+                decimalToInput(m.wastagePct) || <EmptyCell />
+              )}
+            </td>
             <td>
               <BaseAmount value={decimalToInput(m.lineTotalBase)} hasBase={m.hasBase} />
             </td>

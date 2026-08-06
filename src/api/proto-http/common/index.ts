@@ -2338,6 +2338,19 @@ export type TechCardColorwayUsage = {
   // that predates this field OMITS it on the full-replace recipe write, and the store must then
   // PRESERVE the existing pin (absent ≠ explicit clear; an explicit 0 clears).
   materialId?: number;
+  // consumption_source is the provenance of the norm. "manual" (or "") — typed by the operator;
+  // the article's wastage_percent grosses cost up, exactly as before. "marker" — applied from a
+  // saved раскладка whose measured length already CONTAINS the cutting waste (selvedge rides the
+  // per-running-metre price), so costing must NOT gross such rows up again. `optional` is
+  // load-bearing like material_id: a stale client omits the field on the full-replace recipe
+  // write and the store PRESERVES the stored provenance triple; a present value is written as
+  // sent ("" normalises to manual and clears the pcts).
+  consumptionSource?: string;
+  // Display decomposition of a marker-sourced norm's waste (кромка / межлекальные выпады), in
+  // percent of the piece area. NEVER multiplied into any cost — the marker length already pays
+  // for both. NULL/unset on manual rows; carried/cleared together with consumption_source.
+  wasteSelvedgePct: googletype_Decimal | undefined;
+  wasteCutPct: googletype_Decimal | undefined;
 };
 
 // TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
@@ -2726,6 +2739,9 @@ export type TechCardSizePattern = {
   // version is the sheet's revision within its (style, size) — the "v3" the admin used to scrape out
   // of the filename. Send 0 and the server assigns MAX+1 for a url it has not seen on this card
   // before, and preserves the number for one it has; send a number to pin the factory's own.
+  // On a keyed replacement (url change or size move) an echoed number EQUAL to the replaced row's
+  // is treated as a round-trip echo and renumbered MAX+1 — a deliberate pin must differ from the
+  // replaced row's number.
   version: number | undefined;
   // uploaded_at is when this PDF was first attached to the card. SERVER-OWNED (ignored on write):
   // patterns are a full-replace child, so the row is deleted and reinserted on every card save — the
@@ -2738,6 +2754,21 @@ export type TechCardSizePattern = {
   // clears the name. NOTE for JSON clients — protojson cannot tell `"name": null` from an absent
   // field, so null also reads as "preserve"; to clear a name, send the empty string.
   name?: string;
+  // 8 and 9 are reserved for view_url / download_url (feat/private-patterns branch, in flight).
+  // line_key is the row's STABLE identity across saves and across FILE REPLACEMENT (the url is not —
+  // replacing the sheet mints a new object url). Mint a ULID on first upload and round-trip it
+  // unchanged; keep it when replacing the file and change only the url. ONE KEY NAMES ONE ROW: the
+  // same sheet hung on two sizes is two rows and therefore two keys — reusing a key on two payload
+  // rows is rejected. Empty = a legacy/stale client — the server then matches by (size_id, url)
+  // exactly as before and assigns a key itself.
+  lineKey: string | undefined;
+  // bom_line_key binds this sheet to the fabric BOM line it is cut from («один DXF = одна ткань»),
+  // set at upload time. Explicit presence, same rules as `name`: ABSENT — the server preserves the
+  // stored binding (a stale client cannot wipe it); PRESENT — stored as sent, empty string unbinds.
+  // A non-empty value must name a fabric-section BOM line of this card, except when it round-trips
+  // the row's stored value unchanged (the slot may have been deleted — the binding then reads as
+  // «слот удалён» rather than blocking the save).
+  bomLineKey?: string;
 };
 
 // TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
@@ -2984,6 +3015,27 @@ export type TechCardPieceColorwayMaterial = {
   fusingBomItemId: number | undefined;
 };
 
+// TechCardPieceDxfAlias maps one DXF block name to a cut-piece, SCOPED to one fabric slot
+// (bom_line_key — the same binding pattern rows carry). The canonical piece name lives only in
+// TechCardPiece.name; block names are per-file exporter noise («PERED_S», «front-38»), so the same
+// generic name in different fabrics' files maps independently while any spelling within one
+// fabric's files (all its size DXFs) resolves to one piece. The DB UNIQUE is case-insensitive per
+// (card, slot, block).
+export type TechCardPieceDxfAlias = {
+  bomLineKey: string | undefined;
+  blockName: string | undefined;
+  pieceLineKey: string | undefined;
+};
+
+// TechCardPieceDxfAliasSet is a presence wrapper: proto3 cannot distinguish an EMPTY repeated field
+// from an ABSENT one, and these aliases follow the pattern-binding precedent — a stale client that
+// predates the feature must not wipe mappings it never saw. Message ABSENT → the server carries the
+// stored aliases forward untouched; message PRESENT → its items are the new full set (empty items
+// clears all). New clients always send it, round-tripping what they read.
+export type TechCardPieceDxfAliasSet = {
+  items: TechCardPieceDxfAlias[] | undefined;
+};
+
 // TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):
 // how many per garment, whether mirrored/paired, its grainline (долевая) and whether it is fused
 // (клеевая). materials picks, per colourway, which BOM fabric it is cut from. Full-replace child.
@@ -3099,6 +3151,12 @@ export type TechCardInsert = {
   // sent on the wire is dropped. NOTE: a RELEASED card is frozen for edits (ErrTechCardReleased), so
   // this planning date is only settable while the card is draft/approved — see the store's freeze check.
   targetDropDate: wellKnownTimestamp | undefined;
+  // DXF block-name → cut-piece aliases, scoped per fabric slot (§2.2). Presence-gated via the
+  // wrapper (see TechCardPieceDxfAliasSet): absent = preserve stored, present = full replace.
+  // Send the wrapper ONLY when the alias editor is wired, and always round-trip what was read —
+  // the wrapper protects against a STALE client, not a half-implemented one: a client that
+  // defaults to an empty PRESENT wrapper clears the whole table on every save.
+  pieceDxfAliases: TechCardPieceDxfAliasSet | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -3232,6 +3290,9 @@ export type TechCardMarkerSummary = {
   updatedBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // Кромка (selvedge, cm per edge) the раскладка ran with — snapshotted at save time from the
+  // effective article so the waste decomposition stays auditable after the material changes.
+  selvedgeCm: googletype_Decimal | undefined;
 };
 
 // TechCardMarker is a full stored marker: the summary plus the self-contained layout.
@@ -3274,6 +3335,11 @@ export type TechCardMarkerPiece = {
   bboxWCm: number | undefined;
   bboxHCm: number | undefined;
   areaCm2: number | undefined;
+  // schema_version 2 additions (both optional): the resolved cut-piece identity at save time, so a
+  // marker survives piece renames — readers resolve the display name through the alias map and fall
+  // back to `name` as saved. piece_id above stays parse-local (a v1 decision that remains right).
+  pieceLineKey: string | undefined;
+  blockName: string | undefined;
 };
 
 export type TechCardMarkerPoint = {
@@ -3310,6 +3376,9 @@ export type TechCardMarkerInsert = {
   placedCount: number | undefined;
   totalCount: number | undefined;
   layout: TechCardMarkerLayout | undefined;
+  // Кромка the layout was computed with (cm per edge, >= 0; 0 = none/unknown). The nesting
+  // client populates it from the linked article's selvedge_cm at save time.
+  selvedgeCm: googletype_Decimal | undefined;
 };
 
 // TechCardListItem is a lightweight tech-card header for list views.

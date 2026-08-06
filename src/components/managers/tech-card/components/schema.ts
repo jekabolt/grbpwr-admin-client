@@ -269,6 +269,12 @@ const bomItemSchema = z
     fabricWeightGsm: z.string().optional().default(''),
     fabricDirection: z.string().optional().default('TECH_CARD_FABRIC_DIRECTION_UNKNOWN'),
     wastagePercent: z.string().optional().default(''),
+    // READ-ONLY enrichment the single-card read fills (0259): the width the раскладка should
+    // prefill (this line's own fabricWidth, else the linked article's) and the article's кромка
+    // per edge. Carried through the form so the nesting modal can read them without a second
+    // query; never sent back (the server ignores them on write).
+    effectiveFabricWidthCm: z.string().optional().default(''),
+    selvedgeCm: z.string().optional().default(''),
     // optional link to a catalog Material (0 = unlinked free-text line). The line keeps its own
     // snapshot fields regardless of the link.
     materialId: z.number().optional().default(0),
@@ -686,6 +692,8 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
         ? b.fabricDirection
         : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
     wastagePercent: decimalToInput(b.wastagePercent),
+    effectiveFabricWidthCm: decimalToInput(b.effectiveFabricWidthCm),
+    selvedgeCm: decimalToInput(b.selvedgeCm),
     // material_id and id are int64 on the wire (techcard.proto), and grpc-gateway serialises int64
     // as a STRING — the generated TS type says `number` and is wrong. Without coercing, the form
     // holds "12" and z.number() rejects it as "Invalid input" on bomItems.N.materialId, blocking
