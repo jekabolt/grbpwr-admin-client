@@ -138,15 +138,28 @@ export function useTechCardDraft(
     }
     // `patterns` may exist but predate the binding column; carry it per row, by identity.
     if (Array.isArray(data.patterns) && Array.isArray(loaded.patterns)) {
+      // Loaded rows are registered under BOTH identities, because the two sides cannot agree on
+      // one: every STORED row has a lineKey (0260 backfilled LEGACY… keys and the store mints one
+      // for anything still without), while a draft old enough to need this carry-forward is by
+      // definition from a build whose schema had no lineKey at all. Keying the map by lineKey
+      // alone therefore missed every single row it existed to match — the fallback was dead code
+      // for exactly its own case, and the merge silently unbound the whole card.
       const bindingByKey = new Map<string, string>();
       for (const p of loaded.patterns) {
-        const id = p.lineKey?.trim() || `${p.sizeId ?? 0}|${p.url ?? ''}`;
-        if (p.bomLineKey) bindingByKey.set(id, p.bomLineKey);
+        if (!p.bomLineKey) continue;
+        const lk = p.lineKey?.trim();
+        if (lk) bindingByKey.set(lk, p.bomLineKey);
+        bindingByKey.set(`${p.sizeId ?? 0}|${p.url ?? ''}`, p.bomLineKey);
       }
       data.patterns = data.patterns.map((p) => {
+        // A current-build draft carries the field, and '' there is a deliberate unbind.
         if (typeof p.bomLineKey === 'string') return p;
-        const id = p.lineKey?.trim() || `${p.sizeId ?? 0}|${p.url ?? ''}`;
-        return { ...p, bomLineKey: bindingByKey.get(id) ?? '' };
+        const lk = p.lineKey?.trim();
+        const carried =
+          (lk ? bindingByKey.get(lk) : undefined) ??
+          bindingByKey.get(`${p.sizeId ?? 0}|${p.url ?? ''}`) ??
+          '';
+        return { ...p, bomLineKey: carried };
       });
     }
     form.reset(data, { keepDefaultValues: true });

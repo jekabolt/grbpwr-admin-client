@@ -30,6 +30,11 @@ export type PieceDTO = {
   blockName?: string;
   // Which uploaded file the piece came from (display).
   source: string;
+  // Index of that file in the parsed batch. `source` is a DISPLAY name and two sheets can
+  // legitimately carry the same one (two revisions re-exported under one factory filename, or
+  // two rows both falling back to the same placeholder), so anything that needs to tell files
+  // apart must use this, not the name.
+  fileIndex?: number;
   // Outer contour, CCW, cm, origin at the piece's bbox min corner.
   poly: Pt[];
   bboxW: number; // cm

@@ -400,7 +400,14 @@ export function NestingModal({
   const lockedSlot = lockedBomLineKey
     ? fabricLines.find((b) => b.lineKey === lockedBomLineKey)
     : undefined;
-  const lockDangling = !!lockedBomLineKey && !lockedSlot;
+  // Two different reasons a lock fails to resolve, and they need opposite advice. The slot may be
+  // GONE from the card — pick another. Or it may exist but be UNSAVED: a sheet can be bound to a
+  // BOM line added a moment ago (the card save reconciles the BOM before patterns), while a marker
+  // is a separate RPC that can only reference a stored line. Telling the operator that a fabric
+  // they just created «is no longer a fabric line» would be simply false.
+  const lockedUnsaved =
+    !!lockedBomLineKey && !lockedSlot && (bomLines ?? []).some((b) => b.lineKey === lockedBomLineKey);
+  const lockDangling = !!lockedBomLineKey && !lockedSlot && !lockedUnsaved;
 
   const prefilled = useRef(false);
   useEffect(() => {
@@ -1131,7 +1138,13 @@ export function NestingModal({
               костинг
             </CalloutBox>
           )}
-          {unsavedSlots > 0 && !lockedSlot && (
+          {lockedUnsaved && (
+            <CalloutBox tone='note'>
+              ткань этих DXF ещё не сохранена в карточке — сохраните карточку, тогда маркер
+              привяжется к ней; сейчас он уйдёт без привязки
+            </CalloutBox>
+          )}
+          {unsavedSlots > 0 && !lockedSlot && !lockedUnsaved && (
             <Text size='nano' variant='label' component='p'>
               новые слоты BOM появятся здесь после сохранения карточки
             </Text>

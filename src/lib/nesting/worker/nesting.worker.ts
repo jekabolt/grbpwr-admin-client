@@ -26,6 +26,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
   let nextId = 1;
   let failedFiles = 0;
 
+  let fileIndex = 0;
   for (const file of files) {
     try {
       const buf = await file.arrayBuffer();
@@ -45,6 +46,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
           name: raw.blockName == null ? `деталь ${nextId - 1}` : raw.name,
           blockName: raw.blockName ?? '',
           source: file.name,
+          fileIndex,
           poly,
           bboxW: bb.maxX - bb.minX,
           bboxH: bb.maxY - bb.minY,
@@ -55,6 +57,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
       failedFiles++;
       warnings.push(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
     }
+    fileIndex++;
   }
 
   // Every file failed → that's an error, not a note with an empty piece list.

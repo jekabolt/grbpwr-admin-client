@@ -81,9 +81,8 @@ export function PatternUploadModal({
       (files ?? []).map((file) => ({
         file,
         name: '',
-        // Only a DXF is preselected. A PDF is a sheet a human reads, not a thing cut from a
-        // cloth, and the inline editor on the выкройки grid is DXF-only — so a PDF bound here
-        // by default could never be unbound.
+        // A PDF is a sheet a human reads, not a thing cut from a cloth: it gets no fabric
+        // control and no binding. Only DXFs carry one.
         bomLineKey: isDxfFile(file) ? soleSlot : '',
         status: 'pending',
       })),
@@ -185,7 +184,7 @@ export function PatternUploadModal({
                 )
               }
             />
-            {slots.length > 0 && (
+            {slots.length > 0 && isDxfFile(row.file) && (
               <select
                 className='h-8 w-full border border-borderColor bg-bgColor px-1.5 text-micro'
                 aria-label={`ткань для ${row.file.name}`}
@@ -197,9 +196,7 @@ export function PatternUploadModal({
                   )
                 }
               >
-                <option value=''>
-                  {isDxfFile(row.file) ? 'выберите ткань…' : 'без привязки к ткани'}
-                </option>
+                <option value=''>выберите ткань…</option>
                 {slots.map((s) => (
                   <option key={s.lineKey} value={s.lineKey}>
                     {s.name || 'без названия'}
