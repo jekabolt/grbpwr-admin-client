@@ -12,6 +12,18 @@ import type { ClosedLoop } from './chain';
 import type { EntityGroup, LayeredChain } from './transform';
 import { chainLoops } from './chain';
 
+// Долевая (grain line) в DXF — это отдельная НЕЗАМКНУТАЯ линия внутри блока, а не свойство
+// контура. Какой слой её несёт, по одному блоку не понять (в реальном файле это слой 7, но на
+// слое 8 лежат внутренние линии такой же формы и длиннее), поэтому парсер только собирает
+// кандидатов, а выбор делается там, где виден весь файл.
+export type GrainCandidate = {
+  layer: string;
+  // Угол оси в градусах CCW от +X, приведён к [0,180): у долевой нет направления, есть
+  // направление ТКАНИ, а 0 и 180 движок и так разрешает обоим.
+  angleDeg: number;
+  lengthCm: number;
+};
+
 export type RawPiece = {
   name: string;
   // The DXF block this piece came from, or null for the loose-entity pool. Kept SEPARATE from
@@ -25,6 +37,9 @@ export type RawPiece = {
   // layer 1 held one ungraded contour repeated in all five size blocks while layer 14 graded
   // properly, so trusting layer 1 (as this did) made every size come out identical.
   layer: string;
+  // Кандидаты в долевую из ЭТОГО блока. Одни и те же у всех контуров блока: долевая
+  // принадлежит детали, а не тому, по какой линии её кроят.
+  grain: GrainCandidate[];
   poly: Pt[]; // CCW, cm, absolute drawing coords (normalized later)
 };
 
@@ -83,6 +98,22 @@ export function groupToPieces(
 ): RawPiece[] {
   const label = group.blockName ?? 'модель';
 
+  // Кандидаты в долевую: прямые незамкнутые отрезки. Двухточечные — потому что долевую рисуют
+  // одной линией; ломаная из восьми точек на том же слое (встречается на слое внутренних линий)
+  // это уже не она.
+  const grain: GrainCandidate[] = [];
+  for (const c of group.chains) {
+    if (c.closed || c.pts.length !== 2) continue;
+    const dx = c.pts[1].x - c.pts[0].x;
+    const dy = c.pts[1].y - c.pts[0].y;
+    const lengthCm = Math.hypot(dx, dy);
+    if (lengthCm < 1) continue; // засечка или мусор, не долевая
+    let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
+    // Ось, а не вектор: −30° и 150° — одна и та же долевая.
+    angleDeg = ((angleDeg % 180) + 180) % 180;
+    grain.push({ layer: c.layer, angleDeg, lengthCm });
+  }
+
   // Chained PER LAYER, not with layer 1 winning outright. Two reasons. A contour belongs to one
   // layer, so joining open chains ACROSS layers can only invent geometry that is in no file. And
   // the old preference silently answered a question it had no business answering: it returned the
@@ -139,6 +170,7 @@ export function groupToPieces(
         name: label,
         blockName: group.blockName,
         layer: loop.layer,
+        grain,
         poly: ensureCCW(cleaned),
       });
     }

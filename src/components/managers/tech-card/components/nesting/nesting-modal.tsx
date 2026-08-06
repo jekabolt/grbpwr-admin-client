@@ -29,6 +29,7 @@ import { LayoutEditor } from './layout-editor';
 import { buildMarkerLayout, dec, decNum, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
 import { sizeRank } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
+import { defaultGrainLayer, grainLayerOptions, orientToGrain } from './grain';
 import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
@@ -159,7 +160,7 @@ export function NestingModal({
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
       )?.size ?? '');
-  const pieces = useMemo(
+  const selectedPieces = useMemo(
     () =>
       allPieces.filter(
         (p) =>
@@ -168,6 +169,20 @@ export function NestingModal({
       ),
     [allPieces, split, contourLayer, shownSize],
   );
+
+  // Ориентация по долевой. Движок считает, что деталь нарисована долевой вдоль полосы, — в
+  // реальных файлах это не так, и деталь, выкроенная поперёк долевой, тянется и садится не
+  // туда. Поворачиваем ПОДЕТАЛЬНО: в одном файле все детали под 90°, в другом половина под 0°,
+  // половина под 90°, так что общий поворот листа починил бы один и сломал другой.
+  const grainLayers = useMemo(() => grainLayerOptions(allPieces), [allPieces]);
+  const autoGrainLayer = useMemo(() => defaultGrainLayer(grainLayers), [grainLayers]);
+  const [grainOn, setGrainOn] = useState(true);
+  const grainLayer = grainOn ? autoGrainLayer : '';
+  const oriented = useMemo(
+    () => orientToGrain(selectedPieces, grainLayer),
+    [selectedPieces, grainLayer],
+  );
+  const pieces = oriented.pieces;
   const usable = widthCm - 2 * marginCm;
 
   // Cross-strip span in the allowed rotations; a piece that fits nowhere is auto-unchecked.
@@ -896,6 +911,42 @@ export function NestingModal({
                   на слое {contourLayer || '—'} нет контура у {missingOnLayer.length} блоков — они
                   не попадут в раскладку: {missingOnLayer.slice(0, 6).join(', ')}
                   {missingOnLayer.length > 6 ? '…' : ''}
+                </Text>
+              )}
+              {/* Долевая. Выключатель есть, потому что правило опознания слоя — эвристика, а не
+                  контракт; но по умолчанию включено: молча положить деталь поперёк долевой
+                  дороже, чем предложить это выключить. */}
+              {autoGrainLayer !== '' && (
+                <div className='flex flex-wrap items-center gap-2'>
+                  <label className='flex cursor-pointer items-center gap-1.5'>
+                    <CheckboxCommon
+                      name='nest-grain'
+                      checked={grainOn}
+                      disabled={running}
+                      onChange={(c: boolean) => guardManual(() => setGrainOn(c))}
+                    />
+                    <Text size='micro' component='span'>
+                      ориентировать по долевой (слой {autoGrainLayer})
+                    </Text>
+                  </label>
+                  {grainOn && (
+                    <Text size='nano' variant='label' component='span'>
+                      повёрнуто деталей: {oriented.rotated}
+                    </Text>
+                  )}
+                </div>
+              )}
+              {grainOn && oriented.missing.length > 0 && (
+                <Text size='nano' component='p' className='text-error'>
+                  долевая не найдена у {oriented.missing.length} деталей — они лягут так, как
+                  нарисованы: {oriented.missing.slice(0, 6).join(', ')}
+                  {oriented.missing.length > 6 ? '…' : ''}
+                </Text>
+              )}
+              {autoGrainLayer === '' && (
+                <Text size='nano' component='p' className='text-error'>
+                  долевая в файле не найдена — детали лягут так, как нарисованы, и это может быть
+                  поперёк долевой
                 </Text>
               )}
               {sizeOpts.length > 1 && (

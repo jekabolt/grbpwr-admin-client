@@ -46,6 +46,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
           name: raw.blockName == null ? `деталь ${nextId - 1}` : raw.name,
           blockName: raw.blockName ?? '',
           layer: raw.layer,
+          grain: raw.grain,
           source: file.name,
           fileIndex,
           poly,
