@@ -571,6 +571,7 @@ function BomTile({
     purpose?: string;
     purposeNote?: string;
     isSample?: boolean;
+    fabricDirection?: string;
   };
 
   const linked = (row.materialId ?? 0) > 0;
@@ -598,6 +599,12 @@ function BomTile({
   // грамматура · ширина · мат/сатин/блеск · состав · цвет — the identifying spec line, with the
   // colour appended. Empty on an unlinked line, which has no catalog material behind it yet.
   const specLine = material ? join(materialSpec(material), material.color) : '';
+
+  // Только рулонные строки: направление — свойство ПОЛОТНА, и спрашивать его у нитки или у
+  // фурнитуры было бы данными, которые ни один экран не читает.
+  const needsDirection =
+    isRollGoodsSection(row.section) &&
+    (!row.fabricDirection || row.fabricDirection === 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN');
 
   // #64: an unlinked line is the release blocker, so it reads as the blocker marker; a linked line
   // shows its price, or flags a missing one.
@@ -708,6 +715,12 @@ function BomTile({
             <Pill tone='attention'>роль не задана</Pill>
           ) : null}
           {roleDuplicate ? <Pill tone='attention'>дубль роли</Pill> : null}
+          {/* НАПРАВЛЕНИЕ ТКАНИ, не проставленное на рулонной строке (Ф1). Поле есть с 0073 и
+              обязательным никогда не было, поэтому пустое оно почти везде — а с Ф1 оно решает,
+              можно ли переворачивать деталь на раскладке, и сервер не примет норму, пока ответа
+              нет. Плашка стоит ЗДЕСЬ, потому что чинится это здесь: отказ приходит в модалке
+              раскладки, за две вкладки отсюда, и без метки его пришлось бы искать перебором. */}
+          {needsDirection ? <Pill tone='attention'>направление ткани?</Pill> : null}
         </div>
       </button>
 
