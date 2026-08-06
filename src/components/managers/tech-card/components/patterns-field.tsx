@@ -32,6 +32,10 @@ import { TechCardFormData } from './schema';
 const NestingModal = lazy(() =>
   import('./nesting/nesting-modal').then((m) => ({ default: m.NestingModal })),
 );
+// Same lazy neighbourhood: the matching dialog parses DXF through the same worker.
+const PieceMatchModal = lazy(() =>
+  import('./nesting/piece-match-modal').then((m) => ({ default: m.PieceMatchModal })),
+);
 
 type PatternRow = {
   sizeId?: number;
@@ -114,6 +118,14 @@ export function PatternsField({
     // The fabric these sheets are bound to; '' for legacy unbound DXFs, which the modal then
     // asks about as before.
     bomLineKey: string;
+  } | null>(null);
+  // «сопоставить детали»: the same DXF set, opened against the cut-piece list instead of the
+  // nesting engine (null = closed).
+  const [matching, setMatching] = useState<{
+    sizeLabel: string;
+    bomLineKey: string;
+    fabricName: string;
+    files: NestingFile[];
   } | null>(null);
   // The card's fabric BOM lines, live from form state — the save-marker dialog's slot select.
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
@@ -464,6 +476,32 @@ export function PatternsField({
               ⌗ раскладка{dxfGroupsOf(slot).length > 1 ? ` · ${fabricName(g.bomLineKey)}` : ''}
             </Button>
           ))}
+          {/* Matching is per FABRIC, like the раскладка — a block name means one piece within one
+              cloth, and the same name in another cloth's file is another piece. An unbound
+              legacy group has no scope to write into, so it must get its fabric first. */}
+          {canEdit &&
+            dxfGroupsOf(slot)
+              .filter((g) => !!g.bomLineKey)
+              .map((g) => (
+                <Button
+                  key={`match-${g.bomLineKey}`}
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  className='mt-1 w-full'
+                  title={`сопоставить блоки DXF с деталями кроя для «${fabricName(g.bomLineKey)}»`}
+                  onClick={() =>
+                    setMatching({
+                      sizeLabel: label,
+                      bomLineKey: g.bomLineKey,
+                      fabricName: fabricName(g.bomLineKey),
+                      files: g.files,
+                    })
+                  }
+                >
+                  ↔ детали{dxfGroupsOf(slot).length > 1 ? ` · ${fabricName(g.bomLineKey)}` : ''}
+                </Button>
+              ))}
         </Tile>
       </div>
     );
@@ -567,6 +605,25 @@ export function PatternsField({
             season={season}
             styleNumber={styleNumber}
             onClose={() => setNesting(null)}
+          />
+        </Suspense>
+      )}
+
+      {/* Сопоставление блоков DXF с деталями кроя — тот же ленивый чанк (общий воркер разбора). */}
+      {matching && (
+        <Suspense
+          fallback={
+            <Text size='micro' variant='label'>
+              загрузка модуля разбора DXF…
+            </Text>
+          }
+        >
+          <PieceMatchModal
+            files={matching.files}
+            bomLineKey={matching.bomLineKey}
+            fabricName={matching.fabricName}
+            sizeLabel={matching.sizeLabel}
+            onClose={() => setMatching(null)}
           />
         </Suspense>
       )}

@@ -488,6 +488,19 @@ const techCardObject = z.object({
   sizeIds: z.array(z.number()).default([]),
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
   patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
+  // DXF block → cut piece, SCOPED BY FABRIC (0262). The scope is what makes the mapping safe:
+  // the same generic block name («полочка») in the main-fabric file and the lining file is two
+  // different pieces, which a card-level mapping could not express. Written as a full-replace
+  // set alongside the card body.
+  pieceDxfAliases: z
+    .array(
+      z.object({
+        bomLineKey: z.string().optional().default(''),
+        blockName: z.string().optional().default(''),
+        pieceLineKey: z.string().optional().default(''),
+      }),
+    )
+    .default([]),
   // NF-07 auxiliary items: purpose is 'sellable' (default) or 'auxiliary' (produces a packaging
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
@@ -598,6 +611,7 @@ export const techCardDefaultData: TechCardFormData = {
   sizeIds: [],
   sizeQuantities: [],
   patterns: [],
+  pieceDxfAliases: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
   auxSubtype: UNSET_AUX_SUBTYPE,
   outputMaterialId: 0,
@@ -785,6 +799,12 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // never re-mints an existing row's key (see patternSchema).
       lineKey: p.lineKey ?? '',
       bomLineKey: p.bomLineKey ?? '',
+    })),
+    // The wrapper is always present on read, so `items` is the authoritative stored set.
+    pieceDxfAliases: (insert?.pieceDxfAliases?.items ?? []).map((a) => ({
+      bomLineKey: a.bomLineKey ?? '',
+      blockName: a.blockName ?? '',
+      pieceLineKey: a.pieceLineKey ?? '',
     })),
     purpose: toPurposeEnum(insert?.purpose),
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
@@ -1066,6 +1086,14 @@ export function mapFormToTechCardInsert(
   }));
   const bomIndexByKey = new Map<string, number>();
   bomLines.forEach((b, i) => bomIndexByKey.set(b.lineKey, i));
+  // Which cut-pieces this save actually persists — the set DXF aliases may reference. Blank rows
+  // are dropped below and a keyless row gets a fresh key no alias can know, so both are excluded.
+  // Lowercased: the store compares alias→piece keys case-insensitively.
+  const livePieceKeys = new Set(
+    (data.pieces ?? [])
+      .filter((p) => !isBlankPiece(p) && !!p.lineKey?.trim())
+      .map((p) => p.lineKey!.trim().toLowerCase()),
+  );
   const outBomRef = (
     lineKey?: string,
   ): { bomLineKey: string | undefined; bomItemIndex: number | undefined } => {
@@ -1195,6 +1223,20 @@ export function mapFormToTechCardInsert(
             };
           }),
       })),
+    // DXF block → piece aliases (0262). ALWAYS sent as a wrapper — the wrapper IS the presence
+    // signal, and a client that owns the mapping must be able to empty it. Aliases whose piece
+    // left the card are dropped rather than sent: the store answers an unresolvable
+    // piece_line_key with a field violation, which would block the whole save over a row the
+    // operator deleted on the pieces tab and never connected to a DXF in their head.
+    pieceDxfAliases: {
+      items: (data.pieceDxfAliases ?? []).filter(
+        (a) =>
+          !!a.bomLineKey?.trim() &&
+          !!a.blockName?.trim() &&
+          !!a.pieceLineKey?.trim() &&
+          livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()),
+      ),
+    },
     bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
       name: b.name?.trim() || '',
