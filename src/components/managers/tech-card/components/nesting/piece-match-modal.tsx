@@ -38,7 +38,17 @@ import { sizeRank, splitBlockSize } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet, type PieceMark } from './piece-sheet';
-import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
+import {
+  missingSizesIn,
+  splitPiecesBySize,
+  useDictionarySizeTokens,
+  useSizeTokens,
+} from './use-block-sizes';
+import {
+  useSizeNames,
+  useSizeOrdering,
+} from 'components/managers/model/components/use-size-systems';
+import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Block names are matched the way the DB collates them: trimmed, inner whitespace collapsed,
@@ -176,6 +186,22 @@ export function PieceMatchModal({
     [allPieces],
   );
   const [showGrain, setShowGrain] = useState(true);
+  // Размеры, которые есть в файле, но не заведены в карточке. Пока их там нет, хвост у таких
+  // блоков не отрезается — и одна деталь двоится на строку в каждом непризнанном размере.
+  const dictTokens = useDictionarySizeTokens();
+  const sizeById = useSizeNames();
+  const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
+  const orderSizes = useSizeOrdering();
+  const missingSizes = useMemo(
+    () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById),
+    [allPieces, dictTokens, cardSizeIds, sizeById],
+  );
+  const addMissingSizes = () => {
+    // Через корень массива: size-ids-field держит на нём свой useFieldArray, а append оттуда
+    // его бы не уведомил — измерено на RHF 7.62 (см. комментарий у записи pieces).
+    const next = orderSizes([...cardSizeIds, ...missingSizes.map((m) => m.sizeId)]);
+    setValue('sizeIds', next, { shouldDirty: true });
+  };
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
   // meant, and the full-set write then rewrites them in that form.
@@ -770,19 +796,38 @@ export function PieceMatchModal({
                   </label>
                 </div>
               )}
-              {/* Размерный ряд карточки уже не покрывает файл. Тогда блоки нераспознанных
-                  размеров не сворачиваются к идентичности и заводят ЛИШНИЕ детали кроя — по
-                  одной на каждый такой размер. Оператору неоткуда об этом догадаться, кроме
-                  как отсюда: сами блоки лежат в группе «без размера». */}
-              {sizeOptions.length > 1 && sizeOptions.some((o) => o.size === '') && (
+              {/* В файле есть размеры, которых нет в карточке. Пока их там нет, хвост у таких
+                  блоков не отрезается, и одна деталь кроя двоится — по строке на каждый
+                  непризнанный размер. Добавляет их ЧЕЛОВЕК: резать имена по всему словарю
+                  нельзя («FP_L» — левая полочка, а «L» в словаре есть как размер), поэтому
+                  машина только показывает находку. */}
+              {missingSizes.length > 0 && (
                 <CalloutBox tone='warning'>
-                  <Text size='micro' component='p'>
-                    у {sizeOptions.find((o) => o.size === '')?.count ?? 0} контуров размер не
-                    опознан — их имена не совпали с размерным рядом карточки. Такие блоки заведут
-                    отдельные детали кроя вместо общих: проверьте размерный ряд стиля.
-                  </Text>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <Text size='micro' component='span'>
+                      в файле есть размеры, которых нет в карточке:{' '}
+                      {missingSizes.map((m) => formatSizeName(m.name)).join(', ')} — пока они не
+                      заведены, детали этих размеров считаются отдельными
+                    </Text>
+                    <Button type='button' variant='secondary' size='xs' onClick={addMissingSizes}>
+                      добавить в карточку ({missingSizes.length})
+                    </Button>
+                  </div>
                 </CalloutBox>
               )}
+              {/* Осталась группа «без размера», хотя все словарные размеры уже заведены — значит
+                  хвост этих блоков размером не является вовсе. */}
+              {missingSizes.length === 0 &&
+                sizeOptions.length > 1 &&
+                sizeOptions.some((o) => o.size === '') && (
+                  <CalloutBox tone='warning'>
+                    <Text size='micro' component='p'>
+                      у {sizeOptions.find((o) => o.size === '')?.count ?? 0} контуров размер в
+                      имени не опознан — такие блоки заведут свои детали кроя, не общие с
+                      остальными размерами
+                    </Text>
+                  </CalloutBox>
+                )}
               {missingOnLayer.length > 0 && (
                 <CalloutBox tone='warning'>
                   <Text size='micro' component='p'>
@@ -926,6 +971,37 @@ export function PieceMatchModal({
           </div>
         )}
 
+        {/* Заведение пачкой. Имена уже нормализованы — BP_1_S и BP_1_XL это один BP_1 — так что
+            «завести всё» создаёт ровно по одной детали кроя на деталь чертежа, а не по одной на
+            размер. Девять выпадающих списков подряд никто не выберет правильно. */}
+        {rows.length > 0 && (
+          <div className='flex flex-wrap items-center gap-2'>
+            <Text size='nano' variant='label' component='span'>
+              не сопоставлено: {rows.length}
+            </Text>
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              disabled={rows.every((r) => r.choice)}
+              onClick={() =>
+                setRows((prev) => prev.map((r) => (r.choice ? r : { ...r, choice: CREATE })))
+              }
+            >
+              завести все как детали кроя ({rows.filter((r) => !r.choice).length})
+            </Button>
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              disabled={rows.every((r) => !r.choice)}
+              onClick={() => setRows((prev) => prev.map((r) => ({ ...r, choice: '' })))}
+            >
+              снять выбор
+            </Button>
+          </div>
+        )}
+
         {/* The same state as a list: a sheet answers «which piece is this», a list answers
             «what is still unanswered» and stays reachable from the keyboard. */}
         {rows.length > 0 && (
@@ -978,7 +1054,9 @@ export function PieceMatchModal({
 
         {rows.length > 0 && (
           <Text size='nano' variant='label' component='p'>
-            «пропустить» оставляет блок несопоставленным — диалог предложит его снова.
+            имена нормализованы: BP_1_S и BP_1_XL — это одна деталь BP_1, и заводится она один
+            раз на все размеры. «пропустить» оставляет блок несопоставленным — диалог предложит
+            его снова.
           </Text>
         )}
 

@@ -26,6 +26,62 @@ export function useSizeTokens(): Map<string, number> {
   }, [sizeIds, sizeById, orderSizes]);
 }
 
+// Размеры, которые есть в ФАЙЛЕ, но не заведены в размерный ряд карточки.
+//
+// Отдельная функция, потому что опознаются они по ВСЕМУ словарю размеров, а не по ряду
+// карточки: пока размера нет в ряду, `useSizeTokens` его хвостом не считает, и увидеть его
+// нельзя в принципе — блок просто остаётся с полным именем, а деталь двоится (BP_1_XS и
+// BP_1_M становятся разными строками вместо одной BP_1).
+//
+// Но РЕЗАТЬ по словарю нельзя: «FP_L» — это левая полочка, а «L» есть в словаре как размер.
+// Поэтому машина только показывает находку, а добавляет размер в карточку человек. Ровно та же
+// сделка, что и во всём диалоге: предлагает машина, решает человек.
+export function useDictionarySizeTokens(): Map<string, number> {
+  const sizeById = useSizeNames();
+  return useMemo(() => {
+    const byToken = new Map<string, number[]>();
+    for (const [id, name] of sizeById) {
+      for (const t of sizeTokensOf(name)) {
+        const list = byToken.get(t) ?? [];
+        list.push(id);
+        byToken.set(t, list);
+      }
+    }
+    // Только однозначные: токен, ведущий на два размера, опознанием не является.
+    const out = new Map<string, number>();
+    for (const [t, ids] of byToken) if (ids.length === 1) out.set(t, ids[0]);
+    return out;
+  }, [sizeById]);
+}
+
+// Хвостовой токен имени блока, очищенный до букв и цифр. Без всякой проверки — это кандидат,
+// а не размер.
+function tailToken(block: string): string {
+  const parts = block.trim().split('_');
+  if (parts.length < 2) return '';
+  return parts[parts.length - 1].replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+}
+
+export type MissingSize = { token: string; sizeId: number; name: string };
+
+export function missingSizesIn(
+  pieces: readonly PieceDTO[],
+  dictTokens: ReadonlyMap<string, number>,
+  cardSizeIds: readonly number[],
+  sizeById: ReadonlyMap<number, string>,
+): MissingSize[] {
+  const inCard = new Set(cardSizeIds);
+  const found = new Map<number, MissingSize>();
+  for (const p of pieces) {
+    const t = tailToken(p.blockName ?? '');
+    if (!t) continue;
+    const id = dictTokens.get(t);
+    if (id == null || inCard.has(id)) continue;
+    if (!found.has(id)) found.set(id, { token: t, sizeId: id, name: sizeById.get(id) ?? `#${id}` });
+  }
+  return [...found.values()];
+}
+
 export type SizeGroup = {
   // Размер, как он написан в файле; '' — блоки без размерного хвоста.
   size: string;
