@@ -78,7 +78,15 @@ export function PatternUploadModal({
   // painted frame shows zero rows and a disabled confirm.
   useLayoutEffect(() => {
     setStaged(
-      (files ?? []).map((file) => ({ file, name: '', bomLineKey: soleSlot, status: 'pending' })),
+      (files ?? []).map((file) => ({
+        file,
+        name: '',
+        // Only a DXF is preselected. A PDF is a sheet a human reads, not a thing cut from a
+        // cloth, and the inline editor on the выкройки grid is DXF-only — so a PDF bound here
+        // by default could never be unbound.
+        bomLineKey: isDxfFile(file) ? soleSlot : '',
+        status: 'pending',
+      })),
     );
     setBusy(false);
   }, [files, soleSlot]);

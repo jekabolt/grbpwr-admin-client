@@ -124,7 +124,32 @@ export function useTechCardDraft(
   // defaults — isDirty is then computed as draft ≠ loaded card.
   const restore = () => {
     if (!pending) return;
-    form.reset(pending.data, { keepDefaultValues: true });
+    // A draft written by an OLDER build has no idea about fields added since, and zod fills them
+    // with their empty defaults — which the save path then sends as deliberate values. For the
+    // DXF↔fabric bindings and the block→piece aliases that means «unbind everything» and «the
+    // alias set is empty», silently deleting work done elsewhere with no 409 to stop it (the
+    // lock version comes from the fresh card query, not from the draft). So anything the draft
+    // does not actually carry is taken from the loaded card instead of from a default.
+    const loaded = form.getValues();
+    const data = { ...pending.data } as typeof pending.data;
+    const carried = ['patterns', 'pieceDxfAliases'] as const;
+    for (const key of carried) {
+      if (!(key in (pending.data as object))) (data as Record<string, unknown>)[key] = loaded[key];
+    }
+    // `patterns` may exist but predate the binding column; carry it per row, by identity.
+    if (Array.isArray(data.patterns) && Array.isArray(loaded.patterns)) {
+      const bindingByKey = new Map<string, string>();
+      for (const p of loaded.patterns) {
+        const id = p.lineKey?.trim() || `${p.sizeId ?? 0}|${p.url ?? ''}`;
+        if (p.bomLineKey) bindingByKey.set(id, p.bomLineKey);
+      }
+      data.patterns = data.patterns.map((p) => {
+        if (typeof p.bomLineKey === 'string') return p;
+        const id = p.lineKey?.trim() || `${p.sizeId ?? 0}|${p.url ?? ''}`;
+        return { ...p, bomLineKey: bindingByKey.get(id) ?? '' };
+      });
+    }
+    form.reset(data, { keepDefaultValues: true });
     // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging
     // identity, which is what makes an ALREADY-MOUNTED panel re-run its claim effect and adopt its
     // snapshot — every tab body is mounted from page load, so without that bump the claim had
