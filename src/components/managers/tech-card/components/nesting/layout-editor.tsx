@@ -5,7 +5,8 @@
 // раскладки вместе с остальной геометрией.
 import { useMemo, useRef, useState } from 'react';
 import Text from 'ui/components/text';
-import type { Placement, PieceDTO, RotationDeg } from 'lib/nesting/types';
+import type { NestResult, Placement, PieceDTO, RotationDeg } from 'lib/nesting/types';
+import { type LayoutLabel, planLayoutLabels } from 'lib/nesting/render/label-fit';
 import { rotatedBounds } from 'lib/nesting/geom/clearance';
 
 const FILL = '#f2f2f2';
@@ -42,6 +43,31 @@ export function LayoutEditor({
   onChange: (next: Placement[]) => void;
 }) {
   const byId = useMemo(() => new Map(pieces.map((p) => [p.id, p])), [pieces]);
+  // ТОТ ЖЕ планировщик подписей, что у SVG-экспорта и плоттерного DXF.
+  //
+  // Это ГЛАВНЫЙ экран: потоковое превью показывается только пока идёт прогон, а готовый прогон,
+  // сохранённый маркер и ручная правка рисуются здесь — и именно отсюда жмут «скачать DXF».
+  // Пока редактор рисовал подпись по-своему (горизонтально, одним кеглем, в центре повёрнутого
+  // ГАБАРИТА), картинка после окончания прогона возвращалась к разъезжающимся именам, а усечение,
+  // которое уедет на резак, на экране не показывалось вообще — проверить его было негде.
+  //
+  // Пересчёт привязан к ЗАФИКСИРОВАННЫМ размещениям: во время перетаскивания план не трогаем, у
+  // тянущейся детали подпись едет за ней по-старому, а на pointerup всё пересобирается. Иначе
+  // каждый кадр перетаскивания стоил бы полного планирования.
+  const labelPlans = useMemo(
+    () =>
+      planLayoutLabels(
+        { placements: [...placements], usedLengthCm } as unknown as NestResult,
+        pieces,
+        widthCm,
+      ),
+    [placements, pieces, widthCm, usedLengthCm],
+  );
+  const planByKey = useMemo(() => {
+    const m = new Map<string, LayoutLabel>();
+    for (const l of labelPlans) m.set(`${l.placement.pieceId}|${l.placement.instance}`, l);
+    return m;
+  }, [labelPlans]);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   // Live drag: index + current translation override (committed on pointerup).
@@ -118,7 +144,12 @@ export function LayoutEditor({
     const st = dragStart.current;
     if (!st || !drag) return;
     const p = toSvg(e);
-    const next = clamp(drag.index, st.x + (p.x - st.px), st.y + (p.y - st.py), placements[drag.index].rot);
+    const next = clamp(
+      drag.index,
+      st.x + (p.x - st.px),
+      st.y + (p.y - st.py),
+      placements[drag.index].rot,
+    );
     setDrag({ index: drag.index, x: next.x, y: next.y });
   };
 
@@ -163,15 +194,17 @@ export function LayoutEditor({
               ? `выбрано: ${selPiece.name}${placements[selected].rot ? ` (${placements[selected].rot}°)` : ''}`
               : 'перетащите деталь · клик — выбрать · R — поворот'}
           </Text>
-          {selected != null && selPiece && rotsFor(selPiece, placements[selected].rot).length > 1 && (
-            <button
-              type='button'
-              className='text-nano uppercase underline hover:opacity-70'
-              onClick={rotateSelected}
-            >
-              повернуть (R)
-            </button>
-          )}
+          {selected != null &&
+            selPiece &&
+            rotsFor(selPiece, placements[selected].rot).length > 1 && (
+              <button
+                type='button'
+                className='text-nano uppercase underline hover:opacity-70'
+                onClick={rotateSelected}
+              >
+                повернуть (R)
+              </button>
+            )}
         </div>
       )}
       <div
@@ -192,7 +225,15 @@ export function LayoutEditor({
           className='h-auto w-full'
           onPointerDown={() => setSelected(null)}
         >
-          <rect x={0} y={0} width={L} height={W} fill='#ffffff' stroke={RULE} strokeWidth={W / 300} />
+          <rect
+            x={0}
+            y={0}
+            width={L}
+            height={W}
+            fill='#ffffff'
+            stroke={RULE}
+            strokeWidth={W / 300}
+          />
           {marginCm > 0 && (
             <rect
               x={marginCm}
@@ -246,30 +287,96 @@ export function LayoutEditor({
                       любом повороте и перетаскивании. Раскройщик режет по маркеру — маркер без
                       надсечек неполон. */}
                   {(piece.inner ?? []).map((c, k) => {
-                    const pts = c.pts.map((pt) => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' ');
+                    const pts = c.pts
+                      .map((pt) => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`)
+                      .join(' ');
                     return c.closed ? (
-                      <polygon key={k} points={pts} fill='none' stroke={STROKE} strokeWidth={W / 700} />
+                      <polygon
+                        key={k}
+                        points={pts}
+                        fill='none'
+                        stroke={STROKE}
+                        strokeWidth={W / 700}
+                      />
                     ) : (
-                      <polyline key={k} points={pts} fill='none' stroke={STROKE} strokeWidth={W / 700} />
+                      <polyline
+                        key={k}
+                        points={pts}
+                        fill='none'
+                        stroke={STROKE}
+                        strokeWidth={W / 700}
+                      />
                     );
                   })}
                 </g>
-                <text
-                  x={lx}
-                  y={ly}
-                  fontSize={W / 40}
-                  fill={bad ? BAD : INK}
-                  textAnchor='middle'
-                  pointerEvents='none'
-                >
-                  {label}
-                  {pl.rot ? ` (${pl.rot}°)` : ''}
-                </text>
+                {(() => {
+                  const planned = planByKey.get(`${pl.pieceId}|${pl.instance}`);
+                  // Во время перетаскивания план устарел по координатам — показываем старую
+                  // простую подпись, она едет вместе с деталью; на pointerup план пересоберётся.
+                  if (!planned || drag?.index === index) {
+                    return (
+                      <text
+                        x={lx}
+                        y={ly}
+                        fontSize={W / 40}
+                        fill={bad ? BAD : INK}
+                        textAnchor='middle'
+                        pointerEvents='none'
+                      >
+                        {label}
+                        {pl.rot ? ` (${pl.rot}°)` : ''}
+                      </text>
+                    );
+                  }
+                  const { plan } = planned;
+                  return (
+                    <g pointerEvents='none'>
+                      {plan.leader && (
+                        <>
+                          <circle
+                            cx={plan.leader.dotX}
+                            cy={plan.leader.dotY}
+                            r={plan.fontCm * 0.22}
+                            fill={bad ? BAD : INK}
+                          />
+                          <line
+                            x1={plan.leader.dotX}
+                            y1={plan.leader.dotY}
+                            x2={plan.leader.toX}
+                            y2={plan.leader.toY}
+                            stroke={bad ? BAD : INK}
+                            strokeWidth={W / 900}
+                          />
+                        </>
+                      )}
+                      <text
+                        x={plan.box.cx}
+                        y={plan.box.cy}
+                        fontSize={plan.fontCm}
+                        fill={bad ? BAD : INK}
+                        textAnchor='middle'
+                        dominantBaseline='central'
+                        fontFamily='monospace'
+                        transform={`rotate(${plan.box.angleDeg} ${plan.box.cx} ${plan.box.cy})`}
+                      >
+                        {plan.text}
+                        {plan.truncated && <title>{label}</title>}
+                      </text>
+                    </g>
+                  );
+                })()}
               </g>
             );
           })}
 
-          <line x1={usedLengthCm} y1={0} x2={usedLengthCm} y2={W} stroke={INK} strokeWidth={W / 300} />
+          <line
+            x1={usedLengthCm}
+            y1={0}
+            x2={usedLengthCm}
+            y2={W}
+            stroke={INK}
+            strokeWidth={W / 300}
+          />
           {targetCm != null && targetCm > 0 && (
             <line
               x1={targetCm}

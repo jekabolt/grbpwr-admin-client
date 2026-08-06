@@ -69,6 +69,14 @@ function simplifyRing(pts: readonly Pt[], eps: number): Pt[] {
   return out.length >= 3 ? out : [...pts];
 }
 
+// Деталь с упрощённым контуром — только для планирования подписей в живом превью. Тот же eps,
+// что и у отрисовки, поэтому подпись согласована с тем, что нарисовано на экране.
+function simplifyPieceForLabels(p: PieceDTO): PieceDTO {
+  const poly = simplifyRing(p.poly, LIVE_LABEL_EPS_CM);
+  return poly === p.poly ? p : { ...p, poly };
+}
+const LIVE_LABEL_EPS_CM = 0.05;
+
 export function renderLayoutSvg(
   result: NestResult,
   pieces: readonly PieceDTO[],
@@ -136,7 +144,13 @@ export function renderLayoutSvg(
   // помещаться внутрь СВОЕЙ детали, поворачиваясь по долевой и уменьшаясь, а не выезжать на
   // соседнюю. Тот же planLayoutLabels зовёт плоттерный DXF, поэтому экран и резак показывают
   // одно и то же — включая усечения и выноски.
-  for (const lab of planLayoutLabels(result, pieces, fabricWidthCm)) {
+  //
+  // В ЖИВОМ ПРЕВЬЮ планируем по УПРОЩЁННЫМ контурам. Планирование по истинной геометрии стоит
+  // ~9.7 мс из 9.8 мс кадра на 90 деталях (≈14 тысяч вершин), то есть съедает кадр целиком и
+  // обесценивает само упрощение, ради дешевизны которого этот путь и заведён. При экспорте
+  // (simplifyEpsCm = 0) геометрия истинная, и экран с плоттером сходятся там, где это важно.
+  const labelPieces = simplifyEpsCm > 0 ? pieces.map(simplifyPieceForLabels) : pieces;
+  for (const lab of planLayoutLabels(result, labelPieces, fabricWidthCm)) {
     const { plan } = lab;
     if (plan.leader) {
       parts.push(
