@@ -534,24 +534,43 @@ export function PatternsField({
             дополняется из файла сам. Колорвей на файл не влияет — лекала общие, — но артикул и
             его ширину каждый колорвей подставляет свои.
           </Text>
-          {canEdit && uploadSlots.length > 0 && (
-            // Загрузка DXF не спрашивает размер: их в файле несколько. Строка выкройки на
-            // сервере по-прежнему несёт size_id, поэтому кладём её в ПЕРВЫЙ размер ряда —
-            // слот остаётся местом хранения, а не смыслом.
+        </div>
+        {/* Плейсхолдер загрузки — НЕ на плитке размера. Размеров в одном DXF несколько, так что
+            спрашивать «в какой размер положить» бессмысленно; спрашивается ткань. Пунктирная
+            рамка тут значит то же, что и на сетке размеров: сюда ещё ничего не положили. */}
+        {canEdit && uploadSlots.length > 0 && (
+          <div
+            className={`flex flex-col items-center justify-center gap-1 border border-dashed p-3 ${
+              dxfByFabric.length === 0 ? 'border-error' : 'border-borderColor'
+            }`}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault();
+              const dropped = Array.from(e.dataTransfer.files ?? []).filter((f) =>
+                f.name.toLowerCase().endsWith('.dxf'),
+              );
+              // Кладём в тот же слот, что и кнопка: наименьший размер ряда. Модалка спросит
+              // ткань, потому что fabricSlots передан.
+              if (dropped.length > 0) setDroppedOn({ sizeId: orderSizes(sizeIds)[0] ?? 0, files: dropped });
+            }}
+          >
+            <Text size='nano' variant='label' component='span'>
+              {dxfByFabric.length === 0
+                ? 'DXF ещё не загружены'
+                : 'добавить ещё один DXF — другой материал'}
+            </Text>
             <PatternUploadButton
-              label='+ DXF на ткань'
+              label='+ DXF'
               fabricSlots={uploadSlots}
               onUploaded={(p) =>
                 append({ sizeId: orderSizes(sizeIds)[0] ?? 0, lineKey: ulid(), ...p })
               }
               className='[&_button]:px-2 [&_button]:py-px [&_button]:text-micro [&_button]:tracking-label'
             />
-          )}
-        </div>
-        {dxfByFabric.length === 0 && (
-          <Text size='nano' variant='label' component='p'>
-            DXF ещё не загружены
-          </Text>
+            <Text size='nano' variant='label' component='span'>
+              перетащите файл сюда · размер спрашивать не нужно, он в именах деталей
+            </Text>
+          </div>
         )}
           {dxfByFabric.map((g) => {
             const bound = !!g.bomLineKey && liveFabricKeys.has(g.bomLineKey);
