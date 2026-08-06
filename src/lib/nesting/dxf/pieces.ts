@@ -22,6 +22,11 @@ export type GrainCandidate = {
   // направление ТКАНИ, а 0 и 180 движок и так разрешает обоим.
   angleDeg: number;
   lengthCm: number;
+  // Сам отрезок в АБСОЛЮТНЫХ координатах чертежа — чтобы нарисовать его на листе там, где он
+  // и лежит. Оператор должен видеть прочитанную долевую до того, как ткань разрезана: угол
+  // числом ничего не проверяет, а линия поверх детали проверяет сразу.
+  a: Pt;
+  b: Pt;
 };
 
 export type RawPiece = {
@@ -111,7 +116,7 @@ export function groupToPieces(
     let angleDeg = (Math.atan2(dy, dx) * 180) / Math.PI;
     // Ось, а не вектор: −30° и 150° — одна и та же долевая.
     angleDeg = ((angleDeg % 180) + 180) % 180;
-    grain.push({ layer: c.layer, angleDeg, lengthCm });
+    grain.push({ layer: c.layer, angleDeg, lengthCm, a: c.pts[0], b: c.pts[1] });
   }
 
   // Chained PER LAYER, not with layer 1 winning outright. Two reasons. A contour belongs to one

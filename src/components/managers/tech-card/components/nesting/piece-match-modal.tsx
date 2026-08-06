@@ -36,6 +36,7 @@ import { clampUtf8Bytes } from 'utils/pattern';
 import type { TechCardFormData } from '../schema';
 import { sizeRank, splitBlockSize } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
+import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet, type PieceMark } from './piece-sheet';
 import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
@@ -164,6 +165,12 @@ export function PieceMatchModal({
     () => blocksMissingOnLayer(allPieces, contourLayer),
     [allPieces, contourLayer],
   );
+  // Долевая на листе — та же линия, по которой раскладка разворачивает деталь.
+  const grainLayer = useMemo(
+    () => defaultGrainLayer(grainLayerOptions(allPieces)),
+    [allPieces],
+  );
+  const [showGrain, setShowGrain] = useState(true);
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
   // meant, and the full-set write then rewrites them in that form.
@@ -716,6 +723,23 @@ export function PieceMatchModal({
                   ))}
                 </div>
               )}
+              {/* Долевая на листе. Раскладка разворачивает деталь именно по этой линии, так что
+                  увидеть её здесь — единственный способ проверить прочитанное до того, как
+                  ткань разрезана. */}
+              {grainLayer !== '' && (
+                <div className='mb-1'>
+                  <label className='flex cursor-pointer items-center gap-1.5'>
+                    <input
+                      type='checkbox'
+                      checked={showGrain}
+                      onChange={(e) => setShowGrain(e.target.checked)}
+                    />
+                    <Text size='nano' variant='label' component='span'>
+                      показать долевую (слой {grainLayer}) — по ней раскладка разворачивает деталь
+                    </Text>
+                  </label>
+                </div>
+              )}
               {/* Размерный ряд карточки уже не покрывает файл. Тогда блоки нераспознанных
                   размеров не сворачиваются к идентичности и заводят ЛИШНИЕ детали кроя — по
                   одной на каждый такой размер. Оператору неоткуда об этом догадаться, кроме
@@ -767,6 +791,7 @@ export function PieceMatchModal({
                 // sit at different places on the sheet, so the view would land on nothing.
                 key={`${sheet.index}|${shownSize}`}
                 pieces={sheetPieces}
+                grainLayer={showGrain ? grainLayer : ''}
                 keyOf={ciOf}
                 markOf={markOf}
                 labelOf={labelOf}

@@ -37,7 +37,8 @@ export type PieceDTO = {
   // Долевая, как она нарисована в файле: прямые незамкнутые отрезки блока с их слоями и углами
   // (ось, [0,180)). Какой слой её несёт, решается там, где виден весь файл. Пусто у детали из
   // сохранённого маркера — там ориентация уже применена.
-  grain?: { layer: string; angleDeg: number; lengthCm: number }[];
+  // `a`/`b` — концы отрезка в абсолютных координатах чертежа, чтобы лист мог его нарисовать.
+  grain?: { layer: string; angleDeg: number; lengthCm: number; a: Pt; b: Pt }[];
   // Which uploaded file the piece came from (display).
   source: string;
   // Index of that file in the parsed batch. `source` is a DISPLAY name and two sheets can
