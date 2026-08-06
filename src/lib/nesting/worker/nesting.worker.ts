@@ -4,6 +4,7 @@
 import type { NestConfig, ParseOpts, PieceDTO, Unit, WorkerRequest, WorkerResponse } from '../types';
 import { area, bounds } from '../geom/polygon';
 import { parseFiles } from './parse-files';
+import { orientToGrain } from '../geom/grain-orient';
 import { nest } from '../nest';
 
 const post = (msg: WorkerResponse) => {
@@ -81,8 +82,13 @@ async function handleNest(id: number, parseId: number, config: NestConfig): Prom
     post({ type: 'error', id, message: 'данные деталей устарели — обновите разбор DXF' });
     return;
   }
+  // Разворот по долевой делается ЗДЕСЬ, на той же геометрии, которую увидит движок. Раньше он
+  // жил на главном потоке и сюда не доезжал: через NestConfig едут только идентификаторы, так
+  // что детали укладывались как нарисованы, а экран показывал повёрнутые контуры с чужими
+  // размещениями. Функция чистая и вызывается с тем же слоем на главном потоке — значит обе
+  // стороны получают побайтово одно и то же.
   const result = await nest(
-    currentParse.pieces,
+    orientToGrain(currentParse.pieces, config.grainLayer).pieces,
     config,
     () => cancelled.has(id),
     (p) =>

@@ -84,8 +84,13 @@ function similarity(a: string, b: string): number {
 const SUGGEST_MIN = 0.6;
 
 type BlockRow = {
-  block: string; // normalized name, as stored
+  // ИДЕНТИЧНОСТЬ детали, а не имя блока из файла: BP_1_XS, BP_1_M и BP_1_XL — это одна деталь
+  // кроя BP_1 в трёх размерах, и в списке она обязана быть одной строкой.
+  block: string;
   instances: number; // how many times it appears in the file(s)
+  // Размеры, в которых эта деталь нашлась. Показывается рядом с именем: это и есть видимое
+  // доказательство, что строка смерженная, а не «случайно попался только один размер».
+  sizes: string[];
   // What the dialog proposes and why. 'exact' | 'loose' need no badge — they ARE the name;
   // 'similar' and 'other-fabric' are guesses and say so.
   suggested: string; // piece lineKey, '' = none
@@ -180,7 +185,9 @@ export function PieceMatchModal({
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
   // count to offer the block again in the SAME pass. Rebuilding `rows` from the effect instead
   // would wipe whatever the operator has already chosen.
-  const [blockCounts, setBlockCounts] = useState<Map<string, { block: string; instances: number }>>(
+  const [blockCounts, setBlockCounts] = useState<
+    Map<string, { block: string; instances: number; sizes: string[] }>
+  >(
     new Map(),
   );
   // Blocks the operator asked to unmap in this dialog session (ci keys).
@@ -253,6 +260,7 @@ export function PieceMatchModal({
     // every consumption derived from it.
     const perFile = new Map<string, Map<string, number>>();
     const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
+    const sizesByCi = new Map<string, Set<string>>(); // ci key → размеры, в которых деталь есть
     for (const p of contourPieces) {
       // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
       // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
@@ -261,6 +269,12 @@ export function PieceMatchModal({
       if (!b) continue; // a file with no per-piece blocks has nothing to map
       const ci = b.toLowerCase();
       if (!spelling.has(ci)) spelling.set(ci, b);
+      const sz = split.codeById.get(p.id)?.size ?? '';
+      if (sz) {
+        const set = sizesByCi.get(ci) ?? new Set<string>();
+        set.add(sz);
+        sizesByCi.set(ci, set);
+      }
       // Bucketed by the file's INDEX **and the size**, not by the file alone. Two sheets
       // legitimately share a display name (two revisions re-exported by the factory under one
       // filename), so the name cannot separate them — and now that one file holds every size,
@@ -275,8 +289,13 @@ export function PieceMatchModal({
     for (const file of perFile.values()) {
       for (const [ci, n] of file) counts.set(ci, Math.max(counts.get(ci) ?? 0, n));
     }
-    const all = new Map<string, { block: string; instances: number }>();
-    for (const [ci, instances] of counts) all.set(ci, { block: spelling.get(ci)!, instances });
+    const all = new Map<string, { block: string; instances: number; sizes: string[] }>();
+    for (const [ci, instances] of counts) {
+      const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
+        (a, b) => sizeRank(a, sizeTokens) - sizeRank(b, sizeTokens),
+      );
+      all.set(ci, { block: spelling.get(ci)!, instances, sizes });
+    }
     setBlockCounts(all);
     const next: BlockRow[] = [];
     for (const [ci, instances] of counts) {
@@ -313,7 +332,10 @@ export function PieceMatchModal({
       // Only the two exact tiers are pre-selected. A similarity guess or another fabric's
       // mapping is offered, never applied by default — being wrong there costs cloth.
       const preselect = basis === 'exact' || basis === 'loose' ? suggested : '';
-      next.push({ block, instances, suggested, basis, choice: preselect });
+      const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
+        (a, b) => sizeRank(a, sizeTokens) - sizeRank(b, sizeTokens),
+      );
+      next.push({ block, instances, sizes, suggested, basis, choice: preselect });
     }
     next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
     setRows(next);
@@ -453,7 +475,14 @@ export function PieceMatchModal({
       if (!found) return prev;
       return [
         ...prev,
-        { block: found.block, instances: found.instances, suggested: '', basis: 'none', choice: '' },
+        {
+          block: found.block,
+          instances: found.instances,
+          sizes: found.sizes,
+          suggested: '',
+          basis: 'none',
+          choice: '',
+        },
       ];
     });
   };
@@ -468,6 +497,7 @@ export function PieceMatchModal({
       ci: selected,
       block: counted?.block ?? row?.block ?? selected,
       instances: counted?.instances ?? row?.instances ?? 0,
+      sizes: counted?.sizes ?? row?.sizes ?? [],
       row,
       mappedTo,
       mappedName: mappedTo ? (nameByPieceKey.get(mappedTo.toLowerCase()) ?? '—') : null,
@@ -810,8 +840,14 @@ export function PieceMatchModal({
               {focus && (
                 <div className='space-y-1.5 border border-borderColor p-2'>
                   <Text size='micro' component='p' className='break-words'>
-                    блок <span className='uppercase'>{focus.block}</span> · ×{focus.instances}
+                    деталь <span className='uppercase'>{focus.block}</span> · ×{focus.instances} в
+                    изделии
                   </Text>
+                  {focus.sizes.length > 0 && (
+                    <Text size='nano' variant='label' component='p'>
+                      одна на размеры: {focus.sizes.join(' ')}
+                    </Text>
+                  )}
                   {focus.mappedTo && !focus.dropped ? (
                     <>
                       {/* Renaming right here is the point of the sheet: the shape tells you what
@@ -896,8 +932,9 @@ export function PieceMatchModal({
           <DataTable variant='grid' className='[&_td]:text-micro'>
             <thead>
               <tr>
-                <th>блок DXF</th>
-                <th>в файле</th>
+                <th>деталь в DXF</th>
+                <th>размеры</th>
+                <th>в изделии</th>
                 <th>деталь кроя</th>
               </tr>
             </thead>
@@ -919,6 +956,11 @@ export function PieceMatchModal({
                       >
                         {r.block}
                       </button>
+                    </td>
+                    {/* Размеры, в которых деталь нашлась. Это и есть видимое доказательство,
+                        что строка одна на всю градацию: BP_1_XS…BP_1_XL — одна деталь BP_1. */}
+                    <td className='whitespace-nowrap'>
+                      {r.sizes.length > 0 ? r.sizes.join(' ') : '—'}
                     </td>
                     <td>×{r.instances}</td>
                     <td>

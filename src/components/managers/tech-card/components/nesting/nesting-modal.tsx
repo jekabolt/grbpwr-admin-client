@@ -29,7 +29,8 @@ import { LayoutEditor } from './layout-editor';
 import { buildMarkerLayout, dec, decNum, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
 import { sizeRank } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
-import { defaultGrainLayer, grainLayerOptions, orientToGrain } from './grain';
+import { orientToGrain } from 'lib/nesting/geom/grain-orient';
+import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
@@ -176,8 +177,11 @@ export function NestingModal({
   // половина под 90°, так что общий поворот листа починил бы один и сломал другой.
   const grainLayers = useMemo(() => grainLayerOptions(allPieces), [allPieces]);
   const autoGrainLayer = useMemo(() => defaultGrainLayer(grainLayers), [grainLayers]);
-  const [grainOn, setGrainOn] = useState(true);
-  const grainLayer = grainOn ? autoGrainLayer : '';
+  // null = следовать автоопределению; '' = не разворачивать. Слой можно и ПЕРЕБРАТЬ, а не
+  // только выключить: опознание — эвристика, и молча ошибиться она может в обе стороны.
+  const [grainPick, setGrainPick] = useState<string | null>(null);
+  const grainLayer =
+    grainPick === null ? autoGrainLayer : grainLayers.some((o) => o.layer === grainPick) ? grainPick : '';
   const oriented = useMemo(
     () => orientToGrain(selectedPieces, grainLayer),
     [selectedPieces, grainLayer],
@@ -230,10 +234,27 @@ export function NestingModal({
   // (inputs are disabled while running, so this can only fire against a done run). Manual
   // edits reached here only through guardManual, which clears them first; this stays as the
   // safety net for any programmatic parameter change (e.g. a re-parse reseeding `sel`).
+  // Слой контура, размер и слой долевой меняют САМУ ГЕОМЕТРИЮ, которую укладывают, поэтому
+  // держать после них готовый результат нельзя: размещения остались бы от прежних деталей.
+  // Перебор слоя долевой при готовом прогоне разворачивал детали на экране, оставляя чужие
+  // размещения, — и такой маркер спокойно сохранялся, потому что «размещено 9/9» продолжало
+  // быть правдой. Смена слоя или размера ещё и меняет идентификаторы, так что полоса
+  // оказывалась пустой при бодрой статистике.
   useEffect(() => {
     resetRun();
     setManual(null);
-  }, [widthCm, gapCm, marginCm, crossGrain, sel, setsN, resetRun]);
+  }, [
+    widthCm,
+    gapCm,
+    marginCm,
+    crossGrain,
+    sel,
+    setsN,
+    contourLayer,
+    shownSize,
+    grainLayer,
+    resetRun,
+  ]);
 
   const target = targetCm === '' ? undefined : targetCm;
 
@@ -337,6 +358,10 @@ export function NestingModal({
       gapCm,
       edgeMarginCm: marginCm,
       allowCrossGrain: crossGrain,
+      // Едет ИМЯ СЛОЯ, а не повёрнутая геометрия: через эту границу геометрия не ходит вовсе,
+      // и воркер разворачивает свою копию той же чистой функцией на том же входе. Так экран и
+      // движок гарантированно смотрят на одни детали.
+      grainLayer,
       timeBudgetMs: budgetS * 1000,
       rdpEpsCm: NEST_DEFAULTS.rdpEpsCm,
     };
@@ -913,42 +938,6 @@ export function NestingModal({
                   {missingOnLayer.length > 6 ? '…' : ''}
                 </Text>
               )}
-              {/* Долевая. Выключатель есть, потому что правило опознания слоя — эвристика, а не
-                  контракт; но по умолчанию включено: молча положить деталь поперёк долевой
-                  дороже, чем предложить это выключить. */}
-              {autoGrainLayer !== '' && (
-                <div className='flex flex-wrap items-center gap-2'>
-                  <label className='flex cursor-pointer items-center gap-1.5'>
-                    <CheckboxCommon
-                      name='nest-grain'
-                      checked={grainOn}
-                      disabled={running}
-                      onChange={(c: boolean) => guardManual(() => setGrainOn(c))}
-                    />
-                    <Text size='micro' component='span'>
-                      ориентировать по долевой (слой {autoGrainLayer})
-                    </Text>
-                  </label>
-                  {grainOn && (
-                    <Text size='nano' variant='label' component='span'>
-                      повёрнуто деталей: {oriented.rotated}
-                    </Text>
-                  )}
-                </div>
-              )}
-              {grainOn && oriented.missing.length > 0 && (
-                <Text size='nano' component='p' className='text-error'>
-                  долевая не найдена у {oriented.missing.length} деталей — они лягут так, как
-                  нарисованы: {oriented.missing.slice(0, 6).join(', ')}
-                  {oriented.missing.length > 6 ? '…' : ''}
-                </Text>
-              )}
-              {autoGrainLayer === '' && (
-                <Text size='nano' component='p' className='text-error'>
-                  долевая в файле не найдена — детали лягут так, как нарисованы, и это может быть
-                  поперёк долевой
-                </Text>
-              )}
               {sizeOpts.length > 1 && (
                 <div className='flex flex-wrap items-center gap-1'>
                   <Text size='nano' variant='label' component='span'>
@@ -971,6 +960,59 @@ export function NestingModal({
               )}
             </div>
           )}
+
+          {/* Долевая — СВОЯ панель, а не часть выбора слоя и размера. Пока она жила внутри той,
+              на файле с одним контурным слоем и одним размером панель не рендерилась вовсе:
+              выключатель, счётчик повёрнутых и список деталей без долевой исчезали, а разворот
+              всё равно происходил — то есть обе обещанные страховки пропадали ровно там, где
+              проверить было нечем. */}
+          <div className='space-y-1 border border-borderColor p-1.5'>
+            <div className='flex flex-wrap items-center gap-1'>
+              <Text size='nano' variant='label' component='span'>
+                долевая:
+              </Text>
+              {grainLayers.map((o) => (
+                <Button
+                  key={o.layer}
+                  type='button'
+                  variant={o.layer === grainLayer ? 'main' : 'secondary'}
+                  size='xs'
+                  disabled={running}
+                  title={`слой ${o.layer}: ровно один отрезок у ${o.exactlyOne} из ${o.seen} деталей, типичная длина ${o.medianLengthCm.toFixed(1)} см`}
+                  onClick={() => guardManual(() => setGrainPick(o.layer))}
+                >
+                  слой {o.layer}
+                </Button>
+              ))}
+              <Button
+                type='button'
+                variant={grainLayer === '' ? 'main' : 'secondary'}
+                size='xs'
+                disabled={running}
+                title='класть детали так, как они нарисованы'
+                onClick={() => guardManual(() => setGrainPick(''))}
+              >
+                не разворачивать
+              </Button>
+              {grainLayer !== '' && (
+                <Text size='nano' variant='label' component='span'>
+                  повёрнуто: {oriented.rotated} из {pieces.length}
+                </Text>
+              )}
+            </div>
+            {grainLayer !== '' && oriented.missing.length > 0 && (
+              <Text size='nano' component='p' className='text-error'>
+                долевая не определена однозначно у {oriented.missing.length} деталей — они лягут
+                так, как нарисованы: {oriented.missing.slice(0, 6).join(', ')}
+                {oriented.missing.length > 6 ? '…' : ''}
+              </Text>
+            )}
+            {grainLayer === '' && (
+              <Text size='nano' component='p' className='text-error'>
+                детали лягут так, как нарисованы в файле, — это может оказаться поперёк долевой
+              </Text>
+            )}
+          </div>
 
           {/* Piece list: checkbox · thumb · name · размеры · qty. */}
           {pieces.length > 0 && (

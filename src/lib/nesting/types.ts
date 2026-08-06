@@ -78,6 +78,12 @@ export type NestConfig = {
   gapCm: number;
   edgeMarginCm: number;
   allowCrossGrain: boolean; // adds 90/270 to the rotation set
+  // Слой DXF с долевой. Воркер разворачивает по нему детали ПЕРЕД укладкой: движок считает, что
+  // деталь нарисована долевой вдоль полосы, а в реальных файлах это не так. Едет именно имя
+  // слоя, а не готовая геометрия — геометрия через эту границу не ходит вовсе, и единственный
+  // способ гарантировать, что экран и движок смотрят на одно, это применить одну чистую функцию
+  // к одному входу по обе стороны. '' — не разворачивать.
+  grainLayer: string;
   timeBudgetMs: number;
   // RDP simplification epsilon for NFP inputs, cm.
   rdpEpsCm: number;
