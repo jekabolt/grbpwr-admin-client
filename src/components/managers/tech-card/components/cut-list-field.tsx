@@ -12,15 +12,19 @@ import Text from 'ui/components/text';
 import { TechCardFormData } from './schema';
 import { useStyleCutList } from './useStyleReadViews';
 
-// Q6: read-only production cut-list — one row per cut-piece (деталь кроя), expanded with
-// total_per_garment already folding the mirrored pair (pieces_per_garment × 2) and, per
-// colourway, which fabric (and optional fusing) BOM line it's cut from. NOT costing-gated —
-// this is pattern/production data, not money.
+// Q6: read-only production cut-list — one row per cut-piece (деталь кроя) with its
+// total_per_garment and, per colourway, which fabric (and optional fusing) BOM line it's cut from.
+// NOT costing-gated — this is pattern/production data, not money.
+//
+// The mirror flag is GONE (it expanded a piece ×2 as a left+right pair and was never used):
+// total_per_garment is now simply pieces_per_garment. GetStyleCutList stopped doubling in the same
+// change, so this table and the editor cannot disagree.
+//
 // #42: this table is a CALCULATED projection, not an editable list — there is nothing to "add"
-// here. It is derived (GetStyleCutList) from the cut-pieces × their mirror flag × each colourway's
-// fabric mapping — both of which live on the colorways tab. This view just reflects the result.
+// here. It is derived (GetStyleCutList) from the cut-pieces (patterns tab) × each colourway's
+// fabric mapping (colorways tab). This view just reflects the result.
 const INTRO =
-  'Calculated, not editable: pieces × mirror × each colourway’s fabric mapping. Add / edit the pieces and their fabric per colourway on the colorways tab — this table just shows the result.';
+  'Calculated, not editable: pieces × each colourway’s fabric mapping. Add / edit the pieces on the patterns tab, their fabric per colourway on the colorways tab — this table just shows the result.';
 
 const SHELL_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_FABRIC',
@@ -159,7 +163,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
     return (
       <CalloutBox tone='note'>
         <Text size='micro'>
-          {INTRO} No cut pieces yet — add one on the colorways tab and it will appear here.
+          {INTRO} No cut pieces yet — add one on the patterns tab and it will appear here.
         </Text>
       </CalloutBox>
     );
@@ -231,7 +235,6 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
             <th>grainline</th>
             <th>fused</th>
             <th>pieces / garment</th>
-            <th>mirrored</th>
             <th>total / garment</th>
             <th>fabric (by colourway)</th>
           </tr>
@@ -245,7 +248,6 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
                 <td>{p.grainline || <EmptyCell />}</td>
                 <td>{p.fused ? <Pill tone='mut'>fused</Pill> : <EmptyCell />}</td>
                 <td>{p.piecesPerGarment ?? 0}</td>
-                <td>{p.mirrored ? '×2 pair' : <EmptyCell />}</td>
                 <td>{p.totalPerGarment ?? 0}</td>
                 <td>
                   {fabrics.length === 0 ? (
@@ -291,7 +293,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
             );
           })}
           <TotalRow>
-            <td colSpan={5}>
+            <td colSpan={4}>
               {pieces.length} pieces
               {totals.garments > 0 ? ` · ${group(totals.garments)} garments` : ''}
             </td>

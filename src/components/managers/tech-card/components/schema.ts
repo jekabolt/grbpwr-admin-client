@@ -193,12 +193,11 @@ export function isBlankPiece(p: {
   note?: string;
   calloutNumber?: number;
   fused?: boolean;
-  mirrored?: boolean;
   piecesPerGarment?: number;
   materials?: { bomLineKey?: string; fusingBomLineKey?: string; note?: string }[];
 }): boolean {
   if (p.name?.trim() || p.grainline?.trim() || p.note?.trim()) return false;
-  if (p.calloutNumber || p.fused || p.mirrored) return false;
+  if (p.calloutNumber || p.fused) return false;
   if ((p.piecesPerGarment ?? 1) > 1) return false;
   return !(p.materials ?? []).some(
     (m) => m.bomLineKey?.trim() || m.fusingBomLineKey?.trim() || m.note?.trim(),
@@ -216,7 +215,12 @@ const pieceSchema = z
   .object({
     name: z.string().optional().default(''),
     piecesPerGarment: z.number().optional().default(1),
-    mirrored: z.boolean().optional().default(false),
+    // NO `mirrored`. The flag existed to expand a piece ×2 as a left+right pair (Q6) and was never
+    // used in practice; it is deliberately absent from the form, so the save mapper does not send it
+    // and the store writes `mirrored = 0` on the next save of any card that still carries a true.
+    // GetStyleCutList stopped doubling by it server-side in the same change — a client that merely
+    // hid the field would still have shown the server's doubled total_per_garment with nothing on
+    // screen to explain it.
     grainline: z.string().optional().default(''),
     fused: z.boolean().optional().default(false),
     calloutNumber: z.number().optional().default(0),
@@ -859,7 +863,6 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       lineKey: p.lineKey?.trim() || ulid(),
       name: p.name || '',
       piecesPerGarment: p.piecesPerGarment ?? 1,
-      mirrored: p.mirrored ?? false,
       grainline: p.grainline || '',
       fused: p.fused ?? false,
       calloutNumber: p.calloutNumber ?? 0,
@@ -1227,7 +1230,9 @@ export function mapFormToTechCardInsert(
         // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
         // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
         piecesPerGarment: p.piecesPerGarment || 1,
-        mirrored: p.mirrored ?? false,
+        // `mirrored` is NOT sent (see pieceSchema). The proto field still exists, so omitting it
+        // makes the wire value false and the store's UPDATE clears a stored true — the retirement
+        // is a write, not just a hidden control, and it lands card-by-card as cards are saved.
         grainline: p.grainline?.trim() || '',
         fused: p.fused ?? false,
         calloutNumber: p.calloutNumber || 0,

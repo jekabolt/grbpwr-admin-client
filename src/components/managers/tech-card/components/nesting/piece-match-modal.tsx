@@ -143,15 +143,16 @@ export function PieceMatchModal({
   // `_subjects.state` — `_subjects.array` is fired from exactly two places, setValue on a field
   // array name and reset. So an append made HERE never reaches the useFieldArray that PiecesTab
   // owns on the same name: its `fields` stay as they were, and a piece created from this dialog
-  // was invisible in the «детали кроя» table (which sits on the COLORWAYS tab) until the card
-  // was saved and refetched. The piece DID exist in form values, so the colourway recipe below
-  // that table listed it — two views of one array disagreeing is worse than either being empty.
+  // was invisible in the «детали кроя» table until the card was saved and refetched. The piece DID
+  // exist in form values, so every other reader of the array listed it — two views of one array
+  // disagreeing is worse than either being empty.
   //
   // The root write regenerates every field id, so the pieces table's rows remount. That costs
   // nothing but DOM focus here: those rows are fully CONTROLLED (value from useWatch + setValue
   // on change, not `register`), so a remount cannot lose a typed value — and this dialog is a
-  // modal over the PATTERNS tab, so nothing there is mid-edit behind it anyway. Aliases have no
-  // field array at all and always took an ordinary setValue.
+  // modal over the PATTERNS tab, which is where that table now lives, so it is behind the modal
+  // and nothing in it is mid-edit. Aliases have no field array at all and always took an ordinary
+  // setValue.
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as TechCardFormData['pieces'];
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
@@ -596,7 +597,7 @@ export function PieceMatchModal({
     try {
       const created: NonNullable<TechCardFormData['pieces']> = [];
       // Read at commit time, not from the render-time snapshot: the operator can have added or
-      // renamed a piece on the PIECES tab while this dialog was open.
+      // renamed a piece in the table behind this dialog while it was open.
       const live = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
       // Two pieces sharing a name make every reference to «полочка» ambiguous on the factory
       // sheet, and the server rejects the save for it (useCreatePiece keeps the same rule). So a
@@ -660,7 +661,6 @@ export function PieceMatchModal({
               // How many times the block appears in the file IS how many of that piece a garment
               // takes — the operator can still correct it on the pieces tab.
               piecesPerGarment: r.instances,
-              mirrored: false,
               grainline: '',
               fused: false,
               calloutNumber: 0,

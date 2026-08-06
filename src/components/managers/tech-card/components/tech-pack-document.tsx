@@ -639,7 +639,6 @@ export function TechPackDocument({
                 <th className={`${TH} w-6`}>#</th>
                 <th className={TH}>piece</th>
                 <th className={`${TH} text-center`}>qty / garment</th>
-                <th className={`${TH} text-center`}>mirrored</th>
                 <th className={TH}>grainline</th>
                 <th className={`${TH} text-center`}>fused</th>
                 <th className={TH}>fabric (by colourway)</th>
@@ -659,7 +658,6 @@ export function TechPackDocument({
                       )}
                     </td>
                     <td className={`${TD} text-center`}>{p.piecesPerGarment ?? '—'}</td>
-                    <td className={`${TD} text-center`}>{p.mirrored ? 'yes' : 'no'}</td>
                     <td className={TD}>{p.grainline || '—'}</td>
                     <td className={`${TD} text-center`}>{p.fused ? 'yes' : 'no'}</td>
                     <td className={TD}>

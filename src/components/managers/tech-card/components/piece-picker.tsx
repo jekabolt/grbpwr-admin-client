@@ -15,7 +15,7 @@ export type PieceRef = { lineKey: string; name: string };
 export const normalizePieceName = (name: string) => name.trim().toLowerCase();
 
 // The card's cut pieces, live from form state (not the server) so a piece added seconds ago on the
-// PIECES tab — or inline from a picker below — is immediately selectable everywhere, without a save
+// PATTERNS tab — or inline from a picker below — is immediately selectable everywhere, without a save
 // round-trip. Only pieces carrying a lineKey are offered: a reference to a piece with no stable
 // identity cannot be resolved server-side, so offering one would silently drop the link on save.
 export function useFormPieces(): PieceRef[] {
@@ -31,7 +31,7 @@ export function useFormPieces(): PieceRef[] {
 
 // Creates a cut piece from a picker without leaving the tab it's on, and returns its lineKey.
 // Discovering a part you forgot to declare is exactly what happens while writing an operation or a
-// norm; making that a trip to the PIECES tab loses the thought.
+// norm; making that a trip to the PATTERNS tab loses the thought.
 //
 // A name that already exists is NEVER created a second time — the existing piece's key comes back
 // instead. Two pieces sharing a name make every reference to "полочка" ambiguous to the human
@@ -55,7 +55,6 @@ export function useCreatePiece(): (name: string) => string {
           name: trimmed,
           lineKey,
           piecesPerGarment: 1,
-          mirrored: false,
           grainline: '',
           fused: false,
           calloutNumber: 0,
@@ -185,7 +184,7 @@ export function PieceMultiPicker({
 }) {
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosen = value.filter((k) => byKey.has(k));
-  // A key that no longer resolves (its piece was deleted on the PIECES tab) is surfaced rather than
+  // A key that no longer resolves (its piece was deleted on the PATTERNS tab) is surfaced rather than
   // silently dropped — the save would unlink it and nobody would know which operation lost a part.
   const dangling = value.filter((k) => !byKey.has(k));
 
@@ -228,7 +227,7 @@ export function PieceMultiPicker({
       </ChipRow>
       {dangling.length > 0 && (
         <Text size='micro' className='text-error'>
-          {dangling.length} деталь(и) удалены с вкладки PIECES — выберите заново
+          {dangling.length} деталь(и) удалены с вкладки PATTERNS — выберите заново
         </Text>
       )}
       {hint && (

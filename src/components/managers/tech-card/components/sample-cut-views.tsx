@@ -59,7 +59,6 @@ export function FabricSwatch({ index, className }: { index: number; className?: 
 type FormPiece = {
   name?: string;
   piecesPerGarment?: number;
-  mirrored?: boolean;
   grainline?: string;
   fused?: boolean;
   calloutNumber?: number;
@@ -76,10 +75,9 @@ type FormCallout = { number?: number; mediaId?: number; posX?: string; posY?: st
 export type CutPiece = {
   key: string;
   name: string;
-  /** pieces_per_garment × 2 when mirrored — the same fold GetStyleCutList applies (Q6). */
+  /** pieces_per_garment. The mirror flag that used to double this is gone — see GetStyleCutList. */
   total: number;
   perGarment: number;
-  mirrored: boolean;
   grainline: string;
   fused: boolean;
   calloutNumber: number;
@@ -170,9 +168,7 @@ export function useSampleCutView(techCard: common_TechCard | undefined, colorway
         key: p.lineKey || `${name}-${i}`,
         name,
         perGarment,
-        // Q6: mirrored means CUT AS A PAIR, so it doubles the count rather than flagging it.
-        total: perGarment * (p.mirrored ? 2 : 1),
-        mirrored: !!p.mirrored,
+        total: perGarment,
         grainline: p.grainline?.trim() || '',
         fused: !!p.fused,
         calloutNumber: p.calloutNumber ?? 0,
@@ -302,11 +298,6 @@ export function SampleCutPieces({
                 <Text component='span' size='micro' className='tabular-nums'>
                   ×{p.total}
                 </Text>
-                {p.mirrored && (
-                  <Text size='nano' variant='label' className='uppercase'>
-                    mirrored pair
-                  </Text>
-                )}
               </span>
             </div>
           );
@@ -391,7 +382,6 @@ export function SampleCutTicket({
                       <Text size='nano' variant='label' component='span' className='uppercase'>
                         {' '}
                         {[
-                          p.mirrored ? 'mirrored' : '',
                           p.grainline ? `${grainlineArrow(p.grainline)} ${p.grainline}` : '',
                           p.fused ? 'fused' : '',
                         ]

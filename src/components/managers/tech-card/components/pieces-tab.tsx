@@ -1,32 +1,20 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Canvas, Pin } from 'ui/components/canvas';
 import { DataTable } from 'ui/components/data-table';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
-import GenericPopover from 'ui/components/popover';
-import { SectionHeader } from 'ui/components/section-header';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
-import { grainlineArrow, grainlineOptions, pieceCodeOptions } from './piece-codes';
+import { grainlineArrow, grainlineOptionsFor, pieceCodeOptions } from './piece-codes';
 import { normalizePieceName } from './piece-picker';
 import { TechCardFormData } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 
-// Cut-piece detail = one pattern part (деталь кроя). The fabric map's cells reference BOM lines from
-// the body-fabric sections; fusing draws from interlining.
-const FABRIC_SECTIONS = [
-  'TECH_CARD_BOM_SECTION_FABRIC',
-  'TECH_CARD_BOM_SECTION_LINING',
-  'TECH_CARD_BOM_SECTION_INTERLINING',
-  'TECH_CARD_BOM_SECTION_INSULATION',
-];
-const FUSING_SECTIONS = ['TECH_CARD_BOM_SECTION_INTERLINING'];
-
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number];
-type FormMaterial = NonNullable<FormPiece['materials']>[number];
 type FormCallout = {
   number?: number;
   mediaId?: number;
@@ -35,14 +23,18 @@ type FormCallout = {
   posY?: string;
 };
 
-const colorwayLabel = (c: { colorwayId?: number; colorCode?: string; baseSku?: string }) =>
-  c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? 0}`;
+// Table controls sit at the same metrics as `Input` (1px edge box, 3px/7px, 22px min height) —
+// DESIGN.md §5. A native select, not the Radix one: this cell is dense, and Radix's Select cannot
+// carry an empty-string option, which is exactly the value a piece that has never been given a
+// grainline holds.
+const selectCls =
+  'block min-h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none';
 
-// The marker diagram beside the table (13.1). Grainline and mirroring are GEOMETRY — a picture
-// verifies them faster than a column of words — so the callout number each piece already carries is
-// drawn where the sketch says it lives. Pins are positioned against the image's own box (not a
-// fixed-aspect frame) because callout posX/posY are fractions OF THE IMAGE: letterboxing a
-// 4:3 sketch inside a 3:4 frame would slide every pin off the part it names.
+// The marker diagram beside the table (13.1). Grainline is GEOMETRY — a picture verifies it faster
+// than a column of words — so the callout number each piece already carries is drawn where the
+// sketch says it lives. Pins are positioned against the image's own box (not a fixed-aspect frame)
+// because callout posX/posY are fractions OF THE IMAGE: letterboxing a 4:3 sketch inside a 3:4 frame
+// would slide every pin off the part it names.
 function PieceDiagram({
   techCard,
   pinnedNumbers,
@@ -144,65 +136,49 @@ function PieceDiagram({
   );
 }
 
-// A colourway column's «copy from ▾»: fills this colourway's whole fabric map from another one.
-
-// Cut-piece details (детали кроя) + the piece × colourway fabric map (NF-05). Pieces are positional.
-// The map stores a sparse materials list keyed by the colourway id (pieceMaterial.colorwayIndex holds
-// colorway_id on the wire, schema.ts); a colourway with no entry is unmapped.
+// Cut-piece details (детали кроя) — one row per pattern part.
+//
+// This block lives on the PATTERNS tab, directly under «выкройки (DXF)», because a cut piece is a
+// property of the PATTERN, not of a colour: every colourway cuts the same pieces. The pieces
+// themselves arrive from the DXF through «↔ детали кроя» on the panel above, so the dialog and the
+// list it writes into are now on one screen. What stays on COLORWAYS is the per-colourway fabric
+// map — which BOM line each piece is cut from in that colourway, and its fusing — because that IS
+// per-colourway data.
+//
+// The `pieces` field array is owned HERE and nowhere else. `PieceMatchModal` writes through a ROOT
+// `setValue('pieces', …)` on purpose: measured against react-hook-form 7.62, `append`/`remove` emit
+// only on `_subjects.state`, never `_subjects.array`, so a second `useFieldArray('pieces')` anywhere
+// would not resync and a piece created from the DXF dialog would be invisible until a save+refetch.
 export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'pieces' });
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
-  // NF-05 fix (M8): the fabric-map columns are the style's REAL colourways (techCard.colorways,
-  // AdminColorwayRef[]) — the RHF `colorways` form array is permanently [] since colourways became
-  // products. Reading form state here left the whole section un-populatable regardless of how many
-  // colourways existed.
-  const colorways = techCard?.colorways ?? [];
-  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
-    name?: string;
-    section?: string;
+  // DXF block → piece aliases (0262). They are what lets this table say where a piece came from:
+  // a piece with an alias is drawn in a real CAD file, and that file — not the word in the `grain`
+  // column — is what the раскладка orients the piece by.
+  const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as Array<{
+    bomLineKey?: string;
+    blockName?: string;
+    pieceLineKey?: string;
   }>;
 
   // Row ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
   const pin = useCrossHighlight<number>();
 
-  // Fabric-map cell read/write, keyed by the real colourway id (nf05-01: resolve to the id, never a
-  // positional index — the cell must stay attached to the colourway that was picked, not whatever
-  // sits at that array position). materials is sparse — a colourway with no entry is unmapped.
-  const cellFor = (pi: number, colorwayId: number) =>
-    (pieces[pi]?.materials ?? []).find((m) => (m.colorwayIndex ?? 0) === colorwayId);
-  const setCell = (pi: number, colorwayId: number, patch: Partial<FormMaterial>) => {
-    const materials = (getValues(`pieces.${pi}.materials`) ?? []) as FormMaterial[];
-    const at = materials.findIndex((m) => (m.colorwayIndex ?? 0) === colorwayId);
-    const nextEntry: FormMaterial =
-      at >= 0
-        ? { ...materials[at], ...patch }
-        : { colorwayIndex: colorwayId, bomLineKey: '', fusingBomLineKey: '', note: '', ...patch };
-    const next =
-      at >= 0 ? materials.map((m, i) => (i === at ? nextEntry : m)) : [...materials, nextEntry];
-    setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
-  };
-
-  // Column copy: per ROW setValue on `pieces.N.materials`, never a whole-array setValue — replacing
-  // the array root desyncs useFieldArray's keys and re-mounts every input mid-edit.
-  const copyColumn = (fromId: number, toId: number) => {
-    if (fromId === toId) return;
-    const all = (getValues('pieces') ?? []) as FormPiece[];
-    all.forEach((p, pi) => {
-      const materials = (p.materials ?? []) as FormMaterial[];
-      const src = materials.find((m) => (m.colorwayIndex ?? 0) === fromId);
-      const at = materials.findIndex((m) => (m.colorwayIndex ?? 0) === toId);
-      const patch = {
-        bomLineKey: src?.bomLineKey ?? '',
-        fusingBomLineKey: src?.fusingBomLineKey ?? '',
-      };
-      const nextEntry: FormMaterial =
-        at >= 0 ? { ...materials[at], ...patch } : { colorwayIndex: toId, note: '', ...patch };
-      const next =
-        at >= 0 ? materials.map((m, i) => (i === at ? nextEntry : m)) : [...materials, nextEntry];
-      setValue(`pieces.${pi}.materials`, next, { shouldDirty: true });
-    });
-  };
+  // Which DXF blocks each piece is drawn as, by lineKey. Case-folded on the key the same way the
+  // matching dialog and the server do, so a piece is found whichever spelling the alias carries.
+  const blocksByPiece = useMemo(() => {
+    const m = new Map<string, string[]>();
+    for (const a of aliases) {
+      const key = (a.pieceLineKey ?? '').trim().toLowerCase();
+      const block = (a.blockName ?? '').trim();
+      if (!key || !block) continue;
+      const list = m.get(key) ?? [];
+      if (!list.includes(block)) list.push(block);
+      m.set(key, list);
+    }
+    return m;
+  }, [aliases]);
 
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
   // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
@@ -280,7 +256,6 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       name: '',
       lineKey: ulid(),
       piecesPerGarment: 1,
-      mirrored: false,
       grainline: '',
       fused: false,
       calloutNumber: 0,
@@ -289,203 +264,199 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     });
 
   return (
-    <div className='flex flex-col gap-3.5'>
+    <Section
+      title='детали кроя'
+      question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев; из какой ткани — на вкладке colorways'
+      action={
+        <Button type='button' variant='main' size='sm' data-field='pieces.add' onClick={addPiece}>
+          + piece
+        </Button>
+      }
+    >
       <datalist id='piece-code-suggestions'>
         {pieceCodeOptions.map((c) => (
           <option key={c} value={c} />
         ))}
       </datalist>
-      <datalist id='grainline-suggestions'>
-        {grainlineOptions.map((g) => (
-          <option key={g} value={g} />
-        ))}
-      </datalist>
 
-      {/* CUT PIECES — table + mini diagram */}
-      <section className='border border-borderColor bg-bgColor p-4'>
-        <SectionHeader
-          title='детали кроя'
-          question='— code, name, per garment, mirrored, grainline, fused, callout number'
-          action={
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              data-field='pieces.add'
-              onClick={addPiece}
-            >
-              + piece
-            </Button>
-          }
-        />
-        {fields.length === 0 ? (
-          <Text size='micro' variant='label'>
-            no pieces yet — add the pattern parts that get cut (front, back, collar…)
-          </Text>
-        ) : (
-          // minmax(0,1fr) — not 1fr — so the wide 8-column table can shrink and scroll inside its
-          // own overflow-x-auto instead of forcing the track wide and shoving the diagram column.
-          <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_160px]'>
-            <DataTable className='min-w-[760px] [&_td]:!align-middle [&_td]:!text-left [&_th]:!text-left'>
-              {/* Fixed column widths so every row lines up; the code/name column flexes, the rest are
-                  sized to their control. Alignment is forced left/middle (the DataTable default right-
-                  aligns, which fought the left-aligned inputs and read crooked). */}
-              <colgroup>
-                <col />
-                <col className='w-[52px]' />
-                <col className='w-[92px]' />
-                <col className='w-[150px]' />
-                <col className='w-[56px]' />
-                <col className='w-[180px]' />
-                <col className='w-[40px]' />
-              </colgroup>
-              <thead>
-                <tr>
-                  <th>code / name</th>
-                  <th>×</th>
-                  <th>mirror</th>
-                  <th>grain</th>
-                  <th>fused</th>
-                  <th>note</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {fields.map((f, pi) => {
-                  const p = pieces[pi] ?? {};
-                  const callout = p.calloutNumber || 0;
-                  const arrow = grainlineArrow(p.grainline);
-                  return (
-                    <tr
-                      key={f.id}
-                      {...pin.bind(callout > 0 ? callout : null)}
-                      className={pin.isActive(callout) ? 'bg-bgZebra' : undefined}
-                    >
-                      <td>
-                        <Input
-                          className='w-full'
-                          data-field={`pieces.${pi}.name`}
-                          aria-invalid={duplicateRows.has(pi)}
-                          list='piece-code-suggestions'
-                          value={p.name ?? ''}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setValue(`pieces.${pi}.name`, e.target.value, { shouldDirty: true })
-                          }
-                          placeholder='FP front piece'
-                        />
-                        {duplicateRows.has(pi) && (
-                          <Text size='micro' variant='error'>
-                            такая деталь уже есть — имя должно быть уникальным
-                          </Text>
-                        )}
-                        {detachedKeys.has((p.lineKey ?? '').trim()) && (
-                          <div className='mt-0.5'>
-                            <Pill
-                              tone='attention'
-                              title='выноска, на которую ссылалась деталь, удалена со скетча — проставьте callout # заново на вкладке sketch'
-                            >
-                              откреплена от выноски
-                            </Pill>
-                          </div>
-                        )}
-                      </td>
-                      <td>
-                        <Input
-                          className='w-full'
-                          type='number'
-                          min='1'
-                          value={p.piecesPerGarment ?? 1}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setValue(`pieces.${pi}.piecesPerGarment`, Number(e.target.value) || 1, {
-                              shouldDirty: true,
-                            })
-                          }
-                        />
-                      </td>
-                      <td>
-                        {/* the resulting multiplier is shown inline so the cut list is predictable */}
-                        <div className='flex items-center gap-1'>
-                          <input
-                            type='checkbox'
-                            aria-label='mirrored pair'
-                            checked={!!p.mirrored}
-                            onChange={(e) =>
-                              setValue(`pieces.${pi}.mirrored`, e.target.checked, {
-                                shouldDirty: true,
-                              })
-                            }
-                          />
-                          <Text size='micro' variant='label' component='span'>
-                            {p.mirrored ? `×${(p.piecesPerGarment ?? 1) * 2}` : ''}
-                          </Text>
+      {fields.length === 0 ? (
+        <Text size='micro' variant='label'>
+          деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо
+          добавьте вручную (полочка, спинка, воротник…)
+        </Text>
+      ) : (
+        // minmax(0,1fr) — not 1fr — so the wide table can shrink and scroll inside its own
+        // overflow-x-auto instead of forcing the track wide and shoving the diagram column.
+        <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_160px]'>
+          <DataTable className='min-w-[680px] [&_td]:!align-middle [&_td]:!text-left [&_th]:!text-left'>
+            {/* Fixed column widths so every row lines up; the code/name column flexes, the rest are
+                sized to their control. Alignment is forced left/middle (the DataTable default right-
+                aligns, which fought the left-aligned inputs and read crooked). */}
+            <colgroup>
+              <col />
+              <col className='w-[52px]' />
+              <col className='w-[210px]' />
+              <col className='w-[56px]' />
+              <col className='w-[180px]' />
+              <col className='w-[40px]' />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>code / name</th>
+                <th>×</th>
+                <th>grain</th>
+                <th>fused</th>
+                <th>note</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {fields.map((f, pi) => {
+                const p = pieces[pi] ?? {};
+                const callout = p.calloutNumber || 0;
+                const arrow = grainlineArrow(p.grainline);
+                const blocks = blocksByPiece.get((p.lineKey ?? '').trim().toLowerCase()) ?? [];
+                return (
+                  <tr
+                    key={f.id}
+                    {...pin.bind(callout > 0 ? callout : null)}
+                    className={pin.isActive(callout) ? 'bg-bgZebra' : undefined}
+                  >
+                    <td>
+                      <Input
+                        className='w-full'
+                        data-field={`pieces.${pi}.name`}
+                        aria-invalid={duplicateRows.has(pi)}
+                        list='piece-code-suggestions'
+                        value={p.name ?? ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setValue(`pieces.${pi}.name`, e.target.value, { shouldDirty: true })
+                        }
+                        placeholder='FP front piece'
+                      />
+                      {duplicateRows.has(pi) && (
+                        <Text size='micro' variant='error'>
+                          такая деталь уже есть — имя должно быть уникальным
+                        </Text>
+                      )}
+                      {detachedKeys.has((p.lineKey ?? '').trim()) && (
+                        <div className='mt-0.5'>
+                          <Pill
+                            tone='attention'
+                            title='выноска, на которую ссылалась деталь, удалена со скетча — проставьте callout # заново на вкладке sketch'
+                          >
+                            откреплена от выноски
+                          </Pill>
                         </div>
-                      </td>
-                      <td>
-                        <div className='flex items-center gap-1'>
-                          <Input
-                            className='w-full'
-                            list='grainline-suggestions'
-                            value={p.grainline ?? ''}
-                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                              setValue(`pieces.${pi}.grainline`, e.target.value, {
-                                shouldDirty: true,
-                              })
-                            }
-                            placeholder='lengthwise'
-                          />
-                          <span aria-hidden className='shrink-0'>
-                            {arrow}
-                          </span>
-                        </div>
-                      </td>
-                      <td>
-                        <input
-                          type='checkbox'
-                          aria-label='fused'
-                          checked={!!p.fused}
+                      )}
+                    </td>
+                    <td>
+                      <Input
+                        className='w-full'
+                        type='number'
+                        min='1'
+                        value={p.piecesPerGarment ?? 1}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setValue(`pieces.${pi}.piecesPerGarment`, Number(e.target.value) || 1, {
+                            shouldDirty: true,
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <div className='flex items-center gap-1'>
+                        <select
+                          className={selectCls}
+                          aria-label='grainline'
+                          value={p.grainline ?? ''}
                           onChange={(e) =>
-                            setValue(`pieces.${pi}.fused`, e.target.checked, {
+                            setValue(`pieces.${pi}.grainline`, e.target.value, {
                               shouldDirty: true,
                             })
                           }
-                        />
-                      </td>
-                      <td>
-                        <Input
-                          className='w-full'
-                          value={p.note ?? ''}
-                          onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                            setValue(`pieces.${pi}.note`, e.target.value, { shouldDirty: true })
-                          }
-                        />
-                      </td>
-                      <td>
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='xs'
-                          aria-label='remove piece'
-                          onClick={() => removePiece(pi)}
                         >
-                          ✕
-                        </Button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </DataTable>
+                          {grainlineOptionsFor(p.grainline).map((o) => (
+                            <option key={o.value || '(unset)'} value={o.value}>
+                              {o.label}
+                            </option>
+                          ))}
+                        </select>
+                        <span aria-hidden className='shrink-0'>
+                          {arrow}
+                        </span>
+                      </div>
+                      {/* Where the direction ACTUALLY comes from. A piece drawn in a DXF carries its
+                          долевая as a line on its own layer, and that line — not this word — is what
+                          the раскладка rotates the piece by. Saying so is the point: a word that
+                          contradicts the file is worse than no word at all. */}
+                      {blocks.length > 0 && (
+                        <div className='mt-0.5'>
+                          <Pill
+                            tone='mut'
+                            title={`долевая берётся из DXF: ${blocks.join(', ')} — раскладка разворачивает деталь по линии на слое долевой, слово здесь только печатается в тех-пак`}
+                          >
+                            долевая из DXF
+                          </Pill>
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      <input
+                        type='checkbox'
+                        aria-label='fused'
+                        checked={!!p.fused}
+                        onChange={(e) =>
+                          setValue(`pieces.${pi}.fused`, e.target.checked, {
+                            shouldDirty: true,
+                          })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <Input
+                        className='w-full'
+                        value={p.note ?? ''}
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setValue(`pieces.${pi}.note`, e.target.value, { shouldDirty: true })
+                        }
+                      />
+                    </td>
+                    <td>
+                      <Button
+                        type='button'
+                        variant='secondary'
+                        size='xs'
+                        aria-label='remove piece'
+                        onClick={() => removePiece(pi)}
+                      >
+                        ✕
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </DataTable>
 
-            <PieceDiagram
-              techCard={techCard}
-              pinnedNumbers={pinnedNumbers}
-              labelForPin={labelForPin}
-              activePin={pin.active}
-              onActivePinChange={pin.setActive}
-            />
-          </div>
-        )}
-      </section>
-    </div>
+          <PieceDiagram
+            techCard={techCard}
+            pinnedNumbers={pinnedNumbers}
+            labelForPin={labelForPin}
+            activePin={pin.active}
+            onActivePinChange={pin.setActive}
+          />
+
+          {/* Said once, under the table, rather than per row. The four values are the ones the
+              server's CHECK accepts — anything else fails the whole card save, which is why this
+              stopped being a free-text field with suggestions. */}
+          <Text size='micro' variant='label' className='lg:col-span-2'>
+            долевая — закрытый список (lengthwise / crosswise / bias / any): сервер отвергает любое
+            другое значение и роняет сохранение всей карточки. У детали, заведённой из DXF, реальное
+            направление задаёт линия долевой в самом файле — по ней раскладка разворачивает деталь,
+            а слово здесь только печатается в тех-пак и не должно ему противоречить.
+          </Text>
+        </div>
+      )}
+    </Section>
   );
 }

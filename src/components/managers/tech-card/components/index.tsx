@@ -136,10 +136,11 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // leads the band because everything under it is downstream of a pattern: a sample is cut from
   // these sheets, and the marker on this tab is what the BOM's fabric consumption is measured from.
   //
-  // Cut pieces live on the colorways tab: a piece and the article each colourway cuts it from are
-  // one question answered in two places, and the recipe editor's placement picker offers exactly
-  // the pieces the table above it defines. Splitting them meant editing a piece, switching tab,
-  // and re-finding the colourway to point at it.
+  // Cut pieces live HERE too, directly under the DXF sheets. A piece is a property of the PATTERN,
+  // not of a colour — every colourway cuts the same pieces — and they are literally created from
+  // the sheets above them by «↔ детали кроя». They used to sit on colorways, so the dialog that
+  // makes them and the list they land in were on different tabs. What stays on colorways is the
+  // per-colourway fabric map: which article each piece is cut from IN THAT COLOUR.
   { band: 'develop', tabs: ['patterns', 'samples', 'bom', 'colorways', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
@@ -149,9 +150,11 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
 ];
 
 // Tabs that were folded into another one keep their deep links working: ?tab=dev became a costing
-// section, ?tab=pieces the first section of colorways. A shared link or a bookmark still lands on
-// the right place, and the address bar is rewritten to match what is rendered.
-const FOLDED_TABS: Record<string, TabId> = { dev: 'costing', pieces: 'colorways' };
+// section, ?tab=pieces a section of patterns (it lived on colorways in between). A shared link or a
+// bookmark still lands on the right place, and the address bar is rewritten to match what is
+// rendered. Both targets exist on every card, auxiliary included — which is why no alias needs
+// re-resolving per card any more.
+const FOLDED_TABS: Record<string, TabId> = { dev: 'costing', pieces: 'patterns' };
 
 // Maps a form-error root key to the tab that owns it; unmapped keys are header fields.
 const ERROR_TAB: Record<string, TabId> = {
@@ -162,7 +165,10 @@ const ERROR_TAB: Record<string, TabId> = {
   sizeIds: 'patterns',
   sizeQuantities: 'patterns',
   bomItems: 'bom',
-  pieces: 'colorways',
+  // Cut pieces (and their DXF block aliases) render on PATTERNS. A `pieces.N.*` violation routed
+  // anywhere else raises a toast naming a field nobody can see.
+  pieces: 'patterns',
+  pieceDxfAliases: 'patterns',
   details: 'header',
   construction: 'construction',
   operations: 'construction',
@@ -302,13 +308,11 @@ export function TechCardForm({
   // Switching tabs drops a stale ?sample= / ?fits=; extra params (a sample to open, a fittings
   // filter) can be set in the same navigation (spine deep links).
   const rawTab = params.get('tab');
-  // A folded alias has to resolve to a tab that EXISTS on this card: ?tab=pieces folds into
-  // colorways, which an auxiliary card does not have — its cut-piece table lives on construction.
-  // Resolving to the hidden tab instead would bounce the deep link to header via the fallback
-  // effect, i.e. silently drop the operator somewhere they did not ask for.
-  const resolveFold = (t: TabId | undefined) =>
-    t === 'colorways' && isAux ? ('construction' as TabId) : t;
-  const tabParam = rawTab ? (resolveFold(FOLDED_TABS[rawTab]) ?? rawTab) : rawTab;
+  // A folded alias has to resolve to a tab that EXISTS on this card. Both fold targets (costing,
+  // patterns) do on every card, including an auxiliary one — ?tab=pieces used to fold onto
+  // colorways, which an aux card does not have, and that needed a per-card rewrite here. Since the
+  // cut-piece table moved to PATTERNS the alias is unconditional.
+  const tabParam = rawTab ? (FOLDED_TABS[rawTab] ?? rawTab) : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
@@ -563,9 +567,9 @@ export function TechCardForm({
     patterns: len(sizeIdsW) > 0 && len(patternsW) > 0,
     bom: len(bomItemsW) > 0,
     // colourways are products, read from techCard.colorways (the RHF `colorways` array is always []).
-    // The cut pieces this tab now also owns are deliberately NOT part of the test: no release gate
-    // requires them, so a style that genuinely has none (an accessory) would be pegged below 100%
-    // for good. Its own half-empty table says so on the tab.
+    // Cut pieces are deliberately NOT part of any tab's test (they answer for `patterns` now): no
+    // release gate requires them, so a style that genuinely has none (an accessory) would be pegged
+    // below 100% for good. Its own half-empty table says so on the tab.
     // Left UNSET for an auxiliary card: it can never have a colourway, its tab is hidden
     // (isTabVisible), and stating `false` for a section that cannot exist would be a claim about
     // work that is not outstanding.
@@ -580,14 +584,13 @@ export function TechCardForm({
   };
   const isFilled = (t: TabId) => sectionFilled[t] === true;
 
-  // ERROR_TAB is static, but ONE of its rows moves: `pieces` errors point at the colourways tab,
-  // which an auxiliary card does not have — its cut-piece table lives on CONSTRUCTION instead. Every
-  // lookup goes through here so the rail's error dot, the failed-save tab switch and the
-  // walk-to-the-field routine all land on the tab that actually renders the field.
-  const errorTabFor = (rootKey: string): TabId => {
-    const tab = ERROR_TAB[rootKey] ?? 'header';
-    return tab === 'colorways' && isAux ? 'construction' : tab;
-  };
+  // Every lookup goes through here so the rail's error dot, the failed-save tab switch and the
+  // walk-to-the-field routine all land on the tab that actually renders the field. The map is now
+  // purely static: it used to re-route `pieces` (colorways → construction for an auxiliary card,
+  // which has no colourways), and that special case died with the move of the cut-piece table onto
+  // PATTERNS — a tab every card has. Nothing in ERROR_TAB points at `colorways` any more, which is
+  // what lets isTabVisible hide it for an aux card with no error escape.
+  const errorTabFor = (rootKey: string): TabId => ERROR_TAB[rootKey] ?? 'header';
 
   // Full dotted paths, not root keys: `bomItems.3.name` used to collapse to `bomItems`, so the rail
   // could only ever say "something on the BOM tab is wrong" and the count was always 1 per tab.
@@ -609,11 +612,11 @@ export function TechCardForm({
   const isTabVisible = (t: TabId) => {
     // An auxiliary card produces a MATERIAL, not products: it has no colourways (CreateColorway
     // refuses an aux style), so the whole tab — the colourway recipes, the lab dips, the SKU-shaped
-    // machinery — is furniture for a thing that cannot exist. The cut-piece editor that shares the
-    // tab is not: a кофр is cut and sewn like any garment, so for aux it moves onto CONSTRUCTION
-    // (same band, "how it's made") rather than disappearing with the colourways.
-    // No error escape here, unlike the IDEA rule below: errorTabFor already re-routes the one error
-    // root that pointed at this tab (`pieces`), so nothing can be filed against an invisible tab.
+    // machinery — is furniture for a thing that cannot exist. Nothing else shares the tab any more:
+    // the cut-piece editor (a кофр is cut and sewn like any garment) lives on PATTERNS, which every
+    // card has, so hiding this one takes nothing an aux card needs with it.
+    // No error escape here, unlike the IDEA rule below: no ERROR_TAB row points at `colorways` any
+    // more, so nothing can be filed against this tab while it is invisible.
     if (t === 'colorways' && isAux) return false;
     if (isIdea && !IDEA_TABS.includes(t)) return errorTabs.has(t);
     if (t === 'costing' && !canReadCosting) return false;
@@ -628,12 +631,10 @@ export function TechCardForm({
   // Rewrite a legacy ?tab=dev / ?tab=pieces to the tab that absorbed it, so the URL matches what is
   // rendered (the alias above already resolves it; this cleans the address bar / a bookmark).
   useEffect(() => {
-    // Same resolution as the alias above — writing the UNresolved fold here would put ?tab=colorways
-    // in the address bar of an aux card, whose colourways tab does not exist.
-    const folded = rawTab ? resolveFold(FOLDED_TABS[rawTab]) : undefined;
+    const folded = rawTab ? FOLDED_TABS[rawTab] : undefined;
     if (folded) navTo(folded);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rawTab, isAux]);
+  }, [rawTab]);
   // If the open tab becomes hidden (switching a card to IDEA while on the BOM tab, or permissions
   // resolving and taking the costing tab away), fall back to header so the body isn't blank.
   useEffect(() => {
@@ -1712,6 +1713,12 @@ export function TechCardForm({
                   savedSizeIds={techCard?.techCard?.sizeIds ?? undefined}
                 />
               </Section>
+              {/* Cut pieces sit directly under the sheets they come out of: «↔ детали кроя» on the
+                  panel above creates them, and until now it wrote into a table on another tab. Its
+                  own block, not a nested one — a block never contains a block (DESIGN.md). Mounted
+                  ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
+                  set of [data-field] anchors for revealField to walk to. */}
+              <PiecesTab techCard={techCard} />
               <Section title='раскладки (маркеры) — расход ткани по размерам'>
                 <MarkersSection
                   techCard={techCard}
@@ -1739,46 +1746,42 @@ export function TechCardForm({
               </Section>
             </div>
 
-            {/* COLORWAYS — the cut pieces first (what the garment is made OF), then, per colourway,
-                which article each piece is cut from, in what colour and at what consumption. The
-                recipe editor's placement picker offers exactly the pieces defined above it, so the
-                two read top to bottom as one question. */}
+            {/* COLORWAYS — per colourway, which article each piece is cut from, in what colour and
+                at what consumption. The pieces THEMSELVES are on the patterns tab: a piece belongs
+                to the pattern, not to a colour, and every colourway cuts the same ones. What is
+                genuinely per-colourway is this map, and the recipe editor's placement picker offers
+                exactly the pieces defined there. */}
             {/* CONDITIONAL, not merely hidden: SectionStack's `hidden` is a display:none attribute
                 and every child stays MOUNTED. Left as a hidden-only branch for an aux card this
-                would mount PiecesTab a second time — two useFieldArray('pieces') on one form and two
-                sets of [data-field] anchors, so revealField's querySelector would walk the operator
-                to the invisible copy — and keep ColorwayRecipes alive fetching the whole material
-                catalogue for a card that can never have a colourway. */}
+                would keep ColorwayRecipes alive fetching the whole material catalogue for a card
+                that can never have a colourway. */}
             <SectionStack hidden={activeTab !== 'colorways' || isAux}>
               {!isAux && (
-                <>
-                  <PiecesTab techCard={techCard} />
-                  <div>
-                    {isEditMode && numId ? (
-                      <ColorwayRecipes
-                        techCard={techCard}
-                        techCardId={numId}
-                        canEdit={canWrite(SECTION.techCards) && !frozen}
-                      />
-                    ) : (
-                      <Text variant='inactive' size='small'>
-                        save the card first — colourways are products; their material recipes are
-                        edited here once the style exists.
-                      </Text>
-                    )}
-                  </div>
-                </>
+                <div>
+                  {isEditMode && numId ? (
+                    <ColorwayRecipes
+                      techCard={techCard}
+                      techCardId={numId}
+                      canEdit={canWrite(SECTION.techCards) && !frozen}
+                    />
+                  ) : (
+                    <Text variant='inactive' size='small'>
+                      save the card first — colourways are products; their material recipes are
+                      edited here once the style exists.
+                    </Text>
+                  )}
+                </div>
               )}
             </SectionStack>
 
             {/* CONSTRUCTION — how it's made: operations, then the cut list the cutting room works
                 from (a calculated projection, not an editable list). */}
             <SectionStack hidden={activeTab !== 'construction'}>
-              {/* Aux cards have no colourways tab to hold the cut pieces, and a sewn auxiliary item
-                  (кофр, dust bag) has pattern parts like anything else — so the piece table lands
-                  here, above the operations that assemble those parts. Its per-colourway fabric map
-                  simply has no columns for an aux card, which is the truth. */}
-              {isAux && <PiecesTab techCard={techCard} />}
+              {/* No PiecesTab branch here any more. It used to be mounted for an AUXILIARY card,
+                  whose colourways tab (the pieces' old home) does not exist — two conditional mounts
+                  of one field array, which is exactly the shape that made a piece created from the
+                  DXF dialog land in the copy nobody was looking at. Cut pieces are on PATTERNS now,
+                  a tab every card has, so the whole special case is gone. */}
               <ConstructionTab techCard={techCard} />
               {isEditMode && numId && (
                 <Section title='cut list (production projection — mirror ×2 folded)'>
