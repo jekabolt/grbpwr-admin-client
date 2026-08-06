@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useSizeNames, useSizeOrdering } from 'components/managers/model/components/use-size-systems';
 import type { PieceDTO } from 'lib/nesting/types';
-import { sizeRank, splitBlockSize, sizeTokensOf, type BlockCode } from './block-code';
+import { deriveBlockSizes, sizeTokensOf, type BlockCode } from './block-code';
 
 // Токены, которые в конце имени блока считаются размером, вместе с их местом в градации.
 // Только размерный ряд ЭТОЙ карточки: см. block-code.ts — «L» обязан быть размером лишь там, где
@@ -36,7 +36,7 @@ export function useSizeTokens(): Map<string, number> {
 // Но РЕЗАТЬ по словарю нельзя: «FP_L» — это левая полочка, а «L» есть в словаре как размер.
 // Поэтому машина только показывает находку, а добавляет размер в карточку человек. Ровно та же
 // сделка, что и во всём диалоге: предлагает машина, решает человек.
-export function useDictionarySizeTokens(): Map<string, number> {
+export function useDictionarySizeTokens(): Map<string, number[]> {
   const sizeById = useSizeNames();
   return useMemo(() => {
     const byToken = new Map<string, number[]>();
@@ -47,37 +47,59 @@ export function useDictionarySizeTokens(): Map<string, number> {
         byToken.set(t, list);
       }
     }
-    // Только однозначные: токен, ведущий на два размера, опознанием не является.
-    const out = new Map<string, number>();
-    for (const [t, ids] of byToken) if (ids.length === 1) out.set(t, ids[0]);
-    return out;
+    return byToken;
   }, [sizeById]);
 }
 
-// Хвостовой токен имени блока, очищенный до букв и цифр. Без всякой проверки — это кандидат,
-// а не размер.
-function tailToken(block: string): string {
-  const parts = block.trim().split('_');
+// Система размеров, в которой заведён размер: «xs_44ta_m» → «ta_m». Один токен («s») живёт в
+// нескольких системах сразу, и выбирать между ними надо не жребием, а по тому, чем уже
+// пользуется карточка.
+function systemOf(name: string | undefined): string {
+  const parts = (name ?? '').split('_');
   if (parts.length < 2) return '';
-  return parts[parts.length - 1].replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+  return `${(parts[1] ?? '').replace(/\d+/g, '')}_${parts[2] ?? ''}`;
 }
 
 export type MissingSize = { token: string; sizeId: number; name: string };
 
+// Размеры, которые есть В ФАЙЛЕ, но не заведены в карточке.
+//
+// Источник — токены, выведенные из структуры файла (deriveSizeTokens), а НЕ словарь: словарь
+// сказал бы только, что такой размер вообще бывает, а вопрос стоит иначе — какие размеры несёт
+// этот чертёж. Файл на один размер не даёт ни одного токена, и предлагать там нечего.
 export function missingSizesIn(
   pieces: readonly PieceDTO[],
-  dictTokens: ReadonlyMap<string, number>,
+  dictTokens: ReadonlyMap<string, number[]>,
   cardSizeIds: readonly number[],
   sizeById: ReadonlyMap<number, string>,
 ): MissingSize[] {
   const inCard = new Set(cardSizeIds);
+  // Системы, которыми карточка уже пользуется, — ими и разрешается неоднозначность токена.
+  const cardSystems = new Set([...inCard].map((id) => systemOf(sizeById.get(id))));
+  const covered = new Set<string>();
+  for (const id of inCard) for (const t of sizeTokensOf(sizeById.get(id))) covered.add(t);
+
+  const derived = new Set(
+    [
+      ...deriveBlockSizes(
+        pieces.map((p) => p.blockName ?? ''),
+        (t) => dictTokens.has(t),
+      ).values(),
+    ].map((raw) => raw.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase()),
+  );
   const found = new Map<number, MissingSize>();
-  for (const p of pieces) {
-    const t = tailToken(p.blockName ?? '');
-    if (!t) continue;
-    const id = dictTokens.get(t);
-    if (id == null || inCard.has(id)) continue;
-    if (!found.has(id)) found.set(id, { token: t, sizeId: id, name: sizeById.get(id) ?? `#${id}` });
+  for (const token of derived) {
+    if (covered.has(token)) continue; // такой размер в карточке уже есть
+    const ids = dictTokens.get(token) ?? [];
+    if (ids.length === 0) continue; // словарь такого размера не знает — предложить нечего
+    const pick =
+      ids.find((id) => cardSystems.has(systemOf(sizeById.get(id)))) ??
+      (ids.length === 1 ? ids[0] : undefined);
+    // Неоднозначный токен в системе, которой карточка не пользуется, оставляем человеку:
+    // добавить не тот размер хуже, чем не добавить никакого.
+    if (pick == null || inCard.has(pick)) continue;
+    if (!found.has(pick))
+      found.set(pick, { token, sizeId: pick, name: sizeById.get(pick) ?? `#${pick}` });
   }
   return [...found.values()];
 }
@@ -92,43 +114,63 @@ export type BlockSplit = {
   // Разбор имени по каждой детали, по её id.
   codeById: Map<number, BlockCode>;
   groups: SizeGroup[];
+  // Порядок размеров, общий для всех потребителей: селектор, столбец «размеры», список групп.
+  // Считается по СРЕДНЕЙ ПЛОЩАДИ деталей размера, а не по ряду карточки: градация монотонна,
+  // XS мельче XL, — значит порядок выводится из тех же данных, что и всё остальное, и работает
+  // для размеров, которых в карточке ещё нет.
+  orderOfSize: Map<string, number>;
+  // Токены, которые в ЭТОМ файле оказались размерами (очищенные). Ими сворачиваются к
+  // идентичности старые алиасы, где размер записан прямо в имени: иначе читающая и пишущая
+  // стороны разошлись бы, и «снять связь» удаляла бы не тот ключ.
+  sizeTokenSet: Set<string>;
 };
 
 // Разбирает имена и раскладывает детали по размерам. Группы идут в порядке градации; группа ''
 // (блоки без размерного хвоста) — последней: это остаток, а не размер.
 export function splitPiecesBySize(
   pieces: readonly PieceDTO[],
-  sizeTokens: ReadonlyMap<string, number>,
+  // Токены, которые ВООБЩЕ бывают размерами (весь словарь). Не ряд карточки: у карточки может
+  // быть заведено M и L, а в файле лежать XS…XL — и тогда BP_S, BP_XS, BP_XL перестали бы быть
+  // размерами и превратились в отдельные детали кроя вместо одной BP. Виды деталей обязаны
+  // доставаться из ФАЙЛА, независимо от того, что успели завести в карточке.
+  // Достаточно уметь отвечать «бывает ли такой токен размером» — подходит и Set, и Map словаря.
+  dictTokens: { has(token: string): boolean },
 ): BlockSplit {
-  // Отрезаем хвост, ТОЛЬКО если файл действительно градуированный — то есть если размерных
-  // хвостов в нём встретилось хотя бы два РАЗНЫХ.
-  //
-  // Иначе цена ошибки несимметрична. В файле на один размер блок «FP_L» — это левая полочка, и
-  // «L» там модификатор, а не размер; отрезав его, мы слили бы левую полочку с деталью «FP» —
-  // одна деталь кроя на две физических, то есть не та ткань на раскройном столе, ровно та
-  // ошибка, ради которой диалог и существует. А НЕ отрезав в односайзовом файле, мы всего лишь
-  // просим оператора сопоставить блоки ещё раз для следующего файла: связей станет по одной на
-  // файл, что скучно, но верно.
-  const graded = new Set<string>();
-  for (const p of pieces) {
-    const s = splitBlockSize(p.blockName ?? '', sizeTokens).size;
-    if (s) graded.add(s.toLowerCase());
-    if (graded.size > 1) break;
-  }
-  const effective = graded.size > 1 ? sizeTokens : new Map<string, number>();
+  // Что именно резать, решает структура файла, а не список токенов: см. deriveBlockSizes —
+  // хвост обязан быть размером из словаря И меняться у своей основы, иначе «FP_L» слилась бы
+  // с «FP_R» в одну деталь.
+  const verdict = deriveBlockSizes(
+    pieces.map((p) => p.blockName ?? ''),
+    (t) => dictTokens.has(t),
+  );
 
   const codeById = new Map<number, BlockCode>();
   const bySize = new Map<string, PieceDTO[]>();
   for (const p of pieces) {
-    const code = splitBlockSize(p.blockName ?? '', effective);
+    const raw = (p.blockName ?? '').trim();
+    const size = verdict.get(raw) ?? '';
+    const code: BlockCode = size
+      ? { raw, identity: raw.slice(0, raw.length - size.length - 1), size }
+      : { raw, identity: raw, size: '' };
     codeById.set(p.id, code);
     const list = bySize.get(code.size) ?? [];
     list.push(p);
     bySize.set(code.size, list);
   }
-  const rank = (size: string) => sizeRank(size, sizeTokens);
+
+  // Порядок — по средней площади деталей размера. Ряд карточки для этого не годится: размеров
+  // из файла в нём может не быть вовсе, а градация монотонна, так что площадь упорядочивает их
+  // сама и без справочников.
+  const meanArea = (ps: PieceDTO[]) =>
+    ps.length === 0 ? 0 : ps.reduce((s, p) => s + p.areaCm2, 0) / ps.length;
   const groups = [...bySize.entries()]
     .map(([size, ps]) => ({ size, pieces: ps }))
-    .sort((a, b) => rank(a.size) - rank(b.size));
-  return { codeById, groups };
+    .sort((a, b) =>
+      a.size === '' ? 1 : b.size === '' ? -1 : meanArea(a.pieces) - meanArea(b.pieces),
+    );
+  const orderOfSize = new Map(groups.map((g, i) => [g.size, g.size === '' ? 1e6 : i]));
+  const sizeTokenSet = new Set(
+    [...verdict.values()].map((raw) => raw.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase()),
+  );
+  return { codeById, groups, orderOfSize, sizeTokenSet };
 }

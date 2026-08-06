@@ -34,7 +34,7 @@ import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes } from 'utils/pattern';
 import type { TechCardFormData } from '../schema';
-import { sizeRank, splitBlockSize } from './block-code';
+import { splitBlockSize } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet, type PieceMark } from './piece-sheet';
@@ -42,7 +42,6 @@ import {
   missingSizesIn,
   splitPiecesBySize,
   useDictionarySizeTokens,
-  useSizeTokens,
 } from './use-block-sizes';
 import {
   useSizeNames,
@@ -154,12 +153,12 @@ export function PieceMatchModal({
   const { parse } = useNesting(files);
   // One DXF carries the whole grade, so the size lives in the block name and has to be split off
   // before anything else: the piece «BP_1» exists once for the style, not once per size.
-  const sizeTokens = useSizeTokens();
+  const dictTokens = useDictionarySizeTokens();
   const allPieces = useMemo(
     () => (parse.phase === 'ready' ? parse.pieces : []),
     [parse],
   );
-  const split = useMemo(() => splitPiecesBySize(allPieces, sizeTokens), [allPieces, sizeTokens]);
+  const split = useMemo(() => splitPiecesBySize(allPieces, dictTokens), [allPieces, dictTokens]);
   // A block carries the piece on more than one layer (sewing line and cutting line). Only ONE of
   // them is the piece; the other must not reach the counting, or every block would be counted
   // twice and pieces_per_garment would double.
@@ -188,7 +187,6 @@ export function PieceMatchModal({
   const [showGrain, setShowGrain] = useState(true);
   // Размеры, которые есть в файле, но не заведены в карточке. Пока их там нет, хвост у таких
   // блоков не отрезается — и одна деталь двоится на строку в каждом непризнанном размере.
-  const dictTokens = useDictionarySizeTokens();
   const sizeById = useSizeNames();
   const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const orderSizes = useSizeOrdering();
@@ -205,7 +203,7 @@ export function PieceMatchModal({
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
   // meant, and the full-set write then rewrites them in that form.
-  const identityOf = (block: string) => normBlock(splitBlockSize(block, sizeTokens).identity);
+  const identityOf = (block: string) => normBlock(splitBlockSize(block, split.sizeTokenSet).identity);
 
   const [rows, setRows] = useState<BlockRow[]>([]);
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
@@ -261,7 +259,7 @@ export function PieceMatchModal({
       m.set(identityOf(a.blockName ?? '').toLowerCase(), pk);
     }
     return m;
-  }, [aliases, bomLineKey, livePieceKeys, sizeTokens]);
+  }, [aliases, bomLineKey, livePieceKeys, split]);
   const otherFabricByBlock = useMemo(() => {
     const m = new Map<string, string>();
     for (const a of aliases ?? []) {
@@ -270,7 +268,7 @@ export function PieceMatchModal({
       if (!m.has(k)) m.set(k, a.pieceLineKey ?? '');
     }
     return m;
-  }, [aliases, bomLineKey, sizeTokens]);
+  }, [aliases, bomLineKey, split]);
 
   // Rebuild the proposal whenever a parse lands. Blocks this fabric already maps are left out —
   // the dialog is for what is NOT yet answered.
@@ -318,7 +316,7 @@ export function PieceMatchModal({
     const all = new Map<string, { block: string; instances: number; sizes: string[] }>();
     for (const [ci, instances] of counts) {
       const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
-        (a, b) => sizeRank(a, sizeTokens) - sizeRank(b, sizeTokens),
+        (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
       );
       all.set(ci, { block: spelling.get(ci)!, instances, sizes });
     }
@@ -359,7 +357,7 @@ export function PieceMatchModal({
       // mapping is offered, never applied by default — being wrong there costs cloth.
       const preselect = basis === 'exact' || basis === 'loose' ? suggested : '';
       const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
-        (a, b) => sizeRank(a, sizeTokens) - sizeRank(b, sizeTokens),
+        (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
       );
       next.push({ block, instances, sizes, suggested, basis, choice: preselect });
     }
@@ -389,7 +387,7 @@ export function PieceMatchModal({
         pieceName: nameByKey.get(pieceKey.toLowerCase()) ?? '—',
       }))
       .sort((a, b) => a.block.localeCompare(b.block, 'ru'));
-  }, [mineByBlock, aliases, bomLineKey, pieceOptions, sizeTokens]);
+  }, [mineByBlock, aliases, bomLineKey, pieceOptions, split]);
   const toUnmap = unmapped.length;
 
   // ── the sheet ─────────────────────────────────────────────────────────────────────────
@@ -420,11 +418,11 @@ export function PieceMatchModal({
       const s = split.codeById.get(p.id)?.size ?? '';
       seen.set(s, (seen.get(s) ?? 0) + 1);
     }
-    const rank = (s: string) => sizeRank(s, sizeTokens);
+    const rank = (s: string) => split.orderOfSize.get(s) ?? 1e6;
     return [...seen.entries()]
       .map(([size, count]) => ({ size, count }))
       .sort((a, b) => rank(a.size) - rank(b.size));
-  }, [sheet, split, sizeTokens]);
+  }, [sheet, split]);
   // The chosen size, falling back to the BIGGEST group when the operator has not picked or the
   // sheet changed under them. Not the first in grade order: the '' group is a remainder, not a
   // size, and it sorts last — so a file where only a couple of blocks carry a recognised size

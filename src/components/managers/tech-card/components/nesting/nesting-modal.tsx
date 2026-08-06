@@ -27,11 +27,10 @@ import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
 import { buildMarkerLayout, dec, decNum, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
-import { sizeRank } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
+import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
@@ -129,8 +128,8 @@ export function NestingModal({
   // линия кроя). Раскладывать надо ровно один размер по ровно одному контуру: иначе на полосу
   // ложится вся градация сразу и меряется длина, которая не относится ни к одному размеру.
   const allPieces = useMemo(() => (parse.phase === 'ready' ? parse.pieces : []), [parse]);
-  const sizeTokens = useSizeTokens();
-  const split = useMemo(() => splitPiecesBySize(allPieces, sizeTokens), [allPieces, sizeTokens]);
+  const dictTokens = useDictionarySizeTokens();
+  const split = useMemo(() => splitPiecesBySize(allPieces, dictTokens), [allPieces, dictTokens]);
   const layerOpts = useMemo(() => layerOptions(allPieces, split.codeById), [allPieces, split]);
   const [activeLayer, setActiveLayer] = useState<string | null>(null);
   const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
@@ -145,8 +144,8 @@ export function NestingModal({
     }
     return [...seen.entries()]
       .map(([size, count]) => ({ size, count }))
-      .sort((a, b) => sizeRank(a.size, sizeTokens) - sizeRank(b.size, sizeTokens));
-  }, [allPieces, split, contourLayer, sizeTokens]);
+      .sort((a, b) => (split.orderOfSize.get(a.size) ?? 1e6) - (split.orderOfSize.get(b.size) ?? 1e6));
+  }, [allPieces, split, contourLayer]);
   const missingOnLayer = useMemo(
     () => blocksMissingOnLayer(allPieces, contourLayer),
     [allPieces, contourLayer],

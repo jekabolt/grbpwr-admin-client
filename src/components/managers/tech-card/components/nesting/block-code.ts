@@ -55,8 +55,8 @@ const bareToken = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase()
 
 export function splitBlockSize(
   block: string,
-  // Токен → место в градации. Значение здесь не нужно, важно только членство.
-  sizeTokens: ReadonlyMap<string, number>,
+  // Достаточно членства: и Set, и Map подходят.
+  sizeTokens: { has(token: string): boolean },
 ): BlockCode {
   const raw = block.trim();
   const parts = raw.split('_');
@@ -76,4 +76,72 @@ export function splitBlockSize(
 export function sizeRank(size: string, sizeTokens: ReadonlyMap<string, number>): number {
   if (!size) return Number.MAX_SAFE_INTEGER;
   return sizeTokens.get(bareToken(size)) ?? 1e6;
+}
+
+// Размерные токены, выведенные ИЗ САМОГО ФАЙЛА.
+//
+// Опираться только на размерный ряд карточки нельзя: у карточки в ряду могут стоять M и L, а в
+// файле лежать XS, S, M, L, XL — и тогда BP_S, BP_XS, BP_XL размерами не считаются и становятся
+// отдельными деталями кроя вместо одной BP. Владелец прав: виды деталей обязаны доставаться из
+// файла без всякой оглядки на карточку.
+//
+// Но и резать всё подряд нельзя: «FP_L» — это ЛЕВАЯ полочка. Разделяет их структура файла.
+// Размер — это то, что МЕНЯЕТСЯ у одной и той же основы имени и повторяется у МНОГИХ основ:
+// BP_{XS,S,M,L,XL}, FP_L_{XS,S,M,L,XL}, SL_R_{XS,S,M,L,XL} — пять токенов, каждый у девяти
+// основ. Модификатор так себя не ведёт: «R» в паре FP_L/FP_R встретится у одной-двух основ.
+// Вердикт по КАЖДОМУ блоку: имя блока → размерный хвост, как он написан. Блока в карте нет —
+// значит хвост у него отрезать нельзя.
+//
+// Решение принимается по ОСНОВЕ имени, а не по токену вообще, и это принципиально. Правило «то,
+// что меняется у одной основы» само по себе слишком слабо: набор FP_L, FP_R, SL_L, SL_R,
+// PCK_L, PCK_R даёт токены «l» и «r», меняющиеся у трёх основ, — и левая полочка слилась бы с
+// правой в одну деталь кроя. Поэтому добавлены два условия:
+//
+//   1. хвост обязан быть РАЗМЕРОМ ИЗ СЛОВАРЯ. «r» размером не бывает нигде, и пара {l,r}
+//      рассыпается: у основы остаётся один размерный хвост, то есть никакой градации;
+//   2. градуированной считается ОСНОВА, у которой таких хвостов не меньше двух. В файле, где
+//      настоящая градация соседствует с голой парой FP_L/FP_R, основа «FP» условию не отвечает,
+//      и обе полочки остаются целыми, пока BP_XS…BP_XL спокойно схлопываются.
+export function deriveBlockSizes(
+  blockNames: Iterable<string>,
+  isSizeToken: (token: string) => boolean,
+): Map<string, string> {
+  type Info = { stem: string; bare: string; raw: string };
+  const infoByBlock = new Map<string, Info>();
+  const tailsByStem = new Map<string, Set<string>>();
+  for (const rawName of blockNames) {
+    const name = (rawName ?? '').trim();
+    if (!name || infoByBlock.has(name)) continue;
+    const parts = name.split('_');
+    if (parts.length < 2) continue;
+    const stem = parts.slice(0, -1).join('_');
+    const raw = parts[parts.length - 1];
+    const bare = bareToken(raw);
+    if (!stem || !bare) continue;
+    infoByBlock.set(name, { stem, bare, raw });
+    const set = tailsByStem.get(stem) ?? new Set<string>();
+    set.add(bare);
+    tailsByStem.set(stem, set);
+  }
+
+  const graded = new Set<string>(); // основы с настоящей градацией
+  const freq = new Map<string, number>(); // размерный токен → у скольких таких основ встретился
+  for (const [stem, tails] of tailsByStem) {
+    const sizeTails = [...tails].filter(isSizeToken);
+    if (sizeTails.length < 2) continue;
+    graded.add(stem);
+    for (const t of sizeTails) freq.set(t, (freq.get(t) ?? 0) + 1);
+  }
+  if (freq.size === 0) return new Map();
+  // Токен, встречающийся заметно реже самого частого, к размерному ряду не относится.
+  const max = Math.max(...freq.values());
+  const need = Math.max(2, max / 2);
+  const sizeSet = new Set([...freq].filter(([, n]) => n >= need).map(([t]) => t));
+
+  const out = new Map<string, string>();
+  for (const [block, info] of infoByBlock) {
+    if (!graded.has(info.stem) || !sizeSet.has(info.bare)) continue;
+    out.set(block, info.raw);
+  }
+  return out;
 }
