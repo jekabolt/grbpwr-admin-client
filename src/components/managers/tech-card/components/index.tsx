@@ -129,12 +129,18 @@ type TabId = (typeof TABS)[number]['id'];
 const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // Moodboard before sketch: the reference comes first and the technical drawing is derived from
   // it, so the rail follows the order the work actually happens in.
-  { band: 'design', tabs: ['header', 'moodboard', 'sketch', 'patterns'] },
+  { band: 'design', tabs: ['header', 'moodboard', 'sketch'] },
+  // Patterns OPENS develop rather than closing design: nothing on it describes what the style is.
+  // The size range, the measurement chart, the DXF sheets and the раскладки are the first artefacts
+  // MADE from the sketch, and the sheets are filed by BOM material — «how it's made» throughout. It
+  // leads the band because everything under it is downstream of a pattern: a sample is cut from
+  // these sheets, and the marker on this tab is what the BOM's fabric consumption is measured from.
+  //
   // Cut pieces live on the colorways tab: a piece and the article each colourway cuts it from are
   // one question answered in two places, and the recipe editor's placement picker offers exactly
   // the pieces the table above it defines. Splitting them meant editing a piece, switching tab,
   // and re-finding the colourway to point at it.
-  { band: 'develop', tabs: ['samples', 'bom', 'colorways', 'construction'] },
+  { band: 'develop', tabs: ['patterns', 'samples', 'bom', 'colorways', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
   // `spec` would break the rail's lifecycle reading — the bands are the story of the card, in order.
@@ -536,6 +542,10 @@ export function TechCardForm({
   const moodboardMedia = useWatch({ control: form.control, name: 'moodboardMedia' });
   const technicalMedia = useWatch({ control: form.control, name: 'technicalMedia' });
   const sizeIdsW = useWatch({ control: form.control, name: 'sizeIds' });
+  // Watched for the patterns glyph only. Cheap in practice: a rename commits on blur/Enter and a
+  // rebind on select, so this re-renders the form on an upload or a deliberate edit — not per
+  // keystroke (the inline rename holds its draft in the panel's own state).
+  const patternsW = useWatch({ control: form.control, name: 'patterns' });
   const operationsW = useWatch({ control: form.control, name: 'operations' });
   const labelsW = useWatch({ control: form.control, name: 'labels' });
   // Which tabs count toward "the card's core spec is filled", and whether each currently has content.
@@ -543,7 +553,14 @@ export function TechCardForm({
     header: !!name?.trim() && (stage === 'TECH_CARD_STAGE_IDEA' || !!styleNumber?.trim()),
     sketch: len(technicalMedia) > 0,
     moodboard: len(moodboardMedia) > 0,
-    patterns: len(sizeIdsW) > 0,
+    // A size range alone stopped answering for this tab. The выкройки panel below it files DXF
+    // sheets BY MATERIAL and names every fabric line with no sheet as a hole, so a card carrying a
+    // full size range and not one pattern was ticked done while the tab itself said otherwise.
+    // The truthful rule is the panel's own — every rollgoods BOM line carries at least one DXF —
+    // but that rule is ROLE_OF_SECTION in patterns-field.tsx, and restating it here would be a
+    // second implementation to keep in step (and would peg a card whose sheets are still on paper
+    // below done for good). This is the cheap, strictly-less-wrong half: the range AND a sheet.
+    patterns: len(sizeIdsW) > 0 && len(patternsW) > 0,
     bom: len(bomItemsW) > 0,
     // colourways are products, read from techCard.colorways (the RHF `colorways` array is always []).
     // The cut pieces this tab now also owns are deliberately NOT part of the test: no release gate
