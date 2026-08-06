@@ -114,6 +114,15 @@ const patternSchema = z.object({
   // Server-owned; round-tripped read-only so the grid can show when a PDF actually arrived. Sending
   // it back is harmless — the write path drops it and carries the stored value forward by url.
   uploadedAt: z.string().optional().default(''),
+  // Stable row identity (0260). Unlike BOM/piece keys the SERVER never mints one: an empty key is
+  // the legacy signal its upsert-diff matches by (size_id, url) on. So this client keeps whatever
+  // key a row already has and mints only for rows created here — minting for every row would make
+  // one save read as all-new rows and drop every DXF↔slot binding on the card.
+  lineKey: z.string().optional().default(''),
+  // Which fabric BOM line this sheet is cut from — the binding a раскладка needs to know which
+  // cloth (and therefore which width and кромка) a DXF belongs to. '' = unbound: legal for a PDF,
+  // and legal for legacy DXF rows uploaded before this existed.
+  bomLineKey: z.string().optional().default(''),
 });
 
 const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity = 'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
@@ -772,6 +781,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       sizeBytes: wireInt(p.sizeBytes),
       version: p.version || 0,
       uploadedAt: p.uploadedAt ?? '',
+      // Kept EXACTLY as stored, including the LEGACY… keys the 0260 backfill wrote: this client
+      // never re-mints an existing row's key (see patternSchema).
+      lineKey: p.lineKey ?? '',
+      bomLineKey: p.bomLineKey ?? '',
     })),
     purpose: toPurposeEnum(insert?.purpose),
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
@@ -1111,6 +1124,13 @@ export function mapFormToTechCardInsert(
         // uploaded row carries 0 and the server assigns MAX+1 for its size. uploadedAt is
         // server-owned and deliberately not sent.
         version: p.version || 0,
+        // Identity as held (0260): '' on a legacy row keeps the server matching it by
+        // (size_id, url); a key minted at upload survives «заменить файл».
+        lineKey: p.lineKey?.trim() || '',
+        // ALWAYS present, like `name`: an absent bom_line_key is the stale-client signal that
+        // preserves the stored binding, so a client that owns the field must send '' to unbind
+        // rather than fall into carry-forward.
+        bomLineKey: p.bomLineKey?.trim() || '',
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.

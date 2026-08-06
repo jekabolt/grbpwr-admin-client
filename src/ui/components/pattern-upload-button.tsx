@@ -26,12 +26,20 @@ export type UploadedPattern = {
   // Operator-entered display name from the naming modal. '' = deliberately unnamed — the
   // save path still sends it explicitly (absent-on-the-wire is reserved for stale clients).
   name: string;
+  // Fabric BOM line this sheet is cut from, picked in the modal. '' when the caller offers no
+  // slots (fittings have no BOM) or the operator left a PDF unbound.
+  bomLineKey: string;
 };
+
+// A fabric slot the sheet can be bound to. Deliberately minimal — this control lives in ui/ and
+// must not learn the tech-card's BOM shape.
+export type PatternFabricSlot = { lineKey: string; name: string };
 
 // One picked file staged in the naming modal, with its per-file upload status.
 type StagedFile = {
   file: File;
   name: string;
+  bomLineKey: string;
   status: 'pending' | 'uploading' | 'done' | 'error';
   error?: string;
 };
@@ -47,23 +55,41 @@ export function PatternUploadModal({
   files,
   onClose,
   onUploaded,
+  fabricSlots,
 }: {
   files: File[] | null; // null = closed
   onClose: () => void;
   onUploaded: (pattern: UploadedPattern) => void;
+  // Fabric slots to bind sheets to. Omitted entirely by callers that have none (fittings), and
+  // then no slot control renders and every sheet uploads unbound — the binding is a tech-card
+  // concept, not a property of uploading a file.
+  fabricSlots?: PatternFabricSlot[];
 }) {
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [busy, setBusy] = useState(false);
+
+  const slots = fabricSlots ?? [];
+  // One fabric on the card means there is nothing to ask: preselect it. With two or more the
+  // modal must not guess — which cloth a sheet is cut from is exactly the fact being captured.
+  const soleSlot = slots.length === 1 ? slots[0].lineKey : '';
 
   // Re-stage whenever a new batch arrives. `files` is a fresh array per pick/drop, so
   // identity is the correct trigger. Layout effect: with a passive one the dialog's first
   // painted frame shows zero rows and a disabled confirm.
   useLayoutEffect(() => {
-    setStaged((files ?? []).map((file) => ({ file, name: '', status: 'pending' })));
+    setStaged(
+      (files ?? []).map((file) => ({ file, name: '', bomLineKey: soleSlot, status: 'pending' })),
+    );
     setBusy(false);
-  }, [files]);
+  }, [files, soleSlot]);
 
   const open = files != null && files.length > 0;
+  // A DXF without a slot cannot be laid out: the раскладка would have no width, no кромка and
+  // no idea which fabric's consumption it measures. Blocked here rather than discovered later,
+  // while the operator still has the file in front of them. PDFs stay optional — a sheet a human
+  // reads does not need a cloth.
+  const missingSlot =
+    slots.length > 0 && staged.some((r) => r.status !== 'done' && isDxfFile(r.file) && !r.bomLineKey);
 
   async function uploadAll() {
     setBusy(true);
@@ -87,6 +113,7 @@ export function PatternUploadModal({
           // rejects a string, which silently blocks the whole save).
           sizeBytes: Number(res.sizeBytes ?? rows[i].file.size) || 0,
           name: clampPatternName(rows[i].name),
+          bomLineKey: rows[i].bomLineKey,
         });
         rows[i] = { ...rows[i], status: 'done' };
       } catch (e) {
@@ -114,12 +141,13 @@ export function PatternUploadModal({
       title={staged.length === 1 ? 'название выкройки' : `названия выкроек (${staged.length})`}
       confirmLabel={doneCount > 0 ? 'повторить незагруженные' : 'загрузить'}
       cancelLabel={doneCount > 0 ? 'закрыть' : 'отмена'}
-      confirmDisabled={busy || staged.every((r) => r.status === 'done')}
+      confirmDisabled={busy || staged.every((r) => r.status === 'done') || missingSlot}
       closeOnConfirm={false}
     >
       <div className='space-y-2.5'>
         <Text size='micro' variant='label'>
           название необязательно — пустое поле оставит только имя файла
+          {slots.length > 0 ? '; для DXF обязательна ткань — из неё берутся ширина и кромка' : ''}
         </Text>
         {staged.map((row, i) => (
           <div key={`${row.file.name}-${i}`} className='space-y-0.5'>
@@ -149,6 +177,28 @@ export function PatternUploadModal({
                 )
               }
             />
+            {slots.length > 0 && (
+              <select
+                className='h-8 w-full border border-borderColor bg-bgColor px-1.5 text-micro'
+                aria-label={`ткань для ${row.file.name}`}
+                value={row.bomLineKey}
+                disabled={busy || row.status === 'done'}
+                onChange={(e) =>
+                  setStaged((rows) =>
+                    rows.map((r, j) => (j === i ? { ...r, bomLineKey: e.target.value } : r)),
+                  )
+                }
+              >
+                <option value=''>
+                  {isDxfFile(row.file) ? 'выберите ткань…' : 'без привязки к ткани'}
+                </option>
+                {slots.map((s) => (
+                  <option key={s.lineKey} value={s.lineKey}>
+                    {s.name || 'без названия'}
+                  </option>
+                ))}
+              </select>
+            )}
             {row.status === 'uploading' && (
               <Text size='micro' variant='label'>
                 загрузка…
@@ -178,13 +228,21 @@ type Props = {
   label?: string;
   disabled?: boolean;
   className?: string;
+  // Forwarded to the naming modal; see PatternUploadModal.
+  fabricSlots?: PatternFabricSlot[];
 };
 
 // Shared выкройка upload control (§1): pick (multi-select, PDF/DXF, ≤40 MB each) → naming
 // modal → base64 → Admin.UploadPattern per file → hand each {url, filename, sizeBytes,
 // name} back to the caller. Errors are mapped (bad file vs server) and surfaced inline +
 // via snackbar. Stateless beyond the staged batch — it never touches form state itself.
-export function PatternUploadButton({ onUploaded, label, disabled, className }: Props) {
+export function PatternUploadButton({
+  onUploaded,
+  label,
+  disabled,
+  className,
+  fabricSlots,
+}: Props) {
   const { showMessage } = useSnackBarStore();
   const inputRef = useRef<HTMLInputElement>(null);
   const inputId = `pattern-upload-${useId().replace(/:/g, '')}`;
@@ -234,7 +292,12 @@ export function PatternUploadButton({ onUploaded, label, disabled, className }: 
           {error}
         </Text>
       )}
-      <PatternUploadModal files={picked} onClose={() => setPicked(null)} onUploaded={onUploaded} />
+      <PatternUploadModal
+        files={picked}
+        onClose={() => setPicked(null)}
+        onUploaded={onUploaded}
+        fabricSlots={fabricSlots}
+      />
     </div>
   );
 }
