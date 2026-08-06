@@ -142,7 +142,7 @@ export function MarkersSection({
                         ячейка читалась бы как недозаполненная. */}
                     <span className='block text-nano text-labelColor'>
                       {colorwayLabelById.get(Number(m.colorwayId ?? 0)) ??
-                        (Number(m.colorwayId ?? 0) ? 'колорвей удалён' : 'общая')}
+                        (Number(m.colorwayId ?? 0) ? 'колорвей не в карточке' : 'общая')}
                     </span>
                   </td>
                   <td>{decNum(m.fabricWidthCm)} см</td>

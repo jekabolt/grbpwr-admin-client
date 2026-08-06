@@ -144,16 +144,32 @@ export function markersOfColorway(
   });
 }
 
-// Newest marker per size for one BOM line — the per-size apply source.
+// Какой из двух маркеров ЛУЧШЕ для данного колорвея: сперва принадлежность, потом дата.
+//
+// Одной фильтрации мало. Отобрав «свои плюс общие», выбирать между ними по updatedAt значит
+// разрешить свежему ОБЩЕМУ маркеру перебить собственный маркер колорвея — а общий снят на
+// дефолтной ширине слота, тогда как собственный снят на артикуле, который этот колорвей реально
+// закупает. Именно эту подмену колонка colorway_id и заводилась предотвращать, и заметить её
+// нечем: длина отличается ровно настолько, насколько отличаются ширины.
+export function betterMarker(colorwayId: number) {
+  const own = (m: common_TechCardMarkerSummary) =>
+    colorwayId && Number(m.colorwayId ?? 0) === colorwayId ? 0 : 1;
+  return (a: common_TechCardMarkerSummary, b: common_TechCardMarkerSummary): number =>
+    own(a) - own(b) || newerMarker(a, b);
+}
+
+// Лучший маркер на каждый размер для одной строки BOM — источник для применения по размерам.
 export function latestPerSize(
   markers: common_TechCardMarkerSummary[],
+  colorwayId = 0,
 ): Map<number, common_TechCardMarkerSummary> {
+  const better = betterMarker(colorwayId);
   const bySize = new Map<number, common_TechCardMarkerSummary>();
   for (const m of markers) {
     const sid = m.sizeId ?? 0;
     if (!sid) continue;
     const prev = bySize.get(sid);
-    if (!prev || newerMarker(m, prev) < 0) bySize.set(sid, m);
+    if (!prev || better(m, prev) < 0) bySize.set(sid, m);
   }
   return bySize;
 }

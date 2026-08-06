@@ -28,10 +28,10 @@ import { parseDecimalNumber } from 'utils/decimal';
 import {
   consumptionCm,
   decNum,
+  betterMarker,
   latestPerSize,
   markersForLine,
   markerWasteDecomposition,
-  newerMarker,
   toBomUnit,
 } from './nesting/marker-io';
 import type { TechCardFormData } from './schema';
@@ -40,6 +40,7 @@ import type { TechCardFormData } from './schema';
 
 export function MarkerApplyHint({
   markers,
+  colorwayId = 0,
   lineKey,
   unit,
   wastagePercent,
@@ -50,6 +51,10 @@ export function MarkerApplyHint({
   onApply,
 }: {
   markers: common_TechCardMarkerSummary[] | undefined;
+  // Колорвей, чей рецепт редактируется. Список уже отфильтрован (свои + общие), но выбирать
+  // ЛУЧШИЙ надо тоже с оглядкой на принадлежность, иначе свежий общий маркер перебьёт
+  // собственный — см. betterMarker.
+  colorwayId?: number;
   lineKey: string;
   unit: string;
   wastagePercent: string;
@@ -73,7 +78,10 @@ export function MarkerApplyHint({
   const [markerId, setMarkerId] = useState<number>(0);
   const [mode, setMode] = useState<'scalar' | 'perSize'>('scalar');
 
-  const newest = useMemo(() => [...lineMarkers].sort(newerMarker)[0], [lineMarkers]);
+  const newest = useMemo(
+    () => [...lineMarkers].sort(betterMarker(colorwayId))[0],
+    [lineMarkers, colorwayId],
+  );
   // The card's fit reference — a scalar norm taken from a non-base size deserves a callout.
   const baseSampleSizeId = (useWatch<TechCardFormData>({ name: 'baseSampleSizeId' }) ??
     0) as number;
@@ -81,7 +89,7 @@ export function MarkerApplyHint({
 
   const chosen = lineMarkers.find((m) => m.id === markerId) ?? newest;
   const conv = toBomUnit(consumptionCm(chosen), unit);
-  const bySize = latestPerSize(lineMarkers);
+  const bySize = latestPerSize(lineMarkers, colorwayId);
   const fullCoverage = sizeIds.length > 0 && sizeIds.every((id) => bySize.has(id));
   const wastage = parseDecimalNumber(wastagePercent);
 

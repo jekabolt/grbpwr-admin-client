@@ -1226,6 +1226,7 @@ function SlotUsageRow({
   sizeNameById,
   canEdit,
   markers,
+  colorwayId,
   onChange,
   onRemove,
 }: {
@@ -1235,6 +1236,8 @@ function SlotUsageRow({
   usedKeys: Set<string>;
   materials: common_Material[];
   markers?: common_TechCardMarkerSummary[];
+  // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
+  colorwayId?: number;
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -1359,6 +1362,7 @@ function SlotUsageRow({
                 тот же onChange, которым staged-рецепт и живёт. */}
             <MarkerApplyHint
               markers={markers}
+              colorwayId={colorwayId}
               lineKey={draft.bomLineKey}
               unit={unit}
               wastagePercent={slot?.wastagePercent ?? ''}
@@ -1428,6 +1432,7 @@ function PieceRecipeCard({
   bomItems,
   materials,
   markers,
+  colorwayId,
   sizeIds,
   sizeQuantities,
   sizeNameById,
@@ -1442,6 +1447,8 @@ function PieceRecipeCard({
   bomItems: BomLine[];
   materials: common_Material[];
   markers?: common_TechCardMarkerSummary[];
+  // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
+  colorwayId?: number;
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -1486,6 +1493,7 @@ function PieceRecipeCard({
               usedKeys={usedKeys}
               materials={materials}
               markers={markers}
+              colorwayId={colorwayId}
               sizeIds={sizeIds}
               sizeQuantities={sizeQuantities}
               sizeNameById={sizeNameById}
@@ -2249,6 +2257,7 @@ function ColorwayRecipeEditor({
                   bomItems={bomItems}
                   materials={materials}
                   markers={cwMarkers}
+                  colorwayId={colorwayId}
                   sizeIds={sizeIds}
                   sizeQuantities={sizeQuantities}
                   sizeNameById={sizeNameById}
@@ -2311,6 +2320,7 @@ function ColorwayRecipeEditor({
                 usedKeys={garmentUsedKeys}
                 materials={materials}
                 markers={cwMarkers}
+                colorwayId={colorwayId}
                 sizeIds={sizeIds}
                 sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}

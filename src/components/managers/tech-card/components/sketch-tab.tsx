@@ -183,15 +183,30 @@ function TechCardGallery({
     });
   }
 
+  // ЗАПИСЬ ИДЁТ В КОРЕНЬ МАССИВА, а не через append/remove этого useFieldArray.
+  //
+  // На «callouts» висят ДВА useFieldArray: этот и свой у CalloutsList — и оба смонтированы
+  // одновременно, они соседи в одной секции. В react-hook-form 7.62 append/remove НЕ эмитят
+  // _subjects.array (измерено), поэтому соседний массив о правке не узнаёт: пин на картинке
+  // появляется (он читается из useWatch), а строки в структурированном списке нет. Хуже того,
+  // remove по устаревшему fields адресует НЕ ТУ выноску. setValue по корню массива событие
+  // эмитит, и оба useFieldArray пересинхронизируются — это ровно та же починка, что была нужна
+  // деталям кроя.
+  const writeCallouts = (next: FormCallout[]) =>
+    setValue('callouts', next, { shouldDirty: true });
+
   function addCalloutTo(mediaId: number, x: number, y: number) {
-    calloutFA.append({
-      number: nextNumber(),
-      part: '',
-      description: '',
-      mediaId,
-      posX: x.toFixed(3),
-      posY: y.toFixed(3),
-    });
+    writeCallouts([
+      ...((getValues('callouts') ?? []) as FormCallout[]),
+      {
+        number: nextNumber(),
+        part: '',
+        description: '',
+        mediaId,
+        posX: x.toFixed(3),
+        posY: y.toFixed(3),
+      },
+    ]);
   }
 
   // Map a callout's stable field key back to its global index for RHF field paths.
@@ -241,7 +256,10 @@ function TechCardGallery({
       }}
       onRemoveCallout={(key) => {
         const i = keyToIndex.get(key);
-        if (i != null) calloutFA.remove(i);
+        if (i != null)
+          writeCallouts(
+            ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== i),
+          );
       }}
       renderNote={(key) => {
         const i = keyToIndex.get(key);
@@ -305,8 +323,17 @@ function TechCardGallery({
 // reaching UNPINNED callouts (a callout survives its image being removed), so it announces how many
 // there are and opens itself when any exist.
 function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
-  const { control, formState } = useFormContext<TechCardFormData>();
-  const { fields, remove } = useFieldArray({ control, name: 'callouts' });
+  const { control, formState, getValues, setValue } = useFormContext<TechCardFormData>();
+  // `fields` даёт стабильные ключи для React; удаление идёт КОРНЕВЫМ setValue — по той же
+  // причине, что и в галерее: на «callouts» висят два useFieldArray, и remove одного не
+  // доходит до другого. Плюс remove по устаревшему fields адресует не ту выноску.
+  const { fields } = useFieldArray({ control, name: 'callouts' });
+  const removeCallout = (index: number) =>
+    setValue(
+      'callouts',
+      ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== index),
+      { shouldDirty: true },
+    );
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
   const technicalMedia = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
     mediaId: number;
@@ -430,7 +457,7 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
                     variant='secondary'
                     size='xs'
                     aria-label='remove callout'
-                    onClick={() => remove(index)}
+                    onClick={() => removeCallout(index)}
                     className='cursor-pointer'
                   >
                     ✕
