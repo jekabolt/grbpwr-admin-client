@@ -3,12 +3,12 @@
 // (progress + cancel land between pairs); the GA then runs against a warm cache, so its
 // per-gene abort polling is cheap and the budget overshoot is bounded.
 import type { NestConfig, NestResult, PieceDTO, RotationDeg } from '../types';
-import { rdpSimplify, sanitizeLoop } from '../geom/clipper';
+import { SCALE, rdpSimplify, sanitizeLoop } from '../geom/clipper';
 import { bounds, ensureCCW, rotatePoly } from '../geom/polygon';
 import { convexParts } from '../geom/triangulate';
 import { hashString, runGa } from './ga';
 import { NfpCache, type PreparedPiece } from './nfp';
-import type { Gene } from './place';
+import { compactPlacements, type Gene, type PlacedGene } from './place';
 
 export type NestProgress = {
   phase: 'nfp' | 'ga';
@@ -105,7 +105,7 @@ export async function nest(
 
   // Gap compensation: NFP inputs are RDP-simplified, whose chords cut ≤ rdpEps inside
   // convex runs PER PIECE — widen the octagon so true contours still end up ≥ gap apart.
-  const nfps = new NfpCache(config.gapCm + 2 * config.rdpEpsCm);
+  const nfps = new NfpCache(config.gapCm + 2 * config.rdpEpsCm, config.gapCm);
   const areaSum = genesBase.reduce((s, g) => s + g.piece.areaCm2, 0);
   const deadline = started + config.timeBudgetMs;
 
@@ -171,6 +171,32 @@ export async function nest(
     isCancelled,
     onGeneration: (p) => onProgress({ phase: 'ga', generation: p.generation, best: toResult(p.best, p.generation) }),
   });
+
+  // Deterministic left-slide compaction of the GA winner: re-place each piece against the
+  // others fixed, filling holes that opened after it was originally placed. Pass-capped;
+  // the wall-clock cap is a safety net that only bites on runs whose determinism the
+  // budget already truncated (the GA stopped on time, not on maxGenerations).
+  const byKey = new Map(genesBase.map((g) => [`${g.piece.id}|${g.instance}`, g]));
+  const placedGenes: PlacedGene[] = [];
+  for (const pl of best.placements) {
+    const g = byKey.get(`${pl.pieceId}|${pl.instance}`);
+    if (!g) continue;
+    placedGenes.push({ ...g, rot: pl.rot, x: Math.round(pl.x * SCALE), y: Math.round(pl.y * SCALE) });
+  }
+  if (!isCancelled() && placedGenes.length === best.placements.length && placedGenes.length > 0) {
+    // No wall-clock deadline: the pass cap alone bounds the cost, and a clock-truncated
+    // compaction made same-seed results machine-dependent for a ≤0.008 cm gain.
+    const compacted = compactPlacements(
+      placedGenes,
+      config.fabricWidthCm,
+      config.edgeMarginCm,
+      lMax,
+      nfps,
+    );
+    if (compacted.usedLengthCm <= best.usedLengthCm + 1e-9) {
+      return toResult(compacted, generation);
+    }
+  }
 
   return toResult(best, generation);
 }
