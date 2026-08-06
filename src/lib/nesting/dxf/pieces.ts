@@ -14,6 +14,11 @@ import { chainLoops } from './chain';
 
 export type RawPiece = {
   name: string;
+  // The DXF block this piece came from, or null for the loose-entity pool. Kept SEPARATE from
+  // `name` (which falls back to a placeholder label for display): downstream this is the key
+  // cut-piece aliases match on, so it must never be a fallback string that a real block could
+  // also spell.
+  blockName: string | null;
   poly: Pt[]; // CCW, cm, absolute drawing coords (normalized later)
 };
 
@@ -109,7 +114,7 @@ export function groupToPieces(
   for (const loop of chosen) {
     const cleaned = sanitizeLoop(stripDegenerate(loop.pts, 1e-4));
     if (!cleaned || area(cleaned) < MIN_PIECE_AREA_CM2) continue;
-    pieces.push({ name: label, poly: ensureCCW(cleaned) });
+    pieces.push({ name: label, blockName: group.blockName, poly: ensureCCW(cleaned) });
   }
   return pieces;
 }

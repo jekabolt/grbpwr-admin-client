@@ -38,8 +38,12 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
         const poly = raw.poly.map((p) => ({ x: p.x - bb.minX, y: p.y - bb.minY }));
         out.push({
           id: nextId++,
-          name: raw.name === 'модель' ? `деталь ${nextId - 1}` : raw.name,
-          blockName: raw.name === 'модель' ? '' : raw.name,
+          // Two different questions, answered from the SOURCE rather than from each other:
+          // what to show (a placeholder when the file carried no block), and which block this
+          // came from (the alias key — '' only when there genuinely is none). Testing the label
+          // against 'модель' would misread a DXF whose block is literally named that.
+          name: raw.blockName == null ? `деталь ${nextId - 1}` : raw.name,
+          blockName: raw.blockName ?? '',
           source: file.name,
           poly,
           bboxW: bb.maxX - bb.minX,

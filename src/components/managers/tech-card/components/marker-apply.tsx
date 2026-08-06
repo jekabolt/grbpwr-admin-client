@@ -53,8 +53,8 @@ export function MarkerApplyHint({
   lineKey: string;
   unit: string;
   wastagePercent: string;
-  // Effective article width, cm as the form/catalog holds it: the colourway PIN's material
-  // width first, the slot default otherwise. '' = unknown.
+  // Effective article's CUTTING width in cm (roll − 2×кромка) — the same quantity a marker
+  // records in fabricWidthCm, so the two are comparable. '' = unknown.
   articleWidth: string;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
@@ -90,18 +90,25 @@ export function MarkerApplyHint({
   // `chosen` and label by `newest`, which diverged the moment the selector was touched).
   const preview = conv ? `${conv.value} ${conv.unit}` : `${consumptionCm(chosen)} см`;
 
-  // Width honesty (design §1): a marker computed for another width is a different norm.
+  // Width honesty (design §1): a marker computed for another width is a different norm. Both
+  // sides are CUTTING widths — the article's roll minus its кромка, and the width the layout
+  // actually ran on. Comparing the roll against the layout would flag every fabric that has a
+  // кромка as a mismatch.
   const artW = parseDecimalNumber(articleWidth);
   const chosenW = decNum(chosen.fabricWidthCm);
   const widthMismatch =
     Number.isFinite(artW) && artW > 0 && chosenW > 0 && Math.abs(artW - chosenW) > 0.5;
-  const perSizeWidths = [...bySize.values()].map((m) => decNum(m.fabricWidthCm)).filter((w) => w > 0);
+  // The markers the per-size mode would actually apply — the card's sizes, not every size that
+  // happens to carry a marker (a leftover marker for a size since dropped from the card must
+  // not colour a warning, or an average, about what will be written).
+  const appliedPerSize = sizeIds.map((id) => bySize.get(id)).filter((m) => m != null);
+  const perSizeWidths = appliedPerSize.map((m) => decNum(m!.fabricWidthCm)).filter((w) => w > 0);
   const mixedWidths =
     perSizeWidths.length > 1 && Math.max(...perSizeWidths) - Math.min(...perSizeWidths) > 0.5;
 
   // Scalar-mode spread: a flat norm silently taken from one size understates/overstates the
   // run when sizes diverge — or when the chosen size is not the base sample size.
-  const perSizeCons = [...bySize.values()].map((m) => consumptionCm(m)).filter((c) => c > 0);
+  const perSizeCons = appliedPerSize.map((m) => consumptionCm(m!)).filter((c) => c > 0);
   const spreadPct =
     perSizeCons.length > 1
       ? ((Math.max(...perSizeCons) - Math.min(...perSizeCons)) / Math.min(...perSizeCons)) * 100
@@ -260,8 +267,10 @@ export function MarkerApplyHint({
             </CalloutBox>
           )}
           {(() => {
-            const used = mode === 'scalar' ? [chosen] : [...bySize.values()];
-            const parts = used.map(markerWasteDecomposition).filter((d) => d != null);
+            // Exactly the markers apply() would use — the preview and the value written must be
+            // the same number.
+            const used = mode === 'scalar' ? [chosen] : appliedPerSize;
+            const parts = used.map((m) => markerWasteDecomposition(m!)).filter((d) => d != null);
             if (parts.length === 0) {
               return (
                 <Text size='nano' variant='label' component='p'>

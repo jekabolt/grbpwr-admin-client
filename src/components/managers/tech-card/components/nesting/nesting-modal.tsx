@@ -368,16 +368,25 @@ export function NestingModal({
   // open and only in nest mode — a later edit by the operator is never overridden, and with
   // two or more fabrics the modal does not guess (that binding is chosen per DXF file).
   // Under the width input: where the number came from, so «140» is never mistaken for the
-  // article's real cutting width.
+  // article's real cutting width. With several fabrics the modal does not guess a width, but it
+  // still names what each slot would give — the operator holds the same data it does and should
+  // not have to work out roll − 2×кромка by hand.
   const widthSource = (() => {
-    if (viewData || fabricLines.length !== 1) return '';
-    const b = fabricLines[0];
-    const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
-    if (!Number.isFinite(roll) || roll <= 0) return '';
-    const sv = slotSelvedge(b);
-    return sv > 0
-      ? `рулон ${roll} см − кромка 2×${sv} см`
-      : `рулон ${roll} см, кромка не задана`;
+    if (viewData || fabricLines.length === 0) return '';
+    const describe = (b: MarkerBomLine) => {
+      const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
+      if (!Number.isFinite(roll) || roll <= 0) return '';
+      const sv = slotSelvedge(b);
+      return sv > 0 ? `рулон ${roll} − кромка 2×${sv}` : `рулон ${roll}, кромка не задана`;
+    };
+    if (fabricLines.length === 1) return describe(fabricLines[0]);
+    const each = fabricLines
+      .map((b) => {
+        const cut = slotCutWidth(b);
+        return Number.isFinite(cut) ? `${b.name || 'ткань'} ${Math.round(cut * 10) / 10}` : '';
+      })
+      .filter(Boolean);
+    return each.length ? `раскрой по слотам, см: ${each.join(' · ')}` : '';
   })();
 
   const prefilled = useRef(false);

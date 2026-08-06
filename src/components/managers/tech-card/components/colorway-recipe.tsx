@@ -47,7 +47,7 @@ import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
-import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { MarkerApplyHint } from './marker-apply';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
@@ -116,7 +116,11 @@ type BomLine = {
   unitPrice?: string; // decimal string
   currency?: string;
   wastagePercent?: string; // decimal string
-  fabricWidth?: string; // decimal string, cm — the slot's default cloth width
+  fabricWidth?: string; // decimal string, cm — the slot's default cloth ROLL width
+  // Read-only enrichment off the card read (0259): the кромка per edge of the linked article.
+  // Cutting width = roll − 2×selvedge, and that is what a marker is laid on — comparing a
+  // marker against the ROLL width flags every fabric that has a кромка as a mismatch.
+  selvedgeCm?: string;
   // structured { part: [{ code, percent }] } JSON on catalog-linked / picker-authored lines, free
   // text only on legacy rows — read it through parseCompositionCode, never with a bare regex.
   composition?: string;
@@ -146,11 +150,16 @@ type UsageDraft = {
   lineTotal: string;
   sizeRunTotal: string;
   // Wastage provenance (0261). 'marker' = the norm came from a saved раскладка and its measured
-  // length ALREADY contains the cutting waste, so costing must not gross it up again; '' /
-  // 'manual' = typed by hand and the article's wastage_percent applies as before. The two pcts
-  // are the display decomposition of a marker norm's waste (кромка / межлекальные выпады) and
-  // are NEVER multiplied into a cost — they only explain where the length went.
-  consumptionSource: string;
+  // length ALREADY contains the cutting waste, so costing must not gross it up again; '' =
+  // typed by hand and the article's wastage_percent applies as before. The two pcts are the
+  // display decomposition of a marker norm's waste (кромка / межлекальные выпады) and are NEVER
+  // multiplied into a cost — they only explain where the length went.
+  //
+  // `undefined` is a THIRD state and not the same as '': it means this draft does not know the
+  // provenance, and the field must then be OMITTED on the wire so the store carries the stored
+  // triple forward. It arises only from a staged draft persisted by a build that predates these
+  // fields — asserting '' there would silently downgrade every marker row to manual on restore.
+  consumptionSource: string | undefined;
   wasteSelvedgePct: string;
   wasteCutPct: string;
 };
@@ -482,6 +491,26 @@ function measured(section?: string): boolean {
   return !section || MEASURED_SECTIONS.has(section);
 }
 
+// The width a раскладка for this usage would actually be laid on: the effective article's roll
+// width minus its кромка on both edges (0259). The pinned material wins over the slot — a
+// colourway pin can be a different cloth — and the flat legacy width stands in when the typed
+// fabric attributes are absent. '' when no width is known at all; a кромка wider than the roll
+// is operator error the read must not turn into a negative width.
+function cuttingWidthOf(material?: common_Material, slot?: BomLine): string {
+  // Width and кромка are resolved as a PAIR from one article. Taking the width off the pinned
+  // material and the кромка off the slot would describe a cloth that does not exist — the pin
+  // is there precisely because it is a different roll.
+  const pinnedRoll = material?.fabricAttrs?.widthCm?.value || material?.fabricWidth?.value || '';
+  const [rollRaw, selvedgeRaw] = pinnedRoll
+    ? [pinnedRoll, material?.fabricAttrs?.selvedgeCm?.value || '']
+    : [slot?.fabricWidth || '', slot?.selvedgeCm || ''];
+  const roll = parseDecimalNumber(rollRaw);
+  if (!Number.isFinite(roll) || roll <= 0) return '';
+  const sv = parseDecimalNumber(selvedgeRaw);
+  const cut = roll - 2 * (Number.isFinite(sv) && sv > 0 ? sv : 0);
+  return cut > 0 ? String(Math.round(cut * 100) / 100) : '';
+}
+
 // Resolve a stored usage into a draft. bom_line_key is the durable ref; fall back to resolving the
 // server bom_item_id against the saved BOM lines so a legacy usage still points at the right line.
 function fromRead(
@@ -507,7 +536,11 @@ function fromRead(
     pieceLineKey: u.pieceLineKey || piecesById.get(wireInt(u.pieceId))?.lineKey || '',
     lineTotal: decimalToInput(u.lineTotal),
     sizeRunTotal: decimalToInput(u.sizeRunTotal),
-    consumptionSource: u.consumptionSource || '',
+    // The server normalises '' to 'manual', so a row this client has saved once reads back as
+    // 'manual' while a hand edit writes ''. Both mean the same thing, and leaving them distinct
+    // made a no-op edit (type 1.5 over 1.5) differ from its baseline signature and claim a
+    // staged change that does not exist. Normalise on the way IN, one spelling from here on.
+    consumptionSource: u.consumptionSource === 'manual' ? '' : u.consumptionSource || '',
     wasteSelvedgePct: decimalToInput(u.wasteSelvedgePct),
     wasteCutPct: decimalToInput(u.wasteCutPct),
   };
@@ -534,11 +567,12 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
     pieceLineKey: d.pieceLineKey || '',
     pieceId: undefined,
     pieceIndex: undefined,
-    // Wastage provenance (0261). This client OWNS the triple now, so it is always sent: the
-    // presence of consumption_source is what tells the store «write what I say» instead of
-    // «preserve what you stored» (the carry-forward path exists for clients that predate the
-    // field). Sending '' with empty pcts is therefore a deliberate reset to manual.
-    consumptionSource: d.consumptionSource || '',
+    // Wastage provenance (0261). Sent VERBATIM, including undefined: presence is what tells the
+    // store «write what I say» instead of «preserve what you stored», so '' is a deliberate
+    // reset to manual and undefined is «I don't know, keep yours». JSON.stringify drops the key
+    // for undefined, which is exactly the carry-forward the store expects from a stale client —
+    // and a draft restored from a pre-0261 snapshot IS one.
+    consumptionSource: d.consumptionSource,
     wasteSelvedgePct: inputToDecimal(d.wasteSelvedgePct),
     wasteCutPct: inputToDecimal(d.wasteCutPct),
     // output-only — never sent
@@ -1277,7 +1311,12 @@ function SlotUsageRow({
             allowedSections={allowedSections}
             usedKeys={usedKeys}
             canEdit={canEdit}
-            onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0 })}
+            // Moving the row to another slot drops the marker provenance too. A раскладка is
+            // measured on ONE cloth: carried across, its «marker» flag would keep costing from
+            // grossing the new slot's wastage onto a length that never contained the new
+            // cloth's cutting waste — understating the line, with no marker on the new slot for
+            // the operator to notice it by. Same class of desync as retyping the number.
+            onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0, ...MANUAL_PROVENANCE })}
           />
         </label>
 
@@ -1311,9 +1350,11 @@ function SlotUsageRow({
               lineKey={draft.bomLineKey}
               unit={unit}
               wastagePercent={slot?.wastagePercent ?? ''}
-              // Effective article width: the pinned/linked material's catalog width first
-              // (a colourway pin can be a different cloth), the slot's own width otherwise.
-              articleWidth={material?.fabricWidth?.value ?? slot?.fabricWidth ?? ''}
+              // The article's CUTTING width — roll minus the кромка on both edges — because
+              // that is the width a marker is laid on and records. The pinned/linked material's
+              // catalog figures come first (a colourway pin can be a different cloth), the
+              // slot's own otherwise.
+              articleWidth={cuttingWidthOf(material, slot)}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
@@ -2526,6 +2567,7 @@ export function ColorwayRecipes({
             currency: b.currency,
             wastagePercent: b.wastagePercent,
             fabricWidth: b.fabricWidth,
+            selvedgeCm: b.selvedgeCm,
             composition: b.composition,
             materialId,
             material: materialId > 0 ? materialById.get(materialId) : undefined,
