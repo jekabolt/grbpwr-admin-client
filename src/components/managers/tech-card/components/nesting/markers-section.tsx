@@ -177,6 +177,8 @@ export function MarkersSection({
           <NestingModal
             files={null}
             view={view}
+            techCardId={techCardId}
+            canEdit={canEdit}
             sizeLabel={formatSizeName(
               sizeById.get(view.summary?.sizeId ?? 0) ?? `#${view.summary?.sizeId ?? 0}`,
             )}
