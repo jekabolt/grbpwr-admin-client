@@ -1,7 +1,14 @@
 // Worker entry: owns the parsed pieces (keyed by parse job) so re-nesting with new
 // settings never re-parses, and the GA runs off the main thread with cooperative yields
 // so cancel/progress messages drain mid-run.
-import type { NestConfig, ParseOpts, PieceDTO, Unit, WorkerRequest, WorkerResponse } from '../types';
+import type {
+  NestConfig,
+  ParseOpts,
+  PieceDTO,
+  Unit,
+  WorkerRequest,
+  WorkerResponse,
+} from '../types';
 import { area, bounds } from '../geom/polygon';
 import { parseFiles } from './parse-files';
 import { orientToGrain } from '../geom/grain-orient';
@@ -79,7 +86,8 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
     return;
   }
 
-  if (out.length === 0 && warnings.length === 0) warnings.push('в файлах не нашлось замкнутых контуров деталей');
+  if (out.length === 0 && warnings.length === 0)
+    warnings.push('в файлах не нашлось замкнутых контуров деталей');
   // Commit only when no newer parse started while this one awaited.
   if (seq === parseSeq) currentParse = { id, pieces: out };
   post({ type: 'parsed', id, pieces: out, detectedUnit: detected, warnings });
@@ -101,11 +109,12 @@ async function handleNest(id: number, parseId: number, config: NestConfig): Prom
   // лишних контуров значило бы платить за них временем на каждом прогоне.
   const wanted = new Set(config.pieces.map((p) => p.pieceId));
   const oriented = orientToGrain(currentParse.pieces, config.grainLayer).pieces;
+  const seam = applySeamAllowance(
+    oriented.filter((p) => wanted.has(p.id)),
+    config.seamAllowanceCm,
+  );
   const result = await nest(
-    applySeamAllowance(
-      oriented.filter((p) => wanted.has(p.id)),
-      config.seamAllowanceCm,
-    ).pieces,
+    seam.pieces,
     config,
     () => cancelled.has(id),
     (p) =>
@@ -119,6 +128,22 @@ async function handleNest(id: number, parseId: number, config: NestConfig): Prom
         nfpTotal: p.nfpTotal,
       }),
   );
+  // Оболочка вместо детали — В ПРЕДУПРЕЖДЕНИЯ РЕЗУЛЬТАТА, а не только в левую панель.
+  //
+  // Когда обход внешней грани срывается (после лестницы попыток это стало редкостью, но не
+  // невозможностью), контур заменяется выпуклой оболочкой: у полочки это заливает пройму и
+  // горловину. Расход при этом завышен — то есть по ткани безопасно, — но плоттерный файл
+  // отдаёт оболочку на слое CUT, и резак режет ПО НЕЙ. «Безопасно по расходу» и «безопасно
+  // резать» здесь расходятся, и второе важнее.
+  //
+  // Предупреждения результата едут в сохранённый маркер, поэтому это увидит и тот, кто откроет
+  // раскладку завтра, а не только тот, кто смотрел на панель в момент прогона.
+  if (seam.hulled.length > 0) {
+    result.warnings = [
+      ...(result.warnings ?? []),
+      `контур заменён выпуклой оболочкой (припуск не сошёлся): ${seam.hulled.join(', ')} — РЕЗАТЬ ПО ЭТОМУ ФАЙЛУ НЕЛЬЗЯ, силуэт детали искажён`,
+    ];
+  }
   post({ type: 'result', id, result });
   cancelled.delete(id);
 }

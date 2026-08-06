@@ -14,6 +14,7 @@
 // Contours are the TRUE tessellated piece outlines (the same `poly` the SVG export
 // draws), not the RDP-simplified placement geometry.
 import type { NestResult, PieceDTO, Pt, RotationDeg } from '../types';
+import { SEAM_LINE_LAYER } from '../geom/seam-allowance';
 import { DXF_CAP_PER_EM, planLayoutLabels } from './label-fit';
 
 function rotPt(p: Pt, rot: RotationDeg): Pt {
@@ -102,7 +103,7 @@ export function renderLayoutDxf(
         const r = rotPt(p, pl.rot);
         return { x: r.x + pl.x, y: r.y + pl.y };
       });
-      entities.push(...polylineTags('INNER', ip, c.closed));
+      entities.push(...polylineTags(c.layer === SEAM_LINE_LAYER ? 'SEAM' : 'INNER', ip, c.closed));
     }
   }
 
@@ -199,6 +200,11 @@ export function renderLayoutDxf(
     // INNER — чертёж детали (линия шва, надсечки, свёрла, вытачки). Отдельным слоем, чтобы
     // резак по нему НЕ резал, а цех мог включить и увидеть.
     ...layerTags('INNER', 8),
+    // SEAM — ТОЛЬКО линия шва, отдельно от остального чертежа. Иначе она неотличима от цепочек
+    // со слоя 1 файла, а тот не градуируется: у XS его линия отстоит от контура на 0.03–2.03 см
+    // и местами его пересекает. Раскройщик, проверяющий припуск по зазору между линиями, обязан
+    // иметь возможность выключить всё лишнее и увидеть ровно одну пару.
+    ...layerTags('SEAM', 4),
     [0, 'ENDTAB'],
     // ШРИФТ ОБЪЯВЛЕН ЯВНО. Без таблицы STYLE и ссылки на неё из TEXT (группа 7) читатель
     // подставляет любой свой, а планировщик подписей бронирует место по конкретной метрике: у
