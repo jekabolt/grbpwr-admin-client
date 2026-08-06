@@ -116,10 +116,13 @@ type BomLine = {
   unitPrice?: string; // decimal string
   currency?: string;
   wastagePercent?: string; // decimal string
-  fabricWidth?: string; // decimal string, cm — the slot's default cloth ROLL width
-  // Read-only enrichment off the card read (0259): the кромка per edge of the linked article.
-  // Cutting width = roll − 2×selvedge, and that is what a marker is laid on — comparing a
-  // marker against the ROLL width flags every fabric that has a кромка as a mismatch.
+  fabricWidth?: string; // decimal string, cm — this LINE's own cloth ROLL width, if it sets one
+  // Read-only enrichment off the card read (0259): effectiveFabricWidthCm is
+  // COALESCE(this line's width, the linked article's) — the roll the раскладка prefills from —
+  // and selvedgeCm is that article's кромка per edge. Cutting width = roll − 2×selvedge, and
+  // that is what a marker is laid on: comparing a marker against the ROLL width flags every
+  // fabric with a кромка as a mismatch.
+  effectiveFabricWidthCm?: string;
   selvedgeCm?: string;
   // structured { part: [{ code, percent }] } JSON on catalog-linked / picker-authored lines, free
   // text only on legacy rows — read it through parseCompositionCode, never with a bare regex.
@@ -496,14 +499,22 @@ function measured(section?: string): boolean {
 // colourway pin can be a different cloth — and the flat legacy width stands in when the typed
 // fabric attributes are absent. '' when no width is known at all; a кромка wider than the roll
 // is operator error the read must not turn into a negative width.
-function cuttingWidthOf(material?: common_Material, slot?: BomLine): string {
-  // Width and кромка are resolved as a PAIR from one article. Taking the width off the pinned
-  // material and the кромка off the slot would describe a cloth that does not exist — the pin
-  // is there precisely because it is a different roll.
-  const pinnedRoll = material?.fabricAttrs?.widthCm?.value || material?.fabricWidth?.value || '';
-  const [rollRaw, selvedgeRaw] = pinnedRoll
-    ? [pinnedRoll, material?.fabricAttrs?.selvedgeCm?.value || '']
-    : [slot?.fabricWidth || '', slot?.selvedgeCm || ''];
+function cuttingWidthOf(material?: common_Material, slot?: BomLine, pinned = false): string {
+  // Precedence must match what the раскладка itself laid on (nesting-modal), or the two sides
+  // of the width comparison disagree and warn about a marker that fits:
+  //   pinned  — the colourway named a DIFFERENT cloth, so BOTH numbers come from it (taking the
+  //             pin's width with the slot's кромка would describe a roll that does not exist);
+  //   else    — effective width, i.e. this line's own override before the article's own figure,
+  //             paired with the linked article's кромка, which is what selvedgeCm already is.
+  const [rollRaw, selvedgeRaw] = pinned
+    ? [
+        material?.fabricAttrs?.widthCm?.value || material?.fabricWidth?.value || '',
+        material?.fabricAttrs?.selvedgeCm?.value || '',
+      ]
+    : [
+        slot?.effectiveFabricWidthCm || slot?.fabricWidth || '',
+        slot?.selvedgeCm || '',
+      ];
   const roll = parseDecimalNumber(rollRaw);
   if (!Number.isFinite(roll) || roll <= 0) return '';
   const sv = parseDecimalNumber(selvedgeRaw);
@@ -1354,7 +1365,14 @@ function SlotUsageRow({
               // that is the width a marker is laid on and records. The pinned/linked material's
               // catalog figures come first (a colourway pin can be a different cloth), the
               // slot's own otherwise.
-              articleWidth={cuttingWidthOf(material, slot)}
+              // "Pinned" here means pinned to a DIFFERENT article than the slot's default: a pin
+              // back to the slot's own article is the same cloth, and the line's own width
+              // override still describes it.
+              articleWidth={cuttingWidthOf(
+                material,
+                slot,
+                draft.materialId > 0 && draft.materialId !== slot?.materialId,
+              )}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
@@ -2567,6 +2585,7 @@ export function ColorwayRecipes({
             currency: b.currency,
             wastagePercent: b.wastagePercent,
             fabricWidth: b.fabricWidth,
+            effectiveFabricWidthCm: b.effectiveFabricWidthCm,
             selvedgeCm: b.selvedgeCm,
             composition: b.composition,
             materialId,

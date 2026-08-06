@@ -155,10 +155,12 @@ export function buildMarkerLayout(args: {
 }): common_TechCardMarkerLayout {
   const { pieces, perSetQty, urlBySource, result, unit, config } = args;
   const used = new Set(result.placements.map((p) => p.pieceId));
-  // v2 = pieces carry piece_line_key/block_name. Claimed only when the blob really carries some
-  // of that identity: a DXF with no per-piece blocks and no resolved cut-pieces produces a blob
-  // that is v1 in everything but the number, and a reader branching on the version would then
-  // resolve names through an empty key instead of falling back to the saved name.
+  // v2 = pieces carry block_name AND/OR piece_line_key — the version says "some identity is
+  // here", never which. A reader must therefore branch on the FIELD it needs, not on the
+  // version: markers written before the matching dialog exists carry block_name only, and
+  // resolving them through an empty piece_line_key would lose the name they did save.
+  // Claimed only when the blob really carries one of the two: a DXF with no per-piece blocks
+  // and no resolved cut-pieces is v1 in everything but the number.
   const carriesIdentity = pieces.some(
     (p) => used.has(p.id) && ((p.blockName ?? '') !== '' || (args.pieceLineKeyById?.get(p.id) ?? '') !== ''),
   );
