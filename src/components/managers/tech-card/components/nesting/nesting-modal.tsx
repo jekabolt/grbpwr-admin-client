@@ -438,6 +438,13 @@ export function NestingModal({
     effective ? renderLayoutSvg(effective, displayPieces, displayWidth, displayTarget, 0) : null;
 
   const checkedCount = pieces.filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id)).length;
+  // Потолки СЕРВЕРА на сохраняемый маркер (internal/apisrv/admin/techcard_markers.go). Они
+  // проверяются на сохранении, то есть ПОСЛЕ прогона: набрать 400 деталей, подождать бюджет и
+  // только тогда узнать, что норму не примут, — это потерянное время и никакой подсказки о том,
+  // сколько лишнего. Числа продублированы здесь сознательно и подписаны источником: спросить их у
+  // сервера нечем, а молчать до отказа хуже, чем держать копию, у которой видно, чья она.
+  const MAX_MARKER_PIECES = 300;
+  const MAX_MARKER_PLACEMENTS = 5000;
   // Total instances that will actually be nested: Σ qty × комплекты over the selection.
   const instanceCount = pieces
     .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
@@ -1474,6 +1481,9 @@ export function NestingModal({
                   детали: {pieces.length} · выбрано {checkedCount}
                   {setsN > 1 || instanceCount !== checkedCount
                     ? ` · к раскладке: ${instanceCount}`
+                    : ''}
+                  {checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS
+                    ? ` · СВЕРХ ПОТОЛКА (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку сервер не сохранит`
                     : ''}
                 </Text>
                 <button
