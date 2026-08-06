@@ -10,6 +10,7 @@
 // разойтись. Вьювер красивее, но он ничего не знает про детали.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { PieceDTO, Pt } from 'lib/nesting/types';
+import { LabelSpace, planLabel, type LabelPlan } from 'lib/nesting/render/label-fit';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 
@@ -40,40 +41,16 @@ const vy = (y: number) => -y;
 // Сдвиг курсора, ниже которого жест считается кликом, а не протяжкой (экранные пиксели).
 const DRAG_SLOP = 4;
 
-function pointInPolygon(pt: Pt, poly: readonly Pt[]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const a = poly[i];
-    const b = poly[j];
-    if (a.y > pt.y !== b.y > pt.y && pt.x < ((b.x - a.x) * (pt.y - a.y)) / (b.y - a.y) + a.x) {
-      inside = !inside;
-    }
-  }
-  return inside;
-}
-
-// Куда ставить подпись. Центр bbox у вогнутой детали (обтачка, «Г»-образная планка) попадает в
-// её собственный вырез — а подписи рисуются поверх ВСЕХ контуров, так что имя оказалось бы над
-// соседней деталью и читалось бы как её. Поэтому центроид по площади, с откатом на центр bbox,
-// если и он вне контура (бывает у подковообразных).
-function labelAnchor(poly: readonly Pt[], bboxW: number, bboxH: number): Pt {
-  const mid = { x: bboxW / 2, y: bboxH / 2 };
-  if (poly.length < 3) return mid;
-  let a2 = 0;
-  let cx = 0;
-  let cy = 0;
-  for (let i = 0; i < poly.length; i++) {
-    const p = poly[i];
-    const q = poly[(i + 1) % poly.length];
-    const cross = p.x * q.y - q.x * p.y;
-    a2 += cross;
-    cx += (p.x + q.x) * cross;
-    cy += (p.y + q.y) * cross;
-  }
-  if (Math.abs(a2) < 1e-9) return mid;
-  const c = { x: cx / (3 * a2), y: cy / (3 * a2) };
-  if (pointInPolygon(c, poly)) return c;
-  return pointInPolygon(mid, poly) ? mid : c;
+// Угол долевой ДЛЯ ПОДПИСИ. Подпись, положенная вдоль долевой, ложится вдоль детали — так её и
+// ждут в лекальном цеху. Требование «ровно один отрезок» то же, что у ориентации (см.
+// geom/grain-orient.ts): два кандидата — значит непонятно, какой из них долевая. Деталь без
+// блока пропускаем: в файле-россыпи кандидаты общие на весь чертёж, и один случайный отрезок
+// развернул бы подписи всего листа.
+function grainAngleForLabel(p: PieceDTO, layer: string): number | null {
+  if (!p.blockName) return null;
+  const all = p.grain ?? [];
+  const hits = layer ? all.filter((c) => c.layer === layer) : all;
+  return hits.length === 1 ? hits[0].angleDeg : null;
 }
 
 export function PieceSheet({
@@ -150,6 +127,71 @@ export function PieceSheet({
   // ней и стала бы некликабельной.
   const ordered = useMemo(() => [...placed].sort((a, b) => b.areaCm2 - a.areaCm2), [placed]);
 
+  // Подписи. Раньше имя рисовалось горизонтально одним кеглем в центроиде и у узкой или
+  // диагональной детали уезжало на СОСЕДНЮЮ — на листе это читается как «вот эта деталь так и
+  // называется». Теперь план (внутрь контура → поворот по долевой/длинной оси → мельче →
+  // усечение → выноска) считает общий с раскладкой планировщик, см. lib/nesting/render/label-fit.
+  //
+  // Пересчитывается на МАСШТАБ, а не на кадр: кегль берётся от окна (box.w), а место подписи —
+  // от чертежа, так что протяжка плана не меняет и платить за неё каждым кадром незачем.
+  const labelTexts = ordered.map((p) => labelOf(p));
+  const labelKey = labelTexts.join(' ');
+  const viewW = box?.w ?? 0;
+  const labelPlans = useMemo(() => {
+    const out = new Map<number, LabelPlan>();
+    if (!viewW || ordered.length === 0) return out;
+    // Мельче этого подпись всё равно нечитаема; на приближении она вернётся сама, потому что
+    // кегль считается от окна.
+    const fontMax = viewW / 55;
+    const fontMin = viewW / 130;
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    const polys = new Map<number, Pt[]>();
+    for (const p of ordered) {
+      const ox = p.originX!;
+      const oy = p.originY!;
+      polys.set(
+        p.id,
+        p.poly.map((pt) => ({ x: ox + pt.x, y: oy + pt.y })),
+      );
+      if (ox < minX) minX = ox;
+      if (oy < minY) minY = oy;
+      if (ox + p.bboxW > maxX) maxX = ox + p.bboxW;
+      if (oy + p.bboxH > maxY) maxY = oy + p.bboxH;
+    }
+    // Выноска имеет право уйти чуть за габарит чертежа — лист всё равно рисуется с полями.
+    const pad = fontMax * 3;
+    const space = new LabelSpace({
+      minX: minX - pad,
+      minY: minY - pad,
+      maxX: maxX + pad,
+      maxY: maxY + pad,
+    });
+    for (const p of ordered) space.addPolygon(polys.get(p.id)!, p.id);
+    ordered.forEach((p, i) => {
+      const text = labelTexts[i];
+      if (!text) return;
+      out.set(
+        p.id,
+        planLabel({
+          poly: polys.get(p.id)!,
+          text,
+          fontMaxCm: fontMax,
+          fontMinCm: fontMin,
+          preferredAngleDeg: grainAngleForLabel(p, grainLayer ?? ''),
+          space,
+          selfKey: p.id,
+        }),
+      );
+    });
+    return out;
+    // labelTexts участвует через labelKey: сами функции labelOf приходят inline-стрелками и
+    // меняют идентичность каждый рендер, а пересчёт плана на каждый кадр протяжки — дорого.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordered, viewW, labelKey, grainLayer]);
+
   // Экранные пиксели на одну чертёжную единицу. SVG вписывает viewBox по УМОЛЧАНИЮ как
   // 'xMidYMid meet': масштаб единый по обеим осям, а лишнее место уходит в поля по краям.
   // Поэтому делить смещение курсора на ширину элемента нельзя — как только пропорции окна и
@@ -196,7 +238,12 @@ export function PieceSheet({
       const limit = fit ?? b;
       const w = Math.min(limit.w, Math.max(limit.w / 40, b.w * factor));
       const scale = w / b.w;
-      setView({ x: at.x - (at.x - b.x) * scale, y: at.y - (at.y - b.y) * scale, w, h: b.h * scale });
+      setView({
+        x: at.x - (at.x - b.x) * scale,
+        y: at.y - (at.y - b.y) * scale,
+        w,
+        h: b.h * scale,
+      });
     };
     svg.addEventListener('wheel', onWheel, { passive: false });
     return () => svg.removeEventListener('wheel', onWheel);
@@ -287,6 +334,7 @@ export function PieceSheet({
             // Толщина — от текущего окна, а не от листа: иначе на зуме обводка разъезжается
             // в кляксу.
             const sw = (on ? box.w / 280 : box.w / 520) || 0.01;
+            const plan = labelPlans.get(p.id);
             return (
               <polygon
                 key={p.id}
@@ -305,7 +353,12 @@ export function PieceSheet({
                 // Двойной клик по листу возвращает обзор; по детали — не должен, иначе
                 // привычный двойной щелчок по выбору выбрасывает весь зум.
                 onDoubleClick={(e) => e.stopPropagation()}
-              />
+              >
+                {/* Усечённое имя обязано остаться восстановимым: подсказка висит на самой
+                    детали, а не на подписи — та не принимает указатель, иначе перехватывала
+                    бы клик у своего же контура. */}
+                {plan?.truncated ? <title>{plan.full}</title> : null}
+              </polygon>
             );
           })}
 
@@ -373,30 +426,44 @@ export function PieceSheet({
 
           {/* Подписи — отдельным проходом поверх ВСЕХ контуров: иначе имя крупной детали
               оказывалось бы под мелкой, лежащей на ней сверху. pointerEvents='none', чтобы
-              текст не перехватывал клик у своей же детали. */}
-          {ordered.map((p) => {
-            const label = labelOf(p);
-            if (!label) return null;
-            const fs = box.w / 55;
-            // Мельче трёх кеглей подпись всё равно нечитаема и превращается в грязь; на
-            // приближении она вернётся сама, потому что кегль считается от окна.
-            if (p.bboxW < fs * 3) return null;
-            const a = labelAnchor(p.poly, p.bboxW, p.bboxH);
-            return (
+              текст не перехватывал клик у своей же детали.
+
+              Угол берётся со знаком минус: план считается в чертёжной системе (Y вверх), а
+              лист рисуется через vy() — картинка зеркальна, и строка обязана лечь вдоль
+              детали такой, какой её ВИДНО. */}
+          {Array.from(labelPlans, ([id, plan]) => (
+            <g key={`t${id}`} pointerEvents='none'>
+              {plan.leader ? (
+                <>
+                  <circle
+                    cx={plan.leader.dotX}
+                    cy={vy(plan.leader.dotY)}
+                    r={plan.fontCm * 0.22}
+                    fill='#111111'
+                  />
+                  <line
+                    x1={plan.leader.dotX}
+                    y1={vy(plan.leader.dotY)}
+                    x2={plan.leader.toX}
+                    y2={vy(plan.leader.toY)}
+                    stroke='#111111'
+                    strokeWidth={box.w / 900 || 0.005}
+                  />
+                </>
+              ) : null}
               <text
-                key={`t${p.id}`}
-                x={p.originX! + a.x}
-                y={vy(p.originY! + a.y)}
-                fontSize={fs}
+                transform={`translate(${plan.x} ${vy(plan.y)})${
+                  plan.angleDeg ? ` rotate(${-plan.angleDeg})` : ''
+                }`}
+                fontSize={plan.fontCm}
                 fill='#111111'
                 textAnchor='middle'
                 dominantBaseline='middle'
-                pointerEvents='none'
               >
-                {label}
+                {plan.text}
               </text>
-            );
-          })}
+            </g>
+          ))}
         </svg>
       </div>
       <div className='flex flex-wrap items-center gap-2'>

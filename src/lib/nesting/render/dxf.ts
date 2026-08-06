@@ -14,6 +14,7 @@
 // Contours are the TRUE tessellated piece outlines (the same `poly` the SVG export
 // draws), not the RDP-simplified placement geometry.
 import type { NestResult, PieceDTO, Pt, RotationDeg } from '../types';
+import { DXF_CAP_PER_EM, planLayoutLabels } from './label-fit';
 
 function rotPt(p: Pt, rot: RotationDeg): Pt {
   switch (rot) {
@@ -103,31 +104,57 @@ export function renderLayoutDxf(
       });
       entities.push(...polylineTags('INNER', ip, c.closed));
     }
+  }
 
-    if (labels) {
-      let cx = 0;
-      let cy = 0;
-      for (const p of placed) {
-        cx += p.x;
-        cy += p.y;
+  // Подписи считаются ТЕМ ЖЕ планировщиком, что и в SVG (render/label-fit.ts), на тех же
+  // истинных контурах: имя ложится внутрь СВОЕЙ детали — повёрнутым по долевой/длинной оси,
+  // при нужде уменьшенным и усечённым, а совсем мелкой детали достаётся выноска. Разойдись
+  // здесь реализация с экранной — раскройщик получил бы маркер, где имя стоит на соседней
+  // детали, а на экране всё выглядело правильно.
+  if (labels) {
+    for (const lab of planLayoutLabels(result, pieces, fabricWidthCm)) {
+      const { plan } = lab;
+      if (plan.leader) {
+        // Выноска: точка на детали + линия до рамки. Обе на LABELS — резак этот слой не режет.
+        entities.push(
+          [0, 'CIRCLE'],
+          [8, 'LABELS'],
+          [10, num(plan.leader.dotX)],
+          [20, num(plan.leader.dotY)],
+          [30, '0.0'],
+          [40, num(plan.fontCm * 0.22)],
+        );
+        entities.push(
+          ...polylineTags(
+            'LABELS',
+            [
+              { x: plan.leader.dotX, y: plan.leader.dotY },
+              { x: plan.leader.toX, y: plan.leader.toY },
+            ],
+            false,
+          ),
+        );
       }
-      cx /= placed.length;
-      cy /= placed.length;
-      const label =
-        (pl.instance > 0 ? `${dto.name} ×${pl.instance + 1}` : dto.name) +
-        (pl.rot ? ` (${pl.rot}°)` : '');
       entities.push(
         [0, 'TEXT'],
         [8, 'LABELS'],
-        [10, num(cx)],
-        [20, num(cy)],
+        [10, num(plan.x)],
+        [20, num(plan.y)],
         [30, '0.0'],
-        [40, '1.0'], // text height, cm
-        [1, textValue(label)],
-        [72, '1'], // center-aligned — alignment point is 11/21
-        [11, num(cx)],
-        [21, num(cy)],
+        // Группа 40 — высота ПРОПИСНОЙ, а не кегль: связь задана одной константой на оба
+        // формата, иначе буквы на плоттере были бы не того размера, что на экране.
+        [40, num(plan.fontCm * DXF_CAP_PER_EM)],
+        [1, textValue(plan.text)],
+        // Угол строки, CCW — в DXF Y смотрит вверх, так что знак тот же, что в плане.
+        [50, num(plan.angleDeg)],
+        // 72/73 = выравнивание по центру и по середине; при ненулевых 72/73 точкой отсчёта
+        // становится 11/21, а не 10/20. Порядок групп канонический для R12 (73 идёт ПОСЛЕ
+        // 11/21/31) — строгие драйверы читают поток последовательно.
+        [72, '1'],
+        [11, num(plan.x)],
+        [21, num(plan.y)],
         [31, '0.0'],
+        [73, '2'],
       );
     }
   }

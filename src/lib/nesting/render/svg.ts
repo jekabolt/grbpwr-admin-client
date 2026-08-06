@@ -1,6 +1,7 @@
 // NestResult → standalone SVG string. Used both for the live preview (innerHTML) and the
 // «скачать SVG» export, so colors are concrete monochrome values, not CSS vars.
 import type { NestResult, PieceDTO, Pt, RotationDeg } from '../types';
+import { planLayoutLabels } from './label-fit';
 
 const FILL = '#f2f2f2';
 const STROKE = '#8a8a8a';
@@ -88,7 +89,9 @@ export function renderLayoutSvg(
     `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${-pad} ${-pad} ${L + 2 * pad} ${W + 2 * pad}" font-family="monospace">`,
   );
   // Fabric strip: selvedges as solid rules.
-  parts.push(`<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${RULE}" stroke-width="${W / 300}"/>`);
+  parts.push(
+    `<rect x="0" y="0" width="${L}" height="${W}" fill="#ffffff" stroke="${RULE}" stroke-width="${W / 300}"/>`,
+  );
 
   // cm ruler along X: tick every 10, label every 50.
   const tick = W / 60;
@@ -111,7 +114,9 @@ export function renderLayoutSvg(
       const r = rotPt(p, pl.rot);
       return `${(r.x + pl.x).toFixed(2)},${(r.y + pl.y).toFixed(2)}`;
     });
-    parts.push(`<polygon points="${pts.join(' ')}" fill="${FILL}" stroke="${STROKE}" stroke-width="${W / 400}"/>`);
+    parts.push(
+      `<polygon points="${pts.join(' ')}" fill="${FILL}" stroke="${STROKE}" stroke-width="${W / 400}"/>`,
+    );
     // Чертёж детали: линия шва, надсечки, свёрла, вытачки — тем же поворотом и сдвигом, что и
     // контур. Раскройщик режет по этой картинке, и силуэт без надсечек ему не годится.
     for (const c of dto.inner ?? []) {
@@ -125,19 +130,28 @@ export function renderLayoutSvg(
         `<${tag} points="${ip.join(' ')}" fill="none" stroke="${STROKE}" stroke-width="${W / 700}"/>`,
       );
     }
-    // Name at the placed centroid-ish point (bbox center is stable enough for labels).
-    let cx = 0;
-    let cy = 0;
-    for (const p of poly) {
-      const r = rotPt(p, pl.rot);
-      cx += r.x + pl.x;
-      cy += r.y + pl.y;
+  }
+
+  // Подписи — ПОСЛЕДНИМ проходом и по общему плану (см. render/label-fit.ts): имя обязано
+  // помещаться внутрь СВОЕЙ детали, поворачиваясь по долевой и уменьшаясь, а не выезжать на
+  // соседнюю. Тот же planLayoutLabels зовёт плоттерный DXF, поэтому экран и резак показывают
+  // одно и то же — включая усечения и выноски.
+  for (const lab of planLayoutLabels(result, pieces, fabricWidthCm)) {
+    const { plan } = lab;
+    if (plan.leader) {
+      parts.push(
+        `<circle cx="${plan.leader.dotX.toFixed(2)}" cy="${plan.leader.dotY.toFixed(2)}" r="${(plan.fontCm * 0.22).toFixed(3)}" fill="${INK}"/>`,
+        `<line x1="${plan.leader.dotX.toFixed(2)}" y1="${plan.leader.dotY.toFixed(2)}" x2="${plan.leader.toX.toFixed(2)}" y2="${plan.leader.toY.toFixed(2)}" stroke="${INK}" stroke-width="${W / 900}"/>`,
+      );
     }
-    cx /= poly.length;
-    cy /= poly.length;
-    const label = pl.instance > 0 ? `${dto.name} ×${pl.instance + 1}` : dto.name;
+    // Знак угла ПРЯМОЙ. Координаты полосы кладутся в SVG как есть (никакого scale(1,-1)), то
+    // есть отображение тождественно: направление детали (cosθ, sinθ) и базовая линия строки
+    // rotate(θ) — это один и тот же вектор в одном пространстве. Экранный переворот Y действует
+    // на обоих одинаково, поэтому строка ложится вдоль детали. Ср. piece-sheet.tsx, где Y
+    // инвертируется в числах через vy() и знак угла поэтому обратный.
+    const rot = plan.angleDeg ? ` rotate(${plan.angleDeg.toFixed(2)})` : '';
     parts.push(
-      `<text x="${cx.toFixed(2)}" y="${cy.toFixed(2)}" font-size="${W / 40}" fill="${INK}" text-anchor="middle">${esc(label)}${pl.rot ? ` (${pl.rot}°)` : ''}</text>`,
+      `<text transform="translate(${plan.x.toFixed(2)} ${plan.y.toFixed(2)})${rot}" dy="0.35em" font-size="${plan.fontCm.toFixed(3)}" fill="${INK}" text-anchor="middle"><title>${esc(plan.full)}</title>${esc(plan.text)}</text>`,
     );
   }
 
