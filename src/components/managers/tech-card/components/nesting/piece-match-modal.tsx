@@ -34,7 +34,9 @@ import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes } from 'utils/pattern';
 import type { TechCardFormData } from '../schema';
+import { splitBlockSize } from './block-code';
 import { PieceSheet, type PieceMark } from './piece-sheet';
+import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Block names are matched the way the DB collates them: trimmed, inner whitespace collapsed,
@@ -133,6 +135,17 @@ export function PieceMatchModal({
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
   const { parse } = useNesting(files);
+  // One DXF carries the whole grade, so the size lives in the block name and has to be split off
+  // before anything else: the piece «BP_1» exists once for the style, not once per size.
+  const sizeTokens = useSizeTokens();
+  const split = useMemo(
+    () => splitPiecesBySize(parse.phase === 'ready' ? parse.pieces : [], sizeTokens),
+    [parse, sizeTokens],
+  );
+  // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
+  // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
+  // meant, and the full-set write then rewrites them in that form.
+  const identityOf = (block: string) => normBlock(splitBlockSize(block, sizeTokens).identity);
 
   const [rows, setRows] = useState<BlockRow[]>([]);
   // Every block found in the files with its instance count, mapped or not — «снять» needs the
@@ -155,6 +168,10 @@ export function PieceMatchModal({
   // re-uploaded (revisions) — they are separate drawings and must not be drawn on top of
   // each other.
   const [activeFile, setActiveFile] = useState(0);
+  // Which SIZE is on screen. A graded DXF draws every size on one sheet; showing them together
+  // is unreadable, and it is also the wrong question — a piece is one piece across the grade.
+  // null = follow the first group.
+  const [activeSize, setActiveSize] = useState<string | null>(null);
 
   // Only pieces that can actually be referenced: a keyless or nameless row is not addressable.
   const pieceOptions = useMemo(
@@ -179,19 +196,19 @@ export function PieceMatchModal({
       if ((a.bomLineKey ?? '') !== bomLineKey) continue;
       const pk = (a.pieceLineKey ?? '').trim();
       if (!livePieceKeys.has(pk.toLowerCase())) continue;
-      m.set(normBlock(a.blockName ?? '').toLowerCase(), pk);
+      m.set(identityOf(a.blockName ?? '').toLowerCase(), pk);
     }
     return m;
-  }, [aliases, bomLineKey, livePieceKeys]);
+  }, [aliases, bomLineKey, livePieceKeys, sizeTokens]);
   const otherFabricByBlock = useMemo(() => {
     const m = new Map<string, string>();
     for (const a of aliases ?? []) {
       if ((a.bomLineKey ?? '') === bomLineKey) continue;
-      const k = loose(a.blockName ?? '');
+      const k = loose(identityOf(a.blockName ?? ''));
       if (!m.has(k)) m.set(k, a.pieceLineKey ?? '');
     }
     return m;
-  }, [aliases, bomLineKey]);
+  }, [aliases, bomLineKey, sizeTokens]);
 
   // Rebuild the proposal whenever a parse lands. Blocks this fabric already maps are left out —
   // the dialog is for what is NOT yet answered.
@@ -208,17 +225,22 @@ export function PieceMatchModal({
     const perFile = new Map<string, Map<string, number>>();
     const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
     for (const p of parse.pieces) {
-      const b = normBlock(p.blockName ?? '');
+      // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
+      // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
+      // here is what keeps the piece count a property of the STYLE.
+      const b = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
       if (!b) continue; // a file with no per-piece blocks has nothing to map
       const ci = b.toLowerCase();
       if (!spelling.has(ci)) spelling.set(ci, b);
-      // Bucketed by the file's INDEX, not its display name: two sheets legitimately share a name
-      // (two revisions re-exported by the factory under one filename, or two rows both falling
-      // back to the same placeholder), and merging them would sum their instances again.
-      const fileKey = String(p.fileIndex ?? p.source);
-      const file = perFile.get(fileKey) ?? new Map<string, number>();
+      // Bucketed by the file's INDEX **and the size**, not by the file alone. Two sheets
+      // legitimately share a display name (two revisions re-exported by the factory under one
+      // filename), so the name cannot separate them — and now that one file holds every size,
+      // counting per file would report «BP_1 ×5» for a piece cut once per garment, multiplying
+      // pieces_per_garment and every consumption derived from it by the size run.
+      const bucket = `${p.fileIndex ?? p.source}|${split.codeById.get(p.id)?.size ?? ''}`;
+      const file = perFile.get(bucket) ?? new Map<string, number>();
       file.set(ci, (file.get(ci) ?? 0) + 1);
-      perFile.set(fileKey, file);
+      perFile.set(bucket, file);
     }
     const counts = new Map<string, number>();
     for (const file of perFile.values()) {
@@ -266,7 +288,7 @@ export function PieceMatchModal({
     }
     next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
     setRows(next);
-  }, [parse, pieceOptions, mineByBlock, otherFabricByBlock]);
+  }, [parse, split, pieceOptions, mineByBlock, otherFabricByBlock]);
 
   const decided = rows.filter((r) => r.choice).length;
   const alreadyMapped = mineByBlock.size;
@@ -278,17 +300,19 @@ export function PieceMatchModal({
     return [...mineByBlock.entries()]
       .map(([ci, pieceKey]) => ({
         ci,
-        block: normBlock(
+        // Matched on the IDENTITY, like `mineByBlock` itself: a stored alias may still spell the
+        // size out, and comparing raw names would miss it and fall back to the bare key.
+        block: identityOf(
           (aliases ?? []).find(
             (a) =>
               (a.bomLineKey ?? '') === bomLineKey &&
-              normBlock(a.blockName ?? '').toLowerCase() === ci,
+              identityOf(a.blockName ?? '').toLowerCase() === ci,
           )?.blockName ?? ci,
         ),
         pieceName: nameByKey.get(pieceKey.toLowerCase()) ?? '—',
       }))
       .sort((a, b) => a.block.localeCompare(b.block, 'ru'));
-  }, [mineByBlock, aliases, bomLineKey, pieceOptions]);
+  }, [mineByBlock, aliases, bomLineKey, pieceOptions, sizeTokens]);
   const toUnmap = unmapped.length;
 
   // ── the sheet ─────────────────────────────────────────────────────────────────────────
@@ -311,6 +335,33 @@ export function PieceMatchModal({
   }, [parse]);
   const sheet = sheets[Math.min(activeFile, Math.max(0, sheets.length - 1))];
 
+  // Sizes present in the ACTIVE sheet — a second file can legitimately carry a different subset.
+  const sizeOptions = useMemo(() => {
+    if (!sheet) return [];
+    const seen = new Map<string, number>();
+    for (const p of sheet.pieces) {
+      const s = split.codeById.get(p.id)?.size ?? '';
+      seen.set(s, (seen.get(s) ?? 0) + 1);
+    }
+    const rank = (s: string) =>
+      s === '' ? Number.MAX_SAFE_INTEGER : (sizeTokens.get(s.toLowerCase()) ?? 1e6);
+    return [...seen.entries()]
+      .map(([size, count]) => ({ size, count }))
+      .sort((a, b) => rank(a.size) - rank(b.size));
+  }, [sheet, split, sizeTokens]);
+  // The chosen size, falling back to the first when the operator has not picked or the sheet
+  // changed under them.
+  const shownSize = sizeOptions.some((o) => o.size === activeSize)
+    ? (activeSize as string)
+    : (sizeOptions[0]?.size ?? '');
+  const sheetPieces = useMemo(
+    () =>
+      sheet
+        ? sheet.pieces.filter((p) => (split.codeById.get(p.id)?.size ?? '') === shownSize)
+        : [],
+    [sheet, split, shownSize],
+  );
+
   const nameByPieceKey = useMemo(
     () => new Map(pieceOptions.map((p) => [p.lineKey.toLowerCase(), p.name])),
     [pieceOptions],
@@ -320,8 +371,10 @@ export function PieceMatchModal({
     [rows],
   );
   // A contour with no block carries no identity the alias table can hold, so it is drawn but
-  // not clickable — '' is the sheet's own signal for that.
-  const ciOf = (p: PieceDTO) => normBlock(p.blockName ?? '').toLowerCase();
+  // not clickable — '' is the sheet's own signal for that. Keyed on the IDENTITY, so the same
+  // piece in another size is the same thing to click.
+  const ciOf = (p: PieceDTO) =>
+    normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '').toLowerCase();
 
   const markOf = (p: PieceDTO): PieceMark => {
     const ci = ciOf(p);
@@ -598,12 +651,35 @@ export function PieceMatchModal({
                   ))}
                 </div>
               )}
+              {/* One graded DXF draws the whole size run on one sheet. Overlaid they are
+                  unreadable, so only one size is ever on screen — and since a cut piece is ONE
+                  piece across the grade, switching size changes what you look at, never what
+                  gets created. */}
+              {sizeOptions.length > 1 && (
+                <div className='mb-1 flex flex-wrap items-center gap-1'>
+                  <Text size='nano' variant='label' component='span'>
+                    размер:
+                  </Text>
+                  {sizeOptions.map((o) => (
+                    <Button
+                      key={o.size || '(none)'}
+                      type='button'
+                      variant={o.size === shownSize ? 'main' : 'secondary'}
+                      size='xs'
+                      title={`${o.count} контуров`}
+                      onClick={() => setActiveSize(o.size)}
+                    >
+                      {o.size || 'без размера'}
+                    </Button>
+                  ))}
+                </div>
+              )}
               <PieceSheet
-                // Keyed by the FILE: zoom/pan live inside the sheet, so without a remount
-                // switching tabs kept the previous drawing's viewBox — and two files exported
-                // from different origins would leave the operator staring at blank canvas.
-                key={sheet.index}
-                pieces={sheet.pieces}
+                // Keyed by the FILE and the SIZE: zoom/pan live inside the sheet, so without a
+                // remount switching either kept the previous drawing's viewBox — and two sizes
+                // sit at different places on the sheet, so the view would land on nothing.
+                key={`${sheet.index}|${shownSize}`}
+                pieces={sheetPieces}
                 keyOf={ciOf}
                 markOf={markOf}
                 labelOf={labelOf}
