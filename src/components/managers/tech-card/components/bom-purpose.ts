@@ -50,6 +50,13 @@ export function bomPurposeLabel(purpose?: string): string {
   return PURPOSE_LABEL[purpose] ?? purpose.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase();
 }
 
+// Роль строки по умолчанию, когда оператор её не написал: назначение уже сказано, и повторять
+// одно и то же руками незачем. «Другое» роли не даёт — там смысл в примечании, а не в значении.
+export function defaultRoleForPurpose(purpose?: string): string {
+  if (!purpose || purpose === UNSET_PURPOSE || purpose === 'TECH_CARD_BOM_PURPOSE_OTHER') return '';
+  return PURPOSE_LABEL[purpose] ?? '';
+}
+
 export const techCardBomPurposeOptions: Array<{
   value: common_TechCardBomPurpose;
   label: string;

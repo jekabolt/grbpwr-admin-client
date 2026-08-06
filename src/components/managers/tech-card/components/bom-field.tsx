@@ -59,6 +59,7 @@ import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
 import {
   UNSET_PURPOSE,
+  defaultRoleForPurpose,
   groupBomLines,
   isOtherPurpose,
   isRollGoodsSection,
@@ -866,14 +867,29 @@ export function BomField({
   const addPurposeAnswered = !addNeedsPurpose || addPurpose !== UNSET_PURPOSE;
 
   // Step 2 commit: one new slot — the answered role, the picked article as its default.
+  // Роль обязательна только там, где назначение её не заменяет. У рулонной ткани назначение уже
+  // сказано, и пустая роль подставится из него.
+  const roleAnswered = !!addRole.trim() || (addNeedsPurpose && addPurposeAnswered);
+
   const commitAdd = () => {
     const m = addMaterial;
     const materialId = wireInt(m?.id);
-    if (!m || !materialId || !addRole.trim() || !addPurposeAnswered) return;
+    if (!m || !materialId || !roleAnswered || !addPurposeAnswered) return;
     append({
       ...emptyBomItem,
       ...materialLineFields(m),
-      name: addRole.trim(),
+      // Роль СПРАШИВАЕТСЯ ТОЛЬКО ТАМ, ГДЕ НАЗНАЧЕНИЕ НЕ ОТВЕЧАЕТ.
+      //
+      // У рулонной ткани назначение говорит то же самое, и требовать вдобавок «роль в изделии»
+      // значит спрашивать одно дважды. Пустая роль подставляется из назначения — это единственное
+      // место, где угадывать можно: оператор ТОЛЬКО ЧТО его выбрал, это не догадка по секции.
+      //
+      // Но само поле остаётся, и не из осторожности. Во-первых, у ниток, фурнитуры и отделки
+      // назначения нет вовсе, и «основная молния» против «молния кармана» — единственное, чем они
+      // различаются. Во-вторых, модель прямо допускает НЕСКОЛЬКО строк на одно назначение (в этом
+      // и смысл «сабсета тканей»), и две «основной материал» — полочка и капюшон — без роли стали
+      // бы неразличимы в раскладке, cut list и плане материалов.
+      name: addRole.trim() || defaultRoleForPurpose(addPurpose),
       // A non-roll-goods article never reaches the purpose question, so it lands unset — the same
       // state the server and the DB CHECK both require of it.
       purpose: addNeedsPurpose ? addPurpose : UNSET_PURPOSE,
@@ -1011,9 +1027,9 @@ export function BomField({
                   not a category, and nothing filled it in automatically on purpose. */}
               {g.unsorted && (
                 <Text variant='label' size='micro'>
-                  У этих тканей назначение не задано. Автоматически оно не проставляется:
-                  «основная / карманка / контраст» отличаются только тем, зачем они в изделии, и
-                  угадать это по секции нельзя. Откройте карточку и выберите назначение.
+                  У этих тканей назначение не задано. Автоматически оно не проставляется: «основная
+                  / карманка / контраст» отличаются только тем, зачем они в изделии, и угадать это
+                  по секции нельзя. Откройте карточку и выберите назначение.
                 </Text>
               )}
               <Tiles min={160}>
@@ -1142,9 +1158,9 @@ export function BomField({
           open
           onOpenChange={(v) => !v && setAddMaterial(undefined)}
           width='sm'
-          title={addNeedsPurpose ? 'роль и назначение' : 'роль в изделии'}
+          title={addNeedsPurpose ? 'назначение ткани' : 'роль в изделии'}
           confirmLabel='add'
-          confirmDisabled={!addRole.trim() || !addPurposeAnswered}
+          confirmDisabled={!roleAnswered || !addPurposeAnswered}
           closeOnConfirm={false}
           onConfirm={commitAdd}
         >
@@ -1163,7 +1179,7 @@ export function BomField({
             </div>
             <div>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                роль в изделии *
+                {addNeedsPurpose ? 'роль в изделии' : 'роль в изделии *'}
               </Text>
               <div className='mt-1'>
                 <Input
@@ -1172,13 +1188,18 @@ export function BomField({
                   autoComplete='off'
                   autoFocus
                   list='bom-add-role-suggestions'
-                  placeholder='основная ткань / подкладка / молния…'
+                  placeholder={
+                    addNeedsPurpose
+                      ? defaultRoleForPurpose(addPurpose) ||
+                        'необязательно — подставится назначение'
+                      : 'основная молния / нитки верха / бейка…'
+                  }
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddRole(e.target.value)}
                   onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                     // Same gate as the confirm button — on a fabric, Enter after the role is only
                     // half the answer, and committing on it would create exactly the unsorted line
                     // this modal exists to prevent.
-                    if (e.key === 'Enter' && addRole.trim() && addPurposeAnswered) {
+                    if (e.key === 'Enter' && roleAnswered && addPurposeAnswered) {
                       e.preventDefault();
                       commitAdd();
                     }
