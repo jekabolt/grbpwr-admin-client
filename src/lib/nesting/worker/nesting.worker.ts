@@ -1,16 +1,8 @@
 // Worker entry: owns the parsed pieces (keyed by parse job) so re-nesting with new
 // settings never re-parses, and the GA runs off the main thread with cooperative yields
 // so cancel/progress messages drain mid-run.
-import type {
-  NestConfig,
-  ParseOpts,
-  PieceDTO,
-  Unit,
-  WorkerRequest,
-  WorkerResponse,
-} from '../types';
-import { area, bounds } from '../geom/polygon';
-import { parseFiles } from './parse-files';
+import type { NestConfig, ParseOpts, PieceDTO, WorkerRequest, WorkerResponse } from '../types';
+import { parseSheets, type SheetBytes } from './parse-files';
 import { orientToGrain } from '../geom/grain-orient';
 import { applySeamAllowance } from '../geom/seam-allowance';
 import { nest } from '../nest';
@@ -29,56 +21,12 @@ const cancelled = new Set<number>();
 
 async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<void> {
   const seq = ++parseSeq;
-  const warnings: string[] = [];
-  const out: PieceDTO[] = [];
-  let detected: Exclude<Unit, 'auto'> = 'mm';
-  let nextId = 1;
-  let failedFiles = 0;
+  const sheets: SheetBytes[] = [];
+  for (const file of files) sheets.push({ name: file.name, buf: await file.arrayBuffer() });
 
-  let fileIndex = 0;
-  for (const file of files) {
-    try {
-      const buf = await file.arrayBuffer();
-      const { raws, unit, unitGuessed } = parseFiles(buf, opts, warnings);
-      detected = unit;
-      if (unitGuessed) warnings.push(`${file.name}: единицы не заданы в файле — принято ${unit}`);
-      for (const raw of raws) {
-        const bb = bounds(raw.poly);
-        // Normalize: local origin at bbox min corner — placement x/y then read naturally.
-        const poly = raw.poly.map((p) => ({ x: p.x - bb.minX, y: p.y - bb.minY }));
-        out.push({
-          id: nextId++,
-          // Two different questions, answered from the SOURCE rather than from each other:
-          // what to show (a placeholder when the file carried no block), and which block this
-          // came from (the alias key — '' only when there genuinely is none). Testing the label
-          // against 'модель' would misread a DXF whose block is literally named that.
-          name: raw.blockName == null ? `деталь ${nextId - 1}` : raw.name,
-          blockName: raw.blockName ?? '',
-          layer: raw.layer,
-          grain: raw.grain,
-          // Тем же сдвигом, что и контур: внутренняя геометрия обязана оставаться на своём
-          // месте ОТНОСИТЕЛЬНО детали, иначе на раскладке надсечки уедут от неё.
-          inner: raw.inner.map((p) => ({
-            layer: p.layer,
-            closed: p.closed,
-            pts: p.pts.map((q) => ({ x: q.x - bb.minX, y: q.y - bb.minY })),
-          })),
-          source: file.name,
-          fileIndex,
-          poly,
-          bboxW: bb.maxX - bb.minX,
-          bboxH: bb.maxY - bb.minY,
-          areaCm2: area(poly),
-          originX: bb.minX,
-          originY: bb.minY,
-        });
-      }
-    } catch (e) {
-      failedFiles++;
-      warnings.push(`${file.name}: ${e instanceof Error ? e.message : String(e)}`);
-    }
-    fileIndex++;
-  }
+  // Same call the node probe makes (scripts/nest-probe.mjs) — the measurement has to walk
+  // the pipeline the operator walks, not a second copy of it.
+  const { pieces: out, detectedUnit: detected, warnings, failedFiles } = parseSheets(sheets, opts);
 
   // Every file failed → that's an error, not a note with an empty piece list.
   if (files.length > 0 && failedFiles === files.length) {

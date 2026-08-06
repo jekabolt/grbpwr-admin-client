@@ -23,7 +23,7 @@
 // measured on the benchmark set it changes used length by <1% while tripling placement
 // time. A candidate that fails the winding test is simply skipped, so correctness never
 // depends on candidate completeness — only quality does.
-import type { Placement, Pt, RotationDeg } from '../types';
+import type { Placement, Pt, RotationDeg, UnplacedPiece } from '../types';
 import { SCALE } from '../geom/clipper';
 import type { NfpCache, NfpPaths, PreparedPiece } from './nfp';
 
@@ -40,6 +40,10 @@ export type PlacedGene = Gene & { x: number; y: number };
 export type PlacementResult = {
   placements: Placement[];
   usedLengthCm: number;
+  // Genes this order could not place. Empty is the normal case; a non-empty list is the
+  // honest alternative to the old behaviour, which laid the piece down overlapping and let
+  // usedLength grow as though it had gone somewhere legal.
+  unplaced: UnplacedPiece[];
 };
 
 type Neighbour = { nfp: NfpPaths; ox: number; oy: number };
@@ -276,6 +280,7 @@ export function placeOrder(
   abort?: () => boolean,
 ): PlacementResult | null {
   const placed: PlacedGene[] = [];
+  const unplaced: UnplacedPiece[] = [];
   let usedLength = 0; // int units
   const m = Math.round(edgeMarginCm * SCALE);
   const W = Math.round(fabricWidthCm * SCALE);
@@ -292,7 +297,14 @@ export function placeOrder(
     const xHi = L - m - bMaxX;
     const yLo = m - bMinY;
     const yHi = W - m - bMaxY;
-    if (yLo > yHi || xLo > xHi) continue; // cannot fit the width in this rotation — prep filters these
+    if (yLo > yHi || xLo > xHi) {
+      // Cannot fit the width in this rotation. Prep filters pieces that fit in NO rotation,
+      // so reaching here means the GA chose a rotation this piece cannot wear — the gene is
+      // reported rather than silently vanishing, which is what made placedCount drop with no
+      // reason attached.
+      unplaced.push({ pieceId: g.piece.id, instance: g.instance, reason: 'width' });
+      continue;
+    }
 
     const neighbours: Neighbour[] = placed.map((q) => ({
       nfp: nfps.get(q.piece, q.rot, g.piece, g.rot),
@@ -331,24 +343,44 @@ export function placeOrder(
     // VALIDATED like any candidate and pushed right until it clears every neighbour —
     // an unvalidated frontier was measured landing strictly inside two forbidden
     // regions at once on a constructed case.
-    let x = best ? best.x : usedLength + m - bMinX;
-    let y = best ? best.y : yLo;
+    // Clamped to the strip: an unclamped frontier start could already sit past xHi, and the
+    // first feasibility test would then «seat» the piece off the end of the fabric.
+    let x = best ? best.x : Math.min(xHi, Math.max(xLo, usedLength + m - bMinX));
+    const y = best ? best.y : yLo;
+    let seated = !!best;
     if (!best) {
       const step = Math.max(1, Math.round((bMaxX - bMinX) / 4));
       let guard = 0;
-      while ((!feasible(neighbours, x, y) || !verify(x, y)) && x < xHi && guard < 4096) {
-        x += step;
+      for (;;) {
+        if (feasible(neighbours, x, y) && verify(x, y)) {
+          seated = true;
+          break;
+        }
+        // The strip's right edge and the step guard are BOTH terminal, and neither may end
+        // in a placement. The old loop exited on `x >= xHi` or on the guard and then pushed
+        // the piece regardless — an overlapping placement whose length the marker счёл
+        // честной. A run that reaches here has nothing true to say except «не влезло».
+        if (x >= xHi || guard >= 4096) break;
+        x = Math.min(xHi, x + step);
         guard++;
       }
+    }
+    if (!seated) {
+      unplaced.push({ pieceId: g.piece.id, instance: g.instance, reason: 'no-space' });
+      continue;
     }
     placed.push({ ...g, x, y });
     usedLength = Math.max(usedLength, x + bMaxX + m);
   }
 
-  return toResult(placed, usedLength);
+  return toResult(placed, usedLength, unplaced);
 }
 
-function toResult(placed: readonly PlacedGene[], usedLength: number): PlacementResult {
+function toResult(
+  placed: readonly PlacedGene[],
+  usedLength: number,
+  unplaced: UnplacedPiece[] = [],
+): PlacementResult {
   return {
     placements: placed.map((p) => ({
       pieceId: p.piece.id,
@@ -358,6 +390,7 @@ function toResult(placed: readonly PlacedGene[], usedLength: number): PlacementR
       y: p.y / SCALE,
     })),
     usedLengthCm: usedLength / SCALE,
+    unplaced,
   };
 }
 
@@ -368,6 +401,14 @@ function toResult(placed: readonly PlacedGene[], usedLength: number): PlacementR
 // same-seed results machine-dependent (verified: the 500 ms floor changed the output)
 // for a measured gain of ≤0.008 cm — the iteration cap alone keeps the cost bounded.
 // Pure integer math, same candidate machinery as placement.
+//
+// CANCELLATION (Ф0) is a different question from the clock, and conflating the two is what
+// left this the longest uninterruptible tail in the engine: «стоп» was checked once BEFORE
+// compaction and never again, so a stop pressed at second 3 of a 40-second compaction was
+// answered at second 40 (in the UI, by killing the worker after 1.5 s and throwing the run
+// away). A cancelled run returns what it has and says so; a run nobody cancelled walks
+// exactly the passes it walked before, so the determinism the clock argument protects is
+// untouched.
 export function compactPlacements(
   genes: readonly PlacedGene[],
   fabricWidthCm: number,
@@ -375,6 +416,7 @@ export function compactPlacements(
   lMaxCm: number,
   nfps: NfpCache,
   maxPasses = 3,
+  isCancelled?: () => boolean,
 ): PlacementResult {
   const m = Math.round(edgeMarginCm * SCALE);
   const W = Math.round(fabricWidthCm * SCALE);
@@ -387,6 +429,10 @@ export function compactPlacements(
     let moved = false;
     const order = work.map((_, i) => i).sort((i, j) => work[i].x - work[j].x || i - j);
     for (const i of order) {
+      // Polled per piece, not per pass: one pass over 130 instances is seconds long, and a
+      // stop must not have to wait for it. Every piece in `work` holds a position that was
+      // feasible when it was written, so returning mid-pass returns a valid marker.
+      if (isCancelled?.()) return finish();
       const g = work[i];
       const b = g.piece.boundsAt[g.rot];
       const bMinX = Math.round(b.minX * SCALE);

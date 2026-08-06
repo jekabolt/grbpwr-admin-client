@@ -284,8 +284,14 @@ export function markerToView(marker: common_TechCardMarker): {
     efficiency: decNum(s.efficiencyPct) / 100,
     placedCount: s.placedCount ?? (l.placements ?? []).length,
     totalCount: s.totalCount ?? (l.placements ?? []).length,
+    // A STORED marker is a layout, not a run: nothing about it is unplaced (a marker whose
+    // pieces did not all fit was never savable — the save gate требует placed === total),
+    // nobody cancelled it, and it carries no telemetry. Stating that here rather than
+    // leaving the fields optional keeps the reader from having to ask which case it holds.
+    unplaced: [],
     generation: 0,
     elapsedMs: 0,
+    cancelled: false,
     warnings: l.warnings ?? [],
   };
   const target = l.params?.targetLengthCm ?? 0;

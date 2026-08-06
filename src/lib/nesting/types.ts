@@ -112,16 +112,64 @@ export type Placement = {
   y: number;
 };
 
+// Why an instance is NOT on the marker. The engine used to have no way to say this: a
+// piece too wide for the fabric was dropped before the gene list was built, and a piece the
+// placer could not fit was laid down ANYWAY, overlapping, with usedLength growing as if it
+// had gone somewhere. Both are now answered here, and the two are different news:
+//   'width'    — no allowed rotation fits the fabric width. Nothing the search can do.
+//   'no-space' — the placer found no feasible position on the strip. The strip is
+//                practically unbounded along X, so this is a genuine pathology (a pocket
+//                whose only opening is an NFP×NFP corner) and not «the marker is full».
+//   'missing'  — the job asked for a piece the parse does not contain. Only reachable from
+//                a stale config, and it exists so placed + unplaced === total holds even
+//                then, instead of the counts quietly disagreeing.
+export type UnplacedReason = 'width' | 'no-space' | 'missing';
+
+export type UnplacedPiece = {
+  pieceId: number;
+  instance: number;
+  reason: UnplacedReason;
+};
+
+// What the run actually did, as opposed to what the screen used to imply it did. The
+// operator waits N seconds and reads «оптимизировано» — with generations=0 that word is a
+// lie: the marker is the first greedy stack, unsearched. Telemetry is what lets the screen
+// say so.
+export type NestTelemetry = {
+  // NFP prepass coverage. done < total means the rest was computed lazily inside the GA.
+  nfpDone: number;
+  nfpTotal: number;
+  // Individuals scored. 0 with generations 0 means not even the seed was evaluated.
+  evaluated: number;
+  // The contour simplification the engine actually used — raised above the requested value
+  // when the job is too big to precompute at that fidelity (see nest/index.ts).
+  rdpEpsCm: number;
+  requestedRdpEpsCm: number;
+  // Convex-hull count the prepass was predicted to cost, and what it really took. The pair
+  // of them is how the calibration constant behind the eps choice stays honest.
+  predictedHulls: number;
+  prepassMs: number;
+};
+
 export type NestResult = {
   placements: Placement[];
   usedLengthCm: number;
   efficiency: number; // Σ piece area / (width × usedLength), 0..1
   placedCount: number;
   totalCount: number;
+  // Instances that did NOT make it onto the fabric, with the reason. Invariant the probe
+  // asserts: placedCount + unplaced.length === totalCount — for a run that FINISHED. A
+  // cancelled run makes no claim about the pieces it never got to, so it reports what it
+  // placed and nothing else; `cancelled` is what tells the two apart.
+  unplaced: UnplacedPiece[];
   generation: number;
   elapsedMs: number;
+  // The run was cancelled — the result is best-so-far, not a finished search.
+  cancelled: boolean;
   // Non-fatal geometry notes (e.g. a degenerate contour fell back to its convex hull).
   warnings: string[];
+  // Absent on a marker restored from storage: the blob keeps a layout, not a run.
+  telemetry?: NestTelemetry;
 };
 
 export type WorkerRequest =

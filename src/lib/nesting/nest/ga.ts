@@ -51,12 +51,27 @@ export type GaOptions = {
 const POP = 10;
 const MUTATION_P = 0.1;
 
+// Fitness cost of ONE unplaced instance, in the same units as marker length (cm).
+//
+// Load-bearing, not cosmetic. Fitness is «how long is the marker», and the moment the
+// placer became able to answer «не влезло» (Ф0), a run that DROPS a piece scores SHORTER
+// than one that seats it — so the plain length would have made the search actively seek out
+// orders that lose pieces, and the winner would look like the best marker on the screen.
+// The penalty is larger than any physically possible marker (lMax is bounded by every piece
+// laid end to end), so an order that seats more instances always beats one that seats fewer,
+// and length only ever breaks ties among equally complete orders.
+const UNPLACED_PENALTY_CM = 1e7;
+
+function fitnessOf(res: PlacementResult): number {
+  return res.usedLengthCm + res.unplaced.length * UNPLACED_PENALTY_CM;
+}
+
 function evaluate(ind: Individual, opts: GaOptions, abort?: () => boolean): PlacementResult | null {
   // rots are indexed by GENE, not by slot — they survive order crossover intact and can
   // never assign a piece a rotation outside its own allowed set.
   const genes = ind.order.map((gi) => ({ ...opts.genesBase[gi], rot: ind.rots[gi] }));
   const res = placeOrder(genes, opts.fabricWidthCm, opts.edgeMarginCm, opts.lMaxCm, opts.nfps, abort);
-  if (res) ind.fitness = res.usedLengthCm;
+  if (res) ind.fitness = fitnessOf(res);
   return res;
 }
 
@@ -101,7 +116,9 @@ function pick(sorted: Individual[], rnd: () => number, skip?: Individual): Indiv
   }
 }
 
-export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; generation: number; evaluated: number }> {
+export async function runGa(
+  opts: GaOptions,
+): Promise<{ best: PlacementResult | null; generation: number; evaluated: number }> {
   const n = opts.genesBase.length;
   const rnd = mulberry32(opts.seed);
   const deadline = opts.deadlineMs;
@@ -174,9 +191,16 @@ export async function runGa(opts: GaOptions): Promise<{ best: PlacementResult; g
   }
 
   if (!best) {
-    // Budget was too small to finish even one individual — evaluate the seed without the
-    // abort so a stop always returns SOME layout (small inputs make this fast).
-    best = evaluate(seedInd, opts) as PlacementResult;
+    // Budget was too small to finish even one individual. The seed is evaluated once more
+    // WITHOUT the clock so a run that merely ran out of time still returns a layout — small
+    // jobs make this cheap, and «пусто» would be the wrong answer for a slow machine.
+    //
+    // CANCELLATION is honoured here even so (Ф0): this was the tail that turned «стоп» into
+    // a 30-second wait on the 45-piece file — the deadline had passed, every individual came
+    // back null, and this line then re-ran the whole placement with the lazy NFP misses that
+    // made it slow in the first place. Cancel now means cancel; the caller reports an empty
+    // result as cancelled rather than as a marker.
+    best = evaluate(seedInd, opts, () => opts.isCancelled());
     evaluated++;
   }
   return { best, generation, evaluated };

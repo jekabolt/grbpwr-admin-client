@@ -12,6 +12,7 @@
         "build": "vite build",
         "build:check": "tsc && vite build",
         "preview": "vite preview",
+        "nest:probe": "node scripts/nest-probe.mjs",
         "fix": "yarn lint && yarn format",
         "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
         "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",

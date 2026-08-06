@@ -351,6 +351,44 @@ export function NestingModal({
   // and efficiency_pct is a 0..100 column. Clamp once, use everywhere.
   const effPct = effective ? Math.min(100, effective.efficiency * 100) : 0;
 
+  // «НЕ ВЛЕЗЛО» — a different fact from «нарушения», and the panel has to keep them apart.
+  //
+  // A violation is a marker the engine BUILT whose clearances a human may still accept: the
+  // note says so and blocks nothing. An unplaced piece is the opposite — the engine could
+  // not seat it at all, so it is NOT on the fabric, and the layout on screen is short of a
+  // piece the order needs. Saving is already impossible (canSave требует placed === total),
+  // but until Ф0 the only sign of it was the «размещено» counter reading 44/45, which reads
+  // like an accounting detail rather than «эта деталь никуда не легла».
+  const unplaced = !running ? (displayResult?.unplaced ?? []) : [];
+  const unplacedText = useMemo(() => {
+    if (unplaced.length === 0) return '';
+    const nameOf = (id: number) => displayPieces.find((p) => p.id === id)?.name || `деталь ${id}`;
+    const byReason = new Map<string, Set<string>>();
+    for (const u of unplaced) {
+      const set = byReason.get(u.reason) ?? new Set<string>();
+      set.add(nameOf(u.pieceId));
+      byReason.set(u.reason, set);
+    }
+    const word: Record<string, string> = {
+      width: 'шире полосы ни в одном повороте',
+      'no-space': 'не нашлось места на полосе',
+      missing: 'детали нет в разобранных файлах',
+    };
+    return [...byReason.entries()]
+      .map(([reason, names]) => `${[...names].join(', ')} — ${word[reason] ?? reason}`)
+      .join('; ');
+  }, [unplaced, displayPieces]);
+
+  // «Поиск не начинался». generation 0 means the GA never completed a generation, so the
+  // marker on screen is the seed order — big-piece-first greedy — and nothing was searched.
+  // The word «оптимизировано» over that number was the screen's own lie: the operator waited
+  // the full budget and got the layout the engine would have produced in one pass.
+  const greedyOnly = !viewData && !running && displayResult != null && displayResult.generation === 0;
+  const simplified =
+    displayResult?.telemetry && displayResult.telemetry.rdpEpsCm > displayResult.telemetry.requestedRdpEpsCm
+      ? displayResult.telemetry
+      : null;
+
   const editingActive =
     !running &&
     canEdit &&
@@ -1460,6 +1498,19 @@ export function NestingModal({
               </Text>
             </div>
           )}
+          {!running && displayResult?.cancelled && displayResult.placements.length === 0 && (
+            <CalloutBox tone='warning'>
+              остановлено до первой готовой раскладки — показывать нечего. Прежде тут появлялась
+              раскладка, досчитанная уже ПОСЛЕ «стопа»: её никто не ждал, и длина у неё была
+              настоящая, поэтому отличить её от результата было нельзя.
+            </CalloutBox>
+          )}
+          {unplaced.length > 0 && (
+            <CalloutBox tone='error'>
+              не влезло: {unplaced.length} — {unplacedText}. Этих деталей на раскладке НЕТ, длина
+              посчитана без них; сохранить норму нельзя, пока каждая деталь не легла.
+            </CalloutBox>
+          )}
           {violations.length > 0 && !running && (
             <CalloutBox tone='warning'>
               нарушения: {violations.length}
@@ -1506,11 +1557,35 @@ export function NestingModal({
               {!viewData && displayResult && (
                 <Stat
                   label='поколение'
-                  value={String(displayResult.generation)}
+                  value={
+                    displayResult.generation === 0 ? (
+                      <Pill tone='warn'>поиска не было</Pill>
+                    ) : (
+                      String(displayResult.generation)
+                    )
+                  }
                   sub={`${(displayResult.elapsedMs / 1000).toFixed(1)} с${run.phase === 'done' && run.stopped ? ' · остановлено' : ''}`}
                 />
               )}
             </StatGrid>
+          )}
+          {/* Готовность мерится ПОКОЛЕНИЯМИ, а не секундами: бюджет говорит, сколько мы ждали,
+              и ничего — сколько успели. Ноль поколений значит, что на экране лежит затравка. */}
+          {greedyOnly && (
+            <CalloutBox tone='warning'>
+              поиск не начинался — это жадная укладка «крупные детали вперёд», а не оптимум.
+              {displayResult?.telemetry
+                ? ` Подготовка геометрии съела ${(displayResult.telemetry.prepassMs / 1000).toFixed(1)} с из бюджета (${displayResult.telemetry.nfpDone}/${displayResult.telemetry.nfpTotal} пар).`
+                : ''}{' '}
+              Дайте больше времени или снимите раскладку меньшим составом.
+            </CalloutBox>
+          )}
+          {simplified && (
+            <Text size='nano' variant='label' component='p'>
+              контуры упрощены до {simplified.rdpEpsCm} см вместо {simplified.requestedRdpEpsCm} см —
+              иначе подготовка геометрии не уложилась бы в бюджет и поиск не начался бы вовсе.
+              Детали от этого лежат чуть свободнее.
+            </Text>
           )}
           {displayResult && displayResult.warnings.length > 0 && (
             <CalloutBox tone='note'>

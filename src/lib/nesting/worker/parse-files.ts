@@ -1,9 +1,10 @@
 // Per-file pipeline: bytes → dxf-parser → block expansion → loop chaining/filtering →
-// raw pieces in absolute cm coordinates.
-import type { ParseOpts, Unit } from '../types';
+// raw pieces in absolute cm coordinates, then the normalization into PieceDTO.
+import type { ParseOpts, PieceDTO, Unit } from '../types';
 import { parseDxf } from '../dxf/parse';
 import { expandGroups } from '../dxf/transform';
 import { groupToPieces, type RawPiece } from '../dxf/pieces';
+import { area, bounds } from '../geom/polygon';
 
 export function parseFiles(
   buf: ArrayBuffer,
@@ -23,4 +24,77 @@ export function parseFiles(
     raws.push(...groupToPieces(g, opts.tolChain, warnings));
   }
   return { raws, unit: parsed.unit, unitGuessed: parsed.unitGuessed };
+}
+
+// Bytes of one uploaded sheet, decoupled from the browser's File so the same pipeline
+// runs off the main thread AND in the node probe (scripts/nest-probe.mjs). The probe is
+// the only place the engine's promises get measured against true geometry, so it has to
+// walk the code path the worker walks — a probe that rebuilt its own pieces would be
+// measuring a second implementation.
+export type SheetBytes = { name: string; buf: ArrayBuffer };
+
+export type ParsedSheets = {
+  pieces: PieceDTO[];
+  detectedUnit: Exclude<Unit, 'auto'>;
+  warnings: string[];
+  // Files whose parse threw. The caller decides what «all of them» means: the worker
+  // turns it into an error rather than an empty piece list with notes.
+  failedFiles: number;
+};
+
+// Parse a batch of sheets into placement-ready pieces. Ids are minted across the batch
+// (1-based) because everything downstream — the marker blob, the cut-piece aliases, the
+// nest config — addresses a piece by that id.
+export function parseSheets(sheets: readonly SheetBytes[], opts: ParseOpts): ParsedSheets {
+  const warnings: string[] = [];
+  const pieces: PieceDTO[] = [];
+  let detectedUnit: Exclude<Unit, 'auto'> = 'mm';
+  let nextId = 1;
+  let failedFiles = 0;
+  let fileIndex = 0;
+
+  for (const sheet of sheets) {
+    try {
+      const { raws, unit, unitGuessed } = parseFiles(sheet.buf, opts, warnings);
+      detectedUnit = unit;
+      if (unitGuessed) warnings.push(`${sheet.name}: единицы не заданы в файле — принято ${unit}`);
+      for (const raw of raws) {
+        const bb = bounds(raw.poly);
+        // Normalize: local origin at bbox min corner — placement x/y then read naturally.
+        const poly = raw.poly.map((p) => ({ x: p.x - bb.minX, y: p.y - bb.minY }));
+        pieces.push({
+          id: nextId++,
+          // Two different questions, answered from the SOURCE rather than from each other:
+          // what to show (a placeholder when the file carried no block), and which block this
+          // came from (the alias key — '' only when there genuinely is none). Testing the label
+          // against 'модель' would misread a DXF whose block is literally named that.
+          name: raw.blockName == null ? `деталь ${nextId - 1}` : raw.name,
+          blockName: raw.blockName ?? '',
+          layer: raw.layer,
+          grain: raw.grain,
+          // Тем же сдвигом, что и контур: внутренняя геометрия обязана оставаться на своём
+          // месте ОТНОСИТЕЛЬНО детали, иначе на раскладке надсечки уедут от неё.
+          inner: raw.inner.map((p) => ({
+            layer: p.layer,
+            closed: p.closed,
+            pts: p.pts.map((q) => ({ x: q.x - bb.minX, y: q.y - bb.minY })),
+          })),
+          source: sheet.name,
+          fileIndex,
+          poly,
+          bboxW: bb.maxX - bb.minX,
+          bboxH: bb.maxY - bb.minY,
+          areaCm2: area(poly),
+          originX: bb.minX,
+          originY: bb.minY,
+        });
+      }
+    } catch (e) {
+      failedFiles++;
+      warnings.push(`${sheet.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    fileIndex++;
+  }
+
+  return { pieces, detectedUnit, warnings, failedFiles };
 }
