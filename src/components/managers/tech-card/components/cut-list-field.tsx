@@ -21,10 +21,13 @@ import { useStyleCutList } from './useStyleReadViews';
 // change, so this table and the editor cannot disagree.
 //
 // #42: this table is a CALCULATED projection, not an editable list — there is nothing to "add"
-// here. It is derived (GetStyleCutList) from the cut-pieces (patterns tab) × each colourway's
-// fabric mapping. This view just reflects the result.
+// here. It is derived (GetStyleCutList) from the cut-pieces × each colourway's fabric mapping.
+// This view just reflects the result.
+//
+// It renders on the PATTERNS tab now, directly under the «детали кроя» block it projects, so the
+// copy below points at that block rather than at a tab the reader is already on.
 const INTRO =
-  'Calculated, not editable: pieces × each colourway’s fabric mapping. Add / edit the pieces on the patterns tab — this table just shows the result. Столбец «ткань по колорвеям» пока НЕ заполняется: редактора карты тканей в админке нет, и рецепт колорвея пишет другую таблицу — так что пустая ячейка тут означает «негде задать», а не «забыли».';
+  'Calculated, not editable: pieces × each colourway’s fabric mapping. Add / edit the pieces in the «детали кроя» block above — this table just shows the result. Столбец «ткань по колорвеям» пока НЕ заполняется: редактора карты тканей в админке нет, и рецепт колорвея пишет другую таблицу — так что пустая ячейка тут означает «негде задать», а не «забыли».';
 
 const SHELL_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_FABRIC',
@@ -163,7 +166,8 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
     return (
       <CalloutBox tone='note'>
         <Text size='micro'>
-          {INTRO} No cut pieces yet — add one on the patterns tab and it will appear here.
+          {INTRO} No cut pieces yet — add one in the «детали кроя» block above and it will appear
+          here.
         </Text>
       </CalloutBox>
     );
@@ -218,8 +222,8 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
       {totals.garments === 0 && (
         <CalloutBox tone='warning'>
           <Text size='micro'>
-            заполните тираж по размерам (patterns → size run) — без него проекция кроя не считается,
-            поэтому счётчики показывают «—», а не ноль.
+            заполните тираж по размерам (блок «size range» вверху этой вкладки) — без него проекция
+            кроя не считается, поэтому счётчики показывают «—», а не ноль.
           </Text>
         </CalloutBox>
       )}

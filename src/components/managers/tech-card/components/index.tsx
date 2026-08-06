@@ -141,7 +141,13 @@ const TAB_GROUPS: { band: string; tabs: TabId[] }[] = [
   // the sheets above them by «↔ детали кроя». They used to sit on colorways, so the dialog that
   // makes them and the list they land in were on different tabs. What stays on colorways is the
   // per-colourway fabric map: which article each piece is cut from IN THAT COLOUR.
-  { band: 'develop', tabs: ['patterns', 'samples', 'bom', 'colorways', 'construction'] },
+  //
+  // BOM sits directly under patterns, ahead of samples: the выкройки panel files its DXF sheets BY
+  // BOM material line and names every rollgoods line with no sheet as a hole, so the tab that
+  // DEFINES those lines belongs next to the tab that reads them — two entries apart it read as an
+  // unrelated stop. Samples follow both, which is also the order the work happens in: you cannot
+  // cut a sample before there is a pattern and a fabric to cut it from.
+  { band: 'develop', tabs: ['patterns', 'bom', 'samples', 'colorways', 'construction'] },
   { band: 'spec', tabs: ['labels', 'costing', 'issues', 'signoff'] },
   // Production is its own band: it is what happens AFTER the spec is settled, and folding it into
   // `spec` would break the rail's lifecycle reading — the bands are the story of the card, in order.
@@ -1719,6 +1725,23 @@ export function TechCardForm({
                   ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
                   set of [data-field] anchors for revealField to walk to. */}
               <PiecesTab techCard={techCard} />
+              {/* The cut list is the projection of the block directly above it: it is derived
+                  entirely from the cut pieces, the size range and the per-colourway fabric map, and
+                  the first two now live on THIS tab. It used to close the construction tab, which
+                  put the output two tabs away from its inputs. Here the operator's flow finally
+                  runs in one place — upload DXF → match blocks to pieces → see the piece list →
+                  see what will actually be cut — instead of jumping tabs to read the answer.
+                  A peer Section, not nested inside the pieces block: a block never contains a
+                  block (DESIGN.md). Mount semantics are unchanged — this SectionStack, like the
+                  construction one, is display:none-hidden with its children MOUNTED, so
+                  useStyleCutList still fires once on a saved card and no fetch is gained or lost.
+                  Guarded by isEditMode && numId exactly as before: without a saved id the query is
+                  disabled and the table would have nothing to project. */}
+              {isEditMode && numId && (
+                <Section title='cut list (production projection)'>
+                  <CutListField techCardId={numId} />
+                </Section>
+              )}
               <Section title='раскладки (маркеры) — расход ткани по размерам'>
                 <MarkersSection
                   techCard={techCard}
@@ -1774,8 +1797,8 @@ export function TechCardForm({
               )}
             </SectionStack>
 
-            {/* CONSTRUCTION — how it's made: operations, then the cut list the cutting room works
-                from (a calculated projection, not an editable list). */}
+            {/* CONSTRUCTION — how it's made: the assembly map and the operations. The cut list used
+                to close this tab; it moved to PATTERNS, next to the cut pieces it is derived from. */}
             <SectionStack hidden={activeTab !== 'construction'}>
               {/* No PiecesTab branch here any more. It used to be mounted for an AUXILIARY card,
                   whose colourways tab (the pieces' old home) does not exist — two conditional mounts
@@ -1783,11 +1806,6 @@ export function TechCardForm({
                   DXF dialog land in the copy nobody was looking at. Cut pieces are on PATTERNS now,
                   a tab every card has, so the whole special case is gone. */}
               <ConstructionTab techCard={techCard} />
-              {isEditMode && numId && (
-                <Section title='cut list (production projection)'>
-                  <CutListField techCardId={numId} />
-                </Section>
-              )}
             </SectionStack>
 
             {/* LABELS & PACKAGING */}
