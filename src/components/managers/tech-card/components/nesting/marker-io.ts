@@ -198,17 +198,29 @@ export function buildMarkerLayout(args: {
 }): common_TechCardMarkerLayout {
   const { pieces, perSetQty, urlBySource, result, unit, config } = args;
   const used = new Set(result.placements.map((p) => p.pieceId));
-  // v2 = pieces carry block_name AND/OR piece_line_key — the version says "some identity is
-  // here", never which. A reader must therefore branch on the FIELD it needs, not on the
-  // version: markers written before the matching dialog exists carry block_name only, and
-  // resolving them through an empty piece_line_key would lose the name they did save.
-  // Claimed only when the blob really carries one of the two: a DXF with no per-piece blocks
-  // and no resolved cut-pieces is v1 in everything but the number.
-  const carriesIdentity = pieces.some(
-    (p) => used.has(p.id) && ((p.blockName ?? '') !== '' || (args.pieceLineKeyById?.get(p.id) ?? '') !== ''),
-  );
+  // v2 said "pieces carry block_name AND/OR piece_line_key" — never which — and was claimed only
+  // when the blob really carried one of the two. That conditional claim is gone with v3, and the
+  // reason it can go is the rule it always rested on: a READER BRANCHES ON THE FIELD IT NEEDS,
+  // NEVER ON THE NUMBER. Markers written before the matching dialog existed carry block_name only,
+  // and resolving them through an empty piece_line_key would lose the name they did save — so no
+  // reader was ever entitled to infer a field's presence from the version, and none does.
+  // v3 = the writer KNOWS THE FLIP POLICY: it derives its rotation set from the cloth's
+  // направление (lib/nesting/types.ts allowedRotations), so it never lays a piece upside down on
+  // one_way cloth, and its placements can express a mirror (`flipped`).
+  //
+  // The version is what makes the server's policy check possible AT ALL, and that is why it is
+  // claimed unconditionally here rather than only when a mirror is present. The server judges
+  // rotations only from v3 up — deliberately, because stored markers legitimately carry rotations
+  // outside today's policy (the manual editor saves the rotation a piece ACTUALLY has, so 90° at
+  // allow_cross_grain=false and 180° are both on file) and judging them by a rule that did not
+  // exist when they were taken would refuse measurements nobody can re-take without re-nesting.
+  // So a blob that does NOT claim v3 is exempt — and a client that kept writing v2 would leave the
+  // whole guard dead while the operator was told it was protected.
+  //
+  // The version ladder stays cumulative and the identity rule above is unchanged: a reader still
+  // branches on the FIELD it needs, never on the number.
   return {
-    schemaVersion: carriesIdentity ? 2 : 1,
+    schemaVersion: 3,
     params: {
       unit,
       tolCm: args.tol,
