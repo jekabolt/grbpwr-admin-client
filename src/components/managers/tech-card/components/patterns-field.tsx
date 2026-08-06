@@ -9,7 +9,6 @@ import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DxfQuickViewModal } from 'ui/components/dxf-quick-view-modal';
 import Input from 'ui/components/input';
 import { PatternUploadButton, PatternUploadModal } from 'ui/components/pattern-upload-button';
 import { Pill } from 'ui/components/pill';
@@ -32,6 +31,10 @@ import { TechCardFormData } from './schema';
 // nothing loads until someone actually opens a раскладка.
 const NestingModal = lazy(() =>
   import('./nesting/nesting-modal').then((m) => ({ default: m.NestingModal })),
+);
+// Просмотр DXF нашим листом — из того же ленивого чанка: воркер и парсер общие.
+const DxfSheetViewer = lazy(() =>
+  import('./nesting/dxf-sheet-viewer').then((m) => ({ default: m.DxfSheetViewer })),
 );
 // Same lazy neighbourhood: the matching dialog parses DXF through the same worker.
 const PieceMatchModal = lazy(() =>
@@ -523,12 +526,31 @@ export function PatternsField({
           материалы (основная, подклад, карманы) — это разные файлы. Раньше эти кнопки жили на
           плитке размера, и файл, залитый в слот M, был не виден из слота XS: там просто нет
           строки. Размер выбирается внутри диалога, по именам блоков. */}
-      {dxfByFabric.length > 0 && (
-        <div className='space-y-1 border border-borderColor p-2'>
+      <div className='space-y-1 border border-borderColor p-2'>
+        <div className='flex flex-wrap items-center justify-between gap-2'>
           <Text size='micro' variant='label' component='p'>
-            раскладка и детали кроя — по ткани: один DXF несёт все размеры, а размер выбирается
-            внутри
+            DXF — один файл на ТКАНЬ, со всеми размерами внутри. Размер выбирается при просмотре
+            и в раскладке, а размерный ряд карточки дополняется из файла сам.
           </Text>
+          {canEdit && uploadSlots.length > 0 && (
+            // Загрузка DXF не спрашивает размер: их в файле несколько. Строка выкройки на
+            // сервере по-прежнему несёт size_id, поэтому кладём её в ПЕРВЫЙ размер ряда —
+            // слот остаётся местом хранения, а не смыслом.
+            <PatternUploadButton
+              label='+ DXF на ткань'
+              fabricSlots={uploadSlots}
+              onUploaded={(p) =>
+                append({ sizeId: orderSizes(sizeIds)[0] ?? 0, lineKey: ulid(), ...p })
+              }
+              className='[&_button]:px-2 [&_button]:py-px [&_button]:text-micro [&_button]:tracking-label'
+            />
+          )}
+        </div>
+        {dxfByFabric.length === 0 && (
+          <Text size='nano' variant='label' component='p'>
+            DXF ещё не загружены
+          </Text>
+        )}
           {dxfByFabric.map((g) => {
             const bound = !!g.bomLineKey && liveFabricKeys.has(g.bomLineKey);
             return (
@@ -587,8 +609,7 @@ export function PatternsField({
               </div>
             );
           })}
-        </div>
-      )}
+      </div>
 
       <Text size='micro' variant='label'>
         {slots.length > 0 && `${covered} of ${slots.length} sizes have a pattern`}
@@ -638,13 +659,19 @@ export function PatternsField({
         </div>
       </ConfirmationModal>
 
-      {/* DXF quick view — WebGL render of the drawing, dynamically loaded. */}
-      <DxfQuickViewModal
-        url={viewing && isDxfUrl(viewing.url) ? (viewing.url ?? null) : null}
-        title={viewing ? labelOf(viewing) : undefined}
-        sizeBytes={viewing?.sizeBytes}
-        onClose={() => setViewing(null)}
-      />
+      {/* Просмотр DXF — НАШИМ листом, с выбором размера и слоёв. WebGL-вьювер рисовал файл
+          целиком, а градуированный чертёж это пять размеров сразу: каша, в которой ничего не
+          разобрать, и никакого способа посмотреть один размер. Здесь та же геометрия, по
+          которой считается раскладка, так что увиденное и посчитанное не расходятся. */}
+      {viewing && isDxfUrl(viewing.url) && (
+        <Suspense fallback={null}>
+          <DxfSheetViewer
+            files={[{ name: labelOf(viewing), url: viewing.url! }]}
+            title={labelOf(viewing)}
+            onClose={() => setViewing(null)}
+          />
+        </Suspense>
+      )}
 
       {/* Раскладка (nesting) — the whole feature is a lazy chunk; mounted only when open. */}
       {nesting && (

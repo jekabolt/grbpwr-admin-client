@@ -22,7 +22,7 @@
 // Writes nothing of its own — it stages `pieces` and `pieceDxfAliases` into the card form, and
 // the card's own Save persists both in one transaction (the store upserts pieces first, so a
 // piece created here resolves for the alias that references it).
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import type { PieceDTO } from 'lib/nesting/types';
 import { Button } from 'ui/components/button';
@@ -211,12 +211,23 @@ export function PieceMatchModal({
     () => missingSizesIn(allPieces, dictTokens, cardSizeIds, sizeById),
     [allPieces, dictTokens, cardSizeIds, sizeById],
   );
-  const addMissingSizes = () => {
-    // Через корень массива: size-ids-field держит на нём свой useFieldArray, а append оттуда
-    // его бы не уведомил — измерено на RHF 7.62 (см. комментарий у записи pieces).
-    const next = orderSizes([...cardSizeIds, ...missingSizes.map((m) => m.sizeId)]);
-    setValue('sizeIds', next, { shouldDirty: true });
-  };
+  // Размеры из файла заводятся в карточку САМИ, как только разбор закончился: файл — источник
+  // истины о том, какие размеры у стиля есть, а ручная кнопка означала бы, что деталь может
+  // остаться разорванной на строку в каждом непризнанном размере просто потому, что кнопку не
+  // нажали. Пишется в форму, то есть видно сразу и сохраняется вместе с карточкой.
+  //
+  // Через корень массива: size-ids-field держит на нём свой useFieldArray, а append оттуда его
+  // бы не уведомил — измерено на RHF 7.62 (см. комментарий у записи pieces).
+  const [addedSizes, setAddedSizes] = useState<string[]>([]);
+  const addedRef = useRef(false);
+  useEffect(() => {
+    if (parse.phase !== 'ready' || addedRef.current || missingSizes.length === 0) return;
+    addedRef.current = true;
+    setAddedSizes(missingSizes.map((m) => formatSizeName(m.name)));
+    setValue('sizeIds', orderSizes([...cardSizeIds, ...missingSizes.map((m) => m.sizeId)]), {
+      shouldDirty: true,
+    });
+  }, [parse.phase, missingSizes, cardSizeIds, orderSizes, setValue]);
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
   // meant, and the full-set write then rewrites them in that form.
@@ -842,18 +853,12 @@ export function PieceMatchModal({
                   непризнанный размер. Добавляет их ЧЕЛОВЕК: резать имена по всему словарю
                   нельзя («FP_L» — левая полочка, а «L» в словаре есть как размер), поэтому
                   машина только показывает находку. */}
-              {missingSizes.length > 0 && (
-                <CalloutBox tone='warning'>
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <Text size='micro' component='span'>
-                      в файле есть размеры, которых нет в карточке:{' '}
-                      {missingSizes.map((m) => formatSizeName(m.name)).join(', ')} — пока они не
-                      заведены, детали этих размеров считаются отдельными
-                    </Text>
-                    <Button type='button' variant='secondary' size='xs' onClick={addMissingSizes}>
-                      добавить в карточку ({missingSizes.length})
-                    </Button>
-                  </div>
+              {addedSizes.length > 0 && (
+                <CalloutBox tone='note'>
+                  <Text size='micro' component='p'>
+                    размерный ряд карточки дополнен из файла: {addedSizes.join(', ')} — уже
+                    в форме, сохранится вместе с карточкой
+                  </Text>
                 </CalloutBox>
               )}
               {/* Осталась группа «без размера», хотя все словарные размеры уже заведены — значит
