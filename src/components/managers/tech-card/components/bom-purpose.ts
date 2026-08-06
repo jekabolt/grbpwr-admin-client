@@ -221,6 +221,50 @@ export type FabricScope<L extends RollGoodsLine = RollGoodsLine> = {
   lines: L[];
 };
 
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// НАПРАВЛЕНИЕ ТКАНИ across a scope (Ф1). A назначение legitimately owns SEVERAL BOM lines, and
+// nothing validates that they agree about direction — so the раскладка has to decide what the
+// scope's direction IS.
+//
+// STRICTEST WINS: one napped article in the scope makes the whole scope napped. The alternative
+// (loosest, or first-line-wins) produces a marker that is legal for one of the articles and puts
+// the other one's pile against itself — and a two-tone garment is not something anyone catches
+// before it is cut. Mirrors the backend rule in internal/entity/fabric_scope.go.
+//
+// UNKNOWN wins over everything, and that is the point of the field being tri-state: NULL is the
+// ABSENCE of an answer, not a value. Reading it as «any» would silently permit the flip on every
+// line nobody has filled in, which is almost all of them today; reading it as one_way would make
+// every existing marker unreproducible. So it stays its own answer, and the SAVE path is where it
+// bites (the server refuses a marker whose cloth has no direction) rather than the search.
+
+export type ScopeDirection = 'unknown' | 'any' | 'one_way' | 'two_way';
+
+const DIRECTION_OF_ENUM: Record<string, ScopeDirection> = {
+  TECH_CARD_FABRIC_DIRECTION_ANY: 'any',
+  TECH_CARD_FABRIC_DIRECTION_ONE_WAY: 'one_way',
+  TECH_CARD_FABRIC_DIRECTION_TWO_WAY: 'two_way',
+};
+
+export function directionOf(enumValue?: string): ScopeDirection {
+  return DIRECTION_OF_ENUM[(enumValue ?? '').trim()] ?? 'unknown';
+}
+
+/**
+ * The direction a раскладка over these lines must obey. An EMPTY list is 'unknown' — an unbound
+ * sheet names no cloth, and claiming «any» for it would be inventing permission out of nothing.
+ */
+export function strictestDirection(lines: Array<{ fabricDirection?: string }>): ScopeDirection {
+  if (lines.length === 0) return 'unknown';
+  let out: ScopeDirection = 'any';
+  for (const l of lines) {
+    const d = directionOf(l.fabricDirection);
+    if (d === 'unknown') return 'unknown';
+    if (d === 'one_way') out = 'one_way';
+    else if (d === 'two_way' && out === 'any') out = 'two_way';
+  }
+  return out;
+}
+
 /** THE rule, pure half: no BOM needed, so the dedupe checks can run anywhere. */
 export function fabricScopeKey(purpose?: string, bomLineKey?: string): string {
   const p = (purpose ?? '').trim();

@@ -214,6 +214,10 @@ export async function probe(input: ProbeInput): Promise<ProbeOutput> {
     gapCm: NEST_DEFAULTS.gapCm,
     edgeMarginCm: NEST_DEFAULTS.edgeMarginCm,
     allowCrossGrain: NEST_DEFAULTS.allowCrossGrain,
+    // The probe measures GEOMETRY, so it runs the loosest policy on purpose: 'any' is the
+    // rotation set the engine has always searched, and pinning it here keeps a change in the
+    // direction default from silently re-baselining every recorded number in this file.
+    fabricDirection: 'any',
     grainLayer,
     seamAllowanceCm: NEST_DEFAULTS.seamAllowanceCm,
     timeBudgetMs: NEST_DEFAULTS.timeBudgetMs,

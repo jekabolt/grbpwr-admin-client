@@ -36,10 +36,12 @@ import {
 import { ulid } from 'utils/ulid';
 import {
   type FabricScope,
+  type ScopeDirection,
   bindingForScope,
   bomPurposeLabel,
   fabricScopes,
   scopeKeyOfBinding,
+  strictestDirection,
 } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
 import { markerColorways } from './nesting/colorway-widths';
@@ -105,6 +107,7 @@ type FabricLine = {
   wastagePercent: string;
   effectiveFabricWidthCm: string;
   selvedgeCm: string;
+  fabricDirection: string;
   order: number;
 };
 
@@ -244,6 +247,7 @@ export function PatternsField({
   const [nesting, setNesting] = useState<{
     sizeId: number;
     files: NestingFile[];
+    fabricDirection: ScopeDirection;
     // The concrete BOM LINE these sheets lay out on, which is a DIFFERENT question from what the
     // panel groups by. A раскладка measures cloth: its width and кромка come off the article the
     // colourway pins to ONE line, so a class («основной материал») does not determine it. Filled
@@ -270,6 +274,7 @@ export function PatternsField({
     selvedgeCm?: string;
     lineKey?: string;
     purpose?: string;
+    fabricDirection?: string;
     id?: number;
   }>;
   const fabricBomLines = useMemo(
@@ -290,6 +295,10 @@ export function PatternsField({
           // cutting width from these instead of the 140 cm default.
           effectiveFabricWidthCm: b.effectiveFabricWidthCm ?? '',
           selvedgeCm: b.selvedgeCm ?? '',
+          // Направление ткани (0073). Существует с прошлого года, потребителем был только
+          // дайджест MATERIALS — до движка оно не доезжало вовсе, и раскладка на ворсовой
+          // ткани спокойно переворачивала детали на 180°.
+          fabricDirection: b.fabricDirection ?? '',
           order: i,
         }))
         // Основная ткань первой, дальше подклад/бортовка/утеплитель — порядок ролей, а не
@@ -763,6 +772,11 @@ export function PatternsField({
                       sizeId: g.entries[0]?.row.sizeId ?? storageSizeId,
                       files: filesOf(g.entries),
                       bomLineKey: soleLine,
+                      // Направление СКОУПА, а не строки: назначение законно владеет несколькими
+                      // артикулами, и согласованность их направлений никто не валидирует.
+                      // Строгое побеждает — одна ворсовая в скоупе делает ворсовым весь скоуп,
+                      // иначе маркер, законный для одной ткани, кладёт вторую ворсом к себе же.
+                      fabricDirection: strictestDirection(g.scope.lines),
                     })
                   }
                 >
@@ -1015,6 +1029,7 @@ export function PatternsField({
             bomLines={fabricBomLines}
             colorways={colorwayOptions}
             lockedBomLineKey={nesting.bomLineKey || undefined}
+            fabricDirection={nesting.fabricDirection}
             canEdit={canEdit}
             savedSizeIds={savedSizeIds}
             season={season}

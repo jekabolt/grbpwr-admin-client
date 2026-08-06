@@ -62,6 +62,7 @@ const baseCfg = {
   gapCm: 0.5,
   edgeMarginCm: 0,
   allowCrossGrain: false,
+  fabricDirection: 'any',
   grainLayer: '',
   seamAllowanceCm: 0,
   rdpEpsCm: 0.05,
@@ -197,7 +198,29 @@ function verify(pieces, res, cfg, label) {
   if (res.placements.length > 0) verify(pieces, res, baseCfg, 'после поздней отмены');
 }
 
-// ── probe 5: real files ────────────────────────────────────────────────────────────────
+// ── probe 5: направление ткани доходит до движка ───────────────────────────────────────
+// Ф1's acceptance check. `fabric_direction` has existed on the BOM line since migration 0073
+// and reached nothing but a digest: the раскладка flipped pieces 180° on napped cloth and
+// nobody could see it, because a flipped contour looks identical on screen and only shows up
+// as a two-tone garment under the lights.
+{
+  console.log('\n── направление ткани: one_way запрещает 180° ──');
+  const pieces = mod.syntheticPieces(
+    Array.from({ length: 8 }, (_, i) => ({ w: 22 + (i % 3) * 9, h: 28 + (i % 4) * 7 })),
+  );
+  const job = { pieces: pieces.map((p) => ({ pieceId: p.id, quantity: 3 })), timeBudgetMs: 3_000 };
+  const oneWay = await mod.nest(pieces, { ...baseCfg, ...job, fabricDirection: 'one_way' }, () => false, () => {});
+  const twoWay = await mod.nest(pieces, { ...baseCfg, ...job, fabricDirection: 'two_way' }, () => false, () => {});
+  const flipped = (r) => r.placements.filter((p) => p.rot === 180).length;
+  check(flipped(oneWay) === 0, 'на ворсовой ткани ни одного размещения на 180°', `${flipped(oneWay)} из ${oneWay.placements.length}`);
+  check(oneWay.placedCount === oneWay.totalCount, 'при этом всё размещено', `${oneWay.placedCount}/${oneWay.totalCount}`);
+  // two_way is the control: without it a zero above could mean «the search never picked 180»
+  // rather than «the search was not allowed to», and the probe would pass on a broken rule.
+  check(flipped(twoWay) > 0, 'на two_way переворот действительно используется (контроль)', `${flipped(twoWay)} из ${twoWay.placements.length}`);
+  verify(pieces, oneWay, baseCfg, 'one_way');
+}
+
+// ── probe 6: real files ────────────────────────────────────────────────────────────────
 for (const arg of args) {
   const path = resolve(process.cwd(), arg.replace(/^~/, process.env.HOME ?? '~'));
   console.log(`\n── ${path} ──`);

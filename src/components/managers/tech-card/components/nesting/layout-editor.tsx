@@ -5,7 +5,8 @@
 // раскладки вместе с остальной геометрией.
 import { useMemo, useRef, useState } from 'react';
 import Text from 'ui/components/text';
-import type { NestResult, Placement, PieceDTO, RotationDeg } from 'lib/nesting/types';
+import type { FabricDirection, NestResult, Placement, PieceDTO, RotationDeg } from 'lib/nesting/types';
+import { allowedRotations } from 'lib/nesting/types';
 import { type LayoutLabel, planLayoutLabels } from 'lib/nesting/render/label-fit';
 import { rotatedBounds } from 'lib/nesting/geom/clearance';
 
@@ -25,6 +26,7 @@ export function LayoutEditor({
   targetCm,
   marginCm,
   allowCrossGrain,
+  fabricDirection,
   editable,
   violating,
   onChange,
@@ -36,6 +38,11 @@ export function LayoutEditor({
   targetCm?: number;
   marginCm: number;
   allowCrossGrain: boolean;
+  // Направление ткани раскладки. Легаси-маркер, снятый до Ф1, приходит как 'unknown' — и это
+  // правильное поведение для НЕГО: политика переворота у него не записана, и запрещать её
+  // задним числом значило бы перечеркнуть каждый сохранённый маркер. Текущий поворот детали
+  // всё равно остаётся в цикле ниже, поэтому 180° старого маркера не пропадает.
+  fabricDirection: FabricDirection;
   editable: boolean;
   // Placement indices that violate clearances — painted red.
   violating: ReadonlySet<number>;
@@ -74,7 +81,11 @@ export function LayoutEditor({
   const [drag, setDrag] = useState<{ index: number; x: number; y: number } | null>(null);
   const dragStart = useRef<{ px: number; py: number; x: number; y: number } | null>(null);
 
-  const rots: RotationDeg[] = allowCrossGrain ? [0, 90, 180, 270] : [0, 180];
+  // ТА ЖЕ функция, что применяет движок. Направление ткани решает переворот на 180°, и решать
+  // его здесь отдельным выражением значило бы завести вторую копию политики, которая разойдётся
+  // с первой молча: рука предложила бы поворот, которого поиск не рассматривал, и маркер на
+  // ворсовой ткани уехал бы на резак с деталями против ворса.
+  const rots: RotationDeg[] = allowedRotations(fabricDirection, allowCrossGrain);
   const usableWidth = Math.max(0, widthCm - 2 * marginCm);
 
   // Поворот предлагается только в тех положениях, где деталь помещается по ширине —

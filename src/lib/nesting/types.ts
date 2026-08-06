@@ -7,9 +7,33 @@ export type Pt = { x: number; y: number };
 
 export type Unit = 'auto' | 'mm' | 'cm' | 'in';
 
-// Rotations are whole degrees CCW. Grain runs along the strip (+X), so 0/180 are always
-// allowed and 90/270 only when the operator explicitly permits cross-grain.
+// Rotations are whole degrees CCW. Grain runs along the strip (+X), so 90/270 are cross-grain
+// and 0/180 differ only in which way the piece FACES — which matters on napped cloth.
 export type RotationDeg = 0 | 90 | 180 | 270;
+
+// НАПРАВЛЕНИЕ ТКАНИ, as the BOM line records it (migration 0073). 'unknown' is the state of
+// almost every existing line — it is the ABSENCE of an answer, not a value, and it must never
+// be silently read as «any»: on napped cloth a 180° flip puts one piece's pile against its
+// neighbour's and the garment comes out two-tone under the lights.
+export type FabricDirection = 'unknown' | 'any' | 'one_way' | 'two_way';
+
+// The rotations a piece may wear. THE rule, and it lives in types.ts (the only module
+// main-thread UI may import) for one reason: it has to be applied on BOTH sides of the worker
+// boundary — the engine when it searches, and the manual editor when it offers «повернуть».
+// A transform applied on only one side of that boundary was already a production bug once
+// (beb34ca1: the grain rotation lived on the main thread and never reached the worker, so the
+// screen showed rotated contours with placements computed for unrotated ones).
+//
+// two_way and any both permit the flip: «направленная ⇒ переворот запрещён» is the binary
+// reading, and it is wrong — two_way is exactly the cloth whose nap reads the same both ways.
+// 90/270 stay governed by allowCrossGrain alone, as they always were.
+export function allowedRotations(
+  direction: FabricDirection,
+  allowCrossGrain: boolean,
+): RotationDeg[] {
+  const base: RotationDeg[] = allowCrossGrain ? [0, 90, 180, 270] : [0, 180];
+  return direction === 'one_way' ? base.filter((r) => r !== 180) : base;
+}
 
 export type ParseOpts = {
   // Manual override; 'auto' reads $INSUNITS and falls back to mm (the AAMA norm).
@@ -83,6 +107,15 @@ export type NestConfig = {
   gapCm: number;
   edgeMarginCm: number;
   allowCrossGrain: boolean; // adds 90/270 to the rotation set
+  // НАПРАВЛЕНИЕ of the cloth this marker is laid on, resolved from the BOM line(s) the sheets
+  // are bound to — STRICTEST WINS across a назначение that owns several lines, because one
+  // napped article in the scope makes the whole scope napped.
+  //
+  // Travels as a value, and the rotation set is derived from it INSIDE the worker
+  // (allowedRotations), for the same reason the grain layer and the seam allowance travel as a
+  // name and a number: geometry does not cross this boundary, and a policy applied only on the
+  // main thread does not reach the search.
+  fabricDirection: FabricDirection;
   // Слой DXF с долевой. Воркер разворачивает по нему детали ПЕРЕД укладкой: движок считает, что
   // деталь нарисована долевой вдоль полосы, а в реальных файлах это не так. Едет именно имя
   // слоя, а не готовая геометрия — геометрия через эту границу не ходит вовсе, и единственный

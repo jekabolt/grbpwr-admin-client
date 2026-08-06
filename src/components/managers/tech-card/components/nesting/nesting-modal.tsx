@@ -9,6 +9,7 @@ import { adminService } from 'api/api';
 import type { common_TechCardMarker } from 'api/proto-http/admin';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
+import { extractFieldViolations } from 'utils/field-errors';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -20,7 +21,14 @@ import Selector from 'ui/components/selector';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
-import type { NestConfig, NestResult, Placement, PieceDTO, Unit } from 'lib/nesting/types';
+import type {
+  FabricDirection,
+  NestConfig,
+  NestResult,
+  Placement,
+  PieceDTO,
+  Unit,
+} from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { checkLayout, measureLayout, type Violation } from 'lib/nesting/geom/clearance';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
@@ -88,6 +96,7 @@ export function NestingModal({
   bomLines,
   colorways,
   lockedBomLineKey,
+  fabricDirection = 'unknown',
   view,
   canEdit = true,
   savedSizeIds,
@@ -114,6 +123,12 @@ export function NestingModal({
   // The fabric these DXFs are bound to (0260). When set, the раскладка IS that cloth: the slot
   // is fixed, the width comes from it, and the save dialog shows the slot rather than asking.
   lockedBomLineKey?: string;
+  // НАПРАВЛЕНИЕ ткани этой раскладки, уже сведённое по скоупу (строгое побеждает — см.
+  // bom-purpose.ts). Решает ровно один вопрос: можно ли переворачивать деталь на 180°.
+  // 'unknown' — не «можно», а «никто не ответил»: поиск в этом случае работает как раньше,
+  // а сохранение НОРМЫ сервер не примет, потому что норма без ответа про ворс — это норма,
+  // которую нельзя воспроизвести на ткани.
+  fabricDirection?: FabricDirection;
   // A stored marker to DISPLAY: no worker, no DXF fetch — geometry comes from the blob.
   // Editing a stored layout is Ф5; this mode is view + export.
   view?: common_TechCardMarker | null;
@@ -447,6 +462,7 @@ export function NestingModal({
     if (parse.phase !== 'ready') return;
     setManual(null);
     setRunConfirm(false);
+    setSaveError(null);
     const config: NestConfig = {
       pieces: pieces
         .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
@@ -459,6 +475,10 @@ export function NestingModal({
       gapCm,
       edgeMarginCm: marginCm,
       allowCrossGrain: crossGrain,
+      // Едет ЗНАЧЕНИЕ, а набор поворотов выводит воркер той же чистой функцией
+      // (allowedRotations) — политика, применённая только на главном потоке, до поиска не
+      // доезжает, и это уже было прод-багом с разворотом по долевой.
+      fabricDirection,
       // Едет ИМЯ СЛОЯ, а не повёрнутая геометрия: через эту границу геометрия не ходит вовсе,
       // и воркер разворачивает свою копию той же чистой функцией на том же входе. Так экран и
       // движок гарантированно смотрят на одни детали.
@@ -761,6 +781,21 @@ export function NestingModal({
     !!techCardId &&
     !!resolvedSizeId;
 
+  // Отказ сохранения, разобранный по полям (Ф1.8). Сервер отвергает норму, у ткани которой не
+  // задано направление, и делает это ПОЛЕВЫМ нарушением с описанием, называющим строку BOM. Тост
+  // такой текст съедает: он длинный, он исчезает, и в нём сказано, что чинить, — а чинится это на
+  // другой вкладке. Поэтому отказ оседает на панели, рядом с кнопкой, пока его не устранят.
+  //
+  // Диплинка на вкладку BOM тут быть не может: маркер живёт в модалке НАД формой карточки, и
+  // увести оператора на другую вкладку значит закрыть модалку вместе с посчитанной раскладкой.
+  // Поэтому — точный адрес словами: какая строка и какое поле.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const failMessage = (e: unknown, fallback: string): string => {
+    const vs = extractFieldViolations(e);
+    if (vs.length > 0) return vs.map((v) => v.description).join('; ');
+    return e instanceof Error && e.message ? e.message : fallback;
+  };
+
   async function saveMarker() {
     if (
       !canSave ||
@@ -857,10 +892,9 @@ export function NestingModal({
       // server cannot resolve on the next save in the same session.
       setSlotKey(lockedSlot?.lineKey || (fabricLines.length === 1 ? fabricLines[0].lineKey : ''));
     } catch (e) {
-      showMessage(
-        e instanceof Error && e.message ? e.message : 'не удалось сохранить маркер',
-        'error',
-      );
+      const msg = failMessage(e, 'не удалось сохранить маркер');
+      setSaveError(msg);
+      showMessage(msg, 'error');
     } finally {
       setSaving(false);
     }
@@ -928,10 +962,9 @@ export function NestingModal({
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       onClose();
     } catch (e) {
-      showMessage(
-        e instanceof Error && e.message ? e.message : 'не удалось сохранить правки',
-        'error',
-      );
+      const msg = failMessage(e, 'не удалось сохранить правки');
+      setSaveError(msg);
+      showMessage(msg, 'error');
     } finally {
       setSaving(false);
     }
@@ -1174,6 +1207,27 @@ export function NestingModal({
               контур с дефектом у {seam.hulled.length} деталей — припуск посчитан по выпуклой
               оболочке (с запасом): {seam.hulled.slice(0, 6).join(', ')}
               {seam.hulled.length > 6 ? '…' : ''}
+            </Text>
+          )}
+
+          {/* НАПРАВЛЕНИЕ ТКАНИ. Не настройка раскладки, а факт про полотно — поэтому показывается,
+              а не спрашивается: правится оно на вкладке BOM, у строки материала. Единственное, что
+              оно решает здесь, — переворот детали на 180°: на ворсовой ткани перевёрнутая деталь
+              ложится ворсом против соседки, и готовое изделие выходит двухцветным под лампами.
+              Заметить это на раскладке нечем — контур перевёрнутой детали выглядит ровно так же. */}
+          {!viewData && (
+            <Text size='nano' variant='label' component='p'>
+              направление ткани:{' '}
+              {fabricDirection === 'one_way'
+                ? 'ворсовая (one-way) — переворот на 180° запрещён'
+                : fabricDirection === 'two_way'
+                  ? 'two-way — переворот разрешён'
+                  : fabricDirection === 'any'
+                    ? 'без ворса — переворот разрешён'
+                    : 'НЕ ЗАДАНО'}
+              {fabricDirection === 'unknown'
+                ? ' — раскладка считается с переворотом, но сохранить её как норму нельзя, пока направление не проставлено у строки ткани на вкладке BOM'
+                : ''}
             </Text>
           )}
 
@@ -1502,6 +1556,10 @@ export function NestingModal({
               targetCm={displayTarget}
               marginCm={displayMargin}
               allowCrossGrain={displayCross}
+              // В режиме просмотра — 'unknown': у сохранённого маркера политика переворота не
+              // записана (её колонка появляется только в Ф3), и запрещать 180° задним числом
+              // значило бы перечеркнуть каждый снятый до Ф1 маркер.
+              fabricDirection={viewData ? 'unknown' : fabricDirection}
               editable={editingActive}
               violating={violatingIdx}
               onChange={(next) => setManual(next)}
@@ -1522,6 +1580,11 @@ export function NestingModal({
               остановлено до первой готовой раскладки — показывать нечего. Прежде тут появлялась
               раскладка, досчитанная уже ПОСЛЕ «стопа»: её никто не ждал, и длина у неё была
               настоящая, поэтому отличить её от результата было нельзя.
+            </CalloutBox>
+          )}
+          {saveError && (
+            <CalloutBox tone='error'>
+              сохранить не удалось: {saveError}
             </CalloutBox>
           )}
           {unplaced.length > 0 && (

@@ -9,6 +9,7 @@ import type {
   RotationDeg,
   UnplacedPiece,
 } from '../types';
+import { allowedRotations } from '../types';
 import { SCALE, rdpSimplify, sanitizeLoop } from '../geom/clipper';
 import { bounds, ensureCCW, rotatePoly } from '../geom/polygon';
 import { convexParts } from '../geom/triangulate';
@@ -91,7 +92,13 @@ export async function nest(
 ): Promise<NestResult> {
   const started = Date.now();
   const warnings: string[] = [];
-  const rotations: readonly RotationDeg[] = config.allowCrossGrain ? [0, 90, 180, 270] : [0, 180];
+  // Derived HERE, from the direction the config carries — not handed in as a rotation list.
+  // The main thread computes the same set from the same rule for the manual editor; deriving
+  // it on both sides from one function is what keeps them from drifting.
+  const rotations: readonly RotationDeg[] = allowedRotations(
+    config.fabricDirection,
+    config.allowCrossGrain,
+  );
 
   const byId = new Map(allPieces.map((p) => [p.id, p]));
   const genesBase: Gene[] = [];
