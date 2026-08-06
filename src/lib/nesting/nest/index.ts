@@ -75,6 +75,17 @@ const PREPASS_SHARE = 0.45;
 // under-estimating the machine costs a little quality, while over-estimating costs the
 // generation count the whole change exists to buy.
 const HULLS_PER_MS = 12;
+// Two properties of this scheme worth knowing before touching it:
+//
+//   • The constant is a ONE-FILE, ONE-MACHINE fit. Measured here it is ~21 % pessimistic in the
+//     sane regime (15.2 hulls/ms actual) and ~2.4× optimistic at the finest rung, where the union
+//     tree is over clipper's cliff — i.e. it errs toward over-spending exactly where over-spending
+//     costs the whole budget. That asymmetry is why PREPASS_SHARE is under a half and not, say, 0.8.
+//   • Crossing a rung RESEEDS the search: effectiveEps is part of the seed string below, so adding
+//     one piece or nudging the budget can replace the marker outright rather than perturb it. That
+//     is a consequence of keeping the choice a pure function of the input — the alternative (a
+//     stable eps chosen by the clock) buys continuity by giving up reproducibility, which is the
+//     one property the whole engine is built around.
 
 // Convex-part decomposition of one contour at a given simplification. Sanitize AFTER
 // simplification: RDP can self-intersect a thin neck, and feeding that to the decomposer

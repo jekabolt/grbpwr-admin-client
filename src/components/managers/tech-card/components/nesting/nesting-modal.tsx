@@ -374,6 +374,11 @@ export function NestingModal({
   // piece the order needs. Saving is already impossible (canSave требует placed === total),
   // but until Ф0 the only sign of it was the «размещено» counter reading 44/45, which reads
   // like an accounting detail rather than «эта деталь никуда не легла».
+  // Rare BY DESIGN, and that is not a reason to drop it. The piece list disables anything wider
+  // than the fabric before the run and says «шире полотна» on the row, so the operator learns it in
+  // a glance instead of after a 20-second search — which is the better place to say it. What
+  // survives here is the engine's own guarantee: whatever reaches the placer and does not land is
+  // named. The two are not redundant, they are the pre-flight and the black box.
   const unplaced = !running ? (displayResult?.unplaced ?? []) : [];
   const unplacedText = useMemo(() => {
     if (unplaced.length === 0) return '';
