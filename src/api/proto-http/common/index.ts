@@ -2067,6 +2067,28 @@ export type TechCardBomSection =
   | "TECH_CARD_BOM_SECTION_TRIM"
   | "TECH_CARD_BOM_SECTION_DECORATION"
   | "TECH_CARD_BOM_SECTION_OTHER";
+// TechCardBomPurpose is НАЗНАЧЕНИЕ — what the garment uses a roll-goods line FOR, on its own axis
+// beside `section` (0265). Several lines legitimately share one purpose; that IS the point, the
+// field exists to name a SUBSET of fabrics ("the lining ones", "the contrast ones").
+// It is not a section value. `section` drives the wastage gross-up, the composition derive and what
+// a раскладка may bind to, and a pocket-bag / contrast / mesh fabric is genuinely fabric on all
+// three counts — it differs only in role. It is not free text either: the field exists to GROUP, and
+// a free-text role stops grouping the moment two operators spell it differently. Hence a closed
+// eight-value list, with `other` carrying its meaning in the SEPARATE purpose_note field so a note
+// can never become a shadow purpose on one of the seven real values.
+// UNSET (0) is a first-class state meaning "not sorted yet", not a default. Every line that existed
+// before 0265 is UNSET on purpose: section='fabric' is exactly where pocket-bag, contrast and mesh
+// hide today, so a backfill would have labelled them MAIN confidently and wrongly.
+export type TechCardBomPurpose =
+  | "TECH_CARD_BOM_PURPOSE_UNSET"
+  | "TECH_CARD_BOM_PURPOSE_MAIN"
+  | "TECH_CARD_BOM_PURPOSE_LINING"
+  | "TECH_CARD_BOM_PURPOSE_POCKETING"
+  | "TECH_CARD_BOM_PURPOSE_INTERFACING"
+  | "TECH_CARD_BOM_PURPOSE_INSULATION"
+  | "TECH_CARD_BOM_PURPOSE_CONTRAST"
+  | "TECH_CARD_BOM_PURPOSE_MESH"
+  | "TECH_CARD_BOM_PURPOSE_OTHER";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -2539,6 +2561,19 @@ export type TechCardBomItem = {
   // line is unlinked and carries no width of its own.
   effectiveFabricWidthCm: googletype_Decimal | undefined;
   selvedgeCm: googletype_Decimal | undefined;
+  // НАЗНАЧЕНИЕ (0265) — see TechCardBomPurpose. Accepted only on a ROLL-GOODS line (fabric, lining,
+  // interlining, insulation): those are the four families cloth is measured and laid out by, and a
+  // purpose on a thread or a button would be data no screen ever shows and the later pattern-binding
+  // work would have to un-pick. UNSET is legal everywhere and is what an unsorted line carries.
+  purpose: TechCardBomPurpose | undefined;
+  // Free-text explanation, accepted ONLY when purpose is OTHER (rejected otherwise, and the DB
+  // agrees via chk_bom_item_purpose_note). Optional even then: "другое" without an explanation is a
+  // real answer, and demanding one just farms junk text.
+  purposeNote: string | undefined;
+  // Семпловая: this line is the yardage the SAMPLE is sewn from. A flag, not a ninth purpose — a
+  // sample is assembled from a sample MAIN plus a sample LINING, and as a purpose value both would
+  // collapse into one bucket and lose the role that makes them useful.
+  isSample: boolean | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).

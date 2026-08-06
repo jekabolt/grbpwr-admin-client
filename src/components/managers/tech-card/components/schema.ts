@@ -4,6 +4,7 @@ import {
   common_TechCard,
   common_TechCardApprovalState,
   common_TechCardAuxSubtype,
+  common_TechCardBomPurpose,
   common_TechCardBomSection,
   common_TechCardConstruction,
   common_TechCardConstructionZone,
@@ -26,6 +27,7 @@ import {
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
+import { UNSET_PURPOSE, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import { z } from 'zod';
 
@@ -263,6 +265,14 @@ const pieceSchema = z
 const bomItemSchema = z
   .object({
     section: z.string().optional().default(DEFAULT_BOM_SECTION),
+    // НАЗНАЧЕНИЕ (0265) — a second axis beside `section`, on roll goods only. UNSET is a real state
+    // ("not sorted yet"), NOT a validation failure: every line saved before the field existed
+    // carries it deliberately, so requiring a purpose here would make every existing card unsavable
+    // until it had been sorted by hand. The ADD modal is where a purpose is demanded, because that
+    // is the one moment the operator has the answer in front of them.
+    purpose: z.string().optional().default(UNSET_PURPOSE),
+    purposeNote: z.string().optional().default(''),
+    isSample: z.boolean().optional().default(false),
     name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
     supplier: z.string().optional().default(''),
     supplierRef: z.string().optional().default(''),
@@ -309,6 +319,25 @@ const bomItemSchema = z
         code: z.ZodIssueCode.custom,
         message: 'укажите роль (название) — у строки без артикула имени взять неоткуда',
         path: ['name'],
+      });
+    }
+    // Server parity (parseTechCardBomItems + upsertTechCardBom). Neither of these can be reached by
+    // clicking around — the editor hides the purpose control off roll goods and clears the note off
+    // OTHER — so they exist to turn a state that slipped through into a named field error on the
+    // tile, instead of a 400 naming a line_key the operator has never seen.
+    const purpose = item.purpose && item.purpose !== UNSET_PURPOSE ? item.purpose : '';
+    if (purpose && !isRollGoodsSection(item.section)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'назначение есть только у ткани (fabric / lining / interlining / insulation)',
+        path: ['purpose'],
+      });
+    }
+    if (item.purposeNote?.trim() && !isOtherPurpose(purpose)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'примечание можно писать только к назначению «другое»',
+        path: ['purposeNote'],
       });
     }
   });
@@ -698,6 +727,11 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
   return {
     section:
       b.section && b.section !== 'TECH_CARD_BOM_SECTION_UNKNOWN' ? b.section : DEFAULT_BOM_SECTION,
+    // No fallback and no inference: an unset purpose reads back unset. Anything else here would be
+    // a guess, and a guess is what 0265 deliberately refuses to make.
+    purpose: b.purpose || UNSET_PURPOSE,
+    purposeNote: b.purposeNote || '',
+    isSample: !!b.isSample,
     name: b.name || '',
     supplier: b.supplier || '',
     supplierRef: b.supplierRef || '',
@@ -1239,6 +1273,12 @@ export function mapFormToTechCardInsert(
     },
     bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
+      purpose: (b.purpose || UNSET_PURPOSE) as common_TechCardBomPurpose,
+      // Sent only where it is legal, so a note left behind by switching «другое» → «карманка» cannot
+      // ride out and be refused by chk_bom_item_purpose_note. Dropping it is safe in a way clearing
+      // the PURPOSE would not be: the note only ever explains a purpose that is no longer there.
+      purposeNote: isOtherPurpose(b.purpose) ? b.purposeNote?.trim() ?? '' : '',
+      isSample: !!b.isSample,
       name: b.name?.trim() || '',
       supplier: b.supplier?.trim() || '',
       supplierRef: b.supplierRef?.trim() || '',
