@@ -126,9 +126,15 @@ async function parsePiecesOnce(files: NestingFile[]) {
 type SizeAudit =
   | { phase: 'loading' }
   | { phase: 'error'; message: string }
+  // Хранится РОВНО ТО, ЧТО СКАЗАЛИ ФАЙЛЫ, — набор найденных размерных токенов. Нехватка выводится
+  // при отрисовке, потому что она зависит ещё и от размерного ряда карточки, а ряд правится на
+  // этой же вкладке. Сохранённый ответ «все размеры на месте» пережил бы добавление XXL и
+  // продолжал бы утверждать своё — то есть ровно ту ложь, ради устранения которой заменён счётчик
+  // покрытия. Так несостоятельное состояние просто непредставимо.
+  //
   // graded=false — в именах блоков размеров нет вовсе (не градуированный файл). Это НЕ «нет всех
-  // размеров»: сказать так значило бы повторить ошибку счётчика, который считал не то.
-  | { phase: 'ready'; graded: boolean; missing: number[] };
+  // размеров»: сказать так значило бы повторить ошибку счётчика с другой стороны.
+  | { phase: 'ready'; found: Set<string> };
 
 // Выкройки карточки (§2) — DXF, разложенные ПО МАТЕРИАЛАМ.
 //
@@ -351,16 +357,35 @@ export function PatternsField({
     [fabricBomLines],
   );
 
+  // Размеры карточки, которых в разобранных файлах не оказалось. Считается КАЖДЫЙ РАЗ, а не
+  // хранится: ряд правится на этой же вкладке, прямо над панелью.
+  const missingIn = (a: SizeAudit | undefined): number[] =>
+    a?.phase === 'ready' && a.found.size > 0
+      ? sizeIds.filter((id) => !sizeTokensOf(sizeById.get(id)).some((t) => a.found.has(t)))
+      : [];
+
   // ---- дыры, которые панель обязана назвать вместо счётчика покрытия ---------------------
-  const materialsWithoutDxf = materialGroups.filter((g) => g.entries.length === 0);
+  // Материал без DXF — дыра ТОЛЬКО у основной ткани. Подкладку, бортовку и утеплитель градалка
+  // сплошь и рядом чертит внутри файла основной ткани, а строка выкройки несёт ровно один
+  // bomLineKey, то есть один файл двум материалам служить не может. Красный флаг на подкладке был
+  // бы неопровергаемым: снять его можно только залив тот же файл вторым объектом, что удваивает
+  // скачивание и разводит скоуп алиасов. Заменять счётчик, который занижал, на индикатор, который
+  // завышает, — не улучшение.
+  const isMainFabric = (g: { section: string }) => g.section === 'TECH_CARD_BOM_SECTION_FABRIC';
+  const materialsWithoutDxf = materialGroups.filter(
+    (g) => g.entries.length === 0 && isMainFabric(g),
+  );
+  const rollGoodsWithoutOwnDxf = materialGroups.filter(
+    (g) => g.entries.length === 0 && !isMainFabric(g),
+  );
   // Строки, чей size_id вне ряда карточки. Размер — артефакт хранения, но сервер всё равно
   // сверяет его с размерным рядом и отвергает такую строку, роняя ВЕСЬ сейв карточки.
   const outOfRange = entries.filter((e) => !inRange.has(e.row.sizeId ?? 0));
   const missingSizeNotes = materialGroups.flatMap((g) => {
     if (g.entries.length === 0) return [];
-    const a = audits[sigOf(g.entries)];
-    if (a?.phase !== 'ready' || a.missing.length === 0) return [];
-    return [`${slotLabel(g)} — нет ${a.missing.map(nameOf).join(', ')}`];
+    const missing = missingIn(audits[sigOf(g.entries)]);
+    if (missing.length === 0) return [];
+    return [`${slotLabel(g)} — нет ${missing.map(nameOf).join(', ')}`];
   });
 
   const canUpload = canEdit && uploadSlots.length > 0 && sizeIds.length > 0;
@@ -385,11 +410,7 @@ export function PatternsField({
       // Токены, которые в ЭТИХ файлах оказались размерами — то же правило, по которому размер
       // отрезается от имени детали везде: хвост из словаря, меняющийся у своей основы.
       const found = splitPiecesBySize(pieces, dictTokens).sizeTokenSet;
-      const missing =
-        found.size === 0
-          ? []
-          : sizeIds.filter((id) => !sizeTokensOf(sizeById.get(id)).some((t) => found.has(t)));
-      setAudits((a) => ({ ...a, [sig]: { phase: 'ready', graded: found.size > 0, missing } }));
+      setAudits((a) => ({ ...a, [sig]: { phase: 'ready', found } }));
     } catch (e) {
       setAudits((a) => ({
         ...a,
@@ -577,26 +598,34 @@ export function PatternsField({
       );
     }
     if (a.phase === 'error') {
+      // Кнопка возвращается: одного сорвавшегося скачивания достаточно, чтобы проверка исчезла
+      // навсегда для этого набора файлов, а причина обычно разовая.
       return (
-        <Text size='nano' component='span' className='text-error'>
-          проверка не удалась: {a.message}
-        </Text>
+        <span className='inline-flex items-center gap-1.5'>
+          <Text size='nano' component='span' className='text-error'>
+            проверка не удалась: {a.message}
+          </Text>
+          <Button type='button' variant='secondary' size='xs' onClick={() => runAudit(list)}>
+            ещё раз
+          </Button>
+        </span>
       );
     }
-    if (!a.graded) {
+    if (a.found.size === 0) {
       return (
         <Text size='nano' variant='label' component='span'>
           в именах блоков размеров нет — файл не градуирован
         </Text>
       );
     }
-    return a.missing.length === 0 ? (
+    const missing = missingIn(a);
+    return missing.length === 0 ? (
       <Text size='nano' variant='label' component='span'>
         ✓ все размеры карточки есть в файлах
       </Text>
     ) : (
       <Text size='nano' component='span' className='text-error'>
-        нет в файлах: {a.missing.map(nameOf).join(', ')}
+        нет в файлах: {missing.map(nameOf).join(', ')}
       </Text>
     );
   }
@@ -688,9 +717,20 @@ export function PatternsField({
           g.entries.map(renderRow)
         ) : (
           <div className='space-y-0.5'>
-            <Placeholder dashed tone='error' label='нет dxf' className='py-3' />
-            <Text size='nano' component='p' className='text-error'>
-              раскроить этот материал нечем
+            <Placeholder
+              dashed
+              tone={isMainFabric(g) ? 'error' : undefined}
+              label='нет dxf'
+              className='py-3'
+            />
+            <Text
+              size='nano'
+              component='p'
+              className={isMainFabric(g) ? 'text-error' : 'text-labelColor'}
+            >
+              {isMainFabric(g)
+                ? 'раскроить этот материал нечем'
+                : 'своего DXF нет — возможно, детали лежат в файле основной ткани'}
               {canUpload ? ' — перетащите DXF сюда или нажмите «+ DXF»' : ''}
             </Text>
           </div>
@@ -711,12 +751,12 @@ export function PatternsField({
   return (
     <div className='space-y-2'>
       <Text size='micro' variant='label'>
-        выкройки — DXF, по МАТЕРИАЛАМ. Один чертёж несёт весь размерный ряд: размер записан в
-        именах блоков, выбирается при просмотре и в раскладке, а недостающие размеры карточка
-        добирает из файла сама. Поэтому файл привязывается к материалу — основная ткань,
-        подкладка, бортовка, утеплитель, — и на один материал файлов может быть несколько
-        (основная ткань и карманка это две разные строки BOM). Колорвей на файл не влияет —
-        лекала общие, — но артикул и его ширину каждый колорвей подставляет свои.
+        выкройки — DXF, по МАТЕРИАЛАМ. Один чертёж несёт весь размерный ряд: размер записан в именах
+        блоков, выбирается при просмотре и в раскладке, а недостающие размеры карточка добирает из
+        файла сама. Поэтому файл привязывается к материалу — основная ткань, подкладка, бортовка,
+        утеплитель, — и на один материал файлов может быть несколько (основная ткань и карманка это
+        две разные строки BOM). Колорвей на файл не влияет — лекала общие, — но артикул и его ширину
+        каждый колорвей подставляет свои.
       </Text>
 
       {/* Дыры вместо счётчика покрытия. «N из M размеров» мерило исчезнувшую сущность и
@@ -730,6 +770,12 @@ export function PatternsField({
             {materialsWithoutDxf.length > 0 && (
               <Text size='micro' component='p'>
                 <b>без DXF:</b> {materialsWithoutDxf.map(slotLabel).join('; ')}
+              </Text>
+            )}
+            {rollGoodsWithoutOwnDxf.length > 0 && (
+              <Text size='micro' variant='label' component='p'>
+                своего DXF нет (возможно, в файле основной ткани):{' '}
+                {rollGoodsWithoutOwnDxf.map(slotLabel).join('; ')}
               </Text>
             )}
             {missingSizeNotes.map((n) => (
@@ -772,8 +818,8 @@ export function PatternsField({
 
       {sizeIds.length === 0 && fabricBomLines.length > 0 && (
         <Text size='micro' variant='label'>
-          задайте размерный ряд выше, чтобы загружать выкройки: строка выкройки хранится с
-          размером, и сервер сверяет его с рядом карточки
+          задайте размерный ряд выше, чтобы загружать выкройки: строка выкройки хранится с размером,
+          и сервер сверяет его с рядом карточки
         </Text>
       )}
 
@@ -781,8 +827,8 @@ export function PatternsField({
         <div>
           <GroupLabel>DXF без материала</GroupLabel>
           <Text size='nano' variant='label' className='mb-1'>
-            залиты до появления привязки либо потеряли строку BOM. Выберите материал в строке —
-            без него не считается ни ширина, ни кромка, и раскладка не знает, что меряет.
+            залиты до появления привязки либо потеряли строку BOM. Выберите материал в строке — без
+            него не считается ни ширина, ни кромка, и раскладка не знает, что меряет.
           </Text>
           {looseDxf.map(renderRow)}
         </div>
@@ -794,8 +840,8 @@ export function PatternsField({
           <Text size='nano' variant='label' className='mb-1'>
             новые выкройки принимаются только в DXF: из PDF нельзя ни разложить детали, ни
             сопоставить их с деталями кроя, ни прочитать размер. Эти файлы остаются на карточке и
-            сохраняются вместе с ней — их можно открыть и скачать; заменить их можно, загрузив
-            DXF на нужный материал и удалив PDF.
+            сохраняются вместе с ней — их можно открыть и скачать; заменить их можно, загрузив DXF
+            на нужный материал и удалив PDF.
           </Text>
           {pdfEntries.map(renderRow)}
         </div>

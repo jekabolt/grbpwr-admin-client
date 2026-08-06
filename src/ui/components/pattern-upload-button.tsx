@@ -113,7 +113,8 @@ export function PatternUploadModal({
   // while the operator still has the file in front of them. PDFs stay optional — a sheet a human
   // reads does not need a cloth.
   const missingSlot =
-    slots.length > 0 && staged.some((r) => r.status !== 'done' && isDxfFile(r.file) && !r.bomLineKey);
+    slots.length > 0 &&
+    staged.some((r) => r.status !== 'done' && isDxfFile(r.file) && !r.bomLineKey);
 
   async function uploadAll() {
     setBusy(true);
@@ -288,7 +289,9 @@ export function PatternUploadButton({
     const files = list ? Array.from(list) : [];
     if (files.length === 0) return;
     // Pre-flight the whole batch; bad files are reported and dropped, good ones proceed.
-    const bad = files.map((f) => ({ f, err: patternFileError(f, { dxfOnly }) })).filter((x) => x.err);
+    const bad = files
+      .map((f) => ({ f, err: patternFileError(f, { dxfOnly }) }))
+      .filter((x) => x.err);
     for (const x of bad) showMessage(`${x.f.name}: ${x.err}`, 'error');
     if (bad.length > 0) setError(bad.length === 1 ? bad[0].err : `отклонено файлов: ${bad.length}`);
     const good = files.filter((f) => !patternFileError(f, { dxfOnly }));

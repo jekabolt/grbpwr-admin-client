@@ -516,7 +516,7 @@ const techCardObject = z.object({
   // children
   sizeIds: z.array(z.number()).default([]),
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
-  patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
+  patterns: z.array(patternSchema).default([]), // выкройки: DXF по материалам (size_id — артефакт хранения, колонка NOT NULL)
   // DXF block → cut piece, SCOPED BY FABRIC (0262). The scope is what makes the mapping safe:
   // the same generic block name («полочка») in the main-fabric file and the lining file is two
   // different pieces, which a card-level mapping could not express. Written as a full-replace

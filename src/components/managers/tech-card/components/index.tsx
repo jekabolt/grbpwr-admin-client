@@ -1672,7 +1672,7 @@ export function TechCardForm({
               <SketchTab techCard={techCard} view='moodboard' />
             </div>
 
-            {/* PATTERNS (size range + per-size PDF выкройки) */}
+            {/* PATTERNS (size range + DXF выкройки по материалам) */}
             <SectionStack hidden={activeTab !== 'patterns'}>
               <Section title='size range'>
                 {/* The colourways AS READ: their recipes grade per-size consumption, and that is

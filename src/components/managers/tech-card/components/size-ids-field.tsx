@@ -70,9 +70,12 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
   // предложено удалить ВСЕ выкройки карточки. Поэтому DXF не удаляются, а перевешиваются на
   // оставшийся наименьший размер; теряются только PDF, у которых лист действительно на размер.
   const isDxf = (p: { url?: string }) => isDxfUrl(p.url);
-  const patternCount = (id: number) =>
-    patterns.filter((p) => p.sizeId === id && !isDxf(p)).length;
+  const patternCount = (id: number) => patterns.filter((p) => p.sizeId === id && !isDxf(p)).length;
   const dxfCount = (id: number) => patterns.filter((p) => p.sizeId === id && isDxf(p)).length;
+  // Куда перевесится DXF при снятии размера. undefined = размеров не останется вовсе, и
+  // перевешивать НЕКУДА: строки станут сиротами вне ряда, а такую строку сервер отвергает и
+  // роняет весь сейв карточки. Обещать в диалоге перевешивание в этом случае нельзя.
+  const refileTarget = (id: number) => orderSizes(sizeIds.filter((x) => x !== id))[0];
   // Number of colourway usages that grade this size's consumption, read from the colourways AS READ.
   // It used to reduce over the RHF `colorways` array, which has been permanently empty since
   // colourways became products: the count was always 0, so a size graded only by recipe norms was
@@ -86,7 +89,10 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
       0,
     );
   const quantityCount = (id: number) => sizeQuantities.filter((q) => q.sizeId === id).length;
-  const attachedCount = (id: number) => patternCount(id) + usageLineCount(id) + quantityCount(id);
+  // DXF входят в «размер не свободен»: они не теряются, но их size_id меняется, форма грязнится,
+  // а в случае последнего размера они вообще становятся сиротами. Молча — не годится.
+  const attachedCount = (id: number) =>
+    patternCount(id) + dxfCount(id) + usageLineCount(id) + quantityCount(id);
 
   const pruneAndRemove = (id: number) => {
     setValue(
@@ -97,10 +103,9 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
     if (patterns.some((p) => p.sizeId === id)) {
       // Куда перевесить DXF: наименьший оставшийся размер — то же правило, по которому их кладёт
       // загрузка. Если размеров не осталось вовсе, перевешивать некуда и строка остаётся сиротой —
-      // панель выкроек показывает такие отдельно и даёт «перевесить», что честнее тихого удаления
+      // панель выкроек метит такие строки и даёт «перевесить», что честнее тихого удаления
       // чертежа, который несёт весь ряд.
-      const remaining = orderSizes(sizeIds.filter((x) => x !== id));
-      const fallback = remaining[0];
+      const fallback = refileTarget(id);
       setValue(
         'patterns',
         patterns
@@ -139,8 +144,8 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
     pruneAndRemove(id);
   };
 
-  const pendingName =
-    pendingRemove != null ? formatSizeName(sizeById.get(pendingRemove) ?? `#${pendingRemove}`) : '';
+  const nameOf = (id: number) => formatSizeName(sizeById.get(id) ?? `#${id}`);
+  const pendingName = pendingRemove != null ? nameOf(pendingRemove) : '';
 
   // An id in the range that the dictionary does not know about renders nowhere in the grid. It is
   // still in the payload, so it gets its own row rather than becoming invisible-but-saved.
@@ -232,12 +237,18 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         cancelLabel='отмена'
       >
         <Text size='micro' variant='label' className='mb-2'>
-          Размер {pendingName} используется. Из карточки будет удалено:
+          Размер {pendingName} используется. Что произойдёт:
         </Text>
-        <Row label='выкройки PDF' value={pendingRemove != null ? patternCount(pendingRemove) : 0} />
+        {pendingRemove != null && patternCount(pendingRemove) > 0 && (
+          <Row label='выкройки PDF' value={patternCount(pendingRemove)} />
+        )}
         {pendingRemove != null && dxfCount(pendingRemove) > 0 && (
           <Row
-            label='DXF — не удалятся, перевесятся на другой размер'
+            label={
+              refileTarget(pendingRemove) != null
+                ? `DXF — не удалятся, перевесятся на ${nameOf(refileTarget(pendingRemove)!)}`
+                : 'DXF — перевесить будет НЕКУДА: размеров не останется, и до ручного перевешивания карточка не сохранится'
+            }
             value={dxfCount(pendingRemove)}
           />
         )}
