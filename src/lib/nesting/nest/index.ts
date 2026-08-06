@@ -105,7 +105,7 @@ export async function nest(
 
   // Gap compensation: NFP inputs are RDP-simplified, whose chords cut ≤ rdpEps inside
   // convex runs PER PIECE — widen the octagon so true contours still end up ≥ gap apart.
-  const nfps = new NfpCache(config.gapCm + 2 * config.rdpEpsCm);
+  const nfps = new NfpCache(config.gapCm + 2 * config.rdpEpsCm, config.gapCm);
   const areaSum = genesBase.reduce((s, g) => s + g.piece.areaCm2, 0);
   const deadline = started + config.timeBudgetMs;
 
@@ -184,13 +184,14 @@ export async function nest(
     placedGenes.push({ ...g, rot: pl.rot, x: Math.round(pl.x * SCALE), y: Math.round(pl.y * SCALE) });
   }
   if (!isCancelled() && placedGenes.length === best.placements.length && placedGenes.length > 0) {
+    // No wall-clock deadline: the pass cap alone bounds the cost, and a clock-truncated
+    // compaction made same-seed results machine-dependent for a ≤0.008 cm gain.
     const compacted = compactPlacements(
       placedGenes,
       config.fabricWidthCm,
       config.edgeMarginCm,
       lMax,
       nfps,
-      Date.now() + Math.min(2_000, Math.max(500, config.timeBudgetMs * 0.1)),
     );
     if (compacted.usedLengthCm <= best.usedLengthCm + 1e-9) {
       return toResult(compacted, generation);

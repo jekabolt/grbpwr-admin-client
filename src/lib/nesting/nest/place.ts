@@ -23,7 +23,7 @@
 // measured on the benchmark set it changes used length by <1% while tripling placement
 // time. A candidate that fails the winding test is simply skipped, so correctness never
 // depends on candidate completeness — only quality does.
-import type { Placement, RotationDeg } from '../types';
+import type { Placement, Pt, RotationDeg } from '../types';
 import { SCALE } from '../geom/clipper';
 import type { NfpCache, NfpPaths, PreparedPiece } from './nfp';
 
@@ -44,16 +44,25 @@ export type PlacementResult = {
 
 type Neighbour = { nfp: NfpPaths; ox: number; oy: number };
 
-// Point-vs-region (NonZero winding over the region's paths), in the region's own frame.
-// Returns true when the point is STRICTLY inside — on-boundary is contact, which is legal.
-function strictlyInside(nfp: NfpPaths, px: number, py: number): boolean {
-  let w = 0;
-  for (let pi = 0; pi < nfp.paths.length; pi++) {
-    const b = nfp.boxes[pi];
+// Point-vs-loops (NonZero winding), in the region's own frame. Returns true when the
+// point is STRICTLY inside — on-boundary is contact, which is legal. Boundary detection
+// short-circuits per LOOP, which is exact for the convex-parts representation (a point on
+// one part's boundary and strictly inside another part is still caught by the other
+// part's own winding pass, because each part is tested as its own loop set).
+function strictlyInsideLoops(
+  paths: readonly NfpPaths['paths'][number][],
+  boxes: readonly NfpPaths['boxes'][number][],
+  px: number,
+  py: number,
+): boolean {
+  for (let pi = 0; pi < paths.length; pi++) {
+    const b = boxes[pi];
     // A closed loop cannot wind around a point outside its bbox.
     if (px < b.minX || px > b.maxX || py < b.minY || py > b.maxY) continue;
-    const path = nfp.paths[pi];
+    const path = paths[pi];
     const n = path.length;
+    let w = 0;
+    let onBoundary = false;
     for (let i = 0; i < n; i++) {
       const a = path[i];
       const d = path[(i + 1) % n];
@@ -65,19 +74,25 @@ function strictlyInside(nfp: NfpPaths, px: number, py: number): boolean {
         py >= Math.min(a.y, d.y) &&
         py <= Math.max(a.y, d.y)
       ) {
-        return false; // exactly on a boundary — contact, allowed
+        onBoundary = true; // contact with THIS loop — but another loop may still claim it
+        break;
       }
       if (a.y <= py) {
         if (d.y > py && cross > 0) w++;
       } else if (d.y <= py && cross < 0) w--;
     }
+    if (!onBoundary && w !== 0) return true;
   }
-  return w !== 0;
+  return false;
 }
 
+// ACCEPTANCE runs against the raw convex Minkowski parts — the authority — not the
+// clipper union (candidates-only; see nest/nfp.ts header: the union can carry bites up
+// to 1.09 cm deep that clipper's own Difference agrees with, so it must never decide
+// feasibility).
 function feasible(neighbours: readonly Neighbour[], cx: number, cy: number): boolean {
   for (const nb of neighbours) {
-    if (strictlyInside(nb.nfp, cx - nb.ox, cy - nb.oy)) return false;
+    if (strictlyInsideLoops(nb.nfp.parts, nb.nfp.partBoxes, cx - nb.ox, cy - nb.oy)) return false;
   }
   return true;
 }
@@ -119,9 +134,68 @@ function addLineHits(
   }
 }
 
+// How many verifier rejections to absorb before giving up on a gene's candidate list.
+const MAX_VERIFY = 64;
+
+// Squared distance from point p to segment uv (cm).
+function pointSegDist2(px: number, py: number, ux: number, uy: number, vx: number, vy: number): number {
+  const dx = vx - ux;
+  const dy = vy - uy;
+  const l2 = dx * dx + dy * dy;
+  let t = l2 === 0 ? 0 : ((px - ux) * dx + (py - uy) * dy) / l2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const qx = ux + t * dx;
+  const qy = uy + t * dy;
+  return (px - qx) * (px - qx) + (py - qy) * (py - qy);
+}
+
+// True-contour clearance between two placed contours (cm), early-exiting as soon as it
+// is provably below `limit`. Boundary-to-boundary distance only — pieces are never
+// nested by the placer, so a containment case cannot arise from a BL placement.
+function contoursClearBy(
+  a: readonly Pt[],
+  ax: number,
+  ay: number,
+  b: readonly Pt[],
+  bx: number,
+  by: number,
+  limit: number,
+): boolean {
+  const lim2 = limit * limit;
+  for (let i = 0; i < a.length; i++) {
+    const p1x = a[i].x + ax;
+    const p1y = a[i].y + ay;
+    const p2 = a[(i + 1) % a.length];
+    const p2x = p2.x + ax;
+    const p2y = p2.y + ay;
+    for (let j = 0; j < b.length; j++) {
+      const q1x = b[j].x + bx;
+      const q1y = b[j].y + by;
+      const q2 = b[(j + 1) % b.length];
+      const q2x = q2.x + bx;
+      const q2y = q2.y + by;
+      // Segment crossing ⇒ distance 0.
+      const d1 = (p2x - p1x) * (q1y - p1y) - (p2y - p1y) * (q1x - p1x);
+      const d2 = (p2x - p1x) * (q2y - p1y) - (p2y - p1y) * (q2x - p1x);
+      const d3 = (q2x - q1x) * (p1y - q1y) - (q2y - q1y) * (p1x - q1x);
+      const d4 = (q2x - q1x) * (p2y - q1y) - (q2y - q1y) * (p2x - q1x);
+      if (d1 > 0 !== d2 > 0 && d3 > 0 !== d4 > 0) return false;
+      if (
+        pointSegDist2(p1x, p1y, q1x, q1y, q2x, q2y) < lim2 ||
+        pointSegDist2(p2x, p2y, q1x, q1y, q2x, q2y) < lim2 ||
+        pointSegDist2(q1x, q1y, p1x, p1y, p2x, p2y) < lim2 ||
+        pointSegDist2(q2x, q2y, p1x, p1y, p2x, p2y) < lim2
+      ) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
 // Best position for one gene against fixed neighbours: the (len, y, x)-minimal candidate
-// that passes every winding test. Coordinates are int units; returns null when no
-// candidate is feasible (caller falls back to the frontier).
+// that passes every winding test AND the caller's verifier. Coordinates are int units;
+// returns null when no candidate is feasible (caller falls back to the frontier).
 function bestPositionFor(
   g: Gene,
   neighbours: readonly Neighbour[],
@@ -132,6 +206,7 @@ function bestPositionFor(
   usedLength: number,
   bMaxX: number,
   marginInt: number,
+  verify?: (cx: number, cy: number) => boolean,
 ): { x: number; y: number; len: number } | null {
   // Candidate coordinate pairs, flat [x0,y0, x1,y1, …].
   const cands: number[] = [xLo, yLo, xHi, yLo, xLo, yHi, xHi, yHi];
@@ -166,13 +241,26 @@ function bestPositionFor(
 
   let prevX = NaN;
   let prevY = NaN;
+  let verified = 0;
   for (const i of idx) {
     const cx = cands[2 * i];
     const cy = cands[2 * i + 1];
     if (cx === prevX && cy === prevY) continue; // sorted duplicates are adjacent
     prevX = cx;
     prevY = cy;
-    if (feasible(neighbours, cx, cy)) return { x: cx, y: cy, len: lenOf(i) };
+    if (!feasible(neighbours, cx, cy)) continue;
+    // Final authority: the promise itself (true-contour clearance), checked on the few
+    // candidates that survive the NFP filters. Every NFP-derived proxy — union, raw
+    // convex parts, simplified contours — was measured accepting positions whose true
+    // clearance was short (parts and simplified contours touching at an accepted
+    // contact point), so the accepted position is verified against what the marker
+    // actually promises rather than against a model of it.
+    if (verify && !verify(cx, cy)) {
+      verified++;
+      if (verified > MAX_VERIFY) return null; // pathological pocket — fall back
+      continue;
+    }
+    return { x: cx, y: cy, len: lenOf(i) };
   }
   return null;
 }
@@ -212,12 +300,47 @@ export function placeOrder(
       oy: q.y,
     }));
 
-    const best = bestPositionFor(g, neighbours, xLo, xHi, yLo, yHi, usedLength, bMaxX, m);
+    // True-contour verifier for this gene against everything already placed (cm frame),
+    // bbox-prefiltered so only genuinely near neighbours are measured.
+    const gap = nfps.verifyGapCm;
+    const gPoly = g.piece.polyAt[g.rot];
+    const verify = (cx: number, cy: number): boolean => {
+      const px = cx / SCALE;
+      const py = cy / SCALE;
+      for (const q of placed) {
+        const qb = q.piece.boundsAt[q.rot];
+        const qx = q.x / SCALE;
+        const qy = q.y / SCALE;
+        if (
+          px + b.minX - gap > qx + qb.maxX ||
+          px + b.maxX + gap < qx + qb.minX ||
+          py + b.minY - gap > qy + qb.maxY ||
+          py + b.maxY + gap < qy + qb.minY
+        ) {
+          continue; // bboxes farther apart than the gap — cannot violate
+        }
+        if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.rot], qx, qy, gap)) return false;
+      }
+      return true;
+    };
 
-    // The Lmax bound makes a candidate feasible in practice; a numeric fluke falls back
-    // to the frontier so the individual still evaluates.
-    const x = best ? best.x : usedLength + m - bMinX;
-    const y = best ? best.y : yLo;
+    const best = bestPositionFor(g, neighbours, xLo, xHi, yLo, yHi, usedLength, bMaxX, m, verify);
+
+    // Fallback: no candidate was feasible (constructible when the only pocket corners
+    // are NFP×NFP intersections, which the candidate set skips). The frontier start is
+    // VALIDATED like any candidate and pushed right until it clears every neighbour —
+    // an unvalidated frontier was measured landing strictly inside two forbidden
+    // regions at once on a constructed case.
+    let x = best ? best.x : usedLength + m - bMinX;
+    let y = best ? best.y : yLo;
+    if (!best) {
+      const step = Math.max(1, Math.round((bMaxX - bMinX) / 4));
+      let guard = 0;
+      while ((!feasible(neighbours, x, y) || !verify(x, y)) && x < xHi && guard < 4096) {
+        x += step;
+        guard++;
+      }
+    }
     placed.push({ ...g, x, y });
     usedLength = Math.max(usedLength, x + bMaxX + m);
   }
@@ -240,16 +363,17 @@ function toResult(placed: readonly PlacedGene[], usedLength: number): PlacementR
 
 // Deterministic post-GA compaction: re-place each piece (x-ascending order) against ALL
 // other pieces held fixed, accepting a strictly better (len, y, x). Holes that opened
-// after a piece was originally placed get filled; repeats until a pass moves nothing,
-// the pass cap is hit, or the deadline passes. Pure integer math, same candidate
-// machinery as placement — the result stays verified-overlap-free by construction.
+// after a piece was originally placed get filled; repeats until a pass moves nothing or
+// the pass cap is hit. DELIBERATELY no wall-clock deadline: a clock-truncated pass made
+// same-seed results machine-dependent (verified: the 500 ms floor changed the output)
+// for a measured gain of ≤0.008 cm — the iteration cap alone keeps the cost bounded.
+// Pure integer math, same candidate machinery as placement.
 export function compactPlacements(
   genes: readonly PlacedGene[],
   fabricWidthCm: number,
   edgeMarginCm: number,
   lMaxCm: number,
   nfps: NfpCache,
-  deadlineMs: number,
   maxPasses = 3,
 ): PlacementResult {
   const m = Math.round(edgeMarginCm * SCALE);
@@ -263,7 +387,6 @@ export function compactPlacements(
     let moved = false;
     const order = work.map((_, i) => i).sort((i, j) => work[i].x - work[j].x || i - j);
     for (const i of order) {
-      if (Date.now() > deadlineMs) return finish();
       const g = work[i];
       const b = g.piece.boundsAt[g.rot];
       const bMinX = Math.round(b.minX * SCALE);
@@ -290,7 +413,32 @@ export function compactPlacements(
         y: g.y,
         x: g.x,
       };
-      const best = bestPositionFor(g, neighbours, xLo, xHi, yLo, yHi, othersLen, bMaxX, m);
+      // Same true-contour authority as placement (see placeOrder): a compaction move is
+      // only accepted when the moved piece really clears every other by the promised gap.
+      const gap = nfps.verifyGapCm;
+      const gPoly = g.piece.polyAt[g.rot];
+      const verify = (cx: number, cy: number): boolean => {
+        const px = cx / SCALE;
+        const py = cy / SCALE;
+        for (let j = 0; j < work.length; j++) {
+          if (j === i) continue;
+          const q = work[j];
+          const qb = q.piece.boundsAt[q.rot];
+          const qx = q.x / SCALE;
+          const qy = q.y / SCALE;
+          if (
+            px + b.minX - gap > qx + qb.maxX ||
+            px + b.maxX + gap < qx + qb.minX ||
+            py + b.minY - gap > qy + qb.maxY ||
+            py + b.maxY + gap < qy + qb.minY
+          ) {
+            continue;
+          }
+          if (!contoursClearBy(gPoly, px, py, q.piece.polyAt[q.rot], qx, qy, gap)) return false;
+        }
+        return true;
+      };
+      const best = bestPositionFor(g, neighbours, xLo, xHi, yLo, yHi, othersLen, bMaxX, m, verify);
       if (!best) continue;
       const better =
         best.len < cur.len ||

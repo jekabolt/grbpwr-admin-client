@@ -27,3 +27,25 @@ Empirical notes for clipper2-js@1.2.4 this code relies on (verified by harness t
 - `Clipper.stripDuplicates` compares points by REFERENCE (`lastPt !== path[i]`) — a no-op
   on freshly built paths; `geom/clipper.ts` carries its own coordinate-comparing dedupe.
 - `Clipper.getBounds` is reliable only on a single `Path64`.
+
+## clipper2-js: Union and Difference agree on a WRONG region (verified 2026-08-06)
+
+The union of convex Minkowski parts can come back with bays bitten out of it — measured
+up to **1.09 cm deep on 25 of 32 pair-rotations** of the benchmark set. `Clipper.Difference`
+of the same inputs against that result reports **no residual**, so any coverage self-check
+built on this library is structurally blind to its own defect.
+
+Consequences baked into the engine:
+
+- the union NFP **generates candidate positions only** (it is compact and cheap to walk);
+- the raw convex Minkowski parts are kept alongside it and decide **acceptance**
+  (point-in-part by exact integer winding) — they never touch a boolean op;
+- and because even the parts are built from *simplified* contours (RDP + convex
+  decomposition), the position finally chosen is verified against the **true contours**
+  at the promised gap. Measured: parts-only acceptance still let pairs land at 0.0000 cm
+  true clearance (the accepted point sat on a part boundary while the simplified contours
+  themselves touched); with true-contour verification the 7600-pair sweep reports zero
+  violations in both grain modes.
+
+The rule of thumb this leaves: never let a derived model of the geometry decide a promise
+the marker makes. Verify the promise.

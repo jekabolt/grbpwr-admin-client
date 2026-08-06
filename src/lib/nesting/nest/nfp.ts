@@ -9,11 +9,14 @@
 //   - the union itself runs as a binary pairwise tree (unionBatched), so no single
 //     boolean call ever sees hundreds of overlapping paths.
 //
-// The canonical union output is RDP-simplified (a raw union of hulls ⊕ octagon carries
-// hundreds of micro-vertices) and the shrink this can cause is pre-compensated by
-// inflating the octagon by the same epsilon — the NFP only ever OVER-forbids. Placement
-// (nest/place.ts) never runs boolean ops on these paths: it reads cache-owned rotated
-// variants (paths + bboxes) and tests candidate points with integer winding math.
+// AUTHORITY SPLIT (verification finding): clipper2-js's Union bites bays up to 1.09 cm
+// deep out of real NFPs, and its Difference AGREES with the bitten result — so any
+// union-derived self-check is structurally blind (measured: 25/32 pair-rels affected,
+// pieces touching at 0.0000 cm through the bites). The union is therefore used ONLY to
+// GENERATE candidate positions (it is compact); every candidate is ACCEPTED against the
+// raw convex Minkowski parts, which are exact by construction and never see a boolean
+// op. Placement (nest/place.ts) never runs boolean ops either way: it reads cache-owned
+// rotated variants (paths/parts + bboxes) and tests points with integer winding math.
 //
 // Cache tricks from SVGnest (MIT, algorithm only): rotation canonicalization
 //   NFP(A@a, B@b) = Rot(a)·NFP(A@0, B@(b−a))
@@ -40,7 +43,18 @@ export type IntBox = { minX: number; minY: number; maxX: number; maxY: number };
 
 // A rotated NFP variant, cache-owned and READONLY for callers: placement must never
 // mutate or translate these paths — it works in relative integer coordinates instead.
-export type NfpPaths = { paths: readonly Path64[]; boxes: readonly IntBox[] };
+//
+// TWO representations of the same forbidden region travel together, with different
+// jobs (see the module header on why they may DISAGREE):
+//   paths/boxes — the clipper union, compact: candidate GENERATION only;
+//   parts/partBoxes — the raw convex Minkowski hulls, authoritative: candidate
+//     ACCEPTANCE. A point is forbidden iff strictly inside ANY part.
+export type NfpPaths = {
+  paths: readonly Path64[];
+  boxes: readonly IntBox[];
+  parts: readonly Path64[];
+  partBoxes: readonly IntBox[];
+};
 
 // One-sided NFP boundary decimation: drop a vertex ONLY when the replacing chord GROWS
 // the forbidden region (reflex vertices of outers, and their mirror on holes) and the
@@ -212,9 +226,11 @@ export function unionBatched(parts: Path64[]): Path64[] {
   return acc;
 }
 
+type CanonicalNfp = { paths: Path64[]; parts: Path64[] };
+
 export class NfpCache {
-  // key `${minId}|${maxId}|${rel}` → canonical (rot 0) simplified NFP paths.
-  private cache = new Map<string, Path64[]>();
+  // key `${minId}|${maxId}|${rel}` → canonical (rot 0) union paths + raw convex parts.
+  private cache = new Map<string, CanonicalNfp>();
   // key `${canonicalKey}|${outRot}` → rotated variant with bboxes (cache-owned, readonly).
   private rotated = new Map<string, NfpPaths>();
   private gapOct: Pt[];
@@ -229,16 +245,22 @@ export class NfpCache {
   // under the width guard): the 400-layout stress measured a single worst deficit of
   // 0.047 cm — the margin pushes the whole stack back above the promised gap at the
   // cost of a marginally longer marker.
-  constructor(gapCm: number) {
+  // verifyGapCm is the gap PROMISED to the operator (uncompensated). Placement verifies
+  // the chosen position against true contours at this distance — the NFP proxies are
+  // built from simplified contours and were measured accepting short positions.
+  readonly verifyGapCm: number;
+
+  constructor(gapCm: number, verifyGapCm = gapCm) {
     this.gapOct = gapOctagon(gapCm + NFP_SAFETY_CM);
+    this.verifyGapCm = verifyGapCm;
   }
 
   // Canonical NFP for the UNORDERED pair, at relative rotation `rel`, with the
   // lower-id piece in the A role. Everything else derives from it.
-  private canonical(a: PreparedPiece, b: PreparedPiece, rel: RotationDeg): Path64[] {
+  private canonical(a: PreparedPiece, b: PreparedPiece, rel: RotationDeg): CanonicalNfp {
     const key = `${a.id}|${b.id}|${rel}`;
-    let paths = this.cache.get(key);
-    if (!paths) {
+    let entry = this.cache.get(key);
+    if (!entry) {
       const parts: Path64[] = [];
       for (const pa of a.parts0) {
         for (const pb of b.parts0) {
@@ -258,13 +280,19 @@ export class NfpCache {
       // every candidate test. RDP here was measurably unsafe — it carved eps-deep bays
       // into narrow necks of the union that its compensation did not cover.
       const minPathArea = 0.02 * SCALE * SCALE;
-      paths = union
+      const paths = union
         .filter((p) => Math.abs(Clipper.area(p)) >= minPathArea)
         .map((p) => decimateOneSided(p));
-      this.cache.set(key, paths);
+      // The RAW parts are retained as the acceptance authority: verification proved the
+      // clipper union carries bites up to 1.09 cm deep that Difference AGREES with, so a
+      // union-derived coverage check is structurally blind to them (25/32 pair-rels
+      // affected on the benchmark set). The parts are exact by construction (convex hull
+      // of a Minkowski sum of convex operands) and never touched a boolean op.
+      entry = { paths, parts };
+      this.cache.set(key, entry);
       this.computed++;
     }
-    return paths;
+    return entry;
   }
 
   // Precompute the canonical entry (NFP prepass) — same normalization as get().
@@ -276,12 +304,13 @@ export class NfpCache {
     }
   }
 
-  private rotatedVariant(canonicalKey: string, paths: Path64[], rot: RotationDeg): NfpPaths {
+  private rotatedVariant(canonicalKey: string, entry: CanonicalNfp, rot: RotationDeg): NfpPaths {
     const key = `${canonicalKey}|${rot}`;
     let v = this.rotated.get(key);
     if (!v) {
-      const rp = rotPath64(paths, rot);
-      v = { paths: rp, boxes: rp.map(boxOf) };
+      const rp = rotPath64(entry.paths, rot);
+      const rparts = rotPath64(entry.parts, rot);
+      v = { paths: rp, boxes: rp.map(boxOf), parts: rparts, partBoxes: rparts.map(boxOf) };
       this.rotated.set(key, v);
     }
     return v;
