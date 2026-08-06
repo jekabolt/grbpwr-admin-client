@@ -48,6 +48,11 @@ export function sizeTokensOf(dictionaryName: string | undefined): string[] {
   return out;
 }
 
+// Размерный хвост бывает в оформлении: реальный файл пишет базовый размер как «BP_<S>», в
+// угловых скобках. Для СРАВНЕНИЯ оставляем только буквы и цифры; в имени детали и в подписи
+// размер показываем так, как он написан в файле.
+const bareToken = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+
 export function splitBlockSize(
   block: string,
   // Токен → место в градации. Значение здесь не нужно, важно только членство.
@@ -59,6 +64,12 @@ export function splitBlockSize(
   // пустым именем.
   if (parts.length < 2) return { raw, identity: raw, size: '' };
   const last = parts[parts.length - 1];
-  if (!sizeTokens.has(last.toLowerCase())) return { raw, identity: raw, size: '' };
+  if (!sizeTokens.has(bareToken(last))) return { raw, identity: raw, size: '' };
   return { raw, identity: parts.slice(0, -1).join('_'), size: last };
+}
+
+// Место размера в градации — по очищенному токену, чтобы «<S>» и «S» были одним размером.
+export function sizeRank(size: string, sizeTokens: ReadonlyMap<string, number>): number {
+  if (!size) return Number.MAX_SAFE_INTEGER;
+  return sizeTokens.get(bareToken(size)) ?? 1e6;
 }

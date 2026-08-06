@@ -7,7 +7,7 @@ import { useMemo } from 'react';
 import { useWatch } from 'react-hook-form';
 import { useSizeNames, useSizeOrdering } from 'components/managers/model/components/use-size-systems';
 import type { PieceDTO } from 'lib/nesting/types';
-import { splitBlockSize, sizeTokensOf, type BlockCode } from './block-code';
+import { sizeRank, splitBlockSize, sizeTokensOf, type BlockCode } from './block-code';
 
 // Токены, которые в конце имени блока считаются размером, вместе с их местом в градации.
 // Только размерный ряд ЭТОЙ карточки: см. block-code.ts — «L» обязан быть размером лишь там, где
@@ -53,8 +53,7 @@ export function splitPiecesBySize(
     list.push(p);
     bySize.set(code.size, list);
   }
-  const rank = (size: string) =>
-    size === '' ? Number.MAX_SAFE_INTEGER : (sizeTokens.get(size.toLowerCase()) ?? 1e6);
+  const rank = (size: string) => sizeRank(size, sizeTokens);
   const groups = [...bySize.entries()]
     .map(([size, ps]) => ({ size, pieces: ps }))
     .sort((a, b) => rank(a.size) - rank(b.size));

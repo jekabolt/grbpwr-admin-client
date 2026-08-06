@@ -9,7 +9,7 @@ import { MIN_PIECE_AREA_CM2 } from '../types';
 import { area, bounds, ensureCCW, pointInPolygon, stripDegenerate } from '../geom/polygon';
 import { sanitizeLoop } from '../geom/clipper';
 import type { ClosedLoop } from './chain';
-import type { EntityGroup } from './transform';
+import type { EntityGroup, LayeredChain } from './transform';
 import { chainLoops } from './chain';
 
 export type RawPiece = {
@@ -19,6 +19,12 @@ export type RawPiece = {
   // cut-piece aliases match on, so it must never be a fallback string that a real block could
   // also spell.
   blockName: string | null;
+  // The DXF layer this contour was drawn on. A block routinely carries the SAME piece twice —
+  // the sewing line and the cutting line on different layers — and which of them is the piece
+  // cannot be decided here: it takes seeing every size at once. Measured on a real graded file,
+  // layer 1 held one ungraded contour repeated in all five size blocks while layer 14 graded
+  // properly, so trusting layer 1 (as this did) made every size come out identical.
+  layer: string;
   poly: Pt[]; // CCW, cm, absolute drawing coords (normalized later)
 };
 
@@ -77,44 +83,68 @@ export function groupToPieces(
 ): RawPiece[] {
   const label = group.blockName ?? 'модель';
 
-  // Layer preference: if layer "1" alone yields at least one closed loop, trust it.
-  const layer1 = group.chains.filter((c) => c.layer === '1');
-  let loops: ClosedLoop[] = [];
-  if (layer1.length > 0) {
-    loops = chainLoops(layer1, tolChain, []).loops;
+  // Chained PER LAYER, not with layer 1 winning outright. Two reasons. A contour belongs to one
+  // layer, so joining open chains ACROSS layers can only invent geometry that is in no file. And
+  // the old preference silently answered a question it had no business answering: it returned the
+  // layer-1 contour and threw the rest away, so a file whose layer 1 is not graded (a real one:
+  // layer 1 identical in all five size blocks, layer 14 grading correctly) reported every size as
+  // the same piece. Emitting one candidate PER LAYER moves that choice to where all the sizes are
+  // visible at once.
+  //
+  // Fallback for files that split one contour across layers: chain everything together, which is
+  // what the old code did whenever layer 1 was absent.
+  const byLayer = new Map<string, LayeredChain[]>();
+  for (const c of group.chains) {
+    const list = byLayer.get(c.layer) ?? [];
+    list.push(c);
+    byLayer.set(c.layer, list);
   }
-  if (loops.length === 0) {
-    loops = chainLoops(group.chains, tolChain, warnings).loops;
+  let perLayer: ClosedLoop[][] = [];
+  for (const chains of byLayer.values()) {
+    const loops = chainLoops(chains, tolChain, []).loops;
+    if (loops.length > 0) perLayer.push(loops);
   }
-
-  // Area floor: drills, notches, buttonholes.
-  const before = loops.length;
-  loops = loops.filter((l) => area(l.pts) >= MIN_PIECE_AREA_CM2);
-  const small = before - loops.length;
-  if (small > 0 && group.blockName == null) {
-    warnings.push(`мелких контуров (< ${MIN_PIECE_AREA_CM2} см²) отброшено: ${small}`);
-  }
-
-  loops = dedupeLoops(loops);
-  const { roots, dropped } = keepOutermost(loops);
-  if (dropped > 0 && group.blockName != null) {
-    // Internal contours inside a block are darts/sew lines — expected, not warned per-block.
-  }
-
-  let chosen: ClosedLoop[];
-  if (group.blockName != null) {
-    // A block instance is ONE piece: keep the largest root (the boundary), the rest are
-    // stray annotation shapes.
-    chosen = roots.length > 0 ? [roots.reduce((m, l) => (area(l.pts) > area(m.pts) ? l : m))] : [];
-  } else {
-    chosen = roots;
+  if (perLayer.length === 0) {
+    const all = chainLoops(group.chains, tolChain, warnings).loops;
+    if (all.length > 0) perLayer = [all];
   }
 
   const pieces: RawPiece[] = [];
-  for (const loop of chosen) {
-    const cleaned = sanitizeLoop(stripDegenerate(loop.pts, 1e-4));
-    if (!cleaned || area(cleaned) < MIN_PIECE_AREA_CM2) continue;
-    pieces.push({ name: label, blockName: group.blockName, poly: ensureCCW(cleaned) });
+  let small = 0;
+  for (const group0 of perLayer) {
+    // Area floor: drills, notches, buttonholes.
+    const before = group0.length;
+    let loops = group0.filter((l) => area(l.pts) >= MIN_PIECE_AREA_CM2);
+    small += before - loops.length;
+
+    // Deduped and nested-filtered WITHIN the layer. Across layers both are wrong now: the sewing
+    // line sits inside the cutting line, so a cross-layer keepOutermost would drop exactly the
+    // graded contour this exists to keep, and a cross-layer dedupe would erase whichever of the
+    // two happened to coincide on one size — making that piece vanish for one layer only.
+    loops = dedupeLoops(loops);
+    const { roots } = keepOutermost(loops);
+    // A block instance is ONE piece per layer: keep the largest root, the rest are stray
+    // annotation shapes. The loose pool has no such promise — every root is its own piece.
+    const chosen =
+      group.blockName != null
+        ? roots.length > 0
+          ? [roots.reduce((m, l) => (area(l.pts) > area(m.pts) ? l : m))]
+          : []
+        : roots;
+
+    for (const loop of chosen) {
+      const cleaned = sanitizeLoop(stripDegenerate(loop.pts, 1e-4));
+      if (!cleaned || area(cleaned) < MIN_PIECE_AREA_CM2) continue;
+      pieces.push({
+        name: label,
+        blockName: group.blockName,
+        layer: loop.layer,
+        poly: ensureCCW(cleaned),
+      });
+    }
+  }
+  if (small > 0 && group.blockName == null) {
+    warnings.push(`мелких контуров (< ${MIN_PIECE_AREA_CM2} см²) отброшено: ${small}`);
   }
   return pieces;
 }

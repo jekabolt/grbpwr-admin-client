@@ -45,6 +45,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
           // against 'модель' would misread a DXF whose block is literally named that.
           name: raw.blockName == null ? `деталь ${nextId - 1}` : raw.name,
           blockName: raw.blockName ?? '',
+          layer: raw.layer,
           source: file.name,
           fileIndex,
           poly,

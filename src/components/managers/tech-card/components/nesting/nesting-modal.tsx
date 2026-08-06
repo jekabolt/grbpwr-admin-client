@@ -27,6 +27,9 @@ import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
 import { buildMarkerLayout, dec, decNum, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
+import { sizeRank } from './block-code';
+import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
+import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
@@ -120,7 +123,45 @@ export function NestingModal({
   // field, not fifteen per-piece edits.
   const [setsN, setSetsN] = useState<number>(1);
 
-  const pieces = parse.phase === 'ready' ? parse.pieces : [];
+  // Один DXF несёт ВЕСЬ размерный ряд, а блок несёт контур на нескольких слоях (линия шва и
+  // линия кроя). Раскладывать надо ровно один размер по ровно одному контуру: иначе на полосу
+  // ложится вся градация сразу и меряется длина, которая не относится ни к одному размеру.
+  const allPieces = useMemo(() => (parse.phase === 'ready' ? parse.pieces : []), [parse]);
+  const sizeTokens = useSizeTokens();
+  const split = useMemo(() => splitPiecesBySize(allPieces, sizeTokens), [allPieces, sizeTokens]);
+  const layerOpts = useMemo(() => layerOptions(allPieces, split.codeById), [allPieces, split]);
+  const [activeLayer, setActiveLayer] = useState<string | null>(null);
+  const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
+    ? (activeLayer as string)
+    : defaultContourLayer(layerOpts);
+  const sizeOpts = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const p of allPieces) {
+      if ((p.layer ?? '') !== contourLayer) continue;
+      const s = split.codeById.get(p.id)?.size ?? '';
+      seen.set(s, (seen.get(s) ?? 0) + 1);
+    }
+    return [...seen.entries()]
+      .map(([size, count]) => ({ size, count }))
+      .sort((a, b) => sizeRank(a.size, sizeTokens) - sizeRank(b.size, sizeTokens));
+  }, [allPieces, split, contourLayer, sizeTokens]);
+  const missingOnLayer = useMemo(
+    () => blocksMissingOnLayer(allPieces, contourLayer),
+    [allPieces, contourLayer],
+  );
+  const [activeSize, setActiveSize] = useState<string | null>(null);
+  const shownSize = sizeOpts.some((o) => o.size === activeSize)
+    ? (activeSize as string)
+    : (sizeOpts[0]?.size ?? '');
+  const pieces = useMemo(
+    () =>
+      allPieces.filter(
+        (p) =>
+          (p.layer ?? '') === contourLayer &&
+          (split.codeById.get(p.id)?.size ?? '') === shownSize,
+      ),
+    [allPieces, split, contourLayer, shownSize],
+  );
   const usable = widthCm - 2 * marginCm;
 
   // Cross-strip span in the allowed rotations; a piece that fits nowhere is auto-unchecked.
@@ -812,6 +853,68 @@ export function NestingModal({
             </div>
           )}
 
+          {/* Что именно раскладываем: какой контур и какой размер. Один DXF несёт всю градацию,
+              а блок — контур на нескольких слоях, поэтому без этого выбора на полосу легла бы
+              вся градация разом, а длина маркера не относилась бы ни к одному размеру.
+              Слой по умолчанию — тот, что ГРАДУИРУЕТСЯ: контур, одинаковый во всех размерах,
+              это справочная линия, а не деталь. */}
+          {(layerOpts.length > 1 || sizeOpts.length > 1) && (
+            <div className='space-y-1 border border-borderColor p-1.5'>
+              {layerOpts.length > 1 && (
+                <div className='flex flex-wrap items-center gap-1'>
+                  <Text size='nano' variant='label' component='span'>
+                    контур:
+                  </Text>
+                  {layerOpts.map((o) => (
+                    <Button
+                      key={o.layer || '(none)'}
+                      type='button'
+                      variant={o.layer === contourLayer ? 'main' : 'secondary'}
+                      size='xs'
+                      disabled={running}
+                      title={
+                        o.checked === 0
+                          ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
+                          : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`
+                      }
+                      onClick={() => guardManual(() => setActiveLayer(o.layer))}
+                    >
+                      слой {o.layer || '—'}
+                      {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {missingOnLayer.length > 0 && (
+                <Text size='nano' component='p' className='text-error'>
+                  на слое {contourLayer || '—'} нет контура у {missingOnLayer.length} блоков — они
+                  не попадут в раскладку: {missingOnLayer.slice(0, 6).join(', ')}
+                  {missingOnLayer.length > 6 ? '…' : ''}
+                </Text>
+              )}
+              {sizeOpts.length > 1 && (
+                <div className='flex flex-wrap items-center gap-1'>
+                  <Text size='nano' variant='label' component='span'>
+                    размер:
+                  </Text>
+                  {sizeOpts.map((o) => (
+                    <Button
+                      key={o.size || '(none)'}
+                      type='button'
+                      variant={o.size === shownSize ? 'main' : 'secondary'}
+                      size='xs'
+                      disabled={running}
+                      title={`${o.count} деталей`}
+                      onClick={() => guardManual(() => setActiveSize(o.size))}
+                    >
+                      {o.size || 'без размера'}
+                    </Button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Piece list: checkbox · thumb · name · размеры · qty. */}
           {pieces.length > 0 && (
             <div className='max-h-[46vh] space-y-1 overflow-y-auto border border-borderColor p-1.5'>
@@ -827,7 +930,9 @@ export function NestingModal({
                   className='text-nano uppercase underline hover:opacity-70'
                   onClick={() =>
                     guardManual(() => {
-                      const next: PieceSel = {};
+                      // Слитно, а не заменой: замена стёрла бы выбор деталей ДРУГИХ размеров
+                      // и слоёв, и переключение размера показало бы всё снятым.
+                      const next: PieceSel = { ...sel };
                       for (const p of pieces) {
                         next[p.id] = { checked: !!fitsWidth.get(p.id), qty: sel[p.id]?.qty ?? 1 };
                       }

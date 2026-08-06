@@ -34,7 +34,8 @@ import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes } from 'utils/pattern';
 import type { TechCardFormData } from '../schema';
-import { splitBlockSize } from './block-code';
+import { sizeRank, splitBlockSize } from './block-code';
+import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { PieceSheet, type PieceMark } from './piece-sheet';
 import { splitPiecesBySize, useSizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
@@ -138,9 +139,30 @@ export function PieceMatchModal({
   // One DXF carries the whole grade, so the size lives in the block name and has to be split off
   // before anything else: the piece «BP_1» exists once for the style, not once per size.
   const sizeTokens = useSizeTokens();
-  const split = useMemo(
-    () => splitPiecesBySize(parse.phase === 'ready' ? parse.pieces : [], sizeTokens),
-    [parse, sizeTokens],
+  const allPieces = useMemo(
+    () => (parse.phase === 'ready' ? parse.pieces : []),
+    [parse],
+  );
+  const split = useMemo(() => splitPiecesBySize(allPieces, sizeTokens), [allPieces, sizeTokens]);
+  // A block carries the piece on more than one layer (sewing line and cutting line). Only ONE of
+  // them is the piece; the other must not reach the counting, or every block would be counted
+  // twice and pieces_per_garment would double.
+  const layerOpts = useMemo(
+    () => layerOptions(allPieces, split.codeById),
+    [allPieces, split],
+  );
+  const [activeLayer, setActiveLayer] = useState<string | null>(null);
+  const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
+    ? (activeLayer as string)
+    : defaultContourLayer(layerOpts);
+  const contourPieces = useMemo(
+    () => allPieces.filter((p) => (p.layer ?? '') === contourLayer),
+    [allPieces, contourLayer],
+  );
+  // Блоки, которых на выбранном слое нет вовсе: их не будет ни на листе, ни в списке.
+  const missingOnLayer = useMemo(
+    () => blocksMissingOnLayer(allPieces, contourLayer),
+    [allPieces, contourLayer],
   );
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
@@ -224,7 +246,7 @@ export function PieceMatchModal({
     // every consumption derived from it.
     const perFile = new Map<string, Map<string, number>>();
     const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
-    for (const p of parse.pieces) {
+    for (const p of contourPieces) {
       // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
       // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
       // here is what keeps the piece count a property of the STYLE.
@@ -288,7 +310,7 @@ export function PieceMatchModal({
     }
     next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
     setRows(next);
-  }, [parse, split, pieceOptions, mineByBlock, otherFabricByBlock]);
+  }, [parse, split, contourPieces, pieceOptions, mineByBlock, otherFabricByBlock]);
 
   const decided = rows.filter((r) => r.choice).length;
   const alreadyMapped = mineByBlock.size;
@@ -323,7 +345,7 @@ export function PieceMatchModal({
   const sheets = useMemo(() => {
     if (parse.phase !== 'ready') return [];
     const byFile = new Map<number, { name: string; pieces: PieceDTO[] }>();
-    parse.pieces.forEach((p, i) => {
+    contourPieces.forEach((p, i) => {
       const idx = p.fileIndex ?? i;
       const entry = byFile.get(idx) ?? { name: p.source || `лист ${idx + 1}`, pieces: [] };
       entry.pieces.push(p);
@@ -332,7 +354,7 @@ export function PieceMatchModal({
     return [...byFile.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([index, v]) => ({ index, ...v }));
-  }, [parse]);
+  }, [parse, contourPieces]);
   const sheet = sheets[Math.min(activeFile, Math.max(0, sheets.length - 1))];
 
   // Sizes present in the ACTIVE sheet — a second file can legitimately carry a different subset.
@@ -343,8 +365,7 @@ export function PieceMatchModal({
       const s = split.codeById.get(p.id)?.size ?? '';
       seen.set(s, (seen.get(s) ?? 0) + 1);
     }
-    const rank = (s: string) =>
-      s === '' ? Number.MAX_SAFE_INTEGER : (sizeTokens.get(s.toLowerCase()) ?? 1e6);
+    const rank = (s: string) => sizeRank(s, sizeTokens);
     return [...seen.entries()]
       .map(([size, count]) => ({ size, count }))
       .sort((a, b) => rank(a.size) - rank(b.size));
@@ -650,6 +671,44 @@ export function PieceMatchModal({
                     </Button>
                   ))}
                 </div>
+              )}
+              {/* Which layer holds the piece. Offered only when the file actually draws it on
+                  more than one (sewing line + cutting line), and the default is the layer that
+                  GRADES: a contour identical in every size is a reference, not the piece. Left
+                  switchable because the guess is a guess, and reading the wrong contour means
+                  cutting to the wrong size. */}
+              {layerOpts.length > 1 && (
+                <div className='mb-1 flex flex-wrap items-center gap-1'>
+                  <Text size='nano' variant='label' component='span'>
+                    контур:
+                  </Text>
+                  {layerOpts.map((o) => (
+                    <Button
+                      key={o.layer || '(none)'}
+                      type='button'
+                      variant={o.layer === contourLayer ? 'main' : 'secondary'}
+                      size='xs'
+                      title={
+                        o.checked === 0
+                          ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
+                          : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`
+                      }
+                      onClick={() => setActiveLayer(o.layer)}
+                    >
+                      слой {o.layer || '—'}
+                      {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {missingOnLayer.length > 0 && (
+                <CalloutBox tone='warning'>
+                  <Text size='micro' component='p'>
+                    на слое {contourLayer || '—'} нет контура у {missingOnLayer.length} блоков —
+                    их не видно ни на листе, ни в списке: {missingOnLayer.slice(0, 6).join(', ')}
+                    {missingOnLayer.length > 6 ? '…' : ''}
+                  </Text>
+                </CalloutBox>
               )}
               {/* One graded DXF draws the whole size run on one sheet. Overlaid they are
                   unreadable, so only one size is ever on screen — and since a cut piece is ONE

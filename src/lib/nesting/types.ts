@@ -28,6 +28,12 @@ export type PieceDTO = {
   // no per-piece block (a lone «модель» entity) and the display name is a synthetic «деталь N».
   // This is the key markers and cut-piece aliases match on, so it must never be a fallback.
   blockName?: string;
+  // The DXF layer this contour was drawn on. One block routinely carries the piece TWICE — the
+  // sewing line and the cutting line on different layers — so a block yields one candidate per
+  // layer and the choice is made where every size is visible at once (a layer that does not
+  // change between sizes is not the piece). Optional: a piece restored from a saved marker has
+  // no layer, only the geometry that was actually laid out.
+  layer?: string;
   // Which uploaded file the piece came from (display).
   source: string;
   // Index of that file in the parsed batch. `source` is a DISPLAY name and two sheets can
