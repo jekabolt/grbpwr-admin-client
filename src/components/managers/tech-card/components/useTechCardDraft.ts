@@ -124,7 +124,45 @@ export function useTechCardDraft(
   // defaults — isDirty is then computed as draft ≠ loaded card.
   const restore = () => {
     if (!pending) return;
-    form.reset(pending.data, { keepDefaultValues: true });
+    // A draft written by an OLDER build has no idea about fields added since, and zod fills them
+    // with their empty defaults — which the save path then sends as deliberate values. For the
+    // DXF↔fabric bindings and the block→piece aliases that means «unbind everything» and «the
+    // alias set is empty», silently deleting work done elsewhere with no 409 to stop it (the
+    // lock version comes from the fresh card query, not from the draft). So anything the draft
+    // does not actually carry is taken from the loaded card instead of from a default.
+    const loaded = form.getValues();
+    const data = { ...pending.data } as typeof pending.data;
+    const carried = ['patterns', 'pieceDxfAliases'] as const;
+    for (const key of carried) {
+      if (!(key in (pending.data as object))) (data as Record<string, unknown>)[key] = loaded[key];
+    }
+    // `patterns` may exist but predate the binding column; carry it per row, by identity.
+    if (Array.isArray(data.patterns) && Array.isArray(loaded.patterns)) {
+      // Loaded rows are registered under BOTH identities, because the two sides cannot agree on
+      // one: every STORED row has a lineKey (0260 backfilled LEGACY… keys and the store mints one
+      // for anything still without), while a draft old enough to need this carry-forward is by
+      // definition from a build whose schema had no lineKey at all. Keying the map by lineKey
+      // alone therefore missed every single row it existed to match — the fallback was dead code
+      // for exactly its own case, and the merge silently unbound the whole card.
+      const bindingByKey = new Map<string, string>();
+      for (const p of loaded.patterns) {
+        if (!p.bomLineKey) continue;
+        const lk = p.lineKey?.trim();
+        if (lk) bindingByKey.set(lk, p.bomLineKey);
+        bindingByKey.set(`${p.sizeId ?? 0}|${p.url ?? ''}`, p.bomLineKey);
+      }
+      data.patterns = data.patterns.map((p) => {
+        // A current-build draft carries the field, and '' there is a deliberate unbind.
+        if (typeof p.bomLineKey === 'string') return p;
+        const lk = p.lineKey?.trim();
+        const carried =
+          (lk ? bindingByKey.get(lk) : undefined) ??
+          bindingByKey.get(`${p.sizeId ?? 0}|${p.url ?? ''}`) ??
+          '';
+        return { ...p, bomLineKey: carried };
+      });
+    }
+    form.reset(data, { keepDefaultValues: true });
     // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging
     // identity, which is what makes an ALREADY-MOUNTED panel re-run its claim effect and adopt its
     // snapshot — every tab body is mounted from page load, so without that bump the claim had

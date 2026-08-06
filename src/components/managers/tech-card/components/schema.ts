@@ -114,6 +114,15 @@ const patternSchema = z.object({
   // Server-owned; round-tripped read-only so the grid can show when a PDF actually arrived. Sending
   // it back is harmless — the write path drops it and carries the stored value forward by url.
   uploadedAt: z.string().optional().default(''),
+  // Stable row identity (0260). Unlike BOM/piece keys the SERVER never mints one: an empty key is
+  // the legacy signal its upsert-diff matches by (size_id, url) on. So this client keeps whatever
+  // key a row already has and mints only for rows created here — minting for every row would make
+  // one save read as all-new rows and drop every DXF↔slot binding on the card.
+  lineKey: z.string().optional().default(''),
+  // Which fabric BOM line this sheet is cut from — the binding a раскладка needs to know which
+  // cloth (and therefore which width and кромка) a DXF belongs to. '' = unbound: legal for a PDF,
+  // and legal for legacy DXF rows uploaded before this existed.
+  bomLineKey: z.string().optional().default(''),
 });
 
 const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity = 'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
@@ -479,6 +488,19 @@ const techCardObject = z.object({
   sizeIds: z.array(z.number()).default([]),
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
   patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
+  // DXF block → cut piece, SCOPED BY FABRIC (0262). The scope is what makes the mapping safe:
+  // the same generic block name («полочка») in the main-fabric file and the lining file is two
+  // different pieces, which a card-level mapping could not express. Written as a full-replace
+  // set alongside the card body.
+  pieceDxfAliases: z
+    .array(
+      z.object({
+        bomLineKey: z.string().optional().default(''),
+        blockName: z.string().optional().default(''),
+        pieceLineKey: z.string().optional().default(''),
+      }),
+    )
+    .default([]),
   // NF-07 auxiliary items: purpose is 'sellable' (default) or 'auxiliary' (produces a packaging
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
@@ -589,6 +611,7 @@ export const techCardDefaultData: TechCardFormData = {
   sizeIds: [],
   sizeQuantities: [],
   patterns: [],
+  pieceDxfAliases: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
   auxSubtype: UNSET_AUX_SUBTYPE,
   outputMaterialId: 0,
@@ -772,6 +795,16 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       sizeBytes: wireInt(p.sizeBytes),
       version: p.version || 0,
       uploadedAt: p.uploadedAt ?? '',
+      // Kept EXACTLY as stored, including the LEGACY… keys the 0260 backfill wrote: this client
+      // never re-mints an existing row's key (see patternSchema).
+      lineKey: p.lineKey ?? '',
+      bomLineKey: p.bomLineKey ?? '',
+    })),
+    // The wrapper is always present on read, so `items` is the authoritative stored set.
+    pieceDxfAliases: (insert?.pieceDxfAliases?.items ?? []).map((a) => ({
+      bomLineKey: a.bomLineKey ?? '',
+      blockName: a.blockName ?? '',
+      pieceLineKey: a.pieceLineKey ?? '',
     })),
     purpose: toPurposeEnum(insert?.purpose),
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
@@ -1053,6 +1086,14 @@ export function mapFormToTechCardInsert(
   }));
   const bomIndexByKey = new Map<string, number>();
   bomLines.forEach((b, i) => bomIndexByKey.set(b.lineKey, i));
+  // Which cut-pieces this save actually persists — the set DXF aliases may reference. Blank rows
+  // are dropped below and a keyless row gets a fresh key no alias can know, so both are excluded.
+  // Lowercased: the store compares alias→piece keys case-insensitively.
+  const livePieceKeys = new Set(
+    (data.pieces ?? [])
+      .filter((p) => !isBlankPiece(p) && !!p.lineKey?.trim())
+      .map((p) => p.lineKey!.trim().toLowerCase()),
+  );
   const outBomRef = (
     lineKey?: string,
   ): { bomLineKey: string | undefined; bomItemIndex: number | undefined } => {
@@ -1111,6 +1152,13 @@ export function mapFormToTechCardInsert(
         // uploaded row carries 0 and the server assigns MAX+1 for its size. uploadedAt is
         // server-owned and deliberately not sent.
         version: p.version || 0,
+        // Identity as held (0260): '' on a legacy row keeps the server matching it by
+        // (size_id, url); a key minted at upload survives «заменить файл».
+        lineKey: p.lineKey?.trim() || '',
+        // ALWAYS present, like `name`: an absent bom_line_key is the stale-client signal that
+        // preserves the stored binding, so a client that owns the field must send '' to unbind
+        // rather than fall into carry-forward.
+        bomLineKey: p.bomLineKey?.trim() || '',
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
@@ -1175,6 +1223,20 @@ export function mapFormToTechCardInsert(
             };
           }),
       })),
+    // DXF block → piece aliases (0262). ALWAYS sent as a wrapper — the wrapper IS the presence
+    // signal, and a client that owns the mapping must be able to empty it. Aliases whose piece
+    // left the card are dropped rather than sent: the store answers an unresolvable
+    // piece_line_key with a field violation, which would block the whole save over a row the
+    // operator deleted on the pieces tab and never connected to a DXF in their head.
+    pieceDxfAliases: {
+      items: (data.pieceDxfAliases ?? []).filter(
+        (a) =>
+          !!a.bomLineKey?.trim() &&
+          !!a.blockName?.trim() &&
+          !!a.pieceLineKey?.trim() &&
+          livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()),
+      ),
+    },
     bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
       name: b.name?.trim() || '',

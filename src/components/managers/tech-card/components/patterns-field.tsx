@@ -23,6 +23,7 @@ import {
   isDxfUrl,
   patternFileError,
 } from 'utils/pattern';
+import { ulid } from 'utils/ulid';
 import type { NestingFile } from './nesting/use-nesting';
 import { TechCardFormData } from './schema';
 
@@ -30,6 +31,10 @@ import { TechCardFormData } from './schema';
 // nothing loads until someone actually opens a раскладка.
 const NestingModal = lazy(() =>
   import('./nesting/nesting-modal').then((m) => ({ default: m.NestingModal })),
+);
+// Same lazy neighbourhood: the matching dialog parses DXF through the same worker.
+const PieceMatchModal = lazy(() =>
+  import('./nesting/piece-match-modal').then((m) => ({ default: m.PieceMatchModal })),
 );
 
 type PatternRow = {
@@ -40,6 +45,8 @@ type PatternRow = {
   sizeBytes?: number;
   version?: number;
   uploadedAt?: string;
+  lineKey?: string;
+  bomLineKey?: string;
 };
 type SizeSlot = { sizeId: number; label: string; files: Array<{ row: PatternRow; index: number }> };
 
@@ -108,6 +115,17 @@ export function PatternsField({
     sizeLabel: string;
     sizeId: number;
     files: NestingFile[];
+    // The fabric these sheets are bound to; '' for legacy unbound DXFs, which the modal then
+    // asks about as before.
+    bomLineKey: string;
+  } | null>(null);
+  // «сопоставить детали»: the same DXF set, opened against the cut-piece list instead of the
+  // nesting engine (null = closed).
+  const [matching, setMatching] = useState<{
+    sizeLabel: string;
+    bomLineKey: string;
+    fabricName: string;
+    files: NestingFile[];
   } | null>(null);
   // The card's fabric BOM lines, live from form state — the save-marker dialog's slot select.
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
@@ -138,6 +156,19 @@ export function PatternsField({
           selvedgeCm: b.selvedgeCm ?? '',
         })),
     [bomItems],
+  );
+  // Every fabric line of the card, saved or not. The card save upserts the BOM BEFORE it
+  // reconciles patterns and aliases (techcard.go: bom at :1185, aliases :1198, patterns :1223),
+  // so a line added on the BOM tab a moment ago resolves by the time its key is used. Filtering
+  // on a server id would have left a brand-new card with no slot control at all — and therefore
+  // no binding, no per-fabric раскладка and no matching — until after a save and a return trip.
+  const uploadSlots = useMemo(
+    () => fabricBomLines.map((b) => ({ lineKey: b.lineKey, name: b.name })),
+    [fabricBomLines],
+  );
+  const liveFabricKeys = useMemo(
+    () => new Set(fabricBomLines.map((b) => b.lineKey)),
+    [fabricBomLines],
   );
 
   const rowsBySize = useMemo(() => {
@@ -200,12 +231,27 @@ export function PatternsField({
     if (good.length > 0) setDroppedOn({ sizeId, files: good });
   }
 
-  // The DXF rows of one size, as CDN-backed inputs for the раскладка modal.
-  function dxfFilesOf(slot: SizeSlot): NestingFile[] {
-    return slot.files
-      .filter(({ row }) => isDxfUrl(row.url) && row.url)
-      .map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
+  // The DXF rows of one size, grouped BY FABRIC. One раскладка lays one cloth: pooling every
+  // DXF of a size into one run mixed the main fabric with the lining and measured a length that
+  // belongs to neither. A legacy row with no binding is its own group ('') so it stays usable.
+  function dxfGroupsOf(slot: SizeSlot): Array<{ bomLineKey: string; files: NestingFile[] }> {
+    const byFabric = new Map<string, NestingFile[]>();
+    for (const { row } of slot.files) {
+      if (!row.url || !isDxfUrl(row.url)) continue;
+      const key = row.bomLineKey ?? '';
+      const list = byFabric.get(key) ?? [];
+      list.push({ name: row.name || row.filename || 'выкройка.dxf', url: row.url });
+      byFabric.set(key, list);
+    }
+    // Stable order: the card's own BOM order, unbound last.
+    const order = new Map(fabricBomLines.map((b, i) => [b.lineKey, i]));
+    return [...byFabric.entries()]
+      .map(([bomLineKey, files]) => ({ bomLineKey, files }))
+      .sort((a, b) => (order.get(a.bomLineKey) ?? 1e9) - (order.get(b.bomLineKey) ?? 1e9));
   }
+
+  const fabricName = (lineKey: string) =>
+    fabricBomLines.find((b) => b.lineKey === lineKey)?.name?.trim() || 'без ткани';
 
   function commitRename(index: number, value: string) {
     // '' is a legal committed value — it clears the name and the row falls back to the
@@ -229,6 +275,9 @@ export function PatternsField({
     // a just-uploaded row still carries; on a coverage grid that dash reads as data, so drop it.
     const uploaded = formatTechCardDate(primary?.uploadedAt);
     const uploadedOn = uploaded === '—' ? null : uploaded;
+    // Grouped once per tile: it was being recomputed on every button and every label, which
+    // re-walked the whole file list several times per render.
+    const groups = dxfGroupsOf(slot);
 
     const media = has ? (
       <button
@@ -383,29 +432,98 @@ export function PatternsField({
               {row.name && row.filename && editing?.index !== index && (
                 <span className='block truncate text-nano text-labelColor'>{row.filename}</span>
               )}
+              {/* Fabric binding, editable in place. It has to be reachable after upload too:
+                  every DXF uploaded before 0260 has none, and without this the раскладка for
+                  those rows would stay a guess forever. PDFs are left alone — a sheet a human
+                  reads is not cut from anything. */}
+              {/* An orphan tile's rows are outside the size range and the server rejects them
+                  outright, so offering a binding there would only invite work that cannot land. */}
+              {!orphan && isDxfUrl(row.url) && uploadSlots.length > 0 && editing?.index !== index && (
+                <select
+                  className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
+                  aria-label={`ткань для ${labelOf(row)}`}
+                  value={row.bomLineKey ?? ''}
+                  disabled={isSubmitting || !canEdit}
+                  onChange={(e) =>
+                    setValue(`patterns.${index}.bomLineKey`, e.target.value, { shouldDirty: true })
+                  }
+                >
+                  <option value=''>ткань не выбрана</option>
+                  {/* A binding whose line was deleted or reclassified still EXISTS in form state.
+                      Without an option for it the controlled select paints empty and reads as
+                      «unbound», so "fixing" it would rebind a sheet the operator thought was free. */}
+                  {!!row.bomLineKey && !liveFabricKeys.has(row.bomLineKey) && (
+                    <option value={row.bomLineKey}>ткань удалена из BOM — выберите заново</option>
+                  )}
+                  {uploadSlots.map((s) => (
+                    <option key={s.lineKey} value={s.lineKey}>
+                      {s.name || 'без названия'}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
           ))}
           {!orphan && (
             <PatternUploadButton
               label='+ PDF/DXF'
-              onUploaded={(p) => append({ sizeId, ...p })}
+              fabricSlots={uploadSlots}
+              onUploaded={(p) => append({ sizeId, lineKey: ulid(), ...p })}
               // PatternUploadButton renders a page-sized Button; inside a tile it has to sit at
               // control density. It exposes no `size`, so the density is applied from here.
               className='mt-1 [&_button]:w-full [&_button]:px-1.5 [&_button]:py-px [&_button]:text-micro [&_button]:tracking-label'
             />
           )}
-          {dxfFilesOf(slot).length > 0 && (
+          {groups.map((g) => (
             <Button
+              key={g.bomLineKey || '(none)'}
               type='button'
               variant='secondary'
               size='xs'
               className='mt-1 w-full'
-              title='авто-раскладка DXF-деталей этого размера на полосе ткани'
-              onClick={() => setNesting({ sizeLabel: label, sizeId, files: dxfFilesOf(slot) })}
+              title={`авто-раскладка DXF-деталей этого размера на полосе «${fabricName(g.bomLineKey)}»`}
+              onClick={() =>
+                setNesting({
+                  sizeLabel: label,
+                  sizeId,
+                  files: g.files,
+                  bomLineKey: g.bomLineKey,
+                })
+              }
             >
-              ⌗ раскладка
+              ⌗ раскладка{groups.length > 1 ? ` · ${fabricName(g.bomLineKey)}` : ''}
             </Button>
-          )}
+          ))}
+          {/* Matching is per FABRIC, like the раскладка — a block name means one piece within one
+              cloth, and the same name in another cloth's file is another piece. An unbound
+              legacy group has no scope to write into, so it must get its fabric first. */}
+          {/* Matching writes an alias scoped to a fabric BOM line, and the store REFUSES a new
+              (slot, block) pair whose slot is not a live fabric line — which would fail the whole
+              card save over a row nothing in the UI can reach. So the button only appears while
+              the binding still resolves. */}
+          {canEdit &&
+            groups
+              .filter((g) => !!g.bomLineKey && liveFabricKeys.has(g.bomLineKey))
+              .map((g) => (
+                <Button
+                  key={`match-${g.bomLineKey}`}
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  className='mt-1 w-full'
+                  title={`сопоставить блоки DXF с деталями кроя для «${fabricName(g.bomLineKey)}»`}
+                  onClick={() =>
+                    setMatching({
+                      sizeLabel: label,
+                      bomLineKey: g.bomLineKey,
+                      fabricName: fabricName(g.bomLineKey),
+                      files: g.files,
+                    })
+                  }
+                >
+                  ↔ детали{groups.length > 1 ? ` · ${fabricName(g.bomLineKey)}` : ''}
+                </Button>
+              ))}
         </Tile>
       </div>
     );
@@ -444,7 +562,8 @@ export function PatternsField({
       <PatternUploadModal
         files={droppedOn?.files ?? null}
         onClose={() => setDroppedOn(null)}
-        onUploaded={(p) => droppedOn && append({ sizeId: droppedOn.sizeId, ...p })}
+        onUploaded={(p) => droppedOn && append({ sizeId: droppedOn.sizeId, lineKey: ulid(), ...p })}
+        fabricSlots={uploadSlots}
       />
 
       {/* In-app PDF viewer: the browser renders the sheet inside the modal; a fallback link opens it
@@ -502,11 +621,31 @@ export function PatternsField({
             techCardId={techCardId}
             sizeId={nesting.sizeId}
             bomLines={fabricBomLines}
+            lockedBomLineKey={nesting.bomLineKey || undefined}
             canEdit={canEdit}
             savedSizeIds={savedSizeIds}
             season={season}
             styleNumber={styleNumber}
             onClose={() => setNesting(null)}
+          />
+        </Suspense>
+      )}
+
+      {/* Сопоставление блоков DXF с деталями кроя — тот же ленивый чанк (общий воркер разбора). */}
+      {matching && (
+        <Suspense
+          fallback={
+            <Text size='micro' variant='label'>
+              загрузка модуля разбора DXF…
+            </Text>
+          }
+        >
+          <PieceMatchModal
+            files={matching.files}
+            bomLineKey={matching.bomLineKey}
+            fabricName={matching.fabricName}
+            sizeLabel={matching.sizeLabel}
+            onClose={() => setMatching(null)}
           />
         </Suspense>
       )}

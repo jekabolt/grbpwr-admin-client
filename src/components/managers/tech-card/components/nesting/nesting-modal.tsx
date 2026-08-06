@@ -69,6 +69,7 @@ export function NestingModal({
   techCardId,
   sizeId,
   bomLines,
+  lockedBomLineKey,
   view,
   canEdit = true,
   savedSizeIds,
@@ -83,6 +84,9 @@ export function NestingModal({
   sizeId?: number;
   // The card's fabric BOM lines (slot select of the save dialog).
   bomLines?: MarkerBomLine[];
+  // The fabric these DXFs are bound to (0260). When set, the раскладка IS that cloth: the slot
+  // is fixed, the width comes from it, and the save dialog shows the slot rather than asking.
+  lockedBomLineKey?: string;
   // A stored marker to DISPLAY: no worker, no DXF fetch — geometry comes from the blob.
   // Editing a stored layout is Ф5; this mode is view + export.
   view?: common_TechCardMarker | null;
@@ -389,17 +393,45 @@ export function NestingModal({
     return each.length ? `раскрой по слотам, см: ${each.join(' · ')}` : '';
   })();
 
+  // A binding can go stale while the card is open — the slot is deleted on the BOM tab, or its
+  // section stops being FABRIC. The lock then has nothing to lock ONTO, and pretending otherwise
+  // saved a marker at the 140 cm default with no slot while the dialog said the fabric came from
+  // the DXF binding. Fall back to the selector and say the binding is dangling.
+  const lockedSlot = lockedBomLineKey
+    ? fabricLines.find((b) => b.lineKey === lockedBomLineKey)
+    : undefined;
+  // Two different reasons a lock fails to resolve, and they need opposite advice. The slot may be
+  // GONE from the card — pick another. Or it may exist but be UNSAVED: a sheet can be bound to a
+  // BOM line added a moment ago (the card save reconciles the BOM before patterns), while a marker
+  // is a separate RPC that can only reference a stored line. Telling the operator that a fabric
+  // they just created «is no longer a fabric line» would be simply false.
+  const lockedUnsaved =
+    !!lockedBomLineKey && !lockedSlot && (bomLines ?? []).some((b) => b.lineKey === lockedBomLineKey);
+  const lockDangling = !!lockedBomLineKey && !lockedSlot && !lockedUnsaved;
+
   const prefilled = useRef(false);
   useEffect(() => {
     if (prefilled.current || viewData) return;
-    if (fabricLines.length !== 1) return;
-    const w = slotCutWidth(fabricLines[0]);
-    if (!Number.isFinite(w) || w < 10) return;
+    // The bound fabric wins over the "sole fabric" guess: the sheets themselves say which cloth
+    // they are cut from (0260), and that is a fact, not an inference.
+    const bound = lockedBomLineKey
+      ? lockedSlot
+      : fabricLines.length === 1
+        ? fabricLines[0]
+        : undefined;
+    // A lock on a not-yet-saved line cannot set the SLOT (the marker RPC only takes stored
+    // lines), but the cloth is known and its width is right there — so take the width anyway.
+    // Leaving 140 in place would make the operator re-enter a number the modal is holding.
+    const widthOnly = !bound && lockedUnsaved
+      ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey)
+      : undefined;
+    if (!bound && !widthOnly) return;
     prefilled.current = true;
-    setWidthCm(Math.round(w * 10) / 10);
-    setSlotKey(fabricLines[0].lineKey);
+    if (bound) setSlotKey(bound.lineKey);
+    const w = slotCutWidth(bound ?? widthOnly);
+    if (Number.isFinite(w) && w >= 10) setWidthCm(Math.round(w * 10) / 10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fabricLines.length, viewData]);
+  }, [fabricLines.length, viewData, lockedBomLineKey, lockedSlot, lockedUnsaved, bomLines]);
 
   // A failed source fetch means the run nested a SUBSET: placed==total holds (the missing
   // pieces never parsed), but the marker would read as a clean complete norm. Block save.
@@ -480,7 +512,9 @@ export function NestingModal({
       setMarkerName('');
       // Back to the prefilled slot, not to «не привязывать»: on a single-fabric card the next
       // save in this session would otherwise silently offer an unlinked marker.
-      setSlotKey(fabricLines.length === 1 ? fabricLines[0].lineKey : '');
+      // Only a RESOLVABLE lock is restored: re-arming a dead key would send a bom_line_key the
+      // server cannot resolve on the next save in the same session.
+      setSlotKey(lockedSlot?.lineKey || (fabricLines.length === 1 ? fabricLines[0].lineKey : ''));
     } catch (e) {
       showMessage(e instanceof Error && e.message ? e.message : 'не удалось сохранить маркер', 'error');
     } finally {
@@ -1072,24 +1106,51 @@ export function NestingModal({
               }}
             />
           </label>
-          <label className='block space-y-0.5'>
-            <Text size='nano' variant='label' component='span'>
-              слот BOM (ткань) — куда пойдёт расход
-            </Text>
-            <Selector
-              label=''
-              value={slotKey}
-              options={[
-                { value: '', label: 'не привязывать' },
-                ...fabricLines.map((b) => ({
-                  value: b.lineKey,
-                  label: `${b.name || 'без названия'}${b.unit ? ` · ${b.unit}` : ''}`,
-                })),
-              ]}
-              onChange={(v: string | number) => setSlotKey(String(v))}
-            />
-          </label>
-          {unsavedSlots > 0 && (
+          {lockedSlot ? (
+            // The sheets carry their fabric, so there is nothing to choose — asking again would
+            // invite a marker linked to a cloth its own DXFs are not cut from.
+            <div className='space-y-0.5'>
+              <Text size='nano' variant='label' component='span'>
+                слот BOM (ткань) — куда пойдёт расход
+              </Text>
+              <Text size='micro' component='p'>
+                {slot?.name?.trim() || 'ткань'}
+                {slot?.unit ? ` · ${slot.unit}` : ''} — из привязки DXF
+              </Text>
+            </div>
+          ) : (
+            <label className='block space-y-0.5'>
+              <Text size='nano' variant='label' component='span'>
+                слот BOM (ткань) — куда пойдёт расход
+              </Text>
+              <Selector
+                label=''
+                value={slotKey}
+                options={[
+                  { value: '', label: 'не привязывать' },
+                  ...fabricLines.map((b) => ({
+                    value: b.lineKey,
+                    label: `${b.name || 'без названия'}${b.unit ? ` · ${b.unit}` : ''}`,
+                  })),
+                ]}
+                onChange={(v: string | number) => setSlotKey(String(v))}
+              />
+            </label>
+          )}
+          {lockDangling && (
+            <CalloutBox tone='warning'>
+              ткань, к которой привязаны эти DXF, больше не является тканевой строкой BOM карточки
+              — выберите слот вручную, иначе маркер сохранится без привязки и расход не попадёт в
+              костинг
+            </CalloutBox>
+          )}
+          {lockedUnsaved && (
+            <CalloutBox tone='note'>
+              ткань этих DXF ещё не сохранена в карточке — сохраните карточку, тогда маркер
+              привяжется к ней; сейчас он уйдёт без привязки
+            </CalloutBox>
+          )}
+          {unsavedSlots > 0 && !lockedSlot && !lockedUnsaved && (
             <Text size='nano' variant='label' component='p'>
               новые слоты BOM появятся здесь после сохранения карточки
             </Text>
