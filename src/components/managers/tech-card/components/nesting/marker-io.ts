@@ -26,6 +26,12 @@ export type MarkerBomLine = {
   // waste decomposition stays auditable after the material changes. '' = unknown.
   effectiveFabricWidthCm: string;
   selvedgeCm: string;
+  // The BOM family this line belongs to, as a word the operator reads («подкладка»). '' when the
+  // caller does not classify. Load-bearing rather than decorative: since a раскладка binds to any
+  // roll-goods line, one card can hold «Cupro 90» as lining AND as pocket-bag cloth, and a select
+  // showing the article name alone offers two identical options — while THIS select is the one
+  // that decides which BOM line the measured length lands on.
+  role?: string;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -115,6 +121,27 @@ export function markersForLine(
 ): common_TechCardMarkerSummary[] {
   if (!lineKey) return [];
   return (markers ?? []).filter((m) => (m.bomLineKey ?? '') === lineKey);
+}
+
+// Раскладки, относящиеся к ОДНОМУ колорвею: его собственные плюс общие.
+//
+// Раскладка меряется на КОНКРЕТНОМ полотне — колорвей называет артикул, у артикула своя ширина, —
+// и длина, снятая на 140 см, к артикулу 150 см просто не относится. Предложить её всё равно
+// значит выдать правдоподобное неверное число, а такие глазом не ловятся. Маркеры с colorway_id 0
+// (унаследованные и те, где ширина у всех одна) остаются общими: отбросить их значило бы спрятать
+// всё, что снято до 0264.
+//
+// Фильтр живёт ЗДЕСЬ и применяется на входе в редактор рецепта конкретного колорвея. Полоса
+// расхода на вкладке костинга — карточная, не колорвейная, и фильтровать её этим нельзя.
+export function markersOfColorway(
+  markers: common_TechCardMarkerSummary[] | undefined,
+  colorwayId: number,
+): common_TechCardMarkerSummary[] {
+  if (!colorwayId) return markers ?? [];
+  return (markers ?? []).filter((m) => {
+    const own = Number(m.colorwayId ?? 0);
+    return own === 0 || own === colorwayId;
+  });
 }
 
 // Newest marker per size for one BOM line — the per-size apply source.

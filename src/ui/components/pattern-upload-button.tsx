@@ -32,8 +32,10 @@ export type UploadedPattern = {
 };
 
 // A fabric slot the sheet can be bound to. Deliberately minimal — this control lives in ui/ and
-// must not learn the tech-card's BOM shape.
-export type PatternFabricSlot = { lineKey: string; name: string };
+// must not learn the tech-card's BOM shape. `role` is a caller-rendered word («подкладка»), not a
+// section enum, for the same reason: two lines can carry the SAME material name in different
+// roles, and without it the select shows two identical options.
+export type PatternFabricSlot = { lineKey: string; name: string; role?: string };
 
 // One picked file staged in the naming modal, with its per-file upload status.
 type StagedFile = {
@@ -154,7 +156,9 @@ export function PatternUploadModal({
       <div className='space-y-2.5'>
         <Text size='micro' variant='label'>
           название необязательно — пустое поле оставит только имя файла
-          {slots.length > 0 ? '; для DXF обязательна ткань — из неё берутся ширина и кромка' : ''}
+          {slots.length > 0
+            ? '; для DXF обязателен материал — из него берутся ширина и кромка'
+            : ''}
         </Text>
         {staged.map((row, i) => (
           <div key={`${row.file.name}-${i}`} className='space-y-0.5'>
@@ -187,7 +191,7 @@ export function PatternUploadModal({
             {slots.length > 0 && isDxfFile(row.file) && (
               <select
                 className='h-8 w-full border border-borderColor bg-bgColor px-1.5 text-micro'
-                aria-label={`ткань для ${row.file.name}`}
+                aria-label={`материал для ${row.file.name}`}
                 value={row.bomLineKey}
                 disabled={busy || row.status === 'done'}
                 onChange={(e) =>
@@ -196,10 +200,10 @@ export function PatternUploadModal({
                   )
                 }
               >
-                <option value=''>выберите ткань…</option>
+                <option value=''>выберите материал…</option>
                 {slots.map((s) => (
                   <option key={s.lineKey} value={s.lineKey}>
-                    {s.name || 'без названия'}
+                    {[s.role, s.name.trim()].filter(Boolean).join(' · ') || 'без названия'}
                   </option>
                 ))}
               </select>

@@ -6856,6 +6856,12 @@ export type common_TechCardMarkerSummary = {
   // Кромка (selvedge, cm per edge) the раскладка ran with — snapshotted at save time from the
   // effective article so the waste decomposition stays auditable after the material changes.
   selvedgeCm: googletype_Decimal | undefined;
+  // The colourway whose ARTICLE this layout was measured on (0264); 0 = not colourway-specific.
+  // Every colourway of a style cuts the same pieces, but each pins its own catalog article per
+  // slot, and articles differ in roll width and кромка — so the same geometry on two colourways
+  // is two markers with two measured lengths. A costing suggestion that ignored this would apply
+  // a length taken at another cloth's width, and be wrong in a way that reads as plausible.
+  colorwayId: number | undefined;
 };
 
 export type UpdateTechCardRequest = {
@@ -8218,6 +8224,9 @@ export type common_TechCardMarkerInsert = {
   // Кромка the layout was computed with (cm per edge, >= 0; 0 = none/unknown). The nesting
   // client populates it from the linked article's selvedge_cm at save time.
   selvedgeCm: googletype_Decimal | undefined;
+  // The colourway this раскладка is measured for; 0 = not colourway-specific (legacy markers and
+  // cards whose colourways share one article). Must be a live colourway of this card.
+  colorwayId: number | undefined;
 };
 
 // TechCardMarkerLayout is the self-contained geometry of a marker, stored as an opaque proto-JSON

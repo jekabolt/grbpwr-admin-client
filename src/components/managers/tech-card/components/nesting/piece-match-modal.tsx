@@ -104,6 +104,8 @@ type BlockRow = {
   // 'similar' and 'other-fabric' are guesses and say so.
   suggested: string; // piece lineKey, '' = none
   basis: 'exact' | 'loose' | 'similar' | 'other-fabric' | 'none';
+  // Слот, с которого пришла подсказка 'other-fabric'. '' для остальных оснований.
+  fromSlot?: string;
   choice: string; // piece lineKey, '' = unmapped, NEW = create a piece named after the block
 };
 
@@ -121,12 +123,15 @@ export function PieceMatchModal({
   files,
   bomLineKey,
   fabricName,
+  slotLabelByKey,
   sizeLabel,
   onClose,
 }: {
   files: NestingFile[] | null; // null = closed
   bomLineKey: string;
   fabricName: string;
+  // Подпись слота по его ключу — чтобы подсказка «по другой ткани» могла сказать, ПО КАКОЙ.
+  slotLabelByKey?: Map<string, string>;
   sizeLabel?: string;
   onClose: () => void;
 }) {
@@ -288,12 +293,18 @@ export function PieceMatchModal({
     }
     return m;
   }, [aliases, bomLineKey, livePieceKeys, split]);
+  // Блок с тем же именем, уже сопоставленный на ДРУГОМ слоте. Подсказка полезная, но с тех пор
+  // как выкройка привязывается к любой рулонной строке, «другой слот» может быть другой РОЛЬЮ:
+  // градалка называет полочку подкладки ровно так же, как полочку верха, а это разные детали
+  // кроя. Поэтому запоминается ещё и слот-источник — подсказка обязана называть, откуда она, а
+  // не выглядеть как факт: её принимают пачкой.
   const otherFabricByBlock = useMemo(() => {
-    const m = new Map<string, string>();
+    const m = new Map<string, { pieceKey: string; fromSlot: string }>();
     for (const a of aliases ?? []) {
-      if ((a.bomLineKey ?? '') === bomLineKey) continue;
+      const from = a.bomLineKey ?? '';
+      if (from === bomLineKey) continue;
       const k = loose(identityOf(a.blockName ?? ''));
-      if (!m.has(k)) m.set(k, a.pieceLineKey ?? '');
+      if (!m.has(k)) m.set(k, { pieceKey: a.pieceLineKey ?? '', fromSlot: from });
     }
     return m;
   }, [aliases, bomLineKey, split]);
@@ -358,6 +369,7 @@ export function PieceMatchModal({
       if (mineByBlock.has(ci)) continue;
       let suggested = '';
       let basis: BlockRow['basis'] = 'none';
+      let fromSlot = '';
       const exact = pieceOptions.find((p) => p.name.toLowerCase() === block.toLowerCase());
       const byLoose = pieceOptions.find((p) => loose(p.name) === loose(block));
       const hint = otherFabricByBlock.get(loose(block));
@@ -367,9 +379,10 @@ export function PieceMatchModal({
       } else if (byLoose) {
         suggested = byLoose.lineKey;
         basis = 'loose';
-      } else if (hint && pieceOptions.some((p) => p.lineKey === hint)) {
-        suggested = hint;
+      } else if (hint && pieceOptions.some((p) => p.lineKey === hint.pieceKey)) {
+        suggested = hint.pieceKey;
         basis = 'other-fabric';
+        fromSlot = hint.fromSlot;
       } else {
         let best = SUGGEST_MIN;
         for (const p of pieceOptions) {
@@ -387,7 +400,7 @@ export function PieceMatchModal({
       const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
         (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
       );
-      next.push({ block, instances, sizes, suggested, basis, choice: preselect });
+      next.push({ block, instances, sizes, suggested, basis, fromSlot, choice: preselect });
     }
     next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
     setRows(next);
@@ -703,7 +716,10 @@ export function PieceMatchModal({
   const basisLabel = (r: BlockRow) => {
     if (!r.suggested) return null;
     if (r.basis === 'similar') return <Pill tone='warn'>предложено по похожести</Pill>;
-    if (r.basis === 'other-fabric') return <Pill tone='warn'>по другой ткани</Pill>;
+    if (r.basis === 'other-fabric') {
+      const from = r.fromSlot ? slotLabelByKey?.get(r.fromSlot) : '';
+      return <Pill tone='warn'>{from ? `по «${from}»` : 'по другой ткани'}</Pill>;
+    }
     return null;
   };
 

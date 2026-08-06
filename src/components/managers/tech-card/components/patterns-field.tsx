@@ -1,9 +1,12 @@
+import type { common_Material } from 'api/proto-http/admin';
 import {
   useSizeNames,
   useSizeOrdering,
 } from 'components/managers/model/components/use-size-systems';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
+import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -24,6 +27,7 @@ import {
 } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
 import { sizeTokensOf } from './nesting/block-code';
+import { markerColorways } from './nesting/colorway-widths';
 import type { NestingFile } from './nesting/use-nesting';
 import { TechCardFormData } from './schema';
 
@@ -40,6 +44,22 @@ const DxfSheetViewer = lazy(() =>
 const PieceMatchModal = lazy(() =>
   import('./nesting/piece-match-modal').then((m) => ({ default: m.PieceMatchModal })),
 );
+
+// Секции BOM, к которым МОЖНО привязать выкройку. Это ровно те же четыре «рулонные» семьи,
+// что стор гросс-апит вейстеджем и что кладёт маркер (rollGoodsSections): подклад, бортовку и
+// утеплитель тоже кроят из полотна по лекалу, и до сих пор их DXF привязать было НЕЛЬЗЯ —
+// диалог показывал только основную ткань. Нитки, фурнитура и упаковка сюда не попадают: там
+// нечего раскладывать.
+// Map, not a plain object: an object literal answers for 'constructor' and 'toString' too, so
+// `ROLE[section]` used as a membership test would let those through as truthy inherited functions.
+// Unreachable with today's proto enum, but the shape should not depend on that.
+const ROLE_OF_SECTION = new Map<string, string>([
+  ['TECH_CARD_BOM_SECTION_FABRIC', 'основная ткань'],
+  ['TECH_CARD_BOM_SECTION_LINING', 'подкладка'],
+  ['TECH_CARD_BOM_SECTION_INTERLINING', 'бортовка'],
+  ['TECH_CARD_BOM_SECTION_INSULATION', 'утеплитель'],
+]);
+const SECTION_ORDER = [...ROLE_OF_SECTION.keys()];
 
 type PatternRow = {
   sizeId?: number;
@@ -105,6 +125,21 @@ export function PatternsField({
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
 
+  // Колорвеи карточки с шириной их ПИНОВ по каждому слоту — раскладка меряется на конкретном
+  // артикуле, а называет его колорвей. Читается с сервера: рецепт пишется отдельным RPC
+  // (UpdateColorwayRecipe), в форме карточки пинов нет. includeArchived — чтобы строка,
+  // ссылающаяся на архивный артикул, всё равно разрешилась в ширину, а не молча упала на дефолт.
+  const { data: cardRead } = useTechCard(techCardId);
+  const { data: materialsData } = useMaterials('', true, !!techCardId);
+  const colorwayOptions = useMemo(() => {
+    const byId = new Map<number, common_Material>();
+    for (const m of materialsData?.materials ?? []) {
+      const id = Number(m.id ?? 0);
+      if (id) byId.set(id, m);
+    }
+    return markerColorways(cardRead, byId);
+  }, [cardRead?.techCard, materialsData?.materials]);
+
   const [dragSize, setDragSize] = useState<number | null>(null);
   // Files dropped onto a tile, staged for the naming modal (click uploads stage inside
   // PatternUploadButton; drops land here because the modal must know the target size).
@@ -146,11 +181,13 @@ export function PatternsField({
   const fabricBomLines = useMemo(
     () =>
       bomItems
-        .filter((b) => (b.section ?? '') === 'TECH_CARD_BOM_SECTION_FABRIC' && b.lineKey)
-        .map((b) => ({
+        .filter((b) => ROLE_OF_SECTION.has(b.section ?? '') && b.lineKey)
+        .map((b, i) => ({
           id: b.id ?? 0,
           lineKey: b.lineKey!,
           name: b.name ?? '',
+          section: b.section ?? '',
+          role: ROLE_OF_SECTION.get(b.section ?? '') ?? '',
           unit: b.unit ?? '',
           fabricWidth: b.fabricWidth ?? '',
           wastagePercent: b.wastagePercent ?? '',
@@ -158,7 +195,15 @@ export function PatternsField({
           // cutting width from these instead of the 140 cm default.
           effectiveFabricWidthCm: b.effectiveFabricWidthCm ?? '',
           selvedgeCm: b.selvedgeCm ?? '',
-        })),
+          order: i,
+        }))
+        // Основная ткань первой, дальше подклад/бортовка/утеплитель — порядок ролей, а не
+        // порядок строк BOM: в списке из восьми строк глаз ищет роль, а не позицию.
+        .sort(
+          (a, b) =>
+            SECTION_ORDER.indexOf(a.section) - SECTION_ORDER.indexOf(b.section) ||
+            a.order - b.order,
+        ),
     [bomItems],
   );
   // Every fabric line of the card, saved or not. The card save upserts the BOM BEFORE it
@@ -167,7 +212,7 @@ export function PatternsField({
   // on a server id would have left a brand-new card with no slot control at all — and therefore
   // no binding, no per-fabric раскладка and no matching — until after a save and a return trip.
   const uploadSlots = useMemo(
-    () => fabricBomLines.map((b) => ({ lineKey: b.lineKey, name: b.name })),
+    () => fabricBomLines.map((b) => ({ lineKey: b.lineKey, name: b.name, role: b.role })),
     [fabricBomLines],
   );
   const liveFabricKeys = useMemo(
@@ -274,7 +319,18 @@ export function PatternsField({
   }, [sizeIds, sizeById]);
 
   const fabricName = (lineKey: string) =>
-    fabricBomLines.find((b) => b.lineKey === lineKey)?.name?.trim() || 'без ткани';
+    fabricBomLines.find((b) => b.lineKey === lineKey)?.name?.trim() || 'без материала';
+  // Роль строки. Одна и та же «Cupro 90» может стоять и подкладкой, и карманкой — по имени они
+  // неразличимы, так что роль выводится рядом, а не вместо.
+  const roleOf = (lineKey: string) =>
+    fabricBomLines.find((b) => b.lineKey === lineKey)?.role ?? '';
+  // Подпись слота в выпадающих списках: «подкладка · Cupro 90».
+  const slotLabel = (s: { name: string; role: string }) =>
+    [s.role, s.name.trim()].filter(Boolean).join(' · ') || 'без названия';
+  const slotLabelByKey = useMemo(
+    () => new Map(fabricBomLines.map((b) => [b.lineKey, slotLabel(b)])),
+    [fabricBomLines],
+  );
 
   function commitRename(index: number, value: string) {
     // '' is a legal committed value — it clears the name and the row falls back to the
@@ -463,23 +519,23 @@ export function PatternsField({
               {!orphan && isDxfUrl(row.url) && uploadSlots.length > 0 && editing?.index !== index && (
                 <select
                   className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
-                  aria-label={`ткань для ${labelOf(row)}`}
+                  aria-label={`материал для ${labelOf(row)}`}
                   value={row.bomLineKey ?? ''}
                   disabled={isSubmitting || !canEdit}
                   onChange={(e) =>
                     setValue(`patterns.${index}.bomLineKey`, e.target.value, { shouldDirty: true })
                   }
                 >
-                  <option value=''>ткань не выбрана</option>
+                  <option value=''>материал не выбран</option>
                   {/* A binding whose line was deleted or reclassified still EXISTS in form state.
                       Without an option for it the controlled select paints empty and reads as
                       «unbound», so "fixing" it would rebind a sheet the operator thought was free. */}
                   {!!row.bomLineKey && !liveFabricKeys.has(row.bomLineKey) && (
-                    <option value={row.bomLineKey}>ткань удалена из BOM — выберите заново</option>
+                    <option value={row.bomLineKey}>строка удалена из BOM — выберите заново</option>
                   )}
                   {uploadSlots.map((s) => (
                     <option key={s.lineKey} value={s.lineKey}>
-                      {s.name || 'без названия'}
+                      {slotLabel(s)}
                     </option>
                   ))}
                 </select>
@@ -529,14 +585,16 @@ export function PatternsField({
       <div className='space-y-1 border border-borderColor p-2'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <Text size='micro' variant='label' component='p'>
-            DXF — один файл на ТИП ДЕТАЛЕЙ: основная ткань, подклад, карманы. Внутри все
+            DXF — один файл на ТИП ДЕТАЛЕЙ. Каждый привязывается к своему материалу — основная
+            ткань, подкладка, бортовка, утеплитель, — и на один материал файлов может быть
+            несколько (основная ткань и карманка это две разные строки BOM). Внутри все
             размеры; размер выбирается при просмотре и в раскладке, а размерный ряд карточки
             дополняется из файла сам. Колорвей на файл не влияет — лекала общие, — но артикул и
             его ширину каждый колорвей подставляет свои.
           </Text>
         </div>
         {/* Плейсхолдер загрузки — НЕ на плитке размера. Размеров в одном DXF несколько, так что
-            спрашивать «в какой размер положить» бессмысленно; спрашивается ткань. Пунктирная
+            спрашивать «в какой размер положить» бессмысленно; спрашивается материал. Пунктирная
             рамка тут значит то же, что и на сетке размеров: сюда ещё ничего не положили. */}
         {canEdit && uploadSlots.length > 0 && (
           <div
@@ -550,7 +608,7 @@ export function PatternsField({
                 f.name.toLowerCase().endsWith('.dxf'),
               );
               // Кладём в тот же слот, что и кнопка: наименьший размер ряда. Модалка спросит
-              // ткань, потому что fabricSlots передан.
+              // материал, потому что fabricSlots передан.
               if (dropped.length > 0) setDroppedOn({ sizeId: orderSizes(sizeIds)[0] ?? 0, files: dropped });
             }}
           >
@@ -577,6 +635,11 @@ export function PatternsField({
             return (
               <div key={g.bomLineKey || '(none)'} className='flex flex-wrap items-center gap-1.5'>
                 <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                  {roleOf(g.bomLineKey) && (
+                    <span className='mr-1 border border-textColor px-1 text-nano uppercase leading-snug tracking-label'>
+                      {roleOf(g.bomLineKey)}
+                    </span>
+                  )}
                   {fabricName(g.bomLineKey)}
                   <span className='text-labelColor'>
                     {' '}
@@ -624,7 +687,7 @@ export function PatternsField({
                 )}
                 {!bound && (
                   <Text size='nano' component='span' className='text-error'>
-                    файлы не привязаны к ткани — привяжите на плитке размера
+                    файлы не привязаны к материалу — привяжите на плитке размера
                   </Text>
                 )}
               </div>
@@ -710,6 +773,7 @@ export function PatternsField({
             techCardId={techCardId}
             sizeId={nesting.sizeId}
             bomLines={fabricBomLines}
+            colorways={colorwayOptions}
             lockedBomLineKey={nesting.bomLineKey || undefined}
             canEdit={canEdit}
             savedSizeIds={savedSizeIds}
@@ -733,6 +797,7 @@ export function PatternsField({
             files={matching.files}
             bomLineKey={matching.bomLineKey}
             fabricName={matching.fabricName}
+            slotLabelByKey={slotLabelByKey}
             sizeLabel={matching.sizeLabel}
             onClose={() => setMatching(null)}
           />

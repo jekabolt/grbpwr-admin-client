@@ -49,6 +49,7 @@ import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { MarkerApplyHint } from './marker-apply';
+import { markersOfColorway } from './nesting/marker-io';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
@@ -2031,6 +2032,11 @@ function ColorwayRecipeEditor({
   const staging = useTechCardStaging();
   // A colourway the card has not created yet has no id to write against — it must not stage.
   const colorwayId = colorway.colorwayId ?? 0;
+  // Раскладки ЭТОГО колорвея (плюс общие). Фильтруется один раз на входе, а не в каждом месте
+  // ниже: «применить маркер» подставляет измеренную длину прямо в норму расхода, и длина, снятая
+  // на артикуле другого колорвея, отличается ровно настолько, насколько отличаются ширины — то
+  // есть выглядит совершенно нормально.
+  const cwMarkers = useMemo(() => markersOfColorway(markers, colorwayId), [markers, colorwayId]);
   const stagingKey = `recipe:${colorwayId}`;
   const title = colorwayTitle(colorway);
   const [dirty, setDirty] = useState(false);
@@ -2242,7 +2248,7 @@ function ColorwayRecipeEditor({
                   rows={rows}
                   bomItems={bomItems}
                   materials={materials}
-                  markers={markers}
+                  markers={cwMarkers}
                   sizeIds={sizeIds}
                   sizeQuantities={sizeQuantities}
                   sizeNameById={sizeNameById}
@@ -2304,7 +2310,7 @@ function ColorwayRecipeEditor({
                 allowedSections={GARMENT_SECTIONS}
                 usedKeys={garmentUsedKeys}
                 materials={materials}
-                markers={markers}
+                markers={cwMarkers}
                 sizeIds={sizeIds}
                 sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}

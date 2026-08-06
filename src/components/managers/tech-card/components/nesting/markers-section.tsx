@@ -7,9 +7,10 @@ import type { common_TechCard, common_TechCardMarker } from 'api/proto-http/admi
 import { useSizeNames } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { colorwayLabelOf } from './colorway-widths';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Suspense, lazy, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -39,6 +40,16 @@ export function MarkersSection({
   canEdit: boolean;
 }) {
   const markers = techCard?.markers ?? [];
+  // Колорвей маркера — имя, а не id. Без него две раскладки одного слота на разных ширинах
+  // различаются только числом в колонке «ширина», и понять, которая из них чья, нельзя.
+  const colorwayLabelById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const c of techCard?.colorways ?? []) {
+      const id = Number(c.colorwayId ?? 0);
+      if (id) m.set(id, colorwayLabelOf(c));
+    }
+    return m;
+  }, [techCard?.colorways]);
   const sizeById = useSizeNames();
   const season = (useWatch<TechCardFormData>({ name: 'season' }) ?? '') as string;
   const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
@@ -126,6 +137,13 @@ export function MarkersSection({
                         не привязан / удалён
                       </Text>
                     )}
+                    {/* «общая» — это НЕ отсутствие данных: маркер снят до 0264 или ширина у всех
+                        колорвеев одна, и такая раскладка законно предлагается каждому. Пустая
+                        ячейка читалась бы как недозаполненная. */}
+                    <span className='block text-nano text-labelColor'>
+                      {colorwayLabelById.get(Number(m.colorwayId ?? 0)) ??
+                        (Number(m.colorwayId ?? 0) ? 'колорвей удалён' : 'общая')}
+                    </span>
                   </td>
                   <td>{decNum(m.fabricWidthCm)} см</td>
                   <td>{decNum(m.usedLengthCm)} см</td>

@@ -26,6 +26,7 @@ import { checkLayout, measureLayout, type Violation } from 'lib/nesting/geom/cle
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
+import type { MarkerColorway } from './colorway-widths';
 import { buildMarkerLayout, dec, decNum, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
@@ -74,6 +75,7 @@ export function NestingModal({
   sizeId,
   sizeIdByToken,
   bomLines,
+  colorways,
   lockedBomLineKey,
   view,
   canEdit = true,
@@ -91,8 +93,13 @@ export function NestingModal({
   // маркер обязан сохраняться на ВЫБРАННЫЙ внутри размер, а не на тот, в чей слот файл
   // когда-то положили: иначе он молча запишется не туда, и костинг возьмёт чужую длину.
   sizeIdByToken?: Map<string, number>;
-  // The card's fabric BOM lines (slot select of the save dialog).
+  // The card's roll-goods BOM lines (slot select of the save dialog) — fabric, lining,
+  // interlining and insulation, each carrying the word for its role.
   bomLines?: MarkerBomLine[];
+  // The card's colourways with the cutting width each one's PINNED article gives per slot. The
+  // раскладка is measured on a concrete cloth, and which cloth that is comes from the colourway,
+  // not from the slot: the slot is the role («подкладка»), the colourway names the article.
+  colorways?: MarkerColorway[];
   // The fabric these DXFs are bound to (0260). When set, the раскладка IS that cloth: the slot
   // is fixed, the width comes from it, and the save dialog shows the slot rather than asking.
   lockedBomLineKey?: string;
@@ -432,19 +439,50 @@ export function NestingModal({
   const [nameTouched, setNameTouched] = useState(false);
   const [slotKey, setSlotKey] = useState('');
   const [saving, setSaving] = useState(false);
+  // Колорвей, ПОД КОТОРЫЙ считается раскладка. 0 = общая, «ширина у всех одинаковая». Он выбран
+  // до запуска, а не при сохранении: от него зависит ширина полотна, а ширина — это вход
+  // алгоритма, а не подпись к результату.
+  const [colorwayId, setColorwayId] = useState<number>(0);
 
   // A slot added in the UI but never saved (id 0) cannot be linked — the server resolves
   // bom_line_key against SAVED rows and would reject the whole marker after a paid nest.
   const fabricLines = (bomLines ?? []).filter((b) => b.id > 0);
+  const cwOptions = colorways ?? [];
+  const chosenColorway = cwOptions.find((c) => c.colorwayId === colorwayId);
+  // Роль + артикул. Роль обязательна: раскладка привязывается к любой рулонной строке, поэтому
+  // «Cupro 90» может стоять и подкладкой, и карманкой, и по имени они неразличимы — а именно этот
+  // список решает, на какую строку BOM ляжет измеренный расход.
+  const slotLabel = (b: MarkerBomLine) =>
+    [b.role, b.name?.trim() || 'без названия'].filter(Boolean).join(' · ') +
+    (b.unit ? ` · ${b.unit}` : '');
   const unsavedSlots = (bomLines ?? []).length - fabricLines.length;
   const slot = fabricLines.find((b) => b.lineKey === slotKey);
   // The prefill follows the chosen slot until the operator edits the name by hand.
-  const defaultName = `${sizeLabel ?? ''}${sizeLabel ? ' · ' : ''}${slot?.name?.trim() || `${widthCm} см`}`;
+  // Имя — единственное, что различает два маркера: уникальность в БД это (карточка, размер, имя),
+  // и она НЕ расширена колорвеем (в MySQL повторные NULL в UNIQUE разрешены, так что нулевая
+  // колонка молча сняла бы гарантию с общих маркеров). Поэтому в подпись входит и роль, и
+  // колорвей: без них подкладка и карманка одного артикула на одном размере столкнулись бы на
+  // constraint сырой ошибкой драйвера — уже ПОСЛЕ оплаченного прогона.
+  const defaultName = [
+    sizeLabel || '',
+    (slot ? [slot.role, slot.name?.trim()].filter(Boolean).join(' ') : '') || `${widthCm} см`,
+    chosenColorway?.label ?? '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
   const nameValue = nameTouched ? markerName : [...defaultName].slice(0, 191).join('');
   // Раскройная ширина артикула слота: рулон − 2×кромка (0259). Сравниваем раскладку именно с
   // ней — с полной шириной рулона расхождение было бы ложным на каждой ткани с кромкой.
+  //
+  // ПИН КОЛОРВЕЯ ГЛАВНЕЕ ДЕФОЛТА СЛОТА. Слот — это роль («подкладка»), а колорвей называет
+  // артикул, из которого её реально кроят, и у артикула своя ширина. Ширина слота — то, чем эта
+  // роль кроится «вообще»; ширина пина — то, на чём кроится ЭТОТ колорвей. Раскладка меряет
+  // второе. Рулон и кромка берутся из одного источника: ширина пина с кромкой слота описала бы
+  // рулон, которого не существует.
   const slotCutWidth = (b?: MarkerBomLine): number => {
     if (!b) return NaN;
+    const pin = chosenColorway?.widthByLine.get(b.lineKey);
+    if (pin && Number.isFinite(pin.cutCm)) return pin.cutCm;
     const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
     if (!Number.isFinite(roll) || roll <= 0) return NaN;
     const sel = parseDecimalNumber(b.selvedgeCm);
@@ -452,6 +490,8 @@ export function NestingModal({
     return cut > 0 ? cut : NaN;
   };
   const slotSelvedge = (b?: MarkerBomLine): number => {
+    const pin = b ? chosenColorway?.widthByLine.get(b.lineKey) : undefined;
+    if (pin && Number.isFinite(pin.cutCm)) return pin.selvedgeCm;
     const s = b ? parseDecimalNumber(b.selvedgeCm) : NaN;
     return Number.isFinite(s) && s > 0 ? s : 0;
   };
@@ -478,7 +518,8 @@ export function NestingModal({
     const each = fabricLines
       .map((b) => {
         const cut = slotCutWidth(b);
-        return Number.isFinite(cut) ? `${b.name || 'ткань'} ${Math.round(cut * 10) / 10}` : '';
+        const name = [b.role, b.name?.trim()].filter(Boolean).join(' ') || 'материал';
+        return Number.isFinite(cut) ? `${name} ${Math.round(cut * 10) / 10}` : '';
       })
       .filter(Boolean);
     return each.length ? `раскрой по слотам, см: ${each.join(' · ')}` : '';
@@ -500,11 +541,32 @@ export function NestingModal({
     !!lockedBomLineKey && !lockedSlot && (bomLines ?? []).some((b) => b.lineKey === lockedBomLineKey);
   const lockDangling = !!lockedBomLineKey && !lockedSlot && !lockedUnsaved;
 
+  // Какой именно артикул подставил колорвей — иначе «ширина взялась откуда-то» и проверить нечем.
+  const pinArticle = (() => {
+    const key = lockedSlot?.lineKey || slotKey;
+    const pin = key ? chosenColorway?.widthByLine.get(key) : undefined;
+    if (!pin || !Number.isFinite(pin.cutCm)) return '';
+    return `${pin.articleName || 'без названия'} · раскрой ${pin.cutCm} см`;
+  })();
+  // Карточка предлагает рулонные строки, а слот не выбран. Раньше это молча сохраняло маркер с
+  // пустой привязкой: длина измерена, костинг её не видит, и понять это можно только по тому, что
+  // норма не появилась. Пока строк не было вовсе (примерки, черновая карточка) привязывать нечего
+  // и запрет был бы ложным.
+  const noSlotChosen = !viewData && fabricLines.length > 0 && !lockedSlot && !slotKey;
+
   const prefilled = useRef(false);
   useEffect(() => {
     if (prefilled.current || viewData) return;
-    // The bound fabric wins over the "sole fabric" guess: the sheets themselves say which cloth
-    // they are cut from (0260), and that is a fact, not an inference.
+    // The bound fabric wins over the "sole slot" guess: the sheets themselves say which cloth they
+    // are cut from (0260), and that is a fact, not an inference.
+    //
+    // The guess is deliberately narrow — exactly ONE roll-goods line on the whole card. It used to
+    // read as «the only fabric», which was the same thing while only fabric lines could be offered;
+    // now that lining, interlining and insulation are offered too, a lined garment has two or more
+    // candidates and there is nothing to infer from. Guessing the fabric there would bind a lining
+    // раскладка to the shell half the time, and the mistake is invisible: the layout is correct,
+    // the length is real, and it lands on the wrong BOM line. Instead the modal asks — noSlotChosen
+    // below makes the unanswered question block the save rather than pass silently.
     const bound = lockedBomLineKey
       ? lockedSlot
       : fabricLines.length === 1
@@ -519,10 +581,26 @@ export function NestingModal({
     if (!bound && !widthOnly) return;
     prefilled.current = true;
     if (bound) setSlotKey(bound.lineKey);
-    const w = slotCutWidth(bound ?? widthOnly);
-    if (Number.isFinite(w) && w >= 10) setWidthCm(Math.round(w * 10) / 10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fabricLines.length, viewData, lockedBomLineKey, lockedSlot, lockedUnsaved, bomLines]);
+
+  // Ширина следует за выбранной парой (колорвей, слот) — до тех пор, пока оператор не введёт её
+  // руками. Это не удобство: ширина есть ВХОД алгоритма, и раскладка, посчитанная на 140 по
+  // умолчанию вместо реальных 148, даёт правдоподобную и неверную длину. Ручной ввод больше не
+  // перебивается — свой номер оператор ставит осознанно, и подставлять поверх него было бы хуже,
+  // чем не подставлять вовсе.
+  const [widthTouched, setWidthTouched] = useState(false);
+  const resolvedSlot = fabricLines.find((b) => b.lineKey === slotKey);
+  useEffect(() => {
+    if (viewData || widthTouched) return;
+    const src =
+      resolvedSlot ??
+      (lockedUnsaved ? (bomLines ?? []).find((b) => b.lineKey === lockedBomLineKey) : undefined);
+    if (!src) return;
+    const w = slotCutWidth(src);
+    if (Number.isFinite(w) && w >= 10) setWidthCm(Math.round(w * 10) / 10);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slotKey, colorwayId, viewData, widthTouched, lockedUnsaved, lockedBomLineKey, bomLines]);
 
   // A failed source fetch means the run nested a SUBSET: placed==total holds (the missing
   // pieces never parsed), but the marker would read as a clean complete norm. Block save.
@@ -542,6 +620,7 @@ export function NestingModal({
     !viewData &&
     canEdit &&
     !fetchFailed &&
+    !noSlotChosen &&
     !sizeUnsaved &&
     !sizeUnresolved &&
     run.phase === 'done' &&
@@ -589,6 +668,10 @@ export function NestingModal({
           name,
           source: manual ? 'manual' : 'auto',
           bomLineKey: slotKey,
+          // Колорвей, под чей артикул мерялась раскладка (0264). 0 = общая. Без него две
+          // раскладки одного слота на разных ширинах неразличимы, и «применить маркер» в рецепте
+          // предложит длину, снятую на чужом полотне.
+          colorwayId,
           fabricWidthCm: dec(widthCm),
           gapCm: dec(gapCm),
           edgeMarginCm: dec(marginCm),
@@ -651,6 +734,10 @@ export function NestingModal({
           name: s.name ?? '',
           source: 'manual',
           bomLineKey: s.bomLineKey ?? '',
+          // Правка геометрии сохранённого маркера НЕ переназначает колорвей — она правит
+          // раскладку, а не то, чьё полотно мерялось. Взять здесь выбранный в модалке колорвей
+          // значило бы молча переприписать чужой замер.
+          colorwayId: s.colorwayId ?? 0,
           fabricWidthCm: s.fabricWidthCm,
           gapCm: s.gapCm,
           edgeMarginCm: s.edgeMarginCm,
@@ -707,6 +794,64 @@ export function NestingModal({
         {/* Left rail: material + run parameters, then the recognized piece list.
             A stored marker has nothing to configure — the rail collapses to its piece list. */}
         <div className={viewData ? 'hidden' : 'w-full shrink-0 space-y-2.5 lg:w-[300px]'}>
+          {/* ИЗ ЧЕГО КРОИМ — до параметров прогона, потому что от этой пары берётся ширина, а
+              ширина есть вход алгоритма. Колорвей называет артикул, слот называет роль; вместе они
+              дают полотно, на котором раскладка меряется. */}
+          {(cwOptions.length > 0 || fabricLines.length > 0) && (
+            <div className='space-y-1.5 border border-hairline p-1.5'>
+              {cwOptions.length > 0 && (
+                <label className='block space-y-0.5'>
+                  <Text size='nano' variant='label' component='span'>
+                    колорвей — чей артикул кроим
+                  </Text>
+                  <Selector
+                    label=''
+                    value={String(colorwayId)}
+                    options={[
+                      { value: '0', label: 'общая — ширина у всех одинаковая' },
+                      ...cwOptions.map((c) => ({
+                        value: String(c.colorwayId),
+                        label: c.label,
+                      })),
+                    ]}
+                    onChange={(v: string | number) => setColorwayId(Number(v) || 0)}
+                  />
+                </label>
+              )}
+              {!lockedSlot && fabricLines.length > 0 && (
+                <label className='block space-y-0.5'>
+                  <Text size='nano' variant='label' component='span'>
+                    ткань — куда пойдёт расход
+                  </Text>
+                  <Selector
+                    label=''
+                    value={slotKey}
+                    options={[
+                      { value: '', label: 'не выбрана' },
+                      ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
+                    ]}
+                    onChange={(v: string | number) => setSlotKey(String(v))}
+                  />
+                </label>
+              )}
+              {lockedSlot && (
+                <Text size='nano' variant='label' component='p'>
+                  ткань: {slotLabel(lockedSlot)} — из привязки DXF
+                </Text>
+              )}
+              {pinArticle && (
+                <Text size='nano' variant='label' component='p'>
+                  артикул колорвея: {pinArticle}
+                </Text>
+              )}
+              {noSlotChosen && (
+                <Text size='nano' component='p' className='text-error'>
+                  выберите ткань — иначе маркер сохранится без привязки и расход не попадёт в
+                  костинг
+                </Text>
+              )}
+            </div>
+          )}
           <div className='grid grid-cols-2 gap-1.5'>
             <label className='space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
@@ -721,7 +866,10 @@ export function NestingModal({
                 onBlur={() => {
                   const next = Math.max(10, numOr(widthRaw ?? '', widthCm));
                   setWidthRaw(null);
-                  if (next !== widthCm) guardManual(() => setWidthCm(next));
+                  if (next !== widthCm) {
+                    setWidthTouched(true);
+                    guardManual(() => setWidthCm(next));
+                  }
                 }}
                 disabled={running}
               />
@@ -1335,8 +1483,7 @@ export function NestingModal({
                 слот BOM (ткань) — куда пойдёт расход
               </Text>
               <Text size='micro' component='p'>
-                {slot?.name?.trim() || 'ткань'}
-                {slot?.unit ? ` · ${slot.unit}` : ''} — из привязки DXF
+                {lockedSlot ? slotLabel(lockedSlot) : 'ткань'} — из привязки DXF
               </Text>
             </div>
           ) : (
@@ -1349,10 +1496,7 @@ export function NestingModal({
                 value={slotKey}
                 options={[
                   { value: '', label: 'не привязывать' },
-                  ...fabricLines.map((b) => ({
-                    value: b.lineKey,
-                    label: `${b.name || 'без названия'}${b.unit ? ` · ${b.unit}` : ''}`,
-                  })),
+                  ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
                 ]}
                 onChange={(v: string | number) => setSlotKey(String(v))}
               />
