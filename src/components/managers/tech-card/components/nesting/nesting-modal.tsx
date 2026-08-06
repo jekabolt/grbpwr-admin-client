@@ -150,9 +150,15 @@ export function NestingModal({
     [allPieces, contourLayer],
   );
   const [activeSize, setActiveSize] = useState<string | null>(null);
+  // Крупнейшая группа, а не первая по градации: группа '' — это остаток, а не размер, и она
+  // сортируется последней, так что файл, где размер распознан лишь у части блоков, открылся бы
+  // на этой части, спрятав остальное за переключателем.
   const shownSize = sizeOpts.some((o) => o.size === activeSize)
     ? (activeSize as string)
-    : (sizeOpts[0]?.size ?? '');
+    : (sizeOpts.reduce<{ size: string; count: number } | null>(
+        (best, o) => (!best || o.count > best.count ? o : best),
+        null,
+      )?.size ?? '');
   const pieces = useMemo(
     () =>
       allPieces.filter(

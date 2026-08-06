@@ -44,10 +44,27 @@ export function splitPiecesBySize(
   pieces: readonly PieceDTO[],
   sizeTokens: ReadonlyMap<string, number>,
 ): BlockSplit {
+  // Отрезаем хвост, ТОЛЬКО если файл действительно градуированный — то есть если размерных
+  // хвостов в нём встретилось хотя бы два РАЗНЫХ.
+  //
+  // Иначе цена ошибки несимметрична. В файле на один размер блок «FP_L» — это левая полочка, и
+  // «L» там модификатор, а не размер; отрезав его, мы слили бы левую полочку с деталью «FP» —
+  // одна деталь кроя на две физических, то есть не та ткань на раскройном столе, ровно та
+  // ошибка, ради которой диалог и существует. А НЕ отрезав в односайзовом файле, мы всего лишь
+  // просим оператора сопоставить блоки ещё раз для следующего файла: связей станет по одной на
+  // файл, что скучно, но верно.
+  const graded = new Set<string>();
+  for (const p of pieces) {
+    const s = splitBlockSize(p.blockName ?? '', sizeTokens).size;
+    if (s) graded.add(s.toLowerCase());
+    if (graded.size > 1) break;
+  }
+  const effective = graded.size > 1 ? sizeTokens : new Map<string, number>();
+
   const codeById = new Map<number, BlockCode>();
   const bySize = new Map<string, PieceDTO[]>();
   for (const p of pieces) {
-    const code = splitBlockSize(p.blockName ?? '', sizeTokens);
+    const code = splitBlockSize(p.blockName ?? '', effective);
     codeById.set(p.id, code);
     const list = bySize.get(code.size) ?? [];
     list.push(p);

@@ -65,7 +65,11 @@ export function splitBlockSize(
   if (parts.length < 2) return { raw, identity: raw, size: '' };
   const last = parts[parts.length - 1];
   if (!sizeTokens.has(bareToken(last))) return { raw, identity: raw, size: '' };
-  return { raw, identity: parts.slice(0, -1).join('_'), size: last };
+  const identity = parts.slice(0, -1).join('_');
+  // «_XS» (ведущее подчёркивание) оставило бы пустую идентичность: такой блок стал бы
+  // безымянным и молча пропал бы из диалога, хотя до этого прекрасно сопоставлялся.
+  if (!identity) return { raw, identity: raw, size: '' };
+  return { raw, identity, size: last };
 }
 
 // Место размера в градации — по очищенному токену, чтобы «<S>» и «S» были одним размером.

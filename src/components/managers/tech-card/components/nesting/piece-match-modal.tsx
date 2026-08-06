@@ -370,11 +370,16 @@ export function PieceMatchModal({
       .map(([size, count]) => ({ size, count }))
       .sort((a, b) => rank(a.size) - rank(b.size));
   }, [sheet, split, sizeTokens]);
-  // The chosen size, falling back to the first when the operator has not picked or the sheet
-  // changed under them.
+  // The chosen size, falling back to the BIGGEST group when the operator has not picked or the
+  // sheet changed under them. Not the first in grade order: the '' group is a remainder, not a
+  // size, and it sorts last — so a file where only a couple of blocks carry a recognised size
+  // would open showing those two and hide everything else behind a toggle nobody would press.
   const shownSize = sizeOptions.some((o) => o.size === activeSize)
     ? (activeSize as string)
-    : (sizeOptions[0]?.size ?? '');
+    : (sizeOptions.reduce<{ size: string; count: number } | null>(
+        (best, o) => (!best || o.count > best.count ? o : best),
+        null,
+      )?.size ?? '');
   const sheetPieces = useMemo(
     () =>
       sheet
@@ -416,7 +421,10 @@ export function PieceMatchModal({
     const row = rowByCi.get(ci);
     if (row?.choice === CREATE) return `+ ${row.block}`;
     if (row?.choice) return nameByPieceKey.get(row.choice.toLowerCase()) ?? row.block;
-    return normBlock(p.blockName ?? '');
+    // Идентичность, а не сырое имя: иначе на листе — главной поверхности диалога — блок
+    // подписан «BP_1_XS», а строка таблицы, заголовок инспектора и «+ создать» рядом говорят
+    // «BP_1». Расходиться должен файл с нами, а не мы сами с собой.
+    return normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
   };
 
   const setChoice = (ci: string, value: string) =>
@@ -515,9 +523,16 @@ export function PieceMatchModal({
         // dangling alias is excluded from `mineByBlock` so its block can be mapped again). The
         // full-set write makes dropping it the repair.
         if (!liveKeys.has((a.pieceLineKey ?? '').trim().toLowerCase())) continue;
-        byKey.set(aliasKey(a.bomLineKey ?? '', a.blockName ?? ''), {
+        // Свёрнуто к ИДЕНТИЧНОСТИ и на записи тоже. Читающая сторона (mineByBlock, mappedRows,
+        // ciOf, unmapped) вся работает по идентичности, и пока эта петля переносила сырое имя,
+        // ключи двух сторон не совпадали: «снять связь» удаляла ключ «B1|bp_1», а алиас лежал
+        // под «B1|bp_1_xs» и переживал сохранение — кнопка отчитывалась об удалении, которого
+        // не было. Хуже того, следующее сопоставление того же блока добавляло ВТОРОЙ алиас на
+        // ту же физическую деталь, невидимый и неудаляемый ничем, кроме удаления самой детали.
+        const ident = identityOf(a.blockName ?? '');
+        byKey.set(aliasKey(a.bomLineKey ?? '', ident), {
           bomLineKey: a.bomLineKey ?? '',
-          blockName: normBlock(a.blockName ?? ''),
+          blockName: ident,
           pieceLineKey: a.pieceLineKey ?? '',
         });
       }
@@ -700,6 +715,19 @@ export function PieceMatchModal({
                     </Button>
                   ))}
                 </div>
+              )}
+              {/* Размерный ряд карточки уже не покрывает файл. Тогда блоки нераспознанных
+                  размеров не сворачиваются к идентичности и заводят ЛИШНИЕ детали кроя — по
+                  одной на каждый такой размер. Оператору неоткуда об этом догадаться, кроме
+                  как отсюда: сами блоки лежат в группе «без размера». */}
+              {sizeOptions.length > 1 && sizeOptions.some((o) => o.size === '') && (
+                <CalloutBox tone='warning'>
+                  <Text size='micro' component='p'>
+                    у {sizeOptions.find((o) => o.size === '')?.count ?? 0} контуров размер не
+                    опознан — их имена не совпали с размерным рядом карточки. Такие блоки заведут
+                    отдельные детали кроя вместо общих: проверьте размерный ряд стиля.
+                  </Text>
+                </CalloutBox>
               )}
               {missingOnLayer.length > 0 && (
                 <CalloutBox tone='warning'>
