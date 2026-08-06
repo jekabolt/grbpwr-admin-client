@@ -1688,7 +1688,7 @@ export function TechCardForm({
               <Section title='размерная таблица (межурменты) — общая для всех колорвеев стиля'>
                 <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
               </Section>
-              <Section title='выкройки (PDF/DXF) — по размерам'>
+              <Section title='выкройки (DXF) — по материалам'>
                 <PatternsField
                   techCardId={numId || undefined}
                   canEdit={canWrite(SECTION.techCards) && !frozen}

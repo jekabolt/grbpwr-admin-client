@@ -6,6 +6,7 @@ import {
   MAX_PATTERN_FILENAME,
   MAX_PATTERN_NAME,
   PATTERN_FILE_ACCEPT,
+  PATTERN_FILE_ACCEPT_DXF,
   clampPatternName,
   clampUtf8Bytes,
   formatBytes,
@@ -58,6 +59,8 @@ export function PatternUploadModal({
   onClose,
   onUploaded,
   fabricSlots,
+  defaultBomLineKey,
+  dxfOnly,
 }: {
   files: File[] | null; // null = closed
   onClose: () => void;
@@ -66,14 +69,26 @@ export function PatternUploadModal({
   // then no slot control renders and every sheet uploads unbound — the binding is a tech-card
   // concept, not a property of uploading a file.
   fabricSlots?: PatternFabricSlot[];
+  // Slot to preselect when the caller already knows which cloth the sheet belongs to — the
+  // tech card's panel is organised BY material, so dropping a file into the «подкладка» group
+  // has already answered the question. Still editable here; ignored when it names no live slot.
+  defaultBomLineKey?: string;
+  // Restrict the pick to DXF. Opt-in, not the default: fittings legitimately attach PDF sheets.
+  dxfOnly?: boolean;
 }) {
   const [staged, setStaged] = useState<StagedFile[]>([]);
   const [busy, setBusy] = useState(false);
 
   const slots = fabricSlots ?? [];
-  // One fabric on the card means there is nothing to ask: preselect it. With two or more the
+  // The slot a new sheet starts on: the caller's stated one when it is real, else the card's only
+  // fabric (with one cloth there is nothing to ask). With two or more and no stated default the
   // modal must not guess — which cloth a sheet is cut from is exactly the fact being captured.
-  const soleSlot = slots.length === 1 ? slots[0].lineKey : '';
+  const presetSlot =
+    defaultBomLineKey && slots.some((s) => s.lineKey === defaultBomLineKey)
+      ? defaultBomLineKey
+      : slots.length === 1
+        ? slots[0].lineKey
+        : '';
 
   // Re-stage whenever a new batch arrives. `files` is a fresh array per pick/drop, so
   // identity is the correct trigger. Layout effect: with a passive one the dialog's first
@@ -85,12 +100,12 @@ export function PatternUploadModal({
         name: '',
         // A PDF is a sheet a human reads, not a thing cut from a cloth: it gets no fabric
         // control and no binding. Only DXFs carry one.
-        bomLineKey: isDxfFile(file) ? soleSlot : '',
+        bomLineKey: isDxfFile(file) ? presetSlot : '',
         status: 'pending',
       })),
     );
     setBusy(false);
-  }, [files, soleSlot]);
+  }, [files, presetSlot]);
 
   const open = files != null && files.length > 0;
   // A DXF without a slot cannot be laid out: the раскладка would have no width, no кромка and
@@ -156,9 +171,11 @@ export function PatternUploadModal({
       <div className='space-y-2.5'>
         <Text size='micro' variant='label'>
           название необязательно — пустое поле оставит только имя файла
-          {slots.length > 0
-            ? '; для DXF обязателен материал — из него берутся ширина и кромка'
-            : ''}
+          {slots.length === 0
+            ? ''
+            : dxfOnly
+              ? '; материал обязателен — из него берутся ширина и кромка'
+              : '; для DXF обязателен материал — из него берутся ширина и кромка'}
         </Text>
         {staged.map((row, i) => (
           <div key={`${row.file.name}-${i}`} className='space-y-0.5'>
@@ -239,18 +256,25 @@ type Props = {
   className?: string;
   // Forwarded to the naming modal; see PatternUploadModal.
   fabricSlots?: PatternFabricSlot[];
+  defaultBomLineKey?: string;
+  // Accept DXF only. OPT-IN — the tech card's выкройки are cut geometry and a PDF there is a
+  // dead end, but a fitting sheet is a document a human reads and PDF stays legitimate for it.
+  // Hard-coding the restriction in this shared control would have broken that call site.
+  dxfOnly?: boolean;
 };
 
-// Shared выкройка upload control (§1): pick (multi-select, PDF/DXF, ≤40 MB each) → naming
-// modal → base64 → Admin.UploadPattern per file → hand each {url, filename, sizeBytes,
-// name} back to the caller. Errors are mapped (bad file vs server) and surfaced inline +
-// via snackbar. Stateless beyond the staged batch — it never touches form state itself.
+// Shared выкройка upload control (§1): pick (multi-select, ≤40 MB each, PDF/DXF or DXF-only per
+// `dxfOnly`) → naming modal → base64 → Admin.UploadPattern per file → hand each {url, filename,
+// sizeBytes, name} back to the caller. Errors are mapped (bad file vs server) and surfaced inline
+// + via snackbar. Stateless beyond the staged batch — it never touches form state itself.
 export function PatternUploadButton({
   onUploaded,
   label,
   disabled,
   className,
   fabricSlots,
+  defaultBomLineKey,
+  dxfOnly,
 }: Props) {
   const { showMessage } = useSnackBarStore();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -264,10 +288,10 @@ export function PatternUploadButton({
     const files = list ? Array.from(list) : [];
     if (files.length === 0) return;
     // Pre-flight the whole batch; bad files are reported and dropped, good ones proceed.
-    const bad = files.map((f) => ({ f, err: patternFileError(f) })).filter((x) => x.err);
+    const bad = files.map((f) => ({ f, err: patternFileError(f, { dxfOnly }) })).filter((x) => x.err);
     for (const x of bad) showMessage(`${x.f.name}: ${x.err}`, 'error');
     if (bad.length > 0) setError(bad.length === 1 ? bad[0].err : `отклонено файлов: ${bad.length}`);
-    const good = files.filter((f) => !patternFileError(f));
+    const good = files.filter((f) => !patternFileError(f, { dxfOnly }));
     if (good.length > 0) setPicked(good);
   }
 
@@ -277,7 +301,7 @@ export function PatternUploadButton({
         ref={inputRef}
         id={inputId}
         type='file'
-        accept={PATTERN_FILE_ACCEPT}
+        accept={dxfOnly ? PATTERN_FILE_ACCEPT_DXF : PATTERN_FILE_ACCEPT}
         multiple
         className='sr-only'
         disabled={disabled}
@@ -294,7 +318,7 @@ export function PatternUploadButton({
         disabled={disabled}
         onClick={() => inputRef.current?.click()}
       >
-        {label ?? '+ PDF/DXF'}
+        {label ?? (dxfOnly ? '+ DXF' : '+ PDF/DXF')}
       </Button>
       {error && (
         <Text size='small' className='mt-1 block text-error'>
@@ -306,6 +330,8 @@ export function PatternUploadButton({
         onClose={() => setPicked(null)}
         onUploaded={onUploaded}
         fabricSlots={fabricSlots}
+        defaultBomLineKey={defaultBomLineKey}
+        dxfOnly={dxfOnly}
       />
     </div>
   );

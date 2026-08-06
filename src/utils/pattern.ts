@@ -8,7 +8,14 @@ export const MAX_PATTERN_FILENAME = 255; // server caps it; trim client-side
 export const MAX_PATTERN_NAME = 255; // display name — server caps it; trim client-side
 
 // What the file input offers. The server sniffs bytes authoritatively — this is UX only.
+//
+// TWO lists, because the two callers want different things and the difference is not a setting,
+// it is what the file IS. A fitting sheet is a document a human READS — PDF is the right format
+// for it and stays. A tech-card выкройка is geometry a machine cuts: only DXF carries the graded
+// block names, the layers and the contours that the viewer, the раскладка and the piece matcher
+// all read, so a PDF there is a dead end that merely looks filed.
 export const PATTERN_FILE_ACCEPT = 'application/pdf,.pdf,.dxf,image/vnd.dxf';
+export const PATTERN_FILE_ACCEPT_DXF = '.dxf,image/vnd.dxf';
 
 // Accept by declared MIME or extension — some browsers leave file.type blank for PDFs.
 export function isPdfFile(file: File): boolean {
@@ -55,8 +62,18 @@ export function clampPatternName(s: string): string {
 
 // Pre-flight check shared by the pick and drop paths. Returns a user-facing error, or
 // null when the file may be offered to the naming modal / upload.
-export function patternFileError(file: File): string | null {
-  if (!isPdfFile(file) && !isDxfFile(file)) return 'Только PDF или DXF.';
+//
+// `dxfOnly` is OPT-IN and not the default on purpose. The server still accepts both formats, and
+// so does the fitting editor, where a PDF sheet is exactly the right thing to attach. Making the
+// restriction a caller's choice keeps the tighter rule where it belongs — the tech card, where a
+// PDF cannot be laid out, matched to cut pieces or read for a size — instead of imposing it on
+// every consumer of this helper.
+export function patternFileError(file: File, opts?: { dxfOnly?: boolean }): string | null {
+  if (opts?.dxfOnly) {
+    if (!isDxfFile(file)) return 'Только DXF — PDF больше не принимается для выкроек тех карты.';
+  } else if (!isPdfFile(file) && !isDxfFile(file)) {
+    return 'Только PDF или DXF.';
+  }
   if (file.size > MAX_PATTERN_BYTES) return 'Файл слишком большой — максимум 40 МБ.';
   return null;
 }

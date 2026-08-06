@@ -2,9 +2,11 @@ import { common_AdminColorwayRef } from 'api/proto-http/admin';
 import { SizePickerModal } from 'components/managers/model/components/size-picker-modal';
 import {
   useSizeNames,
+  useSizeOrdering,
   useSizeSystems,
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
+import { isDxfUrl } from 'utils/pattern';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -38,7 +40,10 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
     () => permittedSizeSystems(dictionary?.categories, dictionary?.categorySizeSystems, categoryId),
     [dictionary?.categories, dictionary?.categorySizeSystems, categoryId],
   );
-  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{ sizeId?: number }>;
+  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{
+    sizeId?: number;
+    url?: string;
+  }>;
   const sizeQuantities = (useWatch({ control, name: 'sizeQuantities' }) ?? []) as Array<{
     sizeId?: number;
   }>;
@@ -53,10 +58,21 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
     selectedIds: sizeIds,
   });
   const sizeById = useSizeNames();
+  const orderSizes = useSizeOrdering();
 
   const selected = new Set(sizeIds);
 
-  const patternCount = (id: number) => patterns.filter((p) => p.sizeId === id).length;
+  // Выкройки, которые снятие размера ДЕЙСТВИТЕЛЬНО потеряет.
+  //
+  // Размерный слот у DXF — артефакт хранения: size_id в таблице NOT NULL, а градуированный файл
+  // несёт весь ряд, поэтому загрузка кладёт его в наименьший размер ряда, и никакой смысл в этом
+  // не заложен. Считать такие строки «потерями размера» и удалять их значило бы: снял XS —
+  // предложено удалить ВСЕ выкройки карточки. Поэтому DXF не удаляются, а перевешиваются на
+  // оставшийся наименьший размер; теряются только PDF, у которых лист действительно на размер.
+  const isDxf = (p: { url?: string }) => isDxfUrl(p.url);
+  const patternCount = (id: number) =>
+    patterns.filter((p) => p.sizeId === id && !isDxf(p)).length;
+  const dxfCount = (id: number) => patterns.filter((p) => p.sizeId === id && isDxf(p)).length;
   // Number of colourway usages that grade this size's consumption, read from the colourways AS READ.
   // It used to reduce over the RHF `colorways` array, which has been permanently empty since
   // colourways became products: the count was always 0, so a size graded only by recipe norms was
@@ -79,9 +95,19 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
       { shouldDirty: true },
     );
     if (patterns.some((p) => p.sizeId === id)) {
+      // Куда перевесить DXF: наименьший оставшийся размер — то же правило, по которому их кладёт
+      // загрузка. Если размеров не осталось вовсе, перевешивать некуда и строка остаётся сиротой —
+      // панель выкроек показывает такие отдельно и даёт «перевесить», что честнее тихого удаления
+      // чертежа, который несёт весь ряд.
+      const remaining = orderSizes(sizeIds.filter((x) => x !== id));
+      const fallback = remaining[0];
       setValue(
         'patterns',
-        patterns.filter((p) => p.sizeId !== id) as TechCardFormData['patterns'],
+        patterns
+          .filter((p) => p.sizeId !== id || isDxf(p))
+          .map((p) =>
+            p.sizeId === id && fallback != null ? { ...p, sizeId: fallback } : p,
+          ) as TechCardFormData['patterns'],
         { shouldDirty: true },
       );
     }
@@ -208,10 +234,13 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         <Text size='micro' variant='label' className='mb-2'>
           Размер {pendingName} используется. Из карточки будет удалено:
         </Text>
-        <Row
-          label='выкройки (PDF/DXF)'
-          value={pendingRemove != null ? patternCount(pendingRemove) : 0}
-        />
+        <Row label='выкройки PDF' value={pendingRemove != null ? patternCount(pendingRemove) : 0} />
+        {pendingRemove != null && dxfCount(pendingRemove) > 0 && (
+          <Row
+            label='DXF — не удалятся, перевесятся на другой размер'
+            value={dxfCount(pendingRemove)}
+          />
+        )}
         <Row
           label='строки расхода по размерам (колорвеи)'
           value={pendingRemove != null ? usageLineCount(pendingRemove) : 0}
