@@ -18,13 +18,25 @@
 // радиуса d, посчитанная через «сырой офсет + внешняя грань планарного разбиения»:
 //   1. Сырой офсет: каждое ребро сдвигается наружу на d, выпуклый угол заполняется веером дуги
 //      (вершины ЛЕЖАТ на окружности радиуса d — k-угольник вписан, то есть офсет всегда чуть
-//      МЕНЬШЕ круглого, и площадь сходится к аналитической СНИЗУ); вогнутый угол просто
-//      соединяется хордой, из-за чего кривая сама себя пересекает.
+//      МЕНЬШЕ круглого, и площадь сходится к аналитической СНИЗУ); вогнутый угол сводится в
+//      МИТРУ — точную точку пересечения двух сдвинутых прямых.
 //   2. Внешняя грань. Все петли самопересечения у НАРУЖНОГО офсета лежат ВНУТРИ P ⊕ K, а сама
 //      кривая целиком лежит в замыкании P ⊕ K, поэтому неограниченная грань разбиения — это в
 //      точности дополнение к P ⊕ K, а её граница — искомый контур кроя. Обход границы обычный:
 //      старт из лексикографически минимальной вершины, дальше на каждом узле берётся первое
 //      ребро по часовой стрелке от входящего.
+//
+// ПОЧЕМУ МИТРА, А НЕ ХОРДА, В ВОГНУТОМ УГЛУ. Хорда между концами двух сдвинутых рёбер — это
+// «честный» сырой офсет, и на бумаге разбиение снимает получившуюся петлю. На реальных лекалах
+// оно рассыпается: контур детали — тесселированная кривая, где вогнутый поворот составляет
+// доли градуса, и петля у такого угла имеет размер долей МИКРОНА. После округления на решётку
+// Q она вырождается, ребра становятся коллинеарными, порядок рёбер вокруг узла инвертируется —
+// и обход сваливается во внутреннюю грань. Померено: у панели BP_XS из «summer men.dxf» (112
+// вершин, 105 вогнутых поворотов) обход замыкался на площади 0.0003 см² вместо 740, и так на
+// 44 деталях из 45. Митра убирает саму петлю: у пологого поворота она И ЕСТЬ точная граница
+// суммы Минковского. Ограничение MITER_LIMIT отсекает только по-настоящему острые вогнутые
+// углы (> 120°), где выброс митры был бы велик, — там снова хорда, и петля там КРУПНАЯ, то
+// есть разбиению хорошо обусловлена.
 // Единственное сознательное огрубление: если P ⊕ K оказалась с дыркой (узкая «подкова», у
 // которой концы сходятся ближе 2d), дырка заливается — контур детали в этой модели один, и
 // залить дырку значит попросить БОЛЬШЕ ткани, а не меньше.
@@ -44,12 +56,18 @@ const Q = 10_000;
 // = 0.0048·d: при припуске 1 см это 0.05 мм, вчетверо ниже допуска тесселяции дуг парсера.
 export const DEFAULT_ARC_SEGMENTS = 32;
 
+// Во сколько раз митра вогнутого угла может отойти от вершины дальше, чем на припуск. 2 —
+// поворот до 120°; дальше угол срезается хордой.
+const MITER_LIMIT = 2;
+
 export type OffsetOutcome = {
   poly: Pt[];
   // true — обход внешней грани не удался и контур заменён выпуклой оболочкой сырого офсета.
   // Оболочка ВСЕГДА накрывает истинный офсет, то есть деталь считается с запасом; занизить
   // расход этот путь не может по построению.
   fallback: boolean;
+  // Почему обход не сошёлся — для диагностики; '' при успехе, 'none' когда офсета не было.
+  reason: '' | 'none' | 'raw-degenerate' | 'open-walk' | 'short-loop' | 'not-larger';
 };
 
 export function offsetOutward(
@@ -57,60 +75,71 @@ export function offsetOutward(
   dCm: number,
   arcSegments = DEFAULT_ARC_SEGMENTS,
 ): OffsetOutcome {
-  if (!(dCm > 0) || poly.length < 3) return { poly: [...poly], fallback: false };
+  if (!(dCm > 0) || poly.length < 3) return { poly: [...poly], fallback: false, reason: 'none' };
   const src = ensureCCW(stripDegenerate(poly, 1e-4));
-  if (src.length < 3) return { poly: [...poly], fallback: false };
+  if (src.length < 3) return { poly: [...poly], fallback: false, reason: 'none' };
 
   const raw = rawOffsetLoop(src, dCm, arcSegments);
+  let reason: OffsetOutcome['reason'] = 'raw-degenerate';
   if (raw.length >= 3) {
     const traced = traceOuterFace(raw);
+    if (!traced) reason = 'open-walk';
+    else if (traced.length < 3) reason = 'short-loop';
     // Офсет наружу обязан быть СТРОГО больше исходника — иначе обход ушёл не на ту грань.
-    if (traced && traced.length >= 3 && signedArea(traced) > signedArea(src)) {
-      return { poly: traced, fallback: false };
-    }
+    else if (signedArea(traced) <= signedArea(src)) reason = 'not-larger';
+    else return { poly: traced, fallback: false, reason: '' };
   }
   const hull = convexHull(raw);
-  return { poly: hull.length >= 3 ? hull : [...poly], fallback: hull.length >= 3 };
+  return { poly: hull.length >= 3 ? hull : [...poly], fallback: hull.length >= 3, reason };
 }
 
-// Сырой (самопересекающийся) офсет: рёбра наружу на d, выпуклые углы — веер по дуге.
+// Сырой (возможно самопересекающийся) офсет, вершина за вершиной: выпуклый угол — веер по
+// дуге, вогнутый — митра (или хорда за пределом митры).
 function rawOffsetLoop(src: readonly Pt[], d: number, arcSegments: number): Pt[] {
   const n = src.length;
   const step = (2 * Math.PI) / Math.max(4, Math.round(arcSegments));
-  const out: Pt[] = [];
+  // Наружная нормаль ребра i (CCW-контур: внутренность слева по ходу, значит нормаль справа).
+  const nrm: Pt[] = new Array(n);
   for (let i = 0; i < n; i++) {
     const a = src[i];
     const b = src[(i + 1) % n];
-    const c = src[(i + 2) % n];
     const ex = b.x - a.x;
     const ey = b.y - a.y;
     const el = Math.hypot(ex, ey);
-    if (el < 1e-12) continue;
-    // Внутренность CCW-контура слева по ходу, значит наружная нормаль — справа.
-    const nx = ey / el;
-    const ny = -ex / el;
-    out.push({ x: a.x + d * nx, y: a.y + d * ny });
-    out.push({ x: b.x + d * nx, y: b.y + d * ny });
+    nrm[i] = el < 1e-12 ? { x: 0, y: 0 } : { x: ey / el, y: -ex / el };
+  }
+  // Порог на скалярное произведение нормалей, за которым митра длиннее MITER_LIMIT·d.
+  const minDot = 2 / (MITER_LIMIT * MITER_LIMIT) - 1;
 
-    const fx = c.x - b.x;
-    const fy = c.y - b.y;
-    const fl = Math.hypot(fx, fy);
-    if (fl < 1e-12) continue;
-    const cross = ex * fy - ey * fx;
-    // Вогнутый (или прямой) угол — хорда до начала следующего офсетного ребра; петля, которую
-    // она создаёт, снимается обходом внешней грани.
-    if (cross <= 0) continue;
-    const mx = fy / fl;
-    const my = -fx / fl;
-    const a0 = Math.atan2(ny, nx);
-    const a1 = Math.atan2(my, mx);
-    let sweep = a1 - a0;
-    while (sweep < 0) sweep += 2 * Math.PI;
-    while (sweep >= 2 * Math.PI) sweep -= 2 * Math.PI;
-    const steps = Math.ceil(sweep / step);
-    for (let j = 1; j < steps; j++) {
-      const ang = a0 + (sweep * j) / steps;
-      out.push({ x: b.x + d * Math.cos(ang), y: b.y + d * Math.sin(ang) });
+  const out: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const v = src[i];
+    const np = nrm[(i - 1 + n) % n]; // нормаль входящего ребра
+    const nn = nrm[i]; // нормаль исходящего
+    if ((np.x === 0 && np.y === 0) || (nn.x === 0 && nn.y === 0)) continue;
+    const cross = np.x * nn.y - np.y * nn.x; // >0 — выпукло (нормаль повернула влево)
+    const dot = np.x * nn.x + np.y * nn.y;
+    if (cross > 0) {
+      out.push({ x: v.x + d * np.x, y: v.y + d * np.y });
+      const a0 = Math.atan2(np.y, np.x);
+      const a1 = Math.atan2(nn.y, nn.x);
+      let sweep = a1 - a0;
+      while (sweep < 0) sweep += 2 * Math.PI;
+      while (sweep >= 2 * Math.PI) sweep -= 2 * Math.PI;
+      const steps = Math.ceil(sweep / step);
+      for (let j = 1; j < steps; j++) {
+        const ang = a0 + (sweep * j) / steps;
+        out.push({ x: v.x + d * Math.cos(ang), y: v.y + d * Math.sin(ang) });
+      }
+      out.push({ x: v.x + d * nn.x, y: v.y + d * nn.y });
+    } else if (dot >= minDot && 1 + dot > 1e-9) {
+      // Митра: точка на расстоянии d от ОБЕИХ сдвинутых прямых, ровно одна вершина.
+      const k = d / (1 + dot);
+      out.push({ x: v.x + k * (np.x + nn.x), y: v.y + k * (np.y + nn.y) });
+    } else {
+      // Слишком острый вогнутый угол — хорда; петлю снимет обход внешней грани.
+      out.push({ x: v.x + d * np.x, y: v.y + d * np.y });
+      out.push({ x: v.x + d * nn.x, y: v.y + d * nn.y });
     }
   }
   return out;
@@ -120,11 +149,19 @@ type INode = { x: number; y: number };
 
 // Граница неограниченной грани планарного разбиения замкнутой ломаной, в CCW.
 function traceOuterFace(rawPts: readonly Pt[]): Pt[] | null {
+  // Координаты в файле абсолютные чертёжные (метры от начала листа) — считаем в СОБСТВЕННОЙ
+  // системе кривой, чтобы целые произведения в предикатах пересечения оставались маленькими.
+  let ox = Infinity;
+  let oy = Infinity;
+  for (const p of rawPts) {
+    if (p.x < ox) ox = p.x;
+    if (p.y < oy) oy = p.y;
+  }
   // Квантование на решётку + схлопывание совпавших соседей (и стыка).
   const P: INode[] = [];
   for (const p of rawPts) {
-    const x = Math.round(p.x * Q);
-    const y = Math.round(p.y * Q);
+    const x = Math.round((p.x - ox) * Q);
+    const y = Math.round((p.y - oy) * Q);
     const last = P[P.length - 1];
     if (last && last.x === x && last.y === y) continue;
     P.push({ x, y });
@@ -305,7 +342,7 @@ function traceOuterFace(rawPts: readonly Pt[]): Pt[] | null {
     const nxt = nextEdge(prev, cur);
     if (nxt < 0) return null;
     if (cur === start && nxt === first) {
-      return toCm(loopIdx, nodes);
+      return toCm(loopIdx, nodes, ox, oy);
     }
     loopIdx.push(cur);
     prev = cur;
@@ -314,13 +351,13 @@ function traceOuterFace(rawPts: readonly Pt[]): Pt[] | null {
   return null;
 }
 
-function toCm(loopIdx: readonly number[], nodes: readonly INode[]): Pt[] | null {
+function toCm(loopIdx: readonly number[], nodes: readonly INode[], ox: number, oy: number): Pt[] | null {
   const pts: Pt[] = [];
   // Внешняя грань обойдена по часовой стрелке (внешность слева) — деталь наружу отдаётся CCW,
   // как её ждёт весь остальной конвейер раскладки.
   for (let k = loopIdx.length - 1; k >= 0; k--) {
     const n = nodes[loopIdx[k]];
-    const p = { x: n.x / Q, y: n.y / Q };
+    const p = { x: n.x / Q + ox, y: n.y / Q + oy };
     const last = pts[pts.length - 1];
     if (last && last.x === p.x && last.y === p.y) continue;
     pts.push(p);

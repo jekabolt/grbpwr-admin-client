@@ -30,6 +30,7 @@ import type { MarkerColorway } from './colorway-widths';
 import { buildMarkerLayout, dec, decNum, exportFileName, markerToView, type MarkerBomLine } from './marker-io';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
+import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
@@ -129,6 +130,9 @@ export function NestingModal({
   const [targetCm, setTargetCm] = useState<number | ''>('');
   const [gapCm, setGapCm] = useState<number>(NEST_DEFAULTS.gapCm);
   const [marginCm, setMarginCm] = useState<number>(NEST_DEFAULTS.edgeMarginCm);
+  // Припуск на шов: контур из DXF — линия ШВА, а кроят по линии КРОЯ. Это вход алгоритма, а не
+  // подпись к результату (см. lib/nesting/geom/seam-allowance.ts).
+  const [allowanceCm, setAllowanceCm] = useState<number>(NEST_DEFAULTS.seamAllowanceCm);
   const [crossGrain, setCrossGrain] = useState<boolean>(NEST_DEFAULTS.allowCrossGrain);
   const [budgetS, setBudgetS] = useState<number>(NEST_DEFAULTS.timeBudgetMs / 1000);
   const [sel, setSel] = useState<PieceSel>({});
@@ -197,7 +201,15 @@ export function NestingModal({
     () => orientToGrain(selectedPieces, grainLayer),
     [selectedPieces, grainLayer],
   );
-  const pieces = oriented.pieces;
+  // Припуск раздувает контур ЗДЕСЬ и той же чистой функцией, что зовёт воркер на тех же деталях
+  // с тем же числом. Само число едет в NestConfig — геометрия через границу воркера не ходит, и
+  // припуск, применённый только тут, до движка бы не доехал (ровно так однажды уехал в прод
+  // разворот по долевой: экран показывал одно, укладывалось другое).
+  const seam = useMemo(
+    () => applySeamAllowance(oriented.pieces, allowanceCm),
+    [oriented, allowanceCm],
+  );
+  const pieces = seam.pieces;
   const usable = widthCm - 2 * marginCm;
 
   // Cross-strip span in the allowed rotations; a piece that fits nowhere is auto-unchecked.
@@ -264,6 +276,7 @@ export function NestingModal({
     contourLayer,
     shownSize,
     grainLayer,
+    allowanceCm,
     resetRun,
   ]);
 
@@ -373,6 +386,8 @@ export function NestingModal({
       // и воркер разворачивает свою копию той же чистой функцией на том же входе. Так экран и
       // движок гарантированно смотрят на одни детали.
       grainLayer,
+      // Едет ЧИСЛО, а раздувает контуры воркер той же чистой функцией на тех же деталях.
+      seamAllowanceCm: allowanceCm,
       timeBudgetMs: budgetS * 1000,
       rdpEpsCm: NEST_DEFAULTS.rdpEpsCm,
     };
@@ -692,7 +707,17 @@ export function NestingModal({
         urlBySource,
         result: {
           ...effective,
-          warnings: [...effective.warnings, ...(manualNote ? [manualNote] : [])],
+          // Припуск попадает в ЗАПИСЬ маркера. В блобе лежит геометрия линии КРОЯ, а в
+          // summary для припуска колонки нет — без этой строки открытый через полгода маркер
+          // не отвечает на вопрос «по какой линии это мерялось», хотя от ответа зависит
+          // каждый сантиметр записанного расхода.
+          warnings: [
+            ...effective.warnings,
+            allowanceCm > 0
+              ? `припуск на шов: ${allowanceCm.toFixed(2)} см — сохранён контур КРОЯ (в DXF лежит линия шва), припуск ровный по всему контуру`
+              : 'припуск на шов: 0 — раскладывалась ЛИНИЯ ШВА, расход занижен относительно кроя',
+            ...(manualNote ? [manualNote] : []),
+          ],
         },
         unit: unitOverride === 'auto' ? parse.detectedUnit : unitOverride,
         config: { targetLengthCm: target, rdpEpsCm: NEST_DEFAULTS.rdpEpsCm, timeBudgetMs: budgetS * 1000 },
@@ -981,6 +1006,29 @@ export function NestingModal({
                 disabled={running}
               />
             </label>
+            {/* Припуск на шов — ВХОД алгоритма, а не подпись к результату: он раздувает контур
+                до линии кроя ещё до укладки, поэтому и длина, и SVG, и плоттерный DXF описывают
+                то, что цех действительно вырежет. */}
+            <label className='space-y-0.5'>
+              <Text size='nano' variant='label' component='span'>
+                припуск на шов, см
+              </Text>
+              <Input
+                name='nest-allowance'
+                type='number'
+                value={allowanceCm}
+                min={0}
+                step={0.1}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const next = Math.max(0, numOr(e.target.value, allowanceCm));
+                  if (next !== allowanceCm) guardManual(() => setAllowanceCm(next));
+                }}
+                disabled={running}
+              />
+              <Text size='nano' variant='label' component='span'>
+                контур DXF — линия шва; кладётся линия кроя
+              </Text>
+            </label>
             <label className='space-y-0.5'>
               <Text size='nano' variant='label' component='span'>
                 комплектов, шт
@@ -998,6 +1046,32 @@ export function NestingModal({
               />
             </label>
           </div>
+
+          {/* Допущение проговаривается вслух: число одно на весь комплект и кладётся РОВНЫМ по
+              всему контуру, а настоящий подгиб низа шире. Молчаливое допущение здесь стоило бы
+              метров ткани, а увидеть его на картинке нельзя. */}
+          {allowanceCm > 0 ? (
+            <CalloutBox tone='note'>
+              <Text size='nano' component='p'>
+                припуск {allowanceCm.toFixed(2)} см отложен РОВНО по всему контуру каждой детали и
+                одинаков для всего комплекта. Подгиб низа в жизни шире, горловина уже — раскладка
+                этого не знает. Линия шва остаётся нарисованной внутри линии кроя.
+              </Text>
+            </CalloutBox>
+          ) : (
+            <CalloutBox tone='error'>
+              <Text size='nano' component='p'>
+                припуск 0 — раскладывается ЛИНИЯ ШВА, а цех кроит шире. Расход будет занижен.
+              </Text>
+            </CalloutBox>
+          )}
+          {seam.hulled.length > 0 && (
+            <Text size='nano' component='p' className='text-error'>
+              контур с дефектом у {seam.hulled.length} деталей — припуск посчитан по выпуклой
+              оболочке (с запасом): {seam.hulled.slice(0, 6).join(', ')}
+              {seam.hulled.length > 6 ? '…' : ''}
+            </Text>
+          )}
 
           <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
             <label className='flex cursor-pointer items-center gap-1.5'>

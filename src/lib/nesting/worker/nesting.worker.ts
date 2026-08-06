@@ -5,6 +5,7 @@ import type { NestConfig, ParseOpts, PieceDTO, Unit, WorkerRequest, WorkerRespon
 import { area, bounds } from '../geom/polygon';
 import { parseFiles } from './parse-files';
 import { orientToGrain } from '../geom/grain-orient';
+import { applySeamAllowance } from '../geom/seam-allowance';
 import { nest } from '../nest';
 
 const post = (msg: WorkerResponse) => {
@@ -89,13 +90,22 @@ async function handleNest(id: number, parseId: number, config: NestConfig): Prom
     post({ type: 'error', id, message: 'данные деталей устарели — обновите разбор DXF' });
     return;
   }
-  // Разворот по долевой делается ЗДЕСЬ, на той же геометрии, которую увидит движок. Раньше он
-  // жил на главном потоке и сюда не доезжал: через NestConfig едут только идентификаторы, так
-  // что детали укладывались как нарисованы, а экран показывал повёрнутые контуры с чужими
-  // размещениями. Функция чистая и вызывается с тем же слоем на главном потоке — значит обе
-  // стороны получают побайтово одно и то же.
+  // Разворот по долевой и ПРИПУСК НА ШОВ делаются ЗДЕСЬ, на той же геометрии, которую увидит
+  // движок. Раньше разворот жил на главном потоке и сюда не доезжал: через NestConfig едут
+  // только идентификаторы и числа, так что детали укладывались как нарисованы, а экран
+  // показывал повёрнутые контуры с чужими размещениями. Обе функции чистые и вызываются с теми
+  // же аргументами на главном потоке — значит обе стороны получают побайтово одно и то же.
+  //
+  // Порядок тот же, что на экране: сначала развернуть по долевой, потом раздуть. Раздуваются
+  // ТОЛЬКО детали из задания — в разборе лежит вся градация на всех слоях, и раздувать сотню
+  // лишних контуров значило бы платить за них временем на каждом прогоне.
+  const wanted = new Set(config.pieces.map((p) => p.pieceId));
+  const oriented = orientToGrain(currentParse.pieces, config.grainLayer).pieces;
   const result = await nest(
-    orientToGrain(currentParse.pieces, config.grainLayer).pieces,
+    applySeamAllowance(
+      oriented.filter((p) => wanted.has(p.id)),
+      config.seamAllowanceCm,
+    ).pieces,
     config,
     () => cancelled.has(id),
     (p) =>
