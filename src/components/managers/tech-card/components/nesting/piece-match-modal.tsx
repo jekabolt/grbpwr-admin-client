@@ -185,6 +185,23 @@ export function PieceMatchModal({
     [allPieces],
   );
   const [showGrain, setShowGrain] = useState(true);
+  // Слои внутренней геометрии, найденные в файле: линия шва, надсечки, свёрла, вытачки. По
+  // умолчанию показываются ВСЕ — деталь без них это голый силуэт, а режут именно по ним.
+  const innerLayerNames = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const p of contourPieces) {
+      for (const c of p.inner ?? []) {
+        if (c.layer === grainLayer) continue; // долевая рисуется отдельно и красным
+        seen.set(c.layer, (seen.get(c.layer) ?? 0) + 1);
+      }
+    }
+    return [...seen.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [contourPieces, grainLayer]);
+  const [hiddenInner, setHiddenInner] = useState<string[]>([]);
+  const innerLayers = useMemo(
+    () => new Set(innerLayerNames.map(([l]) => l).filter((l) => !hiddenInner.includes(l))),
+    [innerLayerNames, hiddenInner],
+  );
   // Размеры, которые есть в файле, но не заведены в карточке. Пока их там нет, хвост у таких
   // блоков не отрезается — и одна деталь двоится на строку в каждом непризнанном размере.
   const sizeById = useSizeNames();
@@ -777,6 +794,32 @@ export function PieceMatchModal({
                   ))}
                 </div>
               )}
+              {/* Слои чертежа. Линия шва (зазор до линии кроя — это и есть припуск), надсечки,
+                  свёрла, вытачки: по ним режут, и деталь без них — голый силуэт. Показываются
+                  все, выключить можно любой: на плотном листе лишние слои превращаются в кашу. */}
+              {innerLayerNames.length > 0 && (
+                <div className='mb-1 flex flex-wrap items-center gap-2'>
+                  <Text size='nano' variant='label' component='span'>
+                    слои чертежа:
+                  </Text>
+                  {innerLayerNames.map(([layer, n]) => (
+                    <label key={layer} className='flex cursor-pointer items-center gap-1'>
+                      <input
+                        type='checkbox'
+                        checked={!hiddenInner.includes(layer)}
+                        onChange={(e) =>
+                          setHiddenInner((prev) =>
+                            e.target.checked ? prev.filter((l) => l !== layer) : [...prev, layer],
+                          )
+                        }
+                      />
+                      <Text size='nano' variant='label' component='span'>
+                        {layer} ({n})
+                      </Text>
+                    </label>
+                  ))}
+                </div>
+              )}
               {/* Долевая на листе. Раскладка разворачивает деталь именно по этой линии, так что
                   увидеть её здесь — единственный способ проверить прочитанное до того, как
                   ткань разрезана. */}
@@ -865,6 +908,7 @@ export function PieceMatchModal({
                 key={`${sheet.index}|${shownSize}`}
                 pieces={sheetPieces}
                 grainLayer={showGrain ? grainLayer : ''}
+                innerLayers={innerLayers}
                 keyOf={ciOf}
                 markOf={markOf}
                 labelOf={labelOf}

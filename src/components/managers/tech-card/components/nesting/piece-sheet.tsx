@@ -84,11 +84,15 @@ export function PieceSheet({
   keyOf,
   onPick,
   grainLayer,
+  innerLayers,
 }: {
   pieces: readonly PieceDTO[];
   // Слой долевой. '' — не показывать. Рисуется поверх контуров: раскладка поворачивает деталь
   // именно по этой линии, и человек должен увидеть прочитанное ДО того, как ткань разрезана.
   grainLayer?: string;
+  // Какие слои внутренней геометрии рисовать: линия шва (припуск виден как зазор до линии
+  // кроя), надсечки, свёрла, вытачки. Без них деталь на экране — голый силуэт, а режут по ним.
+  innerLayers?: ReadonlySet<string>;
   // Ключ, под которым деталь опознаётся снаружи (у диалога это регистронезависимое имя блока).
   // '' = у контура нет имени, кликать нечего.
   keyOf: (piece: PieceDTO) => string;
@@ -304,6 +308,33 @@ export function PieceSheet({
               />
             );
           })}
+
+          {/* Внутренняя геометрия: линия шва, надсечки, свёрла, вытачки. Рисуется ПОД подписями
+              и над контурами, тонко и серым — это чертёж детали, а не выделение. Замкнутые пути
+              (линия шва) идут polygon'ом без заливки, открытые (надсечки, базовые) — polyline. */}
+          {innerLayers && innerLayers.size > 0
+            ? ordered.map((p) => {
+                const paths = (p.inner ?? []).filter(
+                  (c) => innerLayers.has(c.layer) && c.layer !== grainLayer,
+                );
+                if (paths.length === 0) return null;
+                const ox = p.originX!;
+                const oy = p.originY!;
+                return (
+                  <g key={`i${p.id}`} pointerEvents='none' fill='none' stroke='#8a8a8a'>
+                    {paths.map((c, i) => {
+                      const pts = c.pts.map((pt) => `${ox + pt.x},${vy(oy + pt.y)}`).join(' ');
+                      const sw = box.w / 700 || 0.01;
+                      return c.closed ? (
+                        <polygon key={i} points={pts} strokeWidth={sw} />
+                      ) : (
+                        <polyline key={i} points={pts} strokeWidth={sw} />
+                      );
+                    })}
+                  </g>
+                );
+              })
+            : null}
 
           {/* Долевая: тот самый отрезок из файла, по которому раскладка разворачивает деталь.
               Отдельным проходом поверх контуров и без реакции на указатель — линия не должна

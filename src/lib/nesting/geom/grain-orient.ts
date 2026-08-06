@@ -66,6 +66,17 @@ export function orientToGrain(pieces: readonly PieceDTO[], layer: string): Orien
       ...p,
       // Контур снова от своего левого нижнего угла — этого ждёт размещатель.
       poly: spun.map((pt) => ({ x: pt.x - minX, y: pt.y - minY })),
+      // Внутренняя геометрия поворачивается ВМЕСТЕ с контуром и тем же сдвигом. Оставить её
+      // как есть значило бы разложить деталь повёрнутой, а надсечки и линию шва нарисовать по
+      // старому — на раскладке они оказались бы рядом с деталью, а не на ней.
+      inner: p.inner?.map((path) => ({
+        layer: path.layer,
+        closed: path.closed,
+        pts: path.pts.map((pt) => ({
+          x: pt.x * cos - pt.y * sin - minX,
+          y: pt.x * sin + pt.y * cos - minY,
+        })),
+      })),
       bboxW: maxX - minX,
       bboxH: maxY - minY,
       // Повёрнутая деталь больше НЕ лежит на своём месте в чертеже. Снимаем координаты, чтобы

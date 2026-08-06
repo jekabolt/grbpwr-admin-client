@@ -48,6 +48,13 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
           blockName: raw.blockName ?? '',
           layer: raw.layer,
           grain: raw.grain,
+          // Тем же сдвигом, что и контур: внутренняя геометрия обязана оставаться на своём
+          // месте ОТНОСИТЕЛЬНО детали, иначе на раскладке надсечки уедут от неё.
+          inner: raw.inner.map((p) => ({
+            layer: p.layer,
+            closed: p.closed,
+            pts: p.pts.map((q) => ({ x: q.x - bb.minX, y: q.y - bb.minY })),
+          })),
           source: file.name,
           fileIndex,
           poly,

@@ -112,6 +112,19 @@ export function renderLayoutSvg(
       return `${(r.x + pl.x).toFixed(2)},${(r.y + pl.y).toFixed(2)}`;
     });
     parts.push(`<polygon points="${pts.join(' ')}" fill="${FILL}" stroke="${STROKE}" stroke-width="${W / 400}"/>`);
+    // Чертёж детали: линия шва, надсечки, свёрла, вытачки — тем же поворотом и сдвигом, что и
+    // контур. Раскройщик режет по этой картинке, и силуэт без надсечек ему не годится.
+    for (const c of dto.inner ?? []) {
+      const ip = c.pts.map((p) => {
+        const r = rotPt(p, pl.rot);
+        return `${(r.x + pl.x).toFixed(2)},${(r.y + pl.y).toFixed(2)}`;
+      });
+      if (ip.length < 2) continue;
+      const tag = c.closed ? 'polygon' : 'polyline';
+      parts.push(
+        `<${tag} points="${ip.join(' ')}" fill="none" stroke="${STROKE}" stroke-width="${W / 700}"/>`,
+      );
+    }
     // Name at the placed centroid-ish point (bbox center is stable enough for labels).
     let cx = 0;
     let cy = 0;

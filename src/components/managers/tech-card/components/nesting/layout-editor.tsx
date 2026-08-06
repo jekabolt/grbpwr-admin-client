@@ -241,6 +241,18 @@ export function LayoutEditor({
                     stroke={bad ? BAD : selected === index ? INK : STROKE}
                     strokeWidth={bad || selected === index ? W / 250 : W / 400}
                   />
+                  {/* Чертёж детали внутри контура: линия шва, надсечки, свёрла, вытачки. Едут
+                      тем же transform'ом, что и контур, поэтому остаются на своих местах при
+                      любом повороте и перетаскивании. Раскройщик режет по маркеру — маркер без
+                      надсечек неполон. */}
+                  {(piece.inner ?? []).map((c, k) => {
+                    const pts = c.pts.map((pt) => `${pt.x.toFixed(2)},${pt.y.toFixed(2)}`).join(' ');
+                    return c.closed ? (
+                      <polygon key={k} points={pts} fill='none' stroke={STROKE} strokeWidth={W / 700} />
+                    ) : (
+                      <polyline key={k} points={pts} fill='none' stroke={STROKE} strokeWidth={W / 700} />
+                    );
+                  })}
                 </g>
                 <text
                   x={lx}

@@ -39,6 +39,11 @@ export type PieceDTO = {
   // сохранённого маркера — там ориентация уже применена.
   // `a`/`b` — концы отрезка в абсолютных координатах чертежа, чтобы лист мог его нарисовать.
   grain?: { layer: string; angleDeg: number; lengthCm: number; a: Pt; b: Pt }[];
+  // Внутренняя геометрия детали со слоями — линия шва, надсечки, свёрла, вытачки, базовые
+  // линии. Координаты в СИСТЕМЕ КОНТУРА (тот же сдвиг, что у poly), поэтому она едет вместе с
+  // деталью через поворот по долевой и через размещение на полосе. Без этого раскройщик
+  // получает маркер без единой надсечки.
+  inner?: { layer: string; closed: boolean; pts: Pt[] }[];
   // Which uploaded file the piece came from (display).
   source: string;
   // Index of that file in the parsed batch. `source` is a DISPLAY name and two sheets can

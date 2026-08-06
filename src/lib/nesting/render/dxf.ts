@@ -6,7 +6,9 @@
 // Layers: CUT (color 7) — every placed piece contour, the only layer a cutter needs;
 // STRIP (color 1) — the fabric boundary rectangle, for aligning the marker on the table;
 // LABELS (color 3) — piece-name TEXT at each piece's center, ignored by plotters, read
-// by humans. Coordinates are cm (declared via $INSUNITS=5), y-up exactly as the source
+// by humans; INNER (color 8) — чертёж детали: линия шва, надсечки, свёрла, вытачки. INNER
+// намеренно НЕ CUT: резак режет по CUT, и линия шва с вытачками там разрезала бы деталь
+// пополам. Отдельным слоем цех их видит и решает сам, что надрезать. Coordinates are cm (declared via $INSUNITS=5), y-up exactly as the source
 // pattern DXF was authored — chirality is preserved, nothing is mirrored for display.
 //
 // Contours are the TRUE tessellated piece outlines (the same `poly` the SVG export
@@ -42,12 +44,14 @@ function textValue(s: string): string {
 
 type Tag = [code: number, value: string];
 
-function polylineTags(layer: string, pts: readonly Pt[]): Tag[] {
+function polylineTags(layer: string, pts: readonly Pt[], closed = true): Tag[] {
   const tags: Tag[] = [
     [0, 'POLYLINE'],
     [8, layer],
     [66, '1'], // vertices follow
-    [70, '1'], // closed
+    // Надсечка и базовая линия — НЕЗАМКНУТЫЕ. Пометить их закрытыми значило бы дорисовать
+    // отрезок обратно и заставить резак пройти по ткани лишний раз.
+    [70, closed ? '1' : '0'],
   ];
   for (const p of pts) {
     tags.push([0, 'VERTEX'], [8, layer], [10, num(p.x)], [20, num(p.y)], [30, '0.0']);
@@ -87,6 +91,18 @@ export function renderLayoutDxf(
       return { x: r.x + pl.x, y: r.y + pl.y };
     });
     entities.push(...polylineTags('CUT', placed));
+
+    // Внутренняя геометрия детали — на СВОЙ слой INNER, не на CUT. Резак режет по CUT, и
+    // отправить туда линию шва с вытачками значило бы разрезать деталь пополам. Отдельным слоем
+    // цех их видит и решает сам: надсечки надрезать, линию шва пробить или проигнорировать.
+    for (const c of dto.inner ?? []) {
+      if (c.pts.length < 2) continue;
+      const ip = c.pts.map((p) => {
+        const r = rotPt(p, pl.rot);
+        return { x: r.x + pl.x, y: r.y + pl.y };
+      });
+      entities.push(...polylineTags('INNER', ip, c.closed));
+    }
 
     if (labels) {
       let cx = 0;
@@ -146,10 +162,13 @@ export function renderLayoutDxf(
     [2, 'TABLES'],
     [0, 'TABLE'],
     [2, 'LAYER'],
-    [70, '3'],
+    [70, '4'],
     ...layerTags('CUT', 7),
     ...layerTags('STRIP', 1),
     ...layerTags('LABELS', 3),
+    // INNER — чертёж детали (линия шва, надсечки, свёрла, вытачки). Отдельным слоем, чтобы
+    // резак по нему НЕ резал, а цех мог включить и увидеть.
+    ...layerTags('INNER', 8),
     [0, 'ENDTAB'],
     [0, 'ENDSEC'],
     [0, 'SECTION'],

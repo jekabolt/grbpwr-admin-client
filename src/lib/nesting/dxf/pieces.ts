@@ -29,6 +29,13 @@ export type GrainCandidate = {
   b: Pt;
 };
 
+export type InnerPath = { layer: string; closed: boolean; pts: Pt[] };
+
+// Потолок на точку внутренней геометрии одной детали. Лекальные файлы бывают с тысячами
+// вершин на кривых, и тащить их все в главный поток незачем: это картинка для человека, а не
+// геометрия для движка. Что не поместилось — честно считается и называется.
+const MAX_INNER_POINTS = 4000;
+
 export type RawPiece = {
   name: string;
   // The DXF block this piece came from, or null for the loose-entity pool. Kept SEPARATE from
@@ -45,6 +52,12 @@ export type RawPiece = {
   // Кандидаты в долевую из ЭТОГО блока. Одни и те же у всех контуров блока: долевая
   // принадлежит детали, а не тому, по какой линии её кроят.
   grain: GrainCandidate[];
+  // Внутренняя геометрия детали со слоями: линия шва (припуск виден как зазор между ней и
+  // линией кроя), надсечки, свёрла, вытачки, базовые линии. Раньше всё это умирало здесь —
+  // keepOutermost выбрасывал внутренние контуры, а мелкие отсекались по площади, — и раскройщик
+  // получал маркер без единой надсечки. Координаты АБСОЛЮТНЫЕ чертёжные, как у poly до
+  // нормализации.
+  inner: InnerPath[];
   poly: Pt[]; // CCW, cm, absolute drawing coords (normalized later)
 };
 
@@ -171,11 +184,24 @@ export function groupToPieces(
     for (const loop of chosen) {
       const cleaned = sanitizeLoop(stripDegenerate(loop.pts, 1e-4));
       if (!cleaned || area(cleaned) < MIN_PIECE_AREA_CM2) continue;
+      // Внутренняя геометрия = всё, что НЕ на слое самого контура. Для детали, взятой по линии
+      // шва (слой 14), сюда попадает и линия кроя (слой 1) — то есть припуск виден как зазор
+      // между двумя линиями, а не как число, которое надо кому-то верить.
+      const inner: InnerPath[] = [];
+      let budget = MAX_INNER_POINTS;
+      for (const c of group.chains) {
+        if (c.layer === loop.layer || c.pts.length < 2) continue;
+        if (budget <= 0) break;
+        const pts = c.pts.length > budget ? c.pts.slice(0, budget) : c.pts;
+        budget -= pts.length;
+        inner.push({ layer: c.layer, closed: c.closed && pts.length === c.pts.length, pts });
+      }
       pieces.push({
         name: label,
         blockName: group.blockName,
         layer: loop.layer,
         grain,
+        inner,
         poly: ensureCCW(cleaned),
       });
     }
