@@ -9,7 +9,13 @@ import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import { Row, RowTotal } from 'ui/components/row';
 import Text from 'ui/components/text';
-import { grainlineArrow } from './piece-codes';
+import {
+  CUT_SYMMETRY_PRINT_LEGEND,
+  cutSymmetryBadge,
+  cutSymmetryPrintCaption,
+  cutSymmetryUnanswered,
+  grainlineArrow,
+} from './piece-codes';
 import { TechCardFormData } from './schema';
 
 // ---------------------------------------------------------------------------
@@ -59,6 +65,7 @@ export function FabricSwatch({ index, className }: { index: number; className?: 
 type FormPiece = {
   name?: string;
   piecesPerGarment?: number;
+  cutSymmetry?: string;
   grainline?: string;
   fused?: boolean;
   calloutNumber?: number;
@@ -78,6 +85,12 @@ export type CutPiece = {
   /** pieces_per_garment. The mirror flag that used to double this is gone — see GetStyleCutList. */
   total: number;
   perGarment: number;
+  /**
+   * КАК кроятся эти `total` панелей (`cut_symmetry`, 0275). Числа не трогает — объясняет их. Это
+   * тот самый талон, который уходит на раскройный стол, поэтому «две одинаковые» против «левая и
+   * правая» обязано быть на нём написано, а не подразумеваться.
+   */
+  cutSymmetry: string;
   grainline: string;
   fused: boolean;
   calloutNumber: number;
@@ -169,6 +182,7 @@ export function useSampleCutView(techCard: common_TechCard | undefined, colorway
         name,
         perGarment,
         total: perGarment,
+        cutSymmetry: p.cutSymmetry?.trim() || '',
         grainline: p.grainline?.trim() || '',
         fused: !!p.fused,
         calloutNumber: p.calloutNumber ?? 0,
@@ -254,6 +268,7 @@ export function SampleCutPieces({
         {view.pieces.map((p) => {
           const fabric = p.fabricIndex >= 0 ? view.fabrics[p.fabricIndex] : undefined;
           const arrow = grainlineArrow(p.grainline);
+          const symmetry = cutSymmetryBadge(p.cutSymmetry, p.perGarment);
           return (
             <div
               key={p.key}
@@ -277,6 +292,19 @@ export function SampleCutPieces({
                     no fabric mapped for this colourway
                   </Text>
                 )}
+                {/* Подсвечивается только то, что расходится с чтением по умолчанию. Голое «×2»
+                    читается как две одинаковые панели, поэтому «одинаковые» идёт обычной серой
+                    подписью, а «зеркальные пары» / «со сгибом» / «парность не указана» — бейджем:
+                    это либо указание, меняющее физическую деталь на выходе, либо прямой вопрос к
+                    человеку. */}
+                {symmetry &&
+                  (symmetry.tone === 'mut' ? (
+                    <Text size='nano' variant='label' component='span' className='uppercase'>
+                      · {symmetry.label}
+                    </Text>
+                  ) : (
+                    <Pill tone={symmetry.tone}>{symmetry.label}</Pill>
+                  ))}
                 {p.grainline && (
                   <Text size='nano' variant='label' component='span' className='uppercase'>
                     · {arrow ? `${arrow} ` : ''}
@@ -373,26 +401,46 @@ export function SampleCutTicket({
                   {f.cut} cut
                 </Text>
               </div>
-              {f.pieces.map((p) => (
-                <Row
-                  key={p.key}
-                  label={
-                    <span>
-                      <b>{p.name}</b>
-                      <Text size='nano' variant='label' component='span' className='uppercase'>
-                        {' '}
-                        {[
-                          p.grainline ? `${grainlineArrow(p.grainline)} ${p.grainline}` : '',
-                          p.fused ? 'fused' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                      </Text>
-                    </span>
-                  }
-                  value={`×${p.total}`}
-                />
-              ))}
+              {f.pieces.map((p) => {
+                // Тот же словарь и то же правило, что в тех-паке: `identical` не печатается вовсе
+                // (голое «×2» и так означает две одинаковые), а неразмеченная парная деталь несёт
+                // оговорку. Талон уходит на раскройный стол — здесь эта строка и работает.
+                const caption = cutSymmetryPrintCaption(p.cutSymmetry, p.perGarment);
+                const unanswered = cutSymmetryUnanswered(p.cutSymmetry, p.perGarment);
+                return (
+                  <Row
+                    key={p.key}
+                    label={
+                      <span>
+                        <b>{p.name}</b>
+                        <Text size='nano' variant='label' component='span' className='uppercase'>
+                          {' '}
+                          {[
+                            p.grainline ? `${grainlineArrow(p.grainline)} ${p.grainline}` : '',
+                            p.fused ? 'fused' : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </Text>
+                        {caption && (
+                          <Text
+                            size='nano'
+                            component='span'
+                            // Вопрос к цеху набирается чернилами и жирным, указание — обычной
+                            // подписью. Красного здесь нет: в этом админе красный означает убыток,
+                            // а неотвеченный вопрос — не убыток.
+                            className={`uppercase ${unanswered ? 'font-bold' : ''}`}
+                          >
+                            {' · '}
+                            {caption}
+                          </Text>
+                        )}
+                      </span>
+                    }
+                    value={`×${p.total}`}
+                  />
+                );
+              })}
             </div>
           ))}
 
@@ -413,6 +461,13 @@ export function SampleCutTicket({
             label={`${view.pieces.length} patterns · ${view.fusedCut} fused`}
             value={`${view.totalCut} to cut`}
           />
+
+          {/* Словарь — один раз на талон, и только если в нём есть что объяснять. */}
+          {view.pieces.some((p) => cutSymmetryPrintCaption(p.cutSymmetry, p.perGarment)) && (
+            <Text size='nano' variant='label'>
+              {CUT_SYMMETRY_PRINT_LEGEND}
+            </Text>
+          )}
         </div>
 
         {/* The return leg. The norm on the left is what the recipe says; the blank on the right is

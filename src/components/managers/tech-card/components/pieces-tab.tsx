@@ -9,7 +9,18 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
-import { grainlineArrow, grainlineOptionsFor, pieceCodeOptions } from './piece-codes';
+import {
+  CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
+  UNSET_CUT_SYMMETRY,
+  cutSymmetryBadge,
+  cutSymmetryCountInvalid,
+  cutSymmetryOptionsFor,
+  cutSymmetryUnanswered,
+  grainlineArrow,
+  grainlineOptionsFor,
+  isCutSymmetryMarked,
+  pieceCodeOptions,
+} from './piece-codes';
 import { normalizePieceName } from './piece-picker';
 import { TechCardFormData } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
@@ -248,6 +259,21 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       .map((p) => p.name?.trim() || 'без названия')
       .join(' · ') || `#${n}`;
 
+  // Разметка кроя по всей вкладке: сколько деталей уйдёт на фабрику с оговоркой «парность не
+  // указана» (то же условие, что печатает тех-пак — Р5), и сколько вообще без ответа. Первое число
+  // — счётчик риска и метр кампании Д2; второе живёт в подсказке, потому что деталь по одной на
+  // изделие тоже стоит разметить (сгиб печатается и у неё), но кричать про неё не о чем.
+  const unmarked = useMemo(() => {
+    let pairing = 0;
+    let any = 0;
+    for (const p of pieces) {
+      if (isCutSymmetryMarked(p.cutSymmetry)) continue;
+      any += 1;
+      if (cutSymmetryUnanswered(p.cutSymmetry, p.piecesPerGarment)) pairing += 1;
+    }
+    return { pairing, any, total: pieces.length };
+  }, [pieces]);
+
   // A new row is minted with its stable lineKey up front, NOT left for the save mapper: the
   // operation and recipe pickers can only offer a piece that already has one, so without it a part
   // added here stayed unlinkable until the card had been saved and reloaded.
@@ -256,6 +282,9 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       name: '',
       lineKey: ulid(),
       piecesPerGarment: 1,
+      // Явно, а не через дефолт схемы: новая строка стартует «не размечено», и это состояние —
+      // ответ «никто не спрашивал», а не отсутствие поля.
+      cutSymmetry: UNSET_CUT_SYMMETRY,
       grainline: '',
       fused: false,
       calloutNumber: 0,
@@ -268,9 +297,19 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       title='детали кроя'
       question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из какой ткани кроится каждая деталь в конкретном колорвее — редактора пока НЕТ ни на одной вкладке, столбец в cut list из-за этого пустой'
       action={
-        <Button type='button' variant='main' size='sm' data-field='pieces.add' onClick={addPiece}>
-          + piece
-        </Button>
+        <div className='flex items-center gap-2'>
+          {unmarked.pairing > 0 && (
+            <Pill
+              tone='attention'
+              title={`Деталей, которые идут по две и больше на изделие, а как кроятся — не сказано: ${unmarked.pairing}. В тех-паке у каждой такой строки печатается «парность не указана»: молчать нельзя, потому что после миграции 0266 зеркальная пара выглядит как голая «2», и цех выкроит две одинаковые панели вместо левой и правой. Всего без разметки: ${unmarked.any} из ${unmarked.total}.`}
+            >
+              парность не указана: {unmarked.pairing}
+            </Pill>
+          )}
+          <Button type='button' variant='main' size='sm' data-field='pieces.add' onClick={addPiece}>
+            + piece
+          </Button>
+        </div>
       }
     >
       <datalist id='piece-code-suggestions'>
@@ -288,13 +327,14 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
         // minmax(0,1fr) — not 1fr — so the wide table can shrink and scroll inside its own
         // overflow-x-auto instead of forcing the track wide and shoving the diagram column.
         <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_160px]'>
-          <DataTable className='min-w-[680px] [&_td]:!align-middle [&_td]:!text-left [&_th]:!text-left'>
+          <DataTable className='min-w-[860px] [&_td]:!align-middle [&_td]:!text-left [&_th]:!text-left'>
             {/* Fixed column widths so every row lines up; the code/name column flexes, the rest are
                 sized to their control. Alignment is forced left/middle (the DataTable default right-
                 aligns, which fought the left-aligned inputs and read crooked). */}
             <colgroup>
               <col />
               <col className='w-[52px]' />
+              <col className='w-[184px]' />
               <col className='w-[210px]' />
               <col className='w-[56px]' />
               <col className='w-[180px]' />
@@ -304,6 +344,9 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
               <tr>
                 <th>code / name</th>
                 <th>×</th>
+                {/* Сразу за количеством, потому что это его пояснение: «×2» ничего не говорит о
+                    том, две это копии или левая с правой. */}
+                <th>как кроится</th>
                 <th>grain</th>
                 <th>fused</th>
                 <th>note</th>
@@ -316,6 +359,8 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                 const callout = p.calloutNumber || 0;
                 const arrow = grainlineArrow(p.grainline);
                 const blocks = blocksByPiece.get((p.lineKey ?? '').trim().toLowerCase()) ?? [];
+                const symmetryBadge = cutSymmetryBadge(p.cutSymmetry, p.piecesPerGarment);
+                const oddPair = cutSymmetryCountInvalid(p.cutSymmetry, p.piecesPerGarment);
                 return (
                   <tr
                     key={f.id}
@@ -355,6 +400,12 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                         className='w-full'
                         type='number'
                         min='1'
+                        // Помечено невалидным вместе с селектом: CHECK в БД двухколоночный, и
+                        // нарушить его можно с ЛЮБОЙ из двух сторон — как выбрав «зеркальные пары»
+                        // при нечётном количестве, так и исправив количество на нечётное у уже
+                        // размеченной детали. Подсветить только селект значило бы указать не на то
+                        // поле в половине случаев.
+                        aria-invalid={oddPair}
                         value={p.piecesPerGarment ?? 1}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
                           setValue(`pieces.${pi}.piecesPerGarment`, Number(e.target.value) || 1, {
@@ -362,6 +413,51 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                           })
                         }
                       />
+                    </td>
+                    <td>
+                      <select
+                        className={selectCls}
+                        aria-label='как кроится'
+                        // Якорь для revealField: и схема, и сервер адресуют нарушение чётности
+                        // путём `pieces.N.cutSymmetry`, а прокрутить и подсветить он умеет только
+                        // элемент с этим самым атрибутом. Без него ошибка находит вкладку, но не
+                        // строку.
+                        data-field={`pieces.${pi}.cutSymmetry`}
+                        aria-invalid={oddPair}
+                        value={p.cutSymmetry ?? UNSET_CUT_SYMMETRY}
+                        onChange={(e) =>
+                          setValue(`pieces.${pi}.cutSymmetry`, e.target.value, {
+                            shouldDirty: true,
+                          })
+                        }
+                      >
+                        {cutSymmetryOptionsFor(p.cutSymmetry).map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {/* Бейдж висит ТОЛЬКО там, где вопрос существует — у детали с ≥2 на изделие
+                          без ответа. Он повторяет ровно ту строку, которую в этом случае напечатает
+                          тех-пак, чтобы экран и бумага не расходились. У детали по одной на изделие
+                          парности нет, и молчаливого селекта «— не размечено» там достаточно:
+                          серый бейдж на каждой второй строке сегодня (размечено пока ничего) только
+                          обесценил бы синий. */}
+                      {symmetryBadge?.tone === 'attention' && (
+                        <div className='mt-0.5'>
+                          <Pill
+                            tone='attention'
+                            title='эта деталь идёт по две и больше на изделие, а как они кроятся — не сказано. Если это зеркальная пара, а лекало пришло полукомплектом, раскладка положит только одну хиральность и на крой уйдут одни левые. В тех-паке у строки печатается «парность не указана».'
+                          >
+                            {symmetryBadge.label}
+                          </Pill>
+                        </div>
+                      )}
+                      {oddPair && (
+                        <Text size='micro' variant='error'>
+                          {CUT_SYMMETRY_EVEN_COUNT_MESSAGE}
+                        </Text>
+                      )}
                     </td>
                     <td>
                       <div className='flex items-center gap-1'>
@@ -449,12 +545,25 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
           {/* Said once, under the table, rather than per row. The four values are the ones the
               server's CHECK accepts — anything else fails the whole card save, which is why this
               stopped being a free-text field with suggestions. */}
-          <Text size='micro' variant='label' className='lg:col-span-2'>
-            долевая — закрытый список (lengthwise / crosswise / bias / any): сервер отвергает любое
-            другое значение и роняет сохранение всей карточки. У детали, заведённой из DXF, реальное
-            направление задаёт линия долевой в самом файле — по ней раскладка разворачивает деталь,
-            а слово здесь только печатается в тех-пак и не должно ему противоречить.
-          </Text>
+          <div className='flex flex-col gap-1 lg:col-span-2'>
+            <Text size='micro' variant='label'>
+              долевая — закрытый список (lengthwise / crosswise / bias / any): сервер отвергает
+              любое другое значение и роняет сохранение всей карточки. У детали, заведённой из DXF,
+              реальное направление задаёт линия долевой в самом файле — по ней раскладка
+              разворачивает деталь, а слово здесь только печатается в тех-пак и не должно ему
+              противоречить.
+            </Text>
+            {/* Почему у колонки вообще есть состояние «не размечено» и почему оно не «одинаковые».
+                Сказано один раз под таблицей, а не в подсказке каждой строки. */}
+            <Text size='micro' variant='label'>
+              как кроится — количество этим НЕ меняется: «×2» и так означает две панели на изделие,
+              колонка лишь говорит, копии это или левая с правой. «Не размечено» — не то же самое,
+              что «одинаковые»: это значит, что вопрос никто не задавал, и такой ответ сохраняется
+              как есть, не подменяясь умолчанием. Зеркальная пара делится пополам, поэтому её
+              количество обязано быть чётным; крой по сгибу парным не бывает по построению (контур
+              симметричен сам себе), а «со сгибом и нужна дважды» — это манжеты: со сгибом × 2.
+            </Text>
+          </div>
         </div>
       )}
     </Section>

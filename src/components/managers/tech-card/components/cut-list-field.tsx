@@ -9,6 +9,7 @@ import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
+import { cutSymmetryBadge, cutSymmetryUnanswered } from './piece-codes';
 import { TechCardFormData } from './schema';
 import { useStyleCutList } from './useStyleReadViews';
 
@@ -19,6 +20,10 @@ import { useStyleCutList } from './useStyleReadViews';
 // The mirror flag is GONE (it expanded a piece ×2 as a left+right pair and was never used):
 // total_per_garment is now simply pieces_per_garment. GetStyleCutList stopped doubling in the same
 // change, so this table and the editor cannot disagree.
+//
+// 0275 вернула КЛАССИФИКАЦИЮ, но не множитель: колонка «как кроится» объясняет уже посчитанные
+// числа и ни одного из них не меняет — total_per_garment по-прежнему равен pieces_per_garment.
+// Именно поэтому её можно было добавить, не трогая ни одну сумму на этом экране.
 //
 // #42: this table is a CALCULATED projection, not an editable list — there is nothing to "add"
 // here. It is derived (GetStyleCutList) from the cut-pieces × each colourway's fabric mapping.
@@ -103,6 +108,11 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
 
     const perGarment = pieces.reduce((s, p) => s + (p.totalPerGarment ?? 0), 0);
     const fusedPerGarment = pieces.reduce((s, p) => s + (p.fused ? p.totalPerGarment ?? 0 : 0), 0);
+    // Сколько строк уйдёт в цех с оговоркой «парность не указана» — то же условие, по которому
+    // печатает тех-пак. Число, а не молчание: это таблица, по которой кроят.
+    const unmarkedPairing = pieces.filter((p) =>
+      cutSymmetryUnanswered(p.cutSymmetry, p.piecesPerGarment),
+    ).length;
 
     // Fabric is projected off the PRIMARY colourway's recipe: the size run is style-level, so
     // multiplying every colourway's recipe by it would count the same garments once per colour.
@@ -138,6 +148,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
       garments,
       perGarment,
       fusedPerGarment,
+      unmarkedPairing,
       piecesToCut: garments > 0 ? perGarment * garments : null,
       fusedTotal: garments > 0 ? fusedPerGarment * garments : null,
       shell: shell > 0 ? shell : null,
@@ -239,6 +250,9 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
             <th>grainline</th>
             <th>fused</th>
             <th>pieces / garment</th>
+            {/* Между количеством и total, потому что это пояснение к ним обоим: числа одинаковые
+                (0275 ничего не умножает), и колонка говорит, ЧТО это за штуки. */}
+            <th>как кроится</th>
             <th>total / garment</th>
             <th>fabric (by colourway)</th>
           </tr>
@@ -246,12 +260,31 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
         <tbody>
           {pieces.map((p, i) => {
             const fabrics = p.fabrics ?? [];
+            // Read-only на этом RPC (поле 9 в StyleCutListPiece): раскроечный цех работает по этой
+            // таблице, а редактируется разметка в блоке «детали кроя» выше.
+            const symmetry = cutSymmetryBadge(p.cutSymmetry, p.piecesPerGarment);
             return (
               <tr key={p.pieceId || i}>
                 <td>{p.name || `#${p.pieceId}`}</td>
                 <td>{p.grainline || <EmptyCell />}</td>
                 <td>{p.fused ? <Pill tone='mut'>fused</Pill> : <EmptyCell />}</td>
                 <td>{p.piecesPerGarment ?? 0}</td>
+                <td>
+                  {symmetry ? (
+                    <Pill
+                      tone={symmetry.tone}
+                      title={
+                        symmetry.tone === 'attention'
+                          ? 'деталь идёт по две и больше на изделие, а как они кроятся — не сказано. Ответьте в блоке «детали кроя» выше: пока ответа нет, тех-пак печатает эту же оговорку фабрике.'
+                          : undefined
+                      }
+                    >
+                      {symmetry.label}
+                    </Pill>
+                  ) : (
+                    <EmptyCell />
+                  )}
+                </td>
                 <td>{p.totalPerGarment ?? 0}</td>
                 <td>
                   {fabrics.length === 0 ? (
@@ -297,9 +330,10 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
             );
           })}
           <TotalRow>
-            <td colSpan={4}>
+            <td colSpan={5}>
               {pieces.length} pieces
               {totals.garments > 0 ? ` · ${group(totals.garments)} garments` : ''}
+              {totals.unmarkedPairing > 0 ? ` · ${totals.unmarkedPairing} без разметки кроя` : ''}
             </td>
             <td>{group(totals.perGarment)}</td>
             <td>

@@ -1099,6 +1099,10 @@ export function NestingModal({
           layout: {
             schemaVersion,
             params: view.layout?.params,
+            // Состав раскладки (Ф2) эхом, как params и pieces рядом: правка ОДНОГО размещения не
+            // должна ронять состав чужого маркера. У легаси-блоба его нет — тогда здесь undefined,
+            // ключ в JSON не появляется, и блоб остаётся ровно прежним.
+            composition: view.layout?.composition,
             pieces: view.layout?.pieces ?? [],
             placements: effective.placements.map((pl) => ({
               pieceId: pl.pieceId,

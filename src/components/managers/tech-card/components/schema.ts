@@ -19,6 +19,7 @@ import {
   common_TechCardMediaKind,
   common_TechCardOperationType,
   common_TechCardPackaging,
+  common_TechCardPieceCutSymmetry,
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
   common_TechCardStage,
@@ -34,6 +35,12 @@ import {
   isRollGoodsSection,
 } from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
+import {
+  CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
+  UNSET_CUT_SYMMETRY,
+  cutSymmetryCountInvalid,
+  isCutSymmetryMarked,
+} from './piece-codes';
 import { z } from 'zod';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
@@ -205,11 +212,16 @@ export function isBlankPiece(p: {
   calloutNumber?: number;
   fused?: boolean;
   piecesPerGarment?: number;
+  cutSymmetry?: string;
   materials?: { bomLineKey?: string; fusingBomLineKey?: string; note?: string }[];
 }): boolean {
   if (p.name?.trim() || p.grainline?.trim() || p.note?.trim()) return false;
   if (p.calloutNumber || p.fused) return false;
   if ((p.piecesPerGarment ?? 1) > 1) return false;
+  // Разметка кроя считается содержимым наравне с долевой и дублированием. Без этой строки ряд, в
+  // котором оператор успел ответить только на вопрос «как кроится», выбрасывался бы на сохранении
+  // МОЛЧА — потеря данных без единого сообщения, ради экономии одной проверки.
+  if (isCutSymmetryMarked(p.cutSymmetry)) return false;
   return !(p.materials ?? []).some(
     (m) => m.bomLineKey?.trim() || m.fusingBomLineKey?.trim() || m.note?.trim(),
   );
@@ -232,6 +244,13 @@ const pieceSchema = z
     // GetStyleCutList stopped doubling by it server-side in the same change — a client that merely
     // hid the field would still have shown the server's doubled total_per_garment with nothing on
     // screen to explain it.
+    //
+    // КАК КРОИТСЯ (`cut_symmetry`, 0275) — НЕ воскрешение `mirrored` выше, а отдельное поле, потому
+    // что воскрешать нечего: 0266 погасила все единицы по построению. Оно ничего не умножает и
+    // отвечает только на вопрос «как связаны эти piecesPerGarment панелей». Держим ПОЛНЫЙ литерал
+    // перечисления, как `fabricDirection` на строке BOM, а не короткое слово: круглый рейс без
+    // словаря переводов — это то, что делает сохранение неспособным подменить ответ оператора.
+    cutSymmetry: z.string().optional().default(UNSET_CUT_SYMMETRY),
     grainline: z.string().optional().default(''),
     fused: z.boolean().optional().default(false),
     calloutNumber: z.number().optional().default(0),
@@ -252,6 +271,19 @@ const pieceSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Piece name is required',
         path: ['name'],
+      });
+    }
+    // Зеркальная пара при нечётном (или нулевом) количестве. Правило живёт в CHECK'е БД
+    // (`chk_tcp_mirrored_needs_even_count`), и CHECK этот ДВУХКОЛОНОЧНЫЙ: он срабатывает и когда
+    // правят одно только количество у уже размеченной детали. Без этой проверки оператор получил бы
+    // сырой MySQL 3819 про колонку, которой не касался, и сохранение всей карточки — с сезоном,
+    // подписями и всем остальным — упало бы без единого адресуемого поля. Ошибка вешается на
+    // `cutSymmetry`, то есть на контрол, который её и вызвал.
+    if (cutSymmetryCountInvalid(piece.cutSymmetry, piece.piecesPerGarment)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
+        path: ['cutSymmetry'],
       });
     }
     // A fabric-map cell addresses its colourway by id (colorwayIndex holds colorway_id on the wire),
@@ -923,6 +955,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       lineKey: p.lineKey?.trim() || ulid(),
       name: p.name || '',
       piecesPerGarment: p.piecesPerGarment ?? 1,
+      // Круглый рейс начинается ЗДЕСЬ. Сервер шлёт поле на чтении всегда; неразмеченная деталь
+      // приезжает как `_UNKNOWN` (или отсутствует у карточки, сохранённой до 0275) — оба случая
+      // сходятся в одно «не размечено», и именно оно потом уедет обратно нетронутым.
+      cutSymmetry: p.cutSymmetry || UNSET_CUT_SYMMETRY,
       grainline: p.grainline || '',
       fused: p.fused ?? false,
       calloutNumber: p.calloutNumber ?? 0,
@@ -1298,6 +1334,18 @@ export function mapFormToTechCardInsert(
         // `mirrored` is NOT sent (see pieceSchema). The proto field still exists, so omitting it
         // makes the wire value false and the store's UPDATE clears a stored true — the retirement
         // is a write, not just a hidden control, and it lands card-by-card as cards are saved.
+        //
+        // `cutSymmetry`, наоборот, шлётся ВСЕГДА — круглым рейсом того, что прочитали. Поле в прото
+        // объявлено `optional` не ради этого клиента, а ради устаревшей вкладки: ОТСУТСТВИЕ поля
+        // сервер читает как «оставь хранимое», а ЯВНЫЙ `_UNKNOWN` — как «очисти в „не размечено“».
+        // Раз так, у нас ровно два обязательства, и оба выполняет одна эта строка: не потерять
+        // чужой ответ (форма засеяна с чтения, значит вернётся прочитанное) и уметь его снять
+        // (оператор выбрал «— не размечено» — уедет `_UNKNOWN`, и разметка снимется).
+        //
+        // Молчать было бы «безопаснее» ровно до первого снятия разметки, которое стало бы
+        // невозможным и необъяснимым: контрол показывает «не размечено», а карточка после перезагрузки
+        // снова помечена.
+        cutSymmetry: (p.cutSymmetry || UNSET_CUT_SYMMETRY) as common_TechCardPieceCutSymmetry,
         grainline: p.grainline?.trim() || '',
         fused: p.fused ?? false,
         calloutNumber: p.calloutNumber || 0,

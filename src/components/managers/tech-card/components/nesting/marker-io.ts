@@ -241,6 +241,11 @@ export function buildMarkerLayout(args: {
   // branches on the FIELD it needs, never on the number.
   return {
     schemaVersion: 3,
+    // Состав (Ф2, schema_version 4) этот писатель пока не собирает: он пишет однородный блоб
+    // «один размер × N комплектов», и ПУСТОЙ состав — это ровно его законное чтение (читатель
+    // берёт состав из шапки: {summary.size_id, summary.sets}). undefined, а не [] — ключа в JSON
+    // не появляется, блоб байт в байт прежний.
+    composition: undefined,
     params: {
       unit,
       tolCm: args.tol,
@@ -266,6 +271,13 @@ export function buildMarkerLayout(args: {
         // just displays by the name it saved.
         blockName: p.blockName ?? '',
         pieceLineKey: args.pieceLineKeyById?.get(p.id) ?? '',
+        // Ф2 (schema_version 4) завела на детали блоба размер её градации. Этот писатель
+        // размерами не оперирует — он пишет однородный блоб, — и `undefined` здесь означает ровно
+        // это: «деталь размеро-агностична / блоб легаси», то самое чтение, которое даёт прежнюю
+        // формулу количеств без ветвления по версии. Именно undefined, а не 0: ключа в JSON не
+        // появляется вовсе, и блоб остаётся байт в байт тем же, что до бампа прото — регрессионный
+        // пробник Ф0.5 сверяет «тот же вход ⇒ тот же блоб».
+        sizeId: undefined,
       })),
     placements: result.placements.map((pl) => ({
       pieceId: pl.pieceId,
