@@ -29,12 +29,7 @@ import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils'
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
-import {
-  UNSET_PURPOSE,
-  fabricScopeKey,
-  isOtherPurpose,
-  isRollGoodsSection,
-} from './bom-purpose';
+import { UNSET_PURPOSE, fabricScopeKey, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import {
   CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
@@ -1337,8 +1332,7 @@ export function mapFormToTechCardInsert(
         // Same contract on the назначение half (0267): stated on every row, UNSET being the explicit
         // unbind. Omitting it would put this client in the stale-client lane and make an unbind
         // silently impossible.
-        fabricPurpose: (p.fabricPurpose?.trim() ||
-          UNSET_PURPOSE) as common_TechCardBomPurpose,
+        fabricPurpose: (p.fabricPurpose?.trim() || UNSET_PURPOSE) as common_TechCardBomPurpose,
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
@@ -1390,7 +1384,12 @@ export function mapFormToTechCardInsert(
         cutSymmetry: (p.cutSymmetry || UNSET_CUT_SYMMETRY) as common_TechCardPieceCutSymmetry,
         grainline: p.grainline?.trim() || '',
         fused: p.fused ?? false,
-        calloutNumber: p.calloutNumber || 0,
+        // НЕ 0, а «поля нет». Ноль сервер принимает как настоящий номер (dto: `!= nil`), не находит
+        // выноску №0 и помечает деталь `detached` — то есть «выноску, на которую ты ссылалась,
+        // удалили» у детали, которую никогда ни к чему не прикрепляли. На бете так помечены 16
+        // деталей из 18. Выноски нумеруются с единицы, поэтому 0 не может быть ничем, кроме
+        // «не задано», и единственная его честная запись — отсутствие поля.
+        calloutNumber: p.calloutNumber && p.calloutNumber > 0 ? p.calloutNumber : undefined,
         note: p.note?.trim() || '',
         materials: (p.materials ?? [])
           // drop fully-empty cells (no fabric, no fusing, no note) so the map stays sparse —
@@ -1437,8 +1436,7 @@ export function mapFormToTechCardInsert(
           bomLineKey: a.bomLineKey?.trim() || '',
           blockName: a.blockName!.trim(),
           pieceLineKey: a.pieceLineKey!.trim(),
-          fabricPurpose: (a.fabricPurpose?.trim() ||
-            UNSET_PURPOSE) as common_TechCardBomPurpose,
+          fabricPurpose: (a.fabricPurpose?.trim() || UNSET_PURPOSE) as common_TechCardBomPurpose,
         })),
     },
     bomItems: bomLines.map((b) => ({

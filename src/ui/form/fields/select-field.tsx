@@ -10,6 +10,13 @@ type Props = {
   loading?: boolean;
   className?: string;
   valueAsNumber?: boolean;
+  // Побочный эффект выбора, вызываемый ПОСЛЕ записи в форму. Нужен там, где поле — лишь половина
+  // связи, и вторую половину обязана дописать та же правка (выноска НАЗЫВАЕТ деталь, а деталь
+  // ССЫЛАЕТСЯ на выноску номером — одно без другого связью не является).
+  //
+  // Отдельным параметром, а не через `...props`: они расстилаются ПОСЛЕ `{...field}`, и переданный
+  // снаружи onValueChange просто затёр бы внутренний — поле перестало бы писать значение в форму.
+  onAfterChange?: (value: string | number | undefined) => void;
   items: {
     label: string;
     value: string | number;
@@ -26,6 +33,7 @@ export default function SelectField({
   label,
   className,
   valueAsNumber = false,
+  onAfterChange,
   ...props
 }: Props) {
   const { control, trigger } = useFormContext();
@@ -42,9 +50,11 @@ export default function SelectField({
         <FormItem>
           <FormLabel>{label}</FormLabel>
           <Select
-            onValueChange={(val: string | undefined) =>
-              field.onChange(valueAsNumber && val != null ? Number(val) : val)
-            }
+            onValueChange={(val: string | undefined) => {
+              const next = valueAsNumber && val != null ? Number(val) : val;
+              field.onChange(next);
+              onAfterChange?.(next);
+            }}
             items={items}
             {...field}
             value={valueAsNumber && field.value != null ? String(field.value) : field.value}
