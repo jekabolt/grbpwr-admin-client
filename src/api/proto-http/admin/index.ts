@@ -94,6 +94,29 @@ export type TierCode =
   | "TIER_CODE_PLUS"
   | "TIER_CODE_PLUS_PLUS"
   | "TIER_CODE_HACKER";
+// The degree of one check. FOUR, not a bool, and the load-bearing one is UNKNOWN.
+// UNKNOWN is «THE SERVER HAS NO INSTRUMENT TO ANSWER», not «the data is bad». It NEVER blocks, in
+// any mode, and it is NEVER counted as passed. Blocking on it would punish the operator for a phase
+// we have not built; folding it into OK would silently not perform a check we promised — the exact
+// mistake Ф1 refused when it declined to read a NULL fabric direction as a value
+// (internal/entity/fabric_direction.go: «NULL IS NOT A FOURTH VALUE»).
+// The boundary between UNKNOWN and BLOCKER: «the conditions the marker was measured under were
+// never recorded» is an ANSWER (fitness under the «not worse than» rule cannot be established, so
+// the norm is not fit) and is therefore a BLOCKER. «There is no size index» is the ABSENCE OF AN
+// INSTRUMENT and is therefore UNKNOWN.
+export type ProductionRunReadinessSeverity =
+  | "PRODUCTION_RUN_READINESS_SEVERITY_UNSPECIFIED"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_OK"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_UNKNOWN"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_WARNING"
+  | "PRODUCTION_RUN_READINESS_SEVERITY_BLOCKER";
+// Where the coverage figure came from. Always NORM today. Ф4.6 switches the requirement from the
+// norm to the lays, and this field exists precisely so that switch is VISIBLE rather than guessed at
+// from the magnitude of the number.
+export type ProductionRunCoverageSource =
+  | "PRODUCTION_RUN_COVERAGE_SOURCE_UNSPECIFIED"
+  | "PRODUCTION_RUN_COVERAGE_SOURCE_NORM"
+  | "PRODUCTION_RUN_COVERAGE_SOURCE_LAYS";
 // AccessLevel is the level of access an account has to a section. WRITE implies READ.
 export type AccessLevel =
   | "ACCESS_LEVEL_UNSPECIFIED"
@@ -5025,6 +5048,17 @@ export type WorkshopSettings = {
   // (the table length rejects 0, this accepts it).
   // A tech card may override it (common.TechCardInsert.required_seam_allowance_cm).
   defaultSeamAllowanceCm: googletype_Decimal | undefined;
+  // BLOCKING MODE of the production-run readiness gate (Ф6.1/Ф6.9) — третий жилец дома настроек цеха.
+  // ABSENT = not configured, and — UNLIKE every other tenant of this house — «not configured» here
+  // has a DEFINED BEHAVIOUR: REPORT-ONLY MODE. The gate computes and shows everything and does not
+  // refuse the creation of a run. There is no third state a command can be in, so «no verdict» is
+  // not available to this setting the way it is to the table length.
+  // Rolling the column out any other way would have stopped production outright: on the day Ф6 ships
+  // not a single card carries a norm with recorded measurement conditions, so «no verdict ⇒ refuse»
+  // would have refused everyone.
+  // true is switched on ONLY after кампания Д3 (re-measuring the norms). The order is forced and
+  // physically irreversible: directions (Д1) → re-measure after Ф3 ships (Д3) → blocking (Д4).
+  runReadinessBlocking?: boolean;
 };
 
 export type GetWorkshopSettingsRequest = {
@@ -5059,6 +5093,14 @@ export type UpdateWorkshopSettingsRequest = {
   // allowance is a 4-5 cm hem, so anything past 10 is millimetres typed into a centimetre field or a
   // stray zero.
   defaultSeamAllowanceCm: googletype_Decimal | undefined;
+  // Ф6.9 — the blocking-mode switch. `optional` is MANDATORY here and is not decoration: without
+  // presence, «did not send the field» and «turn it off» are the same bytes on the wire, and a stale
+  // bundle saving the workshop screen would silently disable the gate. Exactly the price already
+  // paid on fabric_direction.
+  // Absent = leave alone. Present false = report-only. Present true = blocking. There is no
+  // "clear it back to unset" for a bool, and none is needed: false and unset behave identically
+  // (report-only), which is the whole point of the column's NULL having a defined behaviour.
+  runReadinessBlocking?: boolean;
 };
 
 export type UpdateWorkshopSettingsResponse = {
@@ -7457,6 +7499,22 @@ export type TechCardReadinessRequirement = {
   label: string | undefined;
   met: boolean | undefined;
   detail: string | undefined;
+  // UNKNOWN — the server COULD NOT ANSWER this row. Not «unmet», and above all not «met».
+  // It exists for one row today, `patterns`, and the reason is that the row was LYING. It counted
+  // DISTINCT tech_card_size_pattern.size_id against the size range, but the client files every
+  // sheet of a card under the SMALLEST size of the range as a pure storage artefact — so a card with
+  // five sizes and one graded DXF read as «1 of 5» and could never satisfy the prod checklist,
+  // while a card with one flat sheet per size read as fully covered whether or not those files
+  // contain those sizes.
+  // A false PASS is the worse of the two states, so the row stops asserting «verified» immediately
+  // rather than waiting for the index to fill. UNKNOWN does not count as unmet, so NO card becomes
+  // newly blocked at deploy time — the only thing that changes is that the server stops lying. The
+  // real check switches itself on card by card as the Ф6.3 size index (PutTechCardPatternSizeIndex)
+  // is populated.
+  // A row with unknown = true always carries a `detail` saying WHY there is no verdict, and `met` is
+  // false. `*_ready` booleans on this response are computed as «no row is unmet», with unknown rows
+  // skipped — a client recomputing readiness from the rows must do the same.
+  unknown: boolean | undefined;
 };
 
 // GetTechCardReadiness answers "what is missing before this style can move on" — the checklist the
@@ -8461,6 +8519,11 @@ export type MaterialPlanBlocker = {
   colorwayName: string | undefined;
   plannedQty: number | undefined;
   reason: string | undefined;
+  // STABLE MACHINE KEY for the same cause: `no_article` | `no_norm`. `reason` above stays a human
+  // sentence and is rewritten freely — a client that branched on its text would break on a typo fix.
+  // The readiness gate (Ф6) computes these two facts from THIS list rather than recomputing them,
+  // so the key is what keeps one fact from acquiring a second definition.
+  key: string | undefined;
 };
 
 export type GetProductionRunMaterialPlanResponse = {
@@ -8468,6 +8531,150 @@ export type GetProductionRunMaterialPlanResponse = {
   caveats: string[] | undefined;
   contributions: MaterialPlanContribution[] | undefined;
   blockers: MaterialPlanBlocker[] | undefined;
+};
+
+// ProductionRunReadinessCell is one cell of the planned grid. It deliberately repeats the key of
+// production_run_line (product × size), because that IS the run about to be written: the gate judges
+// what will be recorded, not a paraphrase of it.
+export type ProductionRunReadinessCell = {
+  colorwayId: number | undefined;
+  sizeId: number | undefined;
+  plannedQty: number | undefined;
+};
+
+export type CheckProductionRunReadinessRequest = {
+  techCardId: number | undefined;
+  // 0 = «planning against the LIVE card». A legal value (production_run.release_id is NULLable) and
+  // it does NOT become an error — see the release_frozen key.
+  releaseId: number | undefined;
+  // The colourways being asked about. NOT derived from `cells`: the modal has to be able to show a
+  // verdict for a colourway whose quantities have not been typed yet, or there is nothing to grey
+  // its checkbox out with.
+  colorwayIds: number[] | undefined;
+  cells: ProductionRunReadinessCell[] | undefined;
+  // Re-checking an EXISTING run (detail page badges). 0 = a future run. It does not change any rule;
+  // it changes where actual_wastage_percent comes from for the metreage.
+  runId: number | undefined;
+};
+
+// Where to go to fix it. THE CLIENT CHOOSES THE TAB, from `key`, with the same machinery as
+// RELEASE_BLOCKER_TAB / REQ_TAB and for the same reason: a tab name is one admin's navigation, not a
+// fact about the data. The server hands over IDENTIFIERS ONLY, so the client has something to build
+// a URL out of. An empty/zero field means «this check is not about that kind of object».
+export type ProductionRunReadinessTarget = {
+  techCardId: number | undefined;
+  colorwayId: number | undefined;
+  bomLineKey: string | undefined;
+  bomItemId: number | undefined;
+  markerId: number | undefined;
+  materialId: number | undefined;
+  sizeId: number | undefined;
+};
+
+// One check of the gate.
+// `key` is STABLE WIRE VOCABULARY and is what a client branches on (see the stability rules on
+// CheckProductionRunReadinessResponse). `label`/`detail` are human text, rewritten freely, and
+// rewording them is NEVER a contract change.
+export type ProductionRunReadinessFinding = {
+  key: string | undefined;
+  severity: ProductionRunReadinessSeverity | undefined;
+  label: string | undefined;
+  detail: string | undefined;
+  target: ProductionRunReadinessTarget | undefined;
+};
+
+export type ProductionRunReadinessColorway = {
+  colorwayId: number | undefined;
+  colorwayName: string | undefined;
+  ready: boolean | undefined;
+  findings: ProductionRunReadinessFinding[] | undefined;
+};
+
+// Coverage BY THE NORM, per (colourway, article) pair. NOT a lay plan: lays are built after the run
+// is created, on the detail page. The modal's heading is literally «оценка по норме».
+export type ProductionRunReadinessCoverage = {
+  colorwayId: number | undefined;
+  bomItemId: number | undefined;
+  slotName: string | undefined;
+  materialId: number | undefined;
+  materialName: string | undefined;
+  unit: string | undefined;
+  unitCode: common_MaterialUnit | undefined;
+  required: googletype_Decimal | undefined;
+  onHand: googletype_Decimal | undefined;
+  shortage: googletype_Decimal | undefined;
+  source: ProductionRunCoverageSource | undefined;
+};
+
+// Coverage ACROSS SIZES AND ACROSS CLOTHS (Ф4.5). A garment is not provisioned until ALL of its
+// cloths are: 22 fronts and 20 linings are 20 garments.
+export type ProductionRunReadinessUnitCoverage = {
+  colorwayId: number | undefined;
+  sizeId: number | undefined;
+  plannedQty: number | undefined;
+  // Garments for which EVERY required slot has both an article and a norm for this size. Today this
+  // is 0 or planned_qty (a binary fact about the recipe) rather than a fraction: fractions come from
+  // the STOCK, and that is units_from_stock below.
+  provisionedQty: number | undefined;
+  // Garments today's stock suffices for: min over slots of floor(on_hand / norm), capped at
+  // planned_qty. An ESTIMATE, not a promise — see source.
+  unitsFromStock: number | undefined;
+  source: ProductionRunCoverageSource | undefined;
+  blockingBomItemIds: number[] | undefined;
+};
+
+// The gate's answer.
+// KEY STABILITY RULES (this is contract, not style):
+// * a key names the FACT that is missing — never the screen that fixes it, and never the sentence
+// we happen to describe it with;
+// * rewording label/detail is NEVER a contract change;
+// * two facts a client would route to two different places are ALWAYS two keys, even when the
+// sentence is the same (this is how colorway_linked and lab_dip live: one screen, two keys, and
+// the aux filter drops them separately);
+// * a key NEVER carries identifiers — those live in `target`;
+// * a key is never re-used for a different fact. A retired key simply stops being emitted and the
+// new fact gets a new key. A client that does not know a key MUST still render the row and route
+// it to the header tab — the same rule RELEASE_BLOCKER_TAB already states.
+export type CheckProductionRunReadinessResponse = {
+  ready: boolean | undefined;
+  blockingEnabled: boolean | undefined;
+  // What CreateProductionRun WILL DO with this request: true = refuse. Sent explicitly rather than
+  // left to «!ready && blocking_enabled», because this is exactly the sentence the modal prints and
+  // the client must not be able to get it wrong.
+  wouldBlock: boolean | undefined;
+  // How many checks COULD NOT ANSWER. Zero is NOT «everything was verified successfully» — it means
+  // no check had to admit it lacked an instrument. Non-zero next to ready=true is the honest state
+  // «nothing is known to be broken, and these things were not checked at all».
+  unknownCount: number | undefined;
+  card: ProductionRunReadinessFinding[] | undefined;
+  colorways: ProductionRunReadinessColorway[] | undefined;
+  run: ProductionRunReadinessFinding[] | undefined;
+  coverage: ProductionRunReadinessCoverage[] | undefined;
+  unitCoverage: ProductionRunReadinessUnitCoverage[] | undefined;
+  // The material plan's own irreducible caveats (unconvertible units and the like), passed through
+  // VERBATIM: they are already written as sentences for a human, and restating them as keys would
+  // give one fact a second definition.
+  caveats: string[] | undefined;
+};
+
+export type PutTechCardPatternSizeIndexRequest = {
+  techCardId: number | undefined;
+  // The fabric scope: the назначение (0265) when the card has been sorted, else the BOM line's
+  // line_key — the same key entity.FabricScopeKey computes and the generated column
+  // tech_card_piece_dxf_block.scope_key holds (0267).
+  scopeKey: string | undefined;
+  // line_keys of the sheets the client actually parsed. The server checks them against ITS OWN
+  // current membership of the scope and refuses a mismatch: an index computed over the wrong files
+  // is worse than no index.
+  sheetLineKeys: string[] | undefined;
+  // Normalised (letters/digits only, lowercase) size tokens. EMPTY is legal and means «no grading
+  // was found in the files» — it is stored, and it reads back as NO VERDICT.
+  sizeTokens: string[] | undefined;
+};
+
+export type PutTechCardPatternSizeIndexResponse = {
+  sheetFingerprint: string | undefined;
+  resolvedSizeCount: number | undefined;
 };
 
 export type ReceiveMaterialStockRequest = {
@@ -10580,6 +10787,25 @@ export interface AdminService {
   // colourway norms × planned qty × (1 + wastage), against on-hand and already-issued stock (NF-06).
   // It is a plan-estimate before the marker; the real consumption comes from stock issues.
   GetProductionRunMaterialPlan(request: GetProductionRunMaterialPlanRequest): Promise<GetProductionRunMaterialPlanResponse>;
+  // CheckProductionRunReadiness — ГЕЙТ ГОТОВНОСТИ ПРОГОНА (Ф6). Not to be confused with
+  // GetTechCardReadiness: that one is ADVISORY, takes only a card id, and sees colourways as two
+  // aggregates; this one judges ONE CONCRETE FUTURE RUN — by its colourways and its quantities —
+  // and its verdict is RE-COMPUTED SERVER-SIDE inside CreateProductionRun.
+  // Read-only: writes nothing. POST rather than GET because the input carries a GRID
+  // (colourway × size × quantity), a repeating structure a query string has no honest
+  // representation of. The read-only-POST precedent in this service is GenerateTechCardOperations.
+  // THE RESPONSE ALWAYS LISTS EVERY CHECK, INCLUDING THE ONES THAT PASSED. A list of refusals alone
+  // never tells the operator WHAT the gate checks — and without that, the day blocking mode is
+  // switched on (Ф6.9) reads as a breakage rather than as a policy taking effect.
+  // NO MONEY TRAVELS IN THE ANSWER, and that is worth saying out loud because GetProductionRun right
+  // beside it strips costing: `coverage` is metres and pieces, `unit_coverage` is garments. Nothing
+  // here is stripped for an account without costing:read, and there is nothing to strip.
+  // Classified rd(production), NOT rd(tech_cards): the one consumer is the run-creation modal and
+  // the one meaning is «why can I not create this run». Whoever may create a run must be able to
+  // read the reason it was refused, or a planner without tech-card access gets a dead control
+  // stating an unfixable requirement. GetProductionRunMaterialPlan reads the very same card facts
+  // and is classified the same way.
+  CheckProductionRunReadiness(request: CheckProductionRunReadinessRequest): Promise<CheckProductionRunReadinessResponse>;
   // Material warehouse (new-flow NF-01): on-hand balance + moving-average valuation and an
   // append-only movement ledger per catalog material.
   ReceiveMaterialStock(request: ReceiveMaterialStockRequest): Promise<ReceiveMaterialStockResponse>;
@@ -10659,6 +10885,25 @@ export interface AdminService {
   // Refused with FailedPrecondition on a released card (marker designation is card content), and
   // NotFound for a marker that does not exist.
   SetTechCardMarkerNorm(request: SetTechCardMarkerNormRequest): Promise<SetTechCardMarkerNormResponse>;
+  // PutTechCardPatternSizeIndex stores the size tokens the CLIENT parsed out of the DXF block names
+  // of one fabric scope (Ф6.3), so the server-side readiness gate can answer «is there a pattern for
+  // this size» honestly instead of counting tech_card_size_pattern.size_id — a column the client
+  // fills with the smallest size of the range as a pure STORAGE ARTEFACT, which is why the existing
+  // `patterns` row of GetTechCardReadiness lies on every graded card.
+  // THE SERVER DOES NOT PARSE DXF AND NEVER WILL. The heuristic that decides «which token in this
+  // file is a size» (deriveBlockSizes) stays in ONE place, in the client. What crosses the wire is
+  // its RESULT.
+  // The client sends TOKENS and the LIST OF SHEETS it parsed. The fingerprint of that sheet set is
+  // computed BY THE SERVER out of its own tech_card_size_pattern rows, so «I parsed exactly these
+  // files» cannot be forged, and re-uploading any sheet makes the index stale automatically — the
+  // same device 0268 used to close the blob-version exemption forgery.
+  // AN EMPTY TOKEN SET IS A LEGAL ANSWER and means «the files carry no size coding» (one size per
+  // file yields no tokens at all: deriveBlockSizes demands at least two size tails on one name stem).
+  // It reads as NO VERDICT, never as «there are no sizes».
+  // wr(tech_cards): this WRITES a derived fact about the card's patterns, from the patterns tab, in
+  // the same session as the upload. A production planner must not be able to write it — the index
+  // feeds the gate, and the right to rewrite it is the right to clear one's own blocker.
+  PutTechCardPatternSizeIndex(request: PutTechCardPatternSizeIndexRequest): Promise<PutTechCardPatternSizeIndexResponse>;
   // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
   // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
   // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
@@ -14873,6 +15118,23 @@ export function createAdminServiceClient(
         method: "GetProductionRunMaterialPlan",
       }) as Promise<GetProductionRunMaterialPlanResponse>;
     },
+    CheckProductionRunReadiness(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/production-runs/readiness`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CheckProductionRunReadiness",
+      }) as Promise<CheckProductionRunReadinessResponse>;
+    },
     ReceiveMaterialStock(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/inventory/receive`; // eslint-disable-line quotes
       const body = JSON.stringify(request);
@@ -15249,6 +15511,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetTechCardMarkerNorm",
       }) as Promise<SetTechCardMarkerNormResponse>;
+    },
+    PutTechCardPatternSizeIndex(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/pattern-size-index`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "PutTechCardPatternSizeIndex",
+      }) as Promise<PutTechCardPatternSizeIndexResponse>;
     },
     ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes
