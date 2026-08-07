@@ -16,6 +16,8 @@
         "nest:chirality": "node scripts/marker-chirality-probe.mjs",
         "marker:composition": "node scripts/marker-composition-probe.mjs",
         "nest:budget": "node scripts/nest-budget-probe.mjs",
+        "nest:conditions": "node scripts/nest-conditions-probe.mjs",
+        "nest:mixed": "node scripts/mixed-vs-homogeneous-probe.mjs",
         "fix": "yarn lint && yarn format",
         "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
         "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",

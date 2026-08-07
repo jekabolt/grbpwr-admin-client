@@ -14,6 +14,15 @@
 //    only at FULL size coverage (a marker for every size of the card range).
 // №2 wastage_percent grosses on top of measured consumption, which already includes
 //    inter-piece waste — the dialog warns and names the number, but never rewrites it.
+//
+// Ф3 добавляет третье правило: НОРМА ВЕДЁТ. Из раскладок одной ткани человек назначает
+// нормировочную (`is_norm`, отдельный RPC), и `betterMarker` ставит её ПЕРВЫМ ключом — решение
+// бьёт эвристики «свой колорвей» и «свежесть». Отсюда же следует главное ограничение (§6.4):
+// FK от рецепта к маркеру НЕ СУЩЕСТВУЕТ. Применение КОПИРУЕТ число в usage.consumption, поэтому
+// переназначение нормы не пересчитывает ни одной строки рецепта и никогда не пересчитает. Оба
+// экрана обязаны сказать это словами — полоса называет расхождение вслух («рецепты не
+// пересчитаны»), диалог называет копирование — и ни один не пытается свести их сам: молчаливое
+// авто-применение подменило бы решение человека числом, которого он не выбирал.
 import type { common_TechCard, common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -31,9 +40,11 @@ import {
   consumptionCm,
   decNum,
   betterMarker,
+  isLegacyNorm,
   latestPerSize,
   markersForLine,
   markerWasteDecomposition,
+  pieceSetChanged,
   scalarNormRefusal,
   toBomUnit,
 } from './nesting/marker-io';
@@ -81,23 +92,38 @@ export function MarkerApplyHint({
   const [markerId, setMarkerId] = useState<number>(0);
   const [mode, setMode] = useState<'scalar' | 'perSize'>('scalar');
 
+  // Порядок предпочтения — ОДИН на весь файл и живёт в betterMarker: НОРМА → свой колорвей →
+  // свежесть (Ф3.4). Назначение нормы — решение человека, принадлежность и дата — эвристики, и
+  // решение бьёт эвристику. Список показывается В ЭТОМ ЖЕ порядке (селектор ниже), чтобы «что
+  // предложено» и «что первым в списке» не могли разойтись.
+  const ranked = useMemo(
+    () => [...lineMarkers].sort(betterMarker(colorwayId)),
+    [lineMarkers, colorwayId],
+  );
   // Лучший ПРИМЕНИМЫЙ маркер, а если применимых нет — просто лучший.
   //
   // С Ф2 у раскладки может не быть скалярной нормы вовсе (смешанный состав — среднее по составу,
-  // в рецепт такое не пишется). Брать сюда просто «самый свежий» значило бы: одна смешанная
-  // раскладка, снятая последней, гасит кнопку «применить» на строке, где рядом лежит совершенно
-  // годная однородная. Порядок предпочтения (свой колорвей → свежесть) при этом не меняется —
-  // применимость проверяется ПЕРВОЙ, потому что неприменимое число не лучше любой давности.
-  const newest = useMemo(() => {
-    const ranked = [...lineMarkers].sort(betterMarker(colorwayId));
-    return ranked.find((m) => !scalarNormRefusal(m)) ?? ranked[0];
-  }, [lineMarkers, colorwayId]);
+  // в рецепт такое не пишется). Брать сюда просто первого по рангу значило бы: одна смешанная
+  // раскладка гасит кнопку «применить» на строке, где рядом лежит совершенно годная однородная.
+  // Применимость проверяется ПЕРВОЙ, потому что неприменимое число не лучше любого ранга. Но
+  // подмену назначенной нормы применимой раскладкой нельзя делать МОЛЧА: о ней говорят пилюля
+  // «норма не даёт расхода» на строке и колаут в диалоге (оба через notTheNorm/normRefusal).
+  const preferred = useMemo(() => ranked.find((m) => !scalarNormRefusal(m)) ?? ranked[0], [ranked]);
   // The card's fit reference — a scalar norm taken from a non-base size deserves a callout.
   const baseSampleSizeId = (useWatch<TechCardFormData>({ name: 'baseSampleSizeId' }) ??
     0) as number;
-  if (lineMarkers.length === 0 || !newest) return null;
+  if (lineMarkers.length === 0 || !preferred) return null;
 
-  const chosen = lineMarkers.find((m) => m.id === markerId) ?? newest;
+  const chosen = lineMarkers.find((m) => m.id === markerId) ?? preferred;
+  // Назначенная норма линии — величина ОТДЕЛЬНАЯ от выбранного маркера, и путать их нельзя:
+  // применяется не всегда она (норма может не выдавать скалярной нормы, а оператор — выбрать
+  // другую раскладку руками), и тогда экран обязан назвать, ЧТО именно уйдёт в рецепт.
+  const normMarker = lineMarkers.find((m) => m.isNorm === true);
+  const normRefusal = normMarker ? scalarNormRefusal(normMarker) : '';
+  // consumptionCm сам отказывает на смешанной — арифметики до отказа тут не случается.
+  const normCons = normMarker ? consumptionCm(normMarker) : null;
+  const normConv = normCons != null ? toBomUnit(normCons, unit) : null;
+  const notTheNorm = normMarker != null && (chosen.id ?? 0) !== (normMarker.id ?? 0);
   // ОТКАЗ ИДЁТ ПЕРЕД АРИФМЕТИКОЙ. Смешанная раскладка не выдаёт расход на изделие: её длина —
   // средняя по составу, и записанная в рецепт она завышает мелкие размеры и занижает крупные —
   // ровно та ошибка, ради устранения которой Ф2 и заводилась. Дальше по коду `chosenCons === null`
@@ -127,7 +153,8 @@ export function MarkerApplyHint({
   const compLabel = (m: common_TechCardMarkerSummary) =>
     compositionLabel(compositionOf(m), (id) => sizeName(id)) || 'состав не читается';
   // Label and number from the same marker — the CHOSEN one (the hint used to number by
-  // `chosen` and label by `newest`, which diverged the moment the selector was touched).
+  // `chosen` and label by the auto-picked marker, which diverged the moment the selector
+  // was touched).
   const preview = conv
     ? `${conv.value} ${conv.unit}`
     : chosenCons != null
@@ -177,6 +204,19 @@ export function MarkerApplyHint({
   // baseSampleSizeId — это отдельный, более сильный факт.
   const offRunSize = chosenSizeId > 0 && sizeIds.length > 0 && !sizeIds.includes(chosenSizeId);
 
+  // УСЛОВИЯ СЪЁМКИ на том маркере, который реально уйдёт в рецепт (Ф3). Ни одно из двух не
+  // запрещает применение: «старая норма» — это раскладка, снятая до того, как условия стали
+  // записываться (категория ПРОИЗВОДНАЯ, своего флага у неё нет), а «набор изменился» — сверка
+  // отпечатка деталей. Оба — знание, которое есть у экрана и которого нет у оператора, и молчать
+  // о нём значит выдать число уверенней, чем оно есть. НЕИЗВЕСТНОСТЬ отпечатка — НЕ изменение:
+  // pieceSetChanged намеренно ложен на UNKNOWN, иначе бейджем покрылись бы все старые маркеры разом.
+  const perSizeChanged = sizeIds
+    .filter((id) => pieceSetChanged(bySize.get(id)))
+    .map((id) => sizeName(id));
+  const perSizeLegacy = sizeIds
+    .filter((id) => bySize.get(id) != null && isLegacyNorm(bySize.get(id)))
+    .map((id) => sizeName(id));
+
   // Provenance stamped with the number (0261): «marker» tells costing this figure ALREADY
   // contains the cutting waste, so the article's wastage_percent must not gross it up a second
   // time. The decomposition is display only. In per-size mode the applied norms come from
@@ -225,6 +265,36 @@ export function MarkerApplyHint({
       <Text size='nano' variant='label' component='span'>
         из раскладки: {chosenRefusal ? '—' : preview} · «{chosen.name}» ({compLabel(chosen)})
       </Text>
+      {/* «Норма» — ПОДПИСЬ, а не порядок. Раньше назначенную раскладку можно было опознать только
+          по тому, что её предложили первой, — то есть не отличить от «просто самой свежей». */}
+      {chosen.isNorm === true && (
+        <Pill tone='ink' title='назначенная нормировочная раскладка этой ткани на карточке'>
+          норма
+        </Pill>
+      )}
+      {pieceSetChanged(chosen) && (
+        <Pill
+          tone='attention'
+          title='набор деталей карточки изменился после съёмки этой раскладки — длина измерена по прежнему набору'
+        >
+          набор изменился
+        </Pill>
+      )}
+      {isLegacyNorm(chosen) && (
+        <Pill
+          tone='mut'
+          title='условия съёмки (припуск, слои, переворот) не записаны — раскладка снята до того, как их стали записывать'
+        >
+          старая норма
+        </Pill>
+      )}
+      {/* Норма назначена, а предлагается не она — на строке это видно только здесь: диалог с
+          объяснением ещё надо открыть, а прочитать число можно и не открывая. */}
+      {notTheNorm && normRefusal && (
+        <Pill tone='warn' title={normRefusal}>
+          норма не даёт расхода
+        </Pill>
+      )}
       {chosenRefusal && (
         <Pill tone='warn' title={chosenRefusal}>
           {compositionOf(chosen).length > 1 ? 'смешанный состав' : 'состав не читается'}
@@ -264,20 +334,26 @@ export function MarkerApplyHint({
             <Selector
               label='маркер'
               value={chosen.id ?? 0}
-              options={lineMarkers.map((m) => {
+              // Список идёт ПО РАНГУ (норма → свой колорвей → свежесть), а не в порядке,
+              // в котором строки приехали с сервера: первый пункт списка обязан совпадать с тем,
+              // что экран предложил сам.
+              options={ranked.map((m) => {
                 const c = consumptionCm(m);
                 return {
                   value: m.id ?? 0,
                   // Неприменимая раскладка остаётся В СПИСКЕ и подписана словом. Спрятать её
                   // значило бы ответить на «а где раскладка, которую я только что снял»
                   // молчанием; подписать «— смешанный состав» — назвать причину там, где её ищут.
-                  label: `«${m.name}» · ${compLabel(m)} · ${
+                  // «набор изменился» стоит здесь же: это факт о ГОДНОСТИ числа, и узнать его надо
+                  // до выбора, а не после. «Старая норма» намеренно осталась ниже, на выбранном
+                  // маркере: до Ф3 её несёт КАЖДАЯ строка, и в списке это был бы шум, а не сигнал.
+                  label: `${m.isNorm === true ? 'норма · ' : ''}«${m.name}» · ${compLabel(m)} · ${
                     c != null
                       ? `${c} см/ед`
                       : compositionOf(m).length > 1
                         ? 'нормы нет — смешанный состав'
                         : 'нормы нет — состав не читается'
-                  }`,
+                  }${pieceSetChanged(m) ? ' · набор изменился' : ''}`,
                 };
               })}
               onChange={(v: string | number) => setMarkerId(Number(v))}
@@ -322,6 +398,24 @@ export function MarkerApplyHint({
             <CalloutBox tone='error'>
               единица линии BOM ({unit || '—'}) не поддерживает раскладку — расход измерен в
               сантиметрах длины
+            </CalloutBox>
+          )}
+          {/* Применяется НЕ НОРМА — и это надо сказать до нажатия, а не объяснять потом. Два
+              разных случая, и путать их нельзя: экран сам обошёл норму, потому что она не выдаёт
+              расхода на изделие (тогда это предупреждение), либо оператор выбрал другую раскладку
+              руками (тогда это констатация). Молчаливая подмена назначенной нормы «просто
+              применимой» — ровно то, ради чего норма и заводилась. */}
+          {mode === 'scalar' && notTheNorm && normMarker && (
+            <CalloutBox tone={normRefusal ? 'warning' : 'note'}>
+              {normRefusal
+                ? `назначенная норма «${normMarker.name}» расхода на изделие не даёт (${
+                    compositionOf(normMarker).length > 1
+                      ? 'смешанный состав'
+                      : 'состав не читается'
+                  }) — применится «${chosen.name}», а не она`
+                : `применится «${chosen.name}», а НЕ назначенная норма «${normMarker.name}»${
+                    normConv ? ` (${normConv.value} ${normConv.unit})` : ''
+                  }`}
             </CalloutBox>
           )}
           {mode === 'perSize' && (
@@ -371,6 +465,34 @@ export function MarkerApplyHint({
                 .join('; ')}
             </CalloutBox>
           )}
+          {/* Условия съёмки (Ф3). Ни одно из двух не запрещает применение — и НЕ должно: гейт
+              условий живёт в Ф6, а здесь их дело — не дать применить число молча увереннее, чем
+              оно есть. */}
+          {mode === 'scalar' && pieceSetChanged(chosen) && (
+            <CalloutBox tone='warning'>
+              набор деталей карточки изменился после съёмки «{chosen.name}»: длина измерена по
+              ПРЕЖНЕМУ набору деталей. Применить можно, но число стоит подтвердить пересъёмкой
+            </CalloutBox>
+          )}
+          {mode === 'perSize' && perSizeChanged.length > 0 && (
+            <CalloutBox tone='warning'>
+              набор деталей карточки изменился после съёмки раскладок размеров{' '}
+              {perSizeChanged.join(', ')}: их длины измерены по ПРЕЖНЕМУ набору деталей
+            </CalloutBox>
+          )}
+          {mode === 'scalar' && isLegacyNorm(chosen) && (
+            <CalloutBox tone='note'>
+              старая норма: у «{chosen.name}» не записаны условия съёмки — ни припуск, ни слои, ни
+              политика переворота, а значит по чему именно она снята, сказать нечем. Применить
+              можно; пересъёмка запишет условия
+            </CalloutBox>
+          )}
+          {mode === 'perSize' && perSizeLegacy.length > 0 && (
+            <CalloutBox tone='note'>
+              старая норма у размеров {perSizeLegacy.join(', ')}: условия съёмки (припуск, слои,
+              переворот) не записаны
+            </CalloutBox>
+          )}
           {/* Заметки об отходах — только когда применить ВОЗМОЖНО. Под отказом строка «в норме
               уже сидят отходы …» описывала бы норму, которой нет, прямо под колаутом об этом. */}
           {applyPossible && Number.isFinite(wastage) && wastage > 0 && (
@@ -404,8 +526,13 @@ export function MarkerApplyHint({
               </Text>
             );
           })()}
+          {/* §6.4 сказанное там, где оно случается. Кнопка КОПИРУЕТ число: ссылки на раскладку в
+              рецепте не остаётся, и никакое последующее событие — ни пересъёмка, ни назначение
+              другой нормы — этот рецепт не тронет. */}
           <Text size='nano' variant='label' component='p'>
-            запись уйдёт при сохранении карточки (рецепт колорвея staged-сейвом)
+            запись уйдёт при сохранении карточки (рецепт колорвея staged-сейвом). Число
+            КОПИРУЕТСЯ: связи рецепта с раскладкой нет — переназначат норму или переснимут
+            раскладку, рецепт сам не пересчитается, применять придётся заново
           </Text>
         </div>
       </ConfirmationModal>
@@ -425,33 +552,43 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
       .filter((b) => b.lineKey && markersForLine(markers, b.lineKey).length > 0)
       .map((b) => {
         const lineMarkers = markersForLine(markers, b.lineKey!);
-        // Та же поправка, что в подсказке рецепта: полоса показывает ПРИМЕНИМУЮ раскладку, а
-        // смешанная не гасит её собой только потому, что снята последней.
-        const ranked = [...lineMarkers].sort((x, y) =>
-          String(y.updatedAt ?? '').localeCompare(String(x.updatedAt ?? '')),
-        );
-        const newest = ranked.find((m) => !scalarNormRefusal(m)) ?? ranked[0];
-        const refusal = scalarNormRefusal(newest);
-        const cons = consumptionCm(newest);
+        // ТОТ ЖЕ компаратор, что в подсказке рецепта: НОРМА → свежесть. Здесь стояла голая
+        // сортировка по updatedAt, и это была не мелочь: полоса называла «самую свежую»
+        // раскладку там, где рецепт применяли из назначенной нормы, — два экрана про одну ткань
+        // показывали разные числа, и расхождение выглядело ошибкой рецепта. colorwayId = 0
+        // намеренно: полоса КАРТОЧНАЯ, не колорвейная (см. markersOfColorway), и ключ
+        // принадлежности здесь выключен — сравнивать колорвеи между собой она не должна.
+        const ranked = [...lineMarkers].sort(betterMarker(0));
+        // Смешанная раскладка не гасит собой применимую только потому, что стоит выше по рангу.
+        const best = ranked.find((m) => !scalarNormRefusal(m)) ?? ranked[0];
+        const refusal = scalarNormRefusal(best);
+        const cons = consumptionCm(best);
         const conv = cons != null ? toBomUnit(cons, b.unit ?? '') : null;
-        // Пропуск свежего маркера — ФАКТ, а не служебная деталь: оператор только что снял
-        // настил, а полоса показывает число со старого. В диалоге применения пропуск виден в
-        // селекторе с причиной; у полосы селектора нет — значит, нужна пометка.
-        const skipped = ranked.length > 0 && newest !== ranked[0] ? ranked[0] : null;
+        // Пропуск лучшего маркера — ФАКТ, а не служебная деталь: пропущенной может оказаться и
+        // САМА НАЗНАЧЕННАЯ НОРМА (смешанный состав расхода на изделие не выдаёт), и тогда полоса
+        // показывает число не с неё. В диалоге применения пропуск виден в селекторе с причиной;
+        // у полосы селектора нет — значит, нужна пометка.
+        const skipped = ranked.length > 0 && best !== ranked[0] ? ranked[0] : null;
         // What the recipes currently say for this slot: distinct non-empty scalars across
         // colourways (a per-size graded usage shows as «по размерам»). Кто внёс скаляр —
         // запоминается: дельта против чужого колорвея — ложная тревога (его артикул может быть
         // другой ширины, и «расхождение» — это расхождение тканей, а не рецепта с раскладкой).
         const scalars = new Set<string>();
         const scalarCws = new Set<number>();
+        // Скаляры, ПРИМЕНЁННЫЕ ИЗ РАСКЛАДКИ, с колорвеем каждого — сырьё для §6.4 ниже. Ручные
+        // числа сюда не попадают: рецепт, набранный руками, ничего про норму не обещал.
+        const markerScalars: { cw: number; value: string }[] = [];
         let perSize = false;
         for (const cw of colorways) {
+          const cwId = Number(cw.colorwayId ?? 0);
           for (const u of cw.usages ?? []) {
             if ((u.bomLineKey ?? '') !== b.lineKey) continue;
             if ((u.sizeConsumptions ?? []).length > 0) perSize = true;
             else if (u.consumption?.value) {
               scalars.add(u.consumption.value);
-              scalarCws.add(Number(cw.colorwayId ?? 0));
+              scalarCws.add(cwId);
+              if ((u.consumptionSource ?? '') === 'marker')
+                markerScalars.push({ cw: cwId, value: u.consumption.value });
             }
           }
         }
@@ -462,16 +599,55 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
             : scalars.size === 1
               ? [...scalars][0]
               : `расходятся (${[...scalars].join(' / ')})`;
-        const newestCw = Number(newest.colorwayId ?? 0);
+        const bestCw = Number(best.colorwayId ?? 0);
         const delta =
           conv &&
           !perSize &&
           scalars.size === 1 &&
           Number([...scalars][0]) > 0 &&
-          (newestCw === 0 || scalarCws.has(newestCw))
+          (bestCw === 0 || scalarCws.has(bestCw))
             ? ((conv.value - Number([...scalars][0])) / Number([...scalars][0])) * 100
             : null;
-        return { line: b, newest, conv, cons, refusal, current, delta, skipped };
+
+        // §6.4 — ПЕРЕСЧЁТА НЕТ И НЕ БУДЕТ. FK от рецепта к маркеру не существует: применение
+        // КОПИРУЕТ длину в tech_card_colorway_usage.consumption, и переназначение нормы не
+        // трогает ни одной строки рецепта. Значит «в рецепте лежит применённое из раскладки
+        // число, а норма сейчас даёт другое» — не порча данных и не рассинхрон, который что-то
+        // когда-нибудь починит: это состояние, закрыть которое может только человек, применив
+        // норму заново. Дельта рядом называет РАЗМЕР расхождения и молчит о его природе — тут
+        // нужна причина, иначе расхождение читается как ошибка рецепта.
+        //
+        // Сравниваются ТОЛЬКО скаляры с провенансом 'marker'. Пер-размерная строка собрана из
+        // нескольких раскладок, из каких — не записано нигде (тот же отсутствующий FK), и
+        // объявить её разошедшейся значило бы гадать. Колорвейный скоуп соблюдается той же
+        // проверкой, что у дельты: норма своего колорвея ничего не утверждает о чужом рецепте —
+        // у того другой артикул, другая ширина, и «расхождение» было бы расхождением тканей.
+        const normMarker = lineMarkers.find((m) => m.isNorm === true);
+        const normCons = normMarker ? consumptionCm(normMarker) : null;
+        const normConv = normCons != null ? toBomUnit(normCons, b.unit ?? '') : null;
+        const normCw = Number(normMarker?.colorwayId ?? 0);
+        // 0.0005 — шум представления: колонка DECIMAL(10,3), а число туда положил тот же apply
+        // строкой из toBomUnit. Всё, что крупнее, — другое измерение, а не другая запись.
+        const staleApplied = normConv
+          ? [
+              ...new Set(
+                markerScalars
+                  .filter((r) => normCw === 0 || r.cw === normCw)
+                  .map((r) => r.value)
+                  .filter((v) => Math.abs(Number(v) - normConv.value) > 0.0005),
+              ),
+            ]
+          : [];
+        const stale =
+          normMarker && normConv && staleApplied.length > 0
+            ? {
+                name: normMarker.name ?? '',
+                value: normConv.value,
+                unit: normConv.unit,
+                applied: staleApplied,
+              }
+            : null;
+        return { line: b, best, conv, cons, refusal, current, delta, skipped, stale };
       });
   }, [bomLines, markers, colorways]);
 
@@ -482,32 +658,71 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
       <Text size='nano' variant='label' component='p'>
         расход из раскладок (маркеров) — применяется в рецепте колорвея, вкладка colourways
       </Text>
-      {rows.map(({ line, newest, conv, cons, refusal, current, delta, skipped }) => (
-        <div key={line.lineKey} className='flex flex-wrap items-center gap-1.5'>
-          <Text size='micro' component='span' className='min-w-0 truncate'>
-            {line.name?.trim() || 'ткань'}
-          </Text>
-          {refusal ? (
-            <Pill tone='warn' title={refusal}>
-              из раскладки: нормы нет —{' '}
-              {compositionOf(newest).length > 1 ? 'смешанный состав' : 'состав не читается'}
-            </Pill>
-          ) : (
-            <Pill tone='mut'>
-              из раскладки: {conv ? `${conv.value} ${conv.unit}` : `${cons} см`}
-            </Pill>
-          )}
-          {skipped && (
-            <Pill tone='mut' title={scalarNormRefusal(skipped)}>
-              свежее измерение «{skipped.name}» пропущено —{' '}
-              {compositionOf(skipped).length > 1 ? 'смешанный состав' : 'состав не читается'}
-            </Pill>
-          )}
-          <Text size='nano' variant='label' component='span'>
-            в рецептах: {current}
-          </Text>
-          {delta != null && Math.abs(delta) > 5 && (
-            <Pill tone='warn'>{delta > 0 ? `+${delta.toFixed(0)}%` : `${delta.toFixed(0)}%`}</Pill>
+      {rows.map(({ line, best, conv, cons, refusal, current, delta, skipped, stale }) => (
+        <div key={line.lineKey} className='space-y-1'>
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Text size='micro' component='span' className='min-w-0 truncate'>
+              {line.name?.trim() || 'ткань'}
+            </Text>
+            {refusal ? (
+              <Pill tone='warn' title={refusal}>
+                из раскладки: нормы нет —{' '}
+                {compositionOf(best).length > 1 ? 'смешанный состав' : 'состав не читается'}
+              </Pill>
+            ) : (
+              <Pill tone='mut'>
+                из раскладки: {conv ? `${conv.value} ${conv.unit}` : `${cons} см`}
+              </Pill>
+            )}
+            {/* Чьё это число: назначенной нормы или просто лучшей раскладки. Без подписи полоса
+                называет цифру с одинаковой уверенностью в обоих случаях. */}
+            {best.isNorm === true && (
+              <Pill tone='ink' title='назначенная нормировочная раскладка этой ткани на карточке'>
+                норма
+              </Pill>
+            )}
+            {pieceSetChanged(best) && (
+              <Pill
+                tone='attention'
+                title='набор деталей карточки изменился после съёмки этой раскладки — длина измерена по прежнему набору'
+              >
+                набор изменился
+              </Pill>
+            )}
+            {isLegacyNorm(best) && (
+              <Pill
+                tone='mut'
+                title='условия съёмки (припуск, слои, переворот) не записаны — раскладка снята до того, как их стали записывать'
+              >
+                старая норма
+              </Pill>
+            )}
+            {skipped && (
+              <Pill
+                tone={skipped.isNorm === true ? 'warn' : 'mut'}
+                title={scalarNormRefusal(skipped)}
+              >
+                {skipped.isNorm === true ? 'назначенная норма' : 'свежее измерение'} «{skipped.name}
+                » расхода не даёт —{' '}
+                {compositionOf(skipped).length > 1 ? 'смешанный состав' : 'состав не читается'}
+              </Pill>
+            )}
+            <Text size='nano' variant='label' component='span'>
+              в рецептах: {current}
+            </Text>
+            {delta != null && Math.abs(delta) > 5 && (
+              <Pill tone='warn'>
+                {delta > 0 ? `+${delta.toFixed(0)}%` : `${delta.toFixed(0)}%`}
+              </Pill>
+            )}
+          </div>
+          {stale && (
+            <CalloutBox tone='warning'>
+              рецепты не пересчитаны: применённое из раскладки {stale.applied.join(' / ')}{' '}
+              {stale.unit} против нормы «{stale.name}» — {stale.value} {stale.unit}. Связи рецепта
+              с раскладкой нет: переназначение нормы ничего не пересчитывает, и прежнее число будет
+              стоять, пока норму не применят заново
+            </CalloutBox>
           )}
         </div>
       ))}

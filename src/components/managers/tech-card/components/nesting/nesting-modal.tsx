@@ -52,7 +52,29 @@ import {
   type MarkerCompositionEntry,
 } from './marker-io';
 import { markerScopeLines, strictestDirection } from '../bom-purpose';
-import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
+import {
+  MAX_SEAM_ALLOWANCE_CM,
+  blocksMissingOnLayer,
+  clampSeamAllowance,
+  defaultContourLayer,
+  layerAllowanceLabel,
+  layerOptions,
+  seamAllowancePrefill,
+  seamLineLayer,
+} from './contour-layer';
+import {
+  allowanceLabel,
+  allowanceUnknownText,
+  buildAllowanceIndex,
+  type ContourAllowance,
+} from './contour-allowance';
+import {
+  describeRebuildError,
+  rebuildMarkerDrawing,
+  type PatternSource,
+  type RebuildError,
+} from './marker-rebuild';
+import { isDxfUrl } from 'utils/pattern';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
@@ -88,13 +110,21 @@ function PieceThumb({ piece }: { piece: PieceDTO }) {
   );
 }
 
-// Потолок припуска, см. См. комментарий у поля ввода.
-const MAX_ALLOWANCE_CM = 10;
-
 function numOr(v: string, fallback: number): number {
   const n = Number(v.replace(',', '.'));
   return Number.isFinite(n) ? n : fallback;
 }
+
+// ПЕРЕСОБРАННЫЙ ЧЕРТЁЖ ДЕТАЛИ (Ф3.5) — состояние, а не булево. Четыре ответа, и каждый решает
+// судьбу кнопок экспорта по-своему: 'off' — пересобирать нечего (режим расчёта, где чертёж и так
+// на руках, либо деградированный блоб, у которого нет и контуров); 'running' — ответа ЕЩЁ нет, и
+// выпускать файл до него нельзя; 'ok' — чертёж восстановлен и уезжает в экспорт; 'error' — не
+// восстановлен, и это ВИДИМАЯ новость, а не тихо неполный файл.
+type DrawingState =
+  | { phase: 'off' }
+  | { phase: 'running' }
+  | { phase: 'ok'; pieces: PieceDTO[]; warnings: string[] }
+  | { phase: 'error'; error: RebuildError };
 
 export function NestingModal({
   files,
@@ -113,6 +143,8 @@ export function NestingModal({
   season,
   styleNumber,
   pieceAliases,
+  requiredSeamAllowanceCm,
+  workshopDefaultSeamAllowanceCm,
 }: {
   files: NestingFile[] | null; // null = closed (nest mode)
   sizeLabel?: string;
@@ -158,8 +190,26 @@ export function NestingModal({
   // сохранённая раскладка пережила переименование детали. Пусто/не передано — маркер сохранится
   // с пустыми ключами, как и раньше: это законное «неизвестно», а не «такой детали нет».
   pieceAliases?: readonly { blockName?: string; pieceLineKey?: string }[];
+  // «ТРЕБУЕМЫЙ ПРИПУСК» карточки, см (Ф3.2). Это ЭТАЛОН, а не факт: он предзаполняет поле, но
+  // никогда не переписывает то, что оператор ввёл руками, и не участвует в отказах — сравнение
+  // «не хуже» делает гейт готовности (Ф6), а не путь сохранения. `null`/не передано = карточка
+  // эталона не задала, и подставлять ноль ЗАПРЕЩЕНО: ноль здесь — законная настройка («наши
+  // выкройки несут линию кроя»), и спутать её с «не настроено» значит объявить каждую раскладку с
+  // припуском нарушающей эталон, которого никто не задавал.
+  requiredSeamAllowanceCm?: number | null;
+  // Припуск цеха по умолчанию, см (admin.WorkshopSettings.default_seam_allowance_cm). Тот же
+  // договор: `null` = не настроено, и это НЕ ноль.
+  workshopDefaultSeamAllowanceCm?: number | null;
 }) {
-  const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(files);
+  // В РЕЖИМЕ ПРОСМОТРА ФАЙЛЫ НЕ РАЗБИРАЮТСЯ ЭТИМ ХУКОМ, и это не экономия, а устранение второго
+  // разбора. С §7.5 вызывающий передаёт в `files` сегодняшние выкройки ткани — но нужны они
+  // ПЕРЕСБОРКЕ (ниже), которая разбирает их с параметрами ИЗ БЛОБА (unit/tol/tolChain), а не
+  // сегодняшними умолчаниями. Отдать те же файлы ещё и сюда значило бы скачать их дважды и
+  // дважды разобрать в двух воркерах — ради `allPieces`, которых в этом режиме не читает никто:
+  // геометрию даёт блоб, левая колонка скрыта, прогон недоступен.
+  const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(
+    view ? null : files,
+  );
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
   // Отказ выдать скалярную норму у ОТКРЫТОГО маркера — слово сервера, если он его сказал.
   // Показывается вместо числа: «средняя по составу» и настоящая норма выглядят одинаково.
@@ -201,7 +251,23 @@ export function NestingModal({
   const allPieces = useMemo(() => (parse.phase === 'ready' ? parse.pieces : []), [parse]);
   const dictTokens = useDictionarySizeTokens();
   const split = useMemo(() => splitPiecesBySize(allPieces, dictTokens), [allPieces, dictTokens]);
-  const layerOpts = useMemo(() => layerOptions(allPieces, split.codeById), [allPieces, split]);
+  // ЗАМЕР ПРИПУСКА, УЖЕ ЛЕЖАЩЕГО В КОНТУРЕ (Ф3.3) — по ПОЛНОМУ разбору и ровно один раз.
+  //
+  // `allPieces`, а не `selectedPieces` и не `pieces`: улика — это ВТОРОЙ контур того же блока, то
+  // есть ровно то, что фильтр по слою из набора и выбрасывает. Померить на отфильтрованном наборе
+  // значит гарантированно получить 'unknown' на каждом слое и назвать это «файл такой».
+  //
+  // Индекс общий для списка слоёв и для выбранного слоя: пара контуров внутри блока ОДНА, и
+  // считать её по разу на слой (3–13 мс за проход) незачем. В режиме просмотра не строится вовсе
+  // — там нет ни файла, ни выбора слоя, а у деталей из блоба нет места в чертеже.
+  const allowanceIndex = useMemo(
+    () => (viewData || allPieces.length === 0 ? null : buildAllowanceIndex(allPieces)),
+    [viewData, allPieces],
+  );
+  const layerOpts = useMemo(
+    () => layerOptions(allPieces, split.codeById, allowanceIndex ?? undefined),
+    [allPieces, split, allowanceIndex],
+  );
   // Деталь кроя за каждой разобранной деталью — ключ, который едет в блоб маркера (схема 2).
   //
   // Поле в блобе существует с самой схемы 2, а заполнялось всё это время пустой строкой: вызов
@@ -259,6 +325,19 @@ export function NestingModal({
   const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
     ? (activeLayer as string)
     : defaultContourLayer(layerOpts);
+  // ЧТО ЛЕЖИТ НА ВЫБРАННОМ СЛОЕ — линия кроя или линия шва. Берётся из уже посчитанного списка
+  // слоёв, а не меряется повторно: это тот же самый замер, и второй его экземпляр был бы местом,
+  // где два числа однажды разойдутся.
+  //
+  // Считается и на слое ПО УМОЛЧАНИЮ, а не только после ручного перебора. Спека §1.4 замечает,
+  // что правило «по градации» обычно само ставит линию шва первой, — но `blazer.dxf` несёт ЧЕТЫРЕ
+  // полных контурных слоя (две линии кроя и две линии шва), и «обычно» на нём не выполняется.
+  // Проверка, которая включается только после ручного клика, пропустила бы ровно тот файл, ради
+  // которого писалась.
+  const contourMeasure: ContourAllowance | null =
+    layerOpts.find((o) => o.layer === contourLayer)?.allowance ?? null;
+  // Слой, на котором ЗАМЕРЕНА линия шва, — второй из двух выходов, которые обязан назвать отказ.
+  const seamLayerPick = useMemo(() => seamLineLayer(layerOpts), [layerOpts]);
   const sizeOpts = useMemo(() => {
     const seen = new Map<string, number>();
     for (const p of allPieces) {
@@ -443,6 +522,77 @@ export function NestingModal({
   const pieces = seam.pieces;
   const usable = widthCm - 2 * marginCm;
 
+  // ── ДВОЙНОЙ ПРИПУСК И ОТКУДА БЕРЁТСЯ ЧИСЛО В ПОЛЕ (Ф3.2, спека §5.3–§5.5) ─────────────────
+  //
+  // Вопрос ровно один: «в контуре, который мы раскладываем, припуск УЖЕ есть?» Если да (замерена
+  // ЛИНИЯ КРОЯ) и оператор при этом просит офсет — припуск ляжет ДВАЖДЫ, и маркер выйдет длиннее
+  // настоящего по периметру каждой детали. Заметить это на картинке нечем: раскладка выглядит
+  // правильной, просто ткани в ней больше.
+  //
+  // ЗДЕСЬ ЭТО ЛОВИТСЯ ДО ПРОГОНА, а сервер ловит на сохранении (§5.3). Не вторая политика: правило
+  // одно и то же, и клиентская проверка нужна затем, чтобы отказ не приходил ПОСЛЕ оплаченного
+  // бюджета — на прогон уходят десятки секунд, и узнать в конце, что норму не примут, значит
+  // выбросить их.
+  const contourIsCutLine =
+    contourMeasure?.verdict === 'cut' && (contourMeasure.allowanceCm ?? 0) > 0;
+  const doubleAllowanceRefusal =
+    !viewData && contourIsCutLine && allowanceCm > 0 && contourMeasure
+      ? `слой ${contourMeasure.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(contourMeasure.allowanceCm ?? 0).toFixed(2)} см снаружи линии шва (совпало на ${contourMeasure.stats.accepted} блоках). Раскладка добавит ещё ${allowanceCm.toFixed(2)} см офсета — припуск будет посчитан ДВАЖДЫ, и длина завышена примерно на ${allowanceCm.toFixed(2)} см по периметру каждой детали. Выходов два: поставить припуск 0 (контур уже с припуском) либо ${
+          seamLayerPick
+            ? `выбрать контурный слой ${seamLayerPick} — на нём замерена линия шва`
+            : 'выбрать контурный слой с линией шва'
+        }.`
+      : null;
+  // УЛИК НЕТ — И ЭТО НЕ ПОВОД ЗАПРЕЩАТЬ (§5.4). Улики отсутствуют ЗАКОНОМЕРНО: у блока один
+  // замкнутый контур, второй контур пересекает первый, блоков меньше трёх. Такая раскладка
+  // сохраняется, `contour_allowance_cm` уезжает NULL, и маркер честно помечен «припуск не
+  // подтверждён файлом» — а не «двойной припуск».
+  const allowanceUnconfirmed =
+    !viewData && parse.phase === 'ready' && allowanceCm > 0 && contourMeasure?.verdict === 'unknown';
+
+  // ПРЕДЗАПОЛНЕНИЕ ПОЛЯ «ПРИПУСК» (§5.5). Порядок источников НЕ ПЕРЕСТАВЛЯТЬ, и последний из них —
+  // не эталон, а признание: `NEST_DEFAULTS.seamAllowanceCm` перестал быть источником истины и
+  // остался последним фолбэком, у которого в подписи так и сказано, что его никто не задавал.
+  const [allowanceTouched, setAllowanceTouched] = useState(false);
+  const allowancePrefill = useMemo(() => {
+    // Пока файл не разобран, подставлять нечего: замера ещё нет, а без него порядок §5.5 отвечал
+    // бы эталоном на вопрос, на который сперва обязан ответить файл.
+    if (viewData || parse.phase !== 'ready') return null;
+    return seamAllowancePrefill({
+      measured: contourMeasure,
+      cardRequiredCm: requiredSeamAllowanceCm,
+      workshopDefaultCm: workshopDefaultSeamAllowanceCm,
+      fallbackCm: NEST_DEFAULTS.seamAllowanceCm,
+    });
+  }, [
+    viewData,
+    parse.phase,
+    contourMeasure,
+    requiredSeamAllowanceCm,
+    workshopDefaultSeamAllowanceCm,
+  ]);
+  useEffect(() => {
+    // Введённое руками не перебивается НИКОГДА — ровно как ширина полотна рядом. Свой номер
+    // оператор ставит осознанно, и подставить поверх него «правильный» значит спорить с
+    // единственным участником, который держал в руках лекало.
+    if (!allowancePrefill || allowanceTouched) return;
+    setAllowanceCm((prev) => (prev === allowancePrefill.value ? prev : allowancePrefill.value));
+  }, [allowancePrefill, allowanceTouched]);
+  // Подпись под полем: КАКОЙ факт про выбранный контур мы знаем. Три ветки, и ни одна не имеет
+  // права звучать как «ноль»: «не измерено» — это отсутствие улик, а не измеренное отсутствие
+  // припуска.
+  const allowanceSourceText = (() => {
+    const m = contourMeasure;
+    if (!m || parse.phase !== 'ready') return 'контур DXF — линия шва; кладётся линия кроя';
+    if (m.verdict === 'cut') {
+      return `слой ${m.layer}: ЛИНИЯ КРОЯ — припуск ${(m.allowanceCm ?? 0).toFixed(2)} см уже в контуре (замерено на ${m.stats.accepted} блоках)`;
+    }
+    if (m.verdict === 'seam') {
+      return `слой ${m.layer}: линия шва — линия кроя нарисована в ${(m.gapCm ?? 0).toFixed(2)} см снаружи (замерено на ${m.stats.accepted} блоках)`;
+    }
+    return `крой или шов — по файлу не определить: ${allowanceUnknownText(m)}`;
+  })();
+
   // Cross-strip span in the allowed rotations; a piece that fits nowhere is auto-unchecked.
   const fitsWidth = useMemo(() => {
     const m = new Map<number, boolean>();
@@ -515,8 +665,104 @@ export function NestingModal({
 
   const target = targetCm === '' ? undefined : targetCm;
 
+  // ── ПЕРЕСБОРКА ЧЕРТЕЖА ДЕТАЛИ ПРИ ЭКСПОРТЕ (Ф3.5, спека §7.2/§7.4) ─────────────────────────
+  //
+  // Блоб маркера хранит внешние контуры и размещения — и всё. Чертёж детали (линия шва, надсечки,
+  // свёрла, вытачки) живёт в `PieceDTO.inner`, в блоб не пишется и полем прото не выражен: он
+  // ПРОИЗВОДНЫЙ от выкройки и условий съёмки, а производное в блобе с капом на 300 деталей — плата
+  // без выигрыша. Значит переоткрытый маркер приходит БЕЗ чертежа, и экспорт из него выдаёт файл,
+  // у которого линии шва нет вовсе. Раскройщик читает это как «у изделия её нет».
+  //
+  // Поэтому: перед экспортом чертёж ПЕРЕСОБИРАЕТСЯ по сегодняшним выкройкам теми же чистыми
+  // функциями и с условиями со строки, а совпадение контура с сохранённым ДОКАЗЫВАЕТСЯ сверкой.
+  // Не доказано — экспорт с чертежом выключается и об этом сказано словами (§7.4), а плоттерный
+  // файл остаётся доступен отдельной кнопкой (решение Р4).
+  //
+  // A degraded marker (unreadable blob → summary only) has no geometry to export: the buttons
+  // would emit a STRIP-rectangle-only file that a plotter would happily cut. Пересобирать там тоже
+  // нечего — сверять пересобранное не с чем.
+  const viewDegraded =
+    viewData != null && (viewData.pieces.length === 0 || viewData.result.placements.length === 0);
+  // ОТКУДА БЕРУТСЯ ФАЙЛЫ ДЛЯ ПЕРЕСБОРКИ — из `files`, и отобраны они ВЫЗЫВАЮЩИМ.
+  //
+  // Отбор («какие листы относятся к ткани ЭТОЙ раскладки») требует строк BOM карточки: с 0267
+  // лист привязывается не только к строке, но и к НАЗНАЧЕНИЮ, и назначение резолвится первым —
+  // лист «основного материала» обслуживает все строки этого назначения и своего bomLineKey не
+  // несёт вовсе. BOM есть у `markers-section`, а не у модалки, и правило отбора там уже позвано
+  // (`patternSourcesForMarker` + резолвер по `fabricScopes`). Позвать его ВТОРОЙ РАЗ здесь, со
+  // своим, более бедным резолвером, значило бы завести два ответа на один вопрос: пока они
+  // совпадают — это дубль, как только разойдутся — это два разных набора выкроек под одним
+  // экраном, и который из них пересобирал чертёж, будет уже не сказать.
+  //
+  // Поэтому модалка принимает готовый список и ничего в нём не решает. Пустой список — законный
+  // ответ «пересобирать не из чего», и он проговаривается словами (`no-patterns`), а не
+  // превращается в тихо неполный файл.
+  const patternSources: PatternSource[] = useMemo(
+    () =>
+      view?.summary
+        ? // PDF — устаревший формат листа; разбирать его нечем, и попытка дала бы отказ разбора
+          // вместо честного «этой ткани выкроек нет».
+          (files ?? []).filter((f) => isDxfUrl(f.url)).map((f) => ({ name: f.name, url: f.url }))
+        : [],
+    [view, files],
+  );
+  const [drawing, setDrawing] = useState<DrawingState>({ phase: 'off' });
+  // Ключ вместо массива в зависимостях: `patternRows` приезжает из `useWatch` формы карточки и
+  // пересобирается новым массивом на каждый рендер родителя. Держать пересборку на идентичности
+  // такого пропса значит скачивать выкройки заново на каждое нажатие клавиши в соседнем поле.
+  const sourcesKey = patternSources.map((s) => `${s.name} ${s.url}`).join('');
+  useEffect(() => {
+    if (!view || viewDegraded) {
+      setDrawing({ phase: 'off' });
+      return;
+    }
+    let dead = false;
+    setDrawing({ phase: 'running' });
+    (async () => {
+      try {
+        const out = await rebuildMarkerDrawing({ marker: view, sources: patternSources });
+        if (dead) return;
+        setDrawing(
+          out.ok
+            ? { phase: 'ok', pieces: out.pieces, warnings: out.warnings }
+            : { phase: 'error', error: out.error },
+        );
+      } catch {
+        // Пересборка своих исключений не бросает (разбор обёрнут внутри), но динамический импорт
+        // воркера — это сеть, и упасть она может. Диагноз тот же и лечится тем же действием.
+        if (!dead) {
+          setDrawing({
+            phase: 'error',
+            error: { kind: 'fetch-failed', names: patternSources.map((s) => s.name) },
+          });
+        }
+      }
+    })();
+    return () => {
+      dead = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, viewDegraded, sourcesKey]);
+  // Пересобранный чертёж НЕ ДОКАЗАН, пока пересборка не ответила: 'running' держит экспорт
+  // закрытым ровно так же, как 'error'. Выпустить файл «пока считается» значит выпустить тот
+  // самый файл без линии шва, только теперь по таймингу.
+  const drawingBlocked = viewData != null && (drawing.phase === 'error' || drawing.phase === 'running');
+  const rebuildText = drawing.phase === 'error' ? describeRebuildError(drawing.error) : '';
+
   // What the right pane shows: the live run in nest mode, the stored geometry in view mode.
-  const displayPieces = viewData ? viewData.pieces : pieces;
+  //
+  // ПЕРЕСОБРАННЫЕ детали побеждают сохранённые, как только пересборка удалась, и это чинит сразу
+  // три места одним движением: у экспортного DXF появляются слои INNER и SEAM, у SVG — те же
+  // линии, а редактор перестаёт рисовать переоткрытый маркер без надсечек. Контур при этом берётся
+  // тоже пересобранный: сохранённый округлён до сотых, а линия шва рядом с ним — полной точности,
+  // и пара линий из разных поколений подорвала бы ровно то обещание, ради которого слой SEAM
+  // заводился («зазор между линиями и есть припуск»). Сверка уже доказала, что они совпадают.
+  const displayPieces =
+    drawing.phase === 'ok' && drawing.pieces.length > 0
+      ? drawing.pieces
+      : viewData
+        ? viewData.pieces
+        : pieces;
   const displayResult = viewData ? viewData.result : result;
   const displayWidth = viewData ? viewData.widthCm : widthCm;
   const displayTarget = viewData ? viewData.targetCm : target;
@@ -693,10 +939,6 @@ export function NestingModal({
     },
     [],
   );
-  // A degraded marker (unreadable blob → summary only) has no geometry to export: the
-  // buttons would emit a STRIP-rectangle-only file that a plotter would happily cut.
-  const viewDegraded =
-    viewData != null && (viewData.pieces.length === 0 || viewData.result.placements.length === 0);
   // Осмысленное имя файла: SEASON-STYLE-размер-ткань-маркер (пустые части опускаются).
   const fileParts = (): Array<string | undefined> => {
     if (viewData) {
@@ -705,26 +947,43 @@ export function NestingModal({
     const fabric = slot?.name || ((files ?? []).length === 1 ? (files ?? [])[0].name : undefined);
     return [season, styleNumber, sizeLabel, fabric];
   };
-  const download = (content: string, mime: string, ext: string) => {
+  const download = (content: string, mime: string, ext: string, extra?: string[]) => {
     const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = exportFileName(fileParts(), ext);
+    a.download = exportFileName([...fileParts(), ...(extra ?? [])], ext);
     a.click();
     // Deferred: Safari/Firefox may not have started the download when click() returns.
     downloadTimer.current = window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
   const downloadSvg = () => {
     const s = exportSvg();
-    if (s && !viewDegraded && !running) download(s, 'image/svg+xml', 'svg');
+    // У SVG нет таблицы слоёв, поэтому приём «не объявлять пустое», которым честен DXF, ему
+    // недоступен: чертежа в нём просто не окажется, и сказать об этом внутри файла нечем. Значит
+    // его честность — только этот гейт. Без него починка DXF просто переносит ложь в соседнюю
+    // кнопку (спека §7.4, дефект D).
+    if (s && !viewDegraded && !running && !drawingBlocked) download(s, 'image/svg+xml', 'svg');
   };
   // Plotter export: R12 DXF of the finished layout, true contours, cm — the EFFECTIVE
   // placements, so a hand-adjusted marker cuts exactly what the operator sees.
-  const dxfReady = (viewData != null && !viewDegraded) || run.phase === 'done';
+  const dxfReady = (viewData != null && !viewDegraded && !drawingBlocked) || run.phase === 'done';
   const downloadDxf = () => {
     if (!dxfReady || !effective) return;
     download(renderLayoutDxf(effective, displayPieces, displayWidth), 'application/dxf', 'dxf');
+  };
+  // ЭКСПОРТ БЕЗ ЧЕРТЕЖА — ЯВНОЙ ВТОРОЙ КНОПКОЙ (решение Р4). Она делает ровно то, что система
+  // делала до Ф3.5, но теперь это ВЫБОР, а не молчание: оператору сказано, чего именно не хватает,
+  // и он решает сам. Убрать эту возможность нельзя — контурный DXF остаётся рабочим плоттерным
+  // файлом, и лишить цех его из-за недоступной выкройки значит чинить ложь поломкой.
+  //
+  // Имя файла НЕСЁТ ПРИЗНАК. Файл переживает вкладку, в которой его скачали, и на диске «маркер
+  // без чертежа» ничем не отличается от полного, если не назвать его иначе.
+  const downloadContoursOnly = () => {
+    if (!effective || viewDegraded || running) return;
+    download(renderLayoutDxf(effective, displayPieces, displayWidth), 'application/dxf', 'dxf', [
+      'только контур',
+    ]);
   };
 
   const verdict =
@@ -1130,6 +1389,12 @@ export function NestingModal({
     !fetchFailed &&
     !noSlotChosen &&
     !directionRefusal &&
+    // Двойной припуск сервер отвергает полевым нарушением (§5.3). Прогон с ним не запускается, и
+    // смена слоя или припуска сбрасывает готовый результат, — то есть сюда это состояние сегодня
+    // не доходит. Запрет всё равно стоит: «сохранить» — последняя дверь перед сервером, и держать
+    // её открытой для пэйлоада, который гарантированно отвергнут, значит обещать отказ вместо
+    // сохранения. Инвариант держится этим файлом, а не порядком сбросов в соседнем эффекте.
+    !doubleAllowanceRefusal &&
     !sizeUnsaved &&
     !sizeUnresolved &&
     sizesWithoutPieces.length === 0 &&
@@ -1252,11 +1517,35 @@ export function NestingModal({
           // ПРИПУСК, КОТОРЫМ РАЗДУВАЛИ КОНТУРЫ ЭТОГО ПРОГОНА. Это вход алгоритма, а не подпись:
           // длина снята по линии кроя, и без числа её не воспроизвести.
           seamAllowanceCm: dec(allowanceCm),
-          // ПРИПУСК, УЖЕ ЗАЛОЖЕННЫЙ В КОНТУР ФАЙЛА, — это ИЗМЕРЕНИЕ, и его пока никто не
-          // измеряет. undefined едет как NULL, то есть «не мерялось». Ноль сюда ставить нельзя:
-          // ноль значит «померили, и его нет», а это другой факт — и на нём костинг посчитал бы
-          // расход по контуру, который на самом деле уже раздут.
-          contourAllowanceCm: undefined,
+          // ПРИПУСК, УЖЕ ЗАЛОЖЕННЫЙ В КОНТУР ФАЙЛА, — это ИЗМЕРЕНИЕ (Ф3.3), и оно уезжает ровно
+          // тогда, когда состоялось. `undefined` едет как NULL, то есть «не мерялось»; ноль
+          // значит «померили, и его нет» — контур был линией шва. Спутать их нельзя ни в одну
+          // сторону: на выдуманном нуле костинг посчитал бы расход по контуру, который на самом
+          // деле уже раздут, а на выдуманном числе — отказал бы за двойной припуск раскладке, в
+          // которой его нет.
+          //
+          // Сервер судит по ЭТОМУ числу (§5.3): contour > 0 вместе с seam > 0 — отказ. До него
+          // такое сочетание не доезжает, потому что прогон с ним не запускается (см.
+          // doubleAllowanceRefusal), но правило живёт на сервере, а не здесь.
+          contourAllowanceCm:
+            contourMeasure && contourMeasure.allowanceCm != null
+              ? dec(contourMeasure.allowanceCm)
+              : undefined,
+          // СЛОИ — ЧТОБЫ ЧЕРТЁЖ МОЖНО БЫЛО ПЕРЕСОБРАТЬ (Ф3.5). Без них переоткрытый маркер
+          // восстанавливается «тем слоем, который ранжируется первым СЕГОДНЯ», а ранжирование
+          // зависит от файла: перезалили лист — и пересборка молча взяла другой контур.
+          //
+          // Пустая строка у долевой ЗНАЧИМА и значит «не разворачивать»: оператор мог отключить
+          // разворот сознательно. Схлопнуть её в NULL значит при пересборке развернуть детали,
+          // которые разворачивать запретили, — отсюда `optional string` в прото и отправка ''
+          // как значения, а не как пропуска.
+          contourLayer,
+          grainLayer,
+          // ПОЛИТИКА ПЕРЕВОРОТА, ПОД КОТОРОЙ ШЁЛ ПОИСК, — а не направление ткани сегодня.
+          // Направление у полотна меняется, а маркер судят по условиям, при которых он снят.
+          // Вывести это из геометрии нельзя: «ни одна деталь не перевёрнута» не значит «переворот
+          // был запрещён», и такой вывод завысил бы строгость.
+          allowFlip: allowsFlip(effectiveDirection),
           sets: legacyPairOf(composition).sets,
           usedLengthCm: dec(effective.usedLengthCm),
           efficiencyPct: dec(effPct),
@@ -1356,8 +1645,17 @@ export function NestingModal({
           // после этого не отличит раскладку по линии шва от раскладки по линии кроя. Послать
           // undefined на маркере, у которого припуск записан, значит РАЗЖАЛОВАТЬ его в легаси
           // одним движением детали, и заметить это будет не по чему.
+          //
+          // ЭХОМ ИДУТ ВСЕ ПЯТЬ, а не два. Слои и политика переворота — такие же условия съёмки,
+          // как припуск: маркер, у которого правкой одного размещения стёрли contour_layer,
+          // перестаёт быть пересобираемым (Ф3.5 нечем повторить выбор контура), а стёртый
+          // allow_flip делает норму несравнимой для гейта. Пропустить их здесь — тот же класс
+          // дефекта, что и пропущенный `flipped` в размещениях этого же метода.
           seamAllowanceCm: s.seamAllowanceCm,
           contourAllowanceCm: s.contourAllowanceCm,
+          contourLayer: s.contourLayer,
+          grainLayer: s.grainLayer,
+          allowFlip: s.allowFlip,
           // Легаси-пара проезжает КАК ЛЕЖИТ и только вместе. Прежнее `s.sets ?? 1` подставляло
           // единицу маркеру с составом (proto3 роняет умолчание, и в сводке там ноль) — то есть
           // на правку одного размещения отправляло «этот настил кроит одно изделие». Пару спасал
@@ -1584,23 +1882,39 @@ export function NestingModal({
                 type='number'
                 value={allowanceCm}
                 min={0}
-                max={MAX_ALLOWANCE_CM}
+                max={MAX_SEAM_ALLOWANCE_CM}
                 step={0.1}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   // Потолок 10 см — не физика, а защита от промаха по точке: «11» вместо «1.1»
                   // даёт совершенно правдоподобный маркер, просто вчетверо длиннее, и заметить
-                  // это можно только по счёту от поставщика.
-                  const next = Math.min(
-                    MAX_ALLOWANCE_CM,
-                    Math.max(0, numOr(e.target.value, allowanceCm)),
-                  );
-                  if (next !== allowanceCm) guardManual(() => setAllowanceCm(next));
+                  // это можно только по счёту от поставщика. Число живёт в contour-layer.ts, где
+                  // его применяет и предзаполнение: два потолка на одно поле однажды разойдутся.
+                  const next = clampSeamAllowance(numOr(e.target.value, allowanceCm));
+                  if (next !== allowanceCm) {
+                    // Флаг «ввели руками» ставится ВНУТРИ apply — ровно как у ширины: если
+                    // оператор откажется выбрасывать ручные правки, припуск не изменился, и
+                    // считать его введённым руками нельзя, иначе предзаполнение по замеру и по
+                    // эталону карточки молча выключится навсегда.
+                    guardManual(() => {
+                      setAllowanceTouched(true);
+                      setAllowanceCm(next);
+                    });
+                  }
                 }}
                 disabled={running}
               />
+              {/* ЧТО ЛЕЖИТ НА ВЫБРАННОМ СЛОЕ — замером, а не утверждением. Здесь стояло «контур
+                  DXF — линия шва; кладётся линия кроя», и это правда ровно до тех пор, пока слой
+                  выбран правильно: на файле с четырьмя контурными слоями та же строка спокойно
+                  стоит над линией КРОЯ и подтверждает оператору, что офсет нужен. */}
               <Text size='nano' variant='label' component='span'>
-                контур DXF — линия шва; кладётся линия кроя
+                {allowanceSourceText}
               </Text>
+              {!allowanceTouched && allowancePrefill && (
+                <Text size='nano' variant='label' component='span'>
+                  подставлено: {allowancePrefill.why}
+                </Text>
+              )}
             </label>
             {/* Поле «комплектов» жило здесь и умело выразить только N одинаковых изделий одного
                 размера. Его заменила таблица состава ниже — там же, где выбирается, что кроим. */}
@@ -1615,6 +1929,29 @@ export function NestingModal({
                 припуск {allowanceCm.toFixed(2)} см отложен РОВНО по всему контуру каждой детали и
                 одинаков для всего комплекта. Подгиб низа в жизни шире, горловина уже — раскладка
                 этого не знает. Линия шва остаётся нарисованной внутри линии кроя.
+              </Text>
+              {/* ЧЕСТНАЯ ВЕТКА «УЛИК НЕТ» (§5.4). Замер не удался — и это законно, а не
+                  недосмотр: у блока один замкнутый контур, второй контур пересекает первый,
+                  принятых блоков меньше трёх. Сохранение не блокируется, но и молчать нельзя:
+                  маркер уедет с contour_allowance_cm = NULL, то есть «припуск не подтверждён
+                  файлом», и гейт готовности прочитает это как непроверенное происхождение
+                  факта — не как двойной припуск. */}
+              {allowanceUnconfirmed && (
+                <Text size='nano' component='p'>
+                  по файлу НЕ ПОДТВЕРЖДЕНО, что в контуре припуска нет: {''}
+                  {contourMeasure ? allowanceUnknownText(contourMeasure) : ''}. Раскладка считается,
+                  маркер сохраняется — он будет помечен «припуск не подтверждён файлом».
+                </Text>
+              )}
+            </CalloutBox>
+          ) : contourIsCutLine ? (
+            // Ноль ЗДЕСЬ ПРАВИЛЬНЫЙ, и прежний безусловный красный текст ниже утверждал обратное.
+            // На слое с линией кроя припуск уже в контуре: добавить его значит посчитать дважды.
+            <CalloutBox tone='note'>
+              <Text size='nano' component='p'>
+                припуск 0 — и это верно для выбранного слоя: на нём ЛИНИЯ КРОЯ, припуск{' '}
+                {(contourMeasure?.allowanceCm ?? 0).toFixed(2)} см уже заложен в контур. Раскладка
+                кладёт его как есть.
               </Text>
             </CalloutBox>
           ) : (
@@ -1792,24 +2129,37 @@ export function NestingModal({
                   <Text size='nano' variant='label' component='span'>
                     контур:
                   </Text>
-                  {layerOpts.map((o) => (
-                    <Button
-                      key={o.layer || '(none)'}
-                      type='button'
-                      variant={o.layer === contourLayer ? 'main' : 'secondary'}
-                      size='xs'
-                      disabled={running}
-                      title={
-                        o.checked === 0
-                          ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
-                          : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`
-                      }
-                      onClick={() => guardManual(() => setActiveLayer(o.layer))}
-                    >
-                      слой {o.layer || '—'}
-                      {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
-                    </Button>
-                  ))}
+                  {layerOpts.map((o) => {
+                    // Замер — В САМОЙ КНОПКЕ, а не только в подсказке. Вопрос «крой или шов»
+                    // решает, нужен ли офсет вообще, и держать ответ на него под наведением мыши
+                    // значит прятать половину выбора от того, кто его делает.
+                    const measured = layerAllowanceLabel(o);
+                    return (
+                      <Button
+                        key={o.layer || '(none)'}
+                        type='button'
+                        variant={o.layer === contourLayer ? 'main' : 'secondary'}
+                        size='xs'
+                        disabled={running}
+                        title={[
+                          o.checked === 0
+                            ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
+                            : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`,
+                          o.allowance ? allowanceLabel(o.allowance) : '',
+                          o.allowance?.verdict === 'unknown'
+                            ? allowanceUnknownText(o.allowance)
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                        onClick={() => guardManual(() => setActiveLayer(o.layer))}
+                      >
+                        слой {o.layer || '—'}
+                        {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
+                        {measured ? ` · ${measured}` : ''}
+                      </Button>
+                    );
+                  })}
                 </div>
               )}
               {missingOnLayer.length > 0 && (
@@ -2115,6 +2465,42 @@ export function NestingModal({
           {directionRefusal && (
             <CalloutBox tone='error'>сохранить нельзя: {directionRefusal}</CalloutBox>
           )}
+          {/* ДВОЙНОЙ ПРИПУСК — ДО ПРОГОНА, а не после. Панель, а не тост: тост исчезает, а чинится
+              это двумя кликами здесь же — в поле припуска или в списке слоёв. */}
+          {doubleAllowanceRefusal && (
+            <CalloutBox tone='error'>
+              двойной припуск — прогон не запускается: {doubleAllowanceRefusal}
+            </CalloutBox>
+          )}
+          {/* ПЕРЕСБОРКА ЧЕРТЕЖА НЕ УДАЛАСЬ (§7.4). Панель, потому что чинить это надо на другой
+              вкладке — перезалить выкройку, — а тост до туда не доживёт. */}
+          {drawing.phase === 'error' && (
+            <CalloutBox tone='error'>
+              <Text size='nano' component='p'>
+                чертёж детали не восстановлен: {rebuildText}
+              </Text>
+              <Text size='nano' component='p'>
+                «скачать DXF» и «скачать SVG» выключены: файл без линии шва и надсечек цех читает
+                как «у изделия их нет». Плоттерный экспорт остался — кнопкой «DXF: только контуры»,
+                и имя файла это называет.
+              </Text>
+            </CalloutBox>
+          )}
+          {drawing.phase === 'running' && (
+            <Text size='nano' variant='label' component='p'>
+              восстанавливаем чертёж детали по выкройкам карточки — экспорт откроется, когда контур
+              пересобранной детали сойдётся с сохранённым
+            </Text>
+          )}
+          {drawing.phase === 'ok' && drawing.warnings.length > 0 && (
+            <CalloutBox tone='note'>
+              {drawing.warnings.map((w, i) => (
+                <Text key={i} size='nano' component='p'>
+                  пересборка чертежа: {w}
+                </Text>
+              ))}
+            </CalloutBox>
+          )}
           {unplaced.length > 0 && (
             <CalloutBox tone='error'>
               не влезло: {unplaced.length} — {unplacedText}. Этих деталей на раскладке НЕТ, длина
@@ -2386,11 +2772,19 @@ export function NestingModal({
                 <Button
                   type='button'
                   variant='main'
-                  disabled={parse.phase !== 'ready' || checkedCount === 0 || running || overCap}
+                  disabled={
+                    parse.phase !== 'ready' ||
+                    checkedCount === 0 ||
+                    running ||
+                    overCap ||
+                    !!doubleAllowanceRefusal
+                  }
                   title={
-                    overCap
-                      ? `сверх потолка сервера (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку не сохранить: уберите детали или уменьшите состав`
-                      : undefined
+                    doubleAllowanceRefusal
+                      ? doubleAllowanceRefusal
+                      : overCap
+                        ? `сверх потолка сервера (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку не сохранить: уберите детали или уменьшите состав`
+                        : undefined
                   }
                   onClick={requestRun}
                 >
@@ -2415,8 +2809,8 @@ export function NestingModal({
                         ? 'нет прав на изменение карточки, либо она released'
                         : fetchFailed
                           ? 'часть DXF не скачалась — раскладка неполная, такой маркер занизил бы расход'
-                          : directionRefusal
-                            ? directionRefusal
+                          : directionRefusal || doubleAllowanceRefusal
+                            ? directionRefusal || doubleAllowanceRefusal
                             : sizeUnresolved
                               ? unresolvedTokens.length > 0
                                 ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')} — добавьте их в карточку либо уберите из состава`
@@ -2438,9 +2832,15 @@ export function NestingModal({
             <Button
               type='button'
               variant='secondary'
-              disabled={!effective || running || viewDegraded}
+              disabled={!effective || running || viewDegraded || drawingBlocked}
               title={
-                viewDegraded ? 'геометрия маркера нечитаема — доступна только сводка' : undefined
+                viewDegraded
+                  ? 'геометрия маркера нечитаема — доступна только сводка'
+                  : drawing.phase === 'running'
+                    ? 'восстанавливаем чертёж детали по выкройкам…'
+                    : drawing.phase === 'error'
+                      ? `чертёж не восстановлен: ${rebuildText}`
+                      : undefined
               }
               onClick={downloadSvg}
             >
@@ -2453,12 +2853,31 @@ export function NestingModal({
               title={
                 viewDegraded
                   ? 'геометрия маркера нечитаема — доступна только сводка'
-                  : 'DXF R12 для реза — контуры на слое CUT, кромка STRIP, подписи LABELS'
+                  : drawing.phase === 'running'
+                    ? 'восстанавливаем чертёж детали по выкройкам…'
+                    : drawing.phase === 'error'
+                      ? `чертёж не восстановлен: ${rebuildText}`
+                      : 'DXF R12 для реза — контуры на слое CUT, чертёж INNER/SEAM, кромка STRIP, подписи LABELS'
               }
               onClick={downloadDxf}
             >
               скачать DXF
             </Button>
+            {/* ЯВНАЯ ВТОРАЯ КНОПКА (решение Р4) — и появляется она ТОЛЬКО когда чертежа нет.
+                Постоянная кнопка «без чертежа» рядом с полной была бы приглашением выбрать
+                неправильную из двух одинаково доступных; здесь же она — единственный оставшийся
+                выход, и рядом сказано, из-за чего. */}
+            {drawing.phase === 'error' && !viewDegraded && (
+              <Button
+                type='button'
+                variant='secondary'
+                disabled={!effective || running}
+                title={`то же, что система выдавала до починки: контуры и кромка, БЕЗ линии шва и надсечек. Причина: ${rebuildText}`}
+                onClick={downloadContoursOnly}
+              >
+                DXF: только контуры
+              </Button>
+            )}
             <Button type='button' variant='secondary' onClick={requestClose}>
               закрыть
             </Button>
