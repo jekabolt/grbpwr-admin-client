@@ -115,7 +115,7 @@ function plural(n: number, word: string): string {
 const LINE_MARKERS_HINT =
   'раскладки bound to this line. An upper bound on what an unset направление could refuse — never a count of refusals: a layout carrying neither a 180° nor a mirror saves whatever the cloth says.';
 const CARD_MARKERS_HINT =
-  'раскладки bound to any BOM line of this card — every marker a gap here could possibly refuse. Deliberately over-inclusive: a sibling line under the same назначение can be the one that refuses.';
+  'КАРТОЧНЫЕ раскладки bound to any BOM line of this card — every marker a gap here could possibly refuse. Раскройные (снятые под прогон, Ф4.2) НЕ считаются: они умирают вместе со своим прогоном, а направление берут с тех же строк BOM, которые этот отчёт уже покрывает через карточку. Deliberately over-inclusive within card markers: a sibling line under the same назначение can be the one that refuses.';
 
 type Tier = {
   key: string;
@@ -606,9 +606,13 @@ function GapCardTile({
         {/* Blue, not red: a bound marker means "a human has to look at this", which is exactly what
             the mid-flight tone is for. Red would claim these saves are already broken, and no count
             on this screen knows that. */}
+        {/* «card» СТОИТ В САМОЙ ПЛАШКЕ, а не только в подсказке (Ф4, условие решения Р6). С Ф4.2
+            раскройные раскладки из этого числа исключены, и без слова его прочтут как полное — то
+            есть недосчитаются ровно тех раскладок, что сейчас лежат в открытых прогонах. Подсказку
+            наводят курсором, а решение о срочности принимают по цифре на экране. */}
         {linked > 0 && (
           <Pill tone='attention' title={CARD_MARKERS_HINT}>
-            {plural(linked, 'marker')}
+            {plural(linked, 'card marker')}
           </Pill>
         )}
         {card.hasPatterns && (

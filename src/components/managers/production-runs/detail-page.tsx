@@ -27,6 +27,7 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
+import { LayPlan } from './components/lay-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
 import {
@@ -48,6 +49,7 @@ import {
 } from './components/run-conveyor';
 import { RunCosts } from './components/run-costs';
 import { RunReceiptTable } from './components/run-receipt-table';
+import { layVerdict, useRunLays, worstVerdict } from './components/useLays';
 import {
   deleteRunErrorMessage,
   reversalErrorMessage,
@@ -57,12 +59,18 @@ import {
   useReverseRunReceipt,
 } from './components/useProductionRuns';
 
-// A run walks through five phases and the page shows the ONE it is in: the conveyor band names all
-// five with a line of fact each, the current phase's panel is open below it, and the rest collapse
-// to a row apiece that can be expanded in place. Sixteen stacked blocks used to make the page a
-// scroll-hunt for "what do I do next" — the answer is now the ink-filled step and the callout
-// under it. Nothing about the phases' CONTENT changed: each panel is the same editor as before,
-// with the same RPCs, the same permission gates and the same refusal messages.
+// A run walks through six phases — план → материалы → раскрой → приёмка → затраты → закрытие — and
+// the page shows the ONE it is in: the conveyor band names them all with a line of fact each, the
+// current phase's panel is open below it, and the rest collapse to a row apiece that can be
+// expanded in place. Sixteen stacked blocks used to make the page a scroll-hunt for "what do I do
+// next" — the answer is now the ink-filled step and the callout under it. Nothing about the phases'
+// CONTENT changed: each panel is the same editor as before, with the same RPCs, the same permission
+// gates and the same refusal messages.
+//
+// Ф4's «шаг 3 · как раскроить» (lay-plan.tsx) is a phase in its own right here, between materials
+// and receiving: it cannot start before the fabric is issued and nothing can be received before it
+// is done. It owns its own Section, its own numbering in its own title, and its own applicability
+// gate — the band only decides WHEN it is the phase the operator is standing in.
 export function ProductionRunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id) || 0;
@@ -192,6 +200,29 @@ export function ProductionRunDetail() {
     frozenCoverage.current.unissued = materialsFact.issued < materialsFact.positions;
   }
 
+  // Настилы (Ф4), для строки шага «раскрой» на ленте. Тот же ключ, что читает сам блок
+  // (`useRunLays` под detail(runId)) — React Query отдаёт оба чтения из одного запроса, поэтому
+  // лишнего вызова нет: до конвейера блок настилов монтировался на каждой открытой странице, то
+  // есть этот запрос уходил всё равно. Выключен на aux-прогоне: там плана настилов не бывает, и
+  // блок для такого прогона тоже не рендерится.
+  const layPlan = useRunLays(runId, runId > 0 && !isAux);
+  const laysFact = layPlan.data
+    ? {
+        lays: (layPlan.data.lays ?? []).length,
+        sections: (layPlan.data.lays ?? []).reduce((s, l) => s + (l.sections?.length ?? 0), 0),
+        // «Не годен» — вердикт САМОГО сервера, тот же, что печатает пилл карточки настила.
+        unfit: (layPlan.data.lays ?? []).filter((l) => worstVerdict(l.checks ?? []) === 'blocker')
+          .length,
+        stale: (layPlan.data.lays ?? []).filter((l) => l.quantitiesStale === true).length,
+        shortCells: (layPlan.data.coverage ?? []).filter((c) => layVerdict(c.status) === 'blocker')
+          .length,
+      }
+    : undefined;
+  // Есть ли у прогона фаза раскроя вообще. `!isAux` — клиентский гейт блока (его собственный,
+  // дословно), `applicable === false` — серверный вердикт того же факта: если сервер сказал «не
+  // применимо», блок вернёт null, и шаг в ленте вёл бы в пустоту.
+  const hasLayStep = !isAux && layPlan.data?.applicable !== false;
+
   const locked = isRunLocked(ins?.status);
   const receivable = isRunReceivable(ins?.status);
   const late = overdueDays(ins?.promisedAt, ins?.status);
@@ -286,6 +317,7 @@ export function ProductionRunDetail() {
   const steps = buildRunSteps({
     status: ins?.status,
     canReadCosting,
+    hasLayStep,
     plannedQty: plannedQtyTotal,
     colourCount: isAux ? runColourCount || liveVariants : colourModelCount,
     planProblem: auxNoMaterial
@@ -296,6 +328,8 @@ export function ProductionRunDetail() {
     materials: materialsFact,
     hasUnissuedMaterials: frozenCoverage.current.unissued,
     materialsUnavailable: materialPlan.isError,
+    lays: laysFact,
+    laysUnavailable: layPlan.isError,
     receivedQty: receivedQtyTotal,
     postingStuck: receipts.some((rc) => rc.postingStatus === 'dead_letter'),
     accrued: actuals?.actualTotalBase?.value
@@ -305,7 +339,9 @@ export function ProductionRunDetail() {
     recon: (run.recon ?? []).map((c) => ({ ok: !!c.ok, label: reconShort(c.key) })),
     unsaved: {
       1: unsavedPlan ? [isAux ? 'план партии' : 'строки партии'] : undefined,
-      4: unsavedCosts ? ['статьи затрат'] : undefined,
+      // Настил (шаг 3) правится в модальном редакторе с собственным состоянием — черновика на
+      // странице он не оставляет, поэтому и метки «не сохранено» у него нет.
+      5: unsavedCosts ? ['статьи затрат'] : undefined,
     },
   });
   const currentStep = steps.find((s) => s.current)?.id ?? null;
@@ -408,10 +444,23 @@ export function ProductionRunDetail() {
           </Section>
         );
       case 3:
+        // Ф4.3 «как раскроить» — фаза между материалами и приёмкой: настелить нечего, пока ткань не
+        // выдана, и принимать нечего, пока не раскроено. Комментарий и гейт — авторские:
+        //
+        // Блок рисует себя САМ, вместе со своей `Section`: у него есть состояние «не применимо»
+        // (aux-карточка), при котором пустая рамка с заголовком была бы приглашением построить то,
+        // чего у этого прогона не бывает. Клиентский гейт `!isAux` — та же машинерия, что у
+        // требований релиза: сервер отдаёт applicable = false с причиной, клиент не рендерит блок.
+        //
+        // Гейт живёт теперь ОДИН РАЗ — в `hasLayStep`: он же убирает шаг 3 из ленты, так что
+        // строка «раскрыть» не может привести к панели, которая ничего не рисует. Сам `id` нужен
+        // якорю: блок владеет своей Section, поэтому номер шага в заголовке — его, а не наш.
+        return <LayPlan run={run} canEdit={canEdit} locked={locked} id={stepDomId(3)} />;
+      case 4:
         return (
           <Section
-            id={stepDomId(3)}
-            title='шаг 3 · приёмка'
+            id={stepDomId(4)}
+            title='шаг 4 · приёмка'
             question='В клетке «принято/план» по размеру. Каждая поставка — отдельная квитанция; финальная закрывает серию.'
             action={receiveButton('sm', 'secondary')}
           >
@@ -535,7 +584,7 @@ export function ProductionRunDetail() {
             ) : null}
           </Section>
         );
-      case 4:
+      case 5:
         // Money is confidential: without costing:read this step is not on the band at all, so it
         // is never asked for — the guard is here because a panel that can render nothing must say
         // so at its own boundary. The plan-vs-actual STRIP is not here: it summarises the whole
@@ -543,8 +592,8 @@ export function ProductionRunDetail() {
         return canReadCosting ? (
           <>
             <Section
-              id={stepDomId(4)}
-              title='step 4 · actual costs'
+              id={stepDomId(5)}
+              title='step 5 · actual costs'
               question='Log the real costs incurred once known.'
             >
               {/* UpdateProductionRun refuses a received/closed run, and cost articles are written
@@ -563,7 +612,7 @@ export function ProductionRunDetail() {
             ) : null}
           </>
         ) : null;
-      case 5:
+      case 6:
         return (
           <>
             {/* Сверка «ожидаемое vs проведённое» (Phase 8): три server-side чека — квитанции против
@@ -574,8 +623,8 @@ export function ProductionRunDetail() {
                 номер шага, иначе раскрытая строка ведёт в блок «material movements», где слова
                 «шаг 5» нет. Так что блок рендерится всегда и честно говорит, что сверять нечего. */}
             <Section
-              id={stepDomId(5)}
-              title='шаг 5 · сверка'
+              id={stepDomId(6)}
+              title='шаг 6 · сверка'
               question='Каждая цифра рана обязана сходиться с журналами; расхождение — сигнал, не косметика.'
             >
               {(run.recon ?? []).length === 0 ? (

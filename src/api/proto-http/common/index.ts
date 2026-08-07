@@ -2901,6 +2901,25 @@ export type Material = {
   // READ-ONLY (Ф5а.3): the vocabulary normalisation of `unit`. Ignored on write — set `unit`.
   // UNKNOWN = the free text does not map to any known unit, and must not be read as "no unit".
   unitCode: MaterialUnit | undefined;
+  // fabric_thickness_mm (Ф4.8) — толщина полотна В ОДИН СЛОЙ, in MILLIMETRES. The article-side half
+  // of the предел стопки: stack_height_cm = Σ plies × fabric_thickness_mm / 10, checked against the
+  // workshop's WorkshopSettings.max_stack_height_cm. Ranges are a hint, not a taxonomy: шифон
+  // 0.1-0.2, поплин ~0.3, драп 1.5-2.5. Accepted band (0, 50].
+  // ABSENT MEANS «НЕ ЗАМЕРЕНО», AND THAT IS NOT ZERO. A нулевая толщина would make every lay
+  // 0 cm tall and therefore "fits" — a confident verdict built on nothing, which is precisely the
+  // failure «нет толщины — нет проверки, не догадка» forbids. A consumer with no thickness must
+  // report UNKNOWN and withhold the height entirely, prompting «толщина ткани не задана на артикуле
+  // — замерьте, и высота стопки начнёт проверяться». There is deliberately no default «по классу
+  // ткани»: that taxonomy does not exist and inventing one to feed a guess is the disease this
+  // avoids (same argument as cutting_coefficient above).
+  // WRITE SEMANTICS — three states, verbatim the same as cutting_coefficient, its neighbour on the
+  // article, and for the same reason (a stale admin tab, or any bundle from the window between the
+  // backend and client deploys, sends nothing and must not erase a measurement somebody took with
+  // calipers — silently, on a catalogue with neither a signed digest nor an edit journal):
+  // * field ABSENT (null)        → LEAVE AS IS.
+  // * field PRESENT, value ""    → CLEAR it (store NULL).
+  // * field PRESENT with a value → set it.
+  fabricThicknessMm: googletype_Decimal | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the

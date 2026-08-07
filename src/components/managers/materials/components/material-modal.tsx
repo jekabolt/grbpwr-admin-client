@@ -5,6 +5,7 @@ import {
   common_MaterialPurpose,
   common_MediaFull,
   common_TechCardBomSection,
+  googletype_Decimal,
 } from 'api/proto-http/admin';
 import { MediaPreviewWithSelector } from 'components/managers/media/components/media-preview-with-selector';
 import { techCardBomSectionOptions } from 'constants/filter';
@@ -16,13 +17,48 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import {
+  decimalToInput,
+  inputToDecimal,
+  normalizeDecimalInput,
+  parseDecimalNumber,
+  sanitizeDecimal,
+} from 'utils/decimal';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { CompositionWizard, type CompRow } from './composition-wizard';
 import { composeArticle, type ArticleInput } from './material-code';
 import { mediaThumbUrl } from './material-thumb';
 import { materialPurposeOptions, resolveMaterialPurpose } from './purpose-options';
 import { useSaveMaterial } from './useMaterials';
+
+// ───── ВРЕМЕННЫЙ МОСТ Ф4.8 — СНЯТЬ ПОСЛЕ ПЕРЕСБОРКИ ЗЕРКАЛА ПРОТО ─────────────────────────────
+// fabric_thickness_mm уже есть в proto бэкенда (common/techcard.proto: Material #33) и уже ходит по
+// проводу, но сабмодуль зеркала ещё не пересобран, поэтому генерированный common_Material про поле
+// не знает. Это пересечение — ЕДИНСТВЕННОЕ место в файле, где расхождение спрятано. После
+// `make proto` УДАЛИТЬ тип и три приведения к нему (draftFromMaterial, submit) — имя
+// (fabricThicknessMm) и тип (googletype_Decimal) совпадают с генератором дословно.
+
+// ПРИСУТСТВИЕ, А НЕ ЗНАЧЕНИЕ — три состояния записи, общие для коэффициента раскроя (Ф5а.2) и
+// толщины полотна (Ф4.8):
+//
+//   не трогали          → undefined  → поля на проводе НЕТ, сервер оставляет хранимое как есть
+//   очистили            → { }        → явное снятие значения, сервер пишет NULL
+//   ввели число         → { value }  → поставить
+//
+// Сравнение идёт СО СНИМКОМ С СЕРВЕРА, а не с флагом «форма грязная»: набрать значение и стереть
+// его обратно — это не правка, и слать за это очистку значило бы соврать о намерении оператора.
+// Разница между «не прислали» и «прислали пусто» здесь не косметическая: без неё каждое сохранение
+// артикула из вкладки со старым бандлом СТИРАЛО БЫ замер толщины, и стирало бы бесследно — у
+// каталога нет ни подписанного дайджеста, ни журнала правок.
+const CLEAR_MATERIAL_DECIMAL: googletype_Decimal = { value: undefined };
+const presenceDecimal = (
+  current: string,
+  stored?: googletype_Decimal,
+): googletype_Decimal | undefined => {
+  const now = normalizeDecimalInput(current);
+  if (now === decimalToInput(stored)) return undefined;
+  return inputToDecimal(now) ?? CLEAR_MATERIAL_DECIMAL;
+};
 
 // Same box metrics as <Input> — every control in the admin is a 1px box at 3px/7px, 22px min.
 const cell =
@@ -140,6 +176,12 @@ type Draft = {
   otherAttrsRows: KV[];
   otherAttrsRaw: string;
   otherAttrsMode: 'kv' | 'raw';
+  // РАСКРОЙ — две базовые (не CTI) колонки самого артикула, обе NULLable и обе с трёхсостояньевой
+  // записью: коэффициент раскроя (Ф5а.2, 0270) и толщина полотна в один слой (Ф4.8, 0283). Здесь они
+  // живут строками, как и всё остальное в этой форме; в присутствие/отсутствие их превращает
+  // presenceDecimal на сабмите.
+  cuttingCoefficient: string;
+  fabricThicknessMm: string;
   // Warehouse-catalog fields (new-flow NF-02).
   code: string;
   color: string;
@@ -181,6 +223,8 @@ const empty: Draft = {
   otherAttrsRows: [],
   otherAttrsRaw: '',
   otherAttrsMode: 'kv',
+  cuttingCoefficient: '',
+  fabricThicknessMm: '',
   code: '',
   color: '',
   pantone: '',
@@ -271,6 +315,11 @@ const draftFromMaterial = (material: common_Material): Draft => ({
     percent: decimalToInput(e.percent),
   })),
   ...parseOtherAttrs(material.otherAttrs),
+  // РАСКРОЙ. decimalToInput, а не `?? ''` через число: незаданное значение читается как '', а
+  // сохранённый «0» читался бы как '0' — и эти два состояния обязаны остаться различимыми, потому
+  // что именно на них построена вся трёхсостояньевая запись ниже.
+  cuttingCoefficient: decimalToInput(material.cuttingCoefficient),
+  fabricThicknessMm: decimalToInput(material.fabricThicknessMm),
   code: material.code ?? '',
   color: material.color ?? '',
   pantone: material.pantone ?? '',
@@ -512,12 +561,12 @@ export function MaterialModal({
       // Ф5а.3: НОРМАЛИЗАЦИЯ `unit` по закрытому словарю, READ-ONLY — сервер её вычисляет и на
       // записи игнорирует, хранится по-прежнему свободный текст выше.
       unitCode: undefined,
-      // КОЭФФИЦИЕНТ РАСКРОЯ (Ф5а). Редактора у него тут пока нет, и undefined — это ровно
-      // «поле ОТСУТСТВУЕТ», а не «очистить»: у него три состояния записи (нет поля → не трогать,
-      // пустая строка → снять, значение → поставить), и JSON.stringify undefined выбрасывает.
-      // Прислать сюда эхо сохранённого значения было бы ХУЖЕ: это уже второе состояние, «поставить
-      // ровно то же», и оно перестало бы отличаться от намеренной правки.
-      cuttingCoefficient: undefined,
+      // КОЭФФИЦИЕНТ РАСКРОЯ (Ф5а.2) и ТОЛЩИНА ПОЛОТНА (Ф4.8) — обе через presenceDecimal, потому
+      // что обе трёхсостояньевые. Нетронутое поле уходит undefined, то есть ОТСУТСТВУЕТ на проводе
+      // (JSON.stringify его выбрасывает), и сервер оставляет хранимое как есть. Прислать сюда эхо
+      // сохранённого значения было бы ХУЖЕ, чем ничего: это уже второе состояние, «поставить ровно
+      // то же», и оно перестало бы отличаться от намеренной правки.
+      cuttingCoefficient: presenceDecimal(d.cuttingCoefficient, material?.cuttingCoefficient),
       fabricWidth: undefined,
       fabricWeightGsm: undefined,
       archived: material?.archived ?? false,
@@ -580,6 +629,13 @@ export function MaterialModal({
       compositionEntries,
       // #40: sample vs production vs both, from the segmented control below.
       purpose,
+      // Ф4.8 — толщина полотна в ОДИН слой. Артикул без толщины обязан остаться без неё: ноль
+      // означал бы стопку 0 см, то есть «влезает всегда», — вердикт, собранный из отсутствующих
+      // данных. Поэтому здесь ровно presenceDecimal и никаких `?? 0`.
+      fabricThicknessMm: presenceDecimal(
+        d.fabricThicknessMm,
+        material?.fabricThicknessMm,
+      ),
     };
     save.mutate(payload, {
       onSuccess: (data) => {
@@ -1075,6 +1131,62 @@ export function MaterialModal({
                 </div>
               )}
             </div>
+          )}
+
+          {/* ---- РАСКРОЙ (Ф5а.2 + Ф4.8) ------------------------------------------------------
+            Две базовые колонки самого артикула, а не CTI-атрибуты, — поэтому отдельная группа, а не
+            строки внутри «attributes». Показываются только для ткани: коэффициент раскроя и высота
+            стопки — это про полотно, на фурнитуре они не значат ничего.
+
+            ПУСТО ЗДЕСЬ ЗНАЧИТ «НЕ ЗАДАНО», И ЭТО НЕ НОЛЬ. Незаданная толщина не даёт «0 см,
+            влезает» — она снимает проверку высоты стопки целиком, и на экране настила будет
+            сказано, что мерить. Ноль в этих полях невозможен по построению: пустая строка уходит
+            снятием значения, а введённый 0 сервер отклоняет с подсказкой, что очистить надо поле. */}
+          {d.materialClass === 'MATERIAL_CLASS_FABRIC' && (
+            <>
+              <GroupLabel>раскрой</GroupLabel>
+              <div className={grid}>
+                <label className='flex flex-col gap-1'>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    коэффициент раскроя
+                  </Text>
+                  <input
+                    className={cell}
+                    inputMode='decimal'
+                    placeholder='не задан'
+                    value={d.cuttingCoefficient}
+                    onChange={(e) =>
+                      set({ cuttingCoefficient: sanitizeDecimal(e.target.value, 4) })
+                    }
+                  />
+                  <Text variant='label' size='micro'>
+                    МНОЖИТЕЛЬ, а не процент: 1.03 = +3%. Один видимый рычаг вместо восьми потерь,
+                    которые никто не умеет мерить по отдельности, — усадка, обход пороков,
+                    сращивание, оттеночные полосы. Ориентиры: полотно ~1.03, трикотаж ~1.06,
+                    клетка/полоска 1.10–1.20. Пусто = не задан, и тогда потребность не домножается
+                    ни на что.
+                  </Text>
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    толщина полотна, мм
+                  </Text>
+                  <input
+                    className={cell}
+                    inputMode='decimal'
+                    placeholder='не замерена'
+                    value={d.fabricThicknessMm}
+                    onChange={(e) => set({ fabricThicknessMm: sanitizeDecimal(e.target.value, 3) })}
+                  />
+                  <Text variant='label' size='micro'>
+                    В ОДИН СЛОЙ, миллиметры. Из неё и числа слоёв считается высота стопки, которая
+                    сверяется с пределом цеха. Ориентиры: шифон 0.1–0.2, поплин ~0.3, драп 1.5–2.5.
+                    Пусто = не замерена, и тогда высота стопки не проверяется вовсе — замерьте, и
+                    проверка начнёт работать.
+                  </Text>
+                </label>
+              </div>
+            </>
           )}
 
           {/* ---- COMPOSITION (#37) — guided wizard ------------------------------------------- */}

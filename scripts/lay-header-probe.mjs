@@ -356,5 +356,50 @@ for (const [label, header] of dirtyCases) {
   );
 }
 
+console.log('\nF · шапка собирается из НАСТИЛА и СЕКЦИИ (Ф4.7)');
+{
+  const lay = {
+    name: 'BLACK · основная',
+    materialName: 'ART-4410 saint',
+    bomItemName: 'основная ткань',
+    clothLengthCm: { value: '6240.00' },
+    totalPlies: 46,
+    qtySnapshot: [
+      { sizeId: 3, qty: 10 },
+      { sizeId: 4, qty: 20 },
+    ],
+  };
+  const section = { plies: 24, markerLengthCm: { value: '1560.00' } };
+  const ctx = {
+    runId: 7,
+    colorway: 'BLACK',
+    sizeLabel: (id) => ({ 3: 'M', 4: 'L' })[id] ?? String(id),
+  };
+  const h = mod.layPlotterHeader(lay, section, ctx, '2026-08-08T01:02:03Z');
+
+  check(h.plies === 24, 'слои берутся у СЕКЦИИ, а не у настила', `${h.plies} (у настила ${lay.totalPlies})`);
+  check(Number(h.lengthCm) === 1560, 'длина — маркера СЕКЦИИ, а не всего настила', String(h.lengthCm));
+  check(h.composition.length === 2 && h.composition[0].size === 'M' && h.composition[1].size === 'L',
+    'состав из СНИМКА количеств настила, размеры СЛОВАМИ',
+    JSON.stringify(h.composition));
+  check(h.runId === 7 && h.colorway === 'BLACK' && h.articleCode === 'ART-4410 saint',
+    'прогон, цвет и артикул доехали');
+
+  // Секция без своего замера падает на длину настила, а не печатает пусто.
+  const h2 = mod.layPlotterHeader(lay, { plies: 24 }, ctx, '2026-08-08T01:02:03Z');
+  check(Number(h2.lengthCm) === 6240, 'нет длины у секции ⇒ длина настила, а не пусто', String(h2.lengthCm));
+
+  // Пустой снимок не выдумывает состав.
+  const h3 = mod.layPlotterHeader({ ...lay, qtySnapshot: [] }, section, ctx, '2026-08-08T01:02:03Z');
+  check(h3.composition.length === 0, 'пустой снимок не выдумывает состав');
+
+  // И главное — рендер такой шапки печатает слои секции, а не настила.
+  const dxf = mod.render(h);
+  const texts = mod.dxfTexts(mod.scanDxf(dxf)).filter((t) => t.layer === 'HEADER').map((t) => t.text).join(' | ');
+  check(texts.includes('слоёв 24'), 'на ЛИСТЕ напечатаны слои секции', texts.slice(0, 90));
+  check(!texts.includes('слоёв 46'), 'слоёв настила на листе НЕТ — их режут не одним проходом');
+  check(texts.includes('M') && texts.includes('L'), 'размеры на листе словами, не идентификаторами');
+}
+
 console.log(failures === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${failures}`);
 process.exit(failures === 0 ? 0 : 1);

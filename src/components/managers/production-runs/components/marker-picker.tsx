@@ -1,4 +1,5 @@
 import { common_TechCardMarkerSummary } from 'api/proto-http/admin';
+import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
@@ -22,10 +23,12 @@ export function markerFitness(
   bomLineKey: string,
   colorwayId: number,
 ): MarkerFitness {
+  // Слот настила ещё не выбран: годность неизвестна, и предлагать выбор наугад значило бы
+  // готовить отказ сервера. Это не «не подходит», а «нечем сравнивать» — так и сказано.
+  if (!bomLineKey) return { eligible: false, reason: 'сначала выберите ткань настила' };
   const mk = (m.bomLineKey ?? '').trim();
   if (!mk) return { eligible: false, reason: 'раскладка потеряла слот BOM — перепривяжите её' };
-  if (bomLineKey && mk !== bomLineKey)
-    return { eligible: false, reason: 'снята для другой ткани настила' };
+  if (mk !== bomLineKey) return { eligible: false, reason: 'снята для другой ткани настила' };
   const mcw = m.colorwayId ?? 0;
   if (mcw !== 0 && colorwayId > 0 && mcw !== colorwayId)
     return { eligible: false, reason: 'снята для другого колорвея' };
@@ -78,64 +81,101 @@ export function MarkerPicker({
 
   return (
     <GenericPopover
-      open={open}
+      open={open && !disabled}
       onOpenChange={setOpen}
+      noTail
       title='раскладка секции'
-      className='w-[320px]'
-      triggerProps={{ disabled, 'aria-label': 'выбрать раскладку' }}
-      openElement={
-        <span
-          className={`block max-w-[220px] truncate border px-[7px] py-[3px] text-left text-textBaseSize ${
-            selected ? 'border-borderColor' : 'border-error text-error'
-          }`}
-        >
-          {selected ? selected.name || `#${selected.id}` : 'выбрать раскладку…'}
-        </span>
-      }
-    >
-      <div className='flex flex-col gap-1'>
-        {runMarkers.length === 0 ? (
-          <Text size='small' variant='inactive'>
-            у этого прогона ещё нет ни одной раскройной раскладки
+      className='w-[300px]'
+      triggerProps={{
+        disabled,
+        'aria-label': 'выбрать раскладку',
+        className: cn(
+          'flex w-[200px] items-center gap-2 border bg-bgColor px-[7px] py-[3px] text-left',
+          // Секция без раскладки не сохранится — поле краснеет сразу, а не после отказа сервера.
+          selected ? 'border-borderColor' : 'border-error',
+        ),
+      }}
+      openElement={(isOpen) => (
+        <>
+          <span className='min-w-0 flex-1'>
+            <Text component='span' size='control' className='block truncate'>
+              {selected ? selected.name || `#${selected.id}` : '— выбрать раскладку —'}
+            </Text>
+            {selected ? (
+              <Text component='span' size='micro' variant='label' className='block truncate'>
+                {markerLine(selected)}
+              </Text>
+            ) : null}
+          </span>
+          <Text component='span' variant='inactive' className='shrink-0'>
+            {isOpen ? '▴' : '▾'}
           </Text>
+        </>
+      )}
+    >
+      {/* Список во всю ширину поповера — тот же приём, что у пикера слота в рецепте колорвея:
+          текущий вариант помечается зеброй и галочкой, а не заливкой чернилами (заливка — контракт
+          Chip, кликабельного токена, а не строки списка). */}
+      <div role='listbox' aria-label='раскладка секции' className='-mx-2 -my-1.5'>
+        {runMarkers.length === 0 ? (
+          <div className='px-2 py-2.5'>
+            <Text size='micro' variant='label'>
+              у этого прогона ещё нет ни одной раскройной раскладки
+            </Text>
+          </div>
         ) : (
           runMarkers.map((m) => {
             const fit = markerFitness(m, bomLineKey, colorwayId);
+            const current = (m.id ?? 0) === value;
             return (
               <button
                 key={m.id}
                 type='button'
+                role='option'
+                aria-selected={current}
                 disabled={!fit.eligible}
                 onClick={() => {
                   onChange(m.id ?? 0);
                   setOpen(false);
                 }}
-                className={`flex flex-col border px-1.5 py-1 text-left ${
-                  (m.id ?? 0) === value
-                    ? 'border-textColor bg-textColor text-bgColor'
-                    : 'border-borderColor disabled:opacity-60'
-                }`}
+                className={cn(
+                  'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
+                  current && 'bg-bgZebra',
+                  !fit.eligible && 'cursor-not-allowed',
+                )}
               >
-                <Text size='small' component='span'>
-                  {m.name || `#${m.id}`}
-                </Text>
-                <Text size='micro' variant='label' component='span'>
-                  {markerLine(m)}
-                </Text>
-                {fit.reason ? (
-                  <Text
-                    size='micro'
-                    component='span'
-                    className={fit.eligible ? 'text-labelColor' : 'text-error'}
-                  >
-                    {fit.reason}
+                <span className='min-w-0 flex-1'>
+                  <Text component='span' size='control' className='block truncate'>
+                    {m.name || `#${m.id}`}
+                  </Text>
+                  <Text component='span' size='micro' variant='label' className='block truncate'>
+                    {markerLine(m)}
+                  </Text>
+                  {fit.reason ? (
+                    <Text
+                      component='span'
+                      size='micro'
+                      className={cn(
+                        'block truncate',
+                        fit.eligible ? 'text-labelColor' : 'text-error',
+                      )}
+                    >
+                      {fit.reason}
+                    </Text>
+                  ) : null}
+                </span>
+                {current ? (
+                  <Text component='span' variant='inactive' className='shrink-0'>
+                    ✓
                   </Text>
                 ) : null}
               </button>
             );
           })
         )}
+      </div>
 
+      <div className='flex flex-col gap-1'>
         <GroupLabel>взять готовую геометрию</GroupLabel>
         {/* Секция НЕ МОЖЕТ ссылаться на карточный маркер — поэтому не «выбрать норму», а
             «скопировать норму в прогон»: копия фиксирует условия ЭТОГО прогона и умирает вместе с
@@ -153,7 +193,7 @@ export function MarkerPicker({
               variant='secondary'
               size='xs'
               disabled={copying || disabled}
-              className='justify-start text-left'
+              className='w-full'
               onClick={() => {
                 onCopy(m.id ?? 0);
                 setOpen(false);

@@ -2,12 +2,22 @@ import { common_ProductionRunStatus } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import Text from 'ui/components/text';
 
-// The run conveyor: a production run is five phases long, and the detail page shows the one the
+// The run conveyor: a production run is six phases long, and the detail page shows the one the
 // run is IN — the rest collapse to a line each. This module owns two things: WHERE the run is
 // (a pure function over its status), and how the band renders. Nothing here fetches, mutates or
 // gates on permissions; the page passes in facts it has already read.
-
-export type RunStepId = 1 | 2 | 3 | 4 | 5;
+//
+//   1 план → 2 материалы → 3 раскрой → 4 приёмка → 5 затраты → 6 закрытие
+//
+// Cutting (Ф4's «шаг 3 · как раскроить») is a phase of its own and not a detail of either
+// neighbour: nothing can be laid until the materials are issued, and there is nothing to receive
+// until it has been cut. Two steps are CONDITIONAL and leave a numbered gap when absent rather
+// than renumbering their successors — 3 is missing on an auxiliary run (a material output has no
+// colourways, no pieces and no markers, so it is never laid) and 5 is missing without
+// costing:read. A gap says "there is a phase that does not apply to you"; renumbering «закрытие»
+// to 5 for some readers and 6 for others would make two operators describe the same run
+// differently.
+export type RunStepId = 1 | 2 | 3 | 4 | 5 | 6;
 
 /**
  * `done` — passed. `current` — where the run is now (ink-filled on the band).
@@ -37,47 +47,59 @@ export type RunStep = {
  * The mapping and why each arm is where it is:
  *
  *   PLANNED            → 1. Nothing has left the desk. The only actionable thing is the plan.
- *   IN_PROGRESS        → 2 or 3. Production started, so the plan is behind us. The open question
- *                        is the warehouse while any material is still not fully issued, and the
- *                        delivery once everything is out. `hasUnissuedMaterials` is the caller's
- *                        FROZEN verdict, not a live reading — see RunConveyorFacts. `undefined`
- *                        (the plan has not been read yet) resolves to 2, the EARLIER phase:
- *                        guessing early merely shows the materials panel — which holds no draft,
- *                        so a swap costs nothing — while guessing late would hide a live shortage
- *                        behind a collapsed row.
- *   PARTIALLY_RECEIVED → 3. The series is open; the next event is the next delivery. (This status
+ *   IN_PROGRESS        → 2, or 3 (4 on a run that is never laid). Production started, so the plan
+ *                        is behind us. The open question is the warehouse while any material is
+ *                        still not fully issued, and CUTTING once everything is out — that is where
+ *                        an operator with the fabric on the table actually works. It deliberately
+ *                        does NOT advance to приёмка when the lays happen to cover the plan: what
+ *                        ends this phase is a receipt, and a receipt changes the status, which this
+ *                        function already reads. Deriving it from lay coverage instead would move
+ *                        the phase (and the open panel) the moment a lay was saved.
+ *                        `hasUnissuedMaterials` is the caller's FROZEN verdict, not a live
+ *                        reading — see RunConveyorFacts. `undefined` (the plan has not been read
+ *                        yet) resolves to 2, the EARLIER phase: guessing early merely shows the
+ *                        materials panel — which holds no draft, so a swap costs nothing — while
+ *                        guessing late would hide a live shortage behind a collapsed row.
+ *   PARTIALLY_RECEIVED → 4. The series is open; the next event is the next delivery. (This status
  *                        is not offered in any status select, but the server sets it and the run
  *                        genuinely lives here — the band must read it correctly.)
- *   RECEIVED           → 4. Stock is posted and the run is immutable; what it COST is the only
- *                        question still open. Without costing:read there is no step 4 for this
+ *   RECEIVED           → 5. Stock is posted and the run is immutable; what it COST is the only
+ *                        question still open. Without costing:read there is no step 5 for this
  *                        account at all, so its current phase is the last one it can still act
- *                        on — 5 — rather than a step that is not on its band.
- *   CLOSED             → 5. A record. What is left is reading the reconciliation.
+ *                        on — 6 — rather than a step that is not on its band.
+ *   CLOSED             → 6. A record. What is left is reading the reconciliation.
  *   CANCELLED          → null. It will not proceed, so nothing is "current"; the band goes mut
  *                        apart from any step that is genuinely broken (see `buildRunSteps`).
  *
  * An unset/unknown status is a brand-new run: treated as PLANNED, matching the guidance banner.
+ *
+ * The result is always exactly one step, and always one the band actually draws: every arm that
+ * could land on a conditional step (3 without a lay plan, 5 without costing:read) names its
+ * fallback explicitly.
  */
 export function currentRunStep({
   status,
   hasUnissuedMaterials,
+  hasLayStep,
   canReadCosting,
 }: {
   status?: common_ProductionRunStatus | string;
   hasUnissuedMaterials?: boolean;
+  /** false on an auxiliary run: there is no cutting phase at all, so 3 is skipped. */
+  hasLayStep: boolean;
   canReadCosting: boolean;
 }): RunStepId | null {
   switch (status) {
     case 'PRODUCTION_RUN_STATUS_CANCELLED':
       return null;
     case 'PRODUCTION_RUN_STATUS_CLOSED':
-      return 5;
+      return 6;
     case 'PRODUCTION_RUN_STATUS_RECEIVED':
-      return canReadCosting ? 4 : 5;
+      return canReadCosting ? 5 : 6;
     case 'PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED':
-      return 3;
+      return 4;
     case 'PRODUCTION_RUN_STATUS_IN_PROGRESS':
-      return hasUnissuedMaterials === false ? 3 : 2;
+      return hasUnissuedMaterials === false ? (hasLayStep ? 3 : 4) : 2;
     default:
       return 1;
   }
@@ -85,8 +107,10 @@ export function currentRunStep({
 
 export type RunConveyorFacts = {
   status?: common_ProductionRunStatus | string;
-  /** Money is confidential: without costing:read step 4 is not drawn at all. */
+  /** Money is confidential: without costing:read step 5 is not drawn at all. */
   canReadCosting: boolean;
+  /** false on an auxiliary run: a material output is never laid, so step 3 is not drawn. */
+  hasLayStep: boolean;
   // 1 · план
   plannedQty: number;
   colourCount: number;
@@ -103,13 +127,25 @@ export type RunConveyorFacts = {
    * phase (and the panel) out from under the operator mid-action. undefined = not known yet.
    */
   hasUnissuedMaterials?: boolean;
-  // 3 · приёмка
+  /**
+   * 3 · раскрой. undefined = the lay plan has not been read yet (or does not apply).
+   *   lays / sections — the size of the plan;
+   *   unfit           — lays the SERVER calls «не годен» (a BLOCKER check: a section whose marker
+   *                     is not this run's, a mode/parity mismatch, a stack over the height limit);
+   *   stale           — lays whose quantity snapshot no longer matches the run («количества
+   *                     изменились»);
+   *   shortCells      — coverage cells the server marks BLOCKER, i.e. «нехватка — ткань не
+   *                     раскроена».
+   */
+  lays?: { lays: number; sections: number; unfit: number; stale: number; shortCells: number };
+  laysUnavailable?: boolean;
+  // 4 · приёмка
   receivedQty: number;
   postingStuck: boolean;
-  // 4 · затраты. Pre-formatted by the caller («1234.00 EUR»); undefined = nothing booked.
+  // 5 · затраты. Pre-formatted by the caller («1234.00 EUR»); undefined = nothing booked.
   accrued?: string;
   costTotalsPartial: boolean;
-  // 5 · закрытие
+  // 6 · закрытие
   recon: { ok: boolean; label: string }[];
   unsaved: Partial<Record<RunStepId, string[]>>;
 };
@@ -124,15 +160,15 @@ function plural(n: number, one: string, few: string, many: string): string {
 }
 
 /**
- * The five steps, ready to render. Pure: same facts in, same band out.
+ * The six steps, ready to render. Pure: same facts in, same band out.
  *
- * The `problem` marks are deliberately narrow, and BOTH of the planning-time ones are gated on the
- * run still being OPEN. A shortage, an uncounted slot or a line that never got a product are only
- * problems while the run can still act on them — on a received or closed run they are history
- * (plenty of runs never issue their fabric through the warehouse, and a defect-only receipt leaves
- * an unassigned line planned forever), and a ✗ that can never be cleared teaches operators to
- * ignore the glyph. This is the same call `nextStepGuidance` makes when it stops showing those two
- * warnings on a received run.
+ * The `problem` marks are deliberately narrow, and every one of them that describes planning work
+ * is gated on the run still being OPEN. A shortage, an uncounted slot, a line that never got a
+ * product or an unfit lay are only problems while the run can still act on them — on a received or
+ * closed run they are history (plenty of runs never issue their fabric through the warehouse, and a
+ * defect-only receipt leaves an unassigned line planned forever), and a ✗ that can never be cleared
+ * teaches operators to ignore the glyph. This is the same call `nextStepGuidance` makes when it
+ * stops showing those warnings on a received run.
  */
 export function buildRunSteps(f: RunConveyorFacts): RunStep[] {
   const cancelled = f.status === 'PRODUCTION_RUN_STATUS_CANCELLED';
@@ -144,6 +180,7 @@ export function buildRunSteps(f: RunConveyorFacts): RunStep[] {
   const current = currentRunStep({
     status: f.status,
     hasUnissuedMaterials: f.hasUnissuedMaterials,
+    hasLayStep: f.hasLayStep,
     canReadCosting: f.canReadCosting,
   });
   // A planning blocker is only worth naming while the run can still be re-planned.
@@ -171,6 +208,26 @@ export function buildRunSteps(f: RunConveyorFacts): RunStep[] {
       ? 'план материалов недоступен'
       : 'план материалов читается…';
 
+  // 3 · раскрой. «настилов ещё нет» is NOT a defect — it is the phase's own work, and every run is
+  // born with none; the figures that ARE defects (an unfit lay, a coverage cell short of fabric)
+  // only get named once something has actually been laid, in the same words the panel uses.
+  const cutSummary = !f.lays
+    ? f.laysUnavailable
+      ? 'план настилов недоступен'
+      : 'план настилов читается…'
+    : f.lays.lays === 0
+      ? 'настилов ещё нет'
+      : [
+          `${f.lays.lays} ${plural(f.lays.lays, 'настил', 'настила', 'настилов')} · ${f.lays.sections} ${plural(f.lays.sections, 'секция', 'секции', 'секций')}`,
+          f.lays.unfit > 0 ? `не годен: ${f.lays.unfit}` : '',
+          f.lays.stale > 0 ? `количества изменились: ${f.lays.stale}` : '',
+          f.lays.shortCells > 0
+            ? `нехватка: ${f.lays.shortCells} ${plural(f.lays.shortCells, 'клетка', 'клетки', 'клеток')}`
+            : '',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+
   const series = cancelled ? '' : open ? ' · серия открыта' : ' · серия закрыта';
   const receiptSummary =
     `${f.receivedQty} из ${f.plannedQty}${series}` + (f.postingStuck ? ' · постинг завис' : '');
@@ -190,9 +247,24 @@ export function buildRunSteps(f: RunConveyorFacts): RunStep[] {
   const problem: Partial<Record<RunStepId, boolean>> = {
     1: !!planProblem,
     2: !!f.materials && open && (f.materials.short > 0 || f.materials.blockers > 0),
-    3: f.postingStuck,
-    4: f.costTotalsPartial,
-    5: failed.length > 0,
+    // WHAT COUNTS AS A DEFECT IN THE CUTTING PHASE — decided from what lay-plan.tsx itself paints
+    // red, not from what is merely unfinished:
+    //   * a lay whose checks carry a BLOCKER is the card's own red «не годен» pill
+    //     (`lay_marker_scope` — a section pointing at a marker that is not this run's copy,
+    //     `lay_mode_parity`, `lay_stack_height` over the limit). Somebody BUILT something the
+    //     server refuses; that is a defect.
+    //   * a coverage cell the server marks BLOCKER is the matrix's own red «нехватка — ткань не
+    //     раскроена»: the lays that exist do not cover the plan.
+    // Two things are deliberately NOT defects. «Настилов ещё нет» / uncovered pairs are the phase's
+    // WORK — the panel already reports it as «настелено X из Y пар», and a run is born with zero
+    // coverage, so a ✗ from birth would be the noise the shortage gate was trimmed for; that is
+    // also why the coverage arm requires at least one lay to exist. And `quantitiesStale` is
+    // «количества изменились», which lay-card renders as a BLUE attention pill — mid-flight, needs
+    // a human, not broken — so it rides in the summary and never turns the glyph red.
+    3: !!f.lays && open && f.lays.lays > 0 && (f.lays.unfit > 0 || f.lays.shortCells > 0),
+    4: f.postingStuck,
+    5: f.costTotalsPartial,
+    6: failed.length > 0,
   };
 
   const state = (id: RunStepId): RunStepState => {
@@ -217,13 +289,14 @@ export function buildRunSteps(f: RunConveyorFacts): RunStep[] {
   const steps: RunStep[] = [
     step(1, '1 · план', planSummary),
     step(2, '2 · материалы', materialsSummary),
-    step(3, '3 · приёмка', receiptSummary),
   ];
-  // Numbers stay stable across accounts: an account without costing:read sees 1,2,3,5 — a gap that
-  // says "there is a phase you may not read", which beats renumbering «закрытие» to 4 for some
-  // readers and 5 for others.
-  if (f.canReadCosting) steps.push(step(4, '4 · затраты', costSummary));
-  steps.push(step(5, '5 · закрытие', closeSummary));
+  // The two conditional phases leave a numbered GAP rather than renumbering what follows — see the
+  // note at the top of the file. An auxiliary run reads 1,2,4,5,6; an account without costing:read
+  // reads 1,2,3,4,6.
+  if (f.hasLayStep) steps.push(step(3, '3 · раскрой', cutSummary));
+  steps.push(step(4, '4 · приёмка', receiptSummary));
+  if (f.canReadCosting) steps.push(step(5, '5 · затраты', costSummary));
+  steps.push(step(6, '6 · закрытие', closeSummary));
   return steps;
 }
 
@@ -313,7 +386,9 @@ export function RunConveyor({ steps, className }: { steps: RunStep[]; className?
     <ol
       aria-label='этапы партии'
       className={cn('grid border border-borderColor bg-bgColor', className)}
-      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))' }}
+      // 150px: six phases have to fit on one row at the admin's content width before the band
+      // starts wrapping into a second row of cells.
+      style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}
     >
       {steps.map((s) => (
         <li
