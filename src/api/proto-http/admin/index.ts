@@ -7501,6 +7501,101 @@ export type ListCostingMigrationExceptionsResponse = {
   exceptions: CostingMigrationException[] | undefined;
 };
 
+// НАПРАВЛЕНИЕ ТКАНИ gap report (Ф1.8) — see ListTechCardFabricDirectionGaps.
+export type ListTechCardFabricDirectionGapsRequest = {
+  techCardId: number | undefined;
+  // include_inactive adds back the cards the default worklist defers — today exactly the RELEASED
+  // ones, and the `excluded` breakdown always names which states those were. Off by default because
+  // the point of the report is a list somebody can finish; ON for the release go/no-go, because a
+  // released card is deferred on a JUDGEMENT (that nobody re-opens it) and not on a proof.
+  includeInactive: boolean | undefined;
+  // counts_only drops `cards` and answers with the totals alone. The go/no-go call is
+  // (counts_only, include_inactive) = (true, true) — one question, one bounded answer, and that
+  // matters because the unbounded form grows with the portfolio and its failure mode
+  // (ResourceExhausted) would land on precisely the call that gates the release.
+  countsOnly: boolean | undefined;
+};
+
+export type ListTechCardFabricDirectionGapsResponse = {
+  cards: FabricDirectionGapCard[] | undefined;
+  totalCards: number | undefined;
+  // total_lines — roll-goods lines still missing a направление IN THE SCOPE THAT WAS ASKED FOR. On a
+  // default call zero means «nothing refuses today»; it is NOT on its own the release condition,
+  // because the deferred cards below can be re-opened into scope by one ordinary card edit.
+  // THE GO/NO-GO IS total_lines + excluded_lines == 0 — equivalently total_lines == 0 with
+  // include_inactive. That is the one number, and it is the strict form: it also survives somebody
+  // moving a released card back to draft.
+  totalLines: number | undefined;
+  // What the scope deferred, ALWAYS priced even when the rows themselves are withheld. A filter
+  // nobody can see is a report that lies by omission, and this one is read as a release gate; with
+  // include_inactive this is empty and the totals above cover everything.
+  excluded: FabricDirectionGapExclusion[] | undefined;
+  excludedCards: number | undefined;
+  excludedLines: number | undefined;
+};
+
+// FabricDirectionGapCard is one tech card carrying unset cloth lines, with the facts an owner
+// triages by. Cards carrying ANY bound раскладка come first (see linked_marker_count for why that
+// and not blocked_marker_count); ties keep tech_card_id order, so working the list over days never
+// reshuffles it under the operator.
+export type FabricDirectionGapCard = {
+  techCardId: number | undefined;
+  styleNumber: string | undefined;
+  name: string | undefined;
+  stage: common_TechCardStage | undefined;
+  approvalState: common_TechCardApprovalState | undefined;
+  // marker_save_possible is false for a RELEASED card: every marker write on one is refused outright
+  // before направление is consulted, so today its unset lines cannot refuse anything. It says
+  // «right now», not «ever» — moving the card back to draft makes it mutable with the same unset
+  // lines, which is exactly why released is DEFERRED and counted rather than dismissed.
+  markerSavePossible: boolean | undefined;
+  // blocked_marker_count — the sum of the per-line counts below. NOT a count of refusals: see
+  // FabricDirectionGapLine.blocked_marker_count. Informational; it decides nothing about the order.
+  blockedMarkerCount: number | undefined;
+  // linked_marker_count — раскладки bound to any BOM line of this card, i.e. every marker a gap on
+  // THIS card could possibly refuse (a scope is built out of the card's own lines, and an unlinked
+  // раскладка has no cloth at all). Over-inclusive and deliberately so: it is the only count here
+  // with no false negatives, which is why the urgent tier is drawn on it. blocked_marker_count
+  // cannot do that job — it misses the case where an unset line and an ANSWERED line share a
+  // назначение and only the answered one carries markers, and those markers are refused through the
+  // sibling. Re-deriving назначение here to catch that would be the marker rule restated, free to
+  // disagree with itself; over-approximating with a sound count is the cheaper honest answer.
+  linkedMarkerCount: number | undefined;
+  hasPatterns: boolean | undefined;
+  lines: FabricDirectionGapLine[] | undefined;
+};
+
+// FabricDirectionGapLine is one cloth line still waiting for an answer.
+export type FabricDirectionGapLine = {
+  bomItemId: number | undefined;
+  lineKey: string | undefined;
+  // name resolves through the catalogue exactly as the BOM tab resolves it — a material-linked line
+  // legitimately carries an empty name of its own, and printing the stored column alone would show
+  // an operator a ULID where the screen says «ВЕЛЬВЕТ ИЗ КАТАЛОГА». Empty only when the line has
+  // neither its own name nor a linked article; use line_key then.
+  name: string | undefined;
+  section: common_TechCardBomSection | undefined;
+  purpose: common_TechCardBomPurpose | undefined;
+  // is_sample marks семпловая ярдажа. Kept in the worklist rather than filtered out: the marker
+  // rule asks the direction of sample cloth for SAMPLE раскладки, so dropping these rows would let
+  // the report read «done» while a sample раскладка still refuses to save.
+  isSample: boolean | undefined;
+  // blocked_marker_count — раскладки bound to THIS line: the population the rule will judge on this
+  // row, and an UPPER bound on what it refuses, never a count of refusals. The rule lets a layout
+  // through before it ever asks about the cloth when that layout carries neither a 180° nor a
+  // mirror — nothing upside down means no direction can change the verdict — so a marker counted
+  // here may well keep saving. Telling the two apart needs the layout blob, which the store does not
+  // parse by design (0257), so the report reports what it can actually see and says which it is.
+  blockedMarkerCount: number | undefined;
+};
+
+// FabricDirectionGapExclusion is one reason rows were withheld, with its cost in cards and lines.
+export type FabricDirectionGapExclusion = {
+  approvalState: common_TechCardApprovalState | undefined;
+  cards: number | undefined;
+  lines: number | undefined;
+};
+
 // Tech-card release snapshots (task 11).
 export type ListTechCardReleasesRequest = {
   techCardId: number | undefined;
@@ -8484,11 +8579,16 @@ export type common_TechCardMarkerInsert = {
 export type common_TechCardMarkerLayout = {
   // 1 = the original geometry; 2 adds piece_line_key/block_name on a piece; 3 adds `flipped` on a
   // placement (Ф1). The server accepts all three and every stored blob stays readable forever.
-  // The version is also what the save path judges a layout BY. A stored v1/v2 marker legitimately
-  // carries rotations the current policy would not offer — the manual editor saves the rotation a
-  // piece actually has, even outside policy — so applying the directional-cloth rule to it would
-  // retro-invalidate every measurement on file the moment its card gets a направление. Only a blob
-  // that can express `flipped` comes from a client that knows the policy, so only v3 is held to it.
+  // THIS NUMBER DOES NOT DECIDE WHETHER THE POLICY APPLIES, and an earlier version of this comment
+  // said it did. The directional-cloth rule has no version gate: a layout is judged on its geometry
+  // whatever version it declares. The number the exemption is read from is a SERVER-WRITTEN column
+  // (`tech_card_marker.layout_schema_version`, migration 0268) — a policy generation, not this
+  // field. Keying the exemption here was a real defect twice over: `flipped` cannot be forged
+  // because the field did not exist before 3, but a 180° is expressible in every version, so
+  // «declare schema_version 1» was a working opt-out of the exact ban the policy exists to enforce.
+  // What this field IS load-bearing for is `flipped` alone: a mirrored placement in a blob
+  // declaring less than 3 is an impossible payload — no stored blob can contain one — and is
+  // refused as such rather than as a policy violation.
   schemaVersion: number | undefined;
   params: common_TechCardMarkerNestParams | undefined;
   pieces: common_TechCardMarkerPiece[] | undefined;
@@ -8546,8 +8646,17 @@ export type common_TechCardMarkerPlacement = {
   // exists to make expressible (schema_version 3, Ф1).
   // Directional cloth forbids a mirror for the same reason it forbids 180°: both put the piece on
   // the fabric the wrong way up, and ворс, twill or a print then run against the neighbouring
-  // piece. The save path refuses either one on a one_way scope — see the schema_version note above
-  // for why only v3 blobs are judged.
+  // piece. The save path refuses either one on a one_way scope, whatever version the blob declares
+  // — see the schema_version note above for what that field does and does not decide.
+  // THE AXIS IS PART OF THE CONTRACT, and naming it is not pedantry. The reflection is
+  // `(x, y) ↦ (−x, y)` — about the Y axis, in the piece's own coordinates, applied BEFORE rot_deg:
+  // placed(p) = R(rot_deg) · M^flipped · p + (x_cm, y_cm),   M: (x, y) ↦ (−x, y)
+  // Reflecting about the other axis would also produce a correct chirality, so a reader that
+  // guesses wrong still draws a plausible piece — it just draws it a HALF TURN from where the
+  // writer meant, because M_x = R(180) · M_y. On plain cloth that is invisible; on ворс it is a
+  // ruined panel, and in the label planner it is text upside down. Both renderers and the layout
+  // editor must compose this exact expression, and the order matters as much as the axis:
+  // M · R(θ) = R(−θ) · M, so mirroring after rotating differs by 2θ, not by a sign.
   flipped: boolean | undefined;
 };
 
@@ -10133,6 +10242,15 @@ export interface AdminService {
   // DeleteTechCardMarker removes a saved раскладка. Markers are measurements, not structural
   // references — nothing else points at them, so delete is plain (released cards still refuse).
   DeleteTechCardMarker(request: DeleteTechCardMarkerRequest): Promise<DeleteTechCardMarkerResponse>;
+  // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
+  // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
+  // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
+  // every stored line; Ф1 makes an unset direction refuse the save of a раскладка whose geometry
+  // needs judging — including the re-save of a marker that saves fine today. This report is what
+  // makes the fill-in campaign finishable and what says when it is finished; see total_lines for the
+  // exact go/no-go, which is NOT «total_lines == 0» on a default call.
+  // Read-only. Requires tech-cards read: it is the BOM tab's own data, seen across cards.
+  ListTechCardFabricDirectionGaps(request: ListTechCardFabricDirectionGapsRequest): Promise<ListTechCardFabricDirectionGapsResponse>;
   // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
   // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
   // table length, which the nesting modal used to make the operator retype on every раскладка.
@@ -14694,6 +14812,32 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTechCardMarker",
       }) as Promise<DeleteTechCardMarkerResponse>;
+    },
+    ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.techCardId) {
+        queryParams.push(`techCardId=${encodeURIComponent(request.techCardId.toString())}`)
+      }
+      if (request.includeInactive) {
+        queryParams.push(`includeInactive=${encodeURIComponent(request.includeInactive.toString())}`)
+      }
+      if (request.countsOnly) {
+        queryParams.push(`countsOnly=${encodeURIComponent(request.countsOnly.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListTechCardFabricDirectionGaps",
+      }) as Promise<ListTechCardFabricDirectionGapsResponse>;
     },
     GetWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/workshop/settings`; // eslint-disable-line quotes
