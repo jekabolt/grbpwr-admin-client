@@ -2,18 +2,19 @@
 // NestResult. The prepass computes every pairwise NFP up front with cooperative yields
 // (progress + cancel land between pairs); the GA then runs against a warm cache, so its
 // per-gene abort polling is cheap and the budget overshoot is bounded.
-import type {
-  NestConfig,
-  NestResult,
-  PieceDTO,
-  Pt,
-  RotationDeg,
-  UnplacedPiece,
-} from '../types';
+import type { NestConfig, NestResult, PieceDTO, Pt, RotationDeg, UnplacedPiece } from '../types';
 import { allowedRotations, allowsFlip } from '../types';
-import { SCALE, rdpSimplify, sanitizeLoop } from '../geom/clipper';
-import { bounds, ensureCCW, variantPoly, type Bounds } from '../geom/polygon';
-import { convexParts } from '../geom/triangulate';
+import { SCALE } from '../geom/clipper';
+import { bounds, variantPoly, type Bounds } from '../geom/polygon';
+import {
+  GA_MIN_MS,
+  estimateRun,
+  fittingRotations,
+  kindsFor,
+  mirroredCount,
+  relsFor,
+  type EstimatePiece,
+} from './estimate';
 import { hashString, runGa } from './ga';
 import { NfpCache, mirrorParts, type Flip, type PreparedPiece } from './nfp';
 import { compactPlacements, type Gene, type PlacedGene } from './place';
@@ -29,117 +30,11 @@ export type NestProgress = {
 // Primary GA stop — identical input reproduces the identical marker on any machine that
 // completes this many generations inside the time budget.
 const MAX_GENERATIONS = 400;
-// The GA always gets a floor even when the NFP prepass ate the whole budget.
-const GA_MIN_MS = 2_000;
 
-// ── the prepass budget (Ф0) ────────────────────────────────────────────────────────────
-//
-// The measured problem, on the real 45-piece file at the default 20 s budget:
-//
-//   nfp pairs=2070 done=544 (26%) | generations=0 | elapsed=51162ms | placed=45/45
-//
-// Zero generations means the marker the screen called «оптимизировано» is the first greedy
-// stack, unsearched — and it took 51 seconds to say so. The cost is entirely in the NFP
-// prepass, and the prepass cost is entirely in the CONVEX PART COUNT: a pair costs
-// parts(a)×parts(b) Minkowski hulls plus a union tree over them, and clipper2's Union
-// degrades catastrophically past ~100 overlapping inputs (nfp.ts documents the cliff).
-//
-// Measured on that file, one pair at a time:
-//
-//   rdpEps  parts/piece  hulls/pair  ms/pair   2070 pairs
-//   0.05    15.2         252         50.3      104 s
-//   0.10    10.6         119          8.8       18 s
-//   0.20     8.3          72          4.7       10 s
-//   0.40     5.4          32          1.8        4 s
-//
-// So the fidelity of the NFP INPUT decides whether a search happens at all. Raising it is
-// not free — the gap octagon compensates simplification with +2·eps, which spaces pieces
-// slightly further apart than they need — but the full-job numbers say the trade is worth
-// making at scale and not at all at small scale:
-//
-//   20 pieces: eps 0.05 → 297.0 cm (44 gen) · eps 0.40 → 314.6 cm (288 gen)
-//   45 pieces: eps 0.05 → 758.9 cm ( 0 gen, 53 s) · eps 0.40 → 711.2 cm (41 gen, 20 s)
-//
-// Below the cliff the honest eps wins on quality; above it, it loses to its own prepass.
-// Hence: choose the SMALLEST eps on a fixed ladder whose predicted hull count fits the
-// prepass share of the budget. The prediction is pure geometry and the cap is pure config,
-// so the choice is a function of the INPUT — the marker stays reproducible on any machine,
-// which a wall-clock-driven choice would have broken.
-const EPS_LADDER = [0.1, 0.15, 0.2, 0.3, 0.4, 0.6, 0.9] as const;
-// Share of the time budget the prepass may plan to spend. The GA needs the rest, and it
-// needs it warm: NFPs missing from the cache are computed lazily DURING evaluation, where
-// they cost the same but buy no progress bar.
-//
-// ЗДЕСЬ И ЖИВЁТ ЗАПАС — весь, целиком. Оценка времени ниже медианная (не запасливая), и на
-// реальных заданиях она сходится с фактом так: 0.76, 0.84, 0.90, 1.04, 1.26, 1.28 (оба файла
-// ЦЕЛИКОМ, обе хиральности, шесть прогонов). Значит худший факт ≈ 0.45 × 1.3 ≈ 0.59 бюджета, и
-// на это число — а не на память — калибруется порог пробы «предпросчёт не съел бюджет» (0.7).
-// Сдвинется оценка — сдвинутся оба.
-const PREPASS_SHARE = 0.45;
-// СКОЛЬКО ОБОЛОЧЕК В МИЛЛИСЕКУНДУ — ЗАМЕР, А НЕ КОНСТАНТА, и зависит он от того, сколько
-// оболочек приходится на ОДНО объединение. Здесь стояло сперва плоское «12 на всё», потом три
-// ступеньки; обе редакции ошибались в разы и ошибались В СТОРОНУ ПЕРЕРАСХОДА — предсказание
-// проходило под потолок, предпросчёт съедал бюджет целиком, поколений выходило НОЛЬ.
-//
-// Замерено инструментом, который считает ровно тот путь, что движок (время одного ensure() на
-// пару), на ОБОИХ реальных файлах целиком — 46 деталей blazer.dxf и 45 деталей summer men.dxf,
-// по нескольку сотен пар в каждом бине, медиана бина:
-//
-//   оболочек на объединение     4    23    45    91   181   320   490   735  1122  ~1500
-//   blazer,      обол/мс      6.0   5.4   4.7   5.5   4.3   2.9   2.0   1.05  0.89   0.33
-//   summer men,  обол/мс     10.8  10.4  10.2   9.1   9.2   2.9   1.75    —     —      —
-//
-// Отсюда три факта, каждый из которых ломает прежнюю модель:
-//   • В ДЕШЁВОМ режиме скорость 5–10, а не 12–18. Прежние 12 (и «13.5» из старой таблицы,
-//     снятой на другом файле и другой машине) оптимистичны примерно вдвое.
-//   • ОБРЫВ лежит около 256–320 оболочек на объединение и он резкий: 4–9 обол/мс до него, 2.9
-//     сразу за ним. Это обрыв самого clipper'а (шапка nest/nfp.ts), а не свойство машины —
-//     он воспроизводится на обоих файлах в одном и том же месте.
-//   • ПОСЛЕ обрыва скорость продолжает падать, а не выходит на полку: 2.9 → 1.7 → 1.0 → 0.33.
-//     Плоское «5 за обрывом» ошибалось на порядок там, где деталь сложная: у blazer.dxf есть
-//     детали с 40 и 39 выпуклыми частями при eps 0.05, то есть самопара даёт 1600 оболочек на
-//     объединение. Задание из НЕМНОГИХ, но заковыристых деталей проскакивало под потолок по
-//     числу пар — и отдавало предпросчёту весь бюджет.
-//
-// Поэтому модель — сама таблица: узлы ниже интерполируются в лог-лог, за последним узлом
-// продолжается наклон последнего отрезка. Функция непрерывна (у ступенек p/rate(p) прыгал вдвое
-// на одну лишнюю оболочку, а effectiveEps входит в зерно поиска — прыжок переставлял маркер),
-// монотонна и никуда не обращается, кроме своего аргумента.
-const HULL_RATE: ReadonlyArray<readonly [perUnion: number, hullsPerMs: number]> = [
-  [200, 8],
-  [320, 2.9],
-  [500, 1.7],
-  [750, 1.0],
-  [1500, 0.33],
-];
-function hullsPerMs(perUnion: number): number {
-  const p = Math.max(1, perUnion);
-  if (p <= HULL_RATE[0][0]) return HULL_RATE[0][1];
-  for (let i = 1; i < HULL_RATE.length; i++) {
-    const [p1, r1] = HULL_RATE[i];
-    if (p > p1) continue;
-    const [p0, r0] = HULL_RATE[i - 1];
-    const t = Math.log(p / p0) / Math.log(p1 / p0);
-    return Math.exp(Math.log(r0) + t * (Math.log(r1) - Math.log(r0)));
-  }
-  // За таблицей — наклон последнего отрезка (≈ p^-1.6). Пол 0.02 обол/мс: не физика, а защита
-  // от деления на ноль и от бесконечной оценки, до которой ни один реальный файл не доходит.
-  const [pa, ra] = HULL_RATE[HULL_RATE.length - 2];
-  const [pb, rb] = HULL_RATE[HULL_RATE.length - 1];
-  const k = Math.log(rb / ra) / Math.log(pb / pa);
-  return Math.max(0.02, rb * Math.pow(p / pb, k));
-}
-// Two properties of this scheme worth knowing before touching it:
-//
-//   • Оценка теперь МЕДИАННАЯ, а не запасливая: запас живёт в PREPASS_SHARE, где он назван, а
-//     не размазан по константам скорости. Так predictedPrepassMs в телеметрии можно сверять с
-//     фактическим prepassMs и видеть, врёт модель или нет, — чего с зашитым запасом не сделать.
-//     Замеренная сходимость на реальных заданиях — в комментарии к PREPASS_SHARE.
-//   • Crossing a rung RESEEDS the search: effectiveEps is part of the seed string below, so adding
-//     one piece or nudging the budget can replace the marker outright rather than perturb it. That
-//     is a consequence of keeping the choice a pure function of the input — the alternative (a
-//     stable eps chosen by the clock) buys continuity by giving up reproducibility, which is the
-//     one property the whole engine is built around.
+// ЦЕНА ПРЕДПРОСЧЁТА И ВЫБОР СТУПЕНИ УПРОЩЕНИЯ ЖИВУТ В ./estimate. Здесь их больше нет — и это
+// не расфасовка по файлам: та же модель нужна МОДАЛКЕ, чтобы сказать цену ДО прогона, а вторая
+// копия расходится с движком молча, и расходится она в ту сторону, где экран обещает поиск,
+// которого не будет. Всё, что осталось тут, — вызов estimateRun и следствия его ответа.
 
 // Имена деталей для предупреждения. Ключ у карты — id, потому что две РАЗНЫЕ детали кроя
 // законно называются одинаково (полочка верха и полочка подклада приходят из градалки под одним
@@ -149,14 +44,6 @@ function namesWithCount(byId: ReadonlyMap<number, string>): string {
   const n = new Map<string, number>();
   for (const name of byId.values()) n.set(name, (n.get(name) ?? 0) + 1);
   return [...n.entries()].map(([name, c]) => (c > 1 ? `${name} ×${c}` : name)).join(', ');
-}
-
-// Convex-part decomposition of one contour at a given simplification. Sanitize AFTER
-// simplification: RDP can self-intersect a thin neck, and feeding that to the decomposer
-// should be a designed path (hull fallback), not luck.
-function partsAt(poly: readonly { x: number; y: number }[], eps: number) {
-  const simplified = rdpSimplify(poly, eps);
-  return convexParts(ensureCCW(sanitizeLoop(simplified) ?? simplified));
 }
 
 export async function nest(
@@ -241,10 +128,18 @@ export async function nest(
     // поворотов 0/180 поперечный габарит не трогает вовсе, а у 90/270 он равен продольному
     // габариту, который отражение тоже сохраняет ([minX,maxX] → [−maxX,−minX]). Ширина полосы
     // не умеет разрешить одну хиральность и запретить другую.
-    const fitting = rotations.filter((r) => {
-      const b = prep!.boundsAt[0][r];
-      return b.maxY - b.minY <= usableWidth + 1e-9;
-    });
+    //
+    // Само правило (сравнение и его допуск) живёт в estimate.ts и ОДНО на движок и на экран:
+    // модалка меряет тот же поперечный габарит по bbox детали и обязана получить тот же набор
+    // поворотов — от него зависит, сколько относительных углов у пары, то есть вся оценка.
+    const fitting = fittingRotations(
+      (r) => {
+        const b = prep!.boundsAt[0][r];
+        return b.maxY - b.minY;
+      },
+      rotations,
+      usableWidth,
+    );
     if (fitting.length === 0) {
       for (let inst = 0; inst < pc.quantity; inst++) {
         unplacedUpFront.push({ pieceId: dto.id, instance: inst, reason: 'width' });
@@ -252,14 +147,9 @@ export async function nest(
       continue;
     }
     // Сколько экземпляров этой детали кроятся зеркально — ПОСЛЕДНИЕ flippedQuantity штук
-    // (types.ts). Обрезка обязательна: задание приходит извне, а «зеркал больше, чем деталей»
-    // не значит ничего. NaN/Infinity отсекаются ОТДЕЛЬНО, а не обрезкой: Math.floor(NaN) это
-    // NaN, любое сравнение с ним ложно, и парная деталь молча вышла бы незеркальной парой
-    // одинаковых — тот самый брак, только теперь из-за испорченного числа во входе.
-    const wanted = Number(pc.flippedQuantity ?? 0);
-    const flippedCount = Number.isFinite(wanted)
-      ? Math.min(Math.max(0, Math.floor(wanted)), pc.quantity)
-      : 0;
+    // (types.ts). Обрезка и защита от NaN — в estimate.ts, одной функцией на движок и на оценку:
+    // хиральности решают, сколько записей NFP у пары, то есть половину предсказанной цены.
+    const flippedCount = mirroredCount(pc.quantity, pc.flippedQuantity);
     for (let inst = 0; inst < pc.quantity; inst++) {
       const flip: Flip = inst >= pc.quantity - flippedCount ? 1 : 0;
       if (flip === 1 && !canFlip) {
@@ -299,33 +189,14 @@ export async function nest(
 
   const totalCount = config.pieces.reduce((s, pc) => s + Math.max(0, pc.quantity), 0);
 
-  // Which relative rotations a pair can actually be asked for. With every piece free to
-  // wear 0/180 this is the whole set, but a piece too tall for the fabric at 90° carries a
-  // narrower allowedRots, and precomputing rels it can never wear is pure waste.
-  const relsFor = (a: Gene['allowedRots'], b: Gene['allowedRots']): RotationDeg[] => {
-    const out = new Set<RotationDeg>();
-    for (const ra of a) for (const rb of b) out.add(((((rb - ra) % 360) + 360) % 360) as RotationDeg);
-    return [...out].sort((x, y) => x - y);
-  };
-
-  // Какие ХИРАЛЬНОСТИ реально встречаются у экземпляров каждой детали. Пара деталей требует
-  // канона N0 (bFlip 0), если у неё бывает ОДИНАКОВАЯ хиральность, и канона X0 (bFlip 1) —
-  // если РАЗНАЯ; см. шапку nest/nfp.ts. Обычная деталь без зеркал даёт ровно то же множество
-  // записей, что и до Ф1.2, поэтому задание без парных деталей не платит за них ничего.
+  // Какие ХИРАЛЬНОСТИ реально встречаются у экземпляров каждой детали — вход для kindsFor,
+  // который решает, сколько записей NFP требует пара (см. estimate.ts и шапку nest/nfp.ts).
   const flipsOf = new Map<number, Set<Flip>>();
   for (const g of genesBase) {
     let s = flipsOf.get(g.piece.id);
     if (!s) flipsOf.set(g.piece.id, (s = new Set<Flip>()));
     s.add(g.flip);
   }
-  const kindsFor = (fa: Set<Flip> | undefined, fb: Set<Flip> | undefined): Flip[] => {
-    const a = fa ?? new Set<Flip>([0]);
-    const b = fb ?? new Set<Flip>([0]);
-    const out: Flip[] = [];
-    if ((a.has(0) && b.has(0)) || (a.has(1) && b.has(1))) out.push(0);
-    if ((a.has(0) && b.has(1)) || (a.has(1) && b.has(0))) out.push(1);
-    return out;
-  };
 
   let telemetry: NestResult['telemetry'];
 
@@ -371,71 +242,42 @@ export async function nest(
   const rotsOf = new Map<number, Gene['allowedRots']>();
   for (const g of genesBase) if (!rotsOf.has(g.piece.id)) rotsOf.set(g.piece.id, g.allowedRots);
 
-  // Timed from HERE, not from the first NFP pair: the ladder below decomposes every unique
+  // Timed from HERE, not from the first NFP pair: the estimate below decomposes every unique
   // piece at every rung it tries, finest first, and those are the most expensive
   // decompositions in the job. That time is spent preparing geometry and belongs in the
   // number the screen attributes to preparing geometry.
   const prepassStarted = Date.now();
-  // Потолок теперь в МИЛЛИСЕКУНДАХ, а не в оболочках: цена оболочки зависит от того, сколько их
-  // в одном объединении (см. hullsPerMs), и складывать их в одно число значило бы считать
-  // дешёвую и запредельную пару одинаковыми.
-  const prepassCapMs = Math.max(1, config.timeBudgetMs * PREPASS_SHARE);
-  const ladder = [config.rdpEpsCm, ...EPS_LADDER.filter((e) => e > config.rdpEpsCm)];
-  let effectiveEps = config.rdpEpsCm;
-  let predictedHulls = 0;
-  let predictedMs = 0;
-  // Погрубело ли из-за ЗЕРКАЛ: у задания с парными деталями записей NFP вдвое больше, и сказать
-  // оператору «деталей много» было бы неправдой — тех же деталей без зеркал хватает на ступень
-  // тоньше.
-  let mirrorPairs = false;
-  let decomps: ReturnType<typeof partsAt>[] = [];
-  for (let li = 0; li < ladder.length; li++) {
-    const eps = ladder[li];
-    decomps = uniquePieces.map((p) => partsAt(byId.get(p.id)!.poly, eps));
-    const counts = decomps.map((d) => d.parts.length);
-    let hulls = 0;
-    let ms = 0;
-    mirrorPairs = false;
-    for (let i = 0; i < uniquePieces.length; i++) {
-      for (let j = i; j < uniquePieces.length; j++) {
-        const rels = relsFor(
-          rotsOf.get(uniquePieces[i].id) ?? rotations,
-          rotsOf.get(uniquePieces[j].id) ?? rotations,
-        );
-        // Разнохиральная пара — ВТОРАЯ запись на ту же пару и тот же rel: её оболочки считаются
-        // заново (отражением одной детали зеркальную пару не получить). Не учесть её здесь
-        // значило бы занизить предсказание вдвое ровно на тех заданиях, где парных деталей
-        // много, — и снова получить ноль поколений после полного бюджета.
-        const kinds = kindsFor(
-          flipsOf.get(uniquePieces[i].id),
-          flipsOf.get(uniquePieces[j].id),
-        ).length;
-        if (kinds > 1) mirrorPairs = true;
-        // Оболочек в ОДНОМ объединении — по этому числу и берётся скорость; сколько таких
-        // объединений у пары, решают повороты и хиральности.
-        const perUnion = counts[i] * counts[j];
-        const unions = rels.length * kinds;
-        hulls += perUnion * unions;
-        ms += (perUnion * unions) / hullsPerMs(perUnion);
-      }
-    }
-    effectiveEps = eps;
-    predictedHulls = hulls;
-    predictedMs = ms;
-    if (ms <= prepassCapMs || li === ladder.length - 1) break;
-  }
+  // ТА ЖЕ функция, что зовёт модалка ДО прогона (nest/estimate.ts). Не «такая же»: одна и та же,
+  // и это единственное, чем экранное «предрасчёт ~8 с» связано с тем, что движок сейчас сделает.
+  const est = estimateRun(
+    uniquePieces.map(
+      (p): EstimatePiece => ({
+        id: p.id,
+        poly: byId.get(p.id)!.poly,
+        allowedRots: rotsOf.get(p.id) ?? rotations,
+        flips: [...(flipsOf.get(p.id) ?? new Set<Flip>([0]))],
+      }),
+    ),
+    config,
+  );
+  const { effectiveEps, predictedHulls, mirrorPairs } = est;
   uniquePieces.forEach((p, i) => {
+    // Разложения берутся ИЗ ОЦЕНКИ, а не считаются заново: она их уже построила на выбранной
+    // ступени, и второй проход был бы не только лишним временем в предпросчёте, но и вторым
+    // местом, где решается, какая геометрия уедет в NFP.
+    //
     // Зеркальные части — ОТРАЖЕНИЕ тех же самых, а не разложение отражённого контура: см.
     // PreparedPiece.parts0. Считается всегда: проход по десятку выпуклых кусков стоит нисколько,
     // а ветвление «а нужны ли они» — это состояние, которое умеет разъехаться с genesBase.
-    p.parts0 = [decomps[i].parts, mirrorParts(decomps[i].parts)];
-    if (decomps[i].degenerate) {
+    const d = est.decompositions[i];
+    p.parts0 = [d.parts, mirrorParts(d.parts)];
+    if (d.degenerate) {
       warnings.push(
         `«${byId.get(p.id)?.name ?? p.id}»: контур с дефектом — раскладка считает его с запасом (выпуклая оболочка)`,
       );
     }
   });
-  if (effectiveEps > config.rdpEpsCm) {
+  if (est.coarsened) {
     // Причина названа ТА, что сработала. «Деталей много» на зеркальном задании — неправда: те же
     // двадцать деталей без парных ложатся на ступень тоньше, а погрубело оно оттого, что каждая
     // пара «левая + правая» требует ВТОРОЙ записи NFP. Оператор, прочитавший неверную причину,
@@ -487,6 +329,9 @@ export async function nest(
       }
     }
   }
+  // Список пар строится ТЕМИ ЖЕ relsFor/kindsFor, по которым оценка считала свою цену, поэтому
+  // pairs.length обязан равняться est.nfpRecords — это и проверяет nest-budget-probe.mjs. Разъезд
+  // здесь означал бы, что предсказание относится к другому объёму работы, чем предпросчёт.
   onProgress({ phase: 'nfp', nfpDone: 0, nfpTotal: pairs.length });
   let nfpDone = 0;
   // Yield on a TIME cadence rather than every 4 pairs: a pair ranges from 0.8 ms to 50 ms
@@ -513,7 +358,7 @@ export async function nest(
     rdpEpsCm: effectiveEps,
     requestedRdpEpsCm: config.rdpEpsCm,
     predictedHulls,
-    predictedPrepassMs: Math.round(predictedMs),
+    predictedPrepassMs: est.predictedPrepassMs,
     prepassMs,
   };
   if (isCancelled()) return emptyResult(true);
@@ -546,7 +391,11 @@ export async function nest(
       // evaluated is reported LIVE rather than only at the end: a telemetry field that reads 0
       // on every streamed frame is a wrong number, not a missing one.
       if (telemetry) telemetry = { ...telemetry, evaluated: p.evaluated };
-      onProgress({ phase: 'ga', generation: p.generation, best: finalize(p.best, p.generation, false) });
+      onProgress({
+        phase: 'ga',
+        generation: p.generation,
+        best: finalize(p.best, p.generation, false),
+      });
     },
   });
   telemetry = { ...telemetry, evaluated };
@@ -564,7 +413,12 @@ export async function nest(
   for (const pl of best.placements) {
     const g = byKey.get(`${pl.pieceId}|${pl.instance}`);
     if (!g) continue;
-    placedGenes.push({ ...g, rot: pl.rot, x: Math.round(pl.x * SCALE), y: Math.round(pl.y * SCALE) });
+    placedGenes.push({
+      ...g,
+      rot: pl.rot,
+      x: Math.round(pl.x * SCALE),
+      y: Math.round(pl.y * SCALE),
+    });
   }
   if (!isCancelled() && placedGenes.length === best.placements.length && placedGenes.length > 0) {
     // No wall-clock deadline: the pass cap alone bounds the cost, and a clock-truncated
