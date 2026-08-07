@@ -200,23 +200,36 @@ export function NestingModal({
     // «FP_L» и «FP_XL» сворачиваются в одно «FP», и подставить в блоб наугад одну из двух
     // деталей кроя хуже, чем оставить поле пустым — пустое читается как «неизвестно», а
     // неверное читается как ответ.
-    const byBlock = new Map<string, string>();
+    // Неоднозначность ОТКАЗЫВАЕТ на обоих слоях, а не только на свёрнутом. Два алиаса,
+    // привязанных к РАЗНЫМ строкам BOM одного назначения, — законная запись: карточка её прямо
+    // разрешает и запрещает только противоречие внутри одного скоупа. Сюда же они приезжают
+    // отфильтрованными по скоупу, то есть одинаковыми ключами с разными деталями кроя, и
+    // «последний победил» подставил бы в блоб ту, что оказалась позже в массиве, — то есть
+    // случайную. Пусто читается как «неизвестно», неверное читается как ответ.
+    const byBlock = new Map<string, string | null>();
     const folded = new Map<string, string | null>();
+    const put = (m: Map<string, string | null>, k: string, v: string) => {
+      m.set(k, m.has(k) && m.get(k) !== v ? null : v);
+    };
     for (const a of pieceAliases ?? []) {
       const raw = normBlock(a.blockName ?? '');
       const val = (a.pieceLineKey ?? '').trim();
       if (!raw || !val) continue;
-      byBlock.set(raw.toLowerCase(), val);
+      put(byBlock, raw.toLowerCase(), val);
       const ident = normBlock(splitBlockSize(raw, split.sizeTokenSet).identity).toLowerCase();
       if (!ident || ident === raw.toLowerCase()) continue;
-      folded.set(ident, folded.has(ident) && folded.get(ident) !== val ? null : val);
+      put(folded, ident, val);
     }
     const out = new Map<number, string>();
     if (byBlock.size === 0) return out;
     for (const p of allPieces) {
       const key = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '').toLowerCase();
       if (!key) continue;
-      const val = byBlock.get(key) ?? folded.get(key) ?? '';
+      // `null` — это «две детали спорят», и он ОБЯЗАН гасить ключ, а не проваливаться на
+      // свёрнутый слой: ?? пропускает только undefined, поэтому спор на прямом слое не
+      // подменяется догадкой со свёрнутого.
+      const direct = byBlock.get(key);
+      const val = (direct === undefined ? folded.get(key) : direct) ?? '';
       if (val) out.set(p.id, val);
     }
     return out;
