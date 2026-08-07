@@ -5337,8 +5337,28 @@ export type StyleCutListPiece = {
   grainline: string | undefined;
   fused: boolean | undefined;
   fabrics: StyleCutListFabric[] | undefined;
+  // Классификация кроя (0275). total_per_garment по-прежнему РАВЕН pieces_per_garment: это поле
+  // ничего не умножает, оно объясняет уже посчитанное число. UNKNOWN = не размечено.
+  // Здесь голый энум, а не optional: ответ только на чтение, и отсутствие присутствия ничего не
+  // затирает — затирать нечем, писать через этот RPC нельзя.
+  cutSymmetry: common_TechCardPieceCutSymmetry | undefined;
 };
 
+// TechCardPieceCutSymmetry — КАК деталь кроится (миграция 0275). Не количество: количество целиком
+// живёт в pieces_per_garment (0266 свернула туда зеркальное удвоение), и ни одно значение отсюда
+// ничего не умножает. Вернуть множитель нельзя: тех-пак печатает pieces_per_garment и НИКОГДА total,
+// поэтому удвоение «где-то ещё» снова напечатает фабрике «1» у детали, которую кроят парой.
+// UNKNOWN — это ОТВЕТ «никто не спрашивал», а не «обычная деталь». Различать обязательно:
+// неразмеченная парная деталь при полукомплекте лекал даёт 44 левых полочки и ноль правых, и
+// единственное, что от этого спасает, — видимое «не размечено».
+// FOLD не бывает MIRRORED: крой по сгибу — это объединение половины лекала с её отражением, значит
+// контур симметричен сам себе, а отражение симметричного контура конгруэнтно ему. «Со сгибом и нужна
+// дважды» (манжеты) = FOLD + pieces_per_garment = 2.
+export type common_TechCardPieceCutSymmetry =
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_FOLD";
 export type GetStyleCutListRequest = {
   techCardId: number | undefined;
 };
@@ -6591,6 +6611,16 @@ export type common_TechCardPiece = {
   // callout on the card (its source sketch callout was removed) — the piece survives, visibly
   // detached, instead of being silently dropped (orphan-control, S8).
   detached: boolean | undefined;
+  // КАК КРОИТСЯ (0275). Отвечает на вопрос «как связаны эти pieces_per_garment панелей», и ничего не
+  // умножает — см. TechCardPieceCutSymmetry.
+  // ЯВНОЕ ПРИСУТСТВИЕ, а не голый энум, по той же причине, что и fabric_direction на строке BOM:
+  // вкладка со старым бандлом поля не шлёт вовсе, голый proto3-энум приехал бы как UNKNOWN и СТЁР бы
+  // разметку на всех деталях карточки — а разметка, в отличие от направления, невосстановима без
+  // человека с лекалами. ОТСУТСТВИЕ ⇒ сервер несёт хранимое значение дальше (store:
+  // IF(:cut_symmetry_omitted, …), и та же перенос-склейка перед дайджестом, иначе подпись из такой
+  // вкладки рождается устаревшей). ЯВНЫЙ UNKNOWN ⇒ очистить в «не размечено», это осознанное
+  // действие. Новый клиент шлёт поле ВСЕГДА, круглым рейсом того, что прочитал.
+  cutSymmetry?: common_TechCardPieceCutSymmetry;
 };
 
 // TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
@@ -6988,13 +7018,17 @@ export type common_TechCardOutputVariant = {
 };
 
 // TechCardMarkerSummary is the list row of a saved раскладка (marker, tech_card_marker): the
-// measured fabric layout of ONE size's pattern pieces on a strip of fabric. The heavy layout blob
+// measured fabric layout of a СОСТАВ of pattern pieces on a strip of fabric. The heavy layout blob
 // (contours + placements) deliberately does NOT ride here — it travels only on GetTechCardMarker.
-// consumption_per_unit_cm is DERIVED (used_length_cm / sets), never stored, so it cannot drift
-// from its inputs. It is the number costing cares about: fabric per one garment of this size.
+// Ф2 replaced «one size × N комплектов» with a composition (size → garments). The identity of a
+// marker in a list is therefore `composition` (:25), not `size_id` (:3) — a mixed раскладка has no
+// single size to show, and the legacy fields read 0 on one.
 export type common_TechCardMarkerSummary = {
   id: number | undefined;
   techCardId: number | undefined;
+  // ЛЕГАСИ. The size of a homogeneous marker taken before Ф2; 0 = a marker with a composition,
+  // read `composition` (:25). The number is never reused and the field is never removed — a stored
+  // pre-Ф2 row still carries it, and a stale client bundle still sends it back on save.
   sizeId: number | undefined;
   name: string | undefined;
   // Provenance of the layout geometry. "auto" = the nesting engine as it ran; "manual" = an
@@ -7010,6 +7044,8 @@ export type common_TechCardMarkerSummary = {
   gapCm: googletype_Decimal | undefined;
   edgeMarginCm: googletype_Decimal | undefined;
   allowCrossGrain: boolean | undefined;
+  // ЛЕГАСИ, exactly like size_id above: комплектов of the ONE size a pre-Ф2 marker cut. 0 = a
+  // marker with a composition, read total_units (:26).
   sets: number | undefined;
   usedLengthCm: googletype_Decimal | undefined;
   efficiencyPct: googletype_Decimal | undefined;
@@ -7018,6 +7054,14 @@ export type common_TechCardMarkerSummary = {
   // consumption norm — so on stored rows these are always equal; kept as two fields for honesty.
   placedCount: number | undefined;
   totalCount: number | undefined;
+  // OUTPUT-ONLY, = used_length_cm / total_units — fabric per ONE garment.
+  // WITHHELD (unset, not zero) on a marker whose composition holds MORE THAN ONE SIZE. On a mixed
+  // раскладка this quotient is the mean across the состав: it overstates the small sizes and
+  // understates the large ones, which is the very distortion Ф2 exists to remove. It is also the
+  // number a client copies verbatim into tech_card_colorway_usage.consumption with
+  // consumption_source='marker' — i.e. it stops being a display value and becomes a persistent
+  // costing fact nothing downstream can tell apart from a measured one. So the server does not
+  // hand it out; scalar_apply_refusal (:27) says so in words. Per-size figures arrive with Ф2.4.
   consumptionPerUnitCm: googletype_Decimal | undefined;
   createdBy: string | undefined;
   updatedBy: string | undefined;
@@ -7032,6 +7076,33 @@ export type common_TechCardMarkerSummary = {
   // is two markers with two measured lengths. A costing suggestion that ignored this would apply
   // a length taken at another cloth's width, and be wrong in a way that reads as plausible.
   colorwayId: number | undefined;
+  // OUTPUT-ONLY СОСТАВ of the раскладка, one entry per size, ordered by size_id. ALWAYS populated,
+  // for every marker including those taken before Ф2 — migration 0273 projected each legacy row
+  // into the same shape, one entry {size_id, sets}. It is never empty and never carries quantity 0;
+  // an empty composition on the wire is a read bug, not «a marker without a состав».
+  composition: common_TechCardMarkerCompositionEntry[] | undefined;
+  // OUTPUT-ONLY. How many GARMENTS (not pieces!) this раскладка cuts — Σ composition[].quantity, and
+  // the divisor behind consumption_per_unit_cm. Equals `sets` for a legacy marker. NOT to be confused
+  // with total_count (:17), which counts placed PIECE INSTANCES.
+  totalUnits: number | undefined;
+  // OUTPUT-ONLY. Empty = the scalar consumption_per_unit_cm (:18) may be applied to a recipe. A
+  // non-empty string is the server REFUSING to supply a scalar norm for this раскладка, and its text
+  // is the explanation to show: which раскладка, why a single number would be wrong, and what to do
+  // instead. Set exactly when the composition holds more than one size.
+  scalarApplyRefusal: string | undefined;
+};
+
+// TechCardMarkerCompositionEntry is one line of a раскладка's СОСТАВ: how many GARMENTS of one size
+// this marker cuts in a single spread. A mixed состав packs tighter than a homogeneous one — the
+// small pieces of one size settle into the межлекальные выпады of another — and «size + комплекты»
+// was replaced by a map for exactly that reason: the tighter layout was not expressible.
+// repeated, deliberately NOT map<int32,int32>, for three reasons: the order of the entries inside
+// the stored blob must be stable (the Ф0.5 regression probe asserts «same input ⇒ same blob»); a map
+// degrades into an object with string keys through grpc-gateway/OpenAPI; and a repeated entry can
+// grow a field later (Ф2.4 hangs the per-size consumption here) where a map value cannot.
+export type common_TechCardMarkerCompositionEntry = {
+  sizeId: number | undefined;
+  quantity: number | undefined;
 };
 
 export type UpdateTechCardRequest = {
@@ -8551,6 +8622,17 @@ export type SaveTechCardMarkerRequest = {
 // garbage-collected the moment no row references them, so a marker that stored url references
 // would go dark on the next sheet replacement. source_url inside pieces is provenance only.
 export type common_TechCardMarkerInsert = {
+  // ЛЕГАСИ pair with `sets` (:9). The СОСТАВ travels in layout.composition and nowhere else — one
+  // copy on the wire, so there is no «which of the two is right» question to answer and no
+  // cross-validation to write, and the blob stays self-contained (its pieces are tagged with sizes;
+  // the состав is the header of that same geometry).
+  // These two survive for ONE reason: a STALE ADMIN BUNDLE. The admin is an SPA, an open tab keeps
+  // sending the payload it was built with, and Ф1 already paid this price on fabric_direction. A
+  // payload with a non-empty layout.composition ignores both fields; a payload without one is
+  // accepted as a homogeneous marker when size_id > 0 and sets >= 1, and is stored in exactly the
+  // legacy shape. Neither present nor absent is guessed at: with no composition AND no size_id/sets
+  // the save is REFUSED, because inventing «1 комплект» would inflate the per-garment norm N-fold
+  // and a client writes that number straight into a recipe.
   sizeId: number | undefined;
   name: string | undefined;
   source: string | undefined;
@@ -8578,7 +8660,8 @@ export type common_TechCardMarkerInsert = {
 // degrade gracefully on a version they do not know.
 export type common_TechCardMarkerLayout = {
   // 1 = the original geometry; 2 adds piece_line_key/block_name on a piece; 3 adds `flipped` on a
-  // placement (Ф1). The server accepts all three and every stored blob stays readable forever.
+  // placement (Ф1); 4 adds `composition` here and `size_id` on a piece (Ф2). The server accepts all
+  // four and every stored blob stays readable forever.
   // THIS NUMBER DOES NOT DECIDE WHETHER THE POLICY APPLIES, and an earlier version of this comment
   // said it did. The directional-cloth rule has no version gate: a layout is judged on its geometry
   // whatever version it declares. The number the exemption is read from is a SERVER-WRITTEN column
@@ -8594,6 +8677,12 @@ export type common_TechCardMarkerLayout = {
   pieces: common_TechCardMarkerPiece[] | undefined;
   placements: common_TechCardMarkerPlacement[] | undefined;
   warnings: string[] | undefined;
+  // СОСТАВ of the раскладка (schema_version 4). EMPTY means a legacy blob «one size, N комплектов»:
+  // the reader takes the состав from the summary instead — a single entry {summary.size_id,
+  // summary.sets} — and gets precisely the pre-Ф2 semantics back. Branch on THE PRESENCE OF THIS
+  // FIELD, never on schema_version: the version exists to decide forgery and grandfathering (Ф1),
+  // and a reader that switched on it would have to know about versions it will never see again.
+  composition: common_TechCardMarkerCompositionEntry[] | undefined;
 };
 
 // TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
@@ -8608,12 +8697,17 @@ export type common_TechCardMarkerNestParams = {
 };
 
 // TechCardMarkerPiece is one distinct pattern piece: its exact contour (cm, local origin at the
-// piece bbox corner) and how many instances ONE set cuts. Instances = quantity × marker sets.
+// piece bbox corner) and how many instances ONE GARMENT cuts.
 export type common_TechCardMarkerPiece = {
   pieceId: number | undefined;
   name: string | undefined;
   source: string | undefined;
   sourceUrl: string | undefined;
+  // Instances per ONE GARMENT, >= 1. Total instances of this piece in the раскладка:
+  // quantity × (size_id > 0 ? composition[size_id].quantity : total_units)
+  // Legacy blob: no size_id anywhere, composition empty, the состав is {summary.size_id,
+  // summary.sets} and total_units = sets ⇒ the formula gives quantity × sets, which is exactly what
+  // this comment said before Ф2. ONE formula, no branch on the version.
   quantity: number | undefined;
   poly: common_TechCardMarkerPoint[] | undefined;
   bboxWCm: number | undefined;
@@ -8624,6 +8718,13 @@ export type common_TechCardMarkerPiece = {
   // back to `name` as saved. piece_id above stays parse-local (a v1 decision that remains right).
   pieceLineKey: string | undefined;
   blockName: string | undefined;
+  // schema_version 4: the size whose GRADATION this contour belongs to. 0/absent = the piece is
+  // size-agnostic (a DXF block with no size suffix — it does not grade, so one is cut per garment
+  // of the whole состав) OR the blob is legacy. Both readings collapse into the same formula, see
+  // quantity above. A size named here must appear in layout.composition — the server refuses a blob
+  // whose piece points at a size the состав does not cut, because the formula would silently give
+  // that piece zero instances.
+  sizeId: number | undefined;
 };
 
 export type common_TechCardMarkerPoint = {
