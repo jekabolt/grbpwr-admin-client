@@ -23,6 +23,7 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AuxRunPlan } from './components/aux-run-plan';
+import { LayPlan } from './components/lay-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
 import {
@@ -363,8 +364,15 @@ export function ProductionRunDetail() {
         <MaterialPlan run={run} canEdit={canEdit} locked={locked} />
       </Section>
 
+      {/* Шаг 3 — план настилов (Ф4.3). Блок рисует себя САМ, вместе со своей `Section`: у него есть
+          состояние «не применимо» (aux-карточка), при котором пустая рамка с заголовком была бы
+          приглашением построить то, чего у этого прогона не бывает. Клиентский гейт `!isAux` —
+          та же машинерия, что у требований релиза: сервер отдаёт applicable = false с причиной,
+          клиент не рендерит блок. */}
+      {!isAux ? <LayPlan run={run} canEdit={canEdit} locked={locked} /> : null}
+
       {canReadCosting ? (
-        <Section title='step 3 · actual costs' question='Log the real costs incurred once known.'>
+        <Section title='step 4 · actual costs' question='Log the real costs incurred once known.'>
           {/* Same reason: UpdateProductionRun refuses a received/closed run, and cost articles are
               written through it. The editor stays readable, the save is gone. */}
           <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} locked={locked} />

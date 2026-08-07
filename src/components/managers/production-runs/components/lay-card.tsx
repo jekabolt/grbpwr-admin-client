@@ -122,9 +122,11 @@ export function LayCard({
         {lay.name ? ` — ${lay.name}` : ''}
       </GroupLabel>
 
+      {/* Незаданные концевые потери печатаются как «—», а НЕ как «0 см»: ноль здесь означал бы
+          «потерь нет», то есть занижение потребности, выданное за измерение. */}
       <Row
         label={`${LAY_MODE_LABEL[lay.mode ?? ''] ?? 'режим не задан'} · концевые потери ${
-          cmValue(lay.endLossCm) ?? 0
+          cmValue(lay.endLossCm) ?? '—'
         } см на конец слоя`}
         value={`${sections.length} секц. · ${totalPlies} сл.`}
       />
