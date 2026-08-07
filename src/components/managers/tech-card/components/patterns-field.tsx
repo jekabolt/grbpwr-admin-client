@@ -37,6 +37,7 @@ import { ulid } from 'utils/ulid';
 import {
   type FabricScope,
   type ScopeDirection,
+  aliasInScope,
   bindingForScope,
   bomPurposeLabel,
   fabricScopes,
@@ -255,6 +256,12 @@ export function PatternsField({
     // only when the scope owns exactly one line; '' otherwise — for a назначение spanning two
     // articles, and for legacy unbound DXFs, the modal asks, exactly as it already did.
     bomLineKey: string;
+    // Сопоставление «блок → деталь кроя» ЭТОГО скоупа, снятое на момент открытия. Снимок, а не
+    // живая подписка: пока раскладка открыта, карточку под ней не редактируют (модалка накрывает
+    // экран целиком), а скоуп раскладки — это скоуп ЛИСТОВ, и он от выбора слота в диалоге
+    // сохранения не зависит: слот решает, на какую строку BOM ляжет длина, а не какой деталью
+    // кроя является блок.
+    aliases: Array<{ blockName?: string; pieceLineKey?: string }>;
   } | null>(null);
   // «сопоставить детали»: the same DXF set, opened against the cut-piece list instead of the
   // nesting engine (null = closed).
@@ -263,6 +270,16 @@ export function PatternsField({
     fabricName: string;
     files: NestingFile[];
   } | null>(null);
+
+  // Сопоставление блоков DXF с деталями кроя, как его записал диалог «сопоставить детали».
+  // Раскладке оно нужно, чтобы сохранённый маркер нёс piece_line_key и пережил переименование
+  // детали; фильтрация по скоупу — здесь, потому что скоуп знает эта панель, а не модалка.
+  const pieceDxfAliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as Array<{
+    bomLineKey?: string;
+    fabricPurpose?: string;
+    blockName?: string;
+    pieceLineKey?: string;
+  }>;
 
   // The card's fabric BOM lines, live from form state — the save-marker dialog's slot select.
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
@@ -780,6 +797,10 @@ export function PatternsField({
                       sizeId: g.entries[0]?.row.sizeId ?? storageSizeId,
                       files: filesOf(g.entries),
                       bomLineKey: soleLine,
+                      // Алиасы ЭТОГО скоупа: одно и то же имя блока на верхе и на подкладе —
+                      // разные детали кроя, и отдать модалке всё подряд значило бы проставить в
+                      // блоб чужой ключ.
+                      aliases: pieceDxfAliases.filter((a) => aliasInScope(a, g.scope)),
                       // Направление СКОУПА, а не строки: назначение законно владеет несколькими
                       // артикулами, и согласованность их направлений никто не валидирует.
                       // Строгое побеждает — одна ворсовая в скоупе делает ворсовым весь скоуп,
@@ -1055,6 +1076,7 @@ export function PatternsField({
             savedSizeIds={savedSizeIds}
             season={season}
             styleNumber={styleNumber}
+            pieceAliases={nesting.aliases}
             onClose={() => setNesting(null)}
           />
         </Suspense>

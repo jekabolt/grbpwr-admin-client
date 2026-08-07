@@ -20,7 +20,8 @@
 //
 // Usage:
 //   node scripts/nest-probe.mjs                       # synthetic probes only (no fixtures needed)
-//   node scripts/nest-probe.mjs <file.dxf> [...]      # + real files
+//   node scripts/nest-probe.mjs <file.dxf> [...]      # + real files, КАЖДЫЙ в двух режимах:
+//                                                     # как есть и с ЗЕРКАЛЬНЫМИ ПАРАМИ
 //   NEST_PROBE_PIECES=45 node scripts/nest-probe.mjs ~/Downloads/'summer men.dxf'
 //
 // Env knobs: NEST_PROBE_PIECES (distinct pieces, default 20), NEST_PROBE_BUDGET_MS
@@ -516,7 +517,9 @@ const CHIRAL = [
     [{ x: 0, y: 0 }, { x: 6, y: 5 }, { x: -3, y: 4 }],
   ];
   const audit = mod.nfpFlipAudit({ aParts, bParts, gapCm: 0.5, rots: [0, 90, 180, 270] });
-  console.log(`  комбинаций ${audit.cases}, худшее расхождение ${audit.worstDevUnits} ед. (1 ед. = 0.1 мкм)`);
+  // Единица = 1/SCALE = 1e-4 см = 1 микрон (geom/clipper.ts). Ошибка в порядке величины здесь
+  // дороже, чем кажется: этим числом отчитываются о точности тождеств.
+  console.log(`  комбинаций ${audit.cases}, худшее расхождение ${audit.worstDevUnits} ед. (1 ед. = 1 мкм)`);
   check(
     audit.mismatched === 0,
     'каждая ветвь сокращения совпала с честным NFP',
@@ -691,46 +694,82 @@ const CHIRAL = [
   verify(pieces, a, cfg, 'детерминизм с зеркалами');
 }
 
-// ── probe 11: real files ───────────────────────────────────────────────────────────────
-for (const arg of args) {
-  const path = resolve(process.cwd(), arg.replace(/^~/, process.env.HOME ?? '~'));
-  console.log(`\n── ${path} ──`);
-  const buf = await readFile(path);
-  const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+// ── probe 11: real files, В ОБОИХ РЕЖИМАХ ─────────────────────────────────────────────
+//
+// Зеркальный режим гоняется НАРЯДУ с обычным и по умолчанию, а не по переменной окружения.
+// Причина ровно та, по которой этот файл вообще существует: парные детали удваивают число
+// записей NFP, то есть меняют самую дорогую фазу прогона — и первый же замер этого режима
+// (25 с, «summer men.dxf», 20 деталей ×2) дал НОЛЬ поколений и предпросчёт на 21.8 с из 25,
+// провалив собственные проверки этой пробы «бюджет соблюдён» и «поиск успел начаться». Пока
+// режим включался руками, отчитаться можно было половиной, которая проходит. Теперь обе
+// половины в одном выводе, и обе — с проверками.
+async function runFile(path, bytes, mirroredHalf) {
+  const per = mirroredHalf ? 2 : perPiece;
+  const flip = mirroredHalf ? 1 : mirrored;
+  console.log(`\n── ${path}${mirroredHalf ? ' · ЗЕРКАЛЬНЫЕ ПАРЫ' : ''} ──`);
   const out = await mod.probe({
     sheets: [{ name: path.split('/').pop(), open: async () => bytes }],
     maxPieces,
     contourLayer: process.env.NEST_PROBE_LAYER,
     grainLayer: process.env.NEST_PROBE_GRAIN,
-    perPiece,
-    flippedPerPiece: mirrored,
-    config: { timeBudgetMs: budgetMs, fabricDirection: mirrored ? 'two_way' : 'any' },
+    perPiece: per,
+    flippedPerPiece: flip,
+    config: { timeBudgetMs: budgetMs, fabricDirection: flip ? 'two_way' : 'any' },
   });
   const r = out.result;
-  console.log(
-    `  слои: ${out.layers.slice(0, 6).map((l) => `${l.layer}(${l.blocks})`).join(' ')}${out.layers.length > 6 ? ' …' : ''}`,
-  );
+  if (!mirroredHalf) {
+    console.log(
+      `  слои: ${out.layers.slice(0, 6).map((l) => `${l.layer}(${l.blocks})`).join(' ')}${out.layers.length > 6 ? ' …' : ''}`,
+    );
+  }
   console.log(`  деталей: разобрано ${out.parsed}, взято ${out.used}, экземпляров ${out.instances}`);
   console.log(
     `  nfp ${out.progress.nfpDone}/${out.progress.nfpTotal} | поколений ${r.generation} | ${r.elapsedMs} ms (бюджет ${budgetMs}) | размещено ${r.placedCount}/${r.totalCount} | длина ${r.usedLengthCm.toFixed(1)} см | эфф ${(r.efficiency * 100).toFixed(1)}%`,
   );
   console.log(`  блоб ${out.blobHash} | зеркальных ${r.placements.filter((p) => p.flipped).length} | телеметрия ${JSON.stringify(r.telemetry ?? null)}`);
-  check(r.elapsedMs <= budgetMs + 2_000, 'бюджет соблюдён (+2 с)', `${r.elapsedMs} ms`);
-  check(r.generation >= 1, 'поиск успел начаться (≥1 поколение)', `generation=${r.generation}`);
-  check(out.overlaps === 0, 'ноль наложений', `${out.overlaps}`);
+  const tag = mirroredHalf ? ' (зеркальные пары)' : '';
+  check(r.elapsedMs <= budgetMs + 2_000, `бюджет соблюдён (+2 с)${tag}`, `${r.elapsedMs} ms`);
+  // Предпросчёт обязан оставить поиску его долю. Проверяется ИМЕННО здесь, а не только через
+  // «≥1 поколение»: ноль поколений и съеденный бюджет — одно и то же событие, но названное
+  // числом, по которому видно, насколько промахнулась оценка (телеметрия выше печатает и
+  // предсказание, и факт).
+  const prep = r.telemetry?.prepassMs ?? 0;
+  check(
+    prep <= budgetMs * 0.6,
+    `предпросчёт не съел бюджет${tag}`,
+    `${(prep / 1000).toFixed(1)} с из ${(budgetMs / 1000).toFixed(0)}, предсказано ${((r.telemetry?.predictedPrepassMs ?? 0) / 1000).toFixed(1)} с`,
+  );
+  check(r.generation >= 1, `поиск успел начаться (≥1 поколение)${tag}`, `generation=${r.generation}`);
+  check(out.overlaps === 0, `ноль наложений${tag}`, `${out.overlaps}`);
   check(
     out.shortPairs === 0,
-    'зазор выдержан по настоящим контурам',
+    `зазор выдержан по настоящим контурам${tag}`,
     `коротких пар ${out.shortPairs}, минимум ${out.minClearanceCm.toFixed(4)} см`,
   );
-  check(out.outsideWidth === 0, 'ничего не вылезло за полосу', `${out.outsideWidth}`);
+  check(out.outsideWidth === 0, `ничего не вылезло за полосу${tag}`, `${out.outsideWidth}`);
   // Only a FINISHED run owes this: a cancelled one makes no claim about pieces it never
   // reached. Nothing cancels this probe, so reaching the else branch is itself a finding.
   check(
     r.cancelled || r.placedCount + (r.unplaced?.length ?? 0) === r.totalCount,
-    'размещённые + непоместившиеся = всего',
+    `размещённые + непоместившиеся = всего${tag}`,
     `${r.placedCount}+${r.unplaced?.length ?? 0}/${r.totalCount}${r.cancelled ? ' (отменён?!)' : ''}`,
   );
+  if (mirroredHalf) {
+    check(
+      r.placements.filter((p) => p.flipped).length === out.used,
+      'зеркальных ровно половина экземпляров (иначе мерился не тот режим)',
+      `${r.placements.filter((p) => p.flipped).length} из ${r.placements.length}`,
+    );
+  }
+}
+
+for (const arg of args) {
+  const path = resolve(process.cwd(), arg.replace(/^~/, process.env.HOME ?? '~'));
+  const buf = await readFile(path);
+  const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  await runFile(path, bytes, false);
+  // Явно заданный NEST_PROBE_MIRROR — это ручной режим, второй проход тогда не нужен.
+  if (!process.env.NEST_PROBE_MIRROR) await runFile(path, bytes, true);
 }
 
 console.log(`\n${failures === 0 ? 'ВСЁ ЗЕЛЁНОЕ' : `ПРОВАЛОВ: ${failures}`}`);

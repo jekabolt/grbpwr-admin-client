@@ -70,23 +70,56 @@ const EPS_LADDER = [0.1, 0.15, 0.2, 0.3, 0.4, 0.6, 0.9] as const;
 // needs it warm: NFPs missing from the cache are computed lazily DURING evaluation, where
 // they cost the same but buy no progress bar.
 const PREPASS_SHARE = 0.45;
-// Calibration: convex hulls per millisecond of prepass, measured across the sane part-count
-// regime on this file (13.5–21 hulls/ms at eps 0.1–0.8; 5 at eps 0.05, where the union tree
-// is over the cliff). Deliberately conservative — the constant only decides WHICH eps, and
-// under-estimating the machine costs a little quality, while over-estimating costs the
-// generation count the whole change exists to buy.
-const HULLS_PER_MS = 12;
+// СКОЛЬКО ОБОЛОЧЕК В МИЛЛИСЕКУНДУ — НЕ КОНСТАНТА, а функция от того, сколько их приходится на
+// ОДНО объединение. Раньше здесь стояло 12 на все режимы, и это давало осечку ровно там, где
+// она дороже всего:
+//
+//   оболочек на пару   252    119     72     32
+//   мс на пару        50.3    8.8    4.7    1.8
+//   оболочек/мс        5.0   13.5   15.3   17.8
+//
+// Провал сверху — это обрыв самого clipper'а (шапка nest/nfp.ts: Union катастрофически
+// деградирует после ~100 перекрывающихся путей), а не свойство машины. Плоская «12» при
+// 252 оболочках на пару ошибается в 2.4 раза и ошибается В СТОРОНУ ПЕРЕРАСХОДА: предсказание
+// проходит под потолок, предпросчёт съедает бюджет целиком, и поколений выходит НОЛЬ — та
+// самая беда, ради которой лестница и заведена.
+//
+// Замерено на зеркальном задании (то же «summer men.dxf», 20 деталей ×2, 25 с): парные детали
+// удваивают число записей NFP, предсказание по плоской константе дало 133 440 при потолке
+// 135 000 — проскочило на 1.2 % — и прогон отдал 21.8 с из 25 на предпросчёт и 0 поколений.
+// Со ступенчатой оценкой то же задание грубеет на ступень и ищет.
+function hullsPerMs(hullsPerUnion: number): number {
+  if (hullsPerUnion > 150) return 5; // за обрывом clipper'а
+  if (hullsPerUnion > 90) return 10; // подход к обрыву (замер 13.5 — берём с запасом)
+  return 12;
+}
+// Остаточная погрешность, замеренная после починки: на «summer men.dxf» оценка пессимистична
+// (3.7 предсказано против 4.3 фактических — то есть почти в точку), на «blazer.dxf» оптимистична
+// примерно в 1.35 раза (8.5 против 11.4). Подкручивать константы под два файла — ровно то, как
+// прошлая оценка стала неверной; вместо этого пара (predictedPrepassMs, prepassMs) уехала в
+// телеметрию, и её видно в пробе на каждом прогоне.
 // Two properties of this scheme worth knowing before touching it:
 //
-//   • The constant is a ONE-FILE, ONE-MACHINE fit. Measured here it is ~21 % pessimistic in the
-//     sane regime (15.2 hulls/ms actual) and ~2.4× optimistic at the finest rung, where the union
-//     tree is over clipper's cliff — i.e. it errs toward over-spending exactly where over-spending
-//     costs the whole budget. That asymmetry is why PREPASS_SHARE is under a half and not, say, 0.8.
+//   • Это ОДИН файл и ОДНА машина, и ошибаться такая оценка вправе только в сторону запаса:
+//     недооценка машины стоит чуть-чуть качества, переоценка стоит ВСЕГО поиска. На отвергаемой
+//     ступени (eps 0.05, 20 деталей) она предсказывает 18.9 с там, где вышло 12.8, — то есть
+//     отказывается от неё с запасом; на выбранной сходится по порядку (см. замер выше).
+//     Поэтому же PREPASS_SHARE меньше половины.
 //   • Crossing a rung RESEEDS the search: effectiveEps is part of the seed string below, so adding
 //     one piece or nudging the budget can replace the marker outright rather than perturb it. That
 //     is a consequence of keeping the choice a pure function of the input — the alternative (a
 //     stable eps chosen by the clock) buys continuity by giving up reproducibility, which is the
 //     one property the whole engine is built around.
+
+// Имена деталей для предупреждения. Ключ у карты — id, потому что две РАЗНЫЕ детали кроя
+// законно называются одинаково (полочка верха и полочка подклада приходят из градалки под одним
+// именем). Одинаковые имена поэтому не схлопываются, а пересчитываются: «ПОЛОЧКА ×2» — это две
+// детали, а не одна, и оператор, пересчитывающий комплект кроя, обязан это видеть.
+function namesWithCount(byId: ReadonlyMap<number, string>): string {
+  const n = new Map<string, number>();
+  for (const name of byId.values()) n.set(name, (n.get(name) ?? 0) + 1);
+  return [...n.entries()].map(([name, c]) => (c > 1 ? `${name} ×${c}` : name)).join(', ');
+}
 
 // Convex-part decomposition of one contour at a given simplification. Sanitize AFTER
 // simplification: RDP can self-intersect a thin neck, and feeding that to the decomposer
@@ -115,8 +148,11 @@ export async function nest(
   // полуоборот (types.ts, allowsFlip). Ткань решает ОДИН предикат на оба действия.
   const canFlip = allowsFlip(config.fabricDirection);
   // Детали, у которых зеркальные экземпляры пришлось отклонить — для одного внятного
-  // предупреждения вместо N одинаковых.
-  const mirrorRefused = new Set<string>();
+  // предупреждения вместо N одинаковых. Ключ — ID, а не имя: две разные детали кроя законно
+  // называются одинаково (полочка верха и полочка подклада приходят из градалки под одним
+  // именем), и множество имён схлопнуло бы их в одну строку — раскройщик прочёл бы, что
+  // зеркал лишилась одна деталь, а лишились две.
+  const mirrorRefused = new Map<number, string>();
 
   const byId = new Map(allPieces.map((p) => [p.id, p]));
   const genesBase: Gene[] = [];
@@ -187,18 +223,20 @@ export async function nest(
     }
     // Сколько экземпляров этой детали кроятся зеркально — ПОСЛЕДНИЕ flippedQuantity штук
     // (types.ts). Обрезка обязательна: задание приходит извне, а «зеркал больше, чем деталей»
-    // не значит ничего.
-    const flippedCount = Math.min(
-      Math.max(0, Math.floor(pc.flippedQuantity ?? 0)),
-      pc.quantity,
-    );
+    // не значит ничего. NaN/Infinity отсекаются ОТДЕЛЬНО, а не обрезкой: Math.floor(NaN) это
+    // NaN, любое сравнение с ним ложно, и парная деталь молча вышла бы незеркальной парой
+    // одинаковых — тот самый брак, только теперь из-за испорченного числа во входе.
+    const wanted = Number(pc.flippedQuantity ?? 0);
+    const flippedCount = Number.isFinite(wanted)
+      ? Math.min(Math.max(0, Math.floor(wanted)), pc.quantity)
+      : 0;
     for (let inst = 0; inst < pc.quantity; inst++) {
       const flip: Flip = inst >= pc.quantity - flippedCount ? 1 : 0;
       if (flip === 1 && !canFlip) {
         // Направленная ткань. Положить вместо зеркала обычную копию было бы ХУЖЕ, чем не
         // положить: на маркере они неотличимы, и цех накроит одних левых полочек.
         unplacedUpFront.push({ pieceId: dto.id, instance: inst, reason: 'mirror' });
-        mirrorRefused.add(dto.name);
+        mirrorRefused.set(dto.id, dto.name);
         continue;
       }
       genesBase.push({
@@ -223,7 +261,7 @@ export async function nest(
         ? 'ткань направленная (ворс)'
         : 'направление ткани не задано у строки BOM, а без ответа переворот запрещён (иначе норму не сохранить)';
     warnings.push(
-      `${why} — зеркальные экземпляры не размещены: ${[...mirrorRefused].join(', ')}. ` +
+      `${why} — зеркальные экземпляры не размещены: ${namesWithCount(mirrorRefused)}. ` +
         'Переворот на такой ткани кладёт деталь против ворса, как и полуоборот, и маркер с ним ' +
         'не сохранить. Парные детали на ворсе кроят в два слоя лицом к лицу — это другой маркер.',
     );
@@ -308,16 +346,26 @@ export async function nest(
   // decompositions in the job. That time is spent preparing geometry and belongs in the
   // number the screen attributes to preparing geometry.
   const prepassStarted = Date.now();
-  const hullCap = Math.max(1, config.timeBudgetMs * PREPASS_SHARE * HULLS_PER_MS);
+  // Потолок теперь в МИЛЛИСЕКУНДАХ, а не в оболочках: цена оболочки зависит от того, сколько их
+  // в одном объединении (см. hullsPerMs), и складывать их в одно число значило бы считать
+  // дешёвую и запредельную пару одинаковыми.
+  const prepassCapMs = Math.max(1, config.timeBudgetMs * PREPASS_SHARE);
   const ladder = [config.rdpEpsCm, ...EPS_LADDER.filter((e) => e > config.rdpEpsCm)];
   let effectiveEps = config.rdpEpsCm;
   let predictedHulls = 0;
+  let predictedMs = 0;
+  // Погрубело ли из-за ЗЕРКАЛ: у задания с парными деталями записей NFP вдвое больше, и сказать
+  // оператору «деталей много» было бы неправдой — тех же деталей без зеркал хватает на ступень
+  // тоньше.
+  let mirrorPairs = false;
   let decomps: ReturnType<typeof partsAt>[] = [];
   for (let li = 0; li < ladder.length; li++) {
     const eps = ladder[li];
     decomps = uniquePieces.map((p) => partsAt(byId.get(p.id)!.poly, eps));
     const counts = decomps.map((d) => d.parts.length);
     let hulls = 0;
+    let ms = 0;
+    mirrorPairs = false;
     for (let i = 0; i < uniquePieces.length; i++) {
       for (let j = i; j < uniquePieces.length; j++) {
         const rels = relsFor(
@@ -328,16 +376,23 @@ export async function nest(
         // заново (отражением одной детали зеркальную пару не получить). Не учесть её здесь
         // значило бы занизить предсказание вдвое ровно на тех заданиях, где парных деталей
         // много, — и снова получить ноль поколений после полного бюджета.
-        hulls +=
-          counts[i] *
-          counts[j] *
-          rels.length *
-          kindsFor(flipsOf.get(uniquePieces[i].id), flipsOf.get(uniquePieces[j].id)).length;
+        const kinds = kindsFor(
+          flipsOf.get(uniquePieces[i].id),
+          flipsOf.get(uniquePieces[j].id),
+        ).length;
+        if (kinds > 1) mirrorPairs = true;
+        // Оболочек в ОДНОМ объединении — по этому числу и берётся скорость; сколько таких
+        // объединений у пары, решают повороты и хиральности.
+        const perUnion = counts[i] * counts[j];
+        const unions = rels.length * kinds;
+        hulls += perUnion * unions;
+        ms += (perUnion * unions) / hullsPerMs(perUnion);
       }
     }
     effectiveEps = eps;
     predictedHulls = hulls;
-    if (hulls <= hullCap || li === ladder.length - 1) break;
+    predictedMs = ms;
+    if (ms <= prepassCapMs || li === ladder.length - 1) break;
   }
   uniquePieces.forEach((p, i) => {
     // Зеркальные части — ОТРАЖЕНИЕ тех же самых, а не разложение отражённого контура: см.
@@ -351,8 +406,13 @@ export async function nest(
     }
   });
   if (effectiveEps > config.rdpEpsCm) {
+    // Причина названа ТА, что сработала. «Деталей много» на зеркальном задании — неправда: те же
+    // двадцать деталей без парных ложатся на ступень тоньше, а погрубело оно оттого, что каждая
+    // пара «левая + правая» требует ВТОРОЙ записи NFP. Оператор, прочитавший неверную причину,
+    // пойдёт убирать детали вместо того, чтобы дать больше времени.
     warnings.push(
-      `деталей много (${uniquePieces.length}) — контуры упрощены до ${effectiveEps} см, чтобы поиск успел пройти; раскладка от этого чуть свободнее`,
+      `${mirrorPairs ? 'парные детали удваивают предрасчёт' : `деталей много (${uniquePieces.length})`}` +
+        ` — контуры упрощены до ${effectiveEps} см, чтобы поиск успел пройти; раскладка от этого чуть свободнее`,
     );
   }
 
@@ -423,6 +483,7 @@ export async function nest(
     rdpEpsCm: effectiveEps,
     requestedRdpEpsCm: config.rdpEpsCm,
     predictedHulls,
+    predictedPrepassMs: Math.round(predictedMs),
     prepassMs,
   };
   if (isCancelled()) return emptyResult(true);

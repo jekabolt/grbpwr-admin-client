@@ -48,6 +48,7 @@ import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './conto
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
+import { normBlock, splitBlockSize } from './block-code';
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
@@ -103,6 +104,7 @@ export function NestingModal({
   savedSizeIds,
   season,
   styleNumber,
+  pieceAliases,
 }: {
   files: NestingFile[] | null; // null = closed (nest mode)
   sizeLabel?: string;
@@ -142,6 +144,12 @@ export function NestingModal({
   // Filename context: осмысленные имена экспортов (SEASON-STYLE-размер-…).
   season?: string;
   styleNumber?: string;
+  // Сопоставление «блок DXF → деталь кроя», как оно записано на карточке, УЖЕ отфильтрованное по
+  // скоупу этих листов (это знает вызывающий: у одного имени блока на подкладе и на верхе разные
+  // детали кроя). Нужно ровно для одного: проставить в блоб маркера piece_line_key, чтобы
+  // сохранённая раскладка пережила переименование детали. Пусто/не передано — маркер сохранится
+  // с пустыми ключами, как и раньше: это законное «неизвестно», а не «такой детали нет».
+  pieceAliases?: readonly { blockName?: string; pieceLineKey?: string }[];
 }) {
   const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(files);
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
@@ -173,6 +181,46 @@ export function NestingModal({
   const dictTokens = useDictionarySizeTokens();
   const split = useMemo(() => splitPiecesBySize(allPieces, dictTokens), [allPieces, dictTokens]);
   const layerOpts = useMemo(() => layerOptions(allPieces, split.codeById), [allPieces, split]);
+  // Деталь кроя за каждой разобранной деталью — ключ, который едет в блоб маркера (схема 2).
+  //
+  // Поле в блобе существует с самой схемы 2, а заполнялось всё это время пустой строкой: вызов
+  // buildMarkerLayout просто не передавал карту, и «идентичность детали в блобе» была мертва с
+  // рождения. Видно это только в маркере, открытом ПОСЛЕ переименования детали кроя, — то есть
+  // тогда, когда ответ уже не восстановить.
+  //
+  // Считается ЗДЕСЬ, а не у вызывающего, по той же причине, по которой алиасы фильтруются ТАМ:
+  // идентичность блока (имя без размерного хвоста) знает только тот, кто видит разбор — хвост
+  // опознаётся по размерному ряду словаря, а не по имени. Вызывающий знает скоуп, эта модалка
+  // знает файл; ключ собирается из двух половин ровно один раз.
+  const pieceLineKeyById = useMemo(() => {
+    // Алиас пишется под ИДЕНТИЧНОСТЬЮ блока (диалог сопоставления складывает туда имя без
+    // размерного хвоста), но встречаются и старые записи, где размер остался в имени. Поэтому
+    // индекс двухслойный: сначала имя как записано, следом — оно же, свёрнутое к идентичности.
+    // Свёртка НИКОГДА не перекрывает прямое совпадение и снимается вовсе при неоднозначности:
+    // «FP_L» и «FP_XL» сворачиваются в одно «FP», и подставить в блоб наугад одну из двух
+    // деталей кроя хуже, чем оставить поле пустым — пустое читается как «неизвестно», а
+    // неверное читается как ответ.
+    const byBlock = new Map<string, string>();
+    const folded = new Map<string, string | null>();
+    for (const a of pieceAliases ?? []) {
+      const raw = normBlock(a.blockName ?? '');
+      const val = (a.pieceLineKey ?? '').trim();
+      if (!raw || !val) continue;
+      byBlock.set(raw.toLowerCase(), val);
+      const ident = normBlock(splitBlockSize(raw, split.sizeTokenSet).identity).toLowerCase();
+      if (!ident || ident === raw.toLowerCase()) continue;
+      folded.set(ident, folded.has(ident) && folded.get(ident) !== val ? null : val);
+    }
+    const out = new Map<number, string>();
+    if (byBlock.size === 0) return out;
+    for (const p of allPieces) {
+      const key = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '').toLowerCase();
+      if (!key) continue;
+      const val = byBlock.get(key) ?? folded.get(key) ?? '';
+      if (val) out.set(p.id, val);
+    }
+    return out;
+  }, [pieceAliases, allPieces, split]);
   const [activeLayer, setActiveLayer] = useState<string | null>(null);
   const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
     ? (activeLayer as string)
@@ -898,6 +946,7 @@ export function NestingModal({
       const layout = buildMarkerLayout({
         pieces,
         perSetQty,
+        pieceLineKeyById,
         urlBySource,
         result: {
           ...effective,

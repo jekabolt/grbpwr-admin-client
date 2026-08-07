@@ -53,7 +53,7 @@ import {
   aliasScopeKey,
   bindingForScope,
 } from '../bom-purpose';
-import { splitBlockSize } from './block-code';
+import { normBlock, splitBlockSize } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet, type PieceMark } from './piece-sheet';
@@ -68,13 +68,6 @@ import {
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useNesting, type NestingFile } from './use-nesting';
-
-// Block names are matched the way the DB collates them: trimmed, inner whitespace collapsed,
-// compared case-insensitively. Mirrors the server's own normalization so what the dialog treats
-// as one block is what the UNIQUE index treats as one block.
-function normBlock(s: string): string {
-  return s.trim().replace(/\s+/g, ' ');
-}
 
 // Tier-2 key: case, spacing and punctuation carry no meaning across CAD systems — «Полочка_1»,
 // «полочка 1» and «POLOCHKA-1» are one name to a human, and to this.

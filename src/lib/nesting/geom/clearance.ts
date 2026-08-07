@@ -23,11 +23,19 @@ export function placeContour(piece: PieceDTO, pl: Placement): Pt[] {
   return placedPoly(piece.poly, pl);
 }
 
-// `flipped` необязателен и по умолчанию false — ровно как в Placement: у сохранённого маркера
-// и у построенного вручную размещения зеркала нет. Габариты зеркального варианта отличаются от
-// незеркального СМЕЩЕНИЕМ, а не размером ([0,w] переезжает в [−w,0]), так что вызывающий,
-// который зажимает деталь в полосу этими границами, обязан передавать флаг.
-export function rotatedBounds(piece: PieceDTO, rot: RotationDeg, flipped = false): Bounds {
+// `flipped` — ОБЯЗАТЕЛЬНЫЙ параметр, хотя его тип и допускает undefined (ровно как поле в
+// Placement: у маркера, сохранённого до схемы 3, и у размещения, собранного руками, зеркала
+// нет). Значения по умолчанию здесь стояло ровно один коммит, и этого хватило: пять вызовов в
+// ручном редакторе молча взяли `false`, tsc остался зелёным, а габариты зеркальной детали
+// отличаются от незеркальной не размером, а СМЕЩЕНИЕМ — контур из [0,w] переезжает в [−w,0].
+// То есть зажим в полосу считался по коробке, сдвинутой на всю ширину детали, и деталь
+// законно уезжала за кромку. Без значения по умолчанию тот же недосмотр — ошибка компиляции,
+// и компилятор перечисляет места сам. Ради этого договор и вынесен в одно место.
+export function rotatedBounds(
+  piece: PieceDTO,
+  rot: RotationDeg,
+  flipped: Placement['flipped'],
+): Bounds {
   // Four rotations only — rotating the two bbox corners is NOT enough (min/max swap),
   // so rotate the actual contour; cached by callers where it matters.
   let minX = Infinity;
