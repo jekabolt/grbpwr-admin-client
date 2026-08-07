@@ -67,6 +67,38 @@ const PIECE_DND_PREFIX = 'grbpwr-piece:';
 // trigger's first child) with an ellipsis instead of letting the text wrap the control taller/wider.
 const selectNoGrow = '[&>span:first-child]:min-w-0 [&>span:first-child]:truncate';
 
+// The BOM sections an operation can CONSUME, in picker order. The rule is «чем соединяют», not
+// «что соединяют»: roll goods (fabric / lining / insulation) reach a step through pieceLineKeys —
+// they ARE the parts being joined — and packaging never reaches the sewing floor, it rides
+// packaging_recipe. Interlining is the deliberate exception on the roll-goods side: fusing is
+// consumed AT a fusing step.
+//
+// The store has NEVER filtered this — tech_card_operation_bom (0200) accepts any BOM line of the
+// card, resolveBomRef checks nothing but the key, and the CONSTRUCTION digest already hashes
+// bomLineKeys. The old thread+interlining pair was a client-side scope, and it was the only reason
+// фурнитура / тесьма / декор / этикетки could not be attached to the step that consumes them.
+const OPERATION_LINKABLE_SECTIONS = [
+  'TECH_CARD_BOM_SECTION_HARDWARE',
+  'TECH_CARD_BOM_SECTION_THREAD',
+  'TECH_CARD_BOM_SECTION_INTERLINING',
+  'TECH_CARD_BOM_SECTION_TRIM',
+  'TECH_CARD_BOM_SECTION_DECORATION',
+  'TECH_CARD_BOM_SECTION_LABEL',
+];
+const LINKABLE_SECTION_INDEX = new Map(OPERATION_LINKABLE_SECTIONS.map((s, i) => [s, i]));
+
+// Short captions for the grouped picker. techCardBomSectionOptions carries the long disambiguating
+// form («hardware (пуговицы / молнии / кнопки)») — right for a select, far too wide for a caption
+// sitting above a row of chips.
+const LINKABLE_SECTION_LABEL: Record<string, string> = {
+  TECH_CARD_BOM_SECTION_HARDWARE: 'фурнитура',
+  TECH_CARD_BOM_SECTION_THREAD: 'нитки',
+  TECH_CARD_BOM_SECTION_INTERLINING: 'клеевые',
+  TECH_CARD_BOM_SECTION_TRIM: 'тесьма / резинка',
+  TECH_CARD_BOM_SECTION_DECORATION: 'декор',
+  TECH_CARD_BOM_SECTION_LABEL: 'этикетки',
+};
+
 export const emptyOperation = {
   operationNumber: 0,
   node: '',
@@ -138,7 +170,46 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
 }
 
 type PickerOption = { value: number; label: string };
-type BomLine = { lineKey?: string; name?: string; section?: string };
+// materialId is the SLOT DEFAULT article. It is read from the form (not from the card read) so an
+// article picked on the BOM tab and not yet saved still resolves here.
+type BomLine = { lineKey?: string; name?: string; section?: string; materialId?: number };
+
+// What each colourway actually takes for a slot. The operation links the SLOT («основная молния»);
+// the article is per colourway, so this is the read-side join that makes «в разных колорвеях разная
+// фурнитура» visible on the step instead of only on the colorways tab.
+export type ColorwayArticles = {
+  // one entry per live colourway, in card order
+  colorways: {
+    label: string;
+    // BOM line_key → the pins on that colourway's usages of the slot (0 / absent = inherit the
+    // slot default). A key MISSING from the map means this colourway's recipe does not use the
+    // slot at all — a different statement from «uses it with no article», and shown as such.
+    pinsByLineKey: Map<string, number[]>;
+  }[];
+  materialNameById: Map<number, string>;
+};
+
+// Mirrors the server's entity.EffectiveMaterialId (internal/entity/techcard.go): the colourway pin
+// wins, else the slot default, else 0 = no article at all. Same rule as colorway-recipe.tsx's
+// effectiveMaterialId, which resolves it over that file's own draft/slot types — deliberately not
+// shared, because importing the recipe editor's types into the construction tab would couple a
+// read-only display to an editor's staging model. If one of the two changes, both must.
+function effectiveArticleId(pin: number, slotDefault: number): number {
+  return pin > 0 ? pin : slotDefault > 0 ? slotDefault : 0;
+}
+
+// One colourway's answer for a slot, as it reads on the step. A colourway can carry BOTH a resolved
+// article and a hole (two usages of the same slot, one pinned and one with no article anywhere), so
+// the two are printed together rather than the hole hiding the article or the reverse.
+function colorwayArticleText(c: {
+  inRecipe: boolean;
+  missing: boolean;
+  articles: string[];
+}): string {
+  if (!c.inRecipe) return 'не в рецепте';
+  if (!c.missing) return c.articles.join(' / ');
+  return c.articles.length > 0 ? `${c.articles.join(' / ')} + нет артикула` : 'нет артикула';
+}
 
 // Reads a drag payload back as a piece lineKey — the private MIME type first, the prefixed
 // text/plain mirror as the fallback. Returns '' for anything that isn't ours.
@@ -413,6 +484,7 @@ function OperationEditor({
   bomLines,
   pieces,
   pinOptions,
+  colorwayArticles,
   onInsertAfter,
   onRemove,
   onFlashPieces,
@@ -423,6 +495,7 @@ function OperationEditor({
   bomLines: BomLine[];
   pieces: PieceRef[];
   pinOptions: PickerOption[];
+  colorwayArticles?: ColorwayArticles;
   onInsertAfter: () => void;
   onRemove: () => void;
   onFlashPieces: () => void;
@@ -437,20 +510,23 @@ function OperationEditor({
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [over, setOver] = useState(false);
 
-  // The off-part materials this operation consumes (thread / fusing). Multi, because one operation
-  // can join several. Scoped to the same sections the single picker was, so the list stays the
-  // materials an operation plausibly consumes rather than every BOM article.
+  // The off-part materials this operation consumes. Multi, because one operation genuinely joins
+  // several — «втачать молнию» takes the zip AND the thread. Scoped to the sections that can be
+  // consumed BY a step (see OPERATION_LINKABLE_SECTIONS), sorted into that same order so фурнитура
+  // leads and the list reads as a spec rather than as the BOM's own ordering.
   const selectedBomKeys = (useWatch({
     control,
     name: `operations.${index}.bomLineKeys`,
   }) ?? []) as string[];
   const linkableBoms = useMemo(
     () =>
-      bomLines.filter(
-        (b) =>
-          b.section === 'TECH_CARD_BOM_SECTION_THREAD' ||
-          b.section === 'TECH_CARD_BOM_SECTION_INTERLINING',
-      ),
+      bomLines
+        .filter((b) => LINKABLE_SECTION_INDEX.has(b.section ?? ''))
+        .sort(
+          (a, b) =>
+            (LINKABLE_SECTION_INDEX.get(a.section ?? '') ?? 0) -
+            (LINKABLE_SECTION_INDEX.get(b.section ?? '') ?? 0),
+        ),
     [bomLines],
   );
   // Thread articles actually present in this card's BOM — the only ones an operation can really
@@ -507,6 +583,78 @@ function OperationEditor({
     .filter(Boolean) as BomLine[];
   const bomOutOfRange = selectedBomKeys.length > linkedMaterials.length;
   const unlinkedBoms = linkableBoms.filter((b) => !selectedBomKeys.includes(b.lineKey ?? ''));
+  // Grouped for the reveal: six sections in one flat pile would read as undifferentiated, and
+  // «нитки основных швов» sitting next to «основная молния» invites the wrong pick. linkableBoms is
+  // already sorted into section order, so a Map keeps the groups in that order too. Not memoised on
+  // purpose — unlinkedBoms is a fresh array every render, so a useMemo over it would recompute
+  // anyway while costing a dependency that lies about being stable.
+  const unlinkedBySection = (() => {
+    const groups = new Map<string, BomLine[]>();
+    for (const b of unlinkedBoms) {
+      const section = b.section ?? '';
+      const bucket = groups.get(section);
+      if (bucket) bucket.push(b);
+      else groups.set(section, [b]);
+    }
+    return Array.from(groups.entries());
+  })();
+
+  // Which article each colourway actually takes for the slots this step consumes. THE reason the
+  // link is worth having: the operation names the role and stays colourway-agnostic, so without
+  // this a technologist reading the step cannot tell that BLK takes an antique-brass zip where
+  // BONE takes silver. Resolution mirrors the server (pin → slot default → none).
+  //
+  // Not memoised, for the same reason as unlinkedBySection above: linkedMaterials is rebuilt on
+  // every render, so a useMemo keyed on it would recompute anyway while claiming a stability it
+  // does not have.
+  const colorways = colorwayArticles?.colorways ?? [];
+  // No usage on ANY colourway means there is no recipe to report — not that every slot is unused.
+  // A card read that is still refetching looks exactly like this, and printing «не используется ни
+  // в одном рецепте» from it would be a confident negative asserted from missing data.
+  const hasRecipeData = colorways.some((cw) => cw.pinsByLineKey.size > 0);
+  const slotArticles = !hasRecipeData
+    ? []
+    : linkedMaterials.map((line) => {
+        const key = line.lineKey ?? '';
+        const slotDefault = line.materialId ?? 0;
+        const articleName = (id: number) => colorwayArticles?.materialNameById.get(id) ?? `#${id}`;
+        const perColorway = colorways.map((cw) => {
+          const pins = cw.pinsByLineKey.get(key);
+          // No usage at all ≠ a usage with no article. The first says this colourway's recipe never
+          // asks for the slot, the second is a production blocker; conflating them would either
+          // invent a missing article or hide a real one.
+          if (!pins) {
+            return { label: cw.label, ids: [] as number[], inRecipe: false, missing: false };
+          }
+          const ids = Array.from(new Set(pins.map((pin) => effectiveArticleId(pin, slotDefault))));
+          return {
+            label: cw.label,
+            ids: ids.filter((id) => id > 0),
+            inRecipe: true,
+            missing: ids.some((id) => id === 0),
+          };
+        });
+        const inRecipe = perColorway.filter((c) => c.inRecipe);
+        // Compared by ID, never by name: two catalog articles can legitimately share a name (the
+        // same zip stocked from two suppliers), and folding them together would assert that two
+        // colourways take the same physical article when they do not.
+        const distinctIds = new Set(inRecipe.flatMap((c) => c.ids));
+        return {
+          lineKey: key,
+          name: line.name?.trim() || 'unnamed',
+          perColorway: perColorway.map((c) => ({ ...c, articles: c.ids.map(articleName) })),
+          usedAnywhere: inRecipe.length > 0,
+          // «Same everywhere» has to mean EVERY colourway, not merely every colourway that happens
+          // to carry the slot. A zip that exists only in BLK's recipe is the single most important
+          // thing this line can say, and collapsing it to «основная молния → YKK» says the opposite
+          // — that all three colourways take it — while nothing is bought for the other two.
+          uniform:
+            inRecipe.length === colorways.length &&
+            distinctIds.size === 1 &&
+            !inRecipe.some((c) => c.missing),
+          uniformArticle: distinctIds.size === 1 ? articleName(Array.from(distinctIds)[0]) : '',
+        };
+      });
 
   // A pin that no longer resolves (its callout was deleted on the sketch tab) keeps a visible,
   // re-selectable option instead of reading as «— пин —» — the same defensive fallback the issues
@@ -670,10 +818,11 @@ function OperationEditor({
         </Text>
       )}
 
-      <GroupLabel>нитки / клеевые из BOM</GroupLabel>
+      <GroupLabel>материалы из BOM, которые расходует шаг</GroupLabel>
       {linkableBoms.length === 0 ? (
         <Text size='micro' variant='label'>
-          в BOM ещё нет ниток и клеевых — добавьте их на вкладке BOM
+          в BOM нет материалов, которые может расходовать операция — добавьте фурнитуру, нитки,
+          клеевые, тесьму, декор или этикетки на вкладке BOM
         </Text>
       ) : (
         <>
@@ -684,6 +833,7 @@ function OperationEditor({
             {linkedMaterials.map((b) => (
               <Chip
                 key={b.lineKey}
+                title={LINKABLE_SECTION_LABEL[b.section ?? ''] ?? undefined}
                 onRemove={() => toggleBom(b.lineKey ?? '')}
                 onMouseEnter={() => onActiveBomChange?.(b.lineKey ?? null)}
                 onMouseLeave={() => onActiveBomChange?.(null)}
@@ -696,26 +846,52 @@ function OperationEditor({
                 dashed
                 pressed={addingMaterial}
                 onClick={() => setAddingMaterial((v) => !v)}
-                title='привязать нитку или клеевую из BOM'
+                title='привязать материал из BOM — фурнитуру, нитку, клеевую, тесьму, декор, этикетку'
               >
                 {addingMaterial ? '✕ отмена' : '＋ материал'}
               </Chip>
             )}
           </ChipRow>
-          {addingMaterial && (
-            <ChipRow className='mt-1.5'>
-              {unlinkedBoms.map((b) => (
-                <Chip
-                  key={b.lineKey}
-                  onClick={() => {
-                    toggleBom(b.lineKey ?? '');
-                    if (unlinkedBoms.length === 1) setAddingMaterial(false);
-                  }}
-                >
-                  {b.name?.trim() || 'unnamed'}
-                </Chip>
+          {/* The article each colourway resolves the slot to. Printed under the chips rather than
+              inside them: the chip is the ROLE (the durable thing the step links), and folding a
+              per-colourway article into it would claim the operation itself is colourway-specific. */}
+          {slotArticles.map((slot, i) => (
+            // Indexed key: toggleBom dedupes, but the AI-accept path and the save mapper do not, so
+            // a persisted duplicate line key would otherwise collide here.
+            <Text key={`${slot.lineKey}:${i}`} size='micro' variant='label' className='mt-1'>
+              {slot.name} →{' '}
+              {!slot.usedAnywhere
+                ? 'слот не используется ни в одном рецепте колорвея'
+                : slot.uniform
+                  ? slot.uniformArticle
+                  : slot.perColorway
+                      .map((c) => `${c.label}: ${colorwayArticleText(c)}`)
+                      .join(' · ')}
+            </Text>
+          ))}
+          {addingMaterial && unlinkedBySection.length > 0 && (
+            <div className='mt-1.5 space-y-1.5'>
+              {unlinkedBySection.map(([section, lines]) => (
+                <div key={section}>
+                  <Text size='micro' variant='label'>
+                    {LINKABLE_SECTION_LABEL[section] ?? section}
+                  </Text>
+                  <ChipRow>
+                    {lines.map((b) => (
+                      <Chip
+                        key={b.lineKey}
+                        onClick={() => {
+                          toggleBom(b.lineKey ?? '');
+                          if (unlinkedBoms.length === 1) setAddingMaterial(false);
+                        }}
+                      >
+                        {b.name?.trim() || 'unnamed'}
+                      </Chip>
+                    ))}
+                  </ChipRow>
+                </div>
               ))}
-            </ChipRow>
+            </div>
           )}
         </>
       )}
@@ -1015,6 +1191,7 @@ export function OperationsField({
   onActivePinChange,
   activeBom = null,
   onActiveBomChange,
+  colorwayArticles,
   addRequest = null,
   onAdded,
 }: {
@@ -1022,6 +1199,7 @@ export function OperationsField({
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
   onActiveBomChange?: (k: string | null) => void;
+  colorwayArticles?: ColorwayArticles;
   // request from the construction panel to append an operation for a part (nonce dedupes)
   addRequest?: { placement: string; nonce: number } | null;
   onAdded?: () => void;
@@ -1399,6 +1577,7 @@ export function OperationsField({
               bomLines={bomItems}
               pieces={pieces}
               pinOptions={pinOptions}
+              colorwayArticles={colorwayArticles}
               onInsertAfter={() => insertAfter(selectedIndex)}
               onRemove={() => removeOperation(selectedIndex)}
               onFlashPieces={flashPieces}

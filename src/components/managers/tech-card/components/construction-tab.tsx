@@ -1,4 +1,5 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { techCardMediaKindOptions } from 'constants/filter';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -9,9 +10,9 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
 import { ConstructionField } from './construction-field';
-import { OperationsField } from './operations-field';
+import { ColorwayArticles, OperationsField } from './operations-field';
 import { PieceLegend } from './piece-legend';
-import { TechCardFormData } from './schema';
+import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
@@ -237,6 +238,53 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   const pin = useCrossHighlight<number>();
   const bom = useCrossHighlight<string>();
 
+  // Which concrete article each colourway takes for the slots an operation consumes. Assembled here
+  // because the two halves come from different places: the recipe (usages + their pins) rides the
+  // card READ, while the slot's default article is edited in the form on the BOM tab — so a freshly
+  // picked, not-yet-saved default still resolves. The catalog query is the exact one the colorways
+  // tab already holds ('', true), so this is a React Query cache hit rather than a second fetch.
+  const { data: materialsData } = useMaterials('', true);
+  const colorwayArticles = useMemo<ColorwayArticles>(() => {
+    // EVERY id here goes through wireInt. material_id and id are int64 in techcard.proto, and
+    // grpc-gateway serialises int64 as a STRING while the generated TS type claims `number` — so
+    // an unnormalised Map keyed by the raw value type-checks and then misses on every lookup
+    // (schema.ts:846 documents the same trap on the form side). The slot default already arrives
+    // wireInt'd through mapBomItemToForm, so without this the two sides are different runtime
+    // types and a colourway inheriting the default would read as diverging from one that pins it.
+    const materialNameById = new Map<number, string>();
+    for (const material of materialsData?.materials ?? []) {
+      const id = wireInt(material.id);
+      if (id > 0) materialNameById.set(id, material.name?.trim() || `#${id}`);
+    }
+    // Legacy usages carry no bom_line_key, only the resolved bom_item_id. Both come from the same
+    // read payload, so mapping id → line_key here is exact — unlike guessing by position, which is
+    // the bug 0200's read path was written to avoid.
+    const lineKeyByBomId = new Map<number, string>();
+    for (const line of techCard?.techCard?.bomItems ?? []) {
+      const id = wireInt(line.id);
+      const key = line.lineKey?.trim();
+      if (id > 0 && key) lineKeyByBomId.set(id, key);
+    }
+    const colorways = (techCard?.colorways ?? []).map((cw) => {
+      const pinsByLineKey = new Map<string, number[]>();
+      for (const usage of cw.usages ?? []) {
+        const key = usage.bomLineKey?.trim() || lineKeyByBomId.get(wireInt(usage.bomItemId)) || '';
+        if (!key) continue;
+        const pin = wireInt(usage.materialId);
+        const bucket = pinsByLineKey.get(key);
+        if (bucket) bucket.push(pin);
+        else pinsByLineKey.set(key, [pin]);
+      }
+      return {
+        // The operator's word for a colourway, never its numeric id (same rule as colorwayTitle
+        // on the colorways tab).
+        label: cw.colorCode?.trim() || cw.baseSku?.trim() || `#${cw.colorwayId}`,
+        pinsByLineKey,
+      };
+    });
+    return { colorways, materialNameById };
+  }, [techCard?.colorways, techCard?.techCard?.bomItems, materialsData?.materials]);
+
   // The assembly map pins onto the technical sketches (callouts live there).
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
@@ -274,13 +322,14 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
           <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader
               title='operations — assembly order'
-              question='— zone, seam type, allowance, stitch density, needle, thread, SAM'
+              question='— zone, seam type, allowance, stitch density, needle, materials, SAM'
             />
             <OperationsField
               activePin={pin.active}
               onActivePinChange={pin.setActive}
               activeBom={bom.active}
               onActiveBomChange={bom.setActive}
+              colorwayArticles={colorwayArticles}
             />
           </section>
         </div>
