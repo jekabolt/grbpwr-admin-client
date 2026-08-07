@@ -3,6 +3,7 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { techCardMediaKindOptions } from 'constants/filter';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Canvas, Pin } from 'ui/components/canvas';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { SectionHeader } from 'ui/components/section-header';
@@ -10,7 +11,7 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
 import { ConstructionField } from './construction-field';
-import { ColorwayArticles, OperationsField } from './operations-field';
+import { ColorwayArticles, OPERATION_EXPECTED_SECTIONS, OperationsField } from './operations-field';
 import { PieceLegend } from './piece-legend';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
@@ -31,7 +32,14 @@ const CONSTRUCTION_VIEW_KINDS = new Set([
 // The four real construction zones (UNKNOWN is the untagged default, not a zone to cover).
 const TOTAL_CONSTRUCTION_ZONES = 4;
 
-export type SummaryOp = { calloutNumber?: number; timeNorm?: string; smv?: string; zone?: string };
+export type SummaryOp = {
+  calloutNumber?: number;
+  timeNorm?: string;
+  smv?: string;
+  zone?: string;
+  bomLineKeys?: string[];
+};
+type SummaryBom = { lineKey?: string; name?: string; section?: string };
 
 // The minutes ONE operation contributes to total SAM, exactly as the server computes it
 // (dto.operationMinutes: SMV when the operation carries one, else the time norm). This summary
@@ -75,6 +83,20 @@ function ConstructionSummary() {
   ).size;
   const unpinned = operations.filter((o) => !(o.calloutNumber && o.calloutNumber > 0)).length;
 
+  // Completeness in the other direction: which materials the card BUYS but no step CONSUMES. The
+  // per-step checks catch a step missing its material; this catches a material missing its step —
+  // фурнитура that gets costed, ordered and issued to the floor with nothing telling anyone where
+  // it goes. Labels are excluded (they ride tech_card_label / the assembly bill), which is what
+  // OPERATION_EXPECTED_SECTIONS encodes.
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as SummaryBom[];
+  const attachedKeys = new Set(operations.flatMap((o) => o.bomLineKeys ?? []));
+  const unattached = bomItems.filter((b) => {
+    if (!OPERATION_EXPECTED_SECTIONS.has(b.section ?? '')) return false;
+    const key = b.lineKey?.trim();
+    // A line with no key yet (just added, not saved) is by definition on no step.
+    return !key || !attachedKeys.has(key);
+  });
+
   // The SAM → money readout (implied ₽/min from cmt_cost) moved to the costing tab's labour band
   // (Phase 3, plan 11): money reads next to the CMT input it derives from, minutes stay here.
   return (
@@ -95,7 +117,25 @@ function ConstructionSummary() {
           sub='no sketch pin'
           tone={unpinned > 0 ? 'down' : 'default'}
         />
+        <Stat
+          label='off-step materials'
+          value={unattached.length}
+          sub='not consumed by any step'
+          tone={unattached.length > 0 ? 'down' : 'default'}
+        />
       </StatGrid>
+      {/* Named, not merely counted: «3 материала вне шагов» sends the operator hunting through the
+          BOM, and the point of the check is that they already know which zip they forgot.
+          Suppressed while the card has NO operations at all — there every material is trivially
+          off-step, so the callout would greet every new card with a list of its own BOM. */}
+      {opCount > 0 && unattached.length > 0 && (
+        <CalloutBox tone='note' className='mt-2.5'>
+          <Text size='micro'>
+            не привязаны ни к одной операции:{' '}
+            {unattached.map((b) => b.name?.trim() || 'unnamed').join(' · ')}
+          </Text>
+        </CalloutBox>
+      )}
     </div>
   );
 }

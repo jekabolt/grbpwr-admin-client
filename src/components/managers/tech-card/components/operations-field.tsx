@@ -87,6 +87,29 @@ const OPERATION_LINKABLE_SECTIONS = [
 ];
 const LINKABLE_SECTION_INDEX = new Map(OPERATION_LINKABLE_SECTIONS.map((s, i) => [s, i]));
 
+// The lines that SHOULD end up on some step — the picker's set minus labels. A label reaches the
+// garment through tech_card_label / the style assembly bill, so a label line attached to no
+// operation is normal rather than an omission, and flagging it would train people to ignore the
+// whole check.
+export const OPERATION_EXPECTED_SECTIONS = new Set(
+  OPERATION_LINKABLE_SECTIONS.filter((s) => s !== 'TECH_CARD_BOM_SECTION_LABEL'),
+);
+
+// A step whose verb names a material it does not link is almost always an omission. Kept to the two
+// unambiguous verbs: BUTTON_ATTACH consumes a fastener, FUSING consumes fusible. BUTTONHOLE is
+// deliberately absent — it consumes thread, which nearly every step does, so the check would fire
+// as noise and stop being read.
+const OPERATION_TYPE_EXPECTS: Record<string, { section: string; what: string }> = {
+  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: {
+    section: 'TECH_CARD_BOM_SECTION_HARDWARE',
+    what: 'фурнитуру',
+  },
+  TECH_CARD_OPERATION_TYPE_FUSING: {
+    section: 'TECH_CARD_BOM_SECTION_INTERLINING',
+    what: 'клеевую',
+  },
+};
+
 // Short captions for the grouped picker. techCardBomSectionOptions carries the long disambiguating
 // form («hardware (пуговицы / молнии / кнопки)») — right for a select, far too wide for a caption
 // sitting above a row of chips.
@@ -607,6 +630,12 @@ function OperationEditor({
   // Not memoised, for the same reason as unlinkedBySection above: linkedMaterials is rebuilt on
   // every render, so a useMemo keyed on it would recompute anyway while claiming a stability it
   // does not have.
+  // «Пришить кнопки», у которых не привязана ни одна кнопка. Checked against the LINKED lines, so
+  // it clears the moment the operator picks one.
+  const expects = OPERATION_TYPE_EXPECTS[opType];
+  const expectsMaterial =
+    expects && !linkedMaterials.some((b) => b.section === expects.section) ? expects : null;
+
   const colorways = colorwayArticles?.colorways ?? [];
   // No usage on ANY colourway means there is no recipe to report — not that every slot is unused.
   // A card read that is still refetching looks exactly like this, and printing «не используется ни
@@ -898,6 +927,13 @@ function OperationEditor({
       {bomOutOfRange && (
         <Text size='micro' variant='error' className='mt-1'>
           материал был удалён или перемещён — перевыберите его
+        </Text>
+      )}
+      {/* Advisory, never a form error: a step CAN legitimately be drafted before its material
+          exists in the BOM, and blocking the save would make the check the operator's enemy. */}
+      {expectsMaterial && (
+        <Text size='micro' variant='label' className='mt-1'>
+          шаг этого типа обычно расходует {expectsMaterial.what} — она не привязана
         </Text>
       )}
 
