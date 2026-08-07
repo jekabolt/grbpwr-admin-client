@@ -60,6 +60,7 @@ export function AuxRunPlan({
   outputMaterialId,
   outputMaterial,
   outputVariants = [],
+  onDirtyChange,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
@@ -67,11 +68,22 @@ export function AuxRunPlan({
   outputMaterialId: number;
   outputMaterial?: common_Material;
   outputVariants?: common_TechCardOutputVariant[];
+  /**
+   * Reports the unsaved-draft flag upwards: the "· unsaved" marker moved from this panel's own
+   * heading onto the run conveyor. Pass a STABLE callback — it fires from an effect.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const lines = useMemo(() => run.run?.lines ?? [], [run.run?.lines]);
   if (isVariantRun(outputVariants, lines))
     return (
-      <VariantRunPlan run={run} canEdit={canEdit} locked={locked} outputVariants={outputVariants} />
+      <VariantRunPlan
+        run={run}
+        canEdit={canEdit}
+        locked={locked}
+        outputVariants={outputVariants}
+        onDirtyChange={onDirtyChange}
+      />
     );
   return (
     <SingleOutputRunPlan
@@ -80,6 +92,7 @@ export function AuxRunPlan({
       locked={locked}
       outputMaterialId={outputMaterialId}
       outputMaterial={outputMaterial}
+      onDirtyChange={onDirtyChange}
     />
   );
 }
@@ -90,11 +103,13 @@ function VariantRunPlan({
   canEdit,
   locked,
   outputVariants,
+  onDirtyChange,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
   locked: boolean;
   outputVariants: common_TechCardOutputVariant[];
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { showMessage } = useSnackBarStore();
   const { dictionary } = useDictionary();
@@ -193,6 +208,12 @@ function VariantRunPlan({
   // colour just zeroed would visibly reappear at its old quantity and then vanish again. Instead
   // the flag is held until the run actually reads back the plan we submitted.
   const savedPlan = useRef<string | null>(null);
+  // The cleanup is load-bearing: an unmounted editor has no draft left to save, and without it the
+  // conveyor would keep promising an unsaved plan that died with the component.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
   const planSignature = (ls: { outputVariantId?: number; plannedQty?: number }[]) =>
     ls
       .filter((l) => (l.outputVariantId ?? 0) > 0)
@@ -265,7 +286,6 @@ function VariantRunPlan({
     <div className='flex flex-col gap-2'>
       <Text variant='uppercase' size='small'>
         auxiliary output · by colour
-        {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
       </Text>
       <Text variant='inactive' size='small'>
         each colour is produced into its own warehouse bucket — on receive the good units of every
@@ -388,12 +408,14 @@ function SingleOutputRunPlan({
   locked,
   outputMaterialId,
   outputMaterial,
+  onDirtyChange,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
   locked: boolean;
   outputMaterialId: number;
   outputMaterial?: common_Material;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { showMessage } = useSnackBarStore();
   const update = useUpdateRunSection();
@@ -411,6 +433,11 @@ function SingleOutputRunPlan({
     if (dirty) return;
     setQty(line?.plannedQty ? String(line.plannedQty) : '');
   }, [line, dirty]);
+  // See VariantRunPlan: the cleanup keeps the conveyor from advertising a draft that unmounted.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   const unit = outputMaterial?.unit?.trim();
   const label = materialLabel(outputMaterial, outputMaterialId);
@@ -455,7 +482,6 @@ function SingleOutputRunPlan({
     <div className='flex flex-col gap-2'>
       <Text variant='uppercase' size='small'>
         auxiliary output
-        {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
       </Text>
 
       {outputMaterialId ? (

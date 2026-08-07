@@ -1,26 +1,43 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
-import { useMemo, useState } from 'react';
-import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
+import { cn } from 'lib/utility';
+import { Fragment, useEffect, useMemo, useState } from 'react';
+import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Canvas, Pin } from 'ui/components/canvas';
-import { DataTable } from 'ui/components/data-table';
+import { Chip, ChipRow } from 'ui/components/chip';
+import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+import { Tiles } from 'ui/components/tiles';
 import { isDxfUrl } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
-import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
 import {
-  PieceDxfPreview,
+  bomPurposeLabel,
+  fabricScopes,
+  isRollGoodsSection,
+  scopeKeyOfBinding,
+  type FabricScope,
+  type RollGoodsLine,
+} from './bom-purpose';
+import {
+  findPiece,
+  fmtCm,
+  PieceShape,
+  useDxfGeometry,
+  useDxfIndex,
+  type FoundPiece,
   type PieceBlockRef,
   type ScopedDxfFile,
-} from './nesting/piece-dxf-preview';
+} from './nesting/dxf-geometry';
 import {
   CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
   UNSET_CUT_SYMMETRY,
   cutSymmetryBadge,
   cutSymmetryCountInvalid,
+  cutSymmetryOptions,
   cutSymmetryOptionsFor,
   cutSymmetryUnanswered,
   grainlineArrow,
@@ -41,18 +58,27 @@ type FormCallout = {
   posY?: string;
 };
 
-// Table controls sit at the same metrics as `Input` (1px edge box, 3px/7px, 22px min height) —
-// DESIGN.md §5. A native select, not the Radix one: this cell is dense, and Radix's Select cannot
+// Panel controls sit at the same metrics as `Input` (1px edge box, 3px/7px, 22px min height) —
+// DESIGN.md §5. A native select, not the Radix one: this panel is dense, and Radix's Select cannot
 // carry an empty-string option, which is exactly the value a piece that has never been given a
 // grainline holds.
 const selectCls =
   'block min-h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none';
 
-// The marker diagram beside the table (13.1). Grainline is GEOMETRY — a picture verifies it faster
-// than a column of words — so the callout number each piece already carries is drawn where the
-// sketch says it lives. Pins are positioned against the image's own box (not a fixed-aspect frame)
-// because callout posX/posY are fractions OF THE IMAGE: letterboxing a 4:3 sketch inside a 3:4 frame
-// would slide every pin off the part it names.
+// Русская форма счётчика деталей для сводки группы: «1 деталь · 2 детали · 5 деталей».
+const ruPieces = (n: number): string => {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'деталь';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'детали';
+  return 'деталей';
+};
+
+// The marker diagram inside the selected-piece panel (13.1). Grainline is GEOMETRY — a picture
+// verifies it faster than a column of words — so the callout number each piece already carries is
+// drawn where the sketch says it lives. Pins are positioned against the image's own box (not a
+// fixed-aspect frame) because callout posX/posY are fractions OF THE IMAGE: letterboxing a 4:3
+// sketch inside a 3:4 frame would slide every pin off the part it names.
 function PieceDiagram({
   techCard,
   pinnedNumbers,
@@ -121,7 +147,7 @@ function PieceDiagram({
           </Text>
         </Canvas>
         {/* Инструкция обязана называть ТО МЕСТО, где действие есть. Прежняя звала «проставить
-            callout # у детали» — контрол, которого в этой таблице нет с 30.07; связь ставится
+            callout # у детали» — контрол, которого в этом блоке нет с 30.07; связь ставится
             выбором детали в самой выноске на вкладке sketch. */}
         <Text size='micro' variant='label'>
           поставьте выноску на эскизе (вкладка sketch) и выберите в ней эту деталь в поле «part» —
@@ -152,13 +178,13 @@ function PieceDiagram({
         })}
       </div>
       <Text size='micro' variant='label'>
-        наведите на строку — её пин подсветится
+        наведите на плитку — её пин подсветится
       </Text>
     </div>
   );
 }
 
-// Cut-piece details (детали кроя) — one row per pattern part.
+// Cut-piece details (детали кроя) — a tile per pattern part, grouped by fabric scope.
 //
 // This block lives on the PATTERNS tab, directly under «выкройки (DXF)», because a cut piece is a
 // property of the PATTERN, not of a colour: every colourway cuts the same pieces. The pieces
@@ -166,6 +192,12 @@ function PieceDiagram({
 // list it writes into are now on one screen. What stays on COLORWAYS is the per-colourway fabric
 // map — which BOM line each piece is cut from in that colourway, and its fusing — because that IS
 // per-colourway data.
+//
+// The 7-column table this used to be forced a horizontal scroll on every monitor (min 860px inside
+// a 1fr track beside a 200px rail) and let one row grow five lines tall, because three independent
+// warning channels lived in three different columns. A real card is 20–40 rows. The tiles carry
+// what an operator scans FOR (shape, name, count, size); everything editable lives in ONE
+// selected-piece panel below, a peer block — a block never contains a block (DESIGN.md).
 //
 // The `pieces` field array is owned HERE and nowhere else. `PieceMatchModal` writes through a ROOT
 // `setValue('pieces', …)` on purpose: measured against react-hook-form 7.62, `append`/`remove` emit
@@ -175,9 +207,10 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'pieces' });
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
-  // DXF block → piece aliases (0262). They are what lets this table say where a piece came from:
+  const { errors } = useFormState({ control });
+  // DXF block → piece aliases (0262). They are what lets this block say where a piece came from:
   // a piece with an alias is drawn in a real CAD file, and that file — not the word in the `grain`
-  // column — is what the раскладка orients the piece by.
+  // field — is what the раскладка orients the piece by.
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as Array<{
     bomLineKey?: string;
     fabricPurpose?: string;
@@ -185,9 +218,9 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     pieceLineKey?: string;
   }>;
   // Скоупы ткани карточки — то, ПО ЧЕМУ хранится и связь блока с деталью, и привязка листа
-  // выкройки (0267: назначение, а где карточка ещё не разложена — строка BOM). Нужны здесь ровно
-  // для предпросмотра: одно и то же имя блока в файле верха и в файле подклада — РАЗНЫЕ детали, и
-  // искать контур по одному имени значило бы рано или поздно показать чужой.
+  // выкройки (0267: назначение, а где карточка ещё не разложена — строка BOM). Нужны здесь и для
+  // предпросмотра (одно и то же имя блока в файле верха и в файле подклада — РАЗНЫЕ детали), и для
+  // группировки плиток: деталь лежит в группе той ткани, из чьего файла она нарисована.
   const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
     lineKey?: string;
     section?: string;
@@ -202,15 +235,20 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     fabricPurpose?: string;
   }>;
 
-  // Row ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
+  // Tile ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
   const pin = useCrossHighlight<number>();
-  // Разбор DXF стоит скачивания файлов, поэтому он включается человеком и панель монтируется
-  // только тогда (см. piece-dxf-preview.tsx).
-  const [previewOn, setPreviewOn] = useState(false);
-  // Деталь, чей контур сейчас нарисован. Ставится наведением и НЕ снимается уходом курсора — см.
-  // bindRow ниже. Ключ детали (lineKey), а не номер выноски: у выноски номер общий на несколько
-  // деталей, а форму показывать надо ровно одну.
-  const [shownPiece, setShownPiece] = useState<string | null>(null);
+  // Разбор DXF стоит скачивания файлов, поэтому он включается человеком: «⌕ показать формы» в
+  // шапке. Одно нажатие — контуры на всех плитках; геометрия идёт из общего кэша карточки
+  // (dxf-geometry.tsx), так что если её уже разобрала панель выкроек — ничего не качается.
+  const [shapesOn, setShapesOn] = useState(false);
+  // Выбранная плитка — её поля редактирует панель ниже. Ключ — стабильный id строки RHF; пустой
+  // или потерянный (деталь удалена, массив переписан диалогом сопоставления) откатывается к
+  // первой детали, чтобы панель с полями не исчезала, пока детали есть.
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Фильтры плиток: чип скоупа ткани («все» по умолчанию) и счётчик «парность не указана» в
+  // шапке, который по клику оставляет только неразмеченные.
+  const [filter, setFilter] = useState<string>('all');
+  const [pairingOnly, setPairingOnly] = useState(false);
 
   const scopes = useMemo(
     () =>
@@ -226,6 +264,14 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       ),
     [bomItems],
   );
+
+  // Подпись скоупа для чипа фильтра и заголовка группы: у назначения — само назначение, у
+  // неразобранной строки — её название (то же правило, что у панели выкроек, без списка артикулов
+  // — чип должен оставаться коротким).
+  const scopeLabel = (s: FabricScope<RollGoodsLine>): string => {
+    if (!s.byPurpose) return s.lines[0]?.name?.trim() || 'без названия';
+    return bomPurposeLabel(s.key);
+  };
 
   // Which DXF blocks each piece is drawn as, by lineKey. Case-folded on the key the same way the
   // matching dialog and the server do, so a piece is found whichever spelling the alias carries.
@@ -269,6 +315,19 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     );
   }, [patterns, scopes, blocksByPiece]);
 
+  // Общий разбор карточки (React Query, ключ по содержимому пачки): второй читатель той же пачки —
+  // панель выкроек или раскладка — получает геометрию мгновенно, и наоборот.
+  const geometry = useDxfGeometry(previewFiles, shapesOn);
+  const index = useDxfIndex(geometry.data);
+
+  // Контур каждой привязанной детали — один раз на рендер геометрии, а не на плитку.
+  const foundByKey = useMemo(() => {
+    if (!index) return null;
+    const m = new Map<string, FoundPiece | null>();
+    for (const [key, refs] of blocksByPiece) m.set(key, findPiece(index, refs));
+    return m;
+  }, [index, blocksByPiece]);
+
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
   // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
   // form-state renumbering loop was dead. Just drop the piece row here.
@@ -295,7 +354,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   };
 
   // Duplicate CODE / NAME rows, case-insensitively. A piece name is how a human addresses the part
-  // in the operation picker, the recipe norm and the factory sheet, so two rows called «полочка»
+  // in the operation picker, the recipe norm and the factory sheet, so two pieces called «полочка»
   // make every one of those references ambiguous. Flagged here on the field (the server rejects the
   // save with the same rule, so catching it at the source beats a blocked save later).
   const duplicateRows = useMemo(() => {
@@ -337,7 +396,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       .map((p) => p.name?.trim() || 'без названия')
       .join(' · ') || `#${n}`;
 
-  // Разметка кроя по всей вкладке: сколько деталей уйдёт на фабрику с оговоркой «парность не
+  // Разметка кроя по всему блоку: сколько деталей уйдёт на фабрику с оговоркой «парность не
   // указана» (то же условие, что печатает тех-пак — Р5), и сколько вообще без ответа. Первое число
   // — счётчик риска и метр кампании Д2; второе живёт в подсказке, потому что деталь по одной на
   // изделие тоже стоит разметить (сгиб печатается и у неё), но кричать про неё не о чем.
@@ -352,33 +411,11 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     return { pairing, any, total: pieces.length };
   }, [pieces]);
 
-  // Наведение на строку зажигает СРАЗУ ДВЕ проекции детали — её выноску на скетче (где она на
-  // изделии) и её контур из DXF (какой она формы). Хендлеры объединены здесь, а не двумя
-  // раскрытиями `bind` на одном <tr>: второе просто затёрло бы обработчики первого.
-  //
-  // Контур ЗАЛИПАЕТ на последней наведённой детали и по уходу курсора не гаснет — в отличие от
-  // подсветки строки и пина, которые говорят «вот эта строка сейчас под курсором» и обязаны
-  // сняться. Иначе форму нельзя было бы рассмотреть: движение курсора со строки к самой картинке
-  // стирало бы то, ради чего его туда ведут.
-  const bindRow = (callout: number, lineKey: string) => {
-    const a = pin.bind(callout > 0 ? callout : null);
-    const enter = () => {
-      a.onMouseEnter();
-      if (lineKey) setShownPiece(lineKey);
-    };
-    return {
-      onMouseEnter: enter,
-      onFocus: enter,
-      onMouseLeave: a.onMouseLeave,
-      onBlur: a.onBlur,
-    };
-  };
-
   // Переименование детали, ПРИКРЕПЛЁННОЙ к выноске, обязано дописаться в саму выноску.
   //
   // Имя такой детали хранится один раз — в `callout.part`, — и сервер при каждом сохранении
-  // переписывает имя детали оттуда (calloutSync.apply, S8). Написать новое имя только в строку
-  // таблицы значит показать оператору переименование, которое сохранение молча откатит: поле
+  // переписывает имя детали оттуда (calloutSync.apply, S8). Написать новое имя только в поле
+  // панели значит показать оператору переименование, которое сохранение молча откатит: поле
   // выглядит принятым, карточка после перезагрузки снова со старым именем, и объяснения нет
   // нигде. Номер выноски отсюда НЕ правится — его ставит выбор детали на вкладке sketch.
   const renamePiece = (pi: number, value: string) => {
@@ -395,7 +432,8 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   // A new row is minted with its stable lineKey up front, NOT left for the save mapper: the
   // operation and recipe pickers can only offer a piece that already has one, so without it a part
   // added here stayed unlinkable until the card had been saved and reloaded.
-  const addPiece = () =>
+  const [pendingSelectLast, setPendingSelectLast] = useState(false);
+  const addPiece = () => {
     append({
       name: '',
       lineKey: ulid(),
@@ -409,330 +447,693 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       note: '',
       materials: [],
     });
+    // Новая деталь редактируется в панели, и панель обязана открыться на ней: id строки появится
+    // только на следующем рендере, поэтому выбор откладывается флагом.
+    setPendingSelectLast(true);
+  };
+  useEffect(() => {
+    if (!pendingSelectLast || fields.length === 0) return;
+    setSelectedId(fields[fields.length - 1].id);
+    setPendingSelectLast(false);
+  }, [pendingSelectLast, fields]);
+
+  // Плитки, разложенные по скоупам ткани. Скоуп детали — скоуп её первой привязки с ЖИВЫМ скоупом:
+  // findPiece при поиске контура молча пропускает привязку, чья ткань никуда не резолвится (её
+  // файлы даже не качаются), поэтому брать безусловно refs[0] значило бы положить деталь с
+  // привязками [потерянная, живая] в группу «связь без ткани», пока картинка рисуется из живой.
+  // Деталь без привязки — в хвостовой группе «без блока DXF»; деталь, у которой НИ ОДНА связь не
+  // ведёт к живой ткани (строку BOM удалили или переклассифицировали), — в группе «связь без
+  // ткани», а не в «без блока»: сказать «блока нет» тут значило бы обвинить чертёж в том, чего он
+  // не делал.
+  const groups = useMemo(() => {
+    const byScope = new Map<string, number[]>();
+    const unbound: number[] = [];
+    fields.forEach((_, pi) => {
+      const p = pieces[pi] ?? {};
+      const refs = blocksByPiece.get((p.lineKey ?? '').trim().toLowerCase()) ?? [];
+      if (refs.length === 0) {
+        unbound.push(pi);
+        return;
+      }
+      const sk = refs.find((r) => !!r.scopeKey)?.scopeKey ?? '';
+      byScope.set(sk, [...(byScope.get(sk) ?? []), pi]);
+    });
+    const out: Array<{ key: string; label: string; indices: number[] }> = [];
+    for (const s of scopes) {
+      const idx = byScope.get(s.key);
+      if (idx?.length) out.push({ key: `s:${s.key}`, label: scopeLabel(s), indices: idx });
+      byScope.delete(s.key);
+    }
+    // scopeKeyOfBinding резолвит либо в живой скоуп, либо в '' — единственный возможный остаток.
+    for (const [, idx] of byScope) {
+      out.push({ key: 's:', label: 'связь без ткани', indices: idx });
+    }
+    if (unbound.length) out.push({ key: 'unbound', label: 'без блока DXF', indices: unbound });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields, pieces, blocksByPiece, scopes]);
+
+  // Фильтр, чей чип исчез (скоуп опустел, последняя неразмеченная деталь размечена), обязан
+  // сброситься сам — иначе плитки остаются отфильтрованными контролом, которого больше нет.
+  useEffect(() => {
+    if (filter !== 'all' && !groups.some((g) => g.key === filter)) setFilter('all');
+  }, [filter, groups]);
+  useEffect(() => {
+    if (pairingOnly && unmarked.pairing === 0) setPairingOnly(false);
+  }, [pairingOnly, unmarked.pairing]);
+
+  const visibleGroups = useMemo(
+    () =>
+      groups
+        .filter((g) => filter === 'all' || filter === g.key)
+        .map((g) => ({
+          ...g,
+          indices: pairingOnly
+            ? g.indices.filter((pi) =>
+                cutSymmetryUnanswered(pieces[pi]?.cutSymmetry, pieces[pi]?.piecesPerGarment),
+              )
+            : g.indices,
+        }))
+        .filter((g) => g.indices.length > 0),
+    [groups, filter, pairingOnly, pieces],
+  );
+
+  // Выбранная деталь. Потерянный выбор (удаление, перезапись массива диалогом сопоставления)
+  // откатывается к первой детали — панель с полями не должна пропадать, пока детали есть.
+  const selIndex = useMemo(() => {
+    const i = selectedId ? fields.findIndex((f) => f.id === selectedId) : -1;
+    if (i >= 0) return i;
+    return fields.length > 0 ? 0 : -1;
+  }, [selectedId, fields]);
+
+  // Ошибка валидации (своя или серверная) на детали, которой нет в панели, обязана эту панель
+  // переключить: якоря `data-field` полей живут только у ВЫБРАННОЙ детали, а revealField умеет
+  // подождать несколько кадров (index.tsx) — ровно столько, сколько стоит это переключение. Тот же
+  // приём, каким sketch-tab силой раскрывает свёрнутый блок выносок под ошибкой (19.8). Фильтры
+  // сбрасываются вместе с выбором: деталь с ошибкой, скрытая чипом скоупа или счётчиком парности,
+  // оставила бы плитки БЕЗ выбранной детали — панель называет себя «выбранная на плитках выше» и
+  // обязана этому соответствовать.
+  const pieceErrors = errors.pieces;
+  useEffect(() => {
+    if (!pieceErrors || typeof pieceErrors !== 'object') return;
+    const first = Object.keys(pieceErrors)
+      .filter((k) => /^\d+$/.test(k))
+      .map(Number)
+      .sort((a, b) => a - b)[0];
+    if (first == null) return;
+    const id = fields[first]?.id;
+    if (id) {
+      setSelectedId(id);
+      setFilter('all');
+      setPairingOnly(false);
+    }
+    // fields намеренно вне зависимостей: прыгать надо на НОВУЮ ошибку, а не на каждый рендер массива.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pieceErrors]);
+
+  const sel = selIndex >= 0 ? pieces[selIndex] ?? ({} as FormPiece) : null;
+  const selKey = (sel?.lineKey ?? '').trim();
+  const selRefs = sel ? blocksByPiece.get(selKey.toLowerCase()) ?? [] : [];
+  const selFound = sel && foundByKey ? foundByKey.get(selKey.toLowerCase()) ?? null : null;
+  const selCallout = sel?.calloutNumber || 0;
+  const selDup = selIndex >= 0 && duplicateRows.has(selIndex);
+  const selOddPair = sel ? cutSymmetryCountInvalid(sel.cutSymmetry, sel.piecesPerGarment) : false;
+  const selUnanswered = sel ? cutSymmetryUnanswered(sel.cutSymmetry, sel.piecesPerGarment) : false;
+  const selArrow = grainlineArrow(sel?.grainline);
+
+  // Удаление выбранной детали передаёт выбор СОСЕДУ (предыдущему по индексу, иначе следующему), а
+  // не первой детали списка: при чистке хвоста в 40 строк панель, прыгающая каждый раз в начало,
+  // заставляла бы заново прокручивать плитки после каждого удаления. Сосед берётся из снимка
+  // `fields` ДО remove — id выживших строк useFieldArray сохраняет.
+  const removeSelected = () => {
+    if (selIndex < 0) return;
+    const neighbour = fields[selIndex - 1]?.id ?? fields[selIndex + 1]?.id ?? null;
+    removePiece(selIndex);
+    setSelectedId(neighbour);
+  };
 
   return (
-    <Section
-      title='детали кроя'
-      question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из какой ткани кроится каждая деталь в конкретном колорвее — редактора пока НЕТ ни на одной вкладке, столбец в cut list из-за этого пустой'
-      action={
-        <div className='flex items-center gap-2'>
-          {unmarked.pairing > 0 && (
-            <Pill
-              tone='attention'
-              title={`Деталей, которые идут по две и больше на изделие, а как кроятся — не сказано: ${unmarked.pairing}. В тех-паке у каждой такой строки печатается «парность не указана»: молчать нельзя, потому что после миграции 0266 зеркальная пара выглядит как голая «2», и цех выкроит две одинаковые панели вместо левой и правой. Всего без разметки: ${unmarked.any} из ${unmarked.total}.`}
+    <>
+      <Section
+        title='детали кроя'
+        question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из какой ткани кроится каждая деталь в конкретном колорвее — редактора пока НЕТ ни на одной вкладке, столбец в cut list из-за этого пустой'
+        action={
+          <div className='flex flex-wrap items-center gap-2'>
+            {unmarked.pairing > 0 && (
+              // Кликается — значит Chip, не Pill (контракт дизайн-системы), но в цветах прежней
+              // синей пилюли: клик оставляет на плитках только неразмеченные детали. Выбранный —
+              // обычная залитая чернилами форма чипа, чтобы нажатость читалась.
+              <Chip
+                className={pairingOnly ? undefined : 'border-warning text-warning'}
+                selected={pairingOnly}
+                pressed={pairingOnly}
+                onClick={() => setPairingOnly((v) => !v)}
+                title={`Деталей, которые идут по две и больше на изделие, а как кроятся — не сказано: ${unmarked.pairing}. В тех-паке у каждой такой строки печатается «парность не указана»: молчать нельзя, потому что после миграции 0266 зеркальная пара выглядит как голая «2», и цех выкроит две одинаковые панели вместо левой и правой. Всего без разметки: ${unmarked.any} из ${unmarked.total}. Клик — показать только такие детали.`}
+              >
+                парность не указана: {unmarked.pairing}
+              </Chip>
+            )}
+            {duplicateRows.size > 0 && (
+              <Pill
+                tone='warn'
+                title='двум и более деталям дано одно имя. Имя — то, как деталь называют в операциях, рецептуре и на фабричном листе; сервер отвергает сохранение с дублем — имя должно быть уникальным.'
+              >
+                дубль имени: {duplicateRows.size}
+              </Pill>
+            )}
+            {previewFiles.length > 0 && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='sm'
+                aria-pressed={shapesOn}
+                title={
+                  shapesOn
+                    ? 'убрать контуры с плиток; разобранная геометрия остаётся в кэше'
+                    : 'имя блока формы не несёт — скачать привязанные DXF и показать контур каждой детали с реальным габаритом; файлы скачаются и разберутся один раз, кэш общий с панелью выкроек'
+                }
+                onClick={() => setShapesOn((v) => !v)}
+              >
+                {shapesOn ? '⌕ скрыть формы' : '⌕ показать формы'}
+              </Button>
+            )}
+            <Button
+              type='button'
+              variant='main'
+              size='sm'
+              data-field='pieces.add'
+              onClick={addPiece}
             >
-              парность не указана: {unmarked.pairing}
-            </Pill>
-          )}
-          <Button type='button' variant='main' size='sm' data-field='pieces.add' onClick={addPiece}>
-            + piece
-          </Button>
-        </div>
-      }
-    >
-      <datalist id='piece-code-suggestions'>
-        {pieceCodeOptions.map((c) => (
-          <option key={c} value={c} />
-        ))}
-      </datalist>
+              + piece
+            </Button>
+          </div>
+        }
+      >
+        <datalist id='piece-code-suggestions'>
+          {pieceCodeOptions.map((c) => (
+            <option key={c} value={c} />
+          ))}
+        </datalist>
 
-      {fields.length === 0 ? (
-        <Text size='micro' variant='label'>
-          деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо
-          добавьте вручную (полочка, спинка, воротник…)
-        </Text>
-      ) : (
-        // minmax(0,1fr) — not 1fr — so the wide table can shrink and scroll inside its own
-        // overflow-x-auto instead of forcing the track wide and shoving the diagram column.
-        <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_200px]'>
-          <DataTable className='min-w-[860px] [&_td]:!align-middle [&_td]:!text-left [&_th]:!text-left'>
-            {/* Fixed column widths so every row lines up; the code/name column flexes, the rest are
-                sized to their control. Alignment is forced left/middle (the DataTable default right-
-                aligns, which fought the left-aligned inputs and read crooked). */}
-            <colgroup>
-              <col />
-              <col className='w-[52px]' />
-              <col className='w-[184px]' />
-              <col className='w-[210px]' />
-              <col className='w-[56px]' />
-              <col className='w-[180px]' />
-              <col className='w-[40px]' />
-            </colgroup>
-            <thead>
-              <tr>
-                <th>code / name</th>
-                <th>×</th>
-                {/* Сразу за количеством, потому что это его пояснение: «×2» ничего не говорит о
-                    том, две это копии или левая с правой. */}
-                <th>как кроится</th>
-                <th>grain</th>
-                <th>fused</th>
-                <th>note</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {fields.map((f, pi) => {
-                const p = pieces[pi] ?? {};
-                const callout = p.calloutNumber || 0;
-                const arrow = grainlineArrow(p.grainline);
-                const blocks = blocksByPiece.get((p.lineKey ?? '').trim().toLowerCase()) ?? [];
-                const symmetryBadge = cutSymmetryBadge(p.cutSymmetry, p.piecesPerGarment);
-                const oddPair = cutSymmetryCountInvalid(p.cutSymmetry, p.piecesPerGarment);
-                return (
-                  <tr
-                    key={f.id}
-                    {...bindRow(callout, (p.lineKey ?? '').trim())}
-                    // Зебра тут говорит «вот эта строка сейчас показана справа»: у выноски — пока
-                    // курсор на ней, у чертежа — пока его контур нарисован, потому что иначе
-                    // непонятно, к какой строке относится картинка, на которую смотришь.
-                    className={
-                      pin.isActive(callout) ||
-                      (previewOn && !!p.lineKey && shownPiece === (p.lineKey ?? '').trim())
-                        ? 'bg-bgZebra'
-                        : undefined
+        {fields.length === 0 ? (
+          <Text size='micro' variant='label'>
+            деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо
+            добавьте вручную (полочка, спинка, воротник…)
+          </Text>
+        ) : (
+          <>
+            <ChipRow>
+              <Chip selected={filter === 'all'} onClick={() => setFilter('all')}>
+                все {fields.length}
+              </Chip>
+              {groups.map((g) => (
+                <Chip key={g.key} selected={filter === g.key} onClick={() => setFilter(g.key)}>
+                  {g.key === 'unbound' ? 'без блока' : g.label} {g.indices.length}
+                </Chip>
+              ))}
+            </ChipRow>
+
+            {shapesOn && geometry.isError && (
+              <div className='flex flex-wrap items-center gap-2'>
+                <Text size='nano' component='span' className='break-words text-error'>
+                  {geometry.error?.message || 'не удалось разобрать файлы'}
+                </Text>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  onClick={() => geometry.refetch()}
+                >
+                  ещё раз
+                </Button>
+              </div>
+            )}
+            {/* Недокачанный лист — это молча пропавшие детали: их блоки просто «не найдены», что
+                читается как отсутствие привязки. Поэтому о нём говорится вслух. */}
+            {shapesOn &&
+              (geometry.data?.warnings ?? []).map((w, i) => (
+                <Text key={i} size='nano' component='span' className='break-words text-error'>
+                  {w}
+                </Text>
+              ))}
+
+            <div className='flex flex-col gap-5'>
+              {visibleGroups.map((g) => (
+                <div key={g.key} className='flex flex-col gap-2'>
+                  <GroupLabel
+                    flush
+                    action={
+                      <Text size='micro' variant='label'>
+                        {g.indices.length} {ruPieces(g.indices.length)} ·{' '}
+                        {g.indices.reduce((n, pi) => n + (pieces[pi]?.piecesPerGarment ?? 1), 0)} шт
+                        на изделие
+                      </Text>
                     }
                   >
-                    <td>
-                      <Input
-                        className='w-full'
-                        data-field={`pieces.${pi}.name`}
-                        aria-invalid={duplicateRows.has(pi)}
-                        list='piece-code-suggestions'
-                        value={p.name ?? ''}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          renamePiece(pi, e.target.value)
-                        }
-                        placeholder='FP front piece'
-                      />
-                      {duplicateRows.has(pi) && (
-                        <Text size='micro' variant='error'>
-                          такая деталь уже есть — имя должно быть уникальным
-                        </Text>
-                      )}
-                      {/* Связь с выноской — только показ: ставится она на вкладке SKETCH, выбором
-                          детали в самой выноске. Два места записи одного значения разошлись бы на
-                          первом же переименовании. */}
-                      {callout > 0 && !detachedKeys.has((p.lineKey ?? '').trim()) && (
-                        <Text size='micro' variant='label'>
-                          выноска #{callout} — имя приходит с неё
-                        </Text>
-                      )}
-                      {detachedKeys.has((p.lineKey ?? '').trim()) && (
-                        <div className='mt-0.5'>
-                          <Pill
-                            tone='attention'
-                            title='выноска, на которую ссылалась деталь, удалена со скетча (или перестала быть техническим эскизом) — выберите эту деталь в нужной выноске на вкладке sketch'
+                    {g.label}
+                  </GroupLabel>
+                  <Tiles min={118}>
+                    {g.indices.map((pi) => {
+                      const p = pieces[pi] ?? ({} as FormPiece);
+                      const key = (p.lineKey ?? '').trim();
+                      const refs = blocksByPiece.get(key.toLowerCase()) ?? [];
+                      const found =
+                        foundByKey && refs.length > 0
+                          ? foundByKey.get(key.toLowerCase()) ?? null
+                          : null;
+                      const lostScope = refs.length > 0 && refs.every((r) => !r.scopeKey);
+                      // «Нет в разобранных файлах» существует только ПОСЛЕ разбора: пока
+                      // геометрия не включена или грузится, отсутствие контура — не диагноз.
+                      const missing = shapesOn && !!index && refs.length > 0 && !found;
+                      const dup = duplicateRows.has(pi);
+                      // Нечётная зеркальная пара — то, что реально роняет сохранение (CHECK в
+                      // БД), поэтому она видна с плитки, а не только из панели: без этого
+                      // размеченная «зеркальными» деталь с ×3 выглядела бы здоровой.
+                      const oddPair = cutSymmetryCountInvalid(p.cutSymmetry, p.piecesPerGarment);
+                      const unanswered = cutSymmetryUnanswered(p.cutSymmetry, p.piecesPerGarment);
+                      const detached = detachedKeys.has(key);
+                      const badge = cutSymmetryBadge(p.cutSymmetry, p.piecesPerGarment);
+                      const short = badge && badge.tone !== 'attention' ? badge.label : '';
+                      const callout = p.calloutNumber || 0;
+                      const isSelected = pi === selIndex;
+                      // Цвет канта ВСЕГДА в паре со словом на самой плитке (DESIGN.md: состояние
+                      // не сообщается одним цветом): красные слова — «дубль имени» / «× нечётное»
+                      // в подписи, «нет в файлах» / «ткань потеряна» в окне контура; синие —
+                      // «парность не указана» и «откреплена» (той же тревоги, что их пилюли в
+                      // панели, — кант при них остаётся по правилу парности, откреплённость канта
+                      // не красит).
+                      const flags: Array<{ k: string; cls: string; word: string }> = [];
+                      if (dup) flags.push({ k: 'dup', cls: 'text-error', word: 'дубль имени' });
+                      if (oddPair) flags.push({ k: 'odd', cls: 'text-error', word: '× нечётное' });
+                      if (unanswered)
+                        flags.push({ k: 'sym', cls: 'text-warning', word: 'парность не указана' });
+                      if (detached)
+                        flags.push({ k: 'det', cls: 'text-warning', word: 'откреплена' });
+                      return (
+                        <div key={fields[pi]?.id ?? pi} {...pin.bind(callout > 0 ? callout : null)}>
+                          <button
+                            type='button'
+                            aria-pressed={isSelected}
+                            onClick={() => setSelectedId(fields[pi]?.id ?? null)}
+                            className={cn(
+                              'flex h-full w-full flex-col bg-bgColor text-left transition-colors hover:border-textColor',
+                              'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                              // Вес несёт выбор, цвет — здоровье (контракт Tile): выбранная
+                              // плитка утолщает кант до 2px с компенсацией паддинга, чтобы
+                              // контент не дёргался. Тень элементу в потоке DESIGN.md запрещает.
+                              isSelected ? 'border-2 p-[5px]' : 'border p-1.5',
+                              dup || missing || oddPair
+                                ? 'border-error'
+                                : unanswered
+                                  ? 'border-warning'
+                                  : isSelected
+                                    ? 'border-textColor'
+                                    : 'border-borderColor',
+                              pin.isActive(callout) && 'bg-bgZebra',
+                            )}
                           >
-                            откреплена от выноски
-                          </Pill>
+                            <div className='flex h-[84px] w-full items-center justify-center bg-bgZebra p-1'>
+                              {found ? (
+                                <PieceShape
+                                  piece={found.piece}
+                                  grainLayer={index?.grainLayer ?? ''}
+                                  outlineOnly
+                                />
+                              ) : (
+                                <Text
+                                  size='nano'
+                                  component='span'
+                                  variant={missing ? undefined : 'label'}
+                                  className={cn(
+                                    'px-1 text-center uppercase',
+                                    missing && 'text-error',
+                                  )}
+                                >
+                                  {/* Отсутствие привязки и потерянная ткань известны СТАТИЧЕСКИ —
+                                      до всякого скачивания, поэтому они раньше `shapesOn`: иначе
+                                      подпись обещала бы, что кнопка загрузит форму, которой нет. */}
+                                  {refs.length === 0
+                                    ? 'нет блока DXF'
+                                    : lostScope
+                                      ? 'ткань потеряна'
+                                      : !shapesOn
+                                        ? '⌕ формы не загружены'
+                                        : geometry.isPending
+                                          ? 'разбор DXF…'
+                                          : geometry.isError
+                                            ? 'ошибка разбора'
+                                            : 'нет в файлах'}
+                                </Text>
+                              )}
+                            </div>
+                            <Text size='micro' className='mt-1 w-full truncate font-bold uppercase'>
+                              {p.name?.trim() || 'без названия'}
+                            </Text>
+                            <Text size='micro' variant='label' className='w-full truncate'>
+                              ×{p.piecesPerGarment ?? 1}
+                              {short ? ` ${short}` : ''}
+                            </Text>
+                            {found && (
+                              <Text size='micro' variant='label' className='w-full truncate'>
+                                {fmtCm(found.piece.bboxW)} × {fmtCm(found.piece.bboxH)} см
+                              </Text>
+                            )}
+                            {flags.length > 0 && (
+                              <Text size='nano' component='p' className='w-full truncate uppercase'>
+                                {flags.map((f, i) => (
+                                  <Fragment key={f.k}>
+                                    {i > 0 && ' · '}
+                                    <span className={f.cls}>{f.word}</span>
+                                  </Fragment>
+                                ))}
+                              </Text>
+                            )}
+                          </button>
                         </div>
-                      )}
-                    </td>
-                    <td>
-                      <Input
-                        className='w-full'
-                        type='number'
-                        min='1'
-                        // Помечено невалидным вместе с селектом: CHECK в БД двухколоночный, и
-                        // нарушить его можно с ЛЮБОЙ из двух сторон — как выбрав «зеркальные пары»
-                        // при нечётном количестве, так и исправив количество на нечётное у уже
-                        // размеченной детали. Подсветить только селект значило бы указать не на то
-                        // поле в половине случаев.
-                        aria-invalid={oddPair}
-                        value={p.piecesPerGarment ?? 1}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setValue(`pieces.${pi}.piecesPerGarment`, Number(e.target.value) || 1, {
-                            shouldDirty: true,
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <select
-                        className={selectCls}
-                        aria-label='как кроится'
-                        // Якорь для revealField: и схема, и сервер адресуют нарушение чётности
-                        // путём `pieces.N.cutSymmetry`, а прокрутить и подсветить он умеет только
-                        // элемент с этим самым атрибутом. Без него ошибка находит вкладку, но не
-                        // строку.
-                        data-field={`pieces.${pi}.cutSymmetry`}
-                        aria-invalid={oddPair}
-                        value={p.cutSymmetry ?? UNSET_CUT_SYMMETRY}
-                        onChange={(e) =>
-                          setValue(`pieces.${pi}.cutSymmetry`, e.target.value, {
-                            shouldDirty: true,
-                          })
-                        }
-                      >
-                        {cutSymmetryOptionsFor(p.cutSymmetry).map((o) => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                      {/* Бейдж висит ТОЛЬКО там, где вопрос существует — у детали с ≥2 на изделие
-                          без ответа. Он повторяет ровно ту строку, которую в этом случае напечатает
-                          тех-пак, чтобы экран и бумага не расходились. У детали по одной на изделие
-                          парности нет, и молчаливого селекта «— не размечено» там достаточно:
-                          серый бейдж на каждой второй строке сегодня (размечено пока ничего) только
-                          обесценил бы синий. */}
-                      {symmetryBadge?.tone === 'attention' && (
-                        <div className='mt-0.5'>
-                          <Pill
-                            tone='attention'
-                            title='эта деталь идёт по две и больше на изделие, а как они кроятся — не сказано. Если это зеркальная пара, а лекало пришло полукомплектом, раскладка положит только одну хиральность и на крой уйдут одни левые. В тех-паке у строки печатается «парность не указана».'
-                          >
-                            {symmetryBadge.label}
-                          </Pill>
-                        </div>
-                      )}
-                      {oddPair && (
-                        <Text size='micro' variant='error'>
-                          {CUT_SYMMETRY_EVEN_COUNT_MESSAGE}
-                        </Text>
-                      )}
-                    </td>
-                    <td>
-                      <div className='flex items-center gap-1'>
-                        <select
-                          className={selectCls}
-                          aria-label='grainline'
-                          value={p.grainline ?? ''}
-                          onChange={(e) =>
-                            setValue(`pieces.${pi}.grainline`, e.target.value, {
+                      );
+                    })}
+                  </Tiles>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </Section>
+
+      {/* Панель выбранной детали — БЛОК-РОВНЯ под плитками, не вложенный: блок никогда не содержит
+          блок (DESIGN.md). Здесь живёт всё редактирование и все объяснения; плитки только
+          показывают и выбирают. */}
+      {sel && selIndex >= 0 && (
+        <Section
+          title='деталь'
+          question='— выбранная на плитках выше: форма из чертежа, поля строки и происхождение имени'
+          action={
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              aria-label='remove piece'
+              onClick={removeSelected}
+            >
+              ✕ удалить деталь
+            </Button>
+          }
+        >
+          <div className='grid gap-2.5 lg:grid-cols-[240px_minmax(0,1fr)]'>
+            {/* Две проекции одной и той же детали, одна под другой: КАКОЙ она формы (контур из
+                DXF — единственное место в карточке, где виден её реальный габарит, посчитанный по
+                файлу, а не введённый руками) и ГДЕ она на изделии (выноска на скетче). */}
+            <div className='flex flex-col gap-1'>
+              <div className='flex h-40 w-full items-center justify-center border border-borderColor bg-bgColor p-1'>
+                {selFound ? (
+                  <PieceShape piece={selFound.piece} grainLayer={index?.grainLayer ?? ''} />
+                ) : (
+                  <Text size='nano' variant='label' component='span' className='px-1 text-center'>
+                    {/* Отсутствие привязки и потерянная ткань известны СТАТИЧЕСКИ — до всякого
+                        скачивания, поэтому они раньше `shapesOn`: обещать, что кнопка загрузит
+                        форму, которой нет, значило бы врать. Сказать «блока нет в файлах» про
+                        связь, чья ткань ни к чему живому не ведёт (строку BOM удалили или
+                        переклассифицировали), значило бы обвинить чертёж в том, чего он не делал. */}
+                    {selRefs.length === 0
+                      ? 'у этой детали нет привязанного блока DXF'
+                      : selRefs.every((r) => !r.scopeKey)
+                        ? `у связи с «${selRefs[0].block}» потеряна ткань — перепривяжите лист на панели выкроек`
+                        : !shapesOn
+                          ? 'формы не загружены — нажмите «⌕ показать формы» в шапке блока'
+                          : geometry.isPending
+                            ? 'разбор DXF…'
+                            : geometry.isError
+                              ? geometry.error?.message || 'не удалось разобрать файлы'
+                              : `блока «${selRefs[0].block}» в разобранных файлах нет — файл перезалили без него?`}
+                  </Text>
+                )}
+              </div>
+              {selFound && (
+                <>
+                  <Text size='nano' variant='label' component='span' className='break-words'>
+                    {selFound.block}
+                    {selFound.size
+                      ? ` · размер ${selFound.size}${selFound.sizes.length > 1 ? ` из ${selFound.sizes.length}` : ''}`
+                      : ''}
+                  </Text>
+                  <Text size='nano' variant='label' component='span'>
+                    {fmtCm(selFound.piece.bboxW)}×{fmtCm(selFound.piece.bboxH)} см
+                    {selFound.instances > 1 ? ` · ×${selFound.instances} в чертеже` : ''}
+                  </Text>
+                </>
+              )}
+              {shapesOn && index && (
+                <Text size='nano' variant='label' component='span'>
+                  слой {(selFound ? selFound.layer : index.contourLayer) || '—'}
+                  {index.grainLayer ? `, долевая красным (слой ${index.grainLayer})` : ''}
+                </Text>
+              )}
+              <PieceDiagram
+                techCard={techCard}
+                pinnedNumbers={pinnedNumbers}
+                labelForPin={labelForPin}
+                activePin={pin.active}
+                onActivePinChange={pin.setActive}
+              />
+            </div>
+
+            {/* Наведение или фокус в полях зажигает пин детали на эскизе слева — то же поведение,
+                что несла строка старой таблицы: клавиатурный обход полей не должен терять связь
+                «поле → место на изделии». */}
+            <div
+              className='flex flex-col gap-2.5'
+              {...pin.bind(selCallout > 0 ? selCallout : null)}
+            >
+              <div>
+                <Text size='micro' variant='label' component='label' className='uppercase'>
+                  code / name
+                </Text>
+                <Input
+                  className='w-full'
+                  data-field={`pieces.${selIndex}.name`}
+                  aria-invalid={selDup}
+                  list='piece-code-suggestions'
+                  value={sel.name ?? ''}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                    renamePiece(selIndex, e.target.value)
+                  }
+                  placeholder='FP front piece'
+                />
+                {selDup && (
+                  <Text size='micro' variant='error'>
+                    такая деталь уже есть — имя должно быть уникальным
+                  </Text>
+                )}
+              </div>
+
+              {/* Происхождение: из какого чертежа деталь и откуда приходит её имя. Связь с
+                  выноской — только показ: ставится она на вкладке SKETCH, выбором детали в самой
+                  выноске. Два места записи одного значения разошлись бы на первом же
+                  переименовании. */}
+              {(selRefs.length > 0 || selCallout > 0 || detachedKeys.has(selKey)) && (
+                <div className='flex flex-wrap items-center gap-2'>
+                  {selRefs.length > 0 && (
+                    <Pill
+                      tone='mut'
+                      title={`деталь привязана к блокам DXF: ${selRefs.map((b) => b.block).join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае. Форму этого блока видно на плитке и в этой панели — включите «⌕ показать формы» в шапке блока.`}
+                    >
+                      блок DXF привязан
+                    </Pill>
+                  )}
+                  {selCallout > 0 && !detachedKeys.has(selKey) && (
+                    <Text size='micro' variant='label' component='span'>
+                      выноска #{selCallout} — имя приходит с неё
+                    </Text>
+                  )}
+                  {detachedKeys.has(selKey) && (
+                    <Pill
+                      tone='attention'
+                      title='выноска, на которую ссылалась деталь, удалена со скетча (или перестала быть техническим эскизом) — выберите эту деталь в нужной выноске на вкладке sketch'
+                    >
+                      откреплена от выноски
+                    </Pill>
+                  )}
+                </div>
+              )}
+
+              <div className='grid grid-cols-2 gap-2.5 lg:grid-cols-3'>
+                <div>
+                  <Text size='micro' variant='label' component='label' className='uppercase'>
+                    × на изделие
+                  </Text>
+                  <Input
+                    className='w-full'
+                    type='number'
+                    min='1'
+                    // Помечено невалидным вместе с селектом: CHECK в БД двухколоночный, и
+                    // нарушить его можно с ЛЮБОЙ из двух сторон — как выбрав «зеркальные пары»
+                    // при нечётном количестве, так и исправив количество на нечётное у уже
+                    // размеченной детали. Подсветить только селект значило бы указать не на то
+                    // поле в половине случаев.
+                    aria-invalid={selOddPair}
+                    value={sel.piecesPerGarment ?? 1}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setValue(`pieces.${selIndex}.piecesPerGarment`, Number(e.target.value) || 1, {
+                        shouldDirty: true,
+                      })
+                    }
+                  />
+                </div>
+                <div>
+                  <Text size='micro' variant='label' component='label' className='uppercase'>
+                    как кроится
+                  </Text>
+                  <select
+                    className={selectCls}
+                    aria-label='как кроится'
+                    // Якорь для revealField: и схема, и сервер адресуют нарушение чётности
+                    // путём `pieces.N.cutSymmetry`, а прокрутить и подсветить он умеет только
+                    // элемент с этим самым атрибутом. Без него ошибка находит вкладку, но не
+                    // деталь.
+                    data-field={`pieces.${selIndex}.cutSymmetry`}
+                    aria-invalid={selOddPair}
+                    value={sel.cutSymmetry ?? UNSET_CUT_SYMMETRY}
+                    onChange={(e) =>
+                      setValue(`pieces.${selIndex}.cutSymmetry`, e.target.value, {
+                        shouldDirty: true,
+                      })
+                    }
+                  >
+                    {cutSymmetryOptionsFor(sel.cutSymmetry).map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Text size='micro' variant='label' component='label' className='uppercase'>
+                    fused
+                  </Text>
+                  <div className='flex min-h-[22px] items-center'>
+                    <input
+                      type='checkbox'
+                      aria-label='fused'
+                      checked={!!sel.fused}
+                      onChange={(e) =>
+                        setValue(`pieces.${selIndex}.fused`, e.target.checked, {
+                          shouldDirty: true,
+                        })
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+              {selOddPair && (
+                <Text size='micro' variant='error'>
+                  {CUT_SYMMETRY_EVEN_COUNT_MESSAGE}
+                </Text>
+              )}
+
+              {/* Оговорка «парность не указана» объясняется ЗДЕСЬ и один раз — в шапке остался
+                  только счётчик-фильтр. Чипы ставят ответ в один клик. */}
+              {selUnanswered && (
+                <CalloutBox tone='warning'>
+                  <Text size='micro'>
+                    эта деталь идёт по две и больше на изделие, а как они кроятся — не сказано. Если
+                    это зеркальная пара, а лекало пришло полукомплектом, раскладка положит только
+                    одну хиральность и на крой уйдут одни левые. В тех-паке у строки печатается
+                    «парность не указана».
+                  </Text>
+                  <ChipRow className='mt-1'>
+                    {cutSymmetryOptions
+                      .filter((o) => o.value !== UNSET_CUT_SYMMETRY)
+                      .map((o) => (
+                        <Chip
+                          key={o.value}
+                          onClick={() =>
+                            setValue(`pieces.${selIndex}.cutSymmetry`, o.value, {
                               shouldDirty: true,
                             })
                           }
                         >
-                          {grainlineOptionsFor(p.grainline).map((o) => (
-                            <option key={o.value || '(unset)'} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                        <span aria-hidden className='shrink-0'>
-                          {arrow}
-                        </span>
-                      </div>
-                      {/* Where the direction ACTUALLY comes from. A piece drawn in a DXF carries its
-                          долевая as a line on its own layer, and that line — not this word — is what
-                          the раскладка rotates the piece by. Saying so is the point: a word that
-                          contradicts the file is worse than no word at all. */}
-                      {blocks.length > 0 && (
-                        <div className='mt-0.5'>
-                          <Pill
-                            tone='mut'
-                            title={`деталь привязана к блокам DXF: ${blocks.map((b) => b.block).join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае. Форму этого блока можно увидеть справа — включите «⌕ деталь в чертеже» и наведите на строку.`}
-                          >
-                            блок DXF привязан
-                          </Pill>
-                        </div>
-                      )}
-                    </td>
-                    <td>
-                      <input
-                        type='checkbox'
-                        aria-label='fused'
-                        checked={!!p.fused}
-                        onChange={(e) =>
-                          setValue(`pieces.${pi}.fused`, e.target.checked, {
-                            shouldDirty: true,
-                          })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <Input
-                        className='w-full'
-                        value={p.note ?? ''}
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setValue(`pieces.${pi}.note`, e.target.value, { shouldDirty: true })
-                        }
-                      />
-                    </td>
-                    <td>
-                      <Button
-                        type='button'
-                        variant='secondary'
-                        size='xs'
-                        aria-label='remove piece'
-                        onClick={() => removePiece(pi)}
-                      >
-                        ✕
-                      </Button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </DataTable>
+                          {o.label}
+                        </Chip>
+                      ))}
+                  </ChipRow>
+                </CalloutBox>
+              )}
 
-          {/* Две проекции одной и той же детали, одна под другой: ГДЕ она на изделии (выноска на
-              скетче) и КАКОЙ она формы (контур из DXF). Обе ведёт одно наведение на строку. */}
-          <div className='flex flex-col gap-2'>
-            {previewFiles.length > 0 &&
-              (previewOn ? (
-                <PieceDxfPreview
-                  files={previewFiles}
-                  blocksByPiece={blocksByPiece}
-                  activePieceKey={shownPiece}
-                  activePieceName={
-                    pieces.find((x) => (x.lineKey ?? '').trim() === shownPiece)?.name?.trim() ?? ''
-                  }
-                  onClose={() => setPreviewOn(false)}
-                />
-              ) : (
-                <div className='flex flex-col gap-1'>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    title='скачать привязанные DXF и показывать форму детали при наведении на строку'
-                    onClick={() => setPreviewOn(true)}
-                  >
-                    ⌕ деталь в чертеже
-                  </Button>
+              <div className='grid grid-cols-2 gap-2.5'>
+                <div>
+                  <Text size='micro' variant='label' component='label' className='uppercase'>
+                    grain
+                  </Text>
+                  <div className='flex items-center gap-1'>
+                    <select
+                      className={selectCls}
+                      aria-label='grainline'
+                      value={sel.grainline ?? ''}
+                      onChange={(e) =>
+                        setValue(`pieces.${selIndex}.grainline`, e.target.value, {
+                          shouldDirty: true,
+                        })
+                      }
+                    >
+                      {grainlineOptionsFor(sel.grainline).map((o) => (
+                        <option key={o.value || '(unset)'} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span aria-hidden className='shrink-0'>
+                      {selArrow}
+                    </span>
+                  </div>
+                  {/* Where the direction ACTUALLY comes from. A piece drawn in a DXF carries its
+                      долевая as a line on its own layer, and that line — not this word — is what
+                      the раскладка rotates the piece by. Saying so is the point: a word that
+                      contradicts the file is worse than no word at all. */}
                   <Text size='micro' variant='label'>
-                    имя блока формы не несёт. Включите — и наведение на строку покажет её контур из
-                    DXF с реальным габаритом; файлы скачаются и разберутся один раз.
+                    слово в тех-пак; кроит линия из файла
                   </Text>
                 </div>
-              ))}
+                <div>
+                  <Text size='micro' variant='label' component='label' className='uppercase'>
+                    note
+                  </Text>
+                  <Input
+                    className='w-full'
+                    value={sel.note ?? ''}
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                      setValue(`pieces.${selIndex}.note`, e.target.value, { shouldDirty: true })
+                    }
+                  />
+                </div>
+              </div>
 
-            <PieceDiagram
-              techCard={techCard}
-              pinnedNumbers={pinnedNumbers}
-              labelForPin={labelForPin}
-              activePin={pin.active}
-              onActivePinChange={pin.setActive}
-            />
+              <div className='flex flex-col gap-1'>
+                {/* Почему у поля вообще есть состояние «не размечено» и почему оно не
+                    «одинаковые». Сказано один раз под полями, а не в подсказке каждой строки. */}
+                <Text size='micro' variant='label'>
+                  как кроится — количество этим НЕ меняется: «×2» и так означает две панели на
+                  изделие, поле лишь говорит, копии это или левая с правой. «Не размечено» — не то
+                  же самое, что «одинаковые»: это значит, что вопрос никто не задавал, и такой ответ
+                  сохраняется как есть, не подменяясь умолчанием. Зеркальная пара делится пополам,
+                  поэтому её количество обязано быть чётным; крой по сгибу парным не бывает по
+                  построению (контур симметричен сам себе), а «со сгибом и нужна дважды» — это
+                  манжеты: со сгибом × 2.
+                </Text>
+                {/* Said once, under the fields. The four values are the ones the server's CHECK
+                    accepts — anything else fails the whole card save, which is why this stopped
+                    being a free-text field with suggestions. */}
+                <Text size='micro' variant='label'>
+                  долевая — закрытый список (lengthwise / crosswise / bias / any): сервер отвергает
+                  любое другое значение и роняет сохранение всей карточки. У детали, заведённой из
+                  DXF, реальное направление задаёт линия долевой в самом файле — по ней раскладка
+                  разворачивает деталь, а слово здесь только печатается в тех-пак и не должно ему
+                  противоречить.
+                </Text>
+              </div>
+            </div>
           </div>
-
-          {/* Said once, under the table, rather than per row. The four values are the ones the
-              server's CHECK accepts — anything else fails the whole card save, which is why this
-              stopped being a free-text field with suggestions. */}
-          <div className='flex flex-col gap-1 lg:col-span-2'>
-            <Text size='micro' variant='label'>
-              долевая — закрытый список (lengthwise / crosswise / bias / any): сервер отвергает
-              любое другое значение и роняет сохранение всей карточки. У детали, заведённой из DXF,
-              реальное направление задаёт линия долевой в самом файле — по ней раскладка
-              разворачивает деталь, а слово здесь только печатается в тех-пак и не должно ему
-              противоречить.
-            </Text>
-            {/* Почему у колонки вообще есть состояние «не размечено» и почему оно не «одинаковые».
-                Сказано один раз под таблицей, а не в подсказке каждой строки. */}
-            <Text size='micro' variant='label'>
-              как кроится — количество этим НЕ меняется: «×2» и так означает две панели на изделие,
-              колонка лишь говорит, копии это или левая с правой. «Не размечено» — не то же самое,
-              что «одинаковые»: это значит, что вопрос никто не задавал, и такой ответ сохраняется
-              как есть, не подменяясь умолчанием. Зеркальная пара делится пополам, поэтому её
-              количество обязано быть чётным; крой по сгибу парным не бывает по построению (контур
-              симметричен сам себе), а «со сгибом и нужна дважды» — это манжеты: со сгибом × 2.
-            </Text>
-          </div>
-        </div>
+        </Section>
       )}
-    </Section>
+    </>
   );
 }

@@ -40,10 +40,17 @@ export function LayPlan({
   run,
   canEdit,
   locked,
+  id,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
   locked: boolean;
+  /**
+   * Якорь блока. Страница прогона — конвейер по статусу: шаг «раскрой» схлопывается в строку с
+   * кнопкой «раскрыть», и этой кнопке нужен `aria-controls`, а прокрутке — цель. Блок рисует свою
+   * `Section` сам, поэтому id приходит снаружи; `Section` вешает на него ещё и `scroll-mt`.
+   */
+  id?: string;
 }) {
   const runId = run.id ?? 0;
   const techCardId = run.run?.techCardId ?? 0;
@@ -264,6 +271,7 @@ export function LayPlan({
 
   return (
     <Section
+      id={id}
       title='шаг 3 · как раскроить'
       question='Настилы: сколько слоёв какой раскладкой стелим, и покрывают ли они план партии.'
       action={

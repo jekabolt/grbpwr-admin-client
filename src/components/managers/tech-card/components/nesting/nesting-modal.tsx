@@ -79,11 +79,19 @@ import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { normBlock } from './block-code';
+import { ModalRailSection, type RailSectionStatus } from './modal-sections';
 import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
 const MANUAL_NOTE_PREFIX = 'ручная правка:';
+
+// Терминальная причина отказа сохранения — «прогон ещё не завершён» во всех его видах. Когда
+// она ЕДИНСТВЕННАЯ (обычное состояние до первого прогона), красный список не рендерится —
+// error-бокс при только что открытой модалке девальвировал бы тон, — а причина уезжает в
+// тултип кнопки. Константа, потому что это сравнение по идентичности строки.
+const TERMINAL_SAVE_REASON =
+  'сохранить можно завершённую раскладку, в которую поместились все детали';
 
 // Нарушение словами. У кромочного (otherIndex отсутствует) required — это отступ, и при
 // отступе 0 «0.00 см < 0.00 см» звучало бы бессмыслицей: деталь просто вышла за полотно.
@@ -559,7 +567,10 @@ export function NestingModal({
   // сохраняется, `contour_allowance_cm` уезжает NULL, и маркер честно помечен «припуск не
   // подтверждён файлом» — а не «двойной припуск».
   const allowanceUnconfirmed =
-    !viewData && parse.phase === 'ready' && allowanceCm > 0 && contourMeasure?.verdict === 'unknown';
+    !viewData &&
+    parse.phase === 'ready' &&
+    allowanceCm > 0 &&
+    contourMeasure?.verdict === 'unknown';
 
   // ПРЕДЗАПОЛНЕНИЕ ПОЛЯ «ПРИПУСК» (§5.5). Порядок источников НЕ ПЕРЕСТАВЛЯТЬ, и последний из них —
   // не эталон, а признание: `NEST_DEFAULTS.seamAllowanceCm` перестал быть источником истины и
@@ -757,7 +768,8 @@ export function NestingModal({
   // Пересобранный чертёж НЕ ДОКАЗАН, пока пересборка не ответила: 'running' держит экспорт
   // закрытым ровно так же, как 'error'. Выпустить файл «пока считается» значит выпустить тот
   // самый файл без линии шва, только теперь по таймингу.
-  const drawingBlocked = viewData != null && (drawing.phase === 'error' || drawing.phase === 'running');
+  const drawingBlocked =
+    viewData != null && (drawing.phase === 'error' || drawing.phase === 'running');
   const rebuildText = drawing.phase === 'error' ? describeRebuildError(drawing.error) : '';
 
   // What the right pane shows: the live run in nest mode, the stored geometry in view mode.
@@ -1431,6 +1443,75 @@ export function NestingModal({
     run.result.placements.length > 0 &&
     !!techCardId;
 
+  // ОТКАЗ СОХРАНЕНИЯ — МАССИВОМ ПРИЧИН, а не первой из цепочки. Прежний тултип кнопки был
+  // цепочкой из девяти веток и показывал одну причину за раз: остальные открывались по мере
+  // починки, по одной на визит. Теперь ВСЕ активные причины рендерятся разом видимым списком
+  // под правой панелью. Порядок — от прежней цепочки, с тремя сознательными правками:
+  // направление и двойной припуск идут ОТДЕЛЬНЫМИ пунктами и короткими строками (их полные
+  // тексты стоят в секциях рейла — второй экземпляр абзаца на том же экране был бы дублем),
+  // а noSlotChosen добавлен — в цепочке его не было вовсе, он молча падал в терминальную ветку.
+  // Инвариант: массив пуст ⇔ canSave, то есть кнопка выключена ровно по прежнему условию.
+  const saveRefusals: string[] = (() => {
+    if (viewData || canSave) return [];
+    const out: string[] = [];
+    if (!canEdit) out.push('нет прав на изменение карточки, либо она released');
+    if (fetchFailed)
+      out.push('часть DXF не скачалась — раскладка неполная, такой маркер занизил бы расход');
+    if (directionRefusal)
+      out.push(
+        'отказ по направлению ткани — полный текст в секции «3 · как кладём», у строки направления',
+      );
+    if (doubleAllowanceRefusal)
+      out.push(
+        'двойной припуск — прогон не запускается; полный текст в секции «2 · как читаем файл», у выбора контурного слоя',
+      );
+    // Не было в цепочке вовсе: отказ по невыбранной ткани блокировал сохранение молча, а тултип
+    // падал в терминальную ветку про «завершённую раскладку». Формулировка — та же, что в рейле.
+    if (noSlotChosen)
+      out.push(
+        'выберите ткань — иначе маркер сохранится без привязки и расход не попадёт в костинг',
+      );
+    if (sizeUnresolved)
+      out.push(
+        unresolvedTokens.length > 0
+          ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')} — добавьте их в карточку либо уберите из состава`
+          : 'размер раскладки неизвестен — в именах блоков нет размеров, и слот его не называет',
+      );
+    if (sizeUnsaved)
+      out.push('размер добавлен, но карточка не сохранена — сначала сохраните карточку');
+    if (sizesWithoutPieces.length > 0)
+      out.push(
+        `в состав взяты размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`,
+      );
+    if (composition.length > MAX_MARKER_COMPOSITION_SIZES)
+      out.push(
+        `в составе ${composition.length} размеров, потолок сервера — ${MAX_MARKER_COMPOSITION_SIZES}`,
+      );
+    // Терминальная ветка прежней цепочки — она же покрывает незавершённый прогон, пустой
+    // состав и отсутствие серверного контекста (compute-only).
+    if (
+      run.phase !== 'done' ||
+      run.result.placedCount !== run.result.totalCount ||
+      run.result.placements.length === 0 ||
+      composition.length === 0 ||
+      !techCardId
+    )
+      out.push(TERMINAL_SAVE_REASON);
+    return out;
+  })();
+  // Обычное состояние до первого прогона: единственная причина — терминальная. Красный список
+  // при только что открытой модалке не рендерится (см. TERMINAL_SAVE_REASON), причина остаётся
+  // в тултипе кнопки. Инвариант «массив непуст ⇔ disabled» это не трогает.
+  const onlyTerminal = saveRefusals.length === 1 && saveRefusals[0] === TERMINAL_SAVE_REASON;
+  // «1 причина / 2 причины / 5 причин» — заголовок списка не должен врать падежом.
+  const reasonWord = (n: number) => {
+    const d10 = n % 10;
+    const d100 = n % 100;
+    if (d10 === 1 && d100 !== 11) return 'причина';
+    if (d10 >= 2 && d10 <= 4 && (d100 < 10 || d100 >= 20)) return 'причины';
+    return 'причин';
+  };
+
   // Отказ сохранения, разобранный по полям (Ф1.8). Сервер отвергает норму, у ткани которой не
   // задано направление, и делает это ПОЛЕВЫМ нарушением с описанием, называющим строку BOM. Тост
   // такой текст съедает: он длинный, он исчезает, и в нём сказано, что чинить, — а чинится это на
@@ -1732,6 +1813,149 @@ export function NestingModal({
     }
   }
 
+  // ── ЛЕВЫЙ РЕЙЛ: ЧЕТЫРЕ СЕКЦИИ-АККОРДЕОНА ──────────────────────────────────────────────────
+  //
+  // Статус секции считается ЗДЕСЬ, из тех же значений, что рисуют её содержимое: шапка отвечает
+  // за свёрнутую секцию, а второй набор условий рядом с первым однажды разошёлся бы. Блокирующие
+  // отказы (прогон или сохранение не пойдут) держатся отдельно от предупреждений: Pill в шапке
+  // несёт их разным тоном, а перечисление причин едет в title — парой к слову-глифу.
+  //
+  // `sel` засеивается эффектом ПОСЛЕ отрисовки разбора, а до готовности разбора `graded` ложно
+  // пуст. Блокеры, зависящие от выбора деталей или от состава, до этого момента не считаются —
+  // иначе каждый (пере)разбор мигал бы ложными отказами о непрочитанном файле и дёргал
+  // авто-открытие секций (до трёх прыжков за один разбор).
+  const selSeeded = parse.phase === 'ready' && pieces.some((p) => sel[p.id] != null);
+  const railS1: RailSectionStatus = {
+    blockers: [
+      noSlotChosen ? 'ткань не выбрана' : '',
+      unresolvedTokens.length > 0
+        ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')}`
+        : '',
+      selSeeded && !graded && !sizeId ? 'размер раскладки неизвестен' : '',
+      sizeUnsaved ? 'размер добавлен, но карточка не сохранена' : '',
+      selSeeded && sizesWithoutPieces.length > 0
+        ? `размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`
+        : '',
+      composition.length > MAX_MARKER_COMPOSITION_SIZES
+        ? `в составе ${composition.length} размеров — потолок сервера ${MAX_MARKER_COMPOSITION_SIZES}`
+        : '',
+    ].filter(Boolean),
+    warnings: [
+      colorwayNoPin ? `колорвей «${chosenColorway?.label}» не назначил артикул на эту ткань` : '',
+      mixed ? 'смешанный состав — расход на изделие в рецепт не пишется' : '',
+    ].filter(Boolean),
+  };
+  const railS2: RailSectionStatus = {
+    blockers: [
+      parse.phase === 'error' ? 'ошибка разбора DXF' : '',
+      fetchFailed ? 'часть DXF не скачалась — раскладка неполная' : '',
+      doubleAllowanceRefusal ? 'двойной припуск: на выбранном слое линия кроя' : '',
+    ].filter(Boolean),
+    warnings: [
+      parse.phase === 'ready' && parse.warnings.length > 0
+        ? `предупреждений разбора: ${parse.warnings.length}`
+        : '',
+      missingOnLayer.length > 0
+        ? `на слое ${contourLayer || '—'} нет контура у ${missingOnLayer.length} блоков`
+        : '',
+      grainLayer !== '' && oriented.missing.length > 0
+        ? `долевая не определена у ${oriented.missing.length} деталей`
+        : '',
+      grainLayer === '' ? 'детали лягут так, как нарисованы в файле' : '',
+      parse.phase === 'ready' && unitOverride !== 'auto' && unitOverride !== parse.detectedUnit
+        ? 'юниты DXF: ручной override'
+        : '',
+    ].filter(Boolean),
+  };
+  const railS3: RailSectionStatus = {
+    blockers: [
+      // Две ветки отказа — два разных факта: у unknown направление не «запрещает», оно
+      // просто не проставлено, и сказать «ткань не допускает» было бы неправдой.
+      directionRefusal
+        ? effectiveDirection === 'unknown'
+          ? 'раскладка кладёт деталь вверх ногами, а направление ткани не проставлено'
+          : 'раскладка кладёт деталь вверх ногами, а ткань этого не допускает'
+        : '',
+      doubleAllowanceRefusal ? 'двойной припуск — прогон не запускается' : '',
+    ].filter(Boolean),
+    warnings: [
+      allowanceCm === 0 && !contourIsCutLine ? 'припуск 0 — расход будет занижен' : '',
+      allowanceUnconfirmed ? 'припуск не подтверждён файлом' : '',
+      seam.hulled.length > 0 ? `контур с дефектом у ${seam.hulled.length} деталей` : '',
+      !viewData && effectiveDirection === 'unknown' ? 'направление ткани не задано' : '',
+    ].filter(Boolean),
+  };
+  const unfitCount = pieces.filter((p) => !fitsWidth.get(p.id)).length;
+  const railS4: RailSectionStatus = {
+    blockers: [
+      overCap ? 'сверх потолка сервера — прогон не запускается' : '',
+      // Только после засева `sel` (см. selSeeded) — иначе секция «детали» вспыхивала бы
+      // открытой на один кадр после каждого разбора. Когда ни одна деталь не влезает в
+      // ширину, чекбоксы выключены и «не выбрана» была бы ложью: выбирать нечего.
+      selSeeded && checkedCount === 0
+        ? pieces.length > 0 && unfitCount === pieces.length
+          ? 'ни одна деталь не влезает в ширину полотна'
+          : 'не выбрана ни одна деталь'
+        : '',
+    ].filter(Boolean),
+    warnings: [unfitCount > 0 ? `шире полотна: ${unfitCount} деталей` : ''].filter(Boolean),
+  };
+  // Сводка-ответ секции — то, что видно в свёрнутой шапке. Не новые вычисления, а те же числа,
+  // что стоят внутри, свёрнутые в одну строку-ответ.
+  const s1Summary = [
+    cwOptions.length > 0 ? chosenColorway?.label ?? 'общая' : '',
+    lockedSlot
+      ? slotLabel(lockedSlot)
+      : slot
+        ? slotLabel(slot)
+        : fabricLines.length > 0
+          ? 'ткань не выбрана'
+          : '',
+    graded
+      ? activeRows.map((r) => `${r.label}×${r.qty}`).join(' ') || 'состав пуст'
+      : `${ungradedUnits} изд.${sizeLabel ? ` ${sizeLabel}` : ''}`,
+    pieces.length > 0 ? `${pieces.length} дет.` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const unitWord = (u: Unit) => (u === 'mm' ? 'мм' : u === 'cm' ? 'см' : 'дюймы');
+  const s2Summary =
+    parse.phase === 'loading'
+      ? 'загрузка и разбор DXF…'
+      : parse.phase === 'error'
+        ? 'ошибка разбора'
+        : parse.phase === 'ready'
+          ? [
+              unitOverride === 'auto'
+                ? `авто (${unitWord(parse.detectedUnit)})`
+                : unitWord(unitOverride),
+              `контур: слой ${contourLayer || '—'}`,
+              grainLayer === '' ? 'долевая: как нарисовано' : `долевая: слой ${grainLayer}`,
+              sources.length > 1 ? `файлов: ${sources.length}` : '',
+            ]
+              .filter(Boolean)
+              .join(' · ')
+          : '';
+  const s3Summary = `${widthCm} см · зазор ${gapCm} · припуск ${allowanceCm.toFixed(2)}`;
+  // Размещения — в свёрнутой сводке тоже: приближение к потолку 5000 должно быть видно и при
+  // закрытой секции, а не открываться вместе с ней.
+  const s4Summary =
+    parse.phase === 'ready' ? `${checkedCount} / ${pieces.length} · ${instanceCount} разм.` : '—';
+  // Открыта ОДНА секция за раз. Явный выбор оператора — в railPick; null = авто: первая секция
+  // с блокером, иначе первая; 0 = все свёрнуты (повторный клик по открытой шапке).
+  const [railPick, setRailPick] = useState<number | null>(null);
+  const railStatuses = [railS1, railS2, railS3, railS4];
+  const firstBlocked = railStatuses.findIndex((s) => s.blockers.length > 0);
+  const railOpen = railPick ?? (firstBlocked >= 0 ? firstBlocked + 1 : 1);
+  const toggleRail = (n: number) => setRailPick(railOpen === n ? 0 : n);
+  // Первое взаимодействие с СОДЕРЖИМЫМ открытой секции пинит авто-выбор. Без этого правка поля
+  // внутри авто-открытой секции кончалась бы её схлопыванием: оператор трогает «зазор» →
+  // resetRun сбрасывает прогон → directionRefusal исчезает → firstBlocked уезжает → секция
+  // размонтируется посреди набора, фокус улетает на body, недобранные цифры теряются.
+  const pinRail = (n: number) => {
+    if (railPick == null) setRailPick(n);
+  };
+
   return (
     <ConfirmationModal
       open={files != null || view != null}
@@ -1748,691 +1972,771 @@ export function NestingModal({
       hideActions
     >
       <div className='flex flex-col gap-2.5 lg:flex-row'>
-        {/* Left rail: material + run parameters, then the recognized piece list.
-            A stored marker has nothing to configure — the rail collapses to its piece list. */}
+        {/* Left rail: четыре секции-аккордеона — «что кроим», «как читаем файл», «как кладём»,
+            «детали». Открыта одна за раз; свёрнутая шапка несёт сводку-ответ секции и парный к
+            слову индикатор состояния, так что рейл перестаёт конкурировать по высоте с холстом.
+            A stored marker has nothing to configure — the rail is hidden. */}
         <div className={viewData ? 'hidden' : 'w-full shrink-0 space-y-2.5 lg:w-[300px]'}>
-          {/* ИЗ ЧЕГО КРОИМ — до параметров прогона, потому что от этой пары берётся ширина, а
+          <ModalRailSection
+            index={1}
+            title='что кроим'
+            summary={s1Summary}
+            status={railS1}
+            open={railOpen === 1}
+            onToggle={() => toggleRail(1)}
+            onPin={() => pinRail(1)}
+          >
+            {/* ИЗ ЧЕГО КРОИМ — до параметров прогона, потому что от этой пары берётся ширина, а
               ширина есть вход алгоритма. Колорвей называет артикул, слот называет роль; вместе они
               дают полотно, на котором раскладка меряется. */}
-          {(cwOptions.length > 0 || fabricLines.length > 0) && (
-            <div className='space-y-1.5 border border-hairline p-1.5'>
-              {cwOptions.length > 0 && (
-                <label className='block space-y-0.5'>
-                  <Text size='nano' variant='label' component='span'>
-                    колорвей — чей артикул кроим
+            {(cwOptions.length > 0 || fabricLines.length > 0) && (
+              <div className='space-y-1.5 border border-hairline p-1.5'>
+                {cwOptions.length > 0 && (
+                  <label className='block space-y-0.5'>
+                    <Text size='nano' variant='label' component='span'>
+                      колорвей — чей артикул кроим
+                    </Text>
+                    <Selector
+                      label=''
+                      value={String(colorwayId)}
+                      options={[
+                        { value: '0', label: 'общая — ширина у всех одинаковая' },
+                        ...cwOptions.map((c) => ({
+                          value: String(c.colorwayId),
+                          label: c.label,
+                        })),
+                      ]}
+                      onChange={(v: string | number) => setColorwayId(Number(v) || 0)}
+                    />
+                  </label>
+                )}
+                {!lockedSlot && fabricLines.length > 0 && (
+                  <label className='block space-y-0.5'>
+                    <Text size='nano' variant='label' component='span'>
+                      ткань — куда пойдёт расход
+                    </Text>
+                    <Selector
+                      label=''
+                      value={slotKey}
+                      options={[
+                        { value: '', label: 'не выбрана' },
+                        ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
+                      ]}
+                      onChange={(v: string | number) => setSlotKey(String(v))}
+                    />
+                  </label>
+                )}
+                {lockedSlot && (
+                  <Text size='nano' variant='label' component='p'>
+                    ткань: {slotLabel(lockedSlot)} — из привязки DXF
                   </Text>
-                  <Selector
-                    label=''
-                    value={String(colorwayId)}
-                    options={[
-                      { value: '0', label: 'общая — ширина у всех одинаковая' },
-                      ...cwOptions.map((c) => ({
-                        value: String(c.colorwayId),
-                        label: c.label,
-                      })),
-                    ]}
-                    onChange={(v: string | number) => setColorwayId(Number(v) || 0)}
-                  />
-                </label>
-              )}
-              {!lockedSlot && fabricLines.length > 0 && (
-                <label className='block space-y-0.5'>
-                  <Text size='nano' variant='label' component='span'>
-                    ткань — куда пойдёт расход
+                )}
+                {pinArticle && (
+                  <Text size='nano' variant='label' component='p'>
+                    артикул колорвея: {pinArticle}
                   </Text>
-                  <Selector
-                    label=''
-                    value={slotKey}
-                    options={[
-                      { value: '', label: 'не выбрана' },
-                      ...fabricLines.map((b) => ({ value: b.lineKey, label: slotLabel(b) })),
-                    ]}
-                    onChange={(v: string | number) => setSlotKey(String(v))}
-                  />
-                </label>
-              )}
-              {lockedSlot && (
+                )}
+                {noSlotChosen && (
+                  <Text size='nano' component='p' className='text-error'>
+                    выберите ткань — иначе маркер сохранится без привязки и расход не попадёт в
+                    костинг
+                  </Text>
+                )}
+                {colorwayNoPin && (
+                  <Text size='nano' component='p' className='text-error'>
+                    колорвей «{chosenColorway?.label}» не назначил артикул на эту ткань — ширина
+                    взята по умолчанию у строки BOM, и раскладка не будет описывать его полотно
+                  </Text>
+                )}
+              </div>
+            )}
+
+            {/* СОСТАВ НАСТИЛА — то, чем раскладка теперь описывается вместо «размер + комплекты».
+              Смешанный настил ложится плотнее однородного, и пока состав был скаляром, снять
+              такую норму было нечем. Таблица заменила и переключатель размеров, и поле
+              «комплектов»: размер с количеством 0 просто не кроится. */}
+            {!viewData && (
+              <div className='space-y-1 border border-borderColor p-1.5'>
                 <Text size='nano' variant='label' component='p'>
-                  ткань: {slotLabel(lockedSlot)} — из привязки DXF
+                  состав настила — сколько изделий каждого размера кроим за один раз
+                </Text>
+                {graded ? (
+                  compRows.map((r) => {
+                    const bad = !r.resolvable || r.sizeId <= 0;
+                    return (
+                      <div key={r.key} className='flex items-center gap-1.5'>
+                        {/* Подпись — ВСЕ написания размера из файла («M / m»): строка их слила,
+                          и оператор должен видеть, что обе графики кроятся одним тиражом. */}
+                        <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                          {r.label}
+                        </Text>
+                        <Text size='nano' variant='label' component='span'>
+                          {r.count} дет.
+                        </Text>
+                        {bad && r.qty >= 1 && <Pill tone='warn'>нет в карточке</Pill>}
+                        <Input
+                          name={`nest-comp-${r.key}`}
+                          type='number'
+                          value={r.qty}
+                          min={0}
+                          disabled={running}
+                          className='w-14 shrink-0 px-1 py-0 text-micro'
+                          onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                            const next = Math.max(0, Math.round(numOr(e.target.value, r.qty)));
+                            if (next !== r.qty) {
+                              guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
+                            }
+                          }}
+                        />
+                      </div>
+                    );
+                  })
+                ) : (
+                  <label className='flex items-center gap-1.5'>
+                    <Text size='micro' component='span' className='min-w-0 flex-1'>
+                      изделий, шт{sizeLabel ? ` · размер ${sizeLabel}` : ''}
+                    </Text>
+                    <Input
+                      name='nest-units'
+                      type='number'
+                      value={ungradedUnits}
+                      min={1}
+                      disabled={running}
+                      className='w-14 shrink-0 px-1 py-0 text-micro'
+                      onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                        const next = Math.max(1, Math.round(numOr(e.target.value, ungradedUnits)));
+                        if (next !== ungradedUnits) {
+                          guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+                {graded && ungradedCount > 0 && (
+                  <Text size='nano' variant='label' component='p'>
+                    {ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ
+                    изделие состава, то есть по {unitsTotal} шт
+                  </Text>
+                )}
+                {/* Здесь стояла строка «итог: изделий · уникальных деталей · экземпляров» — третья
+                  копия одного и того же счёта. Канонический счёт теперь один: шапка списка в
+                  секции «детали» (изделия, выбранные, к раскладке) и её свёрнутая сводка. */}
+                {mixed && (
+                  <Text size='nano' component='p' className='text-warning'>
+                    смешанный состав: расход НА ИЗДЕЛИЕ у такой раскладки — среднее по составу
+                    (мелкие размеры завышает, крупные занижает), и в рецепт он не пишется. Сама
+                    длина настила и потребность по нему верны; пер-размерный расход придёт с Ф2.4
+                  </Text>
+                )}
+                {unresolvedTokens.length > 0 && (
+                  <Text size='nano' component='p' className='text-error'>
+                    размеров нет в размерном ряду карточки: {unresolvedTokens.join(', ')} —
+                    посчитать раскладку можно, сохранить нельзя: добавьте размер в карточку либо
+                    снимите его из состава (количество 0)
+                  </Text>
+                )}
+                {sizesWithoutPieces.length > 0 && (
+                  <Text size='nano' component='p' className='text-error'>
+                    в состав взяты размеры, у которых не выбрано ни одной детали:{' '}
+                    {sizesWithoutPieces.join(', ')} — длина настила делилась бы на изделия, которых
+                    он не кроит
+                  </Text>
+                )}
+                {!graded && !sizeId && (
+                  <Text size='nano' component='p' className='text-error'>
+                    в именах блоков нет размеров, и размер слота неизвестен — сохранить такую
+                    раскладку нечем
+                  </Text>
+                )}
+              </div>
+            )}
+          </ModalRailSection>
+
+          <ModalRailSection
+            index={2}
+            title='как читаем файл'
+            summary={s2Summary}
+            status={railS2}
+            open={railOpen === 2}
+            onToggle={() => toggleRail(2)}
+            onPin={() => pinRail(2)}
+          >
+            <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
+              <Selector
+                label='юниты DXF'
+                compact
+                value={unitOverride}
+                options={[
+                  {
+                    value: 'auto',
+                    // The detected unit stays visible even on 'авто' — a file whose header
+                    // lies about units is caught by the operator seeing «авто (см)» on a
+                    // sleeve that should be in mm.
+                    label:
+                      parse.phase === 'ready'
+                        ? `авто (${parse.detectedUnit === 'mm' ? 'мм' : parse.detectedUnit === 'cm' ? 'см' : 'дюймы'})`
+                        : 'авто',
+                  },
+                  { value: 'mm', label: 'мм' },
+                  { value: 'cm', label: 'см' },
+                  { value: 'in', label: 'дюймы' },
+                ]}
+                onChange={(v: string | number) =>
+                  guardManual(() => setUnitOverride(String(v) as Unit))
+                }
+                disabled={running || parse.phase === 'loading'}
+              />
+            </div>
+
+            {parse.phase === 'ready' &&
+              unitOverride !== 'auto' &&
+              unitOverride !== parse.detectedUnit && (
+                <Text size='nano' variant='label'>
+                  файл заявляет{' '}
+                  {parse.detectedUnit === 'mm'
+                    ? 'мм'
+                    : parse.detectedUnit === 'cm'
+                      ? 'см'
+                      : 'дюймы'}{' '}
+                  — выбран ручной override
                 </Text>
               )}
-              {pinArticle && (
-                <Text size='nano' variant='label' component='p'>
-                  артикул колорвея: {pinArticle}
+
+            {/* Что именно раскладываем: какой контур и какой размер. Один DXF несёт всю градацию,
+              а блок — контур на нескольких слоях, поэтому без этого выбора на полосу легла бы
+              вся градация разом, а длина маркера не относилась бы ни к одному размеру.
+              Слой по умолчанию — тот, что ГРАДУИРУЕТСЯ: контур, одинаковый во всех размерах,
+              это справочная линия, а не деталь. */}
+            {(layerOpts.length > 1 || missingOnLayer.length > 0) && (
+              <div className='space-y-1 border border-borderColor p-1.5'>
+                {layerOpts.length > 1 && (
+                  <div className='flex flex-wrap items-center gap-1'>
+                    <Text size='nano' variant='label' component='span'>
+                      контур:
+                    </Text>
+                    {layerOpts.map((o) => {
+                      // Замер — В САМОЙ КНОПКЕ, а не только в подсказке. Вопрос «крой или шов»
+                      // решает, нужен ли офсет вообще, и держать ответ на него под наведением мыши
+                      // значит прятать половину выбора от того, кто его делает.
+                      const measured = layerAllowanceLabel(o);
+                      return (
+                        <Button
+                          key={o.layer || '(none)'}
+                          type='button'
+                          variant={o.layer === contourLayer ? 'main' : 'secondary'}
+                          size='xs'
+                          disabled={running}
+                          title={[
+                            o.checked === 0
+                              ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
+                              : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`,
+                            o.allowance ? allowanceLabel(o.allowance) : '',
+                            o.allowance?.verdict === 'unknown'
+                              ? allowanceUnknownText(o.allowance)
+                              : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                          onClick={() => guardManual(() => setActiveLayer(o.layer))}
+                        >
+                          слой {o.layer || '—'}
+                          {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
+                          {measured ? ` · ${measured}` : ''}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                )}
+                {missingOnLayer.length > 0 && (
+                  <Text size='nano' component='p' className='text-error'>
+                    на слое {contourLayer || '—'} нет контура у {missingOnLayer.length} блоков — они
+                    не попадут в раскладку: {missingOnLayer.slice(0, 6).join(', ')}
+                    {missingOnLayer.length > 6 ? '…' : ''}
+                  </Text>
+                )}
+              </div>
+            )}
+
+            {/* ДВОЙНОЙ ПРИПУСК — ДО ПРОГОНА, а не после, и РЯДОМ с выбором слоя, который его
+              вызвал (раньше этот отказ жил стопкой на правой панели, среди новостей про
+              результат). Панель, а не тост: тост исчезает, а чинится это двумя кликами здесь
+              же — в списке слоёв или в поле припуска (секция «как кладём»). */}
+            {doubleAllowanceRefusal && (
+              <CalloutBox tone='error'>
+                двойной припуск — прогон не запускается: {doubleAllowanceRefusal}
+              </CalloutBox>
+            )}
+
+            {/* Долевая — СВОЯ панель, а не часть выбора слоя и размера. Пока она жила внутри той,
+              на файле с одним контурным слоем и одним размером панель не рендерилась вовсе:
+              выключатель, счётчик повёрнутых и список деталей без долевой исчезали, а разворот
+              всё равно происходил — то есть обе обещанные страховки пропадали ровно там, где
+              проверить было нечем. */}
+            <div className='space-y-1 border border-borderColor p-1.5'>
+              <div className='flex flex-wrap items-center gap-1'>
+                <Text size='nano' variant='label' component='span'>
+                  долевая:
                 </Text>
-              )}
-              {noSlotChosen && (
+                {grainLayers.map((o) => (
+                  <Button
+                    key={o.layer}
+                    type='button'
+                    variant={o.layer === grainLayer ? 'main' : 'secondary'}
+                    size='xs'
+                    disabled={running}
+                    title={`слой ${o.layer}: ровно один отрезок у ${o.exactlyOne} из ${o.seen} деталей, типичная длина ${o.medianLengthCm.toFixed(1)} см`}
+                    onClick={() => guardManual(() => setGrainPick(o.layer))}
+                  >
+                    слой {o.layer}
+                  </Button>
+                ))}
+                <Button
+                  type='button'
+                  variant={grainLayer === '' ? 'main' : 'secondary'}
+                  size='xs'
+                  disabled={running}
+                  title='класть детали так, как они нарисованы'
+                  onClick={() => guardManual(() => setGrainPick(''))}
+                >
+                  не разворачивать
+                </Button>
+                {grainLayer !== '' && (
+                  <Text size='nano' variant='label' component='span'>
+                    повёрнуто: {oriented.rotated} из {pieces.length}
+                  </Text>
+                )}
+              </div>
+              {grainLayer !== '' && oriented.missing.length > 0 && (
                 <Text size='nano' component='p' className='text-error'>
-                  выберите ткань — иначе маркер сохранится без привязки и расход не попадёт в
-                  костинг
+                  долевая не определена однозначно у {oriented.missing.length} деталей — они лягут
+                  так, как нарисованы: {oriented.missing.slice(0, 6).join(', ')}
+                  {oriented.missing.length > 6 ? '…' : ''}
                 </Text>
               )}
-              {colorwayNoPin && (
+              {grainLayer === '' && (
                 <Text size='nano' component='p' className='text-error'>
-                  колорвей «{chosenColorway?.label}» не назначил артикул на эту ткань — ширина взята
-                  по умолчанию у строки BOM, и раскладка не будет описывать его полотно
+                  детали лягут так, как нарисованы в файле, — это может оказаться поперёк долевой
                 </Text>
               )}
             </div>
-          )}
-          <div className='grid grid-cols-2 gap-1.5'>
-            <label className='space-y-0.5'>
-              <Text size='nano' variant='label' component='span'>
-                ширина раскроя, см
+
+            {/* One chip per source DXF: each fabric is its own file, so «выбрать одну ткань»
+              must be one click, not fifteen. Indeterminate = partially selected. */}
+            {sources.length > 1 && (
+              <div className='space-y-1'>
+                {sources.map(([source, ps]) => {
+                  const fitting = ps.filter((p) => fitsWidth.get(p.id));
+                  const checkedN = fitting.filter((p) => sel[p.id]?.checked).length;
+                  const state: boolean | 'indeterminate' =
+                    fitting.length > 0 && checkedN === fitting.length
+                      ? true
+                      : checkedN > 0
+                        ? 'indeterminate'
+                        : false;
+                  return (
+                    <label key={source} className='flex cursor-pointer items-center gap-1.5'>
+                      <CheckboxCommon
+                        name={`nest-src-${source}`}
+                        checked={state}
+                        disabled={running || fitting.length === 0}
+                        className='[&>span[data-state=indeterminate]]:opacity-40'
+                        onChange={(c: boolean) =>
+                          guardManual(() =>
+                            setSel((m) => {
+                              const next = { ...m };
+                              for (const p of fitting) {
+                                next[p.id] = { checked: c, qty: m[p.id]?.qty ?? 1 };
+                              }
+                              return next;
+                            }),
+                          )
+                        }
+                      />
+                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                        файл: {source}
+                      </Text>
+                      <Text size='nano' variant='label' component='span' className='shrink-0'>
+                        {checkedN}/{ps.length} дет.
+                      </Text>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            {parse.phase === 'loading' && (
+              <Text size='micro' variant='label'>
+                загрузка и разбор DXF…
               </Text>
-              <Input
-                name='nest-width'
-                type='number'
-                value={widthRaw ?? String(widthCm)}
-                min={10}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWidthRaw(e.target.value)}
-                onBlur={() => {
-                  const next = Math.max(10, numOr(widthRaw ?? '', widthCm));
-                  setWidthRaw(null);
-                  // Флаг «ввели руками» ставится ВНУТРИ apply: если оператор откажется выбрасывать
-                  // ручные правки, ширина не изменилась — и считать её введённой руками нельзя,
-                  // иначе автоподстановка по колорвею молча выключится навсегда.
-                  if (next !== widthCm) {
-                    guardManual(() => {
-                      setWidthTouched(true);
-                      setWidthCm(next);
-                    });
-                  }
-                }}
-                disabled={running}
-              />
-              {widthSource && (
+            )}
+            {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
+            {parse.phase === 'ready' && parse.warnings.length > 0 && (
+              <CalloutBox tone='note' className='max-h-24 space-y-0.5 overflow-y-auto'>
+                {parse.warnings.map((w, i) => (
+                  <Text key={i} size='nano' component='p'>
+                    {w}
+                  </Text>
+                ))}
+              </CalloutBox>
+            )}
+          </ModalRailSection>
+
+          <ModalRailSection
+            index={3}
+            title='как кладём'
+            summary={s3Summary}
+            status={railS3}
+            open={railOpen === 3}
+            onToggle={() => toggleRail(3)}
+            onPin={() => pinRail(3)}
+          >
+            <div className='grid grid-cols-2 gap-1.5'>
+              <label className='space-y-0.5'>
                 <Text size='nano' variant='label' component='span'>
-                  {widthSource}
+                  ширина раскроя, см
                 </Text>
-              )}
-            </label>
-            <label className='space-y-0.5'>
-              <Text size='nano' variant='label' component='span'>
-                целевая длина, см
-              </Text>
-              <Input
-                name='nest-target'
-                type='number'
-                value={targetCm}
-                placeholder='без цели'
-                min={0}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const v = e.target.value.trim();
-                  setTargetCm(v === '' ? '' : Math.max(0, numOr(v, 0)));
-                }}
-                disabled={running}
-              />
-            </label>
-            <label className='space-y-0.5'>
-              <Text size='nano' variant='label' component='span'>
-                зазор, см
-              </Text>
-              <Input
-                name='nest-gap'
-                type='number'
-                value={gapCm}
-                min={0}
-                step={0.1}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const next = Math.max(0, numOr(e.target.value, gapCm));
-                  if (next !== gapCm) guardManual(() => setGapCm(next));
-                }}
-                disabled={running}
-              />
-            </label>
-            <label className='space-y-0.5'>
-              <Text size='nano' variant='label' component='span'>
-                отступ от кромки, см
-              </Text>
-              <Input
-                name='nest-margin'
-                type='number'
-                value={marginCm}
-                min={0}
-                step={0.5}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const next = Math.max(0, numOr(e.target.value, marginCm));
-                  if (next !== marginCm) guardManual(() => setMarginCm(next));
-                }}
-                disabled={running}
-              />
-            </label>
-            {/* Припуск на шов — ВХОД алгоритма, а не подпись к результату: он раздувает контур
+                <Input
+                  name='nest-width'
+                  type='number'
+                  value={widthRaw ?? String(widthCm)}
+                  min={10}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setWidthRaw(e.target.value)}
+                  onBlur={() => {
+                    const next = Math.max(10, numOr(widthRaw ?? '', widthCm));
+                    setWidthRaw(null);
+                    // Флаг «ввели руками» ставится ВНУТРИ apply: если оператор откажется выбрасывать
+                    // ручные правки, ширина не изменилась — и считать её введённой руками нельзя,
+                    // иначе автоподстановка по колорвею молча выключится навсегда.
+                    if (next !== widthCm) {
+                      guardManual(() => {
+                        setWidthTouched(true);
+                        setWidthCm(next);
+                      });
+                    }
+                  }}
+                  disabled={running}
+                />
+                {widthSource && (
+                  <Text size='nano' variant='label' component='span'>
+                    {widthSource}
+                  </Text>
+                )}
+              </label>
+              <label className='space-y-0.5'>
+                <Text size='nano' variant='label' component='span'>
+                  целевая длина, см
+                </Text>
+                <Input
+                  name='nest-target'
+                  type='number'
+                  value={targetCm}
+                  placeholder='без цели'
+                  min={0}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    const v = e.target.value.trim();
+                    setTargetCm(v === '' ? '' : Math.max(0, numOr(v, 0)));
+                  }}
+                  disabled={running}
+                />
+              </label>
+              <label className='space-y-0.5'>
+                <Text size='nano' variant='label' component='span'>
+                  зазор, см
+                </Text>
+                <Input
+                  name='nest-gap'
+                  type='number'
+                  value={gapCm}
+                  min={0}
+                  step={0.1}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    const next = Math.max(0, numOr(e.target.value, gapCm));
+                    if (next !== gapCm) guardManual(() => setGapCm(next));
+                  }}
+                  disabled={running}
+                />
+              </label>
+              <label className='space-y-0.5'>
+                <Text size='nano' variant='label' component='span'>
+                  отступ от кромки, см
+                </Text>
+                <Input
+                  name='nest-margin'
+                  type='number'
+                  value={marginCm}
+                  min={0}
+                  step={0.5}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    const next = Math.max(0, numOr(e.target.value, marginCm));
+                    if (next !== marginCm) guardManual(() => setMarginCm(next));
+                  }}
+                  disabled={running}
+                />
+              </label>
+              {/* Припуск на шов — ВХОД алгоритма, а не подпись к результату: он раздувает контур
                 до линии кроя ещё до укладки, поэтому и длина, и SVG, и плоттерный DXF описывают
                 то, что цех действительно вырежет. */}
-            <label className='space-y-0.5'>
-              <Text size='nano' variant='label' component='span'>
-                припуск на шов, см
-              </Text>
-              <Input
-                name='nest-allowance'
-                type='number'
-                value={allowanceCm}
-                min={0}
-                max={MAX_SEAM_ALLOWANCE_CM}
-                step={0.1}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  // Потолок 10 см — не физика, а защита от промаха по точке: «11» вместо «1.1»
-                  // даёт совершенно правдоподобный маркер, просто вчетверо длиннее, и заметить
-                  // это можно только по счёту от поставщика. Число живёт в contour-layer.ts, где
-                  // его применяет и предзаполнение: два потолка на одно поле однажды разойдутся.
-                  const next = clampSeamAllowance(numOr(e.target.value, allowanceCm));
-                  if (next !== allowanceCm) {
-                    // Флаг «ввели руками» ставится ВНУТРИ apply — ровно как у ширины: если
-                    // оператор откажется выбрасывать ручные правки, припуск не изменился, и
-                    // считать его введённым руками нельзя, иначе предзаполнение по замеру и по
-                    // эталону карточки молча выключится навсегда.
-                    guardManual(() => {
-                      setAllowanceTouched(true);
-                      setAllowanceCm(next);
-                    });
-                  }
-                }}
-                disabled={running}
-              />
-              {/* ЧТО ЛЕЖИТ НА ВЫБРАННОМ СЛОЕ — замером, а не утверждением. Здесь стояло «контур
+              <label className='space-y-0.5'>
+                <Text size='nano' variant='label' component='span'>
+                  припуск на шов, см
+                </Text>
+                <Input
+                  name='nest-allowance'
+                  type='number'
+                  value={allowanceCm}
+                  min={0}
+                  max={MAX_SEAM_ALLOWANCE_CM}
+                  step={0.1}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    // Потолок 10 см — не физика, а защита от промаха по точке: «11» вместо «1.1»
+                    // даёт совершенно правдоподобный маркер, просто вчетверо длиннее, и заметить
+                    // это можно только по счёту от поставщика. Число живёт в contour-layer.ts, где
+                    // его применяет и предзаполнение: два потолка на одно поле однажды разойдутся.
+                    const next = clampSeamAllowance(numOr(e.target.value, allowanceCm));
+                    if (next !== allowanceCm) {
+                      // Флаг «ввели руками» ставится ВНУТРИ apply — ровно как у ширины: если
+                      // оператор откажется выбрасывать ручные правки, припуск не изменился, и
+                      // считать его введённым руками нельзя, иначе предзаполнение по замеру и по
+                      // эталону карточки молча выключится навсегда.
+                      guardManual(() => {
+                        setAllowanceTouched(true);
+                        setAllowanceCm(next);
+                      });
+                    }
+                  }}
+                  disabled={running}
+                />
+                {/* ЧТО ЛЕЖИТ НА ВЫБРАННОМ СЛОЕ — замером, а не утверждением. Здесь стояло «контур
                   DXF — линия шва; кладётся линия кроя», и это правда ровно до тех пор, пока слой
                   выбран правильно: на файле с четырьмя контурными слоями та же строка спокойно
                   стоит над линией КРОЯ и подтверждает оператору, что офсет нужен. */}
-              <Text size='nano' variant='label' component='span'>
-                {allowanceSourceText}
-              </Text>
-              {!allowanceTouched && allowancePrefill && (
                 <Text size='nano' variant='label' component='span'>
-                  подставлено: {allowancePrefill.why}
+                  {allowanceSourceText}
                 </Text>
-              )}
-            </label>
-            {/* Поле «комплектов» жило здесь и умело выразить только N одинаковых изделий одного
+                {!allowanceTouched && allowancePrefill && (
+                  <Text size='nano' variant='label' component='span'>
+                    подставлено: {allowancePrefill.why}
+                  </Text>
+                )}
+              </label>
+              {/* Поле «комплектов» жило здесь и умело выразить только N одинаковых изделий одного
                 размера. Его заменила таблица состава ниже — там же, где выбирается, что кроим. */}
-          </div>
+            </div>
 
-          {/* Допущение проговаривается вслух: число одно на весь комплект и кладётся РОВНЫМ по
+            {/* Допущение проговаривается вслух: число одно на весь комплект и кладётся РОВНЫМ по
               всему контуру, а настоящий подгиб низа шире. Молчаливое допущение здесь стоило бы
               метров ткани, а увидеть его на картинке нельзя. */}
-          {allowanceCm > 0 ? (
-            <CalloutBox tone='note'>
-              <Text size='nano' component='p'>
-                припуск {allowanceCm.toFixed(2)} см отложен РОВНО по всему контуру каждой детали и
-                одинаков для всего комплекта. Подгиб низа в жизни шире, горловина уже — раскладка
-                этого не знает. Линия шва остаётся нарисованной внутри линии кроя.
-              </Text>
-              {/* ЧЕСТНАЯ ВЕТКА «УЛИК НЕТ» (§5.4). Замер не удался — и это законно, а не
+            {allowanceCm > 0 ? (
+              <CalloutBox tone='note'>
+                <Text size='nano' component='p'>
+                  припуск {allowanceCm.toFixed(2)} см отложен РОВНО по всему контуру каждой детали и
+                  одинаков для всего комплекта. Подгиб низа в жизни шире, горловина уже — раскладка
+                  этого не знает. Линия шва остаётся нарисованной внутри линии кроя.
+                </Text>
+                {/* ЧЕСТНАЯ ВЕТКА «УЛИК НЕТ» (§5.4). Замер не удался — и это законно, а не
                   недосмотр: у блока один замкнутый контур, второй контур пересекает первый,
                   принятых блоков меньше трёх. Сохранение не блокируется, но и молчать нельзя:
                   маркер уедет с contour_allowance_cm = NULL, то есть «припуск не подтверждён
                   файлом», и гейт готовности прочитает это как непроверенное происхождение
                   факта — не как двойной припуск. */}
-              {allowanceUnconfirmed && (
+                {allowanceUnconfirmed && (
+                  <Text size='nano' component='p'>
+                    по файлу НЕ ПОДТВЕРЖДЕНО, что в контуре припуска нет: {''}
+                    {contourMeasure ? allowanceUnknownText(contourMeasure) : ''}. Раскладка
+                    считается, маркер сохраняется — он будет помечен «припуск не подтверждён
+                    файлом».
+                  </Text>
+                )}
+              </CalloutBox>
+            ) : contourIsCutLine ? (
+              // Ноль ЗДЕСЬ ПРАВИЛЬНЫЙ, и прежний безусловный красный текст ниже утверждал обратное.
+              // На слое с линией кроя припуск уже в контуре: добавить его значит посчитать дважды.
+              <CalloutBox tone='note'>
                 <Text size='nano' component='p'>
-                  по файлу НЕ ПОДТВЕРЖДЕНО, что в контуре припуска нет: {''}
-                  {contourMeasure ? allowanceUnknownText(contourMeasure) : ''}. Раскладка считается,
-                  маркер сохраняется — он будет помечен «припуск не подтверждён файлом».
+                  припуск 0 — и это верно для выбранного слоя: на нём ЛИНИЯ КРОЯ, припуск{' '}
+                  {(contourMeasure?.allowanceCm ?? 0).toFixed(2)} см уже заложен в контур. Раскладка
+                  кладёт его как есть.
                 </Text>
-              )}
-            </CalloutBox>
-          ) : contourIsCutLine ? (
-            // Ноль ЗДЕСЬ ПРАВИЛЬНЫЙ, и прежний безусловный красный текст ниже утверждал обратное.
-            // На слое с линией кроя припуск уже в контуре: добавить его значит посчитать дважды.
-            <CalloutBox tone='note'>
-              <Text size='nano' component='p'>
-                припуск 0 — и это верно для выбранного слоя: на нём ЛИНИЯ КРОЯ, припуск{' '}
-                {(contourMeasure?.allowanceCm ?? 0).toFixed(2)} см уже заложен в контур. Раскладка
-                кладёт его как есть.
+              </CalloutBox>
+            ) : (
+              <CalloutBox tone='error'>
+                <Text size='nano' component='p'>
+                  припуск 0 — раскладывается ЛИНИЯ ШВА, а цех кроит шире. Расход будет занижен.
+                </Text>
+              </CalloutBox>
+            )}
+            {/* Полный текст отказа живёт ровно в одном месте — в секции «как читаем файл», рядом с
+              выбором слоя, который его вызвал. Здесь, у поля припуска, — только ссылка-строка. */}
+            {doubleAllowanceRefusal && (
+              <Text size='nano' component='p' className='text-error'>
+                двойной припуск — прогон не запускается; подробности и оба выхода — в секции «2 ·
+                как читаем файл», рядом с выбором контурного слоя
               </Text>
-            </CalloutBox>
-          ) : (
-            <CalloutBox tone='error'>
-              <Text size='nano' component='p'>
-                припуск 0 — раскладывается ЛИНИЯ ШВА, а цех кроит шире. Расход будет занижен.
+            )}
+            {seam.hulled.length > 0 && (
+              <Text size='nano' component='p' className='text-error'>
+                контур с дефектом у {seam.hulled.length} деталей — припуск посчитан по выпуклой
+                оболочке (с запасом): {seam.hulled.slice(0, 6).join(', ')}
+                {seam.hulled.length > 6 ? '…' : ''}
               </Text>
-            </CalloutBox>
-          )}
-          {seam.hulled.length > 0 && (
-            <Text size='nano' component='p' className='text-error'>
-              контур с дефектом у {seam.hulled.length} деталей — припуск посчитан по выпуклой
-              оболочке (с запасом): {seam.hulled.slice(0, 6).join(', ')}
-              {seam.hulled.length > 6 ? '…' : ''}
-            </Text>
-          )}
+            )}
 
-          {/* НАПРАВЛЕНИЕ ТКАНИ. Не настройка раскладки, а факт про полотно — поэтому показывается,
+            {/* НАПРАВЛЕНИЕ ТКАНИ. Не настройка раскладки, а факт про полотно — поэтому показывается,
               а не спрашивается: правится оно на вкладке BOM, у строки материала. Единственное, что
               оно решает здесь, — переворот детали на 180°: на ворсовой ткани перевёрнутая деталь
               ложится ворсом против соседки, и готовое изделие выходит двухцветным под лампами.
               Заметить это на раскладке нечем — контур перевёрнутой детали выглядит ровно так же. */}
-          {!viewData && (
-            <Text size='nano' variant='label' component='p'>
-              направление ткани:{' '}
-              {effectiveDirection === 'one_way'
-                ? 'ворсовая (one-way) — переворот на 180° запрещён'
-                : effectiveDirection === 'two_way'
-                  ? 'two-way — переворот разрешён'
-                  : effectiveDirection === 'any'
-                    ? 'без ворса — переворот разрешён'
-                    : 'НЕ ЗАДАНО'}
-              {/* Прежний текст здесь обещал безусловный отказ: «сохранить нельзя, пока направление
+            {!viewData && (
+              <Text size='nano' variant='label' component='p'>
+                направление ткани:{' '}
+                {effectiveDirection === 'one_way'
+                  ? 'ворсовая (one-way) — переворот на 180° запрещён'
+                  : effectiveDirection === 'two_way'
+                    ? 'two-way — переворот разрешён'
+                    : effectiveDirection === 'any'
+                      ? 'без ворса — переворот разрешён'
+                      : 'НЕ ЗАДАНО'}
+                {/* Прежний текст здесь обещал безусловный отказ: «сохранить нельзя, пока направление
                   не проставлено». Сервер строже НЕ настолько — он отказывает только раскладке,
                   которая реально кладёт деталь вверх ногами (180° или зеркало), а раскладку без
                   переворотов принимает при любом направлении, включая непроставленное. Обещание
                   отказа, которого не будет, стоит того же, что и умолчание о настоящем: оператор
                   перестаёт верить плашке. Поэтому теперь тут сказано, что делает КЛИЕНТ — он
                   считает без 180°, — и почему это не блокирует сохранение. */}
-              {effectiveDirection === 'unknown'
-                ? ' — пока никто не ответил, раскладка считается БЕЗ переворота на 180°: такая норма принимается на любой ткани. Проставьте направление у строки ткани на вкладке BOM, и на ненаправленной ткани раскладка станет плотнее'
-                : ''}
-            </Text>
-          )}
-
-          <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
-            <label className='flex cursor-pointer items-center gap-1.5'>
-              <CheckboxCommon
-                name='nest-crossgrain'
-                checked={crossGrain}
-                onChange={(c: boolean) => guardManual(() => setCrossGrain(c))}
-                disabled={running}
-              />
-              <Text size='micro' component='span'>
-                разрешить поворот 90°
-              </Text>
-            </label>
-            <Selector
-              label='время'
-              compact
-              value={budgetS}
-              options={[
-                { value: 5, label: '5 с' },
-                { value: 20, label: '20 с' },
-                { value: 60, label: '60 с' },
-              ]}
-              onChange={(v: string | number) => setBudgetS(Number(v))}
-              disabled={running}
-            />
-            <Selector
-              label='юниты DXF'
-              compact
-              value={unitOverride}
-              options={[
-                {
-                  value: 'auto',
-                  // The detected unit stays visible even on 'авто' — a file whose header
-                  // lies about units is caught by the operator seeing «авто (см)» on a
-                  // sleeve that should be in mm.
-                  label:
-                    parse.phase === 'ready'
-                      ? `авто (${parse.detectedUnit === 'mm' ? 'мм' : parse.detectedUnit === 'cm' ? 'см' : 'дюймы'})`
-                      : 'авто',
-                },
-                { value: 'mm', label: 'мм' },
-                { value: 'cm', label: 'см' },
-                { value: 'in', label: 'дюймы' },
-              ]}
-              onChange={(v: string | number) =>
-                guardManual(() => setUnitOverride(String(v) as Unit))
-              }
-              disabled={running || parse.phase === 'loading'}
-            />
-          </div>
-
-          {parse.phase === 'ready' &&
-            unitOverride !== 'auto' &&
-            unitOverride !== parse.detectedUnit && (
-              <Text size='nano' variant='label'>
-                файл заявляет{' '}
-                {parse.detectedUnit === 'mm' ? 'мм' : parse.detectedUnit === 'cm' ? 'см' : 'дюймы'}{' '}
-                — выбран ручной override
+                {effectiveDirection === 'unknown'
+                  ? ' — пока никто не ответил, раскладка считается БЕЗ переворота на 180°: такая норма принимается на любой ткани. Проставьте направление у строки ткани на вкладке BOM, и на ненаправленной ткани раскладка станет плотнее'
+                  : ''}
               </Text>
             )}
 
-          {parse.phase === 'loading' && (
-            <Text size='micro' variant='label'>
-              загрузка и разбор DXF…
-            </Text>
-          )}
-          {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
-          {parse.phase === 'ready' && parse.warnings.length > 0 && (
-            <CalloutBox tone='note' className='max-h-24 space-y-0.5 overflow-y-auto'>
-              {parse.warnings.map((w, i) => (
-                <Text key={i} size='nano' component='p'>
-                  {w}
+            {/* Тот же отказ, что вынес бы сервер, но ДО отправки и рядом со строкой направления,
+              которой он вызван (раньше жил стопкой на правой панели, среди новостей про
+              результат). Слот и прогон разнесены во времени, поэтому расхождение появляется уже
+              после того, как ждать перестали. */}
+            {directionRefusal && (
+              <CalloutBox tone='error'>сохранить нельзя: {directionRefusal}</CalloutBox>
+            )}
+
+            <div className='flex flex-wrap items-center gap-x-3 gap-y-1.5'>
+              <label className='flex cursor-pointer items-center gap-1.5'>
+                <CheckboxCommon
+                  name='nest-crossgrain'
+                  checked={crossGrain}
+                  onChange={(c: boolean) => guardManual(() => setCrossGrain(c))}
+                  disabled={running}
+                />
+                <Text size='micro' component='span'>
+                  разрешить поворот 90°
                 </Text>
-              ))}
-            </CalloutBox>
-          )}
-
-          {/* One chip per source DXF: each fabric is its own file, so «выбрать одну ткань»
-              must be one click, not fifteen. Indeterminate = partially selected. */}
-          {sources.length > 1 && (
-            <div className='space-y-1'>
-              {sources.map(([source, ps]) => {
-                const fitting = ps.filter((p) => fitsWidth.get(p.id));
-                const checkedN = fitting.filter((p) => sel[p.id]?.checked).length;
-                const state: boolean | 'indeterminate' =
-                  fitting.length > 0 && checkedN === fitting.length
-                    ? true
-                    : checkedN > 0
-                      ? 'indeterminate'
-                      : false;
-                return (
-                  <label key={source} className='flex cursor-pointer items-center gap-1.5'>
-                    <CheckboxCommon
-                      name={`nest-src-${source}`}
-                      checked={state}
-                      disabled={running || fitting.length === 0}
-                      className='[&>span[data-state=indeterminate]]:opacity-40'
-                      onChange={(c: boolean) =>
-                        guardManual(() =>
-                          setSel((m) => {
-                            const next = { ...m };
-                            for (const p of fitting) {
-                              next[p.id] = { checked: c, qty: m[p.id]?.qty ?? 1 };
-                            }
-                            return next;
-                          }),
-                        )
-                      }
-                    />
-                    <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                      файл: {source}
-                    </Text>
-                    <Text size='nano' variant='label' component='span' className='shrink-0'>
-                      {checkedN}/{ps.length} дет.
-                    </Text>
-                  </label>
-                );
-              })}
+              </label>
+              <Selector
+                label='время'
+                compact
+                value={budgetS}
+                options={[
+                  { value: 5, label: '5 с' },
+                  { value: 20, label: '20 с' },
+                  { value: 60, label: '60 с' },
+                ]}
+                onChange={(v: string | number) => setBudgetS(Number(v))}
+                disabled={running}
+              />
             </div>
-          )}
+          </ModalRailSection>
 
-          {/* Что именно раскладываем: какой контур и какой размер. Один DXF несёт всю градацию,
-              а блок — контур на нескольких слоях, поэтому без этого выбора на полосу легла бы
-              вся градация разом, а длина маркера не относилась бы ни к одному размеру.
-              Слой по умолчанию — тот, что ГРАДУИРУЕТСЯ: контур, одинаковый во всех размерах,
-              это справочная линия, а не деталь. */}
-          {(layerOpts.length > 1 || missingOnLayer.length > 0) && (
-            <div className='space-y-1 border border-borderColor p-1.5'>
-              {layerOpts.length > 1 && (
-                <div className='flex flex-wrap items-center gap-1'>
-                  <Text size='nano' variant='label' component='span'>
-                    контур:
+          <ModalRailSection
+            index={4}
+            title='детали'
+            summary={s4Summary}
+            status={railS4}
+            open={railOpen === 4}
+            onToggle={() => toggleRail(4)}
+            onPin={() => pinRail(4)}
+          >
+            {/* Piece list: checkbox · thumb · name · размеры · qty. */}
+            {pieces.length > 0 && (
+              <div className='max-h-[46vh] space-y-1 overflow-y-auto border border-borderColor p-1.5'>
+                <div className='flex items-center justify-between'>
+                  <Text size='nano' variant='label'>
+                    детали: {pieces.length} · выбрано {checkedCount}
+                    {instanceCount !== checkedCount ? ` · к раскладке: ${instanceCount}` : ''}
+                    {` · ${unitsTotal} изд.`}
+                    {checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS
+                      ? ` · СВЕРХ ПОТОЛКА (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку сервер не сохранит`
+                      : ''}
                   </Text>
-                  {layerOpts.map((o) => {
-                    // Замер — В САМОЙ КНОПКЕ, а не только в подсказке. Вопрос «крой или шов»
-                    // решает, нужен ли офсет вообще, и держать ответ на него под наведением мыши
-                    // значит прятать половину выбора от того, кто его делает.
-                    const measured = layerAllowanceLabel(o);
-                    return (
-                      <Button
-                        key={o.layer || '(none)'}
-                        type='button'
-                        variant={o.layer === contourLayer ? 'main' : 'secondary'}
-                        size='xs'
-                        disabled={running}
-                        title={[
-                          o.checked === 0
-                            ? `слой ${o.layer}: ${o.pieces} контуров, сравнить размеры не с чем`
-                            : `слой ${o.layer}: ${o.pieces} контуров, градуируется у ${o.graded} из ${o.checked} деталей`,
-                          o.allowance ? allowanceLabel(o.allowance) : '',
-                          o.allowance?.verdict === 'unknown'
-                            ? allowanceUnknownText(o.allowance)
-                            : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' · ')}
-                        onClick={() => guardManual(() => setActiveLayer(o.layer))}
-                      >
-                        слой {o.layer || '—'}
-                        {o.checked > 0 && o.graded === 0 ? ' (не градуируется)' : ''}
-                        {measured ? ` · ${measured}` : ''}
-                      </Button>
-                    );
-                  })}
+                  <button
+                    type='button'
+                    className='text-nano uppercase underline hover:opacity-70'
+                    onClick={() =>
+                      guardManual(() => {
+                        // Слитно, а не заменой: замена стёрла бы выбор деталей ДРУГИХ размеров
+                        // и слоёв, и переключение размера показало бы всё снятым.
+                        const next: PieceSel = { ...sel };
+                        for (const p of pieces) {
+                          next[p.id] = { checked: !!fitsWidth.get(p.id), qty: sel[p.id]?.qty ?? 1 };
+                        }
+                        setSel(next);
+                      })
+                    }
+                  >
+                    выбрать все
+                  </button>
                 </div>
-              )}
-              {missingOnLayer.length > 0 && (
-                <Text size='nano' component='p' className='text-error'>
-                  на слое {contourLayer || '—'} нет контура у {missingOnLayer.length} блоков — они
-                  не попадут в раскладку: {missingOnLayer.slice(0, 6).join(', ')}
-                  {missingOnLayer.length > 6 ? '…' : ''}
-                </Text>
-              )}
-            </div>
-          )}
-
-          {/* СОСТАВ НАСТИЛА — то, чем раскладка теперь описывается вместо «размер + комплекты».
-              Смешанный настил ложится плотнее однородного, и пока состав был скаляром, снять
-              такую норму было нечем. Таблица заменила и переключатель размеров, и поле
-              «комплектов»: размер с количеством 0 просто не кроится. */}
-          {!viewData && (
-            <div className='space-y-1 border border-borderColor p-1.5'>
-              <Text size='nano' variant='label' component='p'>
-                состав настила — сколько изделий каждого размера кроим за один раз
-              </Text>
-              {graded ? (
-                compRows.map((r) => {
-                  const bad = !r.resolvable || r.sizeId <= 0;
+                {pieces.map((p) => {
+                  const fits = fitsWidth.get(p.id) ?? false;
+                  const s = sel[p.id] ?? { checked: false, qty: 1 };
                   return (
-                    <div key={r.key} className='flex items-center gap-1.5'>
-                      {/* Подпись — ВСЕ написания размера из файла («M / m»): строка их слила,
-                          и оператор должен видеть, что обе графики кроятся одним тиражом. */}
-                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                        {r.label}
-                      </Text>
-                      <Text size='nano' variant='label' component='span'>
-                        {r.count} дет.
-                      </Text>
-                      {bad && r.qty >= 1 && <Pill tone='warn'>нет в карточке</Pill>}
+                    <div key={p.id} className='flex items-center gap-1.5'>
+                      <CheckboxCommon
+                        name={`nest-piece-${p.id}`}
+                        checked={s.checked && fits}
+                        disabled={!fits || running}
+                        onChange={(c: boolean) =>
+                          guardManual(() => setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })))
+                        }
+                      />
+                      <PieceThumb piece={p} />
+                      <div className='min-w-0 flex-1'>
+                        <Text size='micro' component='p' className='truncate'>
+                          {p.name}
+                        </Text>
+                        {/* Размер детали и её тираж в этом настиле. До состава список показывал
+                          ровно один размер, и подпись была бы шумом; теперь в нём лежат детали
+                          нескольких размеров, у которых имена различаются одним хвостом. */}
+                        <Text size='nano' variant='label' component='p'>
+                          {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} см
+                          {graded
+                            ? ` · ${split.codeById.get(p.id)?.size || 'без размера'} · ×${
+                                Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
+                              }`
+                            : ''}
+                        </Text>
+                      </div>
+                      {!fits && <Pill tone='warn'>шире полотна</Pill>}
                       <Input
-                        name={`nest-comp-${r.key}`}
+                        name={`nest-qty-${p.id}`}
                         type='number'
-                        value={r.qty}
-                        min={0}
-                        disabled={running}
-                        className='w-14 shrink-0 px-1 py-0 text-micro'
-                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                          const next = Math.max(0, Math.round(numOr(e.target.value, r.qty)));
-                          if (next !== r.qty) {
-                            guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
-                          }
-                        }}
+                        value={s.qty}
+                        min={1}
+                        disabled={!fits || running}
+                        className='w-12 shrink-0 px-1 py-0 text-micro'
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setSel((m) => ({
+                            ...m,
+                            [p.id]: {
+                              ...s,
+                              qty: Math.max(1, Math.round(numOr(e.target.value, 1))),
+                            },
+                          }))
+                        }
                       />
                     </div>
                   );
-                })
-              ) : (
-                <label className='flex items-center gap-1.5'>
-                  <Text size='micro' component='span' className='min-w-0 flex-1'>
-                    изделий, шт{sizeLabel ? ` · размер ${sizeLabel}` : ''}
-                  </Text>
-                  <Input
-                    name='nest-units'
-                    type='number'
-                    value={ungradedUnits}
-                    min={1}
-                    disabled={running}
-                    className='w-14 shrink-0 px-1 py-0 text-micro'
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                      const next = Math.max(1, Math.round(numOr(e.target.value, ungradedUnits)));
-                      if (next !== ungradedUnits) {
-                        guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
-                      }
-                    }}
-                  />
-                </label>
-              )}
-              {graded && ungradedCount > 0 && (
-                <Text size='nano' variant='label' component='p'>
-                  {ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ изделие
-                  состава, то есть по {unitsTotal} шт
-                </Text>
-              )}
-              <Text size='nano' variant='label' component='p'>
-                итог: {unitsTotal} изделий · {checkedCount} уникальных деталей · {instanceCount}{' '}
-                экземпляров
-              </Text>
-              {mixed && (
-                <Text size='nano' component='p' className='text-warning'>
-                  смешанный состав: расход НА ИЗДЕЛИЕ у такой раскладки — среднее по составу (мелкие
-                  размеры завышает, крупные занижает), и в рецепт он не пишется. Сама длина настила
-                  и потребность по нему верны; пер-размерный расход придёт с Ф2.4
-                </Text>
-              )}
-              {unresolvedTokens.length > 0 && (
-                <Text size='nano' component='p' className='text-error'>
-                  размеров нет в размерном ряду карточки: {unresolvedTokens.join(', ')} — посчитать
-                  раскладку можно, сохранить нельзя: добавьте размер в карточку либо снимите его из
-                  состава (количество 0)
-                </Text>
-              )}
-              {sizesWithoutPieces.length > 0 && (
-                <Text size='nano' component='p' className='text-error'>
-                  в состав взяты размеры, у которых не выбрано ни одной детали:{' '}
-                  {sizesWithoutPieces.join(', ')} — длина настила делилась бы на изделия, которых он
-                  не кроит
-                </Text>
-              )}
-              {!graded && !sizeId && (
-                <Text size='nano' component='p' className='text-error'>
-                  в именах блоков нет размеров, и размер слота неизвестен — сохранить такую
-                  раскладку нечем
-                </Text>
-              )}
-            </div>
-          )}
-
-          {/* Долевая — СВОЯ панель, а не часть выбора слоя и размера. Пока она жила внутри той,
-              на файле с одним контурным слоем и одним размером панель не рендерилась вовсе:
-              выключатель, счётчик повёрнутых и список деталей без долевой исчезали, а разворот
-              всё равно происходил — то есть обе обещанные страховки пропадали ровно там, где
-              проверить было нечем. */}
-          <div className='space-y-1 border border-borderColor p-1.5'>
-            <div className='flex flex-wrap items-center gap-1'>
-              <Text size='nano' variant='label' component='span'>
-                долевая:
-              </Text>
-              {grainLayers.map((o) => (
-                <Button
-                  key={o.layer}
-                  type='button'
-                  variant={o.layer === grainLayer ? 'main' : 'secondary'}
-                  size='xs'
-                  disabled={running}
-                  title={`слой ${o.layer}: ровно один отрезок у ${o.exactlyOne} из ${o.seen} деталей, типичная длина ${o.medianLengthCm.toFixed(1)} см`}
-                  onClick={() => guardManual(() => setGrainPick(o.layer))}
-                >
-                  слой {o.layer}
-                </Button>
-              ))}
-              <Button
-                type='button'
-                variant={grainLayer === '' ? 'main' : 'secondary'}
-                size='xs'
-                disabled={running}
-                title='класть детали так, как они нарисованы'
-                onClick={() => guardManual(() => setGrainPick(''))}
-              >
-                не разворачивать
-              </Button>
-              {grainLayer !== '' && (
-                <Text size='nano' variant='label' component='span'>
-                  повёрнуто: {oriented.rotated} из {pieces.length}
-                </Text>
-              )}
-            </div>
-            {grainLayer !== '' && oriented.missing.length > 0 && (
-              <Text size='nano' component='p' className='text-error'>
-                долевая не определена однозначно у {oriented.missing.length} деталей — они лягут
-                так, как нарисованы: {oriented.missing.slice(0, 6).join(', ')}
-                {oriented.missing.length > 6 ? '…' : ''}
-              </Text>
-            )}
-            {grainLayer === '' && (
-              <Text size='nano' component='p' className='text-error'>
-                детали лягут так, как нарисованы в файле, — это может оказаться поперёк долевой
-              </Text>
-            )}
-          </div>
-
-          {/* Piece list: checkbox · thumb · name · размеры · qty. */}
-          {pieces.length > 0 && (
-            <div className='max-h-[46vh] space-y-1 overflow-y-auto border border-borderColor p-1.5'>
-              <div className='flex items-center justify-between'>
-                <Text size='nano' variant='label'>
-                  детали: {pieces.length} · выбрано {checkedCount}
-                  {instanceCount !== checkedCount ? ` · к раскладке: ${instanceCount}` : ''}
-                  {checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS
-                    ? ` · СВЕРХ ПОТОЛКА (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку сервер не сохранит`
-                    : ''}
-                </Text>
-                <button
-                  type='button'
-                  className='text-nano uppercase underline hover:opacity-70'
-                  onClick={() =>
-                    guardManual(() => {
-                      // Слитно, а не заменой: замена стёрла бы выбор деталей ДРУГИХ размеров
-                      // и слоёв, и переключение размера показало бы всё снятым.
-                      const next: PieceSel = { ...sel };
-                      for (const p of pieces) {
-                        next[p.id] = { checked: !!fitsWidth.get(p.id), qty: sel[p.id]?.qty ?? 1 };
-                      }
-                      setSel(next);
-                    })
-                  }
-                >
-                  выбрать все
-                </button>
+                })}
               </div>
-              {pieces.map((p) => {
-                const fits = fitsWidth.get(p.id) ?? false;
-                const s = sel[p.id] ?? { checked: false, qty: 1 };
-                return (
-                  <div key={p.id} className='flex items-center gap-1.5'>
-                    <CheckboxCommon
-                      name={`nest-piece-${p.id}`}
-                      checked={s.checked && fits}
-                      disabled={!fits || running}
-                      onChange={(c: boolean) =>
-                        guardManual(() => setSel((m) => ({ ...m, [p.id]: { ...s, checked: c } })))
-                      }
-                    />
-                    <PieceThumb piece={p} />
-                    <div className='min-w-0 flex-1'>
-                      <Text size='micro' component='p' className='truncate'>
-                        {p.name}
-                      </Text>
-                      {/* Размер детали и её тираж в этом настиле. До состава список показывал
-                          ровно один размер, и подпись была бы шумом; теперь в нём лежат детали
-                          нескольких размеров, у которых имена различаются одним хвостом. */}
-                      <Text size='nano' variant='label' component='p'>
-                        {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} см
-                        {graded
-                          ? ` · ${split.codeById.get(p.id)?.size || 'без размера'} · ×${
-                              Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
-                            }`
-                          : ''}
-                      </Text>
-                    </div>
-                    {!fits && <Pill tone='warn'>шире полотна</Pill>}
-                    <Input
-                      name={`nest-qty-${p.id}`}
-                      type='number'
-                      value={s.qty}
-                      min={1}
-                      disabled={!fits || running}
-                      className='w-12 shrink-0 px-1 py-0 text-micro'
-                      onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                        setSel((m) => ({
-                          ...m,
-                          [p.id]: { ...s, qty: Math.max(1, Math.round(numOr(e.target.value, 1))) },
-                        }))
-                      }
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          )}
+            )}
+          </ModalRailSection>
         </div>
 
         {/* Right pane: the strip to scale + stats. Finished/stored layouts render through
@@ -2487,19 +2791,11 @@ export function NestingModal({
             </CalloutBox>
           )}
           {saveError && <CalloutBox tone='error'>сохранить не удалось: {saveError}</CalloutBox>}
-          {/* Тот же отказ, что вынес бы сервер, но ДО отправки и рядом с раскладкой, которую он
-              касается. Слот и прогон разнесены во времени, поэтому расхождение появляется уже
-              после того, как ждать перестали. */}
-          {directionRefusal && (
-            <CalloutBox tone='error'>сохранить нельзя: {directionRefusal}</CalloutBox>
-          )}
-          {/* ДВОЙНОЙ ПРИПУСК — ДО ПРОГОНА, а не после. Панель, а не тост: тост исчезает, а чинится
-              это двумя кликами здесь же — в поле припуска или в списке слоёв. */}
-          {doubleAllowanceRefusal && (
-            <CalloutBox tone='error'>
-              двойной припуск — прогон не запускается: {doubleAllowanceRefusal}
-            </CalloutBox>
-          )}
+          {/* Отказы по ВВОДУ (направление ткани, двойной припуск) жили здесь стопкой — их полные
+              тексты теперь стоят в своих секциях рейла, рядом с полями, которые их вызвали.
+              Здесь — новости про результат прогона и сохранение/экспорт, плюс сводный список
+              причин отказа сохранения ниже (эти две причины входят и в него, но короткими
+              строками-ссылками, без второго экземпляра полного текста). */}
           {/* ПЕРЕСБОРКА ЧЕРТЕЖА НЕ УДАЛАСЬ (§7.4). Панель, потому что чинить это надо на другой
               вкладке — перезалить выкройку, — а тост до туда не доживёт. */}
           {drawing.phase === 'error' && (
@@ -2656,21 +2952,22 @@ export function NestingModal({
               новости, ради которой блок и заведён, — «поиска не будет». */}
           {!viewData && !running && parse.phase === 'ready' && checkedCount > 0 && (
             <>
-              <Text size='nano' variant='label' component='p'>
-                до запуска: {checkedCount} уникальных · {instanceCount} размещений · потолок сервера{' '}
-                {MAX_MARKER_PIECES} / {MAX_MARKER_PLACEMENTS}
-                {forecast
-                  ? ` · предрасчёт геометрии ~${(forecast.predictedPrepassMs / 1000).toFixed(1)} с при потолке ${(
-                      forecast.prepassCapMs / 1000
-                    ).toFixed(
-                      1,
-                    )} с из бюджета ${(forecast.timeBudgetMs / 1000).toFixed(0)} с · пар NFP ${forecast.nfpRecords}`
-                  : ''}
-              </Text>
+              {/* Счёт деталей/размещений здесь больше не печатается — канонический счёт живёт в
+                  шапке списка деталей (секция 4). В бюджете осталось только то, чего больше нигде
+                  нет: прогноз предрасчёта и пары NFP; потолки сервера названы в шапке списка и в
+                  тексте отказа ниже. */}
+              {forecast && (
+                <Text size='nano' variant='label' component='p'>
+                  до запуска: предрасчёт геометрии ~
+                  {(forecast.predictedPrepassMs / 1000).toFixed(1)} с при потолке{' '}
+                  {(forecast.prepassCapMs / 1000).toFixed(1)} с из бюджета{' '}
+                  {(forecast.timeBudgetMs / 1000).toFixed(0)} с · пар NFP {forecast.nfpRecords}
+                </Text>
+              )}
               {overCap && (
                 <Text size='nano' component='p' className='text-error'>
-                  сверх потолка сервера — прогон не запускается, потому что такую раскладку не
-                  сохранить:
+                  сверх потолка сервера ({MAX_MARKER_PIECES} деталей / {MAX_MARKER_PLACEMENTS}{' '}
+                  размещений) — прогон не запускается, потому что такую раскладку не сохранить:
                   {checkedCount > MAX_MARKER_PIECES
                     ? ` уберите ${checkedCount - MAX_MARKER_PIECES} деталей`
                     : ''}
@@ -2753,6 +3050,29 @@ export function NestingModal({
             </>
           )}
 
+          {/* ПОЧЕМУ НЕ СОХРАНИТЬ — ВИДИМЫМ СПИСКОМ, а не цепочкой в тултипе кнопки: все
+              активные причины разом. Кнопка выключена ровно пока массив непуст; сам бокс при
+              этом НЕ рендерится, когда причина одна и она терминальная («прогон ещё не
+              завершён») — красный error под пустым плейсхолдером девальвировал бы тон. */}
+          {!viewData && !running && saveRefusals.length > 0 && !onlyTerminal && (
+            <CalloutBox tone='error'>
+              <Text size='nano' component='p'>
+                <b>
+                  сохранить нельзя — {saveRefusals.length} {reasonWord(saveRefusals.length)}:
+                </b>
+              </Text>
+              <ul className='list-disc space-y-0.5 pl-4'>
+                {saveRefusals.map((r, i) => (
+                  <li key={i}>
+                    <Text size='nano' component='span'>
+                      {r}
+                    </Text>
+                  </li>
+                ))}
+              </ul>
+            </CalloutBox>
+          )}
+
           {/* Footer: own actions (the shell's are hidden). */}
           <div className='flex flex-wrap items-center justify-end gap-1.5 border-t border-hairline pt-2'>
             {running && run.nfp && (
@@ -2811,7 +3131,9 @@ export function NestingModal({
                     doubleAllowanceRefusal
                       ? doubleAllowanceRefusal
                       : overCap
-                        ? `сверх потолка сервера (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку не сохранить: уберите детали или уменьшите состав`
+                        ? // Числа потолков намеренно не повторяются: они напечатаны в шапке
+                          // списка деталей и в тексте отказа на панели.
+                          'сверх потолка сервера — такую раскладку не сохранить: уберите детали или уменьшите состав'
                         : undefined
                   }
                   onClick={requestRun}
@@ -2830,26 +3152,19 @@ export function NestingModal({
                   type='button'
                   variant='secondary'
                   disabled={!canSave}
+                  // Прежде здесь была цепочка из девяти веток, повторявшая условия, уже
+                  // напечатанные в рейле, — и показывавшая одну причину за раз. Все активные
+                  // причины теперь стоят видимым списком на панели; тултип только отсылает к
+                  // нему — и не отсылает в никуда: во время прогона список скрыт, а до первого
+                  // прогона (одна терминальная причина) он не рендерится вовсе.
                   title={
                     canSave
                       ? 'сохранить маркер в тех-карту — расход уйдёт в костинг'
-                      : !canEdit
-                        ? 'нет прав на изменение карточки, либо она released'
-                        : fetchFailed
-                          ? 'часть DXF не скачалась — раскладка неполная, такой маркер занизил бы расход'
-                          : directionRefusal || doubleAllowanceRefusal
-                            ? directionRefusal || doubleAllowanceRefusal
-                            : sizeUnresolved
-                              ? unresolvedTokens.length > 0
-                                ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')} — добавьте их в карточку либо уберите из состава`
-                                : 'размер раскладки неизвестен — в именах блоков нет размеров, и слот его не называет'
-                              : sizeUnsaved
-                                ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
-                                : sizesWithoutPieces.length > 0
-                                  ? `в состав взяты размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`
-                                  : composition.length > MAX_MARKER_COMPOSITION_SIZES
-                                    ? `в составе ${composition.length} размеров, потолок сервера — ${MAX_MARKER_COMPOSITION_SIZES}`
-                                    : 'сохранить можно завершённую раскладку, в которую поместились все детали'
+                      : running
+                        ? 'идёт прогон — дождитесь завершения'
+                        : onlyTerminal
+                          ? TERMINAL_SAVE_REASON
+                          : 'см. список причин ниже'
                   }
                   onClick={() => setSaveOpen(true)}
                 >

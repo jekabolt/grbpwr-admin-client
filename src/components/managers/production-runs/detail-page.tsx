@@ -10,19 +10,23 @@ import { MovementsList } from 'components/managers/materials/components/movement
 import { activeVariantCount } from 'components/managers/tech-card/components/output-variants-field';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES, SECTION } from 'constants/routes';
+import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { Section } from 'ui/components/section';
+import { GroupLabel } from 'ui/components/group-label';
+import { Row } from 'ui/components/row';
+import { Section, SectionStack } from 'ui/components/section';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
-import { AuxRunPlan } from './components/aux-run-plan';
+import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
 import { LayPlan } from './components/lay-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
@@ -36,15 +40,37 @@ import {
 } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
+import {
+  RunConveyor,
+  RunStepId,
+  StepGlyph,
+  UnsavedBadge,
+  buildRunSteps,
+} from './components/run-conveyor';
 import { RunCosts } from './components/run-costs';
+import { RunReceiptTable } from './components/run-receipt-table';
+import { layVerdict, useRunLays, worstVerdict } from './components/useLays';
 import {
   deleteRunErrorMessage,
   reversalErrorMessage,
   useDeleteProductionRun,
+  useMaterialPlan,
   useProductionRun,
   useReverseRunReceipt,
 } from './components/useProductionRuns';
 
+// A run walks through six phases — план → материалы → раскрой → приёмка → затраты → закрытие — and
+// the page shows the ONE it is in: the conveyor band names them all with a line of fact each, the
+// current phase's panel is open below it, and the rest collapse to a row apiece that can be
+// expanded in place. Sixteen stacked blocks used to make the page a scroll-hunt for "what do I do
+// next" — the answer is now the ink-filled step and the callout under it. Nothing about the phases'
+// CONTENT changed: each panel is the same editor as before, with the same RPCs, the same permission
+// gates and the same refusal messages.
+//
+// Ф4's «шаг 3 · как раскроить» (lay-plan.tsx) is a phase in its own right here, between materials
+// and receiving: it cannot start before the fabric is issued and nothing can be received before it
+// is done. It owns its own Section, its own numbering in its own title, and its own applicability
+// gate — the band only decides WHEN it is the phase the operator is standing in.
 export function ProductionRunDetail() {
   const { id } = useParams<{ id: string }>();
   const runId = Number(id) || 0;
@@ -106,6 +132,96 @@ export function ProductionRunDetail() {
   // The server demands production:write + products:write + costing:write (it moves stock and
   // rolls back cost_price); the client gates on the two it can see.
   const canReverse = canEdit && canWriteCosting;
+
+  // Which steps the operator has EXPANDED by hand. `true` = expanded, `false`/absent = collapsed.
+  // Visibility only — what keeps a panel alive is `mountedRef` below, not this map.
+  const [openSteps, setOpenSteps] = useState<Partial<Record<RunStepId, boolean>>>({});
+  // Expanding scrolls the panel into view: it renders above the step list, so a click that only
+  // flipped state could visibly do nothing at all. Set on expand, consumed by the effect below —
+  // the panel has to be visible before it can be scrolled to.
+  const [scrollToStep, setScrollToStep] = useState<RunStepId | null>(null);
+  const toggleStep = (step: RunStepId) => {
+    const opening = !openSteps[step];
+    setOpenSteps((prev) => ({ ...prev, [step]: !prev[step] }));
+    if (opening) setScrollToStep(step);
+  };
+  useEffect(() => {
+    if (scrollToStep == null) return;
+    const node = document.getElementById(stepDomId(scrollToStep));
+    node?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+      block: 'start',
+    });
+    setScrollToStep(null);
+  }, [scrollToStep]);
+
+  // The "· unsaved" flags used to live inside each panel's own heading, one per save button, which
+  // is precisely where nobody looking for them was. They report up here now and render as one badge
+  // on the conveyor step that owns them. The callbacks must be STABLE — the editors fire them from
+  // an effect keyed on the callback identity.
+  const [unsavedPlan, setUnsavedPlan] = useState(false);
+  const [unsavedCosts, setUnsavedCosts] = useState(false);
+  const onPlanDirty = useCallback((d: boolean) => setUnsavedPlan(d), []);
+  const onCostsDirty = useCallback((d: boolean) => setUnsavedCosts(d), []);
+  // Steps whose panel is mounted (see mountedPanels below, after the phases are known).
+  const mountedRef = useRef<Set<RunStepId>>(new Set());
+
+  // The material plan, for the conveyor's step-2 line. Same query key as the step-2 panel's own
+  // hook, so React Query serves both from one request and the band can never quote a figure the
+  // panel disagrees with — and it is not an extra call: the panel was mounted unconditionally on
+  // every open of this page before, so the plan was always fetched here anyway.
+  const materialPlan = useMaterialPlan(runId, runId > 0);
+  const mpRows = materialPlan.data?.rows ?? [];
+  const materialsFact = materialPlan.data
+    ? {
+        positions: mpRows.length,
+        // POSITIONS covered, never a sum of quantities: the rows carry metres, pieces and kilos,
+        // and adding those together yields a number that means nothing.
+        issued: mpRows.filter((r) => decNum(r.issued) >= decNum(r.required)).length,
+        short: mpRows.filter((r) => decNum(r.shortage) > 0).length,
+        blockers: (materialPlan.data.blockers ?? []).length,
+      }
+    : undefined;
+
+  // WHERE an in-progress run stands is decided ONCE, from the first successful read of the plan,
+  // and then held for the rest of the visit.
+  //
+  // Live, it moved under the operator's hands: issuing the last missing material invalidates the
+  // run's query key, the plan re-reads with full coverage, and the phase would step from 2 to 3 —
+  // replacing the materials panel someone was mid-issue in with the receipt table. Same for the
+  // panel's own "refresh". A phase is a place to stand, not a live gauge; the SUMMARY line on the
+  // band stays live, so the freshly issued metre is still visible where it belongs.
+  //
+  // Keyed by run id: this component survives a route param change, and a frozen verdict from the
+  // previously viewed run would decide the phase of the next one.
+  const frozenCoverage = useRef<{ runId: number; unissued?: boolean }>({ runId });
+  if (frozenCoverage.current.runId !== runId) frozenCoverage.current = { runId };
+  if (frozenCoverage.current.unissued === undefined && materialsFact) {
+    frozenCoverage.current.unissued = materialsFact.issued < materialsFact.positions;
+  }
+
+  // Настилы (Ф4), для строки шага «раскрой» на ленте. Тот же ключ, что читает сам блок
+  // (`useRunLays` под detail(runId)) — React Query отдаёт оба чтения из одного запроса, поэтому
+  // лишнего вызова нет: до конвейера блок настилов монтировался на каждой открытой странице, то
+  // есть этот запрос уходил всё равно. Выключен на aux-прогоне: там плана настилов не бывает, и
+  // блок для такого прогона тоже не рендерится.
+  const layPlan = useRunLays(runId, runId > 0 && !isAux);
+  const laysFact = layPlan.data
+    ? {
+        lays: (layPlan.data.lays ?? []).length,
+        sections: (layPlan.data.lays ?? []).reduce((s, l) => s + (l.sections?.length ?? 0), 0),
+        // «Не годен» — вердикт САМОГО сервера, тот же, что печатает пилл карточки настила.
+        unfit: (layPlan.data.lays ?? []).filter((l) => worstVerdict(l.checks ?? []) === 'blocker')
+          .length,
+        stale: (layPlan.data.lays ?? []).filter((l) => l.quantitiesStale === true).length,
+        shortCells: (layPlan.data.coverage ?? []).filter((c) => layVerdict(c.status) === 'blocker')
+          .length,
+      }
+    : undefined;
+  // Есть ли у прогона фаза раскроя вообще. `!isAux` — клиентский гейт блока (его собственный,
+  // дословно), `applicable === false` — серверный вердикт того же факта: если сервер сказал «не
+  // применимо», блок вернёт null, и шаг в ленте вёл бы в пустоту.
+  const hasLayStep = !isAux && layPlan.data?.applicable !== false;
 
   const locked = isRunLocked(ins?.status);
   const receivable = isRunReceivable(ins?.status);
@@ -195,6 +311,398 @@ export function ProductionRunDetail() {
       </div>
     );
 
+  const receipts = run.receipts ?? [];
+
+  // The band. Every figure on it is read from the same field the panel below reads.
+  const steps = buildRunSteps({
+    status: ins?.status,
+    canReadCosting,
+    hasLayStep,
+    plannedQty: plannedQtyTotal,
+    colourCount: isAux ? runColourCount || liveVariants : colourModelCount,
+    planProblem: auxNoMaterial
+      ? 'некуда приходовать выпуск'
+      : unassignedPlanned > 0
+        ? `строки без продукта: ${unassignedPlanned}`
+        : undefined,
+    materials: materialsFact,
+    hasUnissuedMaterials: frozenCoverage.current.unissued,
+    materialsUnavailable: materialPlan.isError,
+    lays: laysFact,
+    laysUnavailable: layPlan.isError,
+    receivedQty: receivedQtyTotal,
+    postingStuck: receipts.some((rc) => rc.postingStatus === 'dead_letter'),
+    accrued: actuals?.actualTotalBase?.value
+      ? `${decimalToInput(actuals.actualTotalBase)} ${actuals.baseCurrency || run.plannedCurrency || ''}`.trim()
+      : undefined,
+    costTotalsPartial: !!actuals && actuals.hasBase === false,
+    recon: (run.recon ?? []).map((c) => ({ ok: !!c.ok, label: reconShort(c.key) })),
+    unsaved: {
+      1: unsavedPlan ? [isAux ? 'план партии' : 'строки партии'] : undefined,
+      // Настил (шаг 3) правится в модальном редакторе с собственным состоянием — черновика на
+      // странице он не оставляет, поэтому и метки «не сохранено» у него нет.
+      5: unsavedCosts ? ['статьи затрат'] : undefined,
+    },
+  });
+  const currentStep = steps.find((s) => s.current)?.id ?? null;
+  const otherSteps = steps.filter((s) => s.id !== currentStep);
+
+  // Every step that has been on screen at least once. The panels live in ONE keyed list and only
+  // their VISIBILITY moves, because a panel that changes place in the tree unmounts — and an
+  // unmounted editor takes its typed draft with it. That is not hypothetical: setting a planned run
+  // to in-progress moves the current phase 1→2, so a lines grid rendered in a separate "current"
+  // slot would die exactly when the operator had quantities in it. Accumulated in a ref during
+  // render (adding to a set is idempotent, so a StrictMode double render is harmless); an effect
+  // would leave the current phase's panel unrendered for a frame.
+  if (currentStep != null) mountedRef.current.add(currentStep);
+  for (const key of Object.keys(openSteps)) mountedRef.current.add(Number(key) as RunStepId);
+  // Current phase first — it is what the page is about — then the rest in conveyor order.
+  const mountedPanels = [
+    ...steps.filter((s) => s.id === currentStep),
+    ...steps.filter((s) => s.id !== currentStep && mountedRef.current.has(s.id)),
+  ];
+
+  const colorwayLabel = (productId: number) => {
+    const c = colorways.find((x) => (x.productId ?? 0) === productId && productId > 0);
+    if (c) return `${c.code ? `${c.code} · ` : ''}${c.name ?? `#${productId}`}`;
+    return productId > 0 ? `#${productId}` : '(unassigned)';
+  };
+  // An aux row is a colour bucket; a legacy single-output run's one row is the output material.
+  const auxOutputLabel = (variantId: number) => {
+    const v = outputVariants.find((x) => (x.id ?? 0) === variantId);
+    if (v)
+      return `${v.colorCode ? `${v.colorCode} · ` : ''}${v.colorName || v.materialName || `#${variantId}`}`;
+    if (variantId > 0) return `#${variantId}`;
+    return materialLabel(outputMaterial, outputMaterialId) || 'выпуск';
+  };
+
+  // The receive blocker text is the button's own hover title, verbatim — the guidance callout says
+  // the same thing in a sentence, and the two must not drift apart.
+  const receiveBlockedTitle = auxNoMaterial
+    ? 'set an output material or register a colour variant on the tech card before receiving'
+    : unassignedPlanned
+      ? `${unassignedPlanned} line(s) have no product — publish them or zero their received qty`
+      : undefined;
+  // Receiving lives in the page header AND in the step-3 panel: it is the action of that phase, and
+  // the phase is where an operator looking at the counts already is. Same handler, same modal.
+  // The page header carries the ink-filled page action; inside a panel a control is `secondary`.
+  const receiveButton = (size: 'lg' | 'sm', variant: 'main' | 'secondary') =>
+    canEdit && receivable ? (
+      <Button
+        type='button'
+        variant={variant}
+        size={size}
+        className='uppercase'
+        title={receiveBlockedTitle}
+        onClick={() => setReceiveOpen(true)}
+      >
+        receive
+      </Button>
+    ) : null;
+
+  // One phase's panel: the SAME components as before, only re-parented. A step whose region is
+  // several blocks (closure) returns them as siblings — the caller wraps every region in a
+  // SectionStack, so the 24px gutter between blocks is the divider, as everywhere else.
+  //
+  // The FIRST block of every region carries the step's number and the region's DOM id: it is what
+  // the collapsed row's «раскрыть» points `aria-controls` at and what the scroll lands on, so the
+  // row and the panel it opened can be tied together by eye and by screen reader.
+  const stepPanel = (step: RunStepId) => {
+    switch (step) {
+      case 1:
+        return (
+          <Section
+            id={stepDomId(1)}
+            title='step 1 · what to produce'
+            question='Plan how many of each colour-model × size this run makes.'
+          >
+            {isAux ? (
+              <AuxRunPlan
+                run={run}
+                canEdit={canEdit}
+                locked={locked}
+                outputMaterialId={outputMaterialId}
+                outputMaterial={outputMaterial}
+                outputVariants={outputVariants}
+                onDirtyChange={onPlanDirty}
+              />
+            ) : (
+              <LinesGrid run={run} canEdit={canEdit} locked={locked} onDirtyChange={onPlanDirty} />
+            )}
+          </Section>
+        );
+      case 2:
+        return (
+          <Section
+            id={stepDomId(2)}
+            title='step 2 · materials needed'
+            question="Estimated requirement against warehouse stock, from the tech card's material norms."
+          >
+            {/* `locked` is not decoration: a material issue needs an OPEN run (checkRunOpen), so on a
+                received/closed run the issue button could only ever produce a rejection. */}
+            <MaterialPlan run={run} canEdit={canEdit} locked={locked} />
+          </Section>
+        );
+      case 3:
+        // Ф4.3 «как раскроить» — фаза между материалами и приёмкой: настелить нечего, пока ткань не
+        // выдана, и принимать нечего, пока не раскроено. Комментарий и гейт — авторские:
+        //
+        // Блок рисует себя САМ, вместе со своей `Section`: у него есть состояние «не применимо»
+        // (aux-карточка), при котором пустая рамка с заголовком была бы приглашением построить то,
+        // чего у этого прогона не бывает. Клиентский гейт `!isAux` — та же машинерия, что у
+        // требований релиза: сервер отдаёт applicable = false с причиной, клиент не рендерит блок.
+        //
+        // Гейт живёт теперь ОДИН РАЗ — в `hasLayStep`: он же убирает шаг 3 из ленты, так что
+        // строка «раскрыть» не может привести к панели, которая ничего не рисует. Сам `id` нужен
+        // якорю: блок владеет своей Section, поэтому номер шага в заголовке — его, а не наш.
+        return <LayPlan run={run} canEdit={canEdit} locked={locked} id={stepDomId(3)} />;
+      case 4:
+        return (
+          <Section
+            id={stepDomId(4)}
+            title='шаг 4 · приёмка'
+            question='В клетке «принято/план» по размеру. Каждая поставка — отдельная квитанция; финальная закрывает серию.'
+            action={receiveButton('sm', 'secondary')}
+          >
+            <RunReceiptTable
+              lines={lines}
+              sizeOrder={techCard?.techCard?.sizeIds ?? []}
+              sizeLabel={(s) => String(findInDictionary(dictionary, s, 'size') || s)}
+              rowHeader={isAux ? 'выпуск' : 'колор-модель'}
+              rowLabel={isAux ? auxOutputLabel : colorwayLabel}
+              groupBy={isAux ? 'variant' : 'product'}
+            />
+
+            {/* Receiving history (Phase 5): every booked delivery of this run, oldest first — what
+                arrived when, whether it closed the series, and whether accounting has posted it.
+                Renders only once something was received; money on receipts is server-stripped
+                without costing:read, so the list is safe for every reader. */}
+            {receipts.length > 0 ? (
+              <>
+                <GroupLabel>квитанции</GroupLabel>
+                <div className='flex flex-col'>
+                  {receipts.map((rc) => {
+                    const good = (rc.lines ?? []).reduce(
+                      (s: number, l: { goodQty?: number }) => s + (l.goodQty ?? 0),
+                      0,
+                    );
+                    const defect = (rc.lines ?? []).reduce(
+                      (s: number, l: { defectQty?: number }) => s + (l.defectQty ?? 0),
+                      0,
+                    );
+                    // Phase 7: how many of the defects were recovered as B-grade seconds.
+                    const seconds = (rc.lines ?? []).reduce(
+                      (s: number, l: { defectQty?: number; defectDisposition?: string }) =>
+                        s + (l.defectDisposition === 'seconds' ? l.defectQty ?? 0 : 0),
+                      0,
+                    );
+                    // Phase 6: a reversal row documents the undo of another receipt; a reversed
+                    // receipt stays in the history greyed out — its units and money left every
+                    // rollup.
+                    const isReversalRow = (rc.reversalOf ?? 0) > 0;
+                    const isReversed = (rc.reversedBy ?? 0) > 0;
+                    return (
+                      <div
+                        key={rc.id}
+                        className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0 ${isReversed ? 'opacity-50' : ''}`}
+                      >
+                        <Text size='small'>#{rc.id}</Text>
+                        <Text size='small'>{runDate(rc.receivedAt) || '—'}</Text>
+                        {isReversalRow ? (
+                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                            реверс квитанции #{rc.reversalOf}
+                          </span>
+                        ) : (
+                          <>
+                            <Text size='small'>
+                              {good} годных
+                              {defect > 0
+                                ? ` · ${defect} брак${seconds > 0 ? ` (${seconds} → B-сток)` : ''}`
+                                : ''}
+                            </Text>
+                            {rc.final ? (
+                              <span className='inline-block border border-textColor px-1.5 py-0.5 text-textBaseSize uppercase'>
+                                финальная
+                              </span>
+                            ) : (
+                              <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                                частичная
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {isReversed ? (
+                          <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
+                            реверснута · #{rc.reversedBy}
+                          </span>
+                        ) : null}
+                        {!isReversalRow ? (
+                          <Text
+                            size='small'
+                            variant='inactive'
+                            title='статус проводки в бухгалтерии; pending — воркер ещё не запостил'
+                          >
+                            {rc.postingStatus === 'posted'
+                              ? 'проведена'
+                              : rc.postingStatus === 'dead_letter'
+                                ? 'постинг завис — см. бухгалтерию'
+                                : 'ждёт постинга'}
+                          </Text>
+                        ) : null}
+                        {canReadCosting && rc.hasBase && rc.unitCostBase?.value ? (
+                          <Text size='small' variant='inactive'>
+                            unit cost {decimalToInput(rc.unitCostBase)} {rc.baseCurrency || ''}
+                          </Text>
+                        ) : null}
+                        {rc.note ? (
+                          <Text size='small' variant='inactive'>
+                            {rc.note}
+                          </Text>
+                        ) : null}
+                        {canReverse &&
+                        !isReversalRow &&
+                        !isReversed &&
+                        ins?.status !== 'PRODUCTION_RUN_STATUS_CLOSED' ? (
+                          <Button
+                            type='button'
+                            size='xs'
+                            variant='simpleReverseWithBorder'
+                            className='ml-auto'
+                            onClick={() => {
+                              setReverseReason('');
+                              setReverseTarget(rc.id ?? 0);
+                            }}
+                          >
+                            отменить
+                          </Button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : null}
+          </Section>
+        );
+      case 5:
+        // Money is confidential: without costing:read this step is not on the band at all, so it
+        // is never asked for — the guard is here because a panel that can render nothing must say
+        // so at its own boundary. The plan-vs-actual STRIP is not here: it summarises the whole
+        // batch, like the quantity stats, and lives under the band at every status.
+        return canReadCosting ? (
+          <>
+            <Section
+              id={stepDomId(5)}
+              title='step 5 · actual costs'
+              question='Log the real costs incurred once known.'
+            >
+              {/* UpdateProductionRun refuses a received/closed run, and cost articles are written
+                  through it. The editor stays readable, the save is gone. */}
+              <RunCosts
+                run={run}
+                canEdit={canEdit}
+                canReadCosting={canReadCosting}
+                locked={locked}
+                onDirtyChange={onCostsDirty}
+              />
+            </Section>
+            {actuals &&
+            ((actuals.byColorway?.length ?? 0) > 0 || actuals.unattributedMaterialsBase?.value) ? (
+              <ColorwayCostBlock actuals={actuals} colorways={colorways} />
+            ) : null}
+          </>
+        ) : null;
+      case 6:
+        return (
+          <>
+            {/* Сверка «ожидаемое vs проведённое» (Phase 8): три server-side чека — квитанции против
+                сток-журнала, posted-квитанции против живых проводок, статьи затрат против
+                капитализированных клеймов.
+                Раньше блок скрывался на партии без квитанций, чтобы не шуметь пустотой на странице.
+                Теперь весь шаг 5 и так лежит за «раскрыть» — а первый блок панели обязан называть
+                номер шага, иначе раскрытая строка ведёт в блок «material movements», где слова
+                «шаг 5» нет. Так что блок рендерится всегда и честно говорит, что сверять нечего. */}
+            <Section
+              id={stepDomId(6)}
+              title='шаг 6 · сверка'
+              question='Каждая цифра рана обязана сходиться с журналами; расхождение — сигнал, не косметика.'
+            >
+              {(run.recon ?? []).length === 0 ? (
+                <Text variant='inactive' size='small'>
+                  сверять нечего — партия ещё ничего не приняла
+                </Text>
+              ) : null}
+              <div className='flex flex-col'>
+                {(run.recon ?? []).map((c) => (
+                  <div
+                    key={c.key}
+                    className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
+                  >
+                    <Text size='small' className={c.ok ? '' : 'font-bold text-error'}>
+                      {c.ok ? '✓' : '✗'} {reconLabel(c.key)}
+                    </Text>
+                    <Text size='small' variant='inactive' className='tabular-nums'>
+                      {c.expected} ↔ {c.actual}
+                    </Text>
+                    {!c.ok && c.detail ? (
+                      <Text size='small' variant='inactive' className='w-full'>
+                        {c.detail}
+                      </Text>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            </Section>
+
+            {/* Журнал жизни рана (Phase 8): кто и когда создал/запустил/принял/реверснул/закрыл.
+                Append-only; receipt-события ссылаются на квитанции, не дублируют их. */}
+            {(run.events?.length ?? 0) > 0 ? (
+              <Section title='журнал рана' collapsible defaultOpen={false}>
+                <div className='flex flex-col'>
+                  {(run.events ?? []).map((e) => (
+                    <div
+                      key={e.id}
+                      className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
+                    >
+                      <Text size='small' variant='inactive'>
+                        {runDate(e.createdAt) || '—'}
+                      </Text>
+                      <Text size='small'>{e.eventType}</Text>
+                      {e.actor ? (
+                        <Text size='small' variant='inactive'>
+                          {e.actor}
+                        </Text>
+                      ) : null}
+                      {e.reason ? (
+                        <Text size='small' variant='inactive'>
+                          {e.reason}
+                        </Text>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </Section>
+            ) : null}
+
+            {/* Audit trail, not a planning step — collapsed by default (memory: collapse rarely-used
+                content), same pattern as the tech card's packaging spec / provenance. */}
+            <Section title='material movements' collapsible defaultOpen={false}>
+              <MovementsList filter={{ productionRunId: run.id }} />
+            </Section>
+
+            {/* Продуктовый сток-журнал рана (Phase 8): все движения его reference-семейства —
+                приёмки (production_run:<id>) и реверсы (receipt:<id>). Дополняет материальные
+                движения выше: там — ткань, тут — готовые изделия. */}
+            {receipts.length > 0 ? (
+              <Section title='движения готовых изделий' collapsible defaultOpen={false}>
+                <RunStockChanges runId={run.id ?? 0} createdAt={run.createdAt} />
+              </Section>
+            ) : null}
+          </>
+        );
+    }
+  };
+
   return (
     <div className='flex flex-col gap-6 pb-16'>
       <Link to={ROUTES.productionRuns} className='text-textInactiveColor underline'>
@@ -235,24 +743,7 @@ export function ProductionRunDetail() {
         </div>
         {canEdit && (
           <div className='flex items-center gap-2'>
-            {receivable && (
-              <Button
-                type='button'
-                variant='main'
-                size='lg'
-                className='uppercase'
-                title={
-                  auxNoMaterial
-                    ? 'set an output material or register a colour variant on the tech card before receiving'
-                    : unassignedPlanned
-                      ? `${unassignedPlanned} line(s) have no product — publish them or zero their received qty`
-                      : undefined
-                }
-                onClick={() => setReceiveOpen(true)}
-              >
-                receive
-              </Button>
-            )}
+            {receiveButton('lg', 'main')}
             {/* A received/closed run rejects every update before the payload is examined
                 (ErrProductionRunReceivedImmutable), so the edit modal on it can only fail. */}
             {!locked && (
@@ -281,11 +772,15 @@ export function ProductionRunDetail() {
         )}
       </div>
 
+      {/* The conveyor: five phases, the current one filled with ink. Read-only by design — it
+          reports where the run is, the panels below it act. */}
+      <RunConveyor steps={steps} />
+
       {/* What to do next — the single sentence the rest of the page exists to support. Visible
           text, not a hover-only tooltip, so a blocked receive is obvious before it's clicked. */}
       {guidance ? (
-        <div className={`border p-3 ${GUIDANCE_BOX[guidance.tone]}`}>
-          <Text size='small' className={GUIDANCE_TEXT[guidance.tone]}>
+        <CalloutBox tone={GUIDANCE_TONE[guidance.tone]}>
+          <Text size='small'>
             {guidance.text}
             {guidance.href ? (
               <>
@@ -296,11 +791,12 @@ export function ProductionRunDetail() {
               </>
             ) : null}
           </Text>
-        </div>
+        </CalloutBox>
       ) : null}
 
       {/* Quantity is not money — shown to anyone who can open the run, matching the lines grid
-          below (which is likewise never costing-gated). */}
+          below (which is likewise never costing-gated). This is the whole batch, not one phase,
+          so it stays under the band whatever step the run is in. */}
       <StatGrid>
         <Stat label='planned qty' value={String(plannedQtyTotal)} />
         {/* received = GOOD units — the count that is posted to stock. Defective units are a
@@ -327,165 +823,66 @@ export function ProductionRunDetail() {
         />
       </StatGrid>
 
+      {/* Plan-vs-actual cost: a summary of the WHOLE batch, exactly like the quantity strip above,
+          so it sits under the band at every status rather than behind step 4 — an owner asking
+          "what is this batch costing" must not have to expand a phase to find out. Costing-gated;
+          the editor and the per-colourway split stay in step 4. */}
       {canReadCosting ? <CostSummary run={run} actuals={actuals} /> : null}
 
-      {canReadCosting &&
-      actuals &&
-      ((actuals.byColorway?.length ?? 0) > 0 || actuals.unattributedMaterialsBase?.value) ? (
-        <ColorwayCostBlock actuals={actuals} colorways={colorways} />
-      ) : null}
+      {/* The phases' panels: ONE keyed list, current phase first, everything else hidden until it
+          is expanded. See mountedPanels — the list is what keeps a draft alive across a phase
+          change, so nothing here may move a panel to another place in the tree. */}
+      {mountedPanels.map((s) => (
+        <SectionStack key={s.id} hidden={!(s.id === currentStep || openSteps[s.id])}>
+          {stepPanel(s.id)}
+        </SectionStack>
+      ))}
 
-      {/* The run's own three-step workflow: plan quantities, cover the materials they need, then
-          log what it actually cost. Numbered so "what do I do next" has one obvious answer. */}
-      <Section
-        title='step 1 · what to produce'
-        question='Plan how many of each colour-model × size this run makes.'
-      >
-        {isAux ? (
-          <AuxRunPlan
-            run={run}
-            canEdit={canEdit}
-            locked={locked}
-            outputMaterialId={outputMaterialId}
-            outputMaterial={outputMaterial}
-            outputVariants={outputVariants}
-          />
-        ) : (
-          <LinesGrid run={run} canEdit={canEdit} locked={locked} />
-        )}
-      </Section>
-
-      <Section
-        title='step 2 · materials needed'
-        question="Estimated requirement against warehouse stock, from the tech card's material norms."
-      >
-        {/* `locked` is not decoration: a material issue needs an OPEN run (checkRunOpen), so on a
-            received/closed run the issue button could only ever produce a rejection. */}
-        <MaterialPlan run={run} canEdit={canEdit} locked={locked} />
-      </Section>
-
-      {/* Шаг 3 — план настилов (Ф4.3). Блок рисует себя САМ, вместе со своей `Section`: у него есть
-          состояние «не применимо» (aux-карточка), при котором пустая рамка с заголовком была бы
-          приглашением построить то, чего у этого прогона не бывает. Клиентский гейт `!isAux` —
-          та же машинерия, что у требований релиза: сервер отдаёт applicable = false с причиной,
-          клиент не рендерит блок. */}
-      {!isAux ? <LayPlan run={run} canEdit={canEdit} locked={locked} /> : null}
-
-      {canReadCosting ? (
-        <Section title='step 4 · actual costs' question='Log the real costs incurred once known.'>
-          {/* Same reason: UpdateProductionRun refuses a received/closed run, and cost articles are
-              written through it. The editor stays readable, the save is gone. */}
-          <RunCosts run={run} canEdit={canEdit} canReadCosting={canReadCosting} locked={locked} />
-        </Section>
-      ) : null}
-
-      {/* Receiving history (Phase 5): every booked delivery of this run, oldest first — what
-          arrived when, whether it closed the series, and whether accounting has posted it. Renders
-          only once something was received; money on receipts is server-stripped without
-          costing:read, so the list is safe for every reader. */}
-      {(run.receipts?.length ?? 0) > 0 ? (
+      {otherSteps.length > 0 ? (
         <Section
-          title='приёмки'
-          question='Каждая поставка — отдельная квитанция; финальная закрывает серию.'
+          title={currentStep ? 'остальные шаги' : 'шаги партии'}
+          question={
+            currentStep
+              ? 'Фазы вне текущей — раскрой любую, если нужно вернуться к ней; она откроется выше.'
+              : 'Партия отменена: активной фазы нет.'
+          }
         >
           <div className='flex flex-col'>
-            {(run.receipts ?? []).map((rc) => {
-              const good = (rc.lines ?? []).reduce(
-                (s: number, l: { goodQty?: number }) => s + (l.goodQty ?? 0),
-                0,
-              );
-              const defect = (rc.lines ?? []).reduce(
-                (s: number, l: { defectQty?: number }) => s + (l.defectQty ?? 0),
-                0,
-              );
-              // Phase 7: how many of the defects were recovered as B-grade seconds.
-              const seconds = (rc.lines ?? []).reduce(
-                (s: number, l: { defectQty?: number; defectDisposition?: string }) =>
-                  s + (l.defectDisposition === 'seconds' ? l.defectQty ?? 0 : 0),
-                0,
-              );
-              // Phase 6: a reversal row documents the undo of another receipt; a reversed receipt
-              // stays in the history greyed out — its units and money left every rollup.
-              const isReversalRow = (rc.reversalOf ?? 0) > 0;
-              const isReversed = (rc.reversedBy ?? 0) > 0;
-              return (
-                <div
-                  key={rc.id}
-                  className={`flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0 ${isReversed ? 'opacity-50' : ''}`}
-                >
-                  <Text size='small'>#{rc.id}</Text>
-                  <Text size='small'>{runDate(rc.receivedAt) || '—'}</Text>
-                  {isReversalRow ? (
-                    <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
-                      реверс квитанции #{rc.reversalOf}
-                    </span>
-                  ) : (
-                    <>
-                      <Text size='small'>
-                        {good} годных
-                        {defect > 0
-                          ? ` · ${defect} брак${seconds > 0 ? ` (${seconds} → B-сток)` : ''}`
-                          : ''}
-                      </Text>
-                      {rc.final ? (
-                        <span className='inline-block border border-textColor px-1.5 py-0.5 text-textBaseSize uppercase'>
-                          финальная
-                        </span>
-                      ) : (
-                        <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
-                          частичная
-                        </span>
-                      )}
-                    </>
-                  )}
-                  {isReversed ? (
-                    <span className='inline-block border border-textInactiveColor px-1.5 py-0.5 text-textBaseSize uppercase text-textInactiveColor'>
-                      реверснута · #{rc.reversedBy}
-                    </span>
-                  ) : null}
-                  {!isReversalRow ? (
+            {otherSteps.map((s) => (
+              <Row
+                key={s.id}
+                label={
+                  <span className='flex flex-wrap items-center gap-2'>
+                    <StepGlyph state={s.state} />
+                    <Text size='small' variant='uppercase' component='span'>
+                      {s.title}
+                    </Text>
                     <Text
                       size='small'
-                      variant='inactive'
-                      title='статус проводки в бухгалтерии; pending — воркер ещё не запостил'
+                      component='span'
+                      className={s.state === 'problem' ? 'text-error' : 'text-labelColor'}
                     >
-                      {rc.postingStatus === 'posted'
-                        ? 'проведена'
-                        : rc.postingStatus === 'dead_letter'
-                          ? 'постинг завис — см. бухгалтерию'
-                          : 'ждёт постинга'}
+                      {s.summary}
                     </Text>
-                  ) : null}
-                  {canReadCosting && rc.hasBase && rc.unitCostBase?.value ? (
-                    <Text size='small' variant='inactive'>
-                      unit cost {decimalToInput(rc.unitCostBase)} {rc.baseCurrency || ''}
-                    </Text>
-                  ) : null}
-                  {rc.note ? (
-                    <Text size='small' variant='inactive'>
-                      {rc.note}
-                    </Text>
-                  ) : null}
-                  {canReverse &&
-                  !isReversalRow &&
-                  !isReversed &&
-                  ins?.status !== 'PRODUCTION_RUN_STATUS_CLOSED' ? (
-                    <Button
-                      type='button'
-                      size='xs'
-                      variant='simpleReverseWithBorder'
-                      className='ml-auto'
-                      onClick={() => {
-                        setReverseReason('');
-                        setReverseTarget(rc.id ?? 0);
-                      }}
-                    >
-                      отменить
-                    </Button>
-                  ) : null}
-                </div>
-              );
-            })}
+                    {/* Also on the row, not only on the band: this is where the decision to expand
+                        is taken, and a waiting draft is the strongest reason to take it. */}
+                    {s.unsaved?.length ? <UnsavedBadge what={s.unsaved} /> : null}
+                  </span>
+                }
+                value={
+                  <Button
+                    type='button'
+                    size='xs'
+                    variant='secondary'
+                    aria-expanded={!!openSteps[s.id]}
+                    aria-controls={stepDomId(s.id)}
+                    onClick={() => toggleStep(s.id)}
+                  >
+                    {openSteps[s.id] ? 'свернуть' : 'раскрыть'}
+                  </Button>
+                }
+              />
+            ))}
           </div>
         </Section>
       ) : null}
@@ -541,88 +938,6 @@ export function ProductionRunDetail() {
         </div>
       </ConfirmationModal>
 
-      {/* Сверка «ожидаемое vs проведённое» (Phase 8): три server-side чека — квитанции против
-          сток-журнала, posted-квитанции против живых проводок, статьи затрат против
-          капитализированных клеймов. Рендерится только когда что-то расходится ИЛИ есть
-          квитанции — пустой зелёный блок на плановом ране был бы шумом. */}
-      {(run.recon ?? []).some((c) => !c.ok) || (run.receipts?.length ?? 0) > 0 ? (
-        <Section
-          title='сверка'
-          question='Каждая цифра рана обязана сходиться с журналами; расхождение — сигнал, не косметика.'
-        >
-          <div className='flex flex-col'>
-            {(run.recon ?? []).map((c) => (
-              <div
-                key={c.key}
-                className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
-              >
-                <Text size='small' className={c.ok ? '' : 'font-bold text-error'}>
-                  {c.ok ? '✓' : '✗'}{' '}
-                  {c.key === 'units_receipts_vs_stock_journal'
-                    ? 'единицы: квитанции ↔ сток-журнал'
-                    : c.key === 'money_posted_vs_entries'
-                      ? 'проводки: posted-квитанции ↔ живые записи'
-                      : 'затраты: начислено ↔ капитализировано'}
-                </Text>
-                <Text size='small' variant='inactive' className='tabular-nums'>
-                  {c.expected} ↔ {c.actual}
-                </Text>
-                {!c.ok && c.detail ? (
-                  <Text size='small' variant='inactive' className='w-full'>
-                    {c.detail}
-                  </Text>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </Section>
-      ) : null}
-
-      {/* Журнал жизни рана (Phase 8): кто и когда создал/запустил/принял/реверснул/закрыл.
-          Append-only; receipt-события ссылаются на квитанции, не дублируют их. */}
-      {(run.events?.length ?? 0) > 0 ? (
-        <Section title='журнал рана' collapsible defaultOpen={false}>
-          <div className='flex flex-col'>
-            {(run.events ?? []).map((e) => (
-              <div
-                key={e.id}
-                className='flex flex-wrap items-baseline gap-x-3 gap-y-1 border-b border-hairline py-2 last:border-b-0'
-              >
-                <Text size='small' variant='inactive'>
-                  {runDate(e.createdAt) || '—'}
-                </Text>
-                <Text size='small'>{e.eventType}</Text>
-                {e.actor ? (
-                  <Text size='small' variant='inactive'>
-                    {e.actor}
-                  </Text>
-                ) : null}
-                {e.reason ? (
-                  <Text size='small' variant='inactive'>
-                    {e.reason}
-                  </Text>
-                ) : null}
-              </div>
-            ))}
-          </div>
-        </Section>
-      ) : null}
-
-      {/* Audit trail, not a planning step — collapsed by default (memory: collapse rarely-used
-          content), same pattern as the tech card's packaging spec / provenance. */}
-      <Section title='material movements' collapsible defaultOpen={false}>
-        <MovementsList filter={{ productionRunId: run.id }} />
-      </Section>
-
-      {/* Продуктовый сток-журнал рана (Phase 8): все движения его reference-семейства — приёмки
-          (production_run:<id>) и реверсы (receipt:<id>). Дополняет материальные движения выше:
-          там — ткань, тут — готовые изделия. */}
-      {(run.receipts?.length ?? 0) > 0 ? (
-        <Section title='движения готовых изделий' collapsible defaultOpen={false}>
-          <RunStockChanges runId={run.id ?? 0} createdAt={run.createdAt} />
-        </Section>
-      ) : null}
-
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal
         open={receiveOpen}
@@ -646,23 +961,45 @@ export function ProductionRunDetail() {
   );
 }
 
+// A wire decimal as a number, 0 when unset — for counting plan rows, never for money arithmetic.
+const decNum = (d?: googletype_Decimal) => Number(d?.value ?? '') || 0;
+
+// The anchor of a phase's panel: it lands on the FIRST block of that panel, which is also the block
+// whose title carries the step number. Used by the collapsed row's `aria-controls` and by the
+// scroll-on-expand, so both point at the same thing.
+const stepDomId = (step: RunStepId) => `run-step-${step}`;
+
+// The three server-side reconciliation checks, named. `reconLabel` is the sentence the сверка block
+// has always printed; `reconShort` is the same check in one word, for the conveyor's summary line
+// («сверка не сходится: единицы; затраты»). Unknown keys fall through to the costs check, exactly
+// as the block's original ternary did.
+const RECON_LABEL: Record<string, string> = {
+  units_receipts_vs_stock_journal: 'единицы: квитанции ↔ сток-журнал',
+  money_posted_vs_entries: 'проводки: posted-квитанции ↔ живые записи',
+};
+const RECON_SHORT: Record<string, string> = {
+  units_receipts_vs_stock_journal: 'единицы',
+  money_posted_vs_entries: 'проводки',
+};
+const reconLabel = (key?: string) =>
+  RECON_LABEL[key ?? ''] ?? 'затраты: начислено ↔ капитализировано';
+const reconShort = (key?: string) => RECON_SHORT[key ?? ''] ?? 'затраты';
+
 // Status- (and blocker-) driven guidance banner. Folds the receive button's hover-only `title`
 // blockers (auxNoMaterial / unassignedPlanned — previously invisible until you happened to hover
 // a button) and the run's lifecycle into the one sentence a confused operator actually needs.
 type GuidanceTone = 'neutral' | 'warning' | 'success' | 'error';
 type Guidance = { tone: GuidanceTone; text: string; href?: string; linkLabel?: string };
 
-const GUIDANCE_BOX: Record<GuidanceTone, string> = {
-  neutral: 'border-borderColor',
-  warning: 'border-warning bg-warning/10',
-  success: 'border-success bg-success/10',
-  error: 'border-error bg-error/10',
-};
-const GUIDANCE_TEXT: Record<GuidanceTone, string> = {
-  neutral: '',
-  warning: 'text-warning',
-  success: 'text-success',
-  error: 'text-error',
+// CalloutBox carries three tones and no green one: "done" in this system is the green status badge
+// in the header and the ✓ glyphs on the band, both of which are already on screen when the success
+// sentence shows. A received run therefore reads as a neutral note rather than inventing a fourth
+// callout tone in a screen.
+const GUIDANCE_TONE: Record<GuidanceTone, 'note' | 'warning' | 'error'> = {
+  neutral: 'note',
+  warning: 'warning',
+  success: 'note',
+  error: 'error',
 };
 
 function nextStepGuidance({
@@ -729,8 +1066,6 @@ function nextStepGuidance({
   };
 }
 
-// A numbered card around one step of the run's workflow: a title, a one-line "why", then the
-// existing editor (LinesGrid / AuxRunPlan / MaterialPlan / RunCosts) unchanged inside.
 // Cost variance is actual − plan: spending MORE than planned is bad (red), LESS is good (green) —
 // the inverse of a revenue/KPI delta, where up is good. Kept as one helper so both cost tiles
 // (unit and total) agree on the sign convention.
@@ -833,13 +1168,13 @@ function CostSummary({
       ) : null}
 
       {warnings.length > 0 ? (
-        <div className='flex flex-col gap-1 border border-warning bg-warning/10 p-2'>
+        <CalloutBox tone='warning' className='flex flex-col gap-1'>
           {warnings.map((w, i) => (
-            <Text key={i} size='small' className='text-warning'>
+            <Text key={i} size='small'>
               ! {w}
             </Text>
           ))}
-        </div>
+        </CalloutBox>
       ) : null}
     </div>
   );
