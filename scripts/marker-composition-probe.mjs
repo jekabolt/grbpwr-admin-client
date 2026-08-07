@@ -169,5 +169,62 @@ console.log('\nF · ОТКАЗ ВЫДАТЬ НОРМУ и делитель ра�
   ck(m.consumptionCm(legacy) === 100, 'легаси: 400 / 4 = 100 см', String(m.consumptionCm(legacy)));
 }
 
+console.log('\nG · ВЛАДЕЛЕЦ МАРКЕРА (Ф4.2): карточные списки не показывают раскройные однодневки');
+{
+  // Три строки, приезжающие в ОДНОМ поле techCard.markers — своего List-RPC у клиента нет.
+  // `noField` — это и карточный маркер (proto3 не шлёт нулевой скаляр), и ответ старого сервера,
+  // который про поле ещё не знает. Оба случая обязаны читаться как КАРТОЧНЫЙ.
+  const card = { id: 1, name: 'норма', bomLineKey: 'L1', colorwayId: 5, productionRunId: 0 };
+  const noField = { id: 2, name: 'снята до Ф4', bomLineKey: 'L1', colorwayId: 5 };
+  const runOwned = { id: 3, name: 'раскрой прогона 7', bomLineKey: 'L1', colorwayId: 5, productionRunId: 7 };
+  const all = [card, noField, runOwned];
+
+  const kept = m.cardMarkers(all).map((x) => x.id);
+  ck(JSON.stringify(kept) === '[1,2]', 'карточный список: прогонный маркер СКРЫТ', JSON.stringify(kept));
+  ck(m.cardMarkers([noField]).length === 1, 'undefined читается как КАРТОЧНЫЙ, а не «неизвестно»');
+  ck(m.cardMarkers([runOwned]).length === 0, 'ненулевой production_run_id — единственная причина скрыть');
+  ck(m.cardMarkers(undefined).length === 0, 'отсутствие списка — не падение');
+
+  // Те же три строки через оба карточных фильтра: полоса расхода на костинге (markersForLine) и
+  // предложение «применить расход в рецепт» (markersOfColorway). Прогонный маркер сидит на ТОЙ ЖЕ
+  // строке BOM и в ТОМ ЖЕ колорвее, то есть по прежним правилам прошёл бы оба.
+  const byLine = m.markersForLine(all, 'L1').map((x) => x.id);
+  ck(JSON.stringify(byLine) === '[1,2]', 'markersForLine (костинг): прогонный не проходит', JSON.stringify(byLine));
+  const byCw = m.markersOfColorway(all, 5).map((x) => x.id);
+  ck(JSON.stringify(byCw) === '[1,2]', 'markersOfColorway (рецепт): прогонный не проходит', JSON.stringify(byCw));
+  // Ветка «колорвей не выбран» отпускает фильтр ПРИНАДЛЕЖНОСТИ, но не ВЛАДЕЛЬЦА.
+  const byCw0 = m.markersOfColorway(all, 0).map((x) => x.id);
+  ck(JSON.stringify(byCw0) === '[1,2]', 'markersOfColorway(…, 0): владелец проверяется и без колорвея',
+     JSON.stringify(byCw0));
+
+  // РЕГРЕССИЯ: до появления прогонных маркеров все маркеры карточные, и списки обязаны выглядеть
+  // ровно как сейчас — не «почти», а теми же строками в том же порядке.
+  const legacyOnly = [
+    { id: 11, name: 'a', bomLineKey: 'L1', colorwayId: 0 },
+    { id: 12, name: 'b', bomLineKey: 'L1', colorwayId: 5 },
+    { id: 13, name: 'c', bomLineKey: 'L2', colorwayId: 5 },
+  ];
+  ck(m.cardMarkers(legacyOnly).every((x, i) => x === legacyOnly[i]) &&
+     m.cardMarkers(legacyOnly).length === legacyOnly.length,
+     'список без поля проходит ЦЕЛИКОМ, теми же объектами и в том же порядке');
+  ck(JSON.stringify(m.markersForLine(legacyOnly, 'L1').map((x) => x.id)) === '[11,12]',
+     'markersForLine на сегодняшних данных отвечает прежним набором');
+  ck(JSON.stringify(m.markersOfColorway(legacyOnly, 5).map((x) => x.id)) === '[11,12,13]',
+     'markersOfColorway на сегодняшних данных отвечает прежним набором (свои + общие)');
+}
+
+console.log('\nH · имя файла экспорта: префикс прогона (Ф4.7 §10)');
+{
+  const parts = ['SS26', 'ST-100', 'M', 'основная', 'раскладка 1'];
+  const cardName = m.exportFileName(parts, 'dxf');
+  ck(cardName === 'SS26-ST-100-M-основная-раскладка_1.dxf', 'карточное имя — прежнее', cardName);
+  ck(m.exportFileName(parts, 'dxf', 0) === cardName, 'runId = 0 не добавляет НИ ОДНОГО байта');
+  const runName = m.exportFileName(parts, 'dxf', 7);
+  ck(runName === `PR7_${cardName}`, 'раскройное имя = PR<runId>_ + прежнее', runName);
+  ck(m.exportFileName([], 'dxf', 7) === 'PR7_раскладка.dxf', 'префикс переживает пустые части', m.exportFileName([], 'dxf', 7));
+  ck(m.exportFileName(parts, 'dxf', 8) !== runName,
+     'два прогона одного маркера дают РАЗНЫЕ имена (ради чего префикс и заводился)');
+}
+
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);
 process.exit(bad ? 1 : 0);

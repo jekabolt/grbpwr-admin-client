@@ -963,7 +963,11 @@ export function NestingModal({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = exportFileName([...fileParts(), ...(extra ?? [])], ext);
+    // ПРЕФИКС ПРОГОНА (Ф4.7, §10). Имя собирается из карточки — сезон, стиль, размер, слот, имя
+    // маркера, — и у двух раскройных раскладок разных прогонов эти части совпадают побуквенно.
+    // `productionRunId` здесь тот же, что уезжает во владельца маркера, поэтому имя файла и
+    // владелец не могут разойтись. 0 (карточный экспорт) ⇒ префикса нет, имя прежнее.
+    a.download = exportFileName([...fileParts(), ...(extra ?? [])], ext, productionRunId);
     a.click();
     // Deferred: Safari/Firefox may not have started the download when click() returns.
     downloadTimer.current = window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
