@@ -7198,7 +7198,12 @@ export type common_TechCardMarkerSummary = {
   // number a client copies verbatim into tech_card_colorway_usage.consumption with
   // consumption_source='marker' — i.e. it stops being a display value and becomes a persistent
   // costing fact nothing downstream can tell apart from a measured one. So the server does not
-  // hand it out; scalar_apply_refusal (:27) says so in words. Per-size figures arrive with Ф2.4.
+  // hand it out; scalar_apply_refusal (:27) says so in words.
+  // Ф2.4 DID NOT LIFT THE WITHHOLDING — it supplied the alternative. The per-size figures now ride
+  // on composition[].consumption_per_unit_cm (:25), and a mixed раскладка is applied THROUGH THEM;
+  // this field stays unset there, because «cloth per garment» with no size named is still a question
+  // a mixed настил has no true answer to, and this is still the field a client copies into a sizeless
+  // costing row.
   consumptionPerUnitCm: googletype_Decimal | undefined;
   createdBy: string | undefined;
   updatedBy: string | undefined;
@@ -7217,6 +7222,9 @@ export type common_TechCardMarkerSummary = {
   // for every marker including those taken before Ф2 — migration 0273 projected each legacy row
   // into the same shape, one entry {size_id, sets}. It is never empty and never carries quantity 0;
   // an empty composition on the wire is a read bug, not «a marker without a состав».
+  // Since Ф2.4 each entry also carries THE PER-SIZE НОРМА, and this list is therefore the thing a
+  // mixed раскладка is applied from. total_units (:26), scalar_apply_refusal (:27) and these entries
+  // are all derived server-side from ONE slice, so they cannot describe three different раскладки.
   composition: common_TechCardMarkerCompositionEntry[] | undefined;
   // OUTPUT-ONLY. How many GARMENTS (not pieces!) this раскладка cuts — Σ composition[].quantity, and
   // the divisor behind consumption_per_unit_cm. Equals `sets` for a legacy marker. NOT to be confused
@@ -7225,7 +7233,11 @@ export type common_TechCardMarkerSummary = {
   // OUTPUT-ONLY. Empty = the scalar consumption_per_unit_cm (:18) may be applied to a recipe. A
   // non-empty string is the server REFUSING to supply a scalar norm for this раскладка, and its text
   // is the explanation to show: which раскладка, why a single number would be wrong, and what to do
-  // instead. Set exactly when the composition holds more than one size.
+  // instead. Set exactly when the composition holds more than one size (or none at all).
+  // Since Ф2.4 the REMEDY the text names depends on this row: a mixed раскладка whose composition
+  // carries per-size расход is told to apply BY SIZE, and one whose areas were never recorded (taken
+  // before Ф2.4) is told to re-save. So the string is not a constant per case and must be shown, not
+  // pattern-matched.
   scalarApplyRefusal: string | undefined;
   // УСЛОВИЯ СЪЁМКИ (Ф3), as recorded on the row. See TechCardMarkerInsert (:17-21) for what each
   // one means and why absence is a distinct answer from zero.
@@ -7267,10 +7279,45 @@ export type common_TechCardMarkerSummary = {
 // repeated, deliberately NOT map<int32,int32>, for three reasons: the order of the entries inside
 // the stored blob must be stable (the Ф0.5 regression probe asserts «same input ⇒ same blob»); a map
 // degrades into an object with string keys through grpc-gateway/OpenAPI; and a repeated entry can
-// grow a field later (Ф2.4 hangs the per-size consumption here) where a map value cannot.
+// grow a field later where a map value cannot — which is exactly what Ф2.4 did, hanging the per-size
+// расход (:3) and its area basis (:4) here rather than in a parallel array keyed by size_id. A
+// parallel array would have had to be JOINed to this one by every reader, and two arrays that must
+// agree about which sizes a раскладка cuts are two arrays that will eventually disagree.
 export type common_TechCardMarkerCompositionEntry = {
   sizeId: number | undefined;
   quantity: number | undefined;
+  // РАСХОД ПО ПЛОЩАДИ (Ф2.4). OUTPUT-ONLY, and ONLY on TechCardMarkerSummary.composition — inside a
+  // layout blob these two are always absent, and the save path STRIPS them from an incoming
+  // layout.composition rather than storing them. A derived number frozen in an immutable blob is a
+  // second copy that goes stale the first time used_length is corrected, which is the same reason
+  // consumption_per_unit_cm has never been a column.
+  // consumption_per_unit_cm is cm of cloth per ONE garment OF THIS SIZE:
+  // расход(s) = a_s · used_length_cm / Σ_j (quantity_j · a_j),   a = area_per_garment_cm2
+  // i.e. the measured length of the настил split between the sizes in proportion to the area each
+  // one actually occupies. It is what replaces the mean the summary's own consumption_per_unit_cm
+  // (:18) refuses to hand out on a mixed состав, and it CONVERGES BY CONSTRUCTION:
+  // Σ (quantity × consumption_per_unit_cm) = used_length_cm, exactly, before display rounding. A
+  // client that finds otherwise is reading two different раскладки.
+  // UNSET on every line at once, never on some, and never to be replaced by used_length/total_units:
+  // absence means this раскладка has no per-size answer (it was taken before Ф2.4 and its areas were
+  // never recorded, or its geometry carries no usable area), and the mean is the exact number the
+  // whole mechanism exists to keep out of a recipe. scalar_apply_refusal (:27) says which case this
+  // is in words.
+  consumptionPerUnitCm: googletype_Decimal | undefined;
+  // area_per_garment_cm2 is a_s, the BASIS above published beside the result: the area ONE garment of
+  // this size occupies on the настил — the graded pieces of this size plus a full set of the
+  // size-agnostic ones (a block with no size suffix does not grade, so every garment cuts one set of
+  // it, identically for S and for XL).
+  // It rides so the distribution is auditable and so it can be CONTINUED. The plan (03-composition.md)
+  // wants one настил to нормировать the whole размерный ряд, including sizes the состав does not
+  // cut — «площади градуированных деталей известны из файлов БЕЗ маркера». THE SERVER CANNOT DO THAT
+  // HALF: it never parses a DXF, and the blob it reads holds pieces only for the sizes the состав
+  // cuts. A client that parses the выкройки computes a_s for a missing size itself and applies the
+  // SAME constant — used_length_cm / Σ(quantity × area_per_garment_cm2) — which is why the
+  // denominator's ingredients are on the wire. It should first check its own areas against these for
+  // the sizes that ARE in the состав: a disagreement means the files moved since the норма was taken,
+  // and the continuation is invalid.
+  areaPerGarmentCm2: googletype_Decimal | undefined;
 };
 
 // TechCardMarkerPieceSetStatus compares a раскладка's stored fingerprint of the card's cut-piece set
@@ -8903,6 +8950,11 @@ export type common_TechCardMarkerLayout = {
   // summary.sets} — and gets precisely the pre-Ф2 semantics back. Branch on THE PRESENCE OF THIS
   // FIELD, never on schema_version: the version exists to decide forgery and grandfathering (Ф1),
   // and a reader that switched on it would have to know about versions it will never see again.
+  // Only size_id and quantity mean anything HERE. The derived fields the same message carries on a
+  // summary (consumption_per_unit_cm, area_per_garment_cm2) are STRIPPED by the save path before the
+  // blob is marshalled: the blob is immutable history, and a derived number frozen inside it would
+  // outlive the used_length it was derived from — and would be indistinguishable from a измеренное
+  // one to every future reader.
   composition: common_TechCardMarkerCompositionEntry[] | undefined;
 };
 

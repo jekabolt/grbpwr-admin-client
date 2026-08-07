@@ -23,6 +23,7 @@
 // экрана обязаны сказать это словами — полоса называет расхождение вслух («рецепты не
 // пересчитаны»), диалог называет копирование — и ни один не пытается свести их сам: молчаливое
 // авто-применение подменило бы решение человека числом, которого он не выбирал.
+import { adminService } from 'api/api';
 import type { common_TechCard, common_TechCardMarkerSummary } from 'api/proto-http/admin';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
@@ -34,10 +35,12 @@ import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
+import { sizeTokensOf } from './nesting/block-code';
 import {
   compositionLabel,
   compositionOf,
   consumptionCm,
+  consumptionForSize,
   decNum,
   betterMarker,
   isLegacyNorm,
@@ -48,6 +51,13 @@ import {
   scalarNormRefusal,
   toBomUnit,
 } from './nesting/marker-io';
+import {
+  canContinue,
+  originLabel,
+  perSizePlan,
+  perSizeRefusal,
+  type PerSizePlan,
+} from './nesting/per-size-consumption';
 import type { TechCardFormData } from './schema';
 
 // ── recipe-side apply ───────────────────────────────────────────────────────────────────
@@ -91,6 +101,13 @@ export function MarkerApplyHint({
   const [open, setOpen] = useState(false);
   const [markerId, setMarkerId] = useState<number>(0);
   const [mode, setMode] = useState<'scalar' | 'perSize'>('scalar');
+  // ПРОДОЛЖЕНИЕ ФОРМУЛЫ НА РАЗМЕРЫ ВНЕ СОСТАВА (Ф2.4). Площади считаются по СЕГОДНЯШНИМ выкройкам,
+  // и это мегабайты с CDN плюс разбор в воркере — поэтому только по явному нажатию, никогда само:
+  // диалог открывают чаще, чем продолжают, а качать выкройки ради строки, которую и так применят
+  // скаляром, значит платить за неё каждый раз.
+  const [areas, setAreas] = useState<Map<number, number> | null>(null);
+  const [areaBusy, setAreaBusy] = useState(false);
+  const [areaError, setAreaError] = useState('');
 
   // Порядок предпочтения — ОДИН на весь файл и живёт в betterMarker: НОРМА → свой колорвей →
   // свежесть (Ф3.4). Назначение нормы — решение человека, принадлежность и дата — эвристики, и
@@ -112,6 +129,21 @@ export function MarkerApplyHint({
   // The card's fit reference — a scalar norm taken from a non-base size deserves a callout.
   const baseSampleSizeId = (useWatch<TechCardFormData>({ name: 'baseSampleSizeId' }) ??
     0) as number;
+  // Сырьё продолжения: СЕГОДНЯШНИЕ строки выкроек карточки и её BOM (по нему резолвится, какие
+  // листы обслуживают ткань этой раскладки — с 0267 лист привязан к НАЗНАЧЕНИЮ, а не к строке).
+  // Читаются здесь, потому что форма карточки есть только здесь; сам отбор живёт в marker-rebuild.
+  const patternRows = (useWatch<TechCardFormData>({ name: 'patterns' }) ?? []) as Array<{
+    url?: string;
+    name?: string;
+    filename?: string;
+    bomLineKey?: string;
+    fabricPurpose?: string;
+  }>;
+  const bomRows = (useWatch<TechCardFormData>({ name: 'bomItems' }) ?? []) as Array<{
+    section?: string;
+    lineKey?: string;
+    purpose?: string;
+  }>;
   if (lineMarkers.length === 0 || !preferred) return null;
 
   const chosen = lineMarkers.find((m) => m.id === markerId) ?? preferred;
@@ -131,25 +163,37 @@ export function MarkerApplyHint({
   const chosenRefusal = scalarNormRefusal(chosen);
   const chosenCons = consumptionCm(chosen);
   const conv = chosenCons != null ? toBomUnit(chosenCons, unit) : null;
+  // ПЛАН ПРИМЕНЕНИЯ ПО РАЗМЕРАМ (Ф2.4). Строка на каждый размер ряда, у каждой — ПРОИСХОЖДЕНИЕ:
+  // измерено этой раскладкой, продолжено по площади выкроек, либо среднее по настилу. Раньше
+  // здесь стояла карта «размер → однородная раскладка» и всё; теперь одна СМЕШАННАЯ раскладка
+  // законно закрывает несколько размеров сразу (latestPerSize её пускает, если она несёт
+  // пер-размерные числа), а недостающие размеры добираются продолжением формулы.
   const bySize = latestPerSize(lineMarkers, colorwayId);
-  const fullCoverage = sizeIds.length > 0 && sizeIds.every((id) => bySize.has(id));
-  // Применимость «по размерам» = покрытие И конвертируемость КАЖДОЙ нормы в единицу линии.
-  // Раньше кнопку в обоих режимах глушил общий `!conv`; после разделения режимов пер-размерная
-  // ветка осталась без гейта единицы — на линии с «пог.м» кнопка жила, а клик молча не делал
-  // ничего: apply() выходил на первом же неконвертируемом размере ДО закрытия диалога.
+  const plan: PerSizePlan = perSizePlan({
+    sizeIds,
+    bySize,
+    continueFrom: chosen,
+    clientAreas: areas ?? undefined,
+  });
+  // Режим вообще имеет смысл, только если хоть один размер нормирован ИЗМЕРЕНИЕМ. План из одних
+  // продолжений и средних — это не «применение раскладки», это экстраполяция без опоры.
+  const perSizeOffered = plan.rows.some((r) => r.origin === 'marker');
+  // Применимость = у КАЖДОГО размера есть число И каждое конвертируется в единицу линии.
+  // Гейт единицы держится отдельно от покрытия: без него на линии с «пог.м» кнопка жила, а клик
+  // молча не делал ничего — apply() выходил на первом же неконвертируемом размере.
   const perSizeApplicable =
-    fullCoverage &&
-    sizeIds.every((id) => {
-      const m = bySize.get(id);
-      const cons = m ? consumptionCm(m) : null;
-      return cons != null && toBomUnit(cons, unit) != null;
-    });
+    plan.complete && plan.rows.every((r) => toBomUnit(r.consumptionCm ?? 0, unit) != null);
+  // Продолжать имеет смысл, когда есть чем (раскладка публикует площади состава) и есть зачем
+  // (какой-то размер ряда остался без числа).
+  const continuationOffered =
+    canContinue(chosen) && plan.unansweredSizes.length > 0 && plan.continuation !== 'ok';
   // Один предикат «применить возможно» на кнопку и на пояснения — чтобы заметки об отходах не
   // могли рассказывать про норму, которую тот же экран отказался выдавать.
   const applyPossible = mode === 'scalar' ? conv != null && !chosenRefusal : perSizeApplicable;
   const wastage = parseDecimalNumber(wastagePercent);
 
   const sizeName = (id?: number) => sizeNameById.get(id ?? 0) ?? `#${id}`;
+  const perSizeWhyNot = perSizeRefusal(plan, (id) => sizeName(id));
   const compLabel = (m: common_TechCardMarkerSummary) =>
     compositionLabel(compositionOf(m), (id) => sizeName(id)) || 'состав не читается';
   // Label and number from the same marker — the CHOSEN one (the hint used to number by
@@ -172,7 +216,12 @@ export function MarkerApplyHint({
   // The markers the per-size mode would actually apply — the card's sizes, not every size that
   // happens to carry a marker (a leftover marker for a size since dropped from the card must
   // not colour a warning, or an average, about what will be written).
-  const appliedPerSize = sizeIds.map((id) => bySize.get(id)).filter((m) => m != null);
+  //
+  // ИЗ ПЛАНА, а не из карты размеров: с Ф2.4 строка может прийти от продолжения по площадям, и
+  // тогда «применённая раскладка» у неё — та, чьей константой продолжали. Собирать этот список
+  // мимо плана значило бы предупреждать про ширину и про условия съёмки НЕ ТЕХ раскладок,
+  // которые уйдут в рецепт.
+  const appliedPerSize = [...new Set(plan.rows.map((r) => r.marker).filter((m) => m != null))];
   const perSizeWidths = appliedPerSize.map((m) => decNum(m!.fabricWidthCm)).filter((w) => w > 0);
   const mixedWidths =
     perSizeWidths.length > 1 && Math.max(...perSizeWidths) - Math.min(...perSizeWidths) > 0.5;
@@ -184,8 +233,12 @@ export function MarkerApplyHint({
 
   // Scalar-mode spread: a flat norm silently taken from one size understates/overstates the
   // run when sizes diverge — or when the chosen size is not the base sample size.
-  const perSizeCons = appliedPerSize
-    .map((m) => consumptionCm(m!))
+  //
+  // Числа берутся ИЗ ПЛАНА, а не через consumptionCm по маркерам: на смешанной раскладке
+  // consumptionCm отказывает (у неё нет одного расхода), и разброс по её размерам — ровно тот
+  // самый, ради измерения которого Ф2.4 и заводилась, — считался бы по пустому списку.
+  const perSizeCons = plan.rows
+    .map((r) => r.consumptionCm)
     .filter((c): c is number => c != null && c > 0);
   const spreadPct =
     perSizeCons.length > 1
@@ -210,12 +263,12 @@ export function MarkerApplyHint({
   // отпечатка деталей. Оба — знание, которое есть у экрана и которого нет у оператора, и молчать
   // о нём значит выдать число уверенней, чем оно есть. НЕИЗВЕСТНОСТЬ отпечатка — НЕ изменение:
   // pieceSetChanged намеренно ложен на UNKNOWN, иначе бейджем покрылись бы все старые маркеры разом.
-  const perSizeChanged = sizeIds
-    .filter((id) => pieceSetChanged(bySize.get(id)))
-    .map((id) => sizeName(id));
-  const perSizeLegacy = sizeIds
-    .filter((id) => bySize.get(id) != null && isLegacyNorm(bySize.get(id)))
-    .map((id) => sizeName(id));
+  const perSizeChanged = plan.rows
+    .filter((r) => pieceSetChanged(r.marker ?? undefined))
+    .map((r) => sizeName(r.sizeId));
+  const perSizeLegacy = plan.rows
+    .filter((r) => r.marker != null && isLegacyNorm(r.marker))
+    .map((r) => sizeName(r.sizeId));
 
   // Provenance stamped with the number (0261): «marker» tells costing this figure ALREADY
   // contains the cutting waste, so the article's wastage_percent must not gross it up a second
@@ -245,19 +298,101 @@ export function MarkerApplyHint({
     } else {
       const rows: { sizeId: number; consumption: string }[] = [];
       const used: common_TechCardMarkerSummary[] = [];
-      for (const id of sizeIds) {
-        const m = bySize.get(id);
-        // latestPerSize держит только ОДНОРОДНЫЕ раскладки, так что отказа здесь быть не может;
-        // null всё равно проверяется — молча записать в рецепт ноль хуже, чем не записать ничего.
-        const cons = m ? consumptionCm(m) : null;
-        const c = cons != null ? toBomUnit(cons, unit) : null;
-        if (!c || !m) return;
-        rows.push({ sizeId: id, consumption: String(c.value) });
-        used.push(m);
+      for (const r of plan.rows) {
+        // План уже отказал за каждый размер, который назвать нечем; null проверяется всё равно —
+        // молча записать в рецепт ноль хуже, чем не записать ничего.
+        const c = r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit) : null;
+        if (!c) return;
+        rows.push({ sizeId: r.sizeId, consumption: String(c.value) });
+        if (r.marker && !used.includes(r.marker)) used.push(r.marker);
       }
+      if (rows.length === 0) return;
       onApply({ sizeConsumptions: rows, ...provenance(used) });
     }
     setOpen(false);
+  };
+
+  // ПРОДОЛЖЕНИЕ ПО ВЫКРОЙКАМ — по нажатию, никогда само (см. состояние `areas`).
+  //
+  // Три источника сходятся здесь и нигде больше: блоб раскладки (количества деталей на изделие и
+  // площади неградуируемых), СЕГОДНЯШНИЕ выкройки её ткани и словарь размеров (чем размер написан
+  // в имени блока). Тяжёлое — разбор DXF — приходит ДИНАМИЧЕСКИМ импортом: этот файл живёт в
+  // чанке рецепта, и статический импорт притащил бы туда dxf-parser целиком.
+  const continueByAreas = async () => {
+    setAreaBusy(true);
+    setAreaError('');
+    try {
+      const [{ sizeAreasForMarker }, { patternSourcesForMarker }, { fabricScopes, isRollGoodsSection }] =
+        await Promise.all([
+          import('./nesting/size-areas-from-dxf'),
+          import('./nesting/marker-rebuild'),
+          import('./bom-purpose'),
+        ]);
+      // Какие листы обслуживают ткань ЭТОЙ раскладки. С 0267 лист привязан к НАЗНАЧЕНИЮ, и оно
+      // резолвится перед bomLineKey — фильтр по одному ключу теряет листы «основного материала»
+      // и отвечает «выкроек нет» там, где они загружены.
+      const key = (chosen.bomLineKey ?? '').trim();
+      const rollGoods = bomRows
+        .filter((b) => isRollGoodsSection(b.section) && b.lineKey)
+        .map((b) => ({ lineKey: b.lineKey as string, purpose: b.purpose ?? '' }));
+      const scope = key
+        ? fabricScopes(rollGoods).find((s) => s.lines.some((l) => l.lineKey === key))
+        : undefined;
+      const sources = patternSourcesForMarker(patternRows, {
+        bomLineKey: key,
+        purposeOwnsLine: (p) => !!scope?.byPurpose && scope.key === p,
+      });
+      if (sources.length === 0) {
+        setAreas(null);
+        setAreaError('выкроек этой ткани на карточке нет — площади считать не по чему');
+        return;
+      }
+      // Блоб едет ОТДЕЛЬНЫМ запросом: в сводке его нет намеренно (60–100 КБ на раскладку), а без
+      // него неизвестны ни количества деталей на изделие, ни площади неградуируемых.
+      const r = await adminService.GetTechCardMarker({ id: chosen.id ?? 0 });
+      if (!r.marker) {
+        setAreas(null);
+        setAreaError('раскладка не найдена — возможно, её удалили');
+        return;
+      }
+      // Токены размера — ПО ВСЕМУ СЛОВАРЮ, а не по ряду карточки: иначе размер, лежащий в файле,
+      // но не заведённый в ряд, перестаёт быть размерным хвостом, и деталь двоится на идентичности.
+      const dictTokens = new Set<string>();
+      for (const name of sizeNameById.values()) for (const t of sizeTokensOf(name)) dictTokens.add(t);
+      const wanted = new Set<number>(sizeIds);
+      for (const c of compositionOf(chosen)) wanted.add(c.sizeId);
+      const out = await sizeAreasForMarker({
+        marker: r.marker,
+        sources,
+        sizeIds: [...wanted],
+        tokensOfSize: (id) => sizeTokensOf(sizeNameById.get(id)),
+        isSizeToken: (t) => dictTokens.has(t),
+      });
+      if (!out.ok) {
+        setAreas(null);
+        setAreaError(out.reason);
+        return;
+      }
+      // Сверка клиентских площадей с записанными живёт в perSizePlan — здесь только сырьё. Так
+      // «продолжение недействительно» остаётся ОДНИМ решением в одном месте, а не двумя.
+      setAreas(out.areas.areaBySize);
+    } catch (e) {
+      setAreas(null);
+      setAreaError(
+        e instanceof Error && e.message ? e.message : 'не удалось посчитать площади по выкройкам',
+      );
+    } finally {
+      setAreaBusy(false);
+    }
+  };
+
+  // Закрытие диалога сбрасывает и посчитанные площади: они проверены против ОДНОЙ раскладки и
+  // против СЕГОДНЯШНИХ файлов, а между открытиями могло измениться и то и другое.
+  const reset = () => {
+    setMarkerId(0);
+    setMode('scalar');
+    setAreas(null);
+    setAreaError('');
   };
 
   return (
@@ -310,16 +445,12 @@ export function MarkerApplyHint({
         open={open}
         onOpenChange={(o: boolean) => {
           setOpen(o);
-          if (!o) {
-            setMarkerId(0);
-            setMode('scalar');
-          }
+          if (!o) reset();
         }}
         onConfirm={apply}
         onCancel={() => {
           setOpen(false);
-          setMarkerId(0);
-          setMode('scalar');
+          reset();
         }}
         title='применить расход из раскладки'
         confirmLabel='применить'
@@ -330,7 +461,10 @@ export function MarkerApplyHint({
         closeOnConfirm={false}
       >
         <div className='space-y-2'>
-          {lineMarkers.length > 1 && mode === 'scalar' && (
+          {/* Селектор теперь и в «по размерам»: выбранная раскладка там не только показывается,
+              она ЕСТЬ БАЗИС ПРОДОЛЖЕНИЯ — её константа L/Σ(q·a) достраивает размеры, которых нет
+              в её составе. Прятать выбор в режиме, где он решает больше всего, было бы странно. */}
+          {lineMarkers.length > 1 && (
             <Selector
               label='маркер'
               value={chosen.id ?? 0}
@@ -356,23 +490,35 @@ export function MarkerApplyHint({
                   }${pieceSetChanged(m) ? ' · набор изменился' : ''}`,
                 };
               })}
-              onChange={(v: string | number) => setMarkerId(Number(v))}
+              onChange={(v: string | number) => {
+                setMarkerId(Number(v));
+                // Площади посчитаны ПРОТИВ конкретной раскладки: её блоба, её условий съёмки, её
+                // записанных a_s. Для другой они не проверены ничем, и оставить их значило бы
+                // продолжить чужую константу по чужой сверке.
+                setAreas(null);
+                setAreaError('');
+              }}
             />
           )}
           <ChipRow>
             <Chip selected={mode === 'scalar'} pressed={mode === 'scalar'} onClick={() => setMode('scalar')}>
               единой нормой
             </Chip>
+            {/* «По размерам» ТЕПЕРЬ ДОСТУПНО И ОТ ОДНОЙ СМЕШАННОЙ РАСКЛАДКИ. Раньше режим требовал
+                однородной раскладки на КАЖДЫЙ размер, потому что поделить смешанную было нечем;
+                с Ф2.4 у каждой строки её состава есть свой расход, и она нормирует все свои
+                размеры сразу. Гейт остался один: хоть один размер обязан быть ИЗМЕРЕН, остальное
+                договаривает продолжение по площадям. */}
             <Chip
               selected={mode === 'perSize'}
               pressed={mode === 'perSize'}
-              disabled={!fullCoverage}
+              disabled={!perSizeOffered}
               title={
-                fullCoverage
+                perSizeOffered
                   ? undefined
-                  : 'нужна ОДНОРОДНАЯ раскладка на каждый размер карточки — иначе непокрытые размеры дадут ноль и занизят расход. Смешанная раскладка сюда не годится: её длина общая на весь настил, и поделить её по размерам нечем до пер-размерного расхода (Ф2.4)'
+                  : 'ни один размер карточки не нормирован раскладкой: нужна раскладка, чей состав режет хотя бы один из этих размеров. Смешанная годится — если она снята после того, как площади по размерам стали записываться (иначе поделить её длину по размерам нечем)'
               }
-              onClick={() => fullCoverage && setMode('perSize')}
+              onClick={() => perSizeOffered && setMode('perSize')}
             >
               по размерам
             </Chip>
@@ -394,7 +540,7 @@ export function MarkerApplyHint({
           )}
           {/* Тот же отказ по единице — и в «по размерам»: покрытие полное, а применить нечем.
               Без него кнопка гаснет молча, и объяснить это некому. */}
-          {mode === 'perSize' && fullCoverage && !perSizeApplicable && (
+          {mode === 'perSize' && plan.complete && !perSizeApplicable && (
             <CalloutBox tone='error'>
               единица линии BOM ({unit || '—'}) не поддерживает раскладку — расход измерен в
               сантиметрах длины
@@ -418,17 +564,98 @@ export function MarkerApplyHint({
                   }`}
             </CalloutBox>
           )}
+          {/* ЧИСЛО И ЕГО ПРОИСХОЖДЕНИЕ — В ОДНОЙ СТРОКЕ. Три источника выглядят одинаково
+              убедительно, а стоят разного: «из раскладки» измерено, «по площади выкроек»
+              продолжено той же формулой, «СРЕДНЕЕ» — тот самый перекос, который вся подсистема
+              отказывается отдавать скаляром. Строка без пометки была бы обещанием, которого экран
+              не может дать. */}
           {mode === 'perSize' && (
-            <Text size='nano' variant='label' component='p'>
-              {sizeIds
-                .map((id) => {
-                  const m = bySize.get(id);
-                  const cons = m ? consumptionCm(m) : null;
-                  const c = cons != null ? toBomUnit(cons, unit) : null;
-                  return `${sizeName(id)}: ${c ? `${c.value} ${c.unit}` : '—'}`;
-                })
-                .join(' · ')}
-            </Text>
+            <div className='space-y-0.5'>
+              {plan.rows.map((r) => {
+                const c = r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit) : null;
+                return (
+                  <div key={r.sizeId} className='flex flex-wrap items-baseline gap-1.5'>
+                    <Text size='nano' variant='label' component='span'>
+                      {sizeName(r.sizeId)}:{' '}
+                      {c
+                        ? `${c.value} ${c.unit}`
+                        : r.consumptionCm != null
+                          ? `${r.consumptionCm} см`
+                          : '—'}
+                    </Text>
+                    <Pill
+                      tone={r.origin === 'mean' ? 'warn' : r.origin === 'area' ? 'attention' : 'mut'}
+                      title={
+                        r.origin === 'area'
+                          ? `размера нет в составе «${chosen.name}» — расход продолжен по площади его выкроек (${(r.areaCm2 ?? 0).toFixed(0)} см² на изделие) той же формулой распределения`
+                          : r.origin === 'mean'
+                            ? `выкроек этого размера на карточке нет — подставлено СРЕДНЕЕ по настилу «${chosen.name}». Мелкие размеры оно завышает, крупные занижает`
+                            : r.marker
+                              ? `измерено раскладкой «${r.marker.name}»`
+                              : undefined
+                      }
+                    >
+                      {originLabel(r.origin)}
+                    </Pill>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {/* ПОЧЕМУ ПО РАЗМЕРАМ НЕ ПОЛУЧАЕТСЯ — словами, а не погасшей кнопкой. */}
+          {mode === 'perSize' && !plan.complete && perSizeWhyNot && (
+            <CalloutBox tone='warning'>{perSizeWhyNot}</CalloutBox>
+          )}
+          {/* ПРОДОЛЖЕНИЕ ФОРМУЛЫ НА ОСТАЛЬНОЙ РЯД. Раскладка публикует площадь каждого размера
+              своего состава, а вместе с длиной настила — и константу L/Σ(q·a); размеру, которого
+              в составе не было, недостаёт ровно одного числа — его собственной площади, и она
+              берётся из выкроек. Кнопка, а не автозапуск: это мегабайты с CDN и разбор DXF. */}
+          {mode === 'perSize' && continuationOffered && (
+            <div className='flex flex-wrap items-center gap-1.5'>
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                disabled={areaBusy}
+                onClick={continueByAreas}
+              >
+                {areaBusy ? 'считаю площади…' : 'продолжить по выкройкам'}
+              </Button>
+              <Text size='nano' variant='label' component='span'>
+                посчитать площади размеров {plan.unansweredSizes.map(sizeName).join(', ')} по
+                сегодняшним выкройкам и продолжить распределение «{chosen.name}»
+              </Text>
+            </div>
+          )}
+          {mode === 'perSize' && areaError && <CalloutBox tone='error'>{areaError}</CalloutBox>}
+          {/* СВЕРКА НЕ СОШЛАСЬ — ПРОДОЛЖАТЬ НЕЛЬЗЯ, и это отдельный, более сильный факт, чем
+              «размера нет». Площади посчитаны, но сегодняшние выкройки не воспроизводят те, по
+              которым мерили: файлы менялись после съёмки, а длина настила осталась от прежней
+              геометрии. Экстраполировать константу по чужим файлам значит выдать число, которое
+              ни к чему не относится. */}
+          {mode === 'perSize' && plan.continuation === 'blocked' && plan.areaCheck && (
+            <CalloutBox tone='error'>
+              продолжение недействительно: {plan.areaCheck.reason}. Переснимите раскладку по
+              сегодняшним выкройкам — тогда и длина, и площади будут от одной геометрии
+            </CalloutBox>
+          )}
+          {mode === 'perSize' && plan.continuation === 'ok' && plan.continuedSizes.length > 0 && (
+            <CalloutBox tone='note'>
+              размеры {plan.continuedSizes.map(sizeName).join(', ')} в составе «{chosen.name}» не
+              резались: их расход ПРОДОЛЖЕН по площади выкроек тем же распределением, каким
+              раскладка поделила свою длину между своими размерами. Площади сверены с записанными в
+              раскладке — сегодняшние выкройки те же
+            </CalloutBox>
+          )}
+          {/* СРЕДНЕЕ НАЗЫВАЕТСЯ ВСЛУХ. 03-composition.md оставляет его только размерам без файлов
+              и требует сказать об этом на экране — потому что это ровно то число, ради устранения
+              которого затевался состав, и молча оно неотличимо от измеренного. */}
+          {mode === 'perSize' && plan.meanSizes.length > 0 && (
+            <CalloutBox tone='warning'>
+              у размеров {plan.meanSizes.map(sizeName).join(', ')} выкроек на карточке нет, и им
+              подставлено СРЕДНЕЕ по настилу «{chosen.name}»: мелкие размеры оно завышает, крупные
+              занижает. Загрузите их выкройки — расход посчитается по площади, как у остальных
+            </CalloutBox>
           )}
           {mode === 'scalar' && widthMismatch && (
             <CalloutBox tone='warning'>
