@@ -37,6 +37,19 @@ function serverJudges(blob, legacy) {
   else errs.push('composition_missing');
   const sorted = [...comp].every((c,i,a) => i===0 || a[i-1].sizeId < c.sizeId);
   if (hasComp && !sorted) errs.push('composition not sorted');
+  // entity.ValidateMarkerComposition — правила НАЗВАНЫ, а не выведены из сортировки. Дубль ловился
+  // раньше лишь ПОБОЧНО (строгим '<' в проверке порядка), то есть ровно то правило, ради которого
+  // существует случай E, здесь не было заявлено вовсе.
+  const seen = new Set();
+  for (const c of comp) {
+    if (seen.has(c.sizeId)) errs.push(`composition lists size ${c.sizeId} twice`);
+    seen.add(c.sizeId);
+    if (!(c.quantity >= 1)) errs.push(`size ${c.sizeId}: quantity must be >= 1`);
+    if (c.quantity > 5000) errs.push(`size ${c.sizeId}: quantity over MaxMarkerTotalUnits`);
+  }
+  if (comp.length > 32) errs.push('composition over MaxMarkerCompositionSizes');
+  const units = comp.reduce((s, c) => s + c.quantity, 0);
+  if (units > 5000) errs.push('total_units over MaxMarkerTotalUnits');
   return { errs, stored, totalUnits: stored ? stored.reduce((s,c)=>s+c.quantity,0) : 0 };
 }
 
