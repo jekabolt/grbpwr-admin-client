@@ -271,11 +271,66 @@ export function markersOfColorway(
 // дефолтной ширине слота, тогда как собственный снят на артикуле, который этот колорвей реально
 // закупает. Именно эту подмену колонка colorway_id и заводилась предотвращать, и заметить её
 // нечем: длина отличается ровно настолько, насколько отличаются ширины.
+// НОРМА — ПЕРВЫЙ КЛЮЧ, и это не «ещё одна сортировка», а смена того, кто решает (Ф3.4). Пока
+// ключей было два, норму выбирал КАЛЕНДАРЬ: любая свежая пробная раскладка перебивала ту, которую
+// человек назначил нормировочной, — а назначение и есть высказывание «мерить по этой». Признак
+// ставится отдельным RPC, так что перехватить норму пересохранением геометрии нельзя; здесь
+// остаётся лишь не игнорировать назначенное.
+//
+// Дата остаётся ниже: две нормы в одном скоупе — состояние, которое сервер сообщает отдельно
+// (norm_conflict), а не то, что клиент разрешает молчанием; до тех пор побеждает свежая.
 export function betterMarker(colorwayId: number) {
   const own = (m: common_TechCardMarkerSummary) =>
     colorwayId && Number(m.colorwayId ?? 0) === colorwayId ? 0 : 1;
+  const norm = (m: common_TechCardMarkerSummary) => (m.isNorm === true ? 0 : 1);
   return (a: common_TechCardMarkerSummary, b: common_TechCardMarkerSummary): number =>
-    own(a) - own(b) || newerMarker(a, b);
+    norm(a) - norm(b) || own(a) - own(b) || newerMarker(a, b);
+}
+
+// ── УСЛОВИЯ СЪЁМКИ (Ф3) ─────────────────────────────────────────────────────────────────
+//
+// Читаются ЗДЕСЬ и по ПОЛЮ, тем же правилом, что состав. Отсутствие любого условия — это
+// «не записано», а не ноль: маркер без припуска и есть «СТАРАЯ НОРМА» — категория ПРОИЗВОДНАЯ,
+// без своей колонки и без своего флага, потому что непомеченное само остаётся старым.
+export type MarkerConditions = {
+  seamAllowanceCm: number | null;
+  contourAllowanceCm: number | null;
+  contourLayer: string | null;
+  grainLayer: string | null;
+  allowFlip: boolean | null;
+  /** false = условия не записаны вовсе ⇒ это «старая норма». */
+  recorded: boolean;
+};
+
+export function conditionsOf(s?: common_TechCardMarkerSummary): MarkerConditions {
+  const num = (d?: googletype_Decimal): number | null => {
+    const raw = d?.value;
+    if (raw == null || String(raw).trim() === '') return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  };
+  const seam = num(s?.seamAllowanceCm);
+  return {
+    seamAllowanceCm: seam,
+    contourAllowanceCm: num(s?.contourAllowanceCm),
+    contourLayer: s?.contourLayer ?? null,
+    grainLayer: s?.grainLayer ?? null,
+    allowFlip: s?.allowFlip ?? null,
+    // ПРИПУСК — ЕДИНСТВЕННЫЙ СВИДЕТЕЛЬ. Слой контура законно пуст (файл с одним слоем), долевая
+    // законно пуста («не разворачивать»), переворот — булев и его умолчание неотличимо от
+    // незаписанного. Только припуск записывается всегда, когда условия записывались вообще.
+    recorded: seam != null,
+  };
+}
+
+/** «Старая норма»: снята до того, как условия стали записываться. */
+export function isLegacyNorm(s?: common_TechCardMarkerSummary): boolean {
+  return !conditionsOf(s).recorded;
+}
+
+/** Набор деталей карточки изменился с момента съёмки. НЕИЗВЕСТНОСТЬ — НЕ ИЗМЕНЕНИЕ. */
+export function pieceSetChanged(s?: common_TechCardMarkerSummary): boolean {
+  return s?.pieceSetStatus === 'TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED';
 }
 
 // Лучший маркер на каждый размер для одной строки BOM — источник для применения по размерам.
