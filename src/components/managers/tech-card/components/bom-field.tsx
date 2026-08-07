@@ -1,6 +1,7 @@
 import {
   common_AdminColorwayRef,
   common_Material,
+  common_TechCardBomKind,
   common_TechCardBomSection,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -26,7 +27,7 @@ import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'const
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useFieldArray,
   useFormContext,
@@ -58,6 +59,12 @@ import { flattenFieldErrors } from 'utils/field-errors';
 import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
 import {
+  KIND_HOME_SECTION,
+  UNSET_KIND,
+  isKindEligibleSection,
+  kindOptionsForSection,
+} from './bom-kind';
+import {
   UNSET_PURPOSE,
   defaultRoleForPurpose,
   groupBomLines,
@@ -85,6 +92,9 @@ const emptyBomItem = {
   // honest one, because this template is also what a non-roll-goods line is built from.
   purpose: UNSET_PURPOSE,
   purposeNote: '',
+  // ЧТО ЭТО ЗА ПОЗИЦИЯ (0278): same honest default on the other axis — unset until answered.
+  kind: UNSET_KIND,
+  kindNote: '',
   isSample: false,
   name: '',
   supplier: '',
@@ -176,7 +186,10 @@ function SlotIdentityFields({ index }: { index: number }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
   const rowPurpose = useWatch({ control, name: `bomItems.${index}.purpose` }) as string | undefined;
+  const rowKind = useWatch({ control, name: `bomItems.${index}.kind` }) as string | undefined;
   const rollGoods = isRollGoodsSection(rowSection);
+  const kindEligible = isKindEligibleSection(rowSection);
+  const kindItems = useMemo(() => kindOptionsForSection(rowSection), [rowSection]);
 
   // Moving a line off roll goods takes its purpose with it — a назначение on a thread or a button
   // is data no screen renders and the server refuses outright. This fires only on an actual section
@@ -196,6 +209,24 @@ function SlotIdentityFields({ index }: { index: number }) {
     // fight the operator for the field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rowPurpose, index]);
+
+  // The same two rules for the kind axis, and the first one is STRICTER than purpose's: a kind is
+  // not merely section-family-scoped, it is homed on ONE section. Moving a line from hardware to
+  // trim leaves `zipper` on a trim line — legal-looking, refused by the store, and reported against
+  // a field the operator did not touch. Both branches are no-ops on an already-consistent line.
+  useEffect(() => {
+    if (!rowKind || rowKind === UNSET_KIND) return;
+    const home = KIND_HOME_SECTION[rowKind as common_TechCardBomKind];
+    if (!kindEligible || (home && home !== rowSection)) {
+      setValue(`bomItems.${index}.kind`, UNSET_KIND, { shouldDirty: true });
+    }
+  }, [kindEligible, rowKind, rowSection, index, setValue]);
+  useEffect(() => {
+    if (rowKind !== 'TECH_CARD_BOM_KIND_OTHER') {
+      setValue(`bomItems.${index}.kindNote`, '', { shouldDirty: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowKind, index]);
 
   return (
     <div className='space-y-2'>
@@ -233,6 +264,26 @@ function SlotIdentityFields({ index }: { index: number }) {
                 maxLength={255}
               />
             </div>
+          )}
+        </div>
+      )}
+      {/* ЧТО ЭТО ЗА ПОЗИЦИЯ — the mirror axis, shown exactly where назначение is not. The role
+          above stays free text and stays the slot's identity: «основная молния» and «молния
+          кармана» are both ZIPPER, and the card has to keep telling them apart. This says which
+          of those two questions the line answers, so a picker can group and a step can suggest. */}
+      {kindEligible && (
+        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+          <SelectField
+            name={`bomItems.${index}.kind`}
+            label='вид'
+            items={[{ value: UNSET_KIND, label: '— не задан —' }, ...kindItems]}
+          />
+          {rowKind === 'TECH_CARD_BOM_KIND_OTHER' && (
+            <InputField
+              name={`bomItems.${index}.kindNote`}
+              label='что это за вид'
+              maxLength={255}
+            />
           )}
         </div>
       )}
@@ -775,6 +826,7 @@ export function BomField({
   // later and it becomes an audit of twenty tiles, which is exactly the backlog the unsorted group
   // exists to work off, not something to keep growing.
   const [addPurpose, setAddPurpose] = useState<string>(UNSET_PURPOSE);
+  const [addKind, setAddKind] = useState<string>(UNSET_KIND);
   const [addPurposeNote, setAddPurposeNote] = useState('');
   const [addSample, setAddSample] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -896,6 +948,7 @@ export function BomField({
     // a контраст picked first would be stamped MAIN and never looked at again.
     setAddPurpose(UNSET_PURPOSE);
     setAddPurposeNote('');
+    setAddKind(UNSET_KIND);
     setAddSample(false);
     setAddMaterial(m);
   };
@@ -905,6 +958,12 @@ export function BomField({
   const addSection = addMaterial?.section || emptyBomItem.section;
   const addNeedsPurpose = isRollGoodsSection(addSection);
   const addPurposeAnswered = !addNeedsPurpose || addPurpose !== UNSET_PURPOSE;
+  // ЧТО ЭТО ЗА ПОЗИЦИЯ is asked in the same breath, wherever назначение is not — this IS the moment
+  // the operator has the answer in front of them. ASKED, NOT REQUIRED, unlike purpose: the role name
+  // falls back to a purpose, so a missing purpose leaves the line nameless, whereas nothing depends
+  // on the kind being present and unset is a legal state in the form, the store and the DB alike.
+  const addKindEligible = isKindEligibleSection(addSection);
+  const addKindItems = kindOptionsForSection(addSection);
 
   // Step 2 commit: one new slot — the answered role, the picked article as its default.
   // Роль обязательна только там, где назначение её не заменяет. У рулонной ткани назначение уже
@@ -934,6 +993,7 @@ export function BomField({
       // state the server and the DB CHECK both require of it.
       purpose: addNeedsPurpose ? addPurpose : UNSET_PURPOSE,
       purposeNote: addNeedsPurpose && isOtherPurpose(addPurpose) ? addPurposeNote.trim() : '',
+      kind: addKindEligible ? addKind : UNSET_KIND,
       isSample: addSample,
       materialId,
       lineKey: ulid(),
@@ -1257,6 +1317,23 @@ export function BomField({
                 the purpose names the SUBSET of the fabrics it belongs to, which is what makes
                 «карманка», «контраст» and «сетка» tellable apart from «основная» at all — today
                 they are all section=fabric and the free-text role is the only difference. */}
+            {addKindEligible && (
+              <div>
+                <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                  вид
+                </Text>
+                <div className='mt-1'>
+                  <Select
+                    name='bom-add-kind'
+                    items={addKindItems}
+                    value={addKind === UNSET_KIND ? undefined : addKind}
+                    placeholder='молния / кнопка / резинка…'
+                    fullWidth
+                    onValueChange={(v: string) => setAddKind(v)}
+                  />
+                </div>
+              </div>
+            )}
             {addNeedsPurpose && (
               <>
                 <div>

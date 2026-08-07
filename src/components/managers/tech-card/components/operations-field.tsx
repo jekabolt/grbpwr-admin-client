@@ -51,6 +51,7 @@ import {
   topstitchWidthOptions,
   zoneOptions,
 } from './operation-options';
+import { OPERATION_TYPE_PREFERRED_KINDS, kindLabel } from './bom-kind';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData } from './schema';
 
@@ -195,7 +196,13 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
 type PickerOption = { value: number; label: string };
 // materialId is the SLOT DEFAULT article. It is read from the form (not from the card read) so an
 // article picked on the BOM tab and not yet saved still resolves here.
-type BomLine = { lineKey?: string; name?: string; section?: string; materialId?: number };
+type BomLine = {
+  lineKey?: string;
+  name?: string;
+  section?: string;
+  materialId?: number;
+  kind?: string;
+};
 
 // What each colourway actually takes for a slot. The operation links the SLOT («основная молния»);
 // the article is per colourway, so this is the read-side join that makes «в разных колорвеях разная
@@ -611,6 +618,14 @@ function OperationEditor({
   // already sorted into section order, so a Map keeps the groups in that order too. Not memoised on
   // purpose — unlinkedBoms is a fresh array every render, so a useMemo over it would recompute
   // anyway while costing a dependency that lies about being stable.
+  //
+  // Within that, ЧТО ЭТО ЗА ПОЗИЦИЯ (0278) does the actual suggesting: a BUTTON_ATTACH step offers
+  // buttons and snaps before the rest of the фурнитура, and the group holding them leads. This only
+  // ever REORDERS — never filters — so a step that genuinely takes something unexpected is one
+  // glance further down rather than unreachable, and a card whose lines carry no kind yet reads
+  // exactly as it did before.
+  const preferredKinds = new Set<string>(OPERATION_TYPE_PREFERRED_KINDS[opType] ?? []);
+  const isPreferred = (b: BomLine) => !!b.kind && preferredKinds.has(b.kind);
   const unlinkedBySection = (() => {
     const groups = new Map<string, BomLine[]>();
     for (const b of unlinkedBoms) {
@@ -619,7 +634,12 @@ function OperationEditor({
       if (bucket) bucket.push(b);
       else groups.set(section, [b]);
     }
-    return Array.from(groups.entries());
+    for (const lines of groups.values()) {
+      lines.sort((a, b) => Number(isPreferred(b)) - Number(isPreferred(a)));
+    }
+    return Array.from(groups.entries()).sort(
+      ([, a], [, b]) => Number(b.some(isPreferred)) - Number(a.some(isPreferred)),
+    );
   })();
 
   // Which article each colourway actually takes for the slots this step consumes. THE reason the
@@ -862,7 +882,9 @@ function OperationEditor({
             {linkedMaterials.map((b) => (
               <Chip
                 key={b.lineKey}
-                title={LINKABLE_SECTION_LABEL[b.section ?? ''] ?? undefined}
+                // The kind when the line carries one — «молния» says more than «фурнитура» — and the
+                // section as the fallback for every line not classified yet.
+                title={kindLabel(b.kind) ?? LINKABLE_SECTION_LABEL[b.section ?? ''] ?? undefined}
                 onRemove={() => toggleBom(b.lineKey ?? '')}
                 onMouseEnter={() => onActiveBomChange?.(b.lineKey ?? null)}
                 onMouseLeave={() => onActiveBomChange?.(null)}

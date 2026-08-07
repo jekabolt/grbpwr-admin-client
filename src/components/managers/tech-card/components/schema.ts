@@ -4,6 +4,7 @@ import {
   common_TechCard,
   common_TechCardApprovalState,
   common_TechCardAuxSubtype,
+  common_TechCardBomKind,
   common_TechCardBomPurpose,
   common_TechCardBomSection,
   common_TechCardConstruction,
@@ -28,6 +29,7 @@ import {
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
+import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
 import { UNSET_PURPOSE, fabricScopeKey, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import {
@@ -314,6 +316,11 @@ const bomItemSchema = z
     // is the one moment the operator has the answer in front of them.
     purpose: z.string().optional().default(UNSET_PURPOSE),
     purposeNote: z.string().optional().default(''),
+    // ЧТО ЭТО ЗА ПОЗИЦИЯ (0278) — the mirror axis on everything that is NOT roll goods and not a
+    // label. Unset is a real state for the same reason purpose's is: every line predating the field
+    // is deliberately unclassified, and demanding a kind here would make those cards unsavable.
+    kind: z.string().optional().default(UNSET_KIND),
+    kindNote: z.string().optional().default(''),
     isSample: z.boolean().optional().default(false),
     name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
     supplier: z.string().optional().default(''),
@@ -380,6 +387,33 @@ const bomItemSchema = z
         code: z.ZodIssueCode.custom,
         message: 'примечание можно писать только к назначению «другое»',
         path: ['purposeNote'],
+      });
+    }
+    // Same parity for the other axis (0278). The kind↔section PAIRING is checked too, not just
+    // eligibility: the store refuses a zip on a thread line, and catching it here names the field
+    // instead of surfacing a violation on a line_key nobody recognises.
+    const kind = item.kind && item.kind !== UNSET_KIND ? item.kind : '';
+    if (kind && !isKindEligibleSection(item.section)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message:
+          'вид есть у фурнитуры, ниток, тесьмы, декора и упаковки — у ткани это назначение, у этикетки её тип',
+        path: ['kind'],
+      });
+    }
+    const home = KIND_HOME_SECTION[kind as common_TechCardBomKind];
+    if (kind && home && home !== item.section) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'этот вид относится к другой секции',
+        path: ['kind'],
+      });
+    }
+    if (item.kindNote?.trim() && kind !== 'TECH_CARD_BOM_KIND_OTHER') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'примечание можно писать только к виду «другое»',
+        path: ['kindNote'],
       });
     }
   });
@@ -818,6 +852,8 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     // a guess, and a guess is what 0265 deliberately refuses to make.
     purpose: b.purpose || UNSET_PURPOSE,
     purposeNote: b.purposeNote || '',
+    kind: b.kind || UNSET_KIND,
+    kindNote: b.kindNote || '',
     isSample: !!b.isSample,
     name: b.name || '',
     supplier: b.supplier || '',
@@ -1404,6 +1440,13 @@ export function mapFormToTechCardInsert(
       // ride out and be refused by chk_bom_item_purpose_note. Dropping it is safe in a way clearing
       // the PURPOSE would not be: the note only ever explains a purpose that is no longer there.
       purposeNote: isOtherPurpose(b.purpose) ? b.purposeNote?.trim() ?? '' : '',
+      // Same pair, other axis (0278). The kind is sent as-is; the note is dropped unless the kind is
+      // OTHER, or a note left behind by a kind the operator has since changed would ride out and be
+      // refused by chk_bom_item_kind_note. Both fields are ALWAYS sent: kind and kind_note share one
+      // presence decision server-side, so omitting one while sending the other is the exact write
+      // MySQL has to reject.
+      kind: (b.kind || UNSET_KIND) as common_TechCardBomKind,
+      kindNote: b.kind === 'TECH_CARD_BOM_KIND_OTHER' ? b.kindNote?.trim() ?? '' : '',
       isSample: !!b.isSample,
       name: b.name?.trim() || '',
       supplier: b.supplier?.trim() || '',
