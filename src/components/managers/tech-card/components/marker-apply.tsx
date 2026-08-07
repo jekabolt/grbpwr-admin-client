@@ -770,6 +770,12 @@ export function MarkerApplyHint({
 // ── costing-side display band ───────────────────────────────────────────────────────────
 
 export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard }) {
+  // Сырое поле карточки: раскройные маркеры прогонов приезжают в нём вперемешку с карточными
+  // (отдельного List-RPC у клиента нет). Отсеивает их markersForLine — через cardMarkers, один
+  // фильтр на весь клиент, — и ВСЁ, что эта полоса читает из маркеров, проходит через него:
+  // отбор строк BOM (:filter ниже), сам список, ранжирование и поиск нормы работают уже с
+  // `lineMarkers`. Держать здесь второй `productionRunId === 0` значило бы завести вторую копию
+  // правила, которая разойдётся с первой.
   const markers = techCard?.markers ?? [];
   const bomLines = techCard?.techCard?.bomItems ?? [];
   const colorways = techCard?.colorways ?? [];

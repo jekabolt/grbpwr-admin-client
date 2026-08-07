@@ -1,9 +1,13 @@
 import {
   buildMarkerLayout,
+  cardMarkers,
   compositionOf,
   consumptionCm,
+  exportFileName,
   legacyPairOf,
   markerToView,
+  markersForLine,
+  markersOfColorway,
   scalarNormRefusal,
   totalUnitsOf,
 } from 'components/managers/tech-card/components/nesting/marker-io';
@@ -57,4 +61,15 @@ export function duplicateSizes() {
   });
 }
 
-export { compositionOf, consumptionCm, legacyPairOf, markerToView, scalarNormRefusal, totalUnitsOf };
+export {
+  cardMarkers,
+  compositionOf,
+  consumptionCm,
+  exportFileName,
+  legacyPairOf,
+  markerToView,
+  markersForLine,
+  markersOfColorway,
+  scalarNormRefusal,
+  totalUnitsOf,
+};

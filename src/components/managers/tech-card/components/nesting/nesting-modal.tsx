@@ -78,8 +78,8 @@ import { isDxfUrl } from 'utils/pattern';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { normBlock, splitBlockSize } from './block-code';
-import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
+import { normBlock } from './block-code';
+import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
@@ -145,6 +145,7 @@ export function NestingModal({
   pieceAliases,
   requiredSeamAllowanceCm,
   workshopDefaultSeamAllowanceCm,
+  productionRunId = 0,
 }: {
   files: NestingFile[] | null; // null = closed (nest mode)
   sizeLabel?: string;
@@ -200,6 +201,14 @@ export function NestingModal({
   // Припуск цеха по умолчанию, см (admin.WorkshopSettings.default_seam_allowance_cm). Тот же
   // договор: `null` = не настроено, и это НЕ ноль.
   workshopDefaultSeamAllowanceCm?: number | null;
+  // ПРОГОН, ПОД КОТОРЫЙ СНИМАЕТСЯ РАСКРОЙНЫЙ МАРКЕР (Ф4.2). 0 = карточный — все сегодняшние
+  // раскладки и норма. Модалка про настилы не знает ничего и знать не должна: она только
+  // проставляет владельца, а секции настила собирает редактор на странице прогона.
+  //
+  // Поле НЕИЗМЕНЯЕМО после создания (см. комментарий у TechCardMarkerInsert.production_run_id):
+  // перевод карточного маркера в прогонный переносит право на его жизнь — раскройный умирает
+  // вместе с прогоном по FK CASCADE. Поэтому оно едет как ПРОП, а не как контрол на экране.
+  productionRunId?: number;
 }) {
   // В РЕЖИМЕ ПРОСМОТРА ФАЙЛЫ НЕ РАЗБИРАЮТСЯ ЭТИМ ХУКОМ, и это не экономия, а устранение второго
   // разбора. С §7.5 вызывающий передаёт в `files` сегодняшние выкройки ткани — но нужны они
@@ -303,7 +312,9 @@ export function NestingModal({
       const val = (a.pieceLineKey ?? '').trim();
       if (!raw || !val) continue;
       put(byBlock, raw.toLowerCase(), val);
-      const ident = normBlock(splitBlockSize(raw, split.sizeTokenSet).identity).toLowerCase();
+      // Свёртка спрашивает ФАЙЛ, а не форму имени: «FP_L» — это левая полочка целиком, и её
+      // алиас обязан остаться прямым совпадением, а не уехать на свёрнутый слой под «FP».
+      const ident = aliasIdentity(raw, split).toLowerCase();
       if (!ident || ident === raw.toLowerCase()) continue;
       put(folded, ident, val);
     }
@@ -952,7 +963,11 @@ export function NestingModal({
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = exportFileName([...fileParts(), ...(extra ?? [])], ext);
+    // ПРЕФИКС ПРОГОНА (Ф4.7, §10). Имя собирается из карточки — сезон, стиль, размер, слот, имя
+    // маркера, — и у двух раскройных раскладок разных прогонов эти части совпадают побуквенно.
+    // `productionRunId` здесь тот же, что уезжает во владельца маркера, поэтому имя файла и
+    // владелец не могут разойтись. 0 (карточный экспорт) ⇒ префикса нет, имя прежнее.
+    a.download = exportFileName([...fileParts(), ...(extra ?? [])], ext, productionRunId);
     a.click();
     // Deferred: Safari/Firefox may not have started the download when click() returns.
     downloadTimer.current = window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
@@ -1501,6 +1516,7 @@ export function NestingModal({
         id: 0,
         techCardId,
         marker: {
+          productionRunId,
           // ЛЕГАСИ-ПАРА ИЛИ СОСТАВ — ровно одно из двух, и это правило сервера
           // (dto.markerCompositionOfInsert), а не вкусовщина: состав приезжает ТОЛЬКО блобом,
           // отдельного поля на вставке нет намеренно — две копии на проводе подняли бы вопрос
@@ -1633,6 +1649,7 @@ export function NestingModal({
         id: s.id ?? 0,
         techCardId,
         marker: {
+          productionRunId,
           sizeId: s.sizeId ?? 0,
           name: s.name ?? '',
           source: 'manual',

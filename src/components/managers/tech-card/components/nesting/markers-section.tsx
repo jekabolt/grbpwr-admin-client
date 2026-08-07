@@ -19,6 +19,7 @@ import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import {
+  cardMarkers,
   compositionLabel,
   compositionOf,
   conditionsOf,
@@ -123,7 +124,13 @@ export function MarkersSection({
   techCardId: number;
   canEdit: boolean;
 }) {
-  const markers = techCard?.markers ?? [];
+  // ТОЛЬКО КАРТОЧНЫЕ РАСКЛАДКИ (Ф4.2). Раскройные маркеры прогонов приезжают в том же поле
+  // `techCard.markers` — отдельного списка у клиента нет, — и этот экран ими не заведует: их
+  // видно на странице прогона, у них нет самостоятельной жизни, и удалять/назначать нормой их
+  // отсюда нельзя (норма прогонной раскладке запрещена CHECK'ом на схеме). Фильтр — один на
+  // клиент, из marker-io; здесь он ставится НА ИСТОЧНИК, поэтому карточными оказываются и
+  // таблица, и сводка конфликтов, и пустое состояние, и поиск прежней нормы ниже.
+  const markers = useMemo(() => cardMarkers(techCard?.markers), [techCard?.markers]);
   // Колорвей маркера — имя, а не id. Без него две раскладки одного слота на разных ширинах
   // различаются только числом в колонке «ширина», и понять, которая из них чья, нельзя.
   const colorwayLabelById = useMemo(() => {
