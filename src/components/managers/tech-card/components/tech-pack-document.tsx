@@ -47,6 +47,11 @@ import { decimalToInput } from 'utils/decimal';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
+import {
+  CUT_SYMMETRY_PRINT_LEGEND,
+  cutSymmetryPrintCaption,
+  cutSymmetryUnanswered,
+} from './piece-codes';
 import { useTechCardReleases } from './useSamples';
 
 const mapOf = (opts: ReadonlyArray<{ value: string; label: string }>) =>
@@ -548,7 +553,7 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* PATTERNS (выкройки) — per-size PDF, QR-linked for the factory */}
+      {/* PATTERNS (выкройки) — per-size PDF/DXF, QR-linked for the factory */}
       {has(tc.patterns) && (
         <Sheet title='patterns (выкройки)'>
           <div className='flex flex-wrap gap-4'>
@@ -559,6 +564,9 @@ export function TechPackDocument({
                   <PatternQR value={p.url ?? ''} />
                   <figcaption className='mt-1 text-micro uppercase'>
                     <div className='font-semibold'>{sizeName(p.sizeId)}</div>
+                    {/* The operator's name for the sheet leads; the CAD filename stays as the
+                        secondary line the factory can match against the file it receives. */}
+                    {p.name && <div className='max-w-[120px] truncate'>{p.name}</div>}
                     {p.filename && (
                       <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
                     )}
@@ -567,7 +575,7 @@ export function TechPackDocument({
               ))}
           </div>
           <p className='mt-2 text-nano text-labelColor'>
-            наведите камеру на QR, чтобы открыть PDF-выкройку этого размера
+            наведите камеру на QR, чтобы открыть выкройку этого размера (PDF/DXF)
           </p>
         </Sheet>
       )}
@@ -636,7 +644,6 @@ export function TechPackDocument({
                 <th className={`${TH} w-6`}>#</th>
                 <th className={TH}>piece</th>
                 <th className={`${TH} text-center`}>qty / garment</th>
-                <th className={`${TH} text-center`}>mirrored</th>
                 <th className={TH}>grainline</th>
                 <th className={`${TH} text-center`}>fused</th>
                 <th className={TH}>fabric (by colourway)</th>
@@ -655,8 +662,31 @@ export function TechPackDocument({
                         <div className='text-labelColor'>unpinned from sketch callout</div>
                       )}
                     </td>
-                    <td className={`${TD} text-center`}>{p.piecesPerGarment ?? '—'}</td>
-                    <td className={`${TD} text-center`}>{p.mirrored ? 'yes' : 'no'}</td>
+                    {/* КОЛИЧЕСТВО И ЕГО ПОЯСНЕНИЕ В ОДНОЙ КЛЕТКЕ — это и есть весь смысл Ф1.3 на
+                        бумаге. Тех-пак печатает pieces_per_garment и НИКОГДА total, поэтому после
+                        миграции 0266 зеркальная пара приходила на фабрику как голая «2», без
+                        единого признака парности: шапка 0266 сама называет это своим худшим
+                        последствием. Подпись стоит вплотную к числу, которое она уточняет, —
+                        отдельная колонка на другом конце строки читалась бы как ещё один атрибут,
+                        а не как оговорка к количеству. */}
+                    <td className={`${TD} text-center`}>
+                      <div>{p.piecesPerGarment ?? '—'}</div>
+                      {(() => {
+                        const caption = cutSymmetryPrintCaption(p.cutSymmetry, p.piecesPerGarment);
+                        if (!caption) return null;
+                        // Неразмеченная парная деталь — это ВОПРОС к цеху, а не факт о ней, и
+                        // выглядеть он должен иначе, чем указание: рамка вместо простой подписи.
+                        return cutSymmetryUnanswered(p.cutSymmetry, p.piecesPerGarment) ? (
+                          <div className='mt-0.5 border border-black px-0.5 text-nano uppercase'>
+                            {caption}
+                          </div>
+                        ) : (
+                          <div className='mt-0.5 text-nano uppercase text-labelColor'>
+                            {caption}
+                          </div>
+                        );
+                      })()}
+                    </td>
                     <td className={TD}>{p.grainline || '—'}</td>
                     <td className={`${TD} text-center`}>{p.fused ? 'yes' : 'no'}</td>
                     <td className={TD}>
@@ -692,6 +722,12 @@ export function TechPackDocument({
               })}
             </tbody>
           </table>
+          {/* Словарь колонки «qty / garment» — один раз под таблицей. Печатается только если в
+              таблице реально есть что объяснять: на карточке, где ни одна деталь не размечена и все
+              идут по одной, легенда была бы строкой ни о чём. */}
+          {(tc.pieces ?? []).some((p) =>
+            cutSymmetryPrintCaption(p.cutSymmetry, p.piecesPerGarment),
+          ) && <p className='mt-1 text-nano text-labelColor'>{CUT_SYMMETRY_PRINT_LEGEND}</p>}
         </Sheet>
       )}
 

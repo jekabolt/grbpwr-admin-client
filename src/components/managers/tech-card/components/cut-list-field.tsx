@@ -9,18 +9,30 @@ import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
+import { cutSymmetryBadge, cutSymmetryUnanswered } from './piece-codes';
 import { TechCardFormData } from './schema';
 import { useStyleCutList } from './useStyleReadViews';
 
-// Q6: read-only production cut-list — one row per cut-piece (деталь кроя), expanded with
-// total_per_garment already folding the mirrored pair (pieces_per_garment × 2) and, per
-// colourway, which fabric (and optional fusing) BOM line it's cut from. NOT costing-gated —
-// this is pattern/production data, not money.
+// Q6: read-only production cut-list — one row per cut-piece (деталь кроя) with its
+// total_per_garment and, per colourway, which fabric (and optional fusing) BOM line it's cut from.
+// NOT costing-gated — this is pattern/production data, not money.
+//
+// The mirror flag is GONE (it expanded a piece ×2 as a left+right pair and was never used):
+// total_per_garment is now simply pieces_per_garment. GetStyleCutList stopped doubling in the same
+// change, so this table and the editor cannot disagree.
+//
+// 0275 вернула КЛАССИФИКАЦИЮ, но не множитель: колонка «как кроится» объясняет уже посчитанные
+// числа и ни одного из них не меняет — total_per_garment по-прежнему равен pieces_per_garment.
+// Именно поэтому её можно было добавить, не трогая ни одну сумму на этом экране.
+//
 // #42: this table is a CALCULATED projection, not an editable list — there is nothing to "add"
-// here. It is derived (GetStyleCutList) from the cut-pieces × their mirror flag × each colourway's
-// fabric mapping — both of which live on the colorways tab. This view just reflects the result.
+// here. It is derived (GetStyleCutList) from the cut-pieces × each colourway's fabric mapping.
+// This view just reflects the result.
+//
+// It renders on the PATTERNS tab now, directly under the «детали кроя» block it projects, so the
+// copy below points at that block rather than at a tab the reader is already on.
 const INTRO =
-  'Calculated, not editable: pieces × mirror × each colourway’s fabric mapping. Add / edit the pieces and their fabric per colourway on the colorways tab — this table just shows the result.';
+  'Calculated, not editable: pieces × each colourway’s fabric mapping. Add / edit the pieces in the «детали кроя» block above — this table just shows the result. Столбец «ткань по колорвеям» пока НЕ заполняется: редактора карты тканей в админке нет, и рецепт колорвея пишет другую таблицу — так что пустая ячейка тут означает «негде задать», а не «забыли».';
 
 const SHELL_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_FABRIC',
@@ -96,6 +108,11 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
 
     const perGarment = pieces.reduce((s, p) => s + (p.totalPerGarment ?? 0), 0);
     const fusedPerGarment = pieces.reduce((s, p) => s + (p.fused ? p.totalPerGarment ?? 0 : 0), 0);
+    // Сколько строк уйдёт в цех с оговоркой «парность не указана» — то же условие, по которому
+    // печатает тех-пак. Число, а не молчание: это таблица, по которой кроят.
+    const unmarkedPairing = pieces.filter((p) =>
+      cutSymmetryUnanswered(p.cutSymmetry, p.piecesPerGarment),
+    ).length;
 
     // Fabric is projected off the PRIMARY colourway's recipe: the size run is style-level, so
     // multiplying every colourway's recipe by it would count the same garments once per colour.
@@ -131,6 +148,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
       garments,
       perGarment,
       fusedPerGarment,
+      unmarkedPairing,
       piecesToCut: garments > 0 ? perGarment * garments : null,
       fusedTotal: garments > 0 ? fusedPerGarment * garments : null,
       shell: shell > 0 ? shell : null,
@@ -159,7 +177,8 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
     return (
       <CalloutBox tone='note'>
         <Text size='micro'>
-          {INTRO} No cut pieces yet — add one on the colorways tab and it will appear here.
+          {INTRO} No cut pieces yet — add one in the «детали кроя» block above and it will appear
+          here.
         </Text>
       </CalloutBox>
     );
@@ -214,8 +233,8 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
       {totals.garments === 0 && (
         <CalloutBox tone='warning'>
           <Text size='micro'>
-            заполните тираж по размерам (patterns → size run) — без него проекция кроя не считается,
-            поэтому счётчики показывают «—», а не ноль.
+            заполните тираж по размерам (блок «size range» вверху этой вкладки) — без него проекция
+            кроя не считается, поэтому счётчики показывают «—», а не ноль.
           </Text>
         </CalloutBox>
       )}
@@ -231,7 +250,9 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
             <th>grainline</th>
             <th>fused</th>
             <th>pieces / garment</th>
-            <th>mirrored</th>
+            {/* Между количеством и total, потому что это пояснение к ним обоим: числа одинаковые
+                (0275 ничего не умножает), и колонка говорит, ЧТО это за штуки. */}
+            <th>как кроится</th>
             <th>total / garment</th>
             <th>fabric (by colourway)</th>
           </tr>
@@ -239,13 +260,31 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
         <tbody>
           {pieces.map((p, i) => {
             const fabrics = p.fabrics ?? [];
+            // Read-only на этом RPC (поле 9 в StyleCutListPiece): раскроечный цех работает по этой
+            // таблице, а редактируется разметка в блоке «детали кроя» выше.
+            const symmetry = cutSymmetryBadge(p.cutSymmetry, p.piecesPerGarment);
             return (
               <tr key={p.pieceId || i}>
                 <td>{p.name || `#${p.pieceId}`}</td>
                 <td>{p.grainline || <EmptyCell />}</td>
                 <td>{p.fused ? <Pill tone='mut'>fused</Pill> : <EmptyCell />}</td>
                 <td>{p.piecesPerGarment ?? 0}</td>
-                <td>{p.mirrored ? '×2 pair' : <EmptyCell />}</td>
+                <td>
+                  {symmetry ? (
+                    <Pill
+                      tone={symmetry.tone}
+                      title={
+                        symmetry.tone === 'attention'
+                          ? 'деталь идёт по две и больше на изделие, а как они кроятся — не сказано. Ответьте в блоке «детали кроя» выше: пока ответа нет, тех-пак печатает эту же оговорку фабрике.'
+                          : undefined
+                      }
+                    >
+                      {symmetry.label}
+                    </Pill>
+                  ) : (
+                    <EmptyCell />
+                  )}
+                </td>
                 <td>{p.totalPerGarment ?? 0}</td>
                 <td>
                   {fabrics.length === 0 ? (
@@ -294,6 +333,7 @@ export function CutListField({ techCardId }: { techCardId?: number }) {
             <td colSpan={5}>
               {pieces.length} pieces
               {totals.garments > 0 ? ` · ${group(totals.garments)} garments` : ''}
+              {totals.unmarkedPairing > 0 ? ` · ${totals.unmarkedPairing} без разметки кроя` : ''}
             </td>
             <td>{group(totals.perGarment)}</td>
             <td>

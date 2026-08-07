@@ -104,7 +104,32 @@ function MaterialsTable({
                 )}
               </span>
             </td>
-            <td>{decimalToInput(m.wastagePct) || <EmptyCell />}</td>
+            {/* Wastage tells two different stories now (0261). On a bom_estimate line the
+                percent is a MULTIPLIER the line total already carries. On a marker line
+                nothing is multiplied — the measured length paid for the waste — and the
+                percent is the decomposition of what that length contains. Rendering both as a
+                bare number made a marker row read as an uplift it never received. */}
+            <td>
+              {m.wastageSource === 'marker' ? (
+                <span className='flex flex-col items-end gap-0.5'>
+                  <Pill tone='mut'>из раскладки</Pill>
+                  <Text size='micro' variant='label' component='span'>
+                    {/* A marker with no recorded efficiency (hand-built or imported) stores no
+                        decomposition, and the server's wastage_pct is the SUM of the two
+                        components — so it is 0 there too, not an independently known total.
+                        Printing «кромка 0% + выпады 0%» would state a split nobody measured;
+                        the norm still contains its waste, we just cannot say how it divides. */}
+                    {decimalToInput(m.wastageSelvedgePct) || decimalToInput(m.wastageCutPct)
+                      ? `кромка ${decimalToInput(m.wastageSelvedgePct) || '0'}% + выпады ${
+                          decimalToInput(m.wastageCutPct) || '0'
+                        }% — уже в норме`
+                      : 'отходы уже в норме; разложение не записано'}
+                  </Text>
+                </span>
+              ) : (
+                decimalToInput(m.wastagePct) || <EmptyCell />
+              )}
+            </td>
             <td>
               <BaseAmount value={decimalToInput(m.lineTotalBase)} hasBase={m.hasBase} />
             </td>

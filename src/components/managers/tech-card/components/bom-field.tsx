@@ -37,14 +37,17 @@ import {
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import CheckboxCommon from 'ui/components/checkbox';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
+import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
+import CheckboxField from 'ui/form/fields/checkbox-field';
 import ComboField from 'ui/form/fields/combo-field';
 import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
@@ -54,6 +57,15 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
+import {
+  UNSET_PURPOSE,
+  defaultRoleForPurpose,
+  groupBomLines,
+  isOtherPurpose,
+  isRollGoodsSection,
+  purposeEditorOptions,
+  techCardBomPurposeOptions,
+} from './bom-purpose';
 import {
   defaultRoleFor,
   looksLikeArticleName,
@@ -68,6 +80,12 @@ import { unitOptions } from './tech-card-options';
 // per colourway on the colorways tab.
 const emptyBomItem = {
   section: 'TECH_CARD_BOM_SECTION_FABRIC',
+  // НАЗНАЧЕНИЕ (0265): unset until someone answers for it. The add flow asks on every roll-goods
+  // line, so a new fabric never actually reaches the grid unsorted — but the default has to be the
+  // honest one, because this template is also what a non-roll-goods line is built from.
+  purpose: UNSET_PURPOSE,
+  purposeNote: '',
+  isSample: false,
   name: '',
   supplier: '',
   supplierRef: '',
@@ -155,21 +173,69 @@ const classShort = (c?: string) =>
 // article keeps its own catalog section on the plate, and a deliberate divergence (a jersey
 // article serving a LINING slot) must be expressible.
 function SlotIdentityFields({ index }: { index: number }) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
+  const rowPurpose = useWatch({ control, name: `bomItems.${index}.purpose` }) as string | undefined;
+  const rollGoods = isRollGoodsSection(rowSection);
+
+  // Moving a line off roll goods takes its purpose with it — a назначение on a thread or a button
+  // is data no screen renders and the server refuses outright. This fires only on an actual section
+  // change (both branches are no-ops once the line is already consistent), so it cannot dirty a card
+  // merely by being opened. Same for the note when the purpose leaves «другое»: it explains a
+  // purpose that is no longer there.
+  useEffect(() => {
+    if (!rollGoods && rowPurpose && rowPurpose !== UNSET_PURPOSE) {
+      setValue(`bomItems.${index}.purpose`, UNSET_PURPOSE, { shouldDirty: true });
+    }
+  }, [rollGoods, rowPurpose, index, setValue]);
+  useEffect(() => {
+    if (!isOtherPurpose(rowPurpose)) {
+      setValue(`bomItems.${index}.purposeNote`, '', { shouldDirty: false });
+    }
+    // Deliberately keyed on the purpose alone: re-running on every keystroke in the note would
+    // fight the operator for the field.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rowPurpose, index]);
+
   return (
-    <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
-      <ComboField
-        name={`bomItems.${index}.name`}
-        label='роль в изделии *'
-        options={roleSuggestions(rowSection)}
-        placeholder='основная ткань / подкладка / молния…'
-      />
-      <SelectField
-        name={`bomItems.${index}.section`}
-        label='секция *'
-        items={techCardBomSectionOptions}
-      />
+    <div className='space-y-2'>
+      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+        <ComboField
+          name={`bomItems.${index}.name`}
+          label='роль в изделии *'
+          options={roleSuggestions(rowSection)}
+          placeholder='основная ткань / подкладка / молния…'
+        />
+        <SelectField
+          name={`bomItems.${index}.section`}
+          label='секция *'
+          items={techCardBomSectionOptions}
+        />
+      </div>
+      {/* Roll goods only — назначение exists where cloth does. Not shown at all elsewhere rather
+          than shown-and-disabled: a control that can never be used is a question the operator has
+          to re-answer on every line. */}
+      {rollGoods && (
+        <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+          <SelectField
+            name={`bomItems.${index}.purpose`}
+            label='назначение'
+            items={purposeEditorOptions}
+          />
+          <div className='flex items-end pb-1'>
+            <CheckboxField name={`bomItems.${index}.isSample`} label='семпловая' />
+          </div>
+          {isOtherPurpose(rowPurpose) && (
+            <div className='sm:col-span-2'>
+              <InputField
+                name={`bomItems.${index}.purposeNote`}
+                label='что это за назначение'
+                maxLength={255}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -502,6 +568,10 @@ function BomTile({
     unitPrice?: string;
     currency?: string;
     materialId?: number;
+    purpose?: string;
+    purposeNote?: string;
+    isSample?: boolean;
+    fabricDirection?: string;
   };
 
   const linked = (row.materialId ?? 0) > 0;
@@ -529,6 +599,12 @@ function BomTile({
   // грамматура · ширина · мат/сатин/блеск · состав · цвет — the identifying spec line, with the
   // colour appended. Empty on an unlinked line, which has no catalog material behind it yet.
   const specLine = material ? join(materialSpec(material), material.color) : '';
+
+  // Только рулонные строки: направление — свойство ПОЛОТНА, и спрашивать его у нитки или у
+  // фурнитуры было бы данными, которые ни один экран не читает.
+  const needsDirection =
+    isRollGoodsSection(row.section) &&
+    (!row.fabricDirection || row.fabricDirection === 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN');
 
   // #64: an unlinked line is the release blocker, so it reads as the blocker marker; a linked line
   // shows its price, or flags a missing one.
@@ -588,6 +664,10 @@ function BomTile({
         <div className='flex flex-wrap items-center gap-1'>
           <Pill tone='mut'>{section || 'section?'}</Pill>
           {cls && cls !== section ? <Pill tone='mut'>{cls}</Pill> : null}
+          {/* Семпловая rides INSIDE its purpose group as a badge, never as a group of its own: a
+              sample is a sample MAIN plus a sample LINING, and a «семплы» heading would put those
+              two in one bucket and throw away the roles that make them useful. */}
+          {row.isSample ? <Pill tone='ink'>семпл</Pill> : null}
         </div>
 
         {/* The ROLE, bold — the slot's identity. The article is the line below it. */}
@@ -618,6 +698,14 @@ function BomTile({
           </Text>
         ) : null}
 
+        {/* The OTHER note, on the tile: its group heading reads «другое», which says only that the
+            operator looked and none of the seven fitted. The note is the part that means something. */}
+        {isOtherPurpose(row.purpose) && row.purposeNote?.trim() ? (
+          <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
+            назначение: {row.purposeNote.trim()}
+          </Text>
+        ) : null}
+
         <div className='mt-0.5 flex min-w-0 flex-wrap items-center gap-1'>
           {priceStatus}
           {/* Advisory role health: a blank role reads as the article name everywhere (the server
@@ -627,6 +715,12 @@ function BomTile({
             <Pill tone='attention'>роль не задана</Pill>
           ) : null}
           {roleDuplicate ? <Pill tone='attention'>дубль роли</Pill> : null}
+          {/* НАПРАВЛЕНИЕ ТКАНИ, не проставленное на рулонной строке (Ф1). Поле есть с 0073 и
+              обязательным никогда не было, поэтому пустое оно почти везде — а с Ф1 оно решает,
+              можно ли переворачивать деталь на раскладке, и сервер не примет норму, пока ответа
+              нет. Плашка стоит ЗДЕСЬ, потому что чинится это здесь: отказ приходит в модалке
+              раскладки, за две вкладки отсюда, и без метки его пришлось бы искать перебором. */}
+          {needsDirection ? <Pill tone='attention'>направление ткани?</Pill> : null}
         </div>
       </button>
 
@@ -676,6 +770,13 @@ export function BomField({
   // The picked article awaiting its role — the role modal is open exactly while this is set.
   const [addMaterial, setAddMaterial] = useState<common_Material | undefined>(undefined);
   const [addRole, setAddRole] = useState('');
+  // НАЗНАЧЕНИЕ, asked in the same breath as the role and REQUIRED when the article is cloth. This is
+  // the moment the answer is cheapest — the operator has just picked the fabric and knows why. Ask
+  // later and it becomes an audit of twenty tiles, which is exactly the backlog the unsorted group
+  // exists to work off, not something to keep growing.
+  const [addPurpose, setAddPurpose] = useState<string>(UNSET_PURPOSE);
+  const [addPurposeNote, setAddPurposeNote] = useState('');
+  const [addSample, setAddSample] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const { fields, append, remove } = useFieldArray({ control, name: 'bomItems' });
   const bomWatch = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
@@ -683,7 +784,14 @@ export function BomField({
     name?: string;
     section?: string;
     materialId?: number;
+    purpose?: string;
   }>;
+  // Positions, never reordered rows: every tile, editor and delete addresses a line by its index in
+  // the field array, so grouping has to hand back where each line IS, not a rearranged copy. Length
+  // comes from `fields` rather than from the watch — the two are the same list, but they settle a
+  // render apart after an append, and a group built off the longer one would briefly index a tile
+  // that has no field behind it.
+  const bomGroups = groupBomLines(fields.map((_, i) => bomWatch[i] ?? {}));
   // Duplicate-role detection for the tiles (advisory, never a save rule): normalized role → count.
   const roleCounts = new Map<string, number>();
   bomWatch.forEach((b) => {
@@ -706,6 +814,33 @@ export function BomField({
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightComposition]);
+
+  // ?bom=<line_key> opens ONE article's editor on arrival — the same hand-off shape this tab uses
+  // in the other direction with ?colorway=<id>. Sent by the направление-ткани worklist (Ф1.8),
+  // whose rows each name a line by its stable key: landing on the tab alone would drop the operator
+  // in front of twenty tiles with nothing saying which one they came for.
+  //
+  // Gated on ?tab=bom because tab panels stay MOUNTED behind the active one — without it, any URL
+  // carrying the param would pop this dialog over whatever tab is actually open. Consumed, not
+  // kept: a param left standing would re-open the dialog on every return to the tab. Waits for the
+  // field array to be seeded, so a deep link that arrives before the card's read lands is resolved
+  // rather than discarded.
+  const deepLinkedLine = params.get('bom');
+  const onBomTab = params.get('tab') === 'bom';
+  useEffect(() => {
+    if (!deepLinkedLine || !onBomTab || fields.length === 0) return;
+    const key = deepLinkedLine.trim();
+    const index = fields.findIndex(
+      (_, i) => ((getValues(`bomItems.${i}.lineKey`) as string) ?? '').trim() === key,
+    );
+    // A key that matches nothing still clears the param: the line was deleted or renamed since the
+    // report was read, and leaving it in the URL would make the tab feel haunted.
+    if (index >= 0) setEditing(index);
+    const next = new URLSearchParams(params);
+    next.delete('bom');
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkedLine, onBomTab, fields.length]);
 
   // The pulsed field lives inside the dialog, so it can only be scrolled to once that content has
   // mounted into its portal — a frame after `editing` is set, not in the effect above.
@@ -756,18 +891,50 @@ export function BomField({
     }
     const sectionHasSlots = bomWatch.some((b) => b.section === m.section);
     setAddRole(sectionHasSlots ? '' : defaultRoleFor(m.section));
+    // No prefill for the purpose, on purpose. The one guess available here — «первая ткань на
+    // карточке значит основная» — is wrong precisely on the cards that need the field: a карманка or
+    // a контраст picked first would be stamped MAIN and never looked at again.
+    setAddPurpose(UNSET_PURPOSE);
+    setAddPurposeNote('');
+    setAddSample(false);
     setAddMaterial(m);
   };
 
+  // The article's own catalog section is what the new line is created with (materialLineFields), so
+  // it is what decides whether a purpose is asked for.
+  const addSection = addMaterial?.section || emptyBomItem.section;
+  const addNeedsPurpose = isRollGoodsSection(addSection);
+  const addPurposeAnswered = !addNeedsPurpose || addPurpose !== UNSET_PURPOSE;
+
   // Step 2 commit: one new slot — the answered role, the picked article as its default.
+  // Роль обязательна только там, где назначение её не заменяет. У рулонной ткани назначение уже
+  // сказано, и пустая роль подставится из него.
+  const roleAnswered = !!addRole.trim() || (addNeedsPurpose && addPurposeAnswered);
+
   const commitAdd = () => {
     const m = addMaterial;
     const materialId = wireInt(m?.id);
-    if (!m || !materialId || !addRole.trim()) return;
+    if (!m || !materialId || !roleAnswered || !addPurposeAnswered) return;
     append({
       ...emptyBomItem,
       ...materialLineFields(m),
-      name: addRole.trim(),
+      // Роль СПРАШИВАЕТСЯ ТОЛЬКО ТАМ, ГДЕ НАЗНАЧЕНИЕ НЕ ОТВЕЧАЕТ.
+      //
+      // У рулонной ткани назначение говорит то же самое, и требовать вдобавок «роль в изделии»
+      // значит спрашивать одно дважды. Пустая роль подставляется из назначения — это единственное
+      // место, где угадывать можно: оператор ТОЛЬКО ЧТО его выбрал, это не догадка по секции.
+      //
+      // Но само поле остаётся, и не из осторожности. Во-первых, у ниток, фурнитуры и отделки
+      // назначения нет вовсе, и «основная молния» против «молния кармана» — единственное, чем они
+      // различаются. Во-вторых, модель прямо допускает НЕСКОЛЬКО строк на одно назначение (в этом
+      // и смысл «сабсета тканей»), и две «основной материал» — полочка и капюшон — без роли стали
+      // бы неразличимы в раскладке, cut list и плане материалов.
+      name: addRole.trim() || defaultRoleForPurpose(addPurpose),
+      // A non-roll-goods article never reaches the purpose question, so it lands unset — the same
+      // state the server and the DB CHECK both require of it.
+      purpose: addNeedsPurpose ? addPurpose : UNSET_PURPOSE,
+      purposeNote: addNeedsPurpose && isOtherPurpose(addPurpose) ? addPurposeNote.trim() : '',
+      isSample: addSample,
       materialId,
       lineKey: ulid(),
     });
@@ -878,20 +1045,47 @@ export function BomField({
       {fields.length === 0 ? (
         <Placeholder label='no BOM articles yet' className='h-16' />
       ) : (
-        // Same auto-filling tile grid as the models list (Tiles min=160) — fixed column counts
-        // made a BOM article a quarter of the page wide on a desktop, so four articles filled a
-        // screen the models list fits a dozen into.
-        <Tiles min={160}>
-          {fields.map((f, index) => (
-            <BomTile
-              key={f.id}
-              index={index}
-              roleDuplicate={(roleCounts.get(normalizeRole(bomWatch[index]?.name)) ?? 0) > 1}
-              onRemove={() => removeArticle(index)}
-              onOpen={() => setEditing(index)}
-            />
+        // Grouped the way the catalog tab groups materials: a heading with a count, tiles under it,
+        // the gutter between groups doing the dividing. Cloth groups by НАЗНАЧЕНИЕ (several sections
+        // legitimately share one purpose — the tile keeps its own section pill), everything else
+        // keeps its section. Tiles stay the same auto-filling grid (min=160): fixed column counts
+        // made a BOM article a quarter of a desktop wide, so four articles filled a screen.
+        <div className='flex flex-col gap-5'>
+          {bomGroups.map((g) => (
+            <div key={g.key} className='flex flex-col gap-2'>
+              <GroupLabel
+                flush
+                action={
+                  <Text size='micro' variant='label'>
+                    {g.indices.length}
+                  </Text>
+                }
+              >
+                {g.label}
+              </GroupLabel>
+              {/* The unsorted pile is the one group that has to explain itself: it is a backlog,
+                  not a category, and nothing filled it in automatically on purpose. */}
+              {g.unsorted && (
+                <Text variant='label' size='micro'>
+                  У этих тканей назначение не задано. Автоматически оно не проставляется: «основная
+                  / карманка / контраст» отличаются только тем, зачем они в изделии, и угадать это
+                  по секции нельзя. Откройте карточку и выберите назначение.
+                </Text>
+              )}
+              <Tiles min={160}>
+                {g.indices.map((index) => (
+                  <BomTile
+                    key={fields[index]?.id ?? index}
+                    index={index}
+                    roleDuplicate={(roleCounts.get(normalizeRole(bomWatch[index]?.name)) ?? 0) > 1}
+                    onRemove={() => removeArticle(index)}
+                    onOpen={() => setEditing(index)}
+                  />
+                ))}
+              </Tiles>
+            </div>
           ))}
-        </Tiles>
+        </div>
       )}
 
       {/* The editor, in the app's one modal shell. No footer: nothing here is committed separately —
@@ -1004,9 +1198,9 @@ export function BomField({
           open
           onOpenChange={(v) => !v && setAddMaterial(undefined)}
           width='sm'
-          title='роль в изделии'
+          title={addNeedsPurpose ? 'назначение ткани' : 'роль в изделии'}
           confirmLabel='add'
-          confirmDisabled={!addRole.trim()}
+          confirmDisabled={!roleAnswered || !addPurposeAnswered}
           closeOnConfirm={false}
           onConfirm={commitAdd}
         >
@@ -1025,7 +1219,7 @@ export function BomField({
             </div>
             <div>
               <Text variant='label' size='micro' tracking='label' className='uppercase'>
-                роль в изделии *
+                {addNeedsPurpose ? 'роль в изделии' : 'роль в изделии *'}
               </Text>
               <div className='mt-1'>
                 <Input
@@ -1034,10 +1228,18 @@ export function BomField({
                   autoComplete='off'
                   autoFocus
                   list='bom-add-role-suggestions'
-                  placeholder='основная ткань / подкладка / молния…'
+                  placeholder={
+                    addNeedsPurpose
+                      ? defaultRoleForPurpose(addPurpose) ||
+                        'необязательно — подставится назначение'
+                      : 'основная молния / нитки верха / бейка…'
+                  }
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setAddRole(e.target.value)}
                   onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                    if (e.key === 'Enter' && addRole.trim()) {
+                    // Same gate as the confirm button — on a fabric, Enter after the role is only
+                    // half the answer, and committing on it would create exactly the unsorted line
+                    // this modal exists to prevent.
+                    if (e.key === 'Enter' && roleAnswered && addPurposeAnswered) {
                       e.preventDefault();
                       commitAdd();
                     }
@@ -1050,6 +1252,59 @@ export function BomField({
                 </datalist>
               </div>
             </div>
+
+            {/* Назначение — asked only for cloth, and required there. The role names this slot;
+                the purpose names the SUBSET of the fabrics it belongs to, which is what makes
+                «карманка», «контраст» and «сетка» tellable apart from «основная» at all — today
+                they are all section=fabric and the free-text role is the only difference. */}
+            {addNeedsPurpose && (
+              <>
+                <div>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    назначение *
+                  </Text>
+                  <div className='mt-1'>
+                    <Select
+                      name='bom-add-purpose'
+                      items={techCardBomPurposeOptions}
+                      value={addPurpose === UNSET_PURPOSE ? undefined : addPurpose}
+                      placeholder='выберите назначение'
+                      fullWidth
+                      onValueChange={(v: string) => setAddPurpose(v)}
+                    />
+                  </div>
+                </div>
+                {isOtherPurpose(addPurpose) && (
+                  <div>
+                    <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                      что это за назначение
+                    </Text>
+                    <div className='mt-1'>
+                      <Input
+                        name='bom-add-purpose-note'
+                        value={addPurposeNote}
+                        autoComplete='off'
+                        maxLength={255}
+                        placeholder='опишите роль этой ткани'
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                          setAddPurposeNote(e.target.value)
+                        }
+                      />
+                    </div>
+                  </div>
+                )}
+                <label className='flex cursor-pointer items-center gap-2'>
+                  <CheckboxCommon
+                    name='bom-add-sample'
+                    checked={addSample}
+                    onChange={(v: boolean) => setAddSample(v)}
+                  />
+                  <Text component='span' size='micro'>
+                    семпловая — из этого метража шьётся семпл
+                  </Text>
+                </label>
+              </>
+            )}
             {addExistingSlotIdx >= 0 && (
               <Text variant='label' size='micro'>
                 этот артикул уже стоит в слоте «

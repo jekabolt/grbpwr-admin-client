@@ -9,6 +9,7 @@ import {
   common_TechCardColorwayUsage,
   common_TechCardLabDipStatus,
   UpdateColorwayRequest,
+  common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import {
   composeArticleFromMaterial,
@@ -46,7 +47,9 @@ import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
-import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import { MarkerApplyHint } from './marker-apply';
+import { markersOfColorway } from './nesting/marker-io';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
@@ -114,6 +117,14 @@ type BomLine = {
   unitPrice?: string; // decimal string
   currency?: string;
   wastagePercent?: string; // decimal string
+  fabricWidth?: string; // decimal string, cm — this LINE's own cloth ROLL width, if it sets one
+  // Read-only enrichment off the card read (0259): effectiveFabricWidthCm is
+  // COALESCE(this line's width, the linked article's) — the roll the раскладка prefills from —
+  // and selvedgeCm is that article's кромка per edge. Cutting width = roll − 2×selvedge, and
+  // that is what a marker is laid on: comparing a marker against the ROLL width flags every
+  // fabric with a кромка as a mismatch.
+  effectiveFabricWidthCm?: string;
+  selvedgeCm?: string;
   // structured { part: [{ code, percent }] } JSON on catalog-linked / picker-authored lines, free
   // text only on legacy rows — read it through parseCompositionCode, never with a bare regex.
   composition?: string;
@@ -142,7 +153,30 @@ type UsageDraft = {
   // display-only (server-computed, stripped without costing:read).
   lineTotal: string;
   sizeRunTotal: string;
+  // Wastage provenance (0261). 'marker' = the norm came from a saved раскладка and its measured
+  // length ALREADY contains the cutting waste, so costing must not gross it up again; '' =
+  // typed by hand and the article's wastage_percent applies as before. The two pcts are the
+  // display decomposition of a marker norm's waste (кромка / межлекальные выпады) and are NEVER
+  // multiplied into a cost — they only explain where the length went.
+  //
+  // `undefined` is a THIRD state and not the same as '': it means this draft does not know the
+  // provenance, and the field must then be OMITTED on the wire so the store carries the stored
+  // triple forward. It arises only from a staged draft persisted by a build that predates these
+  // fields — asserting '' there would silently downgrade every marker row to manual on restore.
+  consumptionSource: string | undefined;
+  wasteSelvedgePct: string;
+  wasteCutPct: string;
 };
+
+// The provenance triple travels together: a norm is either marker-measured (with its
+// decomposition) or hand-typed (with none). Retyping a number by hand makes it manual — leaving
+// it marked «marker» would keep costing from applying the article's wastage to a figure that no
+// longer contains any.
+const MANUAL_PROVENANCE = {
+  consumptionSource: '',
+  wasteSelvedgePct: '',
+  wasteCutPct: '',
+} as const;
 
 // Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields; only the three
 // WRITABLE leaves below travel back through UpdateColorway under LAB_DIP_UPDATE_MASK — see LabDipTimeline.
@@ -461,6 +495,34 @@ function measured(section?: string): boolean {
   return !section || MEASURED_SECTIONS.has(section);
 }
 
+// The width a раскладка for this usage would actually be laid on: the effective article's roll
+// width minus its кромка on both edges (0259). The pinned material wins over the slot — a
+// colourway pin can be a different cloth — and the flat legacy width stands in when the typed
+// fabric attributes are absent. '' when no width is known at all; a кромка wider than the roll
+// is operator error the read must not turn into a negative width.
+function cuttingWidthOf(material?: common_Material, slot?: BomLine, pinned = false): string {
+  // Precedence must match what the раскладка itself laid on (nesting-modal), or the two sides
+  // of the width comparison disagree and warn about a marker that fits:
+  //   pinned  — the colourway named a DIFFERENT cloth, so BOTH numbers come from it (taking the
+  //             pin's width with the slot's кромка would describe a roll that does not exist);
+  //   else    — effective width, i.e. this line's own override before the article's own figure,
+  //             paired with the linked article's кромка, which is what selvedgeCm already is.
+  const [rollRaw, selvedgeRaw] = pinned
+    ? [
+        material?.fabricAttrs?.widthCm?.value || material?.fabricWidth?.value || '',
+        material?.fabricAttrs?.selvedgeCm?.value || '',
+      ]
+    : [
+        slot?.effectiveFabricWidthCm || slot?.fabricWidth || '',
+        slot?.selvedgeCm || '',
+      ];
+  const roll = parseDecimalNumber(rollRaw);
+  if (!Number.isFinite(roll) || roll <= 0) return '';
+  const sv = parseDecimalNumber(selvedgeRaw);
+  const cut = roll - 2 * (Number.isFinite(sv) && sv > 0 ? sv : 0);
+  return cut > 0 ? String(Math.round(cut * 100) / 100) : '';
+}
+
 // Resolve a stored usage into a draft. bom_line_key is the durable ref; fall back to resolving the
 // server bom_item_id against the saved BOM lines so a legacy usage still points at the right line.
 function fromRead(
@@ -486,6 +548,13 @@ function fromRead(
     pieceLineKey: u.pieceLineKey || piecesById.get(wireInt(u.pieceId))?.lineKey || '',
     lineTotal: decimalToInput(u.lineTotal),
     sizeRunTotal: decimalToInput(u.sizeRunTotal),
+    // The server normalises '' to 'manual', so a row this client has saved once reads back as
+    // 'manual' while a hand edit writes ''. Both mean the same thing, and leaving them distinct
+    // made a no-op edit (type 1.5 over 1.5) differ from its baseline signature and claim a
+    // staged change that does not exist. Normalise on the way IN, one spelling from here on.
+    consumptionSource: u.consumptionSource === 'manual' ? '' : u.consumptionSource || '',
+    wasteSelvedgePct: decimalToInput(u.wasteSelvedgePct),
+    wasteCutPct: decimalToInput(u.wasteCutPct),
   };
 }
 
@@ -510,6 +579,14 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
     pieceLineKey: d.pieceLineKey || '',
     pieceId: undefined,
     pieceIndex: undefined,
+    // Wastage provenance (0261). Sent VERBATIM, including undefined: presence is what tells the
+    // store «write what I say» instead of «preserve what you stored», so '' is a deliberate
+    // reset to manual and undefined is «I don't know, keep yours». JSON.stringify drops the key
+    // for undefined, which is exactly the carry-forward the store expects from a stale client —
+    // and a draft restored from a pre-0261 snapshot IS one.
+    consumptionSource: d.consumptionSource,
+    wasteSelvedgePct: inputToDecimal(d.wasteSelvedgePct),
+    wasteCutPct: inputToDecimal(d.wasteCutPct),
     // output-only — never sent
     lineTotal: undefined,
     sizeRunTotal: undefined,
@@ -627,15 +704,23 @@ function UsagePerSizeLocal({
   const orderQtyBySize = new Map<number, number>();
   for (const q of sizeQuantities) if (q.sizeId) orderQtyBySize.set(q.sizeId, q.orderQty ?? 0);
 
+  // Every hand edit of the NUMBER drops the marker provenance (see MANUAL_PROVENANCE): the
+  // decomposition described a length this figure no longer is, and costing must go back to
+  // grossing the article's wastage on top. Switching the grading MODE counts too — «по
+  // размерам» seeds cells from a scalar the marker measured for one size only.
+  const manual = <T extends Partial<UsageDraft>>(patch: T) => ({ ...patch, ...MANUAL_PROVENANCE });
+
   const enablePerSize = () => {
     if (perSize) return;
     const prior = new Map(lastPerSize.current.map((e) => [e.sizeId, e.consumption]));
-    onChange({
-      sizeConsumptions: sizeIds.map((id) => ({
-        sizeId: id,
-        consumption: prior.get(id) ?? draft.consumption ?? '',
-      })),
-    });
+    onChange(
+      manual({
+        sizeConsumptions: sizeIds.map((id) => ({
+          sizeId: id,
+          consumption: prior.get(id) ?? draft.consumption ?? '',
+        })),
+      }),
+    );
   };
   const disablePerSize = () => {
     if (!perSize) return;
@@ -643,7 +728,7 @@ function UsagePerSizeLocal({
       sizeId: e.sizeId ?? 0,
       consumption: e.consumption ?? '',
     }));
-    onChange({ sizeConsumptions: [] });
+    onChange(manual({ sizeConsumptions: [] }));
   };
   const setSizeCell = (sizeId: number, value: string) => {
     const clean = sanitizeDecimal(value);
@@ -651,7 +736,7 @@ function UsagePerSizeLocal({
     const i = next.findIndex((x) => x.sizeId === sizeId);
     if (i >= 0) next[i] = { sizeId, consumption: clean };
     else next.push({ sizeId, consumption: clean });
-    onChange({ sizeConsumptions: next });
+    onChange(manual({ sizeConsumptions: next }));
   };
 
   const preview = runTotalPreview(
@@ -690,7 +775,7 @@ function UsagePerSizeLocal({
           placeholder='per garment'
           aria-label={`consumption per garment${unit ? ` (${unit})` : ''}`}
           value={draft.consumption}
-          onChange={(e) => onChange({ consumption: sanitizeDecimal(e.target.value) })}
+          onChange={(e) => onChange(manual({ consumption: sanitizeDecimal(e.target.value) }))}
         />
       ) : (
         <div className='flex flex-col gap-1.5'>
@@ -1120,6 +1205,7 @@ function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
     pieceLineKey,
     lineTotal: '',
     sizeRunTotal: '',
+    ...MANUAL_PROVENANCE,
   };
 }
 
@@ -1139,6 +1225,8 @@ function SlotUsageRow({
   sizeQuantities,
   sizeNameById,
   canEdit,
+  markers,
+  colorwayId,
   onChange,
   onRemove,
 }: {
@@ -1147,6 +1235,9 @@ function SlotUsageRow({
   allowedSections: Set<string>;
   usedKeys: Set<string>;
   materials: common_Material[];
+  markers?: common_TechCardMarkerSummary[];
+  // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
+  colorwayId?: number;
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -1235,7 +1326,12 @@ function SlotUsageRow({
             allowedSections={allowedSections}
             usedKeys={usedKeys}
             canEdit={canEdit}
-            onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0 })}
+            // Moving the row to another slot drops the marker provenance too. A раскладка is
+            // measured on ONE cloth: carried across, its «marker» flag would keep costing from
+            // grossing the new slot's wastage onto a length that never contained the new
+            // cloth's cutting waste — understating the line, with no marker on the new slot for
+            // the operator to notice it by. Same class of desync as retyping the number.
+            onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0, ...MANUAL_PROVENANCE })}
           />
         </label>
 
@@ -1252,15 +1348,42 @@ function SlotUsageRow({
         )}
 
         {isMeasured && !legacyCountedMeasured ? (
-          <UsagePerSizeLocal
-            draft={draft}
-            sizeIds={sizeIds}
-            sizeQuantities={sizeQuantities}
-            article={article}
-            canEdit={canEdit}
-            sizeNameById={sizeNameById}
-            onChange={onChange}
-          />
+          <div className='flex flex-col gap-1.5'>
+            <UsagePerSizeLocal
+              draft={draft}
+              sizeIds={sizeIds}
+              sizeQuantities={sizeQuantities}
+              article={article}
+              canEdit={canEdit}
+              sizeNameById={sizeNameById}
+              onChange={onChange}
+            />
+            {/* Ф4: измеренный маркером расход этого слота, применяемый в ЭТОТ драфт — через
+                тот же onChange, которым staged-рецепт и живёт. */}
+            <MarkerApplyHint
+              markers={markers}
+              colorwayId={colorwayId}
+              lineKey={draft.bomLineKey}
+              unit={unit}
+              wastagePercent={slot?.wastagePercent ?? ''}
+              // The article's CUTTING width — roll minus the кромка on both edges — because
+              // that is the width a marker is laid on and records. The pinned/linked material's
+              // catalog figures come first (a colourway pin can be a different cloth), the
+              // slot's own otherwise.
+              // "Pinned" here means pinned to a DIFFERENT article than the slot's default: a pin
+              // back to the slot's own article is the same cloth, and the line's own width
+              // override still describes it.
+              articleWidth={cuttingWidthOf(
+                material,
+                slot,
+                draft.materialId > 0 && draft.materialId !== slot?.materialId,
+              )}
+              sizeIds={sizeIds}
+              sizeNameById={sizeNameById}
+              canEdit={canEdit}
+              onApply={(patch) => onChange(patch)}
+            />
+          </div>
         ) : (
           <label className='flex flex-col gap-1'>
             <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
@@ -1272,6 +1395,21 @@ function SlotUsageRow({
               onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
             />
           </label>
+        )}
+
+        {/* Provenance of the norm (0261): a marker-measured figure is priced WITHOUT the
+            article's wastage gross-up, and that is a costing-visible difference the operator
+            must be able to see on the row that causes it. */}
+        {draft.consumptionSource === 'marker' && (
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Pill tone='mut'>из раскладки</Pill>
+            <Text size='nano' variant='label' component='span'>
+              {draft.wasteSelvedgePct || draft.wasteCutPct
+                ? `отходы уже внутри: кромка ${draft.wasteSelvedgePct || '0'}% + выпады ${draft.wasteCutPct || '0'}%`
+                : 'отходы уже внутри нормы; разложение не записано'}
+              {slot?.wastagePercent?.trim() ? ` · ${slot.wastagePercent}% слота не начисляются` : ''}
+            </Text>
+          </div>
         )}
 
         {(draft.lineTotal || draft.sizeRunTotal) && (
@@ -1293,6 +1431,8 @@ function PieceRecipeCard({
   rows,
   bomItems,
   materials,
+  markers,
+  colorwayId,
   sizeIds,
   sizeQuantities,
   sizeNameById,
@@ -1306,6 +1446,9 @@ function PieceRecipeCard({
   rows: IndexedUsage[];
   bomItems: BomLine[];
   materials: common_Material[];
+  markers?: common_TechCardMarkerSummary[];
+  // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
+  colorwayId?: number;
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
@@ -1349,6 +1492,8 @@ function PieceRecipeCard({
               allowedSections={PIECE_SECTIONS}
               usedKeys={usedKeys}
               materials={materials}
+              markers={markers}
+              colorwayId={colorwayId}
               sizeIds={sizeIds}
               sizeQuantities={sizeQuantities}
               sizeNameById={sizeNameById}
@@ -1866,6 +2011,7 @@ function ColorwayRecipeEditor({
   colorway,
   bomItems,
   materials,
+  markers,
   pieces,
   sizeIds,
   sizeQuantities,
@@ -1879,6 +2025,7 @@ function ColorwayRecipeEditor({
   colorway: common_AdminColorwayRef;
   bomItems: BomLine[];
   materials: common_Material[];
+  markers?: common_TechCardMarkerSummary[];
   pieces: RecipePiece[];
   sizeIds: number[];
   sizeQuantities: { sizeId?: number; orderQty?: number }[];
@@ -1893,6 +2040,11 @@ function ColorwayRecipeEditor({
   const staging = useTechCardStaging();
   // A colourway the card has not created yet has no id to write against — it must not stage.
   const colorwayId = colorway.colorwayId ?? 0;
+  // Раскладки ЭТОГО колорвея (плюс общие). Фильтруется один раз на входе, а не в каждом месте
+  // ниже: «применить маркер» подставляет измеренную длину прямо в норму расхода, и длина, снятая
+  // на артикуле другого колорвея, отличается ровно настолько, насколько отличаются ширины — то
+  // есть выглядит совершенно нормально.
+  const cwMarkers = useMemo(() => markersOfColorway(markers, colorwayId), [markers, colorwayId]);
   const stagingKey = `recipe:${colorwayId}`;
   const title = colorwayTitle(colorway);
   const [dirty, setDirty] = useState(false);
@@ -2104,6 +2256,8 @@ function ColorwayRecipeEditor({
                   rows={rows}
                   bomItems={bomItems}
                   materials={materials}
+                  markers={cwMarkers}
+                  colorwayId={colorwayId}
                   sizeIds={sizeIds}
                   sizeQuantities={sizeQuantities}
                   sizeNameById={sizeNameById}
@@ -2165,6 +2319,8 @@ function ColorwayRecipeEditor({
                 allowedSections={GARMENT_SECTIONS}
                 usedKeys={garmentUsedKeys}
                 materials={materials}
+                markers={cwMarkers}
+                colorwayId={colorwayId}
                 sizeIds={sizeIds}
                 sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}
@@ -2444,6 +2600,9 @@ export function ColorwayRecipes({
             unitPrice: b.unitPrice,
             currency: b.currency,
             wastagePercent: b.wastagePercent,
+            fabricWidth: b.fabricWidth,
+            effectiveFabricWidthCm: b.effectiveFabricWidthCm,
+            selvedgeCm: b.selvedgeCm,
             composition: b.composition,
             materialId,
             material: materialId > 0 ? materialById.get(materialId) : undefined,
@@ -2562,6 +2721,7 @@ export function ColorwayRecipes({
             colorway={cw}
             bomItems={bomItems}
             materials={materials}
+            markers={techCard?.markers}
             pieces={pieces}
             sizeIds={sizeIds}
             sizeQuantities={sizeQuantities}

@@ -92,6 +92,7 @@ const resolveMaterialClass = (m: common_Material): common_MaterialClass => {
 
 type FabricDraft = {
   widthCm: string;
+  selvedgeCm: string;
   weightGsm: string;
   fabricDirection: string;
   shrinkagePct: string;
@@ -149,6 +150,7 @@ type Draft = {
 
 const emptyFabric: FabricDraft = {
   widthCm: '',
+  selvedgeCm: '',
   weightGsm: '',
   fabricDirection: '',
   shrinkagePct: '',
@@ -227,6 +229,7 @@ const draftFromMaterial = (material: common_Material): Draft => ({
   fabric: material.fabricAttrs
     ? {
         widthCm: material.fabricAttrs.widthCm?.value ?? '',
+        selvedgeCm: material.fabricAttrs.selvedgeCm?.value ?? '',
         weightGsm: material.fabricAttrs.weightGsm?.value ?? '',
         fabricDirection: material.fabricAttrs.fabricDirection ?? '',
         shrinkagePct: material.fabricAttrs.shrinkagePct?.value ?? '',
@@ -506,6 +509,15 @@ export function MaterialModal({
       composition: material?.composition ?? '',
       spec: material?.spec ?? '',
       unit: d.unit.trim(),
+      // Ф5а.3: НОРМАЛИЗАЦИЯ `unit` по закрытому словарю, READ-ONLY — сервер её вычисляет и на
+      // записи игнорирует, хранится по-прежнему свободный текст выше.
+      unitCode: undefined,
+      // КОЭФФИЦИЕНТ РАСКРОЯ (Ф5а). Редактора у него тут пока нет, и undefined — это ровно
+      // «поле ОТСУТСТВУЕТ», а не «очистить»: у него три состояния записи (нет поля → не трогать,
+      // пустая строка → снять, значение → поставить), и JSON.stringify undefined выбрасывает.
+      // Прислать сюда эхо сохранённого значения было бы ХУЖЕ: это уже второе состояние, «поставить
+      // ровно то же», и оно перестало бы отличаться от намеренной правки.
+      cuttingCoefficient: undefined,
       fabricWidth: undefined,
       fabricWeightGsm: undefined,
       archived: material?.archived ?? false,
@@ -520,6 +532,8 @@ export function MaterialModal({
         d.materialClass === 'MATERIAL_CLASS_FABRIC'
           ? {
               widthCm: inputToDecimal(d.fabric.widthCm),
+              // Кромка (selvedge): unusable strip per edge; the nesting width prefill subtracts 2×.
+              selvedgeCm: inputToDecimal(d.fabric.selvedgeCm),
               weightGsm: inputToDecimal(d.fabric.weightGsm),
               fabricDirection: d.fabric.fabricDirection,
               shrinkagePct: inputToDecimal(d.fabric.shrinkagePct),
@@ -784,6 +798,17 @@ export function MaterialModal({
                     inputMode='decimal'
                     value={d.fabric.widthCm}
                     onChange={(e) => setFabric({ widthCm: sanitizeDecimal(e.target.value) })}
+                  />
+                </label>
+                <label className='flex flex-col gap-1'>
+                  <Text variant='label' size='micro' tracking='label' className='uppercase'>
+                    кромка (cm/край)
+                  </Text>
+                  <input
+                    className={cell}
+                    inputMode='decimal'
+                    value={d.fabric.selvedgeCm}
+                    onChange={(e) => setFabric({ selvedgeCm: sanitizeDecimal(e.target.value) })}
                   />
                 </label>
                 <label className='flex flex-col gap-1'>

@@ -1508,6 +1508,10 @@ export type FittingPattern = {
   // (size_id, url) row across the full-replace save; present (even empty) is stored as sent
   // (empty clears). JSON null reads as absent (preserve) — clear with the empty string.
   name?: string;
+  // view_url / download_url are OUTPUT-ONLY tokenized read urls (see
+  // TechCardSizePattern.view_url). Ignored on write.
+  viewUrl: string | undefined;
+  downloadUrl: string | undefined;
 };
 
 // FittingCallout is a numbered marker pinned to a fitting photo, noting a fit
@@ -2067,6 +2071,28 @@ export type TechCardBomSection =
   | "TECH_CARD_BOM_SECTION_TRIM"
   | "TECH_CARD_BOM_SECTION_DECORATION"
   | "TECH_CARD_BOM_SECTION_OTHER";
+// TechCardBomPurpose is НАЗНАЧЕНИЕ — what the garment uses a roll-goods line FOR, on its own axis
+// beside `section` (0265). Several lines legitimately share one purpose; that IS the point, the
+// field exists to name a SUBSET of fabrics ("the lining ones", "the contrast ones").
+// It is not a section value. `section` drives the wastage gross-up, the composition derive and what
+// a раскладка may bind to, and a pocket-bag / contrast / mesh fabric is genuinely fabric on all
+// three counts — it differs only in role. It is not free text either: the field exists to GROUP, and
+// a free-text role stops grouping the moment two operators spell it differently. Hence a closed
+// eight-value list, with `other` carrying its meaning in the SEPARATE purpose_note field so a note
+// can never become a shadow purpose on one of the seven real values.
+// UNSET (0) is a first-class state meaning "not sorted yet", not a default. Every line that existed
+// before 0265 is UNSET on purpose: section='fabric' is exactly where pocket-bag, contrast and mesh
+// hide today, so a backfill would have labelled them MAIN confidently and wrongly.
+export type TechCardBomPurpose =
+  | "TECH_CARD_BOM_PURPOSE_UNSET"
+  | "TECH_CARD_BOM_PURPOSE_MAIN"
+  | "TECH_CARD_BOM_PURPOSE_LINING"
+  | "TECH_CARD_BOM_PURPOSE_POCKETING"
+  | "TECH_CARD_BOM_PURPOSE_INTERFACING"
+  | "TECH_CARD_BOM_PURPOSE_INSULATION"
+  | "TECH_CARD_BOM_PURPOSE_CONTRAST"
+  | "TECH_CARD_BOM_PURPOSE_MESH"
+  | "TECH_CARD_BOM_PURPOSE_OTHER";
 // TechCardLabDipStatus is the lab-dip approval lifecycle of a colourway.
 export type TechCardLabDipStatus =
   | "TECH_CARD_LAB_DIP_STATUS_UNKNOWN"
@@ -2121,12 +2147,51 @@ export type MaterialPurpose =
   | "MATERIAL_PURPOSE_SAMPLE"
   | "MATERIAL_PURPOSE_PRODUCTION"
   | "MATERIAL_PURPOSE_BOTH";
+// MaterialUnit is the closed vocabulary a material quantity is measured in (Ф5а.3), mirroring
+// entity.MaterialUnit. Before it, every unit was free text and every consumer compared raw strings:
+// the production material plan carried a private metre synonym set (m/м/meter/meters/metre/metres)
+// and degraded into a caveat on any other mismatch, so a slot spelled «м» against an article spelled
+// "m" counted as two different units — the quantity kept the slot's meaning while being compared
+// against the article's stock, and the pinned-article costing path refused to price the line.
+// READ-ONLY on the wire. The stored value stays the free-text `unit` string (which is what a write
+// sets); unit_code is the server's normalisation of it, so a value the vocabulary does not know is
+// never guessed — it arrives as MATERIAL_UNIT_UNKNOWN with the raw string intact beside it, and the
+// set of rows reporting UNKNOWN is precisely the list of units that still need a human. A client
+// must therefore never treat UNKNOWN as "no unit" or as "clear the unit".
+export type MaterialUnit =
+  | "MATERIAL_UNIT_UNKNOWN"
+  | "MATERIAL_UNIT_M"
+  | "MATERIAL_UNIT_CM"
+  | "MATERIAL_UNIT_MM"
+  | "MATERIAL_UNIT_M2"
+  | "MATERIAL_UNIT_G"
+  | "MATERIAL_UNIT_KG"
+  | "MATERIAL_UNIT_PCS"
+  | "MATERIAL_UNIT_PAIR"
+  | "MATERIAL_UNIT_SET"
+  | "MATERIAL_UNIT_CONE"
+  | "MATERIAL_UNIT_ROLL";
 // TechCardFabricDirection is the cutting layout a fabric requires.
 export type TechCardFabricDirection =
   | "TECH_CARD_FABRIC_DIRECTION_UNKNOWN"
   | "TECH_CARD_FABRIC_DIRECTION_ANY"
   | "TECH_CARD_FABRIC_DIRECTION_ONE_WAY"
   | "TECH_CARD_FABRIC_DIRECTION_TWO_WAY";
+// TechCardPieceCutSymmetry — КАК деталь кроится (миграция 0275). Не количество: количество целиком
+// живёт в pieces_per_garment (0266 свернула туда зеркальное удвоение), и ни одно значение отсюда
+// ничего не умножает. Вернуть множитель нельзя: тех-пак печатает pieces_per_garment и НИКОГДА total,
+// поэтому удвоение «где-то ещё» снова напечатает фабрике «1» у детали, которую кроят парой.
+// UNKNOWN — это ОТВЕТ «никто не спрашивал», а не «обычная деталь». Различать обязательно:
+// неразмеченная парная деталь при полукомплекте лекал даёт 44 левых полочки и ноль правых, и
+// единственное, что от этого спасает, — видимое «не размечено».
+// FOLD не бывает MIRRORED: крой по сгибу — это объединение половины лекала с её отражением, значит
+// контур симметричен сам себе, а отражение симметричного контура конгруэнтно ему. «Со сгибом и нужна
+// дважды» (манжеты) = FOLD + pieces_per_garment = 2.
+export type TechCardPieceCutSymmetry =
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED"
+  | "TECH_CARD_PIECE_CUT_SYMMETRY_FOLD";
 // TechCardLabelType classifies a label / tag (Sheet «Этикетки и упаковка»).
 export type TechCardLabelType =
   | "TECH_CARD_LABEL_TYPE_UNKNOWN"
@@ -2338,6 +2403,19 @@ export type TechCardColorwayUsage = {
   // that predates this field OMITS it on the full-replace recipe write, and the store must then
   // PRESERVE the existing pin (absent ≠ explicit clear; an explicit 0 clears).
   materialId?: number;
+  // consumption_source is the provenance of the norm. "manual" (or "") — typed by the operator;
+  // the article's wastage_percent grosses cost up, exactly as before. "marker" — applied from a
+  // saved раскладка whose measured length already CONTAINS the cutting waste (selvedge rides the
+  // per-running-metre price), so costing must NOT gross such rows up again. `optional` is
+  // load-bearing like material_id: a stale client omits the field on the full-replace recipe
+  // write and the store PRESERVES the stored provenance triple; a present value is written as
+  // sent ("" normalises to manual and clears the pcts).
+  consumptionSource?: string;
+  // Display decomposition of a marker-sourced norm's waste (кромка / межлекальные выпады), in
+  // percent of the piece area. NEVER multiplied into any cost — the marker length already pays
+  // for both. NULL/unset on manual rows; carried/cleared together with consumption_source.
+  wasteSelvedgePct: googletype_Decimal | undefined;
+  wasteCutPct: googletype_Decimal | undefined;
 };
 
 // TechCardBomSizeConsumption is the per-size consumption (норма расхода) of one BOM
@@ -2500,9 +2578,19 @@ export type TechCardBomItem = {
   currency: string | undefined;
   comment: string | undefined;
   // fabric data for the cutter / marker (Phase 3.5c)
+  // FULL roll width in cm, кромка INCLUDED — same correction as Material.fabric_width: this is what
+  // effective_fabric_width_cm below resolves to, and that field's own text already derives the
+  // usable cutting width as effective − 2 × selvedge.
   fabricWidth: googletype_Decimal | undefined;
   fabricWeightGsm: googletype_Decimal | undefined;
-  fabricDirection: TechCardFabricDirection | undefined;
+  // Nap / layout. OPTIONAL for presence, on the same reasoning as purpose/is_sample above: the
+  // card is saved WHOLE, the admin is an SPA, and a tab holding an older bundle does not send this
+  // field at all — a proto3 enum's zero value is UNKNOWN, so «absent» and «clear it» were the same
+  // bytes and a stale tab would have wiped the направление off every line of the card. Silently:
+  // the field is not in the signature digest, and NULL is indistinguishable from «ещё не задали».
+  // Since Ф1 that erasure also un-saves every раскладка on the card, so absence now means «do not
+  // touch» and only an explicitly-sent UNKNOWN clears the column.
+  fabricDirection?: TechCardFabricDirection;
   wastagePercent: googletype_Decimal | undefined;
   // material_id optionally links this line to a catalog Material (task 10). The line keeps its
   // own snapshot fields regardless; 0 means unlinked (free-text / legacy).
@@ -2519,6 +2607,41 @@ export type TechCardBomItem = {
   // material catalog), or '' for a pre-provenance row whose origin is honestly unknown.
   priceSource: string | undefined;
   priceSnapshotAt: wellKnownTimestamp | undefined;
+  // READ-ONLY width enrichment (0259, Ф9.1) — ignored on write, filled by the single-card read.
+  // effective_fabric_width_cm = COALESCE(this line's fabric_width, linked article's width): the
+  // width the раскладка should prefill instead of a hardcoded default. selvedge_cm is the linked
+  // article's кромка per edge; usable cutting width = effective − 2×selvedge. Both unset when the
+  // line is unlinked and carries no width of its own.
+  effectiveFabricWidthCm: googletype_Decimal | undefined;
+  selvedgeCm: googletype_Decimal | undefined;
+  // НАЗНАЧЕНИЕ (0265) — see TechCardBomPurpose. Accepted only on a ROLL-GOODS line (fabric, lining,
+  // interlining, insulation): those are the four families cloth is measured and laid out by, and a
+  // purpose on a thread or a button would be data no screen ever shows and the later pattern-binding
+  // work would have to un-pick. UNSET is legal everywhere and is what an unsorted line carries.
+  // OPTIONAL, и это несущее. Админка — SPA на Vercel, вкладки живут через деплои, а карточка
+  // сохраняется целиком. Без явного присутствия старый бандл, который про эти поля не знает,
+  // прислал бы proto3-дефолты — UNSET и false, — и сохранение стёрло бы назначение у ВСЕХ строк
+  // карточки. Стирание было бы вдобавок бесследным: этих полей нет в дайджесте подписи, а NULL
+  // неотличим от «ещё не разложили». Отсутствие поля означает «не трогай», а не «очисти».
+  purpose?: TechCardBomPurpose;
+  // Free-text explanation, accepted ONLY when purpose is OTHER (rejected otherwise, and the DB
+  // agrees via chk_bom_item_purpose_note). Optional even then: "другое" without an explanation is a
+  // real answer, and demanding one just farms junk text.
+  // Optional по той же причине, что и purpose — отсутствие означает «не трогай».
+  purposeNote?: string;
+  // Семпловая: this line is the yardage the SAMPLE is sewn from. A flag, not a ninth purpose — a
+  // sample is assembled from a sample MAIN plus a sample LINING, and as a purpose value both would
+  // collapse into one bucket and lose the role that makes them useful.
+  // Optional по той же причине: голый bool от старого бандла приходит как false и снял бы признак
+  // со всех строк карточки разом.
+  isSample?: boolean;
+  // READ-ONLY (Ф5а.3): the vocabulary normalisation of this line's `unit`. Ignored on write — the
+  // stored value stays the free-text `unit`, deliberately: that column is inside the SIGNED MATERIALS
+  // digest, so respelling «м» → "m" in storage would stale the MATERIALS sign-off of every card that
+  // spells a unit non-canonically, for a change that alters nothing the card BUYS. Comparison against
+  // the article's unit is normalised in the server instead, which costs no sign-off.
+  // UNKNOWN = the free text does not map to a known unit; it is NOT "no unit".
+  unitCode: MaterialUnit | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -2528,6 +2651,9 @@ export type MaterialFabricAttrs = {
   fabricDirection: string | undefined;
   shrinkagePct: googletype_Decimal | undefined;
   rollLengthM: googletype_Decimal | undefined;
+  // Кромка per EDGE, cm — the unusable strip of the roll (0259). Unset/0 = none; the nesting
+  // width and the selvedge wastage component both derive from it.
+  selvedgeCm: googletype_Decimal | undefined;
 };
 
 // MaterialHardwareAttrs are the typed attributes of a hardware-class material (material_hardware_attr).
@@ -2563,7 +2689,17 @@ export type Material = {
   supplierRef: string | undefined;
   composition: string | undefined;
   spec: string | undefined;
+  // Free text, stored EXACTLY as sent — the server never respells it, so a client that writes "pc"
+  // reads back "pc". unit_code below is the server's read-only normalisation of this string, and it
+  // is what comparisons run on; migration 0271 collapsed the legacy catalogue spellings once, but
+  // that was a cleanup, not a standing write rule.
   unit: string | undefined;
+  // FULL roll width in cm, кромка INCLUDED — despite what this comment said until Ф5а.4. Nothing has
+  // ever subtracted the selvedge from it (0259 says so explicitly: the flat copy was labelled
+  // "usable" in 0095 but no consumer ever treated it as such), and both EffectiveFabricWidthCm and
+  // the metres→kg conversion depend on it being the full width: the selvedge is bought, it weighs,
+  // and billing by the cutting width understates the invoiced weight by 2–4% every time. The USABLE
+  // cutting width is this minus 2 × MaterialFabricAttrs.selvedge_cm.
   fabricWidth: googletype_Decimal | undefined;
   fabricWeightGsm: googletype_Decimal | undefined;
   archived: boolean | undefined;
@@ -2605,6 +2741,35 @@ export type Material = {
   // order-to-door time. 0 = unset for both.
   supplierId: number | undefined;
   leadTimeDays: number | undefined;
+  // cutting_coefficient (Ф5а.2) is THE one visible, editable dial per article, replacing eight named
+  // losses nobody can measure separately. It covers, together: усадка, обход пороков, сращивание,
+  // оттеночные полосы — the roll-level reality a marker cannot contain, because a marker is measured
+  // on a clean lay of a nominal width. A MULTIPLIER, not a percent (1.03 = +3%); accepted range
+  // [1, 3].
+  // Unset means nobody has set one and the requirement path multiplies by nothing — an article
+  // without a coefficient plans exactly as it did before this field existed. There is deliberately
+  // ONE default and no per-«класс ткани» taxonomy to pick it from; the value ranges (полотно ~3%,
+  // трикотаж ~6%, клетка/полоска +10–20%) and what the coefficient covers belong in the field's hint
+  // text, so nobody starts adding a column per loss again a year from now.
+  // WRITE SEMANTICS — three states, not two, because "the client did not send the field" and "the
+  // operator cleared it" must not be the same request (same rule as TechCardBomItem.purpose /
+  // is_sample):
+  // * field ABSENT (null)        → LEAVE AS IS. A stale admin tab, or any bundle from before this
+  // field shipped, sends nothing and must not erase a coefficient an
+  // operator set — silently, with no digest and no audit trail.
+  // * field PRESENT, value ""    → CLEAR it (store NULL). This is how the UI unsets the dial.
+  // * field PRESENT with a value → set it.
+  // SCOPE — this is a DEMAND-side dial only. It grosses up the material PLAN's requirement
+  // (GetProductionRunMaterialPlan) and nothing else: the run's planned unit cost and the style cost
+  // estimate gross up by the BOM wastage % alone and do NOT include this coefficient. Planned COGS is
+  // therefore understated by exactly the coefficient wherever one is set. That is deliberate for now —
+  // moving it into the costing chain changes how product.cost_price is derived and every style's
+  // margin with it, which is a separate, deliberately reviewed decision. Do not present a planned cost
+  // as coefficient-inclusive.
+  cuttingCoefficient: googletype_Decimal | undefined;
+  // READ-ONLY (Ф5а.3): the vocabulary normalisation of `unit`. Ignored on write — set `unit`.
+  // UNKNOWN = the free text does not map to any known unit, and must not be read as "no unit".
+  unitCode: MaterialUnit | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -2716,6 +2881,9 @@ export type TechCardSizePattern = {
   // version is the sheet's revision within its (style, size) — the "v3" the admin used to scrape out
   // of the filename. Send 0 and the server assigns MAX+1 for a url it has not seen on this card
   // before, and preserves the number for one it has; send a number to pin the factory's own.
+  // On a keyed replacement (url change or size move) an echoed number EQUAL to the replaced row's
+  // is treated as a round-trip echo and renumbered MAX+1 — a deliberate pin must differ from the
+  // replaced row's number.
   version: number | undefined;
   // uploaded_at is when this PDF was first attached to the card. SERVER-OWNED (ignored on write):
   // patterns are a full-replace child, so the row is deleted and reinserted on every card save — the
@@ -2728,6 +2896,40 @@ export type TechCardSizePattern = {
   // clears the name. NOTE for JSON clients — protojson cannot tell `"name": null` from an absent
   // field, so null also reads as "preserve"; to clear a name, send the empty string.
   name?: string;
+  // view_url / download_url are OUTPUT-ONLY (like uploaded_at): stable tokenized urls on
+  // the backend's own origin (/api/p/{token}) that resolve to the file — the canonical
+  // way to open a pattern once objects go private. Ignored on write; empty when the
+  // stored url does not parse to a managed pattern object key.
+  viewUrl: string | undefined;
+  downloadUrl: string | undefined;
+  // line_key is the row's STABLE identity across saves and across FILE REPLACEMENT (the url is not —
+  // replacing the sheet mints a new object url). Mint a ULID on first upload and round-trip it
+  // unchanged; keep it when replacing the file and change only the url. ONE KEY NAMES ONE ROW: the
+  // same sheet hung on two sizes is two rows and therefore two keys — reusing a key on two payload
+  // rows is rejected. Empty = a legacy/stale client — the server then matches by (size_id, url)
+  // exactly as before and assigns a key itself.
+  lineKey: string | undefined;
+  // bom_line_key binds this sheet to the fabric BOM line it is cut from («один DXF = одна ткань»),
+  // set at upload time. Explicit presence, same rules as `name`: ABSENT — the server preserves the
+  // stored binding (a stale client cannot wipe it); PRESENT — stored as sent, empty string unbinds.
+  // A non-empty value must name a fabric-section BOM line of this card, except when it round-trips
+  // the row's stored value unchanged (the slot may have been deleted — the binding then reads as
+  // «слот удалён» rather than blocking the save).
+  // LEGACY HALF since 0267 — resolve through fabric_purpose first, never read this alone. It cannot
+  // be migrated away: a sheet bound to line L has no purpose to move to until L is sorted, and 0265
+  // deliberately guessed a purpose for nobody.
+  bomLineKey?: string;
+  // fabric_purpose binds the sheet to a НАЗНАЧЕНИЕ (0265) rather than to one BOM line, which is what
+  // a выкройка actually is at card level: «это лекало основной ткани» is a CLASS. The concrete line
+  // matters only where the ARTICLE does — the раскладка (width/selvedge come off the colourway's
+  // pinned article) and the production run — and neither is stored on this row.
+  // Resolution, everywhere, is: fabric_purpose, else bom_line_key. Both coexist deliberately, so a
+  // card nobody has sorted keeps working untouched and migrates itself when somebody sorts it.
+  // Explicit presence, same rules as `bom_line_key`: ABSENT — the server preserves the stored value;
+  // PRESENT — stored as sent, UNSET clearing it. A value other than UNSET must be a назначение
+  // carried by at least one roll-goods BOM line of this card, except when it round-trips the row's
+  // stored value unchanged.
+  fabricPurpose?: TechCardBomPurpose;
 };
 
 // TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
@@ -2974,14 +3176,51 @@ export type TechCardPieceColorwayMaterial = {
   fusingBomItemId: number | undefined;
 };
 
+// TechCardPieceDxfAlias maps one DXF block name to a cut-piece, SCOPED to the cloth it is cut from.
+// The canonical piece name lives only in TechCardPiece.name; block names are per-file exporter noise
+// («PERED_S», «front-38»), so the same generic name in different cloths' files maps independently
+// while any spelling within one cloth's files (all its size DXFs) resolves to one piece.
+// Since 0267 the scope is a НАЗНАЧЕНИЕ (fabric_purpose) where the card has been sorted and the
+// legacy bom_line_key where it has not: scope = fabric_purpose, else bom_line_key. The DB UNIQUE
+// moved with it and is case-insensitive per (card, scope, block) — computed from the generated
+// column scope_key so the index and the server agree by construction. Swapping the purpose into the
+// OLD (card, line, block) index instead would have turned two same-named blocks of two lines sharing
+// one purpose into a duplicate, and a duplicate fails the WHOLE card save.
+export type TechCardPieceDxfAlias = {
+  // bom_line_key is the LEGACY scope, and on a purpose-scoped row it is compatibility: the writer
+  // records the line here too when the purpose owns exactly ONE line, and leaves it empty when the
+  // purpose owns several (there is no single honest answer then). Required only when fabric_purpose
+  // is UNSET — one of the two must name something.
+  bomLineKey: string | undefined;
+  blockName: string | undefined;
+  pieceLineKey: string | undefined;
+  // fabric_purpose is the scope proper (UNSET = not purpose-scoped; the row falls back to
+  // bom_line_key). No explicit presence here and none needed: the alias SET already carries presence
+  // as a whole (TechCardPieceDxfAliasSet) and each row is written whole, so an omitted field on a
+  // row that IS being written means «this row is line-scoped», never «leave the stored value alone».
+  fabricPurpose: TechCardBomPurpose | undefined;
+};
+
+// TechCardPieceDxfAliasSet is a presence wrapper: proto3 cannot distinguish an EMPTY repeated field
+// from an ABSENT one, and these aliases follow the pattern-binding precedent — a stale client that
+// predates the feature must not wipe mappings it never saw. Message ABSENT → the server carries the
+// stored aliases forward untouched; message PRESENT → its items are the new full set (empty items
+// clears all). New clients always send it, round-tripping what they read.
+export type TechCardPieceDxfAliasSet = {
+  items: TechCardPieceDxfAlias[] | undefined;
+};
+
 // TechCardPiece is one structural cut-piece of the garment (полочка, спинка, обтачка горловины…):
 // how many per garment, whether mirrored/paired, its grainline (долевая) and whether it is fused
 // (клеевая). materials picks, per colourway, which BOM fabric it is cut from. Full-replace child.
 export type TechCardPiece = {
   name: string | undefined;
   piecesPerGarment: number | undefined;
-  // Q6: mirrored means the piece is CUT AS A MIRRORED PAIR (left+right), not a decorative flag. The
-  // cut-list (GetStyleCutList) expands a mirrored piece ×2 over pieces_per_garment.
+  // ОТСТАВЛЕНО (миграция 0266). Означало «деталь кроится зеркальной парой», и cut list удваивал
+  // по нему pieces_per_garment. Функцией не пользовались; 0266 свернул удвоение в само количество
+  // и погасил флаг, поэтому сервер больше НИЧЕГО по нему не считает. Поле оставлено, чтобы старая
+  // строка доезжала без потерь — но описывать им правило больше нельзя, иначе следующий читатель
+  // вернёт удвоение.
   mirrored: boolean | undefined;
   grainline: string | undefined;
   fused: boolean | undefined;
@@ -2996,6 +3235,16 @@ export type TechCardPiece = {
   // callout on the card (its source sketch callout was removed) — the piece survives, visibly
   // detached, instead of being silently dropped (orphan-control, S8).
   detached: boolean | undefined;
+  // КАК КРОИТСЯ (0275). Отвечает на вопрос «как связаны эти pieces_per_garment панелей», и ничего не
+  // умножает — см. TechCardPieceCutSymmetry.
+  // ЯВНОЕ ПРИСУТСТВИЕ, а не голый энум, по той же причине, что и fabric_direction на строке BOM:
+  // вкладка со старым бандлом поля не шлёт вовсе, голый proto3-энум приехал бы как UNKNOWN и СТЁР бы
+  // разметку на всех деталях карточки — а разметка, в отличие от направления, невосстановима без
+  // человека с лекалами. ОТСУТСТВИЕ ⇒ сервер несёт хранимое значение дальше (store:
+  // IF(:cut_symmetry_omitted, …), и та же перенос-склейка перед дайджестом, иначе подпись из такой
+  // вкладки рождается устаревшей). ЯВНЫЙ UNKNOWN ⇒ очистить в «не размечено», это осознанное
+  // действие. Новый клиент шлёт поле ВСЕГДА, круглым рейсом того, что прочитал.
+  cutSymmetry?: TechCardPieceCutSymmetry;
 };
 
 // SkuSeason is the normalized style-owned season used in every SKU. The pair is atomic: callers
@@ -3089,6 +3338,12 @@ export type TechCardInsert = {
   // sent on the wire is dropped. NOTE: a RELEASED card is frozen for edits (ErrTechCardReleased), so
   // this planning date is only settable while the card is draft/approved — see the store's freeze check.
   targetDropDate: wellKnownTimestamp | undefined;
+  // DXF block-name → cut-piece aliases, scoped per fabric slot (§2.2). Presence-gated via the
+  // wrapper (see TechCardPieceDxfAliasSet): absent = preserve stored, present = full replace.
+  // Send the wrapper ONLY when the alias editor is wired, and always round-trip what was read —
+  // the wrapper protects against a STALE client, not a half-implemented one: a client that
+  // defaults to an empty PRESENT wrapper clears the whole table on every save.
+  pieceDxfAliases: TechCardPieceDxfAliasSet | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -3154,6 +3409,12 @@ export type TechCard = {
   // through the tech-card save — a variant owns warehouse stock, so a full-replace save must not be
   // able to re-mint or drop one.
   outputVariants: TechCardOutputVariant[] | undefined;
+  // OUTPUT-ONLY summaries of the card's saved раскладки (markers, 0257) — the measured fabric
+  // layouts costing reads consumption from. Summaries only: the layout blob is 60-100 KB per
+  // marker and travels exclusively on GetTechCardMarker. Written through the dedicated
+  // Save/DeleteTechCardMarker RPCs, never through the tech-card save (and marker writes do not
+  // bump lock_version — saving a раскладка must not 409 the operator's own open card form).
+  markers: TechCardMarkerSummary[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -3178,6 +3439,244 @@ export type TechCardOutputVariant = {
   // totals, but keeps its bucket, its stock and its history. Deleting the variant is the harder
   // action — it is the only way to un-pin the card's auxiliary purpose.
   active: boolean | undefined;
+};
+
+// TechCardMarkerSummary is the list row of a saved раскладка (marker, tech_card_marker): the
+// measured fabric layout of a СОСТАВ of pattern pieces on a strip of fabric. The heavy layout blob
+// (contours + placements) deliberately does NOT ride here — it travels only on GetTechCardMarker.
+// Ф2 replaced «one size × N комплектов» with a composition (size → garments). The identity of a
+// marker in a list is therefore `composition` (:25), not `size_id` (:3) — a mixed раскладка has no
+// single size to show, and the legacy fields read 0 on one.
+export type TechCardMarkerSummary = {
+  id: number | undefined;
+  techCardId: number | undefined;
+  // ЛЕГАСИ. The size of a homogeneous marker taken before Ф2; 0 = a marker with a composition,
+  // read `composition` (:25). The number is never reused and the field is never removed — a stored
+  // pre-Ф2 row still carries it, and a stale client bundle still sends it back on save.
+  sizeId: number | undefined;
+  name: string | undefined;
+  // Provenance of the layout geometry. "auto" = the nesting engine as it ran; "manual" = an
+  // operator adjusted placements (Ф5); "imported" reserved for external CAD markers.
+  source: string | undefined;
+  // The BOM fabric line this marker measures, as the stable wire identity of that line ("" = not
+  // linked, or the slot was deleted — the marker stays valid geometry and merely drops out of
+  // costing suggestions). Resolved server-side to tech_card_bom_item(id) with ON DELETE SET NULL.
+  bomLineKey: string | undefined;
+  bomItemName: string | undefined;
+  bomItemUnit: string | undefined;
+  fabricWidthCm: googletype_Decimal | undefined;
+  gapCm: googletype_Decimal | undefined;
+  edgeMarginCm: googletype_Decimal | undefined;
+  allowCrossGrain: boolean | undefined;
+  // ЛЕГАСИ, exactly like size_id above: комплектов of the ONE size a pre-Ф2 marker cut. 0 = a
+  // marker with a composition, read total_units (:26).
+  sets: number | undefined;
+  usedLengthCm: googletype_Decimal | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  // placed/total instance counts at save time. The server refuses to save an incomplete marker
+  // (placed < total, FailedPrecondition) — a layout that did not fit every piece is not a
+  // consumption norm — so on stored rows these are always equal; kept as two fields for honesty.
+  placedCount: number | undefined;
+  totalCount: number | undefined;
+  // OUTPUT-ONLY, = used_length_cm / total_units — fabric per ONE garment.
+  // WITHHELD (unset, not zero) on a marker whose composition holds MORE THAN ONE SIZE. On a mixed
+  // раскладка this quotient is the mean across the состав: it overstates the small sizes and
+  // understates the large ones, which is the very distortion Ф2 exists to remove. It is also the
+  // number a client copies verbatim into tech_card_colorway_usage.consumption with
+  // consumption_source='marker' — i.e. it stops being a display value and becomes a persistent
+  // costing fact nothing downstream can tell apart from a measured one. So the server does not
+  // hand it out; scalar_apply_refusal (:27) says so in words. Per-size figures arrive with Ф2.4.
+  consumptionPerUnitCm: googletype_Decimal | undefined;
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+  // Кромка (selvedge, cm per edge) the раскладка ran with — snapshotted at save time from the
+  // effective article so the waste decomposition stays auditable after the material changes.
+  selvedgeCm: googletype_Decimal | undefined;
+  // The colourway whose ARTICLE this layout was measured on (0264); 0 = not colourway-specific.
+  // Every colourway of a style cuts the same pieces, but each pins its own catalog article per
+  // slot, and articles differ in roll width and кромка — so the same geometry on two colourways
+  // is two markers with two measured lengths. A costing suggestion that ignored this would apply
+  // a length taken at another cloth's width, and be wrong in a way that reads as plausible.
+  colorwayId: number | undefined;
+  // OUTPUT-ONLY СОСТАВ of the раскладка, one entry per size, ordered by size_id. ALWAYS populated,
+  // for every marker including those taken before Ф2 — migration 0273 projected each legacy row
+  // into the same shape, one entry {size_id, sets}. It is never empty and never carries quantity 0;
+  // an empty composition on the wire is a read bug, not «a marker without a состав».
+  composition: TechCardMarkerCompositionEntry[] | undefined;
+  // OUTPUT-ONLY. How many GARMENTS (not pieces!) this раскладка cuts — Σ composition[].quantity, and
+  // the divisor behind consumption_per_unit_cm. Equals `sets` for a legacy marker. NOT to be confused
+  // with total_count (:17), which counts placed PIECE INSTANCES.
+  totalUnits: number | undefined;
+  // OUTPUT-ONLY. Empty = the scalar consumption_per_unit_cm (:18) may be applied to a recipe. A
+  // non-empty string is the server REFUSING to supply a scalar norm for this раскладка, and its text
+  // is the explanation to show: which раскладка, why a single number would be wrong, and what to do
+  // instead. Set exactly when the composition holds more than one size.
+  scalarApplyRefusal: string | undefined;
+};
+
+// TechCardMarkerCompositionEntry is one line of a раскладка's СОСТАВ: how many GARMENTS of one size
+// this marker cuts in a single spread. A mixed состав packs tighter than a homogeneous one — the
+// small pieces of one size settle into the межлекальные выпады of another — and «size + комплекты»
+// was replaced by a map for exactly that reason: the tighter layout was not expressible.
+// repeated, deliberately NOT map<int32,int32>, for three reasons: the order of the entries inside
+// the stored blob must be stable (the Ф0.5 regression probe asserts «same input ⇒ same blob»); a map
+// degrades into an object with string keys through grpc-gateway/OpenAPI; and a repeated entry can
+// grow a field later (Ф2.4 hangs the per-size consumption here) where a map value cannot.
+export type TechCardMarkerCompositionEntry = {
+  sizeId: number | undefined;
+  quantity: number | undefined;
+};
+
+// TechCardMarker is a full stored marker: the summary plus the self-contained layout.
+export type TechCardMarker = {
+  summary: TechCardMarkerSummary | undefined;
+  layout: TechCardMarkerLayout | undefined;
+};
+
+// TechCardMarkerLayout is the self-contained geometry of a marker, stored as an opaque proto-JSON
+// blob (idiom: tech_card_release.snapshot). schema_version guards forward evolution — readers
+// degrade gracefully on a version they do not know.
+export type TechCardMarkerLayout = {
+  // 1 = the original geometry; 2 adds piece_line_key/block_name on a piece; 3 adds `flipped` on a
+  // placement (Ф1); 4 adds `composition` here and `size_id` on a piece (Ф2). The server accepts all
+  // four and every stored blob stays readable forever.
+  // THIS NUMBER DOES NOT DECIDE WHETHER THE POLICY APPLIES, and an earlier version of this comment
+  // said it did. The directional-cloth rule has no version gate: a layout is judged on its geometry
+  // whatever version it declares. The number the exemption is read from is a SERVER-WRITTEN column
+  // (`tech_card_marker.layout_schema_version`, migration 0268) — a policy generation, not this
+  // field. Keying the exemption here was a real defect twice over: `flipped` cannot be forged
+  // because the field did not exist before 3, but a 180° is expressible in every version, so
+  // «declare schema_version 1» was a working opt-out of the exact ban the policy exists to enforce.
+  // What this field IS load-bearing for is `flipped` alone: a mirrored placement in a blob
+  // declaring less than 3 is an impossible payload — no stored blob can contain one — and is
+  // refused as such rather than as a policy violation.
+  schemaVersion: number | undefined;
+  params: TechCardMarkerNestParams | undefined;
+  pieces: TechCardMarkerPiece[] | undefined;
+  placements: TechCardMarkerPlacement[] | undefined;
+  warnings: string[] | undefined;
+  // СОСТАВ of the раскладка (schema_version 4). EMPTY means a legacy blob «one size, N комплектов»:
+  // the reader takes the состав from the summary instead — a single entry {summary.size_id,
+  // summary.sets} — and gets precisely the pre-Ф2 semantics back. Branch on THE PRESENCE OF THIS
+  // FIELD, never on schema_version: the version exists to decide forgery and grandfathering (Ф1),
+  // and a reader that switched on it would have to know about versions it will never see again.
+  composition: TechCardMarkerCompositionEntry[] | undefined;
+};
+
+// TechCardMarkerNestParams are the engine inputs that produced the layout — enough to label the
+// result honestly; NOT enough to re-run the nest (the contours already carry the parse outcome).
+export type TechCardMarkerNestParams = {
+  unit: string | undefined;
+  tolCm: number | undefined;
+  tolChainCm: number | undefined;
+  rdpEpsCm: number | undefined;
+  targetLengthCm: number | undefined;
+  timeBudgetS: number | undefined;
+};
+
+// TechCardMarkerPiece is one distinct pattern piece: its exact contour (cm, local origin at the
+// piece bbox corner) and how many instances ONE GARMENT cuts.
+export type TechCardMarkerPiece = {
+  pieceId: number | undefined;
+  name: string | undefined;
+  source: string | undefined;
+  sourceUrl: string | undefined;
+  // Instances per ONE GARMENT, >= 1. Total instances of this piece in the раскладка:
+  // quantity × (size_id > 0 ? composition[size_id].quantity : total_units)
+  // Legacy blob: no size_id anywhere, composition empty, the состав is {summary.size_id,
+  // summary.sets} and total_units = sets ⇒ the formula gives quantity × sets, which is exactly what
+  // this comment said before Ф2. ONE formula, no branch on the version.
+  quantity: number | undefined;
+  poly: TechCardMarkerPoint[] | undefined;
+  bboxWCm: number | undefined;
+  bboxHCm: number | undefined;
+  areaCm2: number | undefined;
+  // schema_version 2 additions (both optional): the resolved cut-piece identity at save time, so a
+  // marker survives piece renames — readers resolve the display name through the alias map and fall
+  // back to `name` as saved. piece_id above stays parse-local (a v1 decision that remains right).
+  pieceLineKey: string | undefined;
+  blockName: string | undefined;
+  // schema_version 4: the size whose GRADATION this contour belongs to. 0/absent = the piece is
+  // size-agnostic (a DXF block with no size suffix — it does not grade, so one is cut per garment
+  // of the whole состав) OR the blob is legacy. Both readings collapse into the same formula, see
+  // quantity above. A size named here must appear in layout.composition — the server refuses a blob
+  // whose piece points at a size the состав does not cut, because the formula would silently give
+  // that piece zero instances.
+  sizeId: number | undefined;
+};
+
+export type TechCardMarkerPoint = {
+  xCm: number | undefined;
+  yCm: number | undefined;
+};
+
+// TechCardMarkerPlacement is one placed instance: piece contour rotated by rot_deg (CCW) then
+// translated by (x_cm, y_cm) in strip coordinates — x along the fabric, y across the width.
+export type TechCardMarkerPlacement = {
+  pieceId: number | undefined;
+  instance: number | undefined;
+  rotDeg: number | undefined;
+  xCm: number | undefined;
+  yCm: number | undefined;
+  // The instance is MIRRORED — the contour reflected before rot_deg is applied, so its chirality is
+  // the opposite of the piece as parsed. No rotation expresses this: a left and a right полочка are
+  // the same outline turned OVER, never turned around, and an engine that can only rotate cuts 44
+  // left fronts and zero right ones off a half-set of выкройки. That is the failure this field
+  // exists to make expressible (schema_version 3, Ф1).
+  // Directional cloth forbids a mirror for the same reason it forbids 180°: both put the piece on
+  // the fabric the wrong way up, and ворс, twill or a print then run against the neighbouring
+  // piece. The save path refuses either one on a one_way scope, whatever version the blob declares
+  // — see the schema_version note above for what that field does and does not decide.
+  // THE AXIS IS PART OF THE CONTRACT, and naming it is not pedantry. The reflection is
+  // `(x, y) ↦ (−x, y)` — about the Y axis, in the piece's own coordinates, applied BEFORE rot_deg:
+  // placed(p) = R(rot_deg) · M^flipped · p + (x_cm, y_cm),   M: (x, y) ↦ (−x, y)
+  // Reflecting about the other axis would also produce a correct chirality, so a reader that
+  // guesses wrong still draws a plausible piece — it just draws it a HALF TURN from where the
+  // writer meant, because M_x = R(180) · M_y. On plain cloth that is invisible; on ворс it is a
+  // ruined panel, and in the label planner it is text upside down. Both renderers and the layout
+  // editor must compose this exact expression, and the order matters as much as the axis:
+  // M · R(θ) = R(−θ) · M, so mirroring after rotating differs by 2θ, not by a sign.
+  flipped: boolean | undefined;
+};
+
+// TechCardMarkerInsert is the writable payload of SaveTechCardMarker. Geometry is SELF-CONTAINED
+// (contours inside the layout): pattern rows are a full-replace child whose CDN objects are
+// garbage-collected the moment no row references them, so a marker that stored url references
+// would go dark on the next sheet replacement. source_url inside pieces is provenance only.
+export type TechCardMarkerInsert = {
+  // ЛЕГАСИ pair with `sets` (:9). The СОСТАВ travels in layout.composition and nowhere else — one
+  // copy on the wire, so there is no «which of the two is right» question to answer and no
+  // cross-validation to write, and the blob stays self-contained (its pieces are tagged with sizes;
+  // the состав is the header of that same geometry).
+  // These two survive for ONE reason: a STALE ADMIN BUNDLE. The admin is an SPA, an open tab keeps
+  // sending the payload it was built with, and Ф1 already paid this price on fabric_direction. A
+  // payload with a non-empty layout.composition ignores both fields; a payload without one is
+  // accepted as a homogeneous marker when size_id > 0 and sets >= 1, and is stored in exactly the
+  // legacy shape. Neither present nor absent is guessed at: with no composition AND no size_id/sets
+  // the save is REFUSED, because inventing «1 комплект» would inflate the per-garment norm N-fold
+  // and a client writes that number straight into a recipe.
+  sizeId: number | undefined;
+  name: string | undefined;
+  source: string | undefined;
+  bomLineKey: string | undefined;
+  fabricWidthCm: googletype_Decimal | undefined;
+  gapCm: googletype_Decimal | undefined;
+  edgeMarginCm: googletype_Decimal | undefined;
+  allowCrossGrain: boolean | undefined;
+  sets: number | undefined;
+  usedLengthCm: googletype_Decimal | undefined;
+  efficiencyPct: googletype_Decimal | undefined;
+  placedCount: number | undefined;
+  totalCount: number | undefined;
+  layout: TechCardMarkerLayout | undefined;
+  // Кромка the layout was computed with (cm per edge, >= 0; 0 = none/unknown). The nesting
+  // client populates it from the linked article's selvedge_cm at save time.
+  selvedgeCm: googletype_Decimal | undefined;
+  // The colourway this раскладка is measured for; 0 = not colourway-specific (legacy markers and
+  // cards whose colourways share one article). Must be a live colourway of this card.
+  colorwayId: number | undefined;
 };
 
 // TechCardListItem is a lightweight tech-card header for list views.
@@ -3227,6 +3726,10 @@ export type TechCardListItem = {
   // is in legacy single-output mode, where output_material_* above is the whole answer.
   outputVariantCount: number | undefined;
   outputVariantsOnHand: googletype_Decimal | undefined;
+  // How many saved раскладки (markers, 0257) the card carries, batched for the page like
+  // colorway_count. The COUNT only — a "latest consumption" here would be a lie without naming
+  // the size and the BOM slot it was measured for.
+  markerCount: number | undefined;
 };
 
 // MaterialMovementType is the kind of a material-stock movement (new-flow NF-01). quantity is
@@ -3294,6 +3797,16 @@ export type MaterialLot = {
   receivedAt: wellKnownTimestamp | undefined;
   note: string | undefined;
   archived: boolean | undefined;
+  // measured_width_cm is the width that ARRIVED (Ф5а.1), as opposed to the width the supplier
+  // printed: the supplier says 150, the roll measures 148, and the marker is made for the NARROWEST
+  // width in the batch. The article's NOMINAL width lives on MaterialFabricAttrs.width_cm — this is
+  // the measured fact for THIS roll. Unset = nobody measured it (NOT "it matches the nominal").
+  // There is deliberately no measured LENGTH field: received_qty already is it.
+  measuredWidthCm: googletype_Decimal | undefined;
+  // shade_code is the dye lot / оттенок of this roll, for colour matching across rolls. Empty =
+  // unrecorded. The shade also drifts WITHIN one batch, which is why pieces of one garment come
+  // from adjacent layers — that is a note on the lay screen, not another field here.
+  shadeCode: string | undefined;
 };
 
 // MaterialStockRow is a catalog material joined with its stock balance, valuation and low-stock

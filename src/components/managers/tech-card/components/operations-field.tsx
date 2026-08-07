@@ -158,7 +158,7 @@ function readPieceDrag(dt: DataTransfer): string {
 // is exactly what made the operation list and the cut list name the same part differently.
 //
 // It lives here rather than in the editor because only ONE operation is mounted at a time now: a
-// piece renamed on the PIECES tab has to reach every operation that references it, not just the one
+// piece renamed on the PATTERNS tab has to reach every operation that references it, not just the one
 // currently open.
 function PlacementSync() {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
@@ -480,7 +480,7 @@ function OperationEditor({
   }) ?? []) as string[];
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
-  // A key that no longer resolves (its piece was deleted on the PIECES tab, or an older card
+  // A key that no longer resolves (its piece was deleted on the PATTERNS tab, or an older card
   // invented one through the removed picker) is SURFACED, not silently dropped — the save would
   // unlink it and nobody would know which operation lost a part.
   const danglingPieces = selectedPieceKeys.filter((k) => !byKey.has(k));
@@ -654,7 +654,7 @@ function OperationEditor({
           <Chip
             key={k}
             tone='error'
-            title={`деталь ${k} удалена на вкладке colorways — привязка потеряется при сохранении`}
+            title={`деталь ${k} удалена на вкладке patterns — привязка потеряется при сохранении`}
             onRemove={() => removePieceKey(k)}
           >
             {`#${k.slice(-6)} — деталь удалена`}
@@ -1167,7 +1167,7 @@ export function OperationsField({
   }>;
   // Only DECLARED pieces reach the tray. Inventing a piece from inside an operation is what
   // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
-  // PIECES tab, where a piece also gets its cut data instead of just a name.
+  // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
 
   const pinOptions = useMemo<PickerOption[]>(
@@ -1245,10 +1245,11 @@ export function OperationsField({
     setValue(`operations.${index}.pieceLineKeys`, [...cur, lineKey], { shouldDirty: true });
   };
 
-  // Cut pieces are the first section of the colorways tab (they used to have their own).
+  // Cut pieces are a section of the PATTERNS tab (they used to have their own, then sat on
+  // colorways). One target for every card shape — an auxiliary card has no colorways tab.
   const goToPiecesTab = () => {
     const next = new URLSearchParams(params);
-    next.set('tab', 'colorways');
+    next.set('tab', 'patterns');
     setParams(next, { replace: true });
     // that tab is a sibling `hidden` panel, so it is already mounted — one frame is enough
     window.setTimeout(() => revealField('pieces.add'), 120);
@@ -1304,7 +1305,7 @@ export function OperationsField({
               />
             ))
           )}
-          <Chip dashed onClick={goToPiecesTab} title='создать деталь на вкладке PIECES'>
+          <Chip dashed onClick={goToPiecesTab} title='создать деталь на вкладке PATTERNS'>
             + new piece
           </Chip>
           <ToolbarSpacer />

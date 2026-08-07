@@ -1,8 +1,10 @@
+import { clampPatternName } from 'utils/pattern';
 import {
   common_GenderEnum,
   common_TechCard,
   common_TechCardApprovalState,
   common_TechCardAuxSubtype,
+  common_TechCardBomPurpose,
   common_TechCardBomSection,
   common_TechCardConstruction,
   common_TechCardConstructionZone,
@@ -17,6 +19,7 @@ import {
   common_TechCardMediaKind,
   common_TechCardOperationType,
   common_TechCardPackaging,
+  common_TechCardPieceCutSymmetry,
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
   common_TechCardStage,
@@ -25,7 +28,19 @@ import {
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
+import {
+  UNSET_PURPOSE,
+  fabricScopeKey,
+  isOtherPurpose,
+  isRollGoodsSection,
+} from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
+import {
+  CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
+  UNSET_CUT_SYMMETRY,
+  cutSymmetryCountInvalid,
+  isCutSymmetryMarked,
+} from './piece-codes';
 import { z } from 'zod';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
@@ -94,12 +109,17 @@ const sizeQuantitySchema = z.object({
   orderQty: z.number().optional().default(0),
 });
 
-// A downloadable PDF выкройка (cut pattern) for one size. url/filename/sizeBytes are
-// produced by Admin.UploadPattern (never hand-typed); sizeId ∈ size_ids.
+// A downloadable выкройка (cut pattern) file — PDF or DXF, told apart by the url's
+// extension — for one size. url/filename/sizeBytes are produced by Admin.UploadPattern
+// (never hand-typed); sizeId ∈ size_ids.
 const patternSchema = z.object({
   sizeId: z.number().optional().default(0),
   url: z.string().optional().default(''),
   filename: z.string().optional().default(''),
+  // Operator-entered display name; '' = unnamed (the UI falls back to the filename). The
+  // save path sends it EXPLICITLY for every row, empty included — absent-on-the-wire is
+  // reserved for stale clients, which the server answers by preserving the stored name.
+  name: z.string().optional().default(''),
   sizeBytes: z.number().optional().default(0),
   // Rev.N of this sheet within its size. 0 = "assign one": the server numbers a url it has not seen
   // on this card before and preserves the number for one it has, so the client only ever pins a
@@ -108,6 +128,21 @@ const patternSchema = z.object({
   // Server-owned; round-tripped read-only so the grid can show when a PDF actually arrived. Sending
   // it back is harmless — the write path drops it and carries the stored value forward by url.
   uploadedAt: z.string().optional().default(''),
+  // Stable row identity (0260). Unlike BOM/piece keys the SERVER never mints one: an empty key is
+  // the legacy signal its upsert-diff matches by (size_id, url) on. So this client keeps whatever
+  // key a row already has and mints only for rows created here — minting for every row would make
+  // one save read as all-new rows and drop every DXF↔slot binding on the card.
+  lineKey: z.string().optional().default(''),
+  // Which fabric BOM line this sheet is cut from — the binding a раскладка needs to know which
+  // cloth (and therefore which width and кромка) a DXF belongs to. '' = unbound: legal for a PDF,
+  // and legal for legacy DXF rows uploaded before this existed.
+  //
+  // LEGACY HALF since 0267: resolve through fabricPurpose first (fabricScopeKey). It stays because
+  // it cannot be migrated — a sheet bound to line L has no purpose to move to until L is sorted.
+  bomLineKey: z.string().optional().default(''),
+  // The НАЗНАЧЕНИЕ this sheet is cut from (0267) — the honest statement at card level, where no
+  // article is in play. '' = not purpose-bound; the row falls back to bomLineKey.
+  fabricPurpose: z.string().optional().default(''),
 });
 
 const DEFAULT_ISSUE_SEVERITY: common_TechCardIssueSeverity = 'TECH_CARD_ISSUE_SEVERITY_MEDIUM';
@@ -176,13 +211,17 @@ export function isBlankPiece(p: {
   note?: string;
   calloutNumber?: number;
   fused?: boolean;
-  mirrored?: boolean;
   piecesPerGarment?: number;
+  cutSymmetry?: string;
   materials?: { bomLineKey?: string; fusingBomLineKey?: string; note?: string }[];
 }): boolean {
   if (p.name?.trim() || p.grainline?.trim() || p.note?.trim()) return false;
-  if (p.calloutNumber || p.fused || p.mirrored) return false;
+  if (p.calloutNumber || p.fused) return false;
   if ((p.piecesPerGarment ?? 1) > 1) return false;
+  // Разметка кроя считается содержимым наравне с долевой и дублированием. Без этой строки ряд, в
+  // котором оператор успел ответить только на вопрос «как кроится», выбрасывался бы на сохранении
+  // МОЛЧА — потеря данных без единого сообщения, ради экономии одной проверки.
+  if (isCutSymmetryMarked(p.cutSymmetry)) return false;
   return !(p.materials ?? []).some(
     (m) => m.bomLineKey?.trim() || m.fusingBomLineKey?.trim() || m.note?.trim(),
   );
@@ -199,7 +238,19 @@ const pieceSchema = z
   .object({
     name: z.string().optional().default(''),
     piecesPerGarment: z.number().optional().default(1),
-    mirrored: z.boolean().optional().default(false),
+    // NO `mirrored`. The flag existed to expand a piece ×2 as a left+right pair (Q6) and was never
+    // used in practice; it is deliberately absent from the form, so the save mapper does not send it
+    // and the store writes `mirrored = 0` on the next save of any card that still carries a true.
+    // GetStyleCutList stopped doubling by it server-side in the same change — a client that merely
+    // hid the field would still have shown the server's doubled total_per_garment with nothing on
+    // screen to explain it.
+    //
+    // КАК КРОИТСЯ (`cut_symmetry`, 0275) — НЕ воскрешение `mirrored` выше, а отдельное поле, потому
+    // что воскрешать нечего: 0266 погасила все единицы по построению. Оно ничего не умножает и
+    // отвечает только на вопрос «как связаны эти piecesPerGarment панелей». Держим ПОЛНЫЙ литерал
+    // перечисления, как `fabricDirection` на строке BOM, а не короткое слово: круглый рейс без
+    // словаря переводов — это то, что делает сохранение неспособным подменить ответ оператора.
+    cutSymmetry: z.string().optional().default(UNSET_CUT_SYMMETRY),
     grainline: z.string().optional().default(''),
     fused: z.boolean().optional().default(false),
     calloutNumber: z.number().optional().default(0),
@@ -220,6 +271,19 @@ const pieceSchema = z
         code: z.ZodIssueCode.custom,
         message: 'Piece name is required',
         path: ['name'],
+      });
+    }
+    // Зеркальная пара при нечётном (или нулевом) количестве. Правило живёт в CHECK'е БД
+    // (`chk_tcp_mirrored_needs_even_count`), и CHECK этот ДВУХКОЛОНОЧНЫЙ: он срабатывает и когда
+    // правят одно только количество у уже размеченной детали. Без этой проверки оператор получил бы
+    // сырой MySQL 3819 про колонку, которой не касался, и сохранение всей карточки — с сезоном,
+    // подписями и всем остальным — упало бы без единого адресуемого поля. Ошибка вешается на
+    // `cutSymmetry`, то есть на контрол, который её и вызвал.
+    if (cutSymmetryCountInvalid(piece.cutSymmetry, piece.piecesPerGarment)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
+        path: ['cutSymmetry'],
       });
     }
     // A fabric-map cell addresses its colourway by id (colorwayIndex holds colorway_id on the wire),
@@ -248,6 +312,14 @@ const pieceSchema = z
 const bomItemSchema = z
   .object({
     section: z.string().optional().default(DEFAULT_BOM_SECTION),
+    // НАЗНАЧЕНИЕ (0265) — a second axis beside `section`, on roll goods only. UNSET is a real state
+    // ("not sorted yet"), NOT a validation failure: every line saved before the field existed
+    // carries it deliberately, so requiring a purpose here would make every existing card unsavable
+    // until it had been sorted by hand. The ADD modal is where a purpose is demanded, because that
+    // is the one moment the operator has the answer in front of them.
+    purpose: z.string().optional().default(UNSET_PURPOSE),
+    purposeNote: z.string().optional().default(''),
+    isSample: z.boolean().optional().default(false),
     name: z.string().optional().default(''), // required — see the superRefine below for WHY it lives there
     supplier: z.string().optional().default(''),
     supplierRef: z.string().optional().default(''),
@@ -263,6 +335,12 @@ const bomItemSchema = z
     fabricWeightGsm: z.string().optional().default(''),
     fabricDirection: z.string().optional().default('TECH_CARD_FABRIC_DIRECTION_UNKNOWN'),
     wastagePercent: z.string().optional().default(''),
+    // READ-ONLY enrichment the single-card read fills (0259): the width the раскладка should
+    // prefill (this line's own fabricWidth, else the linked article's) and the article's кромка
+    // per edge. Carried through the form so the nesting modal can read them without a second
+    // query; never sent back (the server ignores them on write).
+    effectiveFabricWidthCm: z.string().optional().default(''),
+    selvedgeCm: z.string().optional().default(''),
     // optional link to a catalog Material (0 = unlinked free-text line). The line keeps its own
     // snapshot fields regardless of the link.
     materialId: z.number().optional().default(0),
@@ -288,6 +366,25 @@ const bomItemSchema = z
         code: z.ZodIssueCode.custom,
         message: 'укажите роль (название) — у строки без артикула имени взять неоткуда',
         path: ['name'],
+      });
+    }
+    // Server parity (parseTechCardBomItems + upsertTechCardBom). Neither of these can be reached by
+    // clicking around — the editor hides the purpose control off roll goods and clears the note off
+    // OTHER — so they exist to turn a state that slipped through into a named field error on the
+    // tile, instead of a 400 naming a line_key the operator has never seen.
+    const purpose = item.purpose && item.purpose !== UNSET_PURPOSE ? item.purpose : '';
+    if (purpose && !isRollGoodsSection(item.section)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'назначение есть только у ткани (fabric / lining / interlining / insulation)',
+        path: ['purpose'],
+      });
+    }
+    if (item.purposeNote?.trim() && !isOtherPurpose(purpose)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'примечание можно писать только к назначению «другое»',
+        path: ['purposeNote'],
       });
     }
   });
@@ -466,7 +563,25 @@ const techCardObject = z.object({
   // children
   sizeIds: z.array(z.number()).default([]),
   sizeQuantities: z.array(sizeQuantitySchema).default([]),
-  patterns: z.array(patternSchema).default([]), // per-size PDF выкройки
+  patterns: z.array(patternSchema).default([]), // выкройки: DXF по материалам (size_id — артефакт хранения, колонка NOT NULL)
+  // DXF block → cut piece, SCOPED BY FABRIC (0262). The scope is what makes the mapping safe:
+  // the same generic block name («полочка») in the main-fabric file and the lining file is two
+  // different pieces, which a card-level mapping could not express. Written as a full-replace
+  // set alongside the card body.
+  // Since 0267 the scope is the НАЗНАЧЕНИЕ where the card has been sorted and the legacy line where
+  // it has not: scope = fabricPurpose, else bomLineKey. The DB UNIQUE moved with it, so two lines
+  // sorted into ONE назначение collapse their same-named blocks onto ONE alias — see the collapse
+  // guard in techCardSchema's superRefine.
+  pieceDxfAliases: z
+    .array(
+      z.object({
+        bomLineKey: z.string().optional().default(''),
+        fabricPurpose: z.string().optional().default(''),
+        blockName: z.string().optional().default(''),
+        pieceLineKey: z.string().optional().default(''),
+      }),
+    )
+    .default([]),
   // NF-07 auxiliary items: purpose is 'sellable' (default) or 'auxiliary' (produces a packaging
   // material, not a product). An auxiliary card links no products and its run output receipts into
   // outputMaterialId (required before its first run; 0 = unset).
@@ -544,6 +659,46 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
   // blocked the whole main insert (notes/season/labels/sign-offs/…) for any card carrying a
   // legacy free-text BOM line, which loads with materialId: 0 (mapBomItemToForm) — see wave-2a
   // P0 fix. The BOM tile still shows a soft red "! link a material" hint per unlinked line.
+
+  // ALIAS COLLAPSE (0267) — the sharp edge of binding by назначение instead of by line.
+  //
+  // Two BOM lines sorted into ONE назначение merge their DXF alias sets. If both held a block of
+  // the same name — «полочка» in the shell file and «полочка» in the second shell's file — the
+  // merged set has TWO rows under one scope, and the server's UNIQUE (card, scope, block) refuses
+  // the pair by failing the WHOLE card save: not the aliases, the card. Everything the operator
+  // typed on nine other tabs bounces with it.
+  //
+  // So it is caught here, on the client, before the save leaves — a named block and a named pair of
+  // pieces the operator can actually act on, instead of a server refusal after the fact. The path
+  // routes to the PATTERNS tab (ERROR_TAB.pieceDxfAliases), where «детали кроя» lives.
+  //
+  // Only an ACTUAL duplicate scope key is flagged. Two LINE-scoped aliases whose lines happen to
+  // share a назначение are not a problem and must not nag: the server files them under their own
+  // line scopes exactly as it always did, which is the whole point of the additive shape.
+  const aliasSeen = new Map<string, { index: number; piece: string }>();
+  (data.pieceDxfAliases ?? []).forEach((a, index) => {
+    const block = a.blockName?.trim() ?? '';
+    const piece = a.pieceLineKey?.trim() ?? '';
+    if (!block || !piece) return;
+    const key = `${fabricScopeKey(a.fabricPurpose, a.bomLineKey).toLowerCase()}|${block.toLowerCase()}`;
+    const prev = aliasSeen.get(key);
+    if (!prev) {
+      aliasSeen.set(key, { index, piece });
+      return;
+    }
+    if (prev.piece === piece) return; // the same answer twice is harmless; the wire set dedupes it
+    const nameOf = (k: string) =>
+      (data.pieces ?? []).find((p) => p.lineKey?.trim() === k)?.name?.trim() || k;
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        `блок «${block}» уже сопоставлен с деталью «${nameOf(prev.piece)}» в этом же назначении — ` +
+        `две детали кроя на один блок сервер не примет и отклонит сохранение всей карты. ` +
+        `Откройте «детали кроя» на вкладке ВЫКРОЙКИ и оставьте одну связь ` +
+        `(сейчас спорят «${nameOf(prev.piece)}» и «${nameOf(piece)}»).`,
+      path: ['pieceDxfAliases', index, 'blockName'],
+    });
+  });
 });
 
 export type TechCardFormData = z.input<typeof techCardObject>;
@@ -577,6 +732,7 @@ export const techCardDefaultData: TechCardFormData = {
   sizeIds: [],
   sizeQuantities: [],
   patterns: [],
+  pieceDxfAliases: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
   auxSubtype: UNSET_AUX_SUBTYPE,
   outputMaterialId: 0,
@@ -663,6 +819,11 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
   return {
     section:
       b.section && b.section !== 'TECH_CARD_BOM_SECTION_UNKNOWN' ? b.section : DEFAULT_BOM_SECTION,
+    // No fallback and no inference: an unset purpose reads back unset. Anything else here would be
+    // a guess, and a guess is what 0265 deliberately refuses to make.
+    purpose: b.purpose || UNSET_PURPOSE,
+    purposeNote: b.purposeNote || '',
+    isSample: !!b.isSample,
     name: b.name || '',
     supplier: b.supplier || '',
     supplierRef: b.supplierRef || '',
@@ -680,6 +841,8 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
         ? b.fabricDirection
         : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
     wastagePercent: decimalToInput(b.wastagePercent),
+    effectiveFabricWidthCm: decimalToInput(b.effectiveFabricWidthCm),
+    selvedgeCm: decimalToInput(b.selvedgeCm),
     // material_id and id are int64 on the wire (techcard.proto), and grpc-gateway serialises int64
     // as a STRING — the generated TS type says `number` and is wrong. Without coercing, the form
     // holds "12" and z.number() rejects it as "Invalid input" on bomItems.N.materialId, blocking
@@ -752,11 +915,26 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       sizeId: p.sizeId || 0,
       url: p.url || '',
       filename: p.filename || '',
+      name: p.name ?? '',
       // size_bytes is int64 → arrives as a string from grpc-gateway; coerce to a real number
       // so the form value passes z.number() (a string would silently block save).
       sizeBytes: wireInt(p.sizeBytes),
       version: p.version || 0,
       uploadedAt: p.uploadedAt ?? '',
+      // Kept EXACTLY as stored, including the LEGACY… keys the 0260 backfill wrote: this client
+      // never re-mints an existing row's key (see patternSchema).
+      lineKey: p.lineKey ?? '',
+      bomLineKey: p.bomLineKey ?? '',
+      // The server always states presence on read, so UNSET arrives as a real value — normalise it
+      // to '' here so every reader can test the field with a plain truthiness check.
+      fabricPurpose: p.fabricPurpose && p.fabricPurpose !== UNSET_PURPOSE ? p.fabricPurpose : '',
+    })),
+    // The wrapper is always present on read, so `items` is the authoritative stored set.
+    pieceDxfAliases: (insert?.pieceDxfAliases?.items ?? []).map((a) => ({
+      bomLineKey: a.bomLineKey ?? '',
+      fabricPurpose: a.fabricPurpose && a.fabricPurpose !== UNSET_PURPOSE ? a.fabricPurpose : '',
+      blockName: a.blockName ?? '',
+      pieceLineKey: a.pieceLineKey ?? '',
     })),
     purpose: toPurposeEnum(insert?.purpose),
     auxSubtype: insert?.auxSubtype || UNSET_AUX_SUBTYPE,
@@ -777,7 +955,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       lineKey: p.lineKey?.trim() || ulid(),
       name: p.name || '',
       piecesPerGarment: p.piecesPerGarment ?? 1,
-      mirrored: p.mirrored ?? false,
+      // Круглый рейс начинается ЗДЕСЬ. Сервер шлёт поле на чтении всегда; неразмеченная деталь
+      // приезжает как `_UNKNOWN` (или отсутствует у карточки, сохранённой до 0275) — оба случая
+      // сходятся в одно «не размечено», и именно оно потом уедет обратно нетронутым.
+      cutSymmetry: p.cutSymmetry || UNSET_CUT_SYMMETRY,
       grainline: p.grainline || '',
       fused: p.fused ?? false,
       calloutNumber: p.calloutNumber ?? 0,
@@ -1038,6 +1219,14 @@ export function mapFormToTechCardInsert(
   }));
   const bomIndexByKey = new Map<string, number>();
   bomLines.forEach((b, i) => bomIndexByKey.set(b.lineKey, i));
+  // Which cut-pieces this save actually persists — the set DXF aliases may reference. Blank rows
+  // are dropped below and a keyless row gets a fresh key no alias can know, so both are excluded.
+  // Lowercased: the store compares alias→piece keys case-insensitively.
+  const livePieceKeys = new Set(
+    (data.pieces ?? [])
+      .filter((p) => !isBlankPiece(p) && !!p.lineKey?.trim())
+      .map((p) => p.lineKey!.trim().toLowerCase()),
+  );
   const outBomRef = (
     lineKey?: string,
   ): { bomLineKey: string | undefined; bomItemIndex: number | undefined } => {
@@ -1087,11 +1276,27 @@ export function mapFormToTechCardInsert(
         sizeId: p.sizeId || 0,
         url: p.url?.trim() || '',
         filename: p.filename?.trim() || '',
+        // ALWAYS present, empty string included — an explicit '' clears the name server-side,
+        // while an ABSENT field is the stale-client signal that preserves the stored name. Only
+        // clients that predate the field may omit it.
+        name: clampPatternName(p.name ?? ''),
         sizeBytes: p.sizeBytes || 0,
         // Round-trip the revision so a re-save does not renumber existing sheets; a freshly
         // uploaded row carries 0 and the server assigns MAX+1 for its size. uploadedAt is
         // server-owned and deliberately not sent.
         version: p.version || 0,
+        // Identity as held (0260): '' on a legacy row keeps the server matching it by
+        // (size_id, url); a key minted at upload survives «заменить файл».
+        lineKey: p.lineKey?.trim() || '',
+        // ALWAYS present, like `name`: an absent bom_line_key is the stale-client signal that
+        // preserves the stored binding, so a client that owns the field must send '' to unbind
+        // rather than fall into carry-forward.
+        bomLineKey: p.bomLineKey?.trim() || '',
+        // Same contract on the назначение half (0267): stated on every row, UNSET being the explicit
+        // unbind. Omitting it would put this client in the stale-client lane and make an unbind
+        // silently impossible.
+        fabricPurpose: (p.fabricPurpose?.trim() ||
+          UNSET_PURPOSE) as common_TechCardBomPurpose,
       })),
     // Auxiliary cards link no products and receipt into a material instead; sellable cards carry
     // no output material. Enforce the exclusivity here so a purpose flip can't leave stale data.
@@ -1126,7 +1331,21 @@ export function mapFormToTechCardInsert(
         // clamp to >= 1: 0 has no physical meaning and (no explicit presence on the wire)
         // reads back as unset -> the old || 0 silently flipped a saved 0 to 1 after reload
         piecesPerGarment: p.piecesPerGarment || 1,
-        mirrored: p.mirrored ?? false,
+        // `mirrored` is NOT sent (see pieceSchema). The proto field still exists, so omitting it
+        // makes the wire value false and the store's UPDATE clears a stored true — the retirement
+        // is a write, not just a hidden control, and it lands card-by-card as cards are saved.
+        //
+        // `cutSymmetry`, наоборот, шлётся ВСЕГДА — круглым рейсом того, что прочитали. Поле в прото
+        // объявлено `optional` не ради этого клиента, а ради устаревшей вкладки: ОТСУТСТВИЕ поля
+        // сервер читает как «оставь хранимое», а ЯВНЫЙ `_UNKNOWN` — как «очисти в „не размечено“».
+        // Раз так, у нас ровно два обязательства, и оба выполняет одна эта строка: не потерять
+        // чужой ответ (форма засеяна с чтения, значит вернётся прочитанное) и уметь его снять
+        // (оператор выбрал «— не размечено» — уедет `_UNKNOWN`, и разметка снимется).
+        //
+        // Молчать было бы «безопаснее» ровно до первого снятия разметки, которое стало бы
+        // невозможным и необъяснимым: контрол показывает «не размечено», а карточка после перезагрузки
+        // снова помечена.
+        cutSymmetry: (p.cutSymmetry || UNSET_CUT_SYMMETRY) as common_TechCardPieceCutSymmetry,
         grainline: p.grainline?.trim() || '',
         fused: p.fused ?? false,
         calloutNumber: p.calloutNumber || 0,
@@ -1156,8 +1375,38 @@ export function mapFormToTechCardInsert(
             };
           }),
       })),
+    // DXF block → piece aliases (0262). ALWAYS sent as a wrapper — the wrapper IS the presence
+    // signal, and a client that owns the mapping must be able to empty it. Aliases whose piece
+    // left the card are dropped rather than sent: the store answers an unresolvable
+    // piece_line_key with a field violation, which would block the whole save over a row the
+    // operator deleted on the pieces tab and never connected to a DXF in their head.
+    pieceDxfAliases: {
+      items: (data.pieceDxfAliases ?? [])
+        .filter(
+          (a) =>
+            // One of the two halves must name something — a row naming neither would file under the
+            // empty scope, where every unbound alias of the card would collide with every other.
+            (!!a.bomLineKey?.trim() || !!a.fabricPurpose?.trim()) &&
+            !!a.blockName?.trim() &&
+            !!a.pieceLineKey?.trim() &&
+            livePieceKeys.has(a.pieceLineKey.trim().toLowerCase()),
+        )
+        .map((a) => ({
+          bomLineKey: a.bomLineKey?.trim() || '',
+          blockName: a.blockName!.trim(),
+          pieceLineKey: a.pieceLineKey!.trim(),
+          fabricPurpose: (a.fabricPurpose?.trim() ||
+            UNSET_PURPOSE) as common_TechCardBomPurpose,
+        })),
+    },
     bomItems: bomLines.map((b) => ({
       section: (b.section || 'TECH_CARD_BOM_SECTION_UNKNOWN') as common_TechCardBomSection,
+      purpose: (b.purpose || UNSET_PURPOSE) as common_TechCardBomPurpose,
+      // Sent only where it is legal, so a note left behind by switching «другое» → «карманка» cannot
+      // ride out and be refused by chk_bom_item_purpose_note. Dropping it is safe in a way clearing
+      // the PURPOSE would not be: the note only ever explains a purpose that is no longer there.
+      purposeNote: isOtherPurpose(b.purpose) ? b.purposeNote?.trim() ?? '' : '',
+      isSample: !!b.isSample,
       name: b.name?.trim() || '',
       supplier: b.supplier?.trim() || '',
       supplierRef: b.supplierRef?.trim() || '',
