@@ -78,8 +78,8 @@ import { isDxfUrl } from 'utils/pattern';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { normBlock, splitBlockSize } from './block-code';
-import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
+import { normBlock } from './block-code';
+import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
@@ -303,7 +303,9 @@ export function NestingModal({
       const val = (a.pieceLineKey ?? '').trim();
       if (!raw || !val) continue;
       put(byBlock, raw.toLowerCase(), val);
-      const ident = normBlock(splitBlockSize(raw, split.sizeTokenSet).identity).toLowerCase();
+      // Свёртка спрашивает ФАЙЛ, а не форму имени: «FP_L» — это левая полочка целиком, и её
+      // алиас обязан остаться прямым совпадением, а не уехать на свёрнутый слой под «FP».
+      const ident = aliasIdentity(raw, split).toLowerCase();
       if (!ident || ident === raw.toLowerCase()) continue;
       put(folded, ident, val);
     }
