@@ -390,11 +390,17 @@ export function PatternsField({
   const nameOf = (id: number) =>
     id > 0 ? formatSizeName(sizeById.get(id) ?? `#${id}`) : 'без размера';
 
-  // Куда ложится НОВАЯ строка выкройки. Класть надо во что-то: tech_card_size_pattern.size_id
-  // объявлен NOT NULL, и сервер отвергает строку с размером вне ряда карточки. Берём наименьший
-  // размер ряда — и это АРТЕФАКТ ХРАНЕНИЯ, а не смысл: файл несёт весь ряд, ни один потребитель
-  // (просмотр, раскладка, сопоставление деталей, экспорт маркера) этот size_id не читает, размер
-  // везде берётся из имён блоков. Любой другой размер ряда был бы ровно так же верен.
+  // Куда ложится НОВАЯ строка выкройки. Это АРТЕФАКТ ХРАНЕНИЯ, а не смысл: у ГРАДУИРОВАННОГО файла
+  // размер везде берётся из имён блоков, и ни просмотр, ни раскладка, ни сопоставление деталей, ни
+  // экспорт маркера, ни индекс размеров этот size_id не читают. Берём наименьший размер ряда просто
+  // чтобы не менять хранение уже заведённых карточек; любой другой был бы так же верен.
+  //
+  // ОДИН потребитель всё же есть, и про него легко забыть: раскладка НЕградуированного файла (в
+  // именах блоков размера нет вовсе) берёт размер отсюда — больше ему взять его негде.
+  //
+  // 0 = БЕЗ РАЗМЕРА, и это законное значение с 0281 (в базе NULL): пока размерный ряд пуст, класть
+  // лист некуда, а ждать ряда незачем — размеры конструктор уже записал в сам DXF. Раньше здесь
+  // получался 0, который сервер отвергал, и загрузка выкроек была заперта за чужим решением.
   const storageSizeId = orderSizes(sizeIds)[0] ?? 0;
 
   const dxfEntries = useMemo(() => entries.filter((e) => isDxfUrl(e.row.url)), [entries]);
@@ -485,8 +491,10 @@ export function PatternsField({
     (g) => g.entries.length === 0 && !isMainScope(g),
   );
   // Строки, чей size_id вне ряда карточки. Размер — артефакт хранения, но сервер всё равно
-  // сверяет его с размерным рядом и отвергает такую строку, роняя ВЕСЬ сейв карточки.
-  const outOfRange = entries.filter((e) => !inRange.has(e.row.sizeId ?? 0));
+  // сверяет НЕПУСТОЙ размер с размерным рядом и отвергает такую строку, роняя ВЕСЬ сейв карточки.
+  // Лист БЕЗ размера (0281) сюда не попадает: он не называет размера вовсе, и ряду его проверять
+  // не по чему — ровно поэтому его и можно залить на карточку с пустым рядом.
+  const outOfRange = entries.filter((e) => e.row.sizeId && !inRange.has(e.row.sizeId));
   const missingSizeNotes = scopeGroups.flatMap((g) => {
     if (g.entries.length === 0) return [];
     const missing = missingIn(audits[sigOf(g.entries)]);
@@ -494,7 +502,11 @@ export function PatternsField({
     return [`${scopeLabel(g.scope)} — нет ${missing.map(nameOf).join(', ')}`];
   });
 
-  const canUpload = canEdit && uploadScopes.length > 0 && sizeIds.length > 0;
+  // Загрузку гейтит ТКАНЬ, а не размерный ряд: выкройка привязывается к материалу, и без строки BOM
+  // её некуда положить — а вот без размерного ряда положить есть куда (лист без размера, 0281).
+  // Порядок работы в ателье обратный: DXF приходит от конструктора раньше, чем кто-либо утверждает
+  // градацию, и ряд из этих же файлов потом и набирают.
+  const canUpload = canEdit && uploadScopes.length > 0;
 
   // Drop path of the naming modal: pre-flight here (instant feedback, same guards the
   // server enforces), then stage the good files for naming + upload.
@@ -552,7 +564,12 @@ export function PatternsField({
       showMessage(
         res.tokenCount === 0
           ? 'Записано: файлы не несут размерного кодирования — гейт прогона прочтёт это как «вердикта нет», а не как «размеров нет»'
-          : `Индекс размеров сохранён — размеров ряда карточки найдено в файлах: ${res.resolvedSizeCount}`,
+          : // «найдено размеров РЯДА» на пустом ряду — это всегда 0, и рядом с зелёным тостом такой
+            // счёт читается как неудача разбора, хотя разбор удался. Считать не с чем, поэтому
+            // отчитываемся тем, что нашли в файлах.
+            sizeIds.length === 0
+            ? `Индекс размеров сохранён — в файлах найдено размеров: ${res.tokenCount}; ряд карточки пуст, сверять не с чем`
+            : `Индекс размеров сохранён — размеров ряда карточки найдено в файлах: ${res.resolvedSizeCount}`,
         'success',
       );
     } else {
@@ -569,7 +586,10 @@ export function PatternsField({
   } {
     const { scopeKey, ...rest } = p;
     const picked = scopes.find((x) => x.key === scopeKey);
-    return { ...rest, ...(picked ? bindingForScope(picked) : { fabricPurpose: '', bomLineKey: '' }) };
+    return {
+      ...rest,
+      ...(picked ? bindingForScope(picked) : { fabricPurpose: '', bomLineKey: '' }),
+    };
   }
 
   function commitRename(index: number, value: string) {
@@ -590,7 +610,10 @@ export function PatternsField({
     // data, so drop it instead.
     const uploaded = formatTechCardDate(row.uploadedAt);
     const uploadedOn = uploaded === '—' ? null : uploaded;
-    const stray = !inRange.has(row.sizeId ?? 0);
+    // Лист БЕЗ размера (0281) — не «размер вне ряда», а отсутствие притязания на размер: сервер его
+    // с рядом не сверяет и не отвергает. Красный флаг на нём был бы требованием починить то, что не
+    // сломано, и вернул бы на карточку ровно ту зависимость от ряда, которую 0281 убрала.
+    const stray = !!row.sizeId && !inRange.has(row.sizeId);
     // Разрешённый скоуп строки: сначала назначение, иначе строка BOM — и с поправкой на то, что
     // строка могла с тех пор попасть в назначение. '' = ни к чему живому не ведёт.
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
@@ -782,6 +805,17 @@ export function PatternsField({
         </Text>
       );
     }
+    // Пустой ряд — НЕ повод для галочки. missingIn фильтрует ряд карточки, а пустой ряд не даёт
+    // недостающих по построению, и «✓ все размеры карточки есть в файлах» читалось бы как проверка,
+    // хотя проверять было нечего: карточка не назвала ни одного размера. Показываем то, что реально
+    // сказали файлы, — это и есть ответ, за которым сюда пришли, когда ряд ещё не набран.
+    if (sizeIds.length === 0) {
+      return (
+        <Text size='nano' variant='label' component='span'>
+          размеры в файлах: {[...a.found].join(', ')} — ряд карточки пуст, сверять не с чем
+        </Text>
+      );
+    }
     const missing = missingIn(a);
     return missing.length === 0 ? (
       <Text size='nano' variant='label' component='span'>
@@ -835,10 +869,17 @@ export function PatternsField({
                   title={`авто-раскладка деталей «${label}» на полосе`}
                   onClick={() =>
                     setNesting({
-                      // Размер тут ничего не решает: он выбирается внутри по именам блоков, и
-                      // маркер сохраняется на выбранный. Это лишь запасной вариант для блока,
-                      // чей хвост не опознался.
-                      sizeId: g.entries[0]?.row.sizeId ?? storageSizeId,
+                      // Размер тут ничего не решает у ГРАДУИРОВАННОГО файла: он выбирается внутри по
+                      // именам блоков, и маркер сохраняется на выбранный. Это запасной вариант для
+                      // НЕградуированного — файла, в именах которого размера нет вовсе: такому
+                      // маркеру размер может дать только карточка.
+                      //
+                      // `||`, а не `??`: у листа без размера (0281) здесь стоит 0, и `??` его бы
+                      // принял как ответ — раскладка неградуированного файла осталась бы
+                      // несохранимой НАВСЕГДА, даже после того как оператор набрал размерный ряд,
+                      // потому что вернуть строке размер в интерфейсе нечем. Пустой ряд по-прежнему
+                      // даёт 0, и модалка честно отказывает: там размера действительно нет.
+                      sizeId: g.entries[0]?.row.sizeId || storageSizeId,
                       files: filesOf(g.entries),
                       bomLineKey: soleLine,
                       // Алиасы ЭТОГО скоупа: одно и то же имя блока на верхе и на подкладе —
@@ -895,7 +936,9 @@ export function PatternsField({
                   dxfOnly
                   fabricScopes={uploadScopes}
                   defaultScopeKey={key}
-                  onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
+                  onUploaded={(p) =>
+                    append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })
+                  }
                   // PatternUploadButton renders a page-sized Button; in a group header it has to
                   // sit at control density. It exposes no `size`, so density is applied here.
                   className='[&_button]:px-1.5 [&_button]:py-px [&_button]:text-nano [&_button]:tracking-label'
@@ -932,11 +975,13 @@ export function PatternsField({
     );
   }
 
-  if (fields.length === 0 && sizeIds.length === 0 && fabricBomLines.length === 0) {
+  if (fields.length === 0 && fabricBomLines.length === 0) {
     return (
       <Text size='micro' variant='label'>
-        задайте размерный ряд выше и строки ткани в BOM — выкройка привязывается к материалу, а
-        размеры читаются из самого файла
+        заведите строки ткани в BOM — выкройка привязывается к материалу.
+        {sizeIds.length === 0
+          ? ' Размерный ряд для загрузки не нужен: размеры читаются из самого файла.'
+          : ''}
       </Text>
     );
   }
@@ -1009,10 +1054,16 @@ export function PatternsField({
         scopeGroups.map(renderScope)
       )}
 
+      {/* Пустой ряд больше не блокирует загрузку — но и молчать о нём нельзя: без ряда раскладку
+          сохранить не выйдет (маркер кладётся на КОНКРЕТНЫЙ размер карточки, и токен из имени блока
+          ему не во что резолвить), а проверка «⌕ размеры в файлах» отвечать будет, но сверять
+          найденное станет не с чем. Это не ошибка карточки, поэтому нейтральный тон. */}
       {sizeIds.length === 0 && fabricBomLines.length > 0 && (
         <Text size='micro' variant='label'>
-          задайте размерный ряд выше, чтобы загружать выкройки: строка выкройки хранится с размером,
-          и сервер сверяет его с рядом карточки
+          размерный ряд не задан — DXF грузятся и просматриваются как обычно, лист хранится без
+          размера (размеры и так живут в самом файле). Ряд понадобится, чтобы СОХРАНИТЬ раскладку:
+          маркер ложится на конкретный размер карточки. «⌕ размеры в файлах» покажет, какие размеры
+          в файлах есть, а «↔ детали кроя» заведёт однозначные из них в ряд карточки сам.
         </Text>
       )}
 

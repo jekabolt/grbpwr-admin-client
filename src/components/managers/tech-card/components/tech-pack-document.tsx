@@ -587,7 +587,11 @@ export function TechPackDocument({
                 <figure key={i} className='break-inside-avoid border border-black p-2 text-center'>
                   <PatternQR value={p.url ?? ''} />
                   <figcaption className='mt-1 text-micro uppercase'>
-                    <div className='font-semibold'>{sizeName(p.sizeId)}</div>
+                    {/* Лист без размера (0281) — градуированный: размеры внутри файла. Печатать под
+                        ним прочерк значило бы сказать «размер не заполнен», а это другой факт. */}
+                    <div className='font-semibold'>
+                      {p.sizeId ? sizeName(p.sizeId) : 'весь ряд'}
+                    </div>
                     {/* The operator's name for the sheet leads; the CAD filename stays as the
                         secondary line the factory can match against the file it receives. */}
                     {p.name && <div className='max-w-[120px] truncate'>{p.name}</div>}
@@ -599,7 +603,8 @@ export function TechPackDocument({
               ))}
           </div>
           <p className='mt-2 text-nano text-labelColor'>
-            наведите камеру на QR, чтобы открыть выкройку этого размера (PDF/DXF)
+            наведите камеру на QR, чтобы открыть этот лист выкройки (PDF/DXF). «весь ряд» —
+            градуированный файл: размеры записаны в именах блоков внутри него
           </p>
         </Sheet>
       )}

@@ -72,10 +72,13 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
   const isDxf = (p: { url?: string }) => isDxfUrl(p.url);
   const patternCount = (id: number) => patterns.filter((p) => p.sizeId === id && !isDxf(p)).length;
   const dxfCount = (id: number) => patterns.filter((p) => p.sizeId === id && isDxf(p)).length;
-  // Куда перевесится DXF при снятии размера. undefined = размеров не останется вовсе, и
-  // перевешивать НЕКУДА: строки станут сиротами вне ряда, а такую строку сервер отвергает и
-  // роняет весь сейв карточки. Обещать в диалоге перевешивание в этом случае нельзя.
-  const refileTarget = (id: number) => orderSizes(sizeIds.filter((x) => x !== id))[0];
+  // Куда перевесится DXF при снятии размера: наименьший оставшийся размер, а если размеров не
+  // останется вовсе — 0, то есть БЕЗ РАЗМЕРА (0281: колонка NULLable, сервер такую строку принимает
+  // на карточке с любым рядом, включая пустой). Раньше здесь не было цели вовсе, строка оставалась
+  // на снятом размере, сервер её отвергал и роняла ВЕСЬ сейв карточки — а кнопка «перевесить» в
+  // панели выкроек в этом самом состоянии не рисовалась. Теперь снятие последнего размера просто
+  // возвращает лист в то состояние, в котором его сегодня можно и загрузить.
+  const refileTarget = (id: number) => orderSizes(sizeIds.filter((x) => x !== id))[0] ?? 0;
   // Number of colourway usages that grade this size's consumption, read from the colourways AS READ.
   // It used to reduce over the RHF `colorways` array, which has been permanently empty since
   // colourways became products: the count was always 0, so a size graded only by recipe norms was
@@ -102,16 +105,16 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
     );
     if (patterns.some((p) => p.sizeId === id)) {
       // Куда перевесить DXF: наименьший оставшийся размер — то же правило, по которому их кладёт
-      // загрузка. Если размеров не осталось вовсе, перевешивать некуда и строка остаётся сиротой —
-      // панель выкроек метит такие строки и даёт «перевесить», что честнее тихого удаления
-      // чертежа, который несёт весь ряд.
+      // загрузка, — либо 0 (без размера), если размеров не осталось вовсе. Удаляются только PDF: у
+      // них лист действительно на размер, а градуированный чертёж несёт весь ряд и тихо исчезать
+      // не должен.
       const fallback = refileTarget(id);
       setValue(
         'patterns',
         patterns
           .filter((p) => p.sizeId !== id || isDxf(p))
           .map((p) =>
-            p.sizeId === id && fallback != null ? { ...p, sizeId: fallback } : p,
+            p.sizeId === id ? { ...p, sizeId: fallback } : p,
           ) as TechCardFormData['patterns'],
         { shouldDirty: true },
       );
@@ -245,9 +248,9 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         {pendingRemove != null && dxfCount(pendingRemove) > 0 && (
           <Row
             label={
-              refileTarget(pendingRemove) != null
-                ? `DXF — не удалятся, перевесятся на ${nameOf(refileTarget(pendingRemove)!)}`
-                : 'DXF — перевесить будет НЕКУДА: размеров не останется, и до ручного перевешивания карточка не сохранится'
+              refileTarget(pendingRemove) > 0
+                ? `DXF — не удалятся, перевесятся на ${nameOf(refileTarget(pendingRemove))}`
+                : 'DXF — не удалятся, останутся БЕЗ размера: размеров в ряду не останется, а размеры и так записаны в самих файлах'
             }
             value={dxfCount(pendingRemove)}
           />
