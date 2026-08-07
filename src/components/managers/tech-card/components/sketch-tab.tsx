@@ -14,6 +14,7 @@ import Textarea from 'ui/components/text-area';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { normalizePieceName } from './piece-picker';
 import { TechCardFormData } from './schema';
 
 const kindLabels: Record<string, string> = Object.fromEntries(
@@ -192,8 +193,7 @@ function TechCardGallery({
   // remove по устаревшему fields адресует НЕ ТУ выноску. setValue по корню массива событие
   // эмитит, и оба useFieldArray пересинхронизируются — это ровно та же починка, что была нужна
   // деталям кроя.
-  const writeCallouts = (next: FormCallout[]) =>
-    setValue('callouts', next, { shouldDirty: true });
+  const writeCallouts = (next: FormCallout[]) => setValue('callouts', next, { shouldDirty: true });
 
   function addCalloutTo(mediaId: number, x: number, y: number) {
     writeCallouts([
@@ -367,7 +367,10 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
   // A callout names a PIECE, and a piece is a row on the pieces tab — so the vocabulary here is
   // that table, not the standard nomenclature it was typed from. Free text let a callout point at
   // «FP_R» while the card's only front piece was named «FP_R_1», and nothing ever flagged it.
-  const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{ name?: string }>;
+  const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{
+    name?: string;
+    calloutNumber?: number;
+  }>;
   const pieceOptions = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -392,12 +395,56 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
     return items;
   };
 
+  // ВТОРАЯ ПОЛОВИНА СВЯЗИ. Выноска называет деталь (`callout.part`), а деталь ссылается на выноску
+  // НОМЕРОМ (`piece.calloutNumber`) — и рисуют пины, считают «открепление» и печатают тех-пак
+  // именно по номеру. Клиент писал только первую половину: с тех пор как из таблицы деталей убрали
+  // редактируемую колонку callout (95cdb1af, 30.07) с формулировкой «номер ставится на вкладке
+  // SKETCH», номер не ставился НИГДЕ — `piece.calloutNumber` оставался нулём у всех деталей, и
+  // диаграмма выносок в «деталях кроя» вечно показывала «нет выносок». Здесь эта половина и
+  // дописывается: выбрал деталь в выноске — деталь на неё сослалась.
+  //
+  // Проход по ВСЕМ деталям, а не только по выбранной: смена детали в выноске обязана снять номер с
+  // прежней, иначе на один номер сослались бы две детали, и «открепить» стало бы нечем.
+  const pinPieceToCallout = (calloutIndex: number, part: string | undefined) => {
+    const number = callouts[calloutIndex]?.number ?? 0;
+    if (!number) return;
+    const wanted = normalizePieceName(part ?? '');
+    const live = (getValues('pieces') ?? []) as Array<{ name?: string; calloutNumber?: number }>;
+    live.forEach((p, pi) => {
+      const isTarget = !!wanted && normalizePieceName(p.name ?? '') === wanted;
+      const holds = (p.calloutNumber ?? 0) === number;
+      if (isTarget === holds) return;
+      setValue(`pieces.${pi}.calloutNumber`, isTarget ? number : 0, { shouldDirty: true });
+    });
+  };
+
   // The card's geometry unit exists exactly to say what a callout's dimensions are measured in
   // (techCardMeasurementUnitOptions), so the field names it rather than leaving the operator to
   // guess whether "12" is cm or mm.
   const measurementUnit = (useWatch({ control, name: 'measurementUnit' }) ?? '') as string;
   const unitLabel =
     techCardMeasurementUnitOptions.find((o) => o.value === measurementUnit)?.label ?? '';
+
+  // Выноски этого списка, чей `part` называет РЕАЛЬНУЮ деталь, которая на эту выноску не ссылается.
+  // Считается по живой форме, поэтому кнопка исчезает сама, как только связи проставлены.
+  const unlinkedParts = useMemo(() => {
+    const byName = new Map<string, number>();
+    for (const p of pieces) {
+      const key = normalizePieceName(p.name ?? '');
+      if (key && !byName.has(key)) byName.set(key, p.calloutNumber ?? 0);
+    }
+    return visibleFields
+      .map(({ index }) => ({
+        index,
+        number: callouts[index]?.number ?? 0,
+        part: (callouts[index]?.part ?? '').trim(),
+      }))
+      .filter((u) => {
+        if (!u.number || !u.part) return false;
+        const held = byName.get(normalizePieceName(u.part));
+        return held != null && held !== u.number;
+      });
+  }, [pieces, callouts, visibleFields]);
 
   const pinOptions = [
     { value: 0, label: '(unpinned)' },
@@ -427,6 +474,31 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
       meta={unpinned > 0 ? <Pill tone='attention'>{unpinned} unpinned</Pill> : undefined}
     >
       <div className='space-y-2'>
+        {/* Выноски, которые НАЗЫВАЮТ существующую деталь, но не связаны с ней.
+            Ровно то состояние, в котором сегодня лежит каждая карточка: имя детали проставлено, а
+            номер выноски у детали — нет, потому что писать его было нечему. Молча дописать это на
+            загрузке нельзя (правка карточки, которую никто не делал), поэтому связывание — действие
+            человека, но одним нажатием на все сразу: пятнадцать раз переоткрыть один и тот же
+            селект никто не станет, и карточка так и осталась бы без выносок. */}
+        {unlinkedParts.length > 0 && (
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              title={`деталь названа, но не ссылается на выноску: ${unlinkedParts
+                .map((u) => `#${u.number} → ${u.part}`)
+                .join(', ')}`}
+              onClick={() => unlinkedParts.forEach((u) => pinPieceToCallout(u.index, u.part))}
+            >
+              связать детали с выносками ({unlinkedParts.length})
+            </Button>
+            <Text size='nano' variant='label' component='span'>
+              без связи деталь не знает своей выноски: пин не рисуется в «деталях кроя» и не
+              печатается в тех-паке
+            </Text>
+          </div>
+        )}
         {visibleFields.length === 0 ? (
           <Text size='micro' variant='label'>
             no callouts yet. turn on “add callout”, then click any image above
@@ -470,6 +542,7 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
                   label='part (код детали)'
                   placeholder={pieceOptions.length ? 'pick a piece…' : 'no pieces on this card yet'}
                   items={partOptionsFor(callouts[index]?.part)}
+                  onAfterChange={(v) => pinPieceToCallout(index, typeof v === 'string' ? v : '')}
                 />
                 <SelectField
                   name={`callouts.${index}.mediaId`}

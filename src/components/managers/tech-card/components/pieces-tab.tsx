@@ -120,8 +120,12 @@ function PieceDiagram({
             нет выносок
           </Text>
         </Canvas>
+        {/* Инструкция обязана называть ТО МЕСТО, где действие есть. Прежняя звала «проставить
+            callout # у детали» — контрол, которого в этой таблице нет с 30.07; связь ставится
+            выбором детали в самой выноске на вкладке sketch. */}
         <Text size='micro' variant='label'>
-          проставьте callout # у детали и расставьте выноски на вкладке sketch
+          поставьте выноску на эскизе (вкладка sketch) и выберите в ней эту деталь в поле «part» —
+          пин появится здесь
         </Text>
       </div>
     );
@@ -370,6 +374,24 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     };
   };
 
+  // Переименование детали, ПРИКРЕПЛЁННОЙ к выноске, обязано дописаться в саму выноску.
+  //
+  // Имя такой детали хранится один раз — в `callout.part`, — и сервер при каждом сохранении
+  // переписывает имя детали оттуда (calloutSync.apply, S8). Написать новое имя только в строку
+  // таблицы значит показать оператору переименование, которое сохранение молча откатит: поле
+  // выглядит принятым, карточка после перезагрузки снова со старым именем, и объяснения нет
+  // нигде. Номер выноски отсюда НЕ правится — его ставит выбор детали на вкладке sketch.
+  const renamePiece = (pi: number, value: string) => {
+    setValue(`pieces.${pi}.name`, value, { shouldDirty: true });
+    const n = (getValues(`pieces.${pi}.calloutNumber`) as number) || 0;
+    if (!n) return;
+    const cs = (getValues('callouts') ?? []) as Array<{ number?: number }>;
+    cs.forEach((c, ci) => {
+      if ((c.number ?? 0) === n)
+        setValue(`callouts.${ci}.part`, value.trim(), { shouldDirty: true });
+    });
+  };
+
   // A new row is minted with its stable lineKey up front, NOT left for the save mapper: the
   // operation and recipe pickers can only offer a piece that already has one, so without it a part
   // added here stayed unlinkable until the card had been saved and reloaded.
@@ -479,7 +501,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                         list='piece-code-suggestions'
                         value={p.name ?? ''}
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                          setValue(`pieces.${pi}.name`, e.target.value, { shouldDirty: true })
+                          renamePiece(pi, e.target.value)
                         }
                         placeholder='FP front piece'
                       />
@@ -488,11 +510,19 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                           такая деталь уже есть — имя должно быть уникальным
                         </Text>
                       )}
+                      {/* Связь с выноской — только показ: ставится она на вкладке SKETCH, выбором
+                          детали в самой выноске. Два места записи одного значения разошлись бы на
+                          первом же переименовании. */}
+                      {callout > 0 && !detachedKeys.has((p.lineKey ?? '').trim()) && (
+                        <Text size='micro' variant='label'>
+                          выноска #{callout} — имя приходит с неё
+                        </Text>
+                      )}
                       {detachedKeys.has((p.lineKey ?? '').trim()) && (
                         <div className='mt-0.5'>
                           <Pill
                             tone='attention'
-                            title='выноска, на которую ссылалась деталь, удалена со скетча — проставьте callout # заново на вкладке sketch'
+                            title='выноска, на которую ссылалась деталь, удалена со скетча (или перестала быть техническим эскизом) — выберите эту деталь в нужной выноске на вкладке sketch'
                           >
                             откреплена от выноски
                           </Pill>
