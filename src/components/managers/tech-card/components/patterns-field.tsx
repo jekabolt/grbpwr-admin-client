@@ -15,9 +15,11 @@ import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { Chip } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
+import { Tile, Tiles } from 'ui/components/tiles';
 import {
   PatternUploadButton,
   PatternUploadModal,
@@ -45,6 +47,13 @@ import {
   strictestDirection,
 } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
+import {
+  SheetThumb,
+  useDxfGeometry,
+  useDxfIndex,
+  type DxfIndex,
+  type ScopedDxfFile,
+} from './nesting/dxf-geometry';
 import { publishPatternSizeIndex } from './pattern-size-index';
 import { markerColorways } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
@@ -78,6 +87,29 @@ const ROLE_OF_SECTION = new Map<string, string>([
   ['TECH_CARD_BOM_SECTION_INSULATION', 'утеплитель'],
 ]);
 const SECTION_ORDER = [...ROLE_OF_SECTION.keys()];
+
+// Плитки полки, у которых нет ключа скоупа: они не материал, но выбираются тем же кликом.
+// Префикс с двумя подчёркиваниями — ключ скоупа так выглядеть не может (это либо enum назначения,
+// либо ULID строки BOM, либо пустая строка), так что коллизия невозможна по построению.
+const LOOSE_KEY = '__loose';
+const PDF_KEY = '__pdf';
+
+/** Русская форма счётного существительного: 1 лист, 2 листа, 5 листов. */
+function plural(n: number, one: string, few: string, many: string): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 14) return many;
+  const mod10 = n % 10;
+  if (mod10 === 1) return one;
+  if (mod10 >= 2 && mod10 <= 4) return few;
+  return many;
+}
+
+/** Сколько РАЗНЫХ деталей чертежа лежит в этом скоупе — счёт по идентичностям, не по контурам. */
+function countBlocks(index: DxfIndex, scopeKey: string): number {
+  let n = 0;
+  for (const key of index.byKey.keys()) if (key.startsWith(`${scopeKey}|`)) n += 1;
+  return n;
+}
 
 type PatternRow = {
   sizeId?: number;
@@ -253,6 +285,15 @@ export function PatternsField({
   const [viewing, setViewing] = useState<PatternRow | null>(null);
   // Inline rename in progress: which row and the draft value.
   const [editing, setEditing] = useState<{ index: number; value: string } | null>(null);
+  // Строка, у которой сейчас открыт селект материала. Перепривязка — редкое действие, и держать
+  // её селект открытым у каждой строки значило печатать ответ под заголовком, который его уже дал.
+  const [rebinding, setRebinding] = useState<number | null>(null);
+  // Разбор геометрии включён (кнопкой). НЕ автостарт: открытие вкладки не должно тянуть с CDN
+  // десятки мегабайт — это то же правило, по которому за кнопкой сидела проверка размеров.
+  const [shapesOn, setShapesOn] = useState(false);
+  // Выбранная плитка полки: ключ скоупа, LOOSE_KEY или PDF_KEY. null = экран ещё не трогали, и
+  // выбор выводится из данных (первый материал с файлами, иначе первый вообще).
+  const [pickedKey, setPickedKey] = useState<string | null>(null);
   // Результаты проверки размеров, по ПОДПИСИ набора файлов (urls), а не по материалу: перезалили
   // файл — подпись сменилась, старый ответ сам перестал показываться, вместо того чтобы врать
   // про файл, которого уже нет.
@@ -439,6 +480,39 @@ export function PatternsField({
     list.map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
   const sigOf = (list: Entry[]) => list.map((e) => e.row.url ?? '').join('|');
 
+  // ВСЕ DXF карточки со своими скоупами — одна пачка на один разбор. Ключ кэша считается по её
+  // содержимому, и панель деталей кроя собирает ровно ту же пачку, поэтому второй экран получает
+  // геометрию бесплатно. До этого каждый экран качал файлы себе, и оператор, прошедший вкладку
+  // сверху вниз, платил за одни и те же мегабайты трижды.
+  const allDxfFiles: ScopedDxfFile[] = useMemo(
+    () =>
+      dxfEntries.map((e) => ({
+        scopeKey: scopeKeyOfBinding(e.row.fabricPurpose, e.row.bomLineKey, scopes),
+        name: labelOf(e.row),
+        url: e.row.url!,
+      })),
+    [dxfEntries, scopes],
+  );
+  const geometry = useDxfGeometry(allDxfFiles, shapesOn);
+  const dxfIndex = useDxfIndex(geometry.data);
+
+  // Какая плитка раскрыта. Выбор пользователя выигрывает, пока он указывает на живую плитку:
+  // материал могли удалить из BOM, пока панель открыта, и залипший ключ показал бы пустоту вместо
+  // ближайшего осмысленного материала.
+  const shelfKeys = useMemo(
+    () => [
+      ...scopeGroups.map((g) => g.scope.key),
+      ...(looseDxf.length > 0 ? [LOOSE_KEY] : []),
+      ...(pdfEntries.length > 0 ? [PDF_KEY] : []),
+    ],
+    [scopeGroups, looseDxf.length, pdfEntries.length],
+  );
+  const selectedKey =
+    pickedKey && shelfKeys.includes(pickedKey)
+      ? pickedKey
+      : (scopeGroups.find((g) => g.entries.length > 0)?.scope.key ?? shelfKeys[0] ?? null);
+  const setSelectedKey = setPickedKey;
+
   // Размерный токен из имён блоков → id размера карточки. Нужен раскладке: один DXF несёт весь
   // ряд, и маркер обязан лечь на ВЫБРАННЫЙ внутри размер, а не на тот, в чей слот файл положили.
   const sizeIdByToken = useMemo(() => {
@@ -602,7 +676,24 @@ export function PatternsField({
     setEditing(null);
   }
 
-  function renderRow({ row, index }: Entry) {
+  // Прогнать проверку размеров ПО ВСЕЙ карточке — по одной на материал, последовательно.
+  //
+  // Кнопка была на каждой группе, и её слот морфился между кнопкой, серым предложением, зелёной
+  // галкой и красной строкой с повтором: шапка группы меняла ширину и высоту по мере работы.
+  // Проверка одна и та же, вопрос один и тот же — значит и кнопка одна, на блок.
+  //
+  // ПОСЛЕДОВАТЕЛЬНО, а не Promise.all: каждый прогон качает свои файлы с CDN и разбирает их в
+  // воркере, и запустить пять таких разом значит выстроить их в очередь всё равно, только уже
+  // внутри браузера и без единого шанса показать, что происходит.
+  async function runAllAudits() {
+    setShapesOn(true);
+    for (const g of scopeGroups) {
+      if (g.entries.length === 0) continue;
+      await runAudit(g.entries);
+    }
+  }
+
+  function renderSheetRow({ row, index }: Entry) {
     const dxf = isDxfUrl(row.url);
     const rev = revisionOf(row);
     // When the file first landed, server-side and carried across saves. formatTechCardDate
@@ -619,61 +710,155 @@ export function PatternsField({
     const rowScope = scopeKeyOfBinding(row.fabricPurpose, row.bomLineKey, scopes);
 
     return (
-      <div key={row.lineKey || `row-${index}`} className='border-b border-hairline py-1'>
-        {editing?.index === index ? (
-          <Input
-            name={`pattern-rename-${index}`}
-            value={editing.value}
-            placeholder={row.filename || 'название'}
-            maxLength={MAX_PATTERN_NAME}
-            autoFocus
-            autoComplete='off'
-            className='px-1 py-0 text-micro'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-              setEditing({ index, value: e.target.value })
-            }
-            onBlur={() => commitRename(index, editing.value)}
-            onKeyDown={(e: React.KeyboardEvent) => {
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                commitRename(index, editing.value);
+      <tr key={row.lineKey || `row-${index}`} className='border-b border-hairline align-middle'>
+        <td className='py-1 pr-2'>
+          {editing?.index === index ? (
+            <Input
+              name={`pattern-rename-${index}`}
+              value={editing.value}
+              placeholder={row.filename || 'название'}
+              maxLength={MAX_PATTERN_NAME}
+              autoFocus
+              autoComplete='off'
+              className='px-1 py-0 text-micro'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setEditing({ index, value: e.target.value })
               }
-              if (e.key === 'Escape') setEditing(null);
-            }}
-          />
-        ) : (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            <button
-              type='button'
-              onClick={() => setViewing(row)}
-              title={`посмотреть ${labelOf(row)}`}
-              className='min-w-0 flex-1 truncate text-left text-micro underline hover:opacity-70'
-            >
-              {labelOf(row)}
-            </button>
-            <span className='shrink-0 border border-textColor px-1 text-nano uppercase leading-snug tracking-label'>
-              {dxf ? 'dxf' : 'pdf'}
-            </span>
-            {/* Уже загруженный PDF не ошибка и не поломка — он просто больше не тот формат, в
-                котором заводят выкройки. Серый нейтральный тон, а не красный. */}
-            {!dxf && <Pill tone='mut'>устаревший формат</Pill>}
-            {stray && <Pill tone='warn'>размер вне ряда</Pill>}
-            <Text size='nano' variant='label' component='span' className='shrink-0'>
-              {[
-                rev != null ? `v${rev}` : null,
-                row.sizeBytes ? formatBytes(row.sizeBytes) : null,
-                uploadedOn,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </Text>
+              onBlur={() => commitRename(index, editing.value)}
+              onKeyDown={(e: React.KeyboardEvent) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitRename(index, editing.value);
+                }
+                if (e.key === 'Escape') setEditing(null);
+              }}
+            />
+          ) : (
+            <>
+              <span className='flex flex-wrap items-center gap-1.5'>
+                <button
+                  type='button'
+                  onClick={() => setViewing(row)}
+                  title={`посмотреть ${labelOf(row)}`}
+                  className='min-w-0 truncate text-left text-micro underline hover:opacity-70'
+                >
+                  {labelOf(row)}
+                </button>
+                {/* Уже загруженный PDF не ошибка и не поломка — он просто больше не тот формат, в
+                    котором заводят выкройки. Серый нейтральный тон, а не красный. */}
+                {!dxf && <Pill tone='mut'>устаревший формат</Pill>}
+                {stray && <Pill tone='warn'>размер вне ряда</Pill>}
+              </span>
+              {/* When a name is set the filename still matters (it is what the factory's CAD
+                  saved) — keep it readable underneath rather than only in a tooltip. */}
+              {row.name && row.filename && (
+                <span className='block truncate text-nano text-labelColor'>{row.filename}</span>
+              )}
+              {stray && (
+                <span className='mt-0.5 flex flex-wrap items-center gap-1.5'>
+                  <Text size='nano' component='span' className='text-error'>
+                    размер этой строки не входит в ряд карточки — сервер отвергнет сохранение
+                  </Text>
+                  {canEdit && storageSizeId > 0 && (
+                    <Button
+                      type='button'
+                      variant='secondary'
+                      size='xs'
+                      title='перевесить строку на актуальный размер ряда (размер — только место хранения)'
+                      onClick={() =>
+                        // Смена size_id — это keyed replacement: сервер перенумерует ревизию
+                        // (MAX+1). Файл при этом тот же, и ни один потребитель размер строки не
+                        // читает.
+                        setValue(`patterns.${index}.sizeId`, storageSizeId, { shouldDirty: true })
+                      }
+                    >
+                      перевесить
+                    </Button>
+                  )}
+                </span>
+              )}
+              {/* Cloth binding, editable in place — но ЗА КНОПКОЙ «⇄», а не всегда на виду.
+                  Раньше под заголовком, который уже назвал материал, у каждой строки висел
+                  полноширинный селект со списком всех материалов: поле выбора ответа под самим
+                  ответом, N раз подряд. Перепривязка при этом нужна и остаётся достижимой в один
+                  клик — и она обязана быть достижимой: каждый DXF, залитый до 0260, привязки не
+                  несёт вовсе, и без этого селекта раскладка для таких строк осталась бы догадкой
+                  навсегда. Legacy PDF не трогаем — лист, который читает человек, ни из чего не
+                  кроят.
+
+                  Пишутся ОБА поля разом, через bindingForScope: назначение — то, чем лист
+                  привязан, а строка едет рядом только когда назначение владеет ровно одной.
+                  Записать одно и оставить другое как было — это и есть способ получить лист,
+                  который в панели лежит в одной ткани, а на сервере разрешается в другую. */}
+              {dxf && uploadScopes.length > 0 && (rebinding === index || !rowScope) && (
+                <select
+                  className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
+                  aria-label={`материал для ${labelOf(row)}`}
+                  value={rowScope}
+                  disabled={isSubmitting || !canEdit}
+                  onChange={(e) => {
+                    const picked = scopes.find((x) => x.key === e.target.value);
+                    const b = picked
+                      ? bindingForScope(picked)
+                      : { fabricPurpose: '', bomLineKey: '' };
+                    setValue(`patterns.${index}.fabricPurpose`, b.fabricPurpose, {
+                      shouldDirty: true,
+                    });
+                    setValue(`patterns.${index}.bomLineKey`, b.bomLineKey, { shouldDirty: true });
+                    setRebinding(null);
+                  }}
+                >
+                  {/* ОДНА пустая опция, с разным текстом. Строка, чью привязку удалили или
+                      переклассифицировали, всё ещё несёт её в форме, и селект показывает пустое —
+                      но «материал не выбран» здесь читалось бы как «оператор не выбирал», а
+                      выбирал: выбор просто перестал на что-то указывать, и это разные новости. */}
+                  <option value=''>
+                    {!rowScope && (!!row.bomLineKey || !!row.fabricPurpose)
+                      ? 'привязка потеряна — выберите заново'
+                      : 'материал не выбран'}
+                  </option>
+                  {uploadScopes.map((s) => (
+                    <option key={s.key} value={s.key}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </>
+          )}
+        </td>
+        <td className='py-1 pr-2 text-nano uppercase tracking-label text-labelColor'>
+          {dxf ? 'dxf' : 'pdf'}
+        </td>
+        <td className='py-1 pr-2 text-right text-nano tabular-nums text-labelColor'>
+          {rev != null ? `v${rev}` : '—'}
+        </td>
+        <td className='py-1 pr-2 text-right text-nano tabular-nums text-labelColor'>
+          {row.sizeBytes ? formatBytes(row.sizeBytes) : '—'}
+        </td>
+        <td className='py-1 pr-2 text-right text-nano tabular-nums text-labelColor'>
+          {uploadedOn ?? '—'}
+        </td>
+        <td className='py-1 text-right'>
+          <span className='inline-flex gap-1'>
+            {dxf && uploadScopes.length > 0 && canEdit && (
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                aria-label='rebind pattern'
+                title='перепривязать лист к другому материалу'
+                onClick={() => setRebinding((r) => (r === index ? null : index))}
+              >
+                ⇄
+              </Button>
+            )}
             <Button
               type='button'
               variant='secondary'
               size='xs'
               aria-label='rename pattern'
               title='переименовать'
-              className='shrink-0'
               disabled={isSubmitting}
               onClick={() => setEditing({ index, value: row.name ?? '' })}
             >
@@ -684,97 +869,44 @@ export function PatternsField({
               variant='secondary'
               size='xs'
               aria-label='remove pattern'
-              className='shrink-0'
               onClick={() => remove(index)}
             >
               ✕
             </Button>
-          </div>
-        )}
-        {/* When a name is set the filename still matters (it is what the factory's CAD
-            saved) — keep it readable underneath rather than only in a tooltip. */}
-        {row.name && row.filename && editing?.index !== index && (
-          <span className='block truncate text-nano text-labelColor'>{row.filename}</span>
-        )}
-        {stray && editing?.index !== index && (
-          <div className='mt-0.5 flex flex-wrap items-center gap-1.5'>
-            <Text size='nano' component='span' className='text-error'>
-              размер этой строки не входит в ряд карточки — сервер отвергнет сохранение
-            </Text>
-            {canEdit && storageSizeId > 0 && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='xs'
-                title='перевесить строку на актуальный размер ряда (размер — только место хранения)'
-                onClick={() =>
-                  // Смена size_id — это keyed replacement: сервер перенумерует ревизию (MAX+1).
-                  // Файл при этом тот же, и ни один потребитель размер строки не читает.
-                  setValue(`patterns.${index}.sizeId`, storageSizeId, { shouldDirty: true })
-                }
-              >
-                перевесить
-              </Button>
-            )}
-          </div>
-        )}
-        {/* Cloth binding, editable in place. It has to be reachable after upload too: every DXF
-            uploaded before 0260 has none, and without this the раскладка for those rows would stay
-            a guess forever. Legacy PDFs are left alone — a sheet a human reads is not cut from
-            anything.
-
-            Пишутся ОБА поля разом, через bindingForScope: назначение — то, чем лист привязан, а
-            строка едет рядом только когда назначение владеет ровно одной. Записать одно и оставить
-            другое как было — это и есть способ получить лист, который в панели лежит в одной ткани,
-            а на сервере разрешается в другую. */}
-        {dxf && uploadScopes.length > 0 && editing?.index !== index && (
-          <select
-            className='mt-0.5 h-6 w-full border border-hairline bg-bgColor px-1 text-nano'
-            aria-label={`материал для ${labelOf(row)}`}
-            value={rowScope}
-            disabled={isSubmitting || !canEdit}
-            onChange={(e) => {
-              const picked = scopes.find((x) => x.key === e.target.value);
-              const b = picked ? bindingForScope(picked) : { fabricPurpose: '', bomLineKey: '' };
-              setValue(`patterns.${index}.fabricPurpose`, b.fabricPurpose, { shouldDirty: true });
-              setValue(`patterns.${index}.bomLineKey`, b.bomLineKey, { shouldDirty: true });
-            }}
-          >
-            {/* ОДНА пустая опция, с разным текстом. Строка, чью привязку удалили или
-                переклассифицировали, всё ещё несёт её в форме, и селект показывает пустое — но
-                «материал не выбран» здесь читалось бы как «оператор не выбирал», а выбирал:
-                выбор просто перестал на что-то указывать, и это разные новости. Две опции с одним
-                value были бы хуже пустого текста — вторая недостижима, React берёт первую. */}
-            <option value=''>
-              {!rowScope && (!!row.bomLineKey || !!row.fabricPurpose)
-                ? 'привязка потеряна — выберите заново'
-                : 'материал не выбран'}
-            </option>
-            {uploadScopes.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+          </span>
+        </td>
+      </tr>
     );
   }
 
-  function renderAudit(list: Entry[]) {
-    const sig = sigOf(list);
-    const a = audits[sig];
+  /** Шапка таблицы листов — одна на все три таблицы блока, чтобы колонки читались одинаково. */
+  function sheetHead() {
+    return (
+      <thead>
+        <tr className='border-b border-borderColor text-nano uppercase tracking-label text-labelColor'>
+          <th className='py-1 pr-2 text-left font-normal'>лист</th>
+          <th className='py-1 pr-2 text-left font-normal'>тип</th>
+          <th className='py-1 pr-2 text-right font-normal'>v</th>
+          <th className='py-1 pr-2 text-right font-normal'>размер</th>
+          <th className='py-1 pr-2 text-right font-normal'>загружен</th>
+          <th className='py-1 text-right font-normal' />
+        </tr>
+      </thead>
+    );
+  }
+
+  // Покрытие размеров ОДНОЙ полоской чипов вместо фразы «нет в файлах: XS, S».
+  //
+  // Вопрос «каким размером этот материал кроить нечем» — это вопрос про множество, и множество
+  // читается сеткой, а не перечислением через запятую: чтобы увидеть дырку в списке, его надо
+  // прочесть, а в полоске она видна не читая.
+  function renderCoverage(list: Entry[]) {
+    const a = audits[sigOf(list)];
     if (!a) {
       return (
-        <Button
-          type='button'
-          variant='secondary'
-          size='xs'
-          title='скачать файлы и проверить, какие размеры карточки в них есть'
-          onClick={() => runAudit(list)}
-        >
-          ⌕ размеры в файлах
-        </Button>
+        <Text size='nano' variant='label' component='span'>
+          размеры не проверялись
+        </Text>
       );
     }
     if (a.phase === 'loading') {
@@ -785,17 +917,13 @@ export function PatternsField({
       );
     }
     if (a.phase === 'error') {
-      // Кнопка возвращается: одного сорвавшегося скачивания достаточно, чтобы проверка исчезла
-      // навсегда для этого набора файлов, а причина обычно разовая.
+      // Без кнопки «ещё раз»: полоска живёт ВНУТРИ плитки, а плитка — кнопка выбора материала, и
+      // вложенная кнопка в кнопке невалидна. Повтор делает «⌕ разобрать файлы» в шапке блока —
+      // одного сорвавшегося скачивания достаточно, чтобы ответ пропал, а причина обычно разовая.
       return (
-        <span className='inline-flex items-center gap-1.5'>
-          <Text size='nano' component='span' className='text-error'>
-            проверка не удалась: {a.message}
-          </Text>
-          <Button type='button' variant='secondary' size='xs' onClick={() => runAudit(list)}>
-            ещё раз
-          </Button>
-        </span>
+        <Text size='nano' component='span' className='text-error'>
+          проверка не удалась: {a.message}
+        </Text>
       );
     }
     if (a.found.size === 0) {
@@ -805,45 +933,67 @@ export function PatternsField({
         </Text>
       );
     }
-    // Пустой ряд — НЕ повод для галочки. missingIn фильтрует ряд карточки, а пустой ряд не даёт
-    // недостающих по построению, и «✓ все размеры карточки есть в файлах» читалось бы как проверка,
-    // хотя проверять было нечего: карточка не назвала ни одного размера. Показываем то, что реально
-    // сказали файлы, — это и есть ответ, за которым сюда пришли, когда ряд ещё не набран.
+    // Пустой ряд — НЕ повод для галочки. Ряд карточки не даёт недостающих по построению, и «все
+    // размеры на месте» читалось бы как проверка, хотя проверять было нечего. Показываем то, что
+    // реально сказали файлы, — это и есть ответ, за которым сюда пришли, когда ряд ещё не набран.
     if (sizeIds.length === 0) {
       return (
-        <Text size='nano' variant='label' component='span'>
-          размеры в файлах: {[...a.found].join(', ')} — ряд карточки пуст, сверять не с чем
-        </Text>
+        <span className='flex flex-wrap items-center gap-1'>
+          {[...a.found].map((t) => (
+            <Chip key={t} tone='default'>
+              {t}
+            </Chip>
+          ))}
+          <Text size='nano' variant='label' component='span'>
+            ряд карточки пуст, сверять не с чем
+          </Text>
+        </span>
       );
     }
-    const missing = missingIn(a);
-    return missing.length === 0 ? (
-      <Text size='nano' variant='label' component='span'>
-        ✓ все размеры карточки есть в файлах
-      </Text>
-    ) : (
-      <Text size='nano' component='span' className='text-error'>
-        нет в файлах: {missing.map(nameOf).join(', ')}
-      </Text>
+    const missing = new Set(missingIn(a));
+    return (
+      <span className='flex flex-wrap items-center gap-1'>
+        {orderSizes(sizeIds).map((id) => {
+          const gone = missing.has(id);
+          return (
+            <Chip
+              key={id}
+              selected={!gone}
+              tone={gone ? 'error' : 'default'}
+              title={gone ? 'этого размера в файлах нет' : 'есть в файлах'}
+            >
+              {nameOf(id)}
+            </Chip>
+          );
+        })}
+        {missing.size > 0 && (
+          <Text size='nano' component='span' className='text-error'>
+            нет {[...missing].map(nameOf).join(', ')}
+          </Text>
+        )}
+      </span>
     );
   }
 
-  // Одна ткань: заголовок с назначением (или ролью нераспределённой строки), действия, строки
-  // файлов. Вся зона — цель перетаскивания: вопрос «в какую ткань» единственный, который вообще
-  // есть смысл задавать.
-  function renderScope(g: (typeof scopeGroups)[number]) {
-    const has = g.entries.length > 0;
+  // ── ПОЛКА: одна плитка на материал карточки ─────────────────────────────────────────────
+  //
+  // Плитка отвечает на три вопроса разом, и все три раньше требовали чтения: чем этот материал
+  // кроится (силуэты), каких размеров в файлах нет (полоска), и есть ли вообще чем кроить
+  // (красный кант со словом). Сводный красный CalloutBox над списком поэтому больше не нужен:
+  // он печатал ровно то же самое второй раз, и «своего DXF нет…» стояло в нём дословно тем же
+  // текстом, что и в пустой группе под ним.
+  function renderTile(g: (typeof scopeGroups)[number]) {
     const key = g.scope.key;
     const label = scopeLabel(g.scope);
-    const dragging = dragKey === key;
-    // Раскладка мерит КОНКРЕТНЫЙ артикул: ширина и кромка приходят с пина колорвея на одну строку.
-    // Поэтому запереть её на строку можно только когда назначение владеет ровно одной; иначе
-    // модалка спрашивает сама — ровно как она уже делает для DXF без привязки.
-    const soleLine = g.scope.lines.length === 1 ? g.scope.lines[0].lineKey : '';
+    const has = g.entries.length > 0;
+    const main = isMainScope(g);
+    const blocks = dxfIndex ? countBlocks(dxfIndex, key) : 0;
+    const a = audits[sigOf(g.entries)];
+    const missing = a?.phase === 'ready' ? missingIn(a) : [];
     return (
       <div
         key={key}
-        className={dragging ? 'outline outline-2 outline-textColor' : undefined}
+        className={dragKey === key ? 'outline outline-2 outline-textColor' : undefined}
         onDragOver={(e) => {
           if (!canUpload) return;
           e.preventDefault();
@@ -857,10 +1007,132 @@ export function PatternsField({
           stageDrop(key, e.dataTransfer.files);
         }}
       >
+        <Tile
+          selected={selectedKey === key}
+          tone={(!has && main) || missing.length > 0 ? 'error' : 'default'}
+          onClick={() => setSelectedKey(key)}
+          media={
+            has && dxfIndex && blocks > 0 ? (
+              <div className='flex h-[84px] w-full items-center justify-center border border-hairline bg-bgZebra p-1'>
+                <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
+              </div>
+            ) : (
+              <Placeholder
+                dashed
+                tone={!has && main ? 'error' : 'default'}
+                label={has ? (geometry.isFetching ? 'разбор…' : 'формы не разобраны') : 'нет dxf'}
+                className='h-[84px] w-full'
+              />
+            )
+          }
+          name={label}
+          sub={
+            has
+              ? `${g.entries.length} ${plural(g.entries.length, 'лист', 'листа', 'листов')}${
+                  blocks > 0 ? ` · ${blocks} бл.` : ''
+                }`
+              : main
+                ? 'раскроить этот материал нечем'
+                : 'своего DXF нет — возможно, в файле основной ткани'
+          }
+        >
+          {has && <div className='mt-1'>{renderCoverage(g.entries)}</div>}
+        </Tile>
+      </div>
+    );
+  }
+
+  /** Плитка для того, что материалом не подписано: непривязанные DXF и наследие в PDF. */
+  function renderExtraTile(
+    key: string,
+    name: string,
+    sub: string,
+    list: Entry[],
+    tone: 'default' | 'error',
+  ) {
+    return (
+      <Tile
+        key={key}
+        dashed
+        selected={selectedKey === key}
+        tone={tone}
+        onClick={() => setSelectedKey(key)}
+        media={
+          <Placeholder
+            dashed
+            tone={tone}
+            label={`${list.length} ${plural(list.length, 'файл', 'файла', 'файлов')}`}
+            className='h-[84px] w-full'
+          />
+        }
+        name={name}
+        sub={sub}
+      />
+    );
+  }
+
+  // Панель выбранного материала: действия и листы. Действия висят у ОДНОГО материала — того, с
+  // которым сейчас работают, — а не по четыре штуки в шапке каждой группы разом.
+  function renderSelected() {
+    if (selectedKey === LOOSE_KEY) {
+      return (
+        <div>
+          <GroupLabel>DXF без материала</GroupLabel>
+          <Text size='nano' variant='label' className='mb-1'>
+            залиты до появления привязки либо потеряли строку BOM. Выберите материал в строке — без
+            него не считается ни ширина, ни кромка, и раскладка не знает, что меряет.
+          </Text>
+          <table className='w-full border-collapse text-micro'>
+            {sheetHead()}
+            <tbody>{looseDxf.map(renderSheetRow)}</tbody>
+          </table>
+        </div>
+      );
+    }
+    if (selectedKey === PDF_KEY) {
+      return (
+        <div>
+          <GroupLabel>PDF — устаревший формат</GroupLabel>
+          <Text size='nano' variant='label' className='mb-1'>
+            новые выкройки принимаются только в DXF: из PDF нельзя ни разложить детали, ни
+            сопоставить их с деталями кроя, ни прочитать размер. Эти файлы остаются на карточке и
+            сохраняются вместе с ней — их можно открыть и скачать; заменить их можно, загрузив DXF
+            на нужный материал и удалив PDF.
+          </Text>
+          <table className='w-full border-collapse text-micro'>
+            {sheetHead()}
+            <tbody>{pdfEntries.map(renderSheetRow)}</tbody>
+          </table>
+        </div>
+      );
+    }
+    const g = scopeGroups.find((x) => x.scope.key === selectedKey);
+    if (!g) return null;
+    const has = g.entries.length > 0;
+    const label = scopeLabel(g.scope);
+    // Раскладка мерит КОНКРЕТНЫЙ артикул: ширина и кромка приходят с пина колорвея на одну строку.
+    // Поэтому запереть её на строку можно только когда назначение владеет ровно одной; иначе
+    // модалка спрашивает сама — ровно как она уже делает для DXF без привязки.
+    const soleLine = g.scope.lines.length === 1 ? g.scope.lines[0].lineKey : '';
+    return (
+      <div
+        className={dragKey === g.scope.key ? 'outline outline-2 outline-textColor' : undefined}
+        onDragOver={(e) => {
+          if (!canUpload) return;
+          e.preventDefault();
+          setDragKey(g.scope.key);
+        }}
+        onDragLeave={() => setDragKey((k) => (k === g.scope.key ? null : k))}
+        onDrop={(e) => {
+          if (!canUpload) return;
+          e.preventDefault();
+          setDragKey(null);
+          stageDrop(g.scope.key, e.dataTransfer.files);
+        }}
+      >
         <GroupLabel
           action={
             <div className='flex flex-wrap items-center gap-1.5'>
-              {has && renderAudit(g.entries)}
               {has && (
                 <Button
                   type='button'
@@ -869,9 +1141,9 @@ export function PatternsField({
                   title={`авто-раскладка деталей «${label}» на полосе`}
                   onClick={() =>
                     setNesting({
-                      // Размер тут ничего не решает у ГРАДУИРОВАННОГО файла: он выбирается внутри по
-                      // именам блоков, и маркер сохраняется на выбранный. Это запасной вариант для
-                      // НЕградуированного — файла, в именах которого размера нет вовсе: такому
+                      // Размер тут ничего не решает у ГРАДУИРОВАННОГО файла: он выбирается внутри
+                      // по именам блоков, и маркер сохраняется на выбранный. Это запасной вариант
+                      // для НЕградуированного — файла, в именах которого размера нет вовсе: такому
                       // маркеру размер может дать только карточка.
                       //
                       // `||`, а не `??`: у листа без размера (0281) здесь стоит 0, и `??` его бы
@@ -935,7 +1207,7 @@ export function PatternsField({
                   label='+ DXF'
                   dxfOnly
                   fabricScopes={uploadScopes}
-                  defaultScopeKey={key}
+                  defaultScopeKey={g.scope.key}
                   onUploaded={(p) =>
                     append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })
                   }
@@ -950,26 +1222,21 @@ export function PatternsField({
           {label}
         </GroupLabel>
         {has ? (
-          g.entries.map(renderRow)
+          <table className='w-full border-collapse text-micro'>
+            {sheetHead()}
+            <tbody>{g.entries.map(renderSheetRow)}</tbody>
+          </table>
         ) : (
-          <div className='space-y-0.5'>
-            <Placeholder
-              dashed
-              tone={isMainScope(g) ? 'error' : undefined}
-              label='нет dxf'
-              className='py-3'
-            />
-            <Text
-              size='nano'
-              component='p'
-              className={isMainScope(g) ? 'text-error' : 'text-labelColor'}
-            >
-              {isMainScope(g)
-                ? 'раскроить этот материал нечем'
-                : 'своего DXF нет — возможно, детали лежат в файле основной ткани'}
-              {canUpload ? ' — перетащите DXF сюда или нажмите «+ DXF»' : ''}
-            </Text>
-          </div>
+          <Text
+            size='micro'
+            component='p'
+            className={isMainScope(g) ? 'text-error' : 'text-labelColor'}
+          >
+            {isMainScope(g)
+              ? 'раскроить этот материал нечем'
+              : 'своего DXF нет — возможно, детали лежат в файле основной ткани'}
+            {canUpload ? ' — перетащите DXF сюда или нажмите «+ DXF»' : ''}
+          </Text>
         )}
       </div>
     );
@@ -987,62 +1254,63 @@ export function PatternsField({
   }
 
   return (
-    <div className='space-y-2'>
-      <Text size='micro' variant='label'>
-        выкройки — DXF, по МАТЕРИАЛАМ. Один чертёж несёт весь размерный ряд: размер записан в именах
-        блоков, выбирается при просмотре и в раскладке, а недостающие размеры карточка добирает из
-        файла сама. Поэтому файл привязывается к материалу — основная ткань, подкладка, бортовка,
-        утеплитель, — и на один материал файлов может быть несколько (основная ткань и карманка это
-        две разные строки BOM). Колорвей на файл не влияет — лекала общие, — но артикул и его ширину
-        каждый колорвей подставляет свои.
-      </Text>
+    <div className='space-y-2.5'>
+      {/* Панель блока: состояние слева, действия справа. Одна кнопка разбора на всю карточку —
+          раньше она стояла в шапке КАЖДОЙ группы и её слот морфился между четырьмя разными
+          формами, из-за чего шапка меняла размер по мере работы. */}
+      <div className='flex flex-wrap items-center gap-1.5 border-b border-borderColor pb-1'>
+        <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
+          материалов: {scopeGroups.length}
+        </Text>
+        {materialsWithoutDxf.length > 0 && (
+          <Pill tone='warn' title={materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}>
+            без DXF: {materialsWithoutDxf.length}
+          </Pill>
+        )}
+        {missingSizeNotes.length > 0 && (
+          <Pill tone='warn' title={missingSizeNotes.join('; ')}>
+            дырки по размерам: {missingSizeNotes.length}
+          </Pill>
+        )}
+        {looseDxf.length > 0 && <Pill tone='attention'>без материала: {looseDxf.length}</Pill>}
+        <div className='ml-auto flex flex-wrap items-center gap-1.5'>
+          {dxfEntries.length > 0 && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              disabled={geometry.isFetching}
+              title='скачать файлы карточки и разобрать их один раз: полоска покажет, каких размеров в них нет, а плитки — силуэты деталей. Тот же разбор потом бесплатно берут детали кроя.'
+              onClick={runAllAudits}
+            >
+              {geometry.isFetching ? 'разбор файлов…' : '⌕ разобрать файлы'}
+            </Button>
+          )}
+          {canUpload && (
+            <PatternUploadButton
+              label='+ DXF'
+              dxfOnly
+              fabricScopes={uploadScopes}
+              defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
+              onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
+              className='[&_button]:px-1.5 [&_button]:py-px [&_button]:text-nano [&_button]:tracking-label'
+            />
+          )}
+        </div>
+      </div>
 
-      {/* Дыры вместо счётчика покрытия. «N из M размеров» мерило исчезнувшую сущность и
-          показывало один файл на пять размеров как «1 из 5». */}
-      {materialsWithoutDxf.length > 0 ||
-      missingSizeNotes.length > 0 ||
-      looseDxf.length > 0 ||
-      outOfRange.length > 0 ? (
+      {/* ЕДИНСТВЕННЫЙ оставшийся сводный красный блок: строка вне ряда роняет сохранение ВСЕЙ
+          карточки, а её плитка об этом сказать не может — дефект живёт на строке, а не на
+          материале, и увидеть его, не открыв нужную плитку, было бы нельзя. Всё остальное, что
+          раньше стояло в этом callout'е, теперь написано на самих плитках. */}
+      {outOfRange.length > 0 && (
         <CalloutBox tone='error'>
-          <div className='space-y-0.5'>
-            {materialsWithoutDxf.length > 0 && (
-              <Text size='micro' component='p'>
-                <b>без DXF:</b> {materialsWithoutDxf.map((g) => scopeLabel(g.scope)).join('; ')}
-              </Text>
-            )}
-            {rollGoodsWithoutOwnDxf.length > 0 && (
-              <Text size='micro' variant='label' component='p'>
-                своего DXF нет (возможно, в файле основной ткани):{' '}
-                {rollGoodsWithoutOwnDxf.map((g) => scopeLabel(g.scope)).join('; ')}
-              </Text>
-            )}
-            {missingSizeNotes.map((n) => (
-              <Text key={n} size='micro' component='p'>
-                <b>размеры:</b> {n}
-              </Text>
-            ))}
-            {looseDxf.length > 0 && (
-              <Text size='micro' component='p'>
-                <b>без материала:</b> {looseDxf.length} DXF — раскладка и детали кроя для них
-                недоступны
-              </Text>
-            )}
-            {outOfRange.length > 0 && (
-              <Text size='micro' component='p'>
-                <b>вне размерного ряда:</b> {outOfRange.length} —{' '}
-                {outOfRange.length === 1 ? 'строка отвергнет' : 'строки отвергнут'} сохранение
-                карточки
-              </Text>
-            )}
-          </div>
-        </CalloutBox>
-      ) : (
-        fabricBomLines.length > 0 && (
-          <Text size='micro' variant='label'>
-            каждый материал карточки закрыт DXF. Размеры внутри файлов проверяются по кнопке — их
-            знает только сам файл.
+          <Text size='micro' component='p'>
+            <b>вне размерного ряда:</b> {outOfRange.length}{' '}
+            {outOfRange.length === 1 ? 'строка отвергнет' : 'строки отвергнут'} сохранение карточки —
+            откройте их материал и нажмите «перевесить».
           </Text>
-        )
+        </CalloutBox>
       )}
 
       {fabricBomLines.length === 0 ? (
@@ -1051,45 +1319,48 @@ export function PatternsField({
           подкладку/бортовку/утеплитель, если они есть) на вкладке BOM.
         </Text>
       ) : (
-        scopeGroups.map(renderScope)
+        <>
+          <Tiles min={158}>
+            {scopeGroups.map(renderTile)}
+            {looseDxf.length > 0 &&
+              renderExtraTile(
+                LOOSE_KEY,
+                'без материала',
+                'раскладка и детали кроя недоступны',
+                looseDxf,
+                'error',
+              )}
+            {pdfEntries.length > 0 &&
+              renderExtraTile(PDF_KEY, 'PDF', 'устаревший формат', pdfEntries, 'default')}
+          </Tiles>
+          {renderSelected()}
+        </>
       )}
 
       {/* Пустой ряд больше не блокирует загрузку — но и молчать о нём нельзя: без ряда раскладку
           сохранить не выйдет (маркер кладётся на КОНКРЕТНЫЙ размер карточки, и токен из имени блока
-          ему не во что резолвить), а проверка «⌕ размеры в файлах» отвечать будет, но сверять
-          найденное станет не с чем. Это не ошибка карточки, поэтому нейтральный тон. */}
+          ему не во что резолвить), а проверка размеров отвечать будет, но сверять найденное станет
+          не с чем. Это не ошибка карточки, поэтому нейтральный тон. */}
       {sizeIds.length === 0 && fabricBomLines.length > 0 && (
         <Text size='micro' variant='label'>
           размерный ряд не задан — DXF грузятся и просматриваются как обычно, лист хранится без
           размера (размеры и так живут в самом файле). Ряд понадобится, чтобы СОХРАНИТЬ раскладку:
-          маркер ложится на конкретный размер карточки. «⌕ размеры в файлах» покажет, какие размеры
-          в файлах есть, а «↔ детали кроя» заведёт однозначные из них в ряд карточки сам.
+          маркер ложится на конкретный размер карточки. «⌕ разобрать файлы» покажет, какие размеры в
+          файлах есть, а «↔ детали кроя» заведёт однозначные из них в ряд карточки сам.
         </Text>
       )}
 
-      {looseDxf.length > 0 && (
-        <div>
-          <GroupLabel>DXF без материала</GroupLabel>
-          <Text size='nano' variant='label' className='mb-1'>
-            залиты до появления привязки либо потеряли строку BOM. Выберите материал в строке — без
-            него не считается ни ширина, ни кромка, и раскладка не знает, что меряет.
-          </Text>
-          {looseDxf.map(renderRow)}
-        </div>
-      )}
+      {/* Объяснение материи — В ПОДВАЛЕ, а не над полкой. Оно верное и нужное, но это справка, а
+          не ответ: наверху блока оно стояло между вопросом и ответом и читалось раньше их. */}
+      <Text size='nano' variant='label' component='p' className='border-t border-hairline pt-1.5'>
+        выкройки — DXF, по МАТЕРИАЛАМ. Один чертёж несёт весь размерный ряд: размер записан в именах
+        блоков, выбирается при просмотре и в раскладке, а недостающие размеры карточка добирает из
+        файла сама. Поэтому файл привязывается к материалу — основная ткань, подкладка, бортовка,
+        утеплитель, — и на один материал файлов может быть несколько (основная ткань и карманка это
+        две разные строки BOM). Колорвей на файл не влияет — лекала общие, — но артикул и его ширину
+        каждый колорвей подставляет свои.
+      </Text>
 
-      {pdfEntries.length > 0 && (
-        <div>
-          <GroupLabel>PDF — устаревший формат</GroupLabel>
-          <Text size='nano' variant='label' className='mb-1'>
-            новые выкройки принимаются только в DXF: из PDF нельзя ни разложить детали, ни
-            сопоставить их с деталями кроя, ни прочитать размер. Эти файлы остаются на карточке и
-            сохраняются вместе с ней — их можно открыть и скачать; заменить их можно, загрузив DXF
-            на нужный материал и удалив PDF.
-          </Text>
-          {pdfEntries.map(renderRow)}
-        </div>
-      )}
 
       {/* Naming modal for drops onto a material (click uploads carry their own inside the
           button). Размер не спрашивается: их в файле несколько. */}
