@@ -595,6 +595,11 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
 
 // Client-side preview of the whole-run spend for a measured usage (the backend computes the
 // authoritative size_run_total): Σ(consumption_size × orderQty_size) × price × (1 + wastage%).
+//
+// wastagePercent приходит УЖЕ решённым: на норме с consumption_source='marker' звонящий обязан
+// передать '' — измеренная длина содержит и выпады, и кромку, и костинг на ней процент НЕ
+// начисляет. Предпросмотр, начислявший его безусловно, противоречил колауту диалога применения
+// на том же экране и завышал «расход на партию» ровно на (1 + wastage%).
 function runTotalPreview(
   sizeIds: number[],
   consumptionBySize: Map<number, string>,
@@ -744,7 +749,9 @@ function UsagePerSizeLocal({
     consumptionBySize,
     orderQtyBySize,
     article?.unitPrice ?? '',
-    article?.wastagePercent ?? '',
+    // Маркерная норма уже содержит отходы — процент артикула к ней не применяется (см. комментарий
+    // у runTotalPreview; то же правило, что у серверного size_run_total).
+    draft.consumptionSource === 'marker' ? '' : article?.wastagePercent ?? '',
   );
   const currency = article?.currency ?? '';
   const unit = article?.unit?.trim() || '';

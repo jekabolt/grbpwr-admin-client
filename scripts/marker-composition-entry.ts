@@ -1,4 +1,12 @@
-import { buildMarkerLayout, markerToView } from 'components/managers/tech-card/components/nesting/marker-io';
+import {
+  buildMarkerLayout,
+  compositionOf,
+  consumptionCm,
+  legacyPairOf,
+  markerToView,
+  scalarNormRefusal,
+  totalUnitsOf,
+} from 'components/managers/tech-card/components/nesting/marker-io';
 import type { NestResult, PieceDTO } from 'lib/nesting/types';
 
 const piece = (id: number, name: string): PieceDTO => ({
@@ -39,4 +47,14 @@ export function homogeneous() {
   });
 }
 
-export { markerToView };
+// Один размер, названный файлом ДВАЖДЫ (BP_M и SL_R_m). Писатель обязан слить дубль суммой:
+// сервер такой состав отвергает целиком, и блоб с гарантированным отказом — это потерянный прогон.
+export function duplicateSizes() {
+  return buildMarkerLayout({
+    ...common, pieces: PIECES, result: result([1,2,3,4,5]),
+    composition: [{ sizeId: 3, quantity: 2 }, { sizeId: 4, quantity: 1 }, { sizeId: 3, quantity: 1 }],
+    sizeIdByPieceId: new Map([[1,3],[2,3],[3,4],[4,4]]),
+  });
+}
+
+export { compositionOf, consumptionCm, legacyPairOf, markerToView, scalarNormRefusal, totalUnitsOf };

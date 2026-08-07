@@ -44,10 +44,19 @@ function serverJudges(blob, legacy) {
 const instances = (blob, p, totalUnits, comp) =>
   (p.sizeId > 0 ? (comp.find(c=>c.sizeId===p.sizeId)?.quantity ?? 0) : totalUnits) * p.quantity;
 
+// ПАРА ШАПКИ БЕРЁТСЯ ИЗ КОДА, а не переписывается константой. Раньше здесь стояли рукописные
+// {0,0} и {3,3} с комментарием «ровно то, что шлёт модалка», и это было единственным местом,
+// которому приходилось верить: регресс `sets: 1` на смешанном маркере — тот самый, что подставлял
+// «настил кроит одно изделие», — печатал 19/19. Теперь пару собирает legacyPairOf, то есть та же
+// функция, которую зовёт путь сохранения.
+const wirePair = (comp) => m.legacyPairOf(comp);
+
 console.log('\nA · смешанный настил M×2 + L×1, карман без размера ×2 на изделие');
 {
   const b = m.mixed();
-  const legacy = { sizeId: 0, sets: 0 };            // ровно то, что шлёт модалка на mixed
+  const legacy = wirePair([{ sizeId: 3, quantity: 2 }, { sizeId: 4, quantity: 1 }]);
+  ck(legacy.sizeId === 0 && legacy.sets === 0,
+     'шапка смешанного шлёт НУЛИ (состав победит в блобе)', JSON.stringify(legacy));
   const v = serverJudges(b, legacy);
   ck(v.errs.length === 0, 'сервер принимает блоб', v.errs.join('; ') || 'без замечаний');
   ck(b.schemaVersion === 4, 'schema_version = 4', String(b.schemaVersion));
@@ -64,7 +73,9 @@ console.log('\nA · смешанный настил M×2 + L×1, карман б
 console.log('\nB · однородный настил M×3 — байты обязаны остаться прежними (легаси-форма)');
 {
   const b = m.homogeneous();
-  const legacy = { sizeId: 3, sets: 3 };            // ровно то, что шлёт модалка на однородном
+  const legacy = wirePair([{ sizeId: 3, quantity: 3 }]);
+  ck(legacy.sizeId === 3 && legacy.sets === 3,
+     'шапка однородного несёт НАСТОЯЩУЮ пару (не 1 комплект)', JSON.stringify(legacy));
   const v = serverJudges(b, legacy);
   ck(v.errs.length === 0, 'сервер принимает блоб', v.errs.join('; ') || 'без замечаний');
   ck(b.schemaVersion === 3, 'schema_version = 3 (не 4: состава в блобе нет)', String(b.schemaVersion));
@@ -99,6 +110,50 @@ console.log('\nD · легаси-маркер (снят до Ф2): шапка н
   });
   ck(view.totalUnits === 4, 'изделий = sets', String(view.totalUnits));
   ck(view.composition.length === 1 && view.composition[0].sizeId === 7, 'состав из одной строки шапки');
+}
+
+console.log('\nE · дубль размера: файл назвал один размер дважды (BP_M и SL_R_m)');
+{
+  const b = m.duplicateSizes();
+  const v = serverJudges(b, wirePair(b.composition ?? []));
+  ck(v.errs.length === 0, 'сервер принимает блоб', v.errs.join('; ') || 'без замечаний');
+  ck((b.composition ?? []).length === 2, 'дубль слит: две строки, не три',
+     JSON.stringify(b.composition));
+  const m3 = (b.composition ?? []).find((c) => c.sizeId === 3);
+  ck(m3?.quantity === 3, 'количества дубля СЛОЖИЛИСЬ (2 + 1 = 3)', JSON.stringify(m3));
+  ck(v.totalUnits === 4, 'всего изделий 4 (M×3 + L×1)', String(v.totalUnits));
+}
+
+console.log('\nF · ОТКАЗ ВЫДАТЬ НОРМУ и делитель расхода — то, ради чего Ф2 заводилась');
+{
+  // Смешанный: сервер молчит про расход (поля нет) — клиент обязан отказать САМ, а не поделить.
+  const mix = { name: 'смешанная', composition: [{ sizeId: 3, quantity: 2 }, { sizeId: 4, quantity: 1 }],
+                totalUnits: 3, usedLengthCm: { value: '300' } };
+  ck(m.scalarNormRefusal(mix) !== '', 'смешанный состав → отказ');
+  ck(m.consumptionCm(mix) === null, 'расход на изделие НЕ ВЫДАЁТСЯ (null, а не 100/300)',
+     String(m.consumptionCm(mix)));
+  // Маркер с составом: сервер шлёт sets = 0 (proto3 роняет умолчание). Прежняя дыра давала
+  // usedLength / max(1, sets) = весь настил как норму ОДНОГО изделия.
+  const zeroed = { name: 'нулевая шапка', sizeId: 0, sets: 0, composition: [], totalUnits: 0,
+                   usedLengthCm: { value: '300' } };
+  ck(m.compositionOf(zeroed).length === 0, 'пара (0,0) читается как НЕИЗВЕСТНО, а не как 1 комплект');
+  ck(m.consumptionCm(zeroed) === null, 'нечитаемый состав → нормы нет (не 300 см на изделие)',
+     String(m.consumptionCm(zeroed)));
+  // Однородный: единственный сохранившийся расчёт обязан повторять серверную формулу.
+  const homo = { name: 'однородная', composition: [{ sizeId: 3, quantity: 3 }], totalUnits: 3,
+                 usedLengthCm: { value: '300' } };
+  ck(m.scalarNormRefusal(homo) === '', 'однородный состав → отказа нет');
+  ck(m.consumptionCm(homo) === 100, 'расход = длина / изделия = 100 см', String(m.consumptionCm(homo)));
+  // Делитель и отказ обязаны читать ОДИН срез: разошедшийся totalUnits из шапки не должен
+  // молча стать делителем — иначе одна строка описывает две разные раскладки.
+  const skew = { name: 'расходится', composition: [{ sizeId: 3, quantity: 3 }], totalUnits: 9,
+                 usedLengthCm: { value: '300' } };
+  ck(m.totalUnitsOf(skew) === 3, 'делитель — СУММА СОСТАВА (3), а не totalUnits шапки (9)',
+     String(m.totalUnitsOf(skew)));
+  // Легаси-маркер (до Ф2): пара в шапке, состава нет — норма считается по-прежнему.
+  const legacy = { name: 'легаси', sizeId: 7, sets: 4, composition: [], totalUnits: 0,
+                   usedLengthCm: { value: '400' } };
+  ck(m.consumptionCm(legacy) === 100, 'легаси: 400 / 4 = 100 см', String(m.consumptionCm(legacy)));
 }
 
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);
