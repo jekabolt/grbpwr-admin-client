@@ -684,10 +684,26 @@ const CHIRAL = [
     JSON.stringify(
       r.placements.map((p) => [p.pieceId, p.instance, p.rot, p.flipped === true, Math.round(p.x * 1000), Math.round(p.y * 1000)]),
     );
-  const ta = traceGenerations(key);
-  const tb = traceGenerations(key);
-  const a = await mod.nest(pieces, cfg, () => false, ta.onProgress);
-  const b = await mod.nest(pieces, cfg, () => false, tb.onProgress);
+  // БЮДЖЕТ ПОДБИРАЕТСЯ ПОД МАШИНУ, а не задаётся числом. Смысл предусловия в том, чтобы поиск
+  // ОБОРВАЛСЯ по времени: на потолке поколений обе стороны доходят до конца, и «совпали» тогда
+  // означало бы только «одинаковая арифметика», а проверяется здесь другое — что оборванный на
+  // произвольном месте поиск обрывается ОДИНАКОВО.
+  //
+  // Числом это не задать: на загруженной машине 4 с не хватало и на 300 поколений, на свободной
+  // хватает на все 400 — и зонд начинал падать от того, что вокруг стало тихо. Уменьшаем, пока
+  // время не станет ограничителем.
+  let ta;
+  let tb;
+  let a;
+  let b;
+  for (const ms of [4_000, 1_500, 600, 250, 100]) {
+    ta = traceGenerations(key);
+    tb = traceGenerations(key);
+    const c = { ...cfg, timeBudgetMs: ms };
+    a = await mod.nest(pieces, c, () => false, ta.onProgress);
+    b = await mod.nest(pieces, c, () => false, tb.onProgress);
+    if (a.generation < 399) break;
+  }
   check(a.generation < 399, 'бюджет ограничивал (иначе сравнение — тавтология)', `generation=${a.generation}`);
   checkSameTrajectory(ta, tb, 'поколение в поколение совпадают размещения ВМЕСТЕ с зеркальностью');
   check(

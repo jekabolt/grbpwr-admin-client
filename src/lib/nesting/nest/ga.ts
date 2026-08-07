@@ -44,6 +44,17 @@ export type GaOptions = {
   deadlineMs: number;
   maxGenerations: number;
   seed: number;
+  // ДОПОЛНИТЕЛЬНЫЕ ЗАСЕВЫ — готовые порядки генов, которые кладутся в стартовую популяцию ЦЕЛИКОМ,
+  // вместо мутированной копии базового. Каждый — перестановка индексов genesBase.
+  //
+  // Смысл в гарантии, а не в удаче: возвращаемый best — лучший из ВСЕХ когда-либо оценённых
+  // особей, поэтому решение, положенное в популяцию, — нижняя граница качества ответа. Замер Ф2.6
+  // показал, зачем: без такого засева смешанная раскладка на реальных выкройках проигрывала
+  // тривиальной склейке размеров (516.0 см против 497.6), то есть поиск возвращал результат хуже
+  // строимого вручную.
+  //
+  // Мусор здесь безопасен по построению: неперестановка отбрасывается, лишние — обрезаются.
+  extraSeeds?: readonly (readonly number[])[];
   isCancelled: () => boolean;
   onGeneration: (p: GaProgress) => void;
 };
@@ -129,7 +140,27 @@ export async function runGa(
     fitness: Infinity,
   };
   const pop: Individual[] = [seedInd];
-  for (let i = 1; i < POP; i++) {
+
+  // ЗАСЕВЫ ВЫЗЫВАЮЩЕГО — перед случайными мутациями, и проверенные на месте. Порядок, который не
+  // является перестановкой genesBase, отбрасывается молча: он пришёл бы из рассогласования типов,
+  // а не из данных оператора, и уронить из-за него раскладку не за что — движок просто ищет как
+  // раньше. Повороты берутся первые допустимые, как у базового засева: засев говорит о ПОРЯДКЕ.
+  for (const order of opts.extraSeeds ?? []) {
+    if (pop.length >= POP) break;
+    if (order.length !== n) continue;
+    const seenIdx = new Set(order);
+    if (seenIdx.size !== n) continue;
+    let valid = true;
+    for (const i of order) if (!Number.isInteger(i) || i < 0 || i >= n) { valid = false; break; }
+    if (!valid) continue;
+    // `rots` индексируется ГЕНОМ, а не позицией в порядке (см. evaluate) — поэтому копируется
+    // целиком у базового засева, а не собирается обходом `order`. Собранный обходом массив дал бы
+    // гену A поворот, допустимый для гена B: деталь легла бы поперёк полосы, в которую по ширине
+    // не проходит.
+    pop.push({ order: [...order], rots: [...seedInd.rots], fitness: Infinity });
+  }
+
+  while (pop.length < POP) {
     const ind: Individual = { order: [...seedInd.order], rots: [...seedInd.rots], fitness: Infinity };
     mutate(ind, opts.genesBase, rnd);
     pop.push(ind);

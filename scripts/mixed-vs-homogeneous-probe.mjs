@@ -139,7 +139,15 @@ async function measure(fx, fixture, index) {
     );
   }
 
-  const spec = { composition: comp, agnosticIdentities, agnosticToken };
+  // MIX_SEED_GROUPS=0 — мерить поиск БЕЗ засева склейкой. Нужно ровно для одного: сравнить обе
+  // стороны ОДНОЙ сборкой на ОДНОЙ машине. Сравнивать с числами вчерашнего прогона нельзя —
+  // загрузка машины меняет предпросчёт, а через него и выбранное огрубление геометрии.
+  const spec = {
+    composition: comp,
+    agnosticIdentities,
+    agnosticToken,
+    seedGroups: process.env.MIX_SEED_GROUPS !== '0',
+  };
   const jobs = [
     { tag: 'A', kind: 'СМЕШАННЫЙ', name: label, job: mod.buildJob(fx, spec, BASE) },
     ...comp.map((c, i) => ({

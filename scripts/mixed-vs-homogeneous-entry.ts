@@ -162,6 +162,8 @@ export type JobSpec = {
   // которую формула блоба кроит totalUnits раз.
   agnosticIdentities?: Set<string>;
   agnosticToken?: string;
+  /** false — не слать размер группой, то есть мерить поиск БЕЗ засева склейкой (A/B). */
+  seedGroups?: boolean;
 };
 
 export type BuiltJob = {
@@ -213,7 +215,18 @@ export function buildJob(fx: Fixture, spec: JobSpec, base: BaseParams): BuiltJob
     }
     unitsByPieceId.set(p.id, units);
     if (units < 1) continue;
-    entries.push({ pieceId: p.id, quantity: units });
+    // Размер едет группой — ровно так, как его шлёт модалка. Без этого зонд мерил бы поиск БЕЗ
+    // засева склейкой.
+    //
+    // Выключается переменной, и это не отладочный тумблер: единственный способ узнать, помог ли
+    // засев, — прогнать ОДНУ СБОРКУ на ОДНОЙ машине в обе стороны. Сравнение с числами вчерашнего
+    // прогона ничего не значит — там машина была занята параллельными агентами, предпросчёт шёл
+    // всемеро дольше, и лестница точности выбирала другое огрубление.
+    entries.push({
+      pieceId: p.id,
+      quantity: units,
+      groupKey: spec.seedGroups === false ? undefined : size,
+    });
     instances += units;
     areaCm2 += p.areaCm2 * units;
   }

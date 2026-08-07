@@ -377,6 +377,38 @@ export async function nest(
     e: effectiveEps,
   });
 
+  // ЗАСЕВ СКЛЕЙКОЙ (Ф2.6). Второй стартовый порядок: сначала все детали одной группы, потом все
+  // детали следующей — то есть «уложи один размер, потом другой».
+  //
+  // Это НЕ эвристика в надежде на удачу, а нижняя граница. Склейка — допустимое решение смешанной
+  // задачи, доступное даром: все экземпляры лежат на одной полосе, просто без перемешивания. Замер
+  // Ф2.6 на реальных выкройках показал, что поиск без такого засева этой дармовщине ПРОИГРЫВАЕТ —
+  // 516.0 см против 497.6 на равных количествах M и XL, то есть 3.8 % ткани отдавалось за
+  // перемешивание, которого никто не просил. Возвращаемый best — лучшая из всех оценённых особей,
+  // поэтому засев делает «смешанный не хуже суммы однородных» свойством построения, а не исхода.
+  //
+  // Внутри группы порядок тот же убывающий по площади, что у базового засева, — крупные вперёд.
+  // BL-укладка при этом НЕ обязана дать ровно склейку: детали второй группы садятся в выпады
+  // первой, и результат обычно короче. Хуже склейки он быть не может.
+  const groupOf = new Map<number, string>();
+  for (const pc of config.pieces) if (pc.groupKey) groupOf.set(pc.pieceId, pc.groupKey);
+  const groups = new Set(genesBase.map((g) => groupOf.get(g.piece.id) ?? ''));
+  // Одна группа на всех (или ни одной) — склеивать нечего, и лишняя особь только отняла бы место
+  // у мутанта. Однородный настил обязан искать ровно как раньше.
+  const extraSeeds: number[][] = [];
+  if (groups.size > 1) {
+    const rank = new Map([...groups].map((k, i) => [k, i]));
+    const idx = genesBase.map((_, i) => i);
+    idx.sort((a, b) => {
+      const ga = rank.get(groupOf.get(genesBase[a].piece.id) ?? '') ?? 0;
+      const gb = rank.get(groupOf.get(genesBase[b].piece.id) ?? '') ?? 0;
+      if (ga !== gb) return ga - gb;
+      // genesBase уже отсортирован по убыванию площади, поэтому исходный индекс и есть этот порядок.
+      return a - b;
+    });
+    extraSeeds.push(idx);
+  }
+
   const { best, generation, evaluated } = await runGa({
     genesBase,
     fabricWidthCm: config.fabricWidthCm,
@@ -386,6 +418,7 @@ export async function nest(
     deadlineMs: Math.max(Date.now() + GA_MIN_MS, deadline),
     maxGenerations: MAX_GENERATIONS,
     seed: hashString(seedString),
+    extraSeeds,
     isCancelled,
     onGeneration: (p) => {
       // evaluated is reported LIVE rather than only at the end: a telemetry field that reads 0
