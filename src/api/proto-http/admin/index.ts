@@ -4245,6 +4245,10 @@ export type common_FittingPattern = {
   // (size_id, url) row across the full-replace save; present (even empty) is stored as sent
   // (empty clears). JSON null reads as absent (preserve) — clear with the empty string.
   name?: string;
+  // view_url / download_url are OUTPUT-ONLY tokenized read urls (see
+  // TechCardSizePattern.view_url). Ignored on write.
+  viewUrl: string | undefined;
+  downloadUrl: string | undefined;
 };
 
 // FittingCallout is a numbered marker pinned to a fitting photo, noting a fit
@@ -5003,6 +5007,51 @@ export type PaymentMethodAllowance = {
 export type UpdateSettingsResponse = {
 };
 
+// WorkshopSettings is the singleton shop-floor configuration (workshop_settings, 0272).
+export type WorkshopSettings = {
+  // Usable length of the cutting/spreading table, in CENTIMETRES.
+  // ABSENT means the workshop has not configured a table, and that is NOT the same as zero. A
+  // consumer computing a length verdict must render "no verdict available" for an absent value —
+  // comparing against 0 would tell a workshop that has merely not filled this in that every
+  // раскладка it lays is too long, which is worse than saying nothing.
+  cuttingTableLengthCm: googletype_Decimal | undefined;
+  updatedBy: string | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+export type GetWorkshopSettingsRequest = {
+};
+
+export type GetWorkshopSettingsResponse = {
+  settings: WorkshopSettings | undefined;
+};
+
+// UpdateWorkshopSettingsRequest is a PARTIAL update, and each setting is TRI-STATE:
+// * ABSENT               — leave the stored value alone. This is the default for any client that
+// does not know the setting exists, so a workshop screen shipped before a
+// new tenant landed can never wipe it.
+// * PRESENT, empty value — clear the setting back to "not configured". Needed for real: an
+// operator who mistyped the table length must be able to return it to
+// unknown, because a wrong number produces confident false verdicts while
+// an unset one produces none.
+// * PRESENT with a number — set it.
+// NOTE for JSON/REST callers: protojson cannot tell `"cuttingTableLengthCm": null` from an absent
+// field, so null also reads as "leave alone". To CLEAR a setting send the empty message —
+// `{"cuttingTableLengthCm": {}}` — not null.
+// A request that names no setting at all is rejected rather than executed: it would write nothing
+// but still stamp updated_by/updated_at, putting a fake edit in the audit trail.
+export type UpdateWorkshopSettingsRequest = {
+  // Centimetres. Rejected with a field-tagged InvalidArgument outside the plausibility band
+  // (entity.Min/MaxCuttingTableLengthCm): the single most likely operator mistake is typing METRES
+  // into a field labelled centimetres, and "6" for a 6 m table would otherwise be accepted and then
+  // declare every раскладка too long.
+  cuttingTableLengthCm: googletype_Decimal | undefined;
+};
+
+export type UpdateWorkshopSettingsResponse = {
+  settings: WorkshopSettings | undefined;
+};
+
 // PaymentMethodFee is the estimated processing-fee model of a payment method.
 export type PaymentMethodFee = {
   paymentMethod: common_PaymentMethodNameEnum | undefined;
@@ -5274,13 +5323,15 @@ export type StyleCutListFabric = {
   fusingName: string | undefined;
 };
 
-// StyleCutListPiece is one cut-piece expanded for production (Q6): total_per_garment folds the
-// mirrored pair into the count (pieces_per_garment × 2 when mirrored), and fabrics lists the material
-// per colourway.
+// StyleCutListPiece is one cut-piece for production. total_per_garment EQUALS pieces_per_garment:
+// зеркальное удвоение свёрнуто в само количество миграцией 0266. fabrics перечисляет материал по
+// колорвеям.
 export type StyleCutListPiece = {
   pieceId: number | undefined;
   name: string | undefined;
   piecesPerGarment: number | undefined;
+  // ОТСТАВЛЕНО (миграция 0266): удвоение свёрнуто в pieces_per_garment, флаг погашен. Поле только
+  // отражает хранимое и НИЧЕГО не значит для количества.
   mirrored: boolean | undefined;
   totalPerGarment: number | undefined;
   grainline: string | undefined;
@@ -6015,9 +6066,19 @@ export type common_TechCardBomItem = {
   currency: string | undefined;
   comment: string | undefined;
   // fabric data for the cutter / marker (Phase 3.5c)
+  // FULL roll width in cm, кромка INCLUDED — same correction as Material.fabric_width: this is what
+  // effective_fabric_width_cm below resolves to, and that field's own text already derives the
+  // usable cutting width as effective − 2 × selvedge.
   fabricWidth: googletype_Decimal | undefined;
   fabricWeightGsm: googletype_Decimal | undefined;
-  fabricDirection: common_TechCardFabricDirection | undefined;
+  // Nap / layout. OPTIONAL for presence, on the same reasoning as purpose/is_sample above: the
+  // card is saved WHOLE, the admin is an SPA, and a tab holding an older bundle does not send this
+  // field at all — a proto3 enum's zero value is UNKNOWN, so «absent» and «clear it» were the same
+  // bytes and a stale tab would have wiped the направление off every line of the card. Silently:
+  // the field is not in the signature digest, and NULL is indistinguishable from «ещё не задали».
+  // Since Ф1 that erasure also un-saves every раскладка on the card, so absence now means «do not
+  // touch» and only an explicitly-sent UNKNOWN clears the column.
+  fabricDirection?: common_TechCardFabricDirection;
   wastagePercent: googletype_Decimal | undefined;
   // material_id optionally links this line to a catalog Material (task 10). The line keeps its
   // own snapshot fields regardless; 0 means unlinked (free-text / legacy).
@@ -6062,6 +6123,13 @@ export type common_TechCardBomItem = {
   // Optional по той же причине: голый bool от старого бандла приходит как false и снял бы признак
   // со всех строк карточки разом.
   isSample?: boolean;
+  // READ-ONLY (Ф5а.3): the vocabulary normalisation of this line's `unit`. Ignored on write — the
+  // stored value stays the free-text `unit`, deliberately: that column is inside the SIGNED MATERIALS
+  // digest, so respelling «м» → "m" in storage would stale the MATERIALS sign-off of every card that
+  // spells a unit non-canonically, for a change that alters nothing the card BUYS. Comparison against
+  // the article's unit is normalised in the server instead, which costs no sign-off.
+  // UNKNOWN = the free text does not map to a known unit; it is NOT "no unit".
+  unitCode: common_MaterialUnit | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -6106,6 +6174,30 @@ export type common_TechCardBomPurpose =
   | "TECH_CARD_BOM_PURPOSE_CONTRAST"
   | "TECH_CARD_BOM_PURPOSE_MESH"
   | "TECH_CARD_BOM_PURPOSE_OTHER";
+// MaterialUnit is the closed vocabulary a material quantity is measured in (Ф5а.3), mirroring
+// entity.MaterialUnit. Before it, every unit was free text and every consumer compared raw strings:
+// the production material plan carried a private metre synonym set (m/м/meter/meters/metre/metres)
+// and degraded into a caveat on any other mismatch, so a slot spelled «м» against an article spelled
+// "m" counted as two different units — the quantity kept the slot's meaning while being compared
+// against the article's stock, and the pinned-article costing path refused to price the line.
+// READ-ONLY on the wire. The stored value stays the free-text `unit` string (which is what a write
+// sets); unit_code is the server's normalisation of it, so a value the vocabulary does not know is
+// never guessed — it arrives as MATERIAL_UNIT_UNKNOWN with the raw string intact beside it, and the
+// set of rows reporting UNKNOWN is precisely the list of units that still need a human. A client
+// must therefore never treat UNKNOWN as "no unit" or as "clear the unit".
+export type common_MaterialUnit =
+  | "MATERIAL_UNIT_UNKNOWN"
+  | "MATERIAL_UNIT_M"
+  | "MATERIAL_UNIT_CM"
+  | "MATERIAL_UNIT_MM"
+  | "MATERIAL_UNIT_M2"
+  | "MATERIAL_UNIT_G"
+  | "MATERIAL_UNIT_KG"
+  | "MATERIAL_UNIT_PCS"
+  | "MATERIAL_UNIT_PAIR"
+  | "MATERIAL_UNIT_SET"
+  | "MATERIAL_UNIT_CONE"
+  | "MATERIAL_UNIT_ROLL";
 // TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
 export type common_TechCardConstruction = {
   mainStitchType: string | undefined;
@@ -6429,7 +6521,12 @@ export type common_TechCardSizePattern = {
   // clears the name. NOTE for JSON clients — protojson cannot tell `"name": null` from an absent
   // field, so null also reads as "preserve"; to clear a name, send the empty string.
   name?: string;
-  // 8 and 9 are reserved for view_url / download_url (feat/private-patterns branch, in flight).
+  // view_url / download_url are OUTPUT-ONLY (like uploaded_at): stable tokenized urls on
+  // the backend's own origin (/api/p/{token}) that resolve to the file — the canonical
+  // way to open a pattern once objects go private. Ignored on write; empty when the
+  // stored url does not parse to a managed pattern object key.
+  viewUrl: string | undefined;
+  downloadUrl: string | undefined;
   // line_key is the row's STABLE identity across saves and across FILE REPLACEMENT (the url is not —
   // replacing the sheet mints a new object url). Mint a ULID on first upload and round-trip it
   // unchanged; keep it when replacing the file and change only the url. ONE KEY NAMES ONE ROW: the
@@ -6475,8 +6572,11 @@ export type common_TechCardDetail = {
 export type common_TechCardPiece = {
   name: string | undefined;
   piecesPerGarment: number | undefined;
-  // Q6: mirrored means the piece is CUT AS A MIRRORED PAIR (left+right), not a decorative flag. The
-  // cut-list (GetStyleCutList) expands a mirrored piece ×2 over pieces_per_garment.
+  // ОТСТАВЛЕНО (миграция 0266). Означало «деталь кроится зеркальной парой», и cut list удваивал
+  // по нему pieces_per_garment. Функцией не пользовались; 0266 свернул удвоение в само количество
+  // и погасил флаг, поэтому сервер больше НИЧЕГО по нему не считает. Поле оставлено, чтобы старая
+  // строка доезжала без потерь — но описывать им правило больше нельзя, иначе следующий читатель
+  // вернёт удвоение.
   mirrored: boolean | undefined;
   grainline: string | undefined;
   fused: boolean | undefined;
@@ -6548,12 +6648,16 @@ export type common_TechCardPieceDxfAliasSet = {
   items: common_TechCardPieceDxfAlias[] | undefined;
 };
 
-// TechCardPieceDxfAlias maps one DXF block name to a cut-piece, SCOPED to one fabric slot
-// (bom_line_key — the same binding pattern rows carry). The canonical piece name lives only in
-// TechCardPiece.name; block names are per-file exporter noise («PERED_S», «front-38»), so the same
-// generic name in different fabrics' files maps independently while any spelling within one
-// fabric's files (all its size DXFs) resolves to one piece. The DB UNIQUE is case-insensitive per
-// (card, slot, block).
+// TechCardPieceDxfAlias maps one DXF block name to a cut-piece, SCOPED to the cloth it is cut from.
+// The canonical piece name lives only in TechCardPiece.name; block names are per-file exporter noise
+// («PERED_S», «front-38»), so the same generic name in different cloths' files maps independently
+// while any spelling within one cloth's files (all its size DXFs) resolves to one piece.
+// Since 0267 the scope is a НАЗНАЧЕНИЕ (fabric_purpose) where the card has been sorted and the
+// legacy bom_line_key where it has not: scope = fabric_purpose, else bom_line_key. The DB UNIQUE
+// moved with it and is case-insensitive per (card, scope, block) — computed from the generated
+// column scope_key so the index and the server agree by construction. Swapping the purpose into the
+// OLD (card, line, block) index instead would have turned two same-named blocks of two lines sharing
+// one purpose into a duplicate, and a duplicate fails the WHOLE card save.
 export type common_TechCardPieceDxfAlias = {
   // bom_line_key is the LEGACY scope, and on a purpose-scoped row it is compatibility: the writer
   // records the line here too when the purpose owns exactly ONE line, and leaves it empty when the
@@ -6563,9 +6667,9 @@ export type common_TechCardPieceDxfAlias = {
   blockName: string | undefined;
   pieceLineKey: string | undefined;
   // fabric_purpose is the scope proper (UNSET = not purpose-scoped; the row falls back to
-  // bom_line_key). Since 0267 the DB UNIQUE is per (card, scope, block) where scope =
-  // COALESCE(fabric_purpose, bom_line_key), so two lines sorted into ONE назначение collapse their
-  // same-named blocks onto ONE alias — the case the client must warn about BEFORE saving.
+  // bom_line_key). No explicit presence here and none needed: the alias SET already carries presence
+  // as a whole (TechCardPieceDxfAliasSet) and each row is written whole, so an omitted field on a
+  // row that IS being written means «this row is line-scoped», never «leave the stored value alone».
   fabricPurpose: common_TechCardBomPurpose | undefined;
 };
 
@@ -7146,7 +7250,17 @@ export type common_Material = {
   supplierRef: string | undefined;
   composition: string | undefined;
   spec: string | undefined;
+  // Free text, stored EXACTLY as sent — the server never respells it, so a client that writes "pc"
+  // reads back "pc". unit_code below is the server's read-only normalisation of this string, and it
+  // is what comparisons run on; migration 0271 collapsed the legacy catalogue spellings once, but
+  // that was a cleanup, not a standing write rule.
   unit: string | undefined;
+  // FULL roll width in cm, кромка INCLUDED — despite what this comment said until Ф5а.4. Nothing has
+  // ever subtracted the selvedge from it (0259 says so explicitly: the flat copy was labelled
+  // "usable" in 0095 but no consumer ever treated it as such), and both EffectiveFabricWidthCm and
+  // the metres→kg conversion depend on it being the full width: the selvedge is bought, it weighs,
+  // and billing by the cutting width understates the invoiced weight by 2–4% every time. The USABLE
+  // cutting width is this minus 2 × MaterialFabricAttrs.selvedge_cm.
   fabricWidth: googletype_Decimal | undefined;
   fabricWeightGsm: googletype_Decimal | undefined;
   archived: boolean | undefined;
@@ -7188,6 +7302,35 @@ export type common_Material = {
   // order-to-door time. 0 = unset for both.
   supplierId: number | undefined;
   leadTimeDays: number | undefined;
+  // cutting_coefficient (Ф5а.2) is THE one visible, editable dial per article, replacing eight named
+  // losses nobody can measure separately. It covers, together: усадка, обход пороков, сращивание,
+  // оттеночные полосы — the roll-level reality a marker cannot contain, because a marker is measured
+  // on a clean lay of a nominal width. A MULTIPLIER, not a percent (1.03 = +3%); accepted range
+  // [1, 3].
+  // Unset means nobody has set one and the requirement path multiplies by nothing — an article
+  // without a coefficient plans exactly as it did before this field existed. There is deliberately
+  // ONE default and no per-«класс ткани» taxonomy to pick it from; the value ranges (полотно ~3%,
+  // трикотаж ~6%, клетка/полоска +10–20%) and what the coefficient covers belong in the field's hint
+  // text, so nobody starts adding a column per loss again a year from now.
+  // WRITE SEMANTICS — three states, not two, because "the client did not send the field" and "the
+  // operator cleared it" must not be the same request (same rule as TechCardBomItem.purpose /
+  // is_sample):
+  // * field ABSENT (null)        → LEAVE AS IS. A stale admin tab, or any bundle from before this
+  // field shipped, sends nothing and must not erase a coefficient an
+  // operator set — silently, with no digest and no audit trail.
+  // * field PRESENT, value ""    → CLEAR it (store NULL). This is how the UI unsets the dial.
+  // * field PRESENT with a value → set it.
+  // SCOPE — this is a DEMAND-side dial only. It grosses up the material PLAN's requirement
+  // (GetProductionRunMaterialPlan) and nothing else: the run's planned unit cost and the style cost
+  // estimate gross up by the BOM wastage % alone and do NOT include this coefficient. Planned COGS is
+  // therefore understated by exactly the coefficient wherever one is set. That is deliberate for now —
+  // moving it into the costing chain changes how product.cost_price is derived and every style's
+  // margin with it, which is a separate, deliberately reviewed decision. Do not present a planned cost
+  // as coefficient-inclusive.
+  cuttingCoefficient: googletype_Decimal | undefined;
+  // READ-ONLY (Ф5а.3): the vocabulary normalisation of `unit`. Ignored on write — set `unit`.
+  // UNKNOWN = the free text does not map to any known unit, and must not be read as "no unit".
+  unitCode: common_MaterialUnit | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
@@ -7857,6 +8000,30 @@ export type MaterialPlanRow = {
   shortage: googletype_Decimal | undefined;
   hasSizeNorms: boolean | undefined;
   issuedVariance: googletype_Decimal | undefined;
+  // WHY `required` is bigger than the raw norm (Ф5а.2).
+  // required_before_grossup is Σ(norm × planned_qty) with NO gross-up of any kind applied — no BOM
+  // wastage %, no cutting coefficient — converted into the same unit as `required`. It is the
+  // "before" number of the before → after pair, and it is honest for every row: a manual row, a
+  // marker row, a counted trim, a row with no coefficient at all.
+  // The ONE invariant that always holds is required >= required_before_grossup. The factor between
+  // them is whatever gross-up each contributing line took, and lines take exactly one:
+  // * MARKER-sourced norm → the article's cutting_coefficient;
+  // * manual / legacy measured norm → the BOM line's wastage % (or the run's actual wastage);
+  // * counted trim (4 buttons stay 4 buttons) → nothing.
+  // So required = required_before_grossup × cutting_coefficient holds ONLY for a row fed entirely by
+  // marker norms of an article that has a coefficient. On a manual row the ratio is the wastage
+  // factor while cutting_coefficient may still be set (and a caveat says it did not bite); on a
+  // counted row the ratio is 1. Do NOT derive the coefficient from the two numbers — read it from
+  // cutting_coefficient.
+  // cutting_coefficient is the ARTICLE's coefficient, reported whenever the article has one even if
+  // this run's norms did not let it bite. NOTE it is a DEMAND-side dial only: the run's planned unit
+  // cost and the style cost estimate do NOT include it (they gross up by wastage % alone), so a
+  // planned COGS must never be read as coefficient-inclusive.
+  requiredBeforeGrossup: googletype_Decimal | undefined;
+  cuttingCoefficient: googletype_Decimal | undefined;
+  // Vocabulary normalisation of `unit` (Ф5а.3). UNKNOWN = the row's unit is free text this
+  // server does not know, and quantities under it must not be added to anything else's.
+  unitCode: common_MaterialUnit | undefined;
 };
 
 // MaterialPlanContribution is one slot × colourway share of the plan — the factory-spec breakdown
@@ -7875,6 +8042,12 @@ export type MaterialPlanContribution = {
   unit: string | undefined;
   required: googletype_Decimal | undefined;
   hasSizeNorms: boolean | undefined;
+  // Same decomposition as on the rollup row (Ф5а.2), per slot × colourway: Σ(norm × planned_qty)
+  // with NO gross-up applied (neither wastage % nor coefficient), and the article's cutting
+  // coefficient when it has one (unset = it has none). required >= required_before_grossup always;
+  // the two are related BY the coefficient only on a marker-sourced line — see MaterialPlanRow.
+  requiredBeforeGrossup: googletype_Decimal | undefined;
+  cuttingCoefficient: googletype_Decimal | undefined;
 };
 
 // MaterialPlanBlocker is a slot × colourway the plan could NOT count — a missing article (no pin,
@@ -7917,6 +8090,16 @@ export type ReceiveMaterialStockRequest = {
   // When this delivery was promised to arrive (Phase 9), YYYY-MM-DD; empty = not tracked. Recorded
   // on the receipt so lateness (occurred_at vs expected_at) is a queryable fact without a PO.
   expectedAt: string | undefined;
+  // Roll facts captured at приёмка (Ф5а.1). Both are recorded on the LOT `lot` names, so setting
+  // either WITHOUT a `lot` is REFUSED (InvalidArgument) rather than accepted and dropped — there is
+  // no lot to hang them on, and an operator who measured the roll would otherwise get a 200 and no
+  // data. An omitted value never clears what an earlier receipt into the same lot recorded.
+  // measured_width_cm — the width that ARRIVED, not the one the supplier printed (150 nominal,
+  // 148 measured; the marker is made for the narrowest width in the batch). Must be > 0 when set.
+  // shade_code — the dye lot / оттенок, for colour matching across rolls.
+  // Measured LENGTH has no field: `quantity` already is it.
+  measuredWidthCm: googletype_Decimal | undefined;
+  shadeCode: string | undefined;
 };
 
 export type ReceiveMaterialStockResponse = {
@@ -8299,6 +8482,13 @@ export type common_TechCardMarkerInsert = {
 // blob (idiom: tech_card_release.snapshot). schema_version guards forward evolution — readers
 // degrade gracefully on a version they do not know.
 export type common_TechCardMarkerLayout = {
+  // 1 = the original geometry; 2 adds piece_line_key/block_name on a piece; 3 adds `flipped` on a
+  // placement (Ф1). The server accepts all three and every stored blob stays readable forever.
+  // The version is also what the save path judges a layout BY. A stored v1/v2 marker legitimately
+  // carries rotations the current policy would not offer — the manual editor saves the rotation a
+  // piece actually has, even outside policy — so applying the directional-cloth rule to it would
+  // retro-invalidate every measurement on file the moment its card gets a направление. Only a blob
+  // that can express `flipped` comes from a client that knows the policy, so only v3 is held to it.
   schemaVersion: number | undefined;
   params: common_TechCardMarkerNestParams | undefined;
   pieces: common_TechCardMarkerPiece[] | undefined;
@@ -8349,6 +8539,16 @@ export type common_TechCardMarkerPlacement = {
   rotDeg: number | undefined;
   xCm: number | undefined;
   yCm: number | undefined;
+  // The instance is MIRRORED — the contour reflected before rot_deg is applied, so its chirality is
+  // the opposite of the piece as parsed. No rotation expresses this: a left and a right полочка are
+  // the same outline turned OVER, never turned around, and an engine that can only rotate cuts 44
+  // left fronts and zero right ones off a half-set of выкройки. That is the failure this field
+  // exists to make expressible (schema_version 3, Ф1).
+  // Directional cloth forbids a mirror for the same reason it forbids 180°: both put the piece on
+  // the fabric the wrong way up, and ворс, twill or a print then run against the neighbouring
+  // piece. The save path refuses either one on a one_way scope — see the schema_version note above
+  // for why only v3 blobs are judged.
+  flipped: boolean | undefined;
 };
 
 export type SaveTechCardMarkerResponse = {
@@ -8438,6 +8638,16 @@ export type common_MaterialLot = {
   receivedAt: wellKnownTimestamp | undefined;
   note: string | undefined;
   archived: boolean | undefined;
+  // measured_width_cm is the width that ARRIVED (Ф5а.1), as opposed to the width the supplier
+  // printed: the supplier says 150, the roll measures 148, and the marker is made for the NARROWEST
+  // width in the batch. The article's NOMINAL width lives on MaterialFabricAttrs.width_cm — this is
+  // the measured fact for THIS roll. Unset = nobody measured it (NOT "it matches the nominal").
+  // There is deliberately no measured LENGTH field: received_qty already is it.
+  measuredWidthCm: googletype_Decimal | undefined;
+  // shade_code is the dye lot / оттенок of this roll, for colour matching across rolls. Empty =
+  // unrecorded. The shade also drifts WITHIN one batch, which is why pieces of one garment come
+  // from adjacent layers — that is a note on the lay screen, not another field here.
+  shadeCode: string | undefined;
 };
 
 // AdminPermission grants an account a level of access to one section.
@@ -9437,9 +9647,8 @@ export interface AdminService {
   // GetStyleSizeChart returns a style's full size chart plus the shared lock_version (R5). The admin
   // UI loads the whole chart before editing, because UpdateStyleSizeChart is a full-replace.
   GetStyleSizeChart(request: GetStyleSizeChartRequest): Promise<GetStyleSizeChartResponse>;
-  // GetStyleCutList is the first real consumer of the piece.mirrored flag (Q6): a read-only cut-list
-  // for production. For each cut-piece it expands the quantity (pieces_per_garment × 2 for a mirrored
-  // pair) and resolves, per colourway, which fabric (and fusing) BOM line it is cut from. It is a
+  // GetStyleCutList is the read-only cut-list for production. For each cut-piece it reports the
+  // quantity and resolves, per colourway, which fabric (and fusing) BOM line it is cut from. It is a
   // projection over the tech card — no marker/CAD export, no mutable table.
   GetStyleCutList(request: GetStyleCutListRequest): Promise<GetStyleCutListResponse>;
   // UpdateStyleSizeChart replaces a style's ENTIRE size chart in one versioned request (R5). A colourway
@@ -9924,6 +10133,17 @@ export interface AdminService {
   // DeleteTechCardMarker removes a saved раскладка. Markers are measurements, not structural
   // references — nothing else points at them, so delete is plain (released cards still refuse).
   DeleteTechCardMarker(request: DeleteTechCardMarkerRequest): Promise<DeleteTechCardMarkerResponse>;
+  // GetWorkshopSettings returns «дом настроек цеха» (Ф2.5, 0272): the shop-floor constants that
+  // belong to the ЦЕХ itself and not to any one card or раскладка. Первый жилец is the cutting
+  // table length, which the nesting modal used to make the operator retype on every раскладка.
+  // Every setting is individually optional — an absent one is NOT configured, and a consumer must
+  // degrade to "no verdict" rather than substitute a zero.
+  GetWorkshopSettings(request: GetWorkshopSettingsRequest): Promise<GetWorkshopSettingsResponse>;
+  // UpdateWorkshopSettings patches the workshop configuration. Partial by construction: an omitted
+  // setting is left alone (see UpdateWorkshopSettingsRequest). Returns the resulting configuration,
+  // so a caller never needs a follow-up read. A request that names no setting at all, or a value
+  // outside the plausibility band for its unit, is InvalidArgument with a field-tagged detail.
+  UpdateWorkshopSettings(request: UpdateWorkshopSettingsRequest): Promise<UpdateWorkshopSettingsResponse>;
   // GetOrderPackingSpec is the packer/QC-readable composition of an order (WS7, scope 3): the garments
   // that ship, the on-garment assembly (labels/tags) to verify per line, and the packaging the whole
   // order needs (resolved from WS2 packaging_recipe). Read-only — reserves/consumes nothing.
@@ -14474,6 +14694,40 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTechCardMarker",
       }) as Promise<DeleteTechCardMarkerResponse>;
+    },
+    GetWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/workshop/settings`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetWorkshopSettings",
+      }) as Promise<GetWorkshopSettingsResponse>;
+    },
+    UpdateWorkshopSettings(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/workshop/settings`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "PATCH",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateWorkshopSettings",
+      }) as Promise<UpdateWorkshopSettingsResponse>;
     },
     GetOrderPackingSpec(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.orderUuid) {

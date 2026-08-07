@@ -509,6 +509,15 @@ export function MaterialModal({
       composition: material?.composition ?? '',
       spec: material?.spec ?? '',
       unit: d.unit.trim(),
+      // Ф5а.3: НОРМАЛИЗАЦИЯ `unit` по закрытому словарю, READ-ONLY — сервер её вычисляет и на
+      // записи игнорирует, хранится по-прежнему свободный текст выше.
+      unitCode: undefined,
+      // КОЭФФИЦИЕНТ РАСКРОЯ (Ф5а). Редактора у него тут пока нет, и undefined — это ровно
+      // «поле ОТСУТСТВУЕТ», а не «очистить»: у него три состояния записи (нет поля → не трогать,
+      // пустая строка → снять, значение → поставить), и JSON.stringify undefined выбрасывает.
+      // Прислать сюда эхо сохранённого значения было бы ХУЖЕ: это уже второе состояние, «поставить
+      // ровно то же», и оно перестало бы отличаться от намеренной правки.
+      cuttingCoefficient: undefined,
       fabricWidth: undefined,
       fabricWeightGsm: undefined,
       archived: material?.archived ?? false,

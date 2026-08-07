@@ -193,6 +193,12 @@ export function ReceiveStockModal({
         // Recording input VAT is a costing write; both fields optional, sent only when set.
         inputVatAmount: canWriteCosting ? inputToDecimal(inputVat) : undefined,
         inputVatRegime: canWriteCosting && inputVatRegime ? inputVatRegime : undefined,
+        // ФАКТЫ РУЛОНА НА ПРИЁМКЕ (Ф5а.1): измеренная ширина и оттенок красильной партии. Полей
+        // ввода для них ещё нет — это отдельная работа, — а пропуск безопасен по контракту: они
+        // пишутся на ЛОТ, и опущенное значение никогда не стирает то, что записала предыдущая
+        // приёмка в тот же лот. Ключи объявлены только потому, что генератор требует их наличия.
+        measuredWidthCm: undefined,
+        shadeCode: undefined,
       });
       showMessage(posted(res.movement), 'success');
       onOpenChange(false);

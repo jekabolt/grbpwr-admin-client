@@ -247,6 +247,11 @@ export function mapFormToFittingInsert(
         // Explicit even when '' — absence is the stale-client signal (server keeps the old name).
         name: clampPatternName(p.name ?? ''),
         sizeBytes: p.sizeBytes || 0,
+        // OUTPUT-ONLY токенизированные ссылки чтения (Ф7): сервер их отдаёт и на записи
+        // ИГНОРИРУЕТ. Ключ существует только потому, что генератор объявляет его обязательным;
+        // undefined не сериализуется, и до провода не доедет ничего.
+        viewUrl: undefined,
+        downloadUrl: undefined,
       })),
     mediaIds: data.mediaIds ?? [],
     // note is required by the contract — drop markers left un-annotated on save.
