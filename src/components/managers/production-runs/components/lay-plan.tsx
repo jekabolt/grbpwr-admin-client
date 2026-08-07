@@ -1,4 +1,8 @@
-import { common_ProductionRun, common_ProductionRunLay } from 'api/proto-http/admin';
+import {
+  common_ProductionRun,
+  common_ProductionRunLay,
+  common_ProductionRunLaySection,
+} from 'api/proto-http/admin';
 import { cardMarkers } from 'components/managers/tech-card/components/nesting/marker-io';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
@@ -12,6 +16,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import { LayCard } from './lay-card';
+import { buildLaySectionPlotterFile } from './lay-plotter';
 import { LayCoverageTable } from './lay-coverage-table';
 import { LayEditor, LaySlotOption } from './lay-editor';
 import { layErrorMessage, useDeleteLay, useRunLays, useSaveLay } from './useLays';
@@ -49,6 +54,47 @@ export function LayPlan({
 
   const del = useDeleteLay();
   const reaffirm = useSaveLay();
+
+  // ПЛОТТЕРНЫЙ ФАЙЛ СЕКЦИИ (Ф4.7). Ключ готовящейся секции, а не булев флаг: настил из трёх секций
+  // даёт три кнопки, и общий флаг погасил бы все три, пока грузится геометрия одной.
+  const [plottingKey, setPlottingKey] = useState<string>('');
+  const downloadLayPlotter = async (
+    lay: common_ProductionRunLay,
+    section: common_ProductionRunLaySection,
+    key: string,
+  ) => {
+    if (plottingKey) return;
+    setPlottingKey(key);
+    try {
+      const out = await buildLaySectionPlotterFile(
+        lay,
+        section,
+        {
+          runId,
+          colorway: colorwayLabel(lay.colorwayId ?? 0),
+          sizeLabel,
+          season: techCard?.techCard?.skuSeason ? String(techCard.techCard.skuSeason) : undefined,
+          styleNumber: techCard?.techCard?.styleNumber || undefined,
+        },
+        // Дата берётся здесь, в момент нажатия: это дата ВЫПУСКА ЛИСТА, а не дата настила. Лист
+        // печатают и перепечатывают, и раскройщику важно, та ли распечатка у него в руках.
+        new Date().toISOString(),
+      );
+      if (!out.ok) {
+        showMessage(`Плоттерный файл не собрался — ${out.reason}`, 'error');
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([out.dxf], { type: 'application/dxf' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = out.filename;
+      a.click();
+      // Отложенный отзыв: Safari и Firefox могут не начать скачивание к моменту возврата click().
+      window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } finally {
+      setPlottingKey('');
+    }
+  };
 
   const [editing, setEditing] = useState<{
     layKey?: string;
@@ -282,6 +328,8 @@ export function LayPlan({
                   reaffirming={
                     reaffirm.isPending && reaffirm.variables?.lay?.layKey === lay.layKey
                   }
+                  onPlotter={(section, key) => void downloadLayPlotter(lay, section, key)}
+                  plottingKey={plottingKey}
                   onReaffirm={() => reaffirmQuantities(lay)}
                 />
               ))}

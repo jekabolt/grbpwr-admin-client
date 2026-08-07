@@ -2,6 +2,7 @@ import {
   common_ProductionLayCheck,
   common_ProductionRunLay,
   common_ProductionRunLayQtyEntry,
+  common_ProductionRunLaySection,
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { Button } from 'ui/components/button';
@@ -54,6 +55,8 @@ export function LayCard({
   onDelete,
   onReaffirm,
   reaffirming,
+  onPlotter,
+  plottingKey,
 }: {
   lay: common_ProductionRunLay;
   index: number;
@@ -64,6 +67,10 @@ export function LayCard({
   onDelete: () => void;
   onReaffirm: () => void;
   reaffirming: boolean;
+  /** Выпустить плоттерный файл секции. Отсутствует ⇒ кнопки нет (просмотр без права выпускать). */
+  onPlotter?: (section: common_ProductionRunLaySection, key: string) => void;
+  /** Ключ секции, которая сейчас готовится. Блокирует ТУ ЖЕ кнопку, а не все сразу. */
+  plottingKey?: string;
 }) {
   const checks = lay.checks ?? [];
   const sections = lay.sections ?? [];
@@ -140,12 +147,34 @@ export function LayCard({
       />
       <StackHeightRow lay={lay} checks={checks} />
 
+      {/* ПЛОТТЕР — НА СЕКЦИЮ, А НЕ НА НАСТИЛ. Три секции это три РАЗНЫЕ раскладки, которые режут по
+          очереди своими проходами; один файл «на настил» пришлось бы либо склеить из трёх (такой
+          геометрии не существует), либо молча выбрать одну — и раскройщик получил бы файл, режущий
+          не то, что он настелил. */}
       {sections.map((s, i) => (
         <Row
           key={s.sectionKey || `${s.markerId}-${i}`}
           tone='label'
           label={`${i + 1}. ${s.markerName || `раскладка #${s.markerId ?? 0}`}`}
-          value={`${s.plies ?? 0} сл · ${cmValue(s.sectionLengthCm) ?? '—'} см`}
+          value={
+            <span className='inline-flex items-center gap-2'>
+              <span className='tabular-nums'>
+                {s.plies ?? 0} сл · {cmValue(s.sectionLengthCm) ?? '—'} см
+              </span>
+              {onPlotter && (s.markerId ?? 0) > 0 && (
+                <Button
+                  type='button'
+                  variant='underline'
+                  size='xs'
+                  disabled={plottingKey === (s.sectionKey || `${s.markerId}-${i}`)}
+                  title='DXF для раскройного плоттера: контуры, кромка и ШАПКА (прогон, цвет, артикул, слои, состав, длина). БЕЗ линии шва и надсечек — их восстанавливают по выкройкам, а на странице прогона выкроек нет'
+                  onClick={() => onPlotter(s, s.sectionKey || `${s.markerId}-${i}`)}
+                >
+                  {plottingKey === (s.sectionKey || `${s.markerId}-${i}`) ? 'готовим…' : 'плоттер'}
+                </Button>
+              )}
+            </span>
+          }
         />
       ))}
 
