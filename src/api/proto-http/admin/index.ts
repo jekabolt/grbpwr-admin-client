@@ -5064,6 +5064,18 @@ export type WorkshopSettings = {
   // true is switched on ONLY after кампания Д3 (re-measuring the norms). The order is forced and
   // physically irreversible: directions (Д1) → re-measure after Ф3 ships (Д3) → blocking (Д4).
   runReadinessBlocking?: boolean;
+  // ПРЕДЕЛ ВЫСОТЫ СТОПКИ, in CENTIMETRES — четвёртый жилец дома настроек цеха (Ф4.8), and the house
+  // rule holds again after the one tenant that broke it: ABSENT = не настроено, and a consumer must
+  // then say NOTHING about the height rather than compare against zero.
+  // САНТИМЕТРЫ, А НЕ ЧИСЛО СЛОЁВ — the whole reason this is a shop setting and not a per-marker one:
+  // 30 слоёв шифона это 2 см, 30 слоёв драпа — 30 см. What actually limits the лежание is the blade,
+  // and a blade cuts a HEIGHT. Accepted band (0, 100]; the longest knives reach about 30 cm, so past
+  // a hundred it is a unit mistake rather than a workshop.
+  // ONE limit per shop (решение Р5), not one per fabric: пер-ножевые пределы are a refinement with
+  // no data behind it today, and a column nothing can fill is not created. The article-side half of
+  // the check is common.Material.fabric_thickness_mm; either one absent ⇒ UNKNOWN, and the screen
+  // says which of the two is missing rather than printing a height nobody can trust.
+  maxStackHeightCm: googletype_Decimal | undefined;
 };
 
 export type GetWorkshopSettingsRequest = {
@@ -5106,6 +5118,11 @@ export type UpdateWorkshopSettingsRequest = {
   // "clear it back to unset" for a bool, and none is needed: false and unset behave identically
   // (report-only), which is the whole point of the column's NULL having a defined behaviour.
   runReadinessBlocking?: boolean;
+  // Ф4.8 — предел высоты стопки, CENTIMETRES, band (0, 100]. Zero is REJECTED rather than stored:
+  // a limit of 0 cm would fail every настил ever laid, so «у нас нет предела» is expressed by
+  // clearing the setting (send the empty message), which withholds the verdict instead of failing
+  // it. Same floor argument as the table length, opposite to the seam allowance's legal zero.
+  maxStackHeightCm: googletype_Decimal | undefined;
 };
 
 export type UpdateWorkshopSettingsResponse = {
@@ -7710,6 +7727,25 @@ export type common_Material = {
   // READ-ONLY (Ф5а.3): the vocabulary normalisation of `unit`. Ignored on write — set `unit`.
   // UNKNOWN = the free text does not map to any known unit, and must not be read as "no unit".
   unitCode: common_MaterialUnit | undefined;
+  // fabric_thickness_mm (Ф4.8) — толщина полотна В ОДИН СЛОЙ, in MILLIMETRES. The article-side half
+  // of the предел стопки: stack_height_cm = Σ plies × fabric_thickness_mm / 10, checked against the
+  // workshop's WorkshopSettings.max_stack_height_cm. Ranges are a hint, not a taxonomy: шифон
+  // 0.1-0.2, поплин ~0.3, драп 1.5-2.5. Accepted band (0, 50].
+  // ABSENT MEANS «НЕ ЗАМЕРЕНО», AND THAT IS NOT ZERO. A нулевая толщина would make every lay
+  // 0 cm tall and therefore "fits" — a confident verdict built on nothing, which is precisely the
+  // failure «нет толщины — нет проверки, не догадка» forbids. A consumer with no thickness must
+  // report UNKNOWN and withhold the height entirely, prompting «толщина ткани не задана на артикуле
+  // — замерьте, и высота стопки начнёт проверяться». There is deliberately no default «по классу
+  // ткани»: that taxonomy does not exist and inventing one to feed a guess is the disease this
+  // avoids (same argument as cutting_coefficient above).
+  // WRITE SEMANTICS — three states, verbatim the same as cutting_coefficient, its neighbour on the
+  // article, and for the same reason (a stale admin tab, or any bundle from the window between the
+  // backend and client deploys, sends nothing and must not erase a measurement somebody took with
+  // calipers — silently, on a catalogue with neither a signed digest nor an edit journal):
+  // * field ABSENT (null)        → LEAVE AS IS.
+  // * field PRESENT, value ""    → CLEAR it (store NULL).
+  // * field PRESENT with a value → set it.
+  fabricThicknessMm: googletype_Decimal | undefined;
 };
 
 // MaterialPrice is one point in a material's append-only price history. Prices are in the
