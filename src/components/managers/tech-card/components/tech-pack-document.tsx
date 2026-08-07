@@ -254,6 +254,32 @@ export function TechPackDocument({
     }
     return u.bomItemIndex != null && u.bomItemIndex >= 0 ? items[u.bomItemIndex] : undefined;
   };
+  // EVERY material a step consumes, not just the first. An operation links BOM lines many-to-many
+  // (bom_line_keys → tech_card_operation_bom, 0200) — «втачать молнию» takes the zip AND the thread
+  // — but this sheet resolved only the LEGACY singular triple through resolveUsageArt. That printed
+  // one material for a step that has several, and nothing at all for a step whose links live purely
+  // in bomLineKeys with the legacy mirror empty. The singular ref stays as the fallback, for rows
+  // authored before the plural field existed.
+  const resolveOpMaterials = (o: {
+    bomLineKeys?: string[];
+    bomItemId?: number;
+    bomLineKey?: string;
+    bomItemIndex?: number;
+  }): string[] => {
+    const items = tc.bomItems ?? [];
+    // A key with no surviving line is DROPPED rather than printed as a placeholder: the tech pack
+    // is what the factory cuts and sews to, and «(удалён)» on a spec sheet is worse than silence.
+    // The editor surfaces the same dangling link in red, which is where it belongs.
+    const names = (o.bomLineKeys ?? [])
+      .filter(Boolean)
+      .map((k) => items.find((b) => b.lineKey === k)?.name?.trim() || '')
+      .filter(Boolean);
+    // Fall through when the plural field resolved NOTHING, not merely when it was empty: the legacy
+    // singular ref carries a durable bom_item_id and can still resolve a row whose key has moved.
+    if (names.length > 0) return names;
+    const legacy = resolveUsageArt(o)?.name?.trim();
+    return legacy ? [legacy] : [];
+  };
   // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
   // free-text placement survives only on legacy rows, and an unlinked row is per-garment.
   const resolveUsagePart = (u: common_TechCardColorwayUsage): string => {
@@ -261,9 +287,7 @@ export function TechPackDocument({
     const piece =
       (u.pieceLineKey ? pieces.find((p) => p.lineKey === u.pieceLineKey) : undefined) ??
       (wireInt(u.pieceId)
-        ? pieces.find(
-            (p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId),
-          )
+        ? pieces.find((p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId))
         : undefined);
     return piece?.name?.trim() || u.placement?.trim() || 'на изделие';
   };
@@ -834,12 +858,22 @@ export function TechPackDocument({
                   // Compact secondary line instead of 4 more raw columns (thread/attachment/
                   // stitches-per-cm/BOM-material) — an 11-column table doesn't fit A4, and this
                   // mirrors the seam-type secondary line already used below.
-                  const bomMaterial = resolveUsageArt(o)?.name || '';
+                  // The editor auto-fills `thread` from the linked thread line's ROLE name, so for
+                  // any step that links a thread the same string would otherwise print twice —
+                  // «thread: нитки основных швов · materials: нитки основных швов + основная
+                  // молния». Master printed one ref and never showed it; making the list plural is
+                  // what surfaces the duplicate, so it is dropped here rather than left on the
+                  // sheet the floor actually works from.
+                  const threadNote = (o.thread ?? '').trim().toLowerCase();
+                  const bomMaterials = resolveOpMaterials(o).filter(
+                    (name) => !threadNote || name.toLowerCase() !== threadNote,
+                  );
                   const detail = [
                     o.thread && `thread: ${o.thread}`,
                     o.attachment && `attach: ${o.attachment}`,
                     dec(o.stitchesPerCm) && `${dec(o.stitchesPerCm)} st/cm`,
-                    bomMaterial && `material: ${bomMaterial}`,
+                    bomMaterials.length > 0 &&
+                      `material${bomMaterials.length > 1 ? 's' : ''}: ${bomMaterials.join(' + ')}`,
                   ]
                     .filter(Boolean)
                     .join(' · ');
