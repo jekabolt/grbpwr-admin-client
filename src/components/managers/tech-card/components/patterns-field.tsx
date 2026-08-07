@@ -108,6 +108,7 @@ type FabricLine = {
   effectiveFabricWidthCm: string;
   selvedgeCm: string;
   fabricDirection: string;
+  isSample: boolean;
   order: number;
 };
 
@@ -275,6 +276,9 @@ export function PatternsField({
     lineKey?: string;
     purpose?: string;
     fabricDirection?: string;
+    // Семпловая ярдажа (0265). Флаг РЯДОМ с назначением, а не его значение — и потому он
+    // разбивает скоуп направления надвое: см. markerScopeLines в bom-purpose.ts.
+    isSample?: boolean;
     id?: number;
   }>;
   const fabricBomLines = useMemo(
@@ -299,6 +303,10 @@ export function PatternsField({
           // дайджест MATERIALS — до движка оно не доезжало вовсе, и раскладка на ворсовой
           // ткани спокойно переворачивала детали на 180°.
           fabricDirection: b.fabricDirection ?? '',
+          // Едет до модалки, потому что скоуп направления партиционируется по нему (0265): без
+          // этого непроставленное направление на СЕМПЛОВОМ рулоне снимало бы 180° у
+          // производственного маркера, который сервер бы принял.
+          isSample: !!b.isSample,
           order: i,
         }))
         // Основная ткань первой, дальше подклад/бортовка/утеплитель — порядок ролей, а не
@@ -776,7 +784,20 @@ export function PatternsField({
                       // артикулами, и согласованность их направлений никто не валидирует.
                       // Строгое побеждает — одна ворсовая в скоупе делает ворсовым весь скоуп,
                       // иначе маркер, законный для одной ткани, кладёт вторую ворсом к себе же.
-                      fabricDirection: strictestDirection(g.scope.lines),
+                      //
+                      // СЕМПЛОВЫЕ строки из ответа выброшены: сервер партиционирует скоуп по
+                      // is_sample (0265, MarkerFabricScope), и непроставленное направление на
+                      // семпловом рулоне иначе объявляло бы «НЕ ЗАДАНО» производственной
+                      // раскладке, которую сервер принял бы. Если в скоупе ОДНА семпловая ярдажа
+                      // и ничего больше — судим по ней, это и есть семпловая раскладка.
+                      //
+                      // Это ЗНАЧЕНИЕ НА СТАРТЕ: сохранить оператор может на любую тканевую строку
+                      // карточки, и модалка пересчитывает направление по выбранному слоту сама.
+                      fabricDirection: strictestDirection(
+                        g.scope.lines.some((l) => !l.isSample)
+                          ? g.scope.lines.filter((l) => !l.isSample)
+                          : g.scope.lines,
+                      ),
                     })
                   }
                 >

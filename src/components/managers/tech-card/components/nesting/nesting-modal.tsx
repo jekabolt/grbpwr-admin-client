@@ -29,7 +29,7 @@ import type {
   PieceDTO,
   Unit,
 } from 'lib/nesting/types';
-import { NEST_DEFAULTS } from 'lib/nesting/types';
+import { NEST_DEFAULTS, allowsFlip } from 'lib/nesting/types';
 import { checkLayout, measureLayout, type Violation } from 'lib/nesting/geom/clearance';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
@@ -43,6 +43,7 @@ import {
   markerToView,
   type MarkerBomLine,
 } from './marker-io';
+import { markerScopeLines, strictestDirection } from '../bom-purpose';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
@@ -393,6 +394,14 @@ export function NestingModal({
       width: 'шире полосы ни в одном повороте',
       'no-space': 'не нашлось места на полосе',
       missing: 'детали нет в разобранных файлах',
+      // Зеркало заказано, а ткань его не терпит. Слово тут — не украшение: без него панель
+      // печатала сырой токен «mirror», и оператор видел причину, по которой ничего сделать
+      // нельзя. Действий ровно два, и оба названы.
+      // Какой ИМЕННО факт запретил переворот — ворс или непроставленное направление — называет
+      // предупреждение движка (nest/index.ts), оно показывается рядом и точнее этой строки.
+      // Здесь достаточно сказать, что делать: оба случая чинятся на вкладке BOM.
+      mirror:
+        'ткань переворота не допускает — зеркальный экземпляр класть нечем: проставьте или исправьте направление у строки ткани на вкладке BOM (парные детали на ворсе кроят в два слоя лицом к лицу — это другой маркер)',
     };
     return [...byReason.entries()]
       .map(([reason, names]) => `${[...names].join(', ')} — ${word[reason] ?? reason}`)
@@ -490,7 +499,10 @@ export function NestingModal({
       // Едет ЗНАЧЕНИЕ, а набор поворотов выводит воркер той же чистой функцией
       // (allowedRotations) — политика, применённая только на главном потоке, до поиска не
       // доезжает, и это уже было прод-багом с разворотом по долевой.
-      fabricDirection,
+      //
+      // Именно effectiveDirection, а не проп: искать надо под политикой ТОГО полотна, на которое
+      // маркер ляжет, иначе прогон честно оптимизирует под ткань, которую никто не выбирал.
+      fabricDirection: effectiveDirection,
       // Едет ИМЯ СЛОЯ, а не повёрнутая геометрия: через эту границу геометрия не ходит вовсе,
       // и воркер разворачивает свою копию той же чистой функцией на том же входе. Так экран и
       // движок гарантированно смотрят на одни детали.
@@ -673,6 +685,27 @@ export function NestingModal({
     (bomLines ?? []).some((b) => b.lineKey === lockedBomLineKey);
   const lockDangling = !!lockedBomLineKey && !lockedSlot && !lockedUnsaved;
 
+  // НАПРАВЛЕНИЕ ТОГО ПОЛОТНА, НА КОТОРОЕ РЕАЛЬНО СОХРАНЯТ — а не того, по которому запускали.
+  //
+  // Проп `fabricDirection` вычисляется ОДИН РАЗ, на клике «⌗ раскладка», по скоупу группы DXF. Но
+  // слот запирается только когда назначение владеет ровно одной строкой; иначе диалог сохранения
+  // предлагает ВСЕ тканевые строки карточки, а скоуп сервер резолвит по той, которую прислали. То
+  // есть два расхождения, оба молчаливые: запустили на `any`, сохранили на one_way — отказ после
+  // всего прогона; запустили на one_way, сохранили на `any` — маркер без нужды длиннее, и понять
+  // это не по чему.
+  //
+  // Пересчёт по ВЫБРАННОМУ слоту убирает оба. Пустой резолв (ключа нет в списке — незасейвленная
+  // строка, повисшая привязка) откатывается на стартовый ответ: он всё ещё лучшее, что известно.
+  const effectiveDirection: FabricDirection = useMemo(() => {
+    // Просмотр сохранённого маркера: скоуп его собственной строки разрешает MarkersSection —
+    // у неё под рукой BOM карточки, а сюда доезжает уже ответ.
+    if (viewData) return fabricDirection;
+    const key = lockedSlot?.lineKey || slotKey;
+    if (!key) return fabricDirection;
+    const scope = markerScopeLines(key, bomLines ?? []);
+    return scope.length > 0 ? strictestDirection(scope) : fabricDirection;
+  }, [viewData, fabricDirection, lockedSlot, slotKey, bomLines]);
+
   // Какой именно артикул подставил колорвей — иначе «ширина взялась откуда-то» и проверить нечем.
   const pinArticle = (() => {
     const key = lockedSlot?.lineKey || slotKey;
@@ -780,11 +813,37 @@ export function NestingModal({
   const sizeUnresolved = !!bareSize && sizeIdByToken != null && !sizeIdByToken.has(bareSize);
   const sizeUnsaved =
     savedSizeIds != null && resolvedSizeId != null && !savedSizeIds.includes(resolvedSizeId);
+  // ПРАВИЛО СЕРВЕРА, ПРОВЕРЕННОЕ ДО ОТПРАВКИ (entity.ValidateMarkerFabricDirection). Не вторая
+  // политика: единственный источник запрета — allowsFlip, отсюда и до движка. Здесь только
+  // проверяется, что ГОТОВАЯ раскладка ему не противоречит.
+  //
+  // Нужно это потому, что раскладку и слот выбирают в разное время. Прогон идёт под направлением,
+  // известным на момент запуска; слот оператор может сменить после — и тогда геометрия, законная
+  // для одной ткани, отправляется на другую. Сервер такое отвергает, но узнаёт об этом оператор
+  // последним: после прогона, после «сохранить», с потерянным результатом.
+  //
+  // Проверяется ЭФФЕКТИВНАЯ раскладка (с ручными правками), а не результат прогона: рука кладёт
+  // деталь туда, куда движок бы не положил.
+  //
+  // Только на СОЗДАНИИ. Правка уже лежащего маркера (updateViewMarker) идёт другим путём: там у
+  // строки может быть помилование по поколению политики, и сервер её примет — блокировать здесь
+  // значило бы запретить переименование легаси-раскладки, которое разрешено.
+  const layoutFlipsPiece =
+    !!effective &&
+    (effective.placements.some((p) => p.rot === 180) ||
+      effective.placements.some((p) => p.flipped === true));
+  const directionRefusal =
+    !viewData && layoutFlipsPiece && !allowsFlip(effectiveDirection)
+      ? effectiveDirection === 'unknown'
+        ? 'раскладка кладёт деталь вверх ногами (180° или зеркало), а направление ткани у выбранного слота не проставлено — сервер такую норму не примет: проставьте направление у строки ткани на вкладке BOM либо пересоберите раскладку без переворотов'
+        : 'раскладка кладёт деталь вверх ногами (180° или зеркало), а выбранная ткань помечена one-way — на ворсовой так класть нельзя: смените слот, пересоберите раскладку без переворотов либо исправьте направление ткани, если она на самом деле не ворсовая'
+      : null;
   const canSave =
     !viewData &&
     canEdit &&
     !fetchFailed &&
     !noSlotChosen &&
+    !directionRefusal &&
     !sizeUnsaved &&
     !sizeUnresolved &&
     run.phase === 'done' &&
@@ -820,6 +879,11 @@ export function NestingModal({
     if (!effective) return;
     const name = nameValue.trim();
     if (!name) return;
+    // Отказ прошлой попытки снимается ЗДЕСЬ, на входе в новую. Он держится на панели намеренно
+    // (тост его съедает), но пока чистил его только startRun — а сохраняют не только после
+    // прогона: отказ на слоте А оставался красным на экране, когда сохранение на слот Б уже
+    // прошло и рядом всплыл зелёный тост. Две взаимоисключающие новости об одном действии.
+    setSaveError(null);
     setSaving(true);
     try {
       const perSetQty = new Map<number, number>();
@@ -926,11 +990,27 @@ export function NestingModal({
   async function updateViewMarker() {
     if (!canSaveView || !view?.summary || !effective || !techCardId) return;
     const s = view.summary;
+    setSaveError(null); // см. saveMarker: отказ прошлой попытки не должен пережить удачную
     setSaving(true);
     try {
       const keptWarnings = (view.layout?.warnings ?? []).filter(
         (w) => !w.startsWith(MANUAL_NOTE_PREFIX),
       );
+      // ВЕРСИЯ СХЕМЫ БЛОБА: сохранённая — пока в раскладке нет зеркала, ровно 3 — как только есть.
+      //
+      // Сохранять чужую версию правильно: она делает легаси-маркер переименовываемым, а штамп 3 на
+      // легаси-геометрии это свойство отнял бы. Но зеркало в блобе, заявившем версию младше 3, —
+      // невозможный пэйлоад: поля тогда не существовало, и сервер отвергает такой блоб для КАЖДОГО
+      // маркера, привязанного к ткани или нет (entity.FlipPredatesSchema). То есть выбора между
+      // «сохранить версию» и «сохранить зеркало» нет: сохранив версию, мы бы потеряли и зеркало, и
+      // всю правку вместе с ним.
+      //
+      // Сегодня ветка недостижима — редактор не умеет НАВОДИТЬ зеркало, а прочитать его можно
+      // только из блоба, который уже v3. Она стоит здесь затем, чтобы инвариант держался этим
+      // файлом, а не отсутствием кнопки в соседнем.
+      const storedSchema = view.layout?.schemaVersion ?? 1;
+      const hasFlip = effective.placements.some((p) => p.flipped === true);
+      const schemaVersion = hasFlip ? Math.max(storedSchema, 3) : storedSchema;
       await adminService.SaveTechCardMarker({
         id: s.id ?? 0,
         techCardId,
@@ -955,7 +1035,7 @@ export function NestingModal({
           placedCount: s.placedCount ?? effective.placedCount,
           totalCount: s.totalCount ?? effective.totalCount,
           layout: {
-            schemaVersion: view.layout?.schemaVersion ?? 1,
+            schemaVersion,
             params: view.layout?.params,
             pieces: view.layout?.pieces ?? [],
             placements: effective.placements.map((pl) => ({
@@ -964,6 +1044,12 @@ export function NestingModal({
               rotDeg: pl.rot,
               xCm: Math.round(pl.x * 100) / 100,
               yCm: Math.round(pl.y * 100) / 100,
+              // ТРЕТИЙ путь записи размещений (buildMarkerLayout — первый, saveMarker зовёт его).
+              // Он молча ронял зеркало: открыть зеркальный маркер, подвинуть ОДНУ деталь, сохранить
+              // правки — и все зеркальные экземпляры возвращались обычными. Никакого признака: и
+              // тот и другой контур на экране выглядят одинаково, длина не меняется, счётчики
+              // сходятся. Сорок четыре левые полочки и ни одной правой.
+              flipped: pl.flipped === true,
             })),
             warnings: [...keptWarnings, ...(manualNote ? [manualNote] : [])],
           },
@@ -1230,15 +1316,22 @@ export function NestingModal({
           {!viewData && (
             <Text size='nano' variant='label' component='p'>
               направление ткани:{' '}
-              {fabricDirection === 'one_way'
+              {effectiveDirection === 'one_way'
                 ? 'ворсовая (one-way) — переворот на 180° запрещён'
-                : fabricDirection === 'two_way'
+                : effectiveDirection === 'two_way'
                   ? 'two-way — переворот разрешён'
-                  : fabricDirection === 'any'
+                  : effectiveDirection === 'any'
                     ? 'без ворса — переворот разрешён'
                     : 'НЕ ЗАДАНО'}
-              {fabricDirection === 'unknown'
-                ? ' — раскладка считается с переворотом, но сохранить её как норму нельзя, пока направление не проставлено у строки ткани на вкладке BOM'
+              {/* Прежний текст здесь обещал безусловный отказ: «сохранить нельзя, пока направление
+                  не проставлено». Сервер строже НЕ настолько — он отказывает только раскладке,
+                  которая реально кладёт деталь вверх ногами (180° или зеркало), а раскладку без
+                  переворотов принимает при любом направлении, включая непроставленное. Обещание
+                  отказа, которого не будет, стоит того же, что и умолчание о настоящем: оператор
+                  перестаёт верить плашке. Поэтому теперь тут сказано, что делает КЛИЕНТ — он
+                  считает без 180°, — и почему это не блокирует сохранение. */}
+              {effectiveDirection === 'unknown'
+                ? ' — пока никто не ответил, раскладка считается БЕЗ переворота на 180°: такая норма принимается на любой ткани. Проставьте направление у строки ткани на вкладке BOM, и на ненаправленной ткани раскладка станет плотнее'
                 : ''}
             </Text>
           )}
@@ -1571,10 +1664,17 @@ export function NestingModal({
               targetCm={displayTarget}
               marginCm={displayMargin}
               allowCrossGrain={displayCross}
-              // В режиме просмотра — 'unknown': у сохранённого маркера политика переворота не
-              // записана (её колонка появляется только в Ф3), и запрещать 180° задним числом
-              // значило бы перечеркнуть каждый снятый до Ф1 маркер.
-              fabricDirection={viewData ? 'unknown' : fabricDirection}
+              // НАСТОЯЩЕЕ направление ткани — и в режиме просмотра тоже.
+              //
+              // Здесь стояло 'unknown' для сохранённого маркера, «чтобы не перечёркивать снятое до
+              // Ф1». Перечёркивать оно и не могло: rotsFor всегда оставляет ТЕКУЩИЙ поворот детали
+              // в цикле, так что лежащие в блобе 180° никуда не деваются. Зато вместе с прежним
+              // allowsFlip (где unknown разрешал переворот) оно ПРЕДЛАГАЛО оператору поставить
+              // деталь на 180° на ворсовой ткани — и такая правка старого маркера УХОДИЛА В БАЗУ:
+              // сервер милует строки с поколением политики младше 3, и поколение это остаётся
+              // прежним, так что строка остаётся помилованной навсегда. То есть ровно там, где
+              // помилование должно было защищать старые замеры, оно молча узаконивало новый брак.
+              fabricDirection={effectiveDirection}
               editable={editingActive}
               violating={violatingIdx}
               onChange={(next) => setManual(next)}
@@ -1601,6 +1701,12 @@ export function NestingModal({
             <CalloutBox tone='error'>
               сохранить не удалось: {saveError}
             </CalloutBox>
+          )}
+          {/* Тот же отказ, что вынес бы сервер, но ДО отправки и рядом с раскладкой, которую он
+              касается. Слот и прогон разнесены во времени, поэтому расхождение появляется уже
+              после того, как ждать перестали. */}
+          {directionRefusal && (
+            <CalloutBox tone='error'>сохранить нельзя: {directionRefusal}</CalloutBox>
           )}
           {unplaced.length > 0 && (
             <CalloutBox tone='error'>
@@ -1765,7 +1871,9 @@ export function NestingModal({
                         ? 'нет прав на изменение карточки, либо она released'
                         : fetchFailed
                           ? 'часть DXF не скачалась — раскладка неполная, такой маркер занизил бы расход'
-                          : sizeUnresolved
+                          : directionRefusal
+                            ? directionRefusal
+                            : sizeUnresolved
                             ? `размера «${shownSize}» нет в размерном ряду карточки — добавьте его, иначе маркер записался бы не на тот размер`
                             : sizeUnsaved
                               ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'

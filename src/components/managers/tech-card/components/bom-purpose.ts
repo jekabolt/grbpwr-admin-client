@@ -269,6 +269,47 @@ export function strictestDirection(lines: Array<{ fabricDirection?: string }>): 
   return out;
 }
 
+/**
+ * КАКОЕ ПОЛОТНО СУДИТ РАСКЛАДКУ, привязанную к строке `bomLineKey` — точная копия серверного
+ * `entity.MarkerFabricScope` (internal/entity/fabric_direction.go), потому что расхождение здесь
+ * стоит отказа ПОСЛЕ прогона: клиент раскладывает по одной политике, сервер судит по другой.
+ *
+ * Два правила, и второе легко не заметить:
+ *
+ *  1. НАЗНАЧЕНИЕ, а не строка. Одни и те же лекала кроятся со всех артикулов одного назначения,
+ *     согласованность их направлений никто не валидирует, поэтому строгое побеждает.
+ *  2. СЕМПЛОВАЯ ЯРДАЖА В СКОУП НЕ ВХОДИТ. is_sample — флаг РЯДОМ с назначением, а не его значение,
+ *     ровно потому, что одна карточка несёт производственную основную ткань И семпловую основную
+ *     ткань под ОДНИМ назначением (0265). Без этого фильтра непроставленное направление на
+ *     семпловом рулоне объявляло бы «НЕ ЗАДАНО» и снимало 180° у ПРОИЗВОДСТВЕННОГО маркера,
+ *     который сервер принял бы. Симметрично: ворс производственного рулона не должен управлять
+ *     раскладкой, которая его никогда не коснётся.
+ *
+ * Пустой результат (ключ ни к чему не резолвится, привязки нет) — это 'unknown' у
+ * strictestDirection, то есть «никто не ответил», а не «можно всё».
+ */
+export function markerScopeLines<L extends RollGoodsLine & { isSample?: boolean }>(
+  bomLineKey: string,
+  lines: L[],
+): L[] {
+  const key = (bomLineKey ?? '').trim().toLowerCase();
+  if (!key) return [];
+  const named = lines.find((l) => (l.lineKey ?? '').trim().toLowerCase() === key);
+  if (!named) return [];
+  const sample = !!named.isSample;
+  const purpose = (named.purpose ?? '').trim();
+  if (!purpose || purpose === UNSET_PURPOSE) return [named];
+  return lines.filter((l) => !!l.isSample === sample && (l.purpose ?? '').trim() === purpose);
+}
+
+/** Направление, которому обязана подчиняться раскладка на строке `bomLineKey`. */
+export function markerScopeDirection(
+  bomLineKey: string,
+  lines: Array<RollGoodsLine & { isSample?: boolean; fabricDirection?: string }>,
+): ScopeDirection {
+  return strictestDirection(markerScopeLines(bomLineKey, lines));
+}
+
 /** THE rule, pure half: no BOM needed, so the dedupe checks can run anywhere. */
 export function fabricScopeKey(purpose?: string, bomLineKey?: string): string {
   const p = (purpose ?? '').trim();

@@ -32,6 +32,15 @@ export type MarkerBomLine = {
   // showing the article name alone offers two identical options — while THIS select is the one
   // that decides which BOM line the measured length lands on.
   role?: string;
+  // Что нужно, чтобы ответить «какое полотно судит раскладку на ЭТОЙ строке» — то есть чтобы
+  // позвать markerScopeDirection (bom-purpose.ts, копия серверного MarkerFabricScope). Направление
+  // нельзя взять с одной строки: назначение владеет несколькими артикулами и строгое побеждает, а
+  // семпловая ярдажа в скоуп не входит вовсе. Раньше эти три поля в модалку не доезжали, и она
+  // показывала направление, посчитанное ОДИН РАЗ на старте по группе DXF, — тогда как сохранить
+  // оператор может на любую тканевую строку карточки, и скоуп у неё другой.
+  purpose?: string;
+  fabricDirection?: string;
+  isSample?: boolean;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -206,16 +215,27 @@ export function buildMarkerLayout(args: {
   // reader was ever entitled to infer a field's presence from the version, and none does.
   // v3 = the writer KNOWS THE FLIP POLICY: it derives its rotation set from the cloth's
   // направление (lib/nesting/types.ts allowedRotations), so it never lays a piece upside down on
-  // one_way cloth, and its placements can express a mirror (`flipped`).
+  // cloth that forbids it, and its placements can express a mirror (`flipped`).
   //
-  // The version is what makes the server's policy check possible AT ALL, and that is why it is
-  // claimed unconditionally here rather than only when a mirror is present. The server judges
-  // rotations only from v3 up — deliberately, because stored markers legitimately carry rotations
-  // outside today's policy (the manual editor saves the rotation a piece ACTUALLY has, so 90° at
-  // allow_cross_grain=false and 180° are both on file) and judging them by a rule that did not
-  // exist when they were taken would refuse measurements nobody can re-take without re-nesting.
-  // So a blob that does NOT claim v3 is exempt — and a client that kept writing v2 would leave the
-  // whole guard dead while the operator was told it was protected.
+  // ЧТО ВЕРСИЯ НА САМОМ ДЕЛЕ РЕШАЕТ НА СЕРВЕРЕ — и это НЕ то, что здесь было написано раньше.
+  // Тут стояло «сервер судит повороты только начиная с v3» и «клиент, продолжающий писать v2,
+  // оставил бы всю защиту мёртвой». Обе фразы неверны для развёрнутого бэкенда, и обе опасны: они
+  // подсказывают следующему читателю, что номером версии можно управлять политикой.
+  //
+  //   • Правило про 180°/зеркало (ValidateMarkerFabricDirection) НЕ СМОТРИТ на версию пэйлоада
+  //     вовсе. Оно отказывает по направлению ткани одинаково любому блобу.
+  //   • Дедовщина (grandfathering) для старых раскладок ключуется НЕ пэйлоадом, а колонкой
+  //     layout_schema_version уже лежащей в базе строки, и колонка эта — ПОКОЛЕНИЕ ПОЛИТИКИ,
+  //     серверная константа, а не копия того, что прислал клиент. Ровно затем: копирование
+  //     пэйлоада делало освобождение подделываемым в один запрос (создать чистый маркер с v1,
+  //     следующим апдейтом дописать в него 180°).
+  //   • Версия load-bearing РОВНО ДЛЯ ОДНОГО: FlipPredatesSchema. Зеркало в блобе, заявившем
+  //     версию младше 3, — это невозможный пэйлоад (поля тогда не существовало), и он отвергается
+  //     для КАЖДОГО маркера, привязанного к ткани или нет.
+  //
+  // Заявлять 3 безусловно всё равно правильно: этот писатель действительно умеет зеркало, и
+  // именно это версия и означает. Просто цена ошибки тут не «защита умерла», а «зеркало не
+  // сохранить».
   //
   // The version ladder stays cumulative and the identity rule above is unchanged: a reader still
   // branches on the FIELD it needs, never on the number.
@@ -253,6 +273,18 @@ export function buildMarkerLayout(args: {
       rotDeg: pl.rot,
       xCm: r2(pl.x),
       yCm: r2(pl.y),
+      // ЗЕРКАЛО, схема 3. Договор целиком живёт в lib/nesting/types.ts:
+      //   placed(p) = R(rot) · M^flipped · p + (x, y),  M: (x, y) ↦ (−x, y)
+      // Здесь переезжает только БУЛЕВО ЗНАЧЕНИЕ — ни координаты, ни поворот от зеркала не
+      // зависят, потому что отражение применяется ДО поворота и в собственной системе детали.
+      //
+      // Пишется ВСЕГДА, а не только когда true. Блоб — единственная запись раскладки, и `false`
+      // в нём значит «клиент знал про зеркало и эта деталь не отражена», тогда как отсутствие
+      // ключа значит «писал клиент, который про зеркало не знал». Различать их нужно ровно
+      // потому, что версия 3 заявлена безусловно (см. выше): читатель ветвится по ПОЛЮ, а не по
+      // номеру, и молчаливый пропуск здесь превратил бы каждую зеркальную деталь в обычную при
+      // первом же переоткрытии — тот самый брак, ради которого поле и заводили.
+      flipped: pl.flipped === true,
     })),
     warnings: [...(args.parseWarnings ?? []), ...result.warnings],
   };
@@ -291,6 +323,12 @@ export function markerToView(marker: common_TechCardMarker): {
       rot: (ROTS.includes((pl.rotDeg ?? 0) as RotationDeg) ? pl.rotDeg ?? 0 : 0) as RotationDeg,
       x: pl.xCm ?? 0,
       y: pl.yCm ?? 0,
+      // Обратная сторона записи выше. Отсутствие ключа (блоб схемы 1/2, сохранённый до Ф1) —
+      // это ОТВЕТ «не отражено», а не пробел: зеркала тогда не существовало, выразить его было
+      // нечем. Поэтому `=== true`, а не `??`-цепочка к какому-нибудь умолчанию: единственный
+      // источник зеркальности — этот флаг, и выводить её из чего-то ещё (из чётности instance,
+      // из имени детали) запрещено договором в types.ts.
+      flipped: pl.flipped === true,
     })),
     usedLengthCm: decNum(s.usedLengthCm),
     efficiency: decNum(s.efficiencyPct) / 100,

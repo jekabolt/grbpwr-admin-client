@@ -38,10 +38,12 @@ export function LayoutEditor({
   targetCm?: number;
   marginCm: number;
   allowCrossGrain: boolean;
-  // Направление ткани раскладки. Легаси-маркер, снятый до Ф1, приходит как 'unknown' — и это
-  // правильное поведение для НЕГО: политика переворота у него не записана, и запрещать её
-  // задним числом значило бы перечеркнуть каждый сохранённый маркер. Текущий поворот детали
-  // всё равно остаётся в цикле ниже, поэтому 180° старого маркера не пропадает.
+  // Направление НАСТОЯЩЕЙ ткани этой раскладки — и у сохранённого маркера тоже (MarkersSection
+  // резолвит скоуп его строки BOM). Раньше в режиме просмотра сюда подставлялось 'unknown', и это
+  // была не осторожность, а дыра: редактор ПРЕДЛАГАЛ поставить деталь на 180° на ворсовой ткани,
+  // а сервер такую правку старой строки принимал по помилованию — и строка оставалась помилованной
+  // навсегда. Сохранённые повороты при этом ничего не теряют: rotsFor ниже всегда держит ТЕКУЩИЙ
+  // поворот детали в цикле, поэтому 180° легаси-маркера остаётся выбранным и выбираемым.
   fabricDirection: FabricDirection;
   editable: boolean;
   // Placement indices that violate clearances — painted red.
@@ -92,9 +94,14 @@ export function LayoutEditor({
   // то же правило, что у движка (nest/index.ts). Текущий поворот всегда остаётся в
   // цикле: сохранённый маркер может нести 90° при allowCrossGrain=false, и кнопка не
   // должна молча уводить деталь на 0°.
-  const rotsFor = (piece: PieceDTO, current: RotationDeg): RotationDeg[] => {
+  //
+  // Зеркало передаётся насквозь: у отражённого варианта габариты те же по РАЗМЕРУ, но другие по
+  // положению ([0,w] переезжает в [−w,0]), а «влезает ли по ширине» — вопрос про размер. Считать
+  // его по незеркальному контуру было бы верно по числу и неверно по смыслу; передаём флаг, чтобы
+  // здесь и в clamp ниже мерялась одна и та же деталь.
+  const rotsFor = (piece: PieceDTO, current: RotationDeg, flipped?: boolean): RotationDeg[] => {
     const fitting = rots.filter((r) => {
-      const b = rotatedBounds(piece, r);
+      const b = rotatedBounds(piece, r, flipped);
       return b.maxY - b.minY <= usableWidth + 1e-9;
     });
     if (!fitting.includes(current)) fitting.unshift(current);
@@ -129,7 +136,10 @@ export function LayoutEditor({
     const pl = placements[index];
     const piece = byId.get(pl.pieceId);
     if (!piece) return { x, y };
-    const rb = rotatedBounds(piece, rot);
+    // ЗЕРКАЛО обязано попасть в габариты: у отражённой детали собственный bbox лежит в [−w, 0],
+    // а не в [0, w]. Зажим по незеркальным границам разрешил бы утащить её на целую ширину за
+    // кромку — и это не «немного неточно», а деталь, которой на полотне нет.
+    const rb = rotatedBounds(piece, rot, pl.flipped);
     // Полоса физически ограничена поперёк и слева; вправо длина открыта.
     const minY = marginCm - rb.minY;
     const maxY = W - marginCm - rb.maxY;
@@ -181,12 +191,14 @@ export function LayoutEditor({
     const pl = placements[selected];
     const piece = byId.get(pl.pieceId);
     if (!piece) return;
-    const list = rotsFor(piece, pl.rot);
+    const list = rotsFor(piece, pl.rot, pl.flipped);
     const rot = list[(list.indexOf(pl.rot) + 1) % list.length];
     if (rot === pl.rot) return; // единственное допустимое положение — вращать некуда
-    // Держим центр повёрнутого bbox на месте, чтобы деталь не «прыгала».
-    const rb0 = rotatedBounds(piece, pl.rot);
-    const rb1 = rotatedBounds(piece, rot);
+    // Держим центр повёрнутого bbox на месте, чтобы деталь не «прыгала». Зеркальность у обоих
+    // габаритов ОДНА И ТА ЖЕ: поворот её не меняет (M применяется до R), кнопка «повернуть»
+    // зеркало не снимает и не наводит.
+    const rb0 = rotatedBounds(piece, pl.rot, pl.flipped);
+    const rb1 = rotatedBounds(piece, rot, pl.flipped);
     const cx = pl.x + (rb0.minX + rb0.maxX) / 2;
     const cy = pl.y + (rb0.minY + rb0.maxY) / 2;
     const raw = { x: cx - (rb1.minX + rb1.maxX) / 2, y: cy - (rb1.minY + rb1.maxY) / 2 };
@@ -196,18 +208,26 @@ export function LayoutEditor({
 
   const selPiece = selected != null ? byId.get(placements[selected]?.pieceId) : undefined;
 
+  // Пометки размещения тем же словарём, что и планировщик подписей (render/label-fit.ts): поворот
+  // и «зеркало». Левая и правая полочки на маркере отличаются ТОЛЬКО хиральностью — если её нигде
+  // не написать, человек, сверяющий раскладку с комплектом кроя, различить их не сможет.
+  const marksOf = (pl: Placement): string => {
+    const m = [pl.rot ? `${pl.rot}°` : '', pl.flipped ? 'зеркало' : ''].filter(Boolean);
+    return m.length > 0 ? ` (${m.join(', ')})` : '';
+  };
+
   return (
     <div className='space-y-1'>
       {editable && (
         <div className='flex flex-wrap items-center gap-2'>
           <Text size='nano' variant='label' component='span'>
             {selected != null && selPiece
-              ? `выбрано: ${selPiece.name}${placements[selected].rot ? ` (${placements[selected].rot}°)` : ''}`
+              ? `выбрано: ${selPiece.name}${marksOf(placements[selected])}`
               : 'перетащите деталь · клик — выбрать · R — поворот'}
           </Text>
           {selected != null &&
             selPiece &&
-            rotsFor(selPiece, placements[selected].rot).length > 1 && (
+            rotsFor(selPiece, placements[selected].rot, placements[selected].flipped).length > 1 && (
               <button
                 type='button'
                 className='text-nano uppercase underline hover:opacity-70'
@@ -273,14 +293,25 @@ export function LayoutEditor({
             if (!piece) return null;
             const live = drag?.index === index ? drag : pl;
             const bad = violating.has(index);
-            const rb = rotatedBounds(piece, pl.rot);
+            const rb = rotatedBounds(piece, pl.rot, pl.flipped);
             const lx = live.x + (rb.minX + rb.maxX) / 2;
             const ly = live.y + (rb.minY + rb.maxY) / 2;
             const label = pl.instance > 0 ? `${piece.name} ×${pl.instance + 1}` : piece.name;
             return (
               <g key={index}>
+                {/* ДОГОВОР О РАЗМЕЩЕНИИ, выраженный матрицами SVG (lib/nesting/types.ts):
+                        placed(p) = R(rot) · M^flipped · p + (x, y),   M: (x, y) ↦ (−x, y)
+                    Список transform'ов SVG перемножается СЛЕВА НАПРАВО, а к точке применяется
+                    справа налево — то есть `translate rotate scale(-1 1)` это ровно T·R·M, и
+                    зеркало срабатывает ПЕРВЫМ, в собственных координатах детали. Порядок здесь
+                    не косметика: M·R(θ) = R(−θ)·M, поэтому «scale перед rotate» разошёлся бы с
+                    движком на 2θ — то есть НЕ РАЗОШЁЛСЯ БЫ ВОВСЕ на 0° и 180° и разъехался бы на
+                    180° у детали на 90°. Экран показывал бы деталь, которой в файле для резака
+                    нет, и никакой признак этого не выдал бы: контур остаётся контуром.
+                    Ось тоже часть договора — scale(-1 1), а не scale(1 -1): вторая нарисовала бы
+                    столь же правдоподобную деталь ровно в полуобороте от нужного места. */}
                 <g
-                  transform={`translate(${live.x} ${live.y}) rotate(${pl.rot})`}
+                  transform={`translate(${live.x} ${live.y}) rotate(${pl.rot})${pl.flipped ? ' scale(-1 1)' : ''}`}
                   className={editable ? 'cursor-move' : undefined}
                   onPointerDown={(e) => startDrag(index, e)}
                   onPointerMove={moveDrag}
@@ -335,7 +366,7 @@ export function LayoutEditor({
                         pointerEvents='none'
                       >
                         {label}
-                        {pl.rot ? ` (${pl.rot}°)` : ''}
+                        {marksOf(pl)}
                       </text>
                     );
                   }

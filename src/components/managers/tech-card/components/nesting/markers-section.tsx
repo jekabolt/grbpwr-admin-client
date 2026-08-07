@@ -18,6 +18,11 @@ import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { consumptionCm, decNum } from './marker-io';
+import {
+  isRollGoodsSection,
+  markerScopeDirection,
+  type ScopeDirection,
+} from '../bom-purpose';
 import type { TechCardFormData } from '../schema';
 
 const NestingModal = lazy(() =>
@@ -53,6 +58,33 @@ export function MarkersSection({
   const sizeById = useSizeNames();
   const season = (useWatch<TechCardFormData>({ name: 'season' }) ?? '') as string;
   const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
+  // НАПРАВЛЕНИЕ ТКАНИ ОТКРЫТОГО МАРКЕРА. Раньше сюда не передавалось ничего, и модалка вдобавок
+  // подменяла его на 'unknown' в режиме просмотра — то есть ручной редактор ПРЕДЛАГАЛ поставить
+  // деталь на 180° на ворсовой ткани. Правка старого маркера с таким поворотом уходила в базу:
+  // сервер милует строки, чьё поколение политики младше 3, и поколение при этом не двигает, так
+  // что строка остаётся помилованной навсегда. Помилование, заведённое защищать старые ЗАМЕРЫ,
+  // начинало узаконивать новый брак — и именно на старых строках, ради которых и заводилось.
+  //
+  // Скоуп резолвится тут, а не в модалке: BOM карточки под рукой только здесь.
+  const bomItems = (useWatch<TechCardFormData>({ name: 'bomItems' }) ?? []) as Array<{
+    section?: string;
+    lineKey?: string;
+    purpose?: string;
+    fabricDirection?: string;
+    isSample?: boolean;
+  }>;
+  const rollGoodsLines = useMemo(
+    () =>
+      bomItems
+        .filter((b) => isRollGoodsSection(b.section) && b.lineKey)
+        .map((b) => ({
+          lineKey: b.lineKey as string,
+          purpose: b.purpose ?? '',
+          fabricDirection: b.fabricDirection ?? '',
+          isSample: !!b.isSample,
+        })),
+    [bomItems],
+  );
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
 
@@ -60,6 +92,12 @@ export function MarkersSection({
   const [openingId, setOpeningId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<{ id: number; name: string } | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  // Непривязанная раскладка — 'unknown': ткани у неё нет, спрашивать не у чего, и с белым списком
+  // allowsFlip это значит «переворот не предлагаем», что для геометрии без цели и правильно.
+  const viewDirection: ScopeDirection = useMemo(
+    () => markerScopeDirection(view?.summary?.bomLineKey ?? '', rollGoodsLines),
+    [view?.summary?.bomLineKey, rollGoodsLines],
+  );
 
   const openMarker = async (id: number) => {
     setOpeningId(id);
@@ -202,6 +240,10 @@ export function MarkersSection({
             )}
             season={season}
             styleNumber={styleNumber}
+            // Направление РЕАЛЬНОЙ ткани этого маркера. Ручной редактор предлагает повороты по
+            // нему, поэтому на ворсовой строке 180° он больше не предложит. Уже лежащий в блобе
+            // поворот при этом никуда не денется — rotsFor всегда держит текущий в цикле.
+            fabricDirection={viewDirection}
             onClose={() => setView(null)}
           />
         </Suspense>
