@@ -39,10 +39,16 @@ export function RunCosts({
   canEdit,
   canReadCosting,
   locked = false,
+  onDirtyChange,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
   canReadCosting: boolean;
+  /**
+   * Reports the unsaved-draft flag upwards: the "· unsaved" marker moved from this panel's own
+   * heading onto the run conveyor. Pass a STABLE callback — it fires from an effect.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
   // A received/closed run is immutable server-side (ErrProductionRunReceivedImmutable), and cost
   // articles are written through UpdateProductionRun — so every edit control here would produce a
   // guaranteed rejection. The list stays readable; only the writes go away.
@@ -70,6 +76,14 @@ export function RunCosts({
       })),
     );
   }, [run, dirty]);
+
+  // Before the costing gate below: hooks may not sit behind an early return. The cleanup is
+  // load-bearing — an unmounted editor has no draft left to save, and without it the conveyor
+  // would keep promising unsaved cost articles that died with the component.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   // Cost articles are confidential — hidden entirely without costing:read (never a fake €0.00).
   if (!canReadCosting) return null;
@@ -146,7 +160,6 @@ export function RunCosts({
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='small'>
           actual costs · начислено
-          {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
           {locked ? (
             <span className='ml-2 lowercase text-labelColor'>· закрыто, правки невозможны</span>
           ) : null}

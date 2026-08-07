@@ -7,9 +7,7 @@ import {
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { fetchMediaBlob } from 'lib/features/media-blob';
-import { NEST_DEFAULTS } from 'lib/nesting/types';
-import { NestingWorkerClient } from 'lib/nesting/worker/client';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -49,8 +47,10 @@ import {
 import { sizeTokensOf } from './nesting/block-code';
 import {
   SheetThumb,
+  dxfGeometryQuery,
   useDxfGeometry,
   useDxfIndex,
+  type DxfBundle,
   type DxfIndex,
   type ScopedDxfFile,
 } from './nesting/dxf-geometry';
@@ -165,32 +165,12 @@ function revisionOf(row: PatternRow): number | null {
 // — скачать и разобрать. Это стоит загрузки с CDN и полного разбора геометрии, поэтому проверка
 // сидит на кнопке, а не рисуется сама: открытие вкладки не должно тянуть десятки мегабайт.
 //
-// Разбор идёт ЧЕРЕЗ ТОТ ЖЕ воркер, что и раскладка. Дешёвый скан имён блоков на главном потоке
-// написать легко, но это была бы вторая реализация того же правила, и в день, когда они
-// разойдутся, панель будет уверенно врать — ровно тот класс ошибки, из-за которого этот текст
+// Разбор идёт ЧЕРЕЗ ТОТ ЖЕ воркер, что и раскладка, и с 2026-08 — через тот же КЭШ (dxf-geometry).
+// Своя копия скачивания здесь стояла до тех пор, пока разбор не понадобился ещё и силуэтам плиток:
+// две копии означали два скачивания одних файлов по одному нажатию. Дешёвый скан имён блоков на
+// главном потоке написать легко, но это была бы вторая реализация того же правила, и в день, когда
+// они разойдутся, панель будет уверенно врать — ровно тот класс ошибки, из-за которого этот текст
 // вообще пишется.
-async function parsePiecesOnce(files: NestingFile[]) {
-  const client = new NestingWorkerClient();
-  try {
-    // allSettled: одна недоступная ссылка не должна отменять файлы, которые скачались.
-    const settled = await Promise.allSettled(
-      files.map(async (f) => new File([await fetchMediaBlob(f.url)], f.name)),
-    );
-    const fetched = settled.flatMap((s) => (s.status === 'fulfilled' ? [s.value] : []));
-    if (fetched.length === 0) throw new Error('не удалось скачать DXF с CDN');
-    const out = await client.parse(fetched, {
-      unit: 'auto',
-      tol: NEST_DEFAULTS.tol,
-      tolChain: NEST_DEFAULTS.tolChain,
-    });
-    return out.pieces;
-  } finally {
-    // Разобранная геометрия живёт ВНУТРИ воркера, и она тут больше не нужна: проверка разовая.
-    // Панель остаётся смонтированной, пока открыты другие вкладки карточки, так что оставленный
-    // воркер держал бы эти мегабайты до перезагрузки страницы.
-    client.terminate();
-  }
-}
 
 type SizeAudit =
   | { phase: 'loading' }
@@ -230,7 +210,7 @@ export function PatternsField({
   canEdit?: boolean;
   // Gates the Ф6.3 size-index publish, and it is DELIBERATELY NOT `canEdit`.
   //
-  // Права — да: кнопка «⌕ размеры в файлах» с этой фазы ПИШЕТ на сервер, и читателю нельзя писать
+  // Права — да: кнопка «⌕ разобрать файлы» с этой фазы ПИШЕТ на сервер, и читателю нельзя писать
   // от чужого имени (сервер эту роль не проверяет — RPC админский).
   //
   // Заморозка — НЕТ: замороженная карточка это ровно та, с которой запускают производство, и
@@ -294,6 +274,11 @@ export function PatternsField({
   // Выбранная плитка полки: ключ скоупа, LOOSE_KEY или PDF_KEY. null = экран ещё не трогали, и
   // выбор выводится из данных (первый материал с файлами, иначе первый вообще).
   const [pickedKey, setPickedKey] = useState<string | null>(null);
+  // Цикл проверок идёт. Отдельно от `geometry.isFetching`: разбор кончается раньше, чем публикация
+  // индексов по всем скоупам, и в этом промежутке кнопка снова становилась активной — второе
+  // нажатие переписывало индекс всех материалов заново и выдавало по тосту на каждый.
+  const [auditing, setAuditing] = useState(false);
+  const qc = useQueryClient();
   // Результаты проверки размеров, по ПОДПИСИ набора файлов (urls), а не по материалу: перезалили
   // файл — подпись сменилась, старый ответ сам перестал показываться, вместо того чтобы врать
   // про файл, которого уже нет.
@@ -484,6 +469,9 @@ export function PatternsField({
   // содержимому, и панель деталей кроя собирает ровно ту же пачку, поэтому второй экран получает
   // геометрию бесплатно. До этого каждый экран качал файлы себе, и оператор, прошедший вкладку
   // сверху вниз, платил за одни и те же мегабайты трижды.
+  //
+  // Тот же список уходит и в `fetchQuery` внутри «⌕ разобрать файлы»: покрытие размеров считается
+  // по деталям ИЗ ЭТОГО ЖЕ ответа, а не своим скачиванием.
   const allDxfFiles: ScopedDxfFile[] = useMemo(
     () =>
       dxfEntries.map((e) => ({
@@ -507,10 +495,17 @@ export function PatternsField({
     ],
     [scopeGroups, looseDxf.length, pdfEntries.length],
   );
+  // Фолбэк идёт ЗА ФАЙЛАМИ, а не за материалами: на карточке, где все DXF залиты до 0260 (значит
+  // все непривязанные) или остались только PDF, «первый материал» — это пустая плитка «раскроить
+  // нечем», и настоящие файлы оказывались за неподсвеченной плиткой.
   const selectedKey =
     pickedKey && shelfKeys.includes(pickedKey)
       ? pickedKey
-      : (scopeGroups.find((g) => g.entries.length > 0)?.scope.key ?? shelfKeys[0] ?? null);
+      : (scopeGroups.find((g) => g.entries.length > 0)?.scope.key ??
+        (looseDxf.length > 0 ? LOOSE_KEY : null) ??
+        (pdfEntries.length > 0 ? PDF_KEY : null) ??
+        shelfKeys[0] ??
+        null);
   const setSelectedKey = setPickedKey;
 
   // Размерный токен из имён блоков → id размера карточки. Нужен раскладке: один DXF несёт весь
@@ -561,9 +556,6 @@ export function PatternsField({
       ? g.scope.key === 'TECH_CARD_BOM_PURPOSE_MAIN'
       : g.scope.lines[0]?.section === 'TECH_CARD_BOM_SECTION_FABRIC';
   const materialsWithoutDxf = scopeGroups.filter((g) => g.entries.length === 0 && isMainScope(g));
-  const rollGoodsWithoutOwnDxf = scopeGroups.filter(
-    (g) => g.entries.length === 0 && !isMainScope(g),
-  );
   // Строки, чей size_id вне ряда карточки. Размер — артефакт хранения, но сервер всё равно
   // сверяет НЕПУСТОЙ размер с размерным рядом и отвергает такую строку, роняя ВЕСЬ сейв карточки.
   // Лист БЕЗ размера (0281) сюда не попадает: он не называет размера вовсе, и ряду его проверять
@@ -594,29 +586,37 @@ export function PatternsField({
     if (good.length > 0) setDroppedOn({ scopeKey, files: good });
   }
 
-  async function runAudit(list: Entry[]) {
+  // Покрытие размеров ОДНОГО материала — из УЖЕ РАЗОБРАННОЙ пачки всей карточки.
+  //
+  // Здесь стояло своё скачивание (`parsePiecesOnce` на файлы этого скоупа). Пока разбор нужен был
+  // только размерам, это было верно; как только он понадобился ещё и силуэтам на плитках, одно
+  // нажатие кнопки стало качать каждый файл ДВАЖДЫ — своим каналом и общим. Теперь канал один.
+  //
+  // `splitPiecesBySize` считается по деталям ТОЛЬКО ЭТОГО скоупа, а не по всей пачке, и это не
+  // придирка: функция решает, какой хвост имени блока является размером, глядя на то, какие хвосты
+  // МЕНЯЮТСЯ у одной основы, — то есть ответ зависит от того, что лежит рядом. Пропустив через неё
+  // всю карточку сразу, мы отправили бы на сервер (индекс 0280) другой набор токенов, чем прежде.
+  // Разбор при этом идёт по файлу независимо (`parseFiles` читает $INSUNITS своего буфера), так что
+  // сами детали побитово те же, что дал бы разбор одного скоупа.
+  async function auditFromBundle(list: Entry[], bundle: DxfBundle) {
     const sig = sigOf(list);
-    setAudits((a) => ({ ...a, [sig]: { phase: 'loading' } }));
-    let found: Set<string>;
-    try {
-      const pieces = await parsePiecesOnce(filesOf(list));
-      // Токены, которые в ЭТИХ файлах оказались размерами — то же правило, по которому размер
-      // отрезается от имени детали везде: хвост из словаря, меняющийся у своей основы.
-      found = splitPiecesBySize(pieces, dictTokens).sizeTokenSet;
-      setAudits((a) => ({ ...a, [sig]: { phase: 'ready', found } }));
-    } catch (e) {
-      setAudits((a) => ({
-        ...a,
-        [sig]: {
-          phase: 'error',
-          message: e instanceof Error ? e.message : 'не удалось разобрать файлы',
-        },
-      }));
-      return;
-    }
+    const scopeKey = scopeKeyOfBinding(
+      list[0]?.row.fabricPurpose,
+      list[0]?.row.bomLineKey,
+      scopes,
+    );
+    const scopePieces = bundle.pieces.filter(
+      (p) => (bundle.scopeByFile.get(p.fileIndex ?? -1) ?? '') === scopeKey,
+    );
+    // Токены, которые в ЭТИХ файлах оказались размерами — то же правило, по которому размер
+    // отрезается от имени детали везде: хвост из словаря, меняющийся у своей основы.
+    const found = splitPiecesBySize(scopePieces, dictTokens).sizeTokenSet;
+    setAudits((a) => ({ ...a, [sig]: { phase: 'ready', found } }));
     // Ф6.3: кнопка перестала быть единственным читателем собственного ответа. Тот же набор токенов
     // уезжает на сервер, и с этого момента гейт готовности прогона может честно ответить «есть ли
-    // выкройка на размер L» вместо UNKNOWN. Имя и поведение кнопки не изменились.
+    // выкройка на размер L» вместо UNKNOWN. Что кнопка называется теперь «⌕ разобрать файлы» и
+    // стоит одна на блок, публикации не касается: она по-прежнему идёт по одному запросу на скоуп
+    // с тем же набором листов и тем же набором токенов.
     //
     // СНАРУЖИ try/catch аудита, сознательно: индекс — побочная польза, и его отказ не имеет права
     // превратить успешно показанный ответ в «проверка не удалась».
@@ -676,20 +676,35 @@ export function PatternsField({
     setEditing(null);
   }
 
-  // Прогнать проверку размеров ПО ВСЕЙ карточке — по одной на материал, последовательно.
+  // Разобрать файлы карточки ОДИН раз и ответить обоими ответами: покрытие размеров по каждому
+  // материалу и силуэты для плиток.
   //
   // Кнопка была на каждой группе, и её слот морфился между кнопкой, серым предложением, зелёной
   // галкой и красной строкой с повтором: шапка группы меняла ширину и высоту по мере работы.
   // Проверка одна и та же, вопрос один и тот же — значит и кнопка одна, на блок.
   //
-  // ПОСЛЕДОВАТЕЛЬНО, а не Promise.all: каждый прогон качает свои файлы с CDN и разбирает их в
-  // воркере, и запустить пять таких разом значит выстроить их в очередь всё равно, только уже
-  // внутри браузера и без единого шанса показать, что происходит.
+  // `fetchQuery` по тем же опциям, что читает хук: если пачку уже разобрала панель деталей кроя,
+  // здесь не будет ни одного запроса, а если разбор идёт — мы дождёмся ЕГО, а не запустим второй.
   async function runAllAudits() {
+    if (auditing) return;
+    setAuditing(true);
     setShapesOn(true);
-    for (const g of scopeGroups) {
-      if (g.entries.length === 0) continue;
-      await runAudit(g.entries);
+    const pending = scopeGroups.filter(
+      (g) => g.entries.length > 0 && audits[sigOf(g.entries)]?.phase !== 'ready',
+    );
+    for (const g of pending) setAudits((a) => ({ ...a, [sigOf(g.entries)]: { phase: 'loading' } }));
+    try {
+      const bundle = await qc.fetchQuery(dxfGeometryQuery(allDxfFiles));
+      // ПОСЛЕДОВАТЕЛЬНО: каждый скоуп публикует свой индекс отдельным запросом, и пять
+      // одновременных записей в одну карточку — это гонка за один и тот же ряд.
+      for (const g of pending) await auditFromBundle(g.entries, bundle);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'не удалось разобрать файлы';
+      for (const g of pending) {
+        setAudits((a) => ({ ...a, [sigOf(g.entries)]: { phase: 'error', message } }));
+      }
+    } finally {
+      setAuditing(false);
     }
   }
 
@@ -887,7 +902,9 @@ export function PatternsField({
           <th className='py-1 pr-2 text-left font-normal'>лист</th>
           <th className='py-1 pr-2 text-left font-normal'>тип</th>
           <th className='py-1 pr-2 text-right font-normal'>v</th>
-          <th className='py-1 pr-2 text-right font-normal'>размер</th>
+          {/* «вес», а не «размер»: в этом блоке размер — это S/M/L, и рядом стоят «размер вне
+              ряда» и полоска покрытия размеров. Колонка «размер: 2.4 MB» читалась размерной. */}
+          <th className='py-1 pr-2 text-right font-normal'>вес</th>
           <th className='py-1 pr-2 text-right font-normal'>загружен</th>
           <th className='py-1 text-right font-normal' />
         </tr>
@@ -1013,7 +1030,7 @@ export function PatternsField({
           onClick={() => setSelectedKey(key)}
           media={
             has && dxfIndex && blocks > 0 ? (
-              <div className='flex h-[84px] w-full items-center justify-center border border-hairline bg-bgZebra p-1'>
+              <div className='flex h-[84px] w-full items-center justify-center border border-borderColor bg-bgZebra p-1'>
                 <SheetThumb index={dxfIndex} scopeKey={key} className='h-full w-full' />
               </div>
             ) : (
@@ -1036,7 +1053,7 @@ export function PatternsField({
                 : 'своего DXF нет — возможно, в файле основной ткани'
           }
         >
-          {has && <div className='mt-1'>{renderCoverage(g.entries)}</div>}
+          {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
         </Tile>
       </div>
     );
@@ -1279,11 +1296,11 @@ export function PatternsField({
               type='button'
               variant='secondary'
               size='xs'
-              disabled={geometry.isFetching}
+              disabled={auditing || geometry.isFetching}
               title='скачать файлы карточки и разобрать их один раз: полоска покажет, каких размеров в них нет, а плитки — силуэты деталей. Тот же разбор потом бесплатно берут детали кроя.'
               onClick={runAllAudits}
             >
-              {geometry.isFetching ? 'разбор файлов…' : '⌕ разобрать файлы'}
+              {auditing || geometry.isFetching ? 'разбор файлов…' : '⌕ разобрать файлы'}
             </Button>
           )}
           {canUpload && (
@@ -1299,6 +1316,21 @@ export function PatternsField({
         </div>
       </div>
 
+      {/* Отказ общего разбора и выпавшие из пачки листы — вслух. Молчащий разбор оставлял плитки в
+          «формы не разобраны» без причины, а лист, не скачавшийся с CDN, исчезал из счёта блоков и
+          из миниатюры без единого слова: его детали просто «не находились». */}
+      {geometry.isError && (
+        <Text size='nano' component='p' className='text-error'>
+          разбор файлов не удался: {geometry.error?.message ?? 'причина неизвестна'} — силуэтов и
+          покрытия размеров показать нечем
+        </Text>
+      )}
+      {(geometry.data?.warnings ?? []).map((w) => (
+        <Text key={w} size='nano' component='p' className='text-error'>
+          {w}
+        </Text>
+      ))}
+
       {/* ЕДИНСТВЕННЫЙ оставшийся сводный красный блок: строка вне ряда роняет сохранение ВСЕЙ
           карточки, а её плитка об этом сказать не может — дефект живёт на строке, а не на
           материале, и увидеть его, не открыв нужную плитку, было бы нельзя. Всё остальное, что
@@ -1313,12 +1345,20 @@ export function PatternsField({
         </CalloutBox>
       )}
 
-      {fabricBomLines.length === 0 ? (
+      {fabricBomLines.length === 0 && (
         <Text size='micro' variant='label'>
           в BOM нет строк ткани — выкройку не к чему привязать. Заведите основную ткань (и
           подкладку/бортовку/утеплитель, если они есть) на вкладке BOM.
         </Text>
-      ) : (
+      )}
+
+      {/* Полка рисуется, когда есть ХОТЬ ОДНА плитка, а не когда есть тканевые строки BOM. Плитки
+          «без материала» и «PDF» строятся и без скоупов вовсе, а таблицы этих файлов живут только
+          внутри ВЫБРАННОЙ плитки — так что гейт по `fabricBomLines` прятал их целиком. Карточка, у
+          которой тканевые строки удалили или переклассифицировали, показывала счётчик «без
+          материала: N» и ни одного способа открыть, переименовать или удалить эти файлы, а callout
+          выше советовал «откройте их материал», которого не существует. */}
+      {shelfKeys.length > 0 && (
         <>
           <Tiles min={158}>
             {scopeGroups.map(renderTile)}
@@ -1328,7 +1368,11 @@ export function PatternsField({
                 'без материала',
                 'раскладка и детали кроя недоступны',
                 looseDxf,
-                'error',
+                // НЕ error: файл не сломан, у него просто ещё не выбрана ткань, а пилюля этого же
+                // дефекта в шапке блока — синяя (mid-flight). Красная плитка рядом с синей пилюлей
+                // читалась бы как два разных дефекта. Синего тона у Tile нет, поэтому состояние
+                // здесь несут пунктирный кант и слова «без материала» / «недоступны».
+                'default',
               )}
             {pdfEntries.length > 0 &&
               renderExtraTile(PDF_KEY, 'PDF', 'устаревший формат', pdfEntries, 'default')}

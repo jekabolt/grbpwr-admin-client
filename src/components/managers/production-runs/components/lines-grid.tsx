@@ -25,10 +25,17 @@ export function LinesGrid({
   run,
   canEdit,
   locked,
+  onDirtyChange,
 }: {
   run: common_ProductionRun;
   canEdit: boolean;
   locked: boolean;
+  /**
+   * Reports the unsaved-draft flag upwards. The "· unsaved" marker used to sit in this panel's
+   * own heading; it now lives on the run conveyor, where all four of the page's save buttons are
+   * accounted for in one place. Pass a STABLE callback — this fires from an effect.
+   */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
@@ -78,6 +85,12 @@ export function LinesGrid({
   // Sibling saves (marker, costs, an issue from the plan) refetch the run — without a dirty
   // guard that refetch rebuilt the grid from server state and silently discarded typed cells.
   const [dirty, setDirty] = useState(false);
+  // The cleanup is load-bearing, not symmetry: an unmounted grid has no draft left to save, and
+  // without it the conveyor would keep promising an unsaved plan that died with the component.
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
 
   // Load the grid from the run's lines (distinct products, in first-seen order) — but never
   // over unsaved edits.
@@ -236,7 +249,6 @@ export function LinesGrid({
       <div className='flex flex-wrap items-center justify-between gap-2'>
         <Text variant='uppercase' size='small'>
           lines (colour-model × size)
-          {dirty ? <span className='ml-2 lowercase text-labelColor'>· unsaved</span> : null}
         </Text>
         {editable && (
           <div className='flex items-center gap-2'>

@@ -11,6 +11,14 @@
 // означает буквальное «файл по этому url не меняется»: перезалитая выкройка приезжает с новым
 // url, то есть с новым ключом, — инвалидировать нечего.
 //
+// ОГОВОРКА К КЛЮЧУ: в подпись входит и скоуп, а не только url. Перепривязка листа к другой ткани
+// (и разбор строк BOM по назначениям, от которого скоупы схлопываются) поэтому сбрасывает кэш и
+// заставляет качать всё заново, хотя файлы те же. Так сделано сознательно: скоуп едет ВНУТРИ
+// ответа (`scopeByFile`), и разделять «геометрию» и «чья это ткань» на два кэша значило бы
+// научиться собирать соответствие индексов заново на каждом читателе — ровно та арифметика, из-за
+// которой недокачанный файл однажды приписывал детали чужой материал. Перепривязка — редкое
+// действие, повторное скачивание — его цена.
+//
 // Разбор по-прежнему НЕ стартует сам: `enabled` держит его выключенным, пока экран не скажет, что
 // картинки нужны. Открытие вкладки не должно тянуть файлы — это правило, ради которого превью
 // сидело за кнопкой, и общий кэш его не отменяет, а делает дешевле: заплатив один раз, оператор
@@ -19,11 +27,16 @@ import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { NEST_DEFAULTS, type PieceDTO } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 import { normBlock } from './block-code';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens, type BlockSplit } from './use-block-sizes';
+import {
+  aliasIdentity,
+  splitPiecesBySize,
+  useDictionarySizeTokens,
+  type BlockSplit,
+} from './use-block-sizes';
 
 /** Лист выкройки вместе с РАЗРЕШЁННЫМ скоупом ткани, в котором он лежит. */
 export type ScopedDxfFile = { scopeKey: string; name: string; url: string };
@@ -46,19 +59,18 @@ export function filesSignature(files: readonly ScopedDxfFile[]): string {
 }
 
 /**
- * Скачать и разобрать пачку выкроек. Один запрос на пачку, общий для всех читателей.
+ * Опции запроса — ОДНО определение ключа и функции на всех читателей.
  *
- * `enabled=false` — разбор не стартует и уже лежащий в кэше ответ не трогается: экран, который
- * ещё не просили показывать формы, не должен ни качать, ни выгружать чужое.
+ * Отдельно от хука, потому что читать этот разбор нужно не только рендером: панель выкроек
+ * дожидается его императивно (`queryClient.fetchQuery`), чтобы посчитать по тем же деталям
+ * покрытие размеров. Если бы у императивного пути был свой ключ или своя функция, «⌕ разобрать
+ * файлы» качала бы каждый файл дважды — ровно то, от чего этот модуль и заводился.
  */
-export function useDxfGeometry(
-  files: readonly ScopedDxfFile[],
-  enabled: boolean,
-): UseQueryResult<DxfBundle, Error> {
+export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
   const sig = filesSignature(files);
-  return useQuery<DxfBundle, Error>({
-    queryKey: ['dxf-geometry', sig],
-    enabled: enabled && files.length > 0,
+  const snapshot = files.map((f) => ({ ...f }));
+  return {
+    queryKey: ['dxf-geometry', sig] as const,
     staleTime: Infinity,
     // Геометрия целой карточки — это мегабайты в куче. Пять минут после того, как её перестали
     // показывать, — достаточный запас, чтобы переход между вкладками не платил повторно, и
@@ -67,27 +79,32 @@ export function useDxfGeometry(
     // Ретрай тут вреден: недоступный CDN — это ответ («не удалось скачать»), с которым экран
     // умеет жить, а повтор стоит второго скачивания всего, что скачалось.
     retry: false,
-    queryFn: async ({ signal }) => {
+    queryFn: async ({ signal }: { signal: AbortSignal }): Promise<DxfBundle> => {
       const client = new NestingWorkerClient();
       const abort = () => client.terminate();
       signal.addEventListener('abort', abort);
       try {
         // allSettled: одна недоступная ссылка не должна отменять файлы, которые скачались.
         const settled = await Promise.allSettled(
-          files.map(async (f) => new File([await fetchMediaBlob(f.url)], f.name)),
+          snapshot.map(async (f) => new File([await fetchMediaBlob(f.url)], f.name)),
         );
         const fetched: File[] = [];
         const scopeByFile = new Map<number, string>();
         const warnings: string[] = [];
         settled.forEach((s, i) => {
           if (s.status === 'fulfilled') {
-            scopeByFile.set(fetched.length, files[i].scopeKey);
+            scopeByFile.set(fetched.length, snapshot[i].scopeKey);
             fetched.push(s.value);
           } else {
-            warnings.push(`${files[i].name}: не удалось скачать`);
+            warnings.push(`${snapshot[i].name}: не удалось скачать`);
           }
         });
         if (fetched.length === 0) throw new Error('не удалось скачать ни один DXF с CDN');
+        // ПРОВЕРКА ОТМЕНЫ ПЕРЕД РАЗБОРОМ. `fetchMediaBlob` не принимает signal, поэтому скачивание
+        // само по себе не прерывается; а вот спавнить воркер и разбирать десятки мегабайт ради
+        // результата, который уже никто не ждёт, незачем — до первого `parse` воркера ещё нет, и
+        // `terminate()` по abort'у был no-op.
+        if (signal.aborted) throw new Error('разбор отменён');
         const out = await client.parse(fetched, {
           unit: 'auto',
           tol: NEST_DEFAULTS.tol,
@@ -96,11 +113,28 @@ export function useDxfGeometry(
         return { pieces: out.pieces, scopeByFile, warnings: [...warnings, ...out.warnings] };
       } finally {
         // Контуры уже уехали на главный поток вместе с ответом — держать воркер (а в нём всю
-        // разобранную геометрию) до перезагрузки страницы незачем.
+        // разобранную геометрию) до перезагрузки страницы незачем. `terminate()` идемпотентен.
         signal.removeEventListener('abort', abort);
         client.terminate();
       }
     },
+  };
+}
+
+/**
+ * Скачать и разобрать пачку выкроек. Один запрос на пачку, общий для всех читателей.
+ *
+ * `enabled=false` — разбор не стартует, но уже лежащий в кэше ответ ОТДАЁТСЯ: экран, который ещё
+ * не просили качать, ничего не качает, а если ту же пачку уже разобрал сосед — рисует по готовому.
+ * Это не побочный эффект, а способ, которым панель деталей кроя и панель выкроек делят один разбор.
+ */
+export function useDxfGeometry(
+  files: readonly ScopedDxfFile[],
+  enabled: boolean,
+): UseQueryResult<DxfBundle, Error> {
+  return useQuery<DxfBundle, Error>({
+    ...dxfGeometryQuery(files),
+    enabled: enabled && files.length > 0,
   });
 }
 
@@ -163,7 +197,10 @@ export type FoundPiece = {
  * Найти в чертеже деталь по её привязкам. Первая привязка, которая нашлась, и выигрывает —
  * порядок задаёт вызывающий.
  */
-export function findPiece(index: DxfIndex | null, refs: readonly PieceBlockRef[]): FoundPiece | null {
+export function findPiece(
+  index: DxfIndex | null,
+  refs: readonly PieceBlockRef[],
+): FoundPiece | null {
   if (!index || refs.length === 0) return null;
   for (const r of refs) {
     // Сохранённый алиас может нести размер прямо в имени («BP_1_XS») — сворачиваем к идентичности
@@ -215,15 +252,24 @@ export const fmtCm = (cm: number) => (cm >= 100 ? cm.toFixed(0) : cm.toFixed(1))
  * Одна деталь в СВОИХ координатах: контур, внутренняя геометрия (линия шва, надсечки, свёрла) и
  * долевая. `poly` и `inner` уже нормализованы к габариту детали, `grain` — нет: он приходит в
  * абсолютных координатах чертежа, поэтому сдвигается на origin детали.
+ *
+ * `memo`, и это не оптимизация впрок: панель деталей рисует по контуру НА КАЖДОЙ плитке (20–40
+ * штук), а её форма перерисовывает весь таб на каждый ввод символа. Пропсы стабильны — `piece`
+ * живёт в кэше React Query, слой и класс — строки, — так что без memo каждая клавиша заново
+ * сериализовала бы 40 полных SVG. `outlineOnly` — для тех же плиток: внешний контур и долевая без
+ * внутренней геометрии (линия шва, надсечки), которая на миниатюре всё равно не читается; крупный
+ * контур панели рисует всё.
  */
-export function PieceShape({
+export const PieceShape = memo(function PieceShape({
   piece,
   grainLayer,
   className,
+  outlineOnly,
 }: {
   piece: PieceDTO;
   grainLayer: string;
   className?: string;
+  outlineOnly?: boolean;
 }) {
   const pad = Math.max(piece.bboxW, piece.bboxH, 1) * 0.06;
   const box = {
@@ -233,7 +279,7 @@ export function PieceShape({
     h: piece.bboxH + 2 * pad,
   };
   const points = piece.poly.map((pt) => `${pt.x},${vy(pt.y)}`).join(' ');
-  const inner = (piece.inner ?? []).filter((c) => c.layer !== grainLayer);
+  const inner = outlineOnly ? [] : (piece.inner ?? []).filter((c) => c.layer !== grainLayer);
   // Долевую можно положить на место только зная, где деталь лежала в чертеже. У детали без origin
   // её просто не рисуем — нарисованная от нуля, она ушла бы мимо контура.
   const grain =
@@ -280,7 +326,7 @@ export function PieceShape({
       )}
     </svg>
   );
-}
+});
 
 /**
  * Миниатюра ЛИСТА: все детали одного скоупа в координатах чертежа, только внешние контуры.
