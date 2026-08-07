@@ -76,6 +76,10 @@ export function build(): unknown {
     config: { targetLengthCm: 250, rdpEpsCm: 0.05, timeBudgetMs: 20000 },
     tol: 0.02,
     tolChain: 0.05,
+    // Зонд проверяет зеркальность, а не состав, поэтому состав ОДНОРОДНЫЙ: блоб тогда пишется в
+    // прежней форме (версия 3, без composition), и «тот же вход ⇒ тот же блоб» продолжает
+    // сравнивать ровно то, ради чего заводилось, — киральность.
+    composition: [{ sizeId: 3, quantity: 6 }],
   });
 }
 

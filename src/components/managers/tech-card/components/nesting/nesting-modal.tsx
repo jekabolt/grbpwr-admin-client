@@ -37,11 +37,14 @@ import { LayoutEditor } from './layout-editor';
 import type { MarkerColorway } from './colorway-widths';
 import {
   buildMarkerLayout,
+  compositionLabel,
   dec,
   decNum,
   exportFileName,
   markerToView,
+  scalarNormRefusal,
   type MarkerBomLine,
+  type MarkerCompositionEntry,
 } from './marker-io';
 import { markerScopeLines, strictestDirection } from '../bom-purpose';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
@@ -153,6 +156,9 @@ export function NestingModal({
 }) {
   const { parse, run, start, stop, resetRun, unitOverride, setUnitOverride } = useNesting(files);
   const viewData = useMemo(() => (view ? markerToView(view) : null), [view]);
+  // Отказ выдать скалярную норму у ОТКРЫТОГО маркера — слово сервера, если он его сказал.
+  // Показывается вместо числа: «средняя по составу» и настоящая норма выглядят одинаково.
+  const viewRefusal = view?.summary ? scalarNormRefusal(view.summary) : '';
 
   // The CUTTING width the layout runs on — roll width minus the кромка on both edges. The
   // selvedge is real consumed cloth, so it is not laid on and not forgotten either: it rides
@@ -170,9 +176,19 @@ export function NestingModal({
   const [crossGrain, setCrossGrain] = useState<boolean>(NEST_DEFAULTS.allowCrossGrain);
   const [budgetS, setBudgetS] = useState<number>(NEST_DEFAULTS.timeBudgetMs / 1000);
   const [sel, setSel] = useState<PieceSel>({});
-  // Комплектов: every selected piece's qty is multiplied by this — «10 изделий» is one
-  // field, not fifteen per-piece edits.
-  const [setsN, setSetsN] = useState<number>(1);
+  // СОСТАВ РАСКЛАДКИ (Ф2): размерный ТОКЕН файла → сколько ИЗДЕЛИЙ этого размера кроит настил.
+  //
+  // Здесь стоял скаляр `setsN` («комплектов»), и он умел выразить ровно одно — N одинаковых
+  // изделий одного размера. Настоящий настил кроят смешанным: мелкие детали одного размера
+  // садятся в межлекальные выпады другого, и такая раскладка КОРОЧЕ суммы однородных. Скаляром
+  // это не записывается вовсе, поэтому каждая снятая до сегодня норма мерялась на настиле,
+  // которого в цехе не бывает.
+  //
+  // Ключ — токен ФАЙЛА, а не id размера карточки: разбор деталей идёт в токенах (splitPiecesBySize),
+  // и токен может не резолвиться в размер карточки — такую раскладку разрешено СЧИТАТЬ (оператор
+  // смотрит), но не сохранять. Ключ '' — файл без размерных хвостов: тогда состав ровно один,
+  // размер берётся из слота, а поле подписано «изделий» и ведёт себя ровно как прежние комплекты.
+  const [qtyByToken, setQtyByToken] = useState<Record<string, number>>({});
 
   // Один DXF несёт ВЕСЬ размерный ряд, а блок несёт контур на нескольких слоях (линия шва и
   // линия кроя). Раскладывать надо ровно один размер по ровно одному контуру: иначе на полосу
@@ -255,24 +271,111 @@ export function NestingModal({
     () => blocksMissingOnLayer(allPieces, contourLayer),
     [allPieces, contourLayer],
   );
-  const [activeSize, setActiveSize] = useState<string | null>(null);
-  // Крупнейшая группа, а не первая по градации: группа '' — это остаток, а не размер, и она
-  // сортируется последней, так что файл, где размер распознан лишь у части блоков, открылся бы
-  // на этой части, спрятав остальное за переключателем.
-  const shownSize = sizeOpts.some((o) => o.size === activeSize)
-    ? (activeSize as string)
-    : sizeOpts.reduce<{ size: string; count: number } | null>(
-        (best, o) => (!best || o.count > best.count ? o : best),
-        null,
-      )?.size ?? '';
+  // Градуированные размеры файла — строки состава. Группа '' сюда НЕ входит и размером не
+  // является: это детали без размерного хвоста, и по формуле блоба они кроятся по одной на
+  // КАЖДОЕ изделие состава, а не «вместо» размера. Пока состав был одним размером, '' выглядела
+  // как ещё один вариант в переключателе — и выбрав размер M, оператор терял неградуируемые
+  // детали из раскладки молча.
+  const gradedOpts = useMemo(() => sizeOpts.filter((o) => o.size !== ''), [sizeOpts]);
+  const ungradedCount = sizeOpts.find((o) => o.size === '')?.count ?? 0;
+  // Затравка состава: крупнейшая градуированная группа — 1 изделие, остальные 0. Ровно то же
+  // умолчание, что было у прежнего «показать самый большой размер», и то же число, что стояло в
+  // «комплектов». Пересевается, когда меняется НАБОР токенов (смена контурного слоя, новый разбор).
+  const tokensKey = gradedOpts.map((o) => o.size).join(' ');
+  useEffect(() => {
+    const largest = gradedOpts.reduce<{ size: string; count: number } | null>(
+      (best, o) => (!best || o.count > best.count ? o : best),
+      null,
+    );
+    setQtyByToken(largest ? { [largest.size]: 1 } : { '': 1 });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tokensKey]);
+
+  // Строки состава с разрешённым размером карточки. sizeId 0 = токен не резолвится: считать
+  // такую раскладку можно, сохранить — нет (тот же отказ, что был у одиночного размера, только
+  // построчно).
+  const compRows = useMemo(
+    () =>
+      gradedOpts.map((o) => {
+        const bare = o.size.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+        return {
+          token: o.size,
+          count: o.count,
+          sizeId: (bare ? sizeIdByToken?.get(bare) : undefined) ?? 0,
+          resolvable: !bare || sizeIdByToken == null || sizeIdByToken.has(bare),
+          qty: Math.max(0, Math.round(qtyByToken[o.size] ?? 0)),
+        };
+      }),
+    [gradedOpts, sizeIdByToken, qtyByToken],
+  );
+  const activeRows = useMemo(() => compRows.filter((r) => r.qty >= 1), [compRows]);
+  // Файл без градации: одно число «изделий», размер даёт слот. Прежнее поведение целиком.
+  const ungradedUnits = Math.max(1, Math.round(qtyByToken[''] ?? 1));
+  const graded = compRows.length > 0;
+  // Сколько ИЗДЕЛИЙ кроит настил — делитель расхода и множитель неградуируемых деталей.
+  const unitsTotal = graded ? activeRows.reduce((s, r) => s + r.qty, 0) : ungradedUnits;
+  const unitsByToken = useMemo(
+    () => new Map(activeRows.map((r) => [r.token, r.qty])),
+    [activeRows],
+  );
+  // ФОРМУЛА БЛОБА, одна на весь экран: экземпляров детали = qty × (размер детали в составе ?
+  // количество этого размера : всего изделий). Деталь без размерного хвоста кроится на каждое
+  // изделие состава — потому и умножается на итог, а не на чью-то отдельную строку.
+  const unitsOfPiece = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const p of allPieces) {
+      const tok = split.codeById.get(p.id)?.size ?? '';
+      m.set(p.id, tok === '' ? unitsTotal : (unitsByToken.get(tok) ?? 0));
+    }
+    return m;
+  }, [allPieces, split, unitsTotal, unitsByToken]);
+  // В раскладку идут детали ВСЕХ размеров состава плюс неградуируемые. Размер с количеством 0 —
+  // это «не кроим», и его детали не попадают ни в поиск, ни в блоб.
   const selectedPieces = useMemo(
     () =>
       allPieces.filter(
-        (p) =>
-          (p.layer ?? '') === contourLayer && (split.codeById.get(p.id)?.size ?? '') === shownSize,
+        (p) => (p.layer ?? '') === contourLayer && (unitsOfPiece.get(p.id) ?? 0) >= 1,
       ),
-    [allPieces, split, contourLayer, shownSize],
+    [allPieces, contourLayer, unitsOfPiece],
   );
+  // СОСТАВ, КОТОРЫЙ УЕДЕТ НА СЕРВЕР — в id размеров карточки и отсортированный по ним (тот же
+  // порядок канонизирует сервер, и он часть байтов блоба). Токены, не резолвящиеся в размер,
+  // сюда не попадают — и ровно поэтому ниже стоит отдельный запрет на сохранение: молча
+  // сохранить состав, из которого выпал размер, значит записать норму, которой не мерялось.
+  const composition: MarkerCompositionEntry[] = useMemo(() => {
+    if (graded) {
+      return activeRows
+        .filter((r) => r.sizeId > 0)
+        .map((r) => ({ sizeId: r.sizeId, quantity: r.qty }))
+        .sort((a, b) => a.sizeId - b.sizeId);
+    }
+    // Файл без градации: размер даёт слот (проп), количество — поле «изделий».
+    return sizeId ? [{ sizeId, quantity: ungradedUnits }] : [];
+  }, [graded, activeRows, sizeId, ungradedUnits]);
+  const mixed = composition.length > 1;
+  // Имя размера по id — токеном ФАЙЛА, как он написан в имени блока. Словарь размеров сюда не
+  // доезжает (в модалку передают только карту токен→id), а токен оператор и так видит в таблице
+  // состава — подписывать состав вторым написанием того же размера значило бы завести разночтение.
+  const sizeNameOfId = (id: number) =>
+    compRows.find((r) => r.sizeId === id)?.token || sizeLabel || `#${id}`;
+  // Размер из файла, которого в карточке нет, сохранить нельзя — сервер проверяет ряд, и
+  // молча записать раскладку «куда-нибудь» хуже, чем отказать с объяснением. Теперь ПОСТРОЧНО:
+  // нест разрешён (оператор смотрит), сохранение — нет.
+  const unresolvedTokens = activeRows
+    .filter((r) => !r.resolvable || r.sizeId <= 0)
+    .map((r) => r.token);
+  const sizeUnresolved = unresolvedTokens.length > 0 || (!graded && !sizeId);
+  // Размер градации каждой детали — в блоб (схема 4). Только резолвящиеся: 0 означало бы
+  // «деталь не градуируется», а это другой факт и другая ветка формулы.
+  const sizeIdByPieceId = useMemo(() => {
+    const byToken = new Map(compRows.map((r) => [r.token, r.sizeId]));
+    const m = new Map<number, number>();
+    for (const p of allPieces) {
+      const sid = byToken.get(split.codeById.get(p.id)?.size ?? '') ?? 0;
+      if (sid > 0) m.set(p.id, sid);
+    }
+    return m;
+  }, [allPieces, split, compRows]);
 
   // Ориентация по долевой. Движок считает, что деталь нарисована долевой вдоль полосы, — в
   // реальных файлах это не так, и деталь, выкроенная поперёк долевой, тянется и садится не
@@ -365,9 +468,10 @@ export function NestingModal({
     marginCm,
     crossGrain,
     sel,
-    setsN,
+    // Состав — параметр прогона наравне с шириной: он решает, какие детали и в скольких
+    // экземплярах ложатся на полосу. Готовый результат после его правки описывал бы другой настил.
+    qtyByToken,
     contourLayer,
-    shownSize,
     grainLayer,
     allowanceCm,
     resetRun,
@@ -520,10 +624,14 @@ export function NestingModal({
   // сервера нечем, а молчать до отказа хуже, чем держать копию, у которой видно, чья она.
   const MAX_MARKER_PIECES = 300;
   const MAX_MARKER_PLACEMENTS = 5000;
-  // Total instances that will actually be nested: Σ qty × комплекты over the selection.
+  // Экземпляров на полосе: Σ по выбранным деталям qty × множитель СОСТАВА (см. unitsOfPiece).
+  // Потолок в 5000 упирается именно сюда — не в число размеров, а в количества.
   const instanceCount = pieces
     .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
-    .reduce((s, p) => s + Math.max(1, Math.round(sel[p.id]?.qty ?? 1)) * setsN, 0);
+    .reduce(
+      (s, p) => s + Math.max(1, Math.round(sel[p.id]?.qty ?? 1)) * (unitsOfPiece.get(p.id) ?? 0),
+      0,
+    );
 
   // Source-file groups for the per-fabric one-click filter (each fabric is its own DXF).
   const sources = useMemo(() => {
@@ -550,7 +658,7 @@ export function NestingModal({
         .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
         .map((p) => ({
           pieceId: p.id,
-          quantity: Math.max(1, Math.round(sel[p.id]?.qty ?? 1)) * setsN,
+          quantity: Math.max(1, Math.round(sel[p.id]?.qty ?? 1)) * (unitsOfPiece.get(p.id) ?? 0),
         })),
       fabricWidthCm: widthCm,
       targetLengthCm: target,
@@ -665,7 +773,11 @@ export function NestingModal({
   // (карточка, размер, имя). Отказ читаемый, но приходит ПОСЛЕ прогона; ширина — ровно то, чем
   // две такие раскладки и различаются.
   const defaultName = [
-    sizeLabel || '',
+    // Состав, а не размер: имя — единственное, чем два маркера на одной карточке различаются, и
+    // у раскладки с составом уникальность сузилась до (карточка, имя). Два смешанных настила на
+    // одном слоте и одной ширине, названные одинаково, столкнулись бы на constraint уже ПОСЛЕ
+    // оплаченного прогона.
+    compositionLabel(composition, sizeNameOfId) || sizeLabel || '',
     (slot ? [slot.role, slot.name?.trim()].filter(Boolean).join(' ') : '') || 'раскладка',
     chosenColorway?.label ?? '',
     `${widthCm} см`,
@@ -867,13 +979,26 @@ export function NestingModal({
   // Размер, НА КОТОРЫЙ пишется маркер, — тот, что выбран в диалоге, а не тот, в чей слот файл
   // когда-то положили. Один DXF несёт весь ряд, и раскладка размера XS, записанная как маркер
   // размера M, испортила бы костинг молча: длина есть, размер не тот.
-  const bareSize = shownSize.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
-  const resolvedSizeId = (bareSize ? sizeIdByToken?.get(bareSize) : undefined) ?? sizeId;
-  // Размер из файла, которого в карточке нет, сохранить нельзя — сервер проверяет ряд, и
-  // молча записать раскладку «куда-нибудь» хуже, чем отказать с объяснением.
-  const sizeUnresolved = !!bareSize && sizeIdByToken != null && !sizeIdByToken.has(bareSize);
-  const sizeUnsaved =
-    savedSizeIds != null && resolvedSizeId != null && !savedSizeIds.includes(resolvedSizeId);
+  const unsavedSizes = useMemo(
+    () =>
+      savedSizeIds == null ? [] : composition.filter((c) => !savedSizeIds.includes(c.sizeId)),
+    [savedSizeIds, composition],
+  );
+  const sizeUnsaved = unsavedSizes.length > 0;
+  // РАЗМЕР СОСТАВА, НА КОТОРЫЙ НЕ ЛОЖИТСЯ НИ ОДНОЙ ДЕТАЛИ. Сервер такое отвергает («состав
+  // кроит размер N, а деталей на него не разложено»), и он прав: total_units считает изделия
+  // этого размера, а геометрия не кроит ни одного — длина настила делится на изделия, которых в
+  // нём нет, и любая норма с него занижена. Ловим ДО прогона, а не после.
+  const tokensWithPieces = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of pieces) {
+      if (sel[p.id]?.checked && fitsWidth.get(p.id)) s.add(split.codeById.get(p.id)?.size ?? '');
+    }
+    return s;
+  }, [pieces, sel, fitsWidth, split]);
+  const sizesWithoutPieces = mixed
+    ? activeRows.filter((r) => r.sizeId > 0 && !tokensWithPieces.has(r.token)).map((r) => r.token)
+    : [];
   // ПРАВИЛО СЕРВЕРА, ПРОВЕРЕННОЕ ДО ОТПРАВКИ (entity.ValidateMarkerFabricDirection). Не вторая
   // политика: единственный источник запрета — allowsFlip, отсюда и до движка. Здесь только
   // проверяется, что ГОТОВАЯ раскладка ему не противоречит.
@@ -907,11 +1032,12 @@ export function NestingModal({
     !directionRefusal &&
     !sizeUnsaved &&
     !sizeUnresolved &&
+    sizesWithoutPieces.length === 0 &&
+    composition.length > 0 &&
     run.phase === 'done' &&
     run.result.placedCount === run.result.totalCount &&
     run.result.placements.length > 0 &&
-    !!techCardId &&
-    !!resolvedSizeId;
+    !!techCardId;
 
   // Отказ сохранения, разобранный по полям (Ф1.8). Сервер отвергает норму, у ткани которой не
   // задано направление, и делает это ПОЛЕВЫМ нарушением с описанием, называющим строку BOM. Тост
@@ -934,7 +1060,7 @@ export function NestingModal({
       run.phase !== 'done' ||
       parse.phase !== 'ready' ||
       !techCardId ||
-      !resolvedSizeId
+      composition.length === 0
     )
       return;
     if (!effective) return;
@@ -988,12 +1114,24 @@ export function NestingModal({
         tol: NEST_DEFAULTS.tol,
         tolChain: NEST_DEFAULTS.tolChain,
         parseWarnings: parse.warnings,
+        // Состав и размеры деталей. buildMarkerLayout сам решает, писать ли их в блоб: на
+        // однородной раскладке состав выражается легаси-парой ниже, и блоб остаётся байт в байт
+        // прежним — иначе каждый пересохранённый старый маркер «дрожал» бы без единого отличия.
+        composition,
+        sizeIdByPieceId,
       });
       await adminService.SaveTechCardMarker({
         id: 0,
         techCardId,
         marker: {
-          sizeId: resolvedSizeId,
+          // ЛЕГАСИ-ПАРА ИЛИ СОСТАВ — ровно одно из двух, и это правило сервера
+          // (dto.markerCompositionOfInsert), а не вкусовщина: состав приезжает ТОЛЬКО блобом,
+          // отдельного поля на вставке нет намеренно — две копии на проводе подняли бы вопрос
+          // «какая победит, если они разойдутся», у которого нет бесплатного ответа.
+          //
+          // Смешанная раскладка шлёт нули: сервер увидит состав в блобе и запишет size_id/sets
+          // как NULL. Однородная шлёт пару — и сохраняется ровно так же, как до Ф2.
+          sizeId: mixed ? 0 : composition[0].sizeId,
           name,
           source: manual ? 'manual' : 'auto',
           bomLineKey: slotKey,
@@ -1009,7 +1147,7 @@ export function NestingModal({
           // материал слота отредактируют.
           selvedgeCm: dec(slotSelvedge(slot)),
           allowCrossGrain: crossGrain,
-          sets: setsN,
+          sets: mixed ? 0 : composition[0].quantity,
           usedLengthCm: dec(effective.usedLengthCm),
           efficiencyPct: dec(effPct),
           placedCount: effective.placedCount,
@@ -1072,7 +1210,19 @@ export function NestingModal({
       // файлом, а не отсутствием кнопки в соседнем.
       const storedSchema = view.layout?.schemaVersion ?? 1;
       const hasFlip = effective.placements.some((p) => p.flipped === true);
-      const schemaVersion = hasFlip ? Math.max(storedSchema, 3) : storedSchema;
+      // …И ТО ЖЕ САМОЕ ПРО СОСТАВ. Блоб, который несёт состав или размер на детали под версией
+      // младше 4, сервер отвергает как невозможный пэйлоад (entity.CompositionPredatesSchema) —
+      // и правку вместе с ним. Сегодня такого блоба взяться неоткуда (состав пишется только
+      // вместе с версией 4), но инвариант обязан держаться этим файлом, а не тем, что соседний
+      // пока не умеет иначе.
+      const hasComposition =
+        (view.layout?.composition ?? []).length > 0 ||
+        (view.layout?.pieces ?? []).some((p) => Number(p.sizeId ?? 0) > 0);
+      const schemaVersion = Math.max(
+        storedSchema,
+        hasComposition ? 4 : 0,
+        hasFlip ? 3 : 0,
+      );
       await adminService.SaveTechCardMarker({
         id: s.id ?? 0,
         techCardId,
@@ -1091,7 +1241,12 @@ export function NestingModal({
           // Правка геометрии не пересчитывает кромку: она снимок момента сохранения.
           selvedgeCm: s.selvedgeCm,
           allowCrossGrain: !!s.allowCrossGrain,
-          sets: s.sets ?? 1,
+          // Легаси-пара проезжает КАК ЛЕЖИТ и только вместе. Прежнее `s.sets ?? 1` подставляло
+          // единицу маркеру с составом (proto3 роняет умолчание, и в сводке там ноль) — то есть
+          // на правку одного размещения отправляло «этот настил кроит одно изделие». Пару спасал
+          // только приоритет состава в блобе на сервере; полагаться на это нельзя — состав в
+          // блобе есть лишь у смешанной раскладки.
+          sets: s.sets ?? 0,
           usedLengthCm: dec(effective.usedLengthCm),
           efficiencyPct: dec(effPct),
           placedCount: s.placedCount ?? effective.placedCount,
@@ -1330,22 +1485,8 @@ export function NestingModal({
                 контур DXF — линия шва; кладётся линия кроя
               </Text>
             </label>
-            <label className='space-y-0.5'>
-              <Text size='nano' variant='label' component='span'>
-                комплектов, шт
-              </Text>
-              <Input
-                name='nest-sets'
-                type='number'
-                value={setsN}
-                min={1}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const next = Math.max(1, Math.round(numOr(e.target.value, setsN)));
-                  if (next !== setsN) guardManual(() => setSetsN(next));
-                }}
-                disabled={running}
-              />
-            </label>
+            {/* Поле «комплектов» жило здесь и умело выразить только N одинаковых изделий одного
+                размера. Его заменила таблица состава ниже — там же, где выбирается, что кроим. */}
           </div>
 
           {/* Допущение проговаривается вслух: число одно на весь комплект и кладётся РОВНЫМ по
@@ -1527,7 +1668,7 @@ export function NestingModal({
               вся градация разом, а длина маркера не относилась бы ни к одному размеру.
               Слой по умолчанию — тот, что ГРАДУИРУЕТСЯ: контур, одинаковый во всех размерах,
               это справочная линия, а не деталь. */}
-          {(layerOpts.length > 1 || sizeOpts.length > 1) && (
+          {(layerOpts.length > 1 || missingOnLayer.length > 0) && (
             <div className='space-y-1 border border-borderColor p-1.5'>
               {layerOpts.length > 1 && (
                 <div className='flex flex-wrap items-center gap-1'>
@@ -1561,25 +1702,106 @@ export function NestingModal({
                   {missingOnLayer.length > 6 ? '…' : ''}
                 </Text>
               )}
-              {sizeOpts.length > 1 && (
-                <div className='flex flex-wrap items-center gap-1'>
-                  <Text size='nano' variant='label' component='span'>
-                    размер:
+            </div>
+          )}
+
+          {/* СОСТАВ НАСТИЛА — то, чем раскладка теперь описывается вместо «размер + комплекты».
+              Смешанный настил ложится плотнее однородного, и пока состав был скаляром, снять
+              такую норму было нечем. Таблица заменила и переключатель размеров, и поле
+              «комплектов»: размер с количеством 0 просто не кроится. */}
+          {!viewData && (
+            <div className='space-y-1 border border-borderColor p-1.5'>
+              <Text size='nano' variant='label' component='p'>
+                состав настила — сколько изделий каждого размера кроим за один раз
+              </Text>
+              {graded ? (
+                compRows.map((r) => {
+                  const bad = !r.resolvable || r.sizeId <= 0;
+                  return (
+                    <div key={r.token} className='flex items-center gap-1.5'>
+                      <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                        {r.token}
+                      </Text>
+                      <Text size='nano' variant='label' component='span'>
+                        {r.count} дет.
+                      </Text>
+                      {bad && r.qty >= 1 && <Pill tone='warn'>нет в карточке</Pill>}
+                      <Input
+                        name={`nest-comp-${r.token}`}
+                        type='number'
+                        value={r.qty}
+                        min={0}
+                        disabled={running}
+                        className='w-14 shrink-0 px-1 py-0 text-micro'
+                        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                          const next = Math.max(0, Math.round(numOr(e.target.value, r.qty)));
+                          if (next !== r.qty) {
+                            guardManual(() =>
+                              setQtyByToken((m) => ({ ...m, [r.token]: next })),
+                            );
+                          }
+                        }}
+                      />
+                    </div>
+                  );
+                })
+              ) : (
+                <label className='flex items-center gap-1.5'>
+                  <Text size='micro' component='span' className='min-w-0 flex-1'>
+                    изделий, шт{sizeLabel ? ` · размер ${sizeLabel}` : ''}
                   </Text>
-                  {sizeOpts.map((o) => (
-                    <Button
-                      key={o.size || '(none)'}
-                      type='button'
-                      variant={o.size === shownSize ? 'main' : 'secondary'}
-                      size='xs'
-                      disabled={running}
-                      title={`${o.count} деталей`}
-                      onClick={() => guardManual(() => setActiveSize(o.size))}
-                    >
-                      {o.size || 'без размера'}
-                    </Button>
-                  ))}
-                </div>
+                  <Input
+                    name='nest-units'
+                    type='number'
+                    value={ungradedUnits}
+                    min={1}
+                    disabled={running}
+                    className='w-14 shrink-0 px-1 py-0 text-micro'
+                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                      const next = Math.max(1, Math.round(numOr(e.target.value, ungradedUnits)));
+                      if (next !== ungradedUnits) {
+                        guardManual(() => setQtyByToken((m) => ({ ...m, '': next })));
+                      }
+                    }}
+                  />
+                </label>
+              )}
+              {graded && ungradedCount > 0 && (
+                <Text size='nano' variant='label' component='p'>
+                  {ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ изделие
+                  состава, то есть по {unitsTotal} шт
+                </Text>
+              )}
+              <Text size='nano' variant='label' component='p'>
+                итог: {unitsTotal} изделий · {checkedCount} уникальных деталей · {instanceCount}{' '}
+                экземпляров
+              </Text>
+              {mixed && (
+                <Text size='nano' component='p' className='text-warning'>
+                  смешанный состав: расход НА ИЗДЕЛИЕ у такой раскладки — среднее по составу (мелкие
+                  размеры завышает, крупные занижает), и в рецепт он не пишется. Сама длина настила
+                  и потребность по нему верны; пер-размерный расход придёт с Ф2.4
+                </Text>
+              )}
+              {unresolvedTokens.length > 0 && (
+                <Text size='nano' component='p' className='text-error'>
+                  размеров нет в размерном ряду карточки: {unresolvedTokens.join(', ')} — посчитать
+                  раскладку можно, сохранить нельзя: добавьте размер в карточку либо снимите его из
+                  состава (количество 0)
+                </Text>
+              )}
+              {sizesWithoutPieces.length > 0 && (
+                <Text size='nano' component='p' className='text-error'>
+                  в состав взяты размеры, у которых не выбрано ни одной детали:{' '}
+                  {sizesWithoutPieces.join(', ')} — длина настила делилась бы на изделия, которых он
+                  не кроит
+                </Text>
+              )}
+              {!graded && !sizeId && (
+                <Text size='nano' component='p' className='text-error'>
+                  в именах блоков нет размеров, и размер слота неизвестен — сохранить такую
+                  раскладку нечем
+                </Text>
               )}
             </div>
           )}
@@ -1643,9 +1865,7 @@ export function NestingModal({
               <div className='flex items-center justify-between'>
                 <Text size='nano' variant='label'>
                   детали: {pieces.length} · выбрано {checkedCount}
-                  {setsN > 1 || instanceCount !== checkedCount
-                    ? ` · к раскладке: ${instanceCount}`
-                    : ''}
+                  {instanceCount !== checkedCount ? ` · к раскладке: ${instanceCount}` : ''}
                   {checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS
                     ? ` · СВЕРХ ПОТОЛКА (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку сервер не сохранит`
                     : ''}
@@ -1686,8 +1906,16 @@ export function NestingModal({
                       <Text size='micro' component='p' className='truncate'>
                         {p.name}
                       </Text>
+                      {/* Размер детали и её тираж в этом настиле. До состава список показывал
+                          ровно один размер, и подпись была бы шумом; теперь в нём лежат детали
+                          нескольких размеров, у которых имена различаются одним хвостом. */}
                       <Text size='nano' variant='label' component='p'>
                         {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} см
+                        {graded
+                          ? ` · ${split.codeById.get(p.id)?.size || 'без размера'} · ×${
+                              Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
+                            }`
+                          : ''}
                       </Text>
                     </div>
                     {!fits && <Pill tone='warn'>шире полотна</Pill>}
@@ -1806,10 +2034,22 @@ export function NestingModal({
                 tone={effective.placedCount === effective.totalCount ? undefined : 'down'}
               />
               {viewData && view?.summary && (
+                // РАСХОД НА ИЗДЕЛИЕ ДЕЛИТСЯ НА ИЗДЕЛИЯ, А НЕ НА КОМПЛЕКТЫ. Здесь стояло
+                // usedLength / max(1, sets), и на маркере с составом sets приезжает нулём
+                // (proto3 роняет умолчание) — то есть весь настил показывался как норма одного
+                // изделия. Смешанному составу число не показывается вовсе: у него нормы нет.
                 <Stat
                   label='расход / ед'
-                  value={`${(effective.usedLengthCm / Math.max(1, view.summary.sets ?? 1)).toFixed(1)} см`}
-                  sub={`комплектов: ${view.summary.sets ?? 1}`}
+                  value={
+                    viewRefusal
+                      ? '—'
+                      : `${(effective.usedLengthCm / Math.max(1, viewData.totalUnits)).toFixed(1)} см`
+                  }
+                  sub={
+                    viewRefusal
+                      ? 'смешанный состав — нормы нет'
+                      : `изделий: ${viewData.totalUnits || 1}`
+                  }
                 />
               )}
               {verdict && (
@@ -1940,10 +2180,14 @@ export function NestingModal({
                           : directionRefusal
                             ? directionRefusal
                             : sizeUnresolved
-                            ? `размера «${shownSize}» нет в размерном ряду карточки — добавьте его, иначе маркер записался бы не на тот размер`
+                            ? unresolvedTokens.length > 0
+                              ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')} — добавьте их в карточку либо уберите из состава`
+                              : 'размер раскладки неизвестен — в именах блоков нет размеров, и слот его не называет'
                             : sizeUnsaved
                               ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
-                              : 'сохранить можно завершённую раскладку, в которую поместились все детали'
+                              : sizesWithoutPieces.length > 0
+                                ? `в состав взяты размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`
+                                : 'сохранить можно завершённую раскладку, в которую поместились все детали'
                   }
                   onClick={() => setSaveOpen(true)}
                 >
@@ -2091,10 +2335,25 @@ export function NestingModal({
                 : 'раскладка правлена вручную — маркер сохранится как source: manual'}
             </CalloutBox>
           )}
+          {/* СОСТАВ И ЧТО ИЗ НЕГО СЛЕДУЕТ — последняя строка перед «сохранить», потому что
+              именно она отвечает на вопрос «а какое число уедет в костинг». */}
           <Text size='nano' variant='label' component='p'>
-            комплектов: {setsN} · расход на единицу:{' '}
-            {effective ? (effective.usedLengthCm / Math.max(1, setsN)).toFixed(1) : '—'} см
+            состав: {compositionLabel(composition, (id) => sizeNameOfId(id))} · всего{' '}
+            {unitsTotal} изделий · расход на изделие:{' '}
+            {mixed
+              ? 'не выдаётся — среднее по составу'
+              : effective
+                ? `${(effective.usedLengthCm / Math.max(1, unitsTotal)).toFixed(1)} см`
+                : '—'}
           </Text>
+          {mixed && (
+            <CalloutBox tone='note'>
+              смешанная раскладка сохранится целиком — и длина, и состав, и размеры деталей. Не
+              сохранится только расход НА ИЗДЕЛИЕ: у смешанного настила он средний по составу, а
+              такое число, попав в рецепт, неотличимо от измеренного. Пер-размерный расход придёт
+              с Ф2.4; до тех пор нормой служит однородная раскладка.
+            </CalloutBox>
+          )}
         </div>
       </ConfirmationModal>
 

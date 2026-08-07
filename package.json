@@ -14,6 +14,7 @@
         "preview": "vite preview",
         "nest:probe": "node scripts/nest-probe.mjs",
         "nest:chirality": "node scripts/marker-chirality-probe.mjs",
+        "marker:composition": "node scripts/marker-composition-probe.mjs",
         "fix": "yarn lint && yarn format",
         "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
         "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",

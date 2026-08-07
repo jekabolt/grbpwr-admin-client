@@ -75,13 +75,105 @@ export function decNum(d?: googletype_Decimal): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-// Fabric per ONE garment, cm — prefers the server-derived figure, falls back to the raw
-// division so an optimistic row (not yet refetched) still shows a number.
-export function consumptionCm(s: common_TechCardMarkerSummary): number {
+// ── СОСТАВ раскладки (Ф2) ───────────────────────────────────────────────────────────────
+//
+// Маркер перестал быть «один размер × N комплектов» и стал СОСТАВОМ: размер → сколько ИЗДЕЛИЙ
+// этого размера выкраивает один настил. Смешанный состав ложится плотнее однородного — мелкие
+// детали одного размера садятся в межлекальные выпады другого, — и «размер + комплекты» такую
+// раскладку выразить не мог вовсе.
+//
+// ЧИТАТЬ СОСТАВ РАЗРЕШЕНО ТОЛЬКО ЗДЕСЬ, и ветвится это чтение ПО ПОЛЮ, а не по номеру схемы.
+// Версия блоба существует ради двух совсем других решений (подделка `flipped` и дедовщина
+// направления ткани), и читатель, который переключался бы по ней, обязан был бы знать про версии,
+// которых он больше никогда не увидит. Легаси-маркер — это тот, у кого в шапке лежит пара
+// (size_id, sets) и нет состава; он читается как состав из одной строки, и вся остальная логика
+// перестаёт различать эти два случая.
+export type MarkerCompositionEntry = { sizeId: number; quantity: number };
+
+// Состав как СПИСОК, отсортированный по size_id — тем же порядком, что канонизирует сервер
+// (entity.SortMarkerComposition). Пустой список означает ровно «состав неизвестен» и никогда не
+// «раскладка без состава»: состав есть у каждой раскладки, включая снятые до Ф2 (миграция 0273
+// спроецировала легаси-строки в ту же форму). Пустота здесь — испорченная строка либо
+// оптимистичный объект, ещё не съездивший на сервер, и оба обязаны читаться как НЕИЗВЕСТНО.
+export function compositionOf(s: common_TechCardMarkerSummary): MarkerCompositionEntry[] {
+  const wire = s.composition ?? [];
+  if (wire.length > 0) {
+    return wire
+      .map((c) => ({ sizeId: Number(c.sizeId ?? 0), quantity: Number(c.quantity ?? 0) }))
+      .filter((c) => c.sizeId > 0 && c.quantity > 0)
+      .sort((a, b) => a.sizeId - b.sizeId);
+  }
+  // ЛЕГАСИ. Пара живёт в шапке до Ф2 и приезжает нулями на маркере с составом (proto3 не шлёт
+  // умолчания), поэтому проверяются ОБА поля: «size_id есть, sets нет» — это не «один комплект»,
+  // а неполные данные, и придумывать здесь единицу значит завысить норму на изделие во столько
+  // раз, сколько изделий в настиле.
+  const sizeId = Number(s.sizeId ?? 0);
+  const sets = Number(s.sets ?? 0);
+  if (sizeId > 0 && sets >= 1) return [{ sizeId, quantity: sets }];
+  return [];
+}
+
+// Сколько ИЗДЕЛИЙ (не деталей!) выкраивает раскладка — делитель под расходом на единицу.
+// 0 = неизвестно; арифметического умолчания у этого числа нет и быть не может.
+export function totalUnitsOf(s: common_TechCardMarkerSummary): number {
+  const wire = Number(s.totalUnits ?? 0);
+  if (wire > 0) return wire;
+  return compositionOf(s).reduce((n, c) => n + c.quantity, 0);
+}
+
+// ОТКАЗ ВЫДАТЬ СКАЛЯРНУЮ НОРМУ. '' = расход на изделие можно применять в рецепт; непустая
+// строка — объяснение, которое обязано появиться ТАМ, ГДЕ СТОЯЛО БЫ ЧИСЛО.
+//
+// Слово принадлежит серверу (entity.MarkerScalarNormRefusal): он единственный, кто может
+// отказать, потому что применение нормы — это клиентская запись в
+// tech_card_colorway_usage.consumption с consumption_source='marker', и после неё число
+// неотличимо от измеренного, а релизный снимок замораживает его навсегда.
+//
+// Локальные ветки ниже — не вторая политика, а страховка от МОЛЧАНИЯ: старый сервер, оптимистичный
+// объект, испорченная строка. Ни одна из них не может противоречить серверу — они срабатывают
+// только там, где сервер не сказал ничего.
+export function scalarNormRefusal(s: common_TechCardMarkerSummary): string {
+  const server = (s.scalarApplyRefusal ?? '').trim();
+  if (server) return server;
+  const comp = compositionOf(s);
+  if (comp.length === 0) {
+    return `у раскладки «${s.name ?? ''}» не читается состав: сколько изделий она выкраивает — неизвестно, и расход на изделие назвать нечем. Переоткройте карточку; если не помогло, пересохраните раскладку.`;
+  }
+  if (comp.length > 1) {
+    return `раскладка «${s.name ?? ''}» снята на смешанном составе (${comp.length} размеров) — расход на изделие у неё СРЕДНИЙ по составу: мелкие размеры завышает, крупные занижает. В рецепт такое число не пишется.`;
+  }
+  return '';
+}
+
+// Fabric per ONE garment, cm. `null` = НЕ ВЫДАЁТСЯ, и это ответ, а не пробел.
+//
+// ЗДЕСЬ БЫЛА ДЫРА, СТОИВШАЯ ДЕНЕГ. Функция возвращала `usedLength / max(1, sets)`, а сервер с Ф2
+// шлёт sets=0 на маркере с составом (proto3 роняет умолчание) И НАМЕРЕННО НЕ ШЛЁТ
+// consumption_per_unit_cm на смешанном. Обе половины вместе давали `usedLength / 1` — весь настил
+// как норму одного изделия, число в N раз завышенное и абсолютно правдоподобное на вид. Оно
+// показывалось в списке маркеров и применялось в рецепт одной кнопкой.
+//
+// Поэтому: сперва ОТКАЗ, и только потом арифметика. Единственный сохранившийся расчёт —
+// однородный состав, и он побайтово повторяет серверную формулу (used_length / total_units),
+// то есть не может с ней разойтись; он остался ради строки, которая ещё не съездила на сервер.
+export function consumptionCm(s: common_TechCardMarkerSummary): number | null {
+  if (scalarNormRefusal(s)) return null;
   const derived = decNum(s.consumptionPerUnitCm);
   if (derived > 0) return derived;
-  const sets = Math.max(1, s.sets ?? 1);
-  return r2(decNum(s.usedLengthCm) / sets);
+  const units = totalUnitsOf(s);
+  if (units < 1) return null;
+  return r2(decNum(s.usedLengthCm) / units);
+}
+
+// Состав словами: «S×1 · M×2». Одна раскладка — одна подпись, и она же служит «размером» маркера
+// в списках, где раньше стояло имя одного размера.
+export function compositionLabel(
+  comp: readonly MarkerCompositionEntry[],
+  sizeName: (id: number) => string,
+): string {
+  if (comp.length === 0) return '';
+  if (comp.length === 1 && comp[0].quantity === 1) return sizeName(comp[0].sizeId);
+  return comp.map((c) => `${sizeName(c.sizeId)}×${c.quantity}`).join(' · ');
 }
 
 // Marker cm → the BOM line's unit. The unit is free text — convert ONLY what is
@@ -168,6 +260,16 @@ export function betterMarker(colorwayId: number) {
 }
 
 // Лучший маркер на каждый размер для одной строки BOM — источник для применения по размерам.
+//
+// Размер маркера берётся ИЗ СОСТАВА, а не из легаси-поля size_id: с Ф2 сервер шлёт на маркере с
+// составом size_id = 0, и прежний `m.sizeId ?? 0; if (!sid) continue` молча выбрасывал бы КАЖДЫЙ
+// новый маркер — режим «по размерам» оставался бы вечно недоступным, и понять почему было бы
+// нечем, потому что маркеры в списке при этом видны.
+//
+// В карту попадает ТОЛЬКО ОДНОРОДНАЯ раскладка. Смешанная не является нормой ни одного из своих
+// размеров: её длина — общая на весь настил, а поделить её по размерам нечем до Ф2.4 (расход по
+// площадям). Записать её под, скажем, самым крупным размером состава значило бы выдать среднее за
+// измеренное — ровно та подмена, ради устранения которой Ф2 и заводилась.
 export function latestPerSize(
   markers: common_TechCardMarkerSummary[],
   colorwayId = 0,
@@ -175,8 +277,9 @@ export function latestPerSize(
   const better = betterMarker(colorwayId);
   const bySize = new Map<number, common_TechCardMarkerSummary>();
   for (const m of markers) {
-    const sid = m.sizeId ?? 0;
-    if (!sid) continue;
+    const comp = compositionOf(m);
+    if (comp.length !== 1) continue;
+    const sid = comp[0].sizeId;
     const prev = bySize.get(sid);
     if (!prev || better(m, prev) < 0) bySize.set(sid, m);
   }
@@ -204,9 +307,53 @@ export function buildMarkerLayout(args: {
   // so the marker survives a piece rename. Absent/'' = unresolved, and the reader falls back
   // to the block name saved on the piece.
   pieceLineKeyById?: Map<number, string>;
+  // СОСТАВ раскладки (Ф2): сколько ИЗДЕЛИЙ каждого размера кладёт этот настил. Обязателен и
+  // непуст — раскладка без состава не сохраняется вовсе, и сервер отказывает ей прямо
+  // (ReasonCompositionMissing), потому что придуманный «1 комплект» завысил бы норму на изделие
+  // ровно во столько раз, сколько изделий в настиле.
+  composition: readonly MarkerCompositionEntry[];
+  // Размер градации каждой РАЗОБРАННОЙ детали: id размера карточки, 0/нет = деталь не
+  // градуируется (блок без размерного хвоста — такая кроится по одной на КАЖДОЕ изделие состава).
+  sizeIdByPieceId?: ReadonlyMap<number, number>;
 }): common_TechCardMarkerLayout {
   const { pieces, perSetQty, urlBySource, result, unit, config } = args;
   const used = new Set(result.placements.map((p) => p.pieceId));
+  // Порядок состава — по size_id, тем же правилом, что канонизирует сервер. Он часть БАЙТОВ
+  // блоба, и брать его от того, в каком порядке форма собрала строки, нельзя: пробник Ф0.5
+  // сверяет «тот же вход ⇒ тот же блоб».
+  const composition = [...args.composition]
+    .filter((c) => c.sizeId > 0 && c.quantity >= 1)
+    .sort((a, b) => a.sizeId - b.sizeId);
+  // КАКОЙ ФОРМОЙ ПИСАТЬ СОСТАВ — и почему однородный пишется ПО-СТАРОМУ.
+  //
+  // Состав из одного размера и легаси-пара (size_id, sets) — это ОДИН И ТОТ ЖЕ ФАКТ в двух
+  // кодировках: сервер проецирует пару в состав {size_id, sets} на чтении (миграция 0273), так что
+  // ниже по течению — в списке, в костинге, в latestPerSize — они уже неразличимы. Раз факт один,
+  // выбор кодировки решается ценой ошибки, и она несимметрична:
+  //
+  //   • v4 на однородной раскладке МЕНЯЕТ БАЙТЫ блоба, которые не обязаны меняться, — то есть
+  //     каждый пересохранённый старый маркер «дрожит» без единого содержательного отличия;
+  //   • v4 требует сервера, который её понимает: развёрнутый на проде бэкенд отвергает
+  //     schema_version > 3 целиком («not supported»), и клиент, штампующий 4 безусловно, ломает
+  //     сохранение ЛЮБОЙ раскладки, включая те, что прекрасно выражались и раньше;
+  //   • уникальность имени у легаси-строки — (карточка, размер, имя), у строки с составом —
+  //     (карточка, имя). Безусловная v4 сузила бы её: две раскладки одного имени на разных
+  //     размерах, законные сегодня, столкнулись бы на constraint — ПОСЛЕ оплаченного прогона.
+  //
+  // Поэтому состав уезжает в блоб ровно тогда, когда легаси-пара его выразить НЕ МОЖЕТ, — то есть
+  // на смешанном настиле. Это не «отложить Ф2»: смешанный состав и есть то новое, ради чего она
+  // заводилась, и он записывается полностью, вместе с размерами на деталях.
+  const mixed = composition.length > 1;
+  // Размер на детали — ТОЛЬКО в смешанной раскладке, и это не экономия, а договор. Сервер
+  // отвергает деталь, чей size_id не назван в составе (формула дала бы ей ноль экземпляров), и
+  // при пустом составе это КАЖДАЯ размеченная деталь. В однородной же раскладке ветка формулы
+  // «деталь размеро-агностична» даёт quantity × total_units = quantity × sets — ровно прежний
+  // ответ, без единого поля сверх того, что писалось до Ф2.
+  const sizeOfPiece = (id: number): number | undefined => {
+    if (!mixed) return undefined;
+    const sid = args.sizeIdByPieceId?.get(id) ?? 0;
+    return sid > 0 ? sid : undefined;
+  };
   // v2 said "pieces carry block_name AND/OR piece_line_key" — never which — and was claimed only
   // when the blob really carried one of the two. That conditional claim is gone with v3, and the
   // reason it can go is the rule it always rested on: a READER BRANCHES ON THE FIELD IT NEEDS,
@@ -240,12 +387,18 @@ export function buildMarkerLayout(args: {
   // The version ladder stays cumulative and the identity rule above is unchanged: a reader still
   // branches on the FIELD it needs, never on the number.
   return {
-    schemaVersion: 3,
-    // Состав (Ф2, schema_version 4) этот писатель пока не собирает: он пишет однородный блоб
-    // «один размер × N комплектов», и ПУСТОЙ состав — это ровно его законное чтение (читатель
-    // берёт состав из шапки: {summary.size_id, summary.sets}). undefined, а не [] — ключа в JSON
-    // не появляется, блоб байт в байт прежний.
-    composition: undefined,
+    // 4 — как только в блобе есть состав или размер на детали; иначе прежняя 3. Версия НЕ решает
+    // политику (см. простыню выше), но она обязана соответствовать содержимому: блоб с составом
+    // под версией младше 4 сервер отвергает как невозможный пэйлоад
+    // (entity.CompositionPredatesSchema), и правильно — это клиент, пишущий формат, которым не
+    // владеет.
+    schemaVersion: mixed ? 4 : 3,
+    // undefined, а не []: ключа в JSON не появляется вовсе, и однородный блоб остаётся байт в
+    // байт тем же, что писался до Ф2. Пустой состав в блобе — это законное «читай состав из
+    // шапки» ({summary.size_id, summary.sets}), а не «раскладка без состава».
+    composition: mixed
+      ? composition.map((c) => ({ sizeId: c.sizeId, quantity: c.quantity }))
+      : undefined,
     params: {
       unit,
       tolCm: args.tol,
@@ -271,13 +424,11 @@ export function buildMarkerLayout(args: {
         // just displays by the name it saved.
         blockName: p.blockName ?? '',
         pieceLineKey: args.pieceLineKeyById?.get(p.id) ?? '',
-        // Ф2 (schema_version 4) завела на детали блоба размер её градации. Этот писатель
-        // размерами не оперирует — он пишет однородный блоб, — и `undefined` здесь означает ровно
-        // это: «деталь размеро-агностична / блоб легаси», то самое чтение, которое даёт прежнюю
-        // формулу количеств без ветвления по версии. Именно undefined, а не 0: ключа в JSON не
-        // появляется вовсе, и блоб остаётся байт в байт тем же, что до бампа прото — регрессионный
-        // пробник Ф0.5 сверяет «тот же вход ⇒ тот же блоб».
-        sizeId: undefined,
+        // Размер градации ЭТОГО контура (схема 4). undefined — «деталь не градуируется», и это
+        // ответ, а не пробел: по формуле такая деталь кроится по одной на каждое изделие всего
+        // состава. Именно undefined, а не 0, чтобы ключа в JSON не появлялось: однородный блоб
+        // обязан остаться байт в байт прежним.
+        sizeId: sizeOfPiece(p.id),
       })),
     placements: result.placements.map((pl) => ({
       pieceId: pl.pieceId,
@@ -311,11 +462,29 @@ export function markerToView(marker: common_TechCardMarker): {
   result: NestResult;
   widthCm: number;
   targetCm?: number;
+  // Состав раскладки и размер каждой детали — прочитанные ПО ПОЛЮ, один раз, здесь.
+  composition: MarkerCompositionEntry[];
+  totalUnits: number;
+  sizeIdByPieceId: Map<number, number>;
 } {
   // Generated types spell every key as required-but-undefined, so a bare {} does not
   // assign; the cast is safe because every property is `| undefined`.
   const s = (marker.summary ?? {}) as common_TechCardMarkerSummary;
   const l = (marker.layout ?? {}) as common_TechCardMarkerLayout;
+  // СОСТАВ ЧИТАЕТСЯ ИЗ БЛОБА, А ЕСЛИ ЕГО ТАМ НЕТ — ИЗ ШАПКИ. Это одна ветка на поле, а не две
+  // семантики: пустой composition у блоба означает «легаси, состав в шапке», и compositionOf
+  // достаёт оттуда ту же самую форму — одну строку {size_id, sets}. Ниже по коду разницы уже нет.
+  const blob = (l.composition ?? [])
+    .map((c) => ({ sizeId: Number(c.sizeId ?? 0), quantity: Number(c.quantity ?? 0) }))
+    .filter((c) => c.sizeId > 0 && c.quantity > 0)
+    .sort((a, b) => a.sizeId - b.sizeId);
+  const composition = blob.length > 0 ? blob : compositionOf(s);
+  const totalUnits = composition.reduce((n, c) => n + c.quantity, 0) || totalUnitsOf(s);
+  const sizeIdByPieceId = new Map<number, number>();
+  for (const p of l.pieces ?? []) {
+    const sid = Number(p.sizeId ?? 0);
+    if (sid > 0) sizeIdByPieceId.set(p.pieceId ?? 0, sid);
+  }
   const pieces: PieceDTO[] = (l.pieces ?? []).map((p) => ({
     id: p.pieceId ?? 0,
     name: p.name || `деталь ${p.pieceId ?? 0}`,
@@ -362,5 +531,8 @@ export function markerToView(marker: common_TechCardMarker): {
     result,
     widthCm: decNum(s.fabricWidthCm) || 140,
     targetCm: target > 0 ? target : undefined,
+    composition,
+    totalUnits,
+    sizeIdByPieceId,
   };
 }

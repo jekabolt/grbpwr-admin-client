@@ -17,7 +17,14 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { consumptionCm, decNum } from './marker-io';
+import {
+  compositionLabel,
+  compositionOf,
+  consumptionCm,
+  decNum,
+  scalarNormRefusal,
+  totalUnitsOf,
+} from './marker-io';
 import {
   isRollGoodsSection,
   markerScopeDirection,
@@ -56,6 +63,8 @@ export function MarkersSection({
     return m;
   }, [techCard?.colorways]);
   const sizeById = useSizeNames();
+  // Имя размера по id — одно на весь экран: и в колонке состава, и в подписи открытого маркера.
+  const sizeName = (id: number) => formatSizeName(sizeById.get(id) ?? `#${id}`);
   const season = (useWatch<TechCardFormData>({ name: 'season' }) ?? '') as string;
   const styleNumber = (useWatch<TechCardFormData>({ name: 'styleNumber' }) ?? '') as string;
   // НАПРАВЛЕНИЕ ТКАНИ ОТКРЫТОГО МАРКЕРА. Раньше сюда не передавалось ничего, и модалка вдобавок
@@ -144,11 +153,14 @@ export function MarkersSection({
           <thead>
             <tr>
               <th>название</th>
-              <th>размер</th>
+              {/* СОСТАВ вместо размера: раскладка больше не «один размер», она называет, сколько
+                  изделий какого размера кроит один настил. У снятых до Ф2 состав ровно один
+                  размер, и колонка выглядит как прежняя. */}
+              <th>состав</th>
               <th>слот BOM</th>
               <th>ширина</th>
               <th>длина</th>
-              <th>компл.</th>
+              <th>изделий</th>
               <th>расход / ед</th>
               <th>эфф.</th>
               <th>обновлён</th>
@@ -158,6 +170,11 @@ export function MarkersSection({
           <tbody>
             {markers.map((m) => {
               const cons = consumptionCm(m);
+              // Отказ выдать скалярную норму. Он ЗАМЕЩАЕТ число в колонке расхода, а не
+              // приписывается к нему: на смешанном составе средняя по составу выглядит как
+              // обычная норма, и глазом её не отличить.
+              const refusal = scalarNormRefusal(m);
+              const comp = compositionOf(m);
               return (
                 <tr key={m.id}>
                   <td>
@@ -166,7 +183,13 @@ export function MarkersSection({
                       <Pill tone='mut'>{SOURCE_LABEL[m.source ?? ''] ?? m.source}</Pill>
                     </span>
                   </td>
-                  <td>{formatSizeName(sizeById.get(m.sizeId ?? 0) ?? `#${m.sizeId}`)}</td>
+                  <td>
+                    {compositionLabel(comp, sizeName) || (
+                      <Text size='nano' variant='label' component='span'>
+                        состав не читается
+                      </Text>
+                    )}
+                  </td>
                   <td>
                     {/* The wire cannot tell «never linked» from «slot deleted» (both come
                         from the same LEFT JOIN going NULL) — one honest label, no fake pill. */}
@@ -185,8 +208,20 @@ export function MarkersSection({
                   </td>
                   <td>{decNum(m.fabricWidthCm)} см</td>
                   <td>{decNum(m.usedLengthCm)} см</td>
-                  <td>{m.sets ?? 1}</td>
-                  <td className='font-semibold'>{cons ? `${cons} см` : <EmptyCell />}</td>
+                  <td>{totalUnitsOf(m) || <EmptyCell />}</td>
+                  <td className='font-semibold'>
+                    {cons != null ? (
+                      `${cons} см`
+                    ) : refusal ? (
+                      // Слово, а не пустая ячейка: пустая читается как «ещё не посчитали», тогда
+                      // как здесь считать НЕЧЕГО — и причина висит подсказкой на самой пилюле.
+                      <Pill tone='warn' title={refusal}>
+                        {comp.length > 1 ? 'смешанный состав' : 'состав не читается'}
+                      </Pill>
+                    ) : (
+                      <EmptyCell />
+                    )}
+                  </td>
                   <td>{decNum(m.efficiencyPct) ? `${decNum(m.efficiencyPct)} %` : <EmptyCell />}</td>
                   <td>
                     <span title={m.updatedBy || ''}>{formatTechCardDate(m.updatedAt)}</span>
@@ -235,9 +270,9 @@ export function MarkersSection({
             view={view}
             techCardId={techCardId}
             canEdit={canEdit}
-            sizeLabel={formatSizeName(
-              sizeById.get(view.summary?.sizeId ?? 0) ?? `#${view.summary?.sizeId ?? 0}`,
-            )}
+            // Подпись маркера — его СОСТАВ, а не размер: у раскладки с составом size_id = 0, и
+            // прежняя строка печатала бы «#0» в заголовке модалки и в имени экспортируемого файла.
+            sizeLabel={view.summary ? compositionLabel(compositionOf(view.summary), sizeName) : ''}
             season={season}
             styleNumber={styleNumber}
             // Направление РЕАЛЬНОЙ ткани этого маркера. Ручной редактор предлагает повороты по
