@@ -41,6 +41,7 @@ import {
   dec,
   decNum,
   exportFileName,
+  legacyPairOf,
   markerToView,
   scalarNormRefusal,
   type MarkerBomLine,
@@ -278,35 +279,62 @@ export function NestingModal({
   // детали из раскладки молча.
   const gradedOpts = useMemo(() => sizeOpts.filter((o) => o.size !== ''), [sizeOpts]);
   const ungradedCount = sizeOpts.find((o) => o.size === '')?.count ?? 0;
-  // Затравка состава: крупнейшая градуированная группа — 1 изделие, остальные 0. Ровно то же
-  // умолчание, что было у прежнего «показать самый большой размер», и то же число, что стояло в
-  // «комплектов». Пересевается, когда меняется НАБОР токенов (смена контурного слоя, новый разбор).
-  const tokensKey = gradedOpts.map((o) => o.size).join(' ');
+  // СТРОКА СОСТАВА — ЭТО РАЗМЕР КАРТОЧКИ, А НЕ НАПИСАНИЕ ТОКЕНА. Реальные файлы пишут один
+  // размер несколькими графиками: BP_M и SL_R_m, скобочный базовый BP_<S> рядом с FP_S, буква и
+  // число одного ряда. Пока строки ключевались сырым хвостом, такие написания давали ДВЕ строки
+  // на один size_id — и у файла не оставалось корректного ввода вовсе: заполнить обе значило
+  // получить отказ сервера («lists size N twice») ПОСЛЕ оплаченного прогона, занулить одну —
+  // молча выкроить настил без деталей второй графики. Поэтому написания сливаются здесь, на
+  // входе: одна строка, сумма деталей, одно количество — а сырые токены остаются подписью.
+  //
+  // Ключ строки стабилен к переразбору: резолвнутый размер — '#id', нерезолвнутый токен — сам
+  // токен с префиксом (два нерезолвнутых написания сливать нельзя — может статься, это РАЗНЫЕ
+  // отсутствующие размеры, и слив спрятал бы один из них из списка «добавьте в карточку»).
+  const foldedRows = useMemo(() => {
+    const rows = new Map<
+      string,
+      { key: string; tokens: string[]; count: number; sizeId: number; resolvable: boolean }
+    >();
+    for (const o of gradedOpts) {
+      const bare = o.size.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+      const sizeId = (bare ? sizeIdByToken?.get(bare) : undefined) ?? 0;
+      const resolvable = !bare || sizeIdByToken == null || sizeIdByToken.has(bare);
+      const key = sizeId > 0 ? `#${sizeId}` : `?${o.size}`;
+      const prev = rows.get(key);
+      if (prev) {
+        prev.tokens.push(o.size);
+        prev.count += o.count;
+      } else {
+        rows.set(key, { key, tokens: [o.size], count: o.count, sizeId, resolvable });
+      }
+    }
+    return [...rows.values()];
+  }, [gradedOpts, sizeIdByToken]);
+  // Затравка состава: крупнейшая строка — 1 изделие, остальные 0. Ровно то же умолчание, что
+  // было у прежнего «показать самый большой размер», и то же число, что стояло в «комплектов».
+  // Пересевается, когда меняется НАБОР строк (смена контурного слоя, новый разбор). Разделитель —
+  // NUL как escape-последовательность: литеральный байт в исходнике превращал файл в «бинарный»
+  // для grep/diff, а видимый разделитель мог бы встретиться в токене.
+  const tokensKey = foldedRows.map((r) => r.key).join('\u0000');
   useEffect(() => {
-    const largest = gradedOpts.reduce<{ size: string; count: number } | null>(
-      (best, o) => (!best || o.count > best.count ? o : best),
+    const largest = foldedRows.reduce<{ key: string; count: number } | null>(
+      (best, r) => (!best || r.count > best.count ? r : best),
       null,
     );
-    setQtyByToken(largest ? { [largest.size]: 1 } : { '': 1 });
+    setQtyByToken(largest ? { [largest.key]: 1 } : { '': 1 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokensKey]);
 
-  // Строки состава с разрешённым размером карточки. sizeId 0 = токен не резолвится: считать
-  // такую раскладку можно, сохранить — нет (тот же отказ, что был у одиночного размера, только
-  // построчно).
+  // Строки состава с количеством. sizeId 0 = токен не резолвится: считать такую раскладку
+  // можно, сохранить — нет (тот же отказ, что был у одиночного размера, только построчно).
   const compRows = useMemo(
     () =>
-      gradedOpts.map((o) => {
-        const bare = o.size.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
-        return {
-          token: o.size,
-          count: o.count,
-          sizeId: (bare ? sizeIdByToken?.get(bare) : undefined) ?? 0,
-          resolvable: !bare || sizeIdByToken == null || sizeIdByToken.has(bare),
-          qty: Math.max(0, Math.round(qtyByToken[o.size] ?? 0)),
-        };
-      }),
-    [gradedOpts, sizeIdByToken, qtyByToken],
+      foldedRows.map((r) => ({
+        ...r,
+        label: r.tokens.join(' / '),
+        qty: Math.max(0, Math.round(qtyByToken[r.key] ?? 0)),
+      })),
+    [foldedRows, qtyByToken],
   );
   const activeRows = useMemo(() => compRows.filter((r) => r.qty >= 1), [compRows]);
   // Файл без градации: одно число «изделий», размер даёт слот. Прежнее поведение целиком.
@@ -314,10 +342,13 @@ export function NestingModal({
   const graded = compRows.length > 0;
   // Сколько ИЗДЕЛИЙ кроит настил — делитель расхода и множитель неградуируемых деталей.
   const unitsTotal = graded ? activeRows.reduce((s, r) => s + r.qty, 0) : ungradedUnits;
-  const unitsByToken = useMemo(
-    () => new Map(activeRows.map((r) => [r.token, r.qty])),
-    [activeRows],
-  );
+  // Количество — на КАЖДОЕ написание строки: свёрнутая строка «M / m» раздаёт свой тираж и
+  // деталям с хвостом M, и деталям с хвостом m — это детали одного изделия.
+  const unitsByToken = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of activeRows) for (const t of r.tokens) m.set(t, r.qty);
+    return m;
+  }, [activeRows]);
   // ФОРМУЛА БЛОБА, одна на весь экран: экземпляров детали = qty × (размер детали в составе ?
   // количество этого размера : всего изделий). Деталь без размерного хвоста кроится на каждое
   // изделие состава — потому и умножается на итог, а не на чью-то отдельную строку.
@@ -357,18 +388,19 @@ export function NestingModal({
   // доезжает (в модалку передают только карту токен→id), а токен оператор и так видит в таблице
   // состава — подписывать состав вторым написанием того же размера значило бы завести разночтение.
   const sizeNameOfId = (id: number) =>
-    compRows.find((r) => r.sizeId === id)?.token || sizeLabel || `#${id}`;
+    compRows.find((r) => r.sizeId === id)?.tokens[0] || sizeLabel || `#${id}`;
   // Размер из файла, которого в карточке нет, сохранить нельзя — сервер проверяет ряд, и
   // молча записать раскладку «куда-нибудь» хуже, чем отказать с объяснением. Теперь ПОСТРОЧНО:
   // нест разрешён (оператор смотрит), сохранение — нет.
   const unresolvedTokens = activeRows
     .filter((r) => !r.resolvable || r.sizeId <= 0)
-    .map((r) => r.token);
+    .map((r) => r.label);
   const sizeUnresolved = unresolvedTokens.length > 0 || (!graded && !sizeId);
   // Размер градации каждой детали — в блоб (схема 4). Только резолвящиеся: 0 означало бы
   // «деталь не градуируется», а это другой факт и другая ветка формулы.
   const sizeIdByPieceId = useMemo(() => {
-    const byToken = new Map(compRows.map((r) => [r.token, r.sizeId]));
+    const byToken = new Map<string, number>();
+    for (const r of compRows) for (const t of r.tokens) byToken.set(t, r.sizeId);
     const m = new Map<number, number>();
     for (const p of allPieces) {
       const sid = byToken.get(split.codeById.get(p.id)?.size ?? '') ?? 0;
@@ -632,6 +664,13 @@ export function NestingModal({
       (s, p) => s + Math.max(1, Math.round(sel[p.id]?.qty ?? 1)) * (unitsOfPiece.get(p.id) ?? 0),
       0,
     );
+  // Сверх потолка сервера прогон не ЗАПУСКАЕТСЯ, а не «предупреждается»: раскладка, которую
+  // гарантированно не примут, — это оплаченный бюджет и двадцать минут ожидания перед отказом.
+  // Число размеров (entity.MaxMarkerCompositionSizes) проверяется на сохранении: оно не делает
+  // прогон дороже, а состав можно ужать и после него.
+  const overCap =
+    checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS;
+  const MAX_MARKER_COMPOSITION_SIZES = 32;
 
   // Source-file groups for the per-fabric one-click filter (each fabric is its own DXF).
   const sources = useMemo(() => {
@@ -777,7 +816,11 @@ export function NestingModal({
     // у раскладки с составом уникальность сузилась до (карточка, имя). Два смешанных настила на
     // одном слоте и одной ширине, названные одинаково, столкнулись бы на constraint уже ПОСЛЕ
     // оплаченного прогона.
-    compositionLabel(composition, sizeNameOfId) || sizeLabel || '',
+    //
+    // ТОЛЬКО НА ГРАДУИРОВАННОМ файле. У неградуированного состав — одна строка с размером слота,
+    // имени для которого модалка не знает (sizeLabel на создании всегда пуст), и подпись состава
+    // впечатала бы в ПЕРСИСТЕНТНОЕ имя маркера сырой id хранения («#42 · подкладка …»).
+    graded ? compositionLabel(composition, sizeNameOfId) : sizeLabel || '',
     (slot ? [slot.role, slot.name?.trim()].filter(Boolean).join(' ') : '') || 'раскладка',
     chosenColorway?.label ?? '',
     `${widthCm} см`,
@@ -996,9 +1039,14 @@ export function NestingModal({
     }
     return s;
   }, [pieces, sel, fitsWidth, split]);
-  const sizesWithoutPieces = mixed
-    ? activeRows.filter((r) => r.sizeId > 0 && !tokensWithPieces.has(r.token)).map((r) => r.token)
-    : [];
+  // БЕЗ ГЕЙТА НА mixed — проверка верна для состава ЛЮБОЙ длины, и однородный случай даже
+  // опаснее смешанного: у однородного блоба нет размеров на деталях, так что серверная половина
+  // этой проверки (гейтится hasPieceSize) его не видит вовсе. Состав {M×1}, у которого детали M
+  // сняты галочками или не влезли в ширину, сохранял бы норму, измеренную на одних карманах, —
+  // заниженную и неотличимую от честной.
+  const sizesWithoutPieces = activeRows
+    .filter((r) => r.sizeId > 0 && !r.tokens.some((t) => tokensWithPieces.has(t)))
+    .map((r) => r.label);
   // ПРАВИЛО СЕРВЕРА, ПРОВЕРЕННОЕ ДО ОТПРАВКИ (entity.ValidateMarkerFabricDirection). Не вторая
   // политика: единственный источник запрета — allowsFlip, отсюда и до движка. Здесь только
   // проверяется, что ГОТОВАЯ раскладка ему не противоречит.
@@ -1034,6 +1082,7 @@ export function NestingModal({
     !sizeUnresolved &&
     sizesWithoutPieces.length === 0 &&
     composition.length > 0 &&
+    composition.length <= MAX_MARKER_COMPOSITION_SIZES &&
     run.phase === 'done' &&
     run.result.placedCount === run.result.totalCount &&
     run.result.placements.length > 0 &&
@@ -1130,8 +1179,9 @@ export function NestingModal({
           // «какая победит, если они разойдутся», у которого нет бесплатного ответа.
           //
           // Смешанная раскладка шлёт нули: сервер увидит состав в блобе и запишет size_id/sets
-          // как NULL. Однородная шлёт пару — и сохраняется ровно так же, как до Ф2.
-          sizeId: mixed ? 0 : composition[0].sizeId,
+          // как NULL. Однородная шлёт пару — и сохраняется ровно так же, как до Ф2. Решение
+          // живёт в legacyPairOf (marker-io), а не выражением здесь, — чтобы его проверял зонд.
+          sizeId: legacyPairOf(composition).sizeId,
           name,
           source: manual ? 'manual' : 'auto',
           bomLineKey: slotKey,
@@ -1147,7 +1197,7 @@ export function NestingModal({
           // материал слота отредактируют.
           selvedgeCm: dec(slotSelvedge(slot)),
           allowCrossGrain: crossGrain,
-          sets: mixed ? 0 : composition[0].quantity,
+          sets: legacyPairOf(composition).sets,
           usedLengthCm: dec(effective.usedLengthCm),
           efficiencyPct: dec(effPct),
           placedCount: effective.placedCount,
@@ -1718,16 +1768,18 @@ export function NestingModal({
                 compRows.map((r) => {
                   const bad = !r.resolvable || r.sizeId <= 0;
                   return (
-                    <div key={r.token} className='flex items-center gap-1.5'>
+                    <div key={r.key} className='flex items-center gap-1.5'>
+                      {/* Подпись — ВСЕ написания размера из файла («M / m»): строка их слила,
+                          и оператор должен видеть, что обе графики кроятся одним тиражом. */}
                       <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                        {r.token}
+                        {r.label}
                       </Text>
                       <Text size='nano' variant='label' component='span'>
                         {r.count} дет.
                       </Text>
                       {bad && r.qty >= 1 && <Pill tone='warn'>нет в карточке</Pill>}
                       <Input
-                        name={`nest-comp-${r.token}`}
+                        name={`nest-comp-${r.key}`}
                         type='number'
                         value={r.qty}
                         min={0}
@@ -1737,7 +1789,7 @@ export function NestingModal({
                           const next = Math.max(0, Math.round(numOr(e.target.value, r.qty)));
                           if (next !== r.qty) {
                             guardManual(() =>
-                              setQtyByToken((m) => ({ ...m, [r.token]: next })),
+                              setQtyByToken((m) => ({ ...m, [r.key]: next })),
                             );
                           }
                         }}
@@ -2047,7 +2099,12 @@ export function NestingModal({
                   }
                   sub={
                     viewRefusal
-                      ? 'смешанный состав — нормы нет'
+                      ? // Причина ИЗ СОСТАВА, а не одна на всё: нечитаемый состав (испорченная
+                        // строка, частичный рестор) — другой отказ, и звать его «смешанным»
+                        // значит отправить оператора чинить не то.
+                        viewData.composition.length > 1
+                        ? 'смешанный состав — нормы нет'
+                        : 'состав не читается — нормы нет'
                       : `изделий: ${viewData.totalUnits || 1}`
                   }
                 />
@@ -2153,7 +2210,12 @@ export function NestingModal({
                 <Button
                   type='button'
                   variant='main'
-                  disabled={parse.phase !== 'ready' || checkedCount === 0 || running}
+                  disabled={parse.phase !== 'ready' || checkedCount === 0 || running || overCap}
+                  title={
+                    overCap
+                      ? `сверх потолка сервера (${MAX_MARKER_PIECES} деталей / ${MAX_MARKER_PLACEMENTS} размещений) — такую раскладку не сохранить: уберите детали или уменьшите состав`
+                      : undefined
+                  }
                   onClick={requestRun}
                 >
                   запустить
@@ -2187,7 +2249,9 @@ export function NestingModal({
                               ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
                               : sizesWithoutPieces.length > 0
                                 ? `в состав взяты размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`
-                                : 'сохранить можно завершённую раскладку, в которую поместились все детали'
+                                : composition.length > MAX_MARKER_COMPOSITION_SIZES
+                                  ? `в составе ${composition.length} размеров, потолок сервера — ${MAX_MARKER_COMPOSITION_SIZES}`
+                                  : 'сохранить можно завершённую раскладку, в которую поместились все детали'
                   }
                   onClick={() => setSaveOpen(true)}
                 >
@@ -2338,8 +2402,11 @@ export function NestingModal({
           {/* СОСТАВ И ЧТО ИЗ НЕГО СЛЕДУЕТ — последняя строка перед «сохранить», потому что
               именно она отвечает на вопрос «а какое число уедет в костинг». */}
           <Text size='nano' variant='label' component='p'>
-            состав: {compositionLabel(composition, (id) => sizeNameOfId(id))} · всего{' '}
-            {unitsTotal} изделий · расход на изделие:{' '}
+            состав:{' '}
+            {graded
+              ? compositionLabel(composition, (id) => sizeNameOfId(id))
+              : sizeLabel || 'один размер'}{' '}
+            · всего {unitsTotal} изделий · расход на изделие:{' '}
             {mixed
               ? 'не выдаётся — среднее по составу'
               : effective

@@ -115,10 +115,29 @@ export function compositionOf(s: common_TechCardMarkerSummary): MarkerCompositio
 
 // Сколько ИЗДЕЛИЙ (не деталей!) выкраивает раскладка — делитель под расходом на единицу.
 // 0 = неизвестно; арифметического умолчания у этого числа нет и быть не может.
+//
+// СНАЧАЛА СУММА СОСТАВА, и только потом wire-поле. Отказ (scalarNormRefusal) читает состав, и
+// если бы делитель предпочитал totalUnits из шапки, испорченная строка могла бы описывать ДВЕ
+// разные раскладки разом: состав говорит «3 изделия», шапка — «9», отказа нет, а расход посчитан
+// не тем делителем. Сервер выводит оба числа из одного среза именно затем, чтобы они не могли
+// разойтись, — читатель обязан сохранить эту связку, а не переоткрыть её.
 export function totalUnitsOf(s: common_TechCardMarkerSummary): number {
-  const wire = Number(s.totalUnits ?? 0);
-  if (wire > 0) return wire;
-  return compositionOf(s).reduce((n, c) => n + c.quantity, 0);
+  const sum = compositionOf(s).reduce((n, c) => n + c.quantity, 0);
+  if (sum > 0) return sum;
+  return Number(s.totalUnits ?? 0);
+}
+
+// ЛЕГАСИ-ПАРА (size_id, sets) ПОД СОСТАВ — то, что уезжает в ШАПКУ сохранения. Однородный состав
+// и пара — один факт в двух кодировках, и сервер (dto.markerCompositionOfInsert) берёт пару только
+// когда состава в блобе нет; смешанный шлёт нули, и это правильно — отдельного поля на вставке
+// нет намеренно. Функция существует, чтобы это решение жило в одном месте и ПРОВЕРЯЛОСЬ зондом:
+// пока пара собиралась выражением в модалке, её регресс (sets: 1 на смешанном) зонд поймать не мог.
+export function legacyPairOf(composition: readonly MarkerCompositionEntry[]): {
+  sizeId: number;
+  sets: number;
+} {
+  if (composition.length === 1) return { sizeId: composition[0].sizeId, sets: composition[0].quantity };
+  return { sizeId: 0, sets: 0 };
 }
 
 // ОТКАЗ ВЫДАТЬ СКАЛЯРНУЮ НОРМУ. '' = расход на изделие можно применять в рецепт; непустая
@@ -321,8 +340,20 @@ export function buildMarkerLayout(args: {
   // Порядок состава — по size_id, тем же правилом, что канонизирует сервер. Он часть БАЙТОВ
   // блоба, и брать его от того, в каком порядке форма собрала строки, нельзя: пробник Ф0.5
   // сверяет «тот же вход ⇒ тот же блоб».
-  const composition = [...args.composition]
-    .filter((c) => c.sizeId > 0 && c.quantity >= 1)
+  //
+  // ДУБЛИ РАЗМЕРА СЛИВАЮТСЯ СУММОЙ. Два упоминания одного size_id — это один размер, названный
+  // дважды (файл пишет его двумя графиками: BP_M и SL_R_m), и сумма — единственное чтение такого
+  // входа. Сервер дубль отвергает целиком («composition lists size N twice»), и правильно: он не
+  // знает намерения. Писатель своё намерение знает — и обязан канонизировать СВОЙ вход, а не
+  // доносить на него; блоб с гарантированным отказом хуже, чем отсутствие блоба.
+  const qtyBySize = new Map<number, number>();
+  for (const c of args.composition) {
+    if (c.sizeId > 0 && c.quantity >= 1) {
+      qtyBySize.set(c.sizeId, (qtyBySize.get(c.sizeId) ?? 0) + c.quantity);
+    }
+  }
+  const composition = [...qtyBySize]
+    .map(([sizeId, quantity]) => ({ sizeId, quantity }))
     .sort((a, b) => a.sizeId - b.sizeId);
   // КАКОЙ ФОРМОЙ ПИСАТЬ СОСТАВ — и почему однородный пишется ПО-СТАРОМУ.
   //

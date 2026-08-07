@@ -107,6 +107,20 @@ export function MarkerApplyHint({
   const conv = chosenCons != null ? toBomUnit(chosenCons, unit) : null;
   const bySize = latestPerSize(lineMarkers, colorwayId);
   const fullCoverage = sizeIds.length > 0 && sizeIds.every((id) => bySize.has(id));
+  // Применимость «по размерам» = покрытие И конвертируемость КАЖДОЙ нормы в единицу линии.
+  // Раньше кнопку в обоих режимах глушил общий `!conv`; после разделения режимов пер-размерная
+  // ветка осталась без гейта единицы — на линии с «пог.м» кнопка жила, а клик молча не делал
+  // ничего: apply() выходил на первом же неконвертируемом размере ДО закрытия диалога.
+  const perSizeApplicable =
+    fullCoverage &&
+    sizeIds.every((id) => {
+      const m = bySize.get(id);
+      const cons = m ? consumptionCm(m) : null;
+      return cons != null && toBomUnit(cons, unit) != null;
+    });
+  // Один предикат «применить возможно» на кнопку и на пояснения — чтобы заметки об отходах не
+  // могли рассказывать про норму, которую тот же экран отказался выдавать.
+  const applyPossible = mode === 'scalar' ? conv != null && !chosenRefusal : perSizeApplicable;
   const wastage = parseDecimalNumber(wastagePercent);
 
   const sizeName = (id?: number) => sizeNameById.get(id ?? 0) ?? `#${id}`;
@@ -135,6 +149,11 @@ export function MarkerApplyHint({
   const perSizeWidths = appliedPerSize.map((m) => decNum(m!.fabricWidthCm)).filter((w) => w > 0);
   const mixedWidths =
     perSizeWidths.length > 1 && Math.max(...perSizeWidths) - Math.min(...perSizeWidths) > 0.5;
+  // Честность ширины И в «по размерам». mixedWidths сравнивает маркеры только МЕЖДУ СОБОЙ, и три
+  // одинаково чужих (все на 140 см при артикуле 150) проходили молча — ровно та подмена, от
+  // которой скалярный режим защищён widthMismatch'ем строкой выше.
+  const perSizeWidthMismatch =
+    Number.isFinite(artW) && artW > 0 && perSizeWidths.some((w) => Math.abs(artW - w) > 0.5);
 
   // Scalar-mode spread: a flat norm silently taken from one size understates/overstates the
   // run when sizes diverge — or when the chosen size is not the base sample size.
@@ -152,6 +171,11 @@ export function MarkerApplyHint({
   const chosenSizeId = chosenComp.length === 1 ? chosenComp[0].sizeId : 0;
   const offBaseSize =
     baseSampleSizeId > 0 && chosenSizeId > 0 && chosenSizeId !== baseSampleSizeId;
+  // Маркер размера, которого НЕТ в размерном ряду карточки (остался от снятого размера или
+  // никогда в ряд не входил), — норма ниоткуда: spreadPct его не видит (он считается по размерам
+  // ряда), а offBaseSize молчит, пока базовый размер не заполнен. Нарочно НЕ зависит от
+  // baseSampleSizeId — это отдельный, более сильный факт.
+  const offRunSize = chosenSizeId > 0 && sizeIds.length > 0 && !sizeIds.includes(chosenSizeId);
 
   // Provenance stamped with the number (0261): «marker» tells costing this figure ALREADY
   // contains the cutting waste, so the article's wastage_percent must not gross it up a second
@@ -231,7 +255,7 @@ export function MarkerApplyHint({
         confirmLabel='применить'
         confirmDisabled={
           (mode === 'scalar' && (!conv || !!chosenRefusal)) ||
-          (mode === 'perSize' && !fullCoverage)
+          (mode === 'perSize' && !perSizeApplicable)
         }
         closeOnConfirm={false}
       >
@@ -248,7 +272,11 @@ export function MarkerApplyHint({
                   // значило бы ответить на «а где раскладка, которую я только что снял»
                   // молчанием; подписать «— смешанный состав» — назвать причину там, где её ищут.
                   label: `«${m.name}» · ${compLabel(m)} · ${
-                    c != null ? `${c} см/ед` : 'нормы нет — смешанный состав'
+                    c != null
+                      ? `${c} см/ед`
+                      : compositionOf(m).length > 1
+                        ? 'нормы нет — смешанный состав'
+                        : 'нормы нет — состав не читается'
                   }`,
                 };
               })}
@@ -288,6 +316,14 @@ export function MarkerApplyHint({
               </CalloutBox>
             )
           )}
+          {/* Тот же отказ по единице — и в «по размерам»: покрытие полное, а применить нечем.
+              Без него кнопка гаснет молча, и объяснить это некому. */}
+          {mode === 'perSize' && fullCoverage && !perSizeApplicable && (
+            <CalloutBox tone='error'>
+              единица линии BOM ({unit || '—'}) не поддерживает раскладку — расход измерен в
+              сантиметрах длины
+            </CalloutBox>
+          )}
           {mode === 'perSize' && (
             <Text size='nano' variant='label' component='p'>
               {sizeIds
@@ -313,25 +349,38 @@ export function MarkerApplyHint({
               разные ткани
             </CalloutBox>
           )}
-          {mode === 'scalar' && (offBaseSize || spreadPct > 5) && (
-            <CalloutBox tone='note'>
-              {offBaseSize
-                ? `единая норма взята с размера ${sizeName(chosenSizeId)}, а базовый размер карточки — ${sizeName(baseSampleSizeId)}`
-                : ''}
-              {offBaseSize && spreadPct > 5 ? '; ' : ''}
-              {spreadPct > 5
-                ? `расход по размерам расходится на ${spreadPct.toFixed(0)}% — рассмотрите режим «по размерам»`
-                : ''}
+          {mode === 'perSize' && perSizeWidthMismatch && (
+            <CalloutBox tone='warning'>
+              маркеры посчитаны для полотна {[...new Set(perSizeWidths)].join(' / ')} см, артикул
+              слота — {artW} см: расход не переносится между ширинами без пересчёта
             </CalloutBox>
           )}
-          {Number.isFinite(wastage) && wastage > 0 && (
+          {mode === 'scalar' && (offRunSize || offBaseSize || spreadPct > 5) && (
+            <CalloutBox tone={offRunSize ? 'warning' : 'note'}>
+              {[
+                offRunSize
+                  ? `единая норма взята с размера ${sizeName(chosenSizeId)}, которого НЕТ в размерном ряду карточки`
+                  : offBaseSize
+                    ? `единая норма взята с размера ${sizeName(chosenSizeId)}, а базовый размер карточки — ${sizeName(baseSampleSizeId)}`
+                    : '',
+                spreadPct > 5
+                  ? `расход по размерам расходится на ${spreadPct.toFixed(0)}% — рассмотрите режим «по размерам»`
+                  : '',
+              ]
+                .filter(Boolean)
+                .join('; ')}
+            </CalloutBox>
+          )}
+          {/* Заметки об отходах — только когда применить ВОЗМОЖНО. Под отказом строка «в норме
+              уже сидят отходы …» описывала бы норму, которой нет, прямо под колаутом об этом. */}
+          {applyPossible && Number.isFinite(wastage) && wastage > 0 && (
             <CalloutBox tone='note'>
               у линии стоит {wastage}% отходов, но на применённой из раскладки норме костинг их
               НЕ начисляет: измеренная длина уже содержит и межлекальные выпады, и кромку. Процент
               снова начнёт работать, если норму перебить вручную
             </CalloutBox>
           )}
-          {(() => {
+          {applyPossible && (() => {
             // Exactly the markers apply() would use — the preview and the value written must be
             // the same number.
             const used = mode === 'scalar' ? [chosen] : appliedPerSize;
@@ -385,15 +434,25 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
         const refusal = scalarNormRefusal(newest);
         const cons = consumptionCm(newest);
         const conv = cons != null ? toBomUnit(cons, b.unit ?? '') : null;
+        // Пропуск свежего маркера — ФАКТ, а не служебная деталь: оператор только что снял
+        // настил, а полоса показывает число со старого. В диалоге применения пропуск виден в
+        // селекторе с причиной; у полосы селектора нет — значит, нужна пометка.
+        const skipped = ranked.length > 0 && newest !== ranked[0] ? ranked[0] : null;
         // What the recipes currently say for this slot: distinct non-empty scalars across
-        // colourways (a per-size graded usage shows as «по размерам»).
+        // colourways (a per-size graded usage shows as «по размерам»). Кто внёс скаляр —
+        // запоминается: дельта против чужого колорвея — ложная тревога (его артикул может быть
+        // другой ширины, и «расхождение» — это расхождение тканей, а не рецепта с раскладкой).
         const scalars = new Set<string>();
+        const scalarCws = new Set<number>();
         let perSize = false;
         for (const cw of colorways) {
           for (const u of cw.usages ?? []) {
             if ((u.bomLineKey ?? '') !== b.lineKey) continue;
             if ((u.sizeConsumptions ?? []).length > 0) perSize = true;
-            else if (u.consumption?.value) scalars.add(u.consumption.value);
+            else if (u.consumption?.value) {
+              scalars.add(u.consumption.value);
+              scalarCws.add(Number(cw.colorwayId ?? 0));
+            }
           }
         }
         const current = perSize
@@ -403,11 +462,16 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
             : scalars.size === 1
               ? [...scalars][0]
               : `расходятся (${[...scalars].join(' / ')})`;
+        const newestCw = Number(newest.colorwayId ?? 0);
         const delta =
-          conv && !perSize && scalars.size === 1 && Number([...scalars][0]) > 0
+          conv &&
+          !perSize &&
+          scalars.size === 1 &&
+          Number([...scalars][0]) > 0 &&
+          (newestCw === 0 || scalarCws.has(newestCw))
             ? ((conv.value - Number([...scalars][0])) / Number([...scalars][0])) * 100
             : null;
-        return { line: b, newest, conv, cons, refusal, current, delta };
+        return { line: b, newest, conv, cons, refusal, current, delta, skipped };
       });
   }, [bomLines, markers, colorways]);
 
@@ -418,7 +482,7 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
       <Text size='nano' variant='label' component='p'>
         расход из раскладок (маркеров) — применяется в рецепте колорвея, вкладка colourways
       </Text>
-      {rows.map(({ line, newest, conv, cons, refusal, current, delta }) => (
+      {rows.map(({ line, newest, conv, cons, refusal, current, delta, skipped }) => (
         <div key={line.lineKey} className='flex flex-wrap items-center gap-1.5'>
           <Text size='micro' component='span' className='min-w-0 truncate'>
             {line.name?.trim() || 'ткань'}
@@ -431,6 +495,12 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
           ) : (
             <Pill tone='mut'>
               из раскладки: {conv ? `${conv.value} ${conv.unit}` : `${cons} см`}
+            </Pill>
+          )}
+          {skipped && (
+            <Pill tone='mut' title={scalarNormRefusal(skipped)}>
+              свежее измерение «{skipped.name}» пропущено —{' '}
+              {compositionOf(skipped).length > 1 ? 'смешанный состав' : 'состав не читается'}
             </Pill>
           )}
           <Text size='nano' variant='label' component='span'>
