@@ -31,6 +31,9 @@ import type {
 } from 'lib/nesting/types';
 import { NEST_DEFAULTS, allowsFlip } from 'lib/nesting/types';
 import { checkLayout, measureLayout, type Violation } from 'lib/nesting/geom/clearance';
+// БЮДЖЕТ ДО ЗАПУСКА (Ф2.3). Та же модель, что решает внутри движка, какой точности контуры он
+// потянет: экран зовёт ровно её, а не свою копию.
+import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
@@ -38,6 +41,7 @@ import type { MarkerColorway } from './colorway-widths';
 import {
   buildMarkerLayout,
   compositionLabel,
+  compositionOf,
   dec,
   decNum,
   exportFileName,
@@ -356,7 +360,7 @@ export function NestingModal({
     const m = new Map<number, number>();
     for (const p of allPieces) {
       const tok = split.codeById.get(p.id)?.size ?? '';
-      m.set(p.id, tok === '' ? unitsTotal : (unitsByToken.get(tok) ?? 0));
+      m.set(p.id, tok === '' ? unitsTotal : unitsByToken.get(tok) ?? 0);
     }
     return m;
   }, [allPieces, split, unitsTotal, unitsByToken]);
@@ -577,7 +581,7 @@ export function NestingModal({
   // a glance instead of after a 20-second search — which is the better place to say it. What
   // survives here is the engine's own guarantee: whatever reaches the placer and does not land is
   // named. The two are not redundant, they are the pre-flight and the black box.
-  const unplaced = !running ? (displayResult?.unplaced ?? []) : [];
+  const unplaced = !running ? displayResult?.unplaced ?? [] : [];
   const unplacedText = useMemo(() => {
     if (unplaced.length === 0) return '';
     const nameOf = (id: number) => displayPieces.find((p) => p.id === id)?.name || `деталь ${id}`;
@@ -626,7 +630,8 @@ export function NestingModal({
     !displayResult.cancelled &&
     !(run.phase === 'done' && run.stopped);
   const simplified =
-    displayResult?.telemetry && displayResult.telemetry.rdpEpsCm > displayResult.telemetry.requestedRdpEpsCm
+    displayResult?.telemetry &&
+    displayResult.telemetry.rdpEpsCm > displayResult.telemetry.requestedRdpEpsCm
       ? displayResult.telemetry
       : null;
 
@@ -668,8 +673,7 @@ export function NestingModal({
   // гарантированно не примут, — это оплаченный бюджет и двадцать минут ожидания перед отказом.
   // Число размеров (entity.MaxMarkerCompositionSizes) проверяется на сохранении: оно не делает
   // прогон дороже, а состав можно ужать и после него.
-  const overCap =
-    checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS;
+  const overCap = checkedCount > MAX_MARKER_PIECES || instanceCount > MAX_MARKER_PLACEMENTS;
   const MAX_MARKER_COMPOSITION_SIZES = 32;
 
   // Source-file groups for the per-fabric one-click filter (each fabric is its own DXF).
@@ -681,47 +685,6 @@ export function NestingModal({
     }
     return [...m.entries()];
   }, [pieces]);
-
-  // Ручные правки живут поверх конкретного результата — новый запуск их сносит; спросим.
-  const requestRun = () => {
-    if (manual) setRunConfirm(true);
-    else startRun();
-  };
-  const startRun = () => {
-    if (parse.phase !== 'ready') return;
-    setManual(null);
-    setRunConfirm(false);
-    setSaveError(null);
-    const config: NestConfig = {
-      pieces: pieces
-        .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
-        .map((p) => ({
-          pieceId: p.id,
-          quantity: Math.max(1, Math.round(sel[p.id]?.qty ?? 1)) * (unitsOfPiece.get(p.id) ?? 0),
-        })),
-      fabricWidthCm: widthCm,
-      targetLengthCm: target,
-      gapCm,
-      edgeMarginCm: marginCm,
-      allowCrossGrain: crossGrain,
-      // Едет ЗНАЧЕНИЕ, а набор поворотов выводит воркер той же чистой функцией
-      // (allowedRotations) — политика, применённая только на главном потоке, до поиска не
-      // доезжает, и это уже было прод-багом с разворотом по долевой.
-      //
-      // Именно effectiveDirection, а не проп: искать надо под политикой ТОГО полотна, на которое
-      // маркер ляжет, иначе прогон честно оптимизирует под ткань, которую никто не выбирал.
-      fabricDirection: effectiveDirection,
-      // Едет ИМЯ СЛОЯ, а не повёрнутая геометрия: через эту границу геометрия не ходит вовсе,
-      // и воркер разворачивает свою копию той же чистой функцией на том же входе. Так экран и
-      // движок гарантированно смотрят на одни детали.
-      grainLayer,
-      // Едет ЧИСЛО, а раздувает контуры воркер той же чистой функцией на тех же деталях.
-      seamAllowanceCm: allowanceCm,
-      timeBudgetMs: budgetS * 1000,
-      rdpEpsCm: NEST_DEFAULTS.rdpEpsCm,
-    };
-    start(parse.parseId, config);
-  };
 
   const downloadTimer = useRef<number | null>(null);
   useEffect(
@@ -820,7 +783,15 @@ export function NestingModal({
     // ТОЛЬКО НА ГРАДУИРОВАННОМ файле. У неградуированного состав — одна строка с размером слота,
     // имени для которого модалка не знает (sizeLabel на создании всегда пуст), и подпись состава
     // впечатала бы в ПЕРСИСТЕНТНОЕ имя маркера сырой id хранения («#42 · подкладка …»).
-    graded ? compositionLabel(composition, sizeNameOfId) : sizeLabel || '',
+    // У неградуированного файла размера в имени нет (модалка его не знает — sizeLabel на создании
+    // всегда пуст, а сырой id хранения в ПЕРСИСТЕНТНОЕ имя писать нельзя), но ТИРАЖ остаться
+    // обязан. Уникальность имени у легаси-строки — (карточка, size_key, имя), и у такого маркера
+    // size_key заполнен: без множителя настил на 2 изделия и настил на 4 получают ОДНО имя, и
+    // второе сохранение падает на constraint уже ПОСЛЕ оплаченного прогона. Сравнить 2-up с 4-up
+    // на том же полотне — ровно то, ради чего поле тиража и существует.
+    graded
+      ? compositionLabel(composition, sizeNameOfId)
+      : sizeLabel || (ungradedUnits > 1 ? `${ungradedUnits} изд.` : ''),
     (slot ? [slot.role, slot.name?.trim()].filter(Boolean).join(' ') : '') || 'раскладка',
     chosenColorway?.label ?? '',
     `${widthCm} см`,
@@ -921,6 +892,88 @@ export function NestingModal({
     const scope = markerScopeLines(key, bomLines ?? []);
     return scope.length > 0 ? strictestDirection(scope) : fabricDirection;
   }, [viewData, fabricDirection, lockedSlot, slotKey, bomLines]);
+
+  // ЗАДАНИЕ ПРОГОНА — собирается ОДИН РАЗ и уезжает в две стороны: в воркер, который его считает,
+  // и в оценку, которая говорит его цену ДО запуска (Ф2.3). Раньше конфиг строился внутри
+  // startRun, и предсказать по нему что-либо было нечем: единственный способ узнать цену прогона —
+  // оплатить прогон. Собрать для экрана ВТОРОЙ, «примерно такой же» конфиг было бы хуже, чем не
+  // предсказывать вовсе: прогноз относился бы к заданию, которого никто не запускает.
+  const runConfig: NestConfig = useMemo(
+    () => ({
+      pieces: pieces
+        .filter((p) => sel[p.id]?.checked && fitsWidth.get(p.id))
+        .map((p) => ({
+          pieceId: p.id,
+          quantity: Math.max(1, Math.round(sel[p.id]?.qty ?? 1)) * (unitsOfPiece.get(p.id) ?? 0),
+        })),
+      fabricWidthCm: widthCm,
+      targetLengthCm: target,
+      gapCm,
+      edgeMarginCm: marginCm,
+      allowCrossGrain: crossGrain,
+      // Едет ЗНАЧЕНИЕ, а набор поворотов выводит воркер той же чистой функцией
+      // (allowedRotations) — политика, применённая только на главном потоке, до поиска не
+      // доезжает, и это уже было прод-багом с разворотом по долевой.
+      //
+      // Именно effectiveDirection, а не проп: искать надо под политикой ТОГО полотна, на которое
+      // маркер ляжет, иначе прогон честно оптимизирует под ткань, которую никто не выбирал.
+      fabricDirection: effectiveDirection,
+      // Едет ИМЯ СЛОЯ, а не повёрнутая геометрия: через эту границу геометрия не ходит вовсе,
+      // и воркер разворачивает свою копию той же чистой функцией на том же входе. Так экран и
+      // движок гарантированно смотрят на одни детали.
+      grainLayer,
+      // Едет ЧИСЛО, а раздувает контуры воркер той же чистой функцией на тех же деталях.
+      seamAllowanceCm: allowanceCm,
+      timeBudgetMs: budgetS * 1000,
+      rdpEpsCm: NEST_DEFAULTS.rdpEpsCm,
+    }),
+    [
+      pieces,
+      sel,
+      fitsWidth,
+      unitsOfPiece,
+      widthCm,
+      target,
+      gapCm,
+      marginCm,
+      crossGrain,
+      effectiveDirection,
+      grainLayer,
+      allowanceCm,
+      budgetS,
+    ],
+  );
+
+  // ЦЕНА ПРОГОНА ДО ПРОГОНА. Та же функция, которую зовёт движок внутри себя (nest/estimate.ts):
+  // разойтись экрану и движку нечем, потому что модель одна.
+  //
+  // Считается на ГЛАВНОМ ПОТОКЕ — через границу воркера ходят только числа и идентификаторы, и
+  // просить у него прогноз значило бы завести четвёртый тип сообщения ради 25 мс. Замер: 45–46
+  // деталей реального файла — 23–25 мс, то есть один кадр.
+  //
+  // Сверх потолка сервера не считается вовсе: прогон там ЗАПРЕЩЁН (кнопка выключена), а задание из
+  // трёхсот деталей — единственное, на котором цена самой оценки заметна. Предсказывать прогон,
+  // которого не будет, — это платить за ответ на незаданный вопрос.
+  const forecast = useMemo(() => {
+    if (viewData || parse.phase !== 'ready' || overCap || runConfig.pieces.length === 0)
+      return null;
+    const job = estimateJob(pieces, runConfig);
+    if (job.length === 0) return null;
+    return estimateRun(job, runConfig);
+  }, [viewData, parse.phase, overCap, pieces, runConfig]);
+
+  // Ручные правки живут поверх конкретного результата — новый запуск их сносит; спросим.
+  const requestRun = () => {
+    if (manual) setRunConfirm(true);
+    else startRun();
+  };
+  const startRun = () => {
+    if (parse.phase !== 'ready') return;
+    setManual(null);
+    setRunConfirm(false);
+    setSaveError(null);
+    start(parse.parseId, runConfig);
+  };
 
   // Какой именно артикул подставил колорвей — иначе «ширина взялась откуда-то» и проверить нечем.
   const pinArticle = (() => {
@@ -1023,8 +1076,7 @@ export function NestingModal({
   // когда-то положили. Один DXF несёт весь ряд, и раскладка размера XS, записанная как маркер
   // размера M, испортила бы костинг молча: длина есть, размер не тот.
   const unsavedSizes = useMemo(
-    () =>
-      savedSizeIds == null ? [] : composition.filter((c) => !savedSizeIds.includes(c.sizeId)),
+    () => (savedSizeIds == null ? [] : composition.filter((c) => !savedSizeIds.includes(c.sizeId))),
     [savedSizeIds, composition],
   );
   const sizeUnsaved = unsavedSizes.length > 0;
@@ -1197,6 +1249,14 @@ export function NestingModal({
           // материал слота отредактируют.
           selvedgeCm: dec(slotSelvedge(slot)),
           allowCrossGrain: crossGrain,
+          // ПРИПУСК, КОТОРЫМ РАЗДУВАЛИ КОНТУРЫ ЭТОГО ПРОГОНА. Это вход алгоритма, а не подпись:
+          // длина снята по линии кроя, и без числа её не воспроизвести.
+          seamAllowanceCm: dec(allowanceCm),
+          // ПРИПУСК, УЖЕ ЗАЛОЖЕННЫЙ В КОНТУР ФАЙЛА, — это ИЗМЕРЕНИЕ, и его пока никто не
+          // измеряет. undefined едет как NULL, то есть «не мерялось». Ноль сюда ставить нельзя:
+          // ноль значит «померили, и его нет», а это другой факт — и на нём костинг посчитал бы
+          // расход по контуру, который на самом деле уже раздут.
+          contourAllowanceCm: undefined,
           sets: legacyPairOf(composition).sets,
           usedLengthCm: dec(effective.usedLengthCm),
           efficiencyPct: dec(effPct),
@@ -1268,11 +1328,7 @@ export function NestingModal({
       const hasComposition =
         (view.layout?.composition ?? []).length > 0 ||
         (view.layout?.pieces ?? []).some((p) => Number(p.sizeId ?? 0) > 0);
-      const schemaVersion = Math.max(
-        storedSchema,
-        hasComposition ? 4 : 0,
-        hasFlip ? 3 : 0,
-      );
+      const schemaVersion = Math.max(storedSchema, hasComposition ? 4 : 0, hasFlip ? 3 : 0);
       await adminService.SaveTechCardMarker({
         id: s.id ?? 0,
         techCardId,
@@ -1291,6 +1347,17 @@ export function NestingModal({
           // Правка геометрии не пересчитывает кромку: она снимок момента сохранения.
           selvedgeCm: s.selvedgeCm,
           allowCrossGrain: !!s.allowCrossGrain,
+          // УСЛОВИЯ СЪЁМКИ — ЭХОМ, как ширина и кромка выше, и это не то же самое, что undefined.
+          //
+          // Правка одного размещения не перемеряет ни припуск, ни контур: маркер уже снят, и
+          // подставить сюда состояние ПОЛЕЙ МОДАЛКИ значило бы приписать чужому замеру условия
+          // текущей формы. Но и стереть их нельзя: по контракту (proto) ОТСУТСТВИЕ припуска
+          // означает «СТАРАЯ НОРМА» — никто не записал, по какой линии мерялось, — и костинг
+          // после этого не отличит раскладку по линии шва от раскладки по линии кроя. Послать
+          // undefined на маркере, у которого припуск записан, значит РАЗЖАЛОВАТЬ его в легаси
+          // одним движением детали, и заметить это будет не по чему.
+          seamAllowanceCm: s.seamAllowanceCm,
+          contourAllowanceCm: s.contourAllowanceCm,
           // Легаси-пара проезжает КАК ЛЕЖИТ и только вместе. Прежнее `s.sets ?? 1` подставляло
           // единицу маркеру с составом (proto3 роняет умолчание, и в сводке там ноль) — то есть
           // на правку одного размещения отправляло «этот настил кроит одно изделие». Пару спасал
@@ -1788,9 +1855,7 @@ export function NestingModal({
                         onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                           const next = Math.max(0, Math.round(numOr(e.target.value, r.qty)));
                           if (next !== r.qty) {
-                            guardManual(() =>
-                              setQtyByToken((m) => ({ ...m, [r.key]: next })),
-                            );
+                            guardManual(() => setQtyByToken((m) => ({ ...m, [r.key]: next })));
                           }
                         }}
                       />
@@ -2043,11 +2108,7 @@ export function NestingModal({
               настоящая, поэтому отличить её от результата было нельзя.
             </CalloutBox>
           )}
-          {saveError && (
-            <CalloutBox tone='error'>
-              сохранить не удалось: {saveError}
-            </CalloutBox>
-          )}
+          {saveError && <CalloutBox tone='error'>сохранить не удалось: {saveError}</CalloutBox>}
           {/* Тот же отказ, что вынес бы сервер, но ДО отправки и рядом с раскладкой, которую он
               касается. Слот и прогон разнесены во времени, поэтому расхождение появляется уже
               после того, как ждать перестали. */}
@@ -2102,7 +2163,12 @@ export function NestingModal({
                       ? // Причина ИЗ СОСТАВА, а не одна на всё: нечитаемый состав (испорченная
                         // строка, частичный рестор) — другой отказ, и звать его «смешанным»
                         // значит отправить оператора чинить не то.
-                        viewData.composition.length > 1
+                        //
+                        // Читается ТЕМ ЖЕ источником, что и сам отказ, — сводкой строки. viewData
+                        // берёт состав из БЛОБА в первую очередь, и у маркера, чья проекция
+                        // размеров потеряна, а блоб цел, диагноз разошёлся бы с отказом: сервер
+                        // говорит «не читается», подпись — «смешанный».
+                        compositionOf(view.summary).length > 1
                         ? 'смешанный состав — нормы нет'
                         : 'состав не читается — нормы нет'
                       : `изделий: ${viewData.totalUnits || 1}`
@@ -2148,8 +2214,8 @@ export function NestingModal({
           )}
           {simplified && (
             <Text size='nano' variant='label' component='p'>
-              контуры упрощены до {simplified.rdpEpsCm} см вместо {simplified.requestedRdpEpsCm} см —
-              иначе подготовка геометрии не уложилась бы в бюджет и поиск не начался бы вовсе.
+              контуры упрощены до {simplified.rdpEpsCm} см вместо {simplified.requestedRdpEpsCm} см
+              — иначе подготовка геометрии не уложилась бы в бюджет и поиск не начался бы вовсе.
               Детали от этого лежат чуть свободнее.
             </Text>
           )}
@@ -2161,6 +2227,116 @@ export function NestingModal({
                 </Text>
               ))}
             </CalloutBox>
+          )}
+
+          {/* БЮДЖЕТ ДО ЗАПУСКА (Ф2.3) — рядом с кнопкой, до того как за прогон заплачено.
+              Оператор до сих пор узнавал цену только постфактум: жал «запустить», ждал весь
+              бюджет и читал в телеметрии, что предрасчёт съел его целиком, а поиска не было.
+              Здесь то же самое сказано ЗАРАНЕЕ и той же моделью, которой движок будет считать.
+              Потолки сервера стоят тут же: бюджет и потолки — два ответа на один вопрос «пойдёт
+              ли этот прогон вообще», и разносить их по разным углам экрана значит заставлять
+              оператора складывать их в голове.
+
+              Строки идут ПЛОСКО, соседями остальных заметок этой панели: рамка вокруг них была
+              бы блоком внутри блока (DESIGN.md), а единственная рамка здесь принадлежит той
+              новости, ради которой блок и заведён, — «поиска не будет». */}
+          {!viewData && !running && parse.phase === 'ready' && checkedCount > 0 && (
+            <>
+              <Text size='nano' variant='label' component='p'>
+                до запуска: {checkedCount} уникальных · {instanceCount} размещений · потолок сервера{' '}
+                {MAX_MARKER_PIECES} / {MAX_MARKER_PLACEMENTS}
+                {forecast
+                  ? ` · предрасчёт геометрии ~${(forecast.predictedPrepassMs / 1000).toFixed(1)} с при потолке ${(
+                      forecast.prepassCapMs / 1000
+                    ).toFixed(
+                      1,
+                    )} с из бюджета ${(forecast.timeBudgetMs / 1000).toFixed(0)} с · пар NFP ${forecast.nfpRecords}`
+                  : ''}
+              </Text>
+              {overCap && (
+                <Text size='nano' component='p' className='text-error'>
+                  сверх потолка сервера — прогон не запускается, потому что такую раскладку не
+                  сохранить:
+                  {checkedCount > MAX_MARKER_PIECES
+                    ? ` уберите ${checkedCount - MAX_MARKER_PIECES} деталей`
+                    : ''}
+                  {checkedCount > MAX_MARKER_PIECES && instanceCount > MAX_MARKER_PLACEMENTS
+                    ? ' и'
+                    : ''}
+                  {instanceCount > MAX_MARKER_PLACEMENTS
+                    ? ` уменьшите состав на ${instanceCount - MAX_MARKER_PLACEMENTS} размещений`
+                    : ''}
+                </Text>
+              )}
+              {forecast?.coarsened && (
+                <Text size='nano' variant='label' component='p'>
+                  контуры упростятся до {forecast.effectiveEps} см вместо {forecast.requestedEps} —
+                  {forecast.mirrorPairs
+                    ? ' парные детали удваивают предрасчёт'
+                    : ` деталей много (${forecast.uniquePieces})`}
+                  , иначе поиску не осталось бы времени; раскладка от этого чуть свободнее
+                </Text>
+              )}
+              {/* Три исхода, и путать их нельзя: у первых двух поиск идёт, у третьего его
+                  практически нет. СКОЛЬКО ПОКОЛЕНИЙ успеет поиск — не печатается ни в одном из
+                  них: измеренной цены поколения у движка нет (см. expectedGenerations в
+                  nest/estimate.ts), а выдуманное число хуже отсутствующего — по нему принимают
+                  решения. Экран говорит то, что модель знает: сколько секунд достанется поиску. */}
+              {forecast?.outlook === 'starved' ? (
+                <CalloutBox tone='error'>
+                  <Text size='nano' component='p'>
+                    <b>предрасчёт не уложится в бюджет</b> — ~
+                    {(forecast.predictedPrepassMs / 1000).toFixed(1)} с против{' '}
+                    {(forecast.timeBudgetMs / 1000).toFixed(0)} с. Его оборвут по времени, поиск
+                    получит недосчитанную геометрию и аварийные 2 с: это ровно тот прогон, который
+                    возвращает НОЛЬ ПОКОЛЕНИЙ и жадную укладку. Ждать придётся дольше бюджета, и
+                    насколько — сказать нечем: недостающую геометрию поиск досчитывает внутри себя,
+                    а прерваться умеет только между особями (в замеренном случае бюджет 20 с
+                    обернулся 51 секундой).
+                  </Text>
+                  <Text size='nano' component='p'>
+                    что делать: поставить бюджет от {Math.ceil(forecast.budgetToFitMs / 1000)} с
+                    {forecast.effectiveEps >= 0.9
+                      ? ' (упрощать контуры дальше движку уже некуда — он на самой грубой ступени)'
+                      : ''}
+                    , либо убрать самые сложные детали
+                    {forecast.heaviest.length > 0
+                      ? ` (дороже всех: ${forecast.heaviest
+                          .map(
+                            (h) =>
+                              `${pieces.find((p) => p.id === h.id)?.name ?? h.id} — ${h.parts} выпуклых частей`,
+                          )
+                          .join(', ')})`
+                      : ''}
+                    , либо уменьшить состав.
+                  </Text>
+                </CalloutBox>
+              ) : forecast?.outlook === 'squeezed' ? (
+                <Text size='nano' component='p' className='text-warning'>
+                  предрасчёт съест больше своей доли — поиску останется всего ~
+                  {(forecast.searchMsLeft / 1000).toFixed(1)} с из{' '}
+                  {(forecast.timeBudgetMs / 1000).toFixed(0)}. Бюджета от{' '}
+                  {Math.ceil(forecast.budgetToFitMs / 1000)} с хватило бы на полный предрасчёт.
+                </Text>
+              ) : forecast ? (
+                <Text size='nano' variant='label' component='p'>
+                  поиску останется ~{(forecast.searchMsLeft / 1000).toFixed(1)} с из{' '}
+                  {(forecast.timeBudgetMs / 1000).toFixed(0)} — сколько это выйдет поколений,
+                  зависит от числа экземпляров и от машины, и наперёд этого не мерил никто
+                </Text>
+              ) : null}
+              {/* ПРОГНОЗ ПРОТИВ ФАКТА, когда факт уже есть. Правка любого параметра прогона
+                  сбрасывает результат (эффект выше), поэтому телеметрия здесь всегда от ТОГО ЖЕ
+                  задания — сравнение честное. Модель, которую видно рядом с её же промахом, —
+                  единственная, которую можно поймать на вранье. */}
+              {forecast && displayResult?.telemetry && (
+                <Text size='nano' variant='label' component='p'>
+                  прошлый прогон: предрасчёт {(displayResult.telemetry.prepassMs / 1000).toFixed(1)}{' '}
+                  с при прогнозе ~{(displayResult.telemetry.predictedPrepassMs / 1000).toFixed(1)} с
+                  · поколений {displayResult.generation}
+                </Text>
+              )}
+            </>
           )}
 
           {/* Footer: own actions (the shell's are hidden). */}
@@ -2242,16 +2418,16 @@ export function NestingModal({
                           : directionRefusal
                             ? directionRefusal
                             : sizeUnresolved
-                            ? unresolvedTokens.length > 0
-                              ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')} — добавьте их в карточку либо уберите из состава`
-                              : 'размер раскладки неизвестен — в именах блоков нет размеров, и слот его не называет'
-                            : sizeUnsaved
-                              ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
-                              : sizesWithoutPieces.length > 0
-                                ? `в состав взяты размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`
-                                : composition.length > MAX_MARKER_COMPOSITION_SIZES
-                                  ? `в составе ${composition.length} размеров, потолок сервера — ${MAX_MARKER_COMPOSITION_SIZES}`
-                                  : 'сохранить можно завершённую раскладку, в которую поместились все детали'
+                              ? unresolvedTokens.length > 0
+                                ? `размеров нет в размерном ряду карточки: ${unresolvedTokens.join(', ')} — добавьте их в карточку либо уберите из состава`
+                                : 'размер раскладки неизвестен — в именах блоков нет размеров, и слот его не называет'
+                              : sizeUnsaved
+                                ? 'размер добавлен, но карточка не сохранена — сначала сохраните карточку'
+                                : sizesWithoutPieces.length > 0
+                                  ? `в состав взяты размеры без единой выбранной детали: ${sizesWithoutPieces.join(', ')}`
+                                  : composition.length > MAX_MARKER_COMPOSITION_SIZES
+                                    ? `в составе ${composition.length} размеров, потолок сервера — ${MAX_MARKER_COMPOSITION_SIZES}`
+                                    : 'сохранить можно завершённую раскладку, в которую поместились все детали'
                   }
                   onClick={() => setSaveOpen(true)}
                 >
@@ -2417,8 +2593,8 @@ export function NestingModal({
             <CalloutBox tone='note'>
               смешанная раскладка сохранится целиком — и длина, и состав, и размеры деталей. Не
               сохранится только расход НА ИЗДЕЛИЕ: у смешанного настила он средний по составу, а
-              такое число, попав в рецепт, неотличимо от измеренного. Пер-размерный расход придёт
-              с Ф2.4; до тех пор нормой служит однородная раскладка.
+              такое число, попав в рецепт, неотличимо от измеренного. Пер-размерный расход придёт с
+              Ф2.4; до тех пор нормой служит однородная раскладка.
             </CalloutBox>
           )}
         </div>
