@@ -815,6 +815,33 @@ export function BomField({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlightComposition]);
 
+  // ?bom=<line_key> opens ONE article's editor on arrival — the same hand-off shape this tab uses
+  // in the other direction with ?colorway=<id>. Sent by the направление-ткани worklist (Ф1.8),
+  // whose rows each name a line by its stable key: landing on the tab alone would drop the operator
+  // in front of twenty tiles with nothing saying which one they came for.
+  //
+  // Gated on ?tab=bom because tab panels stay MOUNTED behind the active one — without it, any URL
+  // carrying the param would pop this dialog over whatever tab is actually open. Consumed, not
+  // kept: a param left standing would re-open the dialog on every return to the tab. Waits for the
+  // field array to be seeded, so a deep link that arrives before the card's read lands is resolved
+  // rather than discarded.
+  const deepLinkedLine = params.get('bom');
+  const onBomTab = params.get('tab') === 'bom';
+  useEffect(() => {
+    if (!deepLinkedLine || !onBomTab || fields.length === 0) return;
+    const key = deepLinkedLine.trim();
+    const index = fields.findIndex(
+      (_, i) => ((getValues(`bomItems.${i}.lineKey`) as string) ?? '').trim() === key,
+    );
+    // A key that matches nothing still clears the param: the line was deleted or renamed since the
+    // report was read, and leaving it in the URL would make the tab feel haunted.
+    if (index >= 0) setEditing(index);
+    const next = new URLSearchParams(params);
+    next.delete('bom');
+    setParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkedLine, onBomTab, fields.length]);
+
   // The pulsed field lives inside the dialog, so it can only be scrolled to once that content has
   // mounted into its portal — a frame after `editing` is set, not in the effect above.
   useEffect(() => {

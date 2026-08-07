@@ -32,6 +32,13 @@ export const techCardKeys = {
   // there is no separate invalidation to remember to add.
   readiness: (id: number) => [...techCardKeys.detail(id), 'readiness'] as const,
   pipeline: () => [...techCardKeys.all, 'pipeline'] as const,
+  // НАПРАВЛЕНИЕ ТКАНИ gap report (Ф1.8). Its own branch under `all` rather than under `lists()`:
+  // it is not a page of ListTechCards but a portfolio-wide read of BOM data, and it must not be
+  // dropped by a list invalidation that has nothing to do with it. Declared HERE, next to the keys
+  // it sits beside, so `useUpdateTechCard` below can invalidate it without importing the hooks that
+  // read it — answering a направление IS a card save, and the whole point of the report is that its
+  // number goes down when the operator fixes a line.
+  fabricDirectionGaps: () => [...techCardKeys.all, 'fabricDirectionGaps'] as const,
 };
 
 // Infinite list, optionally filtered. ListTechCards returns `total` (matching count
@@ -172,6 +179,9 @@ export function useUpdateTechCard() {
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
       queryClient.invalidateQueries({ queryKey: techCardKeys.detail(variables.id) });
       queryClient.invalidateQueries({ queryKey: techCardKeys.pipeline() });
+      // A BOM line's направление is written by THIS mutation and by nothing else, so the gap report
+      // is stale the moment a card is saved — including the counter on the tech-cards toolbar chip.
+      queryClient.invalidateQueries({ queryKey: techCardKeys.fabricDirectionGaps() });
     },
   });
 }
