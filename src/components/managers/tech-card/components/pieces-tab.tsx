@@ -250,14 +250,19 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   const previewFiles = useMemo<ScopedDxfFile[]>(() => {
     const needed = new Set<string>();
     for (const refs of blocksByPiece.values()) for (const r of refs) needed.add(r.scopeKey);
-    return patterns
-      .filter((p) => !!p.url && isDxfUrl(p.url))
-      .map((p) => ({
-        scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
-        name: p.name || p.filename || 'выкройка.dxf',
-        url: p.url!,
-      }))
-      .filter((f) => needed.has(f.scopeKey));
+    return (
+      patterns
+        .filter((p) => !!p.url && isDxfUrl(p.url))
+        .map((p) => ({
+          scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
+          name: p.name || p.filename || 'выкройка.dxf',
+          url: p.url!,
+        }))
+        // Пустой скоуп — это лист, потерявший ткань, и он НЕ участвует: панель выкроек для таких
+        // прямо говорит, что детали кроя недоступны, и подставлять их сюда значило бы угадывать
+        // ткань — ровно то, от чего весь этот скоуп и защищает.
+        .filter((f) => !!f.scopeKey && needed.has(f.scopeKey))
+    );
   }, [patterns, scopes, blocksByPiece]);
 
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
