@@ -95,6 +95,7 @@ export enum ROUTES {
   singleTechCard = '/tech-cards/:id',
   techCardPrint = '/tech-cards/:id/print',
   materials = '/materials',
+  workshop = '/workshop',
   productionRuns = '/production-runs',
   productionRun = '/production-runs/:id',
   tasks = '/tasks',
@@ -147,6 +148,10 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'tech cards', route: ROUTES.techCards, section: SECTION.techCards },
       { label: 'materials', route: ROUTES.materials, section: SECTION.techCards },
       { label: 'production', route: ROUTES.productionRuns, section: SECTION.production },
+      // Shop-floor constants (cutting table, default seam allowance). Gated on `production`, which
+      // is what UpdateWorkshopSettings actually requires — not on `settings`, whose screen holds
+      // storefront configuration and is a different role's business.
+      { label: 'workshop', route: ROUTES.workshop, section: SECTION.production },
     ],
   },
   {

@@ -1,15 +1,19 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { techCardMediaKindOptions } from 'constants/filter';
 import { useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Canvas, Pin } from 'ui/components/canvas';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { Section } from 'ui/components/section';
 import { SectionHeader } from 'ui/components/section-header';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
-import { parseDecimalNumber } from 'utils/decimal';
+import DecimalField from 'ui/form/fields/decimal-field';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { SEAM_ALLOWANCE_MAX_CM } from 'utils/seam-allowance';
 import { ConstructionField } from './construction-field';
 import { ColorwayArticles, OPERATION_EXPECTED_SECTIONS, OperationsField } from './operations-field';
 import { PieceLegend } from './piece-legend';
@@ -58,6 +62,61 @@ export function operationMinutes(o: SummaryOp): number {
   if (Number.isFinite(smv)) return smv;
   const sam = parseDecimalNumber(o.timeNorm);
   return Number.isFinite(sam) ? sam : 0;
+}
+
+// ТРЕБУЕМЫЙ ПРИПУСК (Ф3.2) — the standard a раскладка's recorded allowance is judged against, and
+// the one number on this tab a machine reads rather than a human.
+//
+// It sits next to `construction.seamAllowances` deliberately: that field is a free-text note («5
+// мм») written for the factory, this one is a decimal the readiness gate compares against, and the
+// two are exactly the pair an operator would otherwise conflate. On the wire it is a CARD field, not
+// part of `construction` — anything added to a section's digest projection instantly marks every
+// signed-off CONSTRUCTION approval as «edited since signing», on every card at once.
+//
+// THREE VALUES, NOT TWO. Empty means «эта карточка не требует конкретного припуска» and the workshop
+// default applies; a number OVERRIDES the workshop default; and 0 is a number like any other, saying
+// «кроим по линии как нарисована». The readout below spells out which of the three is in force,
+// because a blank field next to a configured workshop default otherwise reads as «ничего не задано»
+// when in fact a standard IS in force — just not this card's.
+function RequiredSeamAllowanceField() {
+  const { control } = useFormContext<TechCardFormData>();
+  const cardValue = ((useWatch({ control, name: 'requiredSeamAllowanceCm' }) ?? '') as string).trim();
+  // The workshop singleton, on the shared query key — the раскладка modal reads the same row for its
+  // allowance prefill, so this is a cache hit rather than a second fetch on the usual path.
+  const { data } = useWorkshopSettings();
+  const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceCm).trim();
+
+  const verdict = cardValue
+    ? `эталон этой карточки: ${cardValue} см${shopDefault ? ` (цеховой ${shopDefault} см перебит)` : ''}`
+    : shopDefault
+      ? `у карточки эталона нет — действует цеховой по умолчанию: ${shopDefault} см`
+      : 'эталона нет ни у карточки, ни у цеха — припуск раскладки сравнивать не с чем';
+
+  return (
+    <Section
+      title='требуемый припуск'
+      question='— число, с которым сверяется припуск раскладки. Не путать с заметкой «seam allowances» ниже: та написана для швеи, это читает машина.'
+    >
+      <div className='flex flex-col gap-1 sm:max-w-sm'>
+        <DecimalField
+          name='requiredSeamAllowanceCm'
+          label='требуемый припуск, см'
+          maxDecimals={2}
+          placeholder={shopDefault ? `цеховой: ${shopDefault}` : 'не задан'}
+        />
+        <Text size='micro' variant='label'>
+          Цеховой припуск — это ФОЛБЭК, а не копия: заполненное поле здесь перебивает его для этого
+          стиля, а сама раскладка перебивает и то и другое своим полем. Пусто = карточка не требует
+          конкретного припуска; 0 — законное и другое значение: «кроим по линии как нарисована».
+          Чтобы снять требование, очистите поле, а не ставьте ноль. От 0 до {SEAM_ALLOWANCE_MAX_CM}{' '}
+          см, до двух знаков.
+        </Text>
+        <Text size='micro' variant='label'>
+          {verdict}
+        </Text>
+      </div>
+    </Section>
+  );
 }
 
 // Summary lead (config pick: Summary B) — the at-a-glance overview the tab lacked: how many
@@ -358,6 +417,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
         </div>
 
         <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
+          <RequiredSeamAllowanceField />
           <ConstructionField />
           <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader

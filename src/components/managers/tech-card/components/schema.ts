@@ -27,6 +27,7 @@ import {
 } from 'api/proto-http/admin';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
+import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
 import {
   UNSET_PURPOSE,
@@ -556,6 +557,22 @@ const techCardObject = z.object({
   // a RELEASED (frozen) card rejects a change to it along with everything else.
   targetDropDate: z.string().optional().default(''),
   measurementUnit: z.string().optional().default(DEFAULT_MEASUREMENT_UNIT),
+  // ТРЕБУЕМЫЙ ПРИПУСК of this style, in CENTIMETRES (Ф3.2) — the standard a раскладка's recorded
+  // allowance is judged against. A NUMBER a machine reads, NOT the free-text
+  // construction.seamAllowances note («5 мм») it renders next to.
+  //
+  // '' IS ABSENT AND ABSENT IS NOT ZERO. Empty means «this card sets no standard of its own» and the
+  // workshop default (WorkshopSettings.default_seam_allowance_cm) applies; '0' is a real, different
+  // setting meaning «наши выкройки несут линию кроя, офсет не нужен». Confusing the two would
+  // declare every раскладка with a 1 cm allowance in breach of a standard nobody set. The round-trip
+  // is what keeps them apart: decimalToInput(undefined) → '' and inputToDecimal('') → undefined, so
+  // a cleared field is OMITTED from the write and the column goes back to NULL, while '0' travels as
+  // { value: '0' }.
+  //
+  // It lives on the card and not inside `construction` on purpose: any field added to a section's
+  // digest projection instantly marks EVERY signed-off CONSTRUCTION approval as «edited since
+  // signing», on every card at once.
+  requiredSeamAllowanceCm: z.string().optional().default(''),
   // The design intent in prose — what this style IS, before any construction detail. Printed at
   // the head of the tech pack's description sheet, above the details and the notes.
   concept: z.string().optional().default(''),
@@ -654,6 +671,19 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
       path: ['season'],
     });
   }
+  // ТРЕБУЕМЫЙ ПРИПУСК (Ф3.2). The server answers an out-of-band value with a bare CHECK-constraint
+  // refusal that names a column and not a field, and it refuses the WHOLE card save with it — every
+  // other tab's work bounces along with the one mistyped number. So the band is checked here, where
+  // the sentence can name the mistake, and a BLANK value is deliberately allowed through: an empty
+  // field is «эталона у карточки нет, берём цеховой», not a missing required value.
+  const seamAllowanceError = validateSeamAllowanceStandard(data.requiredSeamAllowanceCm);
+  if (seamAllowanceError) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: seamAllowanceError,
+      path: ['requiredSeamAllowanceCm'],
+    });
+  }
   // #64: every BOM article should link a catalog material — enforced as a RELEASE blocker
   // (releaseBlockers in index.tsx), not here. A hard zod error on every past-IDEA save wrongly
   // blocked the whole main insert (notes/season/labels/sign-offs/…) for any card carrying a
@@ -727,6 +757,9 @@ export const techCardDefaultData: TechCardFormData = {
   approvalState: DEFAULT_APPROVAL_STATE,
   targetDropDate: '',
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
+  // Blank, never '0' — a NEW card requires no particular allowance until someone says it does, and
+  // seeding a zero here would silently declare «кроим по линии как нарисована» on every new style.
+  requiredSeamAllowanceCm: '',
   concept: '',
   notes: '',
   sizeIds: [],
@@ -904,6 +937,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     approvalState: approvalStateOrDefault(insert?.approvalState),
     targetDropDate: timestampToDateInput(insert?.targetDropDate),
     measurementUnit: measurementUnitOrDefault(insert?.measurementUnit),
+    // decimalToInput, NOT `|| ''` on the number: an absent standard reads as '' and a stored 0 reads
+    // as '0'. Any `||` here would fold the legal zero back into «не задано» on the way in, and the
+    // next save would then clear a standard the operator deliberately set.
+    requiredSeamAllowanceCm: decimalToInput(insert?.requiredSeamAllowanceCm),
     concept: insert?.concept || '',
     notes: insert?.notes || '',
     sizeIds: insert?.sizeIds ?? [],
@@ -1262,6 +1299,11 @@ export function mapFormToTechCardInsert(
     targetDropDate: dateInputToTimestamp(data.targetDropDate),
     measurementUnit: (data.measurementUnit ||
       'TECH_CARD_MEASUREMENT_UNIT_UNKNOWN') as common_TechCardMeasurementUnit,
+    // Blank CLEARS the standard: inputToDecimal('') is undefined, JSON.stringify drops the key, and
+    // the full-replace write stores NULL — «карточка не требует конкретного припуска». '0' is not
+    // blank and survives as { value: '0' }, which is the whole point of the pair. Written after the
+    // `...original` spread so the cleared value wins over the echoed one.
+    requiredSeamAllowanceCm: inputToDecimal(data.requiredSeamAllowanceCm),
     concept: data.concept?.trim() || '',
     notes: data.notes?.trim() || '',
     // children edited here — override the echoed `original` values
