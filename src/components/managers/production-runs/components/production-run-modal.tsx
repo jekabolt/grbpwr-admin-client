@@ -5,16 +5,11 @@ import { common_ProductionRun, common_ProductionRunStatus } from 'api/proto-http
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
-import { runDetailPath, runStatusLabel, runStatusOptions } from './options';
-import {
-  updateRunErrorMessage,
-  useSaveProductionRun,
-  useUpdateRunSection,
-} from './useProductionRuns';
+import { runStatusLabel, runStatusOptions } from './options';
+import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
 const isoToDate = (ts?: string) => (ts ? ts.slice(0, 10) : '');
@@ -47,28 +42,29 @@ const emptyDraft: Draft = {
   actualWastagePercent: '',
 };
 
-// The run's header/meta only. Lines, marker and costs are edited on the detail page (NF-06 makes a
-// run a multi-colourway grid — a single-product modal would collapse it). Create bootstraps an
-// empty run and jumps to its detail; edit is a read-modify-write of just these fields, so it can't
-// wipe the lines/costs saved on the detail page.
+// The run's header/meta only — the EDITOR of an existing run, and nothing else (Ф6.4).
+//
+// Lines, marker and costs are edited on the detail page (NF-06 makes a run a multi-colourway grid —
+// a single-product modal would collapse it); edit here is a read-modify-write of just these fields,
+// so it can't wipe what the detail page saved.
+//
+// CREATION LIVES IN create-run-modal.tsx AND MUST NOT COME BACK HERE. Creating a run became a
+// multi-step surface (карточка → релиз → колорвеи → количества → покрытие) whose whole point is the
+// readiness gate recomputing on the composed grid. This file stays a plain RMW form; a flag serving
+// both would make both worse, and the gate would end up half-wired into a form that never needed it.
 export function ProductionRunModal({
   open,
   onOpenChange,
   run,
-  initialTechCardId,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   run?: common_ProductionRun;
-  // Seed the tech card on a fresh run (the spine's [plan run] deep link, W3.6). Ignored on edit.
-  initialTechCardId?: number;
 }) {
   const { showMessage } = useSnackBarStore();
-  const navigate = useNavigate();
-  const create = useSaveProductionRun();
   const update = useUpdateRunSection();
   const isEdit = !!run?.id;
-  const busy = create.isPending || update.isPending;
+  const busy = update.isPending;
   const [d, setD] = useState<Draft>(emptyDraft);
 
   useEffect(() => {
@@ -86,9 +82,9 @@ export function ProductionRunModal({
             notes: ins.notes ?? '',
             actualWastagePercent: decimalToInput(ins.actualWastagePercent),
           }
-        : { ...emptyDraft, techCardId: initialTechCardId ?? 0 },
+        : emptyDraft,
     );
-  }, [run, open, initialTechCardId]);
+  }, [run, open]);
 
   const { data: tcData } = useQuery({
     // Keyed UNDER techCardKeys.lists() rather than off on its own string, so every tech-card
@@ -130,65 +126,34 @@ export function ProductionRunModal({
   const statusOptions = runStatusOptions;
 
   const submit = () => {
-    if (!d.techCardId) {
-      showMessage('Tech card is required', 'error');
+    // No create branch: this modal is only ever opened on an existing run. A missing id here is a
+    // caller bug, not an operator one — refuse loudly rather than silently minting a run.
+    if (!isEdit || !run?.id) {
+      showMessage('Нет прогона для правки — создание живёт в отдельной модалке', 'error');
       return;
     }
-    if (isEdit && run?.id) {
-      // Patch only the meta; RMW preserves lines / costs / marker edited on the detail page.
-      update.mutate(
-        {
-          id: run.id,
-          lockVersion: run.lockVersion ?? 0,
-          patch: {
-            releaseId: d.releaseId || undefined,
-            status: d.status,
-            startedAt: dateToIso(d.startedAt),
-            plannedStartAt: dateToIso(d.plannedStartAt),
-            promisedAt: dateToIso(d.promisedAt),
-            notes: d.notes.trim(),
-            // Run-level ACTUAL cutting wastage %; blank → undefined clears it (back to BOM estimate).
-            actualWastagePercent: inputToDecimal(d.actualWastagePercent),
-          },
-        },
-        {
-          onSuccess: () => {
-            showMessage('Run updated', 'success');
-            onOpenChange(false);
-          },
-          onError: (e) => showMessage(updateRunErrorMessage(e), 'error'),
-        },
-      );
-      return;
-    }
-    // Create an empty run, then jump to its detail to plan lines / marker / costs.
-    create.mutate(
+    // Patch only the meta; RMW preserves lines / costs / marker edited on the detail page.
+    update.mutate(
       {
-        run: {
-          techCardId: d.techCardId,
+        id: run.id,
+        lockVersion: run.lockVersion ?? 0,
+        patch: {
           releaseId: d.releaseId || undefined,
           status: d.status,
           startedAt: dateToIso(d.startedAt),
           plannedStartAt: dateToIso(d.plannedStartAt),
           promisedAt: dateToIso(d.promisedAt),
-          receivedAt: undefined,
-          supplierId: 0, // factory linkage (Phase 9) — contract field, editor comes with vendor reports
           notes: d.notes.trim(),
-          lines: [],
-          costs: [],
-          markerEfficiencyPct: undefined,
-          markerNotes: undefined,
+          // Run-level ACTUAL cutting wastage %; blank → undefined clears it (back to BOM estimate).
           actualWastagePercent: inputToDecimal(d.actualWastagePercent),
         },
       },
       {
-        onSuccess: (res) => {
-          showMessage('Run created', 'success');
+        onSuccess: () => {
+          showMessage('Run updated', 'success');
           onOpenChange(false);
-          const id = (res as { id?: number })?.id;
-          if (id) navigate(runDetailPath(id));
         },
-        onError: (e) => showMessage(e instanceof Error ? e.message : 'Failed to save run', 'error'),
+        onError: (e) => showMessage(updateRunErrorMessage(e), 'error'),
       },
     );
   };
@@ -200,7 +165,7 @@ export function ProductionRunModal({
         <DialogPrimitives.Content className='fixed inset-x-2.5 top-1/2 z-50 flex max-h-[90vh] w-auto -translate-y-1/2 flex-col overflow-y-auto border border-textInactiveColor bg-bgColor text-textColor lg:inset-x-auto lg:left-1/2 lg:w-[520px] lg:-translate-x-1/2'>
           <div className='sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-textInactiveColor bg-bgColor px-4 py-3'>
             <DialogPrimitives.Title className='text-lg uppercase'>
-              {isEdit ? `production run PR-${run?.id}` : 'new production run'}
+              {`production run PR-${run?.id ?? ''}`}
             </DialogPrimitives.Title>
             <DialogPrimitives.Close asChild>
               <Button type='button' className='shrink-0 cursor-pointer'>
@@ -219,7 +184,9 @@ export function ProductionRunModal({
                 <select
                   className={cell}
                   value={d.techCardId || 0}
-                  disabled={isEdit}
+                  // A run's tech card is fixed at creation: moving one style's batch onto another
+                  // style would re-point its lines at colourways that are not the card's.
+                  disabled
                   onChange={(e) => set({ techCardId: Number(e.target.value) || 0, releaseId: 0 })}
                 >
                   <option value={0}>— select —</option>
@@ -327,13 +294,6 @@ export function ProductionRunModal({
                 onChange={(e) => set({ notes: e.target.value })}
               />
             </label>
-
-            {!isEdit && (
-              <Text variant='inactive' size='small'>
-                After creating, you'll plan colour-model × size lines, marker and costs on the run
-                page.
-              </Text>
-            )}
           </div>
 
           <div className='sticky bottom-0 flex justify-end gap-2 border-t border-textInactiveColor bg-bgColor px-4 py-3'>
@@ -341,7 +301,7 @@ export function ProductionRunModal({
               cancel
             </Button>
             <Button type='button' variant='main' size='lg' disabled={busy} onClick={submit}>
-              {busy ? 'saving…' : isEdit ? 'save' : 'create'}
+              {busy ? 'saving…' : 'save'}
             </Button>
           </div>
         </DialogPrimitives.Content>

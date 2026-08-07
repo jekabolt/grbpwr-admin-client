@@ -1,6 +1,10 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { common_ProductionRunInsert, common_ProductionRunLine } from 'api/proto-http/admin';
+import {
+  CheckProductionRunReadinessRequest,
+  common_ProductionRunInsert,
+  common_ProductionRunLine,
+} from 'api/proto-http/admin';
 import { stockChangeHistoryKeys } from 'components/managers/product/components/stock/useStockChangeHistory';
 import { runStatusToDbFilter } from './options';
 
@@ -113,6 +117,43 @@ export function useMaterialPlan(runId: number, enabled: boolean) {
     queryKey: [...productionRunKeys.detail(runId), 'materialPlan'],
     queryFn: () => adminService.GetProductionRunMaterialPlan({ runId }),
     enabled,
+  });
+}
+
+// ГЕЙТ ГОТОВНОСТИ ПРОГОНА (Ф6) — вердикт для прогона, которого ещё нет.
+//
+// Ключ запроса — КАНОНИЗИРОВАННЫЙ СНИМОК самого запроса, а не (карточка, релиз): вердикт судит
+// сетку, значит два запроса с разной сеткой — это два разных вопроса, и склеивание их одним ключом
+// показало бы чужой ответ. Сортировка внутри подписи делает ключ независимым от того, в каком
+// порядке оператор кликал колорвеи и набирал клетки: перестановка — это тот же вопрос.
+function readinessKey(req: CheckProductionRunReadinessRequest): string {
+  const cells = [...(req.cells ?? [])]
+    .map((c) => `${c.colorwayId ?? 0}:${c.sizeId ?? 0}:${c.plannedQty ?? 0}`)
+    .sort();
+  const cws = [...(req.colorwayIds ?? [])].sort((a, b) => a - b);
+  return JSON.stringify([req.techCardId ?? 0, req.releaseId ?? 0, req.runId ?? 0, cws, cells]);
+}
+
+// `staleTime: 0` — вердикт обязан быть свежим, и это не осторожность: сохранение раскладки НЕ
+// бампает tech_card.lock_version, то есть пересъёмку нормы клиент не в состоянии заметить сам.
+// Кэшированный «готово» пятиминутной давности — ровно та ложь, от которой защищает серверная
+// перепроверка на create; здесь он был бы вторым, тихим источником той же лжи.
+//
+// `keepPreviousData` — чтобы панель не мигала пустотой на каждой набранной цифре. Предыдущий ответ
+// при этом ОБЯЗАН быть подписан «пересчитывается» вызывающим кодом (isFetching): показать старый
+// вердикт молча значило бы выдать его за текущий.
+//
+// `retry: false` — отказ гейта это ответ, а не сбой связи; молчаливые повторы задерживают строку
+// «проверить не удалось», под которой оператор всё равно вправе создать прогон (авторитет на
+// сервере, клиентский гейт — подсказка).
+export function useRunReadiness(req: CheckProductionRunReadinessRequest | null) {
+  return useQuery({
+    enabled: !!req,
+    queryKey: [...productionRunKeys.all, 'readiness', req ? readinessKey(req) : ''],
+    queryFn: () => adminService.CheckProductionRunReadiness(req!),
+    staleTime: 0,
+    placeholderData: keepPreviousData,
+    retry: false,
   });
 }
 

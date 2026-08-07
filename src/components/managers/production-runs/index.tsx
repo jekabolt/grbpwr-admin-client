@@ -7,6 +7,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
+import { CreateRunModal } from './components/create-run-modal';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import { RunCard } from './components/run-card';
@@ -45,8 +46,13 @@ export function ProductionRuns() {
       },
       { replace: true },
     );
+  // TWO surfaces, deliberately (Ф6.4). Creating a run is «карточка → релиз → колорвеи →
+  // количества → покрытие» with the readiness gate recomputing on every change; editing one is a
+  // read-modify-write of its header. One component serving both made both worse, and the create
+  // half is where the gate lives — so the header editor never grew it.
   const [editing, setEditing] = useState<common_ProductionRun | undefined>();
   const [editOpen, setEditOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [receiving, setReceiving] = useState<common_ProductionRun | undefined>();
   const [deleting, setDeleting] = useState<common_ProductionRun | undefined>();
 
@@ -54,10 +60,7 @@ export function ProductionRuns() {
   // then strip the param — otherwise refresh/back re-opens the modal uninvited.
   useEffect(() => {
     if (searchParams.get('new') === '1') {
-      if (canEdit) {
-        setEditing(undefined);
-        setEditOpen(true);
-      }
+      if (canEdit) setCreateOpen(true);
       setSearchParams(
         (prev) => {
           const p = new URLSearchParams(prev);
@@ -89,10 +92,7 @@ export function ProductionRuns() {
   const { showMessage } = useSnackBarStore();
   const runs = data?.runs ?? [];
 
-  const openCreate = () => {
-    setEditing(undefined);
-    setEditOpen(true);
-  };
+  const openCreate = () => setCreateOpen(true);
   const openEdit = (r: common_ProductionRun) => {
     setEditing(r);
     setEditOpen(true);
@@ -184,12 +184,12 @@ export function ProductionRuns() {
         </div>
       )}
 
-      <ProductionRunModal
-        open={editOpen}
-        onOpenChange={setEditOpen}
-        run={editing}
+      <CreateRunModal
+        open={createOpen}
+        onOpenChange={setCreateOpen}
         initialTechCardId={Number(techCardId) || 0}
       />
+      <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={editing} />
       <ReceiveModal
         open={receiving != null}
         onOpenChange={(v) => !v && setReceiving(undefined)}

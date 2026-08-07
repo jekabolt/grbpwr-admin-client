@@ -19,6 +19,7 @@
         "nest:conditions": "node scripts/nest-conditions-probe.mjs",
         "marker:per-size": "node scripts/per-size-consumption-probe.mjs",
         "nest:mixed": "node scripts/mixed-vs-homogeneous-probe.mjs",
+        "gate:keys": "node scripts/run-gate-keys-probe.mjs",
         "fix": "yarn lint && yarn format",
         "lint": "eslint --fix './src/**/*.{js,ts,tsx,json}'",
         "format": "prettier --write './src/**/*.{js,ts,tsx,scss,md,json}'",

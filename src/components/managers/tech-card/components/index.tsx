@@ -1721,6 +1721,10 @@ export function TechCardForm({
                 <PatternsField
                   techCardId={numId || undefined}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
+                  // БЕЗ `&& !frozen`, и это не описка: индекс размеров описывает ФАЙЛЫ, а не
+                  // редактируемое содержимое карточки, и нужен он именно на замороженной — с неё
+                  // запускают прогоны, её и судит гейт готовности.
+                  canPublishIndex={canWrite(SECTION.techCards)}
                   savedSizeIds={techCard?.techCard?.sizeIds ?? undefined}
                 />
               </Section>

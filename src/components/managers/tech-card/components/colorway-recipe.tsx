@@ -1419,6 +1419,25 @@ function SlotUsageRow({
           </div>
         )}
 
+        {/* Ф6.6: РУЧНАЯ НОРМА — тот же вопрос с другой стороны, и он обязан быть подписан ТАМ, ГДЕ
+            ЧИСЛО ВВОДЯТ. Ручной ввод — аварийный выход, и он нужен: без него первый же странный DXF
+            останавливает производство. Поэтому гейт готовности прогона такую норму ПРОПУСКАЕТ
+            (norm_provenance = предупреждение, не блокер) — но помечает, и здесь стоит тот же знак,
+            чтобы «почему у меня жёлтая строка на прогоне» имело ответ на этой же странице.
+            Только для рулонных слотов: у счётного трима ручной ввод — единственный способ, и метка
+            на каждой пуговице была бы шумом, а не сигналом. */}
+        {isMeasured && !legacyCountedMeasured && draft.consumptionSource !== 'marker' && (
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Pill tone='attention'>расход введён руками</Pill>
+            <Text size='nano' variant='label' component='span'>
+              норма не снята с раскладки
+              {slot?.wastagePercent?.trim()
+                ? ` · костинг начисляет сверху ${slot.wastagePercent}% раскроя слота`
+                : ''}
+            </Text>
+          </div>
+        )}
+
         {(draft.lineTotal || draft.sizeRunTotal) && (
           <Text size='micro' variant='label'>
             {draft.lineTotal ? `per garment ${draft.lineTotal}` : ''}

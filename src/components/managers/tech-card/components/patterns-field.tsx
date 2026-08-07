@@ -45,6 +45,7 @@ import {
   strictestDirection,
 } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
+import { publishPatternSizeIndex } from './pattern-size-index';
 import { markerColorways } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
@@ -189,11 +190,22 @@ type SizeAudit =
 export function PatternsField({
   techCardId,
   canEdit = true,
+  canPublishIndex = true,
   savedSizeIds,
 }: {
   techCardId?: number;
   // Gates «сохранить раскладку» (RBAC write + not released), mirroring MarkersSection.
   canEdit?: boolean;
+  // Gates the Ф6.3 size-index publish, and it is DELIBERATELY NOT `canEdit`.
+  //
+  // Права — да: кнопка «⌕ размеры в файлах» с этой фазы ПИШЕТ на сервер, и читателю нельзя писать
+  // от чужого имени (сервер эту роль не проверяет — RPC админский).
+  //
+  // Заморозка — НЕТ: замороженная карточка это ровно та, с которой запускают производство, и
+  // запретить публикацию на ней значило бы навсегда оставить `sizes_in_dxf` в «не проверялось»
+  // именно там, где гейт готовности и работает. Индекс описывает ФАЙЛЫ, а они на релизе не
+  // меняются, так что запись ничего в снимке не сдвигает.
+  canPublishIndex?: boolean;
   // Server-known size range: a form-added size cannot take a marker until the card saves.
   savedSizeIds?: number[];
 }) {
@@ -499,11 +511,12 @@ export function PatternsField({
   async function runAudit(list: Entry[]) {
     const sig = sigOf(list);
     setAudits((a) => ({ ...a, [sig]: { phase: 'loading' } }));
+    let found: Set<string>;
     try {
       const pieces = await parsePiecesOnce(filesOf(list));
       // Токены, которые в ЭТИХ файлах оказались размерами — то же правило, по которому размер
       // отрезается от имени детали везде: хвост из словаря, меняющийся у своей основы.
-      const found = splitPiecesBySize(pieces, dictTokens).sizeTokenSet;
+      found = splitPiecesBySize(pieces, dictTokens).sizeTokenSet;
       setAudits((a) => ({ ...a, [sig]: { phase: 'ready', found } }));
     } catch (e) {
       setAudits((a) => ({
@@ -513,6 +526,37 @@ export function PatternsField({
           message: e instanceof Error ? e.message : 'не удалось разобрать файлы',
         },
       }));
+      return;
+    }
+    // Ф6.3: кнопка перестала быть единственным читателем собственного ответа. Тот же набор токенов
+    // уезжает на сервер, и с этого момента гейт готовности прогона может честно ответить «есть ли
+    // выкройка на размер L» вместо UNKNOWN. Имя и поведение кнопки не изменились.
+    //
+    // СНАРУЖИ try/catch аудита, сознательно: индекс — побочная польза, и его отказ не имеет права
+    // превратить успешно показанный ответ в «проверка не удалась».
+    //
+    // Читателю кнопка по-прежнему отвечает — она просто перестаёт быть записью. Молча: разбор он
+    // запрашивал, публикацию нет, и тост про неслучившееся сохранение был бы отчётом о работе,
+    // которой человек не заказывал.
+    if (!canPublishIndex) return;
+    const res = await publishPatternSizeIndex({
+      techCardId: techCardId ?? 0,
+      sheets: list.map((e) => ({
+        lineKey: e.row.lineKey,
+        fabricPurpose: e.row.fabricPurpose,
+        bomLineKey: e.row.bomLineKey,
+      })),
+      sizeTokens: [...found],
+    });
+    if (res.ok) {
+      showMessage(
+        res.tokenCount === 0
+          ? 'Записано: файлы не несут размерного кодирования — гейт прогона прочтёт это как «вердикта нет», а не как «размеров нет»'
+          : `Индекс размеров сохранён — размеров ряда карточки найдено в файлах: ${res.resolvedSizeCount}`,
+        'success',
+      );
+    } else {
+      showMessage(`Проверка выполнена, но индекс размеров не сохранён — ${res.reason}`, 'error');
     }
   }
 
