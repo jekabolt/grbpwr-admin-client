@@ -1,5 +1,5 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { Canvas, Pin } from 'ui/components/canvas';
@@ -8,7 +8,14 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+import { isDxfUrl } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
+import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
+import {
+  PieceDxfPreview,
+  type PieceBlockRef,
+  type ScopedDxfFile,
+} from './nesting/piece-dxf-preview';
 import {
   CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
   UNSET_CUT_SYMMETRY,
@@ -169,27 +176,89 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
   // column — is what the раскладка orients the piece by.
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as Array<{
     bomLineKey?: string;
+    fabricPurpose?: string;
     blockName?: string;
     pieceLineKey?: string;
+  }>;
+  // Скоупы ткани карточки — то, ПО ЧЕМУ хранится и связь блока с деталью, и привязка листа
+  // выкройки (0267: назначение, а где карточка ещё не разложена — строка BOM). Нужны здесь ровно
+  // для предпросмотра: одно и то же имя блока в файле верха и в файле подклада — РАЗНЫЕ детали, и
+  // искать контур по одному имени значило бы рано или поздно показать чужой.
+  const bomItems = (useWatch({ control, name: 'bomItems' }) ?? []) as Array<{
+    lineKey?: string;
+    section?: string;
+    purpose?: string;
+    name?: string;
+  }>;
+  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{
+    url?: string;
+    name?: string;
+    filename?: string;
+    bomLineKey?: string;
+    fabricPurpose?: string;
   }>;
 
   // Row ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
   const pin = useCrossHighlight<number>();
+  // Разбор DXF стоит скачивания файлов, поэтому он включается человеком и панель монтируется
+  // только тогда (см. piece-dxf-preview.tsx).
+  const [previewOn, setPreviewOn] = useState(false);
+  // Деталь, чей контур сейчас нарисован. Ставится наведением и НЕ снимается уходом курсора — см.
+  // bindRow ниже. Ключ детали (lineKey), а не номер выноски: у выноски номер общий на несколько
+  // деталей, а форму показывать надо ровно одну.
+  const [shownPiece, setShownPiece] = useState<string | null>(null);
+
+  const scopes = useMemo(
+    () =>
+      fabricScopes(
+        bomItems
+          .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
+          .map((b) => ({
+            lineKey: b.lineKey!,
+            purpose: b.purpose,
+            name: b.name,
+            section: b.section,
+          })),
+      ),
+    [bomItems],
+  );
 
   // Which DXF blocks each piece is drawn as, by lineKey. Case-folded on the key the same way the
   // matching dialog and the server do, so a piece is found whichever spelling the alias carries.
+  // Скоуп едет вместе с именем: без него связь — это просто строка, а строка «полочка» есть и на
+  // верхе, и на подкладе.
   const blocksByPiece = useMemo(() => {
-    const m = new Map<string, string[]>();
+    const m = new Map<string, PieceBlockRef[]>();
     for (const a of aliases) {
       const key = (a.pieceLineKey ?? '').trim().toLowerCase();
       const block = (a.blockName ?? '').trim();
       if (!key || !block) continue;
+      // Разрешённый скоуп, а не сырой ключ: связь, записанная на строку до того, как её разложили
+      // в назначение, принадлежит теперь этому назначению — ровно как у листов выкроек.
+      const scopeKey = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes);
       const list = m.get(key) ?? [];
-      if (!list.includes(block)) list.push(block);
+      if (!list.some((r) => r.scopeKey === scopeKey && r.block === block)) {
+        list.push({ scopeKey, block });
+      }
       m.set(key, list);
     }
     return m;
-  }, [aliases]);
+  }, [aliases, scopes]);
+
+  // Листы, которые вообще стоит качать: только DXF и только тех тканей, где связи есть. Скачивать
+  // подкладку ради предпросмотра деталей верха — это десятки мегабайт, не дающие ни одной формы.
+  const previewFiles = useMemo<ScopedDxfFile[]>(() => {
+    const needed = new Set<string>();
+    for (const refs of blocksByPiece.values()) for (const r of refs) needed.add(r.scopeKey);
+    return patterns
+      .filter((p) => !!p.url && isDxfUrl(p.url))
+      .map((p) => ({
+        scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
+        name: p.name || p.filename || 'выкройка.dxf',
+        url: p.url!,
+      }))
+      .filter((f) => needed.has(f.scopeKey));
+  }, [patterns, scopes, blocksByPiece]);
 
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
   // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
@@ -274,6 +343,28 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     return { pairing, any, total: pieces.length };
   }, [pieces]);
 
+  // Наведение на строку зажигает СРАЗУ ДВЕ проекции детали — её выноску на скетче (где она на
+  // изделии) и её контур из DXF (какой она формы). Хендлеры объединены здесь, а не двумя
+  // раскрытиями `bind` на одном <tr>: второе просто затёрло бы обработчики первого.
+  //
+  // Контур ЗАЛИПАЕТ на последней наведённой детали и по уходу курсора не гаснет — в отличие от
+  // подсветки строки и пина, которые говорят «вот эта строка сейчас под курсором» и обязаны
+  // сняться. Иначе форму нельзя было бы рассмотреть: движение курсора со строки к самой картинке
+  // стирало бы то, ради чего его туда ведут.
+  const bindRow = (callout: number, lineKey: string) => {
+    const a = pin.bind(callout > 0 ? callout : null);
+    const enter = () => {
+      a.onMouseEnter();
+      if (lineKey) setShownPiece(lineKey);
+    };
+    return {
+      onMouseEnter: enter,
+      onFocus: enter,
+      onMouseLeave: a.onMouseLeave,
+      onBlur: a.onBlur,
+    };
+  };
+
   // A new row is minted with its stable lineKey up front, NOT left for the save mapper: the
   // operation and recipe pickers can only offer a piece that already has one, so without it a part
   // added here stayed unlinkable until the card had been saved and reloaded.
@@ -326,7 +417,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
       ) : (
         // minmax(0,1fr) — not 1fr — so the wide table can shrink and scroll inside its own
         // overflow-x-auto instead of forcing the track wide and shoving the diagram column.
-        <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_160px]'>
+        <div className='grid gap-2.5 lg:grid-cols-[minmax(0,1fr)_200px]'>
           <DataTable className='min-w-[860px] [&_td]:!align-middle [&_td]:!text-left [&_th]:!text-left'>
             {/* Fixed column widths so every row lines up; the code/name column flexes, the rest are
                 sized to their control. Alignment is forced left/middle (the DataTable default right-
@@ -364,8 +455,16 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                 return (
                   <tr
                     key={f.id}
-                    {...pin.bind(callout > 0 ? callout : null)}
-                    className={pin.isActive(callout) ? 'bg-bgZebra' : undefined}
+                    {...bindRow(callout, (p.lineKey ?? '').trim())}
+                    // Зебра тут говорит «вот эта строка сейчас показана справа»: у выноски — пока
+                    // курсор на ней, у чертежа — пока его контур нарисован, потому что иначе
+                    // непонятно, к какой строке относится картинка, на которую смотришь.
+                    className={
+                      pin.isActive(callout) ||
+                      (previewOn && !!p.lineKey && shownPiece === (p.lineKey ?? '').trim())
+                        ? 'bg-bgZebra'
+                        : undefined
+                    }
                   >
                     <td>
                       <Input
@@ -489,7 +588,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                         <div className='mt-0.5'>
                           <Pill
                             tone='mut'
-                            title={`деталь привязана к блокам DXF: ${blocks.join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае.`}
+                            title={`деталь привязана к блокам DXF: ${blocks.map((b) => b.block).join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае. Форму этого блока можно увидеть справа — включите «⌕ деталь в чертеже» и наведите на строку.`}
                           >
                             блок DXF привязан
                           </Pill>
@@ -534,13 +633,46 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
             </tbody>
           </DataTable>
 
-          <PieceDiagram
-            techCard={techCard}
-            pinnedNumbers={pinnedNumbers}
-            labelForPin={labelForPin}
-            activePin={pin.active}
-            onActivePinChange={pin.setActive}
-          />
+          {/* Две проекции одной и той же детали, одна под другой: ГДЕ она на изделии (выноска на
+              скетче) и КАКОЙ она формы (контур из DXF). Обе ведёт одно наведение на строку. */}
+          <div className='flex flex-col gap-2'>
+            {previewFiles.length > 0 &&
+              (previewOn ? (
+                <PieceDxfPreview
+                  files={previewFiles}
+                  blocksByPiece={blocksByPiece}
+                  activePieceKey={shownPiece}
+                  activePieceName={
+                    pieces.find((x) => (x.lineKey ?? '').trim() === shownPiece)?.name?.trim() ?? ''
+                  }
+                  onClose={() => setPreviewOn(false)}
+                />
+              ) : (
+                <div className='flex flex-col gap-1'>
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='xs'
+                    title='скачать привязанные DXF и показывать форму детали при наведении на строку'
+                    onClick={() => setPreviewOn(true)}
+                  >
+                    ⌕ деталь в чертеже
+                  </Button>
+                  <Text size='micro' variant='label'>
+                    имя блока формы не несёт. Включите — и наведение на строку покажет её контур из
+                    DXF с реальным габаритом; файлы скачаются и разберутся один раз.
+                  </Text>
+                </div>
+              ))}
+
+            <PieceDiagram
+              techCard={techCard}
+              pinnedNumbers={pinnedNumbers}
+              labelForPin={labelForPin}
+              activePin={pin.active}
+              onActivePinChange={pin.setActive}
+            />
+          </div>
 
           {/* Said once, under the table, rather than per row. The four values are the ones the
               server's CHECK accepts — anything else fails the whole card save, which is why this
