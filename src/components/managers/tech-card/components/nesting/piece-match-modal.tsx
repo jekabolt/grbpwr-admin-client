@@ -53,11 +53,12 @@ import {
   aliasScopeKey,
   bindingForScope,
 } from '../bom-purpose';
-import { normBlock, splitBlockSize } from './block-code';
+import { normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet, type PieceMark } from './piece-sheet';
 import {
+  aliasIdentity,
   missingSizesIn,
   splitPiecesBySize,
   useDictionarySizeTokens,
@@ -252,8 +253,10 @@ export function PieceMatchModal({
   }, [parse.phase, missingSizes, cardSizeIds, orderSizes, setValue]);
   // A stored alias may still carry a size-suffixed name from before the split existed. Folding it
   // through the same rule collapses «BP_1_XS» and «BP_1_M» onto the one identity they always
-  // meant, and the full-set write then rewrites them in that form.
-  const identityOf = (block: string) => normBlock(splitBlockSize(block, split.sizeTokenSet).identity);
+  // meant, and the full-set write then rewrites them in that form. The rule asks the FILE, not the
+  // shape of the name: «FP_L» is a whole piece name (left front), and cutting its «L» off just
+  // because the grade has an L size filed the mapping under a stem no drawing has.
+  const identityOf = (block: string) => aliasIdentity(block, split);
 
   const [rows, setRows] = useState<BlockRow[]>([]);
   // Every block found in the files with its instance count, mapped or not — «снять» needs the

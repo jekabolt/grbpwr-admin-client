@@ -21,10 +21,10 @@ import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import { normBlock, splitBlockSize } from './block-code';
+import { normBlock } from './block-code';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
+import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 
 /** Лист выкройки вместе с РАЗРЕШЁННЫМ скоупом ткани, в котором он лежит. */
 export type ScopedDxfFile = { scopeKey: string; name: string; url: string };
@@ -230,9 +230,10 @@ export function PieceDxfPreview({
     for (const r of refs) {
       // Сохранённый алиас может нести размер прямо в имени («BP_1_XS») — сворачиваем к
       // идентичности тем же правилом, что и диалог сопоставления, иначе ключи разойдутся.
-      const identity = normBlock(
-        splitBlockSize(normBlock(r.block), index.split.sizeTokenSet).identity,
-      );
+      // Правило спрашивает ФАЙЛ: «FP_L» — это левая полочка целиком, и срезать у неё «L»
+      // только потому, что в ряду есть размер L, значит искать деталь под именем, которого в
+      // чертеже нет (см. aliasIdentity).
+      const identity = aliasIdentity(r.block, index.split);
       const bySize = index.byKey.get(`${r.scopeKey}|${identity.toLowerCase()}`);
       if (!bySize || bySize.size === 0) continue;
       // Один чертёж несёт всю градацию. Показываем СРЕДИННЫЙ размер: силуэт у всех один, а
