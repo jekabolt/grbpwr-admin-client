@@ -330,7 +330,7 @@ export function PrintOptionsModal({
           </Text>
         )}
 
-        <div>
+        <div className='flex flex-wrap gap-2'>
           <Button
             type='button'
             variant='secondary'
@@ -342,6 +342,26 @@ export function PrintOptionsModal({
           >
             печать без скоупа
           </Button>
+          {/* Наряд на партию умеет тот же фильтр по колорвею, но собрать ему query было неоткуда:
+              единственная ссылка на его печать вела без параметров. Выбранный здесь цвет уезжает
+              и в него — иначе фильтр наряда жил бы только для набранного руками URL. */}
+          {runId > 0 && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='sm'
+              onClick={() => {
+                const qs = colorwayId ? `?colorway=${colorwayId}` : '';
+                window.open(
+                  `${ROUTES.productionRunPrint.replace(':id', String(runId))}${qs}`,
+                  '_blank',
+                );
+                onClose();
+              }}
+            >
+              наряд на партию — pdf
+            </Button>
+          )}
         </div>
       </div>
     </ConfirmationModal>

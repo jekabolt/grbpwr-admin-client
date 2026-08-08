@@ -440,6 +440,9 @@ export function TechPackDocument({
   const b = (id: BookletId) => bookletOn(printScope, id);
 
   const sizeIds = scopedSizeIds(printScope);
+  // Скоуп только по размерам — тоже скоуп, и он тоже обязан быть назван на бумаге: лист с
+  // урезанной градацией иначе читается как «у стиля такая градация».
+  const sizesNarrowed = sizeIds.length !== (tc.sizeIds ?? []).length;
   // The live colourway data — this is the actual fix for #71/M10: previously hardcoded to `[]`,
   // so the colourways sheet and per-colourway cost labels below never rendered for any card.
   const colorways = scopedColorways(printScope);
@@ -594,7 +597,12 @@ export function TechPackDocument({
   // recipe (materials consumed on ship) each live behind their own per-style RPC that neither
   // this component nor the print route ever called — printing only inactive/disabled lines would
   // misstate the spec, so both are filtered to active before rendering.
-  const activeAssembly = assembly.filter((a) => a.active !== false);
+  // Строка сборки может быть привязана к КОНКРЕТНОМУ размеру (размерная этикетка). При скоупе на
+  // размеры прогона чужие размерные строки на лист не идут: этикетка «L» в комплекте, где кроят
+  // только M, — это указание пришить не ту этикетку. Строки без размера («all sizes») остаются.
+  const activeAssembly = assembly.filter(
+    (a) => a.active !== false && (!wireInt(a.sizeId) || sizeIds.includes(wireInt(a.sizeId))),
+  );
   const activePackaging = packagingRecipe.filter((p) => p.active !== false);
   // Mirrors PackagingRecipeField's own resolution: this style's active lines if it has any,
   // else the global fallback it would inherit at order time.
@@ -705,15 +713,16 @@ export function TechPackDocument({
           шапка и те же листы, просто короче таблицы. Не назови он свой скоуп вслух — и лист,
           напечатанный по одному колорвею, читается как «у стиля один цвет», а лист по размерам
           партии — как «у стиля эта градация». Обе ошибки молчаливые и обе дорогие. */}
-      {(printScope.colorway || printScope.run || printScope.profile === 'factory') && (
+      {(printScope.colorway ||
+        printScope.run ||
+        printScope.profile === 'factory' ||
+        sizesNarrowed) && (
         <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
           печать по скоупу:{' '}
           {[
             printScope.colorway ? `колорвей ${colorwayLabel(printScope.colorway)}` : '',
             printScope.run ? `партия PR-${wireInt(printScope.run.id)}` : '',
-            printScope.sizeIds.length && printScope.sizeIds.length !== (tc.sizeIds ?? []).length
-              ? `размеры ${printScope.sizeIds.map(sizeName).join(', ')}`
-              : '',
+            sizesNarrowed ? `размеры ${printScope.sizeIds.map(sizeName).join(', ')}` : '',
             printScope.profile === 'factory' ? 'комплект в цех (без себестоимости)' : '',
           ]
             .filter(Boolean)
@@ -839,13 +848,18 @@ export function TechPackDocument({
                       const x = num(dec(c.posX));
                       const y = num(dec(c.posY));
                       if (Number.isNaN(x) || Number.isNaN(y)) return null;
+                      // Фолбэк номера — индекс в ОБЩЕМ списке выносок, тот же, что в таблице ниже
+                      // и в джойне деталей. Локальный индекс внутри картинки (j) расходился бы с
+                      // ними, как только эскизов больше одного: пин сказал бы «2», строка — «5».
+                      const pinNumber =
+                        wireInt(c.number) || (tc.callouts ?? []).indexOf(c) + 1;
                       return (
                         <span
                           key={j}
                           className='absolute flex size-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white bg-black text-[8px] font-bold text-white'
                           style={{ left: `${x * 100}%`, top: `${y * 100}%` }}
                         >
-                          {c.number || j + 1}
+                          {pinNumber}
                         </span>
                       );
                     })}
