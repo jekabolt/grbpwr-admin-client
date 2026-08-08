@@ -13,7 +13,16 @@ import { sectionShort } from './bom-line-picker';
 // free-text slot NAME already does today. OTHER carries its meaning in a separate note so the note
 // can never quietly become a ninth purpose.
 
-export const UNSET_PURPOSE = 'TECH_CARD_BOM_PURPOSE_UNSET' as const;
+// Подписи назначений живут в bom-purpose-labels.ts (лист без тяжёлых импортов — его читает и
+// публичный вьюер выкроек); реэкспорт сохраняет всех прежних импортёров этого файла.
+import {
+  PURPOSE_LABEL,
+  UNSET_PURPOSE,
+  UNSET_PURPOSE_LABEL,
+  bomPurposeLabel,
+} from './bom-purpose-labels';
+
+export { UNSET_PURPOSE, UNSET_PURPOSE_LABEL, bomPurposeLabel } from './bom-purpose-labels';
 
 // Owner's order, and the order the BOM tab lists its groups in — the garment read outwards from the
 // shell, not alphabetical.
@@ -27,29 +36,6 @@ export const bomPurposeOrder: common_TechCardBomPurpose[] = [
   'TECH_CARD_BOM_PURPOSE_MESH',
   'TECH_CARD_BOM_PURPOSE_OTHER',
 ];
-
-const PURPOSE_LABEL: Record<string, string> = {
-  TECH_CARD_BOM_PURPOSE_MAIN: 'основной материал',
-  TECH_CARD_BOM_PURPOSE_LINING: 'подкладка',
-  TECH_CARD_BOM_PURPOSE_POCKETING: 'карманка',
-  TECH_CARD_BOM_PURPOSE_INTERFACING: 'бортовка / прокладка',
-  TECH_CARD_BOM_PURPOSE_INSULATION: 'утеплитель',
-  TECH_CARD_BOM_PURPOSE_CONTRAST: 'контраст / отделочная',
-  TECH_CARD_BOM_PURPOSE_MESH: 'сетка / второй слой',
-  TECH_CARD_BOM_PURPOSE_OTHER: 'другое',
-};
-
-// The heading an UNSET roll-goods line collects under. Worded as an instruction, not as a value: a
-// line lands here because nobody has sorted it yet, and every line that predates 0265 starts here
-// deliberately — nothing guessed a purpose for them, because section=fabric is precisely where a
-// карманка, a контраст and a сетка hide, and a guess would have labelled all three «основной
-// материал» confidently and wrongly.
-export const UNSET_PURPOSE_LABEL = 'назначение не задано';
-
-export function bomPurposeLabel(purpose?: string): string {
-  if (!purpose || purpose === UNSET_PURPOSE) return UNSET_PURPOSE_LABEL;
-  return PURPOSE_LABEL[purpose] ?? purpose.replace('TECH_CARD_BOM_PURPOSE_', '').toLowerCase();
-}
 
 // Роль строки по умолчанию, когда оператор её не написал: назначение уже сказано, и повторять
 // одно и то же руками незачем. «Другое» роли не даёт — там смысл в примечании, а не в значении.

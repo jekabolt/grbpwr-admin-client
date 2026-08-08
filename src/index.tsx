@@ -231,6 +231,9 @@ const FulfillmentCardDetail = lazyRoute(() =>
     default: m.FulfillmentCardDetail,
   })),
 );
+const PatternViewerPage = lazyRoute(() =>
+  import('components/pattern-viewer/page').then((m) => ({ default: m.PatternViewerPage })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -408,6 +411,11 @@ root.render(
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
                   <Route path={ROUTES.orderInvoice} element={<OrderInvoicePrint />} />
                 </Route>
+                {/* PUBLIC pattern viewer — what a printed tech-pack QR opens on a factory
+                    phone. Deliberately outside ProtectedRoute (no JWT), outside Layout (no
+                    admin chrome) and outside DictionaryProvider (the dictionary is an authed
+                    fetch; a page that needs it is not public). */}
+                <Route path={ROUTES.patternViewer} element={<PatternViewerPage />} />
               </Routes>
             </Suspense>
           </BrowserRouter>
