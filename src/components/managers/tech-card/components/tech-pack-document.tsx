@@ -60,6 +60,11 @@ import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useMemo } from 'react';
 import { decimalToInput } from 'utils/decimal';
+// ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
+// печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
+// же код на такой же публичный вьюер, и вторая копия этой функции означала бы вторую копию правила
+// «не бери window.location.origin», из которых одну однажды поправят, а другую нет.
+import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
@@ -143,22 +148,6 @@ const attachmentText = (
   return s ? `${label} ${s} mm` : label;
 };
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
-
-// ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА.
-//
-// window.location.origin — это адрес вкладки, из которой нажали «save as pdf», а не адрес
-// продукта. Напечатать тех-пак из превью Vercel (штатный способ смотреть бету) значит зашить в
-// каждый QR эфемерный алиас превью: он живёт за Deployment Protection, то есть встречает швею
-// SSO-стеной, и умирает при переименовании ветки. Ни печать, ни QR, ни вьюер при этом не
-// ломаются — бумага просто перестаёт работать через месяц, молча.
-//
-// Поэтому origin берётся из окружения деплоя (у бэкенда ровно это и есть PatternToken.
-// PublicBaseURL), а window.location.origin остаётся ТОЛЬКО как локальный запасной вариант.
-const patternViewerOrigin = (): string => {
-  const configured = (import.meta.env.VITE_PATTERN_VIEWER_ORIGIN as string | undefined)?.trim();
-  if (configured) return configured.replace(/\/$/, '');
-  return window.location.origin;
-};
 
 // Русская форма счётного существительного: 1 лист, 2 листа, 5 листов.
 const plural = (n: number, one: string, few: string, many: string): string => {
@@ -715,36 +704,6 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* SIZE QUANTITIES */}
-      {has(tc.sizeQuantities) && (
-        <Sheet title='size run'>
-          <table className='w-full border-collapse text-control'>
-            <thead>
-              <tr>
-                {(tc.sizeQuantities ?? []).map((sq, i) => (
-                  <th key={i} className={`${TH} text-center`}>
-                    {sizeName(sq.sizeId)}
-                  </th>
-                ))}
-                <th className={`${TH} text-center`}>total</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className='break-inside-avoid'>
-                {(tc.sizeQuantities ?? []).map((sq, i) => (
-                  <td key={i} className={`${TD} text-center`}>
-                    {sq.orderQty ?? 0}
-                  </td>
-                ))}
-                <td className={`${TD} text-center font-semibold`}>
-                  {(tc.sizeQuantities ?? []).reduce((s, sq) => s + (sq.orderQty ?? 0), 0)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </Sheet>
-      )}
-
       {/* MEASUREMENTS — point-of-measure grading chart (GetStyleSizeChart), the single most
           standard artifact of a garment tech pack; previously never fetched/printed. */}
       {has(sizeIds) && measurements.length > 0 && (
@@ -794,7 +753,7 @@ export function TechPackDocument({
                     >
                       <PatternQR
                         size={96}
-                        value={`${patternViewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(g.wireKey)}`}
+                        value={`${viewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(g.wireKey)}`}
                       />
                       <figcaption className='mt-1 max-w-[150px] text-micro uppercase'>
                         <div className='break-words font-semibold'>{g.label}</div>
@@ -1042,7 +1001,9 @@ export function TechPackDocument({
                           <th className={TH}>material</th>
                           <th className={TH}>colour</th>
                           <th className={`${TH} text-right`}>cons. / qty</th>
-                          <th className={`${TH} text-right`}>run total</th>
+                          {/* No «run total»: it printed size_run_total, the spend on the card's
+                              typical calculation batch. A style has no batch — the run does. */}
+                          <th className={`${TH} text-right`}>per garment</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1062,7 +1023,7 @@ export function TechPackDocument({
                                 {cons ? `${cons} ${art?.unit ?? ''}`.trim() : '—'}
                               </td>
                               <td className={`${TD} whitespace-nowrap text-right`}>
-                                {dec(u.sizeRunTotal) || dec(u.lineTotal) || '—'}
+                                {dec(u.lineTotal) || '—'}
                               </td>
                             </tr>
                           );
@@ -1353,7 +1314,10 @@ export function TechPackDocument({
             <div>
               <KV k='materials / unit (primary cw)' v={dec(tc.costing.materialsPerUnit)} />
               <KV k='unit cost' v={dec(tc.costing.unitCost)} />
-              <KV k='order qty' v={tc.costing.orderQty ? String(tc.costing.orderQty) : ''} />
+              {/* No «order qty» / «order cost» on paper. They were the card's typical calculation
+                  size run and unit cost × that run; the run is gone, so printing them would put a
+                  zero-priced batch on a sheet a workshop reads as an order. The batch figures are
+                  printed by the run pack (наряд на партию), from the run's own plan lines. */}
               <KV k='total SAM (min)' v={dec(tc.costing.totalSam)} />
             </div>
           </div>
@@ -1366,7 +1330,6 @@ export function TechPackDocument({
                   <th className={TH}>colourway</th>
                   <th className={`${TH} text-right`}>materials / unit</th>
                   <th className={`${TH} text-right`}>unit cost</th>
-                  <th className={`${TH} text-right`}>order cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -1386,9 +1349,6 @@ export function TechPackDocument({
                       <td className={`${TD} whitespace-nowrap text-right`}>
                         {dec(cc.unitCost) || '—'}
                       </td>
-                      <td className={`${TD} whitespace-nowrap text-right`}>
-                        {dec(cc.orderCost) || '—'}
-                      </td>
                     </tr>
                   );
                 })}
@@ -1396,16 +1356,12 @@ export function TechPackDocument({
             </table>
           )}
 
-          <div className='mt-2 flex items-center justify-between border-t border-black pt-1 text-sm'>
+          {/* The sheet's closing total is the UNIT cost now that «order cost» is gone, so it
+              takes the heavy 2px rule that used to close the sheet under the batch figure. */}
+          <div className='mt-2 flex items-center justify-between border-t-2 border-black pt-1 text-sm'>
             <span className='font-bold uppercase'>unit cost</span>
             <span className='font-bold'>
               {dec(tc.costing.unitCost) || '—'} {tc.costing.currency ?? ''}
-            </span>
-          </div>
-          <div className='mt-1 flex items-center justify-between border-t-2 border-black pt-1 text-sm'>
-            <span className='font-bold uppercase'>order cost</span>
-            <span className='font-bold'>
-              {dec(tc.costing.orderCost) || '—'} {tc.costing.currency ?? ''}
             </span>
           </div>
           {tc.costing.hasUnconvertedCurrencies && (

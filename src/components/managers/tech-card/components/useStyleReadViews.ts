@@ -6,7 +6,6 @@ import { adminService } from 'api/api';
 export const styleReadViewKeys = {
   costEstimate: (techCardId: number, colorwayId: number) =>
     ['styleCostEstimate', techCardId, colorwayId] as const,
-  cutList: (techCardId: number) => ['styleCutList', techCardId] as const,
 };
 
 // GetStyleCostEstimate (Q4) — the transparent plan cost of one colourway — is costing-gated
@@ -27,15 +26,5 @@ export function useStyleCostEstimate(
       }),
     enabled: enabled && !!techCardId && !!colorwayId,
     retry: false,
-  });
-}
-
-// GetStyleCutList (Q6) expands a style's cut-pieces for production (mirrored pieces folded ×2
-// into total_per_garment). A plain read projection — NOT costing-gated.
-export function useStyleCutList(techCardId: number | undefined, enabled: boolean) {
-  return useQuery({
-    queryKey: styleReadViewKeys.cutList(techCardId ?? 0),
-    queryFn: () => adminService.GetStyleCutList({ techCardId: techCardId ?? 0 }),
-    enabled: enabled && !!techCardId,
   });
 }

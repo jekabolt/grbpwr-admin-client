@@ -105,11 +105,6 @@ function hasContent(values: Array<string | number | undefined>): boolean {
 const DEFAULT_MEDIA_KIND: common_TechCardMediaKind = 'TECH_CARD_MEDIA_KIND_FRONT';
 const DEFAULT_BOM_SECTION: common_TechCardBomSection = 'TECH_CARD_BOM_SECTION_FABRIC';
 
-const sizeQuantitySchema = z.object({
-  sizeId: z.number().optional().default(0), // ∈ size_ids
-  orderQty: z.number().optional().default(0),
-});
-
 // A downloadable выкройка (cut pattern) file — PDF or DXF, told apart by the url's
 // extension — for one size. url/filename/sizeBytes are produced by Admin.UploadPattern
 // (never hand-typed); sizeId ∈ size_ids.
@@ -692,7 +687,10 @@ const techCardObject = z.object({
   notes: z.string().optional().default(''),
   // children
   sizeIds: z.array(z.number()).default([]),
-  sizeQuantities: z.array(sizeQuantitySchema).default([]),
+  // NO sizeQuantities. Типовой калькуляционный тираж («size run») удалён из формы целиком:
+  // себестоимость стиля считается по норме БАЗОВОГО размера, а реальный тираж живёт на прогоне
+  // (production_run) — своя сетка колорвей × размер на каждую партию. Поле не читается, не
+  // редактируется и НЕ ОТПРАВЛЯЕТСЯ (см. mapFormToTechCardInsert).
   patterns: z.array(patternSchema).default([]), // выкройки: DXF по материалам (size_id — артефакт хранения, колонка NOT NULL)
   // DXF block → cut piece, SCOPED BY FABRIC (0262). The scope is what makes the mapping safe:
   // the same generic block name («полочка») in the main-fabric file and the lining file is two
@@ -876,7 +874,6 @@ export const techCardDefaultData: TechCardFormData = {
   concept: '',
   notes: '',
   sizeIds: [],
-  sizeQuantities: [],
   patterns: [],
   pieceDxfAliases: [],
   purpose: 'TECH_CARD_PURPOSE_SELLABLE',
@@ -1059,10 +1056,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     concept: insert?.concept || '',
     notes: insert?.notes || '',
     sizeIds: insert?.sizeIds ?? [],
-    sizeQuantities: (insert?.sizeQuantities ?? []).map((q) => ({
-      sizeId: q.sizeId || 0,
-      orderQty: q.orderQty || 0,
-    })),
+    // size_quantities НЕ читается в форму — типовой тираж больше не существует как понятие в UI.
     patterns: (insert?.patterns ?? []).map((p) => ({
       sizeId: p.sizeId || 0,
       url: p.url || '',
@@ -1414,10 +1408,12 @@ export function mapFormToTechCardInsert(
     notes: data.notes?.trim() || '',
     // children edited here — override the echoed `original` values
     sizeIds: data.sizeIds ?? [],
-    sizeQuantities: (data.sizeQuantities ?? []).map((q) => ({
-      sizeId: q.sizeId || 0,
-      orderQty: q.orderQty || 0,
-    })),
+    // Типовой тираж больше не отправляется. `undefined` здесь ОБЯЗАТЕЛЕН и не равен «просто не
+    // писать строку»: выше стоит `...original`, который иначе вернул бы прочитанное
+    // size_quantities обратно на сервер и вечно воскрешал удалённое поле. JSON.stringify роняет
+    // ключ, и запись full-replace оставляет карточку без типового тиража — это и есть цель:
+    // тираж партии живёт на прогоне (production_run), а не на карточке.
+    sizeQuantities: undefined,
     patterns: (data.patterns ?? [])
       .filter((p) => p.url?.trim())
       .map((p) => ({

@@ -61,7 +61,6 @@ export function LinesGrid({
     [techCard?.colorways, dictionary?.colors],
   );
   const cardSizeIds = useMemo(() => techCard?.techCard?.sizeIds ?? [], [techCard]);
-  const sizeQuantities = useMemo(() => techCard?.techCard?.sizeQuantities ?? [], [techCard]);
 
   const lines = useMemo(() => run.run?.lines ?? [], [run]);
 
@@ -144,33 +143,10 @@ export function LinesGrid({
     });
   };
 
-  // Stamp the card's per-size order quantities onto every current row (R-3) — but only into
-  // EMPTY cells, so "top up" never overwrites a hand-split plan.
-  const prefillFromSizeRun = () => {
-    if (rows.length === 0) {
-      showMessage('Add a colour-model first, then prefill', 'error');
-      return;
-    }
-    setDirty(true);
-    setQty((prev) => {
-      const q = { ...prev };
-      rows.forEach((r) =>
-        sizeQuantities.forEach((sq) => {
-          const k = key(r.productId, sq.sizeId ?? 0);
-          if (sq.sizeId && sq.orderQty && !q[k]?.trim()) q[k] = String(sq.orderQty);
-        }),
-      );
-      return q;
-    });
-    // Типовой тираж — калькуляционная величина карты, не заказ (plan 13 §2): скажи это вслух,
-    // чтобы префилл не читался как «система знает, сколько шить».
-    const typicalTotal = sizeQuantities.reduce((sum, sq) => sum + (sq.orderQty ?? 0), 0);
-    showMessage(
-      `Префилл из типового тиража карты (${typicalTotal} шт на колор-модель) — это калькуляционная величина, не заказ; проверьте план партии`,
-      'success',
-    );
-  };
-
+  // Здесь была кнопка «prefill from size run»: она штамповала в сетку типовой калькуляционный
+  // тираж карты. Тираж удалён с карточки целиком — и замены у кнопки нет НАРОЧНО. План партии
+  // набирают руками: сколько шить в этот раз, знает человек, а не карточка, и подсказка из
+  // «типового» микса ровно это знание и подменяла.
   const rowTotal = (productId: number) =>
     columns.reduce((sum, s) => sum + (Number(qty[key(productId, s)]) || 0), 0);
   const colTotal = (sizeId: number) =>
@@ -252,16 +228,6 @@ export function LinesGrid({
         </Text>
         {editable && (
           <div className='flex items-center gap-2'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='lg'
-              className='uppercase'
-              disabled={sizeQuantities.length === 0}
-              onClick={prefillFromSizeRun}
-            >
-              prefill from size run
-            </Button>
             <Button
               type='button'
               variant='main'

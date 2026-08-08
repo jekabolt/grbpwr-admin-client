@@ -57,7 +57,6 @@ import { CompositionEntries } from './composition-entries';
 import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
-import { CutListField } from './cut-list-field';
 import { DetailsEditor } from './details-editor';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
@@ -84,7 +83,6 @@ import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
 import { StyleNumberField } from './style-number-field';
 import { RolesField } from './roles-field';
-import { SizeQuantitiesField } from './size-quantities-field';
 import { SketchTab } from './sketch-tab';
 import {
   TechCardFormData,
@@ -169,7 +167,6 @@ const ERROR_TAB: Record<string, TabId> = {
   callouts: 'sketch',
   patterns: 'patterns',
   sizeIds: 'patterns',
-  sizeQuantities: 'patterns',
   bomItems: 'bom',
   // Cut pieces (and their DXF block aliases) render on PATTERNS. A `pieces.N.*` violation routed
   // anywhere else raises a toast naming a field nobody can see.
@@ -1707,13 +1704,12 @@ export function TechCardForm({
               <Section title='size range'>
                 {/* The colourways AS READ: their recipes grade per-size consumption, and that is
                     what makes removing a size destructive beyond this form. */}
+                {/* Здесь стоял «size run (order qty)» — типовой калькуляционный тираж карты.
+                    Он удалён вместе с size_quantities: себестоимость стиля считается по норме
+                    БАЗОВОГО размера, а реальный тираж живёт на прогоне (production_run), у
+                    которого своя сетка колорвей × размер. Выдуманный микс размеров не влиял ни
+                    на одну цифру и только притворялся планом — не возвращать его сюда. */}
                 <SizeIdsField colorways={techCard?.colorways} />
-                <div className='space-y-2 border-t border-textInactiveColor pt-3'>
-                  <Text variant='uppercase' size='small'>
-                    size run (order qty)
-                  </Text>
-                  <SizeQuantitiesField />
-                </div>
               </Section>
               <Section title='размерная таблица (межурменты) — общая для всех колорвеев стиля'>
                 <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
@@ -1739,23 +1735,6 @@ export function TechCardForm({
                   ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
                   set of [data-field] anchors for revealField to walk to. */}
               <PiecesTab techCard={techCard} active={activeTab === 'patterns'} />
-              {/* The cut list is the projection of the block directly above it: it is derived
-                  entirely from the cut pieces, the size range and the per-colourway fabric map, and
-                  the first two now live on THIS tab. It used to close the construction tab, which
-                  put the output two tabs away from its inputs. Here the operator's flow finally
-                  runs in one place — upload DXF → match blocks to pieces → see the piece list →
-                  see what will actually be cut — instead of jumping tabs to read the answer.
-                  A peer Section, not nested inside the pieces block: a block never contains a
-                  block (DESIGN.md). Mount semantics are unchanged — this SectionStack, like the
-                  construction one, is display:none-hidden with its children MOUNTED, so
-                  useStyleCutList still fires once on a saved card and no fetch is gained or lost.
-                  Guarded by isEditMode && numId exactly as before: without a saved id the query is
-                  disabled and the table would have nothing to project. */}
-              {isEditMode && numId && (
-                <Section title='cut list (production projection)'>
-                  <CutListField techCardId={numId} />
-                </Section>
-              )}
               <Section title='раскладки (маркеры) — расход ткани по размерам'>
                 <MarkersSection
                   techCard={techCard}

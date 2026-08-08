@@ -888,12 +888,14 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           {colorwayCosts.length > 0 && (
             <DataTable>
               <thead>
+                {/* Без колонок qty / order cost: у стиля нет собственной партии. Они показывали
+                    Σ(типового тиража) × себестоимость, а типовой тираж с карточки снят — колонки
+                    читали бы «0», то есть «партия бесплатная». Размер и стоимость партии живут на
+                    прогоне, где числа настоящие. */}
                 <tr>
                   <th>colourway</th>
                   <th>materials / unit</th>
                   <th>unit cost</th>
-                  <th>qty</th>
-                  <th>order cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -921,8 +923,6 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                     </td>
                     <td>{decimalToInput(cc.materialsPerUnit) || <EmptyCell />}</td>
                     <td>{decimalToInput(cc.unitCost) || <EmptyCell />}</td>
-                    <td>{cc.orderQty || <EmptyCell />}</td>
-                    <td>{decimalToInput(cc.orderCost) || <EmptyCell />}</td>
                   </tr>
                 ))}
               </tbody>

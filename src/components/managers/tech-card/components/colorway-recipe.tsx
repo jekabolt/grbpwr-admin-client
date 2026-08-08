@@ -153,7 +153,6 @@ type UsageDraft = {
   pieceLineKey: string;
   // display-only (server-computed, stripped without costing:read).
   lineTotal: string;
-  sizeRunTotal: string;
   // Wastage provenance (0261). 'marker' = the norm came from a saved раскладка and its measured
   // length ALREADY contains the cutting waste, so costing must not gross it up again; '' =
   // typed by hand and the article's wastage_percent applies as before. The two pcts are the
@@ -577,7 +576,6 @@ function fromRead(
     })),
     pieceLineKey: u.pieceLineKey || piecesById.get(wireInt(u.pieceId))?.lineKey || '',
     lineTotal: decimalToInput(u.lineTotal),
-    sizeRunTotal: decimalToInput(u.sizeRunTotal),
     // The server normalises '' to 'manual', so a row this client has saved once reads back as
     // 'manual' while a hand edit writes ''. Both mean the same thing, and leaving them distinct
     // made a no-op edit (type 1.5 over 1.5) differ from its baseline signature and claim a
@@ -642,35 +640,6 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
 // Client-side preview of the whole-run spend for a measured usage (the backend computes the
 // authoritative size_run_total): Σ(consumption_size × orderQty_size) × price × (1 + wastage%).
 //
-// wastagePercent приходит УЖЕ решённым: на норме с consumption_source='marker' звонящий обязан
-// передать '' — измеренная длина содержит и выпады, и кромку, и костинг на ней процент НЕ
-// начисляет. Предпросмотр, начислявший его безусловно, противоречил колауту диалога применения
-// на том же экране и завышал «расход на партию» ровно на (1 + wastage%).
-function runTotalPreview(
-  sizeIds: number[],
-  consumptionBySize: Map<number, string>,
-  orderQtyBySize: Map<number, number>,
-  unitPrice: string,
-  wastagePercent: string,
-): string {
-  const price = Number(unitPrice);
-  if (!unitPrice.trim() || Number.isNaN(price)) return '';
-  let units = 0;
-  let any = false;
-  for (const id of sizeIds) {
-    const raw = consumptionBySize.get(id);
-    const c = Number(raw);
-    if (raw?.trim() && !Number.isNaN(c)) {
-      units += c * (orderQtyBySize.get(id) ?? 0);
-      any = true;
-    }
-  }
-  if (!any || units === 0) return '';
-  const wastage = Number(wastagePercent) || 0;
-  const total = units * price * (1 + wastage / 100);
-  return Number.isFinite(total) ? String(Number(total.toFixed(2))) : '';
-}
-
 // A composition code as the operator reads it. The code slot holds different things depending on who
 // wrote the line: the CompositionPicker stores garment-composition CODES ('COT'), a catalog-linked
 // material stores its resolved fibre NAME ('хлопок органический'). Resolve what the table knows,
@@ -732,7 +701,6 @@ function deriveComposition(
 function UsagePerSizeLocal({
   draft,
   sizeIds,
-  sizeQuantities,
   article,
   canEdit,
   sizeNameById,
@@ -740,7 +708,6 @@ function UsagePerSizeLocal({
 }: {
   draft: UsageDraft;
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   article?: BomLine;
   canEdit: boolean;
   sizeNameById: Map<number, string>;
@@ -752,8 +719,6 @@ function UsagePerSizeLocal({
   const consumptionBySize = new Map<number, string>();
   for (const e of draft.sizeConsumptions)
     if (e.sizeId != null) consumptionBySize.set(e.sizeId, e.consumption ?? '');
-  const orderQtyBySize = new Map<number, number>();
-  for (const q of sizeQuantities) if (q.sizeId) orderQtyBySize.set(q.sizeId, q.orderQty ?? 0);
 
   // Every hand edit of the NUMBER drops the marker provenance (see MANUAL_PROVENANCE): the
   // decomposition described a length this figure no longer is, and costing must go back to
@@ -790,18 +755,8 @@ function UsagePerSizeLocal({
     onChange(manual({ sizeConsumptions: next }));
   };
 
-  const preview = runTotalPreview(
-    sizeIds,
-    consumptionBySize,
-    orderQtyBySize,
-    article?.unitPrice ?? '',
-    // Маркерная норма уже содержит отходы — процент артикула к ней не применяется (см. комментарий
-    // у runTotalPreview; то же правило, что у серверного size_run_total).
-    draft.consumptionSource === 'marker' ? '' : article?.wastagePercent ?? '',
-  );
   const currency = article?.currency ?? '';
   const unit = article?.unit?.trim() || '';
-  const hasOrderQty = sizeIds.some((id) => (orderQtyBySize.get(id) ?? 0) > 0);
   const hasAnyConsumption = sizeIds.some((id) => consumptionBySize.get(id)?.trim());
 
   return (
@@ -858,44 +813,12 @@ function UsagePerSizeLocal({
                   </td>
                 ))}
               </tr>
-              <tr>
-                <td>order qty</td>
-                {sizeIds.map((id) => (
-                  <td key={id} className='text-labelColor'>
-                    {orderQtyBySize.get(id) || <EmptyCell />}
-                  </td>
-                ))}
-              </tr>
-              <tr>
-                <td className='font-bold'>расход на партию ≈</td>
-                <td colSpan={sizeIds.length} className='!text-right font-bold'>
-                  {preview ? `${preview} ${currency}`.trim() : '—'}
-                </td>
-              </tr>
+              {/* Строки «order qty» и «расход на партию» отсюда сняты вместе с типовым тиражом
+                  карточки: у стиля своей партии нет, а норма по размерам — это спецификация, и
+                  умножать её здесь было не на что, кроме выдуманного микса. Сколько уйдёт ткани на
+                  конкретную партию, считает материальный план прогона по его собственным линиям. */}
             </tbody>
           </DataTable>
-          {draft.sizeRunTotal && (
-            <Row
-              tone='label'
-              label={
-                <Text size='micro' variant='label' component='span'>
-                  сохранённое
-                </Text>
-              }
-              value={
-                <Text size='micro' variant='label' component='span'>
-                  {draft.sizeRunTotal} {currency}
-                </Text>
-              }
-            />
-          )}
-          {hasAnyConsumption && !hasOrderQty && (
-            <CalloutBox tone='warning'>
-              <Text size='micro' component='span'>
-                заполните тираж по размерам (patterns → size run), чтобы посчитать расход на партию
-              </Text>
-            </CalloutBox>
-          )}
         </div>
       )}
     </div>
@@ -1257,7 +1180,6 @@ function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
     sizeConsumptions: [],
     pieceLineKey,
     lineTotal: '',
-    sizeRunTotal: '',
     ...MANUAL_PROVENANCE,
     // Новая строка ничего ниоткуда не применяла, и сказать это можно ЯВНО: сохранять здесь нечего
     // (на сервере такой строки ещё нет), а 0 читается тем же правилом, что и везде, — «штампа нет».
@@ -1279,7 +1201,6 @@ function SlotUsageRow({
   usedKeys,
   materials,
   sizeIds,
-  sizeQuantities,
   sizeNameById,
   canEdit,
   markers,
@@ -1296,7 +1217,6 @@ function SlotUsageRow({
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
   onChange: (patch: Partial<UsageDraft>) => void;
@@ -1446,7 +1366,6 @@ function SlotUsageRow({
             <UsagePerSizeLocal
               draft={draft}
               sizeIds={sizeIds}
-              sizeQuantities={sizeQuantities}
               article={article}
               canEdit={canEdit}
               sizeNameById={sizeNameById}
@@ -1558,11 +1477,9 @@ function SlotUsageRow({
           </div>
         )}
 
-        {(draft.lineTotal || draft.sizeRunTotal) && (
+        {draft.lineTotal && (
           <Text size='micro' variant='label'>
-            {draft.lineTotal ? `per garment ${draft.lineTotal}` : ''}
-            {draft.lineTotal && draft.sizeRunTotal ? ' · ' : ''}
-            {draft.sizeRunTotal ? `run ${draft.sizeRunTotal}` : ''}
+            {`per garment ${draft.lineTotal}`}
           </Text>
         )}
       </div>
@@ -1580,7 +1497,6 @@ function PieceRecipeCard({
   markers,
   colorwayId,
   sizeIds,
-  sizeQuantities,
   sizeNameById,
   canEdit,
   canAdd,
@@ -1596,7 +1512,6 @@ function PieceRecipeCard({
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
   canAdd: boolean;
@@ -1641,7 +1556,6 @@ function PieceRecipeCard({
               markers={markers}
               colorwayId={colorwayId}
               sizeIds={sizeIds}
-              sizeQuantities={sizeQuantities}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
               onChange={(patch) => onChange(index, patch)}
@@ -2160,7 +2074,6 @@ function ColorwayRecipeEditor({
   markers,
   pieces,
   sizeIds,
-  sizeQuantities,
   sizeNameById,
   swatchHex,
   lockVersion,
@@ -2174,7 +2087,6 @@ function ColorwayRecipeEditor({
   markers?: common_TechCardMarkerSummary[];
   pieces: RecipePiece[];
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   swatchHex?: string;
   lockVersion: number;
@@ -2410,7 +2322,6 @@ function ColorwayRecipeEditor({
                   markers={cwMarkers}
                   colorwayId={colorwayId}
                   sizeIds={sizeIds}
-                  sizeQuantities={sizeQuantities}
                   sizeNameById={sizeNameById}
                   canEdit={canEdit}
                   canAdd={canAddTo(PIECE_SECTIONS, rows)}
@@ -2473,7 +2384,6 @@ function ColorwayRecipeEditor({
                 markers={cwMarkers}
                 colorwayId={colorwayId}
                 sizeIds={sizeIds}
-                sizeQuantities={sizeQuantities}
                 sizeNameById={sizeNameById}
                 canEdit={canEdit}
                 onChange={(patch) => patchUsage(index, patch)}
@@ -2762,10 +2672,6 @@ export function ColorwayRecipes({
     [formBom, serverBomIdByKey, materialById],
   );
   const sizeIds = (techCard?.techCard?.sizeIds ?? []) as number[];
-  const sizeQuantities = (techCard?.techCard?.sizeQuantities ?? []) as {
-    sizeId?: number;
-    orderQty?: number;
-  }[];
   const sizeNameById = useMemo(() => {
     const m = new Map<number, string>();
     for (const s of dictionary?.sizes ?? []) if (s.id != null) m.set(s.id, s.name ?? `#${s.id}`);
@@ -2875,7 +2781,6 @@ export function ColorwayRecipes({
             markers={techCard?.markers}
             pieces={pieces}
             sizeIds={sizeIds}
-            sizeQuantities={sizeQuantities}
             sizeNameById={sizeNameById}
             swatchHex={hexByCode.get(cw.colorCode ?? '')}
             lockVersion={lockVersion}

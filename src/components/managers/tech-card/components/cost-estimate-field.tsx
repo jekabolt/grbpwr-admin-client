@@ -286,7 +286,7 @@ function EstimateBody({ estimate }: { estimate: StyleCostEstimate }) {
 
   return (
     <div className='flex flex-col gap-3'>
-      {/* Summary-first: what it costs, what it actually cost, and how big the run is. */}
+      {/* Summary-first: what one garment costs to plan, and what it actually cost. */}
       <StatGrid min={130}>
         <Stat
           label='plan'
@@ -308,11 +308,9 @@ function EstimateBody({ estimate }: { estimate: StyleCostEstimate }) {
                 : undefined
           }
         />
-        <Stat
-          label='order cost'
-          value={`${decimalToInput(estimate.orderCostBase) || '—'} ${cur}`}
-          sub={`qty ${estimate.orderQty ?? 0}`}
-        />
+        {/* No «order cost» stat. It was unit cost × the card's typical calculation size run,
+            which no longer exists — the estimate is per GARMENT, and what a batch of it costs is
+            the production run's own plan × this unit cost. */}
         <Stat
           label='materials / unit'
           value={`${decimalToInput(estimate.materialsPerUnitBase) || '—'} ${cur}`}

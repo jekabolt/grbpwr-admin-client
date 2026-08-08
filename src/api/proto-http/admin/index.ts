@@ -8474,6 +8474,12 @@ export type GetProductionRunRequest = {
 
 export type GetProductionRunResponse = {
   run: common_ProductionRun | undefined;
+  // Output-only токен-капабилити ('r' scope) публичного НАРЯДА НА ПАРТИЮ: печать зашивает в QR
+  // {origin админки}/rp/{token}, а страница резолвит его через GET /api/rp/{token} этого бэкенда.
+  // Живёт на ОТВЕТЕ, а не на common.ProductionRun, по той же причине, что и pattern_viewer_token на
+  // ответе карточки: common.* сообщения ложатся в сохраняемые снапшоты, а токену доступа в
+  // сохранённом снапшоте не место. Никогда не персистится; пусто, когда сервис наряда не подключён.
+  runPackToken: string | undefined;
 };
 
 // ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
@@ -8852,6 +8858,110 @@ export type GetProductionRunMaterialPlanResponse = {
   // считаемые слоты, MIXED посередине. Клиент пишет этим заголовок таблицы, и ошибиться в нём ему
   // нельзя — поэтому это поле, а не вывод из содержимого строк.
   planSource: ProductionRunCoverageSource | undefined;
+};
+
+// КАТ-ЛИСТ ПАРТИИ (наряд на прогон). «Сколько каких деталей и из чего выкроить ИМЕННО в этой
+// партии» — то, чем стиль отвечать не может и не должен: количество живёт на прогоне.
+// Считается на СЕРВЕРЕ, хотя админка держит все исходные данные в руках и посчитала бы сама. Причина
+// не в удобстве: этот же ответ уезжает в публичный манифест наряда (/api/rp/{token}), который швея
+// открывает по QR без всякого JWT и без генерённого клиента. Посчитай его на клиенте — и «сколько
+// выкроить» будет существовать в двух реализациях, которые обязаны совпадать и не совпадут. Ровно
+// от такой пары («сколько нужно ткани» на карточке против материального плана прогона) этот наряд и
+// избавляет цех, так что заводить вторую пару этажом ниже было бы смешно.
+// ДЕНЕГ ЗДЕСЬ НЕТ НИ В КАКОМ ВИДЕ и не должно появиться: ответ по построению уходит на бумагу в цех
+// и в публичный манифест, где RBAC-стрип костинга неоткуда взять. Нужна цена — есть материальный
+// план и актуалы прогона, оба за costing:read.
+export type GetProductionRunCutPlanRequest = {
+  runId: number | undefined;
+};
+
+// CutPlanSizeQty — сколько изделий этого размера в партии и сколько панелей детали это даёт.
+// garments — planned_qty клетки линии прогона, НЕ типовой тираж карты.
+export type CutPlanSizeQty = {
+  sizeId: number | undefined;
+  sizeName: string | undefined;
+  garments: number | undefined;
+  piecesToCut: number | undefined;
+};
+
+// CutPlanRow — одна ДЕТАЛЬ одного КОЛОРВЕЯ: её спецификация из карты, из какого артикула её кроят
+// в этом колорвее, и количества по размерам партии.
+// pieces_to_cut = pieces_per_garment × garments. И БОЛЬШЕ НИЧЕГО: cut_symmetry ничего не умножает
+// (0266 свернул удвоение в само количество, 0275 вернул только КЛАССИФИКАЦИЮ). Она едет сюда, чтобы
+// закройщик прочитал словами, как связаны эти панели — «зеркальная пара», «по сгибу», — а не чтобы
+// кто-то умножил на два во второй раз. Следующий, кто захочет здесь удвоить, должен сначала
+// объяснить, почему тех-пак печатает pieces_per_garment.
+export type CutPlanRow = {
+  pieceId: number | undefined;
+  pieceLineKey: string | undefined;
+  pieceName: string | undefined;
+  colorwayId: number | undefined;
+  colorwayName: string | undefined;
+  outputVariantId: number | undefined;
+  outputVariantName: string | undefined;
+  // Спецификация детали — как в карте, слово в слово. Дублируется в каждой строке колорвея
+  // намеренно: наряд печатают и режут по строкам, и деталь без долевой в своей строке — это деталь,
+  // которую раскроят неправильно, даже если та же долевая написана строкой выше у другого цвета.
+  piecesPerGarment: number | undefined;
+  cutSymmetry: common_TechCardPieceCutSymmetry | undefined;
+  grainline: string | undefined;
+  fused: boolean | undefined;
+  // ИЗ ЧЕГО КРОИТЬ. Слот — роль в BOM («основная ткань»), артикул — то, что этот колорвей реально
+  // кладёт на настил: пин рецепта (usage.material_id), иначе дефолт слота. pinned различает эти два
+  // случая: одинаковое имя роли у трёх колорвеев стирает ровно ту разницу, ради которой закройщик
+  // и смотрит в наряд.
+  bomItemId: number | undefined;
+  slotName: string | undefined;
+  section: common_TechCardBomSection | undefined;
+  materialId: number | undefined;
+  materialName: string | undefined;
+  pinned: boolean | undefined;
+  fusingBomItemId: number | undefined;
+  fusingMaterialName: string | undefined;
+  bySize: CutPlanSizeQty[] | undefined;
+  garmentsTotal: number | undefined;
+  piecesToCutTotal: number | undefined;
+  // ОТКУДА ВЗЯЛСЯ СЛОТ. Рецепт колорвея привязывает расход к детали ЧЕРЕЗ usage.piece_id, но поле
+  // необязательное и на живых картах чаще пустое, чем полное. Требовать его — значит выдать цеху
+  // наряд из одних блокеров; молча подставить единственную рулонную ткань колорвея и не сказать об
+  // этом — значит напечатать догадку шрифтом факта.
+  // Поэтому третий вариант: подставить, когда подставлять безопасно (у колорвея РОВНО один рулонный
+  // слот), и пометить строку. true = «рецепт эту деталь не называет, взят единственный рулонный слот
+  // колорвея». Двусмысленный случай (слотов несколько, привязки нет) сюда не попадает вовсе — он
+  // уходит в blockers.
+  slotInferred: boolean | undefined;
+};
+
+// CutPlanBlocker — деталь × колорвей, которую наряд НЕ смог привязать к артикулу. Отдельным
+// списком, а не строкой с пустой тканью: строка с прочерком читается как «кроить не из чего» и
+// теряется среди сорока таких же, а это единственное место наряда, где цех обязан остановиться и
+// спросить. reason — человеческая фраза, не код.
+export type CutPlanBlocker = {
+  pieceId: number | undefined;
+  pieceName: string | undefined;
+  colorwayId: number | undefined;
+  colorwayName: string | undefined;
+  garments: number | undefined;
+  reason: string | undefined;
+};
+
+export type GetProductionRunCutPlanResponse = {
+  rows: CutPlanRow[] | undefined;
+  blockers: CutPlanBlocker[] | undefined;
+  garmentsTotal: number | undefined;
+  piecesToCutTotal: number | undefined;
+  // Карта, по которой посчитан наряд: релиз (замороженная спецификация), к которому привязан
+  // прогон, иначе живая карта. Цех обязан видеть, по какой ревизии кроит, поэтому это поле ответа,
+  // а не то, что клиент выведет из наличия release_id.
+  releaseId: number | undefined;
+  releaseNumber: number | undefined;
+  caveats: string[] | undefined;
+  // ЧЕМ БУМАГА ОТЛИЧАЕТСЯ ОТ ЭКРАНА. Наряд живой: количества берутся из прогона, а прогон правят.
+  // Замораживать документ отдельной сущностью мы не стали — вместо этого он НАЗЫВАЕТ свою ревизию,
+  // и её же несёт QR (?v=). Вьюер сравнивает напечатанное с текущим и говорит «план изменился после
+  // печати» вместо того, чтобы молча показать другие числа тому, кто уже режет по бумаге.
+  runLockVersion: number | undefined;
+  generatedAt: wellKnownTimestamp | undefined;
 };
 
 export type SaveProductionRunLayRequest = {
@@ -11484,6 +11594,11 @@ export interface AdminService {
   // colourway norms × planned qty × (1 + wastage), against on-hand and already-issued stock (NF-06).
   // It is a plan-estimate before the marker; the real consumption comes from stock issues.
   GetProductionRunMaterialPlan(request: GetProductionRunMaterialPlanRequest): Promise<GetProductionRunMaterialPlanResponse>;
+  // GetProductionRunCutPlan — кат-лист ПАРТИИ: деталь × колорвей × размер → сколько панелей
+  // выкроить и из какого артикула. Проекция только на чтение поверх линий прогона и деталей карты
+  // (по релизу, если прогон к нему привязан), сестра материального плана: тот отвечает «сколько
+  // ткани заказать», этот — «что из неё выкроить». Денег в ответе нет, гейт — SectionProduction.
+  GetProductionRunCutPlan(request: GetProductionRunCutPlanRequest): Promise<GetProductionRunCutPlanResponse>;
   // НАСТИЛЫ ПРОГОНА (Ф4). Сознательно ОТДЕЛЬНЫЕ RPC, а не поле UpdateProductionRun: полная замена
   // детей внутри сохранения прогона — буквально причина смерти 0119 (0243:3-9), и она вернулась бы
   // в тот же день, когда настилы поехали бы рядом с production_run_cost, который до сих пор
@@ -15850,6 +15965,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "GetProductionRunMaterialPlan",
       }) as Promise<GetProductionRunMaterialPlanResponse>;
+    },
+    GetProductionRunCutPlan(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.runId) {
+        throw new Error("missing required field request.run_id");
+      }
+      const path = `api/admin/production-runs/${request.runId}/cut-plan`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetProductionRunCutPlan",
+      }) as Promise<GetProductionRunCutPlanResponse>;
     },
     SaveProductionRunLay(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.runId) {

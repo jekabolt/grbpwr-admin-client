@@ -173,6 +173,11 @@ const ProductionRunDetail = lazyRoute(() =>
     default: m.ProductionRunDetail,
   })),
 );
+const RunPackPrint = lazyRoute(() =>
+  import('components/managers/production-runs/print-page').then((m) => ({
+    default: m.RunPackPrint,
+  })),
+);
 const Accounts = lazyRoute(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
@@ -233,6 +238,9 @@ const FulfillmentCardDetail = lazyRoute(() =>
 );
 const PatternViewerPage = lazyRoute(() =>
   import('components/pattern-viewer/page').then((m) => ({ default: m.PatternViewerPage })),
+);
+const RunPackViewerPage = lazyRoute(() =>
+  import('components/run-pack-viewer/page').then((m) => ({ default: m.RunPackViewerPage })),
 );
 
 // Configure QueryClient with best practices
@@ -409,6 +417,9 @@ root.render(
                     no app chrome to isolate via fragile print CSS. */}
                 <Route path='/' element={<ProtectedBare />}>
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
+                  {/* Наряд на партию — бумага ПРОГОНА, не стиля: тех-пак печатает устройство
+                      изделия, наряд — тираж этой партии. Отсюда отдельный печатный роут. */}
+                  <Route path={ROUTES.productionRunPrint} element={<RunPackPrint />} />
                   <Route path={ROUTES.orderInvoice} element={<OrderInvoicePrint />} />
                 </Route>
                 {/* PUBLIC pattern viewer — what a printed tech-pack QR opens on a factory
@@ -416,6 +427,12 @@ root.render(
                     admin chrome) and outside DictionaryProvider (the dictionary is an authed
                     fetch; a page that needs it is not public). */}
                 <Route path={ROUTES.patternViewer} element={<PatternViewerPage />} />
+                {/* PUBLIC run-pack viewer — what a printed НАРЯД НА ПАРТИЮ QR opens on a cutting
+                    floor phone. Same three exclusions as the pattern viewer above, for the same
+                    reasons: no JWT, no admin chrome, no dictionary (all names ride in the
+                    manifest). Its ?v= carries the run's lock version at print time, so the page
+                    can tell the floor the paper in its hands is out of date. */}
+                <Route path={ROUTES.runPackViewer} element={<RunPackViewerPage />} />
               </Routes>
             </Suspense>
           </BrowserRouter>

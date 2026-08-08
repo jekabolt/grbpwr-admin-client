@@ -100,13 +100,10 @@ function Body({ economics }: { economics: StyleEconomics }) {
             sub='informational — separate from the Samples dev cost above, not included in it'
           />
         ) : null}
-        {dev?.unitCostWithDev?.value ? (
-          <EconomicsRow
-            label='Unit cost + dev'
-            value={formatCurrency(parseDecimal(dev.unitCostWithDev))}
-            sub={`amortized over ${formatNumber(dev.orderQty ?? 0)} units · informational only, not part of net after dev`}
-          />
-        ) : null}
+        {/* No «Unit cost + dev» row. It amortised the R&D total over the tech card's typical
+            calculation size run — a made-up batch that no longer exists, so the figure now has no
+            denominator and the server leaves it unset. Amortisation per real planned units lives
+            on the card's dev-expenses panel, which reads the server rollup. */}
       </div>
 
       {prod && (prod.runs ?? 0) > 0 && (
