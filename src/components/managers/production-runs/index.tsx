@@ -15,7 +15,7 @@ import { CreateRunModal } from './components/create-run-modal';
 import { isRunOpen, isRunReceivable, runDetailPath } from './components/options';
 import { ReceiveModal } from './components/receive-modal';
 import { DEFAULT_STALE_DAYS, runAttention } from './components/run-attention';
-import { RunTable, runQty } from './components/run-rows';
+import { RunTable, looksAuxiliary, runQty } from './components/run-rows';
 import { useProductionRuns } from './components/useProductionRuns';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
@@ -136,10 +136,12 @@ export function ProductionRuns() {
   const openCreate = () => setCreateOpen(true);
 
   // ONE control per row: the next step for that batch. Receiving is the only action a list can
-  // usefully offer (it needs nothing but the run), so a receivable batch gets it and everything
-  // else gets the way in.
+  // usefully offer, so a receivable batch gets it — EXCEPT an auxiliary one. An aux run books its
+  // output into a material bucket (or one bucket per colour) that only its tech card knows about,
+  // and this list holds no tech cards; its own page passes that context to the same modal, so an
+  // aux-shaped row is sent there instead of opening a product-shaped receive over it.
   const openRunAction = (r: common_ProductionRun) =>
-    canEdit && isRunReceivable(r.run?.status) ? (
+    canEdit && isRunReceivable(r.run?.status) && !looksAuxiliary(r) ? (
       <span className='flex justify-end'>
         <Button type='button' variant='secondary' size='xs' onClick={() => setReceiving(r)}>
           принять
@@ -201,7 +203,7 @@ export function ProductionRuns() {
                   </span>
                 }
                 value={
-                  canEdit && a.action === 'receive' ? (
+                  canEdit && a.action === 'receive' && !looksAuxiliary(a.run) ? (
                     <Button
                       type='button'
                       variant='secondary'
