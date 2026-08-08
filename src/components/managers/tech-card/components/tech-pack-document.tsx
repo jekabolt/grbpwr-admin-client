@@ -438,6 +438,19 @@ export function TechPackDocument({
   // документ, в котором все значения равны «нет». Лист без единого значения не нужен никому.
   const chartHasAnyValue = [...chartCellByKey.values()].some((v) => (v ?? '').trim() !== '');
 
+  // Раскладки скоупа: раскладка привязана к колорвею, а colorwayId = 0 означает общую для всех
+  // цветов. Общая печатается всегда — она и есть норма этого стиля.
+  const scopedMarkers = useMemo(() => {
+    const all = techCard.markers ?? [];
+    const cwId = wireInt(printScope.colorway?.colorwayId);
+    const inSizeScope = (m: { sizeId?: number }) =>
+      wireInt(m.sizeId) === 0 || sizeIds.includes(wireInt(m.sizeId));
+    return all.filter(
+      (m) => (!cwId || wireInt(m.colorwayId) === 0 || wireInt(m.colorwayId) === cwId) &&
+        inSizeScope(m),
+    );
+  }, [techCard.markers, printScope.colorway, sizeIds]);
+
   // Уход в каноническом порядке словаря. Записи карты приходят в порядке ввода, а на этикетке и
   // на бумаге символы обязаны стоять в одном и том же, узнаваемом порядке.
   const careEntries = useMemo(() => {
@@ -922,6 +935,69 @@ export function TechPackDocument({
                   ))}
                 </tr>
               ))}
+            </tbody>
+          </table>
+        </Sheet>
+      )}
+
+      {/* НОРМЫ И РАСКЛАДКИ. `markers` лежали на карте с самого начала и не печатались НИГДЕ —
+          ни здесь, ни в наряде: норма расхода, то есть главное число раскройного стола, жила
+          только на экране. Лист печатается только при скоупе колорвея, совпадающем с раскладкой,
+          либо для общих раскладок (colorwayId = 0). */}
+      {scopedMarkers.length > 0 && (
+        <Sheet title='нормы и раскладки'>
+          <table className='w-full border-collapse text-micro'>
+            <thead>
+              <tr>
+                <th className={TH}>раскладка</th>
+                <th className={TH}>материал</th>
+                <th className={`${TH} text-right`}>ширина, см</th>
+                <th className={`${TH} text-right`}>длина, см</th>
+                <th className={`${TH} text-right`}>использование</th>
+                <th className={TH}>норма на изделие</th>
+              </tr>
+            </thead>
+            <tbody>
+              {scopedMarkers.map((mk, i) => {
+                const scalar = dec(mk.consumptionPerUnitCm);
+                // Скаляр НАМЕРЕННО не приходит у смешанной раскладки: сервер отказывается свести
+                // расход к одному числу, когда в настиле лежат разные размеры, и объясняет отказ
+                // текстом. Пустая клетка вместо этого читалась бы как «нормы нет».
+                const perSize = (mk.composition ?? []).filter(
+                  (c) => dec(c.consumptionPerUnitCm) !== '',
+                );
+                return (
+                  <tr key={mk.id ?? i} className='break-inside-avoid'>
+                    <td className={TD}>
+                      <div className='font-medium'>{mk.name || `#${mk.id ?? ''}`}</div>
+                      {mk.normConflict && (
+                        <div className='font-bold uppercase'>⚠ {mk.normConflict}</div>
+                      )}
+                    </td>
+                    <td className={TD}>{mk.bomItemName || '—'}</td>
+                    <td className={`${TD} text-right`}>{dec(mk.fabricWidthCm) || '—'}</td>
+                    <td className={`${TD} text-right`}>{dec(mk.usedLengthCm) || '—'}</td>
+                    <td className={`${TD} text-right`}>
+                      {dec(mk.efficiencyPct) ? `${dec(mk.efficiencyPct)} %` : '—'}
+                    </td>
+                    <td className={TD}>
+                      {scalar !== '' ? (
+                        `${scalar} см`
+                      ) : perSize.length > 0 ? (
+                        <div className='flex flex-col gap-0.5'>
+                          {perSize.map((c, j) => (
+                            <div key={j}>
+                              {sizeName(wireInt(c.sizeId))}: {dec(c.consumptionPerUnitCm)} см
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </Sheet>
