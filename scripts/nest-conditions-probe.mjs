@@ -10,7 +10,7 @@
 //     платить за замер, который им не нужен.
 //
 // ЧТО ПРОВЕРЯЕТСЯ ТОЛЬКО НА РЕАЛЬНЫХ ФАЙЛАХ:
-//   • подписи слоёв («линия кроя, +1.00 см» / «линия шва») — против того, что в файле лежит;
+//   • подписи слоёв («линия кроя, +1.00 мм» / «линия шва») — против того, что в файле лежит;
 //   • сработал бы блок двойного припуска на слое ПО УМОЛЧАНИЮ, без единого клика оператора;
 //   • экспорт переоткрытого маркера: слой SEAM в файле есть и НЕ ПУСТ после пересборки, и его
 //     нет вовсе до неё; подменённая выкройка экспорт ОСТАНАВЛИВАЕТ.
@@ -19,7 +19,7 @@
 //   node scripts/nest-conditions-probe.mjs
 //   node scripts/nest-conditions-probe.mjs ~/Downloads/'summer men.dxf' ~/Downloads/blazer.dxf
 //
-// Env: NC_LAYER (слой контура), NC_GRAIN (слой долевой), NC_SEAM (припуск, см).
+// Env: NC_LAYER (слой контура), NC_GRAIN (слой долевой), NC_SEAM (припуск, мм).
 import { build } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -72,42 +72,46 @@ const measurement = (over) => ({
 const cut = measurement({ layer: '1', verdict: 'cut', allowanceCm: 1, gapCm: 1 });
 const seam = measurement({});
 const unknown = measurement({ verdict: 'unknown', allowanceCm: null, gapCm: null, reason: 'too_few_blocks' });
-const FALLBACK = mod.NEST_DEFAULTS.seamAllowanceCm;
-const pre = (args) => mod.seamAllowancePrefill({ fallbackCm: FALLBACK, ...args });
+// NEST_DEFAULTS остаётся конфигом ДВИЖКА и живёт в сантиметрах; предзаполнение отвечает в
+// МИЛЛИМЕТРАХ (0290), поэтому зонд переводит его ровно так же, как это делает экран.
+const FALLBACK = mod.NEST_DEFAULTS.seamAllowanceCm * 10;
+const pre = (args) => mod.seamAllowancePrefill({ fallbackMm: FALLBACK, ...args });
 
 head('A · ПОРЯДОК ПРЕДЗАПОЛНЕНИЯ (§5.5) — синтетические замеры');
 {
-  const a = pre({ measured: cut, cardRequiredCm: 0.7, workshopDefaultCm: 0.3 });
+  const a = pre({ measured: cut, cardRequiredMm: 7, workshopDefaultMm: 3 });
   check(a.value === 0 && a.source === 'contour_is_cut',
     'линия кроя в контуре БЬЁТ и эталон карточки, и цех — офсет 0', `${a.value} · ${a.source}`);
 
-  const b = pre({ measured: seam, cardRequiredCm: 0.7, workshopDefaultCm: 0.3 });
-  check(b.value === 0.7 && b.source === 'card',
+  const b = pre({ measured: seam, cardRequiredMm: 7, workshopDefaultMm: 3 });
+  check(b.value === 7 && b.source === 'card',
     'эталон карточки бьёт цех и замеренный зазор', `${b.value} · ${b.source}`);
 
-  const c = pre({ measured: seam, workshopDefaultCm: 0.3 });
-  check(c.value === 0.3 && c.source === 'workshop',
+  const c = pre({ measured: seam, workshopDefaultMm: 3 });
+  check(c.value === 3 && c.source === 'workshop',
     'цех бьёт замеренный зазор', `${c.value} · ${c.source}`);
 
   const d = pre({ measured: seam });
-  check(d.value === 1 && d.source === 'measured_gap',
+  // Замер живёт в САНТИМЕТРАХ (геометрия файла), а предзаполнение отвечает в МИЛЛИМЕТРАХ: зазор
+  // 1 см приходит сюда десяткой. Это и есть проверка того, что конверсия на границе состоялась.
+  check(d.value === 10 && d.source === 'measured_gap',
     'замеренный зазор бьёт умолчание раскладки', `${d.value} · ${d.source}`);
 
   const e = pre({ measured: unknown });
   check(e.value === FALLBACK && e.source === 'fallback',
     'улик нет и эталона нет — умолчание, и оно НАЗВАНО умолчанием', `${e.value} · ${e.source}`);
 
-  const z = pre({ measured: seam, cardRequiredCm: 0, workshopDefaultCm: 0.3 });
+  const z = pre({ measured: seam, cardRequiredMm: 0, workshopDefaultMm: 3 });
   check(z.value === 0 && z.source === 'card',
     'НОЛЬ КАРТОЧКИ — ЭТО ОТВЕТ, а не «не задано»: он бьёт цех', `${z.value} · ${z.source}`);
 
-  const w = pre({ measured: seam, cardRequiredCm: 40 });
-  check(w.value === 10, 'эталон в миллиметрах упирается в потолок, а не уезжает в раскладку', w.value);
+  const w = pre({ measured: seam, cardRequiredMm: 400 });
+  check(w.value === 100, 'эталон в миллиметрах упирается в потолок, а не уезжает в раскладку', w.value);
 
   const n = pre({ measured: null });
   check(n.source === 'fallback', 'замер не проводился — тоже умолчание, а не ноль', n.source);
 
-  const cz = pre({ measured: measurement({ layer: '1', verdict: 'cut', allowanceCm: 0, gapCm: 0 }), cardRequiredCm: 0.7 });
+  const cz = pre({ measured: measurement({ layer: '1', verdict: 'cut', allowanceCm: 0, gapCm: 0 }), cardRequiredMm: 7 });
   check(cz.source === 'card',
     'вердикт «крой» с нулевым замером НЕ обнуляет поле — обнуляет только измеренный припуск > 0',
     cz.source);
@@ -194,9 +198,9 @@ if (paths.length === 0) {
         ` · двойной припуск на умолчании: ${r.doubleAllowanceOnDefaultLayer ? 'ДА' : 'нет'}`,
     );
     console.log(
-      `     предзаполнение: ${r.prefill.bare.value} см (${r.prefill.bare.source})` +
+      `     предзаполнение: ${r.prefill.bare.value} мм (${r.prefill.bare.source})` +
         (r.prefill.onCutLayer
-          ? ` · на слое кроя: ${r.prefill.onCutLayer.value} см (${r.prefill.onCutLayer.source})`
+          ? ` · на слое кроя: ${r.prefill.onCutLayer.value} мм (${r.prefill.onCutLayer.source})`
           : ''),
     );
     if (r.prefill.onCutLayerWithCard) {
@@ -207,7 +211,7 @@ if (paths.length === 0) {
 
     head(`D · экспорт переоткрытого маркера — ${basename(path)}`);
     console.log(
-      `     блоб: ${r.storedPieces} деталей · припуск ${r.markerSeamAllowanceCm} см · слой ${r.markerContourLayer}`,
+      `     блоб: ${r.storedPieces} деталей · припуск ${r.markerSeamAllowanceCm} мм · слой ${r.markerContourLayer}`,
     );
     check(!r.exportStored.declaresSeam && r.exportStored.seamEntities === 0,
       'БЕЗ пересборки в файле нет слоя SEAM ВООБЩЕ — объявленный пустой слой был бы ложью',

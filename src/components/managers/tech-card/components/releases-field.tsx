@@ -18,6 +18,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Row, RowTotal } from 'ui/components/row';
+import { operationHeading } from './operation-options';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
@@ -97,13 +98,11 @@ function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
   if (!c) return null;
   const rows = (
     [
-      ['main stitch', c.mainStitchType],
-      ['stitch density', c.stitchDensity],
-      ['overlock threads', c.overlockThreads],
-      ['seam allowances', c.seamAllowances],
+      ['default seam class', c.defaultSeamClass],
+      ['default stitch density', c.defaultStitchesPerCm?.value],
+      ['overlock threads', c.overlockThreadCount ? String(c.overlockThreadCount) : ''],
       ['hem finish', c.hemFinish],
       ['pressing', c.pressing],
-      ['machine class', c.machineClass],
       ['notes', c.notes],
     ] as Array<[string, string | undefined]>
   ).filter((r): r is [string, string] => !!r[1]?.trim());
@@ -129,14 +128,20 @@ function SnapshotOperations({ ops }: { ops: common_TechCardOperation[] }) {
           label={
             <Text size='micro' component='span'>
               {o.operationNumber != null ? `#${o.operationNumber} ` : ''}
-              {o.node || '—'}
-              {o.description ? ` — ${o.description}` : ''}
+              {/* Composed, exactly as in the live editor — a frozen release must read the same way
+                  the card did, and there is no stored step title to fall back on any more. */}
+              {operationHeading({
+                operationType: o.operationType,
+                zone: o.zone,
+                pieceNames: [],
+                note: o.note,
+              })}
             </Text>
           }
           value={
-            o.machine ? (
+            o.smv?.value ? (
               <Text size='micro' variant='label' component='span'>
-                {o.machine}
+                {`${o.smv.value} min`}
               </Text>
             ) : undefined
           }

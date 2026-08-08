@@ -9,6 +9,11 @@ import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 import { mediaAspect } from './sample-cut-views';
 import { TechCardFormData } from './schema';
+import {
+  attachmentOptions,
+  operationHeading,
+  seamClassOptions,
+} from './operation-options';
 
 // ---------------------------------------------------------------------------
 // ASSEMBLY MAP — the sketch and the operation list, joined.
@@ -23,19 +28,20 @@ import { TechCardFormData } from './schema';
 // order the factory reads. The list here is therefore in the card's order, unsorted.
 // ---------------------------------------------------------------------------
 
+// This shape is the FORM's, not the wire's — it is read straight out of react-hook-form, which is
+// why nothing here is type-checked against the proto and why the operations break could silently
+// leave it reading eleven fields that no longer exist.
 type FormOperation = {
-  node?: string;
-  description?: string;
-  seamType?: string;
-  machine?: string;
-  thread?: string;
-  needle?: string;
+  operationType?: string;
+  zone?: string;
+  seamClass?: string;
   stitchesPerCm?: string;
-  topstitchWidth?: string;
-  seamAllowance?: string;
-  timeNorm?: string;
-  attachment?: string;
-  placement?: string;
+  seamAllowanceMm?: string;
+  topstitchMode?: string;
+  topstitchWidthMm?: string;
+  attachmentKind?: string;
+  smv?: string;
+  note?: string;
   calloutNumber?: number;
   operationNumber?: number;
   pieceLineKeys?: string[];
@@ -58,16 +64,24 @@ const decimalNum = (v?: string): number => {
 
 /** The spec line under an operation: only what was actually filled in, joined with · */
 function specLine(o: FormOperation, pieceNames: string[]): string {
+  const label = <T extends string>(
+    opts: ReadonlyArray<{ value: T; label: string }>,
+    v?: string,
+    none?: string,
+  ) => (!v || v === none ? '' : (opts.find((o) => o.value === v)?.label ?? ''));
   return [
     pieceNames.join(' + '),
-    o.seamType?.trim(),
-    o.machine?.trim(),
-    o.stitchesPerCm?.trim() ? `${o.stitchesPerCm.trim()} SPI` : '',
-    o.seamAllowance?.trim() ? `SA ${o.seamAllowance.trim()}` : '',
-    o.topstitchWidth?.trim() ? `topstitch ${o.topstitchWidth.trim()}` : '',
-    o.thread?.trim(),
-    o.needle?.trim(),
-    o.attachment?.trim(),
+    label(seamClassOptions, o.seamClass, 'TECH_CARD_SEAM_CLASS_UNKNOWN'),
+    // STITCHES PER CENTIMETRE. It was labelled «SPI» (stitches per inch) here while every other
+    // surface said st/cm — two different quantities under one number.
+    o.stitchesPerCm?.trim() ? `${o.stitchesPerCm.trim()} st/cm` : '',
+    o.seamAllowanceMm?.trim() ? `SA ${o.seamAllowanceMm.trim()} mm` : '',
+    o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_EDGE'
+      ? 'topstitch edge'
+      : o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && o.topstitchWidthMm?.trim()
+        ? `topstitch ${o.topstitchWidthMm.trim()} mm`
+        : '',
+    label(attachmentOptions, o.attachmentKind, 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
   ]
     .filter(Boolean)
     .join(' · ');
@@ -123,7 +137,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
     let time = 0;
     let missing = 0;
     for (const o of operations) {
-      const t = Number(o.timeNorm ?? '');
+      const t = Number(o.smv ?? '');
       if (Number.isFinite(t) && t > 0) time += t;
       else missing += 1;
     }
@@ -203,7 +217,7 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
               .map((k) => pieceNameByKey.get(k))
               .filter((n): n is string => !!n);
             const spec = specLine(o, names);
-            const t = Number(o.timeNorm ?? '');
+            const t = Number(o.smv ?? '');
             return (
               <div
                 key={i}
@@ -214,7 +228,14 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                 </span>
                 <span className='min-w-0'>
                   <Text size='micro' component='span'>
-                    {o.description?.trim() || o.node?.trim() || `operation ${i + 1}`}
+                    {operationHeading({
+                      operationType: o.operationType as Parameters<
+                        typeof operationHeading
+                      >[0]['operationType'],
+                      zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
+                      pieceNames: names,
+                      note: o.note,
+                    }) || `operation ${i + 1}`}
                   </Text>
                   {spec && (
                     <Text size='nano' variant='label' className='uppercase'>

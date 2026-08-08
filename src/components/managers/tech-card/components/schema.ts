@@ -8,7 +8,10 @@ import {
   common_TechCardBomPurpose,
   common_TechCardBomSection,
   common_TechCardConstruction,
-  common_TechCardConstructionZone,
+  common_TechCardAttachmentKind,
+  common_TechCardGarmentZone,
+  common_TechCardSeamClass,
+  common_TechCardTopstitchMode,
   common_TechCardCosting,
   common_TechCardFabricDirection,
   common_TechCardInsert,
@@ -429,53 +432,107 @@ const detailSchema = z.object({
 
 const DEFAULT_LABEL_TYPE: common_TechCardLabelType = 'TECH_CARD_LABEL_TYPE_MAIN';
 
+// The card's DEFAULTS — what a step inherits when it does not override. Typed now, because a
+// free-text default is one nothing can inherit: the block used to say «общие параметры по
+// умолчанию» while every step retyped «5 мм» by hand.
+//
+// No seam allowance here: the card's standard is requiredSeamAllowanceMm on the card itself (0277
+// put it there deliberately — a field in a section's digest projection stales every approved
+// signature of that section). And no main stitch type: the stitch class is a per-STEP fact carried
+// by operationType, and a card-wide default for it is not a thing a card can mean.
 const constructionSchema = z.object({
-  mainStitchType: z.string().optional().default(''),
-  stitchDensity: z.string().optional().default(''),
-  overlockThreads: z.string().optional().default(''),
-  seamAllowances: z.string().optional().default(''),
+  defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
+  defaultStitchesPerCm: z.string().optional().default(''),
+  overlockThreadCount: z.number().optional().default(0),
   hemFinish: z.string().optional().default(''),
   pressing: z.string().optional().default(''),
-  machineClass: z.string().optional().default(''),
   notes: z.string().optional().default(''),
 });
 
 const operationSchema = z.object({
-  node: z.string().min(1, 'Node is required'),
-  description: z.string().optional().default(''),
-  seamType: z.string().optional().default(''),
-  stitchesPerCm: z.string().optional().default(''), // decimal as string
-  // Standard minute value — the sewing time this operation contributes to the garment's SMV
-  // roll-up. Same google.type.Decimal-as-form-string handling as stitchesPerCm.
-  smv: z.string().optional().default(''), // decimal as string
-  topstitchWidth: z.string().optional().default(''),
-  thread: z.string().optional().default(''),
-  note: z.string().optional().default(''),
+  // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
+  // («Node is required») is why: a mandatory field with free input has no right answer, so the
+  // operator invents one and no two cards say the same thing the same way.
+  operationType: z.string().min(1).default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
+  zone: z.string().min(1).default('TECH_CARD_GARMENT_ZONE_UNKNOWN'),
+
   // operationNumber is server-assigned ((position+1)*10) — carried read-only, not edited.
   operationNumber: z.number().optional().default(0),
-  machine: z.string().optional().default(''),
-  seamAllowance: z.string().optional().default(''),
-  needle: z.string().optional().default(''),
-  timeNorm: z.string().optional().default(''), // SAM minutes, decimal as string
-  // classification + links (Phase 3.5d)
-  operationType: z.string().optional().default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
-  zone: z.string().optional().default('TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
-  attachment: z.string().optional().default(''), // приспособление (binder / folder / hemmer)
-  // BOM reference by stable line_key (§2.3) — no positional index, so removing/reordering a BOM
-  // line never renumbers this. '' = no direct material link.
-  bomLineKey: z.string().optional().default(''),
+  // Standard minute value, the ONLY time field. The legacy SAM (`timeNorm`) that used to sit beside
+  // it is gone: two time inputs with no rule about which to fill guarantee half the cards are timed
+  // in the wrong one.
+  smv: z.string().optional().default(''),
   calloutNumber: z.number().optional().default(0), // links a sketch callout.number; 0 = none
-  // garment part this operation works on; resolves its real material via the selected
-  // colourway's usage on the same part. A human LABEL — pieceLineKeys below is the real reference.
-  placement: z.string().optional().default(''),
+
+  // OVERRIDES — '' means INHERIT from the card, and the form must never fill them in from the
+  // inherited value. That is exactly what the old operation-type preset did, and it made «the
+  // technologist chose 4 st/cm» indistinguishable from «it defaulted to 4».
+  seamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
+  stitchesPerCm: z.string().optional().default(''), // stitches per CENTIMETRE, not part of the mm switch
+  seamAllowanceMm: z.string().optional().default(''), // millimetres; '0' is a REAL value, '' is inherit
+  topstitchMode: z.string().optional().default('TECH_CARD_TOPSTITCH_MODE_UNKNOWN'),
+  topstitchWidthMm: z.string().optional().default(''),
+  topstitchRows: z.number().optional().default(0),
+  attachmentKind: z.string().optional().default('TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
+  attachmentSizeMm: z.string().optional().default(''),
+
+  // The only free text on a step. `description` merged into it: two boxes side by side with no rule
+  // about which was which guaranteed two cards would fill them the opposite way round.
+  note: z.string().optional().default(''),
+
   // The cut-pieces this operation works on, by stable TechCardPiece.line_key. REPEATED, unlike the
   // recipe's single piece per norm: an assembly operation joins as many pieces as it joins.
   pieceLineKeys: z.array(z.string()).default([]),
-  // The off-part materials this operation consumes (thread, fusing). REPEATED for the same reason
-  // pieceLineKeys is: one operation can join several materials. The legacy single bomLineKey above
-  // stays as the first entry during the transition.
+  // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
+  // went with the break — the chip row was always the real answer.
   bomLineKeys: z.array(z.string()).default([]),
-});
+})
+  // The two required fields are checked HERE as well as on the server, and the wording is the same
+  // on both sides. Without this the operator learns that a step needs a zone only after a failed
+  // save of the whole card — which is precisely the shape of feedback that made the old mandatory
+  // `node` feel arbitrary.
+  .superRefine((o, ctx) => {
+    if (!o.operationType || o.operationType === 'TECH_CARD_OPERATION_TYPE_UNKNOWN') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['operationType'],
+        message: 'pick what the step does — it names the step and drives its defaults',
+      });
+    }
+    if (!o.zone || o.zone === 'TECH_CARD_GARMENT_ZONE_UNKNOWN') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['zone'],
+        message: 'pick where on the garment — «other» is a legitimate answer',
+      });
+    }
+    // A width beside «edge» is a shadow value the server refuses; catching it here keeps the
+    // refusal next to the control that caused it.
+    if (o.topstitchMode !== 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (o.topstitchWidthMm ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['topstitchWidthMm'],
+        message: 'edge topstitching has no width — clear it, or switch the mode to width',
+      });
+    }
+    if (o.topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && !(o.topstitchWidthMm ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['topstitchWidthMm'],
+        message: 'a topstitch at a stated width needs the width',
+      });
+    }
+    if (
+      (o.attachmentSizeMm ?? '').trim() &&
+      (!o.attachmentKind || o.attachmentKind === 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN')
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['attachmentSizeMm'],
+        message: 'pick the attachment first — a size on its own describes no tool',
+      });
+    }
+  });
 
 const labelSchema = z.object({
   labelType: z.string().optional().default(DEFAULT_LABEL_TYPE),
@@ -518,13 +575,11 @@ const costingSchema = z.object({
 });
 
 export const emptyConstruction: z.input<typeof constructionSchema> = {
-  mainStitchType: '',
-  stitchDensity: '',
-  overlockThreads: '',
-  seamAllowances: '',
+  defaultSeamClass: 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+  defaultStitchesPerCm: '',
+  overlockThreadCount: 0,
   hemFinish: '',
   pressing: '',
-  machineClass: '',
   notes: '',
 };
 
@@ -601,7 +656,7 @@ const techCardObject = z.object({
   // It lives on the card and not inside `construction` on purpose: any field added to a section's
   // digest projection instantly marks EVERY signed-off CONSTRUCTION approval as «edited since
   // signing», on every card at once.
-  requiredSeamAllowanceCm: z.string().optional().default(''),
+  requiredSeamAllowanceMm: z.string().optional().default(''),
   // The design intent in prose — what this style IS, before any construction detail. Printed at
   // the head of the tech pack's description sheet, above the details and the notes.
   concept: z.string().optional().default(''),
@@ -705,12 +760,12 @@ export const techCardSchema = techCardObject.superRefine((data, ctx) => {
   // other tab's work bounces along with the one mistyped number. So the band is checked here, where
   // the sentence can name the mistake, and a BLANK value is deliberately allowed through: an empty
   // field is «эталона у карточки нет, берём цеховой», not a missing required value.
-  const seamAllowanceError = validateSeamAllowanceStandard(data.requiredSeamAllowanceCm);
+  const seamAllowanceError = validateSeamAllowanceStandard(data.requiredSeamAllowanceMm);
   if (seamAllowanceError) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: seamAllowanceError,
-      path: ['requiredSeamAllowanceCm'],
+      path: ['requiredSeamAllowanceMm'],
     });
   }
   // #64: every BOM article should link a catalog material — enforced as a RELEASE blocker
@@ -788,7 +843,7 @@ export const techCardDefaultData: TechCardFormData = {
   measurementUnit: DEFAULT_MEASUREMENT_UNIT,
   // Blank, never '0' — a NEW card requires no particular allowance until someone says it does, and
   // seeding a zero here would silently declare «кроим по линии как нарисована» on every new style.
-  requiredSeamAllowanceCm: '',
+  requiredSeamAllowanceMm: '',
   concept: '',
   notes: '',
   sizeIds: [],
@@ -971,7 +1026,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     // decimalToInput, NOT `|| ''` on the number: an absent standard reads as '' and a stored 0 reads
     // as '0'. Any `||` here would fold the legal zero back into «не задано» on the way in, and the
     // next save would then clear a standard the operator deliberately set.
-    requiredSeamAllowanceCm: decimalToInput(insert?.requiredSeamAllowanceCm),
+    requiredSeamAllowanceMm: decimalToInput(insert?.requiredSeamAllowanceMm),
     concept: insert?.concept || '',
     notes: insert?.notes || '',
     sizeIds: insert?.sizeIds ?? [],
@@ -1051,44 +1106,34 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
     })),
     construction: insert?.construction
       ? {
-          mainStitchType: insert.construction.mainStitchType || '',
-          stitchDensity: insert.construction.stitchDensity || '',
-          overlockThreads: insert.construction.overlockThreads || '',
-          seamAllowances: insert.construction.seamAllowances || '',
+          defaultSeamClass:
+            insert.construction.defaultSeamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+          defaultStitchesPerCm: decimalToInput(insert.construction.defaultStitchesPerCm),
+          overlockThreadCount: insert.construction.overlockThreadCount || 0,
           hemFinish: insert.construction.hemFinish || '',
           pressing: insert.construction.pressing || '',
-          machineClass: insert.construction.machineClass || '',
           notes: insert.construction.notes || '',
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
       pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
-      // The multi list is the only thing the UI edits now. An operation saved before 0200 has only
-      // the legacy single key, so fold it in — otherwise reopening such a card shows no material and
-      // the next save would drop the link it never displayed.
-      bomLineKeys: mergeLegacyBomKey(
-        (o.bomLineKeys ?? []).filter(Boolean),
-        refKey(o.bomLineKey, o.bomItemIndex),
-      ),
-      node: o.node || '',
-      description: o.description || '',
-      seamType: o.seamType || '',
-      stitchesPerCm: decimalToInput(o.stitchesPerCm),
-      smv: decimalToInput(o.smv),
-      topstitchWidth: o.topstitchWidth || '',
-      thread: o.thread || '',
-      note: o.note || '',
+      bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
       operationNumber: o.operationNumber || 0,
-      machine: o.machine || '',
-      seamAllowance: o.seamAllowance || '',
-      needle: o.needle || '',
-      timeNorm: decimalToInput(o.timeNorm),
       operationType: o.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
-      zone: o.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN',
-      attachment: o.attachment || '',
-      bomLineKey: refKey(o.bomLineKey, o.bomItemIndex),
+      zone: o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN',
+      smv: decimalToInput(o.smv),
       calloutNumber: o.calloutNumber || 0,
-      placement: o.placement || '',
+      // Overrides. An ABSENT allowance means «inherit the card standard» and must read back as an
+      // empty control, not as 0 — 0 is the separate, real setting «cut on the line as drawn».
+      seamClass: o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN',
+      stitchesPerCm: decimalToInput(o.stitchesPerCm),
+      seamAllowanceMm: decimalToInput(o.seamAllowanceMm),
+      topstitchMode: o.topstitch?.mode || 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN',
+      topstitchWidthMm: decimalToInput(o.topstitch?.widthMm),
+      topstitchRows: o.topstitch?.rows || 0,
+      attachmentKind: o.attachmentKind || 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN',
+      attachmentSizeMm: decimalToInput(o.attachmentSizeMm),
+      note: o.note || '',
     })),
     labels: (insert?.labels ?? []).map((l) => ({
       labelType:
@@ -1159,24 +1204,25 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
 function mapConstructionOut(
   c?: TechCardFormData['construction'],
 ): common_TechCardConstruction | undefined {
+  const seamClass = (c?.defaultSeamClass ||
+    'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass;
   const out: common_TechCardConstruction = {
-    mainStitchType: c?.mainStitchType?.trim() || '',
-    stitchDensity: c?.stitchDensity?.trim() || '',
-    overlockThreads: c?.overlockThreads?.trim() || '',
-    seamAllowances: c?.seamAllowances?.trim() || '',
+    defaultSeamClass: seamClass,
+    defaultStitchesPerCm: inputToDecimal(c?.defaultStitchesPerCm),
+    overlockThreadCount: c?.overlockThreadCount || 0,
     hemFinish: c?.hemFinish?.trim() || '',
     pressing: c?.pressing?.trim() || '',
-    machineClass: c?.machineClass?.trim() || '',
     notes: c?.notes?.trim() || '',
   };
+  // An UNKNOWN seam class and a zero thread count are «not set», so neither counts as content —
+  // otherwise a card nobody configured would send a construction block full of defaults and the
+  // section would stop reading as empty.
   const content = hasContent([
-    out.mainStitchType,
-    out.stitchDensity,
-    out.overlockThreads,
-    out.seamAllowances,
+    seamClass === 'TECH_CARD_SEAM_CLASS_UNKNOWN' ? '' : seamClass,
+    (c?.defaultStitchesPerCm ?? '').trim(),
+    out.overlockThreadCount ? String(out.overlockThreadCount) : '',
     out.hemFinish,
     out.pressing,
-    out.machineClass,
     out.notes,
   ]);
   return content ? out : undefined;
@@ -1334,7 +1380,7 @@ export function mapFormToTechCardInsert(
     // the full-replace write stores NULL — «карточка не требует конкретного припуска». '0' is not
     // blank and survives as { value: '0' }, which is the whole point of the pair. Written after the
     // `...original` spread so the cleared value wins over the echoed one.
-    requiredSeamAllowanceCm: inputToDecimal(data.requiredSeamAllowanceCm),
+    requiredSeamAllowanceMm: inputToDecimal(data.requiredSeamAllowanceMm),
     concept: data.concept?.trim() || '',
     notes: data.notes?.trim() || '',
     // children edited here — override the echoed `original` values
@@ -1520,41 +1566,51 @@ export function mapFormToTechCardInsert(
     construction: mapConstructionOut(data.construction),
     operations: (data.operations ?? []).map((o, i) => {
       const opBomKeys = (o.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean);
-      // The legacy single ref is DERIVED from the list's first entry, never edited on its own: the
-      // UI dropped the separate «мат. напрямую» control (it asked the same question with room for
-      // one answer), but tech_card_operation.bom_item_id is still written and read during the
-      // transition (0200), so it must keep agreeing with the list.
-      const bomRef = outBomRef(opBomKeys[0] ?? '');
+      // An override goes out ONLY when it is set. An empty control means «inherit the card
+      // standard», and sending 0 for it would state the opposite — 0 is the real setting «cut on
+      // the line as drawn». That distinction is the entire point of the cascade, so it is preserved
+      // on the wire rather than flattened here.
+      const optionalDecimal = (v?: string) => {
+        const t = (v ?? '').trim();
+        return t === '' ? undefined : inputToDecimal(t);
+      };
+      const topstitchMode = (o.topstitchMode ||
+        'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') as common_TechCardTopstitchMode;
       return {
         // Blanks dropped here as well as server-side: an empty key would be a field violation the
         // operator never caused.
         pieceLineKeys: (o.pieceLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
         bomLineKeys: opBomKeys,
-        node: o.node?.trim() || '',
-        description: o.description?.trim() || '',
-        seamType: o.seamType?.trim() || '',
-        stitchesPerCm: inputToDecimal(o.stitchesPerCm),
-        smv: inputToDecimal(o.smv),
-        topstitchWidth: o.topstitchWidth?.trim() || '',
-        thread: o.thread?.trim() || '',
-        note: o.note?.trim() || '',
         // operation number is positional (server is authoritative); send (i+1)*10 so a
         // freshly-created card reads back sensibly before the server recomputes.
         operationNumber: (i + 1) * 10,
-        machine: o.machine?.trim() || '',
-        seamAllowance: o.seamAllowance?.trim() || '',
-        needle: o.needle?.trim() || '',
-        timeNorm: inputToDecimal(o.timeNorm),
         operationType: (o.operationType ||
           'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType,
-        zone: (o.zone || 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN') as common_TechCardConstructionZone,
-        attachment: o.attachment?.trim() || '',
-        // durable BOM reference (§2.3) + a consistent positional index for the transition path.
-        bomLineKey: bomRef.bomLineKey,
-        bomItemIndex: bomRef.bomItemIndex,
-        bomItemId: undefined,
+        zone: (o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN') as common_TechCardGarmentZone,
+        smv: inputToDecimal(o.smv),
         calloutNumber: o.calloutNumber || 0,
-        placement: o.placement?.trim() || '',
+        seamClass: (o.seamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass,
+        stitchesPerCm: inputToDecimal(o.stitchesPerCm),
+        seamAllowanceMm: optionalDecimal(o.seamAllowanceMm),
+        // The sub-message travels only when there IS topstitching: an always-present wrapper
+        // carrying MODE_UNKNOWN reads as «somebody considered it» on every step that has none. And
+        // the width rides only with WIDTH — beside «edge» it would be a shadow value the server
+        // refuses anyway.
+        topstitch:
+          topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN'
+            ? undefined
+            : {
+                mode: topstitchMode,
+                widthMm:
+                  topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH'
+                    ? inputToDecimal(o.topstitchWidthMm)
+                    : undefined,
+                rows: o.topstitchRows || 0,
+              },
+        attachmentKind: (o.attachmentKind ||
+          'TECH_CARD_ATTACHMENT_KIND_UNKNOWN') as common_TechCardAttachmentKind,
+        attachmentSizeMm: optionalDecimal(o.attachmentSizeMm),
+        note: o.note?.trim() || '',
       };
     }),
     labels: (data.labels ?? []).map((l) => ({

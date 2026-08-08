@@ -13,8 +13,9 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
-import { SEAM_ALLOWANCE_MAX_CM } from 'utils/seam-allowance';
+import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionField } from './construction-field';
+import { zoneOptions } from './operation-options';
 import { ColorwayArticles, OPERATION_EXPECTED_SECTIONS, OperationsField } from './operations-field';
 import { PieceLegend } from './piece-legend';
 import { TechCardFormData, wireInt } from './schema';
@@ -34,11 +35,13 @@ const CONSTRUCTION_VIEW_KINDS = new Set([
 ]);
 
 // The four real construction zones (UNKNOWN is the untagged default, not a zone to cover).
-const TOTAL_CONSTRUCTION_ZONES = 4;
+// Zones the card could cover, minus the «— zone —» placeholder. It is derived from the options list
+// rather than typed as a number: the vocabulary went from four values to eighteen in the operations
+// break, and a hardcoded denominator would have gone on reporting «7 / 4».
+const TOTAL_CONSTRUCTION_ZONES = zoneOptions.length - 1;
 
 export type SummaryOp = {
   calloutNumber?: number;
-  timeNorm?: string;
   smv?: string;
   zone?: string;
   bomLineKeys?: string[];
@@ -57,11 +60,10 @@ type SummaryBom = { lineKey?: string; name?: string; section?: string };
 // already used parseDecimalNumber) showed 1.8. Two totals for one column, one of them silently low.
 export function operationMinutes(o: SummaryOp): number {
   // "Set" means parseable, exactly as SMV.Valid means non-NULL server-side — an explicit 0 SMV
-  // counts as zero minutes there and here, it does not fall back to the estimate.
+  // counts as zero minutes there and here. The legacy `timeNorm` fallback went with the column:
+  // one time field, one total, no rule to remember about which of two inputs wins.
   const smv = parseDecimalNumber(o.smv);
-  if (Number.isFinite(smv)) return smv;
-  const sam = parseDecimalNumber(o.timeNorm);
-  return Number.isFinite(sam) ? sam : 0;
+  return Number.isFinite(smv) ? smv : 0;
 }
 
 // ТРЕБУЕМЫЙ ПРИПУСК (Ф3.2) — the standard a раскладка's recorded allowance is judged against, and
@@ -80,44 +82,59 @@ export function operationMinutes(o: SummaryOp): number {
 // when in fact a standard IS in force — just not this card's.
 function RequiredSeamAllowanceField() {
   const { control } = useFormContext<TechCardFormData>();
-  const cardValue = ((useWatch({ control, name: 'requiredSeamAllowanceCm' }) ?? '') as string).trim();
+  const cardValue = ((useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string).trim();
   // The workshop singleton, on the shared query key — the раскладка modal reads the same row for its
   // allowance prefill, so this is a cache hit rather than a second fetch on the usual path.
   const { data } = useWorkshopSettings();
-  const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceCm).trim();
+  const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceMm).trim();
 
   const verdict = cardValue
-    ? `эталон этой карточки: ${cardValue} см${shopDefault ? ` (цеховой ${shopDefault} см перебит)` : ''}`
+    ? `эталон этой карточки: ${cardValue} мм${shopDefault ? ` (цеховой ${shopDefault} мм перебит)` : ''}`
     : shopDefault
-      ? `у карточки эталона нет — действует цеховой по умолчанию: ${shopDefault} см`
-      : 'эталона нет ни у карточки, ни у цеха — припуск раскладки сравнивать не с чем';
+      ? `у карточки эталона нет — действует цеховой: ${shopDefault} мм`
+      : 'эталона нет ни у карточки, ни у цеха — сравнивать не с чем';
 
   return (
+    <div className='flex flex-col gap-1'>
+      <DecimalField
+        name='requiredSeamAllowanceMm'
+        label='required seam allowance, mm'
+        maxDecimals={1}
+        placeholder={shopDefault ? `workshop: ${shopDefault}` : 'not set'}
+      />
+      <Text size='micro' variant='label'>
+        {verdict}
+      </Text>
+      {/* THE ONE THING THAT CANNOT BE SHOWN ANY OTHER WAY: пусто ≠ 0. Пусто = наследуем; 0 = «кроим
+          по линии как нарисована». Всё остальное, что здесь стояло абзацем, теперь видно само —
+          каскад показан плейсхолдером и вердиктом, а текстового двойника, от которого поле надо
+          было отличать, больше нет. */}
+      <Text size='micro' variant='label'>
+        Пусто = наследуется. 0 — другое: «кроим по линии как нарисована». Чтобы снять требование,
+        очистите поле, а не ставьте ноль.
+      </Text>
+    </div>
+  );
+}
+
+// СТАНДАРТЫ КАРТОЧКИ — одна полоса вместо блока на каждое число. Требуемый припуск перестал быть
+// отдельным Section: он больше не защищается от текстового двойника (тот удалён вместе с разрывом)
+// и не объясняет каскад словами (каскад теперь виден плейсхолдером в самом шаге). Осталось одно,
+// что показать иначе нельзя, — разница между пустым полем и нулём.
+function CardStandards() {
+  return (
     <Section
-      title='требуемый припуск'
-      question='— число, с которым сверяется припуск раскладки. Не путать с заметкой «seam allowances» ниже: та написана для швеи, это читает машина.'
+      title='standards'
+      question='— what every step inherits unless it says otherwise'
     >
-      <div className='flex flex-col gap-1 sm:max-w-sm'>
-        <DecimalField
-          name='requiredSeamAllowanceCm'
-          label='требуемый припуск, см'
-          maxDecimals={2}
-          placeholder={shopDefault ? `цеховой: ${shopDefault}` : 'не задан'}
-        />
-        <Text size='micro' variant='label'>
-          Цеховой припуск — это ФОЛБЭК, а не копия: заполненное поле здесь перебивает его для этого
-          стиля, а сама раскладка перебивает и то и другое своим полем. Пусто = карточка не требует
-          конкретного припуска; 0 — законное и другое значение: «кроим по линии как нарисована».
-          Чтобы снять требование, очистите поле, а не ставьте ноль. От 0 до {SEAM_ALLOWANCE_MAX_CM}{' '}
-          см, до двух знаков.
-        </Text>
-        <Text size='micro' variant='label'>
-          {verdict}
-        </Text>
+      <div className='flex flex-col gap-2.5 sm:max-w-sm'>
+        <RequiredSeamAllowanceField />
+        <ConstructionField />
       </div>
     </Section>
   );
 }
+
 
 // Summary lead (config pick: Summary B) — the at-a-glance overview the tab lacked: how many
 // operations, total SAM (feeds costing), how many assembly zones are tagged, and how many steps
@@ -138,7 +155,7 @@ function ConstructionSummary() {
   const opCount = operations.length;
   const totalSam = operations.reduce((s, o) => s + operationMinutes(o), 0);
   const zonesCovered = new Set(
-    operations.map((o) => o.zone).filter((z) => z && z !== 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN'),
+    operations.map((o) => o.zone).filter((z) => z && z !== 'TECH_CARD_GARMENT_ZONE_UNKNOWN'),
   ).size;
   const unpinned = operations.filter((o) => !(o.calloutNumber && o.calloutNumber > 0)).length;
 
@@ -162,13 +179,9 @@ function ConstructionSummary() {
     <div>
       <StatGrid min={130}>
         <Stat label='operations' value={opCount} />
-        {/* The sub names the rule, because the operations rail below closes with a plain sum of the
-            SAM column and the two figures legitimately differ on any card with measured SMVs. */}
-        <Stat
-          label='total SAM'
-          value={`${totalSam.toFixed(1)} мин`}
-          sub='smv else sam · feeds costing'
-        />
+        {/* One number, and the rail below sums the same column. The sub used to explain which of
+            two time fields won, because there were two; there is one. */}
+        <Stat label='total SMV' value={`${totalSam.toFixed(1)} min`} sub='feeds costing' />
         <Stat label='zones covered' value={`${zonesCovered} / ${TOTAL_CONSTRUCTION_ZONES}`} />
         <Stat
           label='unpinned ops'
@@ -417,12 +430,11 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
         </div>
 
         <div className='flex w-full min-w-0 flex-col gap-2.5 lg:flex-1'>
-          <RequiredSeamAllowanceField />
-          <ConstructionField />
+          <CardStandards />
           <section className='border border-borderColor bg-bgColor p-4'>
             <SectionHeader
               title='operations — assembly order'
-              question='— zone, seam type, allowance, stitch density, needle, materials, SAM'
+              question='— what each step does, where, on which pieces, and how long it takes'
             />
             <OperationsField
               activePin={pin.active}

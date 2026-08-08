@@ -43,6 +43,7 @@ import type {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
+import { mmToEngineCm } from './allowance-units';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { ParseOpts, PieceDTO, Pt } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
@@ -58,14 +59,14 @@ import { decNum } from './marker-io';
 // `common_TechCardMarkerSummary` их получит, пересечение ниже останется валидным и НИ ОДНА
 // строка здесь не изменится.
 type Ф3ConditionFields = {
-  seamAllowanceCm?: googletype_Decimal | undefined;
+  seamAllowanceMm?: googletype_Decimal | undefined;
   contourLayer?: string | undefined;
   grainLayer?: string | undefined;
 };
 
 export type MarkerConditions = {
   // Припуск, который раскладка ДОБАВИЛА, раздув контур наружу. 0 — законное значение.
-  seamAllowanceCm: number;
+  seamAllowanceMm: number;
   // Слой DXF, с которого взят разложенный контур. '' — слоя не выбирали (выбирать было не из чего).
   contourLayer: string;
   // Слой DXF долевой. '' ЗНАЧИМА и значит «не разворачивать» — оператор мог отключить разворот.
@@ -79,11 +80,16 @@ export type MarkerConditions = {
 export function readMarkerConditions(summary?: common_TechCardMarkerSummary): MarkerConditions {
   const s = (summary ?? {}) as common_TechCardMarkerSummary & Ф3ConditionFields;
   return {
-    seamAllowanceCm: s.seamAllowanceCm !== undefined ? decNum(s.seamAllowanceCm) : 0,
+    seamAllowanceMm: s.seamAllowanceMm !== undefined ? decNum(s.seamAllowanceMm) : 0,
     contourLayer: s.contourLayer ?? '',
     grainLayer: s.grainLayer ?? '',
-    recorded:
-      s.seamAllowanceCm !== undefined || s.contourLayer !== undefined || s.grainLayer !== undefined,
+    // ЗАПИСАН ЛИ ПРИПУСК — вопрос про ПРИПУСК, и отвечать на него наличием слоя нельзя. Слой контура
+    // и долевая записываются независимо, поэтому раскладка со слоями и без припуска считалась бы
+    // «записанной», а поле выше подставляло бы ВЫДУМАННЫЙ ноль — то есть пересборка молча
+    // раскладывала бы по линии шва там, где припуск просто не мерили. Ноль — законное ИЗМЕРЕННОЕ
+    // значение, и отличать его от «не записано» обязаны все читатели одинаково: conditionsOf в
+    // marker-io.ts судит ровно по этому же признаку.
+    recorded: s.seamAllowanceMm !== undefined,
   };
 }
 
@@ -401,7 +407,9 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
   // переставляется: припуск раздувает УЖЕ развёрнутый контур, и обратная последовательность дала
   // бы другую геометрию на том же входе.
   const oriented = orientToGrain(onLayer, conditions.grainLayer);
-  const seam = applySeamAllowance(oriented.pieces, conditions.seamAllowanceCm);
+  // Те же миллиметры→сантиметры, что в size-areas-from-dxf: пересборка обязана воспроизвести
+  // геометрию исходной раскладки, а движок читает сантиметры.
+  const seam = applySeamAllowance(oriented.pieces, mmToEngineCm(conditions.seamAllowanceMm));
   const candidates = seam.pieces;
   if (seam.hulled.length > 0) {
     warnings.push(`контур заменён выпуклой оболочкой: ${seam.hulled.join(', ')}`);

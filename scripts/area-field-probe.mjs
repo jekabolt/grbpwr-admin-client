@@ -45,7 +45,7 @@ for (const path of files) {
   });
 
   console.log(`\n══ ${r.file} ══`);
-  console.log(`  контуров ${r.parsed} | слой кроя «${r.contourLayer}» | долевая «${r.grainLayer}» | припуск ${r.seamAllowanceCm} см`);
+  console.log(`  контуров ${r.parsed} | слой кроя «${r.contourLayer}» | долевая «${r.grainLayer}» | припуск ${r.seamAllowanceMm} мм`);
   console.log(`  на слое деталей ${r.onLayer} | размеров в файле ${r.sizeTokens.length}${r.sizeTokens.length ? ` (${r.sizeTokens.join(', ')})` : ''}`);
   console.log(`  подмножество съёмки: размер «${r.subsetToken || '—'}» → ${r.subset.length} дет.; полный набор → ${r.full.length} дет.`);
   console.log(`  выпуклой оболочкой заменено: полный ${r.hulledFull}, подмножество ${r.hulledSubset}`);

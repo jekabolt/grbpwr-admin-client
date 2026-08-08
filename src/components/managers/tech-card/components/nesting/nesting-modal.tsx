@@ -53,9 +53,9 @@ import {
 } from './marker-io';
 import { markerScopeLines, strictestDirection } from '../bom-purpose';
 import {
-  MAX_SEAM_ALLOWANCE_CM,
+  MAX_SEAM_ALLOWANCE_MM,
   blocksMissingOnLayer,
-  clampSeamAllowance,
+  clampSeamAllowanceMm,
   defaultContourLayer,
   layerAllowanceLabel,
   layerOptions,
@@ -77,6 +77,7 @@ import {
 import { isDxfUrl } from 'utils/pattern';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
+import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { normBlock } from './block-code';
 import { ModalRailSection, type RailSectionStatus } from './modal-sections';
@@ -151,8 +152,8 @@ export function NestingModal({
   season,
   styleNumber,
   pieceAliases,
-  requiredSeamAllowanceCm,
-  workshopDefaultSeamAllowanceCm,
+  requiredSeamAllowanceMm,
+  workshopDefaultSeamAllowanceMm,
   productionRunId = 0,
 }: {
   files: NestingFile[] | null; // null = closed (nest mode)
@@ -205,10 +206,10 @@ export function NestingModal({
   // эталона не задала, и подставлять ноль ЗАПРЕЩЕНО: ноль здесь — законная настройка («наши
   // выкройки несут линию кроя»), и спутать её с «не настроено» значит объявить каждую раскладку с
   // припуском нарушающей эталон, которого никто не задавал.
-  requiredSeamAllowanceCm?: number | null;
+  requiredSeamAllowanceMm?: number | null;
   // Припуск цеха по умолчанию, см (admin.WorkshopSettings.default_seam_allowance_cm). Тот же
   // договор: `null` = не настроено, и это НЕ ноль.
-  workshopDefaultSeamAllowanceCm?: number | null;
+  workshopDefaultSeamAllowanceMm?: number | null;
   // ПРОГОН, ПОД КОТОРЫЙ СНИМАЕТСЯ РАСКРОЙНЫЙ МАРКЕР (Ф4.2). 0 = карточный — все сегодняшние
   // раскладки и норма. Модалка про настилы не знает ничего и знать не должна: она только
   // проставляет владельца, а секции настила собирает редактор на странице прогона.
@@ -244,7 +245,11 @@ export function NestingModal({
   const [marginCm, setMarginCm] = useState<number>(NEST_DEFAULTS.edgeMarginCm);
   // Припуск на шов: контур из DXF — линия ШВА, а кроят по линии КРОЯ. Это вход алгоритма, а не
   // подпись к результату (см. lib/nesting/geom/seam-allowance.ts).
-  const [allowanceCm, setAllowanceCm] = useState<number>(NEST_DEFAULTS.seamAllowanceCm);
+  // МИЛЛИМЕТРЫ — это поле оператора и то, что уезжает на провод (0290). Движок остаётся в
+  // сантиметрах, и перевод делают ровно две функции из allowance-units.ts, на двух вызовах ниже.
+  const [allowanceMm, setAllowanceMm] = useState<number>(
+    engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
+  );
   const [crossGrain, setCrossGrain] = useState<boolean>(NEST_DEFAULTS.allowCrossGrain);
   const [budgetS, setBudgetS] = useState<number>(NEST_DEFAULTS.timeBudgetMs / 1000);
   const [sel, setSel] = useState<PieceSel>({});
@@ -535,8 +540,8 @@ export function NestingModal({
   // припуск, применённый только тут, до движка бы не доехал (ровно так однажды уехал в прод
   // разворот по долевой: экран показывал одно, укладывалось другое).
   const seam = useMemo(
-    () => applySeamAllowance(oriented.pieces, allowanceCm),
-    [oriented, allowanceCm],
+    () => applySeamAllowance(oriented.pieces, mmToEngineCm(allowanceMm)),
+    [oriented, allowanceMm],
   );
   const pieces = seam.pieces;
   const usable = widthCm - 2 * marginCm;
@@ -555,8 +560,8 @@ export function NestingModal({
   const contourIsCutLine =
     contourMeasure?.verdict === 'cut' && (contourMeasure.allowanceCm ?? 0) > 0;
   const doubleAllowanceRefusal =
-    !viewData && contourIsCutLine && allowanceCm > 0 && contourMeasure
-      ? `слой ${contourMeasure.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(contourMeasure.allowanceCm ?? 0).toFixed(2)} см снаружи линии шва (совпало на ${contourMeasure.stats.accepted} блоках). Раскладка добавит ещё ${allowanceCm.toFixed(2)} см офсета — припуск будет посчитан ДВАЖДЫ, и длина завышена примерно на ${allowanceCm.toFixed(2)} см по периметру каждой детали. Выходов два: поставить припуск 0 (контур уже с припуском) либо ${
+    !viewData && contourIsCutLine && allowanceMm > 0 && contourMeasure
+      ? `слой ${contourMeasure.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(contourMeasure.allowanceCm ?? 0).toFixed(2)} см снаружи линии шва (совпало на ${contourMeasure.stats.accepted} блоках). Раскладка добавит ещё ${allowanceMm.toFixed(1)} мм офсета — припуск будет посчитан ДВАЖДЫ, и длина завышена примерно на ${allowanceMm.toFixed(1)} мм по периметру каждой детали. Выходов два: поставить припуск 0 (контур уже с припуском) либо ${
           seamLayerPick
             ? `выбрать контурный слой ${seamLayerPick} — на нём замерена линия шва`
             : 'выбрать контурный слой с линией шва'
@@ -569,7 +574,7 @@ export function NestingModal({
   const allowanceUnconfirmed =
     !viewData &&
     parse.phase === 'ready' &&
-    allowanceCm > 0 &&
+    allowanceMm > 0 &&
     contourMeasure?.verdict === 'unknown';
 
   // ПРЕДЗАПОЛНЕНИЕ ПОЛЯ «ПРИПУСК» (§5.5). Порядок источников НЕ ПЕРЕСТАВЛЯТЬ, и последний из них —
@@ -582,23 +587,23 @@ export function NestingModal({
     if (viewData || parse.phase !== 'ready') return null;
     return seamAllowancePrefill({
       measured: contourMeasure,
-      cardRequiredCm: requiredSeamAllowanceCm,
-      workshopDefaultCm: workshopDefaultSeamAllowanceCm,
-      fallbackCm: NEST_DEFAULTS.seamAllowanceCm,
+      cardRequiredMm: requiredSeamAllowanceMm,
+      workshopDefaultMm: workshopDefaultSeamAllowanceMm,
+      fallbackMm: engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
     });
   }, [
     viewData,
     parse.phase,
     contourMeasure,
-    requiredSeamAllowanceCm,
-    workshopDefaultSeamAllowanceCm,
+    requiredSeamAllowanceMm,
+    workshopDefaultSeamAllowanceMm,
   ]);
   useEffect(() => {
     // Введённое руками не перебивается НИКОГДА — ровно как ширина полотна рядом. Свой номер
     // оператор ставит осознанно, и подставить поверх него «правильный» значит спорить с
     // единственным участником, который держал в руках лекало.
     if (!allowancePrefill || allowanceTouched) return;
-    setAllowanceCm((prev) => (prev === allowancePrefill.value ? prev : allowancePrefill.value));
+    setAllowanceMm((prev) => (prev === allowancePrefill.value ? prev : allowancePrefill.value));
   }, [allowancePrefill, allowanceTouched]);
   // Подпись под полем: КАКОЙ факт про выбранный контур мы знаем. Три ветки, и ни одна не имеет
   // права звучать как «ноль»: «не измерено» — это отсутствие улик, а не измеренное отсутствие
@@ -681,7 +686,7 @@ export function NestingModal({
     qtyByToken,
     contourLayer,
     grainLayer,
-    allowanceCm,
+    allowanceMm,
     resetRun,
   ]);
 
@@ -1219,7 +1224,8 @@ export function NestingModal({
       // движок гарантированно смотрят на одни детали.
       grainLayer,
       // Едет ЧИСЛО, а раздувает контуры воркер той же чистой функцией на тех же деталях.
-      seamAllowanceCm: allowanceCm,
+      // САНТИМЕТРЫ: это вход движка, а его система координат единицу не меняла.
+      seamAllowanceCm: mmToEngineCm(allowanceMm),
       timeBudgetMs: budgetS * 1000,
       rdpEpsCm: NEST_DEFAULTS.rdpEpsCm,
     }),
@@ -1236,7 +1242,7 @@ export function NestingModal({
       crossGrain,
       effectiveDirection,
       grainLayer,
-      allowanceCm,
+      allowanceMm,
       budgetS,
     ],
   );
@@ -1568,8 +1574,8 @@ export function NestingModal({
           // каждый сантиметр записанного расхода.
           warnings: [
             ...effective.warnings,
-            allowanceCm > 0
-              ? `припуск на шов: ${allowanceCm.toFixed(2)} см — сохранён контур КРОЯ, линия шва лежит на отдельном слое SEAM. ДОПУЩЕНИЕ: припуск взят ровным по всему контуру, тогда как по низу изделия он обычно шире`
+            allowanceMm > 0
+              ? `припуск на шов: ${allowanceMm.toFixed(1)} мм — сохранён контур КРОЯ, линия шва лежит на отдельном слое SEAM. ДОПУЩЕНИЕ: припуск взят ровным по всему контуру, тогда как по низу изделия он обычно шире`
               : 'припуск на шов: 0 — раскладывалась ЛИНИЯ ШВА, расход занижен относительно кроя',
             ...(manualNote ? [manualNote] : []),
           ],
@@ -1624,7 +1630,7 @@ export function NestingModal({
           allowCrossGrain: crossGrain,
           // ПРИПУСК, КОТОРЫМ РАЗДУВАЛИ КОНТУРЫ ЭТОГО ПРОГОНА. Это вход алгоритма, а не подпись:
           // длина снята по линии кроя, и без числа её не воспроизвести.
-          seamAllowanceCm: dec(allowanceCm),
+          seamAllowanceMm: dec(allowanceMm),
           // ПРИПУСК, УЖЕ ЗАЛОЖЕННЫЙ В КОНТУР ФАЙЛА, — это ИЗМЕРЕНИЕ (Ф3.3), и оно уезжает ровно
           // тогда, когда состоялось. `undefined` едет как NULL, то есть «не мерялось»; ноль
           // значит «померили, и его нет» — контур был линией шва. Спутать их нельзя ни в одну
@@ -1635,9 +1641,11 @@ export function NestingModal({
           // Сервер судит по ЭТОМУ числу (§5.3): contour > 0 вместе с seam > 0 — отказ. До него
           // такое сочетание не доезжает, потому что прогон с ним не запускается (см.
           // doubleAllowanceRefusal), но правило живёт на сервере, а не здесь.
-          contourAllowanceCm:
+          // ЗАМЕР В САНТИМЕТРАХ (геометрия файла) → НА ПРОВОД В МИЛЛИМЕТРАХ, той же единственной
+          // функцией. `undefined` проходит насквозь: «не мерялось» это не ноль.
+          contourAllowanceMm:
             contourMeasure && contourMeasure.allowanceCm != null
-              ? dec(contourMeasure.allowanceCm)
+              ? dec(engineCmToMm(contourMeasure.allowanceCm))
               : undefined,
           // СЛОИ — ЧТОБЫ ЧЕРТЁЖ МОЖНО БЫЛО ПЕРЕСОБРАТЬ (Ф3.5). Без них переоткрытый маркер
           // восстанавливается «тем слоем, который ранжируется первым СЕГОДНЯ», а ранжирование
@@ -1760,8 +1768,8 @@ export function NestingModal({
           // перестаёт быть пересобираемым (Ф3.5 нечем повторить выбор контура), а стёртый
           // allow_flip делает норму несравнимой для гейта. Пропустить их здесь — тот же класс
           // дефекта, что и пропущенный `flipped` в размещениях этого же метода.
-          seamAllowanceCm: s.seamAllowanceCm,
-          contourAllowanceCm: s.contourAllowanceCm,
+          seamAllowanceMm: s.seamAllowanceMm,
+          contourAllowanceMm: s.contourAllowanceMm,
           contourLayer: s.contourLayer,
           grainLayer: s.grainLayer,
           allowFlip: s.allowFlip,
@@ -1879,7 +1887,7 @@ export function NestingModal({
       doubleAllowanceRefusal ? 'двойной припуск — прогон не запускается' : '',
     ].filter(Boolean),
     warnings: [
-      allowanceCm === 0 && !contourIsCutLine ? 'припуск 0 — расход будет занижен' : '',
+      allowanceMm === 0 && !contourIsCutLine ? 'припуск 0 — расход будет занижен' : '',
       allowanceUnconfirmed ? 'припуск не подтверждён файлом' : '',
       seam.hulled.length > 0 ? `контур с дефектом у ${seam.hulled.length} деталей` : '',
       !viewData && effectiveDirection === 'unknown' ? 'направление ткани не задано' : '',
@@ -1936,7 +1944,7 @@ export function NestingModal({
               .filter(Boolean)
               .join(' · ')
           : '';
-  const s3Summary = `${widthCm} см · зазор ${gapCm} · припуск ${allowanceCm.toFixed(2)}`;
+  const s3Summary = `${widthCm} см · зазор ${gapCm} · припуск ${allowanceMm.toFixed(1)}`;
   // Размещения — в свёрнутой сводке тоже: приближение к потолку 5000 должно быть видно и при
   // закрытой секции, а не открываться вместе с ней.
   const s4Summary =
@@ -2478,29 +2486,29 @@ export function NestingModal({
                 то, что цех действительно вырежет. */}
               <label className='space-y-0.5'>
                 <Text size='nano' variant='label' component='span'>
-                  припуск на шов, см
+                  припуск на шов, мм
                 </Text>
                 <Input
                   name='nest-allowance'
                   type='number'
-                  value={allowanceCm}
+                  value={allowanceMm}
                   min={0}
-                  max={MAX_SEAM_ALLOWANCE_CM}
+                  max={MAX_SEAM_ALLOWANCE_MM}
                   step={0.1}
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                     // Потолок 10 см — не физика, а защита от промаха по точке: «11» вместо «1.1»
                     // даёт совершенно правдоподобный маркер, просто вчетверо длиннее, и заметить
                     // это можно только по счёту от поставщика. Число живёт в contour-layer.ts, где
                     // его применяет и предзаполнение: два потолка на одно поле однажды разойдутся.
-                    const next = clampSeamAllowance(numOr(e.target.value, allowanceCm));
-                    if (next !== allowanceCm) {
+                    const next = clampSeamAllowanceMm(numOr(e.target.value, allowanceMm));
+                    if (next !== allowanceMm) {
                       // Флаг «ввели руками» ставится ВНУТРИ apply — ровно как у ширины: если
                       // оператор откажется выбрасывать ручные правки, припуск не изменился, и
                       // считать его введённым руками нельзя, иначе предзаполнение по замеру и по
                       // эталону карточки молча выключится навсегда.
                       guardManual(() => {
                         setAllowanceTouched(true);
-                        setAllowanceCm(next);
+                        setAllowanceMm(next);
                       });
                     }
                   }}
@@ -2526,10 +2534,10 @@ export function NestingModal({
             {/* Допущение проговаривается вслух: число одно на весь комплект и кладётся РОВНЫМ по
               всему контуру, а настоящий подгиб низа шире. Молчаливое допущение здесь стоило бы
               метров ткани, а увидеть его на картинке нельзя. */}
-            {allowanceCm > 0 ? (
+            {allowanceMm > 0 ? (
               <CalloutBox tone='note'>
                 <Text size='nano' component='p'>
-                  припуск {allowanceCm.toFixed(2)} см отложен РОВНО по всему контуру каждой детали и
+                  припуск {allowanceMm.toFixed(1)} мм отложен РОВНО по всему контуру каждой детали и
                   одинаков для всего комплекта. Подгиб низа в жизни шире, горловина уже — раскладка
                   этого не знает. Линия шва остаётся нарисованной внутри линии кроя.
                 </Text>

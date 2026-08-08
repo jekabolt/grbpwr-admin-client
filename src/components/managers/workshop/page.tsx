@@ -18,7 +18,7 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors, fieldErrorSummary } from 'utils/field-errors';
 import {
-  SEAM_ALLOWANCE_MAX_CM,
+  SEAM_ALLOWANCE_MAX_MM,
   validateSeamAllowanceStandard,
 } from 'utils/seam-allowance';
 import z from 'zod';
@@ -50,7 +50,7 @@ const workshopSchema = z
   .object({
     // Every setting is a decimal-as-form-string, and '' means ABSENT — «не настроено» — never zero.
     cuttingTableLengthCm: z.string().optional().default(''),
-    defaultSeamAllowanceCm: z.string().optional().default(''),
+    defaultSeamAllowanceMm: z.string().optional().default(''),
     maxStackHeightCm: z.string().optional().default(''),
   })
   .superRefine((data, ctx) => {
@@ -91,12 +91,12 @@ const workshopSchema = z
         });
       }
     }
-    const seam = validateSeamAllowanceStandard(data.defaultSeamAllowanceCm);
+    const seam = validateSeamAllowanceStandard(data.defaultSeamAllowanceMm);
     if (seam) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: seam,
-        path: ['defaultSeamAllowanceCm'],
+        path: ['defaultSeamAllowanceMm'],
       });
     }
     // Ф4.8. Note which neighbour this one sides with on ZERO: the table length, not the allowance.
@@ -143,7 +143,7 @@ type WorkshopFormData = z.input<typeof workshopSchema>;
 
 const EMPTY_FORM: WorkshopFormData = {
   cuttingTableLengthCm: '',
-  defaultSeamAllowanceCm: '',
+  defaultSeamAllowanceMm: '',
   maxStackHeightCm: '',
 };
 
@@ -174,7 +174,7 @@ export function WorkshopSettingsPage() {
             // decimalToInput, not `|| ''` on a number: an unset setting reads as '' and a stored 0
             // reads as '0'. Any `||` here would fold the legal zero back into «не настроено».
             cuttingTableLengthCm: decimalToInput(settings.cuttingTableLengthCm),
-            defaultSeamAllowanceCm: decimalToInput(settings.defaultSeamAllowanceCm),
+            defaultSeamAllowanceMm: decimalToInput(settings.defaultSeamAllowanceMm),
             maxStackHeightCm: decimalToInput(settings.maxStackHeightCm),
           }
         : EMPTY_FORM,
@@ -203,14 +203,14 @@ export function WorkshopSettingsPage() {
       // `googletype_Decimal | undefined`, а не `?:`, так что пропущенный ключ — ошибка сборки, а не
       // «то же самое». JSON.stringify выбрасывает undefined, поэтому на проводе поля просто нет.
       cuttingTableLengthCm: undefined,
-      defaultSeamAllowanceCm: undefined,
+      defaultSeamAllowanceMm: undefined,
       maxStackHeightCm: undefined,
     };
     if (dirtyFields.cuttingTableLengthCm) {
       patch.cuttingTableLengthCm = inputToDecimal(values.cuttingTableLengthCm) ?? CLEAR_SETTING;
     }
-    if (dirtyFields.defaultSeamAllowanceCm) {
-      patch.defaultSeamAllowanceCm = inputToDecimal(values.defaultSeamAllowanceCm) ?? CLEAR_SETTING;
+    if (dirtyFields.defaultSeamAllowanceMm) {
+      patch.defaultSeamAllowanceMm = inputToDecimal(values.defaultSeamAllowanceMm) ?? CLEAR_SETTING;
     }
     if (dirtyFields.maxStackHeightCm) {
       patch.maxStackHeightCm = inputToDecimal(values.maxStackHeightCm) ?? CLEAR_SETTING;
@@ -284,8 +284,8 @@ export function WorkshopSettingsPage() {
 
               <div className='flex flex-col gap-1'>
                 <DecimalField
-                  name='defaultSeamAllowanceCm'
-                  label='припуск по умолчанию, см'
+                  name='defaultSeamAllowanceMm'
+                  label='припуск по умолчанию, мм'
                   maxDecimals={2}
                   placeholder='не настроен'
                   disabled={!canEdit || isLoading || isError}
@@ -295,7 +295,7 @@ export function WorkshopSettingsPage() {
                   раскладка перебивает и то и другое собственным полем. Пусто = эталона нет, и тогда
                   припуск раскладки не с чем сравнивать. 0 — законное значение и значит «наши
                   выкройки несут линию кроя, офсет не нужен»; чтобы снять эталон, очистите поле, а не
-                  ставьте ноль. От 0 до {SEAM_ALLOWANCE_MAX_CM} см, до двух знаков.
+                  ставьте ноль. От 0 до {SEAM_ALLOWANCE_MAX_MM} мм, до одного знака.
                 </Text>
               </div>
 
