@@ -45,6 +45,11 @@ import {
   bomPurposeLabel,
   type RollGoodsLine,
 } from './bom-purpose';
+import { kindLabel } from './bom-kind';
+import {
+  LabelPlacementPictogram,
+  resolvePlacementRegion,
+} from './label-placement-pictogram';
 import { formatCompositionEntries } from './composition-entries';
 import { wireFabricPurpose } from './pattern-size-index';
 import { wireInt } from './schema';
@@ -73,7 +78,7 @@ import { useCareVocabulary } from 'components/managers/product/components/care/u
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { ReactNode, useEffect, useMemo } from 'react';
+import { Fragment, ReactNode, useEffect, useMemo } from 'react';
 import { decimalToInput } from 'utils/decimal';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
@@ -408,25 +413,79 @@ export function TechPackDocument({
   // one material for a step that has several, and nothing at all for a step whose links live purely
   // in bomLineKeys with the legacy mirror empty. The singular ref stays as the fallback, for rows
   // authored before the plural field existed.
+  // Порядок узлов — порядок словаря зон: бумага и экран обязаны перечислять узлы одинаково.
+  // Шаги без зоны идут последней группой, а не растворяются в первой.
+  const operationGroups = useMemo(() => {
+    const indexed = (tc.operations ?? []).map((op, index) => ({ op, index }));
+    const order = zoneOptions.map((z) => z.value as string);
+    const groups: Array<{ zone: string; label: string; operations: typeof indexed }> = [];
+    const push = (zone: string, label: string) => {
+      const operations = indexed.filter((x) => (x.op.zone ?? '') === zone);
+      if (operations.length > 0) groups.push({ zone, label, operations });
+    };
+    for (const z of order) {
+      if (z === 'TECH_CARD_GARMENT_ZONE_UNKNOWN') continue;
+      push(z, zoneText(z as common_TechCardGarmentZone) || z);
+    }
+    const rest = indexed.filter((x) => !order.includes(x.op.zone ?? '') || !x.op.zone);
+    const known = new Set(groups.flatMap((g) => g.operations.map((o) => o.index)));
+    const orphans = rest.filter((x) => !known.has(x.index));
+    if (orphans.length > 0) groups.push({ zone: '', label: 'узел не указан', operations: orphans });
+    return groups;
+  }, [tc.operations]);
+
+  const openIssues = (tc.issues ?? []).filter(
+    (iss) => (iss.status ?? '') === 'TECH_CARD_ISSUE_STATUS_OPEN',
+  );
+
+  // Стандарт припуска карты — печатается в каждой строке, у которой своего значения нет.
+  const cardAllowance = dec(tc.requiredSeamAllowanceMm);
+
+  // Материалы шага: имя + ВИД позиции (молния, пуговица, нитка…) + цвет в скоуповом колорвее.
+  //
+  // Раньше отсюда возвращались одни имена, а ключ без выжившей строки BOM ВЫБРАСЫВАЛСЯ молча — с
+  // рассуждением, что «(удалён)» на спецификации хуже тишины. Это неверно ровно наоборот: шаг,
+  // потерявший ссылку на молнию, печатается как шаг вообще без фурнитуры, и цех шьёт без неё, не
+  // получив ни одного признака, что что-то пропало. Тишина здесь — не отсутствие ошибки, а
+  // отсутствие сообщения о ней.
+  type OpMaterial = { name: string; kind?: string; colour?: string; missing?: boolean };
   const resolveOpMaterials = (o: {
     bomLineKeys?: string[];
     bomItemId?: number;
     bomLineKey?: string;
     bomItemIndex?: number;
-  }): string[] => {
+  }): OpMaterial[] => {
     const items = tc.bomItems ?? [];
-    // A key with no surviving line is DROPPED rather than printed as a placeholder: the tech pack
-    // is what the factory cuts and sews to, and «(удалён)» on a spec sheet is worse than silence.
-    // The editor surfaces the same dangling link in red, which is where it belongs.
-    const names = (o.bomLineKeys ?? [])
-      .filter(Boolean)
-      .map((k) => items.find((b) => b.lineKey === k)?.name?.trim() || '')
-      .filter(Boolean);
-    // Fall through when the plural field resolved NOTHING, not merely when it was empty: the legacy
-    // singular ref carries a durable bom_item_id and can still resolve a row whose key has moved.
-    if (names.length > 0) return names;
-    const legacy = resolveUsageArt(o)?.name?.trim();
-    return legacy ? [legacy] : [];
+    // Цвет — из рецепта ЭТОГО колорвея: нитка и фурнитура меняются с цветом, и именно это швея
+    // должна прочитать на своём листе. Без скоупа колорвея цвет не печатается вовсе — печатать
+    // цвет «какого-то» колорвея хуже, чем не печатать никакого.
+    const scopedUsages = printScope.colorway?.usages ?? [];
+    const colourOf = (b?: common_TechCardBomItem): string => {
+      if (!printScope.colorway || !b) return '';
+      const u = scopedUsages.find(
+        (x) =>
+          (b.lineKey && x.bomLineKey === b.lineKey) ||
+          (wireInt(b.id) && wireInt(x.bomItemId) === wireInt(b.id)),
+      );
+      return u ? resolveUsageColour(u, b) : '';
+    };
+    const described = (b: common_TechCardBomItem): OpMaterial => ({
+      name: b.name?.trim() || '—',
+      kind: kindLabel(b.kind),
+      colour: colourOf(b),
+    });
+
+    const out: OpMaterial[] = [];
+    for (const k of (o.bomLineKeys ?? []).filter(Boolean)) {
+      const b = items.find((x) => x.lineKey === k);
+      if (b) out.push(described(b));
+      else out.push({ name: 'ссылка на материал потеряна', missing: true });
+    }
+    // Фолбэк срабатывает, когда множественное поле не разрешило НИЧЕГО, а не когда оно пусто:
+    // legacy-ссылка несёт durable bom_item_id и способна разрешить строку с уехавшим ключом.
+    if (out.some((m) => !m.missing)) return out;
+    const legacy = resolveUsageArt(o);
+    return legacy ? [described(legacy)] : out;
   };
   // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
   // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
@@ -701,10 +760,13 @@ export function TechPackDocument({
         </div>
       )}
 
-      {/* SKETCHES + CALLOUTS */}
+      {/* SKETCHES + CALLOUTS — лист швеи. Эскиз печатается во всю ширину контентной коробки, а не
+          миниатюрой на 280px: по нему ищут узел глазами, стоя у машины, и номер выноски на
+          миниатюре не читается. Ширина фигуры = ширине страницы, поэтому эскизы идут по одному в
+          ряд, а не плиткой. */}
       {has(tc.technicalMedia) && (
         <Sheet title='technical sketch'>
-          <div className='flex flex-wrap gap-4'>
+          <div className='flex flex-col gap-4'>
             {(tc.technicalMedia ?? []).map((m, i) => {
               const full = m.mediaId != null ? mediaById.get(m.mediaId) : undefined;
               const url = full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
@@ -712,9 +774,12 @@ export function TechPackDocument({
               const pins = (tc.callouts ?? []).filter((c) => c.mediaId === m.mediaId);
               if (!url) return null;
               return (
-                <figure key={i} className='break-inside-avoid'>
-                  <div className='relative inline-block border border-black'>
-                    <img src={url} alt='' className='block max-h-[280px] w-auto' />
+                <figure key={i} className='w-full break-inside-avoid'>
+                  {/* Контейнер обязан повторять коробку картинки: пины позиционируются в
+                      процентах от него, и любой object-fit, меняющий соотношение сторон,
+                      увёл бы номера с их узлов. */}
+                  <div className='relative block w-full border border-black'>
+                    <img src={url} alt='' className='block h-auto w-full' />
                     {pins.map((c, j) => {
                       const x = num(dec(c.posX));
                       const y = num(dec(c.posY));
@@ -745,17 +810,35 @@ export function TechPackDocument({
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
                   <th className={TH}>part</th>
+                  <th className={TH}>детали кроя</th>
                   <th className={TH}>description</th>
                 </tr>
               </thead>
               <tbody>
-                {(tc.callouts ?? []).map((c, i) => (
-                  <tr key={i} className='break-inside-avoid'>
-                    <td className={`${TD} text-center font-semibold`}>{c.number ?? i + 1}</td>
-                    <td className={TD}>{c.part || '—'}</td>
-                    <td className={TD}>{c.description || '—'}</td>
-                  </tr>
-                ))}
+                {(tc.callouts ?? []).map((c, i) => {
+                  // СВЯЗЬ ВЫНОСКИ С ДЕТАЛЬЮ — половина, которой на бумаге не было. Номер на
+                  // эскизе и строка в «cut pieces» жили порознь, и соединить их можно было только
+                  // в голове. Номер выноски берём тем же фолбэком (`c.number || i + 1`), что и
+                  // пин на картинке, иначе пин и строка разъедутся.
+                  const number = wireInt(c.number) || i + 1;
+                  // callout_number = 0/undefined означает «не привязано», а НЕ «выноска №0»:
+                  // джойн к нулю дал бы каждой непривязанной детали ложную связь с первой выноской.
+                  const pieces = (tc.pieces ?? []).filter(
+                    (p) => wireInt(p.calloutNumber) > 0 && wireInt(p.calloutNumber) === number,
+                  );
+                  return (
+                    <tr key={i} className='break-inside-avoid'>
+                      <td className={`${TD} text-center font-semibold`}>{number}</td>
+                      <td className={TD}>{c.part || '—'}</td>
+                      <td className={TD}>
+                        {pieces.length === 0
+                          ? '—'
+                          : pieces.map((p) => p.name || '(без имени)').join(', ')}
+                      </td>
+                      <td className={TD}>{c.description || '—'}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -1193,43 +1276,86 @@ export function TechPackDocument({
                 </tr>
               </thead>
               <tbody>
-                {(tc.operations ?? []).map((o, i) => {
-                  // THE THREAD DE-DUPLICATION THAT USED TO LIVE HERE IS GONE, and so is the reason
-                  // for it: the editor auto-filled `thread` from the linked BOM line, so the same
-                  // string printed twice — once as the step's thread, once in its material list —
-                  // and this table had to subtract one from the other before printing. There is one
-                  // answer now, and it is the material list.
-                  const materials = resolveOpMaterials(o);
-                  const detail = [
-                    dec(o.stitchesPerCm) && `${dec(o.stitchesPerCm)} st/cm`,
-                    topstitchText(o.topstitch),
-                    attachmentText(o.attachmentKind, o.attachmentSizeMm),
-                  ]
-                    .filter(Boolean)
-                    .join(' · ');
-                  return (
-                    <tr key={i} className='break-inside-avoid'>
-                      <td className={`${TD} text-center`}>{o.operationNumber || (i + 1) * 10}</td>
-                      <td className={TD}>
-                        <div>{operationTypeText(o.operationType)}</div>
-                        {o.note && <div className='italic text-labelColor'>{o.note}</div>}
+                {operationGroups.map((g) => (
+                  <Fragment key={g.zone}>
+                    {/* УЗЕЛ. Швея собирает изделие узлами, а не сплошным списком из сорока строк;
+                        до этого зона была колонкой, то есть признаком строки, а не структурой
+                        листа. Порядок групп — порядок словаря зон, чтобы бумага и экран
+                        перечисляли узлы одинаково. */}
+                    <tr className='break-inside-avoid'>
+                      <td
+                        colSpan={7}
+                        className='border border-black bg-neutral-100 px-1.5 py-1 text-control font-bold uppercase tracking-wide'
+                      >
+                        {g.label}
                       </td>
-                      <td className={TD}>{zoneText(o.zone) || '—'}</td>
-                      <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
-                      <td className={TD}>
-                        <div>{seamClassText(o.seamClass) || '—'}</div>
-                        {/* An ABSENT allowance inherits the card standard printed above, so only a
-                            value that DIFFERS is worth ink on the sheet the floor works from. */}
-                        {allowanceText(o.seamAllowanceMm) && (
-                          <div className='text-labelColor'>{allowanceText(o.seamAllowanceMm)}</div>
-                        )}
-                        {detail && <div className='text-labelColor'>{detail}</div>}
-                      </td>
-                      <td className={TD}>{materials.join(' + ') || '—'}</td>
-                      <td className={`${TD} text-right`}>{dec(o.smv) || '—'}</td>
                     </tr>
-                  );
-                })}
+                    {g.operations.map(({ op: o, index: i }) => {
+                      // THE THREAD DE-DUPLICATION THAT USED TO LIVE HERE IS GONE, and so is the
+                      // reason for it: the editor auto-filled `thread` from the linked BOM line, so
+                      // the same string printed twice — once as the step's thread, once in its
+                      // material list. There is one answer now, and it is the material list.
+                      const materials = resolveOpMaterials(o);
+                      const detail = [
+                        dec(o.stitchesPerCm) && `${dec(o.stitchesPerCm)} st/cm`,
+                        topstitchText(o.topstitch),
+                        attachmentText(o.attachmentKind, o.attachmentSizeMm),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ');
+                      // ПРИПУСК ПЕЧАТАЕТСЯ ВСЕГДА. Раньше пустая клетка означала «наследует
+                      // стандарт карты», но выглядела ровно как «не задано», и число приходилось
+                      // помнить из строки над таблицей — стоя у машины, по листу, вынутому из
+                      // стопки. Ноль при этом ЛЕГАЛЕН («кроить по линии») и обязан печататься
+                      // нулём, поэтому отличаем отсутствие поля от значения 0, а не по truthy.
+                      const ownAllowance = dec(o.seamAllowanceMm);
+                      const allowanceCell =
+                        ownAllowance !== ''
+                          ? `${ownAllowance} mm`
+                          : cardAllowance
+                            ? `${cardAllowance} mm (стандарт карты)`
+                            : 'стандарт карты не задан';
+                      return (
+                        <tr key={i} className='break-inside-avoid'>
+                          <td className={`${TD} text-center`}>
+                            {o.operationNumber || (i + 1) * 10}
+                          </td>
+                          <td className={TD}>
+                            <div>{operationTypeText(o.operationType)}</div>
+                            {o.note && <div className='italic text-labelColor'>{o.note}</div>}
+                          </td>
+                          <td className={TD}>{zoneText(o.zone) || '—'}</td>
+                          <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
+                          <td className={TD}>
+                            <div>{seamClassText(o.seamClass) || '—'}</div>
+                            <div className='font-medium'>{allowanceCell}</div>
+                            {detail && <div className='text-labelColor'>{detail}</div>}
+                          </td>
+                          <td className={TD}>
+                            {materials.length === 0 ? (
+                              '—'
+                            ) : (
+                              <div className='flex flex-col gap-0.5'>
+                                {materials.map((m, j) => (
+                                  <div key={j} className={m.missing ? 'font-bold uppercase' : ''}>
+                                    {m.missing ? `⚠ ${m.name}` : m.name}
+                                    {m.kind ? (
+                                      <span className='text-labelColor'> · {m.kind}</span>
+                                    ) : null}
+                                    {m.colour ? (
+                                      <span className='text-labelColor'> · {m.colour}</span>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className={`${TD} text-right`}>{dec(o.smv) || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           )}
@@ -1288,7 +1414,23 @@ export function TechPackDocument({
                         )}
                         {l.note?.trim() && <div className='text-labelColor'>{l.note}</div>}
                       </td>
-                      <td className={TD}>{l.placement || '—'}</td>
+                      <td className={TD}>
+                        {/* Схема размещения жила только на экране. Словами «left side seam, 10 cm
+                            from hem» этикетку ставят по-разному в двух цехах; силуэт с меткой
+                            снимает разночтение быстрее, чем любая формулировка. Нераспознанное
+                            размещение силуэта НЕ печатает — пустой силуэт читался бы как «этикетка
+                            никуда не крепится». */}
+                        <div className='flex items-start gap-2'>
+                          {resolvePlacementRegion(l.placement) && (
+                            <LabelPlacementPictogram
+                              placement={l.placement}
+                              attachment={l.attachment}
+                              className='shrink-0'
+                            />
+                          )}
+                          <span>{l.placement || '—'}</span>
+                        </div>
+                      </td>
                       <td className={TD}>{l.attachment || '—'}</td>
                       <td className={TD}>{l.size || '—'}</td>
                     </tr>
@@ -1489,36 +1631,43 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* ISSUES */}
-      {has(tc.issues) && (
-        <Sheet title='issues'>
+      {/* ОТКРЫТЫЕ ВОПРОСЫ. На бумагу идут только те, что ещё открыты: закрытый вопрос на листе
+          цеха читается как задача, а не как история, и его начинают решать заново. Колонка
+          «resolution» вместе с ними уходит — у открытого вопроса её нет по определению. */}
+      {has(openIssues) && (
+        <Sheet title='открытые вопросы'>
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={TH}>severity</th>
-                <th className={TH}>status</th>
                 <th className={TH}>ref</th>
                 <th className={TH}>description</th>
-                <th className={TH}>resolution</th>
               </tr>
             </thead>
             <tbody>
-              {(tc.issues ?? []).map((iss, i) => (
-                <tr key={i} className='break-inside-avoid'>
-                  <td className={TD}>{issueSevL[iss.severity ?? ''] ?? '—'}</td>
-                  <td className={TD}>{issueStatusL[iss.status ?? ''] ?? '—'}</td>
-                  <td className={TD}>
-                    {[
-                      iss.operationNumber ? `op ${iss.operationNumber}` : '',
-                      iss.calloutNumber ? `callout ${iss.calloutNumber}` : '',
-                    ]
-                      .filter(Boolean)
-                      .join(', ') || '—'}
-                  </td>
-                  <td className={TD}>{iss.description || '—'}</td>
-                  <td className={TD}>{iss.resolutionNote || '—'}</td>
-                </tr>
-              ))}
+              {openIssues.map((iss, i) => {
+                // Ссылка issue→операция хрупкая: клиент перенумеровывает шаги при перестановке, а
+                // AI-регенерация осиротляет ссылки все разом. Потерянная ссылка обязана называться
+                // вслух — «op 40», которого в списке нет, отправляет швею искать несуществующий шаг.
+                const opNo = wireInt(iss.operationNumber);
+                const opLost =
+                  opNo > 0 &&
+                  !(tc.operations ?? []).some((o) => wireInt(o.operationNumber) === opNo);
+                return (
+                  <tr key={i} className='break-inside-avoid'>
+                    <td className={TD}>{issueSevL[iss.severity ?? ''] ?? '—'}</td>
+                    <td className={TD}>
+                      {[
+                        opNo ? `op ${opNo}${opLost ? ' — ссылка потеряна' : ''}` : '',
+                        iss.calloutNumber ? `callout ${iss.calloutNumber}` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(', ') || '—'}
+                    </td>
+                    <td className={TD}>{iss.description || '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </Sheet>
