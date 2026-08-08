@@ -4,9 +4,10 @@ import {
   usePrintReady,
   type PrintDep,
 } from 'components/managers/print/use-print-ready';
+import { parsePrintQuery } from 'components/managers/print/scope';
 import { ROUTES } from 'constants/routes';
-import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { RunPackDocument } from './components/run-pack-document';
@@ -34,6 +35,9 @@ export function RunPackPrint() {
   const { id } = useParams<{ id: string }>();
   const numId = id ? parseInt(id, 10) : 0;
   const runId = Number.isFinite(numId) ? numId : 0;
+  // Наряду из скоупа нужен колорвей: партия на нескольких цветах уезжает в цех по одному цвету.
+  const [searchParams] = useSearchParams();
+  const printQuery = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
 
   const { data: runData, isLoading, isError } = useProductionRun(runId, runId > 0);
   const run = runData?.run;
@@ -127,6 +131,7 @@ export function RunPackPrint() {
             // QR, и это единственное последствие.
             runPackToken={runData?.runPackToken}
             onDataStatus={setDocDeps}
+            printQuery={printQuery}
           />
         </div>
       )}

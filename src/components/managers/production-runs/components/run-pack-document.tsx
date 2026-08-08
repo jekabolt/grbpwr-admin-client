@@ -8,6 +8,7 @@ import {
 } from 'api/proto-http/admin';
 import { useSuppliers } from 'components/managers/accounting/utils/hooks';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
+import { EMPTY_QUERY, type PrintQuery } from 'components/managers/print/scope';
 import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
 import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 import {
@@ -64,6 +65,7 @@ export function RunPackDocument({
   cutPlanUnavailable = false,
   runPackToken,
   onDataStatus,
+  printQuery = EMPTY_QUERY,
 }: {
   run: common_ProductionRun;
   cutPlan?: GetProductionRunCutPlanResponse;
@@ -77,6 +79,12 @@ export function RunPackDocument({
   runPackToken?: string;
   /** Статусы запросов, которые документ делает сам, — для гейта готовности печатной страницы. */
   onDataStatus?: (deps: PrintDep[]) => void;
+  /**
+   * Скоуп печати из query. Наряду сейчас нужен из него только колорвей: партия на нескольких
+   * цветах печатается в цех по одному цвету за раз, иначе на раскройном столе лежит бумага про
+   * чужую ткань.
+   */
+  printQuery?: PrintQuery;
 }) {
   const ins = run.run;
   const runId = wireInt(run.id);
@@ -128,7 +136,21 @@ export function RunPackDocument({
   }, [depsKey]);
 
   const tc = techCard?.techCard;
-  const lines = useMemo(() => ins?.lines ?? [], [ins?.lines]);
+
+  // ФИЛЬТР КОЛОРВЕЯ. Применяется к ИСТОЧНИКАМ (линии, кат-лист, настилы, покрытие), а не к
+  // выводу: отфильтруй только таблицу — и итоги под ней останутся от всей партии, то есть лист
+  // напечатает урезанные строки под чужой суммой. На линии основной карты колорвей адресуется
+  // productId (колорвей = product, R1), на линии aux-карты — outputVariantId.
+  const scopeColorwayId = printQuery.colorwayId;
+  const inScope = (colorwayId?: number, variantId?: number): boolean =>
+    !scopeColorwayId ||
+    wireInt(colorwayId) === scopeColorwayId ||
+    wireInt(variantId) === scopeColorwayId;
+
+  const lines = useMemo(
+    () => (ins?.lines ?? []).filter((l) => inScope(l.productId, l.outputVariantId)),
+    [ins?.lines, scopeColorwayId],
+  );
 
   // Градация карточки, приведённая к числам ОДИН РАЗ. Ниже она трижды сравнивается со множествами
   // размеров, собранными через wireInt (линии прогона, клетки покрытия, кат-лист): сравни строку с
@@ -216,7 +238,10 @@ export function RunPackDocument({
   // КАТ-ЛИСТ. Считает СЕРВЕР (тот же ответ уезжает в публичный манифест наряда), клиент только
   // печатает: вторая реализация «сколько выкроить» обязана была бы совпасть с первой и не совпала
   // бы — ровно от такой пары этот наряд цех и избавляет.
-  const cutRows = useMemo(() => cutPlan?.rows ?? [], [cutPlan?.rows]);
+  const cutRows = useMemo(
+    () => (cutPlan?.rows ?? []).filter((r) => inScope(r.colorwayId, r.outputVariantId)),
+    [cutPlan?.rows, scopeColorwayId],
+  );
   const cutBlockers = cutPlan?.blockers ?? [];
 
   // АВТОРИТЕТЕН ЛИ ОТВЕТ ВООБЩЕ. Пока бэкенд этого RPC дописывают, шлюз может ответить 200 и пустым
@@ -257,8 +282,14 @@ export function RunPackDocument({
   // читается. Печатный вид проще экранного (без поповеров), но СЛОВАРЬ вердиктов общий с экраном —
   // ровно затем словарь и вынесен в useLays.ts: «не проверено» на бумаге и «не проверено» на экране
   // обязаны означать одно и то же.
-  const lays = useMemo(() => laysData?.lays ?? [], [laysData?.lays]);
-  const coverage = useMemo(() => laysData?.coverage ?? [], [laysData?.coverage]);
+  const lays = useMemo(
+    () => (laysData?.lays ?? []).filter((l) => inScope(l.colorwayId)),
+    [laysData?.lays, scopeColorwayId],
+  );
+  const coverage = useMemo(
+    () => (laysData?.coverage ?? []).filter((c) => inScope(c.colorwayId)),
+    [laysData?.coverage, scopeColorwayId],
+  );
 
   const coverageColorways = useMemo(() => {
     const ids = new Set<number>();
@@ -347,6 +378,14 @@ export function RunPackDocument({
           runLockVersion > 0 ? `план v${runLockVersion}` : '',
         )}
       />
+      {/* ЧЕМ ОГРАНИЧЕН ЛИСТ. Наряд по одному колорвею выглядит как наряд на всю партию, только
+          короче: не назови он свой скоуп вслух — и тираж одного цвета прочитают как весь заказ. */}
+      {scopeColorwayId > 0 && (
+        <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+          печать по колорвею: {colorwayLabel(scopeColorwayId)} — строки других цветов этой партии в
+          лист не вошли
+        </p>
+      )}
       {/* ШАПКА — что это за партия и по какой ревизии её кроят. */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
@@ -879,6 +918,15 @@ export function RunPackDocument({
 
       {/* ВЫДАЧА МАТЕРИАЛОВ */}
       <Sheet title='выдача материалов'>
+        {/* Материальный план НЕ ИМЕЕТ оси колорвея: сервер считает потребность по артикулам на всю
+            партию сразу. При печати по одному цвету этот лист остаётся про всю партию, и молчать
+            об этом нельзя — склад выдал бы по нему ткань как под один цвет. */}
+        {scopeColorwayId > 0 && (
+          <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-micro uppercase'>
+            лист посчитан на ВСЮ партию, включая другие колорвеи — потребность по артикулам не
+            делится по цветам
+          </p>
+        )}
         {/* Блокеры плана — первыми и здесь, по той же причине: план, молча уронивший слот, читается
             как «нехватки нет», и партия уезжает шить не с той фурнитурой. */}
         {materialBlockers.length > 0 && (
