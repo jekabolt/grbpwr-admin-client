@@ -177,7 +177,7 @@ async function measure(fx, fixture, index) {
   }
 
   console.log(
-    '\n    прогон              длина, см  поколений      eps  предпросчёт  размещено  проверка',
+    '\n    прогон              длина, см  поколений    оценок      eps  предпросчёт     всего  размещено  проверка',
   );
   const runs = new Map();
   for (const j of jobs) {
@@ -191,8 +191,10 @@ async function measure(fx, fixture, index) {
       console.log(
         `    ${j.tag} ${j.name.padEnd(16)} ${fmt(o.usedLengthCm).padStart(9)}` +
           `  ${String(o.generation).padStart(9)}` +
+          `  ${String(o.evaluated).padStart(8)}` +
           `  ${fmt(o.effectiveEpsCm, 3).padStart(7)}` +
           `  ${(fmt(o.prepassMs / 1000) + ' с').padStart(11)}` +
+          `  ${(fmt(o.elapsedMs / 1000) + ' с').padStart(8)}` +
           `  ${`${o.placedCount}/${o.totalCount}`.padStart(9)}` +
           `  ${geomOk ? 'ok' : `НАЛОЖ ${o.overlaps} КОРОТ ${o.shortPairs} ВНЕ ${o.outsideWidth}`}` +
           `${allPlaced ? '' : '  ← НЕ ВСЁ РАЗМЕЩЕНО'}`,
@@ -207,10 +209,12 @@ async function measure(fx, fixture, index) {
     const l = lens(tag);
     const j = runs.get(tag).job;
     const gens = runs.get(tag).outs.map((o) => o.generation);
+    const secs = runs.get(tag).outs.map((o) => o.elapsedMs / 1000);
     console.log(
       `    ${tag} ${j.name.padEnd(16)} медиана ${fmt(median(l)).padStart(8)} см` +
         `  (min ${fmt(Math.min(...l))} / max ${fmt(Math.max(...l))})` +
         `  поколений ${Math.min(...gens)}…${Math.max(...gens)}` +
+        `  по часам ${fmt(median(secs))} с` +
         // Повтор ОДИН — говорить «прогоны совпали» не о чем: движок посеян детерминированно
         // (nest/index.ts), и повторы меряют не поиск, а ровность машины.
         `  повторы совпали ${REPEATS < 2 ? '— (повтор один)' : new Set(runs.get(tag).outs.map((o) => o.blob)).size === 1 ? 'да' : 'НЕТ'}`,
