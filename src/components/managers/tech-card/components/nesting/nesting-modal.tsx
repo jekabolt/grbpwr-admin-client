@@ -200,14 +200,14 @@ export function NestingModal({
   // сохранённая раскладка пережила переименование детали. Пусто/не передано — маркер сохранится
   // с пустыми ключами, как и раньше: это законное «неизвестно», а не «такой детали нет».
   pieceAliases?: readonly { blockName?: string; pieceLineKey?: string }[];
-  // «ТРЕБУЕМЫЙ ПРИПУСК» карточки, см (Ф3.2). Это ЭТАЛОН, а не факт: он предзаполняет поле, но
+  // «ТРЕБУЕМЫЙ ПРИПУСК» карточки, мм (Ф3.2). Это ЭТАЛОН, а не факт: он предзаполняет поле, но
   // никогда не переписывает то, что оператор ввёл руками, и не участвует в отказах — сравнение
   // «не хуже» делает гейт готовности (Ф6), а не путь сохранения. `null`/не передано = карточка
   // эталона не задала, и подставлять ноль ЗАПРЕЩЕНО: ноль здесь — законная настройка («наши
   // выкройки несут линию кроя»), и спутать её с «не настроено» значит объявить каждую раскладку с
   // припуском нарушающей эталон, которого никто не задавал.
   requiredSeamAllowanceMm?: number | null;
-  // Припуск цеха по умолчанию, см (admin.WorkshopSettings.default_seam_allowance_cm). Тот же
+  // Припуск цеха по умолчанию, мм (admin.WorkshopSettings.default_seam_allowance_mm). Тот же
   // договор: `null` = не настроено, и это НЕ ноль.
   workshopDefaultSeamAllowanceMm?: number | null;
   // ПРОГОН, ПОД КОТОРЫЙ СНИМАЕТСЯ РАСКРОЙНЫЙ МАРКЕР (Ф4.2). 0 = карточный — все сегодняшние
@@ -561,7 +561,7 @@ export function NestingModal({
     contourMeasure?.verdict === 'cut' && (contourMeasure.allowanceCm ?? 0) > 0;
   const doubleAllowanceRefusal =
     !viewData && contourIsCutLine && allowanceMm > 0 && contourMeasure
-      ? `слой ${contourMeasure.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(contourMeasure.allowanceCm ?? 0).toFixed(2)} см снаружи линии шва (совпало на ${contourMeasure.stats.accepted} блоках). Раскладка добавит ещё ${allowanceMm.toFixed(1)} мм офсета — припуск будет посчитан ДВАЖДЫ, и длина завышена примерно на ${allowanceMm.toFixed(1)} мм по периметру каждой детали. Выходов два: поставить припуск 0 (контур уже с припуском) либо ${
+      ? `слой ${contourMeasure.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(engineCmToMm(contourMeasure.allowanceCm) ?? 0).toFixed(1)} мм снаружи линии шва (совпало на ${contourMeasure.stats.accepted} блоках). Раскладка добавит ещё ${allowanceMm.toFixed(1)} мм офсета — припуск будет посчитан ДВАЖДЫ, и длина завышена примерно на ${allowanceMm.toFixed(1)} мм по периметру каждой детали. Выходов два: поставить припуск 0 (контур уже с припуском) либо ${
           seamLayerPick
             ? `выбрать контурный слой ${seamLayerPick} — на нём замерена линия шва`
             : 'выбрать контурный слой с линией шва'
@@ -612,10 +612,10 @@ export function NestingModal({
     const m = contourMeasure;
     if (!m || parse.phase !== 'ready') return 'контур DXF — линия шва; кладётся линия кроя';
     if (m.verdict === 'cut') {
-      return `слой ${m.layer}: ЛИНИЯ КРОЯ — припуск ${(m.allowanceCm ?? 0).toFixed(2)} см уже в контуре (замерено на ${m.stats.accepted} блоках)`;
+      return `слой ${m.layer}: ЛИНИЯ КРОЯ — припуск ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} мм уже в контуре (замерено на ${m.stats.accepted} блоках)`;
     }
     if (m.verdict === 'seam') {
-      return `слой ${m.layer}: линия шва — линия кроя нарисована в ${(m.gapCm ?? 0).toFixed(2)} см снаружи (замерено на ${m.stats.accepted} блоках)`;
+      return `слой ${m.layer}: линия шва — линия кроя нарисована в ${(engineCmToMm(m.gapCm) ?? 0).toFixed(1)} мм снаружи (замерено на ${m.stats.accepted} блоках)`;
     }
     return `крой или шов — по файлу не определить: ${allowanceUnknownText(m)}`;
   })();
@@ -1944,7 +1944,10 @@ export function NestingModal({
               .filter(Boolean)
               .join(' · ')
           : '';
-  const s3Summary = `${widthCm} см · зазор ${gapCm} · припуск ${allowanceMm.toFixed(1)}`;
+  // Единица у КАЖДОГО числа: ширина и зазор — сантиметры, припуск — миллиметры, и в свёрнутой
+  // строке они стоят вплотную. Пока припуск шёл без подписи, «10» рядом с «160 см» читалось как
+  // сантиметры — та же ошибка на порядок, только в голове у оператора.
+  const s3Summary = `${widthCm} см · зазор ${gapCm} см · припуск ${allowanceMm.toFixed(1)} мм`;
   // Размещения — в свёрнутой сводке тоже: приближение к потолку 5000 должно быть видно и при
   // закрытой секции, а не открываться вместе с ней.
   const s4Summary =
@@ -2562,7 +2565,8 @@ export function NestingModal({
               <CalloutBox tone='note'>
                 <Text size='nano' component='p'>
                   припуск 0 — и это верно для выбранного слоя: на нём ЛИНИЯ КРОЯ, припуск{' '}
-                  {(contourMeasure?.allowanceCm ?? 0).toFixed(2)} см уже заложен в контур. Раскладка
+                  {(engineCmToMm(contourMeasure?.allowanceCm) ?? 0).toFixed(1)} мм уже заложен в
+                  контур. Раскладка
                   кладёт его как есть.
                 </Text>
               </CalloutBox>
