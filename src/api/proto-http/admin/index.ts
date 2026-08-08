@@ -5380,10 +5380,18 @@ export type common_TechCardDevCostSummary = {
   totalBase: googletype_Decimal | undefined;
   hasUnconverted: boolean | undefined;
   byKind: common_TechCardDevCostByKind[] | undefined;
-  // Amortized informational figure: production unit_cost + total_base / Σ order_qty — how much
-  // development adds to each unit at the current size run. Unset when order_qty is 0 or the
-  // production unit cost is unavailable. NOT part of cost_price (development is a period cost).
+  // Amortized informational figure: production unit_cost + total_base / order_qty — how much
+  // development adds to each unit over the quantity this style is actually planned to produce.
+  // Unset when order_qty is 0 or the production unit cost is unavailable. NOT part of cost_price
+  // (development is a period cost).
   unitCostWithDev: googletype_Decimal | undefined;
+  // order_qty is Σ planned_qty over the style's NON-CANCELLED PRODUCTION RUNS — the batches somebody
+  // committed to make. It is NOT the tech card's size_quantities: that field is the «типовой тираж
+  // для калькуляции», an illustrative mix nobody produces, and while it was the denominator here the
+  // R&D-per-unit of a style moved whenever someone edited a quantity that was never going to exist.
+  // The field name is kept for wire compatibility; read it as «запланировано по прогонам».
+  // 0 = no production run planned yet, and then unit_cost_with_dev is unset — R&D spent before the
+  // first batch is planned has nothing to be spread over, and no substitute batch is invented for it.
   orderQty: number | undefined;
   // Q8 rollup (read projection, built alongside — never seeded into cost_price):
   byRound: common_TechCardDevCostByRound[] | undefined;
