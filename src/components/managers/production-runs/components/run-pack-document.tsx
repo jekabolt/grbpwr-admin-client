@@ -7,6 +7,10 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { useSuppliers } from 'components/managers/accounting/utils/hooks';
+import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
+import { EMPTY_QUERY, type PrintQuery } from 'components/managers/print/scope';
+import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
+import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 import {
   CUT_SYMMETRY_PRINT_LEGEND,
   cutSymmetryBadge,
@@ -17,7 +21,7 @@ import { useTechCardReleases } from 'components/managers/tech-card/components/us
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useEffect, useMemo } from 'react';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { decimalToInput } from 'utils/decimal';
@@ -41,41 +45,10 @@ import { useMaterialPlan } from './useProductionRuns';
 // которые документ читает, денежные поля НЕСЁТ (release meta.unit_cost, run.actuals); они просто не
 // выводятся, и это правило, а не текущее состояние вёрстки.
 
-const TD = 'border border-black px-1.5 py-1 align-top';
-const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-100 uppercase';
-
-// Sheet / KV — ЛОКАЛЬНЫЕ КОПИИ примитивов тех-пака (tech-pack-document.tsx:190-209), намеренно.
-// Импорт оттуда утащил бы в чанк печатного роута весь тех-пак с его медиа, моделями, словарём ухода
-// и раскладками — ради двух элементов вёрстки по восемь строк. Обе бумаги обязаны выглядеть
-// одинаково, поэтому классы здесь дословно те же: чёрная плашка заголовка листа, TH/TD в 1px, и
-// разрыв страницы, который не рвёт строку.
-function Sheet({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className='mb-5'>
-      <h2 className='mb-2 break-after-avoid bg-black px-2 py-1 text-control font-bold uppercase tracking-[0.12em] text-white'>
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function KV({ k, v }: { k: string; v?: ReactNode }) {
-  const empty = v == null || v === '' || v === '—';
-  return (
-    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-control leading-tight'>
-      <span className='w-36 shrink-0 uppercase tracking-wide text-labelColor'>{k}</span>
-      <span className='font-medium'>{empty ? '—' : v}</span>
-    </div>
-  );
-}
-
-// Пустое место листа. Говорит ПОЧЕМУ пусто: молчаливая пустая таблица в наряде читается как «здесь
-// ничего не требуется», а это ровно противоположно правде в большинстве случаев, из-за которых она
-// пуста.
-function Nothing({ children }: { children: ReactNode }) {
-  return <p className='border border-black px-2 py-1.5 text-micro'>{children}</p>;
-}
+// Примитивы вёрстки (Sheet/KV/TD/TH/Nothing) переехали в components/managers/print/sheet.tsx —
+// общий лёгкий модуль. Раньше здесь стояла намеренная копия, чтобы не тащить в чанк печатного
+// роута наряда весь тех-пак с его медиа, моделями и словарями; общий модуль эту причину снимает,
+// пока сам остаётся standalone (правило записано в его шапке).
 
 const ZERO_TS = '0001-01-01T00:00:00Z';
 
@@ -91,6 +64,8 @@ export function RunPackDocument({
   cutPlan,
   cutPlanUnavailable = false,
   runPackToken,
+  onDataStatus,
+  printQuery = EMPTY_QUERY,
 }: {
   run: common_ProductionRun;
   cutPlan?: GetProductionRunCutPlanResponse;
@@ -102,6 +77,14 @@ export function RunPackDocument({
    * него была бы хуже пустого места — она читается как «QR не пропечатался».
    */
   runPackToken?: string;
+  /** Статусы запросов, которые документ делает сам, — для гейта готовности печатной страницы. */
+  onDataStatus?: (deps: PrintDep[]) => void;
+  /**
+   * Скоуп печати из query. Наряду сейчас нужен из него только колорвей: партия на нескольких
+   * цветах печатается в цех по одному цвету за раз, иначе на раскройном столе лежит бумага про
+   * чужую ткань.
+   */
+  printQuery?: PrintQuery;
 }) {
   const ins = run.run;
   const runId = wireInt(run.id);
@@ -109,18 +92,25 @@ export function RunPackDocument({
   const releaseId = wireInt(ins?.releaseId);
 
   const { dictionary } = useDictionary();
-  const { data: techCard } = useTechCard(techCardId || undefined);
+  const {
+    data: techCard,
+    isPending: techCardPending,
+    isLoading: techCardLoading,
+    isError: techCardError,
+  } = useTechCard(techCardId || undefined);
   // Статусы, а не только данные. Лист, напечатанный на полпути загрузки, обязан сказать
   // «не получено», а не «настилов нет» и не «потребности нет»: пустой ответ и не приехавший ответ
   // выглядят на бумаге одинаково, а означают противоположное, и цех отличить их уже ничем не может.
   const {
     data: laysData,
     isPending: laysPending,
+    isLoading: laysLoading,
     isError: laysError,
   } = useRunLays(runId, runId > 0);
   const {
     data: materialPlan,
     isPending: materialPending,
+    isLoading: materialLoading,
     isError: materialError,
   } = useMaterialPlan(runId, runId > 0);
   const { data: suppliersData } = useSuppliers();
@@ -129,8 +119,48 @@ export function RunPackDocument({
   // зафиксирована» было бы враньём наоборот.
   const { data: releasesData } = useTechCardReleases(techCardId || undefined);
 
+  // Статусы собственных запросов документа — наверх, в гейт готовности печатной страницы.
+  // Ключ-строка не даёт эффекту срабатывать на каждый рендер.
+  //
+  // ГЕЙТУ отдаём isLoading, а НЕ isPending. В react-query v5 у отключённого запроса
+  // (`enabled: false`) `isPending` навсегда true — данных нет и не будет, — а `isLoading` = pending
+  // && fetching, то есть false. Скорми гейту isPending, и прогон, у которого нет привязанной
+  // карты, десять секунд держал бы кнопку печати заблокированной, а потом печатал плашку «тех-карта
+  // не пришла» про запрос, который никто не посылал. Собственным плашкам документа, наоборот,
+  // нужен именно isPending: там вопрос «есть ли данные», а не «едут ли они».
+  const depsKey = [
+    techCardLoading,
+    techCardError,
+    laysLoading,
+    laysError,
+    materialLoading,
+    materialError,
+  ].join(',');
+  useEffect(() => {
+    onDataStatus?.([
+      { label: 'тех-карта', status: depStatus(techCardLoading, techCardError) },
+      { label: 'настилы', status: depStatus(laysLoading, laysError) },
+      { label: 'материальный план', status: depStatus(materialLoading, materialError) },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depsKey]);
+
   const tc = techCard?.techCard;
-  const lines = useMemo(() => ins?.lines ?? [], [ins?.lines]);
+
+  // ФИЛЬТР КОЛОРВЕЯ. Применяется к ИСТОЧНИКАМ (линии, кат-лист, настилы, покрытие), а не к
+  // выводу: отфильтруй только таблицу — и итоги под ней останутся от всей партии, то есть лист
+  // напечатает урезанные строки под чужой суммой. На линии основной карты колорвей адресуется
+  // productId (колорвей = product, R1), на линии aux-карты — outputVariantId.
+  const scopeColorwayId = printQuery.colorwayId;
+  const inScope = (colorwayId?: number, variantId?: number): boolean =>
+    !scopeColorwayId ||
+    wireInt(colorwayId) === scopeColorwayId ||
+    wireInt(variantId) === scopeColorwayId;
+
+  const lines = useMemo(
+    () => (ins?.lines ?? []).filter((l) => inScope(l.productId, l.outputVariantId)),
+    [ins?.lines, scopeColorwayId],
+  );
 
   // Градация карточки, приведённая к числам ОДИН РАЗ. Ниже она трижды сравнивается со множествами
   // размеров, собранными через wireInt (линии прогона, клетки покрытия, кат-лист): сравни строку с
@@ -218,8 +248,13 @@ export function RunPackDocument({
   // КАТ-ЛИСТ. Считает СЕРВЕР (тот же ответ уезжает в публичный манифест наряда), клиент только
   // печатает: вторая реализация «сколько выкроить» обязана была бы совпасть с первой и не совпала
   // бы — ровно от такой пары этот наряд цех и избавляет.
-  const cutRows = useMemo(() => cutPlan?.rows ?? [], [cutPlan?.rows]);
-  const cutBlockers = cutPlan?.blockers ?? [];
+  const cutRows = useMemo(
+    () => (cutPlan?.rows ?? []).filter((r) => inScope(r.colorwayId, r.outputVariantId)),
+    [cutPlan?.rows, scopeColorwayId],
+  );
+  // Блокеры фильтруются так же, как строки: «стоп» про белый цвет над таблицей чёрного
+  // отправляет цех останавливаться из-за чужой партии.
+  const cutBlockers = (cutPlan?.blockers ?? []).filter((b) => inScope(b.colorwayId));
 
   // АВТОРИТЕТЕН ЛИ ОТВЕТ ВООБЩЕ. Пока бэкенд этого RPC дописывают, шлюз может ответить 200 и пустым
   // телом — и тогда `rows: []` неотличимо от честного «в карте нет деталей кроя». Разница огромна:
@@ -259,8 +294,14 @@ export function RunPackDocument({
   // читается. Печатный вид проще экранного (без поповеров), но СЛОВАРЬ вердиктов общий с экраном —
   // ровно затем словарь и вынесен в useLays.ts: «не проверено» на бумаге и «не проверено» на экране
   // обязаны означать одно и то же.
-  const lays = useMemo(() => laysData?.lays ?? [], [laysData?.lays]);
-  const coverage = useMemo(() => laysData?.coverage ?? [], [laysData?.coverage]);
+  const lays = useMemo(
+    () => (laysData?.lays ?? []).filter((l) => inScope(l.colorwayId)),
+    [laysData?.lays, scopeColorwayId],
+  );
+  const coverage = useMemo(
+    () => (laysData?.coverage ?? []).filter((c) => inScope(c.colorwayId)),
+    [laysData?.coverage, scopeColorwayId],
+  );
 
   const coverageColorways = useMemo(() => {
     const ids = new Set<number>();
@@ -340,6 +381,23 @@ export function RunPackDocument({
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
+      {/* Постраничный колонтитул: лист наряда, вынутый из стопки, обязан называть партию и
+          версию плана, по которой он напечатан. Один PageFurniture на документ. */}
+      <PageFurniture
+        line={furnitureLine(
+          `PR-${runId || '—'}`,
+          tc?.styleNumber ? `стиль ${tc.styleNumber}` : '',
+          runLockVersion > 0 ? `план v${runLockVersion}` : '',
+        )}
+      />
+      {/* ЧЕМ ОГРАНИЧЕН ЛИСТ. Наряд по одному колорвею выглядит как наряд на всю партию, только
+          короче: не назови он свой скоуп вслух — и тираж одного цвета прочитают как весь заказ. */}
+      {scopeColorwayId > 0 && (
+        <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+          печать по колорвею: {colorwayLabel(scopeColorwayId)} — строки других цветов этой партии в
+          лист не вошли
+        </p>
+      )}
       {/* ШАПКА — что это за партия и по какой ревизии её кроят. */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
@@ -686,8 +744,13 @@ export function RunPackDocument({
                   <td className={`${TD} text-right uppercase`} colSpan={4 + cutSizeColumns.length}>
                     всего по партии
                   </td>
+                  {/* Итог считаем от ВИДИМЫХ строк, а не берём серверный piecesToCutTotal: тот
+                      посчитан по всему прогону, и под таблицей одного колорвея он был бы суммой
+                      чужих цветов. Без скоупа обе величины совпадают. */}
                   <td className={`${TD} text-center font-bold`}>
-                    {cutPlan?.piecesToCutTotal ?? '?'}
+                    {scopeColorwayId > 0
+                      ? cutRows.reduce((sum, r) => sum + wireInt(r.piecesToCutTotal), 0)
+                      : (cutPlan?.piecesToCutTotal ?? '?')}
                   </td>
                 </tr>
               </tbody>
@@ -872,6 +935,15 @@ export function RunPackDocument({
 
       {/* ВЫДАЧА МАТЕРИАЛОВ */}
       <Sheet title='выдача материалов'>
+        {/* Материальный план НЕ ИМЕЕТ оси колорвея: сервер считает потребность по артикулам на всю
+            партию сразу. При печати по одному цвету этот лист остаётся про всю партию, и молчать
+            об этом нельзя — склад выдал бы по нему ткань как под один цвет. */}
+        {scopeColorwayId > 0 && (
+          <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-micro uppercase'>
+            лист посчитан на ВСЮ партию, включая другие колорвеи — потребность по артикулам не
+            делится по цветам
+          </p>
+        )}
         {/* Блокеры плана — первыми и здесь, по той же причине: план, молча уронивший слот, читается
             как «нехватки нет», и партия уезжает шить не с той фурнитурой. */}
         {materialBlockers.length > 0 && (

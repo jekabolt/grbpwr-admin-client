@@ -52,8 +52,10 @@ import {
   useDeleteProductionRun,
   useMaterialPlan,
   useProductionRun,
+  useProductionRuns,
   useReverseRunReceipt,
 } from './components/useProductionRuns';
+import { PrintOptionsModal } from 'components/managers/print/options-modal';
 
 // A run walks through six phases — план → материалы → раскрой → приёмка → затраты → закрытие — and
 // the page shows the ONE it is in: the conveyor band names them all with a line of fact each and
@@ -126,6 +128,16 @@ export function ProductionRunDetail() {
   const [editOpen, setEditOpen] = useState(false);
   const [receiveOpen, setReceiveOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
+  // Прогоны карты для селекта модалки печати — только когда модалка открыта; до загрузки списка
+  // модалка живёт на одном текущем прогоне (см. fallback в рендере).
+  const { data: cardRunsData } = useProductionRuns(
+    ins?.techCardId ?? 0,
+    '',
+    0,
+    false,
+    printOptionsOpen && !!ins?.techCardId,
+  );
   // Phase 6: reversing a receipt needs a mandatory reason — the dialog carries it. null = closed.
   const [reverseTarget, setReverseTarget] = useState<number | null>(null);
   const [reverseReason, setReverseReason] = useState('');
@@ -774,6 +786,17 @@ export function ProductionRunDetail() {
           <Button asChild variant='secondary' size='lg' className='uppercase'>
             <Link to={runPackPath(run.id ?? 0)}>наряд — pdf</Link>
           </Button>
+          {/* Тех-пак, скоупнутый на ЭТУ партию (преднабранный прогон). Тоже вне гейта canEdit:
+              печать — это чтение. */}
+          <Button
+            type='button'
+            variant='secondary'
+            size='lg'
+            className='uppercase'
+            onClick={() => setPrintOptionsOpen(true)}
+          >
+            тех-пак — pdf
+          </Button>
           {canEdit && (
             <>
               {receiveButton('lg', 'main')}
@@ -933,6 +956,15 @@ export function ProductionRunDetail() {
           />
         </div>
       </ConfirmationModal>
+
+      <PrintOptionsModal
+        open={printOptionsOpen}
+        onClose={() => setPrintOptionsOpen(false)}
+        techCardId={ins?.techCardId ?? 0}
+        techCard={techCard}
+        runs={cardRunsData?.runs ?? [run]}
+        defaultRunId={run.id ?? 0}
+      />
 
       <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={run} />
       <ReceiveModal
