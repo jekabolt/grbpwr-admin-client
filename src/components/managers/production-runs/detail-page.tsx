@@ -21,11 +21,12 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
+import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
-import { decimalToInput } from 'utils/decimal';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
 import { CutReceipts } from './components/cut-receipts';
 import { LayPlan } from './components/lay-plan';
@@ -1099,6 +1100,21 @@ function varianceSub(d?: googletype_Decimal): string | undefined {
   return `Δ ${n > 0 ? '+' : ''}${decimalToInput(d)}`;
 }
 
+// A decimal as a NUMBER, with "absent" kept distinct from zero: null means there is no number at
+// all, and null is NOT 0. (`decNum` above deliberately coerces to 0 for arithmetic — that
+// coercion is exactly what must not happen here, where the whole point is telling "no snapshot"
+// apart from "a snapshot of zero".)
+//
+// Ф6.7 needs this because a google.type.Decimal is a STRING on the wire ({value: "1.5"}) and
+// "1.5" vs "1.5000" is one number written two ways: comparing the strings would announce "the
+// card moved" on a run where nothing moved. Today both sides happen to be rendered from the same
+// 2-dp value in trimmed canonical form, so the strings usually agree too — usually is not a
+// contract, and the scale of either column can widen without anyone touching this file.
+function planCostNumber(d?: googletype_Decimal): number | null {
+  const n = parseDecimalNumber(d?.value);
+  return Number.isFinite(n) ? n : null;
+}
+
 // Plan-vs-actual cost, in tiles: unit cost (feeds cost_price) AND total cost (the actual budget
 // question an owner asks first) — total was computed by the backend already (actuals.plannedTotalBase
 // / actualTotalBase / totalVariance) but had no reader anywhere in this module until now. Hidden
@@ -1111,6 +1127,21 @@ function CostSummary({
   actuals?: common_ProductionRunActuals;
 }) {
   const cur = actuals?.baseCurrency || run.plannedCurrency || '';
+  // Ф6.7. `plannedUnitCost` is a snapshot taken ONCE, when the run was created, and deliberately
+  // never recomputed; `plannedUnitCostToday` is the same formula over TODAY's card. The two drift
+  // legally — re-shooting a norm moves the card's price and not the run's — and the drift cannot
+  // be caught by a date: neither saving a marker nor writing a recipe touches tech_card.updated_at,
+  // so the timestamp is silent in precisely the case this badge exists for. The only honest signal
+  // is that the two NUMBERS disagree. Both sides may independently be absent, and absent is a third
+  // thing — neither zero nor "they agree" — hence four states, three of which are not a badge.
+  const planSnapshot = planCostNumber(run.plannedUnitCost);
+  const planToday = planCostNumber(run.plannedUnitCostToday);
+  const snapshotDate = runDate(run.createdAt) || '—';
+  // The today-price is computed in the BASE currency by construction (the server returns nothing
+  // when the costing is not in base), so `cur` — base first — is its true unit.
+  const planTodayText = run.plannedUnitCostToday?.value
+    ? `${decimalToInput(run.plannedUnitCostToday)} ${cur}`.trim()
+    : '';
   const warnings: string[] = [];
   if (actuals?.mixedMaterialsSources) {
     warnings.push('a manual materials cost AND stock issues both exist — check for a double count');
@@ -1164,6 +1195,58 @@ function CostSummary({
           tone={varianceTone(actuals?.totalVariance)}
         />
       </StatGrid>
+
+      {(() => {
+        // Ф6.7, in the order the four states have to be told apart. Blue (`attention`) is this
+        // system's "changed / stale, a human should look"; grey is "no number to compare". Red
+        // stays reserved for loss and blockers — a plan price that moved is neither.
+        if (planSnapshot === null) {
+          // The snapshot was never taken: the server writes NULL on purpose when the run's costing
+          // is not in the base currency. Today's number may still exist and may be shown — but it
+          // cannot be called a divergence, because there is nothing for it to diverge from.
+          return (
+            <div className='flex flex-wrap items-center gap-2'>
+              <Pill tone='mut'>snapshot not taken</Pill>
+              <Text variant='inactive' size='small'>
+                плановая цена при создании прогона не снималась (костинг не в базовой валюте)
+                {planTodayText ? ` — сегодня та же формула даёт ${planTodayText}` : ''}
+              </Text>
+            </div>
+          );
+        }
+        if (planToday === null) {
+          // Snapshot yes, today no: the card was deleted, or its costing is no longer in base.
+          // Empty must read as empty — this is not "they agree" and not a reason to say nothing.
+          return (
+            <div className='flex flex-wrap items-center gap-2'>
+              <Pill tone='mut'>today not computed</Pill>
+              <Text variant='inactive' size='small'>
+                плановая цена — снапшот от {snapshotDate}; по сегодняшней карточке цену посчитать не
+                удалось (карточки нет или её костинг не в базовой валюте) — расхождение неизвестно
+              </Text>
+            </div>
+          );
+        }
+        // Both numbers exist and agree — nothing has moved the price since the snapshot. Nothing
+        // to say, so nothing is said.
+        if (planToday === planSnapshot) return null;
+        // ПРИЧИНУ НЕ НАЗЫВАЕМ. Соблазн написать «карточка изменилась» велик, и в распространённом
+        // случае это ложь: в ту же формулу входит actual_wastage_percent САМОГО ПРОГОНА, который
+        // правится на этом же экране. Оператор, поменявший процент раскроя, получил бы обвинение
+        // карточки, где никто ничего не трогал, и ушёл бы искать несуществующую правку. Говорим
+        // факт и называем обе двери, в которые стоит заглянуть.
+        return (
+          <div className='flex flex-wrap items-start gap-2'>
+            <Pill tone='attention'>plan drifted</Pill>
+            <Text variant='inactive' size='small'>
+              плановая цена — снапшот от {snapshotDate}; сегодня та же формула даёт {planTodayText} —{' '}
+              {planToday > planSnapshot ? 'дороже' : 'дешевле'} снапшота. Разойтись могли двое:
+              карточка (пересъёмка нормы, правка рецепта или цен) и процент раскроя этого прогона —
+              он тоже входит в расчёт.
+            </Text>
+          </div>
+        );
+      })()}
 
       {(() => {
         // Phase 7 explicitness: the actual unit cost divides the run's whole cost by the GOOD

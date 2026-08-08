@@ -95,6 +95,10 @@ export function MarkerApplyHint({
     consumptionSource?: string;
     wasteSelvedgePct?: string;
     wasteCutPct?: string;
+    // Ф6.8 ШТАМП НОРМЫ: из КАКОЙ раскладки снято это число. Едет тем же патчем, что и провенанс
+    // отходов, по той же причине — чтобы «число» и «откуда оно» не могли разъехаться. 0 —
+    // явное «штампа нет» (см. provenance).
+    normMarkerId?: number;
   }) => void;
 }) {
   const lineMarkers = markersForLine(markers, lineKey);
@@ -277,15 +281,22 @@ export function MarkerApplyHint({
   // across a size run (same geometry, same cloth) and the number is never multiplied by
   // anything; a marker with no recorded efficiency contributes nothing and the split stays
   // blank rather than invented.
-  const provenance = (used: common_TechCardMarkerSummary[]) => {
+  //
+  // Ф6.8 ДОБАВЛЯЕТ К ЭТОМУ ШТАМП: вместе с числом уходит id раскладки, ИЗ КОТОРОЙ оно снято.
+  // §6.4 этим не отменяется — штамп не FK и ничего не пересчитывает; он лишь позволяет строке
+  // рецепта ответить на вопрос, которого она сегодня не помнит: «раскладку с тех пор перемеряли,
+  // число ещё актуально?». Дату применения ставит СЕРВЕР — клиент её не шлёт никогда.
+  const provenance = (used: common_TechCardMarkerSummary[], normMarkerId: number) => {
     const parts = used.map(markerWasteDecomposition).filter((d) => d != null);
-    if (parts.length === 0) return { consumptionSource: 'marker', wasteSelvedgePct: '', wasteCutPct: '' };
+    if (parts.length === 0)
+      return { consumptionSource: 'marker', wasteSelvedgePct: '', wasteCutPct: '', normMarkerId };
     const mean = (pick: (d: { selvedgePct: number; cutPct: number }) => number) =>
       String(Math.round((parts.reduce((s, d) => s + pick(d!), 0) / parts.length) * 100) / 100);
     return {
       consumptionSource: 'marker',
       wasteSelvedgePct: mean((d) => d.selvedgePct),
       wasteCutPct: mean((d) => d.cutPct),
+      normMarkerId,
     };
   };
 
@@ -294,7 +305,13 @@ export function MarkerApplyHint({
       if (!conv || chosenRefusal) return;
       // The scalar mode CLEARS per-size grading (trap №1): a lone per-size row would make
       // the server ignore this very scalar.
-      onApply({ consumption: String(conv.value), sizeConsumptions: [], ...provenance([chosen]) });
+      //
+      // Штамп — id ВЫБРАННОЙ раскладки: одно число, одна раскладка, атрибуция точная.
+      onApply({
+        consumption: String(conv.value),
+        sizeConsumptions: [],
+        ...provenance([chosen], chosen.id ?? 0),
+      });
     } else {
       const rows: { sizeId: number; consumption: string }[] = [];
       const used: common_TechCardMarkerSummary[] = [];
@@ -307,7 +324,26 @@ export function MarkerApplyHint({
         if (r.marker && !used.includes(r.marker)) used.push(r.marker);
       }
       if (rows.length === 0) return;
-      onApply({ sizeConsumptions: rows, ...provenance(used) });
+      // ШТАМП СТАВИТ НЕ РЕЖИМ, А ЧИСЛО ИСТОЧНИКОВ — и 0 здесь такое же решение, как id.
+      //
+      // Штамп утверждает «эти числа пришли из раскладки #N». Ложью его делает НЕСКОЛЬКО источников,
+      // а не слово «по размерам» в названии режима: проштамповать одну из нескольких значило бы
+      // поставить правдоподобную ложь, после которой индикатор расхождения следил бы за ОДНОЙ
+      // раскладкой и МОЛЧА пропускал изменения в остальных — выглядел бы работающим, ничего не
+      // проверяя. Поэтому источников больше одного ⇒ 0.
+      //
+      // Но с Ф2.4 одна СМЕШАННАЯ раскладка законно накрывает весь размерный ряд, и тогда источник
+      // ровно один: утверждение «числа сняты с #N» просто ИСТИННО, а продолжения по площадям
+      // берут её же за базис — перемеряют её, устаревают и они. Отказать здесь в штампе значило бы
+      // выбросить индикатор у самого современного пути ради симметрии с случаем, которого нет.
+      // Считаем РАЗЛИЧНЫЕ id, а не длину массива: две строки могут держать два объекта одной и той
+      // же раскладки.
+      //
+      // 0 обязан быть ЯВНЫМ, а не пропуском поля: отсутствие сервер читает как «сохрани что было»,
+      // и прежний скалярный штамп пережил бы применение по размерам, начав описывать не то число.
+      const sourceIds = new Set(used.map((m) => Number(m.id ?? 0)).filter((id) => id > 0));
+      const stamp = sourceIds.size === 1 ? [...sourceIds][0] : 0;
+      onApply({ sizeConsumptions: rows, ...provenance(used, stamp) });
     }
     setOpen(false);
   };

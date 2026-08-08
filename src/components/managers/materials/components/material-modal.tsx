@@ -26,6 +26,7 @@ import {
 } from 'utils/decimal';
 import { fieldErrorSummary } from 'utils/field-errors';
 import { CompositionWizard, type CompRow } from './composition-wizard';
+import { CuttingCoefficientSuggestion } from './cutting-coefficient-suggestion';
 import { composeArticle, type ArticleInput } from './material-code';
 import { mediaThumbUrl } from './material-thumb';
 import { materialPurposeOptions, resolveMaterialPurpose } from './purpose-options';
@@ -1186,6 +1187,15 @@ export function MaterialModal({
                   </Text>
                 </label>
               </div>
+              {/* Ф5б.3 — КАЛИБРОВКА КОЭФФИЦИЕНТА ПО ФАКТУ. Поле выше заводят «на глазок»; панель
+                показывает, что говорят замеры цеха на настилах этого артикула, и кладёт готовый
+                множитель в поле ПО НАЖАТИЮ. Ничего не сохраняет: сохранение — это save карточки,
+                и нажимает его человек, уже увидев число в инпуте. */}
+              <CuttingCoefficientSuggestion
+                materialId={material?.id ?? 0}
+                isFabric={d.materialClass === 'MATERIAL_CLASS_FABRIC'}
+                onApply={(v) => set({ cuttingCoefficient: sanitizeDecimal(v, 4) })}
+              />
             </>
           )}
 

@@ -24,6 +24,7 @@ import {
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { techCardLabDipStatusOptions } from 'constants/filter';
 import { composition as compositionDict } from 'constants/garment-composition';
 import { useDictionary } from 'lib/providers/dictionary-provider';
@@ -166,12 +167,26 @@ type UsageDraft = {
   consumptionSource: string | undefined;
   wasteSelvedgePct: string;
   wasteCutPct: string;
+  // Ф6.8 ШТАМП НОРМЫ: из КАКОЙ раскладки применён этот расход. `undefined` — то же ТРЕТЬЕ
+  // состояние, что у consumptionSource выше, и по той же причине: «черновик не знает» обязано
+  // ОПУСКАТЬ поле на проводе, чтобы полная замена строк не стёрла аудит, который этот клиент
+  // просто не читал. 0 — явное «штампа нет» (пер-размерная норма, см. marker-apply).
+  normMarkerId: number | undefined;
+  // ПОКАЗ ТОЛЬКО. Серверная отметка «когда норму применили»: клиент её НЕ ШЛЁТ НИКОГДА, ровно
+  // как labDipSubmittedAt и lineTotal. Нужна ей одна вещь — сравниться с updatedAt раскладки и
+  // сказать, не перемеряли ли ту после применения.
+  normAppliedAt: string | undefined;
 };
 
 // The provenance triple travels together: a norm is either marker-measured (with its
 // decomposition) or hand-typed (with none). Retyping a number by hand makes it manual — leaving
 // it marked «marker» would keep costing from applying the article's wastage to a figure that no
 // longer contains any.
+//
+// normMarkerId (Ф6.8) НАРОЧНО НЕ ВХОДИТ В ЭТУ ТРОЙКУ. Демотацию в ручной режим сервер трактует
+// сам: пришедший consumption_source='' снимает и штамп, и его дату. Дублировать здесь нулём
+// значило бы завести второе место, которое обязано согласоваться с первым, — а строке нужно
+// ровно обратное: пусть решает одна сторона.
 const MANUAL_PROVENANCE = {
   consumptionSource: '',
   wasteSelvedgePct: '',
@@ -279,6 +294,21 @@ function fmtDay(v: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
   if (!m) return v;
   return `${m[3]} ${MONTHS[Number(m[2]) - 1] ?? m[2]}`;
+}
+
+// Момент времени из серверной отметки — ЧИСЛОМ, для сравнения двух отметок между собой (Ф6.8).
+//
+// Сравнивать RFC-3339 СТРОКАМИ нельзя: «2026-08-08T10:00:00Z» и «2026-08-08T13:00:00+03:00» —
+// один и тот же момент, а лексикографически это разные строки, и исход сравнения решает смещение
+// зоны, а не время. Дробные секунды и «Z» против «+00:00» ломают его ровно так же.
+//
+// null означает «отметки нет» — пусто, нулевое значение protobuf или неразбираемая строка — и это
+// НЕ эпоха: сравнение с отсутствующей отметкой не даёт права утверждать расхождение. Иначе все
+// строки, применённые до Ф6.8 (а их большинство), разом объявились бы устаревшими.
+function tsMillis(ts?: string): number | null {
+  if (!ts || ts.startsWith('0001-01-01')) return null;
+  const t = new Date(ts).getTime();
+  return Number.isNaN(t) ? null : t;
 }
 
 // Initialise the editor from the colourway ref's mirrored lab-dip fields (techCard.colorways[].labDip*),
@@ -555,6 +585,11 @@ function fromRead(
     consumptionSource: u.consumptionSource === 'manual' ? '' : u.consumptionSource || '',
     wasteSelvedgePct: decimalToInput(u.wasteSelvedgePct),
     wasteCutPct: decimalToInput(u.wasteCutPct),
+    // Ф6.8, ОБА ДОСЛОВНО. Штамп не нормализуется в 0: отсутствие поля — это «сервер ничего не
+    // сказал», и ровно оно обязано вернуться на провод отсутствием, иначе полная замена строк
+    // сотрёт чужой аудит. Отметка времени читается только чтобы её показать.
+    normMarkerId: u.normMarkerId,
+    normAppliedAt: u.normAppliedAt,
   };
 }
 
@@ -587,9 +622,20 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
     consumptionSource: d.consumptionSource,
     wasteSelvedgePct: inputToDecimal(d.wasteSelvedgePct),
     wasteCutPct: inputToDecimal(d.wasteCutPct),
+    // Ф6.8 ШТАМП НОРМЫ — ТОЧНО ТА ЖЕ ДИСЦИПЛИНА, ЧТО У consumptionSource ВЫШЕ, И ПО ТОЙ ЖЕ
+    // ПРИЧИНЕ: дословно, включая undefined. JSON.stringify выбрасывает ключ со значением
+    // undefined, и сервер читает ОТСУТСТВИЕ как «сохрани что было», а явный 0 — как «сними
+    // штамп». Черновик, восстановленный из снимка сборки, которая про штамп не знала, — это
+    // ровно тот случай, ради которого различие и заведено: подставить сюда 0 значило бы стереть
+    // аудит применения на первом же сохранении соседнего поля.
+    normMarkerId: d.normMarkerId,
     // output-only — never sent
     lineTotal: undefined,
     sizeRunTotal: undefined,
+    // Отметку применения ставит СЕРВЕР и только при смене пары (источник, раскладка). Прислать
+    // её отсюда значило бы обновлять её на каждом сохранении рецепта — то есть ГАСИТЬ индикатор
+    // расхождения правкой любого соседнего поля.
+    normAppliedAt: undefined,
   };
 }
 
@@ -1213,6 +1259,10 @@ function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
     lineTotal: '',
     sizeRunTotal: '',
     ...MANUAL_PROVENANCE,
+    // Новая строка ничего ниоткуда не применяла, и сказать это можно ЯВНО: сохранять здесь нечего
+    // (на сервере такой строки ещё нет), а 0 читается тем же правилом, что и везде, — «штампа нет».
+    normMarkerId: 0,
+    normAppliedAt: undefined,
   };
 }
 
@@ -1266,6 +1316,43 @@ function SlotUsageRow({
     draft.sizeConsumptions.length === 0;
   const unit = article?.unit?.trim() || slot?.unit?.trim() || '';
   const missingArticle = !!slot && materialId === 0;
+
+  // ── ШТАМП НОРМЫ И РАСХОЖДЕНИЕ (Ф6.8) ────────────────────────────────────────────────────
+  //
+  // Строка помнит, ИЗ КАКОЙ раскладки снят её расход, и когда. Отсюда — единственный вопрос,
+  // на который она до Ф6.8 ответить не могла: раскладку с тех пор перемеряли, число ещё живое?
+  //
+  // Штамп читается только на строке, чей расход СЕЙЧАС марочный. Ручная правка числа снимает
+  // consumption_source (MANUAL_PROVENANCE), и подпись «применена из раскладки» под числом,
+  // набранным руками, была бы прямой ложью — даже если сервер ещё не успел снять штамп.
+  const stampedId = draft.consumptionSource === 'marker' ? draft.normMarkerId ?? 0 : 0;
+  // Ищется по ВСЕМУ переданному списку раскладок — тому же, из которого применяли. FK на
+  // раскладку не заведён СОЗНАТЕЛЬНО (§6.4): раскладки удаляют, и висящий id значит ровно
+  // «раскладку удалили» — это правда о данных, а не их порча.
+  const stampedMarker = stampedId
+    ? markers?.find((m) => (m.id ?? 0) === stampedId)
+    : undefined;
+  const appliedMs = tsMillis(draft.normAppliedAt);
+  const markerMs = tsMillis(stampedMarker?.updatedAt);
+  // РАСХОЖДЕНИЕ УТВЕРЖДАЕТСЯ, ТОЛЬКО КОГДА ЕСТЬ ОБЕ ОТМЕТКИ. Отсутствие даты применения — не
+  // «применено в эпоху»: так расхождение объявилось бы у каждой строки, применённой до того, как
+  // штамп начали ставить, и индикатор с первого дня кричал бы на всём.
+  const normDrifted = appliedMs != null && markerMs != null && markerMs > appliedMs;
+  const appliedDay = formatTechCardDate(draft.normAppliedAt);
+  const markerDay = formatTechCardDate(stampedMarker?.updatedAt);
+  // Раскладка называется ИМЕНЕМ — тем самым, которым её выбирали в диалоге применения. Номер
+  // остаётся только там, где имени взять негде: у удалённой раскладки его уже никто не помнит.
+  const stampedName = stampedMarker
+    ? `«${stampedMarker.name?.trim() || `#${stampedId}`}»`
+    : `#${stampedId}`;
+  const normStampText = [
+    appliedDay !== '—'
+      ? `норма применена ${appliedDay} из раскладки ${stampedName}`
+      : `норма применена из раскладки ${stampedName}`,
+    normDrifted ? `раскладка изменена ${markerDay} — число могло устареть` : '',
+  ]
+    .filter(Boolean)
+    .join('; ');
 
   // The colourway PIN — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — demoted from a second
   // always-on select to a small popover on the article card: one visible picker per row (the slot),
@@ -1388,6 +1475,10 @@ function SlotUsageRow({
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
+              // Патч уходит в черновик ЦЕЛИКОМ — вместе с ним и штамп нормы (normMarkerId, Ф6.8)
+              // наравне с consumptionSource. Перечислять поля здесь поимённо значило бы завести
+              // список, который обязан догонять marker-apply: провенанс и число разъехались бы
+              // ровно в тот день, когда кто-то добавит там поле и забудет здесь.
               onApply={(patch) => onChange(patch)}
             />
           </div>
@@ -1415,6 +1506,35 @@ function SlotUsageRow({
                 ? `отходы уже внутри: кромка ${draft.wasteSelvedgePct || '0'}% + выпады ${draft.wasteCutPct || '0'}%`
                 : 'отходы уже внутри нормы; разложение не записано'}
               {slot?.wastagePercent?.trim() ? ` · ${slot.wastagePercent}% слота не начисляются` : ''}
+            </Text>
+          </div>
+        )}
+
+        {/* Ф6.8: ПРОИСХОЖДЕНИЕ ЧИСЛА И ЕГО СВЕЖЕСТЬ. Пилюля выше говорит «расход марочный»; эта
+            строка говорит, ЧЕЙ он и не устарел ли. Без штампа (пер-размерные нормы и всё,
+            применённое до Ф6.8) не показывается ничего — их большинство, и они не сломаны,
+            им просто нечего сказать. Расхождение — 'attention' (синий): это «изменилось, нужен
+            человек», а не блокер и не убыток; красный тут врал бы про цену вопроса. */}
+        {stampedId > 0 && (
+          <div className='flex flex-wrap items-center gap-1.5'>
+            {normDrifted && (
+              <Pill
+                tone='attention'
+                title={`раскладку ${stampedName} перемеряли после того, как с неё сняли эту норму — число в строке может относиться к прежней геометрии. Пересчёта нет и не будет: примените расход заново, если хотите свежий`}
+              >
+                раскладка изменена после применения
+              </Pill>
+            )}
+            {!stampedMarker && (
+              <Pill
+                tone='mut'
+                title={`раскладки ${stampedName} среди раскладок этого колорвея больше нет — её удалили. Ссылки (FK) на раскладку не заводили намеренно: число в строке КОПИЯ и остаётся верным, но пересмотреть его источник уже нельзя`}
+              >
+                раскладка удалена
+              </Pill>
+            )}
+            <Text size='nano' variant='label' component='span'>
+              {normStampText}
             </Text>
           </div>
         )}

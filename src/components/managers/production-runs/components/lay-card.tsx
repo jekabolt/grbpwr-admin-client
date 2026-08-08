@@ -22,8 +22,13 @@ import {
   layActualQty,
   layLotState,
   layVerdict,
+  stampWhen,
   worstVerdict,
 } from './useLays';
+
+// Переэкспорт для соседей, которые импортировали отметку отсюда: определение переехало в useLays,
+// чтобы её мог читать и склад, не утаскивая к себе карточку настила.
+export { stampWhen };
 
 export const LAY_MODE_LABEL: Record<string, string> = {
   PRODUCTION_LAY_MODE_FACE_UP: 'лицом вверх',
@@ -259,20 +264,6 @@ function StackHeightRow({
       className={VERDICT_TEXT[verdict]}
     />
   );
-}
-
-// Компактная отметка времени замера: «05 авг, 14:20». Полный формат `formatDate` (месяц словом,
-// год) в колонке чисел не помещается, а год у замера этой недели ничего не добавляет.
-export function stampWhen(ts?: string): string {
-  if (!ts) return '';
-  const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString(undefined, {
-    day: '2-digit',
-    month: 'short',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
 }
 
 // ЛОТ И ФАКТ РАСХОДА — то, что знает ЦЕХ, а не планировщик (Ф5б.1 / Ф5б.2).

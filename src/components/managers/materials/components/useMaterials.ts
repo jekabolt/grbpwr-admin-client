@@ -12,6 +12,8 @@ const materialKeys = {
   list: (section: string, includeArchived: boolean, purpose: common_MaterialPurpose) =>
     [...materialKeys.all, 'list', section, includeArchived, purpose] as const,
   prices: (materialId: number) => [...materialKeys.all, 'prices', materialId] as const,
+  cuttingSuggestion: (materialId: number) =>
+    [...materialKeys.all, 'cutting-coefficient-suggestion', materialId] as const,
 };
 
 // ListMaterials.section is a plain string, not the TechCardBomSection enum — mirroring the
@@ -67,6 +69,29 @@ export function useMaterialPrices(materialId: number, enabled: boolean) {
     queryKey: materialKeys.prices(materialId),
     queryFn: () => adminService.ListMaterialPrices({ materialId }),
     enabled,
+  });
+}
+
+// Ф5б.3 — ПРЕДЛОЖЕНИЕ коэффициента раскроя по факту настилов этого артикула. Сервер ничего не
+// пишет: он считает медиану дрейфа план↔факт по настилам с планом И фактом и отдаёт её вместе с
+// разбором по настилам. Коэффициент в поле ставит рука владельца артикула — та же дисциплина, что
+// у нормы и у пер-размерного расхода.
+//
+// enabled даётся вызывающим и обязан быть двойным (ткань И сохранённый артикул): у несозданного
+// артикула настилов нет по построению, а на фурнитуре коэффициент раскроя не значит ничего.
+// materialId > 0 продублирован здесь, потому что генератор бросает исключение на material_id = 0
+// ещё до запроса.
+//
+// retry:false — RPC классифицирован production:read, а карточку артикула открывает и тот, у кого
+// этого права нет. Без него 403 ретраился бы как временный сбой и всплыл бы с задержкой; с ним он
+// сразу приходит в query.error, и панель читает error.status === 403 как «предложения нет на этом
+// доступе», а не как ошибку (тот же приём, что у useStyleCostEstimate с costing-403).
+export function useCuttingCoefficientSuggestion(materialId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: materialKeys.cuttingSuggestion(materialId),
+    queryFn: () => adminService.GetMaterialCuttingCoefficientSuggestion({ materialId }),
+    enabled: enabled && materialId > 0,
+    retry: false,
   });
 }
 
