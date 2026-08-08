@@ -8454,6 +8454,12 @@ export type GetProductionRunRequest = {
 
 export type GetProductionRunResponse = {
   run: common_ProductionRun | undefined;
+  // Output-only токен-капабилити ('r' scope) публичного НАРЯДА НА ПАРТИЮ: печать зашивает в QR
+  // {origin админки}/rp/{token}, а страница резолвит его через GET /api/rp/{token} этого бэкенда.
+  // Живёт на ОТВЕТЕ, а не на common.ProductionRun, по той же причине, что и pattern_viewer_token на
+  // ответе карточки: common.* сообщения ложатся в сохраняемые снапшоты, а токену доступа в
+  // сохранённом снапшоте не место. Никогда не персистится; пусто, когда сервис наряда не подключён.
+  runPackToken: string | undefined;
 };
 
 // ProductionRun is a stored run: the writable payload plus the server-owned identity, the frozen
