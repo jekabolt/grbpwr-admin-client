@@ -230,6 +230,63 @@ export function TechPackDocument({
     [scope, techCard],
   );
   const { dictionary } = useDictionary();
+
+  // ВСЕ ХУКИ ОБЪЯВЛЕНЫ ДО раннего `if (!tc) return null` ниже. Иначе карта, приехавшая сначала
+  // обёрткой без вложенного insert, а потом целиком (кэш → рефетч), меняла бы число вызовов
+  // хуков между рендерами — а это не «иногда неверный вывод», это падение всего компонента.
+  // Порядок узлов — порядок словаря зон: бумага и экран обязаны перечислять узлы одинаково.
+  // Шаги без зоны идут последней группой, а не растворяются в первой.
+  const operationGroups = useMemo(() => {
+    const indexed = (tc?.operations ?? []).map((op, index) => ({ op, index }));
+    // Раскладываем ПО ОСТАТКУ, а не по совпадению со словарём. Прошлая версия перебирала словарь,
+    // пропускала в нём UNKNOWN — и та же строка исключала UNKNOWN из «остальных», потому что
+    // формально она в словаре ЕСТЬ. Шаг с зоной по умолчанию не попадал ни в одну группу и
+    // исчезал с листа швеи целиком: не «печатался не там», а не печатался вовсе.
+    const rest = new Set(indexed.map((x) => x.index));
+    const groups: Array<{ zone: string; label: string; operations: typeof indexed }> = [];
+    for (const z of zoneOptions.map((o) => o.value as string)) {
+      if (z === 'TECH_CARD_GARMENT_ZONE_UNKNOWN') continue;
+      const operations = indexed.filter((x) => (x.op.zone ?? '') === z);
+      if (operations.length === 0) continue;
+      operations.forEach((x) => rest.delete(x.index));
+      groups.push({ zone: z, label: zoneText(z as common_TechCardGarmentZone) || z, operations });
+    }
+    // Всё, что не разошлось по узлам (UNKNOWN, пустая зона, значение вне словаря клиента),
+    // печатается последней группой. Порядок внутри групп — исходный порядок шагов.
+    const orphans = indexed.filter((x) => rest.has(x.index));
+    if (orphans.length > 0) groups.push({ zone: '', label: 'узел не указан', operations: orphans });
+    return groups;
+  }, [tc?.operations]);
+
+  // Раскладки скоупа: раскладка привязана к колорвею, а colorwayId = 0 означает общую для всех
+  // цветов. Общая печатается всегда — она и есть норма этого стиля.
+  const scopedMarkers = useMemo(() => {
+    const all = techCard.markers ?? [];
+    const cwId = wireInt(printScope.colorway?.colorwayId);
+    const scopeSizes = scopedSizeIds(printScope);
+    const inSizeScope = (m: { sizeId?: number }) =>
+      wireInt(m.sizeId) === 0 || scopeSizes.includes(wireInt(m.sizeId));
+    return all.filter(
+      (m) => (!cwId || wireInt(m.colorwayId) === 0 || wireInt(m.colorwayId) === cwId) &&
+        inSizeScope(m),
+    );
+  }, [techCard.markers, printScope]);
+
+  // Уход в каноническом порядке словаря. Записи карты приходят в порядке ввода, а на этикетке и
+  // на бумаге символы обязаны стоять в одном и том же, узнаваемом порядке.
+  const careEntries = useMemo(() => {
+    const entries = techCard.careEntries ?? [];
+    const order = new Map<string, number>();
+    (dictionary?.careSymbols ?? []).forEach((sym, i) => {
+      if (sym.code) order.set(sym.code, i);
+    });
+    return [...entries].sort(
+      (a, b) =>
+        (order.get(a.code ?? '') ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(b.code ?? '') ?? Number.MAX_SAFE_INTEGER),
+    );
+  }, [techCard.careEntries, dictionary?.careSymbols]);
+
   const careVocabulary = useCareVocabulary();
   const { data: models, isLoading: modelsLoading, isError: modelsError } = useAllModels();
   // Rev.N (task: header proof-of-version) — techCard.id === styleId (R1), same call ReleasesField
@@ -413,58 +470,12 @@ export function TechPackDocument({
   // one material for a step that has several, and nothing at all for a step whose links live purely
   // in bomLineKeys with the legacy mirror empty. The singular ref stays as the fallback, for rows
   // authored before the plural field existed.
-  // Порядок узлов — порядок словаря зон: бумага и экран обязаны перечислять узлы одинаково.
-  // Шаги без зоны идут последней группой, а не растворяются в первой.
-  const operationGroups = useMemo(() => {
-    const indexed = (tc.operations ?? []).map((op, index) => ({ op, index }));
-    const order = zoneOptions.map((z) => z.value as string);
-    const groups: Array<{ zone: string; label: string; operations: typeof indexed }> = [];
-    const push = (zone: string, label: string) => {
-      const operations = indexed.filter((x) => (x.op.zone ?? '') === zone);
-      if (operations.length > 0) groups.push({ zone, label, operations });
-    };
-    for (const z of order) {
-      if (z === 'TECH_CARD_GARMENT_ZONE_UNKNOWN') continue;
-      push(z, zoneText(z as common_TechCardGarmentZone) || z);
-    }
-    const rest = indexed.filter((x) => !order.includes(x.op.zone ?? '') || !x.op.zone);
-    const known = new Set(groups.flatMap((g) => g.operations.map((o) => o.index)));
-    const orphans = rest.filter((x) => !known.has(x.index));
-    if (orphans.length > 0) groups.push({ zone: '', label: 'узел не указан', operations: orphans });
-    return groups;
-  }, [tc.operations]);
 
   // Пустой чарт печатался таблицей из одних прочерков — то есть выглядел как заполненный
   // документ, в котором все значения равны «нет». Лист без единого значения не нужен никому.
   const chartHasAnyValue = [...chartCellByKey.values()].some((v) => (v ?? '').trim() !== '');
 
-  // Раскладки скоупа: раскладка привязана к колорвею, а colorwayId = 0 означает общую для всех
-  // цветов. Общая печатается всегда — она и есть норма этого стиля.
-  const scopedMarkers = useMemo(() => {
-    const all = techCard.markers ?? [];
-    const cwId = wireInt(printScope.colorway?.colorwayId);
-    const inSizeScope = (m: { sizeId?: number }) =>
-      wireInt(m.sizeId) === 0 || sizeIds.includes(wireInt(m.sizeId));
-    return all.filter(
-      (m) => (!cwId || wireInt(m.colorwayId) === 0 || wireInt(m.colorwayId) === cwId) &&
-        inSizeScope(m),
-    );
-  }, [techCard.markers, printScope.colorway, sizeIds]);
 
-  // Уход в каноническом порядке словаря. Записи карты приходят в порядке ввода, а на этикетке и
-  // на бумаге символы обязаны стоять в одном и том же, узнаваемом порядке.
-  const careEntries = useMemo(() => {
-    const entries = techCard.careEntries ?? [];
-    const order = new Map<string, number>();
-    (dictionary?.careSymbols ?? []).forEach((sym, i) => {
-      if (sym.code) order.set(sym.code, i);
-    });
-    return [...entries].sort(
-      (a, b) =>
-        (order.get(a.code ?? '') ?? Number.MAX_SAFE_INTEGER) -
-        (order.get(b.code ?? '') ?? Number.MAX_SAFE_INTEGER),
-    );
-  }, [techCard.careEntries, dictionary?.careSymbols]);
 
   const openIssues = (tc.issues ?? []).filter(
     (iss) => (iss.status ?? '') === 'TECH_CARD_ISSUE_STATUS_OPEN',
