@@ -24,6 +24,15 @@ import {
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
 import {
+  EMPTY_QUERY,
+  buildPrintScope,
+  internalAllowed,
+  moneyAllowed,
+  scopedColorways,
+  scopedSizeIds,
+  type PrintScope,
+} from 'components/managers/print/scope';
+import {
   depStatus,
   type PrintDep,
 } from 'components/managers/print/use-print-ready';
@@ -190,6 +199,7 @@ export function TechPackDocument({
   packagingRecipe = [],
   patternViewerToken = '',
   onDataStatus,
+  scope,
 }: {
   techCard: common_TechCard;
   assembly?: StyleAssemblyLine[];
@@ -201,8 +211,19 @@ export function TechPackDocument({
   // QR per fabric scope opening the public viewer /p/{token}; empty (older backend, service
   // unwired) → transitional per-sheet QR fallback.
   patternViewerToken?: string;
+  /**
+   * Скоуп печати: прогон, колорвей, размеры, профиль. Не задан — прежний внутренний документ
+   * обо всём сразу (все колорвеи, все размеры, деньги на месте).
+   */
+  scope?: PrintScope;
 }) {
   const tc = techCard.techCard;
+  // Скоуп по умолчанию: тот же документ, что печатался до появления скоупа. Так у каждой секции
+  // ниже ровно один источник правды о том, что ей печатать, — даже когда скоупа не передали.
+  const printScope = useMemo(
+    () => scope ?? buildPrintScope({ techCard, query: EMPTY_QUERY }),
+    [scope, techCard],
+  );
   const { dictionary } = useDictionary();
   const careVocabulary = useCareVocabulary();
   const { data: models, isLoading: modelsLoading, isError: modelsError } = useAllModels();
@@ -346,10 +367,14 @@ export function TechPackDocument({
   const approver = roleNames('TECH_CARD_ROLE_APPROVER');
   const sizeName = (id?: number) => (id ? sizeById.get(id) ?? `#${id}` : '—');
   const unitAbbr = tc.measurementUnit === 'TECH_CARD_MEASUREMENT_UNIT_MM' ? 'mm' : 'cm';
-  const sizeIds = tc.sizeIds ?? [];
+  // ЕДИНСТВЕННАЯ точка фильтрации размеров и колорвеев на весь документ. Ниже `sizeIds` и
+  // `colorways` читают все секции — размерная таблица, детали кроя, рецепты, выкройки, костинг, —
+  // поэтому скоуп применяется ЗДЕСЬ, а не в каждой секции. Фильтр, размноженный по секциям, забудут
+  // в одной из них, и на бумаге окажется деталь одного цвета рядом с рецептом всех цветов.
+  const sizeIds = scopedSizeIds(printScope);
   // The live colourway data — this is the actual fix for #71/M10: previously hardcoded to `[]`,
   // so the colourways sheet and per-colourway cost labels below never rendered for any card.
-  const colorways = techCard.colorways ?? [];
+  const colorways = scopedColorways(printScope);
   const colorwayLabel = (cw?: common_AdminColorwayRef): string => {
     if (!cw) return '—';
     const dc = cw.colorCode ? colorByCode.get(cw.colorCode) : undefined;
@@ -556,9 +581,32 @@ export function TechPackDocument({
         line={furnitureLine(
           tc.styleNumber ? `style ${tc.styleNumber}` : '',
           tc.name,
+          // Колорвей и партия — то, чем два одинаковых на вид листа отличаются друг от друга на
+          // столе. Без скоупа обе части пусты, и колонтитул остаётся прежним.
+          printScope.colorway ? colorwayLabel(printScope.colorway) : '',
+          printScope.run ? `PR-${wireInt(printScope.run.id)}` : '',
           latestRelease ? `rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased',
         )}
       />
+      {/* ЧЕМ ОГРАНИЧЕН ЭТОТ ДОКУМЕНТ. Скоупнутый тех-пак выглядит как полный: у него та же
+          шапка и те же листы, просто короче таблицы. Не назови он свой скоуп вслух — и лист,
+          напечатанный по одному колорвею, читается как «у стиля один цвет», а лист по размерам
+          партии — как «у стиля эта градация». Обе ошибки молчаливые и обе дорогие. */}
+      {(printScope.colorway || printScope.run || printScope.profile === 'factory') && (
+        <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+          печать по скоупу:{' '}
+          {[
+            printScope.colorway ? `колорвей ${colorwayLabel(printScope.colorway)}` : '',
+            printScope.run ? `партия PR-${wireInt(printScope.run.id)}` : '',
+            printScope.sizeIds.length && printScope.sizeIds.length !== (tc.sizeIds ?? []).length
+              ? `размеры ${printScope.sizeIds.map(sizeName).join(', ')}`
+              : '',
+            printScope.profile === 'factory' ? 'комплект в цех (без себестоимости)' : '',
+          ]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+      )}
       {/* COVER / IDENTITY */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
@@ -616,10 +664,12 @@ export function TechPackDocument({
       </div>
 
       {/* DESCRIPTION */}
-      {(tc.concept || has(tc.details) || tc.notes) && (
+      {((tc.concept && internalAllowed(printScope)) || has(tc.details) || tc.notes) && (
         <div className='mb-5 mt-4'>
           <Sheet title='description'>
-            {tc.concept && <p className='mb-2 text-xs italic'>{tc.concept}</p>}
+            {tc.concept && internalAllowed(printScope) && (
+              <p className='mb-2 text-xs italic'>{tc.concept}</p>
+            )}
             <div className='space-y-2'>
               {(tc.details ?? []).map((d, i) => {
                 const imgs = (d.mediaIds ?? [])
@@ -712,8 +762,8 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* MOODBOARD */}
-      {has(tc.moodboardMedia) && (
+      {/* MOODBOARD — внутреннее: цеху он не адресован и только удлиняет комплект. */}
+      {has(tc.moodboardMedia) && internalAllowed(printScope) && (
         <Sheet title='moodboard'>
           <div className='flex flex-wrap gap-4'>
             {(tc.moodboardMedia ?? []).map((m, i) => {
@@ -863,11 +913,15 @@ export function TechPackDocument({
                 <th className={`${TH} w-6`}>#</th>
                 <th className={TH}>section</th>
                 <th className={TH}>material</th>
-                <th className={TH}>supplier</th>
+                {/* Поставщик и цена — коммерческие сведения. Профиль `factory` печатает BOM как
+                    спецификацию материалов, а не как закупку. */}
+                {moneyAllowed(printScope) && <th className={TH}>supplier</th>}
                 <th className={TH}>base colour</th>
                 <th className={TH}>fabric</th>
                 <th className={TH}>unit</th>
-                <th className={`${TH} text-right`}>unit price</th>
+                {moneyAllowed(printScope) && (
+                  <th className={`${TH} text-right`}>unit price</th>
+                )}
               </tr>
             </thead>
             <tbody>
@@ -890,16 +944,20 @@ export function TechPackDocument({
                       <div className='font-medium'>{b.name || '—'}</div>
                       {b.composition && <div className='text-labelColor'>{b.composition}</div>}
                     </td>
-                    <td className={TD}>
-                      {b.supplier || '—'}
-                      {b.supplierRef ? ` (${b.supplierRef})` : ''}
-                    </td>
+                    {moneyAllowed(printScope) && (
+                      <td className={TD}>
+                        {b.supplier || '—'}
+                        {b.supplierRef ? ` (${b.supplierRef})` : ''}
+                      </td>
+                    )}
                     <td className={TD}>{b.color || '—'}</td>
                     <td className={TD}>{fabric || '—'}</td>
                     <td className={TD}>{b.unit || '—'}</td>
-                    <td className={`${TD} whitespace-nowrap text-right`}>
-                      {dec(b.unitPrice) ? `${dec(b.unitPrice)} ${b.currency ?? ''}` : '—'}
-                    </td>
+                    {moneyAllowed(printScope) && (
+                      <td className={`${TD} whitespace-nowrap text-right`}>
+                        {dec(b.unitPrice) ? `${dec(b.unitPrice)} ${b.currency ?? ''}` : '—'}
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -920,13 +978,20 @@ export function TechPackDocument({
                 <th className={`${TH} text-center`}>qty / garment</th>
                 <th className={TH}>grainline</th>
                 <th className={`${TH} text-center`}>fused</th>
-                <th className={TH}>fabric (by colourway)</th>
+                <th className={TH}>
+                  {printScope.colorway ? 'fabric' : 'fabric (by colourway)'}
+                </th>
                 <th className={TH}>note</th>
               </tr>
             </thead>
             <tbody>
               {(tc.pieces ?? []).map((p, i) => {
-                const materials = p.materials ?? [];
+                // Скоуп колорвея схлопывает N строк ткани в одну. Фильтровать надо САМ список, а
+                // не только подпись: оставь строки чужих цветов с неразрешённым именем — и в
+                // клетке напечатается «—: ткань», то есть чужая ткань под прочерком вместо цвета.
+                const materials = (p.materials ?? []).filter((m) =>
+                  colorways.some((c) => wireInt(c.colorwayId) === wireInt(m.colorwayId)),
+                );
                 return (
                   <tr key={p.lineKey || i} className='break-inside-avoid'>
                     <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
@@ -981,7 +1046,13 @@ export function TechPackDocument({
                               })?.name || '';
                             return (
                               <div key={j}>
-                                <span className='font-medium'>{colorwayLabel(cw)}</span>:{' '}
+                                {/* При скоупе на один колорвей имя цвета в каждой клетке — шум:
+                                    он уже стоит в колонтитуле и на обложке. */}
+                                {printScope.colorway ? null : (
+                                  <>
+                                    <span className='font-medium'>{colorwayLabel(cw)}</span>:{' '}
+                                  </>
+                                )}
                                 {fabricName || '—'}
                                 {fusingName ? ` (+ fusing: ${fusingName})` : ''}
                               </div>
@@ -1023,7 +1094,9 @@ export function TechPackDocument({
                     )}
                     <span className='font-bold uppercase'>{colorwayLabel(c)}</span>
                     {c.colorCode && <span className='text-labelColor'>{c.colorCode}</span>}
-                    {c.baseSku && <span className='text-labelColor'>· {c.baseSku}</span>}
+                    {c.baseSku && internalAllowed(printScope) && (
+                      <span className='text-labelColor'>· {c.baseSku}</span>
+                    )}
                     <span className='ml-auto text-labelColor'>{lifecycleLabel(c.status)}</span>
                   </div>
                   {usages.length === 0 ? (
@@ -1336,8 +1409,10 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* COSTING */}
-      {tc.costing && (
+      {/* COSTING — только внутренний профиль. Бумага профиля `factory` уезжает внешнему
+          подрядчику, и себестоимость ему не адресована: до скоупа этот лист печатался в том же
+          документе, который отдают на фабрику. */}
+      {tc.costing && moneyAllowed(printScope) && (
         <Sheet title='costing'>
           <div className='grid grid-cols-2 gap-x-8'>
             <div>
@@ -1368,7 +1443,14 @@ export function TechPackDocument({
                 </tr>
               </thead>
               <tbody>
-                {(tc.costing.colorwayCosts ?? []).map((cc, i) => {
+                {(tc.costing.colorwayCosts ?? [])
+                  .filter(
+                    // Скоуп колорвея: печатать себестоимость чужих цветов рядом с выбранным —
+                    // ровно то, от чего документ уходит.
+                    (cc) =>
+                      colorways.some((c) => wireInt(c.colorwayId) === wireInt(cc.colorwayId)),
+                  )
+                  .map((cc, i) => {
                   // colorway_id is a real FK (product id), not a positional index into
                   // `colorways` — resolve by id, not by array offset.
                   const cw = colorways.find(

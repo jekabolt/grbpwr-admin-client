@@ -1,4 +1,6 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
+import { buildPrintScope, parsePrintQuery } from 'components/managers/print/scope';
+import { useProductionRun } from 'components/managers/production-runs/components/useProductionRuns';
 import {
   depStatus,
   usePrintReady,
@@ -6,8 +8,8 @@ import {
 } from 'components/managers/print/use-print-ready';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
-import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { TechPackDocument } from './components/tech-pack-document';
@@ -34,6 +36,11 @@ const PRINT_CSS = `
 export function TechCardPrint() {
   const { id } = useParams<{ id: string }>();
   const numId = id ? parseInt(id, 10) : undefined;
+  // Скоуп печати приезжает query-параметрами: ?run=&colorway=&sizes=&profile=&booklets=&release=.
+  // Без них печать неотличима от прежней — это осознанное свойство, а не переходный период:
+  // внутренний тех-пак обо всём сразу остаётся валидным документом.
+  const [searchParams] = useSearchParams();
+  const query = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
   // useTechCardPrint, not useTechCard: печать also needs the response-level pattern_viewer_token
   // (the per-scope QR codes of the patterns section), which the editor's hook deliberately drops.
   const { data: printData, isLoading, isError } = useTechCardPrint(numId);
@@ -53,6 +60,27 @@ export function TechCardPrint() {
     isError: recipeError,
   } = usePackagingRecipe();
 
+  // Прогон — только когда он запрошен. Скоуп на партию даёт документу тираж, размеры и
+  // (в Ф5) ревизию, по которой партия кроится.
+  const {
+    data: runData,
+    isLoading: runLoading,
+    isError: runError,
+  } = useProductionRun(query.runId, query.runId > 0);
+
+  const scope = useMemo(
+    () =>
+      techCard
+        ? buildPrintScope({
+            techCard,
+            query,
+            run: runData?.run,
+            runPackToken: runData?.runPackToken,
+          })
+        : undefined,
+    [techCard, query, runData?.run, runData?.runPackToken],
+  );
+
   // Статусы запросов, которые документ делает САМ (размерная таблица, материалы, релизы, модели,
   // медиа, словарь ухода). Гейт печати обязан их ждать — именно они рисуют прочерки вместо мерок
   // и пустую колонку цвета при раннем клике. Документ отдаёт их наверх одним колбэком; setState
@@ -63,6 +91,11 @@ export function TechCardPrint() {
     { label: 'тех-карта', status: depStatus(isLoading, isError) },
     { label: 'сборка на изделии', status: depStatus(assemblyLoading, assemblyError) },
     { label: 'рецепт упаковки', status: depStatus(recipeLoading, recipeError) },
+    // Прогон попадает в гейт только когда он вообще запрошен: незапрошенный запрос вечно
+    // «не загружается», и без этого условия кнопка ждала бы то, чего никто не звал.
+    ...(query.runId > 0
+      ? [{ label: 'прогон', status: depStatus(runLoading, runError) }]
+      : []),
     ...docDeps,
   ]);
 
@@ -120,8 +153,18 @@ export function TechCardPrint() {
           <div className='px-8 pt-6'>
             <PrintDegradedNotice items={degraded} />
           </div>
+          {scope?.colorwayMissing || scope?.runMissing ? (
+            <div className='px-8'>
+              <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
+                {scope.colorwayMissing
+                  ? `колорвей #${query.colorwayId} не найден на этой карте — документ напечатан по всем колорвеям`
+                  : `прогон #${query.runId} не получен — документ напечатан без привязки к партии`}
+              </p>
+            </div>
+          ) : null}
           <TechPackDocument
             techCard={techCard}
+            scope={scope}
             assembly={assemblyData?.items ?? []}
             packagingRecipe={packagingRecipeData?.items ?? []}
             patternViewerToken={printData?.patternViewerToken ?? ''}
