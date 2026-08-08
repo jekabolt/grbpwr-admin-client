@@ -1,3 +1,10 @@
+import type {
+  common_TechCardAttachmentKind,
+  common_TechCardGarmentZone,
+  common_TechCardOperationType,
+  common_TechCardSeamClass,
+  common_TechCardTopstitch,
+} from 'api/proto-http/admin';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
@@ -84,7 +91,57 @@ const enumLabel = (v: string | undefined, prefix: string): string =>
 const lifecycleLabel = (v?: string) => enumLabel(v, 'COLORWAY_LIFECYCLE_STATUS_');
 const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 
+import {
+  attachmentOptions,
+  operationTypeOptions,
+  seamClassOptions,
+  zoneOptions,
+} from './operation-options';
+
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
+
+// The printed sheet renders dictionary TOKENS, so it needs the same labels the editor shows. They
+// come from the one options module rather than a second table here — the tech pack and the screen
+// disagreeing about what a token means is exactly the failure a shared vocabulary prevents.
+const optionLabel = <T extends string>(
+  opts: ReadonlyArray<{ value: T; label: string }>,
+  v?: T,
+  noneValue?: T,
+): string => (!v || v === noneValue ? '' : (opts.find((o) => o.value === v)?.label ?? ''));
+
+const operationTypeText = (v?: common_TechCardOperationType): string =>
+  optionLabel(operationTypeOptions, v, 'TECH_CARD_OPERATION_TYPE_UNKNOWN') || '—';
+const zoneText = (v?: common_TechCardGarmentZone): string =>
+  optionLabel(zoneOptions, v, 'TECH_CARD_GARMENT_ZONE_UNKNOWN');
+const seamClassText = (v?: common_TechCardSeamClass): string =>
+  optionLabel(seamClassOptions, v, 'TECH_CARD_SEAM_CLASS_UNKNOWN');
+
+// MILLIMETRES throughout, and ABSENT stays absent: an unset allowance inherits the card standard,
+// and printing «0 mm» for it would tell the floor to cut on the line as drawn.
+const allowanceText = (d?: googletype_Decimal): string => {
+  const v = dec(d);
+  return v ? `${v} mm` : '';
+};
+const densityText = (d?: googletype_Decimal): string => {
+  const v = dec(d);
+  return v ? `${v} st/cm` : '';
+};
+const topstitchText = (t?: common_TechCardTopstitch): string => {
+  if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
+  const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
+  if (t.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return `topstitch ${rows}edge`;
+  const w = dec(t.widthMm);
+  return `topstitch ${rows}${w ? `${w} mm` : ''}`.trim();
+};
+const attachmentText = (
+  kind?: common_TechCardAttachmentKind,
+  size?: googletype_Decimal,
+): string => {
+  const label = optionLabel(attachmentOptions, kind, 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN');
+  if (!label) return '';
+  const s = dec(size);
+  return s ? `${label} ${s} mm` : label;
+};
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
 
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА.
@@ -331,6 +388,16 @@ export function TechPackDocument({
     const legacy = resolveUsageArt(o)?.name?.trim();
     return legacy ? [legacy] : [];
   };
+  // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
+  // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
+  // same join, computed in the editor and stored in the row.
+  const opParts = (o: { pieceLineKeys?: string[] }): string[] => {
+    const pieces = tc.pieces ?? [];
+    return (o.pieceLineKeys ?? [])
+      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || '')
+      .filter(Boolean);
+  };
+
   // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
   // free-text placement survives only on legacy rows, and an unlinked row is per-garment.
   const resolveUsagePart = (u: common_TechCardColorwayUsage): string => {
@@ -1016,15 +1083,21 @@ export function TechPackDocument({
           {tc.construction && (
             <div className='mb-3 grid grid-cols-2 gap-x-8'>
               <div>
-                <KV k='main stitch' v={tc.construction.mainStitchType} />
-                <KV k='stitch density' v={tc.construction.stitchDensity} />
-                <KV k='overlock' v={tc.construction.overlockThreads} />
-                <KV k='seam allowances' v={tc.construction.seamAllowances} />
-                <KV k='hem finish' v={tc.construction.hemFinish} />
+                <KV k='default seam class' v={seamClassText(tc.construction.defaultSeamClass)} />
+                <KV k='default density' v={densityText(tc.construction.defaultStitchesPerCm)} />
+                <KV
+                  k='overlock'
+                  v={
+                    tc.construction.overlockThreadCount
+                      ? `${tc.construction.overlockThreadCount}-thread`
+                      : ''
+                  }
+                />
+                <KV k='required allowance' v={allowanceText(tc.requiredSeamAllowanceMm)} />
               </div>
               <div>
+                <KV k='hem finish' v={tc.construction.hemFinish} />
                 <KV k='pressing' v={tc.construction.pressing} />
-                <KV k='machine class' v={tc.construction.machineClass} />
                 <KV k='notes' v={tc.construction.notes} />
               </div>
             </div>
@@ -1034,54 +1107,49 @@ export function TechPackDocument({
               <thead>
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
-                  <th className={TH}>node</th>
-                  <th className={TH}>part</th>
                   <th className={TH}>operation</th>
-                  <th className={TH}>machine</th>
-                  <th className={TH}>seam / needle</th>
-                  <th className={`${TH} text-right`}>SAM</th>
+                  <th className={TH}>zone</th>
+                  <th className={TH}>pieces</th>
+                  <th className={TH}>seam</th>
+                  <th className={TH}>materials</th>
+                  <th className={`${TH} text-right`}>SMV</th>
                 </tr>
               </thead>
               <tbody>
                 {(tc.operations ?? []).map((o, i) => {
-                  // Compact secondary line instead of 4 more raw columns (thread/attachment/
-                  // stitches-per-cm/BOM-material) — an 11-column table doesn't fit A4, and this
-                  // mirrors the seam-type secondary line already used below.
-                  // The editor auto-fills `thread` from the linked thread line's ROLE name, so for
-                  // any step that links a thread the same string would otherwise print twice —
-                  // «thread: нитки основных швов · materials: нитки основных швов + основная
-                  // молния». Master printed one ref and never showed it; making the list plural is
-                  // what surfaces the duplicate, so it is dropped here rather than left on the
-                  // sheet the floor actually works from.
-                  const threadNote = (o.thread ?? '').trim().toLowerCase();
-                  const bomMaterials = resolveOpMaterials(o).filter(
-                    (name) => !threadNote || name.toLowerCase() !== threadNote,
-                  );
+                  // THE THREAD DE-DUPLICATION THAT USED TO LIVE HERE IS GONE, and so is the reason
+                  // for it: the editor auto-filled `thread` from the linked BOM line, so the same
+                  // string printed twice — once as the step's thread, once in its material list —
+                  // and this table had to subtract one from the other before printing. There is one
+                  // answer now, and it is the material list.
+                  const materials = resolveOpMaterials(o);
                   const detail = [
-                    o.thread && `thread: ${o.thread}`,
-                    o.attachment && `attach: ${o.attachment}`,
                     dec(o.stitchesPerCm) && `${dec(o.stitchesPerCm)} st/cm`,
-                    bomMaterials.length > 0 &&
-                      `material${bomMaterials.length > 1 ? 's' : ''}: ${bomMaterials.join(' + ')}`,
+                    topstitchText(o.topstitch),
+                    attachmentText(o.attachmentKind, o.attachmentSizeMm),
                   ]
                     .filter(Boolean)
                     .join(' · ');
                   return (
                     <tr key={i} className='break-inside-avoid'>
                       <td className={`${TD} text-center`}>{o.operationNumber || (i + 1) * 10}</td>
-                      <td className={TD}>{o.node || '—'}</td>
-                      <td className={TD}>{o.placement || '—'}</td>
                       <td className={TD}>
-                        <div>{o.description || '—'}</div>
-                        {o.seamType && <div className='text-labelColor'>{o.seamType}</div>}
-                        {detail && <div className='text-labelColor'>{detail}</div>}
+                        <div>{operationTypeText(o.operationType)}</div>
                         {o.note && <div className='italic text-labelColor'>{o.note}</div>}
                       </td>
-                      <td className={TD}>{o.machine || '—'}</td>
+                      <td className={TD}>{zoneText(o.zone) || '—'}</td>
+                      <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
                       <td className={TD}>
-                        {[o.seamAllowance, o.needle].filter(Boolean).join(' / ') || '—'}
+                        <div>{seamClassText(o.seamClass) || '—'}</div>
+                        {/* An ABSENT allowance inherits the card standard printed above, so only a
+                            value that DIFFERS is worth ink on the sheet the floor works from. */}
+                        {allowanceText(o.seamAllowanceMm) && (
+                          <div className='text-labelColor'>{allowanceText(o.seamAllowanceMm)}</div>
+                        )}
+                        {detail && <div className='text-labelColor'>{detail}</div>}
                       </td>
-                      <td className={`${TD} text-right`}>{dec(o.timeNorm) || '—'}</td>
+                      <td className={TD}>{materials.join(' + ') || '—'}</td>
+                      <td className={`${TD} text-right`}>{dec(o.smv) || '—'}</td>
                     </tr>
                   );
                 })}

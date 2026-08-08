@@ -114,7 +114,7 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     ? input.parsed.filter((p) => (p.layer ?? '') === conditions.contourLayer)
     : [...input.parsed];
   const oriented = orientToGrain(onLayer, conditions.grainLayer);
-  const seam = applySeamAllowance(oriented.pieces, conditions.seamAllowanceCm);
+  const seam = applySeamAllowance(oriented.pieces, conditions.seamAllowanceMm);
   const candidates = seam.pieces;
   const warnings: string[] = [];
   if (seam.hulled.length > 0) {

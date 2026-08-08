@@ -458,8 +458,8 @@ export function betterMarker(colorwayId: number) {
 // «не записано», а не ноль: маркер без припуска и есть «СТАРАЯ НОРМА» — категория ПРОИЗВОДНАЯ,
 // без своей колонки и без своего флага, потому что непомеченное само остаётся старым.
 export type MarkerConditions = {
-  seamAllowanceCm: number | null;
-  contourAllowanceCm: number | null;
+  seamAllowanceMm: number | null;
+  contourAllowanceMm: number | null;
   contourLayer: string | null;
   grainLayer: string | null;
   allowFlip: boolean | null;
@@ -474,10 +474,10 @@ export function conditionsOf(s?: common_TechCardMarkerSummary): MarkerConditions
     const n = Number(raw);
     return Number.isFinite(n) ? n : null;
   };
-  const seam = num(s?.seamAllowanceCm);
+  const seam = num(s?.seamAllowanceMm);
   return {
-    seamAllowanceCm: seam,
-    contourAllowanceCm: num(s?.contourAllowanceCm),
+    seamAllowanceMm: seam,
+    contourAllowanceMm: num(s?.contourAllowanceMm),
     contourLayer: s?.contourLayer ?? null,
     grainLayer: s?.grainLayer ?? null,
     allowFlip: s?.allowFlip ?? null,

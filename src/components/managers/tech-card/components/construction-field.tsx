@@ -3,15 +3,20 @@ import { useFormContext } from 'react-hook-form';
 import { Accordion } from 'ui/components/accordion';
 import Text from 'ui/components/text';
 import ComboField from 'ui/form/fields/combo-field';
+import DecimalField from 'ui/form/fields/decimal-field';
+import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { seamAllowanceOptions, stitchDensityOptions } from './operation-options';
-import {
-  hemFinishOptions,
-  machineClassOptions,
-  mainStitchTypeOptions,
-  overlockThreadsOptions,
-  pressingOptions,
-} from './tech-card-options';
+import { seamClassOptions } from './operation-options';
+
+// 3/4/5 threads is the whole real range of an overlock; 0 = not set. A closed list rather than a
+// number field because there is no fourth answer, and a free number invites «4-нит.» back.
+const overlockThreadCountOptions = [
+  { value: 0, label: '— threads —' },
+  { value: 3, label: '3' },
+  { value: 4, label: '4' },
+  { value: 5, label: '5' },
+];
+import { hemFinishOptions, pressingOptions } from './tech-card-options';
 
 // General workmanship parameters (Sheet «Обработка», upper block). 1:1 — sent as
 // unset when every field is blank (see mapConstructionOut). Guided combos, not closed sets.
@@ -38,7 +43,7 @@ export function ConstructionField() {
       onOpenChange={setOpen}
       title={
         <Text size='control' variant='uppercase' tracking='label' component='span'>
-          general — finishing &amp; defaults
+          card defaults — what a step inherits
         </Text>
       }
       meta={
@@ -48,40 +53,31 @@ export function ConstructionField() {
       }
     >
       <Text size='micro' variant='label' className='mb-2'>
-        Общие параметры обработки по умолчанию. Конкретные значения по шагам задавайте в операциях
-        ниже.
+        Что шаг наследует, когда не переопределяет. Пустое поле здесь — «не задано»; пустое поле в
+        шаге — «как на карточке».
       </Text>
       <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'>
-        <ComboField
-          name='construction.mainStitchType'
-          label='main stitch type'
-          options={mainStitchTypeOptions}
+        <SelectField
+          name='construction.defaultSeamClass'
+          label='default seam class'
+          items={seamClassOptions}
         />
-        <ComboField
-          name='construction.stitchDensity'
-          label='stitch density (st/cm)'
-          options={stitchDensityOptions}
+        <DecimalField
+          name='construction.defaultStitchesPerCm'
+          label='default stitch density (st/cm)'
+          placeholder='4'
         />
-        <ComboField
-          name='construction.overlockThreads'
+        <SelectField
+          name='construction.overlockThreadCount'
           label='overlock threads'
-          options={overlockThreadsOptions}
-        />
-        <ComboField
-          name='construction.seamAllowances'
-          label='seam allowances'
-          options={seamAllowanceOptions}
+          items={overlockThreadCountOptions}
+          valueAsNumber
         />
         <ComboField name='construction.hemFinish' label='hem finish' options={hemFinishOptions} />
         <ComboField
           name='construction.pressing'
           label='pressing / finish'
           options={pressingOptions}
-        />
-        <ComboField
-          name='construction.machineClass'
-          label='machine class'
-          options={machineClassOptions}
         />
       </div>
       <div className='mt-2'>

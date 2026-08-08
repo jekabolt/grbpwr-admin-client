@@ -38,25 +38,23 @@ import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { fieldErrorSummary, revealField } from 'utils/field-errors';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import {
-  OPERATION_TYPE_PRESETS,
   attachmentOptions,
-  machineOptions,
-  needleOptions,
-  nodeOptions,
+  operationHeading,
   operationTypeOptions,
-  seamAllowanceOptions,
-  seamTypeOptions,
-  stitchDensityOptions,
-  threadOptions,
-  topstitchWidthOptions,
+  seamClassOptions,
+  topstitchModeOptions,
   zoneOptions,
 } from './operation-options';
 import { OPERATION_TYPE_PREFERRED_KINDS, kindLabel } from './bom-kind';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData } from './schema';
+import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
-const NONE_ZONE = 'TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN';
+const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
+const NONE_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
+const NONE_ATTACHMENT = 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN';
+const NONE_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
 
 // Drag payload for the piece tray. A private MIME type so a stray text drop from elsewhere can
 // never be mistaken for a piece reference; the plain-text mirror (prefixed) is only a fallback for
@@ -67,6 +65,16 @@ const PIECE_DND_PREFIX = 'grbpwr-piece:';
 // Keep a Radix select from ballooning when its selected option is long: clip the value span (the
 // trigger's first child) with an ellipsis instead of letting the text wrap the control taller/wider.
 const selectNoGrow = '[&>span:first-child]:min-w-0 [&>span:first-child]:truncate';
+
+// 1..4 rows of topstitching; 0 = unset. Past four it is decoration nobody sews and, more to the
+// point, a typo that reaches the printed sheet as an instruction.
+const TOPSTITCH_ROW_OPTIONS = [
+  { value: 0, label: '— rows —' },
+  { value: 1, label: '1' },
+  { value: 2, label: '2' },
+  { value: 3, label: '3' },
+  { value: 4, label: '4' },
+];
 
 // The BOM sections an operation can CONSUME, in picker order. The rule is «чем соединяют», not
 // «что соединяют»: roll goods (fabric / lining / insulation) reach a step through pieceLineKeys —
@@ -123,25 +131,27 @@ const LINKABLE_SECTION_LABEL: Record<string, string> = {
   TECH_CARD_BOM_SECTION_LABEL: 'этикетки',
 };
 
+// A new step starts EMPTY on every override. Nothing is pre-filled from a preset any more: the
+// moment a default is written into the row, «the technologist chose 4 st/cm» becomes
+// indistinguishable from «it defaulted to 4», and the card stops being able to say which steps
+// genuinely differ.
 export const emptyOperation = {
   operationNumber: 0,
-  node: '',
   operationType: NONE_OP_TYPE,
-  machine: '',
   zone: NONE_ZONE,
-  bomLineKey: '', // '' = no material linked
   calloutNumber: 0, // 0 = no sketch pin linked
-  seamType: '',
-  seamAllowance: '',
-  stitchesPerCm: '',
   smv: '',
-  topstitchWidth: '',
-  needle: '',
-  thread: '',
-  attachment: '',
-  timeNorm: '',
-  description: '',
+  seamClass: NONE_SEAM_CLASS,
+  stitchesPerCm: '',
+  seamAllowanceMm: '',
+  topstitchMode: NONE_TOPSTITCH,
+  topstitchWidthMm: '',
+  topstitchRows: 0,
+  attachmentKind: NONE_ATTACHMENT,
+  attachmentSizeMm: '',
   note: '',
+  pieceLineKeys: [] as string[],
+  bomLineKeys: [] as string[],
 };
 
 type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
@@ -166,30 +176,21 @@ const opTypeLabel = (v: string | undefined) =>
 function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationFormValue {
   return {
     operationNumber: 0,
-    node: o.node?.trim() || '',
     operationType: o.operationType || NONE_OP_TYPE,
-    machine: o.machine?.trim() || '',
     zone: o.zone || NONE_ZONE,
-    bomLineKey: o.bomLineKey?.trim() || '',
-    // The save reads bomLineKeys, not the single key — an AI draft that only filled the legacy
-    // field would otherwise lose its material link the moment it was accepted.
-    bomLineKeys: o.bomLineKeys?.length
-      ? o.bomLineKeys.filter(Boolean)
-      : ([o.bomLineKey?.trim()].filter(Boolean) as string[]),
+    bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
     pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
     calloutNumber: o.calloutNumber || 0,
-    seamType: o.seamType?.trim() || '',
-    seamAllowance: o.seamAllowance?.trim() || '',
-    stitchesPerCm: decimalToInput(o.stitchesPerCm),
     smv: decimalToInput(o.smv),
-    topstitchWidth: o.topstitchWidth?.trim() || '',
-    needle: o.needle?.trim() || '',
-    thread: o.thread?.trim() || '',
-    attachment: o.attachment?.trim() || '',
-    timeNorm: decimalToInput(o.timeNorm),
-    description: o.description?.trim() || '',
+    seamClass: o.seamClass || NONE_SEAM_CLASS,
+    stitchesPerCm: decimalToInput(o.stitchesPerCm),
+    seamAllowanceMm: decimalToInput(o.seamAllowanceMm),
+    topstitchMode: o.topstitch?.mode || NONE_TOPSTITCH,
+    topstitchWidthMm: decimalToInput(o.topstitch?.widthMm),
+    topstitchRows: o.topstitch?.rows || 0,
+    attachmentKind: o.attachmentKind || NONE_ATTACHMENT,
+    attachmentSizeMm: decimalToInput(o.attachmentSizeMm),
     note: o.note?.trim() || '',
-    placement: o.placement?.trim() || '',
   };
 }
 
@@ -254,72 +255,35 @@ function readPieceDrag(dt: DataTransfer): string {
 // section. They render nothing (or one line), so the re-render stops at them instead of running
 // through the rail and the editor — the same discipline readReplaceImpact uses.
 
-// `placement` is the legacy human label the printed sheet and older rows still read. It is DERIVED
-// from the linked pieces rather than typed: a hand-typed "воротник" next to a piece called "collar"
-// is exactly what made the operation list and the cut list name the same part differently.
-//
-// It lives here rather than in the editor because only ONE operation is mounted at a time now: a
-// piece renamed on the PATTERNS tab has to reach every operation that references it, not just the one
-// currently open.
-function PlacementSync() {
-  const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationFormValue[];
-  const pieces = useFormPieces();
-  const firstRun = useRef(true);
+// PlacementSync lived here and is gone with the column it fed. It derived `placement` from the
+// linked piece names and WROTE IT INTO THE ROW — a computed value stored as a fact, hashed into a
+// signed digest, and printed beside the very pieces it was derived from. The zone dictionary now
+// answers «where», and the piece chips answer «on what».
 
-  useEffect(() => {
-    const nameByKey = new Map(pieces.map((p) => [p.lineKey, p.name]));
-    operations.forEach((op, i) => {
-      // An operation with no resolvable linked pieces keeps whatever free text it was saved with
-      // (older cards, AI drafts): this rule only ever overwrites a label it owns.
-      const names = ((op?.pieceLineKeys ?? []) as string[])
-        .map((k) => nameByKey.get(k))
-        .filter(Boolean) as string[];
-      if (names.length === 0) return;
-      const derived = names.join(' + ');
-      if (getValues(`operations.${i}.placement`) !== derived) {
-        // On the first pass, reconcile a stale stored label WITHOUT dirtying: opening a card must
-        // not report unsaved changes the user never made (same discipline as the operation-type
-        // presets).
-        setValue(`operations.${i}.placement`, derived, { shouldDirty: !firstRun.current });
-      }
-    });
-    // The flag is spent on the first pass that actually SEES operations, not on the first render.
-    // This component mounts with the tab, which is before the fetched card is reset into the form —
-    // spending it on an empty array would make the real reconcile the "second" pass and dirty a
-    // card nobody has edited.
-    if (operations.length > 0) firstRun.current = false;
-  }, [operations, pieces, getValues, setValue]);
-
-  return null;
-}
-
-// Closing total for the sequence rail: SAM feeds costing, SMV is the machine norm. Blank/garbage
-// counts as 0 in both.
 function RailTotal() {
   const { control } = useFormContext<TechCardFormData>();
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as OperationFormValue[];
-  const sum = (key: 'timeNorm' | 'smv') =>
-    operations.reduce((acc, o) => {
-      const n = parseDecimalNumber(o?.[key]);
-      return acc + (Number.isFinite(n) ? n : 0);
-    }, 0);
-  const sam = sum('timeNorm');
-  const smv = sum('smv');
+  // ONE total, because there is one time column. The rail used to sum SAM and SMV separately and
+  // then explain, under both, that they legitimately differ — an explanation only needed because
+  // the form asked for the same fact twice.
+  const total = operations.reduce((acc, o) => {
+    const n = parseDecimalNumber(o?.smv);
+    return acc + (Number.isFinite(n) ? n : 0);
+  }, 0);
   return (
     <RowTotal
       label={
         <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-          итого · {operations.length}
+          total · {operations.length}
         </Text>
       }
       value={
         <Text
           size='micro'
           component='span'
-          title={`SAM ${sam.toFixed(1)} мин · SMV ${smv.toFixed(1)}`}
+          title='sum of SMV across the assembly order'
         >
-          {`${sam.toFixed(1)} мин`}
+          {`${total.toFixed(1)} min`}
         </Text>
       }
     />
@@ -344,7 +308,7 @@ function TrayChip({
       onClick={onAdd}
       draggable
       title={`${piece.name} — кликните, чтобы добавить к открытому шагу, или перетащите на любой`}
-      aria-label={`добавить деталь ${piece.name} к открытому шагу`}
+      aria-label={`add piece ${piece.name} to the open step`}
       onDragStart={(e: React.DragEvent) => {
         e.dataTransfer.setData(PIECE_DND_TYPE, piece.lineKey);
         e.dataTransfer.setData('text/plain', `${PIECE_DND_PREFIX}${piece.lineKey}`);
@@ -352,7 +316,7 @@ function TrayChip({
       }}
       className={cn(
         'cursor-grab active:cursor-grabbing',
-        // flashed by the editor's «＋ деталь» — pull the eye to the chips now clickable. The border
+        // flashed by the editor's «＋ piece» — pull the eye to the chips now clickable. The border
         // and fill carry the state on their own, so the pulse is pure decoration and is dropped for
         // anyone who asked for less motion.
         highlighted && 'motion-safe:animate-pulse border-textColor bg-bgZebra text-textColor',
@@ -388,18 +352,37 @@ function RailStep({
   onDropPiece: (index: number, lineKey: string) => void;
 }) {
   const { control } = useFormContext<TechCardFormData>();
-  const node = (useWatch({ control, name: `operations.${index}.node` }) ?? '') as string;
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
-  const timeNorm = (useWatch({ control, name: `operations.${index}.timeNorm` }) ?? '') as string;
+  const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
+  const note = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
     0) as number;
   const bomLineKeys = (useWatch({ control, name: `operations.${index}.bomLineKeys` }) ??
     []) as string[];
+  const smv = (useWatch({ control, name: `operations.${index}.smv` }) ?? '') as string;
+  // The joined pieces, by name, for the composed heading. Resolved through the card's piece list so
+  // a rename on the PATTERNS tab reaches every step that references it — which is what the removed
+  // PlacementSync was trying to achieve by writing the names into the row.
+  const pieceKeys = (useWatch({ control, name: `operations.${index}.pieceLineKeys` }) ??
+    []) as string[];
+  const allPieces = useFormPieces();
+  const pieceNames = pieceKeys
+    .map((k) => allPieces.find((pc) => pc.lineKey === k)?.name)
+    .filter(Boolean) as string[];
 
   const [over, setOver] = useState(false);
   const opNumber = (index + 1) * 10;
-  const sam = parseDecimalNumber(timeNorm);
-  const label = node.trim() || opTypeLabel(opType) || 'новый шаг';
+  const smvMin = parseDecimalNumber(smv);
+  // THE HEADING IS COMPOSED. This is the whole replacement for the removed «УЗЕЛ / ЧТО *»: the step
+  // is named by what it does, where, and on which pieces — three controls the operator has already
+  // filled — so two cards describing the same step read the same way.
+  const label =
+    operationHeading({
+      operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
+      zone: zone as Parameters<typeof operationHeading>[0]['zone'],
+      pieceNames,
+      note,
+    }) || 'new step';
   // The cross-highlight mirrors the sketch pin, which fills error-red while it is the active one.
   const linked =
     (!!activePin && activePin > 0 && calloutNumber === activePin) ||
@@ -444,7 +427,7 @@ function RailStep({
         >
           <button
             type='button'
-            aria-label={`переставить шаг ${opNumber}`}
+            aria-label={`reorder step ${opNumber}`}
             {...dragHandleProps}
             className='shrink-0 cursor-grab touch-none select-none px-1 py-1 leading-none text-labelColor hover:text-textColor active:cursor-grabbing focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
@@ -463,7 +446,7 @@ function RailStep({
             <Text
               size='control'
               component='span'
-              className={cn('min-w-0 flex-1 truncate', !node.trim() && 'text-labelColor')}
+              className={cn('min-w-0 flex-1 truncate', opType === NONE_OP_TYPE && 'text-labelColor')}
             >
               {label}
             </Text>
@@ -494,9 +477,9 @@ function RailStep({
               variant='label'
               component='span'
               className='w-8 shrink-0 text-right tabular-nums'
-              title='SAM, мин'
+              title='SMV, min'
             >
-              {sam > 0 ? sam.toFixed(1) : '—'}
+              {smvMin > 0 ? smvMin.toFixed(1) : '—'}
             </Text>
           </button>
         </div>
@@ -540,6 +523,45 @@ function OperationEditor({
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [over, setOver] = useState(false);
 
+  // The overrides fold. Open when the step already differs — a folded panel hiding a value the
+  // operator set is worse than an open one showing nothing.
+  const zoneValue = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
+  const noteValue = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
+  const seamClass = (useWatch({ control, name: `operations.${index}.seamClass` }) ??
+    NONE_SEAM_CLASS) as string;
+  const seamAllowanceMm = (useWatch({ control, name: `operations.${index}.seamAllowanceMm` }) ??
+    '') as string;
+  const stitchesPerCm = (useWatch({ control, name: `operations.${index}.stitchesPerCm` }) ??
+    '') as string;
+  const topstitchMode = (useWatch({ control, name: `operations.${index}.topstitchMode` }) ??
+    NONE_TOPSTITCH) as string;
+  const attachmentKind = (useWatch({ control, name: `operations.${index}.attachmentKind` }) ??
+    NONE_ATTACHMENT) as string;
+  const overrideCount = [
+    seamClass !== NONE_SEAM_CLASS,
+    seamAllowanceMm.trim() !== '',
+    stitchesPerCm.trim() !== '',
+    topstitchMode !== NONE_TOPSTITCH,
+    attachmentKind !== NONE_ATTACHMENT,
+  ].filter(Boolean).length;
+  const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
+
+  // WHAT THIS STEP WOULD INHERIT, and from where — shown as a placeholder, stored nowhere. The
+  // card's own standard wins over the workshop's, exactly as the server resolves it.
+  const cardAllowanceMm = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string;
+  const cardStitchDensity = (useWatch({ control, name: 'construction.defaultStitchesPerCm' }) ??
+    '') as string;
+  const { data: workshop } = useWorkshopSettings();
+  const shopAllowanceMm = decimalToInput(workshop?.settings?.defaultSeamAllowanceMm).trim();
+  const inherited = {
+    seamAllowance: cardAllowanceMm.trim()
+      ? `${cardAllowanceMm.trim()} (card)`
+      : shopAllowanceMm
+        ? `${shopAllowanceMm} (workshop)`
+        : 'not set',
+    stitchDensity: cardStitchDensity.trim() ? `${cardStitchDensity.trim()} (card)` : 'not set',
+  };
+
   // The off-part materials this operation consumes. Multi, because one operation genuinely joins
   // several — «втачать молнию» takes the zip AND the thread. Scoped to the sections that can be
   // consumed BY a step (see OPERATION_LINKABLE_SECTIONS), sorted into that same order so фурнитура
@@ -559,20 +581,9 @@ function OperationEditor({
         ),
     [bomLines],
   );
-  // Thread articles actually present in this card's BOM — the only ones an operation can really
-  // consume.
-  const bomThreadOptions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          bomLines
-            .filter((b) => b.section === 'TECH_CARD_BOM_SECTION_THREAD')
-            .map((b) => b.name?.trim())
-            .filter(Boolean) as string[],
-        ),
-      ),
-    [bomLines],
-  );
+  // The BOM thread list that used to live here fed a «нитки (артикул)» combo. Both are gone: the
+  // thread an operation consumes IS the material chip, and the combo was a second answer that the
+  // printed sheet then had to subtract from the first.
   const toggleBom = (key: string) => {
     const next = selectedBomKeys.includes(key)
       ? selectedBomKeys.filter((k) => k !== key)
@@ -586,6 +597,16 @@ function OperationEditor({
   }) ?? []) as string[];
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
+  // The same composed heading the rail shows, so the open step and its row in the list are named
+  // identically — they used to differ, because the rail fell back to the type while the editor
+  // header printed only the type and the row printed `node`.
+  const editorHeading =
+    operationHeading({
+      operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
+      zone: zoneValue as Parameters<typeof operationHeading>[0]['zone'],
+      pieceNames: chosenPieces.map((k) => byKey.get(k)?.name ?? '').filter(Boolean),
+      note: noteValue,
+    }) || 'new step';
   // A key that no longer resolves (its piece was deleted on the PATTERNS tab, or an older card
   // invented one through the removed picker) is SURFACED, not silently dropped — the save would
   // unlink it and nobody would know which operation lost a part.
@@ -593,21 +614,10 @@ function OperationEditor({
   const removePieceKey = (lineKey: string) => {
     const next = selectedPieceKeys.filter((k) => k !== lineKey);
     setValue(`operations.${index}.pieceLineKeys`, next, { shouldDirty: true });
-    // PlacementSync only ever writes a label while at least one link still resolves, so unlinking
-    // the LAST piece would otherwise leave the old derived label on the step — a printed sheet
-    // still saying «воротник верхний + воротник нижний» for a step that now touches nothing.
-    // Rewritten here only when this rule already owned the label (the step had resolvable pieces);
-    // a row carrying legacy or AI free text keeps it.
-    if (chosenPieces.length > 0) {
-      const names = next.map((k) => byKey.get(k)?.name).filter(Boolean) as string[];
-      setValue(`operations.${index}.placement`, names.join(' + '), { shouldDirty: true });
-    }
   };
 
-  // The legacy single `bomLineKey` is no longer edited: it duplicated the chip row below («мат.
-  // напрямую» asked the same question with room for one answer), and the operation genuinely takes
-  // several materials. It is still WRITTEN on save, as the first of bomLineKeys, so the older
-  // tech_card_operation.bom_item_id column and anything still reading it keep working (0200).
+  // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
+  // asked the same question with room for one answer, and an operation genuinely takes several.
   const linkedMaterials = selectedBomKeys
     .map((k) => bomLines.find((b) => b.lineKey === k))
     .filter(Boolean) as BomLine[];
@@ -716,42 +726,15 @@ function OperationEditor({
     ];
   }, [pinOptions, calloutNumber]);
 
-  // Apply the verb's machine / stitch defaults on a real change (skip the initial mount so
-  // opening an existing step never auto-dirties the form), filling only blank fields.
-  const firstRun = useRef(true);
-  useEffect(() => {
-    if (firstRun.current) {
-      firstRun.current = false;
-      return;
-    }
-    const preset = OPERATION_TYPE_PRESETS[opType];
-    if (!preset) return;
-    const cur = getValues(`operations.${index}`);
-    if (preset.machine && !cur.machine?.trim()) {
-      setValue(`operations.${index}.machine`, preset.machine, { shouldDirty: true });
-    }
-    if (preset.stitchesPerCm && !cur.stitchesPerCm?.trim()) {
-      setValue(`operations.${index}.stitchesPerCm`, preset.stitchesPerCm, { shouldDirty: true });
-    }
-  }, [opType, index, getValues, setValue]);
+  // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone.
+  //
+  // One wrote the operation type's machine and stitch density into the row whenever those were
+  // blank; the other copied the linked BOM line's name into `thread`. Between them they are why the
+  // printed tech pack had to SUBTRACT the thread from the material list to stop printing it twice,
+  // and why nobody could tell a density the technologist chose from one that simply appeared.
+  //
+  // What replaces them is a PLACEHOLDER: the inherited value is shown, never stored.
 
-  // Linking a thread material from the BOM fills the operation's thread when it's still
-  // blank (the BOM line is the source of truth for which thread to use).
-  const firstBomRun = useRef(true);
-  useEffect(() => {
-    if (firstBomRun.current) {
-      firstBomRun.current = false;
-      return;
-    }
-    const line = linkedMaterials.find((b) => b.section === 'TECH_CARD_BOM_SECTION_THREAD');
-    if (line?.name?.trim()) {
-      const cur = getValues(`operations.${index}`);
-      if (!cur.thread?.trim()) {
-        setValue(`operations.${index}.thread`, line.name, { shouldDirty: true });
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedBomKeys.join(','), index, getValues, setValue]);
 
   return (
     <div
@@ -782,64 +765,52 @@ function OperationEditor({
           {opNumber}
         </Text>
         <Text size='control' variant='uppercase' tracking='label' component='span'>
-          {opTypeLabel(opType) || 'без типа'}
+          {editorHeading}
         </Text>
         <div className='ml-auto flex shrink-0 items-center gap-1.5'>
           <Button type='button' variant='secondary' size='xs' onClick={onInsertAfter}>
-            ＋ шаг ниже
+            ＋ step below
           </Button>
           <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
-            удалить шаг
+            remove step
           </Button>
         </div>
       </div>
 
+      {/* THE CORE, and it is all of it: what the step does, where, and how long it takes. Six
+          controls where there were eighteen. The pieces and materials below are the other half of
+          «with what»; everything else is an override that stays folded away until it differs. */}
       <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
         <SelectField
           name={`operations.${index}.operationType`}
-          label='операция *'
+          label='operation *'
           items={operationTypeOptions}
           className={selectNoGrow}
         />
-        <ComboField
-          name={`operations.${index}.node`}
-          label='узел / что *'
-          placeholder='плечевые швы'
-          options={nodeOptions}
-        />
         <SelectField
           name={`operations.${index}.zone`}
-          label='зона'
+          label='zone *'
           items={zoneOptions}
           className={selectNoGrow}
         />
+        <DecimalField name={`operations.${index}.smv`} label='time, min' placeholder='1.8' min={0} />
         <SelectField
           name={`operations.${index}.calloutNumber`}
-          label='пин на эскизе'
+          label='sketch pin'
           items={rowPinOptions}
           valueAsNumber
           className={selectNoGrow}
-        />
-        {/* SAM feeds costing (it is what the summary above totals); SMV is the machine norm. They
-            are the two time fields, so they sit together rather than one here and one three groups
-            down among the needles. */}
-        <DecimalField name={`operations.${index}.timeNorm`} label='SAM (мин)' placeholder='1.8' />
-        <DecimalField
-          name={`operations.${index}.smv`}
-          label='SMV (мин)'
-          placeholder='0.5'
-          min={0}
         />
       </div>
 
       <GroupLabel
         action={
           <Text size='micro' variant='label' component='span'>
-            клик по детали в лотке добавит сюда
+            click a piece in the tray to add it
           </Text>
         }
       >
-        детали, которые соединяет шаг
+        pieces this step joins
       </GroupLabel>
       <ChipRow>
         {chosenPieces.map((k) => (
@@ -851,27 +822,27 @@ function OperationEditor({
           <Chip
             key={k}
             tone='error'
-            title={`деталь ${k} удалена на вкладке patterns — привязка потеряется при сохранении`}
+            title={`piece ${k} was deleted on the patterns tab — the link is lost on save`}
             onRemove={() => removePieceKey(k)}
           >
-            {`#${k.slice(-6)} — деталь удалена`}
+            {`#${k.slice(-6)} — piece deleted`}
           </Chip>
         ))}
-        <Chip dashed onClick={onFlashPieces} title='выбрать деталь в лотке над списком'>
-          ＋ деталь
+        <Chip dashed onClick={onFlashPieces} title='pick a piece from the tray above the list'>
+          ＋ piece
         </Chip>
       </ChipRow>
       {chosenPieces.length === 0 && danglingPieces.length === 0 && (
         <Text size='micro' variant='label' className='mt-1'>
-          шаг ни с чем не связан — кликните деталь в лотке выше или перетащите её сюда
+          not linked to any piece — click one in the tray above, or drag it here
         </Text>
       )}
 
-      <GroupLabel>материалы из BOM, которые расходует шаг</GroupLabel>
+      <GroupLabel>materials this step consumes</GroupLabel>
       {linkableBoms.length === 0 ? (
         <Text size='micro' variant='label'>
-          в BOM нет материалов, которые может расходовать операция — добавьте фурнитуру, нитки,
-          клеевые, тесьму, декор или этикетки на вкладке BOM
+          the BOM has no materials a step could consume — add hardware, thread,
+          fusing, tape, trim or labels on the BOM tab
         </Text>
       ) : (
         <>
@@ -897,9 +868,9 @@ function OperationEditor({
                 dashed
                 pressed={addingMaterial}
                 onClick={() => setAddingMaterial((v) => !v)}
-                title='привязать материал из BOM — фурнитуру, нитку, клеевую, тесьму, декор, этикетку'
+                title='link a BOM material — hardware, thread, fusing, tape, trim, label'
               >
-                {addingMaterial ? '✕ отмена' : '＋ материал'}
+                {addingMaterial ? '✕ cancel' : '＋ material'}
               </Chip>
             )}
           </ChipRow>
@@ -948,73 +919,106 @@ function OperationEditor({
       )}
       {bomOutOfRange && (
         <Text size='micro' variant='error' className='mt-1'>
-          материал был удалён или перемещён — перевыберите его
+          the material was removed or moved — pick it again
         </Text>
       )}
       {/* Advisory, never a form error: a step CAN legitimately be drafted before its material
           exists in the BOM, and blocking the save would make the check the operator's enemy. */}
       {expectsMaterial && (
         <Text size='micro' variant='label' className='mt-1'>
-          шаг этого типа обычно расходует {expectsMaterial.what} — она не привязана
+          a step of this type usually consumes {expectsMaterial.what} — none is linked
         </Text>
       )}
 
-      <GroupLabel>шов</GroupLabel>
-      <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-4'>
-        <ComboField
-          name={`operations.${index}.seamType`}
-          label='тип шва'
-          options={seamTypeOptions}
-        />
-        <ComboField
-          name={`operations.${index}.seamAllowance`}
-          label='припуск (мм)'
-          options={seamAllowanceOptions}
-        />
-        <ComboField
-          name={`operations.${index}.stitchesPerCm`}
-          label='стежков / см'
-          options={stitchDensityOptions}
-        />
-        <ComboField
-          name={`operations.${index}.topstitchWidth`}
-          label='ширина отстрочки'
-          options={topstitchWidthOptions}
-        />
-      </div>
+      {/* DIFFERS FROM STANDARD — folded away, and empty on most steps. Everything in here inherits
+          from the card when left blank, and the placeholder states WHAT it would inherit and FROM
+          WHERE. The inherited value is never written into the field: that is the whole difference
+          between «the technologist chose 4 st/cm» and «it defaulted to 4», and the old preset
+          effect destroyed it on every row it touched. */}
+      <Accordion
+        open={overridesOpen}
+        onOpenChange={setOverridesOpen}
+        title={
+          <Text size='control' variant='uppercase' tracking='label' component='span'>
+            differs from standard
+          </Text>
+        }
+        meta={
+          overrideCount > 0 ? (
+            <Pill tone='attention'>{overrideCount}</Pill>
+          ) : (
+            <Text size='micro' variant='label' component='span'>
+              inherits everything
+            </Text>
+          )
+        }
+      >
+        <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+          <SelectField
+            name={`operations.${index}.seamClass`}
+            label='seam class'
+            items={seamClassOptions}
+            className={selectNoGrow}
+          />
+          <DecimalField
+            name={`operations.${index}.seamAllowanceMm`}
+            label='seam allowance, mm'
+            maxDecimals={1}
+            placeholder={inherited.seamAllowance}
+          />
+          <DecimalField
+            name={`operations.${index}.stitchesPerCm`}
+            label='stitches / cm'
+            placeholder={inherited.stitchDensity}
+          />
+          <SelectField
+            name={`operations.${index}.topstitchMode`}
+            label='topstitch'
+            items={topstitchModeOptions}
+            className={selectNoGrow}
+          />
+          {/* The width belongs to «at width» and nowhere else — beside «edge» it is a shadow value
+              the server refuses anyway, so the control simply is not there. */}
+          {topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (
+            <>
+              <DecimalField
+                name={`operations.${index}.topstitchWidthMm`}
+                label='topstitch width, mm'
+                maxDecimals={1}
+                placeholder='6'
+              />
+              <SelectField
+                name={`operations.${index}.topstitchRows`}
+                label='rows'
+                items={TOPSTITCH_ROW_OPTIONS}
+                valueAsNumber
+                className={selectNoGrow}
+              />
+            </>
+          )}
+          <SelectField
+            name={`operations.${index}.attachmentKind`}
+            label='attachment'
+            items={attachmentOptions}
+            className={selectNoGrow}
+          />
+          {attachmentKind !== NONE_ATTACHMENT && (
+            <DecimalField
+              name={`operations.${index}.attachmentSizeMm`}
+              label='attachment size, mm'
+              maxDecimals={1}
+              placeholder='8'
+            />
+          )}
+        </div>
+      </Accordion>
 
-      <GroupLabel>машина и инструмент</GroupLabel>
-      <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-4'>
-        <ComboField name={`operations.${index}.machine`} label='машина' options={machineOptions} />
-        <ComboField name={`operations.${index}.needle`} label='игла' options={needleOptions} />
-        {/* Threads are picked from the card's own BOM thread lines, not typed: a free-text
-            article is a string nothing can join on, so thread was never actually accounted for
-            anywhere. Falls back to the generic vocabulary only while the BOM has no thread
-            lines. Selecting the material itself (and so its consumption) is the chip row above;
-            this stays the per-operation article note. */}
-        <ComboField
-          name={`operations.${index}.thread`}
-          label='нитки (артикул)'
-          options={bomThreadOptions.length > 0 ? bomThreadOptions : threadOptions}
-        />
-        <ComboField
-          name={`operations.${index}.attachment`}
-          label='приспособление'
-          options={attachmentOptions}
-        />
-      </div>
-
-      <GroupLabel>текст</GroupLabel>
-      <div className='space-y-2'>
-        <TextareaField
-          name={`operations.${index}.description`}
-          label='описание'
-          rows={2}
-          maxLength={1000}
-        />
+      {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
+          saying which was which, so two cards filled them the opposite way round. */}
+      <div className='mt-2'>
         <TextareaField
           name={`operations.${index}.note`}
-          label='примечание'
+          label='note'
           rows={2}
           maxLength={1000}
         />
@@ -1179,11 +1183,15 @@ function GenerateOperationsPanel({
                     label={
                       <span>
                         <span className='text-labelColor tabular-nums'>{(i + 1) * 10}.</span>{' '}
-                        {o.node?.trim() || '—'}
-                        {o.description?.trim() ? ` — ${o.description.trim()}` : ''}
+                        {operationHeading({
+                          operationType: o.operationType,
+                          zone: o.zone,
+                          pieceNames: [],
+                          note: o.note,
+                        })}
                       </span>
                     }
-                    value={o.machine?.trim() || '—'}
+                    value={o.smv?.value ? `${o.smv.value} min` : '—'}
                   />
                 ))}
               </div>
@@ -1352,10 +1360,12 @@ export function OperationsField({
     });
   };
 
-  // append here (this field array owns the rendered list) when the panel requests it
+  // append here (this field array owns the rendered list) when the panel requests it. The request
+  // no longer carries a step title: there is no title to carry, and the two fields it used to
+  // pre-fill (`node`, `placement`) were the same piece name written twice.
   useEffect(() => {
     if (!addRequest) return;
-    append({ ...emptyOperation, placement: addRequest.placement, node: addRequest.placement });
+    append({ ...emptyOperation });
     setSelected(fields.length);
     onAdded?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1386,12 +1396,12 @@ export function OperationsField({
   // whole operations array here would re-render every row on every keystroke.
   const readReplaceImpact = (): ReplaceImpact => {
     const ops = (getValues('operations') ?? []) as {
-      timeNorm?: string;
+      smv?: string;
       pieceLineKeys?: string[];
     }[];
     return {
       operations: ops.length,
-      sam: ops.filter((o) => (o.timeNorm ?? '').trim()).length,
+      sam: ops.filter((o) => (o.smv ?? '').trim()).length,
       pieceLinks: ops.filter((o) => (o.pieceLineKeys ?? []).length > 0).length,
     };
   };
@@ -1456,7 +1466,7 @@ export function OperationsField({
   // permanently was tried and reverted: the pin fills error-red while it is the active one, so the
   // step you are editing read as the step that is broken.
 
-  // Clicking «＋ деталь» in the editor briefly flashes the tray, so the eye is pulled to the chips
+  // Clicking «＋ piece» in the editor briefly flashes the tray, so the eye is pulled to the chips
   // now clickable. A short pulse, not a persisted mode — the chips stay clickable regardless.
   const [highlightPieces, setHighlightPieces] = useState(false);
   const flashTimer = useRef<number | null>(null);
@@ -1511,7 +1521,6 @@ export function OperationsField({
 
   return (
     <div className='space-y-2.5'>
-      <PlacementSync />
 
       <Text size='micro' variant='label'>
         Шаги сборки по порядку — слева вся последовательность, справа открытый шаг целиком. Номера

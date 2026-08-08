@@ -2314,14 +2314,81 @@ export type TechCardOperationType =
   | "TECH_CARD_OPERATION_TYPE_FUSING"
   | "TECH_CARD_OPERATION_TYPE_HANDWORK"
   | "TECH_CARD_OPERATION_TYPE_OTHER";
-// TechCardConstructionZone groups an operation for display only. Construction stays
-// a single ordered list; the zone is just a visual band (outer shell, lining, …).
-export type TechCardConstructionZone =
-  | "TECH_CARD_CONSTRUCTION_ZONE_UNKNOWN"
-  | "TECH_CARD_CONSTRUCTION_ZONE_OUTER"
-  | "TECH_CARD_CONSTRUCTION_ZONE_LINING"
-  | "TECH_CARD_CONSTRUCTION_ZONE_INTERLINING"
-  | "TECH_CARD_CONSTRUCTION_ZONE_OTHER";
+// TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
+// step cannot be saved without (the other is operation_type). Renamed from
+// TechCardConstructionZone, which had only the three material BANDS and therefore could not answer
+// «where»; the free-text `placement` carried that and is gone.
+// ONE VOCABULARY, TWO CONSUMERS. These are the same tokens the fitting change-request zone uses
+// (0256, chk_fcr_zone_v2), and entity.GarmentZoneTokens is now the single Go source both derive
+// from. Fitting arrived here first — it started as a mirror of the old three bands and widened to
+// garment areas because a fitting remark is about where on the garment the problem is; operations
+// need exactly the same answer for exactly the same reason. Two independent copies of one
+// vocabulary drift silently, which is the whole argument of 0278's header.
+// NUMBERS ARE NOT REPACKED: OTHER stays 4 because it is already on the wire, and the areas take
+// 5..17 after it. Reading order (bands, then areas, then other) lives in GarmentZoneTokens.
+export type TechCardGarmentZone =
+  | "TECH_CARD_GARMENT_ZONE_UNKNOWN"
+  | "TECH_CARD_GARMENT_ZONE_OUTER"
+  | "TECH_CARD_GARMENT_ZONE_LINING"
+  | "TECH_CARD_GARMENT_ZONE_INTERLINING"
+  | "TECH_CARD_GARMENT_ZONE_OTHER"
+  | "TECH_CARD_GARMENT_ZONE_SLEEVE"
+  | "TECH_CARD_GARMENT_ZONE_COLLAR"
+  | "TECH_CARD_GARMENT_ZONE_NECKLINE"
+  | "TECH_CARD_GARMENT_ZONE_ARMHOLE"
+  | "TECH_CARD_GARMENT_ZONE_SHOULDER"
+  | "TECH_CARD_GARMENT_ZONE_CHEST"
+  | "TECH_CARD_GARMENT_ZONE_WAIST"
+  | "TECH_CARD_GARMENT_ZONE_HIP"
+  | "TECH_CARD_GARMENT_ZONE_HEM"
+  | "TECH_CARD_GARMENT_ZONE_POCKET"
+  | "TECH_CARD_GARMENT_ZONE_CLOSURE"
+  | "TECH_CARD_GARMENT_ZONE_BACK"
+  | "TECH_CARD_GARMENT_ZONE_FRONT";
+// TechCardSeamClass is the ISO 4916 seam class, in its six families: SS superimposed, LS lapped,
+// EF edge finishing, BS bound, FS flat, OS ornamental. It replaces the free-text `seam_type`,
+// whose suggestion list mixed the class with the PRESSING DIRECTION — «стачной взаутюжку» and
+// «стачной вразутюжку» are one class (SS plain) pressed two ways, and holding them as two
+// entries made the field answer two questions with one value. Pressing stays prose on
+// TechCardConstruction.pressing.
+// UNKNOWN = inherit TechCardConstruction.default_seam_class. Inheritance is a DISPLAY rule: the
+// server stores the unset value and never materialises the inherited one, so «the technologist
+// chose this» stays distinguishable from «it defaulted».
+export type TechCardSeamClass =
+  | "TECH_CARD_SEAM_CLASS_UNKNOWN"
+  | "TECH_CARD_SEAM_CLASS_SS_PLAIN"
+  | "TECH_CARD_SEAM_CLASS_SS_FRENCH"
+  | "TECH_CARD_SEAM_CLASS_LS_LAPPED"
+  | "TECH_CARD_SEAM_CLASS_LS_FLAT_FELLED"
+  | "TECH_CARD_SEAM_CLASS_EF_HEM_RAW"
+  | "TECH_CARD_SEAM_CLASS_EF_HEM_TURNED"
+  | "TECH_CARD_SEAM_CLASS_EF_FACED"
+  | "TECH_CARD_SEAM_CLASS_BS_BOUND"
+  | "TECH_CARD_SEAM_CLASS_FS_FLAT"
+  | "TECH_CARD_SEAM_CLASS_OS_TOPSTITCH"
+  | "TECH_CARD_SEAM_CLASS_OTHER";
+// TechCardAttachmentKind is the folder / guide / presser foot the step runs with.
+// THERE IS NO `NONE`, AND THAT IS THE POINT: for a presser foot, «none» and «not specified» are
+// the same fact to everyone downstream, and offering both would make an operator pick between two
+// spellings of nothing. UNKNOWN covers it.
+export type TechCardAttachmentKind =
+  | "TECH_CARD_ATTACHMENT_KIND_UNKNOWN"
+  | "TECH_CARD_ATTACHMENT_KIND_BINDER"
+  | "TECH_CARD_ATTACHMENT_KIND_HEMMER_FOLDER"
+  | "TECH_CARD_ATTACHMENT_KIND_SCROLL_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ZIPPER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_INVISIBLE_ZIPPER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE"
+  | "TECH_CARD_ATTACHMENT_KIND_PIPING_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ELASTIC_ATTACHMENT"
+  | "TECH_CARD_ATTACHMENT_KIND_OTHER";
+// TechCardTopstitchMode replaces the free-text `topstitch_width`, whose real values were three
+// different KINDS of answer at once: «нет», «в край» (a placement, not a width) and «2 × 6 мм»
+// (a width AND a row count).
+export type TechCardTopstitchMode =
+  | "TECH_CARD_TOPSTITCH_MODE_UNKNOWN"
+  | "TECH_CARD_TOPSTITCH_MODE_EDGE"
+  | "TECH_CARD_TOPSTITCH_MODE_WIDTH";
 // TechCardIssueSeverity ranks a flagged construction issue.
 export type TechCardIssueSeverity =
   | "TECH_CARD_ISSUE_SEVERITY_UNKNOWN"
@@ -3088,68 +3155,96 @@ export type TechCardSizePattern = {
   fabricPurpose?: TechCardBomPurpose;
 };
 
-// TechCardConstruction holds general workmanship parameters (Sheet «Обработка»).
+// TechCardConstruction holds the card's DEFAULTS — the values an operation inherits when it does
+// not override them. Until the operations break it was a block of free-text notes that nothing
+// inherited (the editor said so out loud: «общие параметры по умолчанию, конкретные задавайте в
+// операциях»), which is exactly why every step re-typed the same «5 мм» by hand.
+// WHAT IS DELIBERATELY NOT HERE: the seam allowance. The card's standard already exists as
+// TechCard.required_seam_allowance_mm, and 0277 put it on the CARD rather than in this message on
+// purpose — anything added to a section's digest projection instantly marks every signed-off
+// CONSTRUCTION approval as «edited since signing», on every card at once. A second card-level
+// allowance here would also be a second answer to a question that already has one.
+// AND NOT `main_stitch_type`: the stitch class (301 / 504 / 602) is a per-STEP fact carried by
+// TechCardOperation.operation_type, and a card-wide default for it is not a thing a card can mean.
 export type TechCardConstruction = {
-  mainStitchType: string | undefined;
-  stitchDensity: string | undefined;
-  overlockThreads: string | undefined;
-  seamAllowances: string | undefined;
   hemFinish: string | undefined;
   pressing: string | undefined;
-  machineClass: string | undefined;
   notes: string | undefined;
+  // Inherited by TechCardOperation.seam_class when that one is UNKNOWN.
+  defaultSeamClass: TechCardSeamClass | undefined;
+  // Inherited by TechCardOperation.stitches_per_cm when that one is unset. In STITCHES PER
+  // CENTIMETRE — stitch density is quoted per cm everywhere and is NOT part of the mm switch.
+  defaultStitchesPerCm: googletype_Decimal | undefined;
+  // 3 | 4 | 5; 0 = unset. The name does NOT reuse the removed `overlock_threads` (a string):
+  // a reused name with a new type is the drift the removed-registry rule exists to prevent.
+  overlockThreadCount: number | undefined;
 };
 
-// TechCardOperation is one per-node sewing operation (Sheet «Обработка»).
+// TechCardTopstitch is the three answers that used to share one string.
+export type TechCardTopstitch = {
+  mode: TechCardTopstitchMode | undefined;
+  // Required when mode = WIDTH, rejected otherwise — a width carried alongside «в край» would be
+  // a shadow value nothing reads.
+  widthMm: googletype_Decimal | undefined;
+  rows: number | undefined;
+};
+
+// TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
+// THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
+// path). Eleven fields left, and they left for three different reasons:
+// (a) THE CODE WROTE THEM, NOT A PERSON. `machine` and `stitches_per_cm` were filled from an
+// operation-type preset, `thread` from the linked BOM line, `placement` from the joined
+// piece names, and each was then stored as a fact and hashed into a signed digest. The
+// printed tech pack had to SUBTRACT `thread` from the material list to stop printing the
+// same string twice — a repair for a duplication that should not have existed.
+// (b) NOBODY READ THEM. `needle` duplicated material_thread_attr.needle_reco, which the thread
+// article already carries, and no consumer anywhere read the operation's copy.
+// (c) THEY ASKED A QUESTION WITH NO SINGLE ANSWER. `node` («узел / что», REQUIRED) offered a
+// list mixing seams, garment areas, pieces and materials, and repeated the verb the type
+// field already held. A working pattern-maker could not fill it and asked whether it was
+// needed. It is not replaced by an optional title: an optional field asking the same
+// unanswerable question just gets answered differently on every card.
+// WHAT A STEP IS NOW: a verb (operation_type), a place (zone), what it joins (piece_line_keys)
+// and what it consumes (bom_line_keys), and how long it takes (smv). Its heading is COMPOSED —
+// «join · side seams · Front + Back» — never typed.
+// EXACTLY TWO FIELDS ARE REQUIRED, and both are closed lists: operation_type and zone. Nothing
+// with free input is mandatory ever again; that pairing is what made `node` a trap.
+// EVERYTHING BELOW «отклонения» IS AN OVERRIDE: unset means INHERIT from the card
+// (TechCardConstruction, and TechCard.required_seam_allowance_mm for the allowance), which
+// inherits from the workshop. The inherited value is shown as a placeholder and NEVER written
+// into the row — the day it is written, «the technologist decided 4 st/cm» stops being
+// distinguishable from «it defaulted to 4», which is precisely today's defect.
 export type TechCardOperation = {
-  node: string | undefined;
-  description: string | undefined;
-  seamType: string | undefined;
-  stitchesPerCm: googletype_Decimal | undefined;
-  topstitchWidth: string | undefined;
-  thread: string | undefined;
-  note: string | undefined;
+  // --- core: what, where, with what, how long -------------------------------------------------
   operationNumber: number | undefined;
-  machine: string | undefined;
-  seamAllowance: string | undefined;
-  needle: string | undefined;
-  timeNorm: googletype_Decimal | undefined;
-  attachment: string | undefined;
   operationType: TechCardOperationType | undefined;
-  // 0-based index into TechCardInsert.bom_items of the material this operation
-  // applies (thread / binding (бейка) / interlining / zipper) when it is NOT resolved
-  // through a part. Uses proto3 explicit presence so index 0 (the first BOM line) is
-  // distinguishable from "no material": unset = no reference. When set, it wins; the
-  // colour resolves via the selected colourway's usage with the same bom_item_index.
-  bomItemIndex?: number;
-  calloutNumber: number | undefined;
-  zone: TechCardConstructionZone | undefined;
-  placement: string | undefined;
-  // via the selected colourway's usages (match trim+lower; bom_item_index wins if set)
-  // bom_line_key references the BOM line by its stable line_key (WS3 follow-up: take positionality off
-  // the wire). Preferred over the positional bom_item_index (kept for the transition). The store
-  // resolves it to bom_item_id, the real FK on read.
-  bomLineKey: string | undefined;
-  bomItemId: number | undefined;
-  // piece_line_keys references the cut-pieces this operation works on, by their stable
-  // TechCardPiece.line_key (WS4) — the same durable reference TechCardColorwayUsage.piece_line_key
-  // uses. REPEATED, unlike the usage's single key, because an assembly operation genuinely spans
-  // pieces and there is no useful bound on how many. A consumption norm, by contrast, is about
-  // exactly one piece, which is why that side stays 1:1. Empty = not tied to specific pieces.
-  // `placement` above stays the human label (PDF/legacy) and is not a join key.
+  zone: TechCardGarmentZone | undefined;
+  // The cut pieces this step joins. Advisory when empty (a step can legitimately be drafted
+  // before its pieces exist) — never a save error.
   pieceLineKeys: string[] | undefined;
-  pieceIds: number[] | undefined;
-  // bom_line_keys references the BOM lines this operation itself consumes -- the off-part materials
-  // (thread, fusing) it joins with -- by their stable line_key. REPEATED for the same reason
-  // piece_line_keys is: one operation can join several materials. Supersedes the single
-  // bom_line_key = 19, which stays for the transition and is read as the first entry when this is
-  // empty. Distinct from piece_line_keys: those are the parts joined, these are what joins them.
+  // The BOM lines this step consumes — thread, fusing, the zip it sets. Also advisory when empty.
   bomLineKeys: string[] | undefined;
-  bomItemIds: number[] | undefined;
-  // smv is the standard minute value and supersedes time_norm above: minute rollups
-  // (TechCardCosting.total_sam) take smv when it is set and fall back to time_norm when it is not,
-  // so re-timing an operation means writing smv, not rewriting the legacy column. Absent = unset.
   smv: googletype_Decimal | undefined;
+  calloutNumber: number | undefined;
+  // --- отклонения от стандарта: unset = inherit, never materialised -----------------------------
+  // STITCHES PER CENTIMETRE — density is quoted per cm in every language and is NOT part of the
+  // millimetre switch below.
+  stitchesPerCm: googletype_Decimal | undefined;
+  seamClass: TechCardSeamClass | undefined;
+  // MILLIMETRES (the whole allowance chain is mm: workshop → card → step). Unset = inherit
+  // TechCard.required_seam_allowance_mm. ZERO IS A REAL SETTING here as everywhere else in that
+  // chain — «our patterns carry the cut line» — and must never collapse into «not set».
+  seamAllowanceMm?: googletype_Decimal;
+  topstitch: TechCardTopstitch | undefined;
+  attachmentKind: TechCardAttachmentKind | undefined;
+  attachmentSizeMm?: googletype_Decimal;
+  // --- the only free text left ------------------------------------------------------------------
+  // One box, not two: `description` and `note` sat side by side with no rule saying which was
+  // which, which guarantees two cards fill them the opposite way round.
+  note: string | undefined;
+  // --- OUTPUT ------------------------------------------------------------------------------------
+  pieceIds: number[] | undefined;
+  bomItemIds: number[] | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -3500,19 +3595,24 @@ export type TechCardInsert = {
   // the wrapper protects against a STALE client, not a half-implemented one: a client that
   // defaults to an empty PRESENT wrapper clears the whole table on every save.
   pieceDxfAliases: TechCardPieceDxfAliasSet | undefined;
-  // ТРЕБУЕМЫЙ ПРИПУСК of this style, in CENTIMETRES (Ф3.2) — the right-hand side the readiness gate
-  // compares a раскладка's recorded allowance against.
-  // ABSENT = fall back to the workshop default (admin.WorkshopSettings.default_seam_allowance_cm),
+  // ТРЕБУЕМЫЙ ПРИПУСК of this style, in MILLIMETRES (Ф3.2) — the right-hand side the readiness gate
+  // compares a раскладка's recorded allowance against, AND the head of the allowance cascade the
+  // sewing steps inherit from (workshop → THIS → operation.seam_allowance_mm).
+  // MILLIMETRES, not centimetres (0290): the whole allowance chain speaks one unit, so no
+  // conversion sits between the standard and the step that must honour it. The cutting TABLE and
+  // the fabric EDGE MARGIN stay in centimetres — a 12 m table reads worse in millimetres — and the
+  // suffix on every field name is what keeps the two straight.
+  // ABSENT = fall back to the workshop default (admin.WorkshopSettings.default_seam_allowance_mm),
   // which may itself be absent — and then there is NO STANDARD, and a consumer must answer «no
   // verdict» rather than substitute zero. Zero is legal here and states something specific: «the
   // выкройки of this model carry the cut line, no offset needed». Confusing «0» with «not
-  // configured» would declare every раскладка with a 1 cm allowance in breach of a standard nobody
+  // configured» would declare every раскладка with a 10 mm allowance in breach of a standard nobody
   // set.
-  // NOT the free text construction.seam_allowances («5 мм»), which stays a human note. This is a
-  // NUMBER a machine reads. It deliberately lives on the card header and not on the construction
-  // section: any field added to a section's digest projection instantly marks EVERY signed-off
-  // CONSTRUCTION approval as «edited since signing», on every card at once.
-  requiredSeamAllowanceCm: googletype_Decimal | undefined;
+  // It deliberately lives on the card header and not on the construction section: any field added
+  // to a section's digest projection instantly marks EVERY signed-off CONSTRUCTION approval as
+  // «edited since signing», on every card at once. (The free-text twin it used to be confused with,
+  // construction.seam_allowances, no longer exists — the operations break removed it.)
+  requiredSeamAllowanceMm: googletype_Decimal | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
@@ -3697,13 +3797,15 @@ export type TechCardMarkerSummary = {
   scalarApplyRefusal: string | undefined;
   // УСЛОВИЯ СЪЁМКИ (Ф3), as recorded on the row. See TechCardMarkerInsert (:17-21) for what each
   // one means and why absence is a distinct answer from zero.
-  // A раскладка whose seam_allowance_cm is ABSENT is «СТАРАЯ НОРМА»: nobody recorded what was laid
+  // A раскладка whose seam_allowance_mm is ABSENT is «СТАРАЯ НОРМА»: nobody recorded what was laid
   // out or under what rules, so костинг cannot tell a marker measured along the seam line from one
   // measured along the cut line — and the two differ by the allowance around the whole perimeter of
   // every piece. That category is DERIVED, never a flag: there is no «is_legacy» column and there
   // never will be one, because the unmarked stays old by itself.
-  seamAllowanceCm: googletype_Decimal | undefined;
-  contourAllowanceCm: googletype_Decimal | undefined;
+  // MILLIMETRES since 0290 (the stored centimetres were multiplied by ten in place), so these two
+  // compare directly against TechCard.required_seam_allowance_mm with no conversion in the middle.
+  seamAllowanceMm: googletype_Decimal | undefined;
+  contourAllowanceMm: googletype_Decimal | undefined;
   contourLayer?: string;
   grainLayer?: string;
   allowFlip?: boolean;
@@ -3939,13 +4041,17 @@ export type TechCardMarkerInsert = {
   // The colourway this раскладка is measured for; 0 = not colourway-specific (legacy markers and
   // cards whose colourways share one article). Must be a live colourway of this card.
   colorwayId: number | undefined;
-  // The allowance the layout ADDED by offsetting the contour outward, cm, >= 0. ZERO IS A LEGAL
-  // VALUE and means «we laid the line as drawn»; ABSENT means «nobody recorded it». Not to be
-  // confused with contour_allowance_cm below — their SUM is the allowance that actually lies
+  // The allowance the layout ADDED by offsetting the contour outward, MILLIMETRES, >= 0. ZERO IS A
+  // LEGAL VALUE and means «we laid the line as drawn»; ABSENT means «nobody recorded it». Not to be
+  // confused with contour_allowance_mm below — their SUM is the allowance that actually lies
   // between the seam line and the cut line on the cloth.
-  seamAllowanceCm: googletype_Decimal | undefined;
+  // MILLIMETRES since 0290 while selvedge_cm and the cutting-table length stay CENTIMETRES: the
+  // allowance chain speaks one unit end to end, cloth and table dimensions speak another, and the
+  // suffix is what keeps them apart. The nesting ENGINE is centimetres throughout (it is a
+  // coordinate system, not a field), so exactly one named pair of functions converts at its edge.
+  seamAllowanceMm: googletype_Decimal | undefined;
   // The allowance ALREADY CONTAINED in the contour that was laid out, MEASURED off the file, cm,
-  // >= 0. 0 = the laid contour IS the seam line (a closed contour was found sitting outside it by a
+  // >= 0, MILLIMETRES. 0 = the laid contour IS the seam line (a closed contour was found outside by a
   // steady distance). > 0 = the laid contour is the CUT line, and this is how far outside it sits.
   // ABSENT = there was nothing to measure with (one closed contour in the block, or the second one
   // crosses the first — which is how a non-grading layer behaves on a non-base size). Absence is NOT
@@ -3954,7 +4060,7 @@ export type TechCardMarkerInsert = {
   // and the spread length overstated by it around the perimeter of every piece. There is exactly one
   // way an operator reaches that state — overriding the contour layer by hand onto the cut line and
   // leaving the offset on — which is what makes the refusal both rare and cheap.
-  contourAllowanceCm: googletype_Decimal | undefined;
+  contourAllowanceMm: googletype_Decimal | undefined;
   // The DXF layer the laid contour was taken from. "" = no layer was chosen (there was nothing to
   // choose from in the file). Recorded so the piece DRAWING can be REBUILT at export time from the
   // same geometry rather than from whatever ranks first today.

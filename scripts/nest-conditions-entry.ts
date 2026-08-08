@@ -19,6 +19,7 @@
 // припуск на шов → блоб маркера → чтение блоба → пересборка. Ни одного шага, написанного заново:
 // зонд, который собрал бы детали сам, мерил бы вторую реализацию.
 import type { common_TechCardMarker } from 'api/proto-http/admin';
+import { engineCmToMm } from '../src/components/managers/tech-card/components/nesting/allowance-units';
 import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/use-block-sizes';
 import {
   buildAllowanceIndex,
@@ -196,7 +197,7 @@ export type ConditionsInput = {
   sheets: SheetBytes[];
   contourLayer?: string;
   grainLayer?: string;
-  seamAllowanceCm?: number;
+  seamAllowanceMm?: number;
   fabricWidthCm?: number;
 };
 
@@ -229,14 +230,16 @@ export async function analyzeConditions(input: ConditionsInput): Promise<Conditi
   const cutOption = opted.find((o) => o.allowance?.verdict === 'cut') ?? null;
 
   // ── §5.5 ──────────────────────────────────────────────────────────────────────────────────
-  const fallbackCm = NEST_DEFAULTS.seamAllowanceCm;
+  // NEST_DEFAULTS остаётся конфигом ДВИЖКА и живёт в сантиметрах; зонд сравнивает
+  // миллиметровые ответы предзаполнения, поэтому переводит его тем же единственным способом.
+  const fallbackMm = engineCmToMm(NEST_DEFAULTS.seamAllowanceCm);
   const prefill = {
-    bare: seamAllowancePrefill({ measured, fallbackCm }),
-    withCard: seamAllowancePrefill({ measured, cardRequiredCm: 0.7, fallbackCm }),
-    withWorkshop: seamAllowancePrefill({ measured, workshopDefaultCm: 0.3, fallbackCm }),
-    onCutLayer: cutOption ? seamAllowancePrefill({ measured: cutOption.allowance, fallbackCm }) : null,
+    bare: seamAllowancePrefill({ measured, fallbackMm }),
+    withCard: seamAllowancePrefill({ measured, cardRequiredMm: 0.7, fallbackMm }),
+    withWorkshop: seamAllowancePrefill({ measured, workshopDefaultMm: 0.3, fallbackMm }),
+    onCutLayer: cutOption ? seamAllowancePrefill({ measured: cutOption.allowance, fallbackMm }) : null,
     onCutLayerWithCard: cutOption
-      ? seamAllowancePrefill({ measured: cutOption.allowance, cardRequiredCm: 0.7, fallbackCm })
+      ? seamAllowancePrefill({ measured: cutOption.allowance, cardRequiredMm: 0.7, fallbackMm })
       : null,
   };
   const doubleAllowanceOnDefaultLayer =
@@ -245,7 +248,7 @@ export async function analyzeConditions(input: ConditionsInput): Promise<Conditi
   // ── B5: путь оператора до блоба ───────────────────────────────────────────────────────────
   const grainLayers = grainLayerOptions(parsed);
   const grainLayer = input.grainLayer ?? defaultGrainLayer(grainLayers);
-  const seamAllowanceCm = input.seamAllowanceCm ?? 1;
+  const seamAllowanceMm = input.seamAllowanceMm ?? 1;
   const widthCm = input.fabricWidthCm ?? 140;
 
   // Один контур на блок выбранного слоя — ровно так набирает детали модалка (плюс её фильтр по
@@ -260,7 +263,7 @@ export async function analyzeConditions(input: ConditionsInput): Promise<Conditi
     picked.push(p);
   }
   const oriented = orientToGrain(picked, grainLayer);
-  const withSeam = applySeamAllowance(oriented.pieces, seamAllowanceCm);
+  const withSeam = applySeamAllowance(oriented.pieces, seamAllowanceMm);
   const laid = withSeam.pieces;
 
   // Размещения синтетические и намеренно тривиальные: зонд проверяет ЧЕРТЁЖ, а не поиск. Реальный
@@ -307,7 +310,7 @@ export async function analyzeConditions(input: ConditionsInput): Promise<Conditi
       efficiencyPct: { value: '50' },
       placedCount: result.placedCount,
       totalCount: result.totalCount,
-      seamAllowanceCm: { value: seamAllowanceCm.toFixed(2) },
+      seamAllowanceMm: { value: seamAllowanceMm.toFixed(2) },
       contourLayer: defaultLayer,
       grainLayer,
     } as common_TechCardMarker['summary'],
@@ -357,7 +360,7 @@ export async function analyzeConditions(input: ConditionsInput): Promise<Conditi
     seamLayers: opted.filter((o) => o.allowance?.verdict === 'seam').map((o) => o.layer),
     prefill,
     doubleAllowanceOnDefaultLayer,
-    markerSeamAllowanceCm: seamAllowanceCm,
+    markerSeamAllowanceCm: seamAllowanceMm,
     markerContourLayer: defaultLayer,
     markerGrainLayer: grainLayer,
     storedPieces: (layout.pieces ?? []).length,

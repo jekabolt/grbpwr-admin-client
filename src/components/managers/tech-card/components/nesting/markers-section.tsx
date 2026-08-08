@@ -71,8 +71,8 @@ const cm2 = (n: number) => n.toFixed(2);
 // null = условия не записаны вовсе. Отдельная ветка, а не «0.00 см», по причине выше.
 function allowanceText(c: MarkerConditions): { total: string; origin: string } | null {
   if (!c.recorded) return null;
-  const seam = c.seamAllowanceCm ?? 0;
-  const contour = c.contourAllowanceCm;
+  const seam = c.seamAllowanceMm ?? 0;
+  const contour = c.contourAllowanceMm;
   return {
     total: `${cm2(seam + (contour ?? 0))} см`,
     origin:

@@ -23,6 +23,7 @@
 // не как второй судья над ним.
 import type { PieceDTO } from 'lib/nesting/types';
 
+import { clampSeamAllowanceMm, engineCmToMm, MAX_SEAM_ALLOWANCE_MM } from './allowance-units';
 import {
   measureContourAllowance,
   type AllowanceIndex,
@@ -142,7 +143,9 @@ export function layerOptions(
 export function layerAllowanceLabel(o: LayerOption): string {
   const m = o.allowance;
   if (!m) return '';
-  if (m.verdict === 'cut') return `линия кроя, +${(m.allowanceCm ?? 0).toFixed(2)} см`;
+  // ЗАМЕР ЖИВЁТ В САНТИМЕТРАХ (это геометрия файла), ПОКАЗЫВАЕТСЯ В МИЛЛИМЕТРАХ (это припуск).
+  // Конверсия здесь и в предзаполнении ниже — по одной и той же функции, других в файле нет.
+  if (m.verdict === 'cut') return `линия кроя, +${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} мм`;
   if (m.verdict === 'seam') return 'линия шва';
   return 'не измерено';
 }
@@ -182,12 +185,14 @@ export function seamLineLayer(options: readonly LayerOption[]): string | null {
 // Потолок припуска, см — тот же, что валидирует сервер (entity.MaxSeamAllowanceCm). Не физика, а
 // проверка единиц: самый широкий реальный припуск — подгиб низа 4–5 см, поэтому «11» вместо «1.1»
 // это промах по точке, дающий совершенно правдоподобный маркер вчетверо длиннее. Ноль ЗАКОНЕН.
-export const MAX_SEAM_ALLOWANCE_CM = 10;
-
-export const clampSeamAllowance = (v: number): number =>
-  Math.min(MAX_SEAM_ALLOWANCE_CM, Math.max(0, v));
+// Потолок переехал в allowance-units.ts вместе с единицей: он обязан двигаться вместе с CHECK'ом
+// миграции 0290 и entity.MaxSeamAllowanceMm, и держать его в трёх файлах вместо двух значило бы
+// добавить третье место для расхождения. Реэкспорт — чтобы модалка импортировала его оттуда же,
+// откуда берёт конверсию.
+export { MAX_SEAM_ALLOWANCE_MM, clampSeamAllowanceMm } from './allowance-units';
 
 export type SeamAllowancePrefill = {
+  /** МИЛЛИМЕТРЫ — то, что попадёт в поле оператора и уедет на провод. */
   value: number;
   // Откуда взялось число — печатается под полем. Подставленное молча неотличимо от введённого, и
   // оператор не может ни проверить его, ни возразить ему.
@@ -197,34 +202,34 @@ export type SeamAllowancePrefill = {
 };
 
 export function seamAllowancePrefill(args: {
-  // Замер ВЫБРАННОГО контурного слоя. null = не мерили.
+  // Замер ВЫБРАННОГО контурного слоя. null = не мерили. В САНТИМЕТРАХ — это геометрия файла.
   measured: ContourAllowance | null;
-  // «Требуемый припуск» карточки, см. null/undefined = не задан. НОЛЬ — ЗАДАН.
-  cardRequiredCm?: number | null;
-  // Припуск цеха по умолчанию, см. Тот же договор.
-  workshopDefaultCm?: number | null;
-  // Последний фолбэк — `NEST_DEFAULTS.seamAllowanceCm`. Приходит параметром, чтобы этот модуль не
-  // тянул конфиг движка ради одного числа и чтобы зонд мог назвать его явно.
-  fallbackCm: number;
+  // «Требуемый припуск» карточки, ММ. null/undefined = не задан. НОЛЬ — ЗАДАН.
+  cardRequiredMm?: number | null;
+  // Припуск цеха по умолчанию, ММ. Тот же договор.
+  workshopDefaultMm?: number | null;
+  // Последний фолбэк — `NEST_DEFAULTS.seamAllowanceCm`, переведённый в ММ вызывающим. Приходит
+  // параметром, чтобы этот модуль не тянул конфиг движка ради одного числа.
+  fallbackMm: number;
 }): SeamAllowancePrefill {
   const m = args.measured;
   if (m && m.verdict === 'cut' && (m.allowanceCm ?? 0) > 0) {
     return {
       value: 0,
       source: 'contour_is_cut',
-      why: `на слое ${m.layer} лежит линия КРОЯ — припуск ${(m.allowanceCm ?? 0).toFixed(2)} см уже в контуре, офсет не нужен`,
+      why: `на слое ${m.layer} лежит линия КРОЯ — припуск ${(engineCmToMm(m.allowanceCm) ?? 0).toFixed(1)} мм уже в контуре, офсет не нужен`,
     };
   }
-  if (args.cardRequiredCm != null && Number.isFinite(args.cardRequiredCm)) {
+  if (args.cardRequiredMm != null && Number.isFinite(args.cardRequiredMm)) {
     return {
-      value: clampSeamAllowance(args.cardRequiredCm),
+      value: clampSeamAllowanceMm(args.cardRequiredMm),
       source: 'card',
       why: 'требуемый припуск карточки',
     };
   }
-  if (args.workshopDefaultCm != null && Number.isFinite(args.workshopDefaultCm)) {
+  if (args.workshopDefaultMm != null && Number.isFinite(args.workshopDefaultMm)) {
     return {
-      value: clampSeamAllowance(args.workshopDefaultCm),
+      value: clampSeamAllowanceMm(args.workshopDefaultMm),
       source: 'workshop',
       why: 'припуск цеха по умолчанию',
     };
@@ -233,13 +238,13 @@ export function seamAllowancePrefill(args: {
   // имеет право подставиться. Ниже только умолчание, которого никто не мерил.
   if (m && m.verdict === 'seam' && m.gapCm != null && m.gapCm > 0) {
     return {
-      value: clampSeamAllowance(m.gapCm),
+      value: clampSeamAllowanceMm(engineCmToMm(m.gapCm)),
       source: 'measured_gap',
-      why: `замерено по файлу: линия кроя нарисована в ${m.gapCm.toFixed(2)} см снаружи линии шва`,
+      why: `замерено по файлу: линия кроя нарисована в ${(engineCmToMm(m.gapCm) ?? 0).toFixed(1)} мм снаружи линии шва`,
     };
   }
   return {
-    value: clampSeamAllowance(args.fallbackCm),
+    value: clampSeamAllowanceMm(args.fallbackMm),
     source: 'fallback',
     why: 'умолчание раскладки — ни карточка, ни цех, ни файл припуска не назвали',
   };
