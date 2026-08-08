@@ -50,6 +50,15 @@ export const ALLOWANCE_MAX_SPREAD_CM = 0.15;
 // Ниже этого зазор считается совпадением линий, а не припуском, см.
 export const ALLOWANCE_MIN_GAP_CM = 0.05;
 
+// Выше этого зазор припуском тоже НЕ является, см. Порог был только снизу, и это была асимметрия
+// без причины: «линии совпали» мы отсекали, а «линии в пятнадцати сантиметрах друг от друга» —
+// принимали и записывали как припуск, если он ровный. Ровный он бывает: подклад, обведённый по
+// контуру верха, или деталь внутри рамки раскладочного блока дают именно параллельную пару.
+// Десять сантиметров — тот же потолок, что стоит на записи (entity.MaxSeamAllowanceMm = 100 мм):
+// шире этого припусков не бывает, значит выбрана не та пара контуров, и честный ответ —
+// «замерить нечем», а не число, которое сервер потом откажется принять.
+export const ALLOWANCE_MAX_GAP_CM = 10;
+
 // Меньше стольких принятых блоков — вывода нет. Мелкая карточка честно остаётся неизмеренной.
 export const ALLOWANCE_MIN_BLOCKS = 3;
 
@@ -133,6 +142,9 @@ export type AllowanceStats = {
   rejectedSpread: number;
   // Пары, отвергнутые близостью (линии практически совпали).
   rejectedTooClose: number;
+  // Пары, отвергнутые шириной: зазор ровный, но шире любого припуска — значит это не пара
+  // «шов/крой», а деталь внутри чужого контура (подклад по верху, рамка блока).
+  rejectedTooWide: number;
   // Пары, которые нельзя было положить в одну систему координат.
   rejectedNoOrigin: number;
   // Блоки, где принятые пары СПОРЯТ: что-то нашлось и снаружи, и внутри выбранного контура.
@@ -282,7 +294,7 @@ function round2(v: number): number {
 
 type PairOutcome =
   | { ok: true; outerId: number; innerId: number; p10: number; p50: number; p90: number; points: number }
-  | { ok: false; why: 'crossing' | 'spread' | 'too_close' };
+  | { ok: false; why: 'crossing' | 'spread' | 'too_close' | 'too_wide' };
 
 // Разбор ОДНОЙ пары контуров одного блока. Порядок аргументов не значим: функция сама решает,
 // кто снаружи, и это решение — единственная улика, ради которой всё написано.
@@ -324,6 +336,7 @@ function judgePair(
   // Порядок проверок значим только для статистики: «линии совпали» и «зазор неровный» —
   // разные диагнозы, и схлопывать их в одну строку значит потерять половину истории.
   if (!(p50 > ALLOWANCE_MIN_GAP_CM)) return { ok: false, why: 'too_close' };
+  if (!(p50 <= ALLOWANCE_MAX_GAP_CM)) return { ok: false, why: 'too_wide' };
   if (!(p90 - p10 <= ALLOWANCE_MAX_SPREAD_CM)) return { ok: false, why: 'spread' };
   return { ok: true, outerId, innerId, p10, p50, p90, points: pts.length };
 }
@@ -448,6 +461,7 @@ function emptyStats(): AllowanceStats {
     rejectedCrossing: 0,
     rejectedSpread: 0,
     rejectedTooClose: 0,
+    rejectedTooWide: 0,
     rejectedNoOrigin: 0,
     conflicted: 0,
     accepted: 0,
@@ -505,6 +519,7 @@ function measureOnIndex(idx: AllowanceIndex, contourLayer: string): ContourAllow
       if (!res.ok) {
         if (res.why === 'crossing') stats.rejectedCrossing++;
         else if (res.why === 'spread') stats.rejectedSpread++;
+        else if (res.why === 'too_wide') stats.rejectedTooWide++;
         else stats.rejectedTooClose++;
         continue;
       }
