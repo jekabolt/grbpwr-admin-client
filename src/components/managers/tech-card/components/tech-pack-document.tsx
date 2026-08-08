@@ -1078,8 +1078,17 @@ export function TechPackDocument({
       )}
 
       {/* CONSTRUCTION + OPERATIONS */}
-      {(tc.construction || has(tc.operations)) && (
+      {(tc.construction || has(tc.operations) || tc.requiredSeamAllowanceMm) && (
         <Sheet title='construction'>
+          {/* CARD-LEVEL, so it prints on its own. It used to sit inside the construction block, which
+              meant a card that sets the standard and leaves the defaults empty printed its steps and
+              not the standard they inherit — and «0 mm» (cut on the line as drawn) became
+              indistinguishable from «no standard» on the paper the floor works from. */}
+          {allowanceText(tc.requiredSeamAllowanceMm) && (
+            <div className='mb-2'>
+              <KV k='required seam allowance' v={allowanceText(tc.requiredSeamAllowanceMm)} />
+            </div>
+          )}
           {tc.construction && (
             <div className='mb-3 grid grid-cols-2 gap-x-8'>
               <div>
@@ -1093,7 +1102,6 @@ export function TechPackDocument({
                       : ''
                   }
                 />
-                <KV k='required allowance' v={allowanceText(tc.requiredSeamAllowanceMm)} />
               </div>
               <div>
                 <KV k='hem finish' v={tc.construction.hemFinish} />

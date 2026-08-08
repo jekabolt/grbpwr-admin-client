@@ -1,5 +1,5 @@
 import { techCardIssueSeverityOptions, techCardIssueStatusOptions } from 'constants/filter';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
@@ -10,6 +10,8 @@ import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { TechCardFormData } from './schema';
+import { operationHeading } from './operation-options';
+import { useFormPieces } from './piece-picker';
 
 const OPEN = 'TECH_CARD_ISSUE_STATUS_OPEN';
 const RESOLVED = 'TECH_CARD_ISSUE_STATUS_RESOLVED';
@@ -51,7 +53,10 @@ const statusLabel = (v?: string) =>
   techCardIssueStatusOptions.find((o) => o.value === v)?.label ?? '—';
 
 type PickerOption = { value: number; label: string };
-type OpInfo = { node?: string; placement?: string };
+// What an issue's operation shows as. It is the COMPOSED heading, same as everywhere else — the
+// step has no stored title, and identifying a step by its positional number alone is how a factory
+// issue gets attached to the wrong one.
+type OpInfo = { label: string };
 type CalloutInfo = { part?: string };
 type IssueValue = NonNullable<TechCardFormData['issues']>[number];
 
@@ -120,7 +125,7 @@ function IssueEditor({
           />
           {opInfo && (
             <Text size='micro' variant='label' className='truncate'>
-              {[opInfo.node, opInfo.placement].filter(Boolean).join(' · ') || '—'}
+              {opInfo.label || '—'}
             </Text>
           )}
         </div>
@@ -177,7 +182,7 @@ function WhereCell({
         <Text
           size='micro'
           component='span'
-          title={[opInfo?.node, opInfo?.placement].filter(Boolean).join(' · ') || undefined}
+          title={opInfo?.label || undefined}
         >
           op {opNumber}
         </Text>
@@ -243,9 +248,24 @@ export function IssuesField() {
   // not a stored id, so options are derived from the live `operations` array position, same as
   // OperationsField's own callout "pin" picker derives from `callouts`.
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as Array<{
-    node?: string;
-    placement?: string;
+    operationType?: string;
+    zone?: string;
+    note?: string;
+    pieceLineKeys?: string[];
   }>;
+  const formPieces = useFormPieces();
+  const headingOf = useCallback(
+    (o: { operationType?: string; zone?: string; note?: string; pieceLineKeys?: string[] }) =>
+      operationHeading({
+        operationType: o.operationType as Parameters<typeof operationHeading>[0]['operationType'],
+        zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
+        pieceNames: (o.pieceLineKeys ?? [])
+          .map((k) => formPieces.find((p) => p.lineKey === k)?.name)
+          .filter(Boolean) as string[],
+        note: o.note,
+      }),
+    [formPieces],
+  );
   const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as Array<{
     number?: number;
     part?: string;
@@ -256,17 +276,17 @@ export function IssuesField() {
       { value: 0, label: '— none —' },
       ...operations.map((o, i) => {
         const num = (i + 1) * 10;
-        const info = [o.node, o.placement].filter(Boolean).join(' · ');
+        const info = headingOf(o);
         return { value: num, label: `#${num}${info ? ` — ${info}` : ''}` };
       }),
     ],
-    [operations],
+    [operations, headingOf],
   );
   const operationByNumber = useMemo(() => {
     const m = new Map<number, OpInfo>();
-    operations.forEach((o, i) => m.set((i + 1) * 10, { node: o.node, placement: o.placement }));
+    operations.forEach((o, i) => m.set((i + 1) * 10, { label: headingOf(o) }));
     return m;
-  }, [operations]);
+  }, [operations, headingOf]);
 
   const calloutOptions = useMemo<PickerOption[]>(
     () => [

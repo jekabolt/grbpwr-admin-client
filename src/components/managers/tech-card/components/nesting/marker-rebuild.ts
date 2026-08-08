@@ -83,8 +83,13 @@ export function readMarkerConditions(summary?: common_TechCardMarkerSummary): Ma
     seamAllowanceMm: s.seamAllowanceMm !== undefined ? decNum(s.seamAllowanceMm) : 0,
     contourLayer: s.contourLayer ?? '',
     grainLayer: s.grainLayer ?? '',
-    recorded:
-      s.seamAllowanceMm !== undefined || s.contourLayer !== undefined || s.grainLayer !== undefined,
+    // ЗАПИСАН ЛИ ПРИПУСК — вопрос про ПРИПУСК, и отвечать на него наличием слоя нельзя. Слой контура
+    // и долевая записываются независимо, поэтому раскладка со слоями и без припуска считалась бы
+    // «записанной», а поле выше подставляло бы ВЫДУМАННЫЙ ноль — то есть пересборка молча
+    // раскладывала бы по линии шва там, где припуск просто не мерили. Ноль — законное ИЗМЕРЕННОЕ
+    // значение, и отличать его от «не записано» обязаны все читатели одинаково: conditionsOf в
+    // marker-io.ts судит ровно по этому же признаку.
+    recorded: s.seamAllowanceMm !== undefined,
   };
 }
 

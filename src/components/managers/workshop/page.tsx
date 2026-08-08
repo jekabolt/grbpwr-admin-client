@@ -18,7 +18,7 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { applyServerFieldErrors, fieldErrorSummary } from 'utils/field-errors';
 import {
-  SEAM_ALLOWANCE_MAX_CM,
+  SEAM_ALLOWANCE_MAX_MM,
   validateSeamAllowanceStandard,
 } from 'utils/seam-allowance';
 import z from 'zod';
@@ -295,7 +295,7 @@ export function WorkshopSettingsPage() {
                   раскладка перебивает и то и другое собственным полем. Пусто = эталона нет, и тогда
                   припуск раскладки не с чем сравнивать. 0 — законное значение и значит «наши
                   выкройки несут линию кроя, офсет не нужен»; чтобы снять эталон, очистите поле, а не
-                  ставьте ноль. От 0 до {SEAM_ALLOWANCE_MAX_CM} см, до двух знаков.
+                  ставьте ноль. От 0 до {SEAM_ALLOWANCE_MAX_MM} мм, до одного знака.
                 </Text>
               </div>
 

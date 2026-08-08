@@ -181,7 +181,7 @@ const ERROR_TAB: Record<string, TabId> = {
   // RENDERS on the construction tab next to the free-text seam-allowance note it disambiguates.
   // Without this row it would fall through to the header default and the toast would name a field
   // that tab does not contain.
-  requiredSeamAllowanceCm: 'construction',
+  requiredSeamAllowanceMm: 'construction',
   operations: 'construction',
   labels: 'labels',
   packaging: 'labels',

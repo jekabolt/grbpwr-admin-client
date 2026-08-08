@@ -126,7 +126,7 @@ const TOTAL_UNITS = COMPOSITION.reduce((s, c) => s + c.quantity, 0);
 const mixedSummary = (over = {}) => ({
   id: 1, name: 'смешанная', usedLengthCm: dec(USED_LENGTH), totalUnits: TOTAL_UNITS,
   sizeId: 0, sets: 0, fabricWidthCm: dec(150), efficiencyPct: dec(70),
-  seamAllowanceCm: dec(0), contourLayer: '', grainLayer: '',
+  seamAllowanceMm: dec(0), contourLayer: '', grainLayer: '',
   composition: wireComposition(PER_SIZE),
   scalarApplyRefusal: refusalWithAreas('смешанная', 2, TOTAL_UNITS),
   ...over,
@@ -315,7 +315,7 @@ console.log('\nH · ОДНОРОДНАЯ РАСКЛАДКА не сломана 
   const rows = serverPerSize(comp, 330, areas);
   const s = {
     id: 2, name: 'однородная', usedLengthCm: dec(330), totalUnits: 3, sizeId: 0, sets: 0,
-    seamAllowanceCm: dec(0), contourLayer: '', grainLayer: '',
+    seamAllowanceMm: dec(0), contourLayer: '', grainLayer: '',
     composition: wireComposition(rows), scalarApplyRefusal: '',
   };
   ck(areas.get(SIZE.M) === 1100, 'сервер: a_M = 1000 + 2×50 = 1100', String(areas.get(SIZE.M)));
@@ -357,7 +357,7 @@ console.log('\nI · ОТКАЗЫ ПРОДОЛЖЕНИЯ вместо правд�
   // записанными и слои — пустая строка там значима, «не разворачивать»). Повторить преобразование
   // контура нечем, а площади, посчитанные другим припуском, с записанными не сойдутся никогда.
   const bare = mixedSummary();
-  delete bare.seamAllowanceCm;
+  delete bare.seamAllowanceMm;
   delete bare.contourLayer;
   delete bare.grainLayer;
   const noConditions = m.sizeAreasFromParsed({

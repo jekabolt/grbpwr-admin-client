@@ -546,6 +546,31 @@ function OperationEditor({
   ].filter(Boolean).length;
   const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
 
+  // HIDING A CONTROL MUST ALSO CLEAR IT. Both fields below are rendered conditionally, and the save
+  // rejects a value that its owner no longer admits — a width beside «edge», a size with no
+  // attachment. Without this, typing a width and then switching to «edge» leaves the number in the
+  // form, hides the input that holds it, and blocks the save demanding the operator clear a field
+  // that is not on screen.
+  useEffect(() => {
+    if (topstitchMode !== 'TECH_CARD_TOPSTITCH_MODE_WIDTH') {
+      if ((getValues(`operations.${index}.topstitchWidthMm`) ?? '') !== '') {
+        setValue(`operations.${index}.topstitchWidthMm`, '', { shouldDirty: true });
+      }
+      if (getValues(`operations.${index}.topstitchRows`)) {
+        setValue(`operations.${index}.topstitchRows`, 0, { shouldDirty: true });
+      }
+    }
+  }, [topstitchMode, index, getValues, setValue]);
+
+  useEffect(() => {
+    if (
+      attachmentKind === NONE_ATTACHMENT &&
+      (getValues(`operations.${index}.attachmentSizeMm`) ?? '') !== ''
+    ) {
+      setValue(`operations.${index}.attachmentSizeMm`, '', { shouldDirty: true });
+    }
+  }, [attachmentKind, index, getValues, setValue]);
+
   // WHAT THIS STEP WOULD INHERIT, and from where — shown as a placeholder, stored nowhere. The
   // card's own standard wins over the workshop's, exactly as the server resolves it.
   const cardAllowanceMm = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string;

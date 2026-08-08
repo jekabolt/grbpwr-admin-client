@@ -13,7 +13,7 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import DecimalField from 'ui/form/fields/decimal-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
-import { SEAM_ALLOWANCE_MAX_CM } from 'utils/seam-allowance';
+import { SEAM_ALLOWANCE_MAX_MM } from 'utils/seam-allowance';
 import { ConstructionField } from './construction-field';
 import { zoneOptions } from './operation-options';
 import { ColorwayArticles, OPERATION_EXPECTED_SECTIONS, OperationsField } from './operations-field';
