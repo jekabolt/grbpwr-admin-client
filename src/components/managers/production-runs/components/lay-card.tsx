@@ -5,16 +5,22 @@ import {
   common_ProductionRunLaySection,
   googletype_Decimal,
 } from 'api/proto-http/admin';
+import { Fragment } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import {
+  LAY_ACTUAL_METHOD_LABEL,
+  MATERIAL_UNIT_LABEL,
+  allLayChecks,
   VERDICT_GLYPH,
   VERDICT_PILL,
   VERDICT_TEXT,
   VERDICT_WORD,
+  layActualQty,
+  layLotState,
   layVerdict,
   worstVerdict,
 } from './useLays';
@@ -74,7 +80,11 @@ export function LayCard({
 }) {
   const checks = lay.checks ?? [];
   const sections = lay.sections ?? [];
-  const verdict = worstVerdict(checks);
+  // ВЕРДИКТ СЧИТАЕТСЯ ПО ВСЕМ ОДИННАДЦАТИ проверкам, а не по семи настиловым: четыре маркерные
+  // (`lay_marker_scope`, `lay_marker_width`, `lay_lot_width`, `lay_mirror_expansion`) приезжают в
+  // секциях. Пока их не складывали, настил с маркером ШИРЕ РУЛОНА — то есть тот, который не
+  // выкроится ни в один проход, — носил зелёный пилл «годен».
+  const verdict = worstVerdict(allLayChecks(lay));
   const stale = lay.quantitiesStale === true;
 
   const totalPlies = lay.totalPlies ?? 0;
@@ -146,40 +156,54 @@ export function LayCard({
         }
       />
       <StackHeightRow lay={lay} checks={checks} />
+      <LotAndFactRows lay={lay} />
 
       {/* ПЛОТТЕР — НА СЕКЦИЮ, А НЕ НА НАСТИЛ. Три секции это три РАЗНЫЕ раскладки, которые режут по
           очереди своими проходами; один файл «на настил» пришлось бы либо склеить из трёх (такой
           геометрии не существует), либо молча выбрать одну — и раскройщик получил бы файл, режущий
           не то, что он настелил. */}
-      {sections.map((s, i) => (
-        <Row
-          key={s.sectionKey || `${s.markerId}-${i}`}
-          tone='label'
-          label={`${i + 1}. ${s.markerName || `раскладка #${s.markerId ?? 0}`}`}
-          value={
-            <span className='inline-flex items-center gap-2'>
-              <span className='tabular-nums'>
-                {s.plies ?? 0} сл · {cmValue(s.sectionLengthCm) ?? '—'} см
-              </span>
-              {onPlotter && (s.markerId ?? 0) > 0 && (
-                <Button
-                  type='button'
-                  variant='underline'
-                  size='xs'
-                  disabled={plottingKey === (s.sectionKey || `${s.markerId}-${i}`)}
-                  title='DXF для раскройного плоттера: контуры, кромка и ШАПКА (прогон, цвет, артикул, слои, состав, длина). БЕЗ линии шва и надсечек — их восстанавливают по выкройкам, а на странице прогона выкроек нет'
-                  onClick={() => onPlotter(s, s.sectionKey || `${s.markerId}-${i}`)}
-                >
-                  {plottingKey === (s.sectionKey || `${s.markerId}-${i}`) ? 'готовим…' : 'плоттер'}
-                </Button>
-              )}
-            </span>
-          }
-        />
-      ))}
+      {sections.map((s, i) => {
+        const key = s.sectionKey || `${s.markerId}-${i}`;
+        return (
+          <Fragment key={key}>
+            <Row
+              tone='label'
+              label={`${i + 1}. ${s.markerName || `раскладка #${s.markerId ?? 0}`}`}
+              value={
+                <span className='inline-flex items-center gap-2'>
+                  <span className='tabular-nums'>
+                    {s.plies ?? 0} сл · {cmValue(s.sectionLengthCm) ?? '—'} см
+                  </span>
+                  {onPlotter && (s.markerId ?? 0) > 0 && (
+                    <Button
+                      type='button'
+                      variant='underline'
+                      size='xs'
+                      disabled={plottingKey === key}
+                      title='DXF для раскройного плоттера: контуры, кромка и ШАПКА (прогон, цвет, артикул, слои, состав, длина). БЕЗ линии шва и надсечек — их восстанавливают по выкройкам, а на странице прогона выкроек нет'
+                      onClick={() => onPlotter(s, key)}
+                    >
+                      {plottingKey === key ? 'готовим…' : 'плоттер'}
+                    </Button>
+                  )}
+                </span>
+              }
+            />
+            {/* МАРКЕРНЫЕ проверки стоят ПОД СВОЕЙ секцией, а не в общем списке внизу: они говорят
+                про ЭТУ раскладку («шире рулона», «чужой маркер»), и в общем списке из трёх секций
+                оператору пришлось бы угадывать, к какой из них относится каждая. */}
+            {(s.checks ?? []).map((c, j) => (
+              <CheckLine key={c.key || j} check={c} indent />
+            ))}
+          </Fragment>
+        );
+      })}
 
+      {/* «Проверки не приехали» — про ВЕСЬ настил, поэтому спрашивается по обоим местам: секционные
+          находки уже нарисованы выше, и говорить «вердикта нет», когда четыре из них на экране,
+          значило бы спорить с собственной страницей. */}
       <div className='mt-1 flex flex-col'>
-        {checks.length === 0 ? (
+        {allLayChecks(lay).length === 0 ? (
           <Text size='micro' variant='label'>
             ? проверки годности не приехали — вердикта по этому настилу нет
           </Text>
@@ -237,10 +261,146 @@ function StackHeightRow({
   );
 }
 
-function CheckLine({ check }: { check: common_ProductionLayCheck }) {
+// Компактная отметка времени замера: «05 авг, 14:20». Полный формат `formatDate` (месяц словом,
+// год) в колонке чисел не помещается, а год у замера этой недели ничего не добавляет.
+export function stampWhen(ts?: string): string {
+  if (!ts) return '';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString(undefined, {
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+// ЛОТ И ФАКТ РАСХОДА — то, что знает ЦЕХ, а не планировщик (Ф5б.1 / Ф5б.2).
+//
+// Пока цех не отчитался, обе строки схлопываются в ОДНУ приглушённую: два пустых поля подряд
+// («рулон не назван», «факт не введён») занимали бы половину карточки, ничего при этом не сообщая.
+// Как только появляется хоть одна половина, поля разъезжаются и каждое отвечает за себя.
+function LotAndFactRows({ lay }: { lay: common_ProductionRunLay }) {
+  const lot = layLotState(lay);
+  const raw = layActualQty(lay);
+  const hasFact = raw !== '';
+  // DECIMAL(12,3) приезжает как «12.400»; хвостовые нули — артефакт колонки, а не точность замера.
+  // Значение при этом НЕ округляется: убираются только нули, которых человек не вводил.
+  const qty = hasFact ? String(Number(raw)) : '';
+
+  if (lot === 'none' && !hasFact) {
+    return <Row tone='label' label='рулон и факт расхода' value='цех ещё не отчитался' />;
+  }
+
+  // UNKNOWN — это «единицу не распознали», а не «единицы нет»: число с нераспознанной единицей всё
+  // равно показывается, но названо словами, потому что сложить его пока не с чем.
+  const unit =
+    lay.actualUom && lay.actualUom !== 'MATERIAL_UNIT_UNKNOWN'
+      ? MATERIAL_UNIT_LABEL[lay.actualUom]
+      : '';
+  const method =
+    lay.actualMethod && lay.actualMethod !== 'PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED'
+      ? LAY_ACTUAL_METHOD_LABEL[lay.actualMethod]
+      : '';
+  const when = stampWhen(lay.actualAt);
+
+  return (
+    <>
+      {/* ТРИ состояния лота, и второе — не разновидность первого. «Удалён из справочника» это
+          история: снимок кода на настиле NOT NULL ровно затем, чтобы настил мог НАЗВАТЬ пропавший
+          рулон. Незаполненное поле выглядит серым, названный рулон — обычным текстом, а причина
+          отрыва идёт приглушённой припиской, чтобы не спорить с самим кодом. */}
+      <Row
+        label='рулон'
+        tone={lot === 'none' ? 'label' : undefined}
+        value={
+          lot === 'named' ? (
+            lay.lotCode || `#${lay.lotId}`
+          ) : lot === 'detached' ? (
+            <span>
+              {lay.lotCode}{' '}
+              <span className='text-labelColor'>· удалён из складского справочника</span>
+            </span>
+          ) : (
+            'не назван'
+          )
+        }
+      />
+
+      <Row
+        label={hasFact && method ? `факт расхода · ${method}` : 'факт расхода'}
+        tone={hasFact ? undefined : 'label'}
+        value={
+          !hasFact ? (
+            'не введён'
+          ) : unit ? (
+            `${qty} ${unit}`
+          ) : (
+            <span>
+              {qty} <span className='text-labelColor'>· единица не распознана</span>
+            </span>
+          )
+        }
+      />
+
+      {/* КТО И КОГДА назвал число — это то, что делает факт фактом. Сервер штампует обе половины
+          сам и НЕ обновляет их, когда сохранение лишь повторило прежний замер, поэтому подпись
+          принадлежит замерщику, а не последнему, кто открыл форму. */}
+      {hasFact ? (
+        <Row
+          tone='label'
+          label='замер'
+          value={`${lay.actualBy || 'автор не записан'}${when ? ` · ${when}` : ''}`}
+        />
+      ) : null}
+
+      {/* ДРЕЙФ рисуется ТОЛЬКО при наличии факта: без факта его пустота уже объяснена строкой выше,
+          и «нечего сравнить» под «факт не введён» было бы вторым ответом на тот же вопрос. А ВОТ
+          при наличии факта пустой дрейф — самостоятельная новость: сравнить не с чем, потому что
+          нет плана или единицы несводимы, и это НЕ «сошлось, 0%». */}
+      {hasFact ? <DriftRow drift={lay.actualDriftPercent} /> : null}
+    </>
+  );
+}
+
+// Дрейф = факт / план настила − 1, в процентах, СО ЗНАКОМ.
+//
+// Плюс — ушло БОЛЬШЕ плана, то есть перерасход, и он красный: красный в этой системе значит потерю.
+// Минус зелёным не красится: «ушло меньше геометрии» — это не победа, а повод спросить, весь ли
+// настил настелили и тем ли мерили.
+//
+// Классификация делается по УЖЕ ОКРУГЛЁННОМУ числу, иначе дрейф 0.04% печатался бы как «+0.0%
+// перерасход» — знак без величины, то есть тревога ни о чём.
+function DriftRow({ drift }: { drift?: googletype_Decimal }) {
+  const raw = Number(drift?.value);
+  if (!drift?.value || !Number.isFinite(raw)) {
+    return (
+      <Row
+        tone='label'
+        label='дрейф к плану настила — сравнить не с чем: нет плана настила либо единица факта не сводится с ним'
+        value={`${VERDICT_GLYPH.unknown} не считается`}
+        className={VERDICT_TEXT.unknown}
+      />
+    );
+  }
+  const shown = Number(raw.toFixed(1));
+  const sign = shown > 0 ? '+' : shown < 0 ? '−' : '';
+  const word = shown > 0 ? 'перерасход' : shown < 0 ? 'меньше плана' : 'сошлось';
+  return (
+    <Row
+      label='дрейф к плану настила'
+      value={`${sign}${Math.abs(shown).toFixed(1)}% ${word}`}
+      // Красный — потому что перерасход это ПОТЕРЯ, а не потому что это вердикт проверки: дрейф
+      // ничего не запрещает, он кормит калибровку коэффициента.
+      className={shown > 0 ? 'text-error' : undefined}
+    />
+  );
+}
+
+function CheckLine({ check, indent }: { check: common_ProductionLayCheck; indent?: boolean }) {
   const verdict = layVerdict(check.status);
   return (
-    <Text size='micro' className={VERDICT_TEXT[verdict]}>
+    <Text size='micro' className={`${VERDICT_TEXT[verdict]}${indent ? ' pl-2.5' : ''}`}>
       {VERDICT_GLYPH[verdict]}{' '}
       {/* «не проверено» произносится ВСЛУХ перед названием проверки: молчаливый серый глиф
           прочитался бы как приглушённое «ок». */}

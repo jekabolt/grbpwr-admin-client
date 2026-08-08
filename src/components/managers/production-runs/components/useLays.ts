@@ -1,6 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import {
+  common_MaterialUnit,
+  common_ProductionLayActualMethod,
   common_ProductionLayCheck,
   common_ProductionLayCheckStatus,
   common_ProductionRunLayInsert,
@@ -213,9 +215,106 @@ export function worstVerdict(checks: common_ProductionLayCheck[]): LayVerdict {
   return 'ok';
 }
 
+// ВСЕ проверки настила, из ОБОИХ мест провода.
+//
+// Проверок одиннадцать, но лежат они не в одном поле: семь про настил целиком приезжают в
+// `lay.checks`, а четыре про КОНКРЕТНЫЙ маркер — `lay_marker_scope`, `lay_marker_width`,
+// `lay_lot_width` (Ф5б.1, Р8) и `lay_mirror_expansion` — в `lay.sections[].checks`. Вердикт,
+// посчитанный по одному только `lay.checks`, молча теряет четыре из одиннадцати, в том числе
+// ЗАПРЕТ «маркер шире рулона»: настил, который физически не выкроить, показывал бы «годен».
+export function allLayChecks(lay: {
+  checks?: common_ProductionLayCheck[];
+  sections?: { checks?: common_ProductionLayCheck[] }[];
+}): common_ProductionLayCheck[] {
+  return [...(lay.checks ?? []), ...(lay.sections ?? []).flatMap((s) => s.checks ?? [])];
+}
+
 export const VERDICT_WORD: Record<LayVerdict, string> = {
   ok: 'годен',
   warning: 'с оговорками',
   blocker: 'не годен',
   unknown: 'не проверен',
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ЛОТ И ФАКТ РАСХОДА (Ф5б.1 / Ф5б.2) — словарь на карточку и на редактор сразу.
+
+// Единица факта. Словарь ЗАКРЫТ проводом (MaterialUnit), а не колонкой, поэтому здесь ровно
+// столько строк, сколько значений в перечислении, и Record<> ловит появление нового значения
+// ошибкой компиляции, а не пустой ячейкой на экране.
+export const MATERIAL_UNIT_LABEL: Record<common_MaterialUnit, string> = {
+  // UNKNOWN — это «единицу не распознали», а НЕ «единицы нет»: прото говорит прямым текстом, что
+  // клиент не имеет права читать её как отсутствие. Поэтому у неё своя подпись, и в выбор она не
+  // попадает (см. FACT_UNIT_OPTIONS) — выбрать «не распознано» нельзя, это ответ сервера, а не
+  // намерение человека.
+  MATERIAL_UNIT_UNKNOWN: 'единица не распознана',
+  MATERIAL_UNIT_M: 'м',
+  MATERIAL_UNIT_CM: 'см',
+  MATERIAL_UNIT_MM: 'мм',
+  MATERIAL_UNIT_M2: 'м²',
+  MATERIAL_UNIT_G: 'г',
+  MATERIAL_UNIT_KG: 'кг',
+  MATERIAL_UNIT_PCS: 'шт',
+  MATERIAL_UNIT_PAIR: 'пара',
+  MATERIAL_UNIT_SET: 'компл.',
+  MATERIAL_UNIT_CONE: 'конус',
+  MATERIAL_UNIT_ROLL: 'рулон',
+};
+
+// Что можно ВЫБРАТЬ в форме факта: весь словарь, кроме UNKNOWN.
+//
+// Список НЕ сужен до «метров и килограммов», хотя настил бывает только из рулонных слотов. Единица
+// факта обязана сводиться с единицей артикула — иначе дрейф не считается вовсе, — а единица
+// артикула здесь неизвестна: по проводу на настиле её нет. Отрезать «лишние» значения значило бы
+// запретить цеху назвать факт в той единице, в которой этот артикул на складе и лежит.
+export const FACT_UNIT_OPTIONS: common_MaterialUnit[] = [
+  'MATERIAL_UNIT_M',
+  'MATERIAL_UNIT_CM',
+  'MATERIAL_UNIT_MM',
+  'MATERIAL_UNIT_M2',
+  'MATERIAL_UNIT_KG',
+  'MATERIAL_UNIT_G',
+  'MATERIAL_UNIT_PCS',
+  'MATERIAL_UNIT_PAIR',
+  'MATERIAL_UNIT_SET',
+  'MATERIAL_UNIT_CONE',
+  'MATERIAL_UNIT_ROLL',
+];
+
+// ЧЕМ замеряли. Метод едет рядом с числом, а не подразумевается: два метода врут по-разному —
+// рулон до/после наследует ошибку измерения остатка и не видит ушедшего в обрезки, а взвешивание
+// переводится в метры через плотность и ширину и потому чувствительно к обеим.
+export const LAY_ACTUAL_METHOD_LABEL: Record<common_ProductionLayActualMethod, string> = {
+  PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED: 'метод не назван',
+  PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER: 'замер рулона до/после',
+  PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED: 'взвешивание',
+};
+
+export const LAY_ACTUAL_METHODS: common_ProductionLayActualMethod[] = [
+  'PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER',
+  'PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED',
+];
+
+// СОСТОЯНИЕ ЛОТА — ТРИ, А НЕ ДВА.
+//
+//   named    — обе половины на месте, обычный случай;
+//   detached — lot_id пуст при НЕПУСТОМ lot_code: рулон удалён из складского справочника
+//              (fk_prlay_lot стоит на SET NULL), но настил всё ещё НАЗЫВАЕТ то, что взял. Это
+//              история, и переписывать её нечем;
+//   none     — рулон просто не назвали. Незаполненное поле, а не история.
+//
+// Разница между вторым и третьим — единственное, ради чего снимок кода вообще NOT NULL; читаться
+// они обязаны по-разному, иначе снимок оплачен зря.
+export type LayLotState = 'named' | 'detached' | 'none';
+
+export function layLotState(lay: { lotId?: number; lotCode?: string }): LayLotState {
+  if ((lay.lotId ?? 0) > 0) return 'named';
+  return (lay.lotCode ?? '').trim() ? 'detached' : 'none';
+}
+
+// Есть ли факт. Факт — это КОЛИЧЕСТВО: единица и метод без числа это наполовину заполненная форма
+// (импликация односторонняя), и показывать её как факт значило бы объявить замер там, где его нет.
+export function layActualQty(lay: { actualQty?: { value?: string } }): string {
+  const raw = (lay.actualQty?.value ?? '').trim();
+  return raw && Number.isFinite(Number(raw)) ? raw : '';
+}

@@ -1,9 +1,12 @@
 import {
+  common_MaterialUnit,
+  common_ProductionLayActualMethod,
   common_ProductionLayMode,
   common_ProductionRunLay,
   common_ProductionRunLayInsert,
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
+import { useMaterialLots } from 'components/managers/materials/components/useWarehouse';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
@@ -15,20 +18,30 @@ import Input from 'ui/components/input';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import SelectComponent from 'ui/components/select';
-import { inputToDecimal, sanitizeDecimal } from 'utils/decimal';
+import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
-import { LAY_MODE_LABEL } from './lay-card';
+import { LAY_MODE_LABEL, stampWhen } from './lay-card';
 import { LaySectionRows, SectionDraft, newSectionDraft, sectionPlies } from './lay-section-rows';
 import {
+  FACT_UNIT_OPTIONS,
+  LAY_ACTUAL_METHODS,
+  LAY_ACTUAL_METHOD_LABEL,
+  MATERIAL_UNIT_LABEL,
   VERDICT_GLYPH,
   VERDICT_TEXT,
+  allLayChecks,
   layErrorMessage,
+  layLotState,
   layVerdict,
   useCopyMarkerToRun,
   useSaveLay,
 } from './useLays';
 
-export type LaySlotOption = { lineKey: string; name: string };
+/**
+ * Слот BOM, на который можно настелить. `materialId` — артикул склада за слотом (0 = слот не
+ * привязан к каталогу): по нему спрашиваются рулоны, и без него выбирать лот не из чего.
+ */
+export type LaySlotOption = { lineKey: string; name: string; materialId: number };
 export type LayColorwayOption = { colorwayId: number; label: string };
 
 // ЕДИНСТВЕННОЕ место во всём плане настилов, где живёт состояние формы.
@@ -113,6 +126,52 @@ export function LayEditor({
       : [newSectionDraft()],
   );
 
+  // ── ЛОТ И ФАКТ РАСХОДА (Ф5б.1 / Ф5б.2) ─────────────────────────────────────
+  // Всё это цеховая половина настила, и она заводится тем же ленивым засевом: правка настила —
+  // ПОЛНАЯ ЗАМЕНА состояния, поэтому форма обязана держать текущие значения даже тогда, когда
+  // человек их не трогает.
+  const [lotId, setLotId] = useState(() => existing?.lotId ?? 0);
+  const [actualQty, setActualQty] = useState(() => existing?.actualQty?.value ?? '');
+  // UNKNOWN / UNSPECIFIED в форму НЕ садятся: «единицу не распознали» — это ответ сервера о
+  // хранимой строке, а не выбор человека, и предложить его как вариант значило бы дать выбрать
+  // «не знаю» вместо единицы.
+  const [actualUom, setActualUom] = useState<common_MaterialUnit | ''>(() =>
+    existing?.actualUom && existing.actualUom !== 'MATERIAL_UNIT_UNKNOWN' ? existing.actualUom : '',
+  );
+  const [actualMethod, setActualMethod] = useState<common_ProductionLayActualMethod | ''>(() =>
+    existing?.actualMethod &&
+    existing.actualMethod !== 'PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED'
+      ? existing.actualMethod
+      : '',
+  );
+
+  // Артикул, чьи рулоны предлагаются. У сохранённого настила он приезжает с сервера (это то, что
+  // колорвей пинит СЕГОДНЯ), у нового — резолвится из выбранного слота. 0 = слот вообще не связан с
+  // каталогом (свободный текст в BOM): тогда список рулонов взять неоткуда, и это говорится вслух.
+  const materialId =
+    (existing?.materialId ?? 0) ||
+    slotOptions.find((s) => s.lineKey === bomLineKey)?.materialId ||
+    0;
+
+  // `includeArchived: true` СОЗНАТЕЛЬНО. Архивный рулон нельзя прятать из списка: если настил уже
+  // на него ссылается, выбор молча показал бы пустоту вместо привязки, которая никуда не делась.
+  // Архив помечен в подписи — видно, что рулон отработан, но переписать историю список не может.
+  const lots = useMaterialLots(materialId, true, materialId > 0);
+  const lotItems = (lots.data?.lots ?? []).map((l) => {
+    const width = (l.measuredWidthCm?.value ?? '').trim();
+    return {
+      value: l.id ?? 0,
+      // Ширина стоит рядом с кодом, потому что раскройщик выбирает рулон по коду, а сверка ширины —
+      // то, ради чего выбор вообще существует (Р8): маркер шире рулона не выкроится ни в один
+      // проход. «Не замерена» пишется словами — пустое место прочиталось бы как «совпадает с
+      // номиналом», а это ровно то, чего measured_width_cm не утверждает.
+      label: `${l.lotCode || `#${l.id}`} · ${width ? `${width} см` : 'ширина не замерена'}${
+        l.archived ? ' · архив' : ''
+      }`,
+    };
+  });
+  const lotState = layLotState({ lotId, lotCode: existing?.lotCode });
+
   const isNew = !existing;
   const busy = save.isPending;
 
@@ -148,6 +207,25 @@ export function LayEditor({
   ) {
     problems.push('лицом к лицу слои складываются парами — нечётное число слоёв неисполнимо');
   }
+  // «ФАКТ ЦЕЛИКОМ ИЛИ НИКАК», и импликация ОДНОСТОРОННЯЯ: количество ⇒ единица И метод. Обратное
+  // не требуется — единица, выбранная раньше количества, это наполовину заполненная форма, а не
+  // ошибка, поэтому строк про «выбрана единица без количества» здесь нет и быть не должно.
+  //
+  // Проверяется ЗДЕСЬ, до отправки. В схеме это CHECK (chk_prlay_actual_complete), но CHECK — пол
+  // под прямым SQL-писателем: он отвечает именем ограничения, из которого цех не узнает, какого из
+  // трёх полей не хватило.
+  const factQtyTyped = actualQty.trim() !== '';
+  if (factQtyTyped && !(parseDecimalNumber(actualQty) > 0)) {
+    problems.push(
+      'факт расхода — положительное число; чтобы отозвать замер, очистите поле целиком',
+    );
+  }
+  if (factQtyTyped && !actualUom) {
+    problems.push('введено количество факта, но не сказано, в чём оно измерено');
+  }
+  if (factQtyTyped && !actualMethod) {
+    problems.push('введено количество факта, но не сказано, как его замерили');
+  }
 
   const submit = () => {
     if (problems.length > 0) return;
@@ -163,14 +241,26 @@ export function LayEditor({
       name: name.trim(),
       note: note.trim(),
       displayOrder: existing?.displayOrder ?? nextDisplayOrder,
-      // ЛОТ И ФАКТ ЭХОМ, А НЕ ПУСТЫМИ. Сохранение настила — полная замена состояния, поэтому поле,
-      // которое эта форма не редактирует, обязано уехать таким, каким пришло. Отправь мы здесь
-      // пустые — правка числа слоёв стирала бы замер цеха, и стирала бы молча: экран планировщика
-      // про факт расхода ничего не знает и не показал бы пропажу.
-      lotId: existing?.lotId ?? 0,
-      actualQty: existing?.actualQty,
-      actualUom: existing?.actualUom,
-      actualMethod: existing?.actualMethod,
+      // ЛОТ И ФАКТ — ТЕПЕРЬ ИЗ ФОРМЫ, А НЕ ЭХОМ. Эхо стояло здесь ровно до тех пор, пока форма их
+      // не редактировала; теперь она редактирует, и значения приходят из её состояния — которое
+      // засеяно из `existing`, поэтому нетронутые поля по-прежнему уезжают такими, какими пришли.
+      // Сохранение настила остаётся ПОЛНОЙ ЗАМЕНОЙ состояния, и это единственная причина, по
+      // которой оба поля обязаны быть здесь названы.
+      lotId,
+      // ОТВЯЗКА ПРОИЗНОСИТСЯ ФЛАГОМ, а не нулём в lotId: голым int32 «не трогай» и «отвяжи» не
+      // различить, и сервер читает ноль как молчание. Без этого выбор «— рулон не назван —»
+      // сохранялся бы молча ничего не меняя, и оператор не смог бы снять ошибочно выбранный рулон.
+      // Эта форма — полный редактор лота, поэтому её «не назван» и есть намерение отвязать; на
+      // новом настиле это отвязка того, чего нет, то есть ничего.
+      clearLot: lotId <= 0,
+      // Пустое количество отзывает факт ЦЕЛИКОМ — вместе с единицей, методом и подписью замерщика.
+      // Единица без числа не отправляется: наполовину заполненная ФОРМА законна (импликация
+      // односторонняя), но наполовину заполненная СТРОКА в базе — это единица при несуществующем
+      // замере, то есть подпись под числом, которого нет.
+      actualQty: factQtyTyped ? inputToDecimal(actualQty) : undefined,
+      actualUom: factQtyTyped ? actualUom || undefined : undefined,
+      actualMethod: factQtyTyped ? actualMethod || undefined : undefined,
+      clearActual: !factQtyTyped,
       sections: sections.map((s, i) => ({
         sectionKey: s.sectionKey,
         markerId: s.markerId,
@@ -250,7 +340,13 @@ export function LayEditor({
               name='lay-slot'
               items={slotOptions.map((s) => ({ value: s.lineKey, label: s.name }))}
               value={bomLineKey}
-              onValueChange={(v: string) => setBomLineKey(v)}
+              // Смена слота — это смена АРТИКУЛА, а значит и списка рулонов. Выбранный до неё лот
+              // принадлежит прежней ткани, и оставить его значило бы отправить на сервер заведомый
+              // отказ («lot_of_another_article») или, хуже, привязать настил к чужому рулону.
+              onValueChange={(v: string) => {
+                setBomLineKey(v);
+                setLotId(0);
+              }}
               placeholder='— выберите слот —'
               fullWidth
             />
@@ -345,14 +441,135 @@ export function LayEditor({
           <Stat label='высота стопки' value='—' sub='считается на сервере при сохранении' />
         </StatGrid>
 
-        {existing && (existing.checks ?? []).length > 0 ? (
+        {/* ЦЕХОВАЯ ПОЛОВИНА НАСТИЛА. Всё выше — план, который строит планировщик; всё ниже знает
+            только тот, кто стоял у стола: с какого рулона стелили и сколько ткани реально ушло. */}
+        <GroupLabel>рулон и факт расхода</GroupLabel>
+
+        <div className='flex flex-col gap-1'>
+          <Text size='micro' variant='label' tracking='label' className='uppercase'>
+            с какого рулона стелили
+          </Text>
+          {materialId > 0 ? (
+            <SelectComponent
+              name='lay-lot'
+              // «Рулон не назван» стоит ПЕРВЫМ пунктом, а не отсутствует: это законное состояние
+              // настила, а не пропуск в форме, и вернуться в него надо уметь так же, как в него
+              // попасть. Заставлять выбирать рулон значило бы требовать от планировщика знания,
+              // которое появляется только у стола.
+              items={[{ value: 0, label: '— рулон не назван —' }, ...lotItems]}
+              value={String(lotId)}
+              onValueChange={(v: string) => setLotId(Number(v) || 0)}
+              placeholder={lots.isLoading ? 'рулоны загружаются…' : '— рулон не назван —'}
+              disabled={busy || lots.isLoading}
+              fullWidth
+            />
+          ) : (
+            <Text size='small' variant='inactive'>
+              артикул этого слота не определяется (строка BOM не связана с каталогом либо слот
+              удалён) — рулоны выбирать не из чего
+            </Text>
+          )}
+          <Text size='micro' variant='label'>
+            Рядом с кодом стоит ИЗМЕРЕННАЯ ширина рулона: маркер шире неё не выкроится ни в один
+            проход, и сервер отвечает на это запретом (проверка «ширина рулона»). Рулон без замера
+            даёт «не проверено», а не «влезает».
+          </Text>
+          {lots.isError ? (
+            <Text size='micro' className='text-error'>
+              список рулонов не читается — сохранить настил всё равно можно, рулон останется
+              прежним
+            </Text>
+          ) : null}
+          {/* Рулон, которого больше нет в справочнике. Настил называет его по снимку кода — это
+              история, и она здесь показывается, а не прячется за пустым выбором. */}
+          {lotState === 'detached' ? (
+            <CalloutBox tone='note'>
+              <Text size='small'>
+                Рулон <b>{existing?.lotCode}</b> удалён из складского справочника. Настил называет
+                его по снимку кода; выбрать его заново в списке нельзя — только назвать другой
+                живой рулон.
+              </Text>
+            </CalloutBox>
+          ) : null}
+        </div>
+
+        <div className='flex flex-wrap items-end gap-2.5'>
+          <div className='flex flex-col gap-1'>
+            <Text size='micro' variant='label' tracking='label' className='uppercase'>
+              сколько реально ушло
+            </Text>
+            <Input
+              name='lay-actual-qty'
+              className='w-28'
+              inputMode='decimal'
+              value={actualQty}
+              disabled={busy}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                setActualQty(sanitizeDecimal(e.target.value, 3))
+              }
+            />
+          </div>
+          <div className='flex flex-col gap-1'>
+            <Text size='micro' variant='label' tracking='label' className='uppercase'>
+              единица
+            </Text>
+            <SelectComponent
+              name='lay-actual-uom'
+              items={FACT_UNIT_OPTIONS.map((u) => ({ value: u, label: MATERIAL_UNIT_LABEL[u] }))}
+              value={actualUom}
+              onValueChange={(v: string) => setActualUom(v as common_MaterialUnit)}
+              placeholder='— единица —'
+              disabled={busy}
+              customWidth={200}
+            />
+          </div>
+        </div>
+
+        <div className='flex flex-col gap-1'>
+          <Text size='micro' variant='label' tracking='label' className='uppercase'>
+            чем замеряли
+          </Text>
+          <ChipRow>
+            {LAY_ACTUAL_METHODS.map((m) => (
+              <Chip
+                key={m}
+                selected={actualMethod === m}
+                pressed={actualMethod === m}
+                disabled={busy}
+                onClick={() => setActualMethod(actualMethod === m ? '' : m)}
+              >
+                {LAY_ACTUAL_METHOD_LABEL[m]}
+              </Chip>
+            ))}
+          </ChipRow>
+          <Text size='micro' variant='label'>
+            Количество, единица и метод едут ВМЕСТЕ: число без единицы нечем сложить, а число без
+            метода — число, о точности которого нечего сказать. Пустое количество отзывает замер
+            целиком. Дрейф к плану настила пересчитает сервер.
+          </Text>
+          {existing?.actualBy || existing?.actualAt ? (
+            <Text size='micro' variant='label'>
+              последний замер: {existing?.actualBy || 'автор не записан'}
+              {stampWhen(existing?.actualAt) ? ` · ${stampWhen(existing?.actualAt)}` : ''}. Подпись
+              переписывается только тогда, когда меняется само измерение.
+            </Text>
+          ) : null}
+        </div>
+
+        {/* Проверки берутся из ОБОИХ мест провода (allLayChecks): маркерные — в том числе «маркер
+            шире рулона» — приезжают в секциях, и форма, где рулон как раз и выбирают, обязана
+            показать причину отказа, а не отправлять за ней обратно на карточку. */}
+        {existing && allLayChecks(existing).length > 0 ? (
           <>
             <GroupLabel>проверки на последнем чтении</GroupLabel>
             <div className='flex flex-col'>
-              {(existing.checks ?? []).map((c, i) => {
+              {allLayChecks(existing).map((c, i) => {
                 const v = layVerdict(c.status);
                 return (
-                  <Text key={c.key || i} size='micro' className={VERDICT_TEXT[v]}>
+                  // Ключ несёт ИНДЕКС, а не только `c.key`: одна и та же маркерная проверка
+                  // приезжает по разу на КАЖДУЮ секцию, и трёхсекционный настил дал бы три
+                  // одинаковых ключа.
+                  <Text key={`${c.key || 'check'}-${i}`} size='micro' className={VERDICT_TEXT[v]}>
                     {VERDICT_GLYPH[v]} {v === 'unknown' ? 'не проверено: ' : ''}
                     {c.label || c.key}
                     {c.detail ? ` — ${c.detail}` : ''}

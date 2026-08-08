@@ -27,6 +27,7 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
+import { CutReceipts } from './components/cut-receipts';
 import { LayPlan } from './components/lay-plan';
 import { LinesGrid } from './components/lines-grid';
 import { MaterialPlan } from './components/material-plan';
@@ -49,7 +50,7 @@ import {
 } from './components/run-conveyor';
 import { RunCosts } from './components/run-costs';
 import { RunReceiptTable } from './components/run-receipt-table';
-import { layVerdict, useRunLays, worstVerdict } from './components/useLays';
+import { allLayChecks, layVerdict, useRunLays, worstVerdict } from './components/useLays';
 import {
   deleteRunErrorMessage,
   reversalErrorMessage,
@@ -211,7 +212,12 @@ export function ProductionRunDetail() {
         lays: (layPlan.data.lays ?? []).length,
         sections: (layPlan.data.lays ?? []).reduce((s, l) => s + (l.sections?.length ?? 0), 0),
         // «Не годен» — вердикт САМОГО сервера, тот же, что печатает пилл карточки настила.
-        unfit: (layPlan.data.lays ?? []).filter((l) => worstVerdict(l.checks ?? []) === 'blocker')
+        //
+        // ПРОВЕРКИ БЕРУТСЯ ЦЕЛИКОМ, ВМЕСТЕ С СЕКЦИОННЫМИ. Четыре из одиннадцати живут на СЕКЦИИ, а
+        // не на настиле — среди них `lay_lot_width` («маркер шире рулона, с которого стелют») и
+        // `lay_marker_width`. Считая только `l.checks`, конвейер объявлял годным настил, который не
+        // режется физически, и объявлял это ровно на том экране, ради которого гейт существует.
+        unfit: (layPlan.data.lays ?? []).filter((l) => worstVerdict(allLayChecks(l)) === 'blocker')
           .length,
         stale: (layPlan.data.lays ?? []).filter((l) => l.quantitiesStale === true).length,
         shortCells: (layPlan.data.coverage ?? []).filter((c) => layVerdict(c.status) === 'blocker')
@@ -455,7 +461,20 @@ export function ProductionRunDetail() {
         // Гейт живёт теперь ОДИН РАЗ — в `hasLayStep`: он же убирает шаг 3 из ленты, так что
         // строка «раскрыть» не может привести к панели, которая ничего не рисует. Сам `id` нужен
         // якорю: блок владеет своей Section, поэтому номер шага в заголовке — его, а не наш.
-        return <LayPlan run={run} canEdit={canEdit} locked={locked} id={stepDomId(3)} />;
+        //
+        // ПРИЁМКА КРОЯ (Ф5б.5) — ВТОРОЙ блок того же шага, а не седьмая фаза ленты. Она называет
+        // ФАКТ раскроя (выкроено → принято в пошив), то есть то, чем шаг «раскрой» заканчивается;
+        // «шаг 4 · приёмка» рядом — про другое событие, про сдачу ГОТОВЫХ изделий на склад, и
+        // сводить их в один шаг значило бы называть одним словом крой и пошив. Своей фазы она не
+        // получает ещё и потому, что лента сознательно НЕ перенумеровывается (run-conveyor.tsx:12-19):
+        // «закрытие» обязано у всех читателей называться шестым. Якорь региона остаётся у первого
+        // блока — плана настилов, поэтому `id` здесь не дублируется.
+        return (
+          <>
+            <LayPlan run={run} canEdit={canEdit} locked={locked} id={stepDomId(3)} />
+            <CutReceipts run={run} canEdit={canEdit} locked={locked} />
+          </>
+        );
       case 4:
         return (
           <Section
