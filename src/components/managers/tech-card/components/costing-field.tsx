@@ -436,7 +436,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         }
       : marginPct == null
         ? {
-            text: `unit cost ${money(unitCost)} · маржа не считается: ${
+            text: `unit cost ${money(unitCost)} · нетто-маржа не считается: ${
               retailReason ||
               (netted ? 'нет розничной цены' : `нет ставки VAT для ${vatCountry || 'страны'}`)
             }`,
