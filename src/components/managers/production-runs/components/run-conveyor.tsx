@@ -320,19 +320,36 @@ const STATE_WORD: Record<RunStepState, string> = {
  * `current` ink-fills the square. Only the band ever passes it: the collapsed list holds the
  * non-current steps by construction, so it draws the glyph alone.
  */
-export function StepGlyph({ state, current }: { state: RunStepState; current?: boolean }) {
+export function StepGlyph({
+  state,
+  current,
+  inverted,
+}: {
+  state: RunStepState;
+  current?: boolean;
+  /** The square sits on an ink-filled cell: flip it so it stays visible. */
+  inverted?: boolean;
+}) {
   return (
     <span
       aria-hidden
       className={cn(
         'inline-flex size-3.5 shrink-0 items-center justify-center border leading-none',
-        current
-          ? 'border-textColor bg-textColor text-bgColor'
-          : state === 'problem'
-            ? 'border-error text-error'
-            : state === 'done'
-              ? 'border-textColor text-textColor'
-              : 'border-borderColor text-borderColor',
+        inverted
+          ? // A broken phase keeps its red even here — a filled red square on black still reads as
+            // "this one is wrong", and the summary beside it says so in words.
+            state === 'problem'
+            ? 'border-error bg-error text-bgColor'
+            : current
+              ? 'border-bgColor bg-bgColor text-textColor'
+              : 'border-bgColor text-bgColor'
+          : current
+            ? 'border-textColor bg-textColor text-bgColor'
+            : state === 'problem'
+              ? 'border-error text-error'
+              : state === 'done'
+                ? 'border-textColor text-textColor'
+                : 'border-borderColor text-borderColor',
       )}
     >
       <Text size='nano' component='span' className='leading-none'>
@@ -347,14 +364,14 @@ export function StepGlyph({ state, current }: { state: RunStepState; current?: b
  * is never carried by colour alone, and the "· unsaved" this replaced was itself a word. The dot is
  * the glyph beside it; the title names which draft.
  */
-export function UnsavedBadge({ what }: { what: string[] }) {
+export function UnsavedBadge({ what, inverted }: { what: string[]; inverted?: boolean }) {
   const title = `не сохранено: ${what.join(', ')}`;
   return (
     <Text
       size='nano'
       tracking='label'
       component='span'
-      className='whitespace-nowrap uppercase text-warning'
+      className={cn('whitespace-nowrap uppercase', inverted ? 'text-bgColor' : 'text-warning')}
       title={title}
     >
       <span aria-hidden>• не сохранено</span>
@@ -379,9 +396,36 @@ const summaryTone = (s: RunStep) =>
 /**
  * The band itself — ONE block: filled white once at the container and ruled internally with 1px
  * edge lines, the same grammar as `StatGrid`. It is not a `Section` (a block never contains a
- * block) and it is not clickable: it reports where the run is, the panels below act.
+ * block).
+ *
+ * NAVIGATION, not just a report. The band used to be deliberately inert: it said where the run
+ * stood and a separate «остальные шаги» block at the very BOTTOM of the page opened the phases.
+ * The map and the way to use it were two thousand pixels apart, so the map read as decoration.
+ * Passing `onSelect` turns every cell into the control it already looked like; the page keeps
+ * deciding which panel is mounted, exactly as it did before.
+ *
+ * `active` is the phase whose panel is open, which is NOT always `current`: clicking a passed
+ * phase opens it without pretending the run went backwards. The ink fill therefore marks the open
+ * cell (that is what a selected control looks like in this system) and the ▶ glyph keeps naming
+ * the phase the run is actually in.
  */
-export function RunConveyor({ steps, className }: { steps: RunStep[]; className?: string }) {
+export function RunConveyor({
+  steps,
+  active,
+  onSelect,
+  panelId,
+  className,
+}: {
+  steps: RunStep[];
+  /** The step whose panel is on screen. Defaults to the run's current phase. */
+  active?: RunStepId | null;
+  /** Omit for a read-only band (the tech card's roll-up has nothing to open). */
+  onSelect?: (id: RunStepId) => void;
+  /** DOM id of the panel a cell opens, for `aria-controls`. */
+  panelId?: (id: RunStepId) => string;
+  className?: string;
+}) {
+  const openId = active ?? steps.find((s) => s.current)?.id ?? null;
   return (
     <ol
       aria-label='этапы партии'
@@ -390,30 +434,57 @@ export function RunConveyor({ steps, className }: { steps: RunStep[]; className?
       // starts wrapping into a second row of cells.
       style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))' }}
     >
-      {steps.map((s) => (
-        <li
-          key={s.id}
-          aria-current={s.current ? 'step' : undefined}
-          className='border-r border-b border-borderColor px-2.5 py-2'
-        >
-          <div className='flex flex-wrap items-center gap-x-1.5'>
-            <StepGlyph state={s.state} current={s.current} />
-            <Text
-              size='micro'
-              tracking='label'
-              component='span'
-              className={cn('uppercase', titleTone(s))}
-            >
-              {s.title}
+      {steps.map((s) => {
+        const open = s.id === openId;
+        const body = (
+          <>
+            <div className='flex flex-wrap items-center gap-x-1.5'>
+              <StepGlyph state={s.state} current={s.current} inverted={open} />
+              <Text
+                size='micro'
+                tracking='label'
+                component='span'
+                className={cn('uppercase', open ? 'font-bold text-bgColor' : titleTone(s))}
+              >
+                {s.title}
+              </Text>
+              <span className='sr-only'>
+                {STATE_WORD[s.state]}
+                {open ? ', открыт' : ''}
+              </span>
+              {s.unsaved?.length ? <UnsavedBadge what={s.unsaved} inverted={open} /> : null}
+            </div>
+            <Text size='small' className={open ? 'text-bgColor' : summaryTone(s)}>
+              {s.summary}
             </Text>
-            <span className='sr-only'>{STATE_WORD[s.state]}</span>
-            {s.unsaved?.length ? <UnsavedBadge what={s.unsaved} /> : null}
-          </div>
-          <Text size='small' className={summaryTone(s)}>
-            {s.summary}
-          </Text>
-        </li>
-      ))}
+          </>
+        );
+        return (
+          <li
+            key={s.id}
+            aria-current={s.current ? 'step' : undefined}
+            className={cn(
+              'border-r border-b border-borderColor',
+              open && 'bg-textColor',
+              !onSelect && 'px-2.5 py-2',
+            )}
+          >
+            {onSelect ? (
+              <button
+                type='button'
+                onClick={() => onSelect(s.id)}
+                aria-expanded={open}
+                aria-controls={panelId?.(s.id)}
+                className='block w-full px-2.5 py-2 text-left'
+              >
+                {body}
+              </button>
+            ) : (
+              body
+            )}
+          </li>
+        );
+      })}
     </ol>
   );
 }

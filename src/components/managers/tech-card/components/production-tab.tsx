@@ -3,9 +3,9 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   daysPast,
   isRunOpen,
-  overdueDays,
+  runDate,
 } from 'components/managers/production-runs/components/options';
-import { RunCard } from 'components/managers/production-runs/components/run-card';
+import { RunTable, runQty } from 'components/managers/production-runs/components/run-rows';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { ROUTES, SECTION } from 'constants/routes';
 import { Controller, useFormContext } from 'react-hook-form';
@@ -26,6 +26,12 @@ import { TechCardFormData } from './schema';
 // warehouse role sees a coherent money-blind view: how many were planned, how many came back good,
 // how many were defective, and what is late. Hiding the tab from them would hide the receiving work
 // itself, which is the one thing that role is for.
+//
+// TWO blocks, in the order the questions are asked: the DATE this style owes, then the batches
+// promising against it. The tab used to open with seven equally-weighted stat cells mixing units,
+// money and defect rates — «опаздывает 0» printed as large as «план 1 040 шт» — while the one
+// relation the block is named after (do the batches land before the drop?) was left for the reader
+// to work out from two dates in different places. `slack` computes it.
 export function ProductionTab({
   techCardId,
   techCard,
@@ -61,23 +67,28 @@ export function ProductionTab({
   // for everyone else while the actual, a quantity, stays.
   const defectPlan = techCard?.techCard?.costing?.defectPercent?.value;
 
+  // THE ONE DERIVED FACT THIS TAB OWES ITS READER: will the batches be there by the drop?
+  //
+  // Measured against the LAST promise still outstanding — a closed batch's promise is history and
+  // a cancelled one was never going to arrive. Both sides are reduced to "days from today" by the
+  // same helper before subtracting, so the difference is exact whatever the timezone.
+  const openPromises = runs
+    .filter((r) => isRunOpen(r.run?.status) && runDate(r.run?.promisedAt))
+    .map((r) => ({
+      id: r.id,
+      promisedAt: r.run?.promisedAt,
+      past: daysPast(r.run?.promisedAt) ?? 0,
+    }))
+    // The LATEST promise is the one with the fewest days past (i.e. furthest into the future).
+    .sort((a, b) => a.past - b.past);
+  const lastPromise = openPromises[0];
+  const slack = lastPromise != null && dropIn != null ? lastPromise.past - dropIn : undefined;
+
   return (
     <SectionStack>
       <Section
-        title='план дропа'
-        question='— the date this style is due, and the batches promising against it'
-        action={
-          // The existing deep link into the runs manager, which seeds the tech card and opens the
-          // create modal. Withheld without production:write — that modal refuses to open for such
-          // an account, so the button would go nowhere.
-          canPlanRuns ? (
-            <Button asChild variant='secondary' size='sm' className='uppercase'>
-              <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>
-                создать партию
-              </Link>
-            </Button>
-          ) : undefined
-        }
+        title='дата дропа'
+        question='— когда стиль обязан быть на складе, и успевают ли партии к этой дате'
       >
         <div className='flex flex-wrap items-end gap-4'>
           <label className='flex flex-col gap-1'>
@@ -101,91 +112,143 @@ export function ProductionTab({
               )}
             />
           </label>
-          {/* A past drop date on a shipped style is history, not an alarm — «просрочен» forever on
-              every old card would train people to ignore the one place it matters (open batches). */}
-          <Text variant='inactive' size='small'>
-            {!dropDate
-              ? 'дата дропа не задана — партиям не с чем сверяться'
-              : dropIn == null
-                ? '—'
-                : dropIn > 0
-                  ? runs.some((r) => isRunOpen(r.run?.status))
-                    ? `дроп просрочен на ${dropIn} дн, партии ещё открыты`
-                    : `дроп прошёл ${dropIn} дн назад`
-                  : dropIn === 0
-                    ? 'дроп сегодня'
-                    : `до дропа ${-dropIn} дн`}
-          </Text>
-          {frozen ? (
-            <Text variant='inactive' size='small'>
-              карта released и заморожена — дату дропа можно менять только после возврата в draft
-            </Text>
-          ) : null}
+          <StatGrid className='min-w-[320px] flex-1' min={120}>
+            <Stat
+              label='до дропа'
+              // A past drop date on a shipped style is history, not an alarm — «просрочен» forever
+              // on every old card would train people to ignore the one place it matters (open
+              // batches).
+              value={
+                !dropDate
+                  ? '—'
+                  : dropIn == null
+                    ? '—'
+                    : dropIn > 0
+                      ? `${dropIn} дн назад`
+                      : dropIn === 0
+                        ? 'сегодня'
+                        : `${-dropIn} дн`
+              }
+              sub={
+                dropIn != null && dropIn > 0 && runs.some((r) => isRunOpen(r.run?.status))
+                  ? 'партии ещё открыты'
+                  : undefined
+              }
+              tone={
+                dropIn != null && dropIn > 0 && runs.some((r) => isRunOpen(r.run?.status))
+                  ? 'down'
+                  : undefined
+              }
+            />
+            <Stat
+              label='последняя обещанная'
+              value={lastPromise ? runDate(lastPromise.promisedAt) || '—' : '—'}
+              sub={lastPromise ? `PR-${lastPromise.id}` : 'открытых партий нет'}
+            />
+            <Stat
+              label='запас'
+              value={slack == null ? '—' : `${slack > 0 ? '+' : ''}${slack} дн`}
+              sub={
+                slack == null
+                  ? 'нужны дата дропа и открытая партия'
+                  : slack < 0
+                    ? 'партия обещана позже дропа'
+                    : 'партии укладываются в дату'
+              }
+              tone={slack == null ? undefined : slack < 0 ? 'down' : 'up'}
+            />
+          </StatGrid>
         </div>
+        {frozen ? (
+          <Text variant='label' size='micro'>
+            карта released и заморожена — дату дропа можно менять только после возврата в draft
+          </Text>
+        ) : null}
+        {!dropDate ? (
+          <Text variant='label' size='micro'>
+            дата дропа не задана — партиям не с чем сверяться
+          </Text>
+        ) : null}
       </Section>
 
-      {/* Roll-up of every batch of this style. Quantities always; money only for a costing role,
-          and only when plan and fact are actually comparable (see comparableUnitCosts). */}
-      <StatGrid>
-        <Stat label='партий' value={String(runs.length)} />
-        <Stat label='план, шт' value={summary.plannedQty > 0 ? String(summary.plannedQty) : '—'} />
-        <Stat
-          label='принято годных'
-          value={summary.anyReceived ? String(summary.receivedQty) : '—'}
-          sub={
-            summary.anyReceived && summary.plannedQty > 0
-              ? `${Math.round((summary.receivedQty / summary.plannedQty) * 100)}% плана`
-              : undefined
-          }
-        />
-        {canReadCosting ? (
+      <Section
+        title={`партии стиля (${runs.length})`}
+        question='— что они обещают этой дате'
+        action={
+          // The existing deep link into the runs manager, which seeds the tech card and opens the
+          // create modal. Withheld without production:write — that modal refuses to open for such
+          // an account, so the button would go nowhere.
+          canPlanRuns ? (
+            <Button asChild variant='secondary' size='sm' className='uppercase'>
+              <Link to={`${ROUTES.productionRuns}?techCardId=${techCardId}&new=1`}>
+                создать партию
+              </Link>
+            </Button>
+          ) : undefined
+        }
+      >
+        {/* Four cells, not seven. «партий» is in the block title, «опаздывает» is a red badge on the
+            row of the batch that is actually late — a zero counter earns no cell. Money only for a
+            costing role, and only when plan and fact are comparable (see comparableUnitCosts). */}
+        <StatGrid>
           <Stat
-            label='план / шт'
-            value={summary.planUnit != null ? summary.planUnit.toFixed(2) : '—'}
-            sub={summary.comparableRuns > 0 ? `${summary.baseCurrency}` : 'нет сопоставимых партий'}
+            label='план, шт'
+            value={summary.plannedQty > 0 ? String(summary.plannedQty) : '—'}
+            sub={summary.cancelled > 0 ? `без ${summary.cancelled} отменённых` : undefined}
           />
-        ) : null}
-        {canReadCosting ? (
           <Stat
-            label='факт / шт'
-            value={summary.factUnit != null ? summary.factUnit.toFixed(2) : '—'}
+            label='принято годных'
+            value={summary.anyReceived ? String(summary.receivedQty) : '—'}
             sub={
-              summary.planUnit != null && summary.factUnit != null
-                ? `Δ ${(summary.factUnit - summary.planUnit).toFixed(2)}`
-                : undefined
-            }
-            // Over the frozen plan is money lost; under it is money saved.
-            tone={
-              summary.planUnit != null && summary.factUnit != null
-                ? summary.factUnit > summary.planUnit
-                  ? 'down'
-                  : 'up'
+              summary.anyReceived && summary.plannedQty > 0
+                ? `${Math.round((summary.receivedQty / summary.plannedQty) * 100)}% плана`
                 : undefined
             }
           />
-        ) : null}
-        <Stat
-          label='брак план / факт'
-          value={`${defectPlan ? Number(defectPlan).toFixed(1) : '—'} / ${
-            summary.defectPct != null ? summary.defectPct.toFixed(1) : '—'
-          }`}
-          sub='%'
-          tone={
-            defectPlan && summary.defectPct != null && summary.defectPct > Number(defectPlan)
-              ? 'down'
-              : undefined
-          }
-        />
-        <Stat
-          label='опаздывает'
-          value={String(summary.overdue)}
-          tone={summary.overdue > 0 ? 'down' : undefined}
-        />
-      </StatGrid>
+          {canReadCosting ? (
+            <Stat
+              label='unit план → факт'
+              value={
+                summary.planUnit != null
+                  ? `${summary.planUnit.toFixed(2)}${
+                      summary.factUnit != null ? ` → ${summary.factUnit.toFixed(2)}` : ''
+                    }`
+                  : '—'
+              }
+              sub={
+                summary.planUnit != null && summary.factUnit != null
+                  ? `Δ ${(summary.factUnit - summary.planUnit).toFixed(2)} ${summary.baseCurrency}`
+                  : summary.comparableRuns > 0
+                    ? summary.baseCurrency
+                    : 'нет сопоставимых партий'
+              }
+              // Over the frozen plan is money lost; under it is money saved.
+              tone={
+                summary.planUnit != null && summary.factUnit != null
+                  ? summary.factUnit > summary.planUnit
+                    ? 'down'
+                    : 'up'
+                  : undefined
+              }
+            />
+          ) : null}
+          <Stat
+            label='брак план / факт'
+            value={`${defectPlan ? Number(defectPlan).toFixed(1) : '—'} / ${
+              summary.defectPct != null ? summary.defectPct.toFixed(1) : '—'
+            }`}
+            sub='%'
+            tone={
+              defectPlan && summary.defectPct != null && summary.defectPct > Number(defectPlan)
+                ? 'down'
+                : undefined
+            }
+          />
+        </StatGrid>
 
-      {/* The batches themselves. RunCards are their own bordered surfaces, so they sit on the
-          ground beside the blocks above rather than nested inside one (box-in-box). */}
-      <div className='flex flex-col gap-3'>
+        {/* The batches themselves, one row each — the same table the runs manager draws, so a
+            batch looks the same wherever it is read. No action column: editing, receiving and
+            deleting a run own modals that live on the run's own page, which the row links to. */}
         {isLoading ? (
           <Text size='small'>loading…</Text>
         ) : isError ? (
@@ -197,13 +260,9 @@ export function ProductionTab({
               : 'партий пока нет'}
           </Text>
         ) : (
-          runs.map((r) => (
-            // No action callbacks: editing, receiving and deleting a run own modals that live on
-            // the runs manager. The card links into the run's own page, which is where they are.
-            <RunCard key={r.id} run={r} canEdit={canPlanRuns} canReadCosting={canReadCosting} />
-          ))
+          <RunTable runs={runs} canReadCosting={canReadCosting} />
         )}
-      </div>
+      </Section>
     </SectionStack>
   );
 }
@@ -220,7 +279,7 @@ function summarise(runs: common_ProductionRun[]) {
   let receivedQty = 0;
   let defectQty = 0;
   let anyReceived = false;
-  let overdue = 0;
+  let cancelled = 0;
   let comparableRuns = 0;
   let planTotal = 0;
   let factTotal = 0;
@@ -229,27 +288,27 @@ function summarise(runs: common_ProductionRun[]) {
 
   for (const r of runs) {
     const a = r.actuals;
+    const q = runQty(r);
     // A cancelled batch is not unmet demand: counting its plan made «принято N% плана» read as a
     // production shortfall on styles where nothing was short. Its received/defect stay counted —
     // goods that DID arrive before a cancel are real.
     if (r.run?.status !== 'PRODUCTION_RUN_STATUS_CANCELLED') {
-      plannedQty += a?.plannedQtyTotal ?? 0;
+      plannedQty += q.planned;
+    } else {
+      cancelled += 1;
     }
-    const recv = a?.receivedQtyTotal ?? 0;
-    const defect = a?.defectQtyTotal ?? 0;
-    receivedQty += recv;
-    defectQty += defect;
-    if (recv > 0 || defect > 0) anyReceived = true;
-    if (overdueDays(r.run?.promisedAt, r.run?.status) > 0) overdue += 1;
+    receivedQty += q.received;
+    defectQty += q.defect;
+    if (q.received > 0 || q.defect > 0) anyReceived = true;
 
     // plannedTotalBase is emitted only when planned_unit_cost is in the base currency AND the run
     // received something; hasBase false means some article could not be folded, so the actual total
     // understates. Either one disqualifies the run from the comparison.
     const planned = a?.plannedTotalBase?.value;
     const actual = a?.actualTotalBase?.value;
-    if (planned && actual && a?.hasBase && recv > 0) {
+    if (planned && actual && a?.hasBase && q.received > 0) {
       comparableRuns += 1;
-      comparableQty += recv;
+      comparableQty += q.received;
       planTotal += Number(planned);
       factTotal += Number(actual);
       // The currency label must come from a run that is actually IN the average above.
@@ -263,7 +322,7 @@ function summarise(runs: common_ProductionRun[]) {
     receivedQty,
     defectQty,
     anyReceived,
-    overdue,
+    cancelled,
     comparableRuns,
     baseCurrency,
     // Same denominator the server uses for defect_pct_actual: what came off the line, not what

@@ -1883,7 +1883,7 @@ export function TechCardForm({
                       </Text>
                     </CalloutBox>
                   )}
-                  <CostingField techCard={techCard} />
+                  <CostingField techCard={techCard} onOpenTab={(t) => setActiveTab(t as TabId)} />
                 </Section>
                 {isEditMode && numId && (
                   <Section title='cost estimate (per colourway — plan vs actual)'>
