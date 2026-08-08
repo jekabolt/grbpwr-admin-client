@@ -94,6 +94,9 @@ export enum ROUTES {
   addTechCard = '/add-tech-card',
   singleTechCard = '/tech-cards/:id',
   techCardPrint = '/tech-cards/:id/print',
+  // PUBLIC pattern viewer — the page a printed tech-pack QR opens (no JWT, no dictionary).
+  // Registered in src/index.tsx OUTSIDE ProtectedRoute/DictionaryProvider on purpose.
+  patternViewer = '/p/:token',
   materials = '/materials',
   workshop = '/workshop',
   productionRuns = '/production-runs',
