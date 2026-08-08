@@ -12,7 +12,6 @@ import { Pill } from 'ui/components/pill';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
-import { isDxfUrl } from 'utils/pattern';
 import { ulid } from 'utils/ulid';
 import {
   bomPurposeLabel,
@@ -22,6 +21,7 @@ import {
   type FabricScope,
   type RollGoodsLine,
 } from './bom-purpose';
+import { useCardDxfPack } from './nesting/card-dxf-pack';
 import {
   findPiece,
   fmtCm,
@@ -30,7 +30,6 @@ import {
   useDxfIndex,
   type FoundPiece,
   type PieceBlockRef,
-  type ScopedDxfFile,
 } from './nesting/dxf-geometry';
 import {
   CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
@@ -203,7 +202,16 @@ function PieceDiagram({
 // `setValue('pieces', …)` on purpose: measured against react-hook-form 7.62, `append`/`remove` emit
 // only on `_subjects.state`, never `_subjects.array`, so a second `useFieldArray('pieces')` anywhere
 // would not resync and a piece created from the DXF dialog would be invisible until a save+refetch.
-export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
+export function PiecesTab({
+  techCard,
+  active,
+}: {
+  techCard?: common_TechCard;
+  // Вкладка PATTERNS открыта — тот же обязательный ответ, что у панели выкроек, и по той же
+  // причине: вкладки карточки смонтированы все сразу и спрятаны через `hidden`, а разбор стоит
+  // скачивания DXF. См. patterns-field.tsx.
+  active: boolean;
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'pieces' });
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
@@ -227,20 +235,17 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     purpose?: string;
     name?: string;
   }>;
-  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as Array<{
-    url?: string;
-    name?: string;
-    filename?: string;
-    bomLineKey?: string;
-    fabricPurpose?: string;
-  }>;
-
   // Tile ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
   const pin = useCrossHighlight<number>();
-  // Разбор DXF стоит скачивания файлов, поэтому он включается человеком: «⌕ показать формы» в
-  // шапке. Одно нажатие — контуры на всех плитках; геометрия идёт из общего кэша карточки
-  // (dxf-geometry.tsx), так что если её уже разобрала панель выкроек — ничего не качается.
-  const [shapesOn, setShapesOn] = useState(false);
+  // Разбор включён. Латч по открытой вкладке — ровно как на панели выкроек: там же написано,
+  // почему это не зеркало `active`. Кнопки «⌕ показать формы» больше нет: имя блока формы не
+  // несёт, то есть без разбора плитки не отвечают на свой единственный вопрос, а геометрия всё
+  // равно идёт из общего кэша карточки (dxf-geometry.tsx) — панель выкроек над этим блоком
+  // просит ТУ ЖЕ пачку, так что скачивание одно на двоих.
+  const [armed, setArmed] = useState(active);
+  useEffect(() => {
+    if (active) setArmed(true);
+  }, [active]);
   // Выбранная плитка — её поля редактирует панель ниже. Ключ — стабильный id строки RHF; пустой
   // или потерянный (деталь удалена, массив переписан диалогом сопоставления) откатывается к
   // первой детали, чтобы панель с полями не исчезала, пока детали есть.
@@ -295,29 +300,15 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
     return m;
   }, [aliases, scopes]);
 
-  // Листы, которые вообще стоит качать: только DXF и только тех тканей, где связи есть. Скачивать
-  // подкладку ради предпросмотра деталей верха — это десятки мегабайт, не дающие ни одной формы.
-  const previewFiles = useMemo<ScopedDxfFile[]>(() => {
-    const needed = new Set<string>();
-    for (const refs of blocksByPiece.values()) for (const r of refs) needed.add(r.scopeKey);
-    return (
-      patterns
-        .filter((p) => !!p.url && isDxfUrl(p.url))
-        .map((p) => ({
-          scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
-          name: p.name || p.filename || 'выкройка.dxf',
-          url: p.url!,
-        }))
-        // Пустой скоуп — это лист, потерявший ткань, и он НЕ участвует: панель выкроек для таких
-        // прямо говорит, что детали кроя недоступны, и подставлять их сюда значило бы угадывать
-        // ткань — ровно то, от чего весь этот скоуп и защищает.
-        .filter((f) => !!f.scopeKey && needed.has(f.scopeKey))
-    );
-  }, [patterns, scopes, blocksByPiece]);
+  // ВСЯ пачка DXF карточки, посчитанная ОБЩЕЙ функцией (card-dxf-pack.ts) — той же самой, что
+  // читает панель выкроек над этим блоком. Список обязан совпасть побайтово: ключ кэша разбора —
+  // это и есть содержимое пачки, и своя, «почти такая же» сборка означала бы второе скачивание
+  // тех же файлов, которого никто не заметит (см. комментарий в card-dxf-pack.ts).
+  const dxfCardPack = useCardDxfPack();
 
   // Общий разбор карточки (React Query, ключ по содержимому пачки): второй читатель той же пачки —
   // панель выкроек или раскладка — получает геометрию мгновенно, и наоборот.
-  const geometry = useDxfGeometry(previewFiles, shapesOn);
+  const geometry = useDxfGeometry(dxfCardPack, armed);
   const index = useDxfIndex(geometry.data);
 
   // Контур каждой привязанной детали — один раз на рендер геометрии, а не на плитку.
@@ -601,21 +592,15 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                 дубль имени: {duplicateRows.size}
               </Pill>
             )}
-            {previewFiles.length > 0 && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='sm'
-                aria-pressed={shapesOn}
-                title={
-                  shapesOn
-                    ? 'убрать контуры с плиток; разобранная геометрия остаётся в кэше'
-                    : 'имя блока формы не несёт — скачать привязанные DXF и показать контур каждой детали с реальным габаритом; файлы скачаются и разберутся один раз, кэш общий с панелью выкроек'
-                }
-                onClick={() => setShapesOn((v) => !v)}
+            {geometry.isFetching && (
+              <Text
+                size='nano'
+                variant='label'
+                component='span'
+                className='uppercase tracking-label'
               >
-                {shapesOn ? '⌕ скрыть формы' : '⌕ показать формы'}
-              </Button>
+                разбор dxf…
+              </Text>
             )}
             <Button
               type='button'
@@ -653,7 +638,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
               ))}
             </ChipRow>
 
-            {shapesOn && geometry.isError && (
+            {geometry.isError && (
               <div className='flex flex-wrap items-center gap-2'>
                 <Text size='nano' component='span' className='break-words text-error'>
                   {geometry.error?.message || 'не удалось разобрать файлы'}
@@ -670,12 +655,11 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
             )}
             {/* Недокачанный лист — это молча пропавшие детали: их блоки просто «не найдены», что
                 читается как отсутствие привязки. Поэтому о нём говорится вслух. */}
-            {shapesOn &&
-              (geometry.data?.warnings ?? []).map((w, i) => (
-                <Text key={i} size='nano' component='span' className='break-words text-error'>
-                  {w}
-                </Text>
-              ))}
+            {(geometry.data?.warnings ?? []).map((w, i) => (
+              <Text key={i} size='nano' component='span' className='break-words text-error'>
+                {w}
+              </Text>
+            ))}
 
             <div className='flex flex-col gap-5'>
               {visibleGroups.map((g) => (
@@ -703,8 +687,8 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                           : null;
                       const lostScope = refs.length > 0 && refs.every((r) => !r.scopeKey);
                       // «Нет в разобранных файлах» существует только ПОСЛЕ разбора: пока
-                      // геометрия не включена или грузится, отсутствие контура — не диагноз.
-                      const missing = shapesOn && !!index && refs.length > 0 && !found;
+                      // геометрия грузится, отсутствие контура — не диагноз.
+                      const missing = !!index && refs.length > 0 && !found;
                       const dup = duplicateRows.has(pi);
                       // Нечётная зеркальная пара — то, что реально роняет сохранение (CHECK в
                       // БД), поэтому она видна с плитки, а не только из панели: без этого
@@ -770,19 +754,18 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                                   )}
                                 >
                                   {/* Отсутствие привязки и потерянная ткань известны СТАТИЧЕСКИ —
-                                      до всякого скачивания, поэтому они раньше `shapesOn`: иначе
-                                      подпись обещала бы, что кнопка загрузит форму, которой нет. */}
+                                      до всякого скачивания, поэтому они стоят раньше состояний
+                                      разбора: сказать про такую деталь «разбор идёт» значило бы
+                                      обещать форму, которой в файлах нет и не будет. */}
                                   {refs.length === 0
                                     ? 'нет блока DXF'
                                     : lostScope
                                       ? 'ткань потеряна'
-                                      : !shapesOn
-                                        ? '⌕ формы не загружены'
-                                        : geometry.isPending
+                                      : geometry.isError
+                                        ? 'ошибка разбора'
+                                        : !index
                                           ? 'разбор DXF…'
-                                          : geometry.isError
-                                            ? 'ошибка разбора'
-                                            : 'нет в файлах'}
+                                          : 'нет в файлах'}
                                 </Text>
                               )}
                             </div>
@@ -850,21 +833,19 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                 ) : (
                   <Text size='nano' variant='label' component='span' className='px-1 text-center'>
                     {/* Отсутствие привязки и потерянная ткань известны СТАТИЧЕСКИ — до всякого
-                        скачивания, поэтому они раньше `shapesOn`: обещать, что кнопка загрузит
-                        форму, которой нет, значило бы врать. Сказать «блока нет в файлах» про
-                        связь, чья ткань ни к чему живому не ведёт (строку BOM удалили или
-                        переклассифицировали), значило бы обвинить чертёж в том, чего он не делал. */}
+                        скачивания, поэтому они стоят раньше состояний разбора. Сказать «блока нет
+                        в файлах» про связь, чья ткань ни к чему живому не ведёт (строку BOM
+                        удалили или переклассифицировали), значило бы обвинить чертёж в том, чего
+                        он не делал. */}
                     {selRefs.length === 0
                       ? 'у этой детали нет привязанного блока DXF'
                       : selRefs.every((r) => !r.scopeKey)
                         ? `у связи с «${selRefs[0].block}» потеряна ткань — перепривяжите лист на панели выкроек`
-                        : !shapesOn
-                          ? 'формы не загружены — нажмите «⌕ показать формы» в шапке блока'
-                          : geometry.isPending
+                        : geometry.isError
+                          ? geometry.error?.message || 'не удалось разобрать файлы'
+                          : !index
                             ? 'разбор DXF…'
-                            : geometry.isError
-                              ? geometry.error?.message || 'не удалось разобрать файлы'
-                              : `блока «${selRefs[0].block}» в разобранных файлах нет — файл перезалили без него?`}
+                            : `блока «${selRefs[0].block}» в разобранных файлах нет — файл перезалили без него?`}
                   </Text>
                 )}
               </div>
@@ -882,7 +863,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                   </Text>
                 </>
               )}
-              {shapesOn && index && (
+              {index && (
                 <Text size='nano' variant='label' component='span'>
                   слой {(selFound ? selFound.layer : index.contourLayer) || '—'}
                   {index.grainLayer ? `, долевая красным (слой ${index.grainLayer})` : ''}
@@ -935,7 +916,7 @@ export function PiecesTab({ techCard }: { techCard?: common_TechCard }) {
                   {selRefs.length > 0 && (
                     <Pill
                       tone='mut'
-                      title={`деталь привязана к блокам DXF: ${selRefs.map((b) => b.block).join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае. Форму этого блока видно на плитке и в этой панели — включите «⌕ показать формы» в шапке блока.`}
+                      title={`деталь привязана к блокам DXF: ${selRefs.map((b) => b.block).join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае. Форму этого блока видно на плитке и в этой панели.`}
                     >
                       блок DXF привязан
                     </Pill>

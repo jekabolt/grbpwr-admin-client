@@ -7,9 +7,9 @@ import {
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { useQueryClient } from '@tanstack/react-query';
+import type { PieceDTO } from 'lib/nesting/types';
 import { useSnackBarStore } from 'lib/stores/store';
-import { Suspense, lazy, useMemo, useState } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -45,15 +45,8 @@ import {
   strictestDirection,
 } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
-import {
-  SheetThumb,
-  dxfGeometryQuery,
-  useDxfGeometry,
-  useDxfIndex,
-  type DxfBundle,
-  type DxfIndex,
-  type ScopedDxfFile,
-} from './nesting/dxf-geometry';
+import { useCardDxfPack } from './nesting/card-dxf-pack';
+import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex } from './pattern-size-index';
 import { markerColorways } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
@@ -127,6 +120,11 @@ type PatternRow = {
 };
 type Entry = { row: PatternRow; index: number };
 
+// Подпись набора листов — по url, а не по материалу: перезалили файл, и подпись сменилась сама,
+// вместо того чтобы отвечать про файл, которого уже нет. Модульная функция, потому что её читают
+// и мемо, и эффект публикации.
+const sigOf = (list: Entry[]) => list.map((e) => e.row.url ?? '').join('|');
+
 // Одна рулонная строка BOM, как её видит панель выкроек: идентичность, роль по секции, назначение
 // (0267) и read-only обогащение 0259, из которого раскладка берёт полезную ширину.
 type FabricLine = {
@@ -158,19 +156,26 @@ function revisionOf(row: PatternRow): number | null {
   return row.version && row.version > 0 ? row.version : null;
 }
 
-// Сколько размеров карточки НЕТ в файлах материала — читается из самих файлов, по запросу.
+// Сколько размеров карточки НЕТ в файлах материала — читается из самих файлов, САМА.
 //
 // Сервер про содержимое DXF не знает ничего: у строки выкройки есть url, размер-артефакт и
 // привязка к материалу, и всё. Значит единственный способ ответить «какого размера в файле нет»
-// — скачать и разобрать. Это стоит загрузки с CDN и полного разбора геометрии, поэтому проверка
-// сидит на кнопке, а не рисуется сама: открытие вкладки не должно тянуть десятки мегабайт.
+// — скачать и разобрать.
 //
-// Разбор идёт ЧЕРЕЗ ТОТ ЖЕ воркер, что и раскладка, и с 2026-08 — через тот же КЭШ (dxf-geometry).
-// Своя копия скачивания здесь стояла до тех пор, пока разбор не понадобился ещё и силуэтам плиток:
-// две копии означали два скачивания одних файлов по одному нажатию. Дешёвый скан имён блоков на
-// главном потоке написать легко, но это была бы вторая реализация того же правила, и в день, когда
-// они разойдутся, панель будет уверенно врать — ровно тот класс ошибки, из-за которого этот текст
-// вообще пишется.
+// Раньше это стояло за кнопкой («⌕ разобрать файлы»), потому что стоит скачивания с CDN. Кнопка
+// убрана: разбор — не отдельное действие оператора, а условие, при котором вкладка вообще
+// отвечает на свои вопросы (какие размеры в файлах, что за детали в них лежат, есть ли форма у
+// детали кроя). Пока её не нажали, вкладка показывала «размеры не проверялись» и пустые плитки —
+// то есть не показывала ничего. Плата за скачивание никуда не делась, поэтому она привязана к
+// ОТКРЫТОЙ вкладке (`active`), а не к монтированию: вкладки карточки смонтированы все сразу и
+// прячутся через `hidden`, так что разбор «на маунте» качал бы десятки мегабайт всякому, кто
+// открыл карточку править BOM.
+//
+// Разбор идёт ЧЕРЕЗ ТОТ ЖЕ воркер, что и раскладка, и через тот же КЭШ (dxf-geometry): пачка
+// ключуется содержимым, поэтому панель деталей кроя, собирающая ту же пачку, получает геометрию
+// бесплатно. Дешёвый скан имён блоков на главном потоке написать легко, но это была бы вторая
+// реализация того же правила, и в день, когда они разойдутся, панель будет уверенно врать —
+// ровно тот класс ошибки, из-за которого этот текст вообще пишется.
 
 type SizeAudit =
   | { phase: 'loading' }
@@ -201,17 +206,23 @@ type SizeAudit =
 // артефакт хранения — см. storageSizeId.
 export function PatternsField({
   techCardId,
+  active,
   canEdit = true,
   canPublishIndex = true,
   savedSizeIds,
 }: {
   techCardId?: number;
+  // Вкладка PATTERNS открыта. Без явного ответа обойтись нельзя: карточка монтирует ВСЕ вкладки
+  // сразу и прячет их через `hidden`, поэтому «смонтированы» и «на экране» — разные вещи, а
+  // разбор стоит скачивания всех DXF карточки. Обязательный проп, а не умолчание: молчаливое
+  // `true` у следующего места монтирования означало бы тихие десятки мегабайт.
+  active: boolean;
   // Gates «сохранить раскладку» (RBAC write + not released), mirroring MarkersSection.
   canEdit?: boolean;
   // Gates the Ф6.3 size-index publish, and it is DELIBERATELY NOT `canEdit`.
   //
-  // Права — да: кнопка «⌕ разобрать файлы» с этой фазы ПИШЕТ на сервер, и читателю нельзя писать
-  // от чужого имени (сервер эту роль не проверяет — RPC админский).
+  // Права — да: разбор с этой фазы ПИШЕТ на сервер, и читателю нельзя писать от чужого имени
+  // (сервер эту роль не проверяет — RPC админский).
   //
   // Заморозка — НЕТ: замороженная карточка это ровно та, с которой запускают производство, и
   // запретить публикацию на ней значило бы навсегда оставить `sizes_in_dxf` в «не проверялось»
@@ -244,7 +255,12 @@ export function PatternsField({
   // артикуле, а называет его колорвей. Читается с сервера: рецепт пишется отдельным RPC
   // (UpdateColorwayRecipe), в форме карточки пинов нет. includeArchived — чтобы строка,
   // ссылающаяся на архивный артикул, всё равно разрешилась в ширину, а не молча упала на дефолт.
-  const { data: cardRead } = useTechCard(techCardId);
+  // `dataUpdatedAt` — отметка ПОСЛЕДНЕГО чтения карточки, и она здесь не для отображения:
+  // публикация индекса размеров идёт теперь сама, один раз на набор (см. эффект ниже), а самая
+  // частая причина её отказа — «на сервере другой набор листов», то есть карточку ещё не
+  // сохранили. Сейв инвалидирует этот запрос, отметка меняется — и попытка повторяется ровно
+  // один раз, без кнопки «ещё раз» и без цикла на каждый рендер формы.
+  const { data: cardRead, dataUpdatedAt: cardReadAt } = useTechCard(techCardId);
   const { data: materialsData } = useMaterials('', true, !!techCardId);
   const colorwayOptions = useMemo(() => {
     const byId = new Map<number, common_Material>();
@@ -268,21 +284,20 @@ export function PatternsField({
   // Строка, у которой сейчас открыт селект материала. Перепривязка — редкое действие, и держать
   // её селект открытым у каждой строки значило печатать ответ под заголовком, который его уже дал.
   const [rebinding, setRebinding] = useState<number | null>(null);
-  // Разбор геометрии включён (кнопкой). НЕ автостарт: открытие вкладки не должно тянуть с CDN
-  // десятки мегабайт — это то же правило, по которому за кнопкой сидела проверка размеров.
-  const [shapesOn, setShapesOn] = useState(false);
+  // Разбор включён. ЛАТЧ, а не зеркало `active`: уход на соседнюю вкладку не имеет права отменить
+  // уже идущее скачивание (React Query бросил бы запрос на полпути и следующий заход начал бы его
+  // заново), а вернувшись, оператор должен увидеть готовый ответ, а не второй разбор.
+  const [armed, setArmed] = useState(active);
+  useEffect(() => {
+    if (active) setArmed(true);
+  }, [active]);
   // Выбранная плитка полки: ключ скоупа, LOOSE_KEY или PDF_KEY. null = экран ещё не трогали, и
   // выбор выводится из данных (первый материал с файлами, иначе первый вообще).
   const [pickedKey, setPickedKey] = useState<string | null>(null);
-  // Цикл проверок идёт. Отдельно от `geometry.isFetching`: разбор кончается раньше, чем публикация
-  // индексов по всем скоупам, и в этом промежутке кнопка снова становилась активной — второе
-  // нажатие переписывало индекс всех материалов заново и выдавало по тосту на каждый.
-  const [auditing, setAuditing] = useState(false);
-  const qc = useQueryClient();
-  // Результаты проверки размеров, по ПОДПИСИ набора файлов (urls), а не по материалу: перезалили
-  // файл — подпись сменилась, старый ответ сам перестал показываться, вместо того чтобы врать
-  // про файл, которого уже нет.
-  const [audits, setAudits] = useState<Record<string, SizeAudit>>({});
+  // Отказ публикации индекса размеров, по подписи набора листов. Только отказ: публикация идёт
+  // фоном, и рассказывать про удавшуюся запись, которую никто не заказывал, — это отчёт о работе,
+  // о которой не спрашивали. А вот «карточку надо сохранить» — руководство к действию.
+  const [indexFailures, setIndexFailures] = useState<Record<string, string>>({});
   // Раскладка modal: the DXF files of one fabric, pooled (null = closed).
   const [nesting, setNesting] = useState<{
     sizeId: number;
@@ -463,26 +478,65 @@ export function PatternsField({
 
   const filesOf = (list: Entry[]): NestingFile[] =>
     list.map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
-  const sigOf = (list: Entry[]) => list.map((e) => e.row.url ?? '').join('|');
 
-  // ВСЕ DXF карточки со своими скоупами — одна пачка на один разбор. Ключ кэша считается по её
-  // содержимому, и панель деталей кроя собирает ровно ту же пачку, поэтому второй экран получает
-  // геометрию бесплатно. До этого каждый экран качал файлы себе, и оператор, прошедший вкладку
-  // сверху вниз, платил за одни и те же мегабайты трижды.
-  //
-  // Тот же список уходит и в `fetchQuery` внутри «⌕ разобрать файлы»: покрытие размеров считается
-  // по деталям ИЗ ЭТОГО ЖЕ ответа, а не своим скачиванием.
-  const allDxfFiles: ScopedDxfFile[] = useMemo(
-    () =>
-      dxfEntries.map((e) => ({
-        scopeKey: scopeKeyOfBinding(e.row.fabricPurpose, e.row.bomLineKey, scopes),
-        name: labelOf(e.row),
-        url: e.row.url!,
-      })),
-    [dxfEntries, scopes],
-  );
-  const geometry = useDxfGeometry(allDxfFiles, shapesOn);
+  // ВСЕ DXF карточки со своими скоупами — одна пачка на один разбор, посчитанная ОБЩЕЙ функцией
+  // (см. card-dxf-pack.ts): панель деталей кроя под этим блоком просит ту же самую, поэтому обе
+  // читают один ответ и файлы качаются один раз. Собирать список здесь своими руками нельзя — ключ
+  // кэша это и есть содержимое пачки, и любое расхождение с соседней панелью означает второе
+  // скачивание тех же мегабайт, которого никто не увидит.
+  const allDxfFiles = useCardDxfPack();
+  const geometry = useDxfGeometry(allDxfFiles, armed);
   const dxfIndex = useDxfIndex(geometry.data);
+  const bundle = geometry.data;
+
+  // ПОКРЫТИЕ РАЗМЕРОВ ПО МАТЕРИАЛАМ — ВЫВОДИТСЯ из разбора, а не хранится состоянием.
+  //
+  // Пока разбор запускала кнопка, ответ был событием: нажали → посчитали → положили в useState. Со
+  // сборкой, которая приезжает сама, хранить его стало нечем и незачем — состояние «мы уже
+  // считали» повторяло бы состояние самого запроса и расходилось бы с ним при каждом перезаливе
+  // файла. Здесь оно просто читается из того, что есть прямо сейчас.
+  //
+  // `splitPiecesBySize` считается по деталям ТОЛЬКО ОДНОГО скоупа, а не по всей пачке, и это не
+  // придирка: функция решает, какой хвост имени блока является размером, глядя на то, какие хвосты
+  // МЕНЯЮТСЯ у одной основы, — то есть ответ зависит от того, что лежит рядом. Пропустив через неё
+  // всю карточку сразу, мы отправили бы на сервер (индекс 0280) другой набор токенов, чем прежде.
+  // Разбор при этом идёт по файлу независимо (`parseFiles` читает $INSUNITS своего буфера), так что
+  // сами детали побитово те же, что дал бы разбор одного скоупа.
+  //
+  // Считается ОТ ПАЧКИ, а не от групп панели, и мемо тоже висит на пачке: группы пересобираются от
+  // любого нажатия клавиши в форме карточки, а это счёт по тысячам контуров — на каждый символ его
+  // гонять незачем. Ключ — скоуп из самого разбора (`scopeByFile`), тот же, по которому группа
+  // ищет свои файлы.
+  const foundByScope = useMemo(() => {
+    const out = new Map<string, Set<string>>();
+    if (!bundle) return out;
+    const byScope = new Map<string, PieceDTO[]>();
+    for (const p of bundle.pieces) {
+      const k = bundle.scopeByFile.get(p.fileIndex ?? -1) ?? '';
+      byScope.set(k, [...(byScope.get(k) ?? []), p]);
+    }
+    for (const [k, list] of byScope) out.set(k, splitPiecesBySize(list, dictTokens).sizeTokenSet);
+    return out;
+  }, [bundle, dictTokens]);
+
+  const audits = useMemo<Record<string, SizeAudit>>(() => {
+    const out: Record<string, SizeAudit> = {};
+    for (const g of scopeGroups) {
+      if (g.entries.length === 0) continue;
+      const sig = sigOf(g.entries);
+      if (bundle) {
+        // Скоупа нет в карте — значит из его файлов не вышло НИ ОДНОЙ детали (пустой чертёж,
+        // непрочитанный слой). Это законный ответ «размеров в именах блоков нет», а не отсутствие
+        // проверки: проверка была, ответ пустой.
+        out[sig] = { phase: 'ready', found: foundByScope.get(g.scope.key) ?? new Set<string>() };
+      } else if (geometry.isError) {
+        out[sig] = { phase: 'error', message: geometry.error?.message ?? 'причина неизвестна' };
+      } else if (armed) {
+        out[sig] = { phase: 'loading' };
+      }
+    }
+    return out;
+  }, [scopeGroups, bundle, foundByScope, geometry.isError, geometry.error, armed]);
 
   // Какая плитка раскрыта. Выбор пользователя выигрывает, пока он указывает на живую плитку:
   // материал могли удалить из BOM, пока панель открыта, и залипший ключ показал бы пустоту вместо
@@ -501,11 +555,11 @@ export function PatternsField({
   const selectedKey =
     pickedKey && shelfKeys.includes(pickedKey)
       ? pickedKey
-      : (scopeGroups.find((g) => g.entries.length > 0)?.scope.key ??
+      : scopeGroups.find((g) => g.entries.length > 0)?.scope.key ??
         (looseDxf.length > 0 ? LOOSE_KEY : null) ??
         (pdfEntries.length > 0 ? PDF_KEY : null) ??
         shelfKeys[0] ??
-        null);
+        null;
   const setSelectedKey = setPickedKey;
 
   // Размерный токен из имён блоков → id размера карточки. Нужен раскладке: один DXF несёт весь
@@ -586,70 +640,66 @@ export function PatternsField({
     if (good.length > 0) setDroppedOn({ scopeKey, files: good });
   }
 
-  // Покрытие размеров ОДНОГО материала — из УЖЕ РАЗОБРАННОЙ пачки всей карточки.
+  // ИНДЕКС РАЗМЕРОВ (Ф6.3) — публикуется САМ, следом за разбором.
   //
-  // Здесь стояло своё скачивание (`parsePiecesOnce` на файлы этого скоупа). Пока разбор нужен был
-  // только размерам, это было верно; как только он понадобился ещё и силуэтам на плитках, одно
-  // нажатие кнопки стало качать каждый файл ДВАЖДЫ — своим каналом и общим. Теперь канал один.
+  // Разбор DXF живёт только в браузере, и без этой записи серверный гейт готовности прогона не
+  // может ответить «есть ли выкройка на размер L» — он читает UNKNOWN. Пока разбор запускала
+  // кнопка, публикация была её продолжением; кнопки нет, а вопрос остался, поэтому запись едет за
+  // тем же ответом, который панель уже показала.
   //
-  // `splitPiecesBySize` считается по деталям ТОЛЬКО ЭТОГО скоупа, а не по всей пачке, и это не
-  // придирка: функция решает, какой хвост имени блока является размером, глядя на то, какие хвосты
-  // МЕНЯЮТСЯ у одной основы, — то есть ответ зависит от того, что лежит рядом. Пропустив через неё
-  // всю карточку сразу, мы отправили бы на сервер (индекс 0280) другой набор токенов, чем прежде.
-  // Разбор при этом идёт по файлу независимо (`parseFiles` читает $INSUNITS своего буфера), так что
-  // сами детали побитово те же, что дал бы разбор одного скоупа.
-  async function auditFromBundle(list: Entry[], bundle: DxfBundle) {
-    const sig = sigOf(list);
-    const scopeKey = scopeKeyOfBinding(
-      list[0]?.row.fabricPurpose,
-      list[0]?.row.bomLineKey,
-      scopes,
-    );
-    const scopePieces = bundle.pieces.filter(
-      (p) => (bundle.scopeByFile.get(p.fileIndex ?? -1) ?? '') === scopeKey,
-    );
-    // Токены, которые в ЭТИХ файлах оказались размерами — то же правило, по которому размер
-    // отрезается от имени детали везде: хвост из словаря, меняющийся у своей основы.
-    const found = splitPiecesBySize(scopePieces, dictTokens).sizeTokenSet;
-    setAudits((a) => ({ ...a, [sig]: { phase: 'ready', found } }));
-    // Ф6.3: кнопка перестала быть единственным читателем собственного ответа. Тот же набор токенов
-    // уезжает на сервер, и с этого момента гейт готовности прогона может честно ответить «есть ли
-    // выкройка на размер L» вместо UNKNOWN. Что кнопка называется теперь «⌕ разобрать файлы» и
-    // стоит одна на блок, публикации не касается: она по-прежнему идёт по одному запросу на скоуп
-    // с тем же набором листов и тем же набором токенов.
-    //
-    // СНАРУЖИ try/catch аудита, сознательно: индекс — побочная польза, и его отказ не имеет права
-    // превратить успешно показанный ответ в «проверка не удалась».
-    //
-    // Читателю кнопка по-прежнему отвечает — она просто перестаёт быть записью. Молча: разбор он
-    // запрашивал, публикацию нет, и тост про неслучившееся сохранение был бы отчётом о работе,
-    // которой человек не заказывал.
-    if (!canPublishIndex) return;
-    const res = await publishPatternSizeIndex({
-      techCardId: techCardId ?? 0,
-      sheets: list.map((e) => ({
-        lineKey: e.row.lineKey,
-        fabricPurpose: e.row.fabricPurpose,
-        bomLineKey: e.row.bomLineKey,
-      })),
-      sizeTokens: [...found],
-    });
-    if (res.ok) {
-      showMessage(
-        res.tokenCount === 0
-          ? 'Записано: файлы не несут размерного кодирования — гейт прогона прочтёт это как «вердикта нет», а не как «размеров нет»'
-          : // «найдено размеров РЯДА» на пустом ряду — это всегда 0, и рядом с зелёным тостом такой
-            // счёт читается как неудача разбора, хотя разбор удался. Считать не с чем, поэтому
-            // отчитываемся тем, что нашли в файлах.
-            sizeIds.length === 0
-            ? `Индекс размеров сохранён — в файлах найдено размеров: ${res.tokenCount}; ряд карточки пуст, сверять не с чем`
-            : `Индекс размеров сохранён — размеров ряда карточки найдено в файлах: ${res.resolvedSizeCount}`,
-        'success',
-      );
-    } else {
-      showMessage(`Проверка выполнена, но индекс размеров не сохранён — ${res.reason}`, 'error');
-    }
-  }
+  // ОДИН РАЗ НА НАБОР. Ключ попытки — отметка чтения карточки + скоуп + подпись листов + токены,
+  // и он ставится ДО await: эффект перезапускается на каждое изменение формы (`scopeGroups`
+  // пересобирается от любого нажатия клавиши), и без этого фонового «уже отправляли» карточка
+  // получала бы по запросу на символ.
+  //
+  // ПОСЛЕДОВАТЕЛЬНО по скоупам: каждый публикует свой индекс отдельным запросом, а пять
+  // одновременных записей в одну карточку — это гонка за один и тот же ряд. Оборванный цикл
+  // (правка формы сменила зависимости) досылает оставшиеся скоупы следующим заходом — их ключи не
+  // отмечены. Ключ уже улетевшего запроса при этом НЕ снимается: снять его значило бы слать тот же
+  // PUT заново на каждый символ, набранный поверх идущей записи.
+  //
+  // Успех молчит. Оператор разбора не заказывал — он открыл вкладку, — и тост про удавшуюся
+  // фоновую запись был бы отчётом о работе, о которой не спрашивали; ответ, за которым сюда
+  // пришли, стоит на плитках. Отказ пишется строкой под шапкой: «сохраните карточку» — это
+  // руководство к действию, а не отчёт.
+  const publishedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!canPublishIndex || !techCardId || !bundle) return;
+    let cancelled = false;
+    (async () => {
+      for (const g of scopeGroups) {
+        if (g.entries.length === 0) continue;
+        const sig = sigOf(g.entries);
+        const a = audits[sig];
+        if (a?.phase !== 'ready') continue;
+        const tokens = [...a.found];
+        const key = `${cardReadAt}|${g.scope.key}|${sig}|${[...tokens].sort().join(',')}`;
+        if (publishedRef.current.has(key)) continue;
+        publishedRef.current.add(key);
+        const res = await publishPatternSizeIndex({
+          techCardId,
+          sheets: g.entries.map((e) => ({
+            lineKey: e.row.lineKey,
+            fabricPurpose: e.row.fabricPurpose,
+            bomLineKey: e.row.bomLineKey,
+          })),
+          sizeTokens: tokens,
+        });
+        if (cancelled) return;
+        setIndexFailures((f) => {
+          if (res.ok) {
+            if (!(sig in f)) return f;
+            const { [sig]: _dropped, ...rest } = f;
+            return rest;
+          }
+          return f[sig] === res.reason ? f : { ...f, [sig]: res.reason };
+        });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canPublishIndex, techCardId, bundle, audits, scopeGroups, cardReadAt]);
 
   // Загрузчик возвращает НЕПРОЗРАЧНЫЙ ключ скоупа: контрол живёт в ui/ и не обязан знать ни про
   // назначения, ни про строки BOM. Разворачивает его в два поля провода здесь — в одном месте, тем
@@ -674,38 +724,6 @@ export function PatternsField({
     // controls, and remounts the row. Byte-clamped — the server counts UTF-8 bytes.
     setValue(`patterns.${index}.name`, clampPatternName(value), { shouldDirty: true });
     setEditing(null);
-  }
-
-  // Разобрать файлы карточки ОДИН раз и ответить обоими ответами: покрытие размеров по каждому
-  // материалу и силуэты для плиток.
-  //
-  // Кнопка была на каждой группе, и её слот морфился между кнопкой, серым предложением, зелёной
-  // галкой и красной строкой с повтором: шапка группы меняла ширину и высоту по мере работы.
-  // Проверка одна и та же, вопрос один и тот же — значит и кнопка одна, на блок.
-  //
-  // `fetchQuery` по тем же опциям, что читает хук: если пачку уже разобрала панель деталей кроя,
-  // здесь не будет ни одного запроса, а если разбор идёт — мы дождёмся ЕГО, а не запустим второй.
-  async function runAllAudits() {
-    if (auditing) return;
-    setAuditing(true);
-    setShapesOn(true);
-    const pending = scopeGroups.filter(
-      (g) => g.entries.length > 0 && audits[sigOf(g.entries)]?.phase !== 'ready',
-    );
-    for (const g of pending) setAudits((a) => ({ ...a, [sigOf(g.entries)]: { phase: 'loading' } }));
-    try {
-      const bundle = await qc.fetchQuery(dxfGeometryQuery(allDxfFiles));
-      // ПОСЛЕДОВАТЕЛЬНО: каждый скоуп публикует свой индекс отдельным запросом, и пять
-      // одновременных записей в одну карточку — это гонка за один и тот же ряд.
-      for (const g of pending) await auditFromBundle(g.entries, bundle);
-    } catch (e) {
-      const message = e instanceof Error ? e.message : 'не удалось разобрать файлы';
-      for (const g of pending) {
-        setAudits((a) => ({ ...a, [sigOf(g.entries)]: { phase: 'error', message } }));
-      }
-    } finally {
-      setAuditing(false);
-    }
   }
 
   function renderSheetRow({ row, index }: Entry) {
@@ -919,14 +937,10 @@ export function PatternsField({
   // прочесть, а в полоске она видна не читая.
   function renderCoverage(list: Entry[]) {
     const a = audits[sigOf(list)];
-    if (!a) {
-      return (
-        <Text size='nano' variant='label' component='span'>
-          размеры не проверялись
-        </Text>
-      );
-    }
-    if (a.phase === 'loading') {
+    // Разбор ещё не включён — вкладку не открывали. Состояние существует ровно один кадр после
+    // открытия и на экране не живёт (скрытая вкладка ничего не рисует), но полоска обязана
+    // отвечать на любом входе, а не падать в undefined.
+    if (!a || a.phase === 'loading') {
       return (
         <Text size='nano' variant='label' component='span'>
           разбор файлов…
@@ -935,7 +949,7 @@ export function PatternsField({
     }
     if (a.phase === 'error') {
       // Без кнопки «ещё раз»: полоска живёт ВНУТРИ плитки, а плитка — кнопка выбора материала, и
-      // вложенная кнопка в кнопке невалидна. Повтор делает «⌕ разобрать файлы» в шапке блока —
+      // вложенная кнопка в кнопке невалидна. Повтор стоит строкой отказа под шапкой блока —
       // одного сорвавшегося скачивания достаточно, чтобы ответ пропал, а причина обычно разовая.
       return (
         <Text size='nano' component='span' className='text-error'>
@@ -1037,7 +1051,18 @@ export function PatternsField({
               <Placeholder
                 dashed
                 tone={!has && main ? 'error' : 'default'}
-                label={has ? (geometry.isFetching ? 'разбор…' : 'формы не разобраны') : 'нет dxf'}
+                // «формы не разобраны» отсюда ушло вместе с кнопкой: разбор идёт сам, и не
+                // разобранных форм больше не бывает — бывает идущий разбор, упавший разбор и
+                // разобранный файл, в котором для этого материала контуров не нашлось.
+                label={
+                  !has
+                    ? 'нет dxf'
+                    : geometry.isError
+                      ? 'ошибка разбора'
+                      : dxfIndex
+                        ? 'форм не найдено'
+                        : 'разбор…'
+                }
                 className='h-[84px] w-full'
               />
             )
@@ -1272,9 +1297,9 @@ export function PatternsField({
 
   return (
     <div className='space-y-2.5'>
-      {/* Панель блока: состояние слева, действия справа. Одна кнопка разбора на всю карточку —
-          раньше она стояла в шапке КАЖДОЙ группы и её слот морфился между четырьмя разными
-          формами, из-за чего шапка меняла размер по мере работы. */}
+      {/* Панель блока: состояние слева, действия справа. Разбор в действиях больше не стоит — он
+          идёт сам, — и от него здесь осталось только слово о том, что он ИДЁТ: скачивание файлов
+          занимает секунды, и без него плитки просто молчат. */}
       <div className='flex flex-wrap items-center gap-1.5 border-b border-borderColor pb-1'>
         <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
           материалов: {scopeGroups.length}
@@ -1291,17 +1316,10 @@ export function PatternsField({
         )}
         {looseDxf.length > 0 && <Pill tone='attention'>без материала: {looseDxf.length}</Pill>}
         <div className='ml-auto flex flex-wrap items-center gap-1.5'>
-          {dxfEntries.length > 0 && (
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              disabled={auditing || geometry.isFetching}
-              title='скачать файлы карточки и разобрать их один раз: полоска покажет, каких размеров в них нет, а плитки — силуэты деталей. Тот же разбор потом бесплатно берут детали кроя.'
-              onClick={runAllAudits}
-            >
-              {auditing || geometry.isFetching ? 'разбор файлов…' : '⌕ разобрать файлы'}
-            </Button>
+          {geometry.isFetching && (
+            <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
+              разбор файлов…
+            </Text>
           )}
           {canUpload && (
             <PatternUploadButton
@@ -1318,18 +1336,41 @@ export function PatternsField({
 
       {/* Отказ общего разбора и выпавшие из пачки листы — вслух. Молчащий разбор оставлял плитки в
           «формы не разобраны» без причины, а лист, не скачавшийся с CDN, исчезал из счёта блоков и
-          из миниатюры без единого слова: его детали просто «не находились». */}
+          из миниатюры без единого слова: его детали просто «не находились».
+          «ещё раз» — единственная оставшаяся кнопка разбора, и она появляется ТОЛЬКО на отказе:
+          сорвавшееся скачивание обычно разовое, а повторить его иначе нечем — автостарт уже
+          отработал и сам себя не перезапустит. */}
       {geometry.isError && (
-        <Text size='nano' component='p' className='text-error'>
-          разбор файлов не удался: {geometry.error?.message ?? 'причина неизвестна'} — силуэтов и
-          покрытия размеров показать нечем
-        </Text>
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Text size='nano' component='span' className='text-error'>
+            разбор файлов не удался: {geometry.error?.message ?? 'причина неизвестна'} — силуэтов и
+            покрытия размеров показать нечем
+          </Text>
+          <Button type='button' variant='secondary' size='xs' onClick={() => geometry.refetch()}>
+            ещё раз
+          </Button>
+        </div>
       )}
       {(geometry.data?.warnings ?? []).map((w) => (
         <Text key={w} size='nano' component='p' className='text-error'>
           {w}
         </Text>
       ))}
+      {/* Индекс размеров не записался. Отдельно от разбора: показанному на плитках ответу отказ
+          записи не мешает — он мешает ГЕЙТУ ГОТОВНОСТИ прогона, который без индекса так и будет
+          отвечать «никто не проверял». Почти всегда лечится сохранением карточки.
+          Печатаются только отказы ЖИВЫХ наборов: набор, чьи файлы с тех пор перезалили или
+          отвязали, больше не существует — его подпись некому пересобрать, и красная строка про
+          него висела бы вечно, требуя починить то, чего уже нет. */}
+      {Object.entries(indexFailures)
+        .filter(([sig]) =>
+          scopeGroups.some((g) => g.entries.length > 0 && sigOf(g.entries) === sig),
+        )
+        .map(([sig, reason]) => (
+          <Text key={sig} size='nano' component='p' className='text-error'>
+            индекс размеров не сохранён — {reason}
+          </Text>
+        ))}
 
       {/* ЕДИНСТВЕННЫЙ оставшийся сводный красный блок: строка вне ряда роняет сохранение ВСЕЙ
           карточки, а её плитка об этом сказать не может — дефект живёт на строке, а не на
@@ -1339,8 +1380,8 @@ export function PatternsField({
         <CalloutBox tone='error'>
           <Text size='micro' component='p'>
             <b>вне размерного ряда:</b> {outOfRange.length}{' '}
-            {outOfRange.length === 1 ? 'строка отвергнет' : 'строки отвергнут'} сохранение карточки —
-            откройте их материал и нажмите «перевесить».
+            {outOfRange.length === 1 ? 'строка отвергнет' : 'строки отвергнут'} сохранение карточки
+            — откройте их материал и нажмите «перевесить».
           </Text>
         </CalloutBox>
       )}
@@ -1389,8 +1430,8 @@ export function PatternsField({
         <Text size='micro' variant='label'>
           размерный ряд не задан — DXF грузятся и просматриваются как обычно, лист хранится без
           размера (размеры и так живут в самом файле). Ряд понадобится, чтобы СОХРАНИТЬ раскладку:
-          маркер ложится на конкретный размер карточки. «⌕ разобрать файлы» покажет, какие размеры в
-          файлах есть, а «↔ детали кроя» заведёт однозначные из них в ряд карточки сам.
+          маркер ложится на конкретный размер карточки. Какие размеры есть в файлах, полоска на
+          плитке покажет сама, а «↔ детали кроя» заведёт однозначные из них в ряд карточки.
         </Text>
       )}
 
@@ -1404,7 +1445,6 @@ export function PatternsField({
         две разные строки BOM). Колорвей на файл не влияет — лекала общие, — но артикул и его ширину
         каждый колорвей подставляет свои.
       </Text>
-
 
       {/* Naming modal for drops onto a material (click uploads carry their own inside the
           button). Размер не спрашивается: их в файле несколько. */}

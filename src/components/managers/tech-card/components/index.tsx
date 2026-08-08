@@ -323,7 +323,7 @@ export function TechCardForm({
   // patterns) do on every card, including an auxiliary one — ?tab=pieces used to fold onto
   // colorways, which an aux card does not have, and that needed a per-card rewrite here. Since the
   // cut-piece table moved to PATTERNS the alias is unconditional.
-  const tabParam = rawTab ? (FOLDED_TABS[rawTab] ?? rawTab) : rawTab;
+  const tabParam = rawTab ? FOLDED_TABS[rawTab] ?? rawTab : rawTab;
   const activeTab: TabId = TABS.some((t) => t.id === tabParam) ? (tabParam as TabId) : 'header';
   const navTo = (id: TabId, extra?: Record<string, string>) =>
     setParams(
@@ -1332,19 +1332,19 @@ export function TechCardForm({
         )}
         <Text size='micro' variant='label' className='mt-2'>
           An auxiliary card produces a material, not products — it cannot own colourways, so all{' '}
-          {convert?.colorways.length ?? 0} are archived first, one by one, and then the card is saved
-          as auxiliary. Archiving is not deletion: the SKU stays frozen and readable and order
+          {convert?.colorways.length ?? 0} are archived first, one by one, and then the card is
+          saved as auxiliary. Archiving is not deletion: the SKU stays frozen and readable and order
           history is untouched.
         </Text>
         <Text size='micro' variant='label' className='mt-2'>
           Restoring an archived colourway works while this card is still SELLABLE — after the flip
-          lands it is one-way. If a step fails, nothing is rolled back and you are told exactly where
-          it stopped.
+          lands it is one-way. If a step fails, nothing is rolled back and you are told exactly
+          where it stopped.
         </Text>
         <Text size='micro' variant='label' className='mt-2'>
           Live colourways are only one of the things that pin the purpose — runs, sold colourways,
-          assembly usage and anything else the card is registered in do too. Archiving clears none of
-          those; the server refuses them on its own and names what it found.
+          assembly usage and anything else the card is registered in do too. Archiving clears none
+          of those; the server refuses them on its own and names what it found.
         </Text>
       </ConfirmationModal>
 
@@ -1525,8 +1525,9 @@ export function TechCardForm({
                     there, not to 412). */}
                   {liveColorways.length > 0 && (
                     <Text variant='error' size='small'>
-                      ! purpose is locked while {liveColorways.length} live colourway(s) are linked —
-                      saving as auxiliary offers to archive them first (archived ones do not count)
+                      ! purpose is locked while {liveColorways.length} live colourway(s) are linked
+                      — saving as auxiliary offers to archive them first (archived ones do not
+                      count)
                     </Text>
                   )}
                   {/* 0252: the OTHER purpose lock, and the one the operator can actually clear from
@@ -1570,8 +1571,8 @@ export function TechCardForm({
                       />
                       {auxSubtype === 'TECH_CARD_AUX_SUBTYPE_UNKNOWN' && (
                         <Text variant='label' size='micro'>
-                          unclassified — the assembly bill and the labels/packaging pickers file this
-                          card under «unknown» until a type is set
+                          unclassified — the assembly bill and the labels/packaging pickers file
+                          this card under «unknown» until a type is set
                         </Text>
                       )}
                     </>
@@ -1720,6 +1721,10 @@ export function TechCardForm({
               <Section title='выкройки (DXF) — по материалам'>
                 <PatternsField
                   techCardId={numId || undefined}
+                  // Разбор DXF стартует сам, но только на ОТКРЫТОЙ вкладке: этот SectionStack
+                  // смонтирован всегда и прячется через `hidden`, так что без явного ответа
+                  // карточка качала бы все выкройки всякому, кто зашёл править BOM.
+                  active={activeTab === 'patterns'}
                   canEdit={canWrite(SECTION.techCards) && !frozen}
                   // БЕЗ `&& !frozen`, и это не описка: индекс размеров описывает ФАЙЛЫ, а не
                   // редактируемое содержимое карточки, и нужен он именно на замороженной — с неё
@@ -1733,7 +1738,7 @@ export function TechCardForm({
                   own block, not a nested one — a block never contains a block (DESIGN.md). Mounted
                   ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
                   set of [data-field] anchors for revealField to walk to. */}
-              <PiecesTab techCard={techCard} />
+              <PiecesTab techCard={techCard} active={activeTab === 'patterns'} />
               {/* The cut list is the projection of the block directly above it: it is derived
                   entirely from the cut pieces, the size range and the per-colourway fabric map, and
                   the first two now live on THIS tab. It used to close the construction tab, which
