@@ -1105,12 +1105,15 @@ function CostLedger({
 }) {
   const cur = actuals?.baseCurrency || run.plannedCurrency || '';
   // Ф6.7. `plannedUnitCost` is a snapshot taken ONCE, when the run was created, and deliberately
-  // never recomputed; `plannedUnitCostToday` is the same formula over TODAY's card. The two drift
-  // legally — re-shooting a norm moves the card's price and not the run's — and the drift cannot
-  // be caught by a date: neither saving a marker nor writing a recipe touches tech_card.updated_at,
-  // so the timestamp is silent in precisely the case this badge exists for. The only honest signal
-  // is that the two NUMBERS disagree. Both sides may independently be absent, and absent is a third
-  // thing — neither zero nor "they agree" — hence four states, three of which are not a badge.
+  // never recomputed; `plannedUnitCostToday` is that same formula run again TODAY. The formula's
+  // inputs are no longer the card alone: it prices the run's OWN colourway × size mix (with the
+  // lines' article pins), so editing the grid moves today's number while the snapshot stays where
+  // planning left it. The two drift legally — re-shooting a norm moves the card's price and not the
+  // run's — and the drift cannot be caught by a date: neither saving a marker nor writing a recipe
+  // touches tech_card.updated_at, so the timestamp is silent in precisely the case this badge exists
+  // for. The only honest signal is that the two NUMBERS disagree. Both sides may independently be
+  // absent, and absent is a third thing — neither zero nor "they agree" — hence four states, three
+  // of which are not a badge.
   const planSnapshot = planCostNumber(run.plannedUnitCost);
   const planToday = planCostNumber(run.plannedUnitCostToday);
   const snapshotDate = runDate(run.createdAt) || '—';
@@ -1228,19 +1231,23 @@ function CostLedger({
         // Both numbers exist and agree — nothing has moved the price since the snapshot. Nothing
         // to say, so nothing is said.
         if (planToday === planSnapshot) return null;
-        // ПРИЧИНУ НЕ НАЗЫВАЕМ. Соблазн написать «карточка изменилась» велик, и в распространённом
-        // случае это ложь: в ту же формулу входит actual_wastage_percent САМОГО ПРОГОНА, который
-        // правится на этом же экране. Оператор, поменявший процент раскроя, получил бы обвинение
-        // карточки, где никто ничего не трогал, и ушёл бы искать несуществующую правку. Говорим
-        // факт и называем обе двери, в которые стоит заглянуть.
+        // ПРИЧИНУ НЕ НАЗЫВАЕМ — и это уже не осторожность, а невозможность. В формулу входят ТРИ
+        // независимых входа: карточка (норма, рецепт, цены), процент раскроя этого прогона и САМА
+        // СЕТКА его линий — плановая цена считается по миксу колорвей × размер этой партии с пинами
+        // артикулов, а снапшот снимается один раз, на создании, и правкой сетки не пересчитывается.
+        // У клиента на руках ровно два числа и ни одного следа того, какой из входов сдвинулся:
+        // отличить правку карточки от правки количеств ему нечем. Прежняя подпись называла
+        // карточку — и с приходом линий в формулу стала врать примерно в половине случаев, отправляя
+        // человека искать в карточке правку, которой там нет. Поэтому говорим только факт: снимок
+        // заморожен на планировании и больше не совпадает с сегодняшним расчётом. Решение
+        // (пересоздавать ли прогон) принимает человек, и принимает его по числам, а не по нашей
+        // догадке о причине.
         return (
           <div className='flex flex-wrap items-start gap-2'>
-            <Pill tone='attention'>plan drifted</Pill>
+            <Pill tone='attention'>план устарел</Pill>
             <Text variant='inactive' size='small'>
-              плановая цена — снапшот от {snapshotDate}; сегодня та же формула даёт {planTodayText}{' '}
-              — {planToday > planSnapshot ? 'дороже' : 'дешевле'} снапшота. Разойтись могли двое:
-              карточка (пересъёмка нормы, правка рецепта или цен) и процент раскроя этого прогона —
-              он тоже входит в расчёт.
+              снапшот от {snapshotDate} заморожен на момент планирования; сегодня та же формула даёт{' '}
+              {planTodayText} — {planToday > planSnapshot ? 'дороже' : 'дешевле'}
             </Text>
           </div>
         );
