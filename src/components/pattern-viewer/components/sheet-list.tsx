@@ -7,7 +7,7 @@ import Text from 'ui/components/text';
 import { formatBytes } from 'utils/pattern';
 import { DxfSheet } from './dxf-sheet';
 import { PdfSheet } from './pdf-sheet';
-import type { PvSheet } from './manifest';
+import { isSafePatternUrl, type PvSheet } from './manifest';
 
 // Тип листа решает манифест (ext от серверного сниффа байтов); имя файла — запасной сигнал на
 // случай пустого поля, той же логикой по хвосту пути, что и isDxfUrl в utils/pattern.
@@ -74,7 +74,9 @@ export function SheetList({
       {sheets.map((sheet, i) => {
         const key = (sheet.line_key ?? '').trim() || `#${i}`;
         const open = openKey === key;
-        const download = (sheet.download_url ?? '').trim();
+        // Ссылка идёт в <a href> — только http(s), см. isSafePatternUrl.
+        const raw = (sheet.download_url ?? '').trim();
+        const download = isSafePatternUrl(raw) ? raw : '';
         const kind = sheetKind(sheet);
         return (
           <div key={key} className='border-b border-hairline last:border-b-0'>

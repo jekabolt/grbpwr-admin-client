@@ -87,6 +87,22 @@ const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
 
+// ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА.
+//
+// window.location.origin — это адрес вкладки, из которой нажали «save as pdf», а не адрес
+// продукта. Напечатать тех-пак из превью Vercel (штатный способ смотреть бету) значит зашить в
+// каждый QR эфемерный алиас превью: он живёт за Deployment Protection, то есть встречает швею
+// SSO-стеной, и умирает при переименовании ветки. Ни печать, ни QR, ни вьюер при этом не
+// ломаются — бумага просто перестаёт работать через месяц, молча.
+//
+// Поэтому origin берётся из окружения деплоя (у бэкенда ровно это и есть PatternToken.
+// PublicBaseURL), а window.location.origin остаётся ТОЛЬКО как локальный запасной вариант.
+const patternViewerOrigin = (): string => {
+  const configured = (import.meta.env.VITE_PATTERN_VIEWER_ORIGIN as string | undefined)?.trim();
+  if (configured) return configured.replace(/\/$/, '');
+  return window.location.origin;
+};
+
 // Русская форма счётного существительного: 1 лист, 2 листа, 5 листов.
 const plural = (n: number, one: string, few: string, many: string): string => {
   const m100 = n % 100;
@@ -711,7 +727,7 @@ export function TechPackDocument({
                     >
                       <PatternQR
                         size={96}
-                        value={`${window.location.origin}/p/${patternViewerToken}?g=${encodeURIComponent(g.wireKey)}`}
+                        value={`${patternViewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(g.wireKey)}`}
                       />
                       <figcaption className='mt-1 max-w-[150px] text-micro uppercase'>
                         <div className='break-words font-semibold'>{g.label}</div>
@@ -734,18 +750,23 @@ export function TechPackDocument({
             </>
           ) : (
             <>
-              {/* TRANSITIONAL fallback — the backend sent no viewer token (older backend or the
-                  pattern service unwired): the old per-sheet QR layout, except each QR encodes
-                  the tokenized view_url when present instead of the raw storage url (which dies
-                  once pattern objects go private). Delete this branch once every contour serves
-                  pattern_viewer_token. */}
+              {/* TRANSITIONAL fallback — the backend sent no viewer token (older backend, or the
+                  pattern service unwired): the old per-sheet QR layout, byte-for-byte.
+                  It deliberately still encodes the RAW url and NOT p.viewUrl, tempting as that
+                  is: view_url is minted with the INTERNAL ('i') scope, whose whole reason for
+                  existing is that revoking a leaked paper tech-pack must not have to break the
+                  admin UI. Putting an admin-scope token on paper trades a known weakness (a
+                  public storage url — what this branch always printed) for a contract violation
+                  that outlives the transition. The print-scope url is not on the wire, so the
+                  honest fix is to ship the backend first and never render this branch. Delete
+                  it once every contour serves pattern_viewer_token. */}
               <div className='flex flex-wrap gap-4'>
                 {patternSheets.map((p, i) => (
                   <figure
                     key={i}
                     className='break-inside-avoid border border-black p-2 text-center'
                   >
-                    <PatternQR value={(p.viewUrl?.trim() || p.url) ?? ''} />
+                    <PatternQR value={p.url ?? ''} />
                     <figcaption className='mt-1 text-micro uppercase'>
                       {/* Лист без размера (0281) — градуированный: размеры внутри файла. Печатать
                           под ним прочерк значило бы сказать «размер не заполнен», а это другой

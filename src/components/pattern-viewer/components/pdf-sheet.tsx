@@ -4,11 +4,13 @@
 // всегда висит на строке листа.
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
-import type { PvSheet } from './manifest';
+import { isSafePatternUrl, type PvSheet } from './manifest';
 
 export function PdfSheet({ sheet }: { sheet: PvSheet }) {
   const url = (sheet.view_url ?? '').trim();
-  if (!url) {
+  // Пустая ссылка и ссылка не той формы — один и тот же тупик для читателя, но разные
+  // причины, и вторая означает, что серверу нечего было подставить (см. isSafePatternUrl).
+  if (!url || !isSafePatternUrl(url)) {
     return (
       <Text size='micro' variant='label' component='p'>
         у листа нет ссылки на файл

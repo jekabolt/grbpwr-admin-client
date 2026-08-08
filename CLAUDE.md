@@ -27,6 +27,13 @@ There is **no test runner** configured. To verify a change, run `yarn build:chec
 
 - Required: `VITE_SERVER_URL` — backend base URL (read in `src/api/api.ts`).
 - Optional: `VITE_MEDIA_PROXY_URL`, `VITE_API_BASE_URL` (dev `/api` proxy, default `http://localhost:3999`).
+- Optional but **set it on every deployed environment**: `VITE_PATTERN_VIEWER_ORIGIN` — the origin
+  baked into the tech pack's pattern QR codes (`{origin}/p/{token}`). It defaults to
+  `window.location.origin`, i.e. the address of the tab that pressed "save as pdf" — so printing
+  from a Vercel *preview* alias produces paper that points at an ephemeral, SSO-protected host and
+  dies when the branch is renamed. Set it to the stable admin host of that contour
+  (`https://admin.beta.grbpwr.com`, `https://admin.grbpwr.com`). Nothing fails visibly when it is
+  wrong; the QR just stops working later, in a workshop.
 - `.env.example` lists a stale `REACT_APP_SERVER_URL` — the code uses `VITE_SERVER_URL`. Don't propagate the old name.
 
 ## Architecture

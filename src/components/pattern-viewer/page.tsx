@@ -95,6 +95,27 @@ export function PatternViewerPage() {
     );
   }
 
+  if (state.phase === 'broken') {
+    // НЕ «недействительна»: сервер ответил, но не манифестом — почти всегда это ошибка
+    // конфигурации (незаданный VITE_SERVER_URL уводит запрос на свой origin, где SPA-rewrite
+    // отдаёт index.html с кодом 200). Перепечатка тут не поможет, и говорить о ней вредно.
+    return (
+      <Shell>
+        <Section>
+          <CalloutBox tone='error'>
+            <Text component='p'>
+              <b>вьюер настроен неправильно</b>
+            </Text>
+            <Text size='micro' variant='label' component='p'>
+              сервер ответил не тем — покажите этот экран разработчику, бумагу перепечатывать не
+              нужно
+            </Text>
+          </CalloutBox>
+        </Section>
+      </Shell>
+    );
+  }
+
   if (state.phase === 'offline') {
     return (
       <Shell>

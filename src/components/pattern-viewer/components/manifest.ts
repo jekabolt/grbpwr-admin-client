@@ -53,6 +53,12 @@ export type ManifestState =
   | { phase: 'invalid' }
   // Сеть/CORS: fetch не долетел. Это не приговор ссылке — показываем «повторить».
   | { phase: 'offline' }
+  // Ответ пришёл, но это не манифест. ОТДЕЛЬНОЕ состояние, а не «недействительна»: самый
+  // вероятный источник — незаданный VITE_SERVER_URL, и тогда запрос уходит на СВОЙ origin,
+  // где catch-all rewrite Vercel отдаёт index.html с кодом 200. Назвать это недействительной
+  // ссылкой значило бы отправить швею перепечатывать исправную бумагу из-за опечатки в
+  // переменной окружения.
+  | { phase: 'broken' }
   | { phase: 'ready'; manifest: PvManifest };
 
 const serverBase = () =>
@@ -69,10 +75,26 @@ export async function fetchManifest(token: string): Promise<ManifestState> {
   }
   if (!res.ok) return { phase: 'invalid' };
   try {
-    return { phase: 'ready', manifest: (await res.json()) as PvManifest };
+    const data = (await res.json()) as PvManifest;
+    // Валидный JSON, который не манифест, — тот же класс, что и HTML: чужой ответ на нашем
+    // адресе. Опознаём по обязательному полю, а не по «объект и ладно».
+    if (!data || typeof data !== 'object' || !Array.isArray(data.groups)) {
+      return { phase: 'broken' };
+    }
+    return { phase: 'ready', manifest: data };
   } catch {
-    return { phase: 'invalid' };
+    return { phase: 'broken' };
   }
+}
+
+// Ссылки на файлы приходят С СЕРВЕРА, но ведут в DOM (<object data>, <a href>) и в fetch,
+// поэтому схема проверяется здесь, а не принимается на веру. Сегодня сервер собирает их как
+// PublicBaseURL + "/api/p/" + токен и подделать их некому; пустой PublicBaseURL, однако, даёт
+// ОТНОСИТЕЛЬНЫЙ "/api/p/…", который catch-all rewrite превратит в index.html внутри <object> —
+// админка, отрисованная внутри самой себя вместо выкройки. Заодно это навсегда закрывает
+// javascript:/data: как класс.
+export function isSafePatternUrl(url?: string): boolean {
+  return /^https?:\/\//i.test((url ?? '').trim());
 }
 
 // view_url — это редирект на presigned-URL хранилища. Для навигации (iframe/скачивание) он
@@ -80,6 +102,7 @@ export async function fetchManifest(token: string): Promise<ManifestState> {
 // поэтому у бэка есть JSON-хоп: ?mode=json возвращает {url} вместо редиректа. view_url может
 // уже нести query-string, отсюда выбор разделителя.
 export async function resolvePatternUrl(viewUrl: string): Promise<string> {
+  if (!isSafePatternUrl(viewUrl)) throw new Error('ссылка на файл выглядит неправильно');
   const sep = viewUrl.includes('?') ? '&' : '?';
   const res = await fetch(`${viewUrl}${sep}mode=json`, { headers: { Accept: 'application/json' } });
   if (!res.ok) throw new Error(`файл недоступен (${res.status})`);
