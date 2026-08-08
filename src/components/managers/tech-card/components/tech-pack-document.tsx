@@ -25,11 +25,13 @@ import {
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
 import {
   EMPTY_QUERY,
+  bookletOn,
   buildPrintScope,
   internalAllowed,
   moneyAllowed,
   scopedColorways,
   scopedSizeIds,
+  type BookletId,
   type PrintScope,
 } from 'components/managers/print/scope';
 import {
@@ -433,6 +435,10 @@ export function TechPackDocument({
   // `colorways` читают все секции — размерная таблица, детали кроя, рецепты, выкройки, костинг, —
   // поэтому скоуп применяется ЗДЕСЬ, а не в каждой секции. Фильтр, размноженный по секциям, забудут
   // в одной из них, и на бумаге окажется деталь одного цвета рядом с рецептом всех цветов.
+  // Тетради комплекта. Модалка даёт выбрать, что печатать; без выбора (booklets не задан)
+  // печатается весь документ, как раньше. Короткое имя — оно стоит в семнадцати гардах подряд.
+  const b = (id: BookletId) => bookletOn(printScope, id);
+
   const sizeIds = scopedSizeIds(printScope);
   // The live colourway data — this is the actual fix for #71/M10: previously hardcoded to `[]`,
   // so the colourways sheet and per-colourway cost labels below never rendered for any card.
@@ -477,9 +483,14 @@ export function TechPackDocument({
 
 
 
-  const openIssues = (tc.issues ?? []).filter(
-    (iss) => (iss.status ?? '') === 'TECH_CARD_ISSUE_STATUS_OPEN',
-  );
+  // ЦЕХУ — только открытые вопросы: закрытый вопрос на его листе читается как задача, и его
+  // начинают решать заново. ВНУТРЕННЕМУ документу нужны все, вместе со статусом и решением, —
+  // он же и архив карты. Раньше все шли всем; резать историю у внутреннего читателя значило бы
+  // молча удалить из документа то, что в нём было.
+  const issuesArchive = internalAllowed(printScope);
+  const printedIssues = issuesArchive
+    ? (tc.issues ?? [])
+    : (tc.issues ?? []).filter((iss) => (iss.status ?? '') === 'TECH_CARD_ISSUE_STATUS_OPEN');
 
   // Стандарт припуска карты — печатается в каждой строке, у которой своего значения нет.
   const cardAllowance = dec(tc.requiredSeamAllowanceMm);
@@ -766,7 +777,8 @@ export function TechPackDocument({
       </div>
 
       {/* DESCRIPTION */}
-      {((tc.concept && internalAllowed(printScope)) || has(tc.details) || tc.notes) && (
+      {((tc.concept && internalAllowed(printScope)) || has(tc.details) || tc.notes) &&
+        b('internal') && (
         <div className='mb-5 mt-4'>
           <Sheet title='description'>
             {tc.concept && internalAllowed(printScope) && (
@@ -807,7 +819,7 @@ export function TechPackDocument({
           миниатюрой на 280px: по нему ищут узел глазами, стоя у машины, и номер выноски на
           миниатюре не читается. Ширина фигуры = ширине страницы, поэтому эскизы идут по одному в
           ряд, а не плиткой. */}
-      {has(tc.technicalMedia) && (
+      {has(tc.technicalMedia) && b('sew') && (
         <Sheet title='technical sketch'>
           <div className='flex flex-col gap-4'>
             {(tc.technicalMedia ?? []).map((m, i) => {
@@ -889,7 +901,7 @@ export function TechPackDocument({
       )}
 
       {/* MOODBOARD — внутреннее: цеху он не адресован и только удлиняет комплект. */}
-      {has(tc.moodboardMedia) && internalAllowed(printScope) && (
+      {has(tc.moodboardMedia) && internalAllowed(printScope) && b('internal') && (
         <Sheet title='moodboard'>
           <div className='flex flex-wrap gap-4'>
             {(tc.moodboardMedia ?? []).map((m, i) => {
@@ -917,7 +929,7 @@ export function TechPackDocument({
 
       {/* MEASUREMENTS — point-of-measure grading chart (GetStyleSizeChart), the single most
           standard artifact of a garment tech pack; previously never fetched/printed. */}
-      {has(sizeIds) && measurements.length > 0 && chartHasAnyValue && (
+      {has(sizeIds) && measurements.length > 0 && chartHasAnyValue && b('qc') && (
         <Sheet title={`measurements (${unitAbbr})`}>
           {/* ТРАНСПОНИРОВАНА: точки замера в строки, размеры в колонки.
               Раньше колонка была на КАЖДУЮ точку замера категории — на карточке с полутора
@@ -955,7 +967,7 @@ export function TechPackDocument({
           ни здесь, ни в наряде: норма расхода, то есть главное число раскройного стола, жила
           только на экране. Лист печатается только при скоупе колорвея, совпадающем с раскладкой,
           либо для общих раскладок (colorwayId = 0). */}
-      {scopedMarkers.length > 0 && (
+      {scopedMarkers.length > 0 && b('cut') && (
         <Sheet title='нормы и раскладки'>
           <table className='w-full border-collapse text-micro'>
             <thead>
@@ -1017,7 +1029,7 @@ export function TechPackDocument({
       {/* PATTERNS (выкройки) — one QR per FABRIC SCOPE, opening the public viewer /p/{token}.
           The per-size breakdown is gone from paper: sheet choice, size switching and download
           all live in the viewer, so the print names the выкройка (the scope), not its files. */}
-      {patternSheets.length > 0 && (
+      {patternSheets.length > 0 && b('cut') && (
         <Sheet title='patterns (выкройки)'>
           {patternViewerToken ? (
             <>
@@ -1099,7 +1111,7 @@ export function TechPackDocument({
       )}
 
       {/* BILL OF MATERIALS — article catalog (recipe/consumption is per colourway below) */}
-      {has(tc.bomItems) && (
+      {has(tc.bomItems) && (b('cut') || b('sew')) && (
         <Sheet title='bill of materials (article catalog)'>
           <table className='w-full border-collapse text-micro'>
             <thead>
@@ -1162,7 +1174,7 @@ export function TechPackDocument({
 
       {/* CUT PIECES — structural pieces (детали кроя) + per-colourway fabric mapping (NF-05).
           Sat unrendered right alongside the BOM/colourways data it references (task: M10). */}
-      {has(tc.pieces) && (
+      {has(tc.pieces) && b('cut') && (
         <Sheet title='cut pieces'>
           <table className='w-full border-collapse text-micro'>
             <thead>
@@ -1186,9 +1198,14 @@ export function TechPackDocument({
                 // Скоуп колорвея схлопывает N строк ткани в одну. Фильтровать надо САМ список, а
                 // не только подпись: оставь строки чужих цветов с неразрешённым именем — и в
                 // клетке напечатается «—: ткань», то есть чужая ткань под прочерком вместо цвета.
-                const materials = (p.materials ?? []).filter((m) =>
-                  colorways.some((c) => wireInt(c.colorwayId) === wireInt(m.colorwayId)),
-                );
+                // Фильтр применяется ТОЛЬКО при скоупе колорвея. Без скоупа строка с
+                // неразрешимым colorwayId (цвет удалён, id = 0) печаталась как «—: ткань» —
+                // выбросить её молча значило бы менять документ там, где менять его не просили.
+                const materials = printScope.colorway
+                  ? (p.materials ?? []).filter(
+                      (m) => wireInt(m.colorwayId) === wireInt(printScope.colorway?.colorwayId),
+                    )
+                  : (p.materials ?? []);
                 return (
                   <tr key={p.lineKey || i} className='break-inside-avoid'>
                     <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
@@ -1277,7 +1294,7 @@ export function TechPackDocument({
       )}
 
       {/* COLOURWAYS — each colourway is a recipe (usages over the BOM catalog) */}
-      {has(colorways) && (
+      {has(colorways) && b('internal') && (
         <Sheet title='colourways'>
           <div className='space-y-4'>
             {colorways.map((c, i) => {
@@ -1311,7 +1328,12 @@ export function TechPackDocument({
                           <th className={`${TH} text-right`}>cons. / qty</th>
                           {/* No «run total»: it printed size_run_total, the spend on the card's
                               typical calculation batch. A style has no batch — the run does. */}
-                          <th className={`${TH} text-right`}>per garment</th>
+                          {/* per garment = line_total, ДЕНЬГИ (сервер срезает их аккаунту без
+                              costing:read). Админ с этим правом, печатая «комплект в цех», отдавал
+                              фабрике себестоимость материалов на изделие построчно. */}
+                          {moneyAllowed(printScope) && (
+                            <th className={`${TH} text-right`}>per garment</th>
+                          )}
                         </tr>
                       </thead>
                       <tbody>
@@ -1330,9 +1352,11 @@ export function TechPackDocument({
                               <td className={`${TD} whitespace-nowrap text-right`}>
                                 {cons ? `${cons} ${art?.unit ?? ''}`.trim() : '—'}
                               </td>
-                              <td className={`${TD} whitespace-nowrap text-right`}>
-                                {dec(u.lineTotal) || '—'}
-                              </td>
+                              {moneyAllowed(printScope) && (
+                                <td className={`${TD} whitespace-nowrap text-right`}>
+                                  {dec(u.lineTotal) || '—'}
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
@@ -1347,7 +1371,7 @@ export function TechPackDocument({
       )}
 
       {/* CONSTRUCTION + OPERATIONS */}
-      {(tc.construction || has(tc.operations) || tc.requiredSeamAllowanceMm) && (
+      {(tc.construction || has(tc.operations) || tc.requiredSeamAllowanceMm) && b('sew') && (
         <Sheet title='construction'>
           {/* CARD-LEVEL, so it prints on its own. It used to sit inside the construction block, which
               meant a card that sets the standard and leaves the defaults empty printed its steps and
@@ -1480,7 +1504,7 @@ export function TechPackDocument({
       )}
 
       {/* LABELS + PACKAGING */}
-      {(has(tc.labels) || tc.packaging) && (
+      {(has(tc.labels) || tc.packaging) && (b('sew') || b('qc')) && (
         <Sheet title='labels & packaging'>
           {has(tc.labels) && (
             <table className='mb-3 w-full border-collapse text-micro'>
@@ -1585,7 +1609,7 @@ export function TechPackDocument({
       {/* ASSEMBLY — ON-GARMENT ITEMS: labels/tags/hangtags attached on or into the garment
           (ListStyleAssembly). Root cause of #71 — this RPC was never fetched, so the section
           was structurally impossible to render regardless of what this component did. */}
-      {has(activeAssembly) && (
+      {has(activeAssembly) && b('sew') && (
         <Sheet title='assembly — on-garment items'>
           <table className='w-full border-collapse text-micro'>
             <thead>
@@ -1632,7 +1656,7 @@ export function TechPackDocument({
       {/* PACKAGING RECIPE — materials consumed on ship (ListPackagingRecipe): once per shipment
           (qty/order, e.g. a branded box) plus once per unit (qty/item, e.g. a dust bag). Same
           missing-RPC root cause as assembly, one tab over. */}
-      {packagingRows.length > 0 && (
+      {packagingRows.length > 0 && b('qc') && (
         <Sheet title='packaging recipe'>
           {packagingIsFallback && (
             <p className='mb-1 text-nano text-labelColor'>
@@ -1671,7 +1695,7 @@ export function TechPackDocument({
       {/* COSTING — только внутренний профиль. Бумага профиля `factory` уезжает внешнему
           подрядчику, и себестоимость ему не адресована: до скоупа этот лист печатался в том же
           документе, который отдают на фабрику. */}
-      {tc.costing && moneyAllowed(printScope) && (
+      {tc.costing && moneyAllowed(printScope) && b('internal') && (
         <Sheet title='costing'>
           <div className='grid grid-cols-2 gap-x-8'>
             <div>
@@ -1704,10 +1728,11 @@ export function TechPackDocument({
               <tbody>
                 {(tc.costing.colorwayCosts ?? [])
                   .filter(
-                    // Скоуп колорвея: печатать себестоимость чужих цветов рядом с выбранным —
-                    // ровно то, от чего документ уходит.
+                    // Только при скоупе: без него печатаем всё, как раньше, включая строки с
+                    // неразрешимым id.
                     (cc) =>
-                      colorways.some((c) => wireInt(c.colorwayId) === wireInt(cc.colorwayId)),
+                      !printScope.colorway ||
+                      wireInt(cc.colorwayId) === wireInt(printScope.colorway.colorwayId),
                   )
                   .map((cc, i) => {
                   // colorway_id is a real FK (product id), not a positional index into
@@ -1751,18 +1776,20 @@ export function TechPackDocument({
       {/* ОТКРЫТЫЕ ВОПРОСЫ. На бумагу идут только те, что ещё открыты: закрытый вопрос на листе
           цеха читается как задача, а не как история, и его начинают решать заново. Колонка
           «resolution» вместе с ними уходит — у открытого вопроса её нет по определению. */}
-      {has(openIssues) && (
-        <Sheet title='открытые вопросы'>
+      {has(printedIssues) && b('sew') && (
+        <Sheet title={issuesArchive ? 'вопросы' : 'открытые вопросы'}>
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
                 <th className={TH}>severity</th>
+                {issuesArchive && <th className={TH}>status</th>}
                 <th className={TH}>ref</th>
                 <th className={TH}>description</th>
+                {issuesArchive && <th className={TH}>resolution</th>}
               </tr>
             </thead>
             <tbody>
-              {openIssues.map((iss, i) => {
+              {printedIssues.map((iss, i) => {
                 // Ссылка issue→операция хрупкая: клиент перенумеровывает шаги при перестановке, а
                 // AI-регенерация осиротляет ссылки все разом. Потерянная ссылка обязана называться
                 // вслух — «op 40», которого в списке нет, отправляет швею искать несуществующий шаг.
@@ -1773,6 +1800,9 @@ export function TechPackDocument({
                 return (
                   <tr key={i} className='break-inside-avoid'>
                     <td className={TD}>{issueSevL[iss.severity ?? ''] ?? '—'}</td>
+                    {issuesArchive && (
+                      <td className={TD}>{issueStatusL[iss.status ?? ''] ?? '—'}</td>
+                    )}
                     <td className={TD}>
                       {[
                         opNo ? `op ${opNo}${opLost ? ' — ссылка потеряна' : ''}` : '',
@@ -1782,6 +1812,7 @@ export function TechPackDocument({
                         .join(', ') || '—'}
                     </td>
                     <td className={TD}>{iss.description || '—'}</td>
+                    {issuesArchive && <td className={TD}>{iss.resolutionNote || '—'}</td>}
                   </tr>
                 );
               })}
@@ -1795,7 +1826,7 @@ export function TechPackDocument({
           (care_entries) на бумагу не попадал вовсе. Порядок — канонический порядок словаря, а не
           порядок записей карты: на вшивной этикетке символы идут стирка → отбеливание → сушка →
           глажка → химчистка, и бумага обязана называть их в том же порядке. */}
-      {has(careEntries) && (
+      {has(careEntries) && b('qc') && (
         <Sheet title='care'>
           <div className='flex flex-wrap gap-3'>
             {careEntries.map((e, i) => {
@@ -1822,7 +1853,7 @@ export function TechPackDocument({
       )}
 
       {/* SIGN-OFFS */}
-      {has(tc.signoffs) && (
+      {has(tc.signoffs) && b('qc') && (
         <Sheet title='sign-off'>
           <table className='w-full border-collapse text-micro'>
             <thead>

@@ -252,7 +252,9 @@ export function RunPackDocument({
     () => (cutPlan?.rows ?? []).filter((r) => inScope(r.colorwayId, r.outputVariantId)),
     [cutPlan?.rows, scopeColorwayId],
   );
-  const cutBlockers = cutPlan?.blockers ?? [];
+  // Блокеры фильтруются так же, как строки: «стоп» про белый цвет над таблицей чёрного
+  // отправляет цех останавливаться из-за чужой партии.
+  const cutBlockers = (cutPlan?.blockers ?? []).filter((b) => inScope(b.colorwayId));
 
   // АВТОРИТЕТЕН ЛИ ОТВЕТ ВООБЩЕ. Пока бэкенд этого RPC дописывают, шлюз может ответить 200 и пустым
   // телом — и тогда `rows: []` неотличимо от честного «в карте нет деталей кроя». Разница огромна:
@@ -742,8 +744,13 @@ export function RunPackDocument({
                   <td className={`${TD} text-right uppercase`} colSpan={4 + cutSizeColumns.length}>
                     всего по партии
                   </td>
+                  {/* Итог считаем от ВИДИМЫХ строк, а не берём серверный piecesToCutTotal: тот
+                      посчитан по всему прогону, и под таблицей одного колорвея он был бы суммой
+                      чужих цветов. Без скоупа обе величины совпадают. */}
                   <td className={`${TD} text-center font-bold`}>
-                    {cutPlan?.piecesToCutTotal ?? '?'}
+                    {scopeColorwayId > 0
+                      ? cutRows.reduce((sum, r) => sum + wireInt(r.piecesToCutTotal), 0)
+                      : (cutPlan?.piecesToCutTotal ?? '?')}
                   </td>
                 </tr>
               </tbody>
