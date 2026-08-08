@@ -434,6 +434,25 @@ export function TechPackDocument({
     return groups;
   }, [tc.operations]);
 
+  // Пустой чарт печатался таблицей из одних прочерков — то есть выглядел как заполненный
+  // документ, в котором все значения равны «нет». Лист без единого значения не нужен никому.
+  const chartHasAnyValue = [...chartCellByKey.values()].some((v) => (v ?? '').trim() !== '');
+
+  // Уход в каноническом порядке словаря. Записи карты приходят в порядке ввода, а на этикетке и
+  // на бумаге символы обязаны стоять в одном и том же, узнаваемом порядке.
+  const careEntries = useMemo(() => {
+    const entries = techCard.careEntries ?? [];
+    const order = new Map<string, number>();
+    (dictionary?.careSymbols ?? []).forEach((sym, i) => {
+      if (sym.code) order.set(sym.code, i);
+    });
+    return [...entries].sort(
+      (a, b) =>
+        (order.get(a.code ?? '') ?? Number.MAX_SAFE_INTEGER) -
+        (order.get(b.code ?? '') ?? Number.MAX_SAFE_INTEGER),
+    );
+  }, [techCard.careEntries, dictionary?.careSymbols]);
+
   const openIssues = (tc.issues ?? []).filter(
     (iss) => (iss.status ?? '') === 'TECH_CARD_ISSUE_STATUS_OPEN',
   );
@@ -874,25 +893,30 @@ export function TechPackDocument({
 
       {/* MEASUREMENTS — point-of-measure grading chart (GetStyleSizeChart), the single most
           standard artifact of a garment tech pack; previously never fetched/printed. */}
-      {has(sizeIds) && measurements.length > 0 && (
+      {has(sizeIds) && measurements.length > 0 && chartHasAnyValue && (
         <Sheet title={`measurements (${unitAbbr})`}>
+          {/* ТРАНСПОНИРОВАНА: точки замера в строки, размеры в колонки.
+              Раньше колонка была на КАЖДУЮ точку замера категории — на карточке с полутора
+              десятками POM таблица уезжала за правое поле A4 и печаталась обрезанной, причём
+              обрезанной молча. Размеров же всегда единицы, и их число ограничено сверху
+              градацией — по этой оси таблица не растёт. */}
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
-                <th className={`${TH} w-16`}>size</th>
-                {measurements.map((m) => (
-                  <th key={m.id} className={`${TH} text-center`}>
-                    {m.name}
+                <th className={TH}>point of measure</th>
+                {sizeIds.map((sizeId) => (
+                  <th key={sizeId} className={`${TH} text-center`}>
+                    {sizeName(sizeId)}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {sizeIds.map((sizeId) => (
-                <tr key={sizeId} className='break-inside-avoid'>
-                  <td className={`${TD} font-semibold`}>{sizeName(sizeId)}</td>
-                  {measurements.map((m) => (
-                    <td key={m.id} className={`${TD} text-center`}>
+              {measurements.map((m) => (
+                <tr key={m.id} className='break-inside-avoid'>
+                  <td className={`${TD} font-semibold`}>{m.name}</td>
+                  {sizeIds.map((sizeId) => (
+                    <td key={sizeId} className={`${TD} text-center`}>
                       {chartCellByKey.get(`${sizeId}:${m.id}`) || '—'}
                     </td>
                   ))}
@@ -1057,6 +1081,9 @@ export function TechPackDocument({
             <thead>
               <tr>
                 <th className={`${TH} w-6`}>#</th>
+                {/* Номер ВЫНОСКИ, а не порядковый номер строки: он и есть тот номер, который швея
+                    видит на эскизе. Порядковый номер строки не значит на бумаге ничего. */}
+                <th className={`${TH} w-10`}>выноска</th>
                 <th className={TH}>piece</th>
                 <th className={`${TH} text-center`}>qty / garment</th>
                 <th className={TH}>grainline</th>
@@ -1078,10 +1105,13 @@ export function TechPackDocument({
                 return (
                   <tr key={p.lineKey || i} className='break-inside-avoid'>
                     <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
+                    <td className={`${TD} text-center font-semibold`}>
+                      {wireInt(p.calloutNumber) > 0 ? wireInt(p.calloutNumber) : '—'}
+                    </td>
                     <td className={TD}>
                       <div className='font-medium'>{p.name || '—'}</div>
                       {p.detached && (
-                        <div className='text-labelColor'>unpinned from sketch callout</div>
+                        <div className='text-labelColor'>связь с выноской эскиза потеряна</div>
                       )}
                     </td>
                     {/* КОЛИЧЕСТВО И ЕГО ПОЯСНЕНИЕ В ОДНОЙ КЛЕТКЕ — это и есть весь смысл Ф1.3 на
@@ -1673,6 +1703,37 @@ export function TechPackDocument({
         </Sheet>
       )}
 
+      {/* УХОД — отдельным листом. До этого символы ухода печатались ТОЛЬКО внутри CARE-этикетки,
+          то есть лишь когда их продублировали в её содержимое: карточный факт ухода
+          (care_entries) на бумагу не попадал вовсе. Порядок — канонический порядок словаря, а не
+          порядок записей карты: на вшивной этикетке символы идут стирка → отбеливание → сушка →
+          глажка → химчистка, и бумага обязана называть их в том же порядке. */}
+      {has(careEntries) && (
+        <Sheet title='care'>
+          <div className='flex flex-wrap gap-3'>
+            {careEntries.map((e, i) => {
+              const code = (e.code ?? '').trim();
+              const voc = careVocabulary.byCode[code];
+              // Локальный фолбэк артворка: пустой словарь на бэкенде не должен превращать лист в
+              // столбик кодов — символ узнают глазами, код не узнаёт никто.
+              const img = voc?.img ?? CARE_ARTWORK[code];
+              return (
+                <div key={i} className='flex w-24 break-inside-avoid flex-col items-center gap-1'>
+                  {img ? (
+                    <img src={img} alt={e.name ?? code} className='h-8 w-8' />
+                  ) : (
+                    <span className='text-control font-bold'>{code}</span>
+                  )}
+                  <span className='text-center text-nano uppercase leading-tight'>
+                    {e.name || voc?.name || code}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </Sheet>
+      )}
+
       {/* SIGN-OFFS */}
       {has(tc.signoffs) && (
         <Sheet title='sign-off'>
@@ -1681,23 +1742,55 @@ export function TechPackDocument({
               <tr>
                 <th className={TH}>section</th>
                 <th className={TH}>state</th>
+                <th className={TH}>действительна?</th>
                 <th className={TH}>signed by</th>
                 <th className={TH}>date</th>
                 <th className={TH}>note</th>
               </tr>
             </thead>
             <tbody>
-              {(tc.signoffs ?? []).map((s, i) => (
-                <tr key={i} className='break-inside-avoid'>
-                  <td className={TD}>{signoffSectionL[s.section ?? ''] ?? '—'}</td>
-                  <td className={TD}>{signoffStateL[s.state ?? ''] ?? '—'}</td>
-                  <td className={TD}>{s.signedBy || '—'}</td>
-                  <td className={TD}>{formatTechCardDate(s.signedAt)}</td>
-                  <td className={TD}>{s.note || '—'}</td>
-                </tr>
-              ))}
+              {(tc.signoffs ?? []).map((s, i) => {
+                // СВЕРКА ПОДПИСИ С СОДЕРЖИМЫМ. Оба конца лежат на карте: подпись хранит digest
+                // секции на момент подписания, карта — её digest сейчас. До этого печаталось
+                // только слово «approved», и секция, правленная ПОСЛЕ подписи, выглядела на
+                // бумаге ровно как подписанная.
+                // sectionDigests живут на ОБЁРТКЕ карты (common_TechCard), а не на insert:
+                // это read-only проекция сервера, а не поле, которое кто-то редактирует.
+                const live = (techCard.sectionDigests ?? []).find(
+                  (d) => d.section === s.section,
+                )?.digest;
+                const signed = s.signedDigest?.trim();
+                const validity = !signed
+                  ? '—'
+                  : !live
+                    ? '—'
+                    : signed === live
+                      ? 'да'
+                      : 'ПРАВЛЕНО ПОСЛЕ ПОДПИСИ';
+                return (
+                  <tr key={i} className='break-inside-avoid'>
+                    <td className={TD}>{signoffSectionL[s.section ?? ''] ?? '—'}</td>
+                    <td className={TD}>{signoffStateL[s.state ?? ''] ?? '—'}</td>
+                    <td className={`${TD} ${validity.startsWith('ПРАВЛЕНО') ? 'font-bold' : ''}`}>
+                      {validity}
+                    </td>
+                    <td className={TD}>{s.signedBy || '—'}</td>
+                    <td className={TD}>{formatTechCardDate(s.signedAt)}</td>
+                    <td className={TD}>{s.note || '—'}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
+          {/* ГРАНИЦЫ ПОДПИСИ, названные вслух. Хеши секций покрывают не всю карту: выкройки и их
+              привязки, рецепты колорвеев (включая пины артикулов), маркеры и нормы, размерная
+              таблица и уход в них не входят. Пока это так, «подписано» на бумаге не означает
+              «лекала и рецепт те же» — и умолчать об этом значит дать подписи больше веса, чем
+              она несёт. */}
+          <p className='mt-2 text-nano text-labelColor'>
+            подпись покрывает содержимое перечисленных секций; выкройки и их привязки, рецепты
+            колорвеев, маркеры и нормы, размерная таблица и уход в хеш не входят
+          </p>
         </Sheet>
       )}
 
