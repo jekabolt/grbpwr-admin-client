@@ -7985,6 +7985,85 @@ export type ListMaterialPricesResponse = {
   prices: common_MaterialPrice[] | undefined;
 };
 
+export type GetMaterialCuttingCoefficientSuggestionRequest = {
+  materialId: number | undefined;
+};
+
+// Предложение коэффициента раскроя ОДНОГО артикула по факту его настилов (Ф5б.3, §4.2).
+// ДВА ЧИСЛА, И ЭТО НЕ ИЗБЫТОЧНОСТЬ. median_drift_percent — ИЗМЕРЕНИЕ (+3.00 = «уходит на 3%
+// больше плана»); suggested_coefficient — МНОЖИТЕЛЬ (1.0300), то, что сохраняется в
+// material.cutting_coefficient. 0270 хранит коэффициент множителем, потому что путь потребности на
+// него УМНОЖАЕТ. Отдай сервер одно измерение — забытый на клиенте «+1» дал бы артикулу
+// коэффициент 0.03, который entity.Material.EffectiveCuttingCoefficient читает как «НЕ ЗАДАНО»
+// (всё, что меньше единицы, — не задано), и калибровка молча обнулила бы себя.
+export type GetMaterialCuttingCoefficientSuggestionResponse = {
+  status: common_MaterialCoefficientSuggestionStatus | undefined;
+  // ИЗМЕРЕНИЕ, в процентах. ЗАПОЛНЕНО и при OUT_OF_RANGE — измерение остаётся фактом тогда, когда
+  // поле его не принимает, и человеку показывают именно его. Пусто только при TOO_FEW_FACTS.
+  medianDriftPercent: googletype_Decimal | undefined;
+  // МНОЖИТЕЛЬ, готовый к сохранению. ПУСТО при TOO_FEW_FACTS и при OUT_OF_RANGE, и ни в одном из
+  // этих случаев это не «1.0»: коэффициента нет и коэффициент равен единице — разные утверждения.
+  suggestedCoefficient: googletype_Decimal | undefined;
+  // Сколько настилов стоит ПОД медианой. Едет ВСЕГДА, в том числе при TOO_FEW_FACTS, где оно и есть
+  // содержание ответа. Предложение без своей опоры нечем взвесить: «1.06 по трём настилам» и
+  // «1.06 по сорока» — два разных утверждения, и решают по ним по-разному.
+  layCount: number | undefined;
+  // Фраза для человека. НЕПУСТА ВСЕГДА, включая READY.
+  detail: string | undefined;
+  // Разбор ПО НАСТИЛАМ, вошедшие и невошедшие, в порядке от свежего замера к старому.
+  drifts: common_MaterialCoefficientLayDrift[] | undefined;
+};
+
+// КАЛИБРОВКА КОЭФФИЦИЕНТА РАСКРОЯ ПО ФАКТУ НАСТИЛОВ (Ф5б.3, решение Р4).
+// дрейф_настила = actual_qty / planned_lay_qty − 1
+// предложение   = МЕДИАНА дрейфов настилов этого артикула, где есть И план, И факт
+// КРУГА ЗДЕСЬ НЕТ, и это самое неочевидное место фазы. Ф4 постановила, что коэффициент раскроя на
+// пути настилов НЕ ПРИМЕНЯЕТСЯ: план настила — чистая геометрия (длина маркера × слои + концевые
+// потери). Коэффициент покрывает ровно то, чего геометрия НЕ видит: усадку, обход пороков,
+// сращивание, оттеночные полосы. Отсюда право делить одно на другое. Применяйся коэффициент к
+// настилу, калибровка стала бы круговой и сходилась бы к произвольной точке.
+// ПРЕДЛОЖЕНИЕ, А НЕ ПРИМЕНЕНИЕ. Сервер не пишет коэффициент никогда; принимает его рука владельца
+// артикула — та же дисциплина, что у нормы в Ф3 и у пер-размерного расхода в Ф2.4.
+export type common_MaterialCoefficientSuggestionStatus =
+  // Сервер ВСЕГДА присылает одно из трёх ниже. Ноль остаётся за «поле не заполнено» и обязан
+  // читаться клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_UNSPECIFIED"
+  // Настилов с планом И фактом меньше трёх. Предложения нет вовсе, и это содержание ответа, а не
+  // его отсутствие: коэффициент, выведенный из одного замера, — догадка в одежде числа.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_TOO_FEW_FACTS"
+  // Медиана посчитана, но коэффициент из неё поле не примет (вне [1, 3], chk 0270). ИЗМЕРЕНИЕ
+  // отдаётся (median_drift_percent), число-предложение — НЕТ, и оно НЕ ПРИЖИМАЕТСЯ к границе:
+  // зажать −12% в 1.0 значило бы подменить измерение ближайшим сохраняемым значением.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_OUT_OF_RANGE"
+  // Предложение есть, и его можно сохранить как есть.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_READY";
+// Вклад ОДНОГО настила в калибровку — с ТРЕТЬИМ ОТВЕТОМ.
+// Разбор едет наружу ЦЕЛИКОМ, вошедшие и невошедшие настилы вместе: медиана по построению ПРЯЧЕТ
+// выброс, а выброс — это, скорее всего, опечатка замерщика («ввели 500 вместо 50»). Отдать только
+// медиану значило бы починить арифметику и оставить неверную строку в базе навсегда. Увидеть её
+// должен человек, поэтому настил называет себя (прогон, карточка, имя), а не только id.
+export type common_MaterialCoefficientLayDrift = {
+  layId: number | undefined;
+  layKey: string | undefined;
+  layName: string | undefined;
+  runId: number | undefined;
+  techCardId: number | undefined;
+  techCardName: string | undefined;
+  // ПЛАН настила, пересчитанный в единицу ФАКТА, — чтобы два числа встали рядом без второго
+  // перевода на клиенте. Пусто, когда плана нет либо он несводим с единицей факта.
+  plannedQty: googletype_Decimal | undefined;
+  actualQty: googletype_Decimal | undefined;
+  actualUom: common_MaterialUnit | undefined;
+  // ДРЕЙФ В ПРОЦЕНТАХ (+6.00 = «ушло на 6% больше плана»), как и actual_drift_percent на настиле:
+  // единица названа В ИМЕНИ ПОЛЯ, и это единственное место, где она названа. ПУСТО ровно у тех
+  // настилов, что в медиану не вошли, — и тогда причина названа в skipped.
+  driftPercent: googletype_Decimal | undefined;
+  // Причина невхождения. НЕПУСТА РОВНО У НЕВОШЕДШИХ: строка без числа и без объяснения неотличима
+  // от бага.
+  skipped: string | undefined;
+  actualAt: wellKnownTimestamp | undefined;
+};
+
 // RepriceTechCardBom (production-costing Phase 3, plan 11).
 export type RepriceTechCardBomRequest = {
   techCardId: number | undefined;
@@ -11284,6 +11363,12 @@ export interface AdminService {
   ListMaterials(request: ListMaterialsRequest): Promise<ListMaterialsResponse>;
   AddMaterialPrice(request: AddMaterialPriceRequest): Promise<AddMaterialPriceResponse>;
   ListMaterialPrices(request: ListMaterialPricesRequest): Promise<ListMaterialPricesResponse>;
+  // ПРЕДЛОЖЕНИЕ КОЭФФИЦИЕНТА РАСКРОЯ по факту настилов (Ф5б.3).
+  // ОТДЕЛЬНЫЙ RPC, а не поле на GetMaterial/ListMaterials, и это решение, а не оформление: ответ
+  // сканирует настилы по ПРОГОНАМ и поднимает их технологические карточки, а платить за это на
+  // каждом чтении каталога незачем — каталог материалов читается всюду, а «сколько на самом деле
+  // ушло ткани» спрашивают отдельно и редко.
+  GetMaterialCuttingCoefficientSuggestion(request: GetMaterialCuttingCoefficientSuggestionRequest): Promise<GetMaterialCuttingCoefficientSuggestionResponse>;
   // RepriceTechCardBom re-pulls the current material-catalog price into every catalog-linked BOM
   // line of a mutable (non-released) card (production-costing Phase 3, plan 11): unit_price/currency are overwritten
   // with the same CATALOG_LATEST resolution the style cost estimate uses (costing currency, else
@@ -15372,6 +15457,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListMaterialPrices",
       }) as Promise<ListMaterialPricesResponse>;
+    },
+    GetMaterialCuttingCoefficientSuggestion(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.materialId) {
+        throw new Error("missing required field request.material_id");
+      }
+      const path = `api/admin/materials/${request.materialId}/cutting-coefficient-suggestion`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMaterialCuttingCoefficientSuggestion",
+      }) as Promise<GetMaterialCuttingCoefficientSuggestionResponse>;
     },
     RepriceTechCardBom(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.techCardId) {

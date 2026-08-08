@@ -4362,6 +4362,29 @@ export type ProductionLayCheckStatus =
   | "PRODUCTION_LAY_CHECK_STATUS_WARNING"
   | "PRODUCTION_LAY_CHECK_STATUS_BLOCKER"
   | "PRODUCTION_LAY_CHECK_STATUS_UNKNOWN";
+// КАЛИБРОВКА КОЭФФИЦИЕНТА РАСКРОЯ ПО ФАКТУ НАСТИЛОВ (Ф5б.3, решение Р4).
+// дрейф_настила = actual_qty / planned_lay_qty − 1
+// предложение   = МЕДИАНА дрейфов настилов этого артикула, где есть И план, И факт
+// КРУГА ЗДЕСЬ НЕТ, и это самое неочевидное место фазы. Ф4 постановила, что коэффициент раскроя на
+// пути настилов НЕ ПРИМЕНЯЕТСЯ: план настила — чистая геометрия (длина маркера × слои + концевые
+// потери). Коэффициент покрывает ровно то, чего геометрия НЕ видит: усадку, обход пороков,
+// сращивание, оттеночные полосы. Отсюда право делить одно на другое. Применяйся коэффициент к
+// настилу, калибровка стала бы круговой и сходилась бы к произвольной точке.
+// ПРЕДЛОЖЕНИЕ, А НЕ ПРИМЕНЕНИЕ. Сервер не пишет коэффициент никогда; принимает его рука владельца
+// артикула — та же дисциплина, что у нормы в Ф3 и у пер-размерного расхода в Ф2.4.
+export type MaterialCoefficientSuggestionStatus =
+  // Сервер ВСЕГДА присылает одно из трёх ниже. Ноль остаётся за «поле не заполнено» и обязан
+  // читаться клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_UNSPECIFIED"
+  // Настилов с планом И фактом меньше трёх. Предложения нет вовсе, и это содержание ответа, а не
+  // его отсутствие: коэффициент, выведенный из одного замера, — догадка в одежде числа.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_TOO_FEW_FACTS"
+  // Медиана посчитана, но коэффициент из неё поле не примет (вне [1, 3], chk 0270). ИЗМЕРЕНИЕ
+  // отдаётся (median_drift_percent), число-предложение — НЕТ, и оно НЕ ПРИЖИМАЕТСЯ к границе:
+  // зажать −12% в 1.0 значило бы подменить измерение ближайшим сохраняемым значением.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_OUT_OF_RANGE"
+  // Предложение есть, и его можно сохранить как есть.
+  | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_READY";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -4792,6 +4815,33 @@ export type ProductionRunCutReceiptInsert = {
   cutQty: number | undefined;
   acceptedQty: number | undefined;
   note: string | undefined;
+};
+
+// Вклад ОДНОГО настила в калибровку — с ТРЕТЬИМ ОТВЕТОМ.
+// Разбор едет наружу ЦЕЛИКОМ, вошедшие и невошедшие настилы вместе: медиана по построению ПРЯЧЕТ
+// выброс, а выброс — это, скорее всего, опечатка замерщика («ввели 500 вместо 50»). Отдать только
+// медиану значило бы починить арифметику и оставить неверную строку в базе навсегда. Увидеть её
+// должен человек, поэтому настил называет себя (прогон, карточка, имя), а не только id.
+export type MaterialCoefficientLayDrift = {
+  layId: number | undefined;
+  layKey: string | undefined;
+  layName: string | undefined;
+  runId: number | undefined;
+  techCardId: number | undefined;
+  techCardName: string | undefined;
+  // ПЛАН настила, пересчитанный в единицу ФАКТА, — чтобы два числа встали рядом без второго
+  // перевода на клиенте. Пусто, когда плана нет либо он несводим с единицей факта.
+  plannedQty: googletype_Decimal | undefined;
+  actualQty: googletype_Decimal | undefined;
+  actualUom: MaterialUnit | undefined;
+  // ДРЕЙФ В ПРОЦЕНТАХ (+6.00 = «ушло на 6% больше плана»), как и actual_drift_percent на настиле:
+  // единица названа В ИМЕНИ ПОЛЯ, и это единственное место, где она названа. ПУСТО ровно у тех
+  // настилов, что в медиану не вошли, — и тогда причина названа в skipped.
+  driftPercent: googletype_Decimal | undefined;
+  // Причина невхождения. НЕПУСТА РОВНО У НЕВОШЕДШИХ: строка без числа и без объяснения неотличима
+  // от бага.
+  skipped: string | undefined;
+  actualAt: wellKnownTimestamp | undefined;
 };
 
 // SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style
