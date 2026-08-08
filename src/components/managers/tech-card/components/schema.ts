@@ -30,7 +30,7 @@ import {
   common_StyleNumberSource,
 } from 'api/proto-http/admin';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
-import { decimalToInput, inputToDecimal } from 'utils/decimal';
+import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decimal';
 import { validateSeamAllowanceStandard } from 'utils/seam-allowance';
 import { ulid } from 'utils/ulid';
 import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind';
@@ -440,14 +440,39 @@ const DEFAULT_LABEL_TYPE: common_TechCardLabelType = 'TECH_CARD_LABEL_TYPE_MAIN'
 // put it there deliberately — a field in a section's digest projection stales every approved
 // signature of that section). And no main stitch type: the stitch class is a per-STEP fact carried
 // by operationType, and a card-wide default for it is not a thing a card can mean.
-const constructionSchema = z.object({
-  defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
-  defaultStitchesPerCm: z.string().optional().default(''),
-  overlockThreadCount: z.number().optional().default(0),
-  hemFinish: z.string().optional().default(''),
-  pressing: z.string().optional().default(''),
-  notes: z.string().optional().default(''),
-});
+// Stitches per CENTIMETRE, and the band is closed on BOTH sides — 1..20, matching
+// entity.MinStitchesPerCm/MaxStitchesPerCm and chk_construction_stitches. It is checked here because
+// the schema constraint answers with MySQL error 3819: no field, no sentence, surfaced as a bare
+// Internal. «0» is the reachable mistake — it reads as «unset» to the person typing it and means «a
+// seam with no stitches» to everything downstream — so blank is the way to leave it inherited.
+const MIN_STITCHES_PER_CM = 1;
+const MAX_STITCHES_PER_CM = 20;
+
+function refineStitchDensity(value: string | undefined, ctx: z.RefinementCtx, path: string[]) {
+  const raw = (value ?? '').trim();
+  if (!raw) return; // blank = inherit / not configured, always legal
+  const n = parseDecimalNumber(raw);
+  if (!Number.isFinite(n) || n < MIN_STITCHES_PER_CM || n > MAX_STITCHES_PER_CM) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: `stitches per cm runs ${MIN_STITCHES_PER_CM}–${MAX_STITCHES_PER_CM} (3–5 is ordinary sewing) — leave it blank to inherit rather than entering 0`,
+    });
+  }
+}
+
+const constructionSchema = z
+  .object({
+    defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
+    defaultStitchesPerCm: z.string().optional().default(''),
+    overlockThreadCount: z.number().optional().default(0),
+    hemFinish: z.string().optional().default(''),
+    pressing: z.string().optional().default(''),
+    notes: z.string().optional().default(''),
+  })
+  .superRefine((c, ctx) =>
+    refineStitchDensity(c.defaultStitchesPerCm, ctx, ['defaultStitchesPerCm']),
+  );
 
 const operationSchema = z.object({
   // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
@@ -532,6 +557,10 @@ const operationSchema = z.object({
         message: 'pick the attachment first — a size on its own describes no tool',
       });
     }
+    // The step's override answers the same question as the card default it overrides, so it takes
+    // the same band. The step's own column predates the break and its CHECK is only `>= 0`, which
+    // would have let a step hold a density the card is not allowed to default to.
+    refineStitchDensity(o.stitchesPerCm, ctx, ['stitchesPerCm']);
   });
 
 const labelSchema = z.object({

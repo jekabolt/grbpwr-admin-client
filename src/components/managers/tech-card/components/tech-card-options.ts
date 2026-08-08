@@ -4,72 +4,32 @@
 // Units of measure for a BOM article / usage (ComboField → bom_item.unit).
 export const unitOptions = ['м', 'см', 'г', 'кг', 'pcs', 'компл', 'м²', 'пог.м', 'рулон'];
 
-// Garment parts. Shared by colourway usages (usage.placement) and operations
-// (operation.placement) so the construction tab can resolve an operation's real material
-// through the selected colourway's usage on the same part. Matched trim+lower server-side.
-export const placementOptions = [
-  'outer',
-  'front',
-  'back',
-  'side panel',
-  'yoke',
-  'sleeve',
-  'cuff',
-  'collar',
-  'inner collar',
-  'collar stand',
-  'lapel',
-  'placket',
-  'pocket',
-  'pocket bag',
-  'waistband',
-  'belt',
-  'hood',
-  'lining',
-  'facing',
-  'gusset',
-  'vent',
-  'hem',
-  'binding',
-  'trim',
-];
-
-// Construction (workmanship) suggestion lists — guided ComboFields on TechCardConstruction.
-export const mainStitchTypeOptions = [
-  'челночный (301)',
-  '2-ниточный цепной (401)',
-  'плоский (605)',
-  'оверлочный (514)',
-  'потайной',
-];
-
-export const overlockThreadsOptions = ['3-нит.', '4-нит.', '5-нит.'];
-
+// FOUR LISTS USED TO LIVE HERE AND ARE GONE with the columns they described (0289):
+// `placementOptions` (operation.placement — the garment zone absorbed it), `mainStitchTypeOptions`
+// (the stitch type is the step's own operation_type), `machineClassOptions` (it repeated the
+// operation type), and `overlockThreadsOptions`. The last one was the dangerous one to leave lying
+// around: it held '3-нит.' / '4-нит.' / '5-нит.' for a field that is now the NUMERIC
+// `overlock_thread_count`, and the whole reason that column got a new name instead of a new type was
+// so nobody could reconnect the old strings to it by reflex.
+//
+// The two below survive because hem finish and pressing are still free text on the card's defaults.
+// They are ENGLISH now: the operations they sit beside moved to English with ISO codes, they print on
+// the same tech pack, and half a tab in each language is worse than either language. Stored values
+// are NOT rewritten — these are suggestions, and somebody's typed instruction is theirs to keep.
 export const hemFinishOptions = [
-  'в подгибку с закрытым срезом',
-  'в подгибку с открытым срезом (оверлок)',
-  'окантовка',
-  'потайная подшивка',
-  'распошивальный',
+  'turned twice, closed edge',
+  'turned once, overlocked edge',
+  'bound',
+  'blindstitched',
+  'coverstitched',
 ];
 
 export const pressingOptions = [
-  'разутюжить',
-  'заутюжить',
-  'отпарить',
-  'дублировать (клеевой)',
-  'ВТО готового изделия',
-];
-
-export const machineClassOptions = [
-  'стачивающая (301)',
-  '2-игольная (401)',
-  'оверлок 4-нит. (514)',
-  'плоскошовная (602)',
-  'распошивальная (605)',
-  'петельная',
-  'пуговичная',
-  'закрепочная (304)',
+  'press open',
+  'press to one side',
+  'steam only',
+  'fuse (interlining)',
+  'final press, finished garment',
 ];
 
 // Packaging suggestion lists.
