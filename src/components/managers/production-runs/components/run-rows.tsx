@@ -52,9 +52,14 @@ export function QtyBar({
   defect: number;
   hasReceived: boolean;
 }) {
-  const pct = (n: number) => (planned > 0 ? Math.min(100, (n / planned) * 100) : 0);
-  const good = pct(received);
-  const bad = Math.min(100 - good, pct(defect));
+  // Scaled to whatever is LARGER, the plan or what actually came off the line. Scaling to the plan
+  // alone clipped the defect segment to nothing on a run that met its plan and produced scrap on
+  // top of it (plan 100, good 100, defect 10 drew no red at all) — the one case where the red is
+  // the whole point. When the line overran the plan, a 1px ink tick marks where the plan sat.
+  const scale = Math.max(planned, received + defect, 1);
+  const good = Math.min(100, (received / scale) * 100);
+  const bad = Math.min(100 - good, (defect / scale) * 100);
+  const planMark = planned > 0 && received + defect > planned ? (planned / scale) * 100 : null;
   return (
     <span className='flex items-center gap-2'>
       <span className='relative block h-3 w-[86px] shrink-0 bg-trackBg' aria-hidden>
@@ -63,6 +68,12 @@ export function QtyBar({
           <span
             className='absolute top-0 h-3 bg-error'
             style={{ left: `${good}%`, width: `${bad}%` }}
+          />
+        )}
+        {planMark != null && (
+          <span
+            className='absolute top-0 h-3 border-l border-textColor'
+            style={{ left: `${planMark}%` }}
           />
         )}
       </span>
@@ -108,7 +119,9 @@ export function RunTable({
           <th>план → принято</th>
           <th>обещано</th>
           {canReadCosting && <th>unit план / факт</th>}
-          <th />
+          <th>
+            <span className='sr-only'>действие</span>
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -116,9 +129,18 @@ export function RunTable({
           const ins = r.run;
           const q = runQty(r);
           const late = overdueDays(ins?.promisedAt, ins?.status);
+          const planCur = r.plannedCurrency || '';
+          const factCur = r.actuals?.baseCurrency || '';
+          // The server emits planned_total_base ONLY when the frozen plan is already in the base
+          // currency, and has_base false means some article could not be folded. Either way plan and
+          // fact are two different monies, and a Δ between them would be arithmetic on mixed
+          // currencies — the exact figure this table must not invent. Same rule the tech card's
+          // roll-up uses to decide what it may average.
+          const comparable = !!r.actuals?.plannedTotalBase?.value && r.actuals?.hasBase === true;
           const variance = r.actuals?.unitCostVariance?.value;
           const varianceNum = Number(variance);
-          const hasVariance = !!variance && Number.isFinite(varianceNum) && varianceNum !== 0;
+          const hasVariance =
+            comparable && !!variance && Number.isFinite(varianceNum) && varianceNum !== 0;
           return (
             <tr key={r.id}>
               <td>
@@ -148,11 +170,16 @@ export function RunTable({
               <td className='tabular-nums'>{runDate(ins?.promisedAt) || '—'}</td>
               {canReadCosting && (
                 <td>
+                  {/* Each figure carries its OWN currency: a run's frozen plan may be quoted in the
+                      factory's money and its actual folded into the company base, and «10 / 12» with
+                      no units is a lie whenever those differ. */}
                   <span className='flex flex-col items-end'>
                     <span>
-                      {decimalToInput(r.plannedUnitCost) || '—'}
-                      {' / '}
-                      {decimalToInput(r.actuals?.actualUnitCost) || '—'}
+                      план {decimalToInput(r.plannedUnitCost) || '—'} {planCur}
+                    </span>
+                    <span>
+                      факт {decimalToInput(r.actuals?.actualUnitCost) || '—'}{' '}
+                      {r.actuals?.actualUnitCost?.value ? factCur : ''}
                     </span>
                     {hasVariance && (
                       // Over the frozen plan is money lost; under it is money saved.

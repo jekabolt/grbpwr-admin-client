@@ -337,9 +337,10 @@ export function StepGlyph({
         'inline-flex size-3.5 shrink-0 items-center justify-center border leading-none',
         inverted
           ? // A broken phase keeps its red even here — a filled red square on black still reads as
-            // "this one is wrong", and the summary beside it says so in words.
+            // "this one is wrong", and the summary beside it says so in words. INK on red, not
+            // white: white on #ff0000 is ~4.0:1, under AA for a 9px glyph; black on red is ~5.3:1.
             state === 'problem'
-            ? 'border-error bg-error text-bgColor'
+            ? 'border-error bg-error text-textColor'
             : current
               ? 'border-bgColor bg-bgColor text-textColor'
               : 'border-bgColor text-bgColor'
@@ -475,7 +476,13 @@ export function RunConveyor({
                 onClick={() => onSelect(s.id)}
                 aria-expanded={open}
                 aria-controls={panelId?.(s.id)}
-                className='block w-full px-2.5 py-2 text-left'
+                className={cn(
+                  'block w-full px-2.5 py-2 text-left',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2',
+                  // A black ring is invisible on the ink-filled open cell; DESIGN.md requires the
+                  // outline on every control without exception, so it inverts with the cell.
+                  open ? 'focus-visible:outline-bgColor' : 'focus-visible:outline-textColor',
+                )}
               >
                 {body}
               </button>

@@ -11,7 +11,6 @@ import { useSnackBarStore } from 'lib/stores/store';
 import { useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
-import { Accordion } from 'ui/components/accordion';
 import { WaterfallRow } from 'ui/components/bar-row';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -129,14 +128,7 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
 //
 // 🔒 costing: the tab is hidden without costing:read; the fieldsets below are disabled without
 // costing:write. The waterfall is still drawn read-only in that case.
-export function CostingField({
-  techCard,
-  onOpenTab,
-}: {
-  techCard?: common_TechCard;
-  /** Jump to another tab of the same card — the materials row's lever into the BOM. */
-  onOpenTab?: (tab: string) => void;
-}) {
+export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { canWriteCosting } = usePermissions();
   const { dictionary } = useDictionary();
@@ -259,7 +251,14 @@ export function CostingField({
 
   // The target now comes from the contract: this style's own, else the house default, resolved
   // server-side into effective_target_margin_pct. No client constant.
-  const targetPct = num(decimalToInput(rollup?.effectiveTargetMarginPct));
+  //
+  // A TYPED target wins over the saved one while it is on screen. The verdict below states «цель
+  // выполнена / не выполнена» as a headline, and judging it against a target the operator has just
+  // replaced (60% margin, target moved 50 → 70) would keep congratulating them until they saved.
+  // Out-of-range input is ignored rather than obeyed: a margin target is a percentage.
+  const typedTarget = num(costing.targetMarginPct);
+  const serverTargetPct = num(decimalToInput(rollup?.effectiveTargetMarginPct));
+  const targetPct = typedTarget > 0 && typedTarget < 100 ? typedTarget : serverTargetPct;
   const hasTarget = targetPct > 0;
   const onTarget = marginPct != null && hasTarget && marginPct >= targetPct;
 
@@ -421,35 +420,44 @@ export function CostingField({
   const targetUnitCost =
     marginBase != null && hasTarget ? marginBase * (1 - targetPct / 100) : undefined;
   const gap = targetUnitCost != null ? unitCost - targetUnitCost : undefined;
+  // A cost the server itself calls incomplete (an uncostable BOM line, a currency with no rate) is
+  // understated by an unknown amount, so a margin computed from it cannot certify anything. The
+  // banner above says what to fix; the verdict must not contradict it with a green «цель выполнена».
+  const costIncomplete = !!rollup?.hasUnpriced || !!rollup?.hasUnconvertedCurrencies;
   const verdict: { text: string; tone: 'ink' | 'label' | 'error' | 'success' } = !hasCosting
     ? {
         text: 'себестоимость ещё не посчитана — заполните BOM или статьи ниже',
         tone: 'label',
       }
-    : marginPct == null
+    : costIncomplete
       ? {
-          text: `unit cost ${money(unitCost)} · маржа не считается: ${
-            retailReason ||
-            (netted ? 'нет розничной цены' : `нет ставки VAT для ${vatCountry || 'страны'}`)
-          }`,
-          tone: 'label',
+          text: `unit cost ${money(unitCost)} занижен — в расчёте есть строки без цены или без курса; маржу по нему считать нельзя`,
+          tone: 'error',
         }
-      : !hasTarget
+      : marginPct == null
         ? {
-            text: `маржа ${marginPct.toFixed(1)}% · ${money(grossMargin ?? 0)} с изделия`,
-            tone: 'ink',
+            text: `unit cost ${money(unitCost)} · маржа не считается: ${
+              retailReason ||
+              (netted ? 'нет розничной цены' : `нет ставки VAT для ${vatCountry || 'страны'}`)
+            }`,
+            tone: 'label',
           }
-        : onTarget
+        : !hasTarget
           ? {
-              text: `маржа ${marginPct.toFixed(1)}% при цели ${targetPct.toFixed(0)}% — цель выполнена`,
-              tone: 'success',
+              text: `маржа ${marginPct.toFixed(1)}% · ${money(grossMargin ?? 0)} с изделия`,
+              tone: 'ink',
             }
-          : {
-              text: `маржа ${marginPct.toFixed(1)}% при цели ${targetPct.toFixed(0)}% — не хватает ${money(
-                gap ?? 0,
-              )} на изделие`,
-              tone: 'error',
-            };
+          : onTarget
+            ? {
+                text: `маржа ${marginPct.toFixed(1)}% при цели ${targetPct.toFixed(0)}% — цель выполнена`,
+                tone: 'success',
+              }
+            : {
+                text: `маржа ${marginPct.toFixed(1)}% при цели ${targetPct.toFixed(0)}% — не хватает ${money(
+                  gap ?? 0,
+                )} на изделие`,
+                tone: 'error',
+              };
 
   // The cost components, in a FIXED order — materials, work, the rest, then the rate that grosses
   // them. Ranking them by size would re-sort the list under the cursor of whoever is typing into
@@ -466,32 +474,42 @@ export function CostingField({
       name: 'материалы (BOM)',
       amount: materials,
       help: 'Считает сервер из BOM × рецептов колорвеев, ПРИ СОХРАНЕНИИ карты: правки BOM, рецепта колорвея или цены материала не попадают в эту цифру, пока карта не сохранена и перечитана. Руками здесь не задаётся.',
-      lever: onOpenTab ? (
-        <Button type='button' size='xs' variant='secondary' onClick={() => onOpenTab('bom')}>
-          bom
+      // A Link, not a button: the tab lives in the URL (?tab=), and an anchor survives both the
+      // frozen fieldset a RELEASED card is wrapped in and a costing:read-only account.
+      lever: (
+        <Button asChild size='xs' variant='secondary'>
+          <Link to='?tab=bom'>bom</Link>
         </Button>
-      ) : undefined,
+      ),
     },
     {
       key: 'cmt',
       name: 'CMT (работа)',
       amount: cmt,
       help: 'Квота фабрики за изделие — единственная money-цифра, которую человек приносит извне. Ставка за минуту ниже выводится из неё и общего SAM конструктива, нигде не хранится.',
-      lever: <DecimalField name='costing.cmtCost' label='CMT cost / изделие' srLabel />,
+      lever: <Lever canWrite={canWriteCosting} name='costing.cmtCost' label='CMT cost / изделие' />,
     },
     {
       key: 'logistics',
       name: 'логистика',
       amount: logistics,
       help: 'За 1 изделие, в валюте костинга. Вводится вручную: вывести её системе не из чего.',
-      lever: <DecimalField name='costing.logisticsCost' label='logistics / изделие' srLabel />,
+      lever: (
+        <Lever
+          canWrite={canWriteCosting}
+          name='costing.logisticsCost'
+          label='logistics / изделие'
+        />
+      ),
     },
     {
       key: 'overhead',
       name: 'overhead',
       amount: overhead,
       help: 'За 1 изделие, в валюте костинга. Ценообразование (наценка, опт, розница) живёт на опубликованном продукте, не здесь.',
-      lever: <DecimalField name='costing.overheadCost' label='overhead / изделие' srLabel />,
+      lever: (
+        <Lever canWrite={canWriteCosting} name='costing.overheadCost' label='overhead / изделие' />
+      ),
     },
     {
       key: 'defect',
@@ -501,7 +519,9 @@ export function CostingField({
         avgWastage != null
           ? `Только брак ГОТОВЫХ изделий. Кроёные потери уже в материалах: средний cutting wastage по BOM-строкам ${avgWastage.toFixed(1)}% (${bomWastages.length} строк с wastage).`
           : 'Только брак ГОТОВЫХ изделий. Потери кроя задаются per-строчно в BOM (wastage %) и уже заложены в материалы.',
-      lever: <DecimalField name='costing.defectPercent' label='reject rate %' srLabel />,
+      lever: (
+        <Lever canWrite={canWriteCosting} name='costing.defectPercent' label='reject rate %' />
+      ),
     },
   ];
   const biggest = components.reduce((a, b) => (b.amount > a.amount ? b : a), components[0]);
@@ -638,6 +658,7 @@ export function CostingField({
               <span className='flex flex-wrap gap-x-1.5'>
                 <span>{breakEven.sub}</span>
                 <span>{`· R&D ${devTotal.toFixed(2)}`}</span>
+                {samplesCount > 0 && <span>{`· ${samplesCount} образцов`}</span>}
               </span>
             ) : (
               breakEven.sub
@@ -645,6 +666,33 @@ export function CostingField({
           }
         />
       </StatGrid>
+
+      {/* Phase 2 migration debt for THIS card: hardware/packaging money the scalar→BOM migration
+          refused to move mechanically. Renders only when rows exist — a cleanly migrated card
+          (the overwhelmingly common case) never sees this. */}
+      {migrationExceptions.length > 0 && (
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            <b>Деньги ждут ручного переноса в BOM.</b> Миграция «hardware/packaging → BOM» не смогла
+            перенести эти суммы автоматически:
+          </Text>
+          {migrationExceptions.map((e, i) => (
+            <Text size='micro' key={i}>
+              {`· ${e.article}: ${e.amount?.value ?? '—'} ${e.currency || ''} — ${
+                e.kind === 'not_draft'
+                  ? 'карта была released (перенесите при пере-релизе)'
+                  : e.kind === 'zero_colorways'
+                    ? 'нет колорвеев, некуда повесить usage'
+                    : 'в секции уже была строка с ценой (double-count; BOM победил)'
+              }`}
+            </Text>
+          ))}
+          <Text size='micro' variant='label'>
+            Перенос: строка BOM с этой суммой + usage на каждый колорвей. Отчёт исторический
+            (зафиксирован миграцией) и не самоочищается.
+          </Text>
+        </CalloutBox>
+      )}
 
       {/* ═══ ИЗ ЧЕГО СЛОЖИЛОСЬ — the components as bars, each with its own lever on the same line.
           Materials are never typed (they come from the BOM); everything else is. */}
@@ -657,7 +705,7 @@ export function CostingField({
           появятся, как только появится первое число.
         </Text>
       ) : (
-        <fieldset disabled={!canWriteCosting} className='m-0 border-0 p-0'>
+        <div>
           {components.map((c) => (
             <CostBar
               key={c.key}
@@ -665,12 +713,38 @@ export function CostingField({
               amount={c.amount}
               share={unitCost > 0 ? (c.amount / unitCost) * 100 : 0}
               pct={biggest.amount > 0 ? (c.amount / biggest.amount) * 100 : 0}
-              help={c.help}
               lever={c.lever}
             />
           ))}
-        </fieldset>
+        </div>
       )}
+      {/* The five paragraphs that used to run between the fields, kept verbatim but out of the way
+          of the numbers they qualify. A disclosure, not a tooltip: this text was VISIBLE before, and
+          hiding it behind hover would lose it for keyboard and touch entirely. */}
+      <Disclosure summary='что означают эти строки'>
+        <dl className='flex flex-col gap-1.5'>
+          {components.map((c) => (
+            <div key={c.key}>
+              <dt>
+                <Text
+                  size='micro'
+                  variant='label'
+                  tracking='label'
+                  component='span'
+                  className='uppercase'
+                >
+                  {c.name}
+                </Text>
+              </dt>
+              <dd className='m-0'>
+                <Text size='micro' variant='label'>
+                  {c.help}
+                </Text>
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </Disclosure>
       {impliedPerMinute != null && (
         <Text size='micro' variant='label'>
           {`total SAM ${totalSam.toFixed(1)} мин (конструктив) → CMT ${cmt.toFixed(2)} ${cur} ≈ ${impliedPerMinute.toFixed(2)} ${cur}/мин — производная ставка, не хранится; сверьте с обычной ставкой фабрики.`}
@@ -747,18 +821,8 @@ export function CostingField({
 
       {/* ═══ ДОКАЗАТЕЛЬСТВА — one click away, never in the way (#72 «too much data, where to
           start»). Each disclosure holds the figures AND the paragraphs that qualify them. */}
-      <Accordion
-        title={
-          <Text
-            size='micro'
-            variant='label'
-            tracking='label'
-            component='span'
-            className='uppercase'
-          >
-            куда уходит розница (водопад)
-          </Text>
-        }
+      <Disclosure
+        summary='куда уходит розница (водопад)'
         meta={retail != null ? money(retail) : undefined}
       >
         {!hasCosting ? (
@@ -811,21 +875,11 @@ export function CostingField({
               : `розница прочитана из ${cur}-цены колорвеев. Ставки VAT для ${vatCountry || 'выбранной страны'} нет, поэтому ничего не вычиталось — для экспортного направления это правильно, иначе задайте ставку в настройках VAT, иначе маржа завышена.`}
           </Text>
         )}
-      </Accordion>
+      </Disclosure>
 
-      <Accordion
-        title={
-          <Text
-            size='micro'
-            variant='label'
-            tracking='label'
-            component='span'
-            className='uppercase'
-          >
-            материалы и колорвеи
-          </Text>
-        }
-        meta={colorwayCosts.length > 0 ? `${colorwayCosts.length}` : undefined}
+      <Disclosure
+        summary='материалы и колорвеи'
+        meta={colorwayCosts.length > 0 ? `${colorwayCosts.length} колорвеев` : undefined}
       >
         <div className='flex flex-col gap-2'>
           {/* Ф4: measured fabric consumption from saved раскладки, beside what the recipes say.
@@ -929,34 +983,8 @@ export function CostingField({
             cost estimate below and on each product’s detail page. R&D is in the dev base currency
             and is deliberately NOT part of unit cost.
           </Text>
-          {/* Phase 2 migration debt for THIS card: hardware/packaging money the scalar→BOM migration
-              refused to move mechanically. Renders only when rows exist — a cleanly migrated card
-              (the overwhelmingly common case) never sees this. */}
-          {migrationExceptions.length > 0 && (
-            <CalloutBox tone='warning'>
-              <Text size='micro'>
-                <b>Деньги ждут ручного переноса в BOM.</b> Миграция «hardware/packaging → BOM» не
-                смогла перенести эти суммы автоматически:
-              </Text>
-              {migrationExceptions.map((e, i) => (
-                <Text size='micro' key={i}>
-                  {`· ${e.article}: ${e.amount?.value ?? '—'} ${e.currency || ''} — ${
-                    e.kind === 'not_draft'
-                      ? 'карта была released (перенесите при пере-релизе)'
-                      : e.kind === 'zero_colorways'
-                        ? 'нет колорвеев, некуда повесить usage'
-                        : 'в секции уже была строка с ценой (double-count; BOM победил)'
-                  }`}
-                </Text>
-              ))}
-              <Text size='micro' variant='label'>
-                Перенос: строка BOM с этой суммой + usage на каждый колорвей. Отчёт исторический
-                (зафиксирован миграцией) и не самоочищается.
-              </Text>
-            </CalloutBox>
-          )}
         </div>
-      </Accordion>
+      </Disclosure>
     </div>
   );
 }
@@ -975,7 +1003,6 @@ function CostBar({
   amount,
   share,
   pct,
-  help,
   lever,
 }: {
   name: string;
@@ -984,15 +1011,11 @@ function CostBar({
   share: number;
   /** % of the biggest component — the drawing. */
   pct: number;
-  help: string;
   lever?: React.ReactNode;
 }) {
   return (
     <div className='grid grid-cols-[minmax(110px,150px)_1fr_auto] items-center gap-2 border-b border-hairline py-1 last:border-b-0'>
-      <span className='flex min-w-0 items-center gap-1'>
-        <span className='truncate'>{name}</span>
-        <Help text={help} />
-      </span>
+      <span className='min-w-0 truncate'>{name}</span>
       <span className='block h-3 bg-trackBg'>
         <span
           className='block h-3 bg-textColor'
@@ -1012,18 +1035,60 @@ function CostBar({
   );
 }
 
-/** The paragraph that used to sit under the field, folded into the field's own line. */
-function Help({ text }: { text: string }) {
+/**
+ * A disclosure that is NOT a form control.
+ *
+ * This whole tab is wrapped in `<fieldset disabled>` on a RELEASED card (tech-card/index.tsx), and
+ * a disabled fieldset disables every button inside it — so evidence hidden behind a `<button>` is
+ * unreadable on exactly the cards people read most. `<details>`/`<summary>` is unaffected, is
+ * keyboard- and touch-operable natively, and draws no second border: a block never contains a
+ * block, so this opens like a `GroupLabel`, not like a card.
+ */
+function Disclosure({
+  summary,
+  meta,
+  children,
+}: {
+  summary: string;
+  meta?: React.ReactNode;
+  children: React.ReactNode;
+}) {
   return (
-    <span
-      title={text}
-      aria-label={text}
-      role='note'
-      className='inline-flex size-3.5 shrink-0 cursor-help items-center justify-center border border-borderColor text-labelColor'
-    >
-      <Text size='nano' component='span'>
-        ?
-      </Text>
-    </span>
+    <details className='group'>
+      <summary className='mt-3 flex cursor-pointer list-none items-baseline gap-2 border-b border-borderColor pb-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor [&::-webkit-details-marker]:hidden'>
+        <Text
+          size='micro'
+          variant='label'
+          tracking='group'
+          component='span'
+          className='font-bold uppercase'
+        >
+          {summary}
+        </Text>
+        {meta && (
+          <Text size='micro' variant='label' component='span'>
+            {meta}
+          </Text>
+        )}
+        <Text size='micro' variant='label' component='span' className='ml-auto' aria-hidden>
+          <span className='group-open:hidden'>▸</span>
+          <span className='hidden group-open:inline'>▾</span>
+        </Text>
+      </summary>
+      <div className='pt-2'>{children}</div>
+    </details>
+  );
+}
+
+/**
+ * One editable cost component. The write gate lives on the FIELD, not around the list of rows: a
+ * `<fieldset disabled>` wrapping the whole band also disables the materials row's link into the
+ * BOM, which is a read action a costing:read account is entitled to.
+ */
+function Lever({ canWrite, name, label }: { canWrite: boolean; name: string; label: string }) {
+  return (
+    <fieldset disabled={!canWrite} className='m-0 border-0 p-0'>
+      <DecimalField name={name} label={label} srLabel />
+    </fieldset>
   );
 }

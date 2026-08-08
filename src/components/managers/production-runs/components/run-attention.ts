@@ -1,5 +1,5 @@
 import { common_ProductionRun } from 'api/proto-http/admin';
-import { daysPast, isRunOpen, isRunReceivable, overdueDays, runDate } from './options';
+import { daysPast, isRunOpen, overdueDays, runDate } from './options';
 import { runQty } from './run-rows';
 
 /**
@@ -29,10 +29,19 @@ export type RunAttention = {
   weight: number;
 };
 
-/** An open run that has not moved in this many days is worth a look. */
-const STALE_DAYS = 21;
+/**
+ * Fallback when the alert settings have not been read yet — the SAME 14 the attention badge falls
+ * back to. This threshold must not be invented locally: it is configurable
+ * (`AlertSettings.production_run_stale_days`) and feeds the `?stale=<days>` deep link, so a
+ * hard-coded number here would list a run as stale that the link's own query excludes, or the other
+ * way round.
+ */
+export const DEFAULT_STALE_DAYS = 14;
 
-export function runAttention(runs: common_ProductionRun[]): RunAttention[] {
+export function runAttention(
+  runs: common_ProductionRun[],
+  staleAfterDays: number = DEFAULT_STALE_DAYS,
+): RunAttention[] {
   const out: RunAttention[] = [];
 
   for (const r of runs) {
@@ -77,13 +86,15 @@ export function runAttention(runs: common_ProductionRun[]): RunAttention[] {
         run: r,
         reason: `серия открыта — принято ${q.received} из ${q.planned}, ждёт следующей поставки`,
         tone: 'attention',
-        action: isRunReceivable(ins?.status) ? 'receive' : 'open',
+        // PARTIALLY_RECEIVED is receivable by definition (isRunReceivable lists it), so this arm
+        // never needs a fallback.
+        action: 'receive',
         weight: 500,
       });
       continue;
     }
 
-    if (!q.hasReceived && idle >= STALE_DAYS) {
+    if (!q.hasReceived && idle >= staleAfterDays) {
       out.push({
         run: r,
         reason: `${idle} дн без движения — ничего не принято`,

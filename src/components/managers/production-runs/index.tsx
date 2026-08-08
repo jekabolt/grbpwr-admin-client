@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query';
+import { adminService } from 'api/api';
 import { common_ProductionRun } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
@@ -10,16 +12,16 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { Toolbar } from 'ui/components/toolbar';
 import { CreateRunModal } from './components/create-run-modal';
-import { isRunOpen, isRunReceivable, overdueDays, runDetailPath } from './components/options';
+import { isRunOpen, isRunReceivable, runDetailPath } from './components/options';
 import { ReceiveModal } from './components/receive-modal';
-import { runAttention } from './components/run-attention';
+import { DEFAULT_STALE_DAYS, runAttention } from './components/run-attention';
 import { RunTable, runQty } from './components/run-rows';
 import { useProductionRuns } from './components/useProductionRuns';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 
 const statusFilterOptions = [
-  { value: '', label: 'все' },
+  { value: '', label: 'all' },
   { value: 'PRODUCTION_RUN_STATUS_PLANNED', label: 'planned' },
   { value: 'PRODUCTION_RUN_STATUS_IN_PROGRESS', label: 'in progress' },
   { value: 'PRODUCTION_RUN_STATUS_RECEIVED', label: 'received' },
@@ -93,16 +95,28 @@ export function ProductionRuns() {
   );
   const runs = useMemo(() => data?.runs ?? [], [data?.runs]);
   const filtered = !!status || !!techCardId || staleDays > 0 || overdueOnly;
+  // The list holds ONE page (limit 200). Say so when it is full rather than presenting a page as
+  // the whole shop — every figure below is computed over what was actually loaded.
+  const pageFull = runs.length >= 200;
+
+  // «Без движения» is a CONFIGURED threshold (AlertSettings.production_run_stale_days), not a local
+  // constant: the tech-cards attention badge counts stale runs with it and the ?stale=<days> link
+  // filters by it server-side. Same query key as that badge, so React Query serves both from one
+  // request instead of asking twice.
+  const alertSettings = useQuery({
+    queryKey: ['attention', 'alertSettings'],
+    queryFn: () => adminService.GetAlertSettings({}),
+  });
+  const staleAfterDays = alertSettings.data?.settings?.productionRunStaleDays || DEFAULT_STALE_DAYS;
 
   // Everything below is computed over the LOADED page, and says so when a filter is on: the client
   // holds one page, so a total presented as store-wide would be a claim it cannot make.
-  const attention = useMemo(() => runAttention(runs), [runs]);
+  const attention = useMemo(() => runAttention(runs, staleAfterDays), [runs, staleAfterDays]);
   const totals = useMemo(() => {
     let open = 0;
     let planned = 0;
     let received = 0;
     let defect = 0;
-    let late = 0;
     for (const r of runs) {
       if (!isRunOpen(r.run?.status)) continue;
       const q = runQty(r);
@@ -110,10 +124,9 @@ export function ProductionRuns() {
       planned += q.planned;
       received += q.received;
       defect += q.defect;
-      if (overdueDays(r.run?.promisedAt, r.run?.status) > 0) late += 1;
     }
     const produced = received + defect;
-    return { open, planned, received, defect, late, produced };
+    return { open, planned, received, defect, produced };
   }, [runs]);
 
   // Open batches are the work; everything terminal is a record and starts collapsed.
@@ -159,7 +172,11 @@ export function ProductionRuns() {
         <Section
           title='требует действия'
           question={
-            filtered ? '— среди партий текущего фильтра' : '— партии, которые не поедут дальше сами'
+            filtered
+              ? '— среди партий текущего фильтра'
+              : pageFull
+                ? '— партии, которые не поедут дальше сами (из первых 200)'
+                : '— партии, которые не поедут дальше сами'
           }
         >
           <div className='flex flex-col'>
@@ -267,7 +284,7 @@ export function ProductionRuns() {
           aria-pressed={overdueOnly}
           onClick={() => patchFilters({ overdue: overdueOnly ? '' : '1' })}
         >
-          опаздывает {overdueOnly ? '✕' : totals.late > 0 ? totals.late : ''}
+          опаздывает {overdueOnly ? '✕' : ''}
         </button>
         {staleDays > 0 ? (
           <button
@@ -293,6 +310,7 @@ export function ProductionRuns() {
         <>
           {openRuns.length > 0 && (
             <Section
+              key='open'
               title={`в работе (${openRuns.length})`}
               question='— партии, которые ещё что-то должны'
             >
@@ -306,8 +324,9 @@ export function ProductionRuns() {
           )}
           {doneRuns.length > 0 && (
             <Section
+              key='done'
               title={`завершённые и отменённые (${doneRuns.length})`}
-              question='— записи; редактировать в них уже нечего'
+              question='— записи; из правок остаётся только реверс квитанции'
               collapsible
               defaultOpen={openRuns.length === 0}
             >

@@ -754,6 +754,15 @@ export function ProductionRunDetail() {
             ) : null}
           </Text>
           <Text size='small'>{runTypeLabel}</Text>
+          {/* The batch's own note. It used to be readable only on the list card that this rework
+              replaced with a table row — and on a received/closed run even the edit modal is
+              withheld (the server refuses the update), so without this line the text an operator
+              typed would be permanently unreachable. */}
+          {ins?.notes ? (
+            <Text variant='label' size='small'>
+              {ins.notes}
+            </Text>
+          ) : null}
         </div>
         {canEdit && (
           <div className='flex items-center gap-2'>
@@ -806,7 +815,13 @@ export function ProductionRunDetail() {
           ))}
         </div>
 
-        <aside className='flex flex-col gap-6 lg:sticky lg:top-4 lg:self-start'>
+        {/* top-16, matching the tech card's section rail: the app nav is FIXED at the top of the
+            viewport, so a sticky column offset any less than that slides underneath it. The max
+            height keeps a long ledger + guidance note scrollable inside its own column. */}
+        {/* order-first below `lg`: stacked, the totals and the "what to do next" sentence must
+            stay under the band and above the panel, exactly where they were before this column
+            existed — otherwise a blocked receive is explained below a screen-high lines grid. */}
+        <aside className='order-first flex flex-col gap-6 self-start lg:order-none lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'>
           <Section title='партия целиком' question='— не одна фаза, а весь батч'>
             <Row label='план' value={String(plannedQtyTotal)} />
             {/* received = GOOD units — the count that is posted to stock. Defective units are a

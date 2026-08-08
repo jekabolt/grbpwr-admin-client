@@ -11,6 +11,7 @@ import { ROUTES, SECTION } from 'constants/routes';
 import { Controller, useFormContext } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
@@ -83,6 +84,12 @@ export function ProductionTab({
     .sort((a, b) => a.past - b.past);
   const lastPromise = openPromises[0];
   const slack = lastPromise != null && dropIn != null ? lastPromise.past - dropIn : undefined;
+  const openRunCount = runs.filter((r) => isRunOpen(r.run?.status)).length;
+  // A promise the factory has ALREADY missed cannot cover a future drop, however much calendar
+  // sits between the two dates. Without this, a batch promised ten days ago and never delivered
+  // reported «+30 дн запаса» in green while the goods do not exist.
+  const promiseMissed = lastPromise != null && lastPromise.past > 0;
+  const dropPassedWithOpenRuns = dropIn != null && dropIn > 0 && openRunCount > 0;
 
   return (
     <SectionStack>
@@ -112,52 +119,52 @@ export function ProductionTab({
               )}
             />
           </label>
-          <StatGrid className='min-w-[320px] flex-1' min={120}>
-            <Stat
-              label='до дропа'
+          {/* Rows, not a second StatGrid: a StatGrid is its own surface and must not be nested in a
+              block (DESIGN.md), and three dates comparing to each other read as a ledger anyway. */}
+          <div className='min-w-[280px] flex-1'>
+            <Row
+              label='дроп'
               // A past drop date on a shipped style is history, not an alarm — «просрочен» forever
               // on every old card would train people to ignore the one place it matters (open
               // batches).
+              tone={dropPassedWithOpenRuns ? 'error' : undefined}
               value={
-                !dropDate
+                !dropDate || dropIn == null
                   ? '—'
-                  : dropIn == null
-                    ? '—'
-                    : dropIn > 0
-                      ? `${dropIn} дн назад`
-                      : dropIn === 0
-                        ? 'сегодня'
-                        : `${-dropIn} дн`
-              }
-              sub={
-                dropIn != null && dropIn > 0 && runs.some((r) => isRunOpen(r.run?.status))
-                  ? 'партии ещё открыты'
-                  : undefined
-              }
-              tone={
-                dropIn != null && dropIn > 0 && runs.some((r) => isRunOpen(r.run?.status))
-                  ? 'down'
-                  : undefined
+                  : dropIn > 0
+                    ? `прошёл ${dropIn} дн назад${dropPassedWithOpenRuns ? ' · партии ещё открыты' : ''}`
+                    : dropIn === 0
+                      ? 'сегодня'
+                      : `через ${-dropIn} дн`
               }
             />
-            <Stat
+            <Row
               label='последняя обещанная'
-              value={lastPromise ? runDate(lastPromise.promisedAt) || '—' : '—'}
-              sub={lastPromise ? `PR-${lastPromise.id}` : 'открытых партий нет'}
-            />
-            <Stat
-              label='запас'
-              value={slack == null ? '—' : `${slack > 0 ? '+' : ''}${slack} дн`}
-              sub={
-                slack == null
-                  ? 'нужны дата дропа и открытая партия'
-                  : slack < 0
-                    ? 'партия обещана позже дропа'
-                    : 'партии укладываются в дату'
+              value={
+                lastPromise
+                  ? `${runDate(lastPromise.promisedAt)} · PR-${lastPromise.id}`
+                  : openRunCount > 0
+                    ? 'открытые партии без обещанной даты'
+                    : 'открытых партий нет'
               }
-              tone={slack == null ? undefined : slack < 0 ? 'down' : 'up'}
             />
-          </StatGrid>
+            <Row
+              label='запас до дропа'
+              tone={slack != null && (slack < 0 || promiseMissed) ? 'error' : undefined}
+              value={
+                slack == null ? (
+                  <span className='text-labelColor'>нужны дата дропа и открытая партия</span>
+                ) : promiseMissed ? (
+                  // The arithmetic is still shown — it is just not a reassurance any more.
+                  `${slack > 0 ? '+' : ''}${slack} дн · обещание уже просрочено`
+                ) : slack < 0 ? (
+                  `${slack} дн · партия обещана позже дропа`
+                ) : (
+                  <span className='text-success'>{`+${slack} дн · партии укладываются в дату`}</span>
+                )
+              }
+            />
+          </div>
         </div>
         {frozen ? (
           <Text variant='label' size='micro'>
@@ -170,6 +177,67 @@ export function ProductionTab({
           </Text>
         ) : null}
       </Section>
+
+      {/* Four cells, not seven, and a block of its own: a StatGrid is already a surface, so it sits
+          ON the ground beside the batch list rather than inside it. «партий» is in the block title
+          below, «опаздывает» is a red badge on the row of the batch that is actually late — a zero
+          counter earns no cell. Money only for a costing role, and only when plan and fact are
+          comparable (see the note on summarise). */}
+      <StatGrid>
+        <Stat
+          label='план, шт'
+          value={summary.plannedQty > 0 ? String(summary.plannedQty) : '—'}
+          sub={summary.cancelled > 0 ? `без ${summary.cancelled} отменённых` : undefined}
+        />
+        <Stat
+          label='принято годных'
+          value={summary.anyReceived ? String(summary.receivedQty) : '—'}
+          sub={
+            summary.anyReceived && summary.plannedQty > 0
+              ? `${Math.round((summary.receivedQty / summary.plannedQty) * 100)}% плана`
+              : undefined
+          }
+        />
+        {canReadCosting ? (
+          <Stat
+            label='unit план → факт'
+            value={
+              summary.planUnit != null
+                ? `${summary.planUnit.toFixed(2)}${
+                    summary.factUnit != null ? ` → ${summary.factUnit.toFixed(2)}` : ''
+                  }`
+                : '—'
+            }
+            sub={
+              summary.planUnit != null && summary.factUnit != null
+                ? `Δ ${(summary.factUnit - summary.planUnit).toFixed(2)} ${summary.baseCurrency}`
+                : summary.comparableRuns > 0
+                  ? summary.baseCurrency
+                  : 'нет сопоставимых партий'
+            }
+            // Over the frozen plan is money lost; under it is money saved.
+            tone={
+              summary.planUnit != null && summary.factUnit != null
+                ? summary.factUnit > summary.planUnit
+                  ? 'down'
+                  : 'up'
+                : undefined
+            }
+          />
+        ) : null}
+        <Stat
+          label='брак план / факт'
+          value={`${defectPlan ? Number(defectPlan).toFixed(1) : '—'} / ${
+            summary.defectPct != null ? summary.defectPct.toFixed(1) : '—'
+          }`}
+          sub='%'
+          tone={
+            defectPlan && summary.defectPct != null && summary.defectPct > Number(defectPlan)
+              ? 'down'
+              : undefined
+          }
+        />
+      </StatGrid>
 
       <Section
         title={`партии стиля (${runs.length})`}
@@ -187,65 +255,6 @@ export function ProductionTab({
           ) : undefined
         }
       >
-        {/* Four cells, not seven. «партий» is in the block title, «опаздывает» is a red badge on the
-            row of the batch that is actually late — a zero counter earns no cell. Money only for a
-            costing role, and only when plan and fact are comparable (see comparableUnitCosts). */}
-        <StatGrid>
-          <Stat
-            label='план, шт'
-            value={summary.plannedQty > 0 ? String(summary.plannedQty) : '—'}
-            sub={summary.cancelled > 0 ? `без ${summary.cancelled} отменённых` : undefined}
-          />
-          <Stat
-            label='принято годных'
-            value={summary.anyReceived ? String(summary.receivedQty) : '—'}
-            sub={
-              summary.anyReceived && summary.plannedQty > 0
-                ? `${Math.round((summary.receivedQty / summary.plannedQty) * 100)}% плана`
-                : undefined
-            }
-          />
-          {canReadCosting ? (
-            <Stat
-              label='unit план → факт'
-              value={
-                summary.planUnit != null
-                  ? `${summary.planUnit.toFixed(2)}${
-                      summary.factUnit != null ? ` → ${summary.factUnit.toFixed(2)}` : ''
-                    }`
-                  : '—'
-              }
-              sub={
-                summary.planUnit != null && summary.factUnit != null
-                  ? `Δ ${(summary.factUnit - summary.planUnit).toFixed(2)} ${summary.baseCurrency}`
-                  : summary.comparableRuns > 0
-                    ? summary.baseCurrency
-                    : 'нет сопоставимых партий'
-              }
-              // Over the frozen plan is money lost; under it is money saved.
-              tone={
-                summary.planUnit != null && summary.factUnit != null
-                  ? summary.factUnit > summary.planUnit
-                    ? 'down'
-                    : 'up'
-                  : undefined
-              }
-            />
-          ) : null}
-          <Stat
-            label='брак план / факт'
-            value={`${defectPlan ? Number(defectPlan).toFixed(1) : '—'} / ${
-              summary.defectPct != null ? summary.defectPct.toFixed(1) : '—'
-            }`}
-            sub='%'
-            tone={
-              defectPlan && summary.defectPct != null && summary.defectPct > Number(defectPlan)
-                ? 'down'
-                : undefined
-            }
-          />
-        </StatGrid>
-
         {/* The batches themselves, one row each — the same table the runs manager draws, so a
             batch looks the same wherever it is read. No action column: editing, receiving and
             deleting a run own modals that live on the run's own page, which the row links to. */}
