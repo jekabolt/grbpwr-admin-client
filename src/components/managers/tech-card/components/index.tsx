@@ -93,6 +93,7 @@ import {
   toPurposeEnum,
   wireInt,
 } from './schema';
+import { PrintOptionsModal } from 'components/managers/print/options-modal';
 import { useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import { ProductionTab } from './production-tab';
 import { SamplesTab } from './samples-tab';
@@ -376,6 +377,7 @@ export function TechCardForm({
   // the handler re-runs the save immediately after setting it.
   const lockOverride = useRef<number | null>(null);
   const [blockersOpen, setBlockersOpen] = useState(false);
+  const [printOptionsOpen, setPrintOptionsOpen] = useState(false);
   // Drawer state lives in the URL so it survives a refresh and can be linked to.
   const tasksOpen = params.get('tasks') === '1';
   // The field a failed save should walk the user to. `nonce` re-arms the effect when the SAME field
@@ -1121,6 +1123,16 @@ export function TechCardForm({
                     pdf
                   </Link>
                 </Button>
+                {/* Печать со скоупом (прогон/колорвей/размеры/профиль/тетради); прямая ссылка
+                    выше остаётся печатью в один клик. */}
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='sm'
+                  onClick={() => setPrintOptionsOpen(true)}
+                >
+                  pdf…
+                </Button>
               </>
             )}
             {canWrite(SECTION.techCards) && !frozen && isEditMode && (
@@ -1259,6 +1271,16 @@ export function TechCardForm({
         >
           <TechCardTasksPanel techCardId={numId} />
         </Drawer>
+      ) : null}
+
+      {isEditMode && numId ? (
+        <PrintOptionsModal
+          open={printOptionsOpen}
+          onClose={() => setPrintOptionsOpen(false)}
+          techCardId={numId}
+          techCard={techCard}
+          runs={productionRunsData?.runs ?? []}
+        />
       ) : null}
 
       {/* Why release is greyed out, on demand. Reuses the SAME blocker list the header
