@@ -4111,6 +4111,33 @@ export type MaterialLot = {
   shadeCode: string | undefined;
 };
 
+// MaterialReservationClaim is ONE still-open claim on a material — a soft hold that depresses
+// available without moving on_hand (0164). Until Ф5б the ledger had a single kind of owner, a
+// customer order holding packaging; it now also admits a production run holding fabric, and the
+// schema CHECK admits EXACTLY ONE of the two (0286). Hence the two id fields, of which precisely
+// one is non-zero: a claim with no owner is a hold nobody can close, and a claim with two owners
+// would be closed twice and release cloth the other owner still holds.
+// created_at is not decoration. A run abandoned in `planned` keeps holding its fabric, and the only
+// thing that makes that visible is the AGE of an open claim — «reserved» alone looks the same on
+// day one and on day ninety.
+export type MaterialReservationClaim = {
+  id: number | undefined;
+  materialId: number | undefined;
+  // Idempotency root: "{order_id}:{material_id}" for an order, "run:{run_id}:{material_id}:{gen}"
+  // for a run. The generation exists because the ledger is append-only and UNIQUE(claim_key, event)
+  // forbids a second reserve on one key — a correction is release-then-reserve, never an update.
+  claimKey: string | undefined;
+  qty: googletype_Decimal | undefined;
+  orderId: number | undefined;
+  runId: number | undefined;
+  // Lot this claim is pinned to (Ф5б.6): a recut a month later out of a DIFFERENT dye lot is a
+  // visible defect on the garment. 0 = pinned to no lot, which is the normal case — the claim is
+  // about the material, and it stays valid when the roll it named is gone.
+  lotId: number | undefined;
+  createdBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
 // MaterialStockRow is a catalog material joined with its stock balance, valuation and low-stock
 // flag — one row of the warehouse list. Money fields are confidential.
 export type MaterialStockRow = {
@@ -4211,6 +4238,15 @@ export type ProductionLayMode =
   | "PRODUCTION_LAY_MODE_UNSPECIFIED"
   | "PRODUCTION_LAY_MODE_FACE_UP"
   | "PRODUCTION_LAY_MODE_FACE_TO_FACE";
+// Чем ИЗМЕРЕН фактический расход настила (Ф5б.2). Метод едет рядом с числом, а не подразумевается,
+// потому что два метода врут по-разному: рулон до/после наследует ошибку измерения остатка и не
+// видит того, что уехало в обрезки, а взвешивание переводится в метры через плотность и ширину и
+// потому чувствительно к ним обеим. Число без метода — это число, о точности которого нечего
+// сказать, поэтому схема требует их вместе (chk_prlay_actual_complete, 0285).
+export type ProductionLayActualMethod =
+  | "PRODUCTION_LAY_ACTUAL_METHOD_UNSPECIFIED"
+  | "PRODUCTION_LAY_ACTUAL_METHOD_ROLL_BEFORE_AFTER"
+  | "PRODUCTION_LAY_ACTUAL_METHOD_WEIGHED";
 // Статус любой проверки Ф4. UNKNOWN — ПЕРВОКЛАССНОЕ значение и НИКОГДА не читается как OK:
 // «не смогли проверить» и «проверили, всё хорошо» — разные предложения, и клиент обязан их
 // различать. Это та же дисциплина, что unknown_count у гейта Ф6.
@@ -4489,6 +4525,22 @@ export type ProductionRunLayInsert = {
   note: string | undefined;
   displayOrder: number | undefined;
   sections: ProductionRunLaySectionInsert[] | undefined;
+  // С КАКОГО РУЛОНА настилали (Ф5б.1). 0 = рулон не назван. Едет ТОЛЬКО идентификатор: снимок
+  // lot_code сервер снимает сам в момент привязки — присланный клиентом снимок можно разойтись с
+  // лотом, на который он якобы ссылается, и тогда настил называл бы не тот рулон, что взял.
+  lotId: number | undefined;
+  // ФАКТ РАСХОДА (Ф5б.2) — «целиком или никак». actual_qty задан ⇒ заданы и actual_uom, и
+  // actual_method; это CHECK в схеме (0285), а не соглашение: факт без единицы — число, которое
+  // нечем сложить. Обратное не требуется: единица, выбранная в форме раньше количества, — это
+  // наполовину заполненная форма, а не ложь.
+  // Единица закрыта ПРОВОДОМ, а не колонкой: перечислением MaterialUnit клиент физически не может
+  // прислать «метры». Хранение остаётся текстовым — так же, как каталожный material.unit (0271),
+  // где нормализация живёт на чтении, а не в схеме.
+  // actual_by / actual_at НЕ принимаются: их штампует сервер. Кто и когда назвал число — это то,
+  // что делает факт фактом, и присланное клиентом «кто» ничего не удостоверяет.
+  actualQty: googletype_Decimal | undefined;
+  actualUom: MaterialUnit | undefined;
+  actualMethod: ProductionLayActualMethod | undefined;
 };
 
 export type ProductionRunLay = {
@@ -4521,6 +4573,28 @@ export type ProductionRunLay = {
   updatedBy: string | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // РУЛОН, С КОТОРОГО НАСТИЛАЛИ (Ф5б.1). Две половины, и вторая не декоративна: lot_id = 0 при
+  // НЕПУСТОМ lot_code означает «рулон удалён из справочника» (FK стоит на SET NULL), и настил
+  // по-прежнему может НАЗВАТЬ то, что взял. Обе пусты — рулон просто не назвали. Различать эти два
+  // случая обязательно: первый — история, которую нельзя переписать, второй — незаполненное поле.
+  lotId: number | undefined;
+  lotCode: string | undefined;
+  // ФАКТ РАСХОДА (Ф5б.2), как его ввёл человек. actual_uom = MATERIAL_UNIT_UNKNOWN при пустом
+  // actual_qty — это «факта нет», а не «единица неизвестна».
+  actualQty: googletype_Decimal | undefined;
+  actualUom: MaterialUnit | undefined;
+  actualMethod: ProductionLayActualMethod | undefined;
+  actualBy: string | undefined;
+  actualAt: wellKnownTimestamp | undefined;
+  // ДРЕЙФ = actual_qty / план настила − 1, в процентах. Пусто, если нет факта, нет плана или их
+  // единицы несводимы — «нечего сравнить» и «сошлось» обязаны выглядеть по-разному.
+  // Сравнивается с ПЛАНОМ НАСТИЛА (planned_length_cm), и круга здесь нет — это самое неочевидное
+  // место фазы. Решение Ф4 постановило, что коэффициент раскроя артикула на пути настилов НЕ
+  // применяется, поэтому план настила — чистая геометрия. Коэффициент же покрывает усадку, обход
+  // пороков, сращивание и оттеночные полосы, то есть ровно то, чего геометрия не видит. Значит
+  // дрейф — честная оценка того, что коэффициент обязан покрыть. Применяйся коэффициент к настилу,
+  // калибровка стала бы круговой: коэффициент правил бы план, а план — коэффициент.
+  actualDriftPercent: googletype_Decimal | undefined;
 };
 
 // Клетка покрытия (Ф4.5). Считается ПО РАЗМЕЩЕНИЯМ, минимум по всем деталям всех тканей колорвея.
@@ -4549,6 +4623,49 @@ export type ProductionRunLayPieceYield = {
   overcutQty: number | undefined;
   status: ProductionLayCheckStatus | undefined;
   detail: string | undefined;
+};
+
+// ПРИЁМКА КРОЯ (Ф5б.5): строка на пару (настил, размер).
+// ЦЕПОЧКА ЧИСЕЛ ПРОГОНА НАЗЫВАЕТСЯ ЗДЕСЬ, ОДИН РАЗ И ЦЕЛИКОМ:
+// заказано (production_run_line.planned_qty)
+// → ВЫКРОЕНО (cut_qty)
+// → ПРИНЯТО В ПОШИВ (accepted_qty)
+// → сдано готовым (production_run_line.received_qty)
+// → брак (production_run_line.defect_qty)
+// Приёмка кроя вставляет ДВА НОВЫХ числа МЕЖДУ заказанным и сданным. Существующие поля при этом НЕ
+// переозначиваются, и это не аккуратность, а необходимость: переименуй мы received_qty в «принято»,
+// завелась бы двойная бухгалтерия, где «принято в пошив» и «сдано готовым» неизбежно разойдутся, а
+// называться будут одинаково.
+// ЧИСЛА НЕ ВАЛИДИРУЮТСЯ ДРУГ ПРОТИВ ДРУГА. «Заказано 10, выкроено 12» — законный перекрой;
+// «выкроено 12, принято 10» — законный брак раскроя. Расхождение ПОКАЗЫВАЕТСЯ, а не запрещается:
+// запрет превратил бы отчёт о том, что произошло со столом, в спор с формой ввода.
+// ЗАКАЗАННОГО И СДАННОГО ЗДЕСЬ СОЗНАТЕЛЬНО НЕТ, хотя показывать их надо рядом. planned_qty и
+// received_qty живут на строке прогона, а её ключ — (колорвей, размер), тогда как ключ настила —
+// (колорвей, слот BOM). У одного колорвея законно несколько настилов (разные размерные блоки,
+// разные ткани), поэтому копия planned_qty в каждую строку приёмки была бы одним и тем же числом,
+// размноженным по настилам, и любая сумма по строкам приёмки удвоила бы заказ. Клиент показывает
+// цепочку целиком, соединяя эти строки со строками прогона, которые у него уже есть.
+export type ProductionRunCutReceipt = {
+  id: number | undefined;
+  layKey: string | undefined;
+  sizeId: number | undefined;
+  sizeName: string | undefined;
+  cutQty: number | undefined;
+  acceptedQty: number | undefined;
+  note: string | undefined;
+  createdBy: string | undefined;
+  updatedBy: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  updatedAt: wellKnownTimestamp | undefined;
+};
+
+// Апсерт строки приёмки. Пара (настил, размер) — естественный ключ: у одного настила один размер
+// приходит один раз, поэтому повторное сохранение той же пары ПРАВИТ строку, а не заводит вторую.
+export type ProductionRunCutReceiptInsert = {
+  sizeId: number | undefined;
+  cutQty: number | undefined;
+  acceptedQty: number | undefined;
+  note: string | undefined;
 };
 
 // SampleInsert is the writable payload of a sample (сэмпл) — a sewn prototype of a style

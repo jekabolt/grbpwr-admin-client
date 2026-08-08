@@ -248,6 +248,14 @@ export function LayPlan({
           name: lay.name ?? '',
           note: lay.note ?? '',
           displayOrder: lay.displayOrder ?? 0,
+          // ЛОТ И ФАКТ ВОЗВРАЩАЮТСЯ РОВНО ТАКИМИ, КАКИМИ ПРИЕХАЛИ. Кнопка «количества проверены»
+          // меняет ОДИН флаг, и всё остальное обязано доехать обратно нетронутым. Отправь она
+          // пустой факт — нажатие планировщика стирало бы замер цеха, то есть кнопка, которая по
+          // названию ничего не меняет, уничтожала бы данные другого человека.
+          lotId: lay.lotId ?? 0,
+          actualQty: lay.actualQty,
+          actualUom: lay.actualUom,
+          actualMethod: lay.actualMethod,
           sections: (lay.sections ?? []).map((s, i) => ({
             sectionKey: s.sectionKey ?? '',
             markerId: s.markerId ?? 0,

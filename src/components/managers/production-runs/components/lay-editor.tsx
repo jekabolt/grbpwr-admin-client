@@ -163,6 +163,14 @@ export function LayEditor({
       name: name.trim(),
       note: note.trim(),
       displayOrder: existing?.displayOrder ?? nextDisplayOrder,
+      // ЛОТ И ФАКТ ЭХОМ, А НЕ ПУСТЫМИ. Сохранение настила — полная замена состояния, поэтому поле,
+      // которое эта форма не редактирует, обязано уехать таким, каким пришло. Отправь мы здесь
+      // пустые — правка числа слоёв стирала бы замер цеха, и стирала бы молча: экран планировщика
+      // про факт расхода ничего не знает и не показал бы пропажу.
+      lotId: existing?.lotId ?? 0,
+      actualQty: existing?.actualQty,
+      actualUom: existing?.actualUom,
+      actualMethod: existing?.actualMethod,
       sections: sections.map((s, i) => ({
         sectionKey: s.sectionKey,
         markerId: s.markerId,
