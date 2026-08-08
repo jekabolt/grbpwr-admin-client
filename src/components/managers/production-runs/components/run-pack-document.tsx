@@ -18,8 +18,10 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { ReactNode, useMemo } from 'react';
+import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { decimalToInput } from 'utils/decimal';
+import { viewerOrigin } from 'utils/viewer-origin';
 import { LAY_MODE_LABEL, cmToM } from './lay-card';
 import { runDate, runStatusLabel } from './options';
 import { VERDICT_GLYPH, VERDICT_WORD, layVerdict, useRunLays } from './useLays';
@@ -88,11 +90,18 @@ export function RunPackDocument({
   run,
   cutPlan,
   cutPlanUnavailable = false,
+  runPackToken,
 }: {
   run: common_ProductionRun;
   cutPlan?: GetProductionRunCutPlanResponse;
   /** Сервер отказал (в том числе «RPC ещё нет на контуре») — это отдельная новость от «пусто». */
   cutPlanUnavailable?: boolean;
+  /**
+   * Токен-капабилити публичного наряда (GetProductionRunResponse.run_pack_token). Пусто — старый
+   * бэкенд или неподключённый сервис наряда: тогда QR просто не рисуется. Рамка-пустышка вместо
+   * него была бы хуже пустого места — она читается как «QR не пропечатался».
+   */
+  runPackToken?: string;
 }) {
   const ins = run.run;
   const runId = wireInt(run.id);
@@ -356,13 +365,42 @@ export function RunPackDocument({
               </div>
               <div>{factory ? `фабрика: ${factory}` : 'фабрика не назначена'}</div>
             </div>
-            {/* МЕСТО ПОД QR НАРЯДА — следующая фаза вешает его сюда.
-                Квадрат пустой и БЕЗ рамки: рамка без кода читалась бы как «QR не пропечатался».
-                Место зарезервировано заранее ровно затем, чтобы появление кода не перекраивало
-                шапку — цех читает её по позициям, и переехавшая строка «по какой ревизии кроим»
-                это не косметика. Ширина под ~22 мм — минимум, на котором телефон берёт код с
-                мятого листа. */}
-            <div data-run-pack-qr className='h-[22mm] w-[22mm] shrink-0' aria-hidden />
+            {/* QR ЖИВОГО НАРЯДА.
+                Ширина под ~22 мм — минимум, на котором телефон берёт код с мятого листа; место было
+                зарезервировано заранее ровно затем, чтобы появление кода не перекраивало шапку —
+                цех читает её по позициям, и переехавшая строка «по какой ревизии кроим» это не
+                косметика.
+
+                В ссылке ДВЕ ЧАСТИ, и вторая — весь смысл этой бумаги. Токен открывает наряд, а
+                ?v={lock_version} говорит, ДЛЯ КАКОЙ ВЕРСИИ ПАРТИИ лист напечатан: вьюер сверяет его
+                с живой версией и, если они разошлись, кричит, что бумага в руках устарела. Убери
+                параметр — и лист снова станет неотличим от свежего, то есть станет ровно тем, от
+                чего живой вьюер и заводился.
+
+                origin берётся из VITE_PATTERN_VIEWER_ORIGIN (utils/viewer-origin), а НЕ из
+                window.location.origin: печать из превью Vercel зашила бы в код эфемерный алиас за
+                SSO, который умирает вместе с веткой, и умирает молча — через месяц, в цеху.
+
+                Токена нет — место остаётся пустым, без рамки: рамка без кода читается как «QR не
+                пропечатался», то есть отправляет печатать заново то, что печатать заново незачем. */}
+            <div data-run-pack-qr className='w-[22mm] shrink-0'>
+              {runPackToken ? (
+                <figure className='text-center'>
+                  <PatternQR
+                    size={76}
+                    value={`${viewerOrigin()}/r/${runPackToken}?v=${runLockVersion}`}
+                  />
+                  <figcaption className='mt-0.5 text-nano uppercase leading-tight'>
+                    живой наряд
+                    <span className='block text-labelColor'>
+                      наведите камеру: числа в нём всегда текущие
+                    </span>
+                  </figcaption>
+                </figure>
+              ) : (
+                <div className='h-[22mm]' aria-hidden />
+              )}
+            </div>
           </div>
         </div>
 

@@ -97,6 +97,11 @@ export enum ROUTES {
   // PUBLIC pattern viewer — the page a printed tech-pack QR opens (no JWT, no dictionary).
   // Registered in src/index.tsx OUTSIDE ProtectedRoute/DictionaryProvider on purpose.
   patternViewer = '/p/:token',
+  // PUBLIC run-pack viewer — the page a printed НАРЯД НА ПАРТИЮ QR opens (no JWT, no dictionary).
+  // Registered in src/index.tsx OUTSIDE ProtectedRoute/Layout/DictionaryProvider, next to
+  // patternViewer and for the same reasons. The QR also carries ?v={run lock version at print
+  // time}, which the page compares against the live manifest to tell the floor its paper is stale.
+  runPackViewer = '/r/:token',
   materials = '/materials',
   workshop = '/workshop',
   productionRuns = '/production-runs',

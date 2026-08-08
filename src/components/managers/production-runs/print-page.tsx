@@ -96,6 +96,11 @@ export function RunPackPrint() {
             run={run}
             cutPlan={cutPlanError ? undefined : cutPlan}
             cutPlanUnavailable={cutPlanError}
+            // Токен публичного наряда живёт на ОТВЕТЕ чтения прогона, а не на самом прогоне
+            // (common.ProductionRun ложится в сохраняемые снапшоты, а токену доступа в снапшоте не
+            // место). Пусто = сервис наряда не подключён на этом контуре — документ печатается без
+            // QR, и это единственное последствие.
+            runPackToken={runData?.runPackToken}
           />
         </div>
       )}

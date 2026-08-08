@@ -239,6 +239,9 @@ const FulfillmentCardDetail = lazyRoute(() =>
 const PatternViewerPage = lazyRoute(() =>
   import('components/pattern-viewer/page').then((m) => ({ default: m.PatternViewerPage })),
 );
+const RunPackViewerPage = lazyRoute(() =>
+  import('components/run-pack-viewer/page').then((m) => ({ default: m.RunPackViewerPage })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -424,6 +427,12 @@ root.render(
                     admin chrome) and outside DictionaryProvider (the dictionary is an authed
                     fetch; a page that needs it is not public). */}
                 <Route path={ROUTES.patternViewer} element={<PatternViewerPage />} />
+                {/* PUBLIC run-pack viewer — what a printed НАРЯД НА ПАРТИЮ QR opens on a cutting
+                    floor phone. Same three exclusions as the pattern viewer above, for the same
+                    reasons: no JWT, no admin chrome, no dictionary (all names ride in the
+                    manifest). Its ?v= carries the run's lock version at print time, so the page
+                    can tell the floor the paper in its hands is out of date. */}
+                <Route path={ROUTES.runPackViewer} element={<RunPackViewerPage />} />
               </Routes>
             </Suspense>
           </BrowserRouter>
