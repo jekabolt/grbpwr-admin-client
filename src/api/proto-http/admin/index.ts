@@ -6996,6 +6996,13 @@ export type GetTechCardRequest = {
 
 export type GetTechCardResponse = {
   techCard: common_TechCard | undefined;
+  // Output-only capability token ('c' scope) for the public pattern viewer: the printed
+  // tech-pack QR encodes {admin origin}/p/{token}, and the page resolves it via this
+  // backend's GET /api/pv/{token}. Deliberately on the RESPONSE and not on
+  // common.TechCard: the release-snapshot path serialises common.TechCard into a stored
+  // blob, and a capability token must never reach a persisted snapshot. Never persisted;
+  // empty when the pattern service is not wired.
+  patternViewerToken: string | undefined;
 };
 
 // TechCard is a stored tech card with resolved sketch media.
