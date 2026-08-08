@@ -1,4 +1,4 @@
-import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -25,7 +25,10 @@ const PRINT_CSS = `
 export function TechCardPrint() {
   const { id } = useParams<{ id: string }>();
   const numId = id ? parseInt(id, 10) : undefined;
-  const { data: techCard, isLoading, isError } = useTechCard(numId);
+  // useTechCardPrint, not useTechCard: печать also needs the response-level pattern_viewer_token
+  // (the per-scope QR codes of the patterns section), which the editor's hook deliberately drops.
+  const { data: printData, isLoading, isError } = useTechCardPrint(numId);
+  const techCard = printData?.techCard;
   // #71 root cause: the on-garment assembly bill (labels/tags) and the packaging recipe each
   // live behind their own per-style RPC — GetTechCard alone (above) never returns them, so the
   // printed pack had nothing to render for either section no matter what TechPackDocument did
@@ -83,6 +86,7 @@ export function TechCardPrint() {
             techCard={techCard}
             assembly={assemblyData?.items ?? []}
             packagingRecipe={packagingRecipeData?.items ?? []}
+            patternViewerToken={printData?.patternViewerToken ?? ''}
           />
         </div>
       )}

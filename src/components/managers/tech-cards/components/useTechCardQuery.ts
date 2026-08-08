@@ -110,6 +110,29 @@ export function useTechCard(id: number | undefined) {
   });
 }
 
+// The SAME read for the PRINT page (Ф4): the card PLUS the response-level pattern_viewer_token,
+// which the printed tech-pack encodes into its per-scope QR codes. A sibling of useTechCard
+// rather than a parameter on it, deliberately: useTechCard returns only response.techCard and
+// seeds the whole editing form — widening its return shape would touch every consumer of the
+// editor for a field only печать reads. Nested UNDER detail(id) so every mutation that already
+// invalidates the card detail invalidates this too.
+export function useTechCardPrint(id: number | undefined) {
+  return useQuery({
+    queryKey: [...techCardKeys.detail(id!), 'print'],
+    queryFn: async () => {
+      const response = await adminService.GetTechCard({ id: id!, vatCountryCode: undefined });
+      return {
+        techCard: response.techCard,
+        // Empty when the backend predates the viewer or the pattern service is unwired —
+        // the печать then falls back to per-sheet QR codes.
+        patternViewerToken: response.patternViewerToken ?? '',
+      };
+    },
+    enabled: !!id,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // The SAME card read again, netted at another country's VAT rate — a pricing scenario, not the
 // card. Deliberately its own query key rather than a parameter on useTechCard: that read is what
 // seeds the whole editing form (mapTechCardToForm), and re-keying it on a dropdown would remount

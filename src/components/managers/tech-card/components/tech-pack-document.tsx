@@ -10,12 +10,21 @@ import {
   common_TechCardBomItem,
   common_TechCardColorwayUsage,
   common_TechCardReleaseMeta,
+  common_TechCardSizePattern,
   googletype_Decimal,
   PackagingRecipeLine,
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
 import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
+import {
+  fabricScopes,
+  isRollGoodsSection,
+  scopeKeyOfBinding,
+  bomPurposeLabel,
+  type RollGoodsLine,
+} from './bom-purpose';
 import { formatCompositionEntries } from './composition-entries';
+import { wireFabricPurpose } from './pattern-size-index';
 import { wireInt } from './schema';
 import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
@@ -77,6 +86,26 @@ const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
+
+// Русская форма счётного существительного: 1 лист, 2 листа, 5 листов.
+const plural = (n: number, one: string, few: string, many: string): string => {
+  const m100 = n % 100;
+  if (m100 >= 11 && m100 <= 14) return many;
+  const m10 = n % 10;
+  return m10 === 1 ? one : m10 >= 2 && m10 <= 4 ? few : many;
+};
+
+// Lowercase extension of a pattern sheet: filename first, url path as the legacy fallback —
+// the same source order as the server manifest's sheetExt and the viewer's sheetKind. The
+// caption branches on it because a SIZELESS sheet means two different things by format: a DXF
+// is graded (sizes live in its block names), a PDF simply has no size — «градуированный» on a
+// PDF would promise a size switcher the viewer will not show.
+const patternExt = (p: { filename?: string; url?: string }): string => {
+  const fromName = /\.([a-z0-9]+)$/i.exec((p.filename ?? '').trim());
+  if (fromName) return fromName[1].toLowerCase();
+  const fromUrl = /\.([a-z0-9]+)$/i.exec((p.url ?? '').split(/[?#]/)[0]);
+  return fromUrl ? fromUrl[1].toLowerCase() : '';
+};
 const num = (s?: string): number => {
   const n = parseFloat(s ?? '');
   return Number.isNaN(n) ? NaN : n;
@@ -115,10 +144,16 @@ export function TechPackDocument({
   techCard,
   assembly = [],
   packagingRecipe = [],
+  patternViewerToken = '',
 }: {
   techCard: common_TechCard;
   assembly?: StyleAssemblyLine[];
   packagingRecipe?: PackagingRecipeLine[];
+  // Card-level capability token from GetTechCardResponse (never on common_TechCard — a token
+  // must not reach a persisted release snapshot). Non-empty → the patterns section prints one
+  // QR per fabric scope opening the public viewer /p/{token}; empty (older backend, service
+  // unwired) → transitional per-sheet QR fallback.
+  patternViewerToken?: string;
 }) {
   const tc = techCard.techCard;
   const { dictionary } = useDictionary();
@@ -333,6 +368,87 @@ export function TechPackDocument({
   const globalPackaging = activePackaging.filter((p) => p.scope === 'global');
   const packagingRows = stylePackaging.length > 0 ? stylePackaging : globalPackaging;
   const packagingIsFallback = stylePackaging.length === 0 && globalPackaging.length > 0;
+
+  // ── PATTERNS (Ф4): fold the sheets into DISPLAY fabric scopes — one QR per scope. ──
+  // A row with no file is not a sheet yet; skipped exactly as before, and as the server
+  // manifest skips it, so «N листов» counts what the viewer will actually list.
+  const patternSheets = (tc.patterns ?? []).filter((p) => p.url?.trim());
+  // Roll-goods lines EXACTLY as the patterns editor builds them (patterns-field.tsx
+  // fabricBomLines): the four roll-goods sections AND a line key. isRollGoodsSection is the
+  // same four-section set as the editor's ROLE_OF_SECTION. A different filter here would
+  // print a different set of groups than both the editor and the server's viewerGroups
+  // (internal/patternaccess/viewer.go) derive — and the caption would lie about what the QR
+  // opens. The editor additionally re-sorts by role for its shelf; membership is what must
+  // agree, and print keeps BOM order (which is also the manifest's group order).
+  const rollGoodsLines: RollGoodsLine[] = (tc.bomItems ?? [])
+    .filter((b) => isRollGoodsSection(b.section) && b.lineKey)
+    .map((b) => ({
+      lineKey: b.lineKey!,
+      purpose: b.purpose ?? '',
+      name: b.name ?? '',
+      section: b.section ?? '',
+    }));
+  const patternScopes = fabricScopes(rollGoodsLines);
+  // scopeKeyOfBinding resolves the MID-SORT case the same way the panel and the server do: a
+  // sheet bound to line L, where L has since been sorted into назначение P, files under P's
+  // group. '' = resolves to nothing → «листы без привязки».
+  const sheetsByScope = new Map<string, common_TechCardSizePattern[]>();
+  for (const p of patternSheets) {
+    const k = scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, patternScopes);
+    sheetsByScope.set(k, [...(sheetsByScope.get(k) ?? []), p]);
+  }
+  // THE WIRE KEY IS THE SERVER'S SPELLING — the whole correctness risk of this section. The
+  // client stores a purpose as the proto enum name (TECH_CARD_BOM_PURPOSE_MAIN); the server's
+  // manifest groups are keyed by the lowercase stored value (main). A purpose scope therefore
+  // converts through wireFabricPurpose; an unsorted-line scope's key is its line_key verbatim
+  // (already the stored spelling); unbound is the literal _unbound. A wrong spelling does not
+  // error — the viewer silently falls back to the first group, i.e. the QR opens the wrong one.
+  const patternGroups: Array<{
+    wireKey: string;
+    label: string;
+    sheets: common_TechCardSizePattern[];
+  }> = [];
+  const seenScopeKeys = new Set<string>();
+  for (const s of patternScopes) {
+    if (seenScopeKeys.has(s.key)) continue; // duplicate line_key guard — one figure per key
+    seenScopeKeys.add(s.key);
+    const sheets = sheetsByScope.get(s.key) ?? [];
+    if (sheets.length === 0) continue; // no sheets → no QR (the manifest omits the group too)
+    patternGroups.push({
+      wireKey: s.byPurpose ? wireFabricPurpose(s.key) : s.key,
+      label: s.byPurpose
+        ? bomPurposeLabel(s.key)
+        : (s.lines[0]?.name ?? '').trim() || 'строка BOM',
+      sheets,
+    });
+  }
+  const unboundSheets = sheetsByScope.get('') ?? [];
+  if (unboundSheets.length > 0) {
+    patternGroups.push({ wireKey: '_unbound', label: 'листы без привязки', sheets: unboundSheets });
+  }
+  // Which sizes a group covers: named sizes in the card's size-range order (strays after),
+  // plus «градуированные» for sizeless DXF and «без размера» for sizeless PDF — two different
+  // facts, branched on the file format the same way the viewer's sheet list does.
+  const patternGroupSizes = (sheets: common_TechCardSizePattern[]): string => {
+    const named = new Set<number>();
+    let graded = false;
+    let sizeless = false;
+    for (const p of sheets) {
+      if (p.sizeId) named.add(p.sizeId);
+      else if (patternExt(p) === 'dxf') graded = true;
+      else sizeless = true;
+    }
+    const inRange = sizeIds.filter((id) => named.has(id));
+    const stray = [...named].filter((id) => !sizeIds.includes(id));
+    return [
+      ...inRange.map(sizeName),
+      ...stray.map(sizeName),
+      graded ? 'градуированные' : '',
+      sizeless ? 'без размера' : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+  };
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
@@ -577,35 +693,82 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* PATTERNS (выкройки) — per-size PDF/DXF, QR-linked for the factory */}
-      {has(tc.patterns) && (
+      {/* PATTERNS (выкройки) — one QR per FABRIC SCOPE, opening the public viewer /p/{token}.
+          The per-size breakdown is gone from paper: sheet choice, size switching and download
+          all live in the viewer, so the print names the выкройка (the scope), not its files. */}
+      {patternSheets.length > 0 && (
         <Sheet title='patterns (выкройки)'>
-          <div className='flex flex-wrap gap-4'>
-            {(tc.patterns ?? [])
-              .filter((p) => p.url?.trim())
-              .map((p, i) => (
-                <figure key={i} className='break-inside-avoid border border-black p-2 text-center'>
-                  <PatternQR value={p.url ?? ''} />
-                  <figcaption className='mt-1 text-micro uppercase'>
-                    {/* Лист без размера (0281) — градуированный: размеры внутри файла. Печатать под
-                        ним прочерк значило бы сказать «размер не заполнен», а это другой факт. */}
-                    <div className='font-semibold'>
-                      {p.sizeId ? sizeName(p.sizeId) : 'весь ряд'}
-                    </div>
-                    {/* The operator's name for the sheet leads; the CAD filename stays as the
-                        secondary line the factory can match against the file it receives. */}
-                    {p.name && <div className='max-w-[120px] truncate'>{p.name}</div>}
-                    {p.filename && (
-                      <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
-                    )}
-                  </figcaption>
-                </figure>
-              ))}
-          </div>
-          <p className='mt-2 text-nano text-labelColor'>
-            наведите камеру на QR, чтобы открыть этот лист выкройки (PDF/DXF). «весь ряд» —
-            градуированный файл: размеры записаны в именах блоков внутри него
-          </p>
+          {patternViewerToken ? (
+            <>
+              <div className='flex flex-wrap gap-4'>
+                {patternGroups.map((g) => {
+                  const maxVersion = g.sheets.reduce((m, p) => Math.max(m, p.version ?? 0), 0);
+                  const sizesLine = patternGroupSizes(g.sheets);
+                  return (
+                    <figure
+                      key={g.wireKey}
+                      className='break-inside-avoid border border-black p-2 text-center'
+                    >
+                      <PatternQR
+                        size={96}
+                        value={`${window.location.origin}/p/${patternViewerToken}?g=${encodeURIComponent(g.wireKey)}`}
+                      />
+                      <figcaption className='mt-1 max-w-[150px] text-micro uppercase'>
+                        <div className='break-words font-semibold'>{g.label}</div>
+                        <div>
+                          {g.sheets.length} {plural(g.sheets.length, 'лист', 'листа', 'листов')}
+                          {maxVersion > 0 ? ` · v${maxVersion}` : ''}
+                        </div>
+                        {sizesLine && (
+                          <div className='break-words text-labelColor'>{sizesLine}</div>
+                        )}
+                      </figcaption>
+                    </figure>
+                  );
+                })}
+              </div>
+              <p className='mt-2 text-nano text-labelColor'>
+                наведите камеру на QR — откроется вьюер этой выкройки: выбор листа, переключение
+                размеров и скачивание внутри
+              </p>
+            </>
+          ) : (
+            <>
+              {/* TRANSITIONAL fallback — the backend sent no viewer token (older backend or the
+                  pattern service unwired): the old per-sheet QR layout, except each QR encodes
+                  the tokenized view_url when present instead of the raw storage url (which dies
+                  once pattern objects go private). Delete this branch once every contour serves
+                  pattern_viewer_token. */}
+              <div className='flex flex-wrap gap-4'>
+                {patternSheets.map((p, i) => (
+                  <figure
+                    key={i}
+                    className='break-inside-avoid border border-black p-2 text-center'
+                  >
+                    <PatternQR value={(p.viewUrl?.trim() || p.url) ?? ''} />
+                    <figcaption className='mt-1 text-micro uppercase'>
+                      {/* Лист без размера (0281) — градуированный: размеры внутри файла. Печатать
+                          под ним прочерк значило бы сказать «размер не заполнен», а это другой
+                          факт. */}
+                      <div className='font-semibold'>
+                        {p.sizeId ? sizeName(p.sizeId) : 'весь ряд'}
+                      </div>
+                      {/* The operator's name for the sheet leads; the CAD filename stays as the
+                          secondary line the factory can match against the file it receives. */}
+                      {p.name && <div className='max-w-[120px] truncate'>{p.name}</div>}
+                      {p.filename && (
+                        <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
+                      )}
+                    </figcaption>
+                  </figure>
+                ))}
+              </div>
+              <p className='mt-2 text-nano text-labelColor'>
+                наведите камеру на QR, чтобы открыть этот лист выкройки (PDF/DXF). «весь ряд» —
+                градуированный файл: размеры записаны в именах блоков внутри него
+              </p>
+            </>
+          )}
         </Sheet>
       )}
 
