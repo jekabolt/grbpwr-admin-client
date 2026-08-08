@@ -715,36 +715,6 @@ export function TechPackDocument({
         </Sheet>
       )}
 
-      {/* SIZE QUANTITIES */}
-      {has(tc.sizeQuantities) && (
-        <Sheet title='size run'>
-          <table className='w-full border-collapse text-control'>
-            <thead>
-              <tr>
-                {(tc.sizeQuantities ?? []).map((sq, i) => (
-                  <th key={i} className={`${TH} text-center`}>
-                    {sizeName(sq.sizeId)}
-                  </th>
-                ))}
-                <th className={`${TH} text-center`}>total</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr className='break-inside-avoid'>
-                {(tc.sizeQuantities ?? []).map((sq, i) => (
-                  <td key={i} className={`${TD} text-center`}>
-                    {sq.orderQty ?? 0}
-                  </td>
-                ))}
-                <td className={`${TD} text-center font-semibold`}>
-                  {(tc.sizeQuantities ?? []).reduce((s, sq) => s + (sq.orderQty ?? 0), 0)}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </Sheet>
-      )}
-
       {/* MEASUREMENTS — point-of-measure grading chart (GetStyleSizeChart), the single most
           standard artifact of a garment tech pack; previously never fetched/printed. */}
       {has(sizeIds) && measurements.length > 0 && (

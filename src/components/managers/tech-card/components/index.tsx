@@ -57,7 +57,6 @@ import { CompositionEntries } from './composition-entries';
 import { ConstructionTab } from './construction-tab';
 import { CostEstimateField } from './cost-estimate-field';
 import { CostingField } from './costing-field';
-import { CutListField } from './cut-list-field';
 import { DetailsEditor } from './details-editor';
 import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
@@ -1739,23 +1738,6 @@ export function TechCardForm({
                   ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
                   set of [data-field] anchors for revealField to walk to. */}
               <PiecesTab techCard={techCard} active={activeTab === 'patterns'} />
-              {/* The cut list is the projection of the block directly above it: it is derived
-                  entirely from the cut pieces, the size range and the per-colourway fabric map, and
-                  the first two now live on THIS tab. It used to close the construction tab, which
-                  put the output two tabs away from its inputs. Here the operator's flow finally
-                  runs in one place — upload DXF → match blocks to pieces → see the piece list →
-                  see what will actually be cut — instead of jumping tabs to read the answer.
-                  A peer Section, not nested inside the pieces block: a block never contains a
-                  block (DESIGN.md). Mount semantics are unchanged — this SectionStack, like the
-                  construction one, is display:none-hidden with its children MOUNTED, so
-                  useStyleCutList still fires once on a saved card and no fetch is gained or lost.
-                  Guarded by isEditMode && numId exactly as before: without a saved id the query is
-                  disabled and the table would have nothing to project. */}
-              {isEditMode && numId && (
-                <Section title='cut list (production projection)'>
-                  <CutListField techCardId={numId} />
-                </Section>
-              )}
               <Section title='раскладки (маркеры) — расход ткани по размерам'>
                 <MarkersSection
                   techCard={techCard}
