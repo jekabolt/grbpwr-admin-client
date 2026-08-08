@@ -1,5 +1,12 @@
+import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
+import {
+  depStatus,
+  usePrintReady,
+  type PrintDep,
+} from 'components/managers/print/use-print-ready';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -11,9 +18,11 @@ import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPa
 // (no portal / absolute / #root hiding — those print blank in Safari): we just hide the
 // toolbar and let the document paginate. The doc's own max-width/padding is dropped in
 // print so it fills the @page content box.
+// @page (размер, поля и margin boxes колонтитула) объявлен ОДИН раз — в print/page-furniture.tsx,
+// который рендерит сам документ. Два объявления @page в одном документе разрешались бы порядком
+// подключения, а не смыслом.
 const PRINT_CSS = `
 @media print {
-  @page { size: A4 portrait; margin: 12mm; }
   html, body { background: #fff !important; }
   .techpack-toolbar { display: none !important; }
   .techpack-doc { border: 0 !important; box-shadow: none !important; }
@@ -33,8 +42,29 @@ export function TechCardPrint() {
   // live behind their own per-style RPC — GetTechCard alone (above) never returns them, so the
   // printed pack had nothing to render for either section no matter what TechPackDocument did
   // with the data. Fetch both here, alongside the tech card, and hand them down.
-  const { data: assemblyData } = useStyleAssembly(numId ?? 0);
-  const { data: packagingRecipeData } = usePackagingRecipe();
+  const {
+    data: assemblyData,
+    isLoading: assemblyLoading,
+    isError: assemblyError,
+  } = useStyleAssembly(numId ?? 0);
+  const {
+    data: packagingRecipeData,
+    isLoading: recipeLoading,
+    isError: recipeError,
+  } = usePackagingRecipe();
+
+  // Статусы запросов, которые документ делает САМ (размерная таблица, материалы, релизы, модели,
+  // медиа, словарь ухода). Гейт печати обязан их ждать — именно они рисуют прочерки вместо мерок
+  // и пустую колонку цвета при раннем клике. Документ отдаёт их наверх одним колбэком; setState
+  // из useState стабилен, поэтому цикла рендеров это не создаёт.
+  const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
+
+  const { ready, degraded } = usePrintReady([
+    { label: 'тех-карта', status: depStatus(isLoading, isError) },
+    { label: 'сборка на изделии', status: depStatus(assemblyLoading, assemblyError) },
+    { label: 'рецепт упаковки', status: depStatus(recipeLoading, recipeError) },
+    ...docDeps,
+  ]);
 
   return (
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
@@ -51,13 +81,16 @@ export function TechCardPrint() {
         </div>
         <div className='flex items-center gap-3'>
           <Text variant='inactive' size='small'>
-            choose “save as PDF” as the destination
+            choose “save as PDF” as the destination · колонтитул и номера страниц печатает только
+            Chrome
           </Text>
           <Button
             variant='main'
             size='lg'
             className='uppercase'
-            disabled={!techCard}
+            // Не «пришла ли карта», а «готов ли весь лист»: данные, шрифты и картинки. По
+            // таймауту гейт отпускает кнопку сам и называет недостающее плашкой на бумаге.
+            disabled={!techCard || !ready}
             onClick={() => window.print()}
           >
             save as pdf
@@ -82,11 +115,17 @@ export function TechCardPrint() {
         </div>
       ) : (
         <div className='techpack-doc border border-textInactiveColor shadow-sm'>
+          {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .techpack-doc, и
+              плашка без неё напечаталась бы текстом впритык к рамке. */}
+          <div className='px-8 pt-6'>
+            <PrintDegradedNotice items={degraded} />
+          </div>
           <TechPackDocument
             techCard={techCard}
             assembly={assemblyData?.items ?? []}
             packagingRecipe={packagingRecipeData?.items ?? []}
             patternViewerToken={printData?.patternViewerToken ?? ''}
+            onDataStatus={setDocDeps}
           />
         </div>
       )}

@@ -22,6 +22,12 @@ import {
   PackagingRecipeLine,
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
+import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
+import {
+  depStatus,
+  type PrintDep,
+} from 'components/managers/print/use-print-ready';
+import { KV, Sheet, TD, TH } from 'components/managers/print/sheet';
 import { CARE_ARTWORK } from 'components/managers/product/components/care/care-artwork';
 import {
   fabricScopes,
@@ -56,9 +62,9 @@ import {
 } from 'constants/filter';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
-import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
+import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useEffect, useMemo } from 'react';
 import { decimalToInput } from 'utils/decimal';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
@@ -173,30 +179,6 @@ const num = (s?: string): number => {
   return Number.isNaN(n) ? NaN : n;
 };
 
-const TD = 'border border-black px-1.5 py-1 align-top';
-const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-100 uppercase';
-
-function Sheet({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className='mb-5'>
-      <h2 className='mb-2 break-after-avoid bg-black px-2 py-1 text-control font-bold uppercase tracking-[0.12em] text-white'>
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function KV({ k, v }: { k: string; v?: ReactNode }) {
-  const empty = v == null || v === '' || v === '—';
-  return (
-    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-control leading-tight'>
-      <span className='w-36 shrink-0 uppercase tracking-wide text-labelColor'>{k}</span>
-      <span className='font-medium'>{empty ? '—' : v}</span>
-    </div>
-  );
-}
-
 // Full printable tech-pack document for one tech card. Pure presentational — reads the
 // loaded card (server truth, so save before exporting). Self-contained black-on-white so
 // it prints/PDFs identically regardless of the app theme. See print-page for the @media
@@ -207,10 +189,13 @@ export function TechPackDocument({
   assembly = [],
   packagingRecipe = [],
   patternViewerToken = '',
+  onDataStatus,
 }: {
   techCard: common_TechCard;
   assembly?: StyleAssemblyLine[];
   packagingRecipe?: PackagingRecipeLine[];
+  /** Статусы запросов, которые документ делает сам, — для гейта готовности печатной страницы. */
+  onDataStatus?: (deps: PrintDep[]) => void;
   // Card-level capability token from GetTechCardResponse (never on common_TechCard — a token
   // must not reach a persisted release snapshot). Non-empty → the patterns section prints one
   // QR per fabric scope opening the public viewer /p/{token}; empty (older backend, service
@@ -220,10 +205,14 @@ export function TechPackDocument({
   const tc = techCard.techCard;
   const { dictionary } = useDictionary();
   const careVocabulary = useCareVocabulary();
-  const { data: models } = useAllModels();
+  const { data: models, isLoading: modelsLoading, isError: modelsError } = useAllModels();
   // Rev.N (task: header proof-of-version) — techCard.id === styleId (R1), same call ReleasesField
   // already makes; free once the constructor tab warmed the cache.
-  const { data: releasesData } = useTechCardReleases(techCard.id);
+  const {
+    data: releasesData,
+    isLoading: releasesLoading,
+    isError: releasesError,
+  } = useTechCardReleases(techCard.id);
 
   const sizeById = useMemo(() => {
     const m = new Map<number, string>();
@@ -254,6 +243,10 @@ export function TechPackDocument({
   // detail reference images (and swatches) are library media ids not carried in the resolved
   // sketch maps — resolve them from the library so they print.
   const libraryMap = useMediaMap();
+  // Тот же запрос, что внутри useMediaMap (react-query отдаёт его из кэша) — но со статусом:
+  // useMediaMap возвращает голую Map, а гейту печати нужно знать, приехала ли медиатека. Без
+  // неё referenced-картинки деталей просто не появятся в DOM, и ждать их decode будет нечего.
+  const { isLoading: mediaLoading, isError: mediaError } = useMedia(500, 0);
   const resolveMedia = (id: number) => mediaById.get(id) ?? libraryMap.get(id);
 
   // Size/measurement grading chart (task: point-of-measure table never printed). Walk the stored
@@ -274,7 +267,11 @@ export function TechPackDocument({
     return out;
   }, [dictionary?.categories, tc?.categoryId]);
   const { measurements } = useMeasurements(dictionary, catPath.top, catPath.sub, catPath.type);
-  const { data: sizeChartData } = useQuery({
+  const {
+    data: sizeChartData,
+    isLoading: chartLoading,
+    isError: chartError,
+  } = useQuery({
     queryKey: ['styleSizeChart', techCard.id],
     queryFn: () => adminService.GetStyleSizeChart({ styleId: techCard.id ?? 0 }),
     enabled: !!techCard.id,
@@ -298,13 +295,42 @@ export function TechPackDocument({
   // (usage pin, else the slot default) own colour/pantone — the usage-level color/pantone inputs
   // are gone from the recipe editor and survive only on legacy rows. Archived included: a pinned
   // article that was later archived must still print its colour.
-  const { data: materialsData } = useMaterials('', true);
+  const {
+    data: materialsData,
+    isLoading: materialsLoading,
+    isError: materialsError,
+  } = useMaterials('', true);
   const materialById = useMemo(() => {
     const m = new Map<number, common_Material>();
     for (const mat of materialsData?.materials ?? [])
       if (wireInt(mat.id)) m.set(wireInt(mat.id), mat);
     return m;
   }, [materialsData?.materials]);
+
+  // Статусы запросов, которые документ делает сам, — наверх, в гейт печати. Ключ-строка не даёт
+  // эффекту срабатывать на каждый рендер (массив пересоздаётся всегда, статусы — нет).
+  const depsKey = [
+    modelsLoading,
+    modelsError,
+    releasesLoading,
+    releasesError,
+    chartLoading,
+    chartError,
+    materialsLoading,
+    materialsError,
+    mediaLoading,
+    mediaError,
+  ].join(',');
+  useEffect(() => {
+    onDataStatus?.([
+      { label: 'модели', status: depStatus(modelsLoading, modelsError) },
+      { label: 'релизы', status: depStatus(releasesLoading, releasesError) },
+      { label: 'размерная таблица', status: depStatus(chartLoading, chartError) },
+      { label: 'справочник материалов', status: depStatus(materialsLoading, materialsError) },
+      { label: 'медиатека', status: depStatus(mediaLoading, mediaError) },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depsKey]);
 
   if (!tc) return null;
 
@@ -524,6 +550,15 @@ export function TechPackDocument({
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
+      {/* Постраничный колонтитул: лист, вынутый из середины стопки, обязан называть свой стиль
+          и версию. Один PageFurniture на документ — @page глобален (см. page-furniture.tsx). */}
+      <PageFurniture
+        line={furnitureLine(
+          tc.styleNumber ? `style ${tc.styleNumber}` : '',
+          tc.name,
+          latestRelease ? `rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased',
+        )}
+      />
       {/* COVER / IDENTITY */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>

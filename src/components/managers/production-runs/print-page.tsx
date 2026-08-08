@@ -1,4 +1,11 @@
+import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
+import {
+  depStatus,
+  usePrintReady,
+  type PrintDep,
+} from 'components/managers/print/use-print-ready';
 import { ROUTES } from 'constants/routes';
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -11,9 +18,10 @@ import { useProductionRun, useRunCutPlan } from './components/useProductionRuns'
 // потоке и печатать его можно без трюков изоляции — никаких порталов, absolute и скрытия #root,
 // которые в Safari печатаются пустой страницей. В печати прячется только тулбар, а собственные
 // max-width/padding документа снимаются, чтобы он занял контентную коробку @page.
+// @page (размер, поля и margin boxes колонтитула) объявлен ОДИН раз — в print/page-furniture.tsx,
+// который рендерит сам документ.
 const PRINT_CSS = `
 @media print {
-  @page { size: A4 portrait; margin: 12mm; }
   html, body { background: #fff !important; }
   .runpack-toolbar { display: none !important; }
   .runpack-doc { border: 0 !important; box-shadow: none !important; }
@@ -39,6 +47,18 @@ export function RunPackPrint() {
     isLoading: cutPlanLoading,
   } = useRunCutPlan(runId, runId > 0);
 
+  // Статусы запросов, которые документ делает САМ (настилы, материальный план, тех-карта, релизы).
+  // Гейт печати обязан их ждать: без них лист печатается с пустыми таблицами, неотличимыми от
+  // «настилов нет». Отказ при этом кнопку НЕ блокирует — см. правило 1 в use-print-ready.ts.
+  const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
+
+  const { ready, degraded } = usePrintReady([
+    { label: 'прогон', status: depStatus(isLoading, isError) },
+    // Кат-лист сознательно НЕ обязателен: наряд остаётся документом партии и без него.
+    { label: 'кат-лист', status: depStatus(cutPlanLoading, cutPlanError) },
+    ...docDeps,
+  ]);
+
   return (
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
       <style>{PRINT_CSS}</style>
@@ -54,7 +74,8 @@ export function RunPackPrint() {
         </div>
         <div className='flex items-center gap-3'>
           <Text variant='inactive' size='small'>
-            choose “save as PDF” as the destination
+            choose “save as PDF” as the destination · колонтитул и номера страниц печатает только
+            Chrome
           </Text>
           <Button
             variant='main'
@@ -63,7 +84,7 @@ export function RunPackPrint() {
             // Печатать разрешено и без кат-листа: наряд остаётся документом партии (линии,
             // настилы, материалы, короба), а отсутствие кат-листа он называет вслух. Блокировать
             // кнопку значило бы выдать не приехавший RPC за отсутствие наряда.
-            disabled={!run || cutPlanLoading}
+            disabled={!run || !ready}
             onClick={() => window.print()}
           >
             save as pdf
@@ -88,6 +109,10 @@ export function RunPackPrint() {
         </div>
       ) : (
         <div className='runpack-doc border border-textInactiveColor shadow-sm'>
+          {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .runpack-doc. */}
+          <div className='px-8 pt-6'>
+            <PrintDegradedNotice items={degraded} />
+          </div>
           {/* Данные отказавшего запроса НЕ передаются: React Query держит последний успешный ответ
               и после провалившегося перезапроса, а документ штампуется версией прогона, прочитанной
               ОТДЕЛЬНЫМ запросом. Отдай он удержанный кат-лист — на бумаге оказались бы старые
@@ -101,6 +126,7 @@ export function RunPackPrint() {
             // место). Пусто = сервис наряда не подключён на этом контуре — документ печатается без
             // QR, и это единственное последствие.
             runPackToken={runData?.runPackToken}
+            onDataStatus={setDocDeps}
           />
         </div>
       )}

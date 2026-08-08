@@ -7,6 +7,9 @@ import {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { useSuppliers } from 'components/managers/accounting/utils/hooks';
+import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
+import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
+import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 import {
   CUT_SYMMETRY_PRINT_LEGEND,
   cutSymmetryBadge,
@@ -17,7 +20,7 @@ import { useTechCardReleases } from 'components/managers/tech-card/components/us
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { findInDictionary } from 'lib/features/findInDictionary';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { ReactNode, useMemo } from 'react';
+import { ReactNode, useEffect, useMemo } from 'react';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { decimalToInput } from 'utils/decimal';
@@ -41,41 +44,10 @@ import { useMaterialPlan } from './useProductionRuns';
 // которые документ читает, денежные поля НЕСЁТ (release meta.unit_cost, run.actuals); они просто не
 // выводятся, и это правило, а не текущее состояние вёрстки.
 
-const TD = 'border border-black px-1.5 py-1 align-top';
-const TH = 'border border-black px-1.5 py-1 text-left font-semibold bg-neutral-100 uppercase';
-
-// Sheet / KV — ЛОКАЛЬНЫЕ КОПИИ примитивов тех-пака (tech-pack-document.tsx:190-209), намеренно.
-// Импорт оттуда утащил бы в чанк печатного роута весь тех-пак с его медиа, моделями, словарём ухода
-// и раскладками — ради двух элементов вёрстки по восемь строк. Обе бумаги обязаны выглядеть
-// одинаково, поэтому классы здесь дословно те же: чёрная плашка заголовка листа, TH/TD в 1px, и
-// разрыв страницы, который не рвёт строку.
-function Sheet({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className='mb-5'>
-      <h2 className='mb-2 break-after-avoid bg-black px-2 py-1 text-control font-bold uppercase tracking-[0.12em] text-white'>
-        {title}
-      </h2>
-      {children}
-    </section>
-  );
-}
-
-function KV({ k, v }: { k: string; v?: ReactNode }) {
-  const empty = v == null || v === '' || v === '—';
-  return (
-    <div className='flex gap-2 break-inside-avoid border-b border-textInactiveColor py-0.5 text-control leading-tight'>
-      <span className='w-36 shrink-0 uppercase tracking-wide text-labelColor'>{k}</span>
-      <span className='font-medium'>{empty ? '—' : v}</span>
-    </div>
-  );
-}
-
-// Пустое место листа. Говорит ПОЧЕМУ пусто: молчаливая пустая таблица в наряде читается как «здесь
-// ничего не требуется», а это ровно противоположно правде в большинстве случаев, из-за которых она
-// пуста.
-function Nothing({ children }: { children: ReactNode }) {
-  return <p className='border border-black px-2 py-1.5 text-micro'>{children}</p>;
-}
+// Примитивы вёрстки (Sheet/KV/TD/TH/Nothing) переехали в components/managers/print/sheet.tsx —
+// общий лёгкий модуль. Раньше здесь стояла намеренная копия, чтобы не тащить в чанк печатного
+// роута наряда весь тех-пак с его медиа, моделями и словарями; общий модуль эту причину снимает,
+// пока сам остаётся standalone (правило записано в его шапке).
 
 const ZERO_TS = '0001-01-01T00:00:00Z';
 
@@ -91,6 +63,7 @@ export function RunPackDocument({
   cutPlan,
   cutPlanUnavailable = false,
   runPackToken,
+  onDataStatus,
 }: {
   run: common_ProductionRun;
   cutPlan?: GetProductionRunCutPlanResponse;
@@ -102,6 +75,8 @@ export function RunPackDocument({
    * него была бы хуже пустого места — она читается как «QR не пропечатался».
    */
   runPackToken?: string;
+  /** Статусы запросов, которые документ делает сам, — для гейта готовности печатной страницы. */
+  onDataStatus?: (deps: PrintDep[]) => void;
 }) {
   const ins = run.run;
   const runId = wireInt(run.id);
@@ -109,7 +84,11 @@ export function RunPackDocument({
   const releaseId = wireInt(ins?.releaseId);
 
   const { dictionary } = useDictionary();
-  const { data: techCard } = useTechCard(techCardId || undefined);
+  const {
+    data: techCard,
+    isPending: techCardPending,
+    isError: techCardError,
+  } = useTechCard(techCardId || undefined);
   // Статусы, а не только данные. Лист, напечатанный на полпути загрузки, обязан сказать
   // «не получено», а не «настилов нет» и не «потребности нет»: пустой ответ и не приехавший ответ
   // выглядят на бумаге одинаково, а означают противоположное, и цех отличить их уже ничем не может.
@@ -128,6 +107,25 @@ export function RunPackDocument({
   // приехать, а прогон при этом ПРИВЯЗАН к релизу. Напечатать в этом случае «ревизия не
   // зафиксирована» было бы враньём наоборот.
   const { data: releasesData } = useTechCardReleases(techCardId || undefined);
+
+  // Статусы собственных запросов документа — наверх, в гейт готовности печатной страницы.
+  // Ключ-строка не даёт эффекту срабатывать на каждый рендер.
+  const depsKey = [
+    techCardPending,
+    techCardError,
+    laysPending,
+    laysError,
+    materialPending,
+    materialError,
+  ].join(',');
+  useEffect(() => {
+    onDataStatus?.([
+      { label: 'тех-карта', status: depStatus(techCardPending, techCardError) },
+      { label: 'настилы', status: depStatus(laysPending, laysError) },
+      { label: 'материальный план', status: depStatus(materialPending, materialError) },
+    ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depsKey]);
 
   const tc = techCard?.techCard;
   const lines = useMemo(() => ins?.lines ?? [], [ins?.lines]);
@@ -340,6 +338,15 @@ export function RunPackDocument({
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
+      {/* Постраничный колонтитул: лист наряда, вынутый из стопки, обязан называть партию и
+          версию плана, по которой он напечатан. Один PageFurniture на документ. */}
+      <PageFurniture
+        line={furnitureLine(
+          `PR-${runId || '—'}`,
+          tc?.styleNumber ? `стиль ${tc.styleNumber}` : '',
+          runLockVersion > 0 ? `план v${runLockVersion}` : '',
+        )}
+      />
       {/* ШАПКА — что это за партия и по какой ревизии её кроят. */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
