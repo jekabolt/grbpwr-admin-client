@@ -95,6 +95,7 @@ export function RunPackDocument({
   const {
     data: techCard,
     isPending: techCardPending,
+    isLoading: techCardLoading,
     isError: techCardError,
   } = useTechCard(techCardId || undefined);
   // Статусы, а не только данные. Лист, напечатанный на полпути загрузки, обязан сказать
@@ -103,11 +104,13 @@ export function RunPackDocument({
   const {
     data: laysData,
     isPending: laysPending,
+    isLoading: laysLoading,
     isError: laysError,
   } = useRunLays(runId, runId > 0);
   const {
     data: materialPlan,
     isPending: materialPending,
+    isLoading: materialLoading,
     isError: materialError,
   } = useMaterialPlan(runId, runId > 0);
   const { data: suppliersData } = useSuppliers();
@@ -118,19 +121,26 @@ export function RunPackDocument({
 
   // Статусы собственных запросов документа — наверх, в гейт готовности печатной страницы.
   // Ключ-строка не даёт эффекту срабатывать на каждый рендер.
+  //
+  // ГЕЙТУ отдаём isLoading, а НЕ isPending. В react-query v5 у отключённого запроса
+  // (`enabled: false`) `isPending` навсегда true — данных нет и не будет, — а `isLoading` = pending
+  // && fetching, то есть false. Скорми гейту isPending, и прогон, у которого нет привязанной
+  // карты, десять секунд держал бы кнопку печати заблокированной, а потом печатал плашку «тех-карта
+  // не пришла» про запрос, который никто не посылал. Собственным плашкам документа, наоборот,
+  // нужен именно isPending: там вопрос «есть ли данные», а не «едут ли они».
   const depsKey = [
-    techCardPending,
+    techCardLoading,
     techCardError,
-    laysPending,
+    laysLoading,
     laysError,
-    materialPending,
+    materialLoading,
     materialError,
   ].join(',');
   useEffect(() => {
     onDataStatus?.([
-      { label: 'тех-карта', status: depStatus(techCardPending, techCardError) },
-      { label: 'настилы', status: depStatus(laysPending, laysError) },
-      { label: 'материальный план', status: depStatus(materialPending, materialError) },
+      { label: 'тех-карта', status: depStatus(techCardLoading, techCardError) },
+      { label: 'настилы', status: depStatus(laysLoading, laysError) },
+      { label: 'материальный план', status: depStatus(materialLoading, materialError) },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey]);

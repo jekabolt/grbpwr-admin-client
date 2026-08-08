@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 // Гейт готовности печати.
 //
@@ -23,6 +23,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 //
 //  4. Всё, что не успело, называется по именам в `degraded` — и печатается НА БУМАГЕ, а не
 //     только на экране. Тот, кто держит лист в цеху, экрана не видел.
+//
+//  5. Статус запроса берётся из `isLoading`, а НЕ из `isPending`: в react-query v5 отключённый
+//     запрос (`enabled: false`) навсегда `isPending`, потому что данных у него нет и не будет.
+//     Гейт, принявший это за загрузку, ждёт то, чего никто не посылал. См. `depStatus`.
 
 export type PrintDepStatus = 'pending' | 'ok' | 'error';
 export type PrintDep = { label: string; status: PrintDepStatus };
@@ -47,10 +51,8 @@ export function usePrintReady(
 
   const [assetsReady, setAssetsReady] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
-  const startedAt = useRef<number | null>(null);
 
   useEffect(() => {
-    if (startedAt.current == null) startedAt.current = performance.now();
     const t = window.setTimeout(() => setTimedOut(true), timeoutMs);
     return () => window.clearTimeout(t);
   }, [timeoutMs]);
