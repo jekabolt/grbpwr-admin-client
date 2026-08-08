@@ -61,7 +61,6 @@ const SOURCE_LABEL: Record<string, string> = {
 // отличается от свежей раскладки с нулевым припуском, а на глаз они выглядели бы одинаково.
 const NOT_RECORDED = 'не записано';
 
-const cm2 = (n: number) => n.toFixed(2);
 
 // Припуск, который РЕАЛЬНО лежит между линией шва и линией кроя, = наложенный раскладкой плюс
 // уже сидевший в контуре файла (их СУММА — определение сервера, см. TechCardMarkerInsert). Пару
@@ -74,7 +73,7 @@ function allowanceText(c: MarkerConditions): { total: string; origin: string } |
   const seam = c.seamAllowanceMm ?? 0;
   const contour = c.contourAllowanceMm;
   return {
-    total: `${cm2(seam + (contour ?? 0))} см`,
+    total: `${(seam + (contour ?? 0)).toFixed(1)} мм`,
     origin:
       contour == null
         ? // Замерить было нечем (один замкнутый контур в блоке). Сумма поэтому неполная, и

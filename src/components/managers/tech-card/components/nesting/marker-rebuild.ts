@@ -43,6 +43,7 @@ import type {
   googletype_Decimal,
 } from 'api/proto-http/admin';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
+import { mmToEngineCm } from './allowance-units';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { ParseOpts, PieceDTO, Pt } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
@@ -401,7 +402,9 @@ export function rebuildMarkerDrawingFromParsed(input: RebuildCoreInput): Rebuild
   // переставляется: припуск раздувает УЖЕ развёрнутый контур, и обратная последовательность дала
   // бы другую геометрию на том же входе.
   const oriented = orientToGrain(onLayer, conditions.grainLayer);
-  const seam = applySeamAllowance(oriented.pieces, conditions.seamAllowanceMm);
+  // Те же миллиметры→сантиметры, что в size-areas-from-dxf: пересборка обязана воспроизвести
+  // геометрию исходной раскладки, а движок читает сантиметры.
+  const seam = applySeamAllowance(oriented.pieces, mmToEngineCm(conditions.seamAllowanceMm));
   const candidates = seam.pieces;
   if (seam.hulled.length > 0) {
     warnings.push(`контур заменён выпуклой оболочкой: ${seam.hulled.join(', ')}`);

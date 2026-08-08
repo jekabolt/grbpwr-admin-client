@@ -38,6 +38,7 @@
 // вызывается всё равно: путь один, и расходиться ему негде.
 import type { common_TechCardMarker, common_TechCardMarkerPiece } from 'api/proto-http/admin';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
+import { mmToEngineCm } from './allowance-units';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { PieceDTO } from 'lib/nesting/types';
 import { deriveBlockSizes, normBlock } from './block-code';
@@ -114,7 +115,11 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     ? input.parsed.filter((p) => (p.layer ?? '') === conditions.contourLayer)
     : [...input.parsed];
   const oriented = orientToGrain(onLayer, conditions.grainLayer);
-  const seam = applySeamAllowance(oriented.pieces, conditions.seamAllowanceMm);
+  // МИЛЛИМЕТРЫ УСЛОВИЙ → САНТИМЕТРЫ ДВИЖКА. applySeamAllowance раздувает контуры в системе
+  // координат раскладки, а она сантиметровая; передать сюда миллиметры значит раздуть каждую
+  // деталь ВДЕСЯТЕРО и завысить площадь размера — ошибка, которая выглядит совершенно правдоподобно
+  // и всплывает только счётом от поставщика.
+  const seam = applySeamAllowance(oriented.pieces, mmToEngineCm(conditions.seamAllowanceMm));
   const candidates = seam.pieces;
   const warnings: string[] = [];
   if (seam.hulled.length > 0) {
