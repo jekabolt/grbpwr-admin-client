@@ -36,6 +36,7 @@ import {
   isRunReceivable,
   overdueDays,
   runDate,
+  runPackPath,
   runStatusLabel,
   runStatusTone,
 } from './components/options';
@@ -760,35 +761,44 @@ export function ProductionRunDetail() {
           </Text>
           <Text size='small'>{runTypeLabel}</Text>
         </div>
-        {canEdit && (
-          <div className='flex items-center gap-2'>
-            {receiveButton('lg', 'main')}
-            {/* A received/closed run rejects every update before the payload is examined
-                (ErrProductionRunReceivedImmutable), so the edit modal on it can only fail. */}
-            {!locked && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase'
-                onClick={() => setEditOpen(true)}
-              >
-                edit
-              </Button>
-            )}
-            {!locked && (
-              <Button
-                type='button'
-                variant='secondary'
-                size='lg'
-                className='uppercase'
-                onClick={() => setDeleteOpen(true)}
-              >
-                delete
-              </Button>
-            )}
-          </div>
-        )}
+        <div className='flex items-center gap-2'>
+          {/* НАРЯД — печатный документ ПАРТИИ (линии, кат-лист, настилы, выдача, короба). Стоит
+              вне гейта canEdit намеренно: распечатать наряд — это чтение, и требовать права на
+              правку прогона от того, кто несёт бумагу в цех, значило бы запереть документ за
+              ролью, которой у раскройщика нет. */}
+          <Button asChild variant='secondary' size='lg' className='uppercase'>
+            <Link to={runPackPath(run.id ?? 0)}>наряд — pdf</Link>
+          </Button>
+          {canEdit && (
+            <>
+              {receiveButton('lg', 'main')}
+              {/* A received/closed run rejects every update before the payload is examined
+                  (ErrProductionRunReceivedImmutable), so the edit modal on it can only fail. */}
+              {!locked && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  className='uppercase'
+                  onClick={() => setEditOpen(true)}
+                >
+                  edit
+                </Button>
+              )}
+              {!locked && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='lg'
+                  className='uppercase'
+                  onClick={() => setDeleteOpen(true)}
+                >
+                  delete
+                </Button>
+              )}
+            </>
+          )}
+        </div>
       </div>
 
       {/* The conveyor: five phases, the current one filled with ink. Read-only by design — it

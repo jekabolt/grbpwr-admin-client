@@ -173,6 +173,11 @@ const ProductionRunDetail = lazyRoute(() =>
     default: m.ProductionRunDetail,
   })),
 );
+const RunPackPrint = lazyRoute(() =>
+  import('components/managers/production-runs/print-page').then((m) => ({
+    default: m.RunPackPrint,
+  })),
+);
 const Accounts = lazyRoute(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
@@ -409,6 +414,9 @@ root.render(
                     no app chrome to isolate via fragile print CSS. */}
                 <Route path='/' element={<ProtectedBare />}>
                   <Route path={ROUTES.techCardPrint} element={<TechCardPrint />} />
+                  {/* Наряд на партию — бумага ПРОГОНА, не стиля: тех-пак печатает устройство
+                      изделия, наряд — тираж этой партии. Отсюда отдельный печатный роут. */}
+                  <Route path={ROUTES.productionRunPrint} element={<RunPackPrint />} />
                   <Route path={ROUTES.orderInvoice} element={<OrderInvoicePrint />} />
                 </Route>
                 {/* PUBLIC pattern viewer — what a printed tech-pack QR opens on a factory

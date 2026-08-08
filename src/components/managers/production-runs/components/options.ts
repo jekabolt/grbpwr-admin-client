@@ -5,6 +5,11 @@ import { ROUTES } from 'constants/routes';
 // navigate to it without importing its parent page — that would be a cycle.
 export const runDetailPath = (id: number) => ROUTES.productionRun.replace(':id', String(id));
 
+// Путь к НАРЯДУ НА ПАРТИЮ (печатный документ прогона). Стоит рядом с runDetailPath по той же
+// причине: ссылку на него ставит шапка прогона, и импортировать ради неё страницу-родителя значило
+// бы завести цикл.
+export const runPackPath = (id: number) => ROUTES.productionRunPrint.replace(':id', String(id));
+
 // Lifecycle statuses. RECEIVED is reached only through ReceiveProductionRun (which posts
 // stock) — never offered as a manual edit; UNKNOWN is never surfaced.
 export const runStatusOptions: { value: common_ProductionRunStatus; label: string }[] = [

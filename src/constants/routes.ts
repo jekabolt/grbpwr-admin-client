@@ -101,6 +101,11 @@ export enum ROUTES {
   workshop = '/workshop',
   productionRuns = '/production-runs',
   productionRun = '/production-runs/:id',
+  // НАРЯД НА ПАРТИЮ — печатный документ ПРОГОНА, а не стиля. Тех-пак карты отвечает «как это
+  // устроено», наряд — «сколько и из чего именно в ЭТОЙ партии»; поэтому у него свой роут на
+  // прогоне, а не лист внутри /tech-cards/:id/print. Регистрируется в index.tsx под ProtectedBare
+  // (без Layout) — по тем же причинам, что techCardPrint.
+  productionRunPrint = '/production-runs/:id/print',
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
   accounts = '/accounts',
