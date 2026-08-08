@@ -1,10 +1,8 @@
 import { ReactNode } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
 import Text from 'ui/components/text';
 import ComboField from 'ui/form/fields/combo-field';
 import InputField from 'ui/form/fields/input-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { TechCardFormData } from './schema';
 import {
   bagStickerOptions,
   foldingMethodOptions,
@@ -22,26 +20,6 @@ import {
 // field still round-trips (schema + map in/out) and prints to the tech pack, and the whole spec is
 // still optional (mapPackagingOut sends it unset when every field is blank).
 
-type PackagingValues = {
-  foldingMethod?: string;
-  polybag?: string;
-  bagSticker?: string;
-  inserts?: string;
-  unitsPerBox?: number | string;
-  boxMarking?: string;
-  boxDimensions?: string;
-  weightNetGrams?: number | string;
-  weightGrossGrams?: number | string;
-  notes?: string;
-};
-
-const num = (v?: number | string): number => {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : 0;
-};
-
-const kilos = (g: number): string => `${(g / 1000).toFixed(g >= 10000 ? 0 : 1)} kg`;
-
 // A scannable spec card: a bordered white tile with an uppercase group title over its fields.
 function SpecCard({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -55,21 +33,16 @@ function SpecCard({ title, children }: { title: string; children: ReactNode }) {
 }
 
 export function PackagingField() {
-  const { control } = useFormContext<TechCardFormData>();
-  const pkg = (useWatch({ control, name: 'packaging' }) ?? {}) as PackagingValues;
-  const sizeQuantities = (useWatch({ control, name: 'sizeQuantities' }) ?? []) as Array<{
-    orderQty?: number;
-  }>;
-
-  const perBox = num(pkg.unitsPerBox);
-  const grossG = num(pkg.weightGrossGrams);
-  const netG = num(pkg.weightNetGrams);
-
-  // The derived line reads the size run off the patterns tab (size_quantities), so "how many
-  // cartons does this style ship in" answers itself instead of being arithmetic on a napkin.
-  const run = sizeQuantities.reduce((n, q) => n + (q.orderQty ?? 0), 0);
-  const cartons = run > 0 && perBox > 0 ? Math.ceil(run / perBox) : 0;
-  const runWeightG = cartons > 0 && grossG > 0 ? cartons * grossG : run > 0 ? run * netG : 0;
+  // Nothing is watched here any more — every control below is a self-binding form field. The
+  // component used to subscribe to `packaging` only to feed the derived carton line described
+  // below, and re-rendered the whole spec grid on every keystroke to do it.
+  //
+  // NO derived "N-piece run → M cartons · X kg" line here any more. It multiplied the card's
+  // typical calculation size run (size_quantities), which no longer exists — a style has no run
+  // size of its own. The carton/weight arithmetic moved to the RUN PACK (наряд на партию), where
+  // it is computed from the run's real plan lines. What stays here is the SPEC — units per box,
+  // dimensions, net/gross weight, polybag — which is a property of the style and is what the run
+  // pack multiplies. Do not re-derive a run figure on this tab: there is nothing to derive it from.
 
   return (
     <div id='packaging-spec' className='flex flex-col gap-3'>
@@ -140,16 +113,6 @@ export function PackagingField() {
       </div>
 
       <TextareaField name='packaging.notes' label='notes' rows={2} maxLength={2000} />
-
-      {run > 0 && (
-        <Text size='micro' variant='label'>
-          {`${run}-piece run`}
-          {cartons > 0
-            ? ` → ${cartons} ${cartons === 1 ? 'carton' : 'cartons'}`
-            : ' → set units per box for a carton count'}
-          {runWeightG > 0 ? ` · ${kilos(runWeightG)}` : ''}
-        </Text>
-      )}
     </div>
   );
 }

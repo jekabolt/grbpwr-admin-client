@@ -304,24 +304,9 @@ export function CreateRunModal({
   const setCell = (colorwayId: number, sizeId: number, v: string) =>
     setQty((prev) => ({ ...prev, [qtyKey(colorwayId, sizeId)]: v.replace(/[^0-9]/g, '') }));
 
-  const prefillFromSizeRun = () => {
-    const sq = card?.techCard?.sizeQuantities ?? [];
-    if (selected.length === 0 || sq.length === 0) return;
-    setQty((prev) => {
-      const next = { ...prev };
-      for (const cw of selected) {
-        for (const row of sq) {
-          const k = qtyKey(cw, row.sizeId ?? 0);
-          if (row.sizeId && row.orderQty && !next[k]?.trim()) next[k] = String(row.orderQty);
-        }
-      }
-      return next;
-    });
-    showMessage(
-      'Префилл из типового тиража карты — это калькуляционная величина, не заказ; проверьте план партии',
-      'success',
-    );
-  };
+  // Префилла «из типового тиража» здесь больше нет: тираж удалён с тех-карты, и подставлять
+  // в план партии нечего. Замены нет НАРОЧНО — количества на прогоне набирают руками, это и был
+  // смысл разделения: карточка описывает изделие, прогон — сколько его шьют в этот раз.
 
   const totalUnits = cells.reduce((s, c) => s + (c.plannedQty ?? 0), 0);
 
@@ -584,22 +569,7 @@ export function CreateRunModal({
                 {/* ── 4. количества ─────────────────────────────────────────────────────── */}
                 {selected.length > 0 && sizeIds.length > 0 ? (
                   <div className='flex flex-col gap-1'>
-                    <GroupLabel
-                      flush
-                      action={
-                        <Button
-                          type='button'
-                          variant='secondary'
-                          size='xs'
-                          disabled={(card?.techCard?.sizeQuantities ?? []).length === 0}
-                          onClick={prefillFromSizeRun}
-                        >
-                          префилл из типового тиража
-                        </Button>
-                      }
-                    >
-                      количества (колорвей × размер)
-                    </GroupLabel>
+                    <GroupLabel flush>количества (колорвей × размер)</GroupLabel>
                     <div className='overflow-x-auto'>
                       <table className='border-collapse'>
                         <thead>

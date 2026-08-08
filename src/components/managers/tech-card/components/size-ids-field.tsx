@@ -23,13 +23,14 @@ import { TechCardFormData } from './schema';
 // glance and the common case needs no overlay at all. The popover behind "more systems" only
 // carries what the category filtered out.
 //
-// Per-size patterns, the size run and the colourways' per-size consumption all reference ids from
-// this set. Removing a size prunes what this form owns (patterns, order qty) and is confirmed first,
-// with the real counts, because that data is gone once it goes. The colourway norms are NOT this
-// form's to prune — they are colourway-owned, saved by their own RPC — so they are counted and
-// named, not silently promised.
+// Per-size patterns and the colourways' per-size consumption reference ids from this set. Removing
+// a size prunes what this form owns (patterns) and is confirmed first, with the real counts,
+// because that data is gone once it goes. The colourway norms are NOT this form's to prune — they
+// are colourway-owned, saved by their own RPC — so they are counted and named, not silently
+// promised. Nothing here counts order quantities any more: the typical calculation size run is
+// gone from the card, and a run's plan lives on the run itself.
 export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRef[] }) {
-  const { control, setValue, getValues } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const { dictionary } = useDictionary();
 
   const sizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
@@ -44,10 +45,6 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
     sizeId?: number;
     url?: string;
   }>;
-  const sizeQuantities = (useWatch({ control, name: 'sizeQuantities' }) ?? []) as Array<{
-    sizeId?: number;
-  }>;
-
   const [pendingRemove, setPendingRemove] = useState<number | null>(null);
 
   // Same filter the picker popover uses — one hook, so the inline grid and the overlay can never
@@ -91,11 +88,9 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
           .length,
       0,
     );
-  const quantityCount = (id: number) => sizeQuantities.filter((q) => q.sizeId === id).length;
   // DXF входят в «размер не свободен»: они не теряются, но их size_id меняется, форма грязнится,
   // а в случае последнего размера они вообще становятся сиротами. Молча — не годится.
-  const attachedCount = (id: number) =>
-    patternCount(id) + dxfCount(id) + usageLineCount(id) + quantityCount(id);
+  const attachedCount = (id: number) => patternCount(id) + dxfCount(id) + usageLineCount(id);
 
   const pruneAndRemove = (id: number) => {
     setValue(
@@ -119,15 +114,8 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         { shouldDirty: true },
       );
     }
-    // prune the size's order qty
-    const quantities = (getValues('sizeQuantities') ?? []) as Array<{ sizeId?: number }>;
-    if (quantities.some((q) => q.sizeId === id)) {
-      setValue(
-        'sizeQuantities',
-        quantities.filter((q) => q.sizeId !== id) as TechCardFormData['sizeQuantities'],
-        { shouldDirty: true },
-      );
-    }
+    // No order-qty pass either: the card no longer holds a size run to prune — the batch plan
+    // lives on the production run, keyed by its own (product, size) lines.
     // No colourway pass. It used to walk the RHF `colorways` array and prune each usage's
     // sizeConsumptions — over a permanently empty array, so it pruned nothing while reading as if
     // it handled the case. Those norms belong to the colourway's own recipe write; the confirmation
@@ -139,7 +127,7 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
       setValue('sizeIds', [...sizeIds, id], { shouldDirty: true });
       return;
     }
-    // removing — confirm first if it would discard patterns / per-size consumption / order qty
+    // removing — confirm first if it would discard patterns / per-size consumption
     if (attachedCount(id) > 0) {
       setPendingRemove(id);
       return;
@@ -185,7 +173,7 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
                     }
                   >
                     {formatSizeName(s.name)}
-                    {/* a size carrying patterns / consumption / order qty is not a free deselect */}
+                    {/* a size carrying patterns / consumption is not a free deselect */}
                     {attached > 0 && <span aria-hidden>•</span>}
                   </Chip>
                 );
@@ -258,10 +246,6 @@ export function SizeIdsField({ colorways }: { colorways?: common_AdminColorwayRe
         <Row
           label='строки расхода по размерам (колорвеи)'
           value={pendingRemove != null ? usageLineCount(pendingRemove) : 0}
-        />
-        <Row
-          label='заказ по размеру (size run)'
-          value={pendingRemove != null ? quantityCount(pendingRemove) : 0}
         />
       </ConfirmationModal>
     </div>

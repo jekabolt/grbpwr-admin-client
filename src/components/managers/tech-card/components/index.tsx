@@ -83,7 +83,6 @@ import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
 import { StyleNumberField } from './style-number-field';
 import { RolesField } from './roles-field';
-import { SizeQuantitiesField } from './size-quantities-field';
 import { SketchTab } from './sketch-tab';
 import {
   TechCardFormData,
@@ -168,7 +167,6 @@ const ERROR_TAB: Record<string, TabId> = {
   callouts: 'sketch',
   patterns: 'patterns',
   sizeIds: 'patterns',
-  sizeQuantities: 'patterns',
   bomItems: 'bom',
   // Cut pieces (and their DXF block aliases) render on PATTERNS. A `pieces.N.*` violation routed
   // anywhere else raises a toast naming a field nobody can see.
@@ -1706,13 +1704,12 @@ export function TechCardForm({
               <Section title='size range'>
                 {/* The colourways AS READ: their recipes grade per-size consumption, and that is
                     what makes removing a size destructive beyond this form. */}
+                {/* Здесь стоял «size run (order qty)» — типовой калькуляционный тираж карты.
+                    Он удалён вместе с size_quantities: себестоимость стиля считается по норме
+                    БАЗОВОГО размера, а реальный тираж живёт на прогоне (production_run), у
+                    которого своя сетка колорвей × размер. Выдуманный микс размеров не влиял ни
+                    на одну цифру и только притворялся планом — не возвращать его сюда. */}
                 <SizeIdsField colorways={techCard?.colorways} />
-                <div className='space-y-2 border-t border-textInactiveColor pt-3'>
-                  <Text variant='uppercase' size='small'>
-                    size run (order qty)
-                  </Text>
-                  <SizeQuantitiesField />
-                </div>
               </Section>
               <Section title='размерная таблица (межурменты) — общая для всех колорвеев стиля'>
                 <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />

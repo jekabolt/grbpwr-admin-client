@@ -145,7 +145,8 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
 
   // NOTE (Phase 0b #17): there used to be a "part of the materials are graded per size, part per
   // garment — the total mixes scales" warning here. It was FALSE. The server normalises a size-only
-  // usage to a per-garment figure by dividing it by the total order qty before it ever reaches
+  // usage to a per-garment figure — nowadays by the norm of the card's BASE SIZE, formerly by
+  // dividing it by the total order qty — before it ever reaches
   // materials_per_unit (see TechCardCosting's own contract comment, entity/techcard.go), so the two
   // ways of grading a usage do NOT mix scales in the rollup. The callout only frightened people off
   // per-size grading, which is the more precise of the two. Removed, not fixed.
@@ -201,7 +202,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   // nobody at all. That made the headline a second implementation of a decimal.Decimal calculation
   // that seeds cost_price: it agreed with the server only by luck, and every understatement the
   // server's own rollup carries (an FX-less BOM line dropped from materials_per_unit, a size-graded
-  // usage normalised by order qty) was re-derived here into margins and a waterfall that read as
+  // usage normalised to one garment) was re-derived here into margins and a waterfall that read as
   // authoritative. Now: unchanged form → the SERVER's figure; unsaved edits → the local preview,
   // labelled as a draft so nobody prices against a number the server has never seen.
   const serverUnitCost = num(decimalToInput(rollup?.unitCost));
@@ -539,11 +540,12 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         <DataTable>
           <thead>
             <tr>
+              {/* No qty / order cost columns: a style has no batch size of its own. They showed
+                  Σ(типовой тираж) × unit cost, and with the typical size run gone they would
+                  read 0 — «партия бесплатная». The batch total belongs to the production run. */}
               <th>colourway</th>
               <th>materials / unit</th>
               <th>unit cost</th>
-              <th>qty</th>
-              <th>order cost</th>
             </tr>
           </thead>
           <tbody>
@@ -569,8 +571,6 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 </td>
                 <td>{decimalToInput(cc.materialsPerUnit) || <EmptyCell />}</td>
                 <td>{decimalToInput(cc.unitCost) || <EmptyCell />}</td>
-                <td>{cc.orderQty || <EmptyCell />}</td>
-                <td>{decimalToInput(cc.orderCost) || <EmptyCell />}</td>
               </tr>
             ))}
           </tbody>

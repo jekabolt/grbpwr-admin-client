@@ -35,7 +35,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Button, buttonVariants } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { DataTable, EmptyCell } from 'ui/components/data-table';
+import { DataTable } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
@@ -150,9 +150,11 @@ type UsageDraft = {
   // preserved verbatim across the full-replace so a save never drops per-size grading / piece links.
   sizeConsumptions: { sizeId?: number; consumption?: string }[];
   pieceLineKey: string;
-  // display-only (server-computed, stripped without costing:read).
+  // display-only (server-computed, stripped without costing:read). Per GARMENT only: the
+  // whole-batch figure (size_run_total) is not carried any more — it was Σ(норма × типовой тираж)
+  // over a made-up size run that no longer exists, i.e. a cost for a batch nobody ordered. The
+  // real batch spend belongs to the production run, which knows its own colourway × size lines.
   lineTotal: string;
-  sizeRunTotal: string;
   // Wastage provenance (0261). 'marker' = the norm came from a saved раскладка and its measured
   // length ALREADY contains the cutting waste, so costing must not gross it up again; '' =
   // typed by hand and the article's wastage_percent applies as before. The two pcts are the
@@ -547,7 +549,6 @@ function fromRead(
     })),
     pieceLineKey: u.pieceLineKey || piecesById.get(wireInt(u.pieceId))?.lineKey || '',
     lineTotal: decimalToInput(u.lineTotal),
-    sizeRunTotal: decimalToInput(u.sizeRunTotal),
     // The server normalises '' to 'manual', so a row this client has saved once reads back as
     // 'manual' while a hand edit writes ''. Both mean the same thing, and leaving them distinct
     // made a no-op edit (type 1.5 over 1.5) differ from its baseline signature and claim a
@@ -587,43 +588,18 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
     consumptionSource: d.consumptionSource,
     wasteSelvedgePct: inputToDecimal(d.wasteSelvedgePct),
     wasteCutPct: inputToDecimal(d.wasteCutPct),
-    // output-only — never sent
+    // output-only — never sent. size_run_total stays in the wire shape (the proto field still
+    // exists) but the editor neither reads nor shows it: see the note on UsageDraft.
     lineTotal: undefined,
     sizeRunTotal: undefined,
   };
 }
 
-// Client-side preview of the whole-run spend for a measured usage (the backend computes the
-// authoritative size_run_total): Σ(consumption_size × orderQty_size) × price × (1 + wastage%).
-//
-// wastagePercent приходит УЖЕ решённым: на норме с consumption_source='marker' звонящий обязан
-// передать '' — измеренная длина содержит и выпады, и кромку, и костинг на ней процент НЕ
-// начисляет. Предпросмотр, начислявший его безусловно, противоречил колауту диалога применения
-// на том же экране и завышал «расход на партию» ровно на (1 + wastage%).
-function runTotalPreview(
-  sizeIds: number[],
-  consumptionBySize: Map<number, string>,
-  orderQtyBySize: Map<number, number>,
-  unitPrice: string,
-  wastagePercent: string,
-): string {
-  const price = Number(unitPrice);
-  if (!unitPrice.trim() || Number.isNaN(price)) return '';
-  let units = 0;
-  let any = false;
-  for (const id of sizeIds) {
-    const raw = consumptionBySize.get(id);
-    const c = Number(raw);
-    if (raw?.trim() && !Number.isNaN(c)) {
-      units += c * (orderQtyBySize.get(id) ?? 0);
-      any = true;
-    }
-  }
-  if (!any || units === 0) return '';
-  const wastage = Number(wastagePercent) || 0;
-  const total = units * price * (1 + wastage / 100);
-  return Number.isFinite(total) ? String(Number(total.toFixed(2))) : '';
-}
+// There used to be a runTotalPreview() here — a client-side «расход на партию» estimate,
+// Σ(норма_размера × типовой тираж_размера) × цена × (1 + wastage%). It is gone with the typical
+// size run it multiplied: without an order quantity per size there is no batch to price on this
+// screen. The per-garment norm is what the recipe owns; the batch spend is the production run's,
+// computed from its own plan lines. Do not reintroduce a local batch estimate here.
 
 // A composition code as the operator reads it. The code slot holds different things depending on who
 // wrote the line: the CompositionPicker stores garment-composition CODES ('COT'), a catalog-linked
@@ -681,12 +657,12 @@ function deriveComposition(
 
 // Per-size consumption grading for one measured usage (ported from colorways-field.tsx into the
 // live local-state editor, M8/§296). Two chips flip between «один на изделие» (the single
-// consumption) ↔ «по размерам» (a grid of one input per declared card size), with a live run-cost
-// preview using the referenced article's price/wastage.
+// consumption) ↔ «по размерам» (a grid of one input per declared card size). NO batch preview:
+// this grid states the NORM per size, and the money a batch of it costs is the production run's
+// question, not the recipe's.
 function UsagePerSizeLocal({
   draft,
   sizeIds,
-  sizeQuantities,
   article,
   canEdit,
   sizeNameById,
@@ -694,7 +670,6 @@ function UsagePerSizeLocal({
 }: {
   draft: UsageDraft;
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   article?: BomLine;
   canEdit: boolean;
   sizeNameById: Map<number, string>;
@@ -706,8 +681,6 @@ function UsagePerSizeLocal({
   const consumptionBySize = new Map<number, string>();
   for (const e of draft.sizeConsumptions)
     if (e.sizeId != null) consumptionBySize.set(e.sizeId, e.consumption ?? '');
-  const orderQtyBySize = new Map<number, number>();
-  for (const q of sizeQuantities) if (q.sizeId) orderQtyBySize.set(q.sizeId, q.orderQty ?? 0);
 
   // Every hand edit of the NUMBER drops the marker provenance (see MANUAL_PROVENANCE): the
   // decomposition described a length this figure no longer is, and costing must go back to
@@ -744,19 +717,7 @@ function UsagePerSizeLocal({
     onChange(manual({ sizeConsumptions: next }));
   };
 
-  const preview = runTotalPreview(
-    sizeIds,
-    consumptionBySize,
-    orderQtyBySize,
-    article?.unitPrice ?? '',
-    // Маркерная норма уже содержит отходы — процент артикула к ней не применяется (см. комментарий
-    // у runTotalPreview; то же правило, что у серверного size_run_total).
-    draft.consumptionSource === 'marker' ? '' : article?.wastagePercent ?? '',
-  );
-  const currency = article?.currency ?? '';
   const unit = article?.unit?.trim() || '';
-  const hasOrderQty = sizeIds.some((id) => (orderQtyBySize.get(id) ?? 0) > 0);
-  const hasAnyConsumption = sizeIds.some((id) => consumptionBySize.get(id)?.trim());
 
   return (
     <div className='flex flex-col gap-1.5'>
@@ -812,44 +773,8 @@ function UsagePerSizeLocal({
                   </td>
                 ))}
               </tr>
-              <tr>
-                <td>order qty</td>
-                {sizeIds.map((id) => (
-                  <td key={id} className='text-labelColor'>
-                    {orderQtyBySize.get(id) || <EmptyCell />}
-                  </td>
-                ))}
-              </tr>
-              <tr>
-                <td className='font-bold'>расход на партию ≈</td>
-                <td colSpan={sizeIds.length} className='!text-right font-bold'>
-                  {preview ? `${preview} ${currency}`.trim() : '—'}
-                </td>
-              </tr>
             </tbody>
           </DataTable>
-          {draft.sizeRunTotal && (
-            <Row
-              tone='label'
-              label={
-                <Text size='micro' variant='label' component='span'>
-                  сохранённое
-                </Text>
-              }
-              value={
-                <Text size='micro' variant='label' component='span'>
-                  {draft.sizeRunTotal} {currency}
-                </Text>
-              }
-            />
-          )}
-          {hasAnyConsumption && !hasOrderQty && (
-            <CalloutBox tone='warning'>
-              <Text size='micro' component='span'>
-                заполните тираж по размерам (patterns → size run), чтобы посчитать расход на партию
-              </Text>
-            </CalloutBox>
-          )}
         </div>
       )}
     </div>
@@ -1211,7 +1136,6 @@ function blankDraft(pieceLineKey: string, placement: string): UsageDraft {
     sizeConsumptions: [],
     pieceLineKey,
     lineTotal: '',
-    sizeRunTotal: '',
     ...MANUAL_PROVENANCE,
   };
 }
@@ -1229,7 +1153,6 @@ function SlotUsageRow({
   usedKeys,
   materials,
   sizeIds,
-  sizeQuantities,
   sizeNameById,
   canEdit,
   markers,
@@ -1246,7 +1169,6 @@ function SlotUsageRow({
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
   onChange: (patch: Partial<UsageDraft>) => void;
@@ -1359,7 +1281,6 @@ function SlotUsageRow({
             <UsagePerSizeLocal
               draft={draft}
               sizeIds={sizeIds}
-              sizeQuantities={sizeQuantities}
               article={article}
               canEdit={canEdit}
               sizeNameById={sizeNameById}
@@ -1438,11 +1359,11 @@ function SlotUsageRow({
           </div>
         )}
 
-        {(draft.lineTotal || draft.sizeRunTotal) && (
+        {/* Per-garment only. The `run …` half of this line printed the server's size_run_total —
+            the cost of the card's made-up typical batch — and went with it. */}
+        {draft.lineTotal && (
           <Text size='micro' variant='label'>
-            {draft.lineTotal ? `per garment ${draft.lineTotal}` : ''}
-            {draft.lineTotal && draft.sizeRunTotal ? ' · ' : ''}
-            {draft.sizeRunTotal ? `run ${draft.sizeRunTotal}` : ''}
+            per garment {draft.lineTotal}
           </Text>
         )}
       </div>
@@ -1460,7 +1381,6 @@ function PieceRecipeCard({
   markers,
   colorwayId,
   sizeIds,
-  sizeQuantities,
   sizeNameById,
   canEdit,
   canAdd,
@@ -1476,7 +1396,6 @@ function PieceRecipeCard({
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
   canAdd: boolean;
@@ -1521,7 +1440,6 @@ function PieceRecipeCard({
               markers={markers}
               colorwayId={colorwayId}
               sizeIds={sizeIds}
-              sizeQuantities={sizeQuantities}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
               onChange={(patch) => onChange(index, patch)}
@@ -2040,7 +1958,6 @@ function ColorwayRecipeEditor({
   markers,
   pieces,
   sizeIds,
-  sizeQuantities,
   sizeNameById,
   swatchHex,
   lockVersion,
@@ -2054,7 +1971,6 @@ function ColorwayRecipeEditor({
   markers?: common_TechCardMarkerSummary[];
   pieces: RecipePiece[];
   sizeIds: number[];
-  sizeQuantities: { sizeId?: number; orderQty?: number }[];
   sizeNameById: Map<number, string>;
   swatchHex?: string;
   lockVersion: number;
@@ -2290,8 +2206,7 @@ function ColorwayRecipeEditor({
                   markers={cwMarkers}
                   colorwayId={colorwayId}
                   sizeIds={sizeIds}
-                  sizeQuantities={sizeQuantities}
-                  sizeNameById={sizeNameById}
+                      sizeNameById={sizeNameById}
                   canEdit={canEdit}
                   canAdd={canAddTo(PIECE_SECTIONS, rows)}
                   onAdd={() =>
@@ -2353,8 +2268,7 @@ function ColorwayRecipeEditor({
                 markers={cwMarkers}
                 colorwayId={colorwayId}
                 sizeIds={sizeIds}
-                sizeQuantities={sizeQuantities}
-                sizeNameById={sizeNameById}
+                  sizeNameById={sizeNameById}
                 canEdit={canEdit}
                 onChange={(patch) => patchUsage(index, patch)}
                 onRemove={() => removeUsage(index)}
@@ -2642,10 +2556,6 @@ export function ColorwayRecipes({
     [formBom, serverBomIdByKey, materialById],
   );
   const sizeIds = (techCard?.techCard?.sizeIds ?? []) as number[];
-  const sizeQuantities = (techCard?.techCard?.sizeQuantities ?? []) as {
-    sizeId?: number;
-    orderQty?: number;
-  }[];
   const sizeNameById = useMemo(() => {
     const m = new Map<number, string>();
     for (const s of dictionary?.sizes ?? []) if (s.id != null) m.set(s.id, s.name ?? `#${s.id}`);
@@ -2755,7 +2665,6 @@ export function ColorwayRecipes({
             markers={techCard?.markers}
             pieces={pieces}
             sizeIds={sizeIds}
-            sizeQuantities={sizeQuantities}
             sizeNameById={sizeNameById}
             swatchHex={hexByCode.get(cw.colorCode ?? '')}
             lockVersion={lockVersion}

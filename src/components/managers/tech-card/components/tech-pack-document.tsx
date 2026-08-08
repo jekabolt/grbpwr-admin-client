@@ -1012,7 +1012,9 @@ export function TechPackDocument({
                           <th className={TH}>material</th>
                           <th className={TH}>colour</th>
                           <th className={`${TH} text-right`}>cons. / qty</th>
-                          <th className={`${TH} text-right`}>run total</th>
+                          {/* No «run total»: it printed size_run_total, the spend on the card's
+                              typical calculation batch. A style has no batch — the run does. */}
+                          <th className={`${TH} text-right`}>per garment</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1032,7 +1034,7 @@ export function TechPackDocument({
                                 {cons ? `${cons} ${art?.unit ?? ''}`.trim() : '—'}
                               </td>
                               <td className={`${TD} whitespace-nowrap text-right`}>
-                                {dec(u.sizeRunTotal) || dec(u.lineTotal) || '—'}
+                                {dec(u.lineTotal) || '—'}
                               </td>
                             </tr>
                           );
@@ -1323,7 +1325,10 @@ export function TechPackDocument({
             <div>
               <KV k='materials / unit (primary cw)' v={dec(tc.costing.materialsPerUnit)} />
               <KV k='unit cost' v={dec(tc.costing.unitCost)} />
-              <KV k='order qty' v={tc.costing.orderQty ? String(tc.costing.orderQty) : ''} />
+              {/* No «order qty» / «order cost» on paper. They were the card's typical calculation
+                  size run and unit cost × that run; the run is gone, so printing them would put a
+                  zero-priced batch on a sheet a workshop reads as an order. The batch figures are
+                  printed by the run pack (наряд на партию), from the run's own plan lines. */}
               <KV k='total SAM (min)' v={dec(tc.costing.totalSam)} />
             </div>
           </div>
@@ -1336,7 +1341,6 @@ export function TechPackDocument({
                   <th className={TH}>colourway</th>
                   <th className={`${TH} text-right`}>materials / unit</th>
                   <th className={`${TH} text-right`}>unit cost</th>
-                  <th className={`${TH} text-right`}>order cost</th>
                 </tr>
               </thead>
               <tbody>
@@ -1356,9 +1360,6 @@ export function TechPackDocument({
                       <td className={`${TD} whitespace-nowrap text-right`}>
                         {dec(cc.unitCost) || '—'}
                       </td>
-                      <td className={`${TD} whitespace-nowrap text-right`}>
-                        {dec(cc.orderCost) || '—'}
-                      </td>
                     </tr>
                   );
                 })}
@@ -1366,16 +1367,12 @@ export function TechPackDocument({
             </table>
           )}
 
-          <div className='mt-2 flex items-center justify-between border-t border-black pt-1 text-sm'>
+          {/* The sheet's closing total is the UNIT cost now that «order cost» is gone, so it
+              takes the heavy 2px rule that used to close the sheet under the batch figure. */}
+          <div className='mt-2 flex items-center justify-between border-t-2 border-black pt-1 text-sm'>
             <span className='font-bold uppercase'>unit cost</span>
             <span className='font-bold'>
               {dec(tc.costing.unitCost) || '—'} {tc.costing.currency ?? ''}
-            </span>
-          </div>
-          <div className='mt-1 flex items-center justify-between border-t-2 border-black pt-1 text-sm'>
-            <span className='font-bold uppercase'>order cost</span>
-            <span className='font-bold'>
-              {dec(tc.costing.orderCost) || '—'} {tc.costing.currency ?? ''}
             </span>
           </div>
           {tc.costing.hasUnconvertedCurrencies && (
