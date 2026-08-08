@@ -15,16 +15,15 @@ import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
-import { Row } from 'ui/components/row';
+import { Row, RowTotal } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
-import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { AuxRunPlan, materialLabel } from './components/aux-run-plan';
@@ -42,13 +41,7 @@ import {
 } from './components/options';
 import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
-import {
-  RunConveyor,
-  RunStepId,
-  StepGlyph,
-  UnsavedBadge,
-  buildRunSteps,
-} from './components/run-conveyor';
+import { RunConveyor, RunStepId, buildRunSteps } from './components/run-conveyor';
 import { RunCosts } from './components/run-costs';
 import { RunReceiptTable } from './components/run-receipt-table';
 import { allLayChecks, layVerdict, useRunLays, worstVerdict } from './components/useLays';
@@ -62,12 +55,17 @@ import {
 } from './components/useProductionRuns';
 
 // A run walks through six phases — план → материалы → раскрой → приёмка → затраты → закрытие — and
-// the page shows the ONE it is in: the conveyor band names them all with a line of fact each, the
-// current phase's panel is open below it, and the rest collapse to a row apiece that can be
-// expanded in place. Sixteen stacked blocks used to make the page a scroll-hunt for "what do I do
-// next" — the answer is now the ink-filled step and the callout under it. Nothing about the phases'
-// CONTENT changed: each panel is the same editor as before, with the same RPCs, the same permission
-// gates and the same refusal messages.
+// the page shows the ONE it is in: the conveyor band names them all with a line of fact each and
+// IS the switch between them, with that phase's panel open underneath. Sixteen stacked blocks used
+// to make the page a scroll-hunt for "what do I do next" — the answer is now the ink-filled step
+// and the note beside it. Nothing about the phases' CONTENT changed: each panel is the same editor
+// as before, with the same RPCs, the same permission gates and the same refusal messages.
+//
+// The band used to be inert and the phases were opened from a «остальные шаги» list at the very
+// bottom of the page — the map and its controls two thousand pixels apart. The band is the
+// navigation now, and that list is gone. The batch's own numbers (quantities, and money for a
+// costing role) moved out of two full-width stat grids into one ledger column beside the work,
+// which is what buys the first panel a place above the fold.
 //
 // Ф4's «шаг 3 · как раскроить» (lay-plan.tsx) is a phase in its own right here, between materials
 // and receiving: it cannot start before the fabric is issued and nothing can be received before it
@@ -135,27 +133,14 @@ export function ProductionRunDetail() {
   // rolls back cost_price); the client gates on the two it can see.
   const canReverse = canEdit && canWriteCosting;
 
-  // Which steps the operator has EXPANDED by hand. `true` = expanded, `false`/absent = collapsed.
-  // Visibility only — what keeps a panel alive is `mountedRef` below, not this map.
-  const [openSteps, setOpenSteps] = useState<Partial<Record<RunStepId, boolean>>>({});
-  // Expanding scrolls the panel into view: it renders above the step list, so a click that only
-  // flipped state could visibly do nothing at all. Set on expand, consumed by the effect below —
-  // the panel has to be visible before it can be scrolled to.
-  const [scrollToStep, setScrollToStep] = useState<RunStepId | null>(null);
-  const toggleStep = (step: RunStepId) => {
-    const opening = !openSteps[step];
-    setOpenSteps((prev) => ({ ...prev, [step]: !prev[step] }));
-    if (opening) setScrollToStep(step);
-  };
-  useEffect(() => {
-    if (scrollToStep == null) return;
-    const node = document.getElementById(stepDomId(scrollToStep));
-    node?.scrollIntoView({
-      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
-      block: 'start',
-    });
-    setScrollToStep(null);
-  }, [scrollToStep]);
+  // WHICH PHASE IS ON SCREEN. The conveyor band is the navigation now, so exactly one panel is
+  // open at a time and this is which — `null` until the operator picks, meaning "wherever the run
+  // itself stands".
+  //
+  // It is deliberately NOT reset when the run's own phase moves: an operator who opened «материалы»
+  // to chase a shortage must not have the panel swapped for the receipt table because a colleague
+  // started the run in another tab.
+  const [pickedStep, setPickedStep] = useState<RunStepId | null>(null);
 
   // The "· unsaved" flags used to live inside each panel's own heading, one per save button, which
   // is precisely where nobody looking for them was. They report up here now and render as one badge
@@ -352,7 +337,14 @@ export function ProductionRunDetail() {
     },
   });
   const currentStep = steps.find((s) => s.current)?.id ?? null;
-  const otherSteps = steps.filter((s) => s.id !== currentStep);
+  // The phase on screen: the operator's pick, else where the run stands. A pick that no longer
+  // exists on the band (costing:read lost mid-session, an aux run with no cutting phase) falls back
+  // rather than showing nothing at all.
+  const activeStep =
+    (pickedStep != null && steps.some((s) => s.id === pickedStep) ? pickedStep : null) ??
+    currentStep ??
+    steps[0]?.id ??
+    null;
 
   // Every step that has been on screen at least once. The panels live in ONE keyed list and only
   // their VISIBILITY moves, because a panel that changes place in the tree unmounts — and an
@@ -361,12 +353,15 @@ export function ProductionRunDetail() {
   // slot would die exactly when the operator had quantities in it. Accumulated in a ref during
   // render (adding to a set is idempotent, so a StrictMode double render is harmless); an effect
   // would leave the current phase's panel unrendered for a frame.
+  //
+  // Switching tabs therefore HIDES a panel, never unmounts it: a half-typed lines grid survives a
+  // trip to the materials tab and back.
   if (currentStep != null) mountedRef.current.add(currentStep);
-  for (const key of Object.keys(openSteps)) mountedRef.current.add(Number(key) as RunStepId);
-  // Current phase first — it is what the page is about — then the rest in conveyor order.
+  if (activeStep != null) mountedRef.current.add(activeStep);
+  // Active phase first — it is what the page is about — then the rest in conveyor order.
   const mountedPanels = [
-    ...steps.filter((s) => s.id === currentStep),
-    ...steps.filter((s) => s.id !== currentStep && mountedRef.current.has(s.id)),
+    ...steps.filter((s) => s.id === activeStep),
+    ...steps.filter((s) => s.id !== activeStep && mountedRef.current.has(s.id)),
   ];
 
   const colorwayLabel = (productId: number) => {
@@ -760,6 +755,15 @@ export function ProductionRunDetail() {
             ) : null}
           </Text>
           <Text size='small'>{runTypeLabel}</Text>
+          {/* The batch's own note. It used to be readable only on the list card that this rework
+              replaced with a table row — and on a received/closed run even the edit modal is
+              withheld (the server refuses the update), so without this line the text an operator
+              typed would be permanently unreachable. */}
+          {ins?.notes ? (
+            <Text variant='label' size='small'>
+              {ins.notes}
+            </Text>
+          ) : null}
         </div>
         {canEdit && (
           <div className='flex items-center gap-2'>
@@ -792,120 +796,82 @@ export function ProductionRunDetail() {
         )}
       </div>
 
-      {/* The conveyor: five phases, the current one filled with ink. Read-only by design — it
-          reports where the run is, the panels below it act. */}
-      <RunConveyor steps={steps} />
+      {/* The conveyor: six phases, and the way between them. The cell of the phase on screen is
+          ink-filled; the ▶ glyph still names the phase the run itself is in. */}
+      <RunConveyor steps={steps} active={activeStep} onSelect={setPickedStep} panelId={stepDomId} />
 
-      {/* What to do next — the single sentence the rest of the page exists to support. Visible
-          text, not a hover-only tooltip, so a blocked receive is obvious before it's clicked. */}
-      {guidance ? (
-        <CalloutBox tone={GUIDANCE_TONE[guidance.tone]}>
-          <Text size='small'>
-            {guidance.text}
-            {guidance.href ? (
-              <>
-                {' '}
-                <Link to={guidance.href} className='underline'>
-                  {guidance.linkLabel}
-                </Link>
-              </>
-            ) : null}
-          </Text>
-        </CalloutBox>
-      ) : null}
+      {/* The work on the left, the batch's own numbers on the right. Two stat grids used to sit
+          between the band and the first panel — thirty-odd cells of chrome that pushed the thing
+          an operator came to do below the fold. They are one ledger column now, and it stays in
+          view while the panel beside it scrolls. */}
+      <div className='grid gap-6 lg:grid-cols-[1fr_250px]'>
+        <div className='flex min-w-0 flex-col gap-6'>
+          {/* The phases' panels: ONE keyed list, active phase first, everything else hidden. See
+              mountedPanels — the list is what keeps a draft alive across a phase change, so
+              nothing here may move a panel to another place in the tree. */}
+          {mountedPanels.map((s) => (
+            <SectionStack key={s.id} hidden={s.id !== activeStep}>
+              {stepPanel(s.id)}
+            </SectionStack>
+          ))}
+        </div>
 
-      {/* Quantity is not money — shown to anyone who can open the run, matching the lines grid
-          below (which is likewise never costing-gated). This is the whole batch, not one phase,
-          so it stays under the band whatever step the run is in. */}
-      <StatGrid>
-        <Stat label='planned qty' value={String(plannedQtyTotal)} />
-        {/* received = GOOD units — the count that is posted to stock. Defective units are a
-            separate count that never reaches the warehouse, so they are not inside this number and
-            the defect rate below is measured against received + defect, the way the server does. */}
-        <Stat
-          label='received (good)'
-          value={hasReceivedAny ? String(receivedQtyTotal) : '—'}
-          sub={
-            hasReceivedAny && plannedQtyTotal > 0
-              ? `${Math.round((receivedQtyTotal / plannedQtyTotal) * 100)}% of plan`
-              : undefined
-          }
-        />
-        <Stat
-          label='defect (not stocked)'
-          value={hasReceivedAny ? String(defectQtyTotal) : '—'}
-          sub={
-            hasReceivedAny && defectQtyTotal > 0
-              ? `${defectPct.toFixed(1)}% of ${producedQtyTotal} produced`
-              : undefined
-          }
-          tone={defectQtyTotal > 0 ? 'down' : undefined}
-        />
-      </StatGrid>
+        {/* top-16, matching the tech card's section rail: the app nav is FIXED at the top of the
+            viewport, so a sticky column offset any less than that slides underneath it. The max
+            height keeps a long ledger + guidance note scrollable inside its own column. */}
+        {/* order-first below `lg`: stacked, the totals and the "what to do next" sentence must
+            stay under the band and above the panel, exactly where they were before this column
+            existed — otherwise a blocked receive is explained below a screen-high lines grid. */}
+        <aside className='order-first flex flex-col gap-6 self-start lg:order-none lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)] lg:overflow-y-auto'>
+          <Section title='партия целиком' question='— не одна фаза, а весь батч'>
+            <Row label='план' value={String(plannedQtyTotal)} />
+            {/* received = GOOD units — the count that is posted to stock. Defective units are a
+                separate count that never reaches the warehouse, so they are not inside this number
+                and the defect rate below is measured against received + defect, as the server
+                does. */}
+            <Row
+              label='принято годных'
+              value={
+                hasReceivedAny
+                  ? `${receivedQtyTotal}${
+                      plannedQtyTotal > 0
+                        ? ` · ${Math.round((receivedQtyTotal / plannedQtyTotal) * 100)}%`
+                        : ''
+                    }`
+                  : '—'
+              }
+            />
+            <Row
+              label='брак'
+              tone={defectQtyTotal > 0 ? 'error' : undefined}
+              value={
+                hasReceivedAny
+                  ? `${defectQtyTotal}${defectQtyTotal > 0 ? ` · ${defectPct.toFixed(1)}%` : ''}`
+                  : '—'
+              }
+            />
+            {canReadCosting ? <CostLedger run={run} actuals={actuals} /> : null}
+          </Section>
 
-      {/* Plan-vs-actual cost: a summary of the WHOLE batch, exactly like the quantity strip above,
-          so it sits under the band at every status rather than behind step 4 — an owner asking
-          "what is this batch costing" must not have to expand a phase to find out. Costing-gated;
-          the editor and the per-colourway split stay in step 4. */}
-      {canReadCosting ? <CostSummary run={run} actuals={actuals} /> : null}
-
-      {/* The phases' panels: ONE keyed list, current phase first, everything else hidden until it
-          is expanded. See mountedPanels — the list is what keeps a draft alive across a phase
-          change, so nothing here may move a panel to another place in the tree. */}
-      {mountedPanels.map((s) => (
-        <SectionStack key={s.id} hidden={!(s.id === currentStep || openSteps[s.id])}>
-          {stepPanel(s.id)}
-        </SectionStack>
-      ))}
-
-      {otherSteps.length > 0 ? (
-        <Section
-          title={currentStep ? 'остальные шаги' : 'шаги партии'}
-          question={
-            currentStep
-              ? 'Фазы вне текущей — раскрой любую, если нужно вернуться к ней; она откроется выше.'
-              : 'Партия отменена: активной фазы нет.'
-          }
-        >
-          <div className='flex flex-col'>
-            {otherSteps.map((s) => (
-              <Row
-                key={s.id}
-                label={
-                  <span className='flex flex-wrap items-center gap-2'>
-                    <StepGlyph state={s.state} />
-                    <Text size='small' variant='uppercase' component='span'>
-                      {s.title}
-                    </Text>
-                    <Text
-                      size='small'
-                      component='span'
-                      className={s.state === 'problem' ? 'text-error' : 'text-labelColor'}
-                    >
-                      {s.summary}
-                    </Text>
-                    {/* Also on the row, not only on the band: this is where the decision to expand
-                        is taken, and a waiting draft is the strongest reason to take it. */}
-                    {s.unsaved?.length ? <UnsavedBadge what={s.unsaved} /> : null}
-                  </span>
-                }
-                value={
-                  <Button
-                    type='button'
-                    size='xs'
-                    variant='secondary'
-                    aria-expanded={!!openSteps[s.id]}
-                    aria-controls={stepDomId(s.id)}
-                    onClick={() => toggleStep(s.id)}
-                  >
-                    {openSteps[s.id] ? 'свернуть' : 'раскрыть'}
-                  </Button>
-                }
-              />
-            ))}
-          </div>
-        </Section>
-      ) : null}
+          {/* What to do next — the single sentence the rest of the page exists to support. Visible
+              text, not a hover-only tooltip, so a blocked receive is obvious before it's clicked. */}
+          {guidance ? (
+            <CalloutBox tone={GUIDANCE_TONE[guidance.tone]}>
+              <Text size='small'>
+                {guidance.text}
+                {guidance.href ? (
+                  <>
+                    {' '}
+                    <Link to={guidance.href} className='underline'>
+                      {guidance.linkLabel}
+                    </Link>
+                  </>
+                ) : null}
+              </Text>
+            </CalloutBox>
+          ) : null}
+        </aside>
+      </div>
 
       {/* Phase 6: the reversal dialog. The reason is MANDATORY server-side (it lands on the
           reversal row, every stock-journal decrement and the run event), so the confirm stays
@@ -1115,11 +1081,12 @@ function planCostNumber(d?: googletype_Decimal): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-// Plan-vs-actual cost, in tiles: unit cost (feeds cost_price) AND total cost (the actual budget
-// question an owner asks first) — total was computed by the backend already (actuals.plannedTotalBase
-// / actualTotalBase / totalVariance) but had no reader anywhere in this module until now. Hidden
-// entirely without costing:read, same as RunCosts below (money is confidential; quantity is not).
-function CostSummary({
+// Plan-vs-actual cost as a LEDGER, not tiles: unit cost (feeds cost_price) and total cost (the
+// budget question an owner asks first). Eight money figures made eight KPI cells, which is a
+// headline treatment for a comparison — a run has a plan and a fact for two things, and rows say
+// that in a quarter of the space. Rendered inside the summary block, so it emits rows, not a box.
+// Hidden entirely without costing:read (money is confidential; quantity is not).
+function CostLedger({
   run,
   actuals,
 }: {
@@ -1154,47 +1121,68 @@ function CostSummary({
       'some cost article could not be folded to the base currency — totals are partial',
     );
   }
+  // Cost variance is actual − plan: over the plan is money lost (red), under it is money saved
+  // (green). Rendered as a coloured value rather than a Row tone, which has no "good" colour.
+  const variance = (d?: googletype_Decimal) => {
+    const sub = varianceSub(d);
+    if (!sub) return null;
+    const tone = varianceTone(d);
+    return (
+      <span className={tone === 'down' ? 'text-error' : tone === 'up' ? 'text-success' : undefined}>
+        {sub}
+      </span>
+    );
+  };
 
   return (
-    <div className='flex flex-col gap-3'>
-      <StatGrid>
-        <Stat
-          label='unit cost · plan'
-          value={
-            run.plannedUnitCost?.value
-              ? `${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''}`
-              : '—'
-          }
-        />
-        <Stat
-          label='unit cost · actual'
-          value={
-            actuals?.actualUnitCost?.value
-              ? `${decimalToInput(actuals.actualUnitCost)} ${cur}`
-              : '— until received'
-          }
-          sub={varianceSub(actuals?.unitCostVariance)}
-          tone={varianceTone(actuals?.unitCostVariance)}
-        />
-        <Stat
-          label='total cost · plan'
-          value={
-            actuals?.plannedTotalBase?.value
-              ? `${decimalToInput(actuals.plannedTotalBase)} ${cur}`
-              : '—'
-          }
-        />
-        <Stat
-          label='total cost · actual'
-          value={
-            actuals?.actualTotalBase?.value
-              ? `${decimalToInput(actuals.actualTotalBase)} ${cur}`
-              : '— until received'
-          }
-          sub={varianceSub(actuals?.totalVariance)}
-          tone={varianceTone(actuals?.totalVariance)}
-        />
-      </StatGrid>
+    <>
+      <GroupLabel>деньги</GroupLabel>
+      <Row
+        label='unit cost · план'
+        value={
+          run.plannedUnitCost?.value
+            ? `${decimalToInput(run.plannedUnitCost)} ${run.plannedCurrency || ''}`
+            : '—'
+        }
+      />
+      <Row
+        label='unit cost · факт'
+        value={
+          actuals?.actualUnitCost?.value ? (
+            <span className='flex flex-wrap justify-end gap-x-1.5'>
+              <span>
+                {decimalToInput(actuals.actualUnitCost)} {cur}
+              </span>
+              {variance(actuals?.unitCostVariance)}
+            </span>
+          ) : (
+            '— до приёмки'
+          )
+        }
+      />
+      <Row
+        label='всего · план'
+        value={
+          actuals?.plannedTotalBase?.value
+            ? `${decimalToInput(actuals.plannedTotalBase)} ${cur}`
+            : '—'
+        }
+      />
+      <RowTotal
+        label='всего · факт'
+        value={
+          actuals?.actualTotalBase?.value ? (
+            <span className='flex flex-wrap justify-end gap-x-1.5'>
+              <span>
+                {decimalToInput(actuals.actualTotalBase)} {cur}
+              </span>
+              {variance(actuals?.totalVariance)}
+            </span>
+          ) : (
+            '— до приёмки'
+          )
+        }
+      />
 
       {(() => {
         // Ф6.7, in the order the four states have to be told apart. Blue (`attention`) is this
@@ -1239,8 +1227,8 @@ function CostSummary({
           <div className='flex flex-wrap items-start gap-2'>
             <Pill tone='attention'>plan drifted</Pill>
             <Text variant='inactive' size='small'>
-              плановая цена — снапшот от {snapshotDate}; сегодня та же формула даёт {planTodayText} —{' '}
-              {planToday > planSnapshot ? 'дороже' : 'дешевле'} снапшота. Разойтись могли двое:
+              плановая цена — снапшот от {snapshotDate}; сегодня та же формула даёт {planTodayText}{' '}
+              — {planToday > planSnapshot ? 'дороже' : 'дешевле'} снапшота. Разойтись могли двое:
               карточка (пересъёмка нормы, правка рецепта или цен) и процент раскроя этого прогона —
               он тоже входит в расчёт.
             </Text>
@@ -1255,7 +1243,7 @@ function CostSummary({
         // client-side in floats is exactly the class of bug the audit banned).
         const absorbed = actuals?.defectQtyTotal ?? 0;
         return absorbed > 0 && actuals?.actualUnitCost?.value ? (
-          <Text variant='inactive' size='small'>
+          <Text variant='label' size='micro'>
             unit cost поглощает {absorbed} бракованных единиц (нормальная потеря капитализируется в
             годные; сверхнормативная списывается учётом при закрытии серии)
           </Text>
@@ -1263,22 +1251,22 @@ function CostSummary({
       })()}
 
       {actuals?.materialsFromStockBase?.value ? (
-        <Text variant='inactive' size='small'>
-          includes {decimalToInput(actuals.materialsFromStockBase)} {cur} of materials issued from
-          stock
+        <Text variant='label' size='micro'>
+          включая {decimalToInput(actuals.materialsFromStockBase)} {cur} материалов, выданных со
+          склада
         </Text>
       ) : null}
 
       {warnings.length > 0 ? (
         <CalloutBox tone='warning' className='flex flex-col gap-1'>
           {warnings.map((w, i) => (
-            <Text key={i} size='small'>
+            <Text key={i} size='micro'>
               ! {w}
             </Text>
           ))}
         </CalloutBox>
       ) : null}
-    </div>
+    </>
   );
 }
 
