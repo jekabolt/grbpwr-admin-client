@@ -85,6 +85,27 @@ export function QtyBar({
   );
 }
 
+/**
+ * Does this run look AUXILIARY, judged from the list payload alone?
+ *
+ * The truth lives on the tech card (`purpose === TECH_CARD_PURPOSE_AUXILIARY`), which a list does
+ * not read — and fetching one card per row to find out would be a query per row. Two shapes give it
+ * away in the run's own lines: a colour-variant line (0252) can only exist on an aux card, and a
+ * legacy single-output aux run carries one product-less, SIZE-less line (a sellable line always has
+ * a size, even when its product is not published yet).
+ *
+ * Used only to decide whether a LIST row may offer «принять». The receiving modal needs the card's
+ * output material and colour variants to book an aux run correctly, and a list has neither, so an
+ * aux-shaped run is sent to its own page instead. Erring either way is cheap: a false positive
+ * costs one extra click, a false negative is the bug this guards against.
+ */
+export function looksAuxiliary(r: common_ProductionRun): boolean {
+  const lines = r.run?.lines ?? [];
+  if (lines.length === 0) return false;
+  if (lines.some((l) => (l.outputVariantId ?? 0) > 0)) return true;
+  return lines.every((l) => !(l.productId ?? 0) && !(l.sizeId ?? 0));
+}
+
 /** The run's lifecycle status, in the one tone table every screen shares. */
 export function RunStatusBadge({ status }: { status?: common_ProductionRunStatus | string }) {
   return (
