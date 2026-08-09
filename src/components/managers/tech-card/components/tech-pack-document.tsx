@@ -1,4 +1,5 @@
 import type {
+  GetProductionRunCutPlanResponse,
   common_TechCardAttachmentKind,
   common_TechCardGarmentZone,
   common_TechCardOperationType,
@@ -23,6 +24,8 @@ import {
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
+import { cutPlanAuthoritative } from 'components/managers/print/labels';
+import { PackagingSheet } from 'components/managers/print/sheets/packaging';
 import {
   PRINT_CUT_SYMMETRY_LEGEND,
   printCutSymmetryCaption,
@@ -205,6 +208,7 @@ export function TechPackDocument({
   patternViewerToken = '',
   onDataStatus,
   scope,
+  cutPlan,
 }: {
   techCard: common_TechCard;
   assembly?: StyleAssemblyLine[];
@@ -221,6 +225,12 @@ export function TechPackDocument({
    * обо всём сразу (все колорвеи, все размеры, деньги на месте).
    */
   scope?: PrintScope;
+  /**
+   * Кат-лист партии (GetProductionRunCutPlan). Приходит только при скоупе на прогон и даёт
+   * ЕДИНСТВЕННЫЙ источник количеств: сколько панелей кроить по каждому размеру. Считает сервер —
+   * тот же ответ печатает наряд, поэтому две бумаги одной партии не могут разойтись в числах.
+   */
+  cutPlan?: GetProductionRunCutPlanResponse;
 }) {
   const tc = techCard.techCard;
   // Скоуп по умолчанию: тот же документ, что печатался до появления скоупа. Так у каждой секции
@@ -445,9 +455,75 @@ export function TechPackDocument({
   // должны быть различимы, даже пока вьюер не умеет сверять её сам.
   const cardLockVersion = wireInt(techCard.lockVersion);
 
+  // Панели по размерам: ключ — line_key детали, значение — размер → сколько кроить. Строки
+  // чужих колорвеев отбрасываются тем же правилом, что и везде (productId ‖ outputVariantId).
+  const cutBySize = (() => {
+    const byPiece = new Map<string, Map<number, number>>();
+    for (const r of cutPlan?.rows ?? []) {
+      if (printScope.colorway) {
+        const cw = wireInt(r.colorwayId) || wireInt(r.outputVariantId);
+        if (cw !== wireInt(printScope.colorway.colorwayId)) continue;
+      }
+      const key = r.pieceLineKey ?? '';
+      if (!key) continue;
+      const row = byPiece.get(key) ?? new Map<number, number>();
+      for (const c of r.bySize ?? []) {
+        const sizeId = wireInt(c.sizeId);
+        // Сервер не назвал количество — это НЕ ноль. Твёрдый «0» на бумаге раскроя читается как
+        // указание не кроить, которого никто не давал; наряд от этого защищается явно.
+        if (c.piecesToCut == null) continue;
+        row.set(sizeId, (row.get(sizeId) ?? 0) + wireInt(c.piecesToCut));
+      }
+      byPiece.set(key, row);
+    }
+    return byPiece;
+  })();
+  // Авторитетность ответа — общим правилом с нарядом (print/labels.ts): две бумаги одной партии
+  // не имеют права по-разному отвечать на вопрос «получен ли кат-лист».
+  const cutPlanIsAuthoritative = cutPlanAuthoritative(cutPlan?.generatedAt);
+  // ДРЕЙФ РЕВИЗИИ. Кат-лист посчитан по какой-то версии плана прогона, а прогон читается СЕЙЧАС —
+  // и это две разные величины, расходящиеся ровно тогда, ради чего наряд свою ревизию и называет:
+  // кто-то поправил сетку, пока лист печатался. Наряд это предупреждение печатает; тех-пак молчал
+  // и печатал панели из устаревшего снимка рядом с листом приёмки, где план взят из ЖИВЫХ линий, —
+  // один комплект, числа двух ревизий, ни слова об этом.
+  const cutPlanDrift =
+    cutPlanIsAuthoritative &&
+    wireInt(cutPlan?.runLockVersion) !== wireInt(printScope.run?.lockVersion);
+  const cutColumns = cutPlanIsAuthoritative && printScope.run ? sizeIds : [];
+  // Имена размеров — из ОТВЕТА кат-листа, а не из словаря клиента: строка наряда и колонка
+  // тех-пака обязаны называть размер одним словом, даже если словарь отстал.
+  const cutSizeName = (() => {
+    const byId = new Map<number, string>();
+    for (const r of cutPlan?.rows ?? [])
+      for (const c of r.bySize ?? []) {
+        const id = wireInt(c.sizeId);
+        if (id > 0 && c.sizeName) byId.set(id, c.sizeName);
+      }
+    return (id: number) => byId.get(id) ?? sizeName(id);
+  })();
+  // Блокеры кат-листа: деталь, не привязанная к артикулу в этом колорвее. В наряде она стоит в
+  // блоке «стоп», а здесь без неё строка выглядела бы как «в этой партии не кроится» — прочерки
+  // по всей длине и ни одного признака, что это НЕ ответ, а отказ.
+  const cutBlockers = (cutPlan?.blockers ?? []).filter(
+    (bl) =>
+      !printScope.colorway ||
+      wireInt(bl.colorwayId) === wireInt(printScope.colorway.colorwayId),
+  );
+
   // Тираж по размерам — из линий прогона, уже суженных скоупом колорвея. Колонки только те
   // размеры, по которым в партии есть клетки: пустая колонка у раскройного стола читается как
   // «размер забыли проставить».
+  // Тираж партии ЦЕЛИКОМ по выбранному колорвею, без сужения по печатаемым размерам. Именно он
+  // уходит в лист упаковки: короба и вес — факт отгрузки всей партии, а не свойство листа, и
+  // посчитанные от поднабора размеров они разошлись бы с нарядом.
+  const batchTotal = (printScope.run?.run?.lines ?? []).reduce((sum, l) => {
+    if (printScope.colorway) {
+      const cw = wireInt(l.productId) || wireInt(l.outputVariantId);
+      if (cw !== wireInt(printScope.colorway.colorwayId)) return sum;
+    }
+    return sum + wireInt(l.plannedQty);
+  }, 0);
+
   const runQty = (() => {
     const bySize = new Map<number, number>();
     // Линии, которые НЕ вошли в тираж: без назначенного колорвея (product_id = 0 легален, пока
@@ -549,6 +625,45 @@ export function TechPackDocument({
   // Стандарт припуска карты — печатается в каждой строке, у которой своего значения нет.
   const cardAllowance = dec(tc.requiredSeamAllowanceMm);
 
+  // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
+  // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
+  // same join, computed in the editor and stored in the row.
+  const opParts = (o: { pieceLineKeys?: string[] }): string[] => {
+    const pieces = tc.pieces ?? [];
+    return (o.pieceLineKeys ?? [])
+      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || '')
+      .filter(Boolean);
+  };
+
+  // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
+  // free-text placement survives only on legacy rows, and an unlinked row is per-garment.
+  const resolveUsagePart = (u: common_TechCardColorwayUsage): string => {
+    const pieces = tc.pieces ?? [];
+    const piece =
+      (u.pieceLineKey ? pieces.find((p) => p.lineKey === u.pieceLineKey) : undefined) ??
+      (wireInt(u.pieceId)
+        ? pieces.find((p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId))
+        : undefined);
+    return piece?.name?.trim() || u.placement?.trim() || 'per garment';
+  };
+  // The "colour" column: the effective article's own colour/pantone (pin, else slot default),
+  // then the legacy usage-level text, then the slot's colour snapshot.
+  const resolveUsageColour = (
+    u: common_TechCardColorwayUsage,
+    art?: common_TechCardBomItem,
+  ): string => {
+    const effId = wireInt(u.materialId) || wireInt(art?.materialId);
+    const m = effId ? materialById.get(effId) : undefined;
+    return (
+      m?.color?.trim() ||
+      m?.pantone?.trim() ||
+      u.color?.trim() ||
+      u.pantone?.trim() ||
+      art?.color?.trim() ||
+      ''
+    );
+  };
+
   // Материалы шага: имя + ВИД позиции (молния, пуговица, нитка…) + цвет в скоуповом колорвее.
   //
   // Раньше отсюда возвращались одни имена, а ключ без выжившей строки BOM ВЫБРАСЫВАЛСЯ молча — с
@@ -594,44 +709,6 @@ export function TechPackDocument({
     if (out.some((m) => !m.missing)) return out;
     const legacy = resolveUsageArt(o);
     return legacy ? [described(legacy)] : out;
-  };
-  // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
-  // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
-  // same join, computed in the editor and stored in the row.
-  const opParts = (o: { pieceLineKeys?: string[] }): string[] => {
-    const pieces = tc.pieces ?? [];
-    return (o.pieceLineKeys ?? [])
-      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || '')
-      .filter(Boolean);
-  };
-
-  // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
-  // free-text placement survives only on legacy rows, and an unlinked row is per-garment.
-  const resolveUsagePart = (u: common_TechCardColorwayUsage): string => {
-    const pieces = tc.pieces ?? [];
-    const piece =
-      (u.pieceLineKey ? pieces.find((p) => p.lineKey === u.pieceLineKey) : undefined) ??
-      (wireInt(u.pieceId)
-        ? pieces.find((p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId))
-        : undefined);
-    return piece?.name?.trim() || u.placement?.trim() || 'per garment';
-  };
-  // The "colour" column: the effective article's own colour/pantone (pin, else slot default),
-  // then the legacy usage-level text, then the slot's colour snapshot.
-  const resolveUsageColour = (
-    u: common_TechCardColorwayUsage,
-    art?: common_TechCardBomItem,
-  ): string => {
-    const effId = wireInt(u.materialId) || wireInt(art?.materialId);
-    const m = effId ? materialById.get(effId) : undefined;
-    return (
-      m?.color?.trim() ||
-      m?.pantone?.trim() ||
-      u.color?.trim() ||
-      u.pantone?.trim() ||
-      art?.color?.trim() ||
-      ''
-    );
   };
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
@@ -1402,6 +1479,13 @@ export function TechPackDocument({
                 <th className={TH}>
                   {printScope.colorway ? 'fabric' : 'fabric (by colourway)'}
                 </th>
+                {/* Панели на ЭТУ партию по размерам — из кат-листа сервера. Без прогона колонок
+                    нет вовсе: количества стиля не существует, есть только количество партии. */}
+                {cutColumns.map((sizeId) => (
+                  <th key={sizeId} className={`${TH} text-center`}>
+                    {cutSizeName(sizeId)}
+                  </th>
+                ))}
                 <th className={TH}>note</th>
               </tr>
             </thead>
@@ -1490,6 +1574,11 @@ export function TechPackDocument({
                         </div>
                       )}
                     </td>
+                    {cutColumns.map((sizeId) => (
+                      <td key={sizeId} className={`${TD} text-center`}>
+                        {cutBySize.get(p.lineKey ?? '')?.get(sizeId) ?? '—'}
+                      </td>
+                    ))}
                     <td className={TD}>{p.note || '—'}</td>
                   </tr>
                 );
@@ -1499,6 +1588,38 @@ export function TechPackDocument({
           {/* Словарь колонки «qty / garment» — один раз под таблицей. Печатается только если в
               таблице реально есть что объяснять: на карточке, где ни одна деталь не размечена и все
               идут по одной, легенда была бы строкой ни о чём. */}
+          {cutPlanDrift && (
+            <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+              batch plan changed after this cut list was computed — panel counts below are from an
+              older snapshot; re-print before cutting
+            </p>
+          )}
+          {cutBlockers.length > 0 && (
+            <div className='mb-2 break-inside-avoid border-2 border-black p-2 text-micro'>
+              <div className='mb-1 text-control font-bold uppercase'>
+                stop — {cutBlockers.length} piece × colourway not linked to an article
+              </div>
+              {cutBlockers.map((bl, i) => (
+                <p key={i}>
+                  {bl.pieceName || `piece #${wireInt(bl.pieceId)}`}
+                  {bl.colorwayName ? ` · ${bl.colorwayName}` : ''} —{' '}
+                  {bl.reason || 'no reason given'}
+                </p>
+              ))}
+            </div>
+          )}
+          {printScope.run && !cutPlanIsAuthoritative && (
+            <p className='mt-1 break-inside-avoid border border-black px-2 py-1 text-micro uppercase'>
+              cut list for this batch was not received — panel counts per size are not printed
+              (this is not «nothing to cut»)
+            </p>
+          )}
+          {cutColumns.length > 0 && (
+            <p className='mt-1 text-nano text-labelColor'>
+              size columns are panels to cut for THIS batch, from the run cut list — not per
+              garment
+            </p>
+          )}
           {(tc.pieces ?? []).some((p) =>
             printCutSymmetryCaption(p.cutSymmetry, p.piecesPerGarment),
           ) && <p className='mt-1 text-nano text-labelColor'>{PRINT_CUT_SYMMETRY_LEGEND}</p>}
@@ -1716,8 +1837,8 @@ export function TechPackDocument({
       )}
 
       {/* LABELS + PACKAGING */}
-      {(has(tc.labels) || tc.packaging) && (b('sew') || b('qc')) && (
-        <Sheet title='labels & packaging'>
+      {has(tc.labels) && (b('sew') || b('qc')) && (
+        <Sheet title='labels'>
           {has(tc.labels) && (
             <table className='mb-3 w-full border-collapse text-micro'>
               <thead>
@@ -1792,29 +1913,6 @@ export function TechPackDocument({
               </tbody>
             </table>
           )}
-          {tc.packaging && (
-            <div className='grid grid-cols-2 gap-x-8'>
-              <div>
-                <KV k='folding' v={tc.packaging.foldingMethod} />
-                <KV k='polybag' v={tc.packaging.polybag} />
-                <KV k='bag sticker' v={tc.packaging.bagSticker} />
-                <KV k='inserts' v={tc.packaging.inserts} />
-              </div>
-              <div>
-                <KV k='units / box' v={tc.packaging.unitsPerBox || ''} />
-                <KV k='box marking' v={tc.packaging.boxMarking} />
-                <KV k='box dimensions' v={tc.packaging.boxDimensions} />
-                <KV
-                  k='weight net / gross'
-                  v={
-                    tc.packaging.weightNetGrams || tc.packaging.weightGrossGrams
-                      ? `${tc.packaging.weightNetGrams || '—'} / ${tc.packaging.weightGrossGrams || '—'} g`
-                      : ''
-                  }
-                />
-              </div>
-            </div>
-          )}
         </Sheet>
       )}
 
@@ -1868,40 +1966,17 @@ export function TechPackDocument({
       {/* PACKAGING RECIPE — materials consumed on ship (ListPackagingRecipe): once per shipment
           (qty/order, e.g. a branded box) plus once per unit (qty/item, e.g. a dust bag). Same
           missing-RPC root cause as assembly, one tab over. */}
-      {packagingRows.length > 0 && b('qc') && (
-        <Sheet title='packaging recipe'>
-          {packagingIsFallback && (
-            <p className='mb-1 text-nano text-labelColor'>
-              no style-specific recipe — showing the inherited global fallback
-            </p>
-          )}
-          <table className='w-full border-collapse text-micro'>
-            <thead>
-              <tr>
-                <th className={TH}>material</th>
-                <th className={`${TH} text-right`}>qty / order</th>
-                <th className={`${TH} text-right`}>qty / item</th>
-              </tr>
-            </thead>
-            <tbody>
-              {packagingRows.map((p, i) => (
-                <tr key={p.id ?? i} className='break-inside-avoid'>
-                  <td className={TD}>{p.materialName || `#${p.materialId}`}</td>
-                  <td className={`${TD} whitespace-nowrap text-right`}>
-                    {dec(p.qtyPerOrder)
-                      ? `${dec(p.qtyPerOrder)} ${p.materialUnit ?? ''}`.trim()
-                      : '—'}
-                  </td>
-                  <td className={`${TD} whitespace-nowrap text-right`}>
-                    {dec(p.qtyPerItem)
-                      ? `${dec(p.qtyPerItem)} ${p.materialUnit ?? ''}`.trim()
-                      : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Sheet>
+      {/* УПАКОВКА — один лист на обе бумаги (print/sheets/packaging.tsx). Раньше описательная
+          половина печаталась здесь, а считаемая от тиража — в наряде, двумя вёрстками одного
+          предмета. Считаемая часть появляется только при скоупе на партию. */}
+      {b('qc') && (tc.packaging || packagingRows.length > 0) && (
+        <PackagingSheet
+          title='packaging'
+          packaging={tc.packaging}
+          recipeRows={packagingRows}
+          recipeIsGlobalFallback={packagingIsFallback}
+          plannedTotal={batchTotal}
+        />
       )}
 
       {/* COSTING — только внутренний профиль. Бумага профиля `factory` уезжает внешнему
@@ -2061,6 +2136,44 @@ export function TechPackDocument({
               );
             })}
           </div>
+        </Sheet>
+      )}
+
+      {/* ЛИСТ ПРИЁМКИ. Единственная бумага комплекта, которая НЕ несёт данных, — её заполняют
+          от руки в цеху. Данных приёмки здесь нет намеренно: ListProductionRunCutReceipts
+          отвечает на «что уже сдано», а этот лист существует ровно для того, чтобы сдавать. */}
+      {b('qc') && printScope.run && sizeIds.length > 0 && (
+        <Sheet title='acceptance sheet'>
+          <table className='w-full border-collapse text-micro'>
+            <thead>
+              <tr>
+                <th className={TH}>size</th>
+                <th className={`${TH} text-center`}>planned</th>
+                <th className={`${TH} text-center`}>cut</th>
+                <th className={`${TH} text-center`}>sewn</th>
+                <th className={`${TH} text-center`}>accepted</th>
+                <th className={`${TH} text-center`}>defects</th>
+                <th className={TH}>signature / date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sizeIds.map((sizeId) => (
+                <tr key={sizeId} className='break-inside-avoid'>
+                  <td className={`${TD} font-semibold`}>{sizeName(sizeId)}</td>
+                  <td className={`${TD} text-center`}>
+                    {runSizeQty.find((r) => r.sizeId === sizeId)?.qty ?? '—'}
+                  </td>
+                  {/* Пустые клетки ростом под руку: ниже 8 мм в них не пишут, а дописывают
+                      сбоку — и лист перестаёт быть таблицей. */}
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Sheet>
       )}
 

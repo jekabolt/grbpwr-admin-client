@@ -17,6 +17,8 @@ import {
   printLayVerdictWord,
 } from 'components/managers/print/labels';
 import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
+import { cutPlanAuthoritative } from 'components/managers/print/labels';
+import { PackagingSheet } from 'components/managers/print/sheets/packaging';
 import { grainlineArrow } from 'components/managers/tech-card/components/piece-codes';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardReleases } from 'components/managers/tech-card/components/useSamples';
@@ -265,7 +267,7 @@ export function RunPackDocument({
   // второе значит выдать несуществующий наряд за полный. Различаем по ревизии: настоящая реализация
   // ВСЕГДА называет свой снимок (generated_at + run_lock_version, они же едут в QR), а пустая
   // заглушка — никогда.
-  const cutPlanAuthoritative = !!cutPlan?.generatedAt && cutPlan.generatedAt !== ZERO_TS;
+  const cutPlanIsAuthoritative = cutPlanAuthoritative(cutPlan?.generatedAt);
 
   // РЕВИЗИЯ, ПОД КОТОРОЙ ПОСЧИТАНЫ КОЛИЧЕСТВА, против ревизии прогона СЕЙЧАС. Это две РАЗНЫЕ
   // величины, и они расходятся ровно в том случае, ради которого документ вообще называет свою
@@ -273,7 +275,7 @@ export function RunPackDocument({
   // брать из снимка другой версии — это подпись под чужими цифрами.
   const runLockVersion = wireInt(run.lockVersion);
   const planLockVersion = wireInt(cutPlan?.runLockVersion);
-  const revisionDrift = cutPlanAuthoritative && planLockVersion !== runLockVersion;
+  const revisionDrift = cutPlanIsAuthoritative && planLockVersion !== runLockVersion;
 
   // Колонки кат-листа и их подписи берутся ИЗ ОТВЕТА (size_name), а не из словаря: строка наряда и
   // её заголовок обязаны называть размер одним словом, даже если словарь клиента отстал.
@@ -373,14 +375,6 @@ export function RunPackDocument({
   const materialCaveats = materialPlan?.caveats ?? [];
 
   const packaging = tc?.packaging;
-  const perBox = wireInt(packaging?.unitsPerBox);
-  const grossG = wireInt(packaging?.weightGrossGrams);
-  const netG = wireInt(packaging?.weightNetGrams);
-  // ТО САМОЕ ЧИСЛО, которое раньше считалось на карточке от типового тиража (packaging-field.tsx):
-  // формула та же, тираж — реальный. Ноль коробов не печатается как «0»: коробов не «ноль», их
-  // просто не из чего посчитать, и это разные предложения.
-  const cartons = perBox > 0 && plannedTotal > 0 ? Math.ceil(plannedTotal / perBox) : 0;
-  const runWeightG = cartons > 0 && grossG > 0 ? cartons * grossG : plannedTotal * netG;
 
   return (
     <div className='mx-auto max-w-[210mm] bg-white px-8 py-6 text-black'>
@@ -498,7 +492,7 @@ export function RunPackDocument({
           <span>batch revision now: lock_version {runLockVersion}</span>
           <span>
             cut list computed for: lock_version{' '}
-            {cutPlanAuthoritative ? planLockVersion : 'UNKNOWN'}
+            {cutPlanIsAuthoritative ? planLockVersion : 'UNKNOWN'}
           </span>
           <span>
             cut list snapshot:{' '}
@@ -612,7 +606,7 @@ export function RunPackDocument({
                 : // Пустой ответ БЕЗ ревизии — это не «кроить нечего», а «мы ничего не узнали».
                   // Пока бэкенд дописывают, шлюз отвечает ровно так, и молчаливое «в карте нет
                   // деталей» отправило бы цех проверять карточку вместо того, чтобы ждать сервер.
-                  !cutPlanAuthoritative
+                  !cutPlanIsAuthoritative
                   ? 'cut list not computed: the server answered without a snapshot revision. This does NOT mean there is nothing to cut — it means nobody computed "how many to cut".'
                   : plannedTotal === 0
                     ? 'no cut list because the batch has no lines: there is nothing to compute "how many to cut" from.'
@@ -1046,51 +1040,10 @@ export function RunPackDocument({
       </Sheet>
 
       {/* УПАКОВКА ПАРТИИ */}
-      <Sheet title='batch packaging'>
-        {/* СЧИТАЕМАЯ и ОПИСАТЕЛЬНАЯ половины упаковки разведены намеренно: карта, где заполнены
-            укладка и полибэг, но не заведено «штук в коробе», раньше целиком объявлялась
-            «не описанной» — и цех терял инструкцию по укладке из-за отсутствия числа, к укладке
-            отношения не имеющего. Не считается ровно то, чего не из чего посчитать. */}
-        {!packaging ? (
-          <Nothing>
-            packaging is not described in the tech card — this batch has no folding, no carton, no
-            weight.
-          </Nothing>
-        ) : (
-          <div className='grid grid-cols-2 gap-x-8'>
-            <div>
-              <KV k='units in batch' v={plannedTotal || ''} />
-              <KV k='pcs per carton' v={perBox || ''} />
-              {/* Коробов считается от РЕАЛЬНОГО тиража партии, а не от типового тиража карточки:
-                  ровно это разделение наряд и вводит. Нецелый короб округляется вверх — половину
-                  короба не отгружают. Пусто (а не «0»), когда считать не из чего: ноль коробов
-                  означал бы «отгружать нечего». */}
-              <KV k='cartons' v={cartons || ''} />
-              <KV
-                k='batch weight'
-                v={
-                  runWeightG > 0
-                    ? `${(runWeightG / 1000).toFixed(runWeightG >= 10000 ? 0 : 1)} kg`
-                    : ''
-                }
-              />
-              {perBox === 0 ? (
-                <p className='mt-1 text-nano uppercase text-labelColor'>
-                  &quot;pcs per carton&quot; is not set on the card — nothing to compute cartons and
-                  batch weight from.
-                </p>
-              ) : null}
-            </div>
-            <div>
-              <KV k='folding' v={packaging.foldingMethod} />
-              <KV k='polybag' v={packaging.polybag} />
-              <KV k='insert card' v={packaging.inserts} />
-              <KV k='carton marking' v={packaging.boxMarking} />
-              <KV k='carton dimensions' v={packaging.boxDimensions} />
-            </div>
-          </div>
-        )}
-      </Sheet>
+      {/* УПАКОВКА — общий лист (print/sheets/packaging.tsx). Считаемая половина живёт в нём же:
+          тираж передаётся пропом, а формулы (короб вверх, пусто вместо нуля) переехали туда
+          дословно вместе с их обоснованием. */}
+      <PackagingSheet title='batch packaging' packaging={packaging} plannedTotal={plannedTotal} />
     </div>
   );
 }
