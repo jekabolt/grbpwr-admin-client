@@ -1866,7 +1866,12 @@ export function TechCardForm({
             {/* COSTING — mounted only with costing:read (field-shaped) */}
             {canReadCosting && (
               <SectionStack hidden={activeTab !== 'costing'}>
-                <Section title='costing'>
+                {/* Three sections, three KINDS OF MONEY. They used to be titled `costing` /
+                  `cost estimate (per colourway — plan vs actual)` / `R&D development cost`, which
+                  named the feature and not the figure — so nothing on screen said that «plan 48.60»
+                  in the second block is the same number as «unit cost 48.60» in the first, or that
+                  R&D is in neither. The `question` clause is the whole fix. */}
+                <Section title='план стиля' question='— что изделие должно стоить по BOM и статьям'>
                   {/* Costing gap at the point of action. The tech-card payload only carries the plan
                     costing rollup (not each colorway's product cost_price), so this is a style-level
                     signal; per-colorway precision lives on each product's detail page. */}
@@ -1878,34 +1883,43 @@ export function TechCardForm({
                   ) && (
                     <CalloutBox tone='warning' className='mb-2.5'>
                       <Text size='micro'>
-                        No costing set for this style — margin, break-even and economics cannot be
-                        computed for its colorways, and its sold products count as uncosted in
-                        analytics (lowering store-wide cost coverage). Add materials or costs below.
+                        Себестоимость этого стиля не задана — маржу, окупаемость и экономику его
+                        колорвеев посчитать не из чего, а проданные товары считаются в аналитике
+                        «без себестоимости» и занижают покрытие по магазину. Добавьте материалы в
+                        BOM или впишите статью ниже.
                       </Text>
                     </CalloutBox>
                   )}
                   <CostingField techCard={techCard} />
                 </Section>
                 {isEditMode && numId && (
-                  <Section title='cost estimate (per colourway — plan vs actual)'>
-                    <CostEstimateField techCardId={numId} techCard={techCard} />
+                  <Section
+                    title='оценка по колорвею'
+                    question='— тот же расчёт построчно, и факт из прогонов рядом с планом'
+                  >
+                    {/* `active` gates the per-colourway fan-out. Every tab of this form is MOUNTED
+                      at once and merely CSS-hidden, so without this the matrix would fire one
+                      GetStyleCostEstimate per colourway on every tech-card open, on every tab. */}
+                    <CostEstimateField
+                      techCardId={numId}
+                      techCard={techCard}
+                      active={activeTab === 'costing'}
+                    />
                   </Section>
                 )}
                 {/* R&D / development spend — folded in from its own tab: a section OF costing, not a
                   separate rail entry. Placed after the unit-cost blocks because it is amortised
                   style dev cost, deliberately NOT part of the product COGS. Edit-mode only (its own
                   RPC needs a saved card id). */}
-                <Section title='R&D development cost'>
-                  {/* Plan 11 band 6: the one label that stops R&D being priced into garments. */}
-                  <Text size='micro' variant='label'>
-                    периодные затраты разработки стиля — НЕ входят в unit cost / COGS; выше они
-                    только как «сколько маржа должна отбить» (break-even).
-                  </Text>
+                <Section
+                  title='R&D'
+                  question='— периодные деньги стиля: в unit cost и COGS не входят никогда'
+                >
                   {isEditMode && numId ? (
                     <DevExpensesField techCardId={numId} />
                   ) : (
                     <Text variant='inactive' size='small'>
-                      save this tech card first, then you can log development costs
+                      сначала сохраните тех-карту — потом сюда можно писать расходы на разработку
                     </Text>
                   )}
                 </Section>

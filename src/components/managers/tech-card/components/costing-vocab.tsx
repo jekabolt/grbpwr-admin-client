@@ -92,26 +92,49 @@ export function LineProblems({
  * non-button element, and without it the control would be mouse-only — the exact failure we are
  * replacing.
  */
-export function HelpMark({ title, children }: { title: string; children: React.ReactNode }) {
+export function HelpMark({
+  title,
+  label,
+  children,
+}: {
+  title: string;
+  /** Word-shaped trigger instead of the `?` square — for "почему" at the end of a sentence. */
+  label?: string;
+  children: React.ReactNode;
+}) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLSpanElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      e.currentTarget.click();
+    }
+  };
+  const focus =
+    'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor';
   return (
     <GenericPopover
       title={title}
       triggerProps={{ asChild: true }}
       openElement={
-        <span
-          role='button'
-          tabIndex={0}
-          aria-label={`что такое «${title}»`}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              e.currentTarget.click();
-            }
-          }}
-          className='inline-flex size-[13px] shrink-0 cursor-help items-center justify-center border border-borderColor align-middle text-nano leading-none text-labelColor hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-        >
-          ?
-        </span>
+        label ? (
+          <span
+            role='button'
+            tabIndex={0}
+            onKeyDown={onKeyDown}
+            className={`cursor-help underline decoration-dotted hover:text-textColor ${focus}`}
+          >
+            {label}
+          </span>
+        ) : (
+          <span
+            role='button'
+            tabIndex={0}
+            aria-label={`что такое «${title}»`}
+            onKeyDown={onKeyDown}
+            className={`inline-flex size-[13px] shrink-0 cursor-help items-center justify-center border border-borderColor align-middle text-nano leading-none text-labelColor hover:border-textColor hover:text-textColor ${focus}`}
+          >
+            ?
+          </span>
+        )
       }
     >
       <Text size='micro' variant='label'>

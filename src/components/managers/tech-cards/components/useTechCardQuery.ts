@@ -6,6 +6,7 @@ import {
   common_TechCardInsert,
   common_TechCardStage,
 } from 'api/proto-http/admin';
+import { styleReadViewKeys } from 'components/managers/tech-card/components/useStyleReadViews';
 
 export type TechCardFilter = {
   stage?: common_TechCardStage;
@@ -205,6 +206,10 @@ export function useUpdateTechCard() {
       // A BOM line's направление is written by THIS mutation and by nothing else, so the gap report
       // is stale the moment a card is saved — including the counter on the tech-cards toolbar chip.
       queryClient.invalidateQueries({ queryKey: techCardKeys.fabricDirectionGaps() });
+      // The per-colourway cost estimate is derived from the BOM prices, usages and cost articles
+      // this mutation just wrote, but it is cached under its OWN key — so without this the costing
+      // tab showed a recomputed headline above a matrix still quoting the previous plan.
+      queryClient.invalidateQueries({ queryKey: styleReadViewKeys.costEstimates(variables.id) });
     },
   });
 }
@@ -231,6 +236,9 @@ export function useRepriceTechCardBom() {
     onSuccess: (_data, techCardId) => {
       queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
       queryClient.invalidateQueries({ queryKey: techCardKeys.lists() });
+      // Repricing rewrites BOM unit prices server-side, which is exactly the input the estimate is
+      // built from — see the note on styleReadViewKeys.costEstimates.
+      queryClient.invalidateQueries({ queryKey: styleReadViewKeys.costEstimates(techCardId) });
     },
   });
 }
