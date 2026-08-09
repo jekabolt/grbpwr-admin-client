@@ -27,6 +27,7 @@
 import type { PieceDTO } from 'lib/nesting/types';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { DxfIndex, PieceBlockRef } from './dxf-geometry';
+import { toBomUnit } from './marker-io';
 import { aliasIdentity } from './use-block-sizes';
 
 /** Деталь кроя карточки в терминах этого расчёта: сколько её на изделие и чем она нарисована. */
@@ -55,6 +56,18 @@ export type DxfNormAreas = {
   gradedPieces: number;
   /** Детали, у которых контур заменён выпуклой оболочкой при раздутии припуском. */
   hulled: string[];
+  /**
+   * Размеры, в чей комплект вошёл контур, ВЫБРАННЫЙ ИЗ НЕСКОЛЬКИХ совпадающих кандидатов на слое
+   * (площади в допуске 0.5%). Отчёт, а не отказ: применение такие копии сознательно принимает —
+   * «тот же контур в двух листах» нормой не рискует. Но выбор здесь берёт ПЕРВОГО кандидата, то
+   * есть зависит от порядка листов в пачке, а равенство ИСХОДНЫХ площадей не переживает раздутия
+   * припуском (офсет строит новый контур геометрически, и периметры у копий разные). Поэтому
+   * пересчёт по текущим данным (dxf-recheck.tsx) по этим размерам числовых утверждений не делает —
+   * сравнение с ними невоспроизводимо по построению.
+   */
+  sizesAmbiguousPick: number[];
+  /** Детали, у которых кандидатов на слое было несколько, — чтобы сообщение называло виновника. */
+  ambiguousPickPieces: string[];
 };
 
 export type DxfNormOutcome = { ok: true; areas: DxfNormAreas } | { ok: false; reason: string };
@@ -174,9 +187,13 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // ДУБЛЬ НА ВЫБРАННОМ СЛОЕ — ДВУСМЫСЛЕННОСТЬ, а не «возьмём первый». Две ревизии одного листа в
   // одном скоупе — сценарий типовой, и площади у них разные ровно потому, что выкройку правили.
   // Взять ту, что раньше попала в пачку, значило бы поставить норму по порядку скачивания файлов.
-  // Совпадающие в пределах допуска копии (тот же контур в двух листах) двусмысленности не создают.
+  // Совпадающие в пределах допуска копии (тот же контур в двух листах) применению не мешают, но
+  // ДОКЛАДЫВАЮТСЯ (multi → sizesAmbiguousPick): первый кандидат — это порядок листов в пачке, а не
+  // выбор, и повторный прогон той же карточки с другим порядком даёт другой контур.
   const AREA_TOLERANCE = 0.005; // 0.5% — дребезг тесселяции, а не редакция выкройки
-  const pickOnLayer = (list: readonly PieceDTO[]): PieceDTO | null | 'ambiguous' => {
+  const pickOnLayer = (
+    list: readonly PieceDTO[],
+  ): { contour: PieceDTO; multi: boolean } | null | 'ambiguous' => {
     const on = list.filter((p) => (p.layer ?? '') === input.contourLayer);
     if (on.length === 0) return null;
     if (on.length > 1) {
@@ -184,7 +201,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       const max = Math.max(...on.map((p) => p.areaCm2));
       if (min > 0 && (max - min) / min > AREA_TOLERANCE) return 'ambiguous';
     }
-    return on[0];
+    return { contour: on[0], multi: on.length > 1 };
   };
 
   const picks: Pick[] = [];
@@ -193,36 +210,51 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // согласоваться, и однажды они разойдутся.
   const contourByKey = new Map<string, PieceDTO>(); // `${sizeId}|${pieceIndex}` → контур
   const sizesIncomplete: number[] = [];
+  const sizesAmbiguousPick: number[] = [];
+  const ambiguousPieceNames = new Set<string>();
 
   for (const sizeId of input.sizeIds) {
     const tokens = input.tokensOfSize(sizeId).map(bare).filter(Boolean);
     let complete = true;
-    const staged: Pick[] = [];
+    const staged: (Pick & { multi: boolean })[] = [];
     for (let i = 0; i < resolved.length; i++) {
       const { bySize, graded } = resolved[i];
       // Градуируемая деталь отвечает ТОЛЬКО своим размером: подстановка безразмерной копии здесь
       // отменена выше отказом — смешивать поколения контуров в одной площади нельзя.
       const key = graded ? tokens.find((t) => bySize.has(t)) ?? null : bySize.has('') ? '' : null;
-      const contour = key != null ? pickOnLayer(bySize.get(key) ?? []) : null;
-      if (contour === 'ambiguous') {
+      const picked = key != null ? pickOnLayer(bySize.get(key) ?? []) : null;
+      if (picked === 'ambiguous') {
         return {
           ok: false,
           reason: `деталь «${resolved[i].piece.name}» лежит на слое ${input.contourLayer} в нескольких вариантах с разной площадью — похоже, в пачке две ревизии выкройки. Какая из них норма, сказать нечем`,
         };
       }
-      if (!contour) {
+      if (!picked) {
         complete = false;
         break;
       }
-      staged.push({ pieceIndex: i, sizeKey: key ?? '', contour });
+      staged.push({
+        pieceIndex: i,
+        sizeKey: key ?? '',
+        contour: picked.contour,
+        multi: picked.multi,
+      });
     }
     if (!complete) {
       sizesIncomplete.push(sizeId);
       continue;
     }
+    // Размер, собравшийся ХОТЬ ОДНИМ контуром из нескольких кандидатов, — в отчёт (не в отказ):
+    // число он получает, но воспроизводимым это число не назвать, см. sizesAmbiguousPick.
+    if (staged.some((s) => s.multi)) {
+      sizesAmbiguousPick.push(sizeId);
+      for (const s of staged) {
+        if (s.multi) ambiguousPieceNames.add(resolved[s.pieceIndex].piece.name);
+      }
+    }
     for (const s of staged) {
       contourByKey.set(`${sizeId}|${s.pieceIndex}`, s.contour);
-      picks.push(s);
+      picks.push({ pieceIndex: s.pieceIndex, sizeKey: s.sizeKey, contour: s.contour });
     }
   }
 
@@ -314,6 +346,8 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       sizelessCm2,
       gradedPieces,
       hulled: seam.hulled,
+      sizesAmbiguousPick: sizesAmbiguousPick.sort((a, b) => a - b),
+      ambiguousPickPieces: [...ambiguousPieceNames].sort(),
     },
   };
 }
@@ -329,4 +363,41 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
 export function nettoLengthCm(areaCm2: number, cuttingWidthCm: number): number | null {
   if (!(cuttingWidthCm > 0) || !(areaCm2 > 0)) return null;
   return areaCm2 / cuttingWidthCm;
+}
+
+// ── ПЛОЩАДИ → СТРОКИ В ЕДИНИЦЕ ЛИНИИ, ОДНОЙ ФУНКЦИЕЙ НА ПРИМЕНЕНИЕ И СВЕРКУ ─────────────────────
+//
+// Цепочка nettoLengthCm → toBomUnit → строковое значение раньше жила внутри диалога применения.
+// Пересчёт по текущим данным (dxf-recheck.tsx) считает РОВНО те же числа, чтобы сравнить их с
+// сохранёнными, — и будь у него своя копия цепочки, «расхождение» однажды оказалось бы разницей
+// двух наших же формул, а не входных данных. Поэтому цепочка живёт здесь одна, вместе с правилом
+// «ноль после округления — не норма»: метры пишутся в тысячных (DECIMAL(10,3)), и крошечная площадь
+// честно даёт 0.000 — строку «с нормой», которая ничего не требует, и нулевой дефицит на прогоне.
+export type DxfNormValueRow = {
+  sizeId: number;
+  areaCm2: number;
+  /** NETTO длина, см. null — ширины нет, делить не на что. */
+  lengthCm: number | null;
+  /** Число в единице строки. null — единица не принимает длину (кг — это Ф3, её ещё нет). */
+  conv: { value: number; unit: string } | null;
+  /** Готовое значение для sizeConsumptions. null — числа нет ЛИБО оно округлилось в ноль. */
+  value: string | null;
+};
+
+export function dxfNormValueRows(
+  rows: readonly DxfNormSizeRow[],
+  cuttingWidthCm: number,
+  unit: string,
+): DxfNormValueRow[] {
+  return rows.map((r) => {
+    const cm = nettoLengthCm(r.areaCm2, cuttingWidthCm);
+    const conv = cm != null ? toBomUnit(cm, unit) : null;
+    return {
+      sizeId: r.sizeId,
+      areaCm2: r.areaCm2,
+      lengthCm: cm,
+      conv,
+      value: conv != null && conv.value > 0 ? String(conv.value) : null,
+    };
+  });
 }

@@ -30,7 +30,6 @@ import { DataTable } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
-import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { parseDecimalNumber } from 'utils/decimal';
 import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
 import {
@@ -41,11 +40,10 @@ import {
 } from './nesting/allowance-units';
 import { sizeTokensOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
-import { buildAllowanceIndex } from './nesting/contour-allowance';
-import { layerAllowanceLabel, layerOptions, seamAllowancePrefill } from './nesting/contour-layer';
-import { dxfNormAreas, nettoLengthCm, type DxfNormPiece } from './nesting/dxf-consumption';
+import { applyLayerOptions, applySeamPrefill } from './nesting/dxf-apply-conditions';
+import { layerAllowanceLabel } from './nesting/contour-layer';
+import { dxfNormAreas, dxfNormValueRows, type DxfNormPiece } from './nesting/dxf-consumption';
 import { useDxfGeometry, useDxfIndex } from './nesting/dxf-geometry';
-import { toBomUnit } from './nesting/marker-io';
 import type { TechCardFormData } from './schema';
 
 export default function DxfApplyDialog({
@@ -110,13 +108,10 @@ export default function DxfApplyDialog({
 
   const layers = useMemo(() => {
     if (!geometry.data || !index) return [];
-    // Индекс замера строится по НЕОТФИЛЬТРОВАННОМУ разбору: на наборе, суженном до одного слоя,
-    // второго контура блока нет по построению, и замер выродился бы в 'unknown' на каждом слое.
-    return layerOptions(
-      geometry.data.pieces,
-      index.split.codeById,
-      buildAllowanceIndex(geometry.data.pieces),
-    );
+    // Список слоёв (и построение индекса замера по неотфильтрованному разбору) — общим кодом с
+    // пересчётом по текущим данным (dxf-recheck.tsx): условия пересчёта там обязаны быть теми же,
+    // что предложил бы этот диалог, и «теми же» их делает один вызов, а не два похожих.
+    return applyLayerOptions(geometry.data, index);
   }, [geometry.data, index]);
   const chosenLayer = layer ?? index?.contourLayer ?? '';
   const chosenOption = layers.find((o) => o.layer === chosenLayer);
@@ -126,19 +121,11 @@ export default function DxfApplyDialog({
   // раскладкой того же файла, где порядок источников полный. Запрос дешёвый и идёт только с открытым
   // диалогом (RBAC: чтение настроек разрешено любому аккаунту).
   const workshop = useWorkshopSettings();
-  const workshopSeamMm = parseDecimalNumber(
-    (workshop.data?.settings?.defaultSeamAllowanceMm as string | undefined) ?? '',
-  );
 
   const prefill = useMemo(
     () =>
-      seamAllowancePrefill({
-        measured: chosenOption?.allowance ?? null,
-        cardRequiredMm: cardSeamMm != null && cardSeamMm !== '' ? Number(cardSeamMm) : null,
-        workshopDefaultMm: Number.isFinite(workshopSeamMm) ? workshopSeamMm : null,
-        fallbackMm: engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
-      }),
-    [chosenOption, cardSeamMm, workshopSeamMm],
+      applySeamPrefill(chosenOption, cardSeamMm, workshop.data?.settings?.defaultSeamAllowanceMm),
+    [chosenOption, cardSeamMm, workshop.data],
   );
   // РУЧНОЙ ВВОД ПРИПУСКА ПРОВЕРЯЕТСЯ, А НЕ ГЛОТАЕТСЯ. Мусор («1.2.3») давал NaN и молча превращался
   // в 0 мм, а 900 мм принимались — при том, что и раскладка, и сервер держат потолок в
@@ -179,21 +166,23 @@ export default function DxfApplyDialog({
     });
   }, [index, pieces, unaliasedPieces, sizeIds, sizeNameById, chosenLayer, seamValue]);
 
-  // Строки применения: размер → netto в единице линии. Полное покрытие ряда или ничего — частичный
-  // ряд заставил бы план подставлять скаляр (которого не будет) на непокрытые размеры.
+  // Строки применения: размер → netto в единице линии — общей функцией с пересчётом по текущим
+  // данным (dxfNormValueRows), включая правило «ноль после округления — не норма»: `toBomUnit` округляет
+  // метры до трёх знаков (колонка DECIMAL(10,3)), и крошечная площадь честно превращается в 0.000 —
+  // строка сохранилась бы «с нормой», которая ничего не требует, и дефицит на прогоне вышел бы
+  // нулевым. Полное покрытие ряда или ничего — частичный ряд заставил бы план подставлять скаляр
+  // (которого не будет) на непокрытые размеры.
   const rows = useMemo(() => {
     if (!outcome?.ok || !(widthCm > 0)) return [];
-    return outcome.areas.rows.map((r) => {
-      const cm = nettoLengthCm(r.areaCm2, widthCm);
-      const conv = cm != null ? toBomUnit(cm, unit) : null;
-      return { sizeId: r.sizeId, areaCm2: r.areaCm2, lengthCm: cm, conv };
-    });
+    return dxfNormValueRows(outcome.areas.rows, widthCm, unit);
   }, [outcome, widthCm, unit]);
-  // НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — ЭТО НЕ НОРМА. `toBomUnit` округляет метры до трёх знаков (колонка
-  // DECIMAL(10,3)), и крошечная площадь честно превращается в 0.000: строка сохранилась бы «с
-  // нормой», которая ничего не требует, и дефицит на прогоне вышел бы нулевым.
-  const complete =
-    rows.length === sizeIds.length && rows.every((r) => r.conv != null && r.conv.value > 0);
+  const complete = rows.length === sizeIds.length && rows.every((r) => r.value != null);
+  // ПРИМЕНЕНИЕ ЖДЁТ НАСТРОЙКИ ЦЕХА. Порядок источников припуска — замер → карточка → ЦЕХ → умолчание
+  // раскладки, и пока запрос цеха в пути, прифилл показывает умолчание. Оператор, успевший нажать
+  // «применить» в это окно, снял бы норму по припуску, которого никто не назначал: цех хранит 12 мм,
+  // подставилось 10, разница ушла по всему периметру каждой детали в себестоимость и в закупку.
+  // Ошибку запроса применение НЕ блокирует (иначе упавшая настройка остановила бы работу), но
+  // подпись прифилла в этом состоянии врёт про «цех не назвал» — об этом говорит отдельная плашка.
   const applicable =
     complete &&
     !wastageMissing &&
@@ -201,6 +190,7 @@ export default function DxfApplyDialog({
     !seamInvalid &&
     !seamOverMax &&
     !doubleAllowance &&
+    !workshop.isPending &&
     downloadFailures.length === 0;
 
   const sizeName = (id: number) => sizeNameById.get(id) ?? `#${id}`;
@@ -217,7 +207,7 @@ export default function DxfApplyDialog({
       // колорвея: без этой строки применение к легаси-строке (обоими полями заполненной с 0079)
       // выглядело бы удавшимся, а рушилось бы потом и в другом месте.
       quantity: '',
-      sizeConsumptions: rows.map((r) => ({ sizeId: r.sizeId, consumption: String(r.conv!.value) })),
+      sizeConsumptions: rows.map((r) => ({ sizeId: r.sizeId, consumption: r.value! })),
       consumptionSource: 'dxf',
       // Разложение отходов описывает измеренную раскладку — у площади деталей его нет, и сервер
       // отказывает паре (dxf + проценты). Штамп нормы снимается явно: 0, а не пропуск поля, иначе
@@ -317,6 +307,20 @@ export default function DxfApplyDialog({
             {seamMm.trim() === '' ? prefill.why : 'введено руками'}
           </Text>
         </label>
+
+        {/* ЦЕХ — ТРЕТИЙ ИСТОЧНИК ПРИПУСКА, и его молчание надо отличать от невозможности спросить.
+            Пока запрос в пути, применение запрещено (см. applicable): подставленное умолчание уехало
+            бы в норму. Если запрос УПАЛ, применять можно — иначе сломанная настройка остановила бы
+            работу, — но подпись «ни карточка, ни цех, ни файл не назвали» в этом состоянии неверна,
+            и молчать об этом нельзя. */}
+        {workshop.isPending && <Text size='micro'>читаем стандарт припуска цеха…</Text>}
+        {workshop.isError && (
+          <CalloutBox tone='warning'>
+            Настройки цеха не читаются, поэтому цеховой стандарт припуска в предзаполнении НЕ
+            участвовал. Если он задан, норма выйдет посчитанной по другому припуску — проверьте
+            число в поле выше.
+          </CalloutBox>
+        )}
 
         {seamInvalid && (
           <CalloutBox tone='warning'>
