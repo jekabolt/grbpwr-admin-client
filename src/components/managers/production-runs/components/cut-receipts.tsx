@@ -18,6 +18,18 @@ import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
+import {
+  ClothReport,
+  buildClothReport,
+  clothRefusalText,
+  fmtDeltaPct,
+  fmtQty,
+  isLayFactFrozen,
+  layClothInput,
+  normBasisText,
+  normRefusalText,
+  pairNormInput,
+} from '../utils/cloth-per-unit';
 import { runDate } from './options';
 import {
   cutReceiptErrorMessage,
@@ -25,7 +37,8 @@ import {
   useDeleteCutReceipt,
   useSaveCutReceiptRows,
 } from './useCutReceipts';
-import { useRunLays } from './useLays';
+import { layActualQty, useRunLays } from './useLays';
+import { useRunNormCard } from './useRunNormCard';
 
 // ПРИЁМКА КРОЯ (Ф5б.5) — дыра между «раскроили» и «детали дошли до пошива», закрытая двумя числами.
 //
@@ -95,6 +108,20 @@ type Draft = { cut: string; accepted: string; note: string };
 const rowKey = (layKey: string, sizeId: number) => `${layKey}:${sizeId}`;
 const digits = (v: string) => v.replace(/[^0-9]/g, '');
 
+// Имя настила ВНУТРИ пары — для отказов и оговорок агрегата: колорвей и слот у всех настилов пары
+// одинаковы, различают их собственное имя либо рулон. На уровне модуля, а не компонента: функцию
+// читают useMemo, стоящие в коде РАНЬШЕ места, где const в теле компонента успел бы объявиться.
+const layShortName = (lay: common_ProductionRunLay) =>
+  (lay.name ?? '').trim() || (lay.lotCode ? `настил (${lay.lotCode})` : `настил #${wireInt(lay.id)}`);
+
+// Идентификатор СЛОТА настила; '' = идентификатора нет ВОВСЕ (легаси-запись без bomLineKey и
+// bomItemId — текущий редактор таких не создаёт). Пустоту обязан обрабатывать вызывающий сам:
+// прежний фолбэк `... || '—'` был недостижим — String(wireInt(undefined)) даёт '0', а строка '0'
+// truthy, — и два безымянных настила РАЗНЫХ слотов (ткань и подкладка) молча склеивались в одну
+// пару с общим числом под именем первого.
+const laySlotKey = (lay: common_ProductionRunLay): string =>
+  lay.bomLineKey || (wireInt(lay.bomItemId) > 0 ? String(wireInt(lay.bomItemId)) : '');
+
 export function CutReceipts({
   run,
   canEdit,
@@ -124,7 +151,13 @@ export function CutReceipts({
   const techCardId = run.run?.techCardId ?? 0;
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
-  const { data: techCard } = useTechCard(techCardId || undefined);
+  // isError нужен отдельно от data: «карточка ещё читается» и «запрос карточки упал» — разные
+  // состояния, и сравнение с нормой обязано назвать второе словами, а не молчать как при первом.
+  const { data: techCard, isError: techCardFailed } = useTechCard(techCardId || undefined);
+  // НОРМА — из снапшота ревизии прогона, живая карточка только фолбэком (и подпись сравнения
+  // его называет). Градация размеров, ярлыки колорвеев и прочее на этом экране остаются живыми:
+  // приёмка — отчёт о сегодняшнем крое, а норма — обещание той ревизии, по которой партию кроят.
+  const { normCard, normBasis, releasePending } = useRunNormCard(run, techCard);
 
   // Настилы читаются ТЕМ ЖЕ ключом, что план настилов рядом (layKeys.list), поэтому лишнего запроса
   // нет: React Query отдаёт оба блока из одного ответа, и два блока одного шага не могут разойтись
@@ -215,8 +248,10 @@ export function CutReceipts({
       const key = lay.layKey ?? '';
       const s = new Set<number>();
       const entries = (lay.qtyCurrent?.length ? lay.qtyCurrent : lay.qtySnapshot) ?? [];
-      for (const e of entries) if (wireInt(e.qty) > 0 && wireInt(e.sizeId) > 0) s.add(wireInt(e.sizeId));
-      for (const r of receiptsByLay.get(key) ?? []) if (wireInt(r.sizeId) > 0) s.add(wireInt(r.sizeId));
+      for (const e of entries)
+        if (wireInt(e.qty) > 0 && wireInt(e.sizeId) > 0) s.add(wireInt(e.sizeId));
+      for (const r of receiptsByLay.get(key) ?? [])
+        if (wireInt(r.sizeId) > 0) s.add(wireInt(r.sizeId));
       m.set(
         key,
         [...s].sort((a, b) => sizeOrder(a) - sizeOrder(b)),
@@ -266,7 +301,8 @@ export function CutReceipts({
   // сказать, что блок показывает не весь заказ.
   const plannedWithoutLays = useMemo(() => {
     const planned = new Set<number>();
-    for (const l of lines) if (wireInt(l.plannedQty) > 0 && wireInt(l.productId) > 0) planned.add(wireInt(l.productId));
+    for (const l of lines)
+      if (wireInt(l.plannedQty) > 0 && wireInt(l.productId) > 0) planned.add(wireInt(l.productId));
     return [...planned].filter((cw) => !colorwayIds.includes(cw)).length;
   }, [lines, colorwayIds]);
 
@@ -306,10 +342,13 @@ export function CutReceipts({
             if (!r) continue;
             reported += 1;
             // Слот BOM, а не настил: внутри слота настилы складываются, между слотами берётся
-            // минимум (см. ЛОВУШКУ вверху файла).
-            const slotKey = lay.bomLineKey || String(wireInt(lay.bomItemId)) || '—';
+            // минимум (см. ЛОВУШКУ вверху файла). Настил БЕЗ идентификатора слота (laySlotKey='')
+            // — сам себе слот: сложить его с другим безымянным значило бы угадать, что они кроят
+            // один и тот же слой, а минимум — направление матрицы покрытия; разъезд слотов при
+            // этом виден в подсказке «слоты расходятся» с именами.
+            const slotKey = laySlotKey(lay) || `lay:${lay.layKey ?? ''}`;
             const acc = bySlot.get(slotKey) ?? {
-              label: lay.bomItemName || lay.materialName || 'слот',
+              label: lay.bomItemName || lay.materialName || layShortName(lay),
               cut: 0,
               accepted: 0,
             };
@@ -337,6 +376,106 @@ export function CutReceipts({
     });
   }, [colorwayIds, laysByColorway, laySizes, lineByPair, receiptByRow, lines, sizeOrder]);
 
+  // ── ТКАНЬ НА ИЗДЕЛИЕ (Ф4) ──────────────────────────────────────────────────────────────
+  // Арифметика и слова отказов — utils/cloth-per-unit, ОБЩИЕ с карточками настилов в плане выше:
+  // две копии формулы на двух экранах разошлись бы молча.
+
+  // Запись факта настила закрыта статусом партии ШИРЕ, чем `locked` (плюс cancelled): на закрытой
+  // партии знаменатель (приёмку кроя) ещё уточняют, а невнесённый числитель не внести уже никогда.
+  const factFrozen = isLayFactFrozen(run.run?.status);
+
+  // Норма для отчёта: ревизия прогона ещё читается → undefined (сравнение молчит, а не мерится
+  // «пока» живой картой); карточка (снапшот ревизии или живая) есть → вход нормы с подписью,
+  // ОТКУДА она; карточка упала и снапшота нет → 'card-failed' (отказ словами). Без ветки
+  // 'card-failed' 500 от GetTechCard был бы неотличим от вечной загрузки, и строка «к норме»
+  // пропадала бы молча.
+  const normFor = (colorwayId: number, bomLineKey: string, bomItemId: number) =>
+    releasePending
+      ? undefined
+      : normCard
+        ? pairNormInput(normCard, colorwayId, bomLineKey, bomItemId, normBasis)
+        : techCardFailed
+          ? ('card-failed' as const)
+          : undefined;
+
+  // Отчёт по ОДНОМУ настилу — итожная строка его таблицы ввода.
+  const clothByLay = useMemo(() => {
+    const m = new Map<string, ClothReport>();
+    for (const lay of lays) {
+      const key = lay.layKey ?? '';
+      m.set(
+        key,
+        buildClothReport(
+          [layClothInput(lay, receiptsByLay.get(key) ?? [], layShortName(lay))],
+          factFrozen,
+          normFor(wireInt(lay.colorwayId), lay.bomLineKey ?? '', wireInt(lay.bomItemId)),
+        ),
+      );
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- normFor — чистая функция от normCard/normBasis/releasePending/techCardFailed
+  }, [lays, receiptsByLay, factFrozen, normCard, normBasis, releasePending, techCardFailed]);
+
+  // Пары (колорвей × слот) — единственная законная агрегация: внутри слота настилы суммируются,
+  // между слотами не складывается ничего (изделию нужны ВСЕ слои — см. ЛОВУШКУ вверху файла).
+  const pairGroups = useMemo(() => {
+    const m = new Map<
+      string,
+      {
+        key: string;
+        colorwayId: number;
+        bomLineKey: string;
+        bomItemId: number;
+        slotName: string;
+        /** У настила нет НИ ОДНОГО идентификатора слота (легаси-запись): он не агрегируется ни с
+         *  кем — «пара» из него одного, — и таблица говорит это вслух вместо молчаливого слияния
+         *  с другим таким же безымянным. */
+        slotless: boolean;
+        lays: common_ProductionRunLay[];
+      }
+    >();
+    for (const lay of lays) {
+      const cw = wireInt(lay.colorwayId);
+      // Тот же слотовый ключ, что у свёртки цепочки выше — пары обоих блоков не могут разойтись;
+      // и там, и тут настил без идентификатора слота ни с кем не склеивается (ключ — его layKey).
+      const slotId = laySlotKey(lay);
+      const key = `${cw}:${slotId || `lay:${lay.layKey ?? ''}`}`;
+      const g = m.get(key);
+      if (g) g.lays.push(lay);
+      else
+        m.set(key, {
+          key,
+          colorwayId: cw,
+          bomLineKey: lay.bomLineKey ?? '',
+          bomItemId: wireInt(lay.bomItemId),
+          slotName: lay.bomItemName || lay.materialName || layShortName(lay),
+          slotless: slotId === '',
+          lays: [lay],
+        });
+    }
+    return [...m.values()];
+  }, [lays]);
+
+  const pairCloth = useMemo(() => {
+    const m = new Map<string, ClothReport>();
+    for (const p of pairGroups) {
+      m.set(
+        p.key,
+        buildClothReport(
+          p.lays.map((l) =>
+            layClothInput(l, receiptsByLay.get(l.layKey ?? '') ?? [], layShortName(l)),
+          ),
+          factFrozen,
+          normFor(p.colorwayId, p.bomLineKey, p.bomItemId),
+        ),
+      );
+    }
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- normFor — чистая функция от normCard/normBasis/releasePending/techCardFailed
+  }, [pairGroups, receiptsByLay, factFrozen, normCard, normBasis, releasePending, techCardFailed]);
+
+  const anyFact = useMemo(() => lays.some((l) => layActualQty(l) !== ''), [lays]);
+
   // Настил не применим к aux-карточке — там нет ни колорвеев, ни деталей, ни раскладок, значит нет
   // и пары (настил, размер). Гейт дублирует тот, что убирает шаг «раскрой» из ленты: блок,
   // смонтированный по ошибке, обязан молчать сам.
@@ -346,9 +485,11 @@ export function CutReceipts({
 
   const serverDraft = (layKey: string, sizeId: number): Draft => {
     const r = receiptByRow.get(rowKey(layKey, sizeId));
-    // ПУСТО ≠ НОЛЬ, и это не придирка: у сервера строка из нулей — это СЧЁТ, равный нулю, а
-    // отсутствие строки — отсутствие счёта. Поэтому базовая линия ненабранной строки — пустые поля,
-    // а явно набранный «0» отличается от неё и уедет на сервер как посчитанный ноль.
+    // ПУСТО ≠ НОЛЬ, но только до сохранения: базовая линия ненабранной строки — пустые поля, и
+    // явно набранный «0» от неё отличим. При сохранении различие умирает — saveLay сериализует
+    // пустое поле нулём (обе колонки NOT NULL, «пусто» серверу не передать), и хранёный ноль уже
+    // не говорит, был ли он набран. Поэтому все тексты про «выкроено 0» / «принято 0» обязаны
+    // признавать обе причины, а не утверждать «посчитанный ноль».
     if (!r) return { cut: '', accepted: '', note: '' };
     return {
       cut: String(wireInt(r.cutQty)),
@@ -494,10 +635,10 @@ export function CutReceipts({
 
           <GroupLabel flush>цепочка чисел</GroupLabel>
           <Text size='micro' variant='label'>
-            заказано → выкроено → принято в пошив → сдано готовым → брак. Заказанное и сданное берутся
-            из строки партии РОВНО ОДИН РАЗ на пару (колорвей, размер); выкроенное и принятое
-            складываются по настилам внутри слота и сводятся минимумом между слотами — изделию нужны
-            все его слои.
+            заказано → выкроено → принято в пошив → сдано готовым → брак. Заказанное и сданное
+            берутся из строки партии РОВНО ОДИН РАЗ на пару (колорвей, размер); выкроенное и
+            принятое складываются по настилам внутри слота и сводятся минимумом между слотами —
+            изделию нужны все его слои.
           </Text>
 
           {/* Колорвей, у которого настилы есть, но ни одного размера в них ещё нет, пропускается:
@@ -524,10 +665,227 @@ export function CutReceipts({
             </Text>
           ) : null}
 
+          {/* ТКАНЬ НА ИЗДЕЛИЕ (Ф4): норма расхода в карточке — план; здесь факт полотна настилов
+              впервые встречается с выкроенным. ЭТО НЕ ДРЕЙФ НАСТИЛА (actualDriftPercent — факт
+              против геометрии настила, его владелец — сервер): здесь другая пара чисел — факт на
+              изделие против нормы на изделие. */}
+          <GroupLabel>ткань на изделие · пары (колорвей × слот)</GroupLabel>
+          <Text size='micro' variant='label'>
+            факт полотна ÷ выкроено — сколько ткани стоил КРОЙ (брак кроя внутри: ткань на него
+            потрачена); факт ÷ принято в пошив — сколько стоило ГОДНОЕ изделие; разница — цена брака
+            кроя в ткани. Настилы складываются только ВНУТРИ пары; полотно разных слотов и разных
+            единиц не складывается — изделию нужны все его слои.
+          </Text>
+          {!anyFact ? (
+            factFrozen ? (
+              // Необратимость называется вслух: иначе оператор ищет кнопку, которой нет.
+              <CalloutBox tone='note'>
+                <Text size='small'>
+                  Замеров полотна нет, а запись факта закрыта статусом партии — «ткань на изделие»
+                  по этим настилам не посчитается уже никогда: приёмка кроя правится и на закрытой
+                  партии (знаменатель уточняем), но числитель уже не появится.
+                </Text>
+              </CalloutBox>
+            ) : (
+              <Text size='small' variant='inactive'>
+                замеры полотна ещё не внесены — «на изделие» посчитается после замера (факт расхода
+                вносится на настиле в плане настилов выше)
+              </Text>
+            )
+          ) : (
+            <DataTable>
+              <thead>
+                <tr>
+                  <th>пара</th>
+                  <th>полотно</th>
+                  <th>выкроено / годных</th>
+                  <th>на крой</th>
+                  <th>на годное</th>
+                  <th className='w-full'>оговорки</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pairGroups.map((p) => {
+                  const report = pairCloth.get(p.key);
+                  const label = `${colorwayLabel(p.colorwayId)} · ${p.slotName}`;
+                  if (!report) return null;
+                  const { perUnit, norm } = report;
+                  if (!perUnit.ok) {
+                    // Отказ агрегата НАЗЫВАЕТ настилы без замера (clothRefusalText) — смешанная
+                    // пара, где часть настилов с фактом, дала бы число ни о чём.
+                    return (
+                      <tr key={p.key}>
+                        <td className='text-left'>{label}</td>
+                        <td>
+                          <EmptyCell />
+                        </td>
+                        <td>
+                          <EmptyCell />
+                        </td>
+                        <td>
+                          <EmptyCell />
+                        </td>
+                        <td>
+                          <EmptyCell />
+                        </td>
+                        <td className='text-left'>
+                          {p.slotless ? (
+                            <Text size='micro' component='span' className='block text-warning'>
+                              у настила нет идентификатора слота BOM (легаси-запись) — строка
+                              показана отдельно и ни с чем не складывается
+                            </Text>
+                          ) : null}
+                          <Text size='micro' component='span' className='block text-labelColor'>
+                            {clothRefusalText(perUnit.refusal, { pair: true })}
+                          </Text>
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const u = perUnit.unitLabel;
+                  const notes: { text: string; tone: 'error' | 'warning' | 'label' }[] = [];
+                  if (p.slotless)
+                    notes.push({
+                      text: 'у настила нет идентификатора слота BOM (легаси-запись) — строка показана отдельно и ни с чем не складывается',
+                      tone: 'warning',
+                    });
+                  if (perUnit.mixed) notes.push({ text: 'среднее по составу пары', tone: 'label' });
+                  // Признака «добор» в данных нет: настил, кроивший ЗАМЕНУ бракованных панелей, а
+                  // не новые комплекты, раздувает знаменатель, и посчитать правильно НЕЛЬЗЯ —
+                  // поэтому каждый агрегат из >1 настила несёт оговорку с направлением ошибки.
+                  // Эвристику «угадать добор по соотношению» не заводим: она ошибалась бы молча,
+                  // а оговорка — нет.
+                  if (perUnit.layCount > 1)
+                    notes.push({
+                      text: `настилов в паре: ${perUnit.layCount} — если какой-то из них добор (замена бракованных панелей, а не новые комплекты), знаменатель раздут: «на изделие» и процент к норме занижены`,
+                      tone: 'warning',
+                    });
+                  if (perUnit.unreportedLays.length > 0)
+                    notes.push({
+                      text: `крой не отчитан: «${perUnit.unreportedLays.join('», «')}» — знаменатель занижен`,
+                      tone: 'warning',
+                    });
+                  if (perUnit.missingSizes.length > 0)
+                    notes.push({
+                      text: `нет приёмки по размерам: ${perUnit.missingSizes
+                        .map(sizeLabel)
+                        .join(', ')} — «на изделие» завышено и будет уменьшаться по мере ввода`,
+                      tone: 'warning',
+                    });
+                  // «Принято больше выкроенного» — невозможное состояние данных, и никакая другая
+                  // строка его не красит (цепочка чисел отмечает только принято < выкроено).
+                  if (perUnit.acceptedOverCut)
+                    notes.push({
+                      text: `принято ${perUnit.acceptedTotal} при выкроенных ${perUnit.cutTotal} — так не бывает: какое-то из чисел врёт, проверьте строки приёмки`,
+                      tone: 'error',
+                    });
+                  if (perUnit.scrapPerGood != null)
+                    notes.push({
+                      text: `цена брака кроя: +${fmtQty(perUnit.scrapPerGood)} ${u} на годное`,
+                      tone: 'error',
+                    });
+                  // «Принято меньше выкроенного» имеет ДВЕ причины, и данные их не различают:
+                  // accepted_qty — NOT NULL DEFAULT 0, поэтому незаполненная приёмка приезжает
+                  // нулём. Признак — по ОТДЕЛЬНЫМ строкам (настил + размер), с именами ОБОИХ:
+                  // сумма по размеру прятала бы незаполненную строку одного настила за принятыми
+                  // соседнего, а без имени настила оператору в паре негде искать.
+                  if (perUnit.acceptedZeroRows.length > 0)
+                    notes.push({
+                      text: `принято ровно 0: ${perUnit.acceptedZeroRows
+                        .map((z) => `${sizeLabel(z.sizeId)} на «${z.lay}»`)
+                        .join(', ')} — если приёмку там не заполнили, годное занижено и «цена брака» завышена`,
+                      tone: 'warning',
+                    });
+                  if (norm) {
+                    if (norm.ok) {
+                      const d = fmtDeltaPct(norm.deltaPct);
+                      // partlyGrossed: процент начислен только на слагаемые без отходов внутри —
+                      // общая фраза «+10% раскроя» читалась бы как процент на всю норму.
+                      notes.push({
+                        text: `к норме ${fmtQty(norm.normPerUnit)} ${norm.unitLabel}/изд (${norm.sourceLabel}${
+                          norm.grossed
+                            ? norm.partlyGrossed
+                              ? ` + ${fmtQty(norm.wastagePct ?? 0)}% раскроя только на часть без отходов внутри`
+                              : ` + ${fmtQty(norm.wastagePct ?? 0)}% раскроя`
+                            : ''
+                        }${norm.weighted ? ', взвешенной по составу' : ''}): ${d.text}`,
+                        tone: d.over ? 'error' : 'label',
+                      });
+                      // С ЧЕМ сравнивали — ревизия прогона или живая карточка. Отдельной строкой,
+                      // потому что фолбэк на живую карту при нечитаемом снапшоте обязан звучать
+                      // тревогой, а не терять слова внутри длинной подписи процента.
+                      notes.push({
+                        text: normBasisText(norm.basis),
+                        tone: norm.basis.kind === 'live-broken-snapshot' ? 'warning' : 'label',
+                      });
+                    } else {
+                      notes.push({
+                        text: `к норме — ${normRefusalText(norm.refusal, sizeLabel)}`,
+                        tone: 'label',
+                      });
+                      // Отказ тоже говорит, в ЧЬЕЙ рецептуре искали: «нормы на пару нет» в
+                      // ревизии — не то же, что в живой карточке.
+                      if (norm.basis)
+                        notes.push({
+                          text: normBasisText(norm.basis),
+                          tone: norm.basis.kind === 'live-broken-snapshot' ? 'warning' : 'label',
+                        });
+                    }
+                  }
+                  return (
+                    <tr key={p.key}>
+                      <td className='text-left'>{label}</td>
+                      <td>
+                        {fmtQty(perUnit.factTotal)} {u}
+                      </td>
+                      <td>
+                        {perUnit.cutTotal} / {perUnit.acceptedTotal}
+                      </td>
+                      <td>
+                        {fmtQty(perUnit.perCut)} {u}
+                      </td>
+                      {/* «Годных 0» не утверждается: нулём приезжает и незаполненная приёмка
+                          (accepted_qty NOT NULL DEFAULT 0). Клетка говорит про ЧИСЛО, оговорка —
+                          в примечаниях. */}
+                      <td className={perUnit.perAccepted == null ? 'text-error' : ''}>
+                        {perUnit.perAccepted == null
+                          ? 'принято 0'
+                          : `${fmtQty(perUnit.perAccepted)} ${u}`}
+                      </td>
+                      <td className='text-left'>
+                        {notes.length === 0 ? (
+                          <EmptyCell />
+                        ) : (
+                          notes.map((n) => (
+                            <Text
+                              key={n.text}
+                              size='micro'
+                              component='span'
+                              className={`block ${
+                                n.tone === 'error'
+                                  ? 'text-error'
+                                  : n.tone === 'warning'
+                                    ? 'text-warning'
+                                    : 'text-labelColor'
+                              }`}
+                            >
+                              {n.text}
+                            </Text>
+                          ))
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </DataTable>
+          )}
+
           <GroupLabel>ввод по настилам</GroupLabel>
           <Text size='micro' variant='label'>
             Строка приёмки — пара (настил, размер); повторное сохранение ПРАВИТ её, а не заводит
-            вторую. Пустая клетка — это «не считали», набранный «0» — посчитанный ноль; чтобы сказать
+            вторую. Пустая клетка — «не считали», но лишь до сохранения строки: сохранённая хранит
+            оба числа, и пустое поле уедет нулём, потом неотличимым от посчитанного. Чтобы сказать
             «этого размера на этом настиле не кроили», удалите строку.
           </Text>
 
@@ -650,7 +1008,9 @@ export function CutReceipts({
                               {stored?.updatedBy ? (
                                 <Text size='nano' variant='label' className='block text-left'>
                                   {stored.updatedBy}
-                                  {runDate(stored.updatedAt) ? ` · ${runDate(stored.updatedAt)}` : ''}
+                                  {runDate(stored.updatedAt)
+                                    ? ` · ${runDate(stored.updatedAt)}`
+                                    : ''}
                                 </Text>
                               ) : null}
                             </td>
@@ -670,6 +1030,15 @@ export function CutReceipts({
                           </tr>
                         );
                       })}
+                      <LayClothTotalRow
+                        planTotal={sizes.reduce(
+                          (s, sz) => s + (layPlanQty.get(rowKey(layKey, sz)) ?? 0),
+                          0,
+                        )}
+                        stored={receiptsByLay.get(layKey) ?? []}
+                        report={clothByLay.get(layKey)}
+                        hasFact={layActualQty(lay) !== ''}
+                      />
                     </tbody>
                   </DataTable>
                 )}
@@ -683,7 +1052,10 @@ export function CutReceipts({
                       onChange={(e) => {
                         const s = Number(e.target.value);
                         if (!s) return;
-                        setExtraSizes((prev) => ({ ...prev, [layKey]: [...(prev[layKey] ?? []), s] }));
+                        setExtraSizes((prev) => ({
+                          ...prev,
+                          [layKey]: [...(prev[layKey] ?? []), s],
+                        }));
                       }}
                     >
                       <option value=''>+ размер…</option>
@@ -721,6 +1093,87 @@ export function CutReceipts({
 }
 
 /**
+ * Итожная строка таблицы ввода ОДНОГО настила: Σ по колонкам + ткань на изделие.
+ *
+ * Суммы — по СОХРАНЁННЫМ строкам, тем же числам, что и «ткань на изделие» рядом: несохранённый
+ * черновик уже помечен в своей строке словом «не сохранено», а итог, прыгающий от каждого нажатия
+ * клавиши, врал бы про то, что знает база.
+ */
+function LayClothTotalRow({
+  planTotal,
+  stored,
+  report,
+  hasFact,
+}: {
+  planTotal: number;
+  stored: common_ProductionRunCutReceipt[];
+  report?: ClothReport;
+  hasFact: boolean;
+}) {
+  // Ни строк, ни замера — итожить нечего, и строка из пустых клеток обещала бы счёт, которого нет.
+  if (stored.length === 0 && !hasFact) return null;
+  const cut = stored.reduce((s, r) => s + wireInt(r.cutQty), 0);
+  const accepted = stored.reduce((s, r) => s + wireInt(r.acceptedQty), 0);
+  return (
+    <TotalRow>
+      <td>Σ</td>
+      <td>{planTotal > 0 ? planTotal : <EmptyCell />}</td>
+      <td>{stored.length > 0 ? cut : <EmptyCell />}</td>
+      <td>{stored.length > 0 ? accepted : <EmptyCell />}</td>
+      <td className='text-left' colSpan={2}>
+        <LayClothSummary report={report} />
+      </td>
+    </TotalRow>
+  );
+}
+
+// Ткань на изделие одного настила — та же арифметика, что на его карточке в плане настилов;
+// сравнение с нормой здесь СОЗНАТЕЛЬНО не повторяется: его несут карточка настила и таблица пар,
+// а третья копия того же процента читалась бы как третий показатель. «Принято 0», а не «годных 0»:
+// нулём приезжает и незаполненная приёмка (accepted_qty NOT NULL DEFAULT 0), утверждать «годных
+// нет» строка права не имеет.
+function LayClothSummary({ report }: { report?: ClothReport }) {
+  if (!report) return null;
+  const { perUnit } = report;
+  if (!perUnit.ok) {
+    const r = perUnit.refusal;
+    if (r.kind === 'zero-cut') {
+      return (
+        <Text size='micro' component='span' className='block text-error'>
+          выкроено 0 — полотно {fmtQty(r.factTotal)} {r.unitLabel} без записанных изделий; ноль мог
+          быть и не введён (пустое поле сохраняется нулём)
+        </Text>
+      );
+    }
+    if (r.kind === 'no-receipts') {
+      return (
+        <Text size='micro' component='span' className='block text-labelColor'>
+          полотно {fmtQty(r.factTotal)} {r.unitLabel} — крой не отчитан, «на изделие» делить не на
+          что
+        </Text>
+      );
+    }
+    return (
+      <Text size='micro' component='span' className='block text-labelColor'>
+        {clothRefusalText(r)}
+        {r.kind === 'no-fact' && !r.frozen ? ' — «на изделие» посчитается после замера' : ''}
+      </Text>
+    );
+  }
+  const u = perUnit.unitLabel;
+  return (
+    <Text size='micro' component='span' className='block text-labelColor'>
+      полотно {fmtQty(perUnit.factTotal)} {u} → {fmtQty(perUnit.perCut)} {u}/изд кроя
+      {perUnit.perAccepted != null
+        ? ` · ${fmtQty(perUnit.perAccepted)} ${u}/изд годного`
+        : ' · принято 0'}
+      {perUnit.acceptedOverCut ? ' · принято больше выкроенного — так не бывает' : ''}
+      {perUnit.missingSizes.length > 0 ? ' · не по всем размерам — завышено' : ''}
+    </Text>
+  );
+}
+
+/**
  * Цепочка одного колорвея. Каждая строка — пара (колорвей, размер), встречающаяся РОВНО ОДИН РАЗ.
  *
  * Цвет здесь никогда не идёт один: рядом с каждым красным числом стоит слово в колонке
@@ -754,10 +1207,13 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
             r.cut != null && r.planned != null && r.reported === r.expected && r.cut < r.planned
               ? r.planned - r.cut
               : 0;
-          const overcut = r.cut != null && r.planned != null && r.cut > r.planned ? r.cut - r.planned : 0;
-          const cutScrap = r.cut != null && r.accepted != null && r.accepted < r.cut ? r.cut - r.accepted : 0;
+          const overcut =
+            r.cut != null && r.planned != null && r.cut > r.planned ? r.cut - r.planned : 0;
+          const cutScrap =
+            r.cut != null && r.accepted != null && r.accepted < r.cut ? r.cut - r.accepted : 0;
           const slotSpread =
-            r.slots.length > 1 && Math.min(...r.slots.map((s) => s.cut)) < Math.max(...r.slots.map((s) => s.cut));
+            r.slots.length > 1 &&
+            Math.min(...r.slots.map((s) => s.cut)) < Math.max(...r.slots.map((s) => s.cut));
 
           if (r.expected === 0) {
             // Размер заказан, но ни один настил его не кроит. Это находка ПЛАНА настилов (там она и
