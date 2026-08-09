@@ -30,7 +30,7 @@ import { composition as compositionDict } from 'constants/garment-composition';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
 import { useSearchParams } from 'react-router-dom';
 import { Button, buttonVariants } from 'ui/components/button';
@@ -51,7 +51,7 @@ import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { DxfApplyHint } from './dxf-apply';
 import { MarkerApplyHint } from './marker-apply';
-import { markersOfColorway } from './nesting/marker-io';
+import { bomUnitStep, markersOfColorway } from './nesting/marker-io';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
@@ -62,6 +62,12 @@ import {
   useUpdateColorwayRecipe,
 } from './useColorwayRecipe';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
+
+// Пересчёт dxf-нормы по текущим данным (Ф2) — lazy() ровно потому же, почему dxf-apply.tsx лениво
+// тянет свой диалог: он подписывается на массивы формы и тянет мегабайты DXF с CDN, а NormSummary
+// смонтирован для каждой строки каждого колорвея. Монтируется только ОТКРЫТОЙ раскрывашкой «из
+// чего сложилось».
+const DxfNormRecheck = lazy(() => import('./dxf-recheck'));
 
 // Phase-02 field metrics: a full 1px box, 3px/7px padding, 22px min height — identical to <Input>,
 // so a control in this locally-managed editor is indistinguishable from an RHF-bound one elsewhere.
@@ -843,16 +849,24 @@ function UsagePerSizeLocal({
 function NormSummary({
   draft,
   unit,
+  sizeIds,
   sizeNameById,
   slotWastagePercent,
   articleWidth,
 }: {
   draft: UsageDraft;
   unit: string;
+  /** Размерный ряд карточки — для проверки «ряд шире нормы» и пересчёта по текущим данным (Ф2). */
+  sizeIds: number[];
   sizeNameById: Map<number, string>;
   slotWastagePercent: string;
   articleWidth: string;
 }) {
+  // Открыта ли раскрывашка — локальный стейт через onToggle: пересчёт dxf-нормы по текущим данным
+  // тянет подписки на массивы формы и мегабайты DXF, а NormSummary смонтирован для КАЖДОЙ строки
+  // КАЖДОГО колорвея одновременно. Закрытая раскрывашка обязана стоить ноль, поэтому тяжёлая часть
+  // (DxfNormRecheck) монтируется только открытой и приезжает lazy().
+  const [open, setOpen] = useState(false);
   const perSize = draft.sizeConsumptions.filter((s) => s.sizeId && (s.consumption ?? '').trim());
   const scalar = draft.consumption.trim();
   if (!scalar && perSize.length === 0) return null;
@@ -911,6 +925,47 @@ function NormSummary({
     );
   }
 
+  // РЯД ШИРЕ НОРМЫ — ИНВАРИАНТ СТРОКИ, А НЕ ОБЪЯСНЕНИЕ, поэтому видим всегда, не за раскрывашкой:
+  // опасное состояние, показанное только тому, кто и так пошёл разбираться, — не показано никому.
+  // Условие шире, чем dxf, сознательно: пер-размерные числа есть, скаляра нет, а какой-то размер
+  // ряда без числа — тогда план прогона (SizeConsumptions[размер] → Consumption → Quantity) на этот
+  // размер не получит норму ВООБЩЕ, из какого бы источника ряд ни пришёл. На dxf-строках дефект
+  // просто гарантирован: применение по выкройкам скаляр снимает, и размер, добавленный в ряд после
+  // применения, остаётся ни с чем. Геометрии проверка не требует — только пропсы.
+  //
+  // ЗАПОЛНЕННОЕ `quantity` ГАСИТ ПРОВЕРКУ, потому что тогда её утверждение неверно: у цепочки
+  // подстановки есть третье звено, и непокрытый размер возьмёт штуки. Строки с обоими полями лежат
+  // с 0079 (ровно поэтому серверный отказ на `dxf` + `quantity` не распространён на manual), и на
+  // такой строке костинг вообще считает штуки × цену, игнорируя весь ряд. Это отдельный legacy-
+  // дефект, и говорить о нём словами «плана не увидит расход вовсе» значило бы соврать.
+  //
+  // ГАСИТ ТОЛЬКО ПОЛОЖИТЕЛЬНЫЙ ЗАПАС: скаляр «0» и quantity «0» — это не подстановка, а ноль ткани,
+  // и предъявлять их как причину молчать значило бы прикрыть дыру нулём. А вот пер-размерный ноль
+  // ОСТАЁТСЯ покрытием сознательно: отсутствие ячейки — «никто не сказал», введённый ноль — сказанное
+  // «столько», и второе не наше дело перетолковывать (у тесьмы на части размеров ноль бывает
+  // законным). Пилюля отвечает за молчание ряда, а не за содержимое чужих чисел.
+  const positive = (v?: string) => {
+    const n = parseDecimalNumber(v ?? '');
+    return Number.isFinite(n) && n > 0;
+  };
+  const coveredSizes = new Set(perSize.map((s) => s.sizeId ?? 0));
+  const uncoveredSizes =
+    perSize.length > 0 && !positive(scalar) && !positive(draft.quantity)
+      ? sizeIds.filter((id) => !coveredSizes.has(id))
+      : [];
+  // Сравнение «было/сейчас» определено только для единиц длины (кг — Ф3, конверсии ещё нет), и
+  // делить площадь без раскройной ширины не на что. Оба факта известны ЗДЕСЬ, из пропсов, — и
+  // решаются до монтирования тяжёлой части: качать мегабайты DXF ради строки, которую всё равно не
+  // с чем сравнить, незачем. Причина по ширине называется двояко не из вежливости: cuttingWidthOf
+  // отдаёт пустую строку и когда ширина не заполнена, и когда кромка съела её целиком.
+  const unitStep = bomUnitStep(unit);
+  const recheckBlocked =
+    unitStep == null
+      ? `для единицы «${unit || '—'}» пересчёт по текущим выкройкам пока не считается — сравнение умеет только метры и сантиметры`
+      : !(parseDecimalNumber(articleWidth) > 0)
+        ? 'пересчёт по текущим выкройкам не делается: раскройная ширина артикула неизвестна — либо не заполнена ширина рулона, либо кромка съедает её целиком'
+        : '';
+
   return (
     <div className='flex flex-col gap-1'>
       <div className='flex flex-wrap items-baseline gap-1.5'>
@@ -928,7 +983,20 @@ function NormSummary({
           </Text>
         )}
       </div>
-      <details className='text-nano'>
+      {uncoveredSizes.length > 0 && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Pill tone='attention'>
+            {`нет нормы: ${uncoveredSizes
+              .map((id) => formatSizeName(sizeNameById.get(id) ?? `#${id}`))
+              .join(', ')}`}
+          </Pill>
+          <Text size='nano' variant='label' component='span'>
+            ряд не покрывает эти размеры, а единой нормы в строке нет — план прогона для них не
+            увидит расход вовсе
+          </Text>
+        </div>
+      )}
+      <details className='text-nano' onToggle={(e) => setOpen(e.currentTarget.open)}>
         <summary className='cursor-pointer uppercase'>из чего сложилось</summary>
         <ul className='list-disc pl-4 pt-1'>
           {explain.map((line, i) => (
@@ -939,6 +1007,37 @@ function NormSummary({
             </li>
           ))}
         </ul>
+        {/* Ф2: пересчёт по текущим данным — только для dxf-нормы и только ОТКРЫТОЙ раскрывашкой.
+            Единица решается здесь, до ленивой части: качать мегабайты DXF ради строки «кг не
+            сравниваем» незачем. */}
+        {isDxf && (
+          <div className='flex flex-col gap-0.5 pt-1'>
+            {recheckBlocked ? (
+              <Text size='nano' variant='label' component='span'>
+                {recheckBlocked}
+              </Text>
+            ) : (
+              open && (
+                <Suspense
+                  fallback={
+                    <Text size='nano' variant='label' component='span'>
+                      пересчитываем по текущим данным карточки…
+                    </Text>
+                  }
+                >
+                  <DxfNormRecheck
+                    lineKey={draft.bomLineKey}
+                    unit={unit}
+                    articleWidth={articleWidth}
+                    sizeIds={sizeIds}
+                    sizeNameById={sizeNameById}
+                    saved={perSize}
+                  />
+                </Suspense>
+              )
+            )}
+          </div>
+        )}
       </details>
     </div>
   );
@@ -1500,6 +1599,7 @@ function SlotUsageRow({
             <NormSummary
               draft={draft}
               unit={unit}
+              sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               slotWastagePercent={slot?.wastagePercent ?? ''}
               articleWidth={cuttingWidthOf(

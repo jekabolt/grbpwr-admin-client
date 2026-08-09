@@ -329,6 +329,18 @@ export function toBomUnit(cm: number, unit?: string): { value: number; unit: str
   return null;
 }
 
+// Шаг округления toBomUnit для единицы строки: метры пишутся в тысячных (DECIMAL(10,3)), сантиметры
+// в сотых. null — единица не длина, и сверка «было/сегодня» для неё не определена вовсе (кг ждёт
+// конверсии Ф3). Живёт ВПЛОТНУЮ к toBomUnit, потому что это одно знание — что мы умеем писать и с
+// какой точностью: допуск сравнения обязан двигаться вместе с округлением записи, иначе дребезг
+// последнего знака читался бы как правка выкройки.
+export function bomUnitStep(unit?: string): number | null {
+  const u = (unit ?? '').trim().toLowerCase();
+  if (u === 'м' || u === 'm') return 0.001;
+  if (u === 'см' || u === 'cm') return 0.01;
+  return null;
+}
+
 // Waste decomposition of a marker-measured norm, in percent OF THE PIECE AREA (0261) — the
 // scale the wire and the costing display use. Both components are explanation, never a
 // multiplier: the marker's own length already paid for them.
