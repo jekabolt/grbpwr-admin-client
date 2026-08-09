@@ -136,6 +136,19 @@ export function useTechCardReleases(techCardId?: number) {
   });
 }
 
+// Замороженный снапшот релиза. Ответ несёт и метаданные, и сам снапшот, а при несовместимом
+// блобе — метаданные + snapshot_error вместо отказа (правило деградации): печать обязана
+// РАЗЛИЧАТЬ «релиз не выбран» и «снапшот не прочитан», иначе молча напечатает живую карту под
+// заголовком замороженной ревизии.
+export function useTechCardRelease(releaseId?: number) {
+  return useQuery({
+    queryKey: ['techCardRelease', releaseId ?? 0],
+    queryFn: () => adminService.GetTechCardRelease({ id: releaseId ?? 0 }),
+    enabled: !!releaseId,
+    staleTime: Infinity,
+  });
+}
+
 export function useDeleteSample() {
   const qc = useQueryClient();
   return useMutation({

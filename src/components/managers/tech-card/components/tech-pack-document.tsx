@@ -443,6 +443,18 @@ export function TechPackDocument({
   // Скоуп только по размерам — тоже скоуп, и он тоже обязан быть назван на бумаге: лист с
   // урезанной градацией иначе читается как «у стиля такая градация».
   const sizesNarrowed = sizeIds.length !== (tc.sizeIds ?? []).length;
+  // Версия карты — штамп на бумаге и в QR выкроек: два листа, напечатанных до и после правки,
+  // должны быть различимы, даже пока вьюер не умеет сверять её сам.
+  const cardLockVersion = wireInt(techCard.lockVersion);
+
+  // «Правлена после релиза» сравнивает время правки карты со временем ПОСЛЕДНЕГО релиза. Обе
+  // величины уже загружены; ноль-таймстемпы и отсутствие релизов дают false, а не ложную тревогу.
+  const cardEditedAfterRelease = (() => {
+    const rel = latestRelease?.createdAt;
+    const upd = techCard.updatedAt;
+    if (!rel || !upd) return false;
+    return new Date(upd).getTime() > new Date(rel).getTime();
+  })();
   // The live colourway data — this is the actual fix for #71/M10: previously hardcoded to `[]`,
   // so the colourways sheet and per-colourway cost labels below never rendered for any card.
   const colorways = scopedColorways(printScope);
@@ -706,9 +718,22 @@ export function TechPackDocument({
           // столе. Без скоупа обе части пусты, и колонтитул остаётся прежним.
           printScope.colorway ? colorwayLabel(printScope.colorway) : '',
           printScope.run ? `PR-${wireInt(printScope.run.id)}` : '',
-          latestRelease ? `rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased',
+          printScope.revision.source === 'release'
+            ? `rev.${printScope.revision.number || '—'}`
+            : latestRelease
+              ? 'живая карта'
+              : 'unreleased',
         )}
       />
+      {/* КАРТА УШЛА ВПЕРЁД ОТ РЕЛИЗА. Печатая живую карту у стиля, где релиз есть, документ обязан
+          сказать, что он НЕ равен подписанной ревизии: без этого лист неотличим от релизного, а
+          кат-лист партии сервер считает как раз по релизу — то есть по другим данным. */}
+      {printScope.revision.source === 'live' && latestRelease && cardEditedAfterRelease && (
+        <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+          карта правлена после Rev.{latestRelease.releaseNumber ?? '—'} — эта бумага НЕ равна
+          подписанной ревизии
+        </p>
+      )}
       {/* ЧЕМ ОГРАНИЧЕН ЭТОТ ДОКУМЕНТ. Скоупнутый тех-пак выглядит как полный: у него та же
           шапка и те же листы, просто короче таблицы. Не назови он свой скоуп вслух — и лист,
           напечатанный по одному колорвею, читается как «у стиля один цвет», а лист по размерам
@@ -754,10 +779,17 @@ export function TechPackDocument({
           <div className='text-right text-control leading-tight'>
             <div className='font-semibold uppercase'>{stageLabel(tc.stage)}</div>
             <div>{approvalStateLabel(tc.approvalState)}</div>
-            {/* Proof of which frozen snapshot (if any) this printout matches — so a printed
-                copy is never mistaken for a newer/older edit. */}
+            {/* ЧЕМ ЭТА БУМАГА ЯВЛЯЕТСЯ. Раньше здесь печаталось «Rev.N» по наибольшему номеру
+                релиза — то есть номер ревизии над данными, взятыми с ЖИВОЙ карты. Карту правили
+                после релиза, а бумага продолжала называть себя релизом. Теперь номер печатается
+                только когда данные действительно из снапшота; иначе лист честно говорит, что он
+                с живой карты. */}
             <div className='font-semibold'>
-              {latestRelease ? `Rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased'}
+              {printScope.revision.source === 'release'
+                ? `Rev.${printScope.revision.number || '—'} · снапшот`
+                : latestRelease
+                  ? 'живая карта (не релиз)'
+                  : 'unreleased'}
             </div>
             <div className='text-labelColor'>{formatTechCardDate(techCard.updatedAt)}</div>
           </div>
@@ -1058,7 +1090,12 @@ export function TechPackDocument({
                     >
                       <PatternQR
                         size={96}
-                        value={`${viewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(g.wireKey)}`}
+                        // &v= — штамп версии карты на бумаге. Сверять его вьюер выкроек пока не
+                        // умеет (публичный манифест версию не несёт — это бэк), но два листа с
+                        // разными v уже различимы: «у тебя какая версия?» получает ответ.
+                        value={`${viewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(
+                          g.wireKey,
+                        )}${cardLockVersion > 0 ? `&v=${cardLockVersion}` : ''}`}
                       />
                       <figcaption className='mt-1 max-w-[150px] text-micro uppercase'>
                         <div className='break-words font-semibold'>{g.label}</div>
@@ -1081,44 +1118,34 @@ export function TechPackDocument({
             </>
           ) : (
             <>
-              {/* TRANSITIONAL fallback — the backend sent no viewer token (older backend, or the
-                  pattern service unwired): the old per-sheet QR layout, byte-for-byte.
-                  It deliberately still encodes the RAW url and NOT p.viewUrl, tempting as that
-                  is: view_url is minted with the INTERNAL ('i') scope, whose whole reason for
-                  existing is that revoking a leaked paper tech-pack must not have to break the
-                  admin UI. Putting an admin-scope token on paper trades a known weakness (a
-                  public storage url — what this branch always printed) for a contract violation
-                  that outlives the transition. The print-scope url is not on the wire, so the
-                  honest fix is to ship the backend first and never render this branch. Delete
-                  it once every contour serves pattern_viewer_token. */}
-              <div className='flex flex-wrap gap-4'>
-                {patternSheets.map((p, i) => (
-                  <figure
-                    key={i}
-                    className='break-inside-avoid border border-black p-2 text-center'
-                  >
-                    <PatternQR value={p.url ?? ''} />
-                    <figcaption className='mt-1 text-micro uppercase'>
-                      {/* Лист без размера (0281) — градуированный: размеры внутри файла. Печатать
-                          под ним прочерк значило бы сказать «размер не заполнен», а это другой
-                          факт. */}
-                      <div className='font-semibold'>
-                        {p.sizeId ? sizeName(p.sizeId) : 'весь ряд'}
-                      </div>
-                      {/* The operator's name for the sheet leads; the CAD filename stays as the
-                          secondary line the factory can match against the file it receives. */}
-                      {p.name && <div className='max-w-[120px] truncate'>{p.name}</div>}
-                      {p.filename && (
-                        <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
-                      )}
-                    </figcaption>
-                  </figure>
-                ))}
-              </div>
-              <p className='mt-2 text-nano text-labelColor'>
-                наведите камеру на QR, чтобы открыть этот лист выкройки (PDF/DXF). «весь ряд» —
-                градуированный файл: размеры записаны в именах блоков внутри него
+              {/* ТОКЕНА ВЬЮЕРА НЕТ — QR НЕ ПЕЧАТАЕТСЯ. Здесь раньше стояла транзишн-ветка,
+                  кодировавшая в QR СЫРОЙ storage-url листа, в обход presign-хопа. Она не могла
+                  подставить p.viewUrl вместо него: тот минтится с ВНУТРЕННИМ ('i') скоупом, весь
+                  смысл которого в том, что отзыв утёкшей бумаги не должен ломать админку, — то
+                  есть выбор был между публичной ссылкой на файл и нарушением контракта отзыва.
+                  Правильный ответ — не печатать QR вовсе: листы перечисляются именами, а
+                  выкройки берутся из админки. Ветка удалена вместе с обеими плохими опциями. */}
+              <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+                вьюер выкроек не подключён на этом контуре — QR не печатается
               </p>
+              <table className='w-full border-collapse text-micro'>
+                <thead>
+                  <tr>
+                    <th className={TH}>размер</th>
+                    <th className={TH}>лист</th>
+                    <th className={TH}>файл</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {patternSheets.map((p, i) => (
+                    <tr key={i} className='break-inside-avoid'>
+                      <td className={TD}>{p.sizeId ? sizeName(p.sizeId) : 'весь ряд'}</td>
+                      <td className={TD}>{p.name || '—'}</td>
+                      <td className={TD}>{p.filename || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </>
           )}
         </Sheet>
