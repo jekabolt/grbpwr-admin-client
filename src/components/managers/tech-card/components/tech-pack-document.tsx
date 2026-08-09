@@ -24,6 +24,7 @@ import {
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
+import { PackagingSheet } from 'components/managers/print/sheets/packaging';
 import {
   PRINT_CUT_SYMMETRY_LEGEND,
   printCutSymmetryCaption,
@@ -1775,8 +1776,8 @@ export function TechPackDocument({
       )}
 
       {/* LABELS + PACKAGING */}
-      {(has(tc.labels) || tc.packaging) && (b('sew') || b('qc')) && (
-        <Sheet title='labels & packaging'>
+      {has(tc.labels) && (b('sew') || b('qc')) && (
+        <Sheet title='labels'>
           {has(tc.labels) && (
             <table className='mb-3 w-full border-collapse text-micro'>
               <thead>
@@ -1851,29 +1852,6 @@ export function TechPackDocument({
               </tbody>
             </table>
           )}
-          {tc.packaging && (
-            <div className='grid grid-cols-2 gap-x-8'>
-              <div>
-                <KV k='folding' v={tc.packaging.foldingMethod} />
-                <KV k='polybag' v={tc.packaging.polybag} />
-                <KV k='bag sticker' v={tc.packaging.bagSticker} />
-                <KV k='inserts' v={tc.packaging.inserts} />
-              </div>
-              <div>
-                <KV k='units / box' v={tc.packaging.unitsPerBox || ''} />
-                <KV k='box marking' v={tc.packaging.boxMarking} />
-                <KV k='box dimensions' v={tc.packaging.boxDimensions} />
-                <KV
-                  k='weight net / gross'
-                  v={
-                    tc.packaging.weightNetGrams || tc.packaging.weightGrossGrams
-                      ? `${tc.packaging.weightNetGrams || '—'} / ${tc.packaging.weightGrossGrams || '—'} g`
-                      : ''
-                  }
-                />
-              </div>
-            </div>
-          )}
         </Sheet>
       )}
 
@@ -1927,40 +1905,17 @@ export function TechPackDocument({
       {/* PACKAGING RECIPE — materials consumed on ship (ListPackagingRecipe): once per shipment
           (qty/order, e.g. a branded box) plus once per unit (qty/item, e.g. a dust bag). Same
           missing-RPC root cause as assembly, one tab over. */}
-      {packagingRows.length > 0 && b('qc') && (
-        <Sheet title='packaging recipe'>
-          {packagingIsFallback && (
-            <p className='mb-1 text-nano text-labelColor'>
-              no style-specific recipe — showing the inherited global fallback
-            </p>
-          )}
-          <table className='w-full border-collapse text-micro'>
-            <thead>
-              <tr>
-                <th className={TH}>material</th>
-                <th className={`${TH} text-right`}>qty / order</th>
-                <th className={`${TH} text-right`}>qty / item</th>
-              </tr>
-            </thead>
-            <tbody>
-              {packagingRows.map((p, i) => (
-                <tr key={p.id ?? i} className='break-inside-avoid'>
-                  <td className={TD}>{p.materialName || `#${p.materialId}`}</td>
-                  <td className={`${TD} whitespace-nowrap text-right`}>
-                    {dec(p.qtyPerOrder)
-                      ? `${dec(p.qtyPerOrder)} ${p.materialUnit ?? ''}`.trim()
-                      : '—'}
-                  </td>
-                  <td className={`${TD} whitespace-nowrap text-right`}>
-                    {dec(p.qtyPerItem)
-                      ? `${dec(p.qtyPerItem)} ${p.materialUnit ?? ''}`.trim()
-                      : '—'}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Sheet>
+      {/* УПАКОВКА — один лист на обе бумаги (print/sheets/packaging.tsx). Раньше описательная
+          половина печаталась здесь, а считаемая от тиража — в наряде, двумя вёрстками одного
+          предмета. Считаемая часть появляется только при скоупе на партию. */}
+      {b('qc') && (tc.packaging || packagingRows.length > 0) && (
+        <PackagingSheet
+          title='packaging'
+          packaging={tc.packaging}
+          recipeRows={packagingRows}
+          recipeIsGlobalFallback={packagingIsFallback}
+          plannedTotal={runSizeQty.reduce((sum, r) => sum + r.qty, 0)}
+        />
       )}
 
       {/* COSTING — только внутренний профиль. Бумага профиля `factory` уезжает внешнему
