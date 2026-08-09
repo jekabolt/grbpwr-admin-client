@@ -24,6 +24,7 @@ import {
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
 import {
+  ALL_BOOKLETS,
   EMPTY_QUERY,
   bookletOn,
   buildPrintScope,
@@ -47,6 +48,7 @@ import {
   bomPurposeLabel,
   type RollGoodsLine,
 } from './bom-purpose';
+import { runStatusLabel } from 'components/managers/production-runs/components/options';
 import { kindLabel } from './bom-kind';
 import {
   LabelPlacementPictogram,
@@ -447,6 +449,35 @@ export function TechPackDocument({
   // должны быть различимы, даже пока вьюер не умеет сверять её сам.
   const cardLockVersion = wireInt(techCard.lockVersion);
 
+  // Тираж по размерам — из линий прогона, уже суженных скоупом колорвея. Колонки только те
+  // размеры, по которым в партии есть клетки: пустая колонка у раскройного стола читается как
+  // «размер забыли проставить».
+  const runSizeQty = (() => {
+    const bySize = new Map<number, number>();
+    for (const l of printScope.run?.run?.lines ?? []) {
+      if (printScope.colorway) {
+        const cw = wireInt(l.productId) || wireInt(l.outputVariantId);
+        if (cw !== wireInt(printScope.colorway.colorwayId)) continue;
+      }
+      const sizeId = wireInt(l.sizeId);
+      bySize.set(sizeId, (bySize.get(sizeId) ?? 0) + wireInt(l.plannedQty));
+    }
+    return sizeIds
+      .filter((id) => bySize.has(id))
+      .map((sizeId) => ({ sizeId, qty: bySize.get(sizeId) ?? 0 }));
+  })();
+
+  const BOOKLET_NAMES: Record<BookletId, string> = {
+    cover: 'маршрутный лист',
+    cut: 'крой',
+    sew: 'пошив',
+    qc: 'ОТК и упаковка',
+    internal: 'внутреннее',
+  };
+  const bookletList = (printScope.query.booklets ?? ALL_BOOKLETS)
+    .map((id) => BOOKLET_NAMES[id])
+    .join(' · ');
+
   // «Правлена после релиза» сравнивает время правки карты со временем ПОСЛЕДНЕГО релиза. Обе
   // величины уже загружены; ноль-таймстемпы и отсутствие релизов дают false, а не ложную тревогу.
   const cardEditedAfterRelease = (() => {
@@ -754,6 +785,117 @@ export function TechPackDocument({
             .join(' · ')}
         </p>
       )}
+      {/* МАРШРУТНЫЙ ЛИСТ КОМПЛЕКТА. Первый лист пачки, которая уезжает в цех: чей стиль, какой
+          цвет, какая партия, сколько чего по размерам и по какой ревизии. Печатается только
+          когда у документа есть скоуп — у внутреннего тех-пака обо всём сразу маршрутного листа
+          нет и быть не может. */}
+      {b('cover') && (printScope.run || printScope.colorway) && (
+        <Sheet title='маршрутный лист'>
+          <div className='grid grid-cols-2 gap-x-8'>
+            <div>
+              <KV k='стиль' v={`${tc.styleNumber || '—'} · ${tc.name || ''}`} />
+              <KV
+                k='колорвей'
+                v={
+                  printScope.colorway ? (
+                    <span className='inline-flex items-center gap-2'>
+                      {/* Свотч — вспомогательный: на ч/б лазере он бесполезен, поэтому имя цвета
+                          стоит рядом ВСЕГДА, а не вместо него при отсутствии заливки. */}
+                      {printScope.colorway.devHex && (
+                        <span
+                          className='inline-block size-3 border border-black'
+                          style={{ backgroundColor: printScope.colorway.devHex }}
+                        />
+                      )}
+                      {colorwayLabel(printScope.colorway)}
+                      {printScope.colorway.pantone ? ` · ${printScope.colorway.pantone}` : ''}
+                    </span>
+                  ) : (
+                    'все колорвеи карты'
+                  )
+                }
+              />
+              <KV k='размеры' v={sizeIds.map(sizeName).join(', ')} />
+            </div>
+            <div>
+              <KV k='партия' v={printScope.run ? `PR-${wireInt(printScope.run.id)}` : '—'} />
+              <KV
+                k='статус'
+                v={printScope.run ? runStatusLabel(printScope.run.run?.status) : ''}
+              />
+              <KV
+                k='фабрика'
+                v={
+                  wireInt(printScope.run?.run?.supplierId)
+                    ? `#${wireInt(printScope.run?.run?.supplierId)}`
+                    : ''
+                }
+              />
+              <KV
+                k='ревизия'
+                v={
+                  printScope.revision.source === 'release'
+                    ? `Rev.${printScope.revision.number || '—'} · снапшот`
+                    : 'живая карта'
+                }
+              />
+            </div>
+          </div>
+
+          {runSizeQty.length > 0 && (
+            <table className='mt-3 w-full border-collapse text-micro'>
+              <thead>
+                <tr>
+                  <th className={TH}>размер</th>
+                  {runSizeQty.map((r) => (
+                    <th key={r.sizeId} className={`${TH} text-center`}>
+                      {sizeName(r.sizeId)}
+                    </th>
+                  ))}
+                  <th className={`${TH} text-center`}>всего</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className='break-inside-avoid'>
+                  <td className={`${TD} font-semibold uppercase`}>тираж, шт</td>
+                  {runSizeQty.map((r) => (
+                    <td key={r.sizeId} className={`${TD} text-center`}>
+                      {r.qty}
+                    </td>
+                  ))}
+                  <td className={`${TD} text-center font-bold`}>
+                    {runSizeQty.reduce((sum, r) => sum + r.qty, 0)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+
+          <div className='mt-3 flex items-start justify-between gap-4'>
+            <div className='text-micro'>
+              <div className='uppercase text-labelColor'>в комплекте</div>
+              {/* Без номеров страниц: сколько страниц займёт тетрадь, при потоковой печати
+                  заранее неизвестно, а обещанное на обложке число, не совпавшее с пачкой,
+                  хуже отсутствия числа. */}
+              <div>{bookletList}</div>
+            </div>
+            {printScope.runPackToken && (
+              <figure className='shrink-0 break-inside-avoid border border-black p-2 text-center'>
+                <PatternQR
+                  size={96}
+                  value={`${viewerOrigin()}/r/${printScope.runPackToken}?v=${wireInt(
+                    printScope.run?.lockVersion,
+                  )}`}
+                />
+                <figcaption className='mt-1 max-w-[110px] text-nano uppercase'>
+                  живой наряд партии
+                </figcaption>
+              </figure>
+            )}
+          </div>
+        </Sheet>
+      )}
+
       {/* COVER / IDENTITY */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
