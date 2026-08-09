@@ -80,7 +80,14 @@ export function TechCardPrint() {
     isLoading: releaseLoading,
     isError: releaseError,
   } = useTechCardRelease(releaseId || undefined);
-  const snapshot = releaseData?.snapshot;
+  // ПРИНАДЛЕЖНОСТЬ РЕЛИЗА ЭТОЙ КАРТЕ. `release_id` прогона и его `tech_card_id` — независимые
+  // ссылки без кросс-чека на записи (бэковый cutspec это документирует и потому сверяет их сам,
+  // деградируя на живую карту). Без сверки `/tech-cards/5/print?release=<релиз карты 77>` печатал
+  // бы весь документ карты 77, но со сборкой и токеном выкроек карты 5 — химеру из двух стилей,
+  // причём вьюер на неизвестный ключ группы молча открывает первую.
+  const releaseForeign =
+    !!releaseData?.release && wireInt(releaseData.release.techCardId) !== (numId ?? 0);
+  const snapshot = releaseForeign ? undefined : releaseData?.snapshot;
   // Снапшот не прочитан — это ТРЕТЬЕ состояние, не «нет релиза» и не «есть». Печатаем живую
   // карту, но говорим об этом вслух: молчаливый фолбэк выдал бы её за замороженную ревизию.
   const snapshotBroken = !!releaseId && !snapshot && !releaseLoading;
@@ -106,15 +113,15 @@ export function TechCardPrint() {
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
 
   const { ready, degraded } = usePrintReady([
-    { label: 'тех-карта', status: depStatus(isLoading, isError) },
-    { label: 'сборка на изделии', status: depStatus(assemblyLoading, assemblyError) },
-    { label: 'рецепт упаковки', status: depStatus(recipeLoading, recipeError) },
+    { label: 'tech card', status: depStatus(isLoading, isError) },
+    { label: 'on-garment assembly', status: depStatus(assemblyLoading, assemblyError) },
+    { label: 'packaging recipe', status: depStatus(recipeLoading, recipeError) },
     // Прогон попадает в гейт только когда он вообще запрошен: незапрошенный запрос вечно
     // «не загружается», и без этого условия кнопка ждала бы то, чего никто не звал.
     ...(query.runId > 0
-      ? [{ label: 'прогон', status: depStatus(runLoading, runError) }]
+      ? [{ label: 'production run', status: depStatus(runLoading, runError) }]
       : []),
-    ...(releaseId ? [{ label: 'снапшот релиза', status: depStatus(releaseLoading, releaseError) }] : []),
+    ...(releaseId ? [{ label: 'release snapshot', status: depStatus(releaseLoading, releaseError) }] : []),
     ...docDeps,
   ]);
 
@@ -176,18 +183,19 @@ export function TechCardPrint() {
             <div className='px-8'>
               <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
                 {scope.colorwayMissing
-                  ? `колорвей #${query.colorwayId} не найден на этой карте — документ напечатан по всем колорвеям`
-                  : `прогон #${query.runId} не получен — документ напечатан без привязки к партии`}
+                  ? `colourway #${query.colorwayId} is not on this card — printed for all colourways`
+                  : `production run #${query.runId} not received — printed without a batch scope`}
               </p>
             </div>
           ) : null}
           {snapshotBroken && (
             <div className='px-8'>
               <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
-                снапшот ревизии не прочитан{releaseData?.snapshotError
-                  ? ` (${releaseData.snapshotError})`
-                  : ''}{' '}
-                — напечатана ЖИВАЯ карта, а не замороженная ревизия
+                {releaseForeign
+                  ? `release #${releaseId} belongs to another tech card — ignored, the LIVE card was printed`
+                  : `revision snapshot could not be read${
+                      releaseData?.snapshotError ? ` (${releaseData.snapshotError})` : ''
+                    } — the LIVE card was printed, not the frozen revision`}
               </p>
             </div>
           )}
