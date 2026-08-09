@@ -27,7 +27,14 @@ export function PackagingSheet({
   recipeRows?: PackagingRecipeLine[];
   /** Рецепт стиля не заведён, печатается глобальный — это надо назвать, а не выдать за стилевой. */
   recipeIsGlobalFallback?: boolean;
-  /** Тираж партии. 0 — печать без прогона: считаемая половина отсутствует, а не обнуляется. */
+  /**
+   * Тираж партии ЦЕЛИКОМ (по выбранному колорвею, но по ВСЕМ его размерам). 0 — печать без
+   * прогона: считаемая половина отсутствует, а не обнуляется.
+   *
+   * Не сужать по печатаемым размерам: короба и вес — факт отгрузки всей партии, а не свойство
+   * листа. Посчитай их от поднабора размеров — и два листа одной партии назовут разное число
+   * коробов, а грузчик поверит тому, который у него в руках.
+   */
   plannedTotal?: number;
 }) {
   const perBox = Number(packaging?.unitsPerBox ?? 0) || 0;
@@ -95,6 +102,7 @@ export function PackagingSheet({
             <thead>
               <tr>
                 <th className={TH}>material</th>
+                <th className={TH}>unit</th>
                 <th className={`${TH} text-right`}>qty / order</th>
                 <th className={`${TH} text-right`}>qty / item</th>
               </tr>
@@ -103,11 +111,14 @@ export function PackagingSheet({
               {recipeRows.map((p, i) => (
                 <tr key={p.id ?? i} className='break-inside-avoid'>
                   <td className={TD}>{p.materialName || `#${p.materialId}`}</td>
+                  {/* Единица обязана стоять рядом с числом: «1.5» без «m» — не количество, а
+                      загадка. Она печаталась в старом тех-паке и чуть не потерялась при слиянии. */}
+                  <td className={TD}>{p.materialUnit || '—'}</td>
                   <td className={`${TD} whitespace-nowrap text-right`}>
-                    {p.qtyPerOrder?.value ?? '—'}
+                    {p.qtyPerOrder?.value?.trim() || '—'}
                   </td>
                   <td className={`${TD} whitespace-nowrap text-right`}>
-                    {p.qtyPerItem?.value ?? '—'}
+                    {p.qtyPerItem?.value?.trim() || '—'}
                   </td>
                 </tr>
               ))}

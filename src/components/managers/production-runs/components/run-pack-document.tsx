@@ -17,6 +17,7 @@ import {
   printLayVerdictWord,
 } from 'components/managers/print/labels';
 import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
+import { cutPlanAuthoritative } from 'components/managers/print/labels';
 import { PackagingSheet } from 'components/managers/print/sheets/packaging';
 import { grainlineArrow } from 'components/managers/tech-card/components/piece-codes';
 import { wireInt } from 'components/managers/tech-card/components/schema';
@@ -266,7 +267,7 @@ export function RunPackDocument({
   // второе значит выдать несуществующий наряд за полный. Различаем по ревизии: настоящая реализация
   // ВСЕГДА называет свой снимок (generated_at + run_lock_version, они же едут в QR), а пустая
   // заглушка — никогда.
-  const cutPlanAuthoritative = !!cutPlan?.generatedAt && cutPlan.generatedAt !== ZERO_TS;
+  const cutPlanIsAuthoritative = cutPlanAuthoritative(cutPlan?.generatedAt);
 
   // РЕВИЗИЯ, ПОД КОТОРОЙ ПОСЧИТАНЫ КОЛИЧЕСТВА, против ревизии прогона СЕЙЧАС. Это две РАЗНЫЕ
   // величины, и они расходятся ровно в том случае, ради которого документ вообще называет свою
@@ -274,7 +275,7 @@ export function RunPackDocument({
   // брать из снимка другой версии — это подпись под чужими цифрами.
   const runLockVersion = wireInt(run.lockVersion);
   const planLockVersion = wireInt(cutPlan?.runLockVersion);
-  const revisionDrift = cutPlanAuthoritative && planLockVersion !== runLockVersion;
+  const revisionDrift = cutPlanIsAuthoritative && planLockVersion !== runLockVersion;
 
   // Колонки кат-листа и их подписи берутся ИЗ ОТВЕТА (size_name), а не из словаря: строка наряда и
   // её заголовок обязаны называть размер одним словом, даже если словарь клиента отстал.
@@ -491,7 +492,7 @@ export function RunPackDocument({
           <span>batch revision now: lock_version {runLockVersion}</span>
           <span>
             cut list computed for: lock_version{' '}
-            {cutPlanAuthoritative ? planLockVersion : 'UNKNOWN'}
+            {cutPlanIsAuthoritative ? planLockVersion : 'UNKNOWN'}
           </span>
           <span>
             cut list snapshot:{' '}
@@ -605,7 +606,7 @@ export function RunPackDocument({
                 : // Пустой ответ БЕЗ ревизии — это не «кроить нечего», а «мы ничего не узнали».
                   // Пока бэкенд дописывают, шлюз отвечает ровно так, и молчаливое «в карте нет
                   // деталей» отправило бы цех проверять карточку вместо того, чтобы ждать сервер.
-                  !cutPlanAuthoritative
+                  !cutPlanIsAuthoritative
                   ? 'cut list not computed: the server answered without a snapshot revision. This does NOT mean there is nothing to cut — it means nobody computed "how many to cut".'
                   : plannedTotal === 0
                     ? 'no cut list because the batch has no lines: there is nothing to compute "how many to cut" from.'

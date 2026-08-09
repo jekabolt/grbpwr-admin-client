@@ -24,6 +24,7 @@ import {
   StyleAssemblyLine,
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
+import { cutPlanAuthoritative } from 'components/managers/print/labels';
 import { PackagingSheet } from 'components/managers/print/sheets/packaging';
 import {
   PRINT_CUT_SYMMETRY_LEGEND,
@@ -468,21 +469,61 @@ export function TechPackDocument({
       const row = byPiece.get(key) ?? new Map<number, number>();
       for (const c of r.bySize ?? []) {
         const sizeId = wireInt(c.sizeId);
+        // Сервер не назвал количество — это НЕ ноль. Твёрдый «0» на бумаге раскроя читается как
+        // указание не кроить, которого никто не давал; наряд от этого защищается явно.
+        if (c.piecesToCut == null) continue;
         row.set(sizeId, (row.get(sizeId) ?? 0) + wireInt(c.piecesToCut));
       }
       byPiece.set(key, row);
     }
     return byPiece;
   })();
-  // АВТОРИТЕТЕН ЛИ ОТВЕТ. Пустые rows без generatedAt — это «мы ничего не узнали», а не «кроить
-  // нечего»: то же правило, по которому живёт наряд. Печатать первое как второе значило бы выдать
-  // неполученный кат-лист за полный.
-  const cutPlanAuthoritative = !!cutPlan?.generatedAt && !cutPlan.generatedAt.startsWith('0001-');
-  const cutColumns = cutPlanAuthoritative && printScope.run ? sizeIds : [];
+  // Авторитетность ответа — общим правилом с нарядом (print/labels.ts): две бумаги одной партии
+  // не имеют права по-разному отвечать на вопрос «получен ли кат-лист».
+  const cutPlanIsAuthoritative = cutPlanAuthoritative(cutPlan?.generatedAt);
+  // ДРЕЙФ РЕВИЗИИ. Кат-лист посчитан по какой-то версии плана прогона, а прогон читается СЕЙЧАС —
+  // и это две разные величины, расходящиеся ровно тогда, ради чего наряд свою ревизию и называет:
+  // кто-то поправил сетку, пока лист печатался. Наряд это предупреждение печатает; тех-пак молчал
+  // и печатал панели из устаревшего снимка рядом с листом приёмки, где план взят из ЖИВЫХ линий, —
+  // один комплект, числа двух ревизий, ни слова об этом.
+  const cutPlanDrift =
+    cutPlanIsAuthoritative &&
+    wireInt(cutPlan?.runLockVersion) !== wireInt(printScope.run?.lockVersion);
+  const cutColumns = cutPlanIsAuthoritative && printScope.run ? sizeIds : [];
+  // Имена размеров — из ОТВЕТА кат-листа, а не из словаря клиента: строка наряда и колонка
+  // тех-пака обязаны называть размер одним словом, даже если словарь отстал.
+  const cutSizeName = (() => {
+    const byId = new Map<number, string>();
+    for (const r of cutPlan?.rows ?? [])
+      for (const c of r.bySize ?? []) {
+        const id = wireInt(c.sizeId);
+        if (id > 0 && c.sizeName) byId.set(id, c.sizeName);
+      }
+    return (id: number) => byId.get(id) ?? sizeName(id);
+  })();
+  // Блокеры кат-листа: деталь, не привязанная к артикулу в этом колорвее. В наряде она стоит в
+  // блоке «стоп», а здесь без неё строка выглядела бы как «в этой партии не кроится» — прочерки
+  // по всей длине и ни одного признака, что это НЕ ответ, а отказ.
+  const cutBlockers = (cutPlan?.blockers ?? []).filter(
+    (bl) =>
+      !printScope.colorway ||
+      wireInt(bl.colorwayId) === wireInt(printScope.colorway.colorwayId),
+  );
 
   // Тираж по размерам — из линий прогона, уже суженных скоупом колорвея. Колонки только те
   // размеры, по которым в партии есть клетки: пустая колонка у раскройного стола читается как
   // «размер забыли проставить».
+  // Тираж партии ЦЕЛИКОМ по выбранному колорвею, без сужения по печатаемым размерам. Именно он
+  // уходит в лист упаковки: короба и вес — факт отгрузки всей партии, а не свойство листа, и
+  // посчитанные от поднабора размеров они разошлись бы с нарядом.
+  const batchTotal = (printScope.run?.run?.lines ?? []).reduce((sum, l) => {
+    if (printScope.colorway) {
+      const cw = wireInt(l.productId) || wireInt(l.outputVariantId);
+      if (cw !== wireInt(printScope.colorway.colorwayId)) return sum;
+    }
+    return sum + wireInt(l.plannedQty);
+  }, 0);
+
   const runQty = (() => {
     const bySize = new Map<number, number>();
     // Линии, которые НЕ вошли в тираж: без назначенного колорвея (product_id = 0 легален, пока
@@ -1442,7 +1483,7 @@ export function TechPackDocument({
                     нет вовсе: количества стиля не существует, есть только количество партии. */}
                 {cutColumns.map((sizeId) => (
                   <th key={sizeId} className={`${TH} text-center`}>
-                    {sizeName(sizeId)}
+                    {cutSizeName(sizeId)}
                   </th>
                 ))}
                 <th className={TH}>note</th>
@@ -1547,7 +1588,27 @@ export function TechPackDocument({
           {/* Словарь колонки «qty / garment» — один раз под таблицей. Печатается только если в
               таблице реально есть что объяснять: на карточке, где ни одна деталь не размечена и все
               идут по одной, легенда была бы строкой ни о чём. */}
-          {printScope.run && !cutPlanAuthoritative && (
+          {cutPlanDrift && (
+            <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+              batch plan changed after this cut list was computed — panel counts below are from an
+              older snapshot; re-print before cutting
+            </p>
+          )}
+          {cutBlockers.length > 0 && (
+            <div className='mb-2 break-inside-avoid border-2 border-black p-2 text-micro'>
+              <div className='mb-1 text-control font-bold uppercase'>
+                stop — {cutBlockers.length} piece × colourway not linked to an article
+              </div>
+              {cutBlockers.map((bl, i) => (
+                <p key={i}>
+                  {bl.pieceName || `piece #${wireInt(bl.pieceId)}`}
+                  {bl.colorwayName ? ` · ${bl.colorwayName}` : ''} —{' '}
+                  {bl.reason || 'no reason given'}
+                </p>
+              ))}
+            </div>
+          )}
+          {printScope.run && !cutPlanIsAuthoritative && (
             <p className='mt-1 break-inside-avoid border border-black px-2 py-1 text-micro uppercase'>
               cut list for this batch was not received — panel counts per size are not printed
               (this is not «nothing to cut»)
@@ -1914,7 +1975,7 @@ export function TechPackDocument({
           packaging={tc.packaging}
           recipeRows={packagingRows}
           recipeIsGlobalFallback={packagingIsFallback}
-          plannedTotal={runSizeQty.reduce((sum, r) => sum + r.qty, 0)}
+          plannedTotal={batchTotal}
         />
       )}
 
