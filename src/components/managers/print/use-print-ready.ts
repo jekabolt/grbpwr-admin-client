@@ -82,7 +82,7 @@ export function usePrintReady(
     const out = failed.map((d) => d.label);
     if (timedOut) {
       out.push(...pending.map((d) => d.label));
-      if (!assetsReady) out.push('изображения');
+      if (!assetsReady) out.push('images');
     }
     return out;
   }, [key, timedOut, assetsReady]);
