@@ -6,6 +6,8 @@ import {
   usePrintReady,
   type PrintDep,
 } from 'components/managers/print/use-print-ready';
+import { useTechCardRelease } from 'components/managers/tech-card/components/useSamples';
+import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
 import { useMemo, useState } from 'react';
@@ -68,18 +70,41 @@ export function TechCardPrint() {
     isError: runError,
   } = useProductionRun(query.runId, query.runId > 0);
 
-  const scope = useMemo(
-    () =>
-      techCard
-        ? buildPrintScope({
-            techCard,
-            query,
-            run: runData?.run,
-            runPackToken: runData?.runPackToken,
-          })
-        : undefined,
-    [techCard, query, runData?.run, runData?.runPackToken],
-  );
+  // РЕВИЗИЯ, ПО КОТОРОЙ ПЕЧАТАЕМ. Явный ?release= выигрывает у привязки прогона: первый —
+  // осознанный выбор оператора, вторая — умолчание партии. Прогон, привязанный к релизу, обязан
+  // печатать тот же снапшот, по которому сервер считает его кат-лист, иначе комплект в цех несёт
+  // кат-лист одной ревизии и операции другой.
+  const releaseId = query.releaseId || wireInt(runData?.run?.run?.releaseId);
+  const {
+    data: releaseData,
+    isLoading: releaseLoading,
+    isError: releaseError,
+  } = useTechCardRelease(releaseId || undefined);
+  // ПРИНАДЛЕЖНОСТЬ РЕЛИЗА ЭТОЙ КАРТЕ. `release_id` прогона и его `tech_card_id` — независимые
+  // ссылки без кросс-чека на записи (бэковый cutspec это документирует и потому сверяет их сам,
+  // деградируя на живую карту). Без сверки `/tech-cards/5/print?release=<релиз карты 77>` печатал
+  // бы весь документ карты 77, но со сборкой и токеном выкроек карты 5 — химеру из двух стилей,
+  // причём вьюер на неизвестный ключ группы молча открывает первую.
+  const releaseForeign =
+    !!releaseData?.release && wireInt(releaseData.release.techCardId) !== (numId ?? 0);
+  const snapshot = releaseForeign ? undefined : releaseData?.snapshot;
+  // Снапшот не прочитан — это ТРЕТЬЕ состояние, не «нет релиза» и не «есть». Печатаем живую
+  // карту, но говорим об этом вслух: молчаливый фолбэк выдал бы её за замороженную ревизию.
+  const snapshotBroken = !!releaseId && !snapshot && !releaseLoading;
+
+  const scope = useMemo(() => {
+    const card = snapshot ?? techCard;
+    if (!card) return undefined;
+    return buildPrintScope({
+      techCard: card,
+      query,
+      run: runData?.run,
+      runPackToken: runData?.runPackToken,
+      revision: snapshot
+        ? { source: 'release', number: wireInt(releaseData?.release?.releaseNumber) }
+        : { source: 'live' },
+    });
+  }, [snapshot, techCard, query, runData?.run, runData?.runPackToken, releaseData?.release]);
 
   // Статусы запросов, которые документ делает САМ (размерная таблица, материалы, релизы, модели,
   // медиа, словарь ухода). Гейт печати обязан их ждать — именно они рисуют прочерки вместо мерок
@@ -88,14 +113,15 @@ export function TechCardPrint() {
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
 
   const { ready, degraded } = usePrintReady([
-    { label: 'тех-карта', status: depStatus(isLoading, isError) },
-    { label: 'сборка на изделии', status: depStatus(assemblyLoading, assemblyError) },
-    { label: 'рецепт упаковки', status: depStatus(recipeLoading, recipeError) },
+    { label: 'tech card', status: depStatus(isLoading, isError) },
+    { label: 'on-garment assembly', status: depStatus(assemblyLoading, assemblyError) },
+    { label: 'packaging recipe', status: depStatus(recipeLoading, recipeError) },
     // Прогон попадает в гейт только когда он вообще запрошен: незапрошенный запрос вечно
     // «не загружается», и без этого условия кнопка ждала бы то, чего никто не звал.
     ...(query.runId > 0
-      ? [{ label: 'прогон', status: depStatus(runLoading, runError) }]
+      ? [{ label: 'production run', status: depStatus(runLoading, runError) }]
       : []),
+    ...(releaseId ? [{ label: 'release snapshot', status: depStatus(releaseLoading, releaseError) }] : []),
     ...docDeps,
   ]);
 
@@ -157,13 +183,24 @@ export function TechCardPrint() {
             <div className='px-8'>
               <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
                 {scope.colorwayMissing
-                  ? `колорвей #${query.colorwayId} не найден на этой карте — документ напечатан по всем колорвеям`
-                  : `прогон #${query.runId} не получен — документ напечатан без привязки к партии`}
+                  ? `colourway #${query.colorwayId} is not on this card — printed for all colourways`
+                  : `production run #${query.runId} not received — printed without a batch scope`}
               </p>
             </div>
           ) : null}
+          {snapshotBroken && (
+            <div className='px-8'>
+              <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
+                {releaseForeign
+                  ? `release #${releaseId} belongs to another tech card — ignored, the LIVE card was printed`
+                  : `revision snapshot could not be read${
+                      releaseData?.snapshotError ? ` (${releaseData.snapshotError})` : ''
+                    } — the LIVE card was printed, not the frozen revision`}
+              </p>
+            </div>
+          )}
           <TechPackDocument
-            techCard={techCard}
+            techCard={snapshot ?? techCard}
             scope={scope}
             assembly={assemblyData?.items ?? []}
             packagingRecipe={packagingRecipeData?.items ?? []}

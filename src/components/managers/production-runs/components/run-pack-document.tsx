@@ -10,12 +10,14 @@ import { useSuppliers } from 'components/managers/accounting/utils/hooks';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
 import { EMPTY_QUERY, type PrintQuery } from 'components/managers/print/scope';
 import { depStatus, type PrintDep } from 'components/managers/print/use-print-ready';
-import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 import {
-  CUT_SYMMETRY_PRINT_LEGEND,
-  cutSymmetryBadge,
-  grainlineArrow,
-} from 'components/managers/tech-card/components/piece-codes';
+  PRINT_CUT_SYMMETRY_LEGEND,
+  PRINT_LAY_MODE_LABEL,
+  printCutSymmetryBadge,
+  printLayVerdictWord,
+} from 'components/managers/print/labels';
+import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
+import { grainlineArrow } from 'components/managers/tech-card/components/piece-codes';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardReleases } from 'components/managers/tech-card/components/useSamples';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -26,9 +28,9 @@ import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { decimalToInput } from 'utils/decimal';
 import { viewerOrigin } from 'utils/viewer-origin';
-import { LAY_MODE_LABEL, cmToM } from './lay-card';
+import { cmToM } from './lay-card';
 import { runDate, runStatusLabel } from './options';
-import { VERDICT_GLYPH, VERDICT_WORD, layVerdict, useRunLays } from './useLays';
+import { VERDICT_GLYPH, layVerdict, useRunLays } from './useLays';
 import { useMaterialPlan } from './useProductionRuns';
 
 // НАРЯД НА ПАРТИЮ — печатный документ ПРОГОНА.
@@ -138,9 +140,9 @@ export function RunPackDocument({
   ].join(',');
   useEffect(() => {
     onDataStatus?.([
-      { label: 'тех-карта', status: depStatus(techCardLoading, techCardError) },
-      { label: 'настилы', status: depStatus(laysLoading, laysError) },
-      { label: 'материальный план', status: depStatus(materialLoading, materialError) },
+      { label: 'tech card', status: depStatus(techCardLoading, techCardError) },
+      { label: 'lays', status: depStatus(laysLoading, laysError) },
+      { label: 'material plan', status: depStatus(materialLoading, materialError) },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey]);
@@ -169,7 +171,8 @@ export function RunPackDocument({
   const gradeSizeIds = useMemo(() => (tc?.sizeIds ?? []).map(wireInt), [tc?.sizeIds]);
 
   const sizeLabel = useMemo(
-    () => (id: number) => (id > 0 ? findInDictionary(dictionary, id, 'size') || `#${id}` : 'б/р'),
+    () => (id: number) =>
+      id > 0 ? findInDictionary(dictionary, id, 'size') || `#${id}` : 'no size',
     [dictionary],
   );
 
@@ -183,16 +186,16 @@ export function RunPackDocument({
       const name = dc?.name ?? cw.colorCode ?? '';
       byId.set(wireInt(cw.colorwayId), `${cw.colorCode ? `${cw.colorCode} · ` : ''}${name}`);
     }
-    return (id: number) => byId.get(id) || (id > 0 ? `#${id}` : '(без колорвея)');
+    return (id: number) => byId.get(id) || (id > 0 ? `#${id}` : '(no colorway)');
   }, [techCard?.colorways, dictionary?.colors]);
 
   const variantLabel = useMemo(() => {
     const byId = new Map<number, string>();
     for (const v of techCard?.outputVariants ?? []) {
       const label = [v.colorCode, v.colorName].filter(Boolean).join(' · ');
-      byId.set(wireInt(v.id), label || `цвет #${wireInt(v.id)}`);
+      byId.set(wireInt(v.id), label || `color #${wireInt(v.id)}`);
     }
-    return (id: number) => byId.get(id) || `цвет #${id}`;
+    return (id: number) => byId.get(id) || `color #${id}`;
   }, [techCard?.outputVariants]);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -215,7 +218,7 @@ export function RunPackDocument({
               ? colorwayLabel(productId)
               : variantId > 0
                 ? variantLabel(variantId)
-                : '(колор-модель не назначена)',
+                : '(colorway not assigned)',
           bySize: new Map(),
           total: 0,
         };
@@ -337,9 +340,9 @@ export function RunPackDocument({
             c.coveredQty ?? 0
           }/${c.plannedQty ?? 0}${
             (c.blockingPieceNames ?? []).length > 0
-              ? `, минимум дают: ${(c.blockingPieceNames ?? []).join(', ')}`
+              ? `, minimum set by: ${(c.blockingPieceNames ?? []).join(', ')}`
               : ''
-          }${(c.unknownPieceCount ?? 0) > 0 ? `, без ответа деталей: ${c.unknownPieceCount}` : ''}`,
+          }${(c.unknownPieceCount ?? 0) > 0 ? `, pieces without an answer: ${c.unknownPieceCount}` : ''}`,
         })),
     [coverage, colorwayLabel, sizeLabel],
   );
@@ -386,16 +389,16 @@ export function RunPackDocument({
       <PageFurniture
         line={furnitureLine(
           `PR-${runId || '—'}`,
-          tc?.styleNumber ? `стиль ${tc.styleNumber}` : '',
-          runLockVersion > 0 ? `план v${runLockVersion}` : '',
+          tc?.styleNumber ? `style ${tc.styleNumber}` : '',
+          runLockVersion > 0 ? `plan v${runLockVersion}` : '',
         )}
       />
       {/* ЧЕМ ОГРАНИЧЕН ЛИСТ. Наряд по одному колорвею выглядит как наряд на всю партию, только
           короче: не назови он свой скоуп вслух — и тираж одного цвета прочитают как весь заказ. */}
       {scopeColorwayId > 0 && (
         <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
-          печать по колорвею: {colorwayLabel(scopeColorwayId)} — строки других цветов этой партии в
-          лист не вошли
+          printed for one colorway: {colorwayLabel(scopeColorwayId)} — lines of this batch&apos;s
+          other colors are not on this sheet
         </p>
       )}
       {/* ШАПКА — что это за партия и по какой ревизии её кроят. */}
@@ -405,11 +408,11 @@ export function RunPackDocument({
             <GrbpwrMark className='mt-0.5 h-10 w-10 shrink-0 text-black' />
             <div>
               <div className='text-micro uppercase tracking-[0.2em] text-labelColor'>
-                {tc?.brand || 'GRBPWR'} · наряд на партию
+                {tc?.brand || 'GRBPWR'} · production run pack
               </div>
               <div className='text-2xl font-bold uppercase leading-tight'>PR-{runId || '—'}</div>
               <div className='text-sm'>
-                стиль <span className='font-semibold'>{tc?.styleNumber || `TC-${techCardId}`}</span>
+                style <span className='font-semibold'>{tc?.styleNumber || `TC-${techCardId}`}</span>
                 {tc?.name ? ` · ${tc.name}` : ''}
               </div>
             </div>
@@ -418,10 +421,10 @@ export function RunPackDocument({
             <div className='text-right text-control leading-tight'>
               <div className='font-semibold uppercase'>{runStatusLabel(ins?.status)}</div>
               <div className='text-labelColor'>
-                план {runDate(ins?.plannedStartAt) || '—'} → обещано{' '}
+                planned {runDate(ins?.plannedStartAt) || '—'} → promised{' '}
                 {runDate(ins?.promisedAt) || '—'}
               </div>
-              <div>{factory ? `фабрика: ${factory}` : 'фабрика не назначена'}</div>
+              <div>{factory ? `factory: ${factory}` : 'factory not assigned'}</div>
             </div>
             {/* QR ЖИВОГО НАРЯДА.
                 Ширина под ~22 мм — минимум, на котором телефон берёт код с мятого листа; место было
@@ -449,9 +452,9 @@ export function RunPackDocument({
                     value={`${viewerOrigin()}/r/${runPackToken}?v=${runLockVersion}`}
                   />
                   <figcaption className='mt-0.5 text-nano uppercase leading-tight'>
-                    живой наряд
+                    live run pack
                     <span className='block text-labelColor'>
-                      наведите камеру: числа в нём всегда текущие
+                      point a camera: its numbers are always current
                     </span>
                   </figcaption>
                 </figure>
@@ -468,18 +471,21 @@ export function RunPackDocument({
         <div className='mt-2'>
           {planReleaseId > 0 ? (
             <div className='border border-black px-2 py-1 text-control'>
-              кат-лист посчитан по замороженной спецификации{' '}
+              cut list computed from frozen specification{' '}
               <b>Rev.{releaseNumber > 0 ? releaseNumber : `#${planReleaseId}`}</b>.
               {/* Claim'у нельзя быть шире того, что заморожено. Замораживает релиз спецификацию
                   кроя, по которой сервер считал кат-лист; градация и упаковка на этом листе взяты
                   с ЖИВОЙ карточки, потому что читаются они оттуда. Написать просто «спецификация
                   заморожена» значило бы распространить гарантию на числа, которых она не покрывает. */}
-              <span className='text-labelColor'> Градация и упаковка ниже — с живой карточки.</span>
+              <span className='text-labelColor'>
+                {' '}
+                Size grading and packaging below come from the live card.
+              </span>
             </div>
           ) : (
             <div className='border-2 border-black px-2 py-1 text-control font-bold uppercase'>
-              печатается по живой карте — ревизия не зафиксирована. Карту правят, и она могла
-              измениться после печати: сверьтесь с технологом до раскроя.
+              printed from the live card — revision not frozen. The card is being edited and may
+              have changed after printing: confirm with the technologist before cutting.
             </div>
           )}
         </div>
@@ -489,16 +495,16 @@ export function RunPackDocument({
             иначе два листа с разными числами неразличимы, и невозможно сказать, какой из них
             устарел. lock_version — версия прогона, generated_at — момент снимка кат-листа. */}
         <div className='mt-1 flex flex-wrap gap-x-4 text-nano uppercase text-labelColor'>
-          <span>ревизия партии сейчас: lock_version {runLockVersion}</span>
+          <span>batch revision now: lock_version {runLockVersion}</span>
           <span>
-            кат-лист посчитан для: lock_version{' '}
-            {cutPlanAuthoritative ? planLockVersion : 'НЕИЗВЕСТНО'}
+            cut list computed for: lock_version{' '}
+            {cutPlanAuthoritative ? planLockVersion : 'UNKNOWN'}
           </span>
           <span>
-            снимок кат-листа:{' '}
-            {stampAt(cutPlan?.generatedAt) || (cutPlanUnavailable ? 'НЕ ПОЛУЧЕН' : 'нет')}
+            cut list snapshot:{' '}
+            {stampAt(cutPlan?.generatedAt) || (cutPlanUnavailable ? 'NOT RECEIVED' : 'none')}
           </span>
-          <span>лист напечатан: {stampAt(new Date().toISOString())}</span>
+          <span>sheet printed: {stampAt(new Date().toISOString())}</span>
         </div>
 
         {/* РАСХОЖДЕНИЕ РЕВИЗИЙ — единственная новость шапки, которая отменяет весь кат-лист ниже.
@@ -507,25 +513,25 @@ export function RunPackDocument({
             верно, — но резать по его числам нельзя, и сказать это надо там, где читают первым. */}
         {revisionDrift && (
           <div className='mt-1 border-2 border-black px-2 py-1 text-control font-bold uppercase'>
-            план партии изменился после расчёта кат-листа (партия lock_version {runLockVersion},
-            кат-лист посчитан для {planLockVersion}) — количества ниже устарели. Перепечатайте наряд
-            до раскроя.
+            the batch plan changed after the cut list was computed (batch lock_version{' '}
+            {runLockVersion}, cut list computed for {planLockVersion}) — quantities below are stale.
+            Reprint the run pack before cutting.
           </div>
         )}
       </header>
 
       {/* ЛИНИИ ПАРТИИ */}
-      <Sheet title='линии партии — сколько шьём'>
+      <Sheet title='batch lines — how many we sew'>
         {lineRows.length === 0 || plannedTotal === 0 ? (
           <Nothing>
-            план партии не заполнен — ни одной клетки «колор-модель × размер». Пока их нет, кат-лист
-            и материальный план ниже считать не от чего.
+            the batch plan is empty — not a single &quot;colorway × size&quot; cell. Until they
+            exist, the cut list and material plan below have nothing to be computed from.
           </Nothing>
         ) : (
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
-                <th className={TH}>колор-модель</th>
+                <th className={TH}>colorway</th>
                 {lineSizeColumns.map((s) => (
                   <th key={s} className={`${TH} text-center`}>
                     {sizeLabel(s)}
@@ -561,38 +567,38 @@ export function RunPackDocument({
       </Sheet>
 
       {/* КАТ-ЛИСТ ПАРТИИ */}
-      <Sheet title='кат-лист партии — что и из чего кроить'>
+      <Sheet title='batch cut list — what to cut and from what'>
         {/* БЛОКЕРЫ ИДУТ ПЕРЕД ТАБЛИЦЕЙ И ОТДЕЛЬНЫМ БЛОКОМ. Это единственное место наряда, где цех
             обязан остановиться и спросить, а строка с прочерком в общей таблице читается как
             «кроить не из чего» и теряется среди сорока таких же. */}
         {cutBlockers.length > 0 && (
           <div className='mb-2 break-inside-avoid border-2 border-black p-2'>
             <div className='mb-1 text-control font-bold uppercase'>
-              стоп — {cutBlockers.length} дет. × колорвей не привязаны к артикулу
+              stop — {cutBlockers.length} piece × colorway rows are not linked to an article
             </div>
             <table className='w-full border-collapse text-micro'>
               <thead>
                 <tr>
-                  <th className={TH}>деталь</th>
-                  <th className={TH}>колорвей</th>
-                  <th className={`${TH} text-center`}>изд.</th>
-                  <th className={TH}>почему</th>
+                  <th className={TH}>piece</th>
+                  <th className={TH}>colorway</th>
+                  <th className={`${TH} text-center`}>units</th>
+                  <th className={TH}>why</th>
                 </tr>
               </thead>
               <tbody>
                 {cutBlockers.map((b, i) => (
                   <tr key={`${wireInt(b.pieceId)}-${wireInt(b.colorwayId)}-${i}`}>
-                    <td className={`${TD} font-medium`}>{b.pieceName || `деталь #${b.pieceId}`}</td>
+                    <td className={`${TD} font-medium`}>{b.pieceName || `piece #${b.pieceId}`}</td>
                     <td className={TD}>{b.colorwayName || colorwayLabel(wireInt(b.colorwayId))}</td>
                     <td className={`${TD} text-center`}>{b.garments ?? 0}</td>
-                    <td className={TD}>{b.reason || 'причина не названа'}</td>
+                    <td className={TD}>{b.reason || 'reason not given'}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <p className='mt-1 text-nano uppercase'>
-              эти детали НЕ включены в таблицу ниже — их нельзя кроить до того, как технолог назовёт
-              артикул.
+              these pieces are NOT included in the table below — they must not be cut until the
+              technologist names the article.
             </p>
           </div>
         )}
@@ -600,45 +606,45 @@ export function RunPackDocument({
         {cutRows.length === 0 ? (
           <Nothing>
             {cutPlanUnavailable
-              ? 'кат-лист НЕ ПОЛУЧЕН от сервера — по этому листу кроить нельзя, распечатайте наряд заново или уточните у технолога.'
+              ? 'cut list NOT RECEIVED from the server — do not cut from this sheet; reprint the run pack or check with the technologist.'
               : !cutPlan
-                ? 'кат-лист ещё не загружен.'
+                ? 'cut list not loaded yet.'
                 : // Пустой ответ БЕЗ ревизии — это не «кроить нечего», а «мы ничего не узнали».
                   // Пока бэкенд дописывают, шлюз отвечает ровно так, и молчаливое «в карте нет
                   // деталей» отправило бы цех проверять карточку вместо того, чтобы ждать сервер.
                   !cutPlanAuthoritative
-                  ? 'кат-лист не посчитан: сервер ответил без ревизии снимка. Это НЕ значит, что кроить нечего — значит, что «сколько выкроить» никто не считал.'
+                  ? 'cut list not computed: the server answered without a snapshot revision. This does NOT mean there is nothing to cut — it means nobody computed "how many to cut".'
                   : plannedTotal === 0
-                    ? 'кат-листа нет, потому что нет линий партии: считать «сколько выкроить» не от чего.'
+                    ? 'no cut list because the batch has no lines: there is nothing to compute "how many to cut" from.'
                     : cutBlockers.length > 0
-                      ? 'ни одна деталь не привязалась к артикулу — всё, что нашлось, стоит в блоке выше.'
-                      : 'в тех-карте не заведено ни одной детали кроя — кроить по этому наряду нечего.'}
+                      ? 'not a single piece is linked to an article — everything found is in the block above.'
+                      : 'the tech card has no cut pieces — there is nothing to cut on this run pack.'}
           </Nothing>
         ) : (
           <>
             <table className='w-full border-collapse text-micro'>
               <thead>
                 <tr>
-                  <th className={TH}>деталь</th>
-                  <th className={TH}>колорвей</th>
+                  <th className={TH}>piece</th>
+                  <th className={TH}>colorway</th>
                   {/* Количество на изделие и подпись «как кроится» стоят в ОДНОЙ клетке, как в
                       тех-паке: подпись уточняет именно это число, а отдельной колонкой на другом
                       конце строки она читается как ещё один атрибут детали. Побочно это снимает
                       колонку с листа, а ширина A4 у таблицы, где к пяти описательным колонкам
                       добавляется вся градация, — не запас, а дефицит. */}
-                  <th className={`${TH} text-center`}>на изд.</th>
-                  <th className={TH}>из чего кроить</th>
+                  <th className={`${TH} text-center`}>per unit</th>
+                  <th className={TH}>cut from</th>
                   {cutSizeColumns.map((s) => (
                     <th key={s.id} className={`${TH} text-center`}>
                       {s.name}
                     </th>
                   ))}
-                  <th className={`${TH} text-center`}>выкроить</th>
+                  <th className={`${TH} text-center`}>to cut</th>
                 </tr>
               </thead>
               <tbody>
                 {cutRows.map((r, i) => {
-                  const badge = cutSymmetryBadge(r.cutSymmetry, r.piecesPerGarment);
+                  const badge = printCutSymmetryBadge(r.cutSymmetry, r.piecesPerGarment);
                   const arrow = grainlineArrow(r.grainline);
                   return (
                     <tr
@@ -651,18 +657,18 @@ export function RunPackDocument({
                       className='break-inside-avoid'
                     >
                       <td className={TD}>
-                        <div className='font-medium'>{r.pieceName || `деталь #${r.pieceId}`}</div>
+                        <div className='font-medium'>{r.pieceName || `piece #${r.pieceId}`}</div>
                         {/* Долевая и клеевая дублируются в КАЖДОЙ строке колорвея намеренно (так же
                             их дублирует сервер): наряд режут по строкам, и деталь без долевой в
                             своей строке — это деталь, которую раскроят неправильно, даже если та же
                             долевая написана строкой выше у другого цвета. */}
                         <div className='text-nano uppercase text-labelColor'>
-                          долевая: {r.grainline || 'не задана'}
+                          grainline: {r.grainline || 'not set'}
                           {arrow ? ` ${arrow}` : ''}
                         </div>
                         {r.fused ? (
                           <div className='text-nano uppercase'>
-                            клеевая: {r.fusingMaterialName || 'артикул не назван'}
+                            fusing: {r.fusingMaterialName || 'article not named'}
                           </div>
                         ) : null}
                       </td>
@@ -694,10 +700,10 @@ export function RunPackDocument({
                         ) : null}
                       </td>
                       <td className={TD}>
-                        <div className='font-medium'>{r.slotName || 'слот не назван'}</div>
-                        <div>{r.materialName || 'артикул не назначен'}</div>
+                        <div className='font-medium'>{r.slotName || 'slot not named'}</div>
+                        <div>{r.materialName || 'article not assigned'}</div>
                         <div className='text-nano uppercase text-labelColor'>
-                          {r.pinned ? 'пин рецепта' : 'дефолт слота'}
+                          {r.pinned ? 'recipe pin' : 'slot default'}
                         </div>
                         {/* ДОГАДКА СЕРВЕРА, НАПЕЧАТАННАЯ КАК ДОГАДКА. slot_inferred = рецепт эту
                             деталь не называет вовсе, и слот подставлен потому, что рулонный слот у
@@ -706,7 +712,7 @@ export function RunPackDocument({
                             человек. */}
                         {r.slotInferred ? (
                           <div className='mt-0.5 border border-black px-0.5 text-nano uppercase'>
-                            ! слот выведен: рецепт деталь не называет
+                            ! slot inferred: the recipe does not name this piece
                           </div>
                         ) : null}
                       </td>
@@ -724,7 +730,7 @@ export function RunPackDocument({
                               <>
                                 <div className='font-semibold'>{cell.piecesToCut ?? '?'}</div>
                                 <div className='text-nano text-labelColor'>
-                                  {cell.garments ?? '?'} изд.
+                                  {cell.garments ?? '?'} units
                                 </div>
                               </>
                             )}
@@ -733,7 +739,7 @@ export function RunPackDocument({
                       })}
                       <td className={`${TD} text-center`}>
                         <div className='font-bold'>{r.piecesToCutTotal ?? '?'}</div>
-                        <div className='text-nano uppercase text-labelColor'>панелей</div>
+                        <div className='text-nano uppercase text-labelColor'>panels</div>
                       </td>
                     </tr>
                   );
@@ -742,7 +748,7 @@ export function RunPackDocument({
                   {/* colSpan = описательные колонки (деталь, колорвей, на изд., из чего) + вся
                       градация; итог стоит под колонкой «выкроить». Разъедется — таблица поедет. */}
                   <td className={`${TD} text-right uppercase`} colSpan={4 + cutSizeColumns.length}>
-                    всего по партии
+                    batch total
                   </td>
                   {/* Итог считаем от ВИДИМЫХ строк, а не берём серверный piecesToCutTotal: тот
                       посчитан по всему прогону, и под таблицей одного колорвея он был бы суммой
@@ -756,11 +762,12 @@ export function RunPackDocument({
               </tbody>
             </table>
 
-            <p className='mt-1 text-nano text-labelColor'>{CUT_SYMMETRY_PRINT_LEGEND}</p>
+            <p className='mt-1 text-nano text-labelColor'>{PRINT_CUT_SYMMETRY_LEGEND}</p>
             <p className='text-nano text-labelColor'>
-              «пин рецепта» — артикул назначен рецептом колорвея; «дефолт слота» — взят артикул по
-              умолчанию у роли в BOM. «Слот выведен» — рецепт эту деталь не называет, слот
-              подставлен по единственной рулонной ткани колорвея: перед раскроем подтвердите.
+              &quot;recipe pin&quot; — the article is assigned by the colorway recipe; &quot;slot
+              default&quot; — the slot&apos;s default article from the BOM is used. &quot;Slot
+              inferred&quot; — the recipe does not name this piece, the slot was substituted as the
+              colorway&apos;s only roll-goods fabric: confirm before cutting.
             </p>
             {(cutPlan?.caveats ?? []).map((c, i) => (
               <p key={i} className='text-nano text-labelColor'>
@@ -772,20 +779,20 @@ export function RunPackDocument({
       </Sheet>
 
       {/* НАСТИЛЫ И ПОКРЫТИЕ */}
-      <Sheet title='план настилов и покрытие'>
+      <Sheet title='lay plan and coverage'>
         {laysPending || laysError ? (
           // «Не приехало» ≠ «нет настилов». На бумаге эти два состояния выглядят одинаково пусто, а
           // означают противоположное: во втором случае цех вправе резать по нормам, в первом —
           // не вправе ничего, потому что плана он не видел.
           <Nothing>
             {laysError
-              ? 'план настилов НЕ ПОЛУЧЕН от сервера — это не значит, что настилов нет.'
-              : 'план настилов ещё загружается — распечатайте лист заново.'}
+              ? 'lay plan NOT RECEIVED from the server — this does not mean there are no lays.'
+              : 'lay plan is still loading — reprint the sheet.'}
           </Nothing>
         ) : laysData?.applicable === false ? (
           <Nothing>
             {laysData.notApplicableReason ||
-              'настилов у этой партии не бывает — карта вспомогательная, деталей кроя и раскладок в ней нет.'}
+              'this batch never has lays — the card is auxiliary, it has no cut pieces or markers.'}
           </Nothing>
         ) : (
           <>
@@ -793,7 +800,7 @@ export function RunPackDocument({
               <table className='mb-2 w-full border-collapse text-micro'>
                 <thead>
                   <tr>
-                    <th className={TH}>покрытие: колорвей</th>
+                    <th className={TH}>coverage: colorway</th>
                     {coverageSizes.map((s) => (
                       <th key={s} className={`${TH} text-center`}>
                         {sizeLabel(s)}
@@ -836,8 +843,8 @@ export function RunPackDocument({
               // противоречить таблице, стоящей на том же листе двумя сантиметрами ниже.
               <Nothing>
                 {lays.length === 0
-                  ? 'покрытие не посчитано — настилов ещё нет.'
-                  : 'настилы есть, а покрытие по ним посчитать не удалось — детали неатрибутируемы, симметрия не размечена или слот не резолвится. Это НЕ «покрыто».'}
+                  ? 'coverage not computed — no lays yet.'
+                  : 'lays exist, but their coverage could not be computed — pieces cannot be attributed, symmetry is not marked, or the slot does not resolve. This is NOT "covered".'}
               </Nothing>
             )}
 
@@ -846,18 +853,20 @@ export function RunPackDocument({
                 «покрыто»: это не «покрыто» и не «нехватка». */}
             {coverage.length > 0 && (
               <p className='mb-2 text-nano uppercase text-labelColor'>
-                {VERDICT_GLYPH.ok} покрыто · {VERDICT_GLYPH.blocker} нехватка — ткань не раскроена ·{' '}
-                {VERDICT_GLYPH.warning} перекрой — решает человек · {VERDICT_GLYPH.unknown} не
-                проверено (это НЕ «покрыто»)
+                {VERDICT_GLYPH.ok} covered · {VERDICT_GLYPH.blocker} shortfall — fabric not cut ·{' '}
+                {VERDICT_GLYPH.warning} overcut — a human decides · {VERDICT_GLYPH.unknown} not
+                checked (this is NOT &quot;covered&quot;)
               </p>
             )}
 
             {coverageNotes.length > 0 && (
               <div className='mb-2 break-inside-avoid border border-black p-2'>
-                <div className='mb-0.5 text-control font-bold uppercase'>клетки без «покрыто»</div>
+                <div className='mb-0.5 text-control font-bold uppercase'>
+                  cells without &quot;covered&quot;
+                </div>
                 {coverageNotes.map((n) => (
                   <p key={n.key} className='text-micro'>
-                    {VERDICT_GLYPH[n.verdict]} {VERDICT_WORD[n.verdict]}: {n.text}
+                    {VERDICT_GLYPH[n.verdict]} {printLayVerdictWord(n.verdict)}: {n.text}
                   </p>
                 ))}
               </div>
@@ -867,51 +876,51 @@ export function RunPackDocument({
               // Чем питается потребность в материалах — говорит САМ материальный план
               // (plan_source), и он напечатан на своём листе. Выводить это здесь из пустого списка
               // настилов значило бы завести второй ответ на тот же вопрос, который сервер уже дал.
-              <Nothing>настилов ещё нет — раскроем по ним не управляют.</Nothing>
+              <Nothing>no lays yet — they do not govern cutting.</Nothing>
             ) : (
               <table className='w-full border-collapse text-micro'>
                 <thead>
                   <tr>
-                    <th className={TH}>настил</th>
-                    <th className={TH}>колорвей · слот · артикул</th>
-                    <th className={TH}>режим</th>
-                    <th className={TH}>секции (маркер × слоёв)</th>
-                    <th className={`${TH} text-center`}>слоёв</th>
-                    <th className={`${TH} text-center`}>план, м</th>
-                    <th className={`${TH} text-center`}>стопка, см</th>
+                    <th className={TH}>lay</th>
+                    <th className={TH}>colorway · slot · article</th>
+                    <th className={TH}>mode</th>
+                    <th className={TH}>sections (marker × plies)</th>
+                    <th className={`${TH} text-center`}>plies</th>
+                    <th className={`${TH} text-center`}>plan, m</th>
+                    <th className={`${TH} text-center`}>stack, cm</th>
                   </tr>
                 </thead>
                 <tbody>
                   {lays.map((lay: common_ProductionRunLay, i) => (
                     <tr key={lay.layKey || i} className='break-inside-avoid'>
                       <td className={TD}>
-                        <div className='font-medium'>{lay.name || `настил ${i + 1}`}</div>
+                        <div className='font-medium'>{lay.name || `lay ${i + 1}`}</div>
                         {/* Рулон назван — значит, настилали именно с него, и это единственная
                             строка наряда, которую потом не переписать. */}
                         {lay.lotCode ? (
                           <div className='text-nano uppercase text-labelColor'>
-                            рулон {lay.lotCode}
+                            roll {lay.lotCode}
                           </div>
                         ) : null}
                         {lay.quantitiesStale ? (
                           <div className='mt-0.5 border border-black px-0.5 text-nano uppercase'>
-                            ! количества изменились после расчёта настила
+                            ! quantities changed after the lay was computed
                           </div>
                         ) : null}
                       </td>
                       <td className={TD}>
                         <div>{lay.colorwayName || colorwayLabel(wireInt(lay.colorwayId))}</div>
                         <div className='text-nano uppercase text-labelColor'>
-                          {lay.bomItemName || 'слот'} · {lay.materialName || 'артикул не назначен'}
+                          {lay.bomItemName || 'slot'} · {lay.materialName || 'article not assigned'}
                         </div>
                       </td>
-                      <td className={TD}>{LAY_MODE_LABEL[lay.mode ?? ''] ?? 'режим не задан'}</td>
+                      <td className={TD}>{PRINT_LAY_MODE_LABEL[lay.mode ?? ''] ?? 'mode not set'}</td>
                       <td className={TD}>
                         {(lay.sections ?? []).length === 0
                           ? '—'
                           : (lay.sections ?? []).map((s, j) => (
                               <div key={s.sectionKey || j}>
-                                {s.markerName || `маркер #${s.markerId}`} × {s.plies ?? 0}
+                                {s.markerName || `marker #${s.markerId}`} × {s.plies ?? 0}
                               </div>
                             ))}
                       </td>
@@ -934,14 +943,14 @@ export function RunPackDocument({
       </Sheet>
 
       {/* ВЫДАЧА МАТЕРИАЛОВ */}
-      <Sheet title='выдача материалов'>
+      <Sheet title='material issue'>
         {/* Материальный план НЕ ИМЕЕТ оси колорвея: сервер считает потребность по артикулам на всю
             партию сразу. При печати по одному цвету этот лист остаётся про всю партию, и молчать
             об этом нельзя — склад выдал бы по нему ткань как под один цвет. */}
         {scopeColorwayId > 0 && (
           <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-micro uppercase'>
-            лист посчитан на ВСЮ партию, включая другие колорвеи — потребность по артикулам не
-            делится по цветам
+            this sheet is computed for the WHOLE batch, other colorways included — per-article
+            requirements do not split by color
           </p>
         )}
         {/* Блокеры плана — первыми и здесь, по той же причине: план, молча уронивший слот, читается
@@ -949,12 +958,12 @@ export function RunPackDocument({
         {materialBlockers.length > 0 && (
           <div className='mb-2 break-inside-avoid border-2 border-black p-2 text-micro'>
             <div className='mb-1 text-control font-bold uppercase'>
-              не посчитано — план материалов неполон
+              not computed — the material plan is incomplete
             </div>
             {materialBlockers.map((b, i) => (
               <p key={`${wireInt(b.bomItemId)}-${wireInt(b.colorwayId)}-${i}`}>
-                {b.slotName || 'слот'} · {b.colorwayName || colorwayLabel(wireInt(b.colorwayId))} —{' '}
-                {b.plannedQty ?? 0} изд.: {b.reason || 'причина не названа'}
+                {b.slotName || 'slot'} · {b.colorwayName || colorwayLabel(wireInt(b.colorwayId))} —{' '}
+                {b.plannedQty ?? 0} units: {b.reason || 'reason not given'}
               </p>
             ))}
           </div>
@@ -966,36 +975,36 @@ export function RunPackDocument({
         {materialPlan?.planSource && materialRows.length > 0 ? (
           <p className='mb-1 text-nano uppercase text-labelColor'>
             {materialPlan.planSource === 'PRODUCTION_RUN_COVERAGE_SOURCE_LAYS'
-              ? 'потребность посчитана по настилам этой партии'
+              ? "requirements computed from this batch's lays"
               : materialPlan.planSource === 'PRODUCTION_RUN_COVERAGE_SOURCE_MIXED'
-                ? 'потребность смешанная: часть слотов по настилам, часть по нормам карточки'
+                ? 'requirements are mixed: some slots from lays, some from tech card norms'
                 : materialPlan.planSource === 'PRODUCTION_RUN_COVERAGE_SOURCE_NORM'
-                  ? 'потребность посчитана по нормам тех-карты (настилов ещё нет)'
-                  : 'источник расчёта потребности сервер не назвал'}
+                  ? 'requirements computed from tech card norms (no lays yet)'
+                  : 'the server did not name the source of this requirement'}
           </p>
         ) : null}
 
         {materialPending || materialError ? (
           <Nothing>
             {materialError
-              ? 'материальный план НЕ ПОЛУЧЕН от сервера — это не значит, что материалов хватает.'
-              : 'материальный план ещё загружается — распечатайте лист заново.'}
+              ? 'material plan NOT RECEIVED from the server — this does not mean materials are sufficient.'
+              : 'material plan is still loading — reprint the sheet.'}
           </Nothing>
         ) : materialRows.length === 0 ? (
           <Nothing>
             {plannedTotal === 0
-              ? 'потребности в материалах нет: в партии нет линий.'
-              : 'потребность не посчитана — у колорвеев карты нет привязанных артикулов с нормами.'}
+              ? 'no material requirements: the batch has no lines.'
+              : "requirements not computed — the card's colorways have no linked articles with norms."}
           </Nothing>
         ) : (
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
-                <th className={TH}>материал</th>
-                <th className={`${TH} text-center`}>требуется</th>
-                <th className={`${TH} text-center`}>на складе</th>
-                <th className={`${TH} text-center`}>выдано</th>
-                <th className={`${TH} text-center`}>нехватка</th>
+                <th className={TH}>material</th>
+                <th className={`${TH} text-center`}>required</th>
+                <th className={`${TH} text-center`}>on hand</th>
+                <th className={`${TH} text-center`}>issued</th>
+                <th className={`${TH} text-center`}>shortage</th>
               </tr>
             </thead>
             <tbody>
@@ -1007,7 +1016,7 @@ export function RunPackDocument({
                       <div className='font-medium'>{r.materialName || `#${r.materialId}`}</div>
                       {r.hasSizeNorms === false ? (
                         <div className='text-nano uppercase text-labelColor'>
-                          норма на изделие, без разбивки по размерам — оценка
+                          per-unit norm, no per-size breakdown — an estimate
                         </div>
                       ) : null}
                     </td>
@@ -1037,45 +1046,47 @@ export function RunPackDocument({
       </Sheet>
 
       {/* УПАКОВКА ПАРТИИ */}
-      <Sheet title='упаковка партии'>
+      <Sheet title='batch packaging'>
         {/* СЧИТАЕМАЯ и ОПИСАТЕЛЬНАЯ половины упаковки разведены намеренно: карта, где заполнены
             укладка и полибэг, но не заведено «штук в коробе», раньше целиком объявлялась
             «не описанной» — и цех терял инструкцию по укладке из-за отсутствия числа, к укладке
             отношения не имеющего. Не считается ровно то, чего не из чего посчитать. */}
         {!packaging ? (
           <Nothing>
-            упаковка в тех-карте не описана — ни укладки, ни короба, ни веса на этой партии нет.
+            packaging is not described in the tech card — this batch has no folding, no carton, no
+            weight.
           </Nothing>
         ) : (
           <div className='grid grid-cols-2 gap-x-8'>
             <div>
-              <KV k='изделий в партии' v={plannedTotal || ''} />
-              <KV k='штук в коробе' v={perBox || ''} />
+              <KV k='units in batch' v={plannedTotal || ''} />
+              <KV k='pcs per carton' v={perBox || ''} />
               {/* Коробов считается от РЕАЛЬНОГО тиража партии, а не от типового тиража карточки:
                   ровно это разделение наряд и вводит. Нецелый короб округляется вверх — половину
                   короба не отгружают. Пусто (а не «0»), когда считать не из чего: ноль коробов
                   означал бы «отгружать нечего». */}
-              <KV k='коробов' v={cartons || ''} />
+              <KV k='cartons' v={cartons || ''} />
               <KV
-                k='вес партии'
+                k='batch weight'
                 v={
                   runWeightG > 0
-                    ? `${(runWeightG / 1000).toFixed(runWeightG >= 10000 ? 0 : 1)} кг`
+                    ? `${(runWeightG / 1000).toFixed(runWeightG >= 10000 ? 0 : 1)} kg`
                     : ''
                 }
               />
               {perBox === 0 ? (
                 <p className='mt-1 text-nano uppercase text-labelColor'>
-                  «штук в коробе» в карте не задано — коробов и вес партии посчитать не из чего.
+                  &quot;pcs per carton&quot; is not set on the card — nothing to compute cartons and
+                  batch weight from.
                 </p>
               ) : null}
             </div>
             <div>
-              <KV k='укладка' v={packaging.foldingMethod} />
-              <KV k='полибэг' v={packaging.polybag} />
-              <KV k='вкладыш' v={packaging.inserts} />
-              <KV k='маркировка короба' v={packaging.boxMarking} />
-              <KV k='габариты короба' v={packaging.boxDimensions} />
+              <KV k='folding' v={packaging.foldingMethod} />
+              <KV k='polybag' v={packaging.polybag} />
+              <KV k='insert card' v={packaging.inserts} />
+              <KV k='carton marking' v={packaging.boxMarking} />
+              <KV k='carton dimensions' v={packaging.boxDimensions} />
             </div>
           </div>
         )}

@@ -24,6 +24,12 @@ import {
 } from 'api/proto-http/admin';
 import { PageFurniture, furnitureLine } from 'components/managers/print/page-furniture';
 import {
+  PRINT_CUT_SYMMETRY_LEGEND,
+  printCutSymmetryCaption,
+  printKindLabel,
+} from 'components/managers/print/labels';
+import {
+  ALL_BOOKLETS,
   EMPTY_QUERY,
   bookletOn,
   buildPrintScope,
@@ -47,7 +53,8 @@ import {
   bomPurposeLabel,
   type RollGoodsLine,
 } from './bom-purpose';
-import { kindLabel } from './bom-kind';
+import { runStatusLabel } from 'components/managers/production-runs/components/options';
+
 import {
   LabelPlacementPictogram,
   resolvePlacementRegion,
@@ -90,11 +97,9 @@ import { viewerOrigin } from 'utils/viewer-origin';
 import { PatternQR } from 'ui/components/pattern-qr';
 import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
-import {
-  CUT_SYMMETRY_PRINT_LEGEND,
-  cutSymmetryPrintCaption,
-  cutSymmetryUnanswered,
-} from './piece-codes';
+// cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
+// его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
+import { cutSymmetryUnanswered } from './piece-codes';
 import { useTechCardReleases } from './useSamples';
 
 const mapOf = (opts: ReadonlyArray<{ value: string; label: string }>) =>
@@ -171,13 +176,6 @@ const attachmentText = (
 };
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
 
-// Русская форма счётного существительного: 1 лист, 2 листа, 5 листов.
-const plural = (n: number, one: string, few: string, many: string): string => {
-  const m100 = n % 100;
-  if (m100 >= 11 && m100 <= 14) return many;
-  const m10 = n % 10;
-  return m10 === 1 ? one : m10 >= 2 && m10 <= 4 ? few : many;
-};
 
 // Lowercase extension of a pattern sheet: filename first, url path as the legacy fallback —
 // the same source order as the server manifest's sheetExt and the viewer's sheetKind. The
@@ -256,7 +254,7 @@ export function TechPackDocument({
     // Всё, что не разошлось по узлам (UNKNOWN, пустая зона, значение вне словаря клиента),
     // печатается последней группой. Порядок внутри групп — исходный порядок шагов.
     const orphans = indexed.filter((x) => rest.has(x.index));
-    if (orphans.length > 0) groups.push({ zone: '', label: 'узел не указан', operations: orphans });
+    if (orphans.length > 0) groups.push({ zone: '', label: 'zone not set', operations: orphans });
     return groups;
   }, [tc?.operations]);
 
@@ -408,11 +406,11 @@ export function TechPackDocument({
   ].join(',');
   useEffect(() => {
     onDataStatus?.([
-      { label: 'модели', status: depStatus(modelsLoading, modelsError) },
-      { label: 'релизы', status: depStatus(releasesLoading, releasesError) },
-      { label: 'размерная таблица', status: depStatus(chartLoading, chartError) },
-      { label: 'справочник материалов', status: depStatus(materialsLoading, materialsError) },
-      { label: 'медиатека', status: depStatus(mediaLoading, mediaError) },
+      { label: 'models', status: depStatus(modelsLoading, modelsError) },
+      { label: 'releases', status: depStatus(releasesLoading, releasesError) },
+      { label: 'size chart', status: depStatus(chartLoading, chartError) },
+      { label: 'material catalog', status: depStatus(materialsLoading, materialsError) },
+      { label: 'media library', status: depStatus(mediaLoading, mediaError) },
     ]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depsKey]);
@@ -443,6 +441,59 @@ export function TechPackDocument({
   // Скоуп только по размерам — тоже скоуп, и он тоже обязан быть назван на бумаге: лист с
   // урезанной градацией иначе читается как «у стиля такая градация».
   const sizesNarrowed = sizeIds.length !== (tc.sizeIds ?? []).length;
+  // Версия карты — штамп на бумаге и в QR выкроек: два листа, напечатанных до и после правки,
+  // должны быть различимы, даже пока вьюер не умеет сверять её сам.
+  const cardLockVersion = wireInt(techCard.lockVersion);
+
+  // Тираж по размерам — из линий прогона, уже суженных скоупом колорвея. Колонки только те
+  // размеры, по которым в партии есть клетки: пустая колонка у раскройного стола читается как
+  // «размер забыли проставить».
+  const runQty = (() => {
+    const bySize = new Map<number, number>();
+    // Линии, которые НЕ вошли в тираж: без назначенного колорвея (product_id = 0 легален, пока
+    // партию планируют до публикации цветов) или с размером вне скоупа. Молча вычесть их значило
+    // бы напечатать заниженный тираж под словом «всего».
+    let dropped = 0;
+    for (const l of printScope.run?.run?.lines ?? []) {
+      const qty = wireInt(l.plannedQty);
+      if (printScope.colorway) {
+        const cw = wireInt(l.productId) || wireInt(l.outputVariantId);
+        if (cw !== wireInt(printScope.colorway.colorwayId)) {
+          dropped += qty;
+          continue;
+        }
+      }
+      const sizeId = wireInt(l.sizeId);
+      if (!sizeIds.includes(sizeId)) {
+        dropped += qty;
+        continue;
+      }
+      bySize.set(sizeId, (bySize.get(sizeId) ?? 0) + qty);
+    }
+    return {
+      rows: sizeIds
+        .filter((id) => bySize.has(id))
+        .map((sizeId) => ({ sizeId, qty: bySize.get(sizeId) ?? 0 })),
+      dropped,
+    };
+  })();
+  const runSizeQty = runQty.rows;
+
+  const BOOKLET_NAMES: Record<BookletId, string> = {
+    cover: 'route sheet',
+    cut: 'cutting',
+    sew: 'sewing',
+    qc: 'QC and packing',
+    internal: 'internal',
+  };
+  // Состав комплекта обязан совпадать с тем, что реально напечатано: профиль `factory` вырезает
+  // внутреннюю тетрадь целиком, и обещать её на обложке значило бы отправить получателя искать
+  // листы, которых в пачке нет.
+  const bookletList = (printScope.query.booklets ?? ALL_BOOKLETS)
+    .filter((id) => id !== 'internal' || internalAllowed(printScope))
+    .map((id) => BOOKLET_NAMES[id])
+    .join(' · ');
+
   // The live colourway data — this is the actual fix for #71/M10: previously hardcoded to `[]`,
   // so the colourways sheet and per-colourway cost labels below never rendered for any card.
   const colorways = scopedColorways(printScope);
@@ -528,7 +579,7 @@ export function TechPackDocument({
     };
     const described = (b: common_TechCardBomItem): OpMaterial => ({
       name: b.name?.trim() || '—',
-      kind: kindLabel(b.kind),
+      kind: printKindLabel(b.kind),
       colour: colourOf(b),
     });
 
@@ -536,7 +587,7 @@ export function TechPackDocument({
     for (const k of (o.bomLineKeys ?? []).filter(Boolean)) {
       const b = items.find((x) => x.lineKey === k);
       if (b) out.push(described(b));
-      else out.push({ name: 'ссылка на материал потеряна', missing: true });
+      else out.push({ name: 'material link lost', missing: true });
     }
     // Фолбэк срабатывает, когда множественное поле не разрешило НИЧЕГО, а не когда оно пусто:
     // legacy-ссылка несёт durable bom_item_id и способна разрешить строку с уехавшим ключом.
@@ -563,7 +614,7 @@ export function TechPackDocument({
       (wireInt(u.pieceId)
         ? pieces.find((p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId))
         : undefined);
-    return piece?.name?.trim() || u.placement?.trim() || 'на изделие';
+    return piece?.name?.trim() || u.placement?.trim() || 'per garment';
   };
   // The "colour" column: the effective article's own colour/pantone (pin, else slot default),
   // then the legacy usage-level text, then the slot's colour snapshot.
@@ -662,13 +713,13 @@ export function TechPackDocument({
       wireKey: s.byPurpose ? wireFabricPurpose(s.key) : s.key,
       label: s.byPurpose
         ? bomPurposeLabel(s.key)
-        : (s.lines[0]?.name ?? '').trim() || 'строка BOM',
+        : (s.lines[0]?.name ?? '').trim() || 'BOM line',
       sheets,
     });
   }
   const unboundSheets = sheetsByScope.get('') ?? [];
   if (unboundSheets.length > 0) {
-    patternGroups.push({ wireKey: '_unbound', label: 'листы без привязки', sheets: unboundSheets });
+    patternGroups.push({ wireKey: '_unbound', label: 'unbound sheets', sheets: unboundSheets });
   }
   // Which sizes a group covers: named sizes in the card's size-range order (strays after),
   // plus «градуированные» for sizeless DXF and «без размера» for sizeless PDF — two different
@@ -687,8 +738,8 @@ export function TechPackDocument({
     return [
       ...inRange.map(sizeName),
       ...stray.map(sizeName),
-      graded ? 'градуированные' : '',
-      sizeless ? 'без размера' : '',
+      graded ? 'graded' : '',
+      sizeless ? 'sizeless' : '',
     ]
       .filter(Boolean)
       .join(', ');
@@ -706,9 +757,34 @@ export function TechPackDocument({
           // столе. Без скоупа обе части пусты, и колонтитул остаётся прежним.
           printScope.colorway ? colorwayLabel(printScope.colorway) : '',
           printScope.run ? `PR-${wireInt(printScope.run.id)}` : '',
-          latestRelease ? `rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased',
+          printScope.revision.source === 'release'
+            ? `rev.${printScope.revision.number || '—'}`
+            : latestRelease
+              ? 'live card'
+              : 'unreleased',
         )}
       />
+      {/* КАРТА УШЛА ВПЕРЁД ОТ РЕЛИЗА. Печатая живую карту у стиля, где релиз есть, документ обязан
+          сказать, что он НЕ равен подписанной ревизии: без этого лист неотличим от релизного, а
+          кат-лист партии сервер считает как раз по релизу — то есть по другим данным. */}
+      {/* ЧТО В СНАПШОТНОЙ БУМАГЕ НЕ ЗАМОРОЖЕНО. Снапшот подменяет только саму карту. Размерная
+          таблица, сборка на изделии, рецепт упаковки и эффективные цвета артикулов приезжают
+          отдельными живыми запросами — и под шапкой «Rev.N · snapshot» напечатались бы
+          сегодняшними без единого признака. Лист, по которому ОТК меряет, обязан сказать, что
+          он сегодняшний. */}
+      {printScope.revision.source === 'release' && (
+        <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+          frozen: card spec, pieces, operations, BOM, colourway recipes, markers, care. live (not
+          frozen): size chart, on-garment assembly, packaging recipe, article colours from the
+          material catalog
+        </p>
+      )}
+      {printScope.revision.source === 'live' && latestRelease && (
+        <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+          printed from the LIVE card — Rev.{latestRelease.releaseNumber ?? '—'} exists and this
+          paper is not it; a batch cut list is computed from the release
+        </p>
+      )}
       {/* ЧЕМ ОГРАНИЧЕН ЭТОТ ДОКУМЕНТ. Скоупнутый тех-пак выглядит как полный: у него та же
           шапка и те же листы, просто короче таблицы. Не назови он свой скоуп вслух — и лист,
           напечатанный по одному колорвею, читается как «у стиля один цвет», а лист по размерам
@@ -718,17 +794,134 @@ export function TechPackDocument({
         printScope.profile === 'factory' ||
         sizesNarrowed) && (
         <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
-          печать по скоупу:{' '}
+          printed for:{' '}
           {[
-            printScope.colorway ? `колорвей ${colorwayLabel(printScope.colorway)}` : '',
-            printScope.run ? `партия PR-${wireInt(printScope.run.id)}` : '',
-            sizesNarrowed ? `размеры ${printScope.sizeIds.map(sizeName).join(', ')}` : '',
-            printScope.profile === 'factory' ? 'комплект в цех (без себестоимости)' : '',
+            printScope.colorway ? `colourway ${colorwayLabel(printScope.colorway)}` : '',
+            printScope.run ? `batch PR-${wireInt(printScope.run.id)}` : '',
+            sizesNarrowed ? `sizes ${printScope.sizeIds.map(sizeName).join(', ')}` : '',
+            printScope.profile === 'factory' ? 'factory pack (no costing)' : '',
           ]
             .filter(Boolean)
             .join(' · ')}
         </p>
       )}
+      {/* МАРШРУТНЫЙ ЛИСТ КОМПЛЕКТА. Первый лист пачки, которая уезжает в цех: чей стиль, какой
+          цвет, какая партия, сколько чего по размерам и по какой ревизии. Печатается только
+          когда у документа есть скоуп — у внутреннего тех-пака обо всём сразу маршрутного листа
+          нет и быть не может. */}
+      {b('cover') && (printScope.run || printScope.colorway) && (
+        <Sheet title='route sheet'>
+          <div className='grid grid-cols-2 gap-x-8'>
+            <div>
+              <KV k='style' v={`${tc.styleNumber || '—'} · ${tc.name || ''}`} />
+              <KV
+                k='colourway'
+                v={
+                  printScope.colorway ? (
+                    <span className='inline-flex items-center gap-2'>
+                      {/* Свотч — вспомогательный: на ч/б лазере он бесполезен, поэтому имя цвета
+                          стоит рядом ВСЕГДА, а не вместо него при отсутствии заливки. */}
+                      {printScope.colorway.devHex && (
+                        <span
+                          className='inline-block size-3 border border-black'
+                          style={{ backgroundColor: printScope.colorway.devHex }}
+                        />
+                      )}
+                      {colorwayLabel(printScope.colorway)}
+                      {printScope.colorway.pantone ? ` · ${printScope.colorway.pantone}` : ''}
+                    </span>
+                  ) : (
+                    'all colourways of the card'
+                  )
+                }
+              />
+              <KV k='sizes' v={sizeIds.map(sizeName).join(', ')} />
+            </div>
+            <div>
+              <KV k='batch' v={printScope.run ? `PR-${wireInt(printScope.run.id)}` : '—'} />
+              <KV
+                k='status'
+                v={printScope.run ? runStatusLabel(printScope.run.run?.status) : ''}
+              />
+              <KV
+                k='factory'
+                v={
+                  wireInt(printScope.run?.run?.supplierId)
+                    ? `#${wireInt(printScope.run?.run?.supplierId)}`
+                    : ''
+                }
+              />
+              <KV
+                k='revision'
+                v={
+                  printScope.revision.source === 'release'
+                    ? `Rev.${printScope.revision.number || '—'} · snapshot`
+                    : 'live card'
+                }
+              />
+            </div>
+          </div>
+
+          {runSizeQty.length > 0 && (
+            <table className='mt-3 w-full border-collapse text-micro'>
+              <thead>
+                <tr>
+                  <th className={TH}>size</th>
+                  {runSizeQty.map((r) => (
+                    <th key={r.sizeId} className={`${TH} text-center`}>
+                      {sizeName(r.sizeId)}
+                    </th>
+                  ))}
+                  <th className={`${TH} text-center`}>total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className='break-inside-avoid'>
+                  <td className={`${TD} font-semibold uppercase`}>planned qty, pcs</td>
+                  {runSizeQty.map((r) => (
+                    <td key={r.sizeId} className={`${TD} text-center`}>
+                      {r.qty}
+                    </td>
+                  ))}
+                  <td className={`${TD} text-center font-bold`}>
+                    {runSizeQty.reduce((sum, r) => sum + r.qty, 0)}
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          )}
+          {runQty.dropped > 0 && (
+            <p className='mt-1 text-nano uppercase'>
+              + {runQty.dropped} pcs on batch lines outside this scope (no colourway assigned, or
+              a size not printed here)
+            </p>
+          )}
+
+          <div className='mt-3 flex items-start justify-between gap-4'>
+            <div className='text-micro'>
+              <div className='uppercase text-labelColor'>in this pack</div>
+              {/* Без номеров страниц: сколько страниц займёт тетрадь, при потоковой печати
+                  заранее неизвестно, а обещанное на обложке число, не совпавшее с пачкой,
+                  хуже отсутствия числа. */}
+              <div>{bookletList}</div>
+            </div>
+            {printScope.runPackToken && (
+              <figure className='shrink-0 break-inside-avoid border border-black p-2 text-center'>
+                <PatternQR
+                  size={96}
+                  value={`${viewerOrigin()}/r/${printScope.runPackToken}?v=${wireInt(
+                    printScope.run?.lockVersion,
+                  )}`}
+                />
+                <figcaption className='mt-1 max-w-[110px] text-nano uppercase'>
+                  live batch order
+                </figcaption>
+              </figure>
+            )}
+          </div>
+        </Sheet>
+      )}
+
       {/* COVER / IDENTITY */}
       <header className='mb-5 border-b-2 border-black pb-3'>
         <div className='flex items-start justify-between gap-4'>
@@ -754,10 +947,17 @@ export function TechPackDocument({
           <div className='text-right text-control leading-tight'>
             <div className='font-semibold uppercase'>{stageLabel(tc.stage)}</div>
             <div>{approvalStateLabel(tc.approvalState)}</div>
-            {/* Proof of which frozen snapshot (if any) this printout matches — so a printed
-                copy is never mistaken for a newer/older edit. */}
+            {/* ЧЕМ ЭТА БУМАГА ЯВЛЯЕТСЯ. Раньше здесь печаталось «Rev.N» по наибольшему номеру
+                релиза — то есть номер ревизии над данными, взятыми с ЖИВОЙ карты. Карту правили
+                после релиза, а бумага продолжала называть себя релизом. Теперь номер печатается
+                только когда данные действительно из снапшота; иначе лист честно говорит, что он
+                с живой карты. */}
             <div className='font-semibold'>
-              {latestRelease ? `Rev.${latestRelease.releaseNumber ?? '—'}` : 'unreleased'}
+              {printScope.revision.source === 'release'
+                ? `Rev.${printScope.revision.number || '—'} · snapshot`
+                : latestRelease
+                  ? 'live card (not a release)'
+                  : 'unreleased'}
             </div>
             <div className='text-labelColor'>{formatTechCardDate(techCard.updatedAt)}</div>
           </div>
@@ -879,7 +1079,7 @@ export function TechPackDocument({
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
                   <th className={TH}>part</th>
-                  <th className={TH}>детали кроя</th>
+                  <th className={TH}>cut pieces</th>
                   <th className={TH}>description</th>
                 </tr>
               </thead>
@@ -902,7 +1102,7 @@ export function TechPackDocument({
                       <td className={TD}>
                         {pieces.length === 0
                           ? '—'
-                          : pieces.map((p) => p.name || '(без имени)').join(', ')}
+                          : pieces.map((p) => p.name || '(unnamed)').join(', ')}
                       </td>
                       <td className={TD}>{c.description || '—'}</td>
                     </tr>
@@ -982,16 +1182,16 @@ export function TechPackDocument({
           только на экране. Лист печатается только при скоупе колорвея, совпадающем с раскладкой,
           либо для общих раскладок (colorwayId = 0). */}
       {scopedMarkers.length > 0 && b('cut') && (
-        <Sheet title='нормы и раскладки'>
+        <Sheet title='markers and consumption norms'>
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
-                <th className={TH}>раскладка</th>
-                <th className={TH}>материал</th>
-                <th className={`${TH} text-right`}>ширина, см</th>
-                <th className={`${TH} text-right`}>длина, см</th>
-                <th className={`${TH} text-right`}>использование</th>
-                <th className={TH}>норма на изделие</th>
+                <th className={TH}>marker</th>
+                <th className={TH}>material</th>
+                <th className={`${TH} text-right`}>width, cm</th>
+                <th className={`${TH} text-right`}>length, cm</th>
+                <th className={`${TH} text-right`}>efficiency</th>
+                <th className={TH}>norm per garment</th>
               </tr>
             </thead>
             <tbody>
@@ -1019,12 +1219,12 @@ export function TechPackDocument({
                     </td>
                     <td className={TD}>
                       {scalar !== '' ? (
-                        `${scalar} см`
+                        `${scalar} cm`
                       ) : perSize.length > 0 ? (
                         <div className='flex flex-col gap-0.5'>
                           {perSize.map((c, j) => (
                             <div key={j}>
-                              {sizeName(wireInt(c.sizeId))}: {dec(c.consumptionPerUnitCm)} см
+                              {sizeName(wireInt(c.sizeId))}: {dec(c.consumptionPerUnitCm)} cm
                             </div>
                           ))}
                         </div>
@@ -1044,7 +1244,7 @@ export function TechPackDocument({
           The per-size breakdown is gone from paper: sheet choice, size switching and download
           all live in the viewer, so the print names the выкройка (the scope), not its files. */}
       {patternSheets.length > 0 && b('cut') && (
-        <Sheet title='patterns (выкройки)'>
+        <Sheet title='patterns'>
           {patternViewerToken ? (
             <>
               <div className='flex flex-wrap gap-4'>
@@ -1058,12 +1258,17 @@ export function TechPackDocument({
                     >
                       <PatternQR
                         size={96}
-                        value={`${viewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(g.wireKey)}`}
+                        // &v= — штамп версии карты на бумаге. Сверять его вьюер выкроек пока не
+                        // умеет (публичный манифест версию не несёт — это бэк), но два листа с
+                        // разными v уже различимы: «у тебя какая версия?» получает ответ.
+                        value={`${viewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(
+                          g.wireKey,
+                        )}${cardLockVersion > 0 ? `&v=${cardLockVersion}` : ''}`}
                       />
                       <figcaption className='mt-1 max-w-[150px] text-micro uppercase'>
                         <div className='break-words font-semibold'>{g.label}</div>
                         <div>
-                          {g.sheets.length} {plural(g.sheets.length, 'лист', 'листа', 'листов')}
+                          {g.sheets.length} {g.sheets.length === 1 ? 'sheet' : 'sheets'}
                           {maxVersion > 0 ? ` · v${maxVersion}` : ''}
                         </div>
                         {sizesLine && (
@@ -1075,50 +1280,43 @@ export function TechPackDocument({
                 })}
               </div>
               <p className='mt-2 text-nano text-labelColor'>
-                наведите камеру на QR — откроется вьюер этой выкройки: выбор листа, переключение
-                размеров и скачивание внутри
+                scan the QR to open this pattern in the viewer: sheet choice, size switching and
+                download all live there
+                {printScope.revision.source === 'release'
+                  ? ' — the viewer serves the CURRENT files, not the ones frozen in this revision'
+                  : ''}
               </p>
             </>
           ) : (
             <>
-              {/* TRANSITIONAL fallback — the backend sent no viewer token (older backend, or the
-                  pattern service unwired): the old per-sheet QR layout, byte-for-byte.
-                  It deliberately still encodes the RAW url and NOT p.viewUrl, tempting as that
-                  is: view_url is minted with the INTERNAL ('i') scope, whose whole reason for
-                  existing is that revoking a leaked paper tech-pack must not have to break the
-                  admin UI. Putting an admin-scope token on paper trades a known weakness (a
-                  public storage url — what this branch always printed) for a contract violation
-                  that outlives the transition. The print-scope url is not on the wire, so the
-                  honest fix is to ship the backend first and never render this branch. Delete
-                  it once every contour serves pattern_viewer_token. */}
-              <div className='flex flex-wrap gap-4'>
-                {patternSheets.map((p, i) => (
-                  <figure
-                    key={i}
-                    className='break-inside-avoid border border-black p-2 text-center'
-                  >
-                    <PatternQR value={p.url ?? ''} />
-                    <figcaption className='mt-1 text-micro uppercase'>
-                      {/* Лист без размера (0281) — градуированный: размеры внутри файла. Печатать
-                          под ним прочерк значило бы сказать «размер не заполнен», а это другой
-                          факт. */}
-                      <div className='font-semibold'>
-                        {p.sizeId ? sizeName(p.sizeId) : 'весь ряд'}
-                      </div>
-                      {/* The operator's name for the sheet leads; the CAD filename stays as the
-                          secondary line the factory can match against the file it receives. */}
-                      {p.name && <div className='max-w-[120px] truncate'>{p.name}</div>}
-                      {p.filename && (
-                        <div className='max-w-[120px] truncate text-labelColor'>{p.filename}</div>
-                      )}
-                    </figcaption>
-                  </figure>
-                ))}
-              </div>
-              <p className='mt-2 text-nano text-labelColor'>
-                наведите камеру на QR, чтобы открыть этот лист выкройки (PDF/DXF). «весь ряд» —
-                градуированный файл: размеры записаны в именах блоков внутри него
+              {/* ТОКЕНА ВЬЮЕРА НЕТ — QR НЕ ПЕЧАТАЕТСЯ. Здесь раньше стояла транзишн-ветка,
+                  кодировавшая в QR СЫРОЙ storage-url листа, в обход presign-хопа. Она не могла
+                  подставить p.viewUrl вместо него: тот минтится с ВНУТРЕННИМ ('i') скоупом, весь
+                  смысл которого в том, что отзыв утёкшей бумаги не должен ломать админку, — то
+                  есть выбор был между публичной ссылкой на файл и нарушением контракта отзыва.
+                  Правильный ответ — не печатать QR вовсе: листы перечисляются именами, а
+                  выкройки берутся из админки. Ветка удалена вместе с обеими плохими опциями. */}
+              <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
+                pattern viewer is not wired on this environment — no QR is printed
               </p>
+              <table className='w-full border-collapse text-micro'>
+                <thead>
+                  <tr>
+                    <th className={TH}>size</th>
+                    <th className={TH}>sheet</th>
+                    <th className={TH}>file</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {patternSheets.map((p, i) => (
+                    <tr key={i} className='break-inside-avoid'>
+                      <td className={TD}>{p.sizeId ? sizeName(p.sizeId) : 'full range'}</td>
+                      <td className={TD}>{p.name || '—'}</td>
+                      <td className={TD}>{p.filename || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </>
           )}
         </Sheet>
@@ -1196,7 +1394,7 @@ export function TechPackDocument({
                 <th className={`${TH} w-6`}>#</th>
                 {/* Номер ВЫНОСКИ, а не порядковый номер строки: он и есть тот номер, который швея
                     видит на эскизе. Порядковый номер строки не значит на бумаге ничего. */}
-                <th className={`${TH} w-10`}>выноска</th>
+                <th className={`${TH} w-10`}>callout</th>
                 <th className={TH}>piece</th>
                 <th className={`${TH} text-center`}>qty / garment</th>
                 <th className={TH}>grainline</th>
@@ -1229,7 +1427,7 @@ export function TechPackDocument({
                     <td className={TD}>
                       <div className='font-medium'>{p.name || '—'}</div>
                       {p.detached && (
-                        <div className='text-labelColor'>связь с выноской эскиза потеряна</div>
+                        <div className='text-labelColor'>sketch callout link lost</div>
                       )}
                     </td>
                     {/* КОЛИЧЕСТВО И ЕГО ПОЯСНЕНИЕ В ОДНОЙ КЛЕТКЕ — это и есть весь смысл Ф1.3 на
@@ -1242,7 +1440,7 @@ export function TechPackDocument({
                     <td className={`${TD} text-center`}>
                       <div>{p.piecesPerGarment ?? '—'}</div>
                       {(() => {
-                        const caption = cutSymmetryPrintCaption(p.cutSymmetry, p.piecesPerGarment);
+                        const caption = printCutSymmetryCaption(p.cutSymmetry, p.piecesPerGarment);
                         if (!caption) return null;
                         // Неразмеченная парная деталь — это ВОПРОС к цеху, а не факт о ней, и
                         // выглядеть он должен иначе, чем указание: рамка вместо простой подписи.
@@ -1302,8 +1500,8 @@ export function TechPackDocument({
               таблице реально есть что объяснять: на карточке, где ни одна деталь не размечена и все
               идут по одной, легенда была бы строкой ни о чём. */}
           {(tc.pieces ?? []).some((p) =>
-            cutSymmetryPrintCaption(p.cutSymmetry, p.piecesPerGarment),
-          ) && <p className='mt-1 text-nano text-labelColor'>{CUT_SYMMETRY_PRINT_LEGEND}</p>}
+            printCutSymmetryCaption(p.cutSymmetry, p.piecesPerGarment),
+          ) && <p className='mt-1 text-nano text-labelColor'>{PRINT_CUT_SYMMETRY_LEGEND}</p>}
         </Sheet>
       )}
 
@@ -1331,7 +1529,7 @@ export function TechPackDocument({
                     <span className='ml-auto text-labelColor'>{lifecycleLabel(c.status)}</span>
                   </div>
                   {usages.length === 0 ? (
-                    <p className='text-micro text-labelColor'>нет материалов</p>
+                    <p className='text-micro text-labelColor'>no materials</p>
                   ) : (
                     <table className='w-full border-collapse text-micro'>
                       <thead>
@@ -1356,7 +1554,7 @@ export function TechPackDocument({
                           const cons =
                             dec(u.quantity) ||
                             dec(u.consumption) ||
-                            (has(u.sizeConsumptions) ? 'по размерам' : '');
+                            (has(u.sizeConsumptions) ? 'per size' : '');
                           const colour = resolveUsageColour(u, art) || '—';
                           return (
                             <tr key={j} className='break-inside-avoid'>
@@ -1468,8 +1666,8 @@ export function TechPackDocument({
                         ownAllowance !== ''
                           ? `${ownAllowance} mm`
                           : cardAllowance
-                            ? `${cardAllowance} mm (стандарт карты)`
-                            : 'стандарт карты не задан';
+                            ? `${cardAllowance} mm (card standard)`
+                            : 'card standard not set';
                       return (
                         <tr key={i} className='break-inside-avoid'>
                           <td className={`${TD} text-center`}>
@@ -1791,7 +1989,7 @@ export function TechPackDocument({
           цеха читается как задача, а не как история, и его начинают решать заново. Колонка
           «resolution» вместе с ними уходит — у открытого вопроса её нет по определению. */}
       {has(printedIssues) && b('sew') && (
-        <Sheet title={issuesArchive ? 'вопросы' : 'открытые вопросы'}>
+        <Sheet title={issuesArchive ? 'issues' : 'open issues'}>
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
@@ -1819,7 +2017,7 @@ export function TechPackDocument({
                     )}
                     <td className={TD}>
                       {[
-                        opNo ? `op ${opNo}${opLost ? ' — ссылка потеряна' : ''}` : '',
+                        opNo ? `op ${opNo}${opLost ? ' — link lost' : ''}` : '',
                         iss.calloutNumber ? `callout ${iss.calloutNumber}` : '',
                       ]
                         .filter(Boolean)
@@ -1874,7 +2072,7 @@ export function TechPackDocument({
               <tr>
                 <th className={TH}>section</th>
                 <th className={TH}>state</th>
-                <th className={TH}>действительна?</th>
+                <th className={TH}>still valid?</th>
                 <th className={TH}>signed by</th>
                 <th className={TH}>date</th>
                 <th className={TH}>note</th>
@@ -1897,13 +2095,13 @@ export function TechPackDocument({
                   : !live
                     ? '—'
                     : signed === live
-                      ? 'да'
-                      : 'ПРАВЛЕНО ПОСЛЕ ПОДПИСИ';
+                      ? 'yes'
+                      : 'EDITED AFTER SIGN-OFF';
                 return (
                   <tr key={i} className='break-inside-avoid'>
                     <td className={TD}>{signoffSectionL[s.section ?? ''] ?? '—'}</td>
                     <td className={TD}>{signoffStateL[s.state ?? ''] ?? '—'}</td>
-                    <td className={`${TD} ${validity.startsWith('ПРАВЛЕНО') ? 'font-bold' : ''}`}>
+                    <td className={`${TD} ${validity.startsWith('EDITED') ? 'font-bold' : ''}`}>
                       {validity}
                     </td>
                     <td className={TD}>{s.signedBy || '—'}</td>
@@ -1920,8 +2118,8 @@ export function TechPackDocument({
               «лекала и рецепт те же» — и умолчать об этом значит дать подписи больше веса, чем
               она несёт. */}
           <p className='mt-2 text-nano text-labelColor'>
-            подпись покрывает содержимое перечисленных секций; выкройки и их привязки, рецепты
-            колорвеев, маркеры и нормы, размерная таблица и уход в хеш не входят
+            a sign-off covers the contents of the listed sections only; patterns and their
+            bindings, colourway recipes, markers and norms, the size chart and care are not hashed
           </p>
         </Sheet>
       )}

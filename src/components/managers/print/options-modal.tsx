@@ -27,13 +27,10 @@ const BOOKLET_LABELS: Record<BookletId, string> = {
   internal: 'внутреннее',
 };
 
-// Профиль «по релизу» СНЯТ до тех пор, пока печать действительно не читает снапшот релиза
-// (Ф5.1 плана tmp/plans/techcard-pdf). Пока `release=` в query никем не потребляется, этот пункт
-// обещал бы замороженную ревизию, а печатал живую карту — то есть ровно ту молчаливую подмену,
-// ради устранения которой затевался весь скоуп. Вернуть вместе с загрузкой снапшота.
 const PROFILE_OPTIONS: { value: PrintProfile; label: string }[] = [
   { value: 'factory', label: 'комплект в цех — без себестоимости' },
   { value: 'internal', label: 'внутренний — всё' },
+  { value: 'release', label: 'по релизу — замороженный снапшот' },
 ];
 
 const printPath = (techCardId: number) => ROUTES.techCardPrint.replace(':id', String(techCardId));

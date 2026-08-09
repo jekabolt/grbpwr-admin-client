@@ -57,9 +57,9 @@ export function RunPackPrint() {
   const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
 
   const { ready, degraded } = usePrintReady([
-    { label: 'прогон', status: depStatus(isLoading, isError) },
+    { label: 'production run', status: depStatus(isLoading, isError) },
     // Кат-лист сознательно НЕ обязателен: наряд остаётся документом партии и без него.
-    { label: 'кат-лист', status: depStatus(cutPlanLoading, cutPlanError) },
+    { label: 'cut list', status: depStatus(cutPlanLoading, cutPlanError) },
     ...docDeps,
   ]);
 

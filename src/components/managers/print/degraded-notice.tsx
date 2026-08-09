@@ -7,8 +7,8 @@ export function PrintDegradedNotice({ items }: { items: string[] }) {
   if (items.length === 0) return null;
   return (
     <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
-      внимание: часть данных не пришла к моменту печати — {items.join(', ')}. Эти разделы на
-      бумаге неполны.
+      warning: some data had not arrived when this was printed — {items.join(', ')}. Those
+      sections are incomplete on paper.
     </p>
   );
 }
