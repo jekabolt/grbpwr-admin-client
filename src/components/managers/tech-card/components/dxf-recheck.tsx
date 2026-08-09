@@ -6,9 +6,10 @@
 // а у dxf пара (dxf, NULL) при повторном применении не меняется — отметка времени тут врала бы по
 // построению. Поэтому сравнивается не дата, а САМО ЧИСЛО: тот же конвейер, что у применения
 // (useFabricDxfPieces → defaultApplyConditions → dxfNormAreas → dxfNormValueRows), со ВСЕМИ его
-// стоп-условиями — неизвестная ширина, единица не длина, частично скачанная пачка, ноль после
-// округления. Стоп-условия здесь не менее важны, чем формула: расчёт по пачке, где свежая ревизия
-// не скачалась, собрался бы по старой и показал бы ложное совпадение.
+// стоп-условиями — неизвестная ширина, единица вне словаря записи (или кг-слот без основы веса),
+// частично скачанная пачка, ноль после округления. Стоп-условия здесь не менее важны, чем формула:
+// расчёт по пачке, где свежая ревизия не скачалась, собрался бы по старой и показал бы ложное
+// совпадение.
 //
 // ЧЕСТНОСТЬ ФОРМУЛИРОВКИ — ГЛАВНОЕ ТРЕБОВАНИЕ. «Текущие данные» — это не только геометрия
 // выкроек: в расчёт входят состав деталей этой ткани, их pieces_per_garment, связи деталей с
@@ -43,7 +44,12 @@ import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { defaultApplyConditions } from './nesting/dxf-apply-conditions';
 import { dxfNormAreas, dxfNormValueRows } from './nesting/dxf-consumption';
 import { useDxfGeometry, useDxfIndex } from './nesting/dxf-geometry';
-import { bomUnitStep } from './nesting/marker-io';
+import {
+  weightBasisLabel,
+  weightRefusalText,
+  type WeightBasisResolution,
+} from './nesting/fabric-weight';
+import { bomUnitKind, bomUnitStep } from './nesting/marker-io';
 import type { TechCardFormData } from './schema';
 import { useFabricDxfPieces } from './use-fabric-dxf-pieces';
 
@@ -61,6 +67,7 @@ export default function DxfNormRecheck({
   lineKey,
   unit,
   articleWidth,
+  weightBasis,
   sizeIds,
   sizeNameById,
   saved,
@@ -70,6 +77,8 @@ export default function DxfNormRecheck({
   unit: string;
   /** РАСКРОЙНАЯ ширина эффективного артикула, см (рулон − 2×кромка). '' = неизвестна. */
   articleWidth: string;
+  /** Основа веса кг-слота (Ф3): полная ширина рулона × плотность — резолвит строка рецепта. */
+  weightBasis: WeightBasisResolution;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   /** Сохранённые пер-размерные числа строки — то, с чем сверяемся. */
@@ -180,19 +189,34 @@ export default function DxfNormRecheck({
     );
   }
 
-  // Страховка от рассинхрона с NormSummary (тот не монтирует пересчёт на не-длине): сравнить
-  // килограммы с метрами и закричать «расхождение» — худший из возможных исходов.
+  // Страховка от рассинхрона с NormSummary (тот не монтирует пересчёт на единице, которую мы не
+  // пишем, и на кг-слоте без основы веса): сравнить килограммы с метрами — или посчитать кг не
+  // той шириной — и закричать «расхождение» было бы худшим из возможных исходов.
   const step = bomUnitStep(unit);
   if (step == null) {
+    // Пустая единица — не «неизвестная»: у неё есть адресная починка (заполнить единицу на
+    // вкладке BOM), и отказ обязан её назвать, а не предлагать словарь единиц, который тут ни
+    // при чём.
     return (
       <Line>
-        {`для единицы «${unit || '—'}» пересчёт пока не считается — сравнение умеет только метры и сантиметры`}
+        {unit
+          ? `для единицы «${unit}» пересчёт не считается — сравнивать умеем метры, сантиметры и килограммы`
+          : 'пересчёт не считается: у слота не заполнена единица — норма пишется в единице слота, заполните её на вкладке BOM'}
       </Line>
     );
   }
+  const unitKind = bomUnitKind(unit);
+  if (unitKind === 'kg' && !weightBasis.ok) {
+    // Отказ называет, ЧЕГО не хватает — ширины или плотности: лечится он заполнением артикула,
+    // а не сменой единицы слота. Пин колорвея меняет слова: искали у пинованного артикула.
+    return (
+      <Line>{`пересчёт по текущим данным не делается: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`}</Line>
+    );
+  }
+  const fabric = weightBasis.ok ? weightBasis.basis : undefined;
 
   // ── сегодняшние числа и сравнение ───────────────────────────────────────────────────────────
-  const rows = dxfNormValueRows(outcome.areas.rows, widthCm, unit);
+  const rows = dxfNormValueRows(outcome.areas.rows, widthCm, unit, fabric);
   const todayBySize = new Map(rows.map((r) => [r.sizeId, r]));
   const ambiguous = new Set(outcome.areas.sizesAmbiguousPick);
   const incompleteSet = new Set(outcome.areas.sizesIncomplete);
@@ -258,7 +282,11 @@ export default function DxfNormRecheck({
 
   // Слой называется СЕГОДНЯШНИМ по умолчанию не для красоты: он ранжируется по ВСЕЙ пачке
   // карточки, и DXF подкладки, загруженный после применения, мог сменить победителя для верха.
-  const conditionsText = `слой ${conditions.layer || '—'} (сегодняшний слой по умолчанию — не обязательно тот, которым применяли), припуск ${conditions.prefill.value} мм (${conditions.prefill.why}), раскройная ширина ${articleWidth} см`;
+  // На кг-слоте в условия входит и основа веса — она такой же вход пересчёта, как ширина, и
+  // сегодняшняя: применяли, возможно, при другой.
+  const conditionsText = `слой ${conditions.layer || '—'} (сегодняшний слой по умолчанию — не обязательно тот, которым применяли), припуск ${conditions.prefill.value} мм (${conditions.prefill.why}), раскройная ширина ${articleWidth} см${
+    unitKind === 'kg' && fabric ? `, вес по основе: ${weightBasisLabel(fabric)}` : ''
+  }`;
 
   const notes: string[] = [];
   if (ambiguousSaved.length > 0) {
@@ -328,8 +356,9 @@ export default function DxfNormRecheck({
         <Line>
           в расчёт входит не только геометрия выкроек: состав деталей этой ткани, их количество на
           изделие, связи деталей с блоками и порядок этих связей, назначение ткани в BOM, размерный
-          ряд и имена размеров, единица строки, раскройная ширина, слой и припуск — расхождение
-          может означать изменение любого из этих входов
+          ряд и имена размеров, единица строки, раскройная ширина, слой и припуск — а на слоте в
+          килограммах ещё полная ширина рулона и плотность артикула — расхождение может означать
+          изменение любого из этих входов
         </Line>
         <Line>
           какие условия были при применении, строка не записывает — сказать, что именно разошлось,

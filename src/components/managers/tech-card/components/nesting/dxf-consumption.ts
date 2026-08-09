@@ -27,7 +27,7 @@
 import type { PieceDTO } from 'lib/nesting/types';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { DxfIndex, PieceBlockRef } from './dxf-geometry';
-import { toBomUnit } from './marker-io';
+import { toBomUnit, type FabricWeightBasis } from './marker-io';
 import { aliasIdentity } from './use-block-sizes';
 
 /** Деталь кроя карточки в терминах этого расчёта: сколько её на изделие и чем она нарисована. */
@@ -378,20 +378,28 @@ export type DxfNormValueRow = {
   areaCm2: number;
   /** NETTO длина, см. null — ширины нет, делить не на что. */
   lengthCm: number | null;
-  /** Число в единице строки. null — единица не принимает длину (кг — это Ф3, её ещё нет). */
+  /**
+   * Число в единице строки. null — единицу мы писать не умеем ЛИБО кг-слоту не передали основу
+   * веса (ширину с плотностью) — toBomUnit без неё честно отказывает.
+   */
   conv: { value: number; unit: string } | null;
   /** Готовое значение для sizeConsumptions. null — числа нет ЛИБО оно округлилось в ноль. */
   value: string | null;
 };
 
+// Кг-слот (Ф3) получает вес ЧЕРЕЗ ТУ ЖЕ ДЛИНУ: netto-длина считается делением площади на
+// РАСКРОЙНУЮ ширину (на кромку деталь не положишь), а вес этой длины — умножением на ПОЛНУЮ
+// (покупаешь всю ширину, кромка весит). Обе ширины в одном расчёте — так и должно быть; сама
+// формула и её запреты живут в toBomUnit.
 export function dxfNormValueRows(
   rows: readonly DxfNormSizeRow[],
   cuttingWidthCm: number,
   unit: string,
+  fabric?: FabricWeightBasis,
 ): DxfNormValueRow[] {
   return rows.map((r) => {
     const cm = nettoLengthCm(r.areaCm2, cuttingWidthCm);
-    const conv = cm != null ? toBomUnit(cm, unit) : null;
+    const conv = cm != null ? toBomUnit(cm, unit, fabric) : null;
     return {
       sizeId: r.sizeId,
       areaCm2: r.areaCm2,

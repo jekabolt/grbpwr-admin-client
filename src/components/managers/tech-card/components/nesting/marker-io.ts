@@ -318,26 +318,86 @@ export function compositionLabel(
   return comp.map((c) => `${sizeName(c.sizeId)}×${c.quantity}`).join(' · ');
 }
 
-// Marker cm → the BOM line's unit. The unit is free text — convert ONLY what is
-// unambiguous (design §3: не угадывать). null = the line's unit cannot take a layout.
-export function toBomUnit(cm: number, unit?: string): { value: number; unit: string } | null {
+// ── ЕДИНИЦЫ СТРОКИ BOM, В КОТОРЫЕ ПИШЕТСЯ НОРМА ─────────────────────────────────────────
+//
+// ТОЧНОЕ ЗЕРКАЛО ТРЁХ СТРОК СЕРВЕРНОГО СЛОВАРЯ (entity.materialUnitSynonyms): метр, сантиметр,
+// килограмм — со всеми синонимами, которыми сервер их узнаёт. Раньше клиент понимал только
+// «м|m|см|cm», и слот, написанный «metres», получал отказ, хотя сервер считает его метрами.
+// Ничего сверх словаря здесь НЕ появляется (ни mm, ни g, ни m²): писать норму в этих единицах
+// инструменты не умеют, и выдуманная поддержка хуже честного отказа.
+const METRE_UNITS = new Set(['m', 'м', 'meter', 'meters', 'metre', 'metres']);
+const CM_UNITS = new Set(['cm', 'см']);
+const KG_UNITS = new Set(['kg', 'кг']);
+
+/** Чем единица строки является для записи нормы. null — норму в неё писать не умеем. */
+export function bomUnitKind(unit?: string): 'm' | 'cm' | 'kg' | null {
   const u = (unit ?? '').trim().toLowerCase();
-  // 3 decimals: tech_card_colorway_usage.consumption is DECIMAL(10,3) — r2 on metres
-  // throws away a digit the column holds (4+ m lost per 1000 units).
-  if (u === 'м' || u === 'm') return { value: r3(cm / 100), unit: u };
-  if (u === 'см' || u === 'cm') return { value: r2(cm), unit: u };
+  if (METRE_UNITS.has(u)) return 'm';
+  if (CM_UNITS.has(u)) return 'cm';
+  if (KG_UNITS.has(u)) return 'kg';
   return null;
 }
 
-// Шаг округления toBomUnit для единицы строки: метры пишутся в тысячных (DECIMAL(10,3)), сантиметры
-// в сотых. null — единица не длина, и сверка «было/сегодня» для неё не определена вовсе (кг ждёт
-// конверсии Ф3). Живёт ВПЛОТНУЮ к toBomUnit, потому что это одно знание — что мы умеем писать и с
-// какой точностью: допуск сравнения обязан двигаться вместе с округлением записи, иначе дребезг
-// последнего знака читался бы как правка выкройки.
-export function bomUnitStep(unit?: string): number | null {
+// ОСНОВА ПЕРЕВОДА ДЛИНЫ В ВЕС (Ф3): полная ширина рулона и плотность. КТО их резолвит — одна
+// функция weightBasisOf (fabric-weight.ts), и только она: у строки BOM под рукой лежит СВОЯ
+// плотность-снимок, и взять её вместо артикульной — молчаливая ошибка, которую тип не поймает.
+export type FabricWeightBasis = { fullWidthCm: number; gsm: number };
+
+// Marker cm → the BOM line's unit. The unit is free text — convert ONLY what is
+// unambiguous (design §3: не угадывать). null = the line's unit cannot take this length.
+//
+// КИЛОГРАММЫ (Ф3) — ЧЕРЕЗ ДЛИНУ, зеркало серверной entity.FabricLengthToKg до последнего делителя:
+//
+//     kg = metres × fullWidthCm × gsm ÷ 100000      // 100000 = cm→m (÷100) × g→kg (÷1000)
+//
+// Ширина здесь ПОЛНАЯ, с кромкой — единственное место, где нужна полная ширина рулона, а не
+// раскройная: кромку покупают, и она физически весит; вес по раскройной ширине занижает то, что
+// выставит поставщик, на 2–4%. Это НЕ противоречит делению площади на раскройную при расчёте
+// длины: на кромку деталь не положишь, но купленная длина несёт кромку с собой — обе ширины в
+// одном расчёте, так и должно быть. СОБЛАЗНИТЕЛЬНАЯ НЕВЕРНАЯ ФОРМУЛА — «кг = площадь деталей ×
+// плотность»: это вес самих ДЕТАЛЕЙ, а не купленного полотна, заниженный ровно в отношении
+// полной ширины к раскройной. Только через длину.
+//
+// Кг без основы (fabric) = null — прежнее поведение: ни один не обновлённый вызывающий не начнёт
+// врать. Проверка на здравость: 100 м × 150 см × 220 г/м² = 33 кг (100 м × 1.50 м = 150 м²;
+// × 220 г/м² = 33 000 г) — вектор серверного теста material_weight_test.go.
+export function toBomUnit(
+  cm: number,
+  unit?: string,
+  fabric?: FabricWeightBasis,
+): { value: number; unit: string } | null {
   const u = (unit ?? '').trim().toLowerCase();
-  if (u === 'м' || u === 'm') return 0.001;
-  if (u === 'см' || u === 'cm') return 0.01;
+  const kind = bomUnitKind(u);
+  // 3 decimals: tech_card_colorway_usage.consumption is DECIMAL(10,3) — r2 on metres
+  // throws away a digit the column holds (4+ m lost per 1000 units).
+  if (kind === 'm') return { value: r3(cm / 100), unit: u };
+  if (kind === 'cm') return { value: r2(cm), unit: u };
+  if (kind === 'kg') {
+    // Конечность проверяется ЗДЕСЬ, а не только в weightBasisOf: контракт toBomUnit обязан
+    // держаться для ЛЮБОГО вызывающего. Infinity проходит голое `> 0` (а даёт её обычный
+    // parseDecimalNumber на строке из сотен цифр), и запись превратилась бы в строку "Infinity".
+    if (
+      !fabric ||
+      !(Number.isFinite(fabric.fullWidthCm) && fabric.fullWidthCm > 0) ||
+      !(Number.isFinite(fabric.gsm) && fabric.gsm > 0)
+    )
+      return null;
+    // Тысячные — той же колонкой, что метры (DECIMAL(10,3)); r3 — число, не строка,
+    // поэтому 9.9 остаётся «9.9», а не «9.900» (как и у метров).
+    return { value: r3(((cm / 100) * fabric.fullWidthCm * fabric.gsm) / 100000), unit: u };
+  }
+  return null;
+}
+
+// Шаг округления toBomUnit для единицы строки: метры и килограммы пишутся в тысячных (обе нормы
+// едут в одну колонку DECIMAL(10,3)), сантиметры в сотых. null — единицу мы не умеем писать
+// вовсе, и сверка «было/сегодня» для неё не определена. Живёт ВПЛОТНУЮ к toBomUnit, потому что
+// это одно знание — что мы умеем писать и с какой точностью: допуск сравнения обязан двигаться
+// вместе с округлением записи, иначе дребезг последнего знака читался бы как правка выкройки.
+export function bomUnitStep(unit?: string): number | null {
+  const kind = bomUnitKind(unit);
+  if (kind === 'm' || kind === 'kg') return 0.001;
+  if (kind === 'cm') return 0.01;
   return null;
 }
 

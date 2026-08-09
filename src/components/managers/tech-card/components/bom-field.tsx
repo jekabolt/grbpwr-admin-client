@@ -80,6 +80,7 @@ import {
   roleCollision,
   roleSuggestions,
 } from './bom-roles';
+import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
 import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 
@@ -116,13 +117,8 @@ const emptyBomItem = {
 };
 
 // Fabric width/weight read from the typed CTI attrs, falling back to the legacy flat fields —
-// shared by the link-time snapshot and the linked-line catalog plate so the two never drift apart.
-function materialFabricWidth(m?: common_Material): string | undefined {
-  return m?.fabricAttrs?.widthCm?.value || m?.fabricWidth?.value;
-}
-function materialFabricWeight(m?: common_Material): string | undefined {
-  return m?.fabricAttrs?.weightGsm?.value || m?.fabricWeightGsm?.value;
-}
+// shared by the link-time snapshot, the linked-line catalog plate AND the length→kg weight basis
+// (nesting/fabric-weight.ts, where the pair now lives) so the three never drift apart.
 
 // The catalog facts a BOM line snapshots off the article it links (S23: the line stays
 // self-contained). ONE helper, so creating a line FROM the picker and linking an article onto an
