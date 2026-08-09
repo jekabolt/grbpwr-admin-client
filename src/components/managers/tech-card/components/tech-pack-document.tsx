@@ -549,6 +549,45 @@ export function TechPackDocument({
   // Стандарт припуска карты — печатается в каждой строке, у которой своего значения нет.
   const cardAllowance = dec(tc.requiredSeamAllowanceMm);
 
+  // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
+  // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
+  // same join, computed in the editor and stored in the row.
+  const opParts = (o: { pieceLineKeys?: string[] }): string[] => {
+    const pieces = tc.pieces ?? [];
+    return (o.pieceLineKeys ?? [])
+      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || '')
+      .filter(Boolean);
+  };
+
+  // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
+  // free-text placement survives only on legacy rows, and an unlinked row is per-garment.
+  const resolveUsagePart = (u: common_TechCardColorwayUsage): string => {
+    const pieces = tc.pieces ?? [];
+    const piece =
+      (u.pieceLineKey ? pieces.find((p) => p.lineKey === u.pieceLineKey) : undefined) ??
+      (wireInt(u.pieceId)
+        ? pieces.find((p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId))
+        : undefined);
+    return piece?.name?.trim() || u.placement?.trim() || 'per garment';
+  };
+  // The "colour" column: the effective article's own colour/pantone (pin, else slot default),
+  // then the legacy usage-level text, then the slot's colour snapshot.
+  const resolveUsageColour = (
+    u: common_TechCardColorwayUsage,
+    art?: common_TechCardBomItem,
+  ): string => {
+    const effId = wireInt(u.materialId) || wireInt(art?.materialId);
+    const m = effId ? materialById.get(effId) : undefined;
+    return (
+      m?.color?.trim() ||
+      m?.pantone?.trim() ||
+      u.color?.trim() ||
+      u.pantone?.trim() ||
+      art?.color?.trim() ||
+      ''
+    );
+  };
+
   // Материалы шага: имя + ВИД позиции (молния, пуговица, нитка…) + цвет в скоуповом колорвее.
   //
   // Раньше отсюда возвращались одни имена, а ключ без выжившей строки BOM ВЫБРАСЫВАЛСЯ молча — с
@@ -594,44 +633,6 @@ export function TechPackDocument({
     if (out.some((m) => !m.missing)) return out;
     const legacy = resolveUsageArt(o);
     return legacy ? [described(legacy)] : out;
-  };
-  // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
-  // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
-  // same join, computed in the editor and stored in the row.
-  const opParts = (o: { pieceLineKeys?: string[] }): string[] => {
-    const pieces = tc.pieces ?? [];
-    return (o.pieceLineKeys ?? [])
-      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || '')
-      .filter(Boolean);
-  };
-
-  // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
-  // free-text placement survives only on legacy rows, and an unlinked row is per-garment.
-  const resolveUsagePart = (u: common_TechCardColorwayUsage): string => {
-    const pieces = tc.pieces ?? [];
-    const piece =
-      (u.pieceLineKey ? pieces.find((p) => p.lineKey === u.pieceLineKey) : undefined) ??
-      (wireInt(u.pieceId)
-        ? pieces.find((p) => wireInt((p as unknown as { id?: unknown }).id) === wireInt(u.pieceId))
-        : undefined);
-    return piece?.name?.trim() || u.placement?.trim() || 'per garment';
-  };
-  // The "colour" column: the effective article's own colour/pantone (pin, else slot default),
-  // then the legacy usage-level text, then the slot's colour snapshot.
-  const resolveUsageColour = (
-    u: common_TechCardColorwayUsage,
-    art?: common_TechCardBomItem,
-  ): string => {
-    const effId = wireInt(u.materialId) || wireInt(art?.materialId);
-    const m = effId ? materialById.get(effId) : undefined;
-    return (
-      m?.color?.trim() ||
-      m?.pantone?.trim() ||
-      u.color?.trim() ||
-      u.pantone?.trim() ||
-      art?.color?.trim() ||
-      ''
-    );
   };
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
