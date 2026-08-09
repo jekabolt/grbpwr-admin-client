@@ -63,6 +63,14 @@ export type DxfNormInput = {
   index: DxfIndex;
   /** Детали кроя ЭТОЙ ткани — все, что заявлены на карточке в этом скоупе. */
   pieces: readonly DxfNormPiece[];
+  /**
+   * Детали кроя, которые по карточке кроятся ИЗ ЭТОЙ ЖЕ ткани, но ни с одним блоком чертежа не
+   * связаны. Отказ, а не пропуск: связи нет — площади нет — площадь изделия неполна, а неполная
+   * занижает норму, и обнаруживается это на складе. Вызывающий обязан их назвать, потому что
+   * привязка «деталь → ткань» живёт на самой детали (`pieces[].materials[].bomLineKey`), а не в
+   * алиасах, и посчитать комплект по одним алиасам значит согласиться с любым недобором.
+   */
+  unaliasedPieces: readonly string[];
   sizeIds: readonly number[];
   /** Как размер написан в имени блока («m», «48»); токены уже очищены. */
   tokensOfSize: (sizeId: number) => readonly string[];
@@ -95,6 +103,12 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   }
   if (input.sizeIds.length === 0) {
     return { ok: false, reason: 'у карточки не заявлен размерный ряд — считать норму не для кого' };
+  }
+  if (input.unaliasedPieces.length > 0) {
+    return {
+      ok: false,
+      reason: `детали этой ткани не связаны ни с одним блоком чертежа: ${input.unaliasedPieces.join(', ')} — площадь изделия вышла бы неполной, а неполная норма занижает и себестоимость, и закупку. Свяжите их на вкладке деталей кроя`,
+    };
   }
 
   // ── что каждая деталь несёт в чертеже ────────────────────────────────────────────────────
@@ -130,6 +144,18 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       norm.set(key, [...(norm.get(key) ?? []), ...list]);
     }
     const graded = [...norm.keys()].some((k) => k !== '');
+    // ДЕТАЛЬ, У КОТОРОЙ ЕСТЬ И РАЗМЕРНЫЕ, И БЕЗРАЗМЕРНЫЕ КОПИИ, — ОТКАЗ, а не выбор одной из них.
+    // Такой вход двусмыслен по существу: безразмерная копия — это либо справочный контур базового
+    // размера (тогда её нельзя складывать), либо деталь, которую кроят одинаково во всех размерах
+    // (тогда её нельзя выбрасывать). Разница между двумя чтениями — целая деталь в площади каждого
+    // размера, и угадать её нечем. Референсная реализация продолжения раскладки
+    // (size-areas-from-dxf.ts) отвергает ровно этот вход теми же словами.
+    if (graded && norm.has('')) {
+      return {
+        ok: false,
+        reason: `деталь «${piece.name}» нарисована и с размерным хвостом, и без него — понять, справочный это контур базового размера или деталь, одинаковая во всех размерах, нечем. Разница — целая деталь в площади каждого размера`,
+      };
+    }
     resolved.push({ piece, bySize: norm, graded });
   }
   if (unmatched.length > 0) {
@@ -145,15 +171,28 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // Контур берётся ТОЛЬКО с выбранного слоя. Подстановка «чем нарисовано вообще», как в findPiece,
   // здесь запрещена: там это показ (лучше не тот слой, чем «детали нет»), а тут это площадь —
   // смешать линию шва одной детали с линией кроя другой значит сложить два разных числа в одно.
-  const onLayer = (list: readonly PieceDTO[]): PieceDTO | null => {
-    for (const p of list) if ((p.layer ?? '') === input.contourLayer) return p;
-    return null;
+  // ДУБЛЬ НА ВЫБРАННОМ СЛОЕ — ДВУСМЫСЛЕННОСТЬ, а не «возьмём первый». Две ревизии одного листа в
+  // одном скоупе — сценарий типовой, и площади у них разные ровно потому, что выкройку правили.
+  // Взять ту, что раньше попала в пачку, значило бы поставить норму по порядку скачивания файлов.
+  // Совпадающие в пределах допуска копии (тот же контур в двух листах) двусмысленности не создают.
+  const AREA_TOLERANCE = 0.005; // 0.5% — дребезг тесселяции, а не редакция выкройки
+  const pickOnLayer = (list: readonly PieceDTO[]): PieceDTO | null | 'ambiguous' => {
+    const on = list.filter((p) => (p.layer ?? '') === input.contourLayer);
+    if (on.length === 0) return null;
+    if (on.length > 1) {
+      const min = Math.min(...on.map((p) => p.areaCm2));
+      const max = Math.max(...on.map((p) => p.areaCm2));
+      if (min > 0 && (max - min) / min > AREA_TOLERANCE) return 'ambiguous';
+    }
+    return on[0];
   };
 
   const picks: Pick[] = [];
-  const sizeKeyByPiece = new Map<string, string>(); // `${sizeId}|${pieceIndex}` → sizeKey
+  // Контур запоминается ТОТ САМЫЙ, что выбран здесь: сумма ниже читает эту карту, а не решает
+  // задачу выбора второй раз. Два прохода по одному правилу — это два места, которые обязаны
+  // согласоваться, и однажды они разойдутся.
+  const contourByKey = new Map<string, PieceDTO>(); // `${sizeId}|${pieceIndex}` → контур
   const sizesIncomplete: number[] = [];
-  const sizelessKey = '';
 
   for (const sizeId of input.sizeIds) {
     const tokens = input.tokensOfSize(sizeId).map(bare).filter(Boolean);
@@ -161,29 +200,28 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     const staged: Pick[] = [];
     for (let i = 0; i < resolved.length; i++) {
       const { bySize, graded } = resolved[i];
-      let key: string | null = null;
-      if (graded) {
-        key = tokens.find((t) => bySize.has(t)) ?? null;
-        // Деталь, у которой есть и размерные, и безразмерные копии, — законна: часть градации
-        // выгружена, часть нет. Безразмерная копия отвечает за любой размер.
-        if (key == null && bySize.has(sizelessKey)) key = sizelessKey;
-      } else {
-        key = bySize.has(sizelessKey) ? sizelessKey : null;
+      // Градуируемая деталь отвечает ТОЛЬКО своим размером: подстановка безразмерной копии здесь
+      // отменена выше отказом — смешивать поколения контуров в одной площади нельзя.
+      const key = graded ? tokens.find((t) => bySize.has(t)) ?? null : bySize.has('') ? '' : null;
+      const contour = key != null ? pickOnLayer(bySize.get(key) ?? []) : null;
+      if (contour === 'ambiguous') {
+        return {
+          ok: false,
+          reason: `деталь «${resolved[i].piece.name}» лежит на слое ${input.contourLayer} в нескольких вариантах с разной площадью — похоже, в пачке две ревизии выкройки. Какая из них норма, сказать нечем`,
+        };
       }
-      const contour = key != null ? onLayer(bySize.get(key) ?? []) : null;
       if (!contour) {
         complete = false;
         break;
       }
-      staged.push({ pieceIndex: i, sizeKey: key ?? sizelessKey, contour });
+      staged.push({ pieceIndex: i, sizeKey: key ?? '', contour });
     }
     if (!complete) {
       sizesIncomplete.push(sizeId);
       continue;
     }
     for (const s of staged) {
-      const k = `${sizeId}|${s.pieceIndex}`;
-      sizeKeyByPiece.set(k, s.sizeKey);
+      contourByKey.set(`${sizeId}|${s.pieceIndex}`, s.contour);
       picks.push(s);
     }
   }
@@ -194,7 +232,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       reason:
         input.contourLayer === ''
           ? 'в выкройках не нашлось ни одного контура — выбирать слой не из чего'
-          : `на слое ${input.contourLayer} нет контуров ни одной детали ни одного размера — выберите другой слой контура`,
+          : `ни у одного размера не собрался полный комплект деталей на слое ${input.contourLayer} — возможно, деталь нарисована на другом слое`,
     };
   }
 
@@ -211,23 +249,18 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // ── площадь по размерам ──────────────────────────────────────────────────────────────────
   const rows: DxfNormSizeRow[] = [];
   const incomplete = new Set(sizesIncomplete);
+  const qtyOf = (i: number) => Math.max(1, Math.round(resolved[i].piece.perGarment || 1));
   for (const sizeId of input.sizeIds) {
     if (incomplete.has(sizeId)) continue;
     let sum = 0;
     let ok = true;
     for (let i = 0; i < resolved.length; i++) {
-      const key = sizeKeyByPiece.get(`${sizeId}|${i}`);
-      if (key == null) {
-        ok = false;
-        break;
-      }
-      const contour = onLayer(resolved[i].bySize.get(key) ?? []);
+      const contour = contourByKey.get(`${sizeId}|${i}`);
       if (!contour) {
         ok = false;
         break;
       }
-      const qty = Math.max(1, Math.round(resolved[i].piece.perGarment || 1));
-      sum += qty * (areaOf.get(contour) ?? contour.areaCm2);
+      sum += qtyOf(i) * (areaOf.get(contour) ?? contour.areaCm2);
     }
     if (!ok || !(sum > 0)) {
       incomplete.add(sizeId);
@@ -236,14 +269,18 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     rows.push({ sizeId, areaCm2: sum });
   }
 
-  // Σ по безразмерным деталям — общая часть каждого размера, нужна объяснению разбора.
+  // Σ по безразмерным деталям — общая часть каждого размера, нужна объяснению разбора. Берётся из
+  // той же карты выбранных контуров (первый размер, для которого выборка полна): безразмерная
+  // деталь по построению одна и та же во всех размерах.
   let sizelessCm2 = 0;
-  for (let i = 0; i < resolved.length; i++) {
-    if (resolved[i].graded) continue;
-    const contour = onLayer(resolved[i].bySize.get(sizelessKey) ?? []);
-    if (!contour) continue;
-    const qty = Math.max(1, Math.round(resolved[i].piece.perGarment || 1));
-    sizelessCm2 += qty * (areaOf.get(contour) ?? contour.areaCm2);
+  const anySize = rows[0]?.sizeId;
+  if (anySize != null) {
+    for (let i = 0; i < resolved.length; i++) {
+      if (resolved[i].graded) continue;
+      const contour = contourByKey.get(`${anySize}|${i}`);
+      if (!contour) continue;
+      sizelessCm2 += qtyOf(i) * (areaOf.get(contour) ?? contour.areaCm2);
+    }
   }
 
   if (rows.length === 0) {
@@ -254,13 +291,28 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     };
   }
 
+  // ФАЙЛ, В КОТОРОМ НЕ ГРАДУИРУЕТСЯ НИ ОДНА ДЕТАЛЬ, НОРМЫ ПО РАЗМЕРАМ НЕ ДАЁТ — и арифметика здесь
+  // как раз не спорит: она честно выдала бы всем размерам ОДНО число. Формально это верно (кроят
+  // одни и те же контуры), а как норма размерного ряда — заявление «XL стоит ровно столько же,
+  // сколько S», сделанное не по выкройкам, а по их отсутствию. Ровно та нечестность, ради которой
+  // диалог и пишет ряд, а не скаляр. Один размер в ряду — случай другой: одинаковость там истинна
+  // (шапка, сумка), и отказывать нечему.
+  const gradedPieces = resolved.filter((r) => r.graded).length;
+  if (gradedPieces === 0 && input.sizeIds.length > 1) {
+    return {
+      ok: false,
+      reason:
+        'в выкройках этой ткани ни одна деталь не градуируется по размерам — площадь каждого размера вышла бы одинаковой, и это была бы не норма размера, а копия соседней. Похоже, выгружен только один размер',
+    };
+  }
+
   return {
     ok: true,
     areas: {
       rows,
       sizesIncomplete: [...incomplete].sort((a, b) => a - b),
       sizelessCm2,
-      gradedPieces: resolved.filter((r) => r.graded).length,
+      gradedPieces,
       hulled: seam.hulled,
     },
   };

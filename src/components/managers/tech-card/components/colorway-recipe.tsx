@@ -604,8 +604,15 @@ function toWire(d: UsageDraft): common_TechCardColorwayUsage {
     pantone: d.pantone.trim(),
     consumption: inputToDecimal(d.consumption),
     quantity: inputToDecimal(d.quantity),
+    // ПУСТАЯ ЯЧЕЙКА РАЗМЕРА — ЭТО «НОРМЫ НЕТ», А НЕ ПОВОД УРОНИТЬ СОХРАНЕНИЕ. Раньше строка
+    // отправлялась с consumption=undefined, и сервер отвечал «consumption must be a non-negative
+    // number» на ВЕСЬ рецепт — то есть стёртая ячейка на одной ткани хоронила сохранение колорвея
+    // целиком, причём сообщением, в котором не видно ни размера, ни слота. С приходом «по выкройкам»
+    // пер-размерные строки становятся обычным делом, а «стереть ячейку и передумать» — обычным
+    // жестом. Не отправить строку значит сказать ровно то, что оператор сделал: у этого размера
+    // нормы нет (план подставит скаляр, если он есть, и честно откажет, если нет).
     sizeConsumptions: (d.sizeConsumptions ?? [])
-      .filter((s) => s.sizeId)
+      .filter((s) => s.sizeId && (s.consumption ?? '').trim() !== '')
       .map((s) => ({ sizeId: s.sizeId, consumption: inputToDecimal(s.consumption) })),
     pieceLineKey: d.pieceLineKey || '',
     pieceId: undefined,
@@ -854,14 +861,21 @@ function NormSummary({
   const isMarker = source === 'marker';
   const isDxf = source === 'dxf';
   const label = isMarker ? 'из раскладки' : isDxf ? 'по выкройкам' : 'введено руками';
-  const value = scalar
-    ? `${scalar}${unit ? ` ${unit}` : ''}`
-    : perSize
-        .map(
-          (s) =>
-            `${formatSizeName(sizeNameById.get(s.sizeId ?? 0) ?? `#${s.sizeId}`)} ${s.consumption}`,
-        )
-        .join(' · ');
+  // ПЕР-РАЗМЕРНАЯ НОРМА ПОБЕЖДАЕТ СКАЛЯР — ровно как на сервере: при непустых size_consumptions
+  // LineTotal невалиден, себестоимость стиля берёт норму базового размера, а план прогона читает
+  // SizeConsumptions → Consumption → Quantity. Скаляр при этом никуда не девается (пер-размерное
+  // применение раскладки его не чистит), и показать его крупно с бейджем «из раскладки» значило бы
+  // назвать нормой число, которого ни один расчёт не берёт. Он остаётся подписью — он всё ещё
+  // работает, но только на размеры вне ряда.
+  const perSizeText = perSize
+    .map(
+      (s) =>
+        `${formatSizeName(sizeNameById.get(s.sizeId ?? 0) ?? `#${s.sizeId}`)} ${s.consumption}`,
+    )
+    .join(' · ');
+  const value =
+    perSize.length > 0 ? perSizeText : scalar ? `${scalar}${unit ? ` ${unit}` : ''}` : '';
+  const scalarFallback = perSize.length > 0 && scalar ? `${scalar}${unit ? ` ${unit}` : ''}` : '';
 
   // Разбор говорит РОВНО то, что известно этой строке, и ни слова сверх. Марочная норма знает свои
   // проценты отходов (они внутри длины); норма с выкроек знает, что она netto и что процент слота
@@ -900,11 +914,19 @@ function NormSummary({
   return (
     <div className='flex flex-col gap-1'>
       <div className='flex flex-wrap items-baseline gap-1.5'>
-        <FieldLabel>расход{unit ? ` (${unit})` : ''}</FieldLabel>
+        <FieldLabel>
+          расход{perSize.length > 0 ? ' по размерам' : ''}
+          {unit ? ` (${unit})` : ''}
+        </FieldLabel>
         <Text size='small' component='span'>
           {value || '—'}
         </Text>
         <Pill tone={isMarker || isDxf ? 'mut' : 'attention'}>{label}</Pill>
+        {scalarFallback && (
+          <Text size='nano' variant='label' component='span'>
+            {`единая норма ${scalarFallback} осталась в строке и работает только на размеры вне ряда`}
+          </Text>
+        )}
       </div>
       <details className='text-nano'>
         <summary className='cursor-pointer uppercase'>из чего сложилось</summary>
@@ -1516,22 +1538,31 @@ function SlotUsageRow({
               onApply={(patch) => onChange(patch)}
             />
             {/* 0294: тот же мост, но от ВЫКРОЕК — для карточки, на которой раскладки ещё нет.
-                Число netto, и диалог сам не даёт применить его на слот без процента раскроя. */}
-            <DxfApplyHint
-              control={control}
-              lineKey={draft.bomLineKey}
-              unit={unit}
-              wastagePercent={slot?.wastagePercent ?? ''}
-              articleWidth={cuttingWidthOf(
-                material,
-                slot,
-                draft.materialId > 0 && draft.materialId !== slot?.materialId,
-              )}
-              sizeIds={sizeIds}
-              sizeNameById={sizeNameById}
-              canEdit={canEdit}
-              onApply={(patch) => onChange(patch)}
-            />
+                Число netto, и диалог сам не даёт применить его на слот без процента раскроя.
+
+                МОНТИРУЕТСЯ ТОЛЬКО НА РЕДАКТИРУЕМОЙ КАРТОЧКЕ, и это не косметика: подсказка держит
+                три подписки на массивы формы (BOM, детали кроя, связи блоков), а редакторы ВСЕХ
+                колорвеев смонтированы одновременно (скрытые — не размонтированные). На выпущенной
+                карточке применять всё равно нечего, а платить за подписки она бы продолжала: правка
+                любой строки BOM будила бы каждую скрытую подсказку. Ранний выход внутри компонента
+                эту цену не убирает — хуки уже подписаны к моменту возврата. */}
+            {canEdit && (
+              <DxfApplyHint
+                control={control}
+                lineKey={draft.bomLineKey}
+                unit={unit}
+                wastagePercent={slot?.wastagePercent ?? ''}
+                articleWidth={cuttingWidthOf(
+                  material,
+                  slot,
+                  draft.materialId > 0 && draft.materialId !== slot?.materialId,
+                )}
+                sizeIds={sizeIds}
+                sizeNameById={sizeNameById}
+                canEdit={canEdit}
+                onApply={(patch) => onChange(patch)}
+              />
+            )}
             {/* РУЧНОЙ ВВОД ОСТАЁТСЯ НАВСЕГДА — и остаётся ЗА РАСКРЫВАШКОЙ, когда норму уже дал
                 инструмент или когда её нет вовсе. Он нужен: без него первый же странный DXF
                 остановил бы производство, а тесьме на метраж выкроек не бывает. Но предлагать его
@@ -1607,19 +1638,11 @@ function SlotUsageRow({
           </div>
         )}
 
-        {/* 0294: норма с выкроек — свой ответ, а не «введено руками». Пилюля ниже про руки её
-            больше не касается, а разбор netto→brutto живёт в NormSummary над числом. */}
-        {draft.consumptionSource === 'dxf' && (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            <Pill tone='mut'>по выкройкам</Pill>
-            <Text size='nano' variant='label' component='span'>
-              netto по площади деталей
-              {slot?.wastagePercent?.trim()
-                ? ` · костинг начисляет сверху ${slot.wastagePercent}% раскроя слота`
-                : ' · ⚠ процент раскроя слота не задан — отходы кроя не начисляются никак'}
-            </Text>
-          </div>
-        )}
+        {/* 0294: отдельного блока про источник «по выкройкам» здесь НЕТ намеренно. Бейдж стоит у
+            числа (NormSummary), а разбор netto→brutto и предупреждение о пустом проценте раскроя —
+            в его раскрывашке. Второй такой же бейдж строкой ниже читался бы как повтор, а не как
+            слоистость: у марочной нормы блок ниже говорит то, чего у числа нет (разложение отходов,
+            штамп, дрейф), а у нормы с выкроек добавить нечего. */}
 
         {/* Ф6.8: ПРОИСХОЖДЕНИЕ ЧИСЛА И ЕГО СВЕЖЕСТЬ. Пилюля выше говорит «расход марочный»; эта
             строка говорит, ЧЕЙ он и не устарел ли. Без штампа (пер-размерные нормы и всё,

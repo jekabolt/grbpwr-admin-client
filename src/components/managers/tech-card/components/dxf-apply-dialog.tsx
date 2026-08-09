@@ -30,8 +30,15 @@ import { DataTable } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
+import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { parseDecimalNumber } from 'utils/decimal';
-import { mmToEngineCm } from './nesting/allowance-units';
+import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
+import {
+  clampSeamAllowanceMm,
+  engineCmToMm,
+  MAX_SEAM_ALLOWANCE_MM,
+  mmToEngineCm,
+} from './nesting/allowance-units';
 import { sizeTokensOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { buildAllowanceIndex } from './nesting/contour-allowance';
@@ -41,12 +48,10 @@ import { useDxfGeometry, useDxfIndex } from './nesting/dxf-geometry';
 import { toBomUnit } from './nesting/marker-io';
 import type { TechCardFormData } from './schema';
 
-// Последний фолбэк припуска — умолчание движка, в миллиметрах (см. NEST_DEFAULTS.seamAllowanceCm).
-const FALLBACK_SEAM_MM = 10;
-
 export default function DxfApplyDialog({
   control,
   pieces,
+  unaliasedPieces,
   unit,
   wastagePercent,
   articleWidth,
@@ -56,12 +61,15 @@ export default function DxfApplyDialog({
   onClose,
   onApply,
 }: {
-  // Форма карточки приходит ЯВНО, а не через useFormContext: строка рецепта живёт в поддереве,
-  // которое рендерится и вне провайдера формы (превью, печать), и молчаливый undefined там
-  // выглядел бы как «выкроек нет».
+  // Форма приходит ЯВНЫМ control'ом, а не через useFormContext ЗДЕСЬ: два поля ниже читаются
+  // именно из неё, и пробрасывать их сквозь обёртку значило бы дублировать. (Пачку DXF собирает
+  // useCardDxfPack, и она контекст всё-таки берёт — у неё нет другого способа, и она вызвана в
+  // компоненте, который монтируется только внутри формы.)
   control: Control<TechCardFormData>;
   /** Детали кроя этой ткани с количеством на изделие — разрешены лёгкой обёрткой (dxf-apply.tsx). */
   pieces: DxfNormPiece[];
+  /** Детали этой же ткани БЕЗ связи с блоком чертежа — расчёт на них отказывает, см. dxfNormAreas. */
+  unaliasedPieces: string[];
   unit: string;
   /** Процент раскроя слота. Пустой = применять нельзя, см. заголовок файла. */
   wastagePercent: string;
@@ -74,6 +82,7 @@ export default function DxfApplyDialog({
   onClose: () => void;
   onApply: (patch: {
     consumption?: string;
+    quantity?: string;
     sizeConsumptions?: { sizeId: number; consumption: string }[];
     consumptionSource?: string;
     wasteSelvedgePct?: string;
@@ -112,32 +121,63 @@ export default function DxfApplyDialog({
   const chosenLayer = layer ?? index?.contourLayer ?? '';
   const chosenOption = layers.find((o) => o.layer === chosenLayer);
 
+  // ЦЕХ СПРАШИВАЕТСЯ НАРАВНЕ С КАРТОЧКОЙ И ФАЙЛОМ. Без него подпись «ни карточка, ни цех, ни файл
+  // припуска не назвали» врала бы: цех мог назвать, его просто не спросили — и норма разошлась бы с
+  // раскладкой того же файла, где порядок источников полный. Запрос дешёвый и идёт только с открытым
+  // диалогом (RBAC: чтение настроек разрешено любому аккаунту).
+  const workshop = useWorkshopSettings();
+  const workshopSeamMm = parseDecimalNumber(
+    (workshop.data?.settings?.defaultSeamAllowanceMm as string | undefined) ?? '',
+  );
+
   const prefill = useMemo(
     () =>
       seamAllowancePrefill({
         measured: chosenOption?.allowance ?? null,
         cardRequiredMm: cardSeamMm != null && cardSeamMm !== '' ? Number(cardSeamMm) : null,
-        fallbackMm: FALLBACK_SEAM_MM,
+        workshopDefaultMm: Number.isFinite(workshopSeamMm) ? workshopSeamMm : null,
+        fallbackMm: engineCmToMm(NEST_DEFAULTS.seamAllowanceCm),
       }),
-    [chosenOption, cardSeamMm],
+    [chosenOption, cardSeamMm, workshopSeamMm],
   );
-  const seamValue = seamMm === '' ? prefill.value : Number(seamMm);
+  // РУЧНОЙ ВВОД ПРИПУСКА ПРОВЕРЯЕТСЯ, А НЕ ГЛОТАЕТСЯ. Мусор («1.2.3») давал NaN и молча превращался
+  // в 0 мм, а 900 мм принимались — при том, что и раскладка, и сервер держат потолок в
+  // MAX_SEAM_ALLOWANCE_MM. Результат уходит прямо в норму, и защиты на сервере у него нет.
+  const seamTyped = seamMm.trim() === '' ? null : Number(seamMm);
+  const seamInvalid = seamTyped != null && (!Number.isFinite(seamTyped) || seamTyped < 0);
+  const seamOverMax =
+    seamTyped != null && Number.isFinite(seamTyped) && seamTyped > MAX_SEAM_ALLOWANCE_MM;
+  const seamValue = seamTyped == null ? prefill.value : clampSeamAllowanceMm(seamTyped);
+
+  // ДВОЙНОЙ ПРИПУСК — тот же отказ, что в раскладке, и теми же словами: если замер сказал, что на
+  // слое лежит ЛИНИЯ КРОЯ, добавленный сверху офсет посчитает припуск ДВАЖДЫ и раздует площадь по
+  // всему периметру каждой детали. Прифилл ставит здесь 0 сам, но оператор может напечатать своё.
+  const measured = chosenOption?.allowance ?? null;
+  const contourIsCutLine = measured?.verdict === 'cut' && (measured.allowanceCm ?? 0) > 0;
+  const doubleAllowance = contourIsCutLine && seamValue > 0;
 
   const widthCm = parseDecimalNumber(articleWidth);
   const wastage = parseDecimalNumber(wastagePercent);
   const wastageMissing = !Number.isFinite(wastage);
+
+  // ЧАСТИЧНО НЕ СКАЧАННАЯ ПАЧКА — не «просто предупреждение». Если свежий лист не скачался, а старая
+  // ревизия в пачке есть, комплект соберётся по НЕЙ, и норма встанет по прошлой геометрии молча.
+  const downloadFailures = (geometry.data?.warnings ?? []).filter(
+    (w) => w.includes('не удалось скачать') || w.includes('не разобрал'),
+  );
 
   const outcome = useMemo(() => {
     if (!index) return null;
     return dxfNormAreas({
       index,
       pieces,
+      unaliasedPieces,
       sizeIds,
-      tokensOfSize: (id) => sizeTokensOf(sizeNameById.get(id)).map((t) => t),
+      tokensOfSize: (id) => sizeTokensOf(sizeNameById.get(id)),
       contourLayer: chosenLayer,
-      allowanceCm: mmToEngineCm(Number.isFinite(seamValue) ? seamValue : 0) ?? 0,
+      allowanceCm: mmToEngineCm(seamValue) ?? 0,
     });
-  }, [index, pieces, sizeIds, sizeNameById, chosenLayer, seamValue]);
+  }, [index, pieces, unaliasedPieces, sizeIds, sizeNameById, chosenLayer, seamValue]);
 
   // Строки применения: размер → netto в единице линии. Полное покрытие ряда или ничего — частичный
   // ряд заставил бы план подставлять скаляр (которого не будет) на непокрытые размеры.
@@ -149,8 +189,19 @@ export default function DxfApplyDialog({
       return { sizeId: r.sizeId, areaCm2: r.areaCm2, lengthCm: cm, conv };
     });
   }, [outcome, widthCm, unit]);
-  const complete = rows.length === sizeIds.length && rows.every((r) => r.conv != null);
-  const applicable = complete && !wastageMissing && canEdit;
+  // НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — ЭТО НЕ НОРМА. `toBomUnit` округляет метры до трёх знаков (колонка
+  // DECIMAL(10,3)), и крошечная площадь честно превращается в 0.000: строка сохранилась бы «с
+  // нормой», которая ничего не требует, и дефицит на прогоне вышел бы нулевым.
+  const complete =
+    rows.length === sizeIds.length && rows.every((r) => r.conv != null && r.conv.value > 0);
+  const applicable =
+    complete &&
+    !wastageMissing &&
+    canEdit &&
+    !seamInvalid &&
+    !seamOverMax &&
+    !doubleAllowance &&
+    downloadFailures.length === 0;
 
   const sizeName = (id: number) => sizeNameById.get(id) ?? `#${id}`;
 
@@ -159,6 +210,13 @@ export default function DxfApplyDialog({
     onApply({
       // Скаляр СНИМАЕТСЯ явно: одна оставшаяся строка заставила бы сервер игнорировать ряд.
       consumption: '',
+      // КОЛИЧЕСТВО СНИМАЕТСЯ ТОЖЕ, И ЭТО НЕ УБОРКА. LineTotal читает Quantity ПЕРВЫМ (штук × цена,
+      // без гросс-апа), а план материалов на той же строке берёт расход — строка с обоими полями
+      // раскалывает себестоимость и потребность. Сервер такую форму на источнике 'dxf' прямо
+      // отказывает (validateDxfNormShape), причём отказом на ВЕСЬ рецепт и позже, на сохранении
+      // колорвея: без этой строки применение к легаси-строке (обоими полями заполненной с 0079)
+      // выглядело бы удавшимся, а рушилось бы потом и в другом месте.
+      quantity: '',
       sizeConsumptions: rows.map((r) => ({ sizeId: r.sizeId, consumption: String(r.conv!.value) })),
       consumptionSource: 'dxf',
       // Разложение отходов описывает измеренную раскладку — у площади деталей его нет, и сервер
@@ -200,10 +258,31 @@ export default function DxfApplyDialog({
           </CalloutBox>
         )}
 
-        {geometry.isPending && <Text size='micro'>качаем и разбираем выкройки…</Text>}
+        {/* ПУСТАЯ ПАЧКА НАЗЫВАЕТСЯ ПУСТОЙ. `useDxfGeometry` при нуле файлов — это отключённый
+            запрос, а у отключённого запроса в react-query v5 `isPending` вечно true: без этой ветки
+            диалог «качал и разбирал выкройки» бесконечно, хотя качать нечего. Состояние достижимое:
+            связи блок→деталь остаются на карточке и после удаления всех DXF. */}
+        {pack.length === 0 ? (
+          <CalloutBox tone='warning'>
+            На карточке нет ни одного DXF — площади считать не по чему. Загрузите выкройки на
+            вкладке выкроек; связи деталей с блоками у вас уже есть.
+          </CalloutBox>
+        ) : (
+          geometry.isPending && <Text size='micro'>качаем и разбираем выкройки…</Text>
+        )}
         {geometry.isError && (
           <CalloutBox tone='warning'>
             не удалось разобрать выкройки: {geometry.error?.message || 'неизвестная ошибка'}
+          </CalloutBox>
+        )}
+        {/* ЧАСТИЧНО СКАЧАННАЯ ПАЧКА ХУЖЕ НЕСКАЧАННОЙ: комплект деталей может собраться по СТАРОЙ
+            ревизии листа, и норма встанет по прошлой геометрии, ничем себя не выдав. Поэтому не
+            предупреждение, а запрет применения. */}
+        {downloadFailures.length > 0 && (
+          <CalloutBox tone='warning'>
+            Часть выкроек не скачалась или не разобралась: {downloadFailures.join('; ')}. Норма
+            могла бы собраться по другому листу — например, по прежней ревизии, — и была бы
+            неотличима от верной. Повторите позже.
           </CalloutBox>
         )}
 
@@ -235,9 +314,28 @@ export default function DxfApplyDialog({
             onChange={(e) => setSeamMm(e.target.value.replace(/[^\d.,]/g, '').replace(',', '.'))}
           />
           <Text size='nano' variant='label' component='span'>
-            {prefill.why}
+            {seamMm.trim() === '' ? prefill.why : 'введено руками'}
           </Text>
         </label>
+
+        {seamInvalid && (
+          <CalloutBox tone='warning'>
+            Припуск читается не как число. Пустое поле означает предзаполнение ({prefill.value} мм),
+            а не ноль: молча посчитать ноль значило бы отдать норму по линии шва.
+          </CalloutBox>
+        )}
+        {seamOverMax && (
+          <CalloutBox tone='warning'>
+            Припуск больше {MAX_SEAM_ALLOWANCE_MM} мм — тот же потолок, что у раскладки и у сервера.
+            Столько не бывает; похоже, введены сантиметры вместо миллиметров.
+          </CalloutBox>
+        )}
+        {/* ТОТ ЖЕ ОТКАЗ, ЧТО В РАСКЛАДКЕ, И ПО ТОЙ ЖЕ ПРИЧИНЕ — правило одно, а не две политики. */}
+        {doubleAllowance && measured && (
+          <CalloutBox tone='warning'>
+            {`Слой ${measured.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(engineCmToMm(measured.allowanceCm) ?? 0).toFixed(1)} мм снаружи линии шва. Добавленный сверху припуск ${seamValue.toFixed(1)} мм посчитает его ДВАЖДЫ и раздует площадь по всему периметру каждой детали. Выходов два: поставить 0 (контур уже с припуском) либо выбрать слой с линией шва.`}
+          </CalloutBox>
+        )}
 
         {!(widthCm > 0) && (
           <CalloutBox tone='warning'>
@@ -302,6 +400,16 @@ export default function DxfApplyDialog({
               <CalloutBox tone='warning'>
                 Единица слота «{unit || '—'}» не принимает длину: применить можно в метрах или
                 сантиметрах.
+              </CalloutBox>
+            )}
+            {/* НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — НЕ НОРМА. Метры округляются до трёх знаков (столько держит
+                колонка), и крошечная площадь честно становится 0.000: строка сохранилась бы «с
+                нормой», которая ничего не требует, а дефицит на прогоне вышел бы нулевым. */}
+            {rows.some((r) => r.conv != null && !(r.conv.value > 0)) && (
+              <CalloutBox tone='warning'>
+                После перевода в «{unit || '—'}» норма округляется в ноль — площадь слишком мала для
+                этой единицы. Ноль означал бы «ткань не нужна»; выберите единицу мельче (см) или
+                проверьте, тот ли слой контура выбран.
               </CalloutBox>
             )}
           </>

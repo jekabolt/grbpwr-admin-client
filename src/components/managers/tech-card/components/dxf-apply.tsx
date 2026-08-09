@@ -19,7 +19,12 @@ import type { TechCardFormData } from './schema';
 
 const DxfApplyDialog = lazy(() => import('./dxf-apply-dialog'));
 
-type PieceRow = { lineKey?: string; name?: string; piecesPerGarment?: number };
+type PieceRow = {
+  lineKey?: string;
+  name?: string;
+  piecesPerGarment?: number;
+  materials?: { bomLineKey?: string; fusingBomLineKey?: string }[];
+};
 type AliasRow = {
   pieceLineKey?: string;
   blockName?: string;
@@ -51,6 +56,7 @@ export function DxfApplyHint({
   canEdit: boolean;
   onApply: (patch: {
     consumption?: string;
+    quantity?: string;
     sizeConsumptions?: { sizeId: number; consumption: string }[];
     consumptionSource?: string;
     wasteSelvedgePct?: string;
@@ -80,11 +86,17 @@ export function DxfApplyHint({
     [scopes, lineKey],
   );
 
-  // Детали кроя ЭТОЙ ткани и их количество на изделие — из карточки. Сколько экземпляров блока
-  // лежит в файле, не спрашиваем принципиально: две ревизии одного листа читались бы как «деталь
-  // идёт по две на изделие».
-  const pieces = useMemo<DxfNormPiece[]>(() => {
-    if (!scopeKey) return [];
+  // КОМПЛЕКТ ДЕТАЛЕЙ СЧИТАЕТСЯ ПО ПРИВЯЗКЕ «ДЕТАЛЬ → ТКАНЬ», А НЕ ПО АЛИАСАМ, и это главное решение
+  // этого файла. Ткань детали заявлена на самой детали (`pieces[].materials[].bomLineKey`); связь с
+  // блоком чертежа (алиас) — отдельный факт, которого может не быть. Собери комплект по алиасам, и
+  // деталь этой же ткани, которую просто забыли связать, молча выпадет из площади — площадь станет
+  // меньше, норма меньше, а обнаружится это на складе. Поэтому непривязанные детали не
+  // выбрасываются, а НАЗЫВАЮТСЯ и расчёт на них отказывает (см. dxfNormAreas).
+  //
+  // Количество на изделие — тоже из карточки. Сколько экземпляров блока лежит в файле, не
+  // спрашиваем принципиально: две ревизии одного листа читались бы как «деталь идёт по две».
+  const { pieces, unaliasedPieces } = useMemo(() => {
+    if (!scopeKey) return { pieces: [] as DxfNormPiece[], unaliasedPieces: [] as string[] };
     const byPiece = new Map<string, { block: string; scopeKey: string }[]>();
     for (const a of aliasRows) {
       const key = (a.pieceLineKey ?? '').trim().toLowerCase();
@@ -100,23 +112,41 @@ export function DxfApplyHint({
       byPiece.set(key, list);
     }
     const out: DxfNormPiece[] = [];
+    const missing: string[] = [];
     for (const p of pieceRows) {
       const key = (p.lineKey ?? '').trim().toLowerCase();
-      const refs = key ? byPiece.get(key) : undefined;
-      if (!refs || refs.length === 0) continue;
+      if (!key) continue;
+      // Деталь принадлежит ЭТОЙ ткани, если хоть одна её строка материалов ссылается на слот этого
+      // скоупа. Дублирование (`fusingBomLineKey`) сюда НЕ входит: клеевая — другая ткань, у неё свой
+      // слот и своя норма.
+      const ownsScope = (p.materials ?? []).some((m) => {
+        const line = (m.bomLineKey ?? '').trim();
+        if (!line) return false;
+        return (
+          (scopes.find((s) => s.lines.some((l) => l.lineKey === line))?.key ?? '') === scopeKey
+        );
+      });
+      if (!ownsScope) continue;
+      const refs = byPiece.get(key);
+      const name = p.name?.trim() || key;
+      if (!refs || refs.length === 0) {
+        missing.push(name);
+        continue;
+      }
       out.push({
-        name: p.name?.trim() || key,
+        name,
         perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
         refs,
       });
     }
-    return out;
+    return { pieces: out, unaliasedPieces: missing };
   }, [aliasRows, pieceRows, scopes, scopeKey]);
 
-  // Кнопки нет, когда предлагать нечего: без деталей, привязанных к блокам чертежа, и без размерного
-  // ряда диалог ответил бы отказом на каждое открытие — а кнопка, которая всегда отказывает, читается
-  // как поломка, а не как отсутствие данных.
-  if (!canEdit || pieces.length === 0 || sizeIds.length === 0) return null;
+  // Кнопки нет, когда предлагать нечего: без деталей этой ткани и без размерного ряда диалог ответил
+  // бы отказом на каждое открытие — а кнопка, которая всегда отказывает, читается как поломка, а не
+  // как отсутствие данных. Непривязанные детали кнопку НЕ гасят: там отказ содержательный и
+  // называет, что именно связать.
+  if (pieces.length + unaliasedPieces.length === 0 || sizeIds.length === 0) return null;
 
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
@@ -131,6 +161,7 @@ export function DxfApplyHint({
           <DxfApplyDialog
             control={control}
             pieces={pieces}
+            unaliasedPieces={unaliasedPieces}
             unit={unit}
             wastagePercent={wastagePercent}
             articleWidth={articleWidth}
