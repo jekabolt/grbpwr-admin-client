@@ -1,4 +1,5 @@
 import type {
+  GetProductionRunCutPlanResponse,
   common_TechCardAttachmentKind,
   common_TechCardGarmentZone,
   common_TechCardOperationType,
@@ -205,6 +206,7 @@ export function TechPackDocument({
   patternViewerToken = '',
   onDataStatus,
   scope,
+  cutPlan,
 }: {
   techCard: common_TechCard;
   assembly?: StyleAssemblyLine[];
@@ -221,6 +223,12 @@ export function TechPackDocument({
    * обо всём сразу (все колорвеи, все размеры, деньги на месте).
    */
   scope?: PrintScope;
+  /**
+   * Кат-лист партии (GetProductionRunCutPlan). Приходит только при скоупе на прогон и даёт
+   * ЕДИНСТВЕННЫЙ источник количеств: сколько панелей кроить по каждому размеру. Считает сервер —
+   * тот же ответ печатает наряд, поэтому две бумаги одной партии не могут разойтись в числах.
+   */
+  cutPlan?: GetProductionRunCutPlanResponse;
 }) {
   const tc = techCard.techCard;
   // Скоуп по умолчанию: тот же документ, что печатался до появления скоупа. Так у каждой секции
@@ -444,6 +452,32 @@ export function TechPackDocument({
   // Версия карты — штамп на бумаге и в QR выкроек: два листа, напечатанных до и после правки,
   // должны быть различимы, даже пока вьюер не умеет сверять её сам.
   const cardLockVersion = wireInt(techCard.lockVersion);
+
+  // Панели по размерам: ключ — line_key детали, значение — размер → сколько кроить. Строки
+  // чужих колорвеев отбрасываются тем же правилом, что и везде (productId ‖ outputVariantId).
+  const cutBySize = (() => {
+    const byPiece = new Map<string, Map<number, number>>();
+    for (const r of cutPlan?.rows ?? []) {
+      if (printScope.colorway) {
+        const cw = wireInt(r.colorwayId) || wireInt(r.outputVariantId);
+        if (cw !== wireInt(printScope.colorway.colorwayId)) continue;
+      }
+      const key = r.pieceLineKey ?? '';
+      if (!key) continue;
+      const row = byPiece.get(key) ?? new Map<number, number>();
+      for (const c of r.bySize ?? []) {
+        const sizeId = wireInt(c.sizeId);
+        row.set(sizeId, (row.get(sizeId) ?? 0) + wireInt(c.piecesToCut));
+      }
+      byPiece.set(key, row);
+    }
+    return byPiece;
+  })();
+  // АВТОРИТЕТЕН ЛИ ОТВЕТ. Пустые rows без generatedAt — это «мы ничего не узнали», а не «кроить
+  // нечего»: то же правило, по которому живёт наряд. Печатать первое как второе значило бы выдать
+  // неполученный кат-лист за полный.
+  const cutPlanAuthoritative = !!cutPlan?.generatedAt && !cutPlan.generatedAt.startsWith('0001-');
+  const cutColumns = cutPlanAuthoritative && printScope.run ? sizeIds : [];
 
   // Тираж по размерам — из линий прогона, уже суженных скоупом колорвея. Колонки только те
   // размеры, по которым в партии есть клетки: пустая колонка у раскройного стола читается как
@@ -1403,6 +1437,13 @@ export function TechPackDocument({
                 <th className={TH}>
                   {printScope.colorway ? 'fabric' : 'fabric (by colourway)'}
                 </th>
+                {/* Панели на ЭТУ партию по размерам — из кат-листа сервера. Без прогона колонок
+                    нет вовсе: количества стиля не существует, есть только количество партии. */}
+                {cutColumns.map((sizeId) => (
+                  <th key={sizeId} className={`${TH} text-center`}>
+                    {sizeName(sizeId)}
+                  </th>
+                ))}
                 <th className={TH}>note</th>
               </tr>
             </thead>
@@ -1491,6 +1532,11 @@ export function TechPackDocument({
                         </div>
                       )}
                     </td>
+                    {cutColumns.map((sizeId) => (
+                      <td key={sizeId} className={`${TD} text-center`}>
+                        {cutBySize.get(p.lineKey ?? '')?.get(sizeId) ?? '—'}
+                      </td>
+                    ))}
                     <td className={TD}>{p.note || '—'}</td>
                   </tr>
                 );
@@ -1500,6 +1546,18 @@ export function TechPackDocument({
           {/* Словарь колонки «qty / garment» — один раз под таблицей. Печатается только если в
               таблице реально есть что объяснять: на карточке, где ни одна деталь не размечена и все
               идут по одной, легенда была бы строкой ни о чём. */}
+          {printScope.run && !cutPlanAuthoritative && (
+            <p className='mt-1 break-inside-avoid border border-black px-2 py-1 text-micro uppercase'>
+              cut list for this batch was not received — panel counts per size are not printed
+              (this is not «nothing to cut»)
+            </p>
+          )}
+          {cutColumns.length > 0 && (
+            <p className='mt-1 text-nano text-labelColor'>
+              size columns are panels to cut for THIS batch, from the run cut list — not per
+              garment
+            </p>
+          )}
           {(tc.pieces ?? []).some((p) =>
             printCutSymmetryCaption(p.cutSymmetry, p.piecesPerGarment),
           ) && <p className='mt-1 text-nano text-labelColor'>{PRINT_CUT_SYMMETRY_LEGEND}</p>}
@@ -2062,6 +2120,44 @@ export function TechPackDocument({
               );
             })}
           </div>
+        </Sheet>
+      )}
+
+      {/* ЛИСТ ПРИЁМКИ. Единственная бумага комплекта, которая НЕ несёт данных, — её заполняют
+          от руки в цеху. Данных приёмки здесь нет намеренно: ListProductionRunCutReceipts
+          отвечает на «что уже сдано», а этот лист существует ровно для того, чтобы сдавать. */}
+      {b('qc') && printScope.run && sizeIds.length > 0 && (
+        <Sheet title='acceptance sheet'>
+          <table className='w-full border-collapse text-micro'>
+            <thead>
+              <tr>
+                <th className={TH}>size</th>
+                <th className={`${TH} text-center`}>planned</th>
+                <th className={`${TH} text-center`}>cut</th>
+                <th className={`${TH} text-center`}>sewn</th>
+                <th className={`${TH} text-center`}>accepted</th>
+                <th className={`${TH} text-center`}>defects</th>
+                <th className={TH}>signature / date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sizeIds.map((sizeId) => (
+                <tr key={sizeId} className='break-inside-avoid'>
+                  <td className={`${TD} font-semibold`}>{sizeName(sizeId)}</td>
+                  <td className={`${TD} text-center`}>
+                    {runSizeQty.find((r) => r.sizeId === sizeId)?.qty ?? '—'}
+                  </td>
+                  {/* Пустые клетки ростом под руку: ниже 8 мм в них не пишут, а дописывают
+                      сбоку — и лист перестаёт быть таблицей. */}
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                  <td className={`${TD} h-8`} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Sheet>
       )}
 

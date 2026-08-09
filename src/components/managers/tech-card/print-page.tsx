@@ -1,6 +1,9 @@
 import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
 import { buildPrintScope, parsePrintQuery } from 'components/managers/print/scope';
-import { useProductionRun } from 'components/managers/production-runs/components/useProductionRuns';
+import {
+  useProductionRun,
+  useRunCutPlan,
+} from 'components/managers/production-runs/components/useProductionRuns';
 import {
   depStatus,
   usePrintReady,
@@ -70,6 +73,16 @@ export function TechCardPrint() {
     isError: runError,
   } = useProductionRun(query.runId, query.runId > 0);
 
+  // Кат-лист партии: сколько панелей кроить по каждому размеру. Считает СЕРВЕР — тот же ответ
+  // печатает наряд. Пересчитать «шт/изделие × тираж» на клиенте значило бы завести вторую
+  // реализацию «сколько выкроить», и она разошлась бы с первой ровно в тот день, когда это
+  // заметит цех.
+  const {
+    data: cutPlan,
+    isLoading: cutPlanLoading,
+    isError: cutPlanError,
+  } = useRunCutPlan(query.runId, query.runId > 0);
+
   // РЕВИЗИЯ, ПО КОТОРОЙ ПЕЧАТАЕМ. Явный ?release= выигрывает у привязки прогона: первый —
   // осознанный выбор оператора, вторая — умолчание партии. Прогон, привязанный к релизу, обязан
   // печатать тот же снапшот, по которому сервер считает его кат-лист, иначе комплект в цех несёт
@@ -122,6 +135,11 @@ export function TechCardPrint() {
       ? [{ label: 'production run', status: depStatus(runLoading, runError) }]
       : []),
     ...(releaseId ? [{ label: 'release snapshot', status: depStatus(releaseLoading, releaseError) }] : []),
+    // Кат-лист НЕ обязателен: без него тех-пак остаётся документом стиля, а отсутствие
+    // количеств лист называет вслух. Отказ в гейте — это degraded, а не блокировка.
+    ...(query.runId > 0
+      ? [{ label: 'cut list', status: depStatus(cutPlanLoading, cutPlanError) }]
+      : []),
     ...docDeps,
   ]);
 
@@ -206,6 +224,7 @@ export function TechCardPrint() {
             packagingRecipe={packagingRecipeData?.items ?? []}
             patternViewerToken={printData?.patternViewerToken ?? ''}
             onDataStatus={setDocDeps}
+            cutPlan={cutPlanError ? undefined : cutPlan}
           />
         </div>
       )}
