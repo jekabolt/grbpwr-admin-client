@@ -51,7 +51,14 @@ import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { DxfApplyHint } from './dxf-apply';
 import { MarkerApplyHint } from './marker-apply';
-import { bomUnitStep, markersOfColorway } from './nesting/marker-io';
+import {
+  fullRollWidthOf,
+  weightBasisLabel,
+  weightBasisOf,
+  weightRefusalText,
+  type WeightBasisResolution,
+} from './nesting/fabric-weight';
+import { bomUnitKind, bomUnitStep, markersOfColorway } from './nesting/marker-io';
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
@@ -198,6 +205,18 @@ const MANUAL_PROVENANCE = {
   wasteSelvedgePct: '',
   wasteCutPct: '',
 } as const;
+
+// ОДНА И ТА ЖЕ ЕДИНИЦА НОРМЫ у двух слотов — ПО СМЫСЛУ, а не по строке. «м» и «metres» — одна
+// единица (bomUnitKind сводит весь словарь синонимов записи), «м» и «см» — разные. Единицы вне
+// словаря сравниваются нормализованными строками: «шт» и «пар» — тоже РАЗНЫЕ единицы, хотя обе
+// нам неизвестны. Неизвестная против известной — разные всегда (число в «м» не становится числом
+// в «шт» от того, что второе мы не умеем писать).
+function sameNormUnit(a?: string, b?: string): boolean {
+  const ka = bomUnitKind(a);
+  const kb = bomUnitKind(b);
+  if (ka != null || kb != null) return ka === kb;
+  return (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
+}
 
 // Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields; only the three
 // WRITABLE leaves below travel back through UpdateColorway under LAB_DIP_UPDATE_MASK — see LabDipTimeline.
@@ -533,22 +552,24 @@ function measured(section?: string): boolean {
 
 // The width a раскладка for this usage would actually be laid on: the effective article's roll
 // width minus its кромка on both edges (0259). The pinned material wins over the slot — a
-// colourway pin can be a different cloth — and the flat legacy width stands in when the typed
-// fabric attributes are absent. '' when no width is known at all; a кромка wider than the roll
-// is operator error the read must not turn into a negative width.
+// colourway pin can be a different cloth. '' when no width is known at all; a кромка wider than
+// the roll is operator error the read must not turn into a negative width.
 function cuttingWidthOf(material?: common_Material, slot?: BomLine, pinned = false): string {
-  // Precedence must match what the раскладка itself laid on (nesting-modal), or the two sides
-  // of the width comparison disagree and warn about a marker that fits:
+  // РУЛОН — ИЗ ОБЩЕГО РЕЗОЛВЕРА (fullRollWidthOf), того же, что у основы веса (weightBasisOf).
+  // Длина делится на РАСКРОЙНУЮ ширину, вес умножается на ПОЛНУЮ — но обе описывают ОДИН рулон,
+  // и резолвить его в двух местах порознь значит дать им молча разойтись в том, КАКУЮ ткань они
+  // считают. Резолвер ставит ЖИВОЕ поле строки раньше read-time обогащения (COALESCE 0259):
+  // они равны всегда, когда поле заполнено, поэтому разница — ровно одно состояние «ширину
+  // поправили в форме и ещё не сохранили», и прежний порядок в нём считал по старой ширине и
+  // глушил проверку «ширина раскладки против ширины артикула» (см. простыню в fabric-weight).
+  // Здесь остаётся только выбор КРОМКИ:
   //   pinned  — the colourway named a DIFFERENT cloth, so BOTH numbers come from it (taking the
   //             pin's width with the slot's кромка would describe a roll that does not exist);
-  //   else    — effective width, i.e. this line's own override before the article's own figure,
-  //             paired with the linked article's кромка, which is what selvedgeCm already is.
-  const [rollRaw, selvedgeRaw] = pinned
-    ? [
-        material?.fabricAttrs?.widthCm?.value || material?.fabricWidth?.value || '',
-        material?.fabricAttrs?.selvedgeCm?.value || '',
-      ]
-    : [slot?.effectiveFabricWidthCm || slot?.fabricWidth || '', slot?.selvedgeCm || ''];
+  //   else    — the linked article's кромка, which is what selvedgeCm already is (0259).
+  const rollRaw = fullRollWidthOf(material, slot, pinned);
+  const selvedgeRaw = pinned
+    ? material?.fabricAttrs?.selvedgeCm?.value || ''
+    : slot?.selvedgeCm || '';
   const roll = parseDecimalNumber(rollRaw);
   if (!Number.isFinite(roll) || roll <= 0) return '';
   const sv = parseDecimalNumber(selvedgeRaw);
@@ -713,6 +734,7 @@ function UsagePerSizeLocal({
   draft,
   sizeIds,
   article,
+  unit,
   canEdit,
   sizeNameById,
   onChange,
@@ -720,6 +742,10 @@ function UsagePerSizeLocal({
   draft: UsageDraft;
   sizeIds: number[];
   article?: BomLine;
+  // ЕДИНИЦА НОРМЫ, резолвленная строкой (SlotUsageRow: единица слота, и только она) — здесь
+  // подписываются поля ввода САМОЙ нормы, и брать единицу с эффективного артикула значило бы
+  // подписать «кг» число, которое сервер хранит и считает в единице строки.
+  unit: string;
   canEdit: boolean;
   sizeNameById: Map<number, string>;
   onChange: (patch: Partial<UsageDraft>) => void;
@@ -767,7 +793,6 @@ function UsagePerSizeLocal({
   };
 
   const currency = article?.currency ?? '';
-  const unit = article?.unit?.trim() || '';
   const hasAnyConsumption = sizeIds.some((id) => consumptionBySize.get(id)?.trim());
 
   return (
@@ -853,6 +878,7 @@ function NormSummary({
   sizeNameById,
   slotWastagePercent,
   articleWidth,
+  weightBasis,
 }: {
   draft: UsageDraft;
   unit: string;
@@ -861,6 +887,8 @@ function NormSummary({
   sizeNameById: Map<number, string>;
   slotWastagePercent: string;
   articleWidth: string;
+  /** Основа веса кг-слота (Ф3) — резолвится строкой (SlotUsageRow), одна на все инструменты. */
+  weightBasis: WeightBasisResolution;
 }) {
   // Открыта ли раскрывашка — локальный стейт через onToggle: пересчёт dxf-нормы по текущим данным
   // тянет подписки на массивы формы и мегабайты DXF, а NormSummary смонтирован для КАЖДОЙ строки
@@ -910,10 +938,16 @@ function NormSummary({
     explain.push(
       `NETTO: Σ(площадь деталей × количество на изделие) ÷ раскройная ширина${articleWidth ? ` (${articleWidth} см)` : ''}`,
     );
+    // КРОМКА ЗДЕСЬ НЕ НАЗЫВАЕТСЯ СРЕДИ ТОГО, ЧТО ДОНАЧИСЛЯЕТ ПРОЦЕНТ, — и это арифметика, а не
+    // формулировка (прежний текст называл, и оператор, поверивший ему, заложил бы кромочную
+    // составляющую в процент — двойной учёт). Netto-длина получена делением площади на
+    // РАСКРОЙНУЮ ширину (рулон − 2×кромка): купленный метр рулона несёт кромку с собой, то есть
+    // кромка УЖЕ оплачена самим делением, ровно один раз. Полный разбор с числами — в шапке
+    // dxf-apply-dialog.tsx.
     explain.push(
       slotWastagePercent.trim()
-        ? `межлекальные выпады, кромка и концы настила в число НЕ входят — их доначисляет процент раскроя слота (${slotWastagePercent}%)`
-        : '⚠ межлекальные выпады, кромка и концы настила в число не входят, а процент раскроя слота НЕ ЗАДАН — себестоимость и потребность занижены',
+        ? `межлекальные выпады и концы настила в число НЕ входят — их доначисляет процент раскроя слота (${slotWastagePercent}%); кромка в процент не входит: она уже оплачена делением на раскройную ширину, и закладывать её туда — посчитать дважды`
+        : '⚠ межлекальные выпады и концы настила в число не входят, а процент раскроя слота НЕ ЗАДАН — себестоимость и потребность занижены (кромки это не касается: она уже внутри, делением на раскройную ширину)',
     );
     explain.push('раскладка, когда появится, даст измеренное число и заменит это');
   } else {
@@ -922,6 +956,20 @@ function NormSummary({
       slotWastagePercent.trim()
         ? `костинг начисляет сверху процент раскроя слота (${slotWastagePercent}%)`
         : 'процент раскроя слота не задан — сверху ничего не начисляется',
+    );
+  }
+  // Кг-слот (Ф3): инструментальная норма в килограммах посчитана ЧЕРЕЗ ДЛИНУ, и основа перевода
+  // называется вслух — ширина здесь ПОЛНАЯ, с кромкой (её покупают, и она весит), в отличие от
+  // раскройной в знаменателе длины. Основа — СЕГОДНЯШНЯЯ: применяли, возможно, при другой, и
+  // именно это проверяет пересчёт ниже. ИСТОЧНИК основы назван честно: плотность — артикула, а
+  // ширина сознательно берётся с ПЕРЕОПРЕДЕЛЕНИЯ строки BOM, когда оно есть (fullRollWidthOf) —
+  // «основа артикула» отправляла бы проверять не то поле. Ручной ввод в кг никто не переводил —
+  // про него молчим.
+  if ((isMarker || isDxf) && bomUnitKind(unit) === 'kg') {
+    explain.push(
+      weightBasis.ok
+        ? `килограммы — через длину: метры × ${weightBasisLabel(weightBasis.basis)} ÷ 100000. Основа сегодняшняя: плотность — артикула, ширина — строки BOM, если она переопределяет артикул`
+        : `килограммы считаются через длину, но сегодня основы веса нет: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`,
     );
   }
 
@@ -953,18 +1001,27 @@ function NormSummary({
     perSize.length > 0 && !positive(scalar) && !positive(draft.quantity)
       ? sizeIds.filter((id) => !coveredSizes.has(id))
       : [];
-  // Сравнение «было/сейчас» определено только для единиц длины (кг — Ф3, конверсии ещё нет), и
-  // делить площадь без раскройной ширины не на что. Оба факта известны ЗДЕСЬ, из пропсов, — и
-  // решаются до монтирования тяжёлой части: качать мегабайты DXF ради строки, которую всё равно не
-  // с чем сравнить, незачем. Причина по ширине называется двояко не из вежливости: cuttingWidthOf
-  // отдаёт пустую строку и когда ширина не заполнена, и когда кромка съела её целиком.
+  // Сравнение «было/сейчас» определено для метров, сантиметров и (с Ф3) килограммов — кг при
+  // условии, что у слота есть основа веса; делить площадь без раскройной ширины не на что. Все
+  // три факта известны ЗДЕСЬ, из пропсов, — и решаются до монтирования тяжёлой части: качать
+  // мегабайты DXF ради строки, которую всё равно не с чем сравнить, незачем. Причина по ширине
+  // называется двояко не из вежливости: cuttingWidthOf отдаёт пустую строку и когда ширина не
+  // заполнена, и когда кромка съела её целиком. Отказ кг-слота называет, ЧЕГО не хватает —
+  // ширины или плотности: «единица не принимает» отправила бы оператора менять единицу вместо
+  // того, чтобы заполнить артикул.
   const unitStep = bomUnitStep(unit);
   const recheckBlocked =
     unitStep == null
-      ? `для единицы «${unit || '—'}» пересчёт по текущим выкройкам пока не считается — сравнение умеет только метры и сантиметры`
-      : !(parseDecimalNumber(articleWidth) > 0)
-        ? 'пересчёт по текущим выкройкам не делается: раскройная ширина артикула неизвестна — либо не заполнена ширина рулона, либо кромка съедает её целиком'
-        : '';
+      ? unit
+        ? `для единицы «${unit}» пересчёт по текущим выкройкам не считается — сравнивать умеем метры, сантиметры и килограммы`
+        : // Пустая единица — не «неизвестная»: у неё есть адресная починка, и отказ обязан её
+          // называть — заполнить единицу на вкладке BOM, а не менять что-то в рецепте.
+          'у слота не заполнена единица — норма пишется и читается в единице слота; заполните её на вкладке BOM'
+      : bomUnitKind(unit) === 'kg' && !weightBasis.ok
+        ? `пересчёт по текущим выкройкам не делается: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`
+        : !(parseDecimalNumber(articleWidth) > 0)
+          ? 'пересчёт по текущим выкройкам не делается: раскройная ширина артикула неизвестна — либо не заполнена ширина рулона, либо кромка съедает её целиком'
+          : '';
 
   return (
     <div className='flex flex-col gap-1'>
@@ -1029,6 +1086,7 @@ function NormSummary({
                     lineKey={draft.bomLineKey}
                     unit={unit}
                     articleWidth={articleWidth}
+                    weightBasis={weightBasis}
                     sizeIds={sizeIds}
                     sizeNameById={sizeNameById}
                     saved={perSize}
@@ -1447,12 +1505,35 @@ function SlotUsageRow({
   const materialId = effectiveMaterialId(draft, slot);
   const article = articleForUsage(slot, material, materialId);
   const isMeasured = measured(slot?.section);
+  // "Pinned" = пин на ДРУГОЙ артикул, чем у слота: пин обратно на свой же артикул — та же ткань,
+  // и переопределение ширины на строке всё ещё описывает её. То же условие уходит в cuttingWidthOf.
+  const pinnedDifferent = draft.materialId > 0 && draft.materialId !== slot?.materialId;
+  // ОСНОВА ВЕСА кг-слота (Ф3) резолвится ЗДЕСЬ — единственным местом, у которого есть и
+  // эффективный артикул, и строка, и факт пина, — и раздаётся готовой всем инструментам ниже
+  // (раскладка, выкройки, пересчёт): ни одно из них не должно выбирать ширину и плотность само.
+  const weightBasis = weightBasisOf(material, slot, pinnedDifferent);
   const legacyCountedMeasured =
     isMeasured &&
     !!draft.quantity.trim() &&
     !draft.consumption.trim() &&
     draft.sizeConsumptions.length === 0;
-  const unit = article?.unit?.trim() || slot?.unit?.trim() || '';
+  // ЕДИНИЦА НОРМЫ — ЕДИНИЦА СТРОКИ BOM, И ТОЛЬКО ОНА. Норма хранится и читается сервером в
+  // единице СТРОКИ; единица артикула — это единица СКЛАДА, и это ДВЕ РАЗНЫЕ единицы: пин
+  // колорвея на артикул другой размерности ЗАКОНЕН, сервер сам конвертирует норму слота в
+  // единицу склада для закупки (ветка «слот в метрах, склад в кг» в
+  // internal/dto/production_material_plan.go). Старый порядок «артикул первым» не конвертировал,
+  // а ПЕРЕИМЕНОВЫВАЛ: пин kg-артикула на строку с 1.42 метра показывал «1.42 кг» — молча, с
+  // сохранением источника нормы, ошибкой в ~20 раз прямо в себестоимости и закупке.
+  //
+  // ФОЛБЭКА В ЕДИНИЦУ АРТИКУЛА НА ПУСТОЙ ЕДИНИЦЕ СЛОТА ТОЖЕ НЕТ, и это исправление, а не
+  // потеря: фолбэк срабатывал ровно на строке без единицы — и тогда инструменты ЗАПИСЫВАЛИ
+  // число в единице артикула, которую не читает никто (сервер и половина прогонов читают
+  // единицу СЛОТА; прогоны на пустой единице честно отказывают — контракты расходились).
+  // Пустая единица теперь один ответ на всех поверхностях: отказ, называющий починку —
+  // заполнить единицу на вкладке BOM, — а не догадка, которую негде проверить. Плашка артикула
+  // и цена законно остаются в единицах самого артикула (articleForUsage / unitPrice) — их не
+  // трогать.
+  const unit = slot?.unit?.trim() || '';
   const missingArticle = !!slot && materialId === 0;
 
   // ── ШТАМП НОРМЫ И РАСХОЖДЕНИЕ (Ф6.8) ────────────────────────────────────────────────────
@@ -1534,8 +1615,30 @@ function SlotUsageRow({
                   slot={slot}
                   materials={materials}
                   canEdit={canEdit}
+                  // СМЕНА ПИНА НА КГ-СЛОТЕ СНИМАЕТ ЧИСЛО НОРМЫ (и провенанс вместе с ним — как
+                  // это делает смена слота, SlotPicker ниже). Кг-норма ЗАКОДИРОВАЛА в себе основу веса КОНКРЕТНОГО
+                  // артикула (полная ширина × плотность, toBomUnit): маркер 2 м на артикуле
+                  // 150 см × 200 г/м² записан как 0.6 кг, и после пина на 180 см × 250 г/м²
+                  // строка продолжала бы обещать 0.6 при правильных 0.9 — прогон объявил бы
+                  // честный факт перерасходом +50%. На слотах в метрах/сантиметрах число НЕ
+                  // трогается: длина от артикула не зависит (за шириной раскладки следит
+                  // отдельная проверка ширины). Сравниваются ЭФФЕКТИВНЫЕ артикулы: «default» ↔
+                  // явный пин на артикул самого слота — та же ткань, и чистить нечего.
+                  //
+                  // НИ В КОЕМ СЛУЧАЕ не «сбросить провенанс, оставив число»: марочное число
+                  // содержит отходы ВНУТРИ, и, став manual, оно получило бы сверху процент
+                  // раскроя слота — двойной учёт. Либо число уходит вместе с источником, либо
+                  // не трогается ничего.
                   onChange={(materialId) => {
-                    onChange({ materialId });
+                    const patch: Partial<UsageDraft> = { materialId };
+                    const effectiveBefore = draft.materialId || slot?.materialId || 0;
+                    const effectiveAfter = materialId || slot?.materialId || 0;
+                    if (bomUnitKind(unit) === 'kg' && effectiveBefore !== effectiveAfter) {
+                      patch.consumption = '';
+                      patch.sizeConsumptions = [];
+                      Object.assign(patch, MANUAL_PROVENANCE);
+                    }
+                    onChange(patch);
                     setPinOpen(false);
                   }}
                 />
@@ -1572,7 +1675,30 @@ function SlotUsageRow({
             // grossing the new slot's wastage onto a length that never contained the new
             // cloth's cutting waste — understating the line, with no marker on the new slot for
             // the operator to notice it by. Same class of desync as retyping the number.
-            onChange={(bomLineKey) => onChange({ bomLineKey, materialId: 0, ...MANUAL_PROVENANCE })}
+            //
+            // ЕСЛИ ЕДИНИЦА НОВОГО СЛОТА — ДРУГАЯ, СНИМАЮТСЯ И САМИ ЧИСЛА (скаляр, пер-размерные
+            // и quantity). Тот же класс рассинхрона, что у провенанса выше, только хуже: единица
+            // нормы — это единица СЛОТА, число её с собой не несёт, и перенос «1.42» из слота в
+            // метрах в слот в сантиметрах молча превращал МЕТРЫ в САНТИМЕТРЫ — записанной в
+            // рецепт ошибкой масштаба в 100 раз, которую половина прогонов честно предъявила бы
+            // как ±99…9900% к норме. Сравнение — по смыслу (sameNormUnit): «м» → «metres»
+            // переезжает с числом, «м» → «см» и «шт» → «пар» — без. Слот, которого больше нет
+            // (или без единицы), против слота с единицей — тоже «другая»: единицу старого числа
+            // проверить нечем, а не угадывать — правило всех инструментов этой строки.
+            onChange={(bomLineKey) => {
+              const next = bomItems.find((item) => item.lineKey === bomLineKey);
+              const patch: Partial<UsageDraft> = {
+                bomLineKey,
+                materialId: 0,
+                ...MANUAL_PROVENANCE,
+              };
+              if (!sameNormUnit(unit, next?.unit)) {
+                patch.consumption = '';
+                patch.sizeConsumptions = [];
+                patch.quantity = '';
+              }
+              onChange(patch);
+            }}
           />
         </label>
 
@@ -1602,11 +1728,8 @@ function SlotUsageRow({
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               slotWastagePercent={slot?.wastagePercent ?? ''}
-              articleWidth={cuttingWidthOf(
-                material,
-                slot,
-                draft.materialId > 0 && draft.materialId !== slot?.materialId,
-              )}
+              articleWidth={cuttingWidthOf(material, slot, pinnedDifferent)}
+              weightBasis={weightBasis}
             />
             {/* Ф4: измеренный маркером расход этого слота, применяемый в ЭТОТ драфт — через
                 тот же onChange, которым staged-рецепт и живёт. */}
@@ -1619,15 +1742,10 @@ function SlotUsageRow({
               // The article's CUTTING width — roll minus the кромка on both edges — because
               // that is the width a marker is laid on and records. The pinned/linked material's
               // catalog figures come first (a colourway pin can be a different cloth), the
-              // slot's own otherwise.
-              // "Pinned" here means pinned to a DIFFERENT article than the slot's default: a pin
-              // back to the slot's own article is the same cloth, and the line's own width
-              // override still describes it.
-              articleWidth={cuttingWidthOf(
-                material,
-                slot,
-                draft.materialId > 0 && draft.materialId !== slot?.materialId,
-              )}
+              // slot's own otherwise ("pinned" = pinned to a DIFFERENT article, see pinnedDifferent).
+              articleWidth={cuttingWidthOf(material, slot, pinnedDifferent)}
+              // Основа веса кг-слота — та же, что у остальных инструментов строки (см. выше).
+              weightBasis={weightBasis}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
@@ -1652,11 +1770,8 @@ function SlotUsageRow({
                 lineKey={draft.bomLineKey}
                 unit={unit}
                 wastagePercent={slot?.wastagePercent ?? ''}
-                articleWidth={cuttingWidthOf(
-                  material,
-                  slot,
-                  draft.materialId > 0 && draft.materialId !== slot?.materialId,
-                )}
+                articleWidth={cuttingWidthOf(material, slot, pinnedDifferent)}
+                weightBasis={weightBasis}
                 sizeIds={sizeIds}
                 sizeNameById={sizeNameById}
                 canEdit={canEdit}
@@ -1675,6 +1790,7 @@ function SlotUsageRow({
                 draft={draft}
                 sizeIds={sizeIds}
                 article={article}
+                unit={unit}
                 canEdit={canEdit}
                 sizeNameById={sizeNameById}
                 onChange={onChange}
@@ -1687,6 +1803,7 @@ function SlotUsageRow({
                     draft={draft}
                     sizeIds={sizeIds}
                     article={article}
+                    unit={unit}
                     canEdit={canEdit}
                     sizeNameById={sizeNameById}
                     onChange={onChange}

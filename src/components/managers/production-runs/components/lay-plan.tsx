@@ -1,5 +1,6 @@
 import {
   common_ProductionRun,
+  common_ProductionRunCutReceipt,
   common_ProductionRunLay,
   common_ProductionRunLaySection,
 } from 'api/proto-http/admin';
@@ -15,11 +16,20 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { wireInt } from 'components/managers/tech-card/components/schema';
+import {
+  ClothReport,
+  buildClothReport,
+  isLayFactFrozen,
+  layClothInput,
+  pairNormInput,
+} from '../utils/cloth-per-unit';
 import { LayCard } from './lay-card';
 import { buildLaySectionPlotterFile } from './lay-plotter';
 import { LayCoverageTable } from './lay-coverage-table';
 import { LayEditor, LaySlotOption } from './lay-editor';
+import { useCutReceipts } from './useCutReceipts';
 import { layErrorMessage, useDeleteLay, useRunLays, useSaveLay } from './useLays';
+import { useRunNormCard } from './useRunNormCard';
 
 // Слоты, которые вообще можно настелить: рулонные секции BOM. Фурнитура, нитки и упаковка настила
 // не имеют, и предлагать их в выборе слота значило бы приглашать в отказ сервера (§4.3 шаг 5).
@@ -57,7 +67,18 @@ export function LayPlan({
   const { dictionary } = useDictionary();
   const { showMessage } = useSnackBarStore();
   const { data, isLoading, isError } = useRunLays(runId, runId > 0);
-  const { data: techCard } = useTechCard(techCardId || undefined);
+  // isError карточки нужен отдельно от data: «ещё читается» и «запрос упал» — разные состояния,
+  // и строка «к норме» на карточке настила обязана назвать второе словами, а не исчезать молча.
+  const { data: techCard, isError: techCardFailed } = useTechCard(techCardId || undefined);
+  // НОРМА — из снапшота ревизии, по которой прогон создан (когда она есть и принадлежит этой
+  // карте); живая карточка — только фолбэк, и подпись сравнения его называет. Всё остальное на
+  // этом экране (слоты, ярлыки, редактор настилов) ЗАКОННО живёт живой карточкой: настил — план
+  // над сегодняшним BOM, а норма — обещание той ревизии, по которой партию кроят.
+  const { normCard, normBasis, releasePending } = useRunNormCard(run, techCard);
+  // Строки приёмки кроя — ТЕМ ЖЕ ключом, что блок приёмки ниже (cutReceiptKeys.list): React Query
+  // отдаёт оба блока из одного ответа, лишнего запроса нет, и «ткань на изделие» на карточке
+  // настила не может разойтись с итогом в таблице приёмки.
+  const { data: receiptData } = useCutReceipts(runId, runId > 0);
 
   const del = useDeleteLay();
   const reaffirm = useSaveLay();
@@ -137,6 +158,52 @@ export function LayPlan({
     () => (id: number) => findInDictionary(dictionary, id, 'size') || String(id),
     [dictionary],
   );
+
+  // ТКАНЬ НА ИЗДЕЛИЕ (Ф4) для карточек настилов. Считается ЗДЕСЬ, а не в карточке: join строк
+  // приёмки с настилом и нормой пары — решение о значении чисел, и оно одно на оба экрана шага 3
+  // (utils/cloth-per-unit); карточка остаётся чистой функцией от своих пропсов.
+  const factFrozen = isLayFactFrozen(run.run?.status);
+  const clothByLay = useMemo(() => {
+    const m = new Map<string, ClothReport>();
+    // Пока строки приёмки не приехали, отчёта нет ВОВСЕ (карточка молчит): отказ «крой не
+    // отчитан» на недогруженном списке был бы ложью.
+    if (!receiptData) return m;
+    const byLay = new Map<string, common_ProductionRunCutReceipt[]>();
+    for (const r of receiptData.receipts ?? []) {
+      const k = r.layKey ?? '';
+      const list = byLay.get(k);
+      if (list) list.push(r);
+      else byLay.set(k, [r]);
+    }
+    for (const lay of lays) {
+      const key = lay.layKey ?? '';
+      m.set(
+        key,
+        buildClothReport(
+          [layClothInput(lay, byLay.get(key) ?? [], lay.name || lay.bomItemName || 'настил')],
+          factFrozen,
+          // Ревизия прогона ещё читается → norm = undefined: сравнение молчит, а не мерится
+          // «пока» живой картой. Карточка (снапшот или живая) не приехала → тоже undefined.
+          // Запрос карточки УПАЛ и снапшота нет → 'card-failed': молчание было бы неотличимо
+          // от вечной загрузки, и отказ называет ошибку словами.
+          releasePending
+            ? undefined
+            : normCard
+              ? pairNormInput(
+                  normCard,
+                  wireInt(lay.colorwayId),
+                  lay.bomLineKey ?? '',
+                  wireInt(lay.bomItemId),
+                  normBasis,
+                )
+              : techCardFailed
+                ? 'card-failed'
+                : undefined,
+        ),
+      );
+    }
+    return m;
+  }, [receiptData, lays, factFrozen, releasePending, normCard, normBasis, techCardFailed]);
 
   // bom_item_id → line_key. Клетка покрытия и разбор по деталям называют слот ЧИСЛОВЫМ id, а
   // запись настила требует стабильного line_key — мост между ними тут, и он двусторонний: у
@@ -360,6 +427,7 @@ export function LayPlan({
                   onPlotter={(section, key) => void downloadLayPlotter(lay, section, key)}
                   plottingKey={plottingKey}
                   onReaffirm={() => reaffirmQuantities(lay)}
+                  cloth={clothByLay.get(lay.layKey || '')}
                 />
               ))}
             </div>

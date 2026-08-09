@@ -16,6 +16,7 @@ import { lazy, Suspense, useState } from 'react';
 import { type Control } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
+import type { WeightBasisResolution } from './nesting/fabric-weight';
 import type { TechCardFormData } from './schema';
 import { useFabricDxfPieces } from './use-fabric-dxf-pieces';
 
@@ -27,6 +28,7 @@ export function DxfApplyHint({
   unit,
   wastagePercent,
   articleWidth,
+  weightBasis,
   sizeIds,
   sizeNameById,
   canEdit,
@@ -39,6 +41,8 @@ export function DxfApplyHint({
   wastagePercent: string;
   /** РАСКРОЙНАЯ ширина эффективного артикула, см (рулон − 2×кромка). '' = неизвестна. */
   articleWidth: string;
+  /** Основа веса кг-слота (Ф3) — резолвит строка рецепта, сюда приходит готовой. */
+  weightBasis: WeightBasisResolution;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
@@ -78,6 +82,7 @@ export function DxfApplyHint({
             unit={unit}
             wastagePercent={wastagePercent}
             articleWidth={articleWidth}
+            weightBasis={weightBasis}
             sizeIds={sizeIds}
             sizeNameById={sizeNameById}
             canEdit={canEdit}
