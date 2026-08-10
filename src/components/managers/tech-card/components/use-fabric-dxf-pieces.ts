@@ -29,9 +29,28 @@ type AliasRow = {
 };
 type BomRow = { lineKey?: string; section?: string; purpose?: string; name?: string };
 
+/**
+ * Привязка «деталь → ткань», ЗАЯВЛЕННАЯ В РЕЦЕПТЕ КОЛОРВЕЯ: строка рецепта с ссылкой на деталь и на
+ * слот. Второй, равноправный источник комплекта — и на практике ОСНОВНОЙ.
+ *
+ * Изначально комплект собирался только по `pieces[].materials[].bomLineKey` (вкладка деталей кроя,
+ * таблица tech_card_piece_material), и рассуждение было правильным по форме: ткань детали заявлена
+ * на самой детали. Но поток, которым пользуются, — другой: «+ добавить материал к детали» на вкладке
+ * колорвеев пишет СТРОКУ РЕЦЕПТА (tech_card_colorway_usage с piece_id), а не материал детали. На
+ * бете это видно в лоб: по всей базе в tech_card_piece_material девять строк на три карточки, и лишь
+ * одна из них вообще называет ткань, — тогда как рецепты с привязкой к детали заполнены. Комплект,
+ * собранный по одному первому источнику, оставался пустым, кнопка «по выкройкам» не появлялась, и
+ * оператор, честно назначивший ткань каждой детали, видел пустую строку без объяснений.
+ *
+ * Поэтому источника ДВА, и они объединяются. Пересечение безопасно: деталь, названная обоими,
+ * входит в комплект один раз (дедуп по ключу детали).
+ */
+export type RecipePieceLink = { pieceLineKey?: string; bomLineKey?: string };
+
 export function useFabricDxfPieces(
   control: Control<TechCardFormData>,
   lineKey: string,
+  recipeLinks: readonly RecipePieceLink[] = [],
 ): { pieces: DxfNormPiece[]; unaliasedPieces: string[] } {
   const bomRows = (useWatch({ control, name: 'bomItems' }) ?? []) as BomRow[];
   const pieceRows = (useWatch({ control, name: 'pieces' }) ?? []) as PieceRow[];
@@ -79,21 +98,36 @@ export function useFabricDxfPieces(
       if (!list.some((r) => r.block === block)) list.push({ block, scopeKey });
       byPiece.set(key, list);
     }
+    // Детали, назначенные этой ткани СТРОКАМИ РЕЦЕПТА (второй источник, см. RecipePieceLink).
+    // Ключи деталей нормализуются так же, как всюду здесь: trim + lower.
+    const byRecipe = new Set<string>();
+    for (const r of recipeLinks) {
+      const key = (r.pieceLineKey ?? '').trim().toLowerCase();
+      const line = (r.bomLineKey ?? '').trim();
+      if (!key || !line) continue;
+      if ((scopes.find((s) => s.lines.some((l) => l.lineKey === line))?.key ?? '') === scopeKey) {
+        byRecipe.add(key);
+      }
+    }
+
     const out: DxfNormPiece[] = [];
     const missing: string[] = [];
     for (const p of pieceRows) {
       const key = (p.lineKey ?? '').trim().toLowerCase();
       if (!key) continue;
-      // Деталь принадлежит ЭТОЙ ткани, если хоть одна её строка материалов ссылается на слот этого
-      // скоупа. Дублирование (`fusingBomLineKey`) сюда НЕ входит: клеевая — другая ткань, у неё свой
-      // слот и своя норма.
-      const ownsScope = (p.materials ?? []).some((m) => {
-        const line = (m.bomLineKey ?? '').trim();
-        if (!line) return false;
-        return (
-          (scopes.find((s) => s.lines.some((l) => l.lineKey === line))?.key ?? '') === scopeKey
-        );
-      });
+      // Деталь принадлежит ЭТОЙ ткани, если её называет ЛИБО строка материалов самой детали, ЛИБО
+      // строка рецепта колорвея (второй источник — на практике основной). Дублирование
+      // (`fusingBomLineKey`) сюда НЕ входит ни в одном из источников: клеевая — другая ткань, у неё
+      // свой слот и своя норма.
+      const ownsScope =
+        byRecipe.has(key) ||
+        (p.materials ?? []).some((m) => {
+          const line = (m.bomLineKey ?? '').trim();
+          if (!line) return false;
+          return (
+            (scopes.find((s) => s.lines.some((l) => l.lineKey === line))?.key ?? '') === scopeKey
+          );
+        });
       if (!ownsScope) continue;
       const refs = byPiece.get(key);
       const name = p.name?.trim() || key;
@@ -108,5 +142,5 @@ export function useFabricDxfPieces(
       });
     }
     return { pieces: out, unaliasedPieces: missing };
-  }, [aliasRows, pieceRows, scopes, scopeKey]);
+  }, [aliasRows, pieceRows, scopes, scopeKey, recipeLinks]);
 }

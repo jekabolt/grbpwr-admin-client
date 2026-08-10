@@ -68,6 +68,7 @@ import {
 import { sectionShort } from './bom-line-picker';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
+import type { RecipePieceLink } from './use-fabric-dxf-pieces';
 import {
   createColorwayErrorMessage,
   recipeSaveErrorMessage,
@@ -884,6 +885,7 @@ function NormSummary({
   sizeNameById,
   slotWastagePercent,
   articleWidth,
+  recipeLinks,
   weightBasis,
 }: {
   draft: UsageDraft;
@@ -893,6 +895,8 @@ function NormSummary({
   sizeNameById: Map<number, string>;
   slotWastagePercent: string;
   articleWidth: string;
+  /** Привязки «деталь → слот» из строк рецепта — второй источник комплекта деталей. */
+  recipeLinks?: readonly RecipePieceLink[];
   /** Основа веса кг-слота (Ф3) — резолвится строкой (SlotUsageRow), одна на все инструменты. */
   weightBasis: WeightBasisResolution;
 }) {
@@ -1095,6 +1099,7 @@ function NormSummary({
                     weightBasis={weightBasis}
                     sizeIds={sizeIds}
                     sizeNameById={sizeNameById}
+                    recipeLinks={recipeLinks}
                     saved={perSize}
                   />
                 </Suspense>
@@ -1487,6 +1492,7 @@ function SlotUsageRow({
   canEdit,
   markers,
   cardMarkersAllColorways,
+  recipeLinks,
   colorwayId,
   onChange,
   onRemove,
@@ -1504,6 +1510,8 @@ function SlotUsageRow({
    * раскладок лежат в соседнем колорвее, и оператор видит их на вкладке выкроек.
    */
   cardMarkersAllColorways?: common_TechCardMarkerSummary[];
+  /** Привязки «деталь → слот» из строк рецепта — второй источник комплекта деталей. */
+  recipeLinks?: readonly RecipePieceLink[];
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
@@ -1743,6 +1751,7 @@ function SlotUsageRow({
               sizeNameById={sizeNameById}
               slotWastagePercent={slot?.wastagePercent ?? ''}
               articleWidth={cuttingWidthOf(material, slot, pinnedDifferent)}
+              recipeLinks={recipeLinks}
               weightBasis={weightBasis}
             />
             {/* Ф4: измеренный маркером расход этого слота, применяемый в ЭТОТ драфт — через
@@ -1792,6 +1801,7 @@ function SlotUsageRow({
                 // Строка без нормы обязана услышать, ЧЕГО не хватает для расчёта по выкройкам, а не
                 // остаться с одним «ввести руками…». Где норма уже есть — молчим: там это шум.
                 explainWhenIdle={!hasNorm}
+                recipeLinks={recipeLinks}
                 onApply={(patch) => onChange(patch)}
               />
             )}
@@ -1982,6 +1992,7 @@ function PieceRecipeCard({
   materials,
   markers,
   cardMarkersAllColorways,
+  recipeLinks,
   colorwayId,
   sizeIds,
   sizeNameById,
@@ -1998,6 +2009,8 @@ function PieceRecipeCard({
   markers?: common_TechCardMarkerSummary[];
   /** Раскладки по всем колорвеям — только для объяснения пустоты, см. SlotUsageRow. */
   cardMarkersAllColorways?: common_TechCardMarkerSummary[];
+  /** Привязки «деталь → слот» из строк рецепта — второй источник комплекта деталей. */
+  recipeLinks?: readonly RecipePieceLink[];
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
@@ -2044,6 +2057,7 @@ function PieceRecipeCard({
               materials={materials}
               markers={markers}
               cardMarkersAllColorways={cardMarkersAllColorways}
+              recipeLinks={recipeLinks}
               colorwayId={colorwayId}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
@@ -2613,6 +2627,16 @@ function ColorwayRecipeEditor({
     [colorway.usages, bomItems, pieces],
   );
   const [usages, setUsages] = useState<UsageDraft[]>(baseline);
+  // ПРИВЯЗКИ «ДЕТАЛЬ → СЛОТ» ИЗ ЖИВЫХ СТРОК РЕЦЕПТА — второй источник комплекта деталей для расчёта
+  // по выкройкам, и на практике основной: «+ добавить материал к детали» пишет именно строку
+  // рецепта, а не материал детали на её вкладке (см. useFabricDxfPieces). Берутся из ЧЕРНОВИКА, а
+  // не из сохранённого рецепта: деталь, которой ткань назначили минуту назад и ещё не сохранили,
+  // обязана участвовать в площади — иначе кнопка появляется только после сохранения, и связь
+  // «сделал → увидел» рвётся.
+  const recipeLinks = useMemo(
+    () => usages.map((u) => ({ pieceLineKey: u.pieceLineKey, bomLineKey: u.bomLineKey })),
+    [usages],
+  );
   // Re-sync when the read changes (after a save's refetch) unless the user has uncommitted edits.
   useEffect(() => {
     if (dirty) return;
@@ -2815,6 +2839,7 @@ function ColorwayRecipeEditor({
                   materials={materials}
                   markers={cwMarkers}
                   cardMarkersAllColorways={allCardMarkers}
+                  recipeLinks={recipeLinks}
                   colorwayId={colorwayId}
                   sizeIds={sizeIds}
                   sizeNameById={sizeNameById}
@@ -2878,6 +2903,7 @@ function ColorwayRecipeEditor({
                 materials={materials}
                 markers={cwMarkers}
                 cardMarkersAllColorways={allCardMarkers}
+                recipeLinks={recipeLinks}
                 colorwayId={colorwayId}
                 sizeIds={sizeIds}
                 sizeNameById={sizeNameById}
