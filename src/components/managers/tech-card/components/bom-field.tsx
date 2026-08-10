@@ -16,7 +16,7 @@ import { MaterialModal } from 'components/managers/materials/components/material
 import {
   MaterialPicker,
   MaterialPickerDialog,
-  useMaterialOnHand,
+  useMaterialStockFacts,
 } from 'components/managers/materials/components/material-picker';
 import {
   MaterialThumb,
@@ -456,9 +456,9 @@ function BomItemRow({
   const linkedMaterial = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
-  // Warehouse balance for the plate's "· 41.6 m on hand". Only fetched once a line is actually
-  // linked AND being edited (this row only mounts inside the open editor dialog).
-  const onHand = useMaterialOnHand(linked);
+  // Warehouse facts for the plate's «склад: 41.6 m · средняя ≈ 1.05 EUR / m». Only fetched once a
+  // line is actually linked AND being edited (this row only mounts inside the open editor dialog).
+  const stockFacts = useMaterialStockFacts(linked);
 
   // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained). Fabric
   // dims read from the typed CTI attrs, falling back to the legacy flat fields.
@@ -494,7 +494,6 @@ function BomItemRow({
   const mirror = (catalogValue: string | undefined, field: string): string | undefined =>
     catalogValue?.trim() ? catalogValue : rowValue(field);
 
-  const unitValue = mirror(linkedMaterial?.unit, 'unit') ?? '';
   // #3: the unit price, its currency and the unit fold into a single read-only "8.00 EUR / m".
   // WHICH price that is comes from the shared ladder (bom-price.ts) — the line's own frozen
   // snapshot first, the article's current catalog price second — the very ladder the server costs
@@ -506,7 +505,22 @@ function BomItemRow({
     { unitPrice: rowValue('unitPrice'), currency: rowValue('currency'), unit: rowValue('unit') },
     linkedMaterial,
   );
-  const stockValue = onHand.get(materialId);
+  // СКЛАД — не третья ступень лестницы цены, а отдельный факт о материале, поэтому он и не живёт в
+  // resolveBomPrice: по средней строка не считается и себестоимостью она не становится. Обе
+  // величины берутся из ОДНОЙ строки ledger'а и меряны в единице МАТЕРИАЛА, которая может не
+  // совпадать с единицей строки, — подпись едет со своим числом, ступени не смешиваются.
+  const stock = stockFacts.get(materialId);
+  const stockUnit = stock?.unit ?? '';
+  const onHandLabel = stock?.onHand ? `${stock.onHand}${stockUnit ? ` ${stockUnit}` : ''}` : '';
+  // Валюта средней подписывается ВСЕГДА, даже когда совпадает с валютой строки: это база (склад
+  // усредняет закупки в разных валютах, приводя каждую к базовой), и без подписи два числа рядом
+  // прочтутся как одни и те же деньги. Знак ≈ говорит, что это оценка того, что уже лежит, а не
+  // котировка следующей закупки. Никаких конвертаций и процентов расхождения на клиенте: валюты
+  // разные, вычитать их нельзя.
+  const avgLabel = stock?.avgUnitCostBase
+    ? `средняя ≈ ${stock.avgUnitCostBase} ${stock.baseCurrency}${stockUnit ? ` / ${stockUnit}` : ''}`
+    : '';
+  const stockLine = join(onHandLabel, avgLabel);
 
   // Куда идти с этой ценой. «Заведите в справочнике» — правда ровно в одном случае из трёх, а
   // перенести каталожную цену на карту умеет только кнопка reprice на вкладке costing — которой на
@@ -614,12 +628,21 @@ function BomItemRow({
                       'composition not set'}
                   </Text>,
                 )}
+                {/* ЦЕНА — та ступень лестницы, по которой строка реально считается. */}
                 <Text variant='label' size='micro' className='truncate'>
-                  {join(
-                    linePrice.label,
-                    stockValue ? `${stockValue}${unitValue ? ` ${unitValue}` : ''} on hand` : '',
-                  ) || 'no price'}
+                  {linePrice.label || 'no price'}
                 </Text>
+                {/* СКЛАД — своей строкой, а не хвостом через «·» к цене. Котировка говорит, во что
+                    обойдётся СЛЕДУЮЩАЯ закупка, средняя — во что обошлось то, что уже лежит и что
+                    будет израсходовано; это разные величины в разных валютах, и поставленные
+                    подряд через точку они читаются как «было → стало». Расхождение между ними —
+                    информация, но увидеть её владелец должен как два подписанных числа, а не как
+                    разницу, которой не существует. */}
+                {stockLine ? (
+                  <Text variant='label' size='micro' className='truncate'>
+                    склад: {stockLine}
+                  </Text>
+                ) : null}
               </div>
             </div>
             <div className='mt-2 flex flex-wrap items-center gap-1.5'>
