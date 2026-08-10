@@ -8,6 +8,7 @@ import {
   stampWhen,
 } from 'components/managers/production-runs/components/useLays';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { Pill } from 'ui/components/pill';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
@@ -253,6 +254,22 @@ export function CuttingCoefficientSuggestion({
             sub={view === 'ready' ? 'множитель · как в поле выше' : 'поле принимает 1–3'}
           />
         </StatGrid>
+      ) : null}
+
+      {/* T7, волна 1: ГРАНИЦА ЭТОГО ЧИСЛА, сказанная там, где число видно. В тех-карте у строки
+          BOM есть внешне похожее поле «est. cutting wastage %» — но у него ДРУГАЯ база: он гроссит
+          NETTO-норму и оплачивает межлекальные выпады с концами настила (типично 15–30%), тогда
+          как дрейф здесь мерян от длины раскладки, где выпады уже внутри (типично единицы
+          процентов). Перенести эту медиану туда — занизить закупку на все выпады, линейно и
+          незаметно. Предупреждение стоит только когда медиана на экране: пока числа нет,
+          переносить нечего. */}
+      {view === 'ready' || view === 'outOfRange' ? (
+        <CalloutBox tone='warning'>
+          Это число — только для поля «коэффициент раскроя» этого артикула: дрейф мерян от
+          ИЗМЕРЕННОЙ длины раскладки, межлекальных выпадов и концов настила в нём нет. В «est.
+          cutting wastage %» на строке BOM тех-карты его не переносить — тот процент гроссит
+          NETTO-норму, и эта медиана занизила бы закупку на все выпады.
+        </CalloutBox>
       ) : null}
 
       {view === 'tooFew' ? (

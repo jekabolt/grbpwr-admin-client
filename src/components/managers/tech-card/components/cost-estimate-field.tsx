@@ -69,7 +69,21 @@ const statTone = (d?: number): 'up' | 'down' | undefined =>
  */
 function WastageCell({ m }: { m: StyleCostMaterialLine }) {
   if (m.wastageSource !== 'marker') {
-    return <>{decimalToInput(m.wastagePct) || <EmptyCell />}</>;
+    const pct = decimalToInput(m.wastagePct);
+    if (!pct) return <EmptyCell />;
+    // T7, волна 1: провенанс процента — тем же приёмом, что источник нормы в рецепте. Утверждение
+    // «введено руками» здесь клиентское, но честное: другого писателя у bom_item.wastage_percent
+    // сегодня не существует. Когда бекенд начнёт считать медиану по настилам и появится
+    // wastage_source, эта подпись станет ветвлением («медиана по N раскроям» / «введено руками»)
+    // — место для него ровно здесь.
+    return (
+      <span className='flex flex-col items-end gap-0.5'>
+        <span>{pct}</span>
+        <Text size='micro' variant='label' component='span'>
+          введено руками
+        </Text>
+      </span>
+    );
   }
   return (
     <span className='flex flex-col items-end gap-0.5'>

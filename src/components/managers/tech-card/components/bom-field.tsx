@@ -3,6 +3,7 @@ import {
   common_Material,
   common_TechCardBomKind,
   common_TechCardBomSection,
+  common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
@@ -55,6 +56,7 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { decimalToInput } from 'utils/decimal';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
@@ -82,6 +84,7 @@ import {
   roleSuggestions,
 } from './bom-roles';
 import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
+import { markersForLine } from './nesting/marker-io';
 import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 
@@ -294,7 +297,41 @@ function SlotIdentityFields({ index }: { index: number }) {
 // This style's use of the article — the ONLY three controls a linked line owns. Everything else on
 // a linked line is a catalog fact, rendered as a plate (below) rather than as disabled inputs.
 // No top padding: the GroupLabel's own top margin is the box's inner top space.
-function ThisStyleFields({ index }: { index: number }) {
+//
+// ПРОЦЕНТ РАСКРОЯ (T7, волна 1). У поля «est. cutting wastage %» здесь стоит разбор: что это за
+// число, откуда его брать и с чем его НЕЛЬЗЯ путать. Прежняя подпись («depends on marker
+// efficiency») не говорила ни того, ни другого — и главное, ничем не защищала от переноса сюда
+// коэффициента раскроя артикула: у того ДРУГАЯ база (измеренная длина раскладки, выпады уже
+// внутри), и его ~4% на месте нужных ~20% занижают закупку на все межлекальные выпады — линейно
+// и незаметно. Расчёт медианы по факту прошлых раскроев приедет отдельной волной на бекенде;
+// здесь — ровно то, что известно клиенту сегодня, без выдуманных чисел и умолчаний.
+function ThisStyleFields({
+  index,
+  material,
+  markers,
+}: {
+  index: number;
+  /** Привязанный артикул строки — ради его коэффициента раскроя (предупреждение о путанице). */
+  material?: common_Material;
+  /** Карточные раскладки (techCard.markers) — лестница «откуда взять процент» смотрит, есть ли
+   *  раскладка ЭТОГО слота: она сильнее любого процента, потому что её длина измерена. */
+  markers?: common_TechCardMarkerSummary[];
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
+  const lineKey = (useWatch({ control, name: `bomItems.${index}.lineKey` }) as string) ?? '';
+  const wastageValue = (
+    (useWatch({ control, name: `bomItems.${index}.wastagePercent` }) as string) ?? ''
+  ).trim();
+  const rollGoods = isRollGoodsSection(rowSection);
+  // Прогонные однодневки отсеивает markersForLine (cardMarkers внутри) — совет «снимите норму с
+  // раскладки» на основании раскладки чужого заказа был бы советом взять число, которого нормой
+  // быть не может.
+  const slotMarkers = markersForLine(markers, lineKey);
+  // «Задан» — по правилу сервера: всё меньше единицы EffectiveCuttingCoefficient читает как «не
+  // задано», и предупреждать о числе, которое ни один расчёт не берёт, значило бы пугать пустотой.
+  const coefRaw = decimalToInput(material?.cuttingCoefficient);
+  const coefSet = Number.isFinite(Number(coefRaw)) && Number(coefRaw) >= 1;
   return (
     <div className='border border-borderColor px-2 pb-2'>
       <GroupLabel>how this style uses it</GroupLabel>
@@ -304,12 +341,67 @@ function ThisStyleFields({ index }: { index: number }) {
           label='fabric direction'
           items={techCardFabricDirectionOptions}
         />
-        <DecimalField name={`bomItems.${index}.wastagePercent`} label='est. cutting wastage %' />
+        <div className='flex flex-col gap-0.5'>
+          <DecimalField name={`bomItems.${index}.wastagePercent`} label='est. cutting wastage %' />
+          {/* ПРОВЕНАНС — тем же приёмом, что у источника нормы и у припуска в dxf-диалоге.
+              Утверждение локальное и потому честное: единственный писатель этого поля сегодня —
+              рука; когда бекенд начнёт считать медиану по настилам, здесь появится и второй
+              источник («медиана по N раскроям»), но выдумывать его раньше расчёта нельзя. */}
+          {wastageValue !== '' && (
+            <Text size='nano' variant='label'>
+              введено руками
+            </Text>
+          )}
+        </div>
       </div>
-      <Text variant='label' size='micro' className='mt-1'>
-        Wastage is an estimate — the real figure depends on marker efficiency at cutting and is set
-        per production run.
-      </Text>
+      {rollGoods ? (
+        <div className='mt-1 space-y-1'>
+          <Text variant='label' size='micro'>
+            Множитель на NETTO-норму: к закупке и в себестоимость идёт норма × (1 + %/100). Он
+            оплачивает то, чего в netto нет: межлекальные выпады, концы настила, стыки и обход
+            пороков. Кромка сюда НЕ входит — она уже оплачена делением площади на раскройную ширину.
+            Норму «из раскладки» процент не гроссит вовсе: измеренная длина уже содержит выпады. На
+            прогоне процент можно переопределить фактическим.
+          </Text>
+          {slotMarkers.length > 0 ? (
+            // Раскладка слота есть — процент этой строке скоро не понадобится вовсе, и это
+            // сильнее любой калибровки: звать оператора к измеренному числу, а не к оценке.
+            <CalloutBox tone='note'>
+              У карточки есть раскладка этого слота — снимите норму с неё в рецепте колорвея
+              (вкладка colorways): длина раскладки ИЗМЕРЕНА и уже содержит межлекальные выпады,
+              процент перестанет применяться. Усадку и пороки артикула доначислит его коэффициент
+              раскроя.
+            </CalloutBox>
+          ) : (
+            // Фактов нет — и это ОСНОВНОЕ состояние после выката, а не исключение: на живой базе
+            // ноль настилов с замером. Никаких «обычно 15–20%» как подсказки к вводу: молча
+            // подставленное умолчание входит в закупку линейно и не видно ни в одном числе.
+            <Text variant='label' size='micro'>
+              Посчитать процент по факту пока не из чего: медиана по прошлым раскроям появится после
+              первых настилов с замером полотна — снимите раскладку и внесите факт расхода на
+              настиле прогона. До тех пор процент оценивается руками; типовой диапазон нарочно не
+              подсказан — на конкретной модели он врёт, а ошибка входит в закупку линейно.
+            </Text>
+          )}
+          {coefSet && (
+            // Главная ошибка, от которой волна 1 защищает: рядом с полем живёт ДРУГОЙ множитель
+            // отходов. Предупреждение стоит только когда коэффициент у артикула правда есть —
+            // то есть ровно когда есть число, которое можно перепутать.
+            <CalloutBox tone='warning'>
+              Не путать с коэффициентом раскроя артикула ({coefRaw}): тот — множитель к ИЗМЕРЕННОЙ
+              длине раскладки, межлекальных выпадов в нём нет. Вписать его сюда — занизить закупку
+              на все выпады.
+            </CalloutBox>
+          )}
+        </div>
+      ) : (
+        // Не рулонная строка: у фурнитуры и ниток нет ни раскладок, ни netto-геометрии — вся
+        // раскройная лестница выше была бы рассказом про чужое. Остаётся сама арифметика поля.
+        <Text variant='label' size='micro' className='mt-1'>
+          Множитель на норму строки: к закупке и в себестоимость идёт норма × (1 + %/100) — запас на
+          отходы и обрезки. На прогоне может быть переопределён фактическим.
+        </Text>
+      )}
       <div className='mt-2'>
         <TextareaField
           name={`bomItems.${index}.comment`}
@@ -331,7 +423,15 @@ function ThisStyleFields({ index }: { index: number }) {
 // and, on the right, the three fields that genuinely belong to this style. An UNLINKED line keeps
 // the full manual form, because with no catalog article behind it those fields really are the
 // operator's.
-function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }) {
+function BomItemRow({
+  index,
+  highlight,
+  markers,
+}: {
+  index: number;
+  highlight?: boolean;
+  markers?: common_TechCardMarkerSummary[];
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const warnNoPrice = useNoPriceWarning();
   const materialId =
@@ -546,7 +646,7 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
             )}
           </div>
 
-          <ThisStyleFields index={index} />
+          <ThisStyleFields index={index} material={linkedMaterial} markers={markers} />
         </div>
         {colorwayHint}
         {createModal}
@@ -626,7 +726,9 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
         </div>
       </div>
 
-      <ThisStyleFields index={index} />
+      {/* Непривязанная строка: артикула нет, поэтому нет и предупреждения о его коэффициенте —
+          но лестница «откуда взять процент» работает и здесь, раскладка привязана к слоту. */}
+      <ThisStyleFields index={index} markers={markers} />
       {colorwayHint}
       {createModal}
     </div>
@@ -860,6 +962,7 @@ type BlockingUser = { colorwayId: number; sku: string };
 export function BomField({
   highlightComposition = 0,
   colorways,
+  markers,
 }: {
   highlightComposition?: number;
   /**
@@ -869,6 +972,12 @@ export function BomField({
    * that has to be checked before a delete rather than fixed up after it.
    */
   colorways?: common_AdminColorwayRef[];
+  /**
+   * Карточные раскладки как READ (techCard.markers) — для лестницы у поля «est. cutting
+   * wastage %»: раскладка слота делает процент ненужным, и об этом надо говорить там, где
+   * процент вводят. Форма о раскладках не знает ничего — они приходят только с чтением карточки.
+   */
+  markers?: common_TechCardMarkerSummary[];
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -1226,7 +1335,7 @@ export function BomField({
             sectionShort(bomWatch[editing]?.section),
           )}
         >
-          <BomItemRow index={editing} highlight={highlightActive} />
+          <BomItemRow index={editing} highlight={highlightActive} markers={markers} />
         </ConfirmationModal>
       )}
 

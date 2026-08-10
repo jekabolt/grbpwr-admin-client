@@ -1779,8 +1779,14 @@ export function TechCardForm({
                   </div>
                 )}
                 {/* The colourways as READ: their recipes are the one reference to a BOM article
-                    this form cannot clear itself, so the delete has to check them first. */}
-                <BomField highlightComposition={bomHighlight} colorways={techCard?.colorways} />
+                    this form cannot clear itself, so the delete has to check them first.
+                    Раскладки — тоже как READ: лестница у поля процента раскроя говорит «снимите
+                    норму с раскладки» только когда раскладка этого слота правда существует. */}
+                <BomField
+                  highlightComposition={bomHighlight}
+                  colorways={techCard?.colorways}
+                  markers={techCard?.markers}
+                />
               </Section>
             </div>
 
