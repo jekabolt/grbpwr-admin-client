@@ -56,6 +56,7 @@ import {
   bomPurposeLabel,
   type RollGoodsLine,
 } from './bom-purpose';
+import { formatBomMoney, resolveBomPrice } from './bom-price';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 
 import {
@@ -1431,6 +1432,13 @@ export function TechPackDocument({
                 ]
                   .filter(Boolean)
                   .join(' · ');
+                // Та же лестница, что на плитке и в панели редактора (bom-price.ts): снапшот
+                // строки → иначе текущая каталожная цена артикула. Бумага печатала только снапшот,
+                // поэтому проценённый уже после привязки артикул уезжал на фабрику с прочерком.
+                const price = resolveBomPrice(
+                  { unitPrice: dec(b.unitPrice), currency: b.currency ?? '', unit: b.unit ?? '' },
+                  materialById.get(wireInt(b.materialId)),
+                );
                 return (
                   <tr key={i} className='break-inside-avoid'>
                     <td className={`${TD} text-center font-semibold`}>{i + 1}</td>
@@ -1450,7 +1458,15 @@ export function TechPackDocument({
                     <td className={TD}>{b.unit || '—'}</td>
                     {moneyAllowed(printScope) && (
                       <td className={`${TD} whitespace-nowrap text-right`}>
-                        {dec(b.unitPrice) ? `${dec(b.unitPrice)} ${b.currency ?? ''}` : '—'}
+                        {/* Без единицы: она стоит своей колонкой слева. */}
+                        {formatBomMoney(price.value, price.currency) || '—'}
+                        {/* Бумага не имеет права молчать о том, ЧЬЯ это цена: каталожная на карте
+                            не зафиксирована и до следующей закупки может уехать. Дрейф снапшота
+                            сюда НЕ печатается — это рабочая заметка экрана, а лист документа
+                            обязан показывать одно число, согласованное на карте. */}
+                        {price.source === 'catalog' && (
+                          <div className='text-labelColor'>catalog</div>
+                        )}
                       </td>
                     )}
                   </tr>
