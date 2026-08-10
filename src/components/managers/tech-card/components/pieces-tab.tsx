@@ -37,8 +37,9 @@ import {
   isCutSymmetryMarked,
   pieceCodeOptions,
 } from './piece-codes';
+import { derivePieceLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { normalizePieceName } from './piece-picker';
-import { TechCardFormData } from './schema';
+import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number];
@@ -510,6 +511,46 @@ export function PiecesTab({
   const selUnanswered = sel ? cutSymmetryUnanswered(sel.cutSymmetry, sel.piecesPerGarment) : false;
   const selArrow = grainlineArrow(sel?.grainline);
 
+  // СЛОИ ВЫБРАННОЙ ДЕТАЛИ ПО КОЛОРВЕЯМ (T4) — read-only проекция РЕЦЕПТА: вкладка деталей
+  // показывает, рецепт (COLORWAYS) редактирует — направление T3. Связь живёт в детальных строках
+  // tech_card_colorway_usage (замороженная tech_card_piece_material не читается), роль слоя —
+  // вывод из строки BOM (piece-layer-role.ts, зеркало entity.DerivePieceLayerRole).
+  const selLayerRows = useMemo(() => {
+    if (!selKey) return [] as Array<{ colorway: string; layers: string }>;
+    const bomItems = techCard?.techCard?.bomItems ?? [];
+    const resolveSlot = (u: { bomItemId?: number; bomLineKey?: string; bomItemIndex?: number }) => {
+      const id = wireInt(u.bomItemId);
+      if (id > 0) {
+        const byId = bomItems.find((b) => wireInt(b.id) === id);
+        if (byId) return byId;
+      }
+      if (u.bomLineKey) {
+        const byKey = bomItems.find((b) => b.lineKey === u.bomLineKey);
+        if (byKey) return byKey;
+      }
+      return u.bomItemIndex != null && u.bomItemIndex >= 0 ? bomItems[u.bomItemIndex] : undefined;
+    };
+    const out: Array<{ colorway: string; layers: string }> = [];
+    for (const c of techCard?.colorways ?? []) {
+      const bound = (c.usages ?? []).filter((u) => (u.pieceLineKey ?? '').trim() === selKey);
+      if (bound.length === 0) continue;
+      const parts: string[] = [];
+      const seen = new Set<string>();
+      for (const u of bound) {
+        const slot = resolveSlot(u);
+        if (!slot || seen.has(slot.lineKey ?? `${slot.id}`)) continue;
+        seen.add(slot.lineKey ?? `${slot.id}`);
+        const role = derivePieceLayerRole(slot.section, slot.purpose);
+        const caption = role.rollGoods ? pieceLayerRoleLabel(role) : '';
+        parts.push(caption ? `${slot.name?.trim() || '—'} · ${caption}` : slot.name?.trim() || '—');
+      }
+      if (parts.length === 0) continue;
+      const cwName = c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? ''}`;
+      out.push({ colorway: cwName, layers: parts.join(', ') });
+    }
+    return out;
+  }, [selKey, techCard?.colorways, techCard?.techCard?.bomItems]);
+
   // Удаление выбранной детали передаёт выбор СОСЕДУ (предыдущему по индексу, иначе следующему), а
   // не первой детали списка: при чистке хвоста в 40 строк панель, прыгающая каждый раз в начало,
   // заставляла бы заново прокручивать плитки после каждого удаления. Сосед берётся из снимка
@@ -525,7 +566,7 @@ export function PiecesTab({
     <>
       <Section
         title='детали кроя'
-        question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из какой ткани кроится каждая деталь в конкретном колорвее — редактора пока НЕТ ни на одной вкладке, столбец в cut list из-за этого пустой'
+        question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из каких тканей (слоёв) кроится деталь в конкретном колорвее — правится строками детали в рецепте на вкладке colorways; здесь это видно в панели выбранной детали'
         action={
           <div className='flex flex-wrap items-center gap-2'>
             {unmarked.pairing > 0 && (
@@ -892,6 +933,25 @@ export function PiecesTab({
                       откреплена от выноски
                     </Pill>
                   )}
+                </div>
+              )}
+
+              {/* Слои детали по колорвеям — read-only проекция рецепта (T4): из каких тканей она
+                  кроится и в какой роли каждая. Правится НЕ здесь: строками детали в рецепте
+                  колорвея (вкладка COLORWAYS). */}
+              {selLayerRows.length > 0 && (
+                <div className='flex flex-col gap-0.5'>
+                  <Text size='micro' variant='label' component='span' className='uppercase'>
+                    слои детали — из рецепта
+                  </Text>
+                  {selLayerRows.map((r, i) => (
+                    <Text key={i} size='micro' component='p'>
+                      <span className='font-medium'>{r.colorway}</span>: {r.layers}
+                    </Text>
+                  ))}
+                  <Text size='nano' variant='label' component='p'>
+                    редактируется на вкладке colorways — строками этой детали в рецепте колорвея
+                  </Text>
                 </div>
               )}
 

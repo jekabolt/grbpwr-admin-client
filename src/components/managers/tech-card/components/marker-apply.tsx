@@ -154,9 +154,6 @@ export function MarkerApplyHint({
   // подмену назначенной нормы применимой раскладкой нельзя делать МОЛЧА: о ней говорят пилюля
   // «норма не даёт расхода» на строке и колаут в диалоге (оба через notTheNorm/normRefusal).
   const preferred = useMemo(() => ranked.find((m) => !scalarNormRefusal(m)) ?? ranked[0], [ranked]);
-  // The card's fit reference — a scalar norm taken from a non-base size deserves a callout.
-  const baseSampleSizeId = (useWatch<TechCardFormData>({ name: 'baseSampleSizeId' }) ??
-    0) as number;
   // Сырьё продолжения: СЕГОДНЯШНИЕ строки выкроек карточки и её BOM (по нему резолвится, какие
   // листы обслуживают ткань этой раскладки — с 0267 лист привязан к НАЗНАЧЕНИЮ, а не к строке).
   // Читаются здесь, потому что форма карточки есть только здесь; сам отбор живёт в marker-rebuild.
@@ -312,12 +309,11 @@ export function MarkerApplyHint({
   // смешанной нормы нет одного размера, и она сюда не доходит — её гасит отказ.
   const chosenComp = compositionOf(chosen);
   const chosenSizeId = chosenComp.length === 1 ? chosenComp[0].sizeId : 0;
-  const offBaseSize =
-    baseSampleSizeId > 0 && chosenSizeId > 0 && chosenSizeId !== baseSampleSizeId;
   // Маркер размера, которого НЕТ в размерном ряду карточки (остался от снятого размера или
   // никогда в ряд не входил), — норма ниоткуда: spreadPct его не видит (он считается по размерам
-  // ряда), а offBaseSize молчит, пока базовый размер не заполнен. Нарочно НЕ зависит от
-  // baseSampleSizeId — это отдельный, более сильный факт.
+  // ряда). Прежний сосед offBaseSize («норма не с базового размера») умер вместе с ролью
+  // базового размера в костинге (T6): себестоимость стиля — среднее по ряду, и «не тот размер»
+  // перестал быть фактом о цене; spreadPct покрывает существенный разброс честнее.
   const offRunSize = chosenSizeId > 0 && sizeIds.length > 0 && !sizeIds.includes(chosenSizeId);
 
   // УСЛОВИЯ СЪЁМКИ на том маркере, который реально уйдёт в рецепт (Ф3). Ни одно из двух не
@@ -786,14 +782,12 @@ export function MarkerApplyHint({
               слота — {artW} см: расход не переносится между ширинами без пересчёта
             </CalloutBox>
           )}
-          {mode === 'scalar' && (offRunSize || offBaseSize || spreadPct > 5) && (
+          {mode === 'scalar' && (offRunSize || spreadPct > 5) && (
             <CalloutBox tone={offRunSize ? 'warning' : 'note'}>
               {[
                 offRunSize
                   ? `единая норма взята с размера ${sizeName(chosenSizeId)}, которого НЕТ в размерном ряду карточки`
-                  : offBaseSize
-                    ? `единая норма взята с размера ${sizeName(chosenSizeId)}, а базовый размер карточки — ${sizeName(baseSampleSizeId)}`
-                    : '',
+                  : '',
                 spreadPct > 5
                   ? `расход по размерам расходится на ${spreadPct.toFixed(0)}% — рассмотрите режим «по размерам»`
                   : '',

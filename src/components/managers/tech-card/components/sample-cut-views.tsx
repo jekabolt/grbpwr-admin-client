@@ -16,6 +16,7 @@ import {
   cutSymmetryUnanswered,
   grainlineArrow,
 } from './piece-codes';
+import { derivePieceLayerRole, isMainLayerRole } from './piece-layer-role';
 import { TechCardFormData } from './schema';
 
 // ---------------------------------------------------------------------------
@@ -71,12 +72,16 @@ type FormPiece = {
   calloutNumber?: number;
   note?: string;
   lineKey?: string;
-  // NOTE: `colorwayIndex` carries a colourway ID, not an index — the proto field was renamed to
-  // colorwayId and the form key was deliberately left alone (see mapTechCardToForm in schema.ts).
-  materials?: Array<{ colorwayIndex?: number; bomLineKey?: string; fusingBomLineKey?: string }>;
 };
 
-type FormBom = { id?: number; lineKey?: string; name?: string; unit?: string; section?: string };
+type FormBom = {
+  id?: number;
+  lineKey?: string;
+  name?: string;
+  unit?: string;
+  section?: string;
+  purpose?: string;
+};
 type FormCallout = { number?: number; mediaId?: number; posX?: string; posY?: string };
 
 export type CutPiece = {
@@ -140,40 +145,88 @@ export function useSampleCutView(techCard: common_TechCard | undefined, colorway
     const bomByKey = new Map<string, FormBom>();
     for (const b of bomItems) if (b.lineKey) bomByKey.set(b.lineKey, b);
 
+    // Норму несут ТОЛЬКО строки «на изделие» (T8: детальная строка — назначение ткани, не норма);
+    // детальная строка того же слота, пройдя позже, затёрла бы норму пустотой.
     const consumptionByKey = new Map<string, string>();
     for (const u of usages) {
-      if (u.bomLineKey) consumptionByKey.set(u.bomLineKey, u.consumption?.value ?? '');
+      if (u.bomLineKey && !(u.pieceLineKey ?? '').trim()) {
+        consumptionByKey.set(u.bomLineKey, u.consumption?.value ?? '');
+      }
+    }
+
+    // РЕЦЕПТНАЯ ПРОЕКЦИЯ СЛОЁВ (T4): связь «деталь ↔ ткань» живёт в детальных строках рецепта, а
+    // не в замороженной tech_card_piece_material (её админка не редактирует, и на живых карточках
+    // она пуста — эти виды печатались без тканей). Деталь со слоями попадает под КАЖДУЮ свою ткань:
+    // полочку с шеллом и подкладом кроят на обоих настилах.
+    const boundByPiece = new Map<string, typeof usages>();
+    for (const u of usages) {
+      const pk = (u.pieceLineKey ?? '').trim();
+      if (!pk) continue;
+      const list = boundByPiece.get(pk) ?? [];
+      list.push(u);
+      boundByPiece.set(pk, list);
+    }
+    // Клеевые слоты всего колорвея — фолбэк пары для fused-детали без своей привязки (правило
+    // серверного кат-плана: привязанный interlining, иначе единственный клеевой слот колорвея).
+    const colorwayFusingKeys = new Set<string>();
+    for (const u of usages) {
+      const bom = u.bomLineKey ? bomByKey.get(u.bomLineKey) : undefined;
+      if (bom?.section === 'TECH_CARD_BOM_SECTION_INTERLINING' && u.bomLineKey) {
+        colorwayFusingKeys.add(u.bomLineKey);
+      }
     }
 
     const fabrics: CutFabric[] = [];
     const fabricIndexByKey = new Map<string, number>();
     const out: CutPiece[] = [];
 
+    const fabricIndexOf = (bomKey: string, bom: FormBom): number => {
+      const existing = fabricIndexByKey.get(bomKey);
+      if (existing != null) return existing;
+      const idx = fabrics.length;
+      fabricIndexByKey.set(bomKey, idx);
+      fabrics.push({
+        key: bomKey,
+        name: bom.name?.trim() || `BOM #${bom.id ?? '?'}`,
+        unit: bom.unit?.trim() || '',
+        consumption: consumptionByKey.get(bomKey) ?? '',
+        pieces: [],
+        cut: 0,
+      });
+      return idx;
+    };
+
     pieces.forEach((p, i) => {
       const name = p.name?.trim();
       if (!name) return; // a blank row the operator has not filled in yet is not a cut piece
       const perGarment = p.piecesPerGarment ?? 1;
-      const mine = (p.materials ?? []).find((m) => (m.colorwayIndex ?? 0) === colorwayId);
-      const bomKey = mine?.bomLineKey || '';
-      const bom = bomKey ? bomByKey.get(bomKey) : undefined;
-      const fusing = mine?.fusingBomLineKey ? bomByKey.get(mine.fusingBomLineKey) : undefined;
-
-      let fabricIndex = -1;
-      if (bomKey && bom) {
-        const existing = fabricIndexByKey.get(bomKey);
-        if (existing != null) {
-          fabricIndex = existing;
-        } else {
-          fabricIndex = fabrics.length;
-          fabricIndexByKey.set(bomKey, fabricIndex);
-          fabrics.push({
-            key: bomKey,
-            name: bom.name?.trim() || `BOM #${bom.id ?? '?'}`,
-            unit: bom.unit?.trim() || '',
-            consumption: consumptionByKey.get(bomKey) ?? '',
-            pieces: [],
-            cut: 0,
-          });
+      const bound = p.lineKey ? boundByPiece.get(p.lineKey) ?? [] : [];
+      const layerKeys: string[] = [];
+      const pieceFusingKeys: string[] = [];
+      for (const u of bound) {
+        const key = u.bomLineKey || '';
+        const bom = key ? bomByKey.get(key) : undefined;
+        if (!bom || layerKeys.includes(key) || pieceFusingKeys.includes(key)) continue;
+        if (bom.section === 'TECH_CARD_BOM_SECTION_INTERLINING') {
+          pieceFusingKeys.push(key);
+          continue;
+        }
+        if (!derivePieceLayerRole(bom.section, bom.purpose).rollGoods) continue;
+        layerKeys.push(key);
+      }
+      // Ведущая ткань детали — слой роли «основная», иначе первый по рецепту.
+      const mainKey =
+        layerKeys.find((k) => {
+          const bom = bomByKey.get(k);
+          return isMainLayerRole(derivePieceLayerRole(bom?.section, bom?.purpose));
+        }) ??
+        layerKeys[0] ??
+        '';
+      let fusingKey = '';
+      if (p.fused) {
+        if (pieceFusingKeys.length === 1) fusingKey = pieceFusingKeys[0];
+        else if (pieceFusingKeys.length === 0 && colorwayFusingKeys.size === 1) {
+          fusingKey = [...colorwayFusingKeys][0];
         }
       }
 
@@ -187,13 +240,17 @@ export function useSampleCutView(techCard: common_TechCard | undefined, colorway
         fused: !!p.fused,
         calloutNumber: p.calloutNumber ?? 0,
         note: p.note?.trim() || '',
-        fabricIndex,
-        fusingName: fusing?.name?.trim() || '',
+        fabricIndex: -1,
+        fusingName: (fusingKey ? bomByKey.get(fusingKey)?.name?.trim() : '') || '',
       };
       out.push(piece);
-      if (fabricIndex >= 0) {
-        fabrics[fabricIndex].pieces.push(piece);
-        fabrics[fabricIndex].cut += piece.total;
+      for (const key of layerKeys) {
+        const bom = bomByKey.get(key);
+        if (!bom) continue;
+        const idx = fabricIndexOf(key, bom);
+        if (key === mainKey) piece.fabricIndex = idx;
+        fabrics[idx].pieces.push(piece);
+        fabrics[idx].cut += piece.total;
       }
     });
 

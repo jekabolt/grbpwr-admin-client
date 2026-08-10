@@ -43,6 +43,8 @@ const SERVER_KEYS = [
   'colorway_live', 'slot_article', 'slot_norm', 'norm_provenance',
   'norm_conditions_recorded', 'norm_seam_allowance', 'norm_flip_policy', 'norm_piece_set',
   'norm_width_vs_article', 'norm_multiple',
+  // слои деталей (T4: роль слоя — вывод из строки BOM)
+  'piece_role_conflict', 'piece_main_fabric', 'piece_fabric_sorted',
   // прогон
   'sizes_in_range', 'sizes_in_dxf', 'quantities_present', 'stock_shortage',
 ];

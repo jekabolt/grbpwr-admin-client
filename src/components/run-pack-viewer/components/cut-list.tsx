@@ -22,6 +22,19 @@ import { DESC_CELL, RUNPACK_GRID } from './table';
 
 const SYMMETRY_PREFIX = 'TECH_CARD_PIECE_CUT_SYMMETRY_';
 
+// РОЛЬ СЛОЯ по секции слота (T4): с решением владельца деталь со слоями даёт СТРОКУ НА КАЖДЫЙ слой
+// (шелл + подклад = две строки одной детали), и без подписи две строки читаются как дубль. Манифест
+// несёт серверное слово секции (bomSectionWord) — глубже секции наряд роль не знает (назначение по
+// проводу кат-плана не едет), и этого достаточно: подпись различает слои, не пересказывая BOM.
+const SECTION_LAYER_WORD: Record<string, string> = {
+  fabric: 'ткань',
+  lining: 'подкладка',
+  interlining: 'дублерин',
+  insulation: 'утеплитель',
+};
+const sectionLayerWord = (section?: string): string =>
+  SECTION_LAYER_WORD[(section ?? '').trim().toLowerCase()] ?? '';
+
 // Пустое значение НЕ превращается в ключ энума: «TECH_CARD_PIECE_CUT_SYMMETRY_» — непустая строка,
 // и cutSymmetryBadge приняла бы её за размеченную симметрию, напечатав сырой префикс закройщику.
 const symmetryKey = (word?: string): string => {
@@ -104,9 +117,11 @@ export function CutList({
               <tr
                 // Ключ несёт И колорвей, И цвет выхода: у aux-строк colorway_id = 0, и без
                 // output_variant_id две строки одной детали в разных цветах становятся неразличимы.
+                // И СЛОТ (T4): деталь со слоями даёт несколько строк одного колорвея — без
+                // bom_item_id ключи шелла и подклада совпали бы.
                 key={`${r.piece_id ?? 0}-${r.colorway_id ?? 0}-${r.output_variant_id ?? 0}-${
-                  r.piece_line_key || i
-                }`}
+                  r.bom_item_id ?? 0
+                }-${r.piece_line_key || i}`}
               >
                 <td className={DESC_CELL}>
                   <div className='font-medium'>
@@ -148,7 +163,9 @@ export function CutList({
                   </div>
                   <div>{(r.material_name ?? '').trim() || 'артикул не назначен'}</div>
                   <Text size='nano' variant='label' component='p' className='uppercase'>
-                    {r.pinned ? 'пин рецепта' : 'дефолт слота'}
+                    {[sectionLayerWord(r.section), r.pinned ? 'пин рецепта' : 'дефолт слота']
+                      .filter(Boolean)
+                      .join(' · ')}
                   </Text>
                 </td>
                 {columns.map((s) => {

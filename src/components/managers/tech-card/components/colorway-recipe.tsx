@@ -81,6 +81,12 @@ import {
   rollGoodsScopes,
   type PieceAliasRow,
 } from './piece-block-refs';
+import {
+  derivePieceLayerRole,
+  isMainLayerRole,
+  isUnsortedLayerRole,
+  pieceLayerRoleLabel,
+} from './piece-layer-role';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
 import type { RecipePieceLink } from './use-fabric-dxf-pieces';
@@ -160,6 +166,9 @@ type BomLine = {
   lineKey?: string;
   name?: string;
   section?: string;
+  // НАЗНАЧЕНИЕ строки (0265) — вход производной РОЛИ СЛОЯ детали (T4, piece-layer-role.ts):
+  // основная / подкладка / дублерин выводятся отсюда, нигде не хранясь.
+  purpose?: string;
   unit?: string;
   unitPrice?: string; // decimal string
   currency?: string;
@@ -949,7 +958,8 @@ function NormSummary({
   const isDxf = source === 'dxf';
   const label = isMarker ? 'из раскладки' : isDxf ? 'по выкройкам' : 'введено руками';
   // ПЕР-РАЗМЕРНАЯ НОРМА ПОБЕЖДАЕТ СКАЛЯР — ровно как на сервере: при непустых size_consumptions
-  // LineTotal невалиден, себестоимость стиля берёт норму базового размера, а план прогона читает
+  // LineTotal невалиден, себестоимость стиля берёт СРЕДНЕЕ ПО РАЗМЕРНОМУ РЯДУ (T6; весь ряд или
+  // строка непосчитана), а план прогона читает
   // SizeConsumptions → Consumption → Quantity. Скаляр при этом никуда не девается (пер-размерное
   // применение раскладки его не чистит), и показать его крупно с бейджем «из раскладки» значило бы
   // назвать нормой число, которого ни один расчёт не берёт. Он остаётся подписью — он всё ещё
@@ -2074,6 +2084,10 @@ function PieceFabricRow({
   // изделие» тоже), а спрятать существующий пин молча значило бы показывать не ту ткань.
   const pinnedDifferent = draft.materialId > 0 && draft.materialId !== slot?.materialId;
   const unit = slot?.unit?.trim() || '';
+  // РОЛЬ СЛОЯ (T4) — проекция строки BOM, не своё поле: основная / подкладка / дублерин выводятся
+  // из назначения (piece-layer-role.ts, зеркало entity.DerivePieceLayerRole). «Не разложено» —
+  // fabric без назначения: роль слоя неизвестна, и чинится это на вкладке BOM, а не здесь.
+  const layerRole = derivePieceLayerRole(slot?.section, slot?.purpose);
 
   // ЛЕГАСИ-ЧИСЛО НА ДЕТАЛИ. Сервер строки одного слота СУММИРУЕТ: в себестоимости каждая строка
   // рецепта добавляет свой UnitTotal (internal/dto/techcard_production.go, colorwayCost), в
@@ -2141,6 +2155,19 @@ function PieceFabricRow({
           </Button>
         )}
       </div>
+      {/* Бейдж роли слоя: серым — известная роль, синим — «не разложено» (П3: не ошибка, а
+          вопрос человеку; жёсткая краснота тут закричала бы на половине живых карточек). */}
+      {!!slot && layerRole.rollGoods && (
+        <span>
+          {isUnsortedLayerRole(layerRole) ? (
+            <Pill tone='attention' title='задай назначение строке на вкладке BOM'>
+              роль слоя неизвестна — назначение не задано
+            </Pill>
+          ) : (
+            <Pill tone='mut'>слой: {pieceLayerRoleLabel(layerRole)}</Pill>
+          )}
+        </span>
+      )}
       {pinnedDifferent && (
         <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
       )}
@@ -2231,6 +2258,30 @@ function PieceRecipeCard({
 }) {
   const usedKeys = new Set(rows.map(({ draft }) => draft.bomLineKey).filter(Boolean));
 
+  // ПРАВИЛА ЦЕЛОСТНОСТИ СЛОЁВ (T4), агрегатом по детали — те же, что держит сервер (отказ рецепта
+  // duplicate_main_fabric, блокер наряда, находки гейта piece_role_conflict / piece_main_fabric):
+  // роль каждого слоя — вывод из строки BOM; клеевая (interlining) — слой дублирования, в правила
+  // кроя не входит.
+  const layerSlots = rows
+    .map(({ draft }) =>
+      draft.bomLineKey ? bomItems.find((b) => b.lineKey === draft.bomLineKey) : undefined,
+    )
+    .filter((s): s is BomLine => !!s && s.section !== 'TECH_CARD_BOM_SECTION_INTERLINING')
+    .filter((s) => derivePieceLayerRole(s.section, s.purpose).rollGoods);
+  const slotName = (s: BomLine) => `«${s.name?.trim() || s.lineKey}»`;
+  const mains = layerSlots.filter((s) =>
+    isMainLayerRole(derivePieceLayerRole(s.section, s.purpose)),
+  );
+  const unsorted = layerSlots.filter((s) =>
+    isUnsortedLayerRole(derivePieceLayerRole(s.section, s.purpose)),
+  );
+  // П1: две основные — ошибка данных; основная рядом с «не разложено» (или две «не разложено») —
+  // её недоказуемый близнец. Оба останавливают наряд, и сервер откажет сейву двух явных main.
+  const twoMains = mains.length >= 2;
+  const unsortedConflict = !twoMains && unsorted.length >= 1 && mains.length + unsorted.length >= 2;
+  // П2: слои есть, основной нет — и нет «не разложено», которая могла бы ею оказаться.
+  const mainless = layerSlots.length > 0 && mains.length === 0 && unsorted.length === 0;
+
   return (
     <div>
       <GroupLabel
@@ -2246,6 +2297,40 @@ function PieceRecipeCard({
         <PieceSilhouette found={shape} />
         {piece.name?.trim() || 'без названия'}
       </GroupLabel>
+      {twoMains && (
+        <div className='flex flex-col gap-1 py-1.5'>
+          <Pill tone='warn'>две основные ткани на одной детали</Pill>
+          <Text size='nano' variant='label' component='p'>
+            {mains.map(slotName).join(' и ')} — обе с назначением «основной материал». Цельная
+            деталь кроится из одной основной: сервер не примет такой рецепт, а наряд остановится.
+            Задай второй ткани её назначение на вкладке BOM (подкладка, дублерин, контраст…) — или
+            разбей деталь на две
+          </Text>
+        </div>
+      )}
+      {unsortedConflict && (
+        <div className='flex flex-col gap-1 py-1.5'>
+          <Pill tone='warn'>назначения слоёв не разобраны</Pill>
+          <Text size='nano' variant='label' component='p'>
+            у детали несколько слоёв, и у {unsorted.map(slotName).join(', ')} не задано назначение —
+            не доказать, что это не вторая основная, и наряд остановится. Задай назначение на
+            вкладке BOM
+          </Text>
+        </div>
+      )}
+      {mainless && (
+        <div className='flex flex-col gap-1 py-1.5'>
+          <Pill tone='attention'>у детали нет основной ткани</Pill>
+          <Text size='nano' variant='label' component='p'>
+            деталь привязана к{' '}
+            {layerSlots
+              .map((s) => pieceLayerRoleLabel(derivePieceLayerRole(s.section, s.purpose)))
+              .join(', ')}
+            , но не к основной. Добавь строку с тканью назначения «основной материал» — или
+            подтверди, что состав детали такой и есть
+          </Text>
+        </div>
+      )}
       {rows.length === 0 ? (
         <Row
           tone='label'
@@ -3408,6 +3493,7 @@ export function ColorwayRecipes({
             lineKey,
             name: b.name,
             section: b.section,
+            purpose: b.purpose,
             unit: b.unit,
             unitPrice: b.unitPrice,
             currency: b.currency,
