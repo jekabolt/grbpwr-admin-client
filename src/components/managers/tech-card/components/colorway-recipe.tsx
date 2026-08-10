@@ -51,6 +51,15 @@ import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { DxfApplyHint } from './dxf-apply';
 import { MarkerApplyHint } from './marker-apply';
+import { useCardDxfPack } from './nesting/card-dxf-pack';
+import {
+  findPiece,
+  fmtCm,
+  PieceShape,
+  useDxfGeometry,
+  useDxfIndex,
+  type FoundPiece,
+} from './nesting/dxf-geometry';
 import {
   fullRollWidthOf,
   weightBasisLabel,
@@ -66,6 +75,12 @@ import {
   markersOfColorway,
 } from './nesting/marker-io';
 import { sectionShort } from './bom-line-picker';
+import {
+  pieceBlockRefs,
+  pieceRefKey,
+  rollGoodsScopes,
+  type PieceAliasRow,
+} from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
 import type { RecipePieceLink } from './use-fabric-dxf-pieces';
@@ -2160,10 +2175,35 @@ function PieceFabricRow({
   );
 }
 
+// Силуэт детали при её имени: форма из ЧЕРТЕЖА, не пиктограмма — рисуется тем же контуром
+// (findPiece: срединный размер ряда, слой линии кроя с фолбэком), что и плитка этой детали на
+// вкладке деталей кроя. Подпись обязательна, иначе это декорация: title называет блок, размер,
+// по которому нарисовано (силуэт один на всю градацию), и габарит. Нет контура — нет и спана,
+// даже пустого: прочерк перед каждой несопоставленной деталью — шум, который T3 только что
+// вычистил, а диагностика («нет в файлах», «ткань потеряна») живёт на вкладке деталей кроя.
+function PieceSilhouette({ found }: { found: FoundPiece | null }) {
+  if (!found) return null;
+  const size = found.size
+    ? `размер ${found.size}${found.sizes.length > 1 ? ` из ${found.sizes.length}` : ''}`
+    : '';
+  const title = [found.block, size, `${fmtCm(found.piece.bboxW)}×${fmtCm(found.piece.bboxH)} см`]
+    .filter(Boolean)
+    .join(' · ');
+  // Без рамки (глиф при имени, не контрол); grainLayer='' гасит красную долевую — на 28px она
+  // читалась бы как цвет состояния, а красный в системе — только ошибка; outlineOnly гасит
+  // внутреннюю геометрию, нечитаемую в этом размере. SVG letterbox-ится в бокс сам (meet).
+  return (
+    <span title={title} className='mr-1.5 inline-flex h-7 w-10 shrink-0'>
+      <PieceShape piece={found.piece} grainLayer='' outlineOnly />
+    </span>
+  );
+}
+
 // One ruled group per declared cut piece. The group owns any number of distinct slot usages; rows
 // are separated by #e6e6e6 hairlines, while the piece label uses the heavier subgroup rule.
 function PieceRecipeCard({
   piece,
+  shape,
   rows,
   bomItems,
   materials,
@@ -2176,6 +2216,8 @@ function PieceRecipeCard({
   onRemove,
 }: {
   piece: PieceRef;
+  /** Контур из разобранных DXF; null — привязки нет, кэш холодный или редактор скрыт. */
+  shape: FoundPiece | null;
   rows: IndexedUsage[];
   bomItems: BomLine[];
   materials: common_Material[];
@@ -2200,6 +2242,8 @@ function PieceRecipeCard({
           ) : undefined
         }
       >
+        {/* Силуэт — ведущий глиф строки детали, слева от имени. */}
+        <PieceSilhouette found={shape} />
         {piece.name?.trim() || 'без названия'}
       </GroupLabel>
       {rows.length === 0 ? (
@@ -2738,6 +2782,7 @@ function ColorwayRecipeEditor({
   materials,
   markers,
   pieces,
+  shapes,
   sizeIds,
   sizeNameById,
   swatchHex,
@@ -2751,6 +2796,11 @@ function ColorwayRecipeEditor({
   materials: common_Material[];
   markers?: common_TechCardMarkerSummary[];
   pieces: RecipePiece[];
+  /**
+   * pieceRefKey детали → контур из разобранных DXF. null у СКРЫТЫХ редакторов — они смонтированы
+   * все сразу, и рендерить в спрятанном DOM по 20–40 полигонов на колорвей никто не просил.
+   */
+  shapes: Map<string, FoundPiece | null> | null;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   swatchHex?: string;
@@ -2949,6 +2999,12 @@ function ColorwayRecipeEditor({
     () => deriveComposition(usages, bomItems, materials),
     [usages, bomItems, materials],
   );
+  // Легенда к силуэтам — ОДНА на редактор, не на строку (иначе воскрес бы шум, который T3 только
+  // что вычистил), и только когда хоть одна иконка видна: подпись без картинок — обещание.
+  const hasSilhouettes = useMemo(
+    () => !!shapes && pieces.some((p) => !!shapes.get(pieceRefKey(p.lineKey))),
+    [shapes, pieces],
+  );
   const garmentUsedKeys = new Set(
     garmentUsages.map(({ draft }) => draft.bomLineKey).filter(Boolean),
   );
@@ -3004,6 +3060,7 @@ function ColorwayRecipeEditor({
                   <PieceRecipeCard
                     key={piece.lineKey}
                     piece={piece}
+                    shape={shapes?.get(pieceRefKey(piece.lineKey)) ?? null}
                     rows={rows}
                     bomItems={bomItems}
                     materials={materials}
@@ -3020,6 +3077,11 @@ function ColorwayRecipeEditor({
                 );
               })}
             </div>
+            {hasSilhouettes && (
+              <Text size='micro' variant='label'>
+                силуэты — из разобранных DXF, по срединному размеру ряда
+              </Text>
+            )}
           </>
         )}
 
@@ -3360,6 +3422,31 @@ export function ColorwayRecipes({
         }),
     [formBom, serverBomIdByKey, materialById],
   );
+  // СИЛУЭТЫ ДЕТАЛЕЙ — пассивная подписка на общий разбор DXF карточки. `enabled=false`: разбор
+  // отсюда НЕ стартует никогда (рецепт — справочная поверхность, мегабайты с CDN и воркер ради
+  // глифов не платим), но кэш, согретый вкладкой PATTERNS, диалогом «по выкройкам…» или
+  // раскрывашкой пересчёта, отдаётся — это документированное свойство useDxfGeometry. Холодная
+  // карточка честно молчит: ни иконок, ни спиннеров, ни одного сетевого запроса; тёплую видно
+  // сразу, а разбор, идущий прямо сейчас, доедет сюда реактивно.
+  const pieceAliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
+    []) as PieceAliasRow[];
+  const dxfPack = useCardDxfPack();
+  const dxfGeometry = useDxfGeometry(dxfPack, false);
+  const dxfIndex = useDxfIndex(dxfGeometry.data);
+  // Контур выбирают ТЕ ЖЕ общие правила, что на вкладке деталей кроя: refs из piece-block-refs +
+  // findPiece (первая живая привязка, срединный размер ряда, слой линии кроя с фолбэком). Своя
+  // эвристика тут разошлась бы с плитками молча — одна деталь рисовалась бы двумя фигурами.
+  const fabScopes = useMemo(() => rollGoodsScopes(formBom ?? []), [formBom]);
+  const refsByPiece = useMemo(
+    () => pieceBlockRefs(pieceAliases, fabScopes),
+    [pieceAliases, fabScopes],
+  );
+  const shapeByKey = useMemo(() => {
+    if (!dxfIndex) return null;
+    const m = new Map<string, FoundPiece | null>();
+    for (const [key, refs] of refsByPiece) m.set(key, findPiece(dxfIndex, refs));
+    return m;
+  }, [dxfIndex, refsByPiece]);
   const sizeIds = (techCard?.techCard?.sizeIds ?? []) as number[];
   const sizeNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -3469,6 +3556,9 @@ export function ColorwayRecipes({
             materials={materials}
             markers={techCard?.markers}
             pieces={pieces}
+            // null всем скрытым: редакторы смонтированы все сразу, и без этого 7 колорвеев ×
+            // 40 деталей положили бы в спрятанный DOM ~300 полигонов по сотням точек.
+            shapes={activeId === cw.colorwayId ? shapeByKey : null}
             sizeIds={sizeIds}
             sizeNameById={sizeNameById}
             swatchHex={hexByCode.get(cw.colorCode ?? '')}
