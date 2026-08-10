@@ -18,7 +18,7 @@ import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import type { WeightBasisResolution } from './nesting/fabric-weight';
 import type { TechCardFormData } from './schema';
-import { useFabricDxfPieces } from './use-fabric-dxf-pieces';
+import { useFabricDxfPieces, type RecipePieceLink } from './use-fabric-dxf-pieces';
 
 const DxfApplyDialog = lazy(() => import('./dxf-apply-dialog'));
 
@@ -33,6 +33,7 @@ export function DxfApplyHint({
   sizeNameById,
   canEdit,
   explainWhenIdle = false,
+  recipeLinks,
   onApply,
 }: {
   control: Control<TechCardFormData>;
@@ -54,6 +55,12 @@ export function DxfApplyHint({
    * деталей и размерный ряд), поэтому объясняет это место, а не вызывающий.
    */
   explainWhenIdle?: boolean;
+  /**
+   * Привязки «деталь → слот» из СТРОК РЕЦЕПТА этого колорвея — второй, на практике основной
+   * источник комплекта деталей (см. useFabricDxfPieces). Без него карточка, где ткань назначена
+   * деталям в рецепте, а не на вкладке деталей кроя, оставалась без кнопки вовсе.
+   */
+  recipeLinks?: readonly RecipePieceLink[];
   onApply: (patch: {
     consumption?: string;
     quantity?: string;
@@ -65,7 +72,7 @@ export function DxfApplyHint({
   }) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { pieces, unaliasedPieces } = useFabricDxfPieces(control, lineKey);
+  const { pieces, unaliasedPieces } = useFabricDxfPieces(control, lineKey, recipeLinks);
 
   // Кнопки нет, когда предлагать нечего: без деталей этой ткани и без размерного ряда диалог ответил
   // бы отказом на каждое открытие — а кнопка, которая всегда отказывает, читается как поломка, а не
@@ -82,7 +89,7 @@ export function DxfApplyHint({
       <Text size='nano' variant='label' component='p'>
         {sizeIds.length === 0
           ? 'по выкройкам расход посчитать нельзя: у карточки не заявлен размерный ряд — норма пишется на каждый размер, и писать её пока не для кого'
-          : 'по выкройкам расход посчитать нельзя: ни одна деталь кроя не заявляет эту ткань в своих материалах. Назначьте ткань детали на вкладке деталей кроя — тогда площадь будет из чего сложить'}
+          : 'по выкройкам расход посчитать нельзя: ни одна деталь кроя не отнесена к этой ткани — ни строкой рецепта («+ добавить материал к детали» здесь же), ни материалом детали на вкладке деталей кроя. Без этого площадь изделия складывать не из чего'}
       </Text>
     );
   }

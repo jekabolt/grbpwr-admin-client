@@ -51,7 +51,7 @@ import {
 } from './nesting/fabric-weight';
 import { bomUnitKind, bomUnitStep } from './nesting/marker-io';
 import type { TechCardFormData } from './schema';
-import { useFabricDxfPieces } from './use-fabric-dxf-pieces';
+import { useFabricDxfPieces, type RecipePieceLink } from './use-fabric-dxf-pieces';
 
 // Все ответы — нано-текстом: внутри раскрывашки строки рецепта только текст и пилюли, никаких
 // вложенных блоков-панелей.
@@ -70,6 +70,7 @@ export default function DxfNormRecheck({
   weightBasis,
   sizeIds,
   sizeNameById,
+  recipeLinks,
   saved,
 }: {
   /** Слот строки — по нему собирается комплект деталей ткани, тем же хуком, что у применения. */
@@ -81,6 +82,8 @@ export default function DxfNormRecheck({
   weightBasis: WeightBasisResolution;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
+  /** Привязки «деталь → слот» из строк рецепта — тот же второй источник, что у применения. */
+  recipeLinks?: readonly RecipePieceLink[];
   /** Сохранённые пер-размерные числа строки — то, с чем сверяемся. */
   saved: { sizeId?: number; consumption?: string }[];
 }) {
@@ -88,7 +91,7 @@ export default function DxfNormRecheck({
   // и пробрасывать control сквозь NormSummary ради двух хуков значило бы таскать его через слой,
   // которому он не нужен.
   const { control } = useFormContext<TechCardFormData>();
-  const { pieces, unaliasedPieces } = useFabricDxfPieces(control, lineKey);
+  const { pieces, unaliasedPieces } = useFabricDxfPieces(control, lineKey, recipeLinks);
   const cardSeamMm = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? null) as
     | number
     | string
