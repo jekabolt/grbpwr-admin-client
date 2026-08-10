@@ -32,6 +32,8 @@ export function catalogPrice(m?: common_Material) {
     // Валюта принадлежит ЧИСЛУ: подписать каталожное число валютой строки — хуже, чем не
     // подписать вовсе, поэтому без цены валюты тоже нет.
     currency: value ? (m?.latestPrice?.currency?.trim() ?? '') : '',
+    // Единица — свойство САМОГО артикула (в ней же лежит и складской остаток), и каталожная цена
+    // всегда котируется за неё. Поэтому она переживает отсутствие цены, в отличие от валюты.
     unit: m?.unit?.trim() ?? '',
   };
 }
@@ -47,6 +49,13 @@ export type BomPriceLine = {
 
 export type ResolvedBomPrice = {
   source: BomPriceSource;
+  /**
+   * Число, валюта и единица — ОДНОЙ ступени, без смешивания. Подписать снапшотное число
+   * каталожной валютой (или каталожной единицей) — та же ложь, что подписать каталожное число
+   * валютой строки, только в другую сторону: «80» превращалось в «80 USD / kg», хотя ни доллара,
+   * ни килограмма на карте никогда не фиксировали. Неизвестная сторона печатается пустой —
+   * голое число честнее подписанного чужой подписью.
+   */
   value: string;
   currency: string;
   unit: string;
@@ -57,7 +66,7 @@ export type ResolvedBomPrice = {
    * Ради этого расхождения и живёт ручная кнопка reprice, поэтому видно его должно быть на строке,
    * а не на костинге через две вкладки.
    */
-  drift?: { value: string; currency: string; label: string };
+  drift?: { value: string; currency: string; unit: string; label: string };
 };
 
 /** «80.00 PLN / m». Пустое число — пустая строка, чтобы вызывающий не печатал одинокую валюту. */
@@ -66,11 +75,21 @@ export function formatBomMoney(value: string, currency?: string, unit?: string):
   return `${value}${currency ? ` ${currency}` : ''}${unit ? ` / ${unit}` : ''}`;
 }
 
+// Известная сторона против известной. Пустая сторона — «неизвестно», а не «другое»: у легаси-строк
+// единица или валюта не заполнены, и объявлять дрейф по их отсутствию значило бы кричать на каждой
+// такой строке о расхождении, которого никто не вносил.
+const sameFacet = (a: string, b: string) => !a || !b || a === b;
+
 // Та же цена? «80» и «80.00» — одно и то же число, записанное дважды, и сравнение строк выдумывало
 // бы дрейф на каждой аккуратно переоценённой строке. Сравниваем численно (с запятой в разделителе
-// тоже: поля формы набирают руками). Смена валюты — дрейф сама по себе, даже при том же числе.
-function samePrice(a: { value: string; currency: string }, b: { value: string; currency: string }) {
-  if (a.currency && b.currency && a.currency !== b.currency) return false;
+// тоже: поля формы набирают руками). Валюта И ЕДИНИЦА — часть цены: 80 PLN/м и 80 PLN/кг это не
+// одна цена, а уехавшая в другую размерность, и молчать об этом опаснее, чем о смене числа.
+function samePrice(
+  a: { value: string; currency: string; unit: string },
+  b: { value: string; currency: string; unit: string },
+) {
+  if (!sameFacet(a.currency, b.currency)) return false;
+  if (!sameFacet(a.unit, b.unit)) return false;
   const na = parseDecimalNumber(a.value);
   const nb = parseDecimalNumber(b.value);
   if (!Number.isFinite(na) || !Number.isFinite(nb)) return a.value.trim() === b.value.trim();
@@ -88,27 +107,29 @@ export function resolveBomPrice(line: BomPriceLine, material?: common_Material):
   const currency = line.currency?.trim() ?? '';
   const unit = line.unit?.trim() ?? '';
 
-  // 1) Снапшот строки — цена, согласованная на карте. Каталог её не перебивает: переносить цену
-  //    вправе только явный reprice, иначе карта молча меняла бы себестоимость под ногами.
+  // 1) Снапшот строки — цена, согласованная на карте, со СВОЕЙ валютой и СВОЕЙ единицей. Каталог
+  //    не перебивает её и не дописывает ей подпись: переносить цену вправе только явный reprice,
+  //    иначе карта молча меняла бы и себестоимость, и размерность под ногами.
   if (value) {
-    const cur = currency || catalog.currency;
-    const u = unit || catalog.unit;
-    const drifted = !!catalog.value && !samePrice({ value, currency: cur }, catalog);
+    const own = { value, currency, unit };
+    const drifted = !!catalog.value && !samePrice(own, catalog);
     return {
       source: 'line',
-      value,
-      currency: cur,
-      unit: u,
-      label: formatBomMoney(value, cur, u),
+      ...own,
+      label: formatBomMoney(value, currency, unit),
       drift: drifted
         ? {
             value: catalog.value,
             currency: catalog.currency,
-            // Валюта — только если она НЕ та, что уже напечатана рядом с числом строки: на плитке
-            // за место дерутся четыре плашки, и «каталог 95» читается, а «каталог 95 PLN» рвёт ряд.
+            unit: catalog.unit,
+            // Валюта и единица — только те, что ОТЛИЧАЮТСЯ от уже напечатанных рядом с числом
+            // строки: на плитке за место дерутся четыре плашки, и «каталог 95» читается, а
+            // «каталог 95 PLN / m» рвёт ряд. Но «каталог 95 / kg» обязано быть напечатано
+            // целиком — иначе «95» прочтут как «95 за метр».
             label: formatBomMoney(
               catalog.value,
-              catalog.currency && catalog.currency !== cur ? catalog.currency : '',
+              catalog.currency && catalog.currency !== currency ? catalog.currency : '',
+              catalog.unit && catalog.unit !== unit ? catalog.unit : '',
             ),
           }
         : undefined,
@@ -116,24 +137,16 @@ export function resolveBomPrice(line: BomPriceLine, material?: common_Material):
   }
 
   // 2) Каталожная цена артикула — та самая ступень, которой не было на экранах: цена в справочнике
-  //    есть, на карте не зафиксирована.
+  //    есть, на карте не зафиксирована. Единица тоже каталожная: это цена ЗА каталожную единицу.
   if (catalog.value) {
-    const u = catalog.unit || unit;
     return {
       source: 'catalog',
-      value: catalog.value,
-      currency: catalog.currency,
-      unit: u,
-      label: formatBomMoney(catalog.value, catalog.currency, u),
+      ...catalog,
+      label: formatBomMoney(catalog.value, catalog.currency, catalog.unit),
     };
   }
 
-  // 3) Цены нет нигде — и только здесь «заведите её в справочнике» правда.
-  return {
-    source: 'none',
-    value: '',
-    currency: currency || catalog.currency,
-    unit: unit || catalog.unit,
-    label: '',
-  };
+  // 3) Цены нет нигде — и только здесь «заведите её в справочнике» правда. Валюта и единица
+  //    остаются строкины: подписывать нечего, но её собственные объявления печатать можно.
+  return { source: 'none', value: '', currency, unit, label: '' };
 }

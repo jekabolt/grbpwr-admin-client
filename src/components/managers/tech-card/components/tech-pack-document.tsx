@@ -1455,7 +1455,14 @@ export function TechPackDocument({
                     )}
                     <td className={TD}>{b.color || '—'}</td>
                     <td className={TD}>{fabric || '—'}</td>
-                    <td className={TD}>{b.unit || '—'}</td>
+                    {/* Единица ТОЙ цены, что напечатана в соседней колонке: если цена пришла с
+                        каталожной ступени, то и «за что» у неё каталожное. Печатать unit строки
+                        рядом с каталожным числом — это лист «m | 95 PLN», где 95 за килограмм, и
+                        уезжает он на фабрику. Без колонки цены (профиль factory) печатается
+                        собственная единица строки — выравнивать не с чем. */}
+                    <td className={TD}>
+                      {(moneyAllowed(printScope) ? price.unit : b.unit) || '—'}
+                    </td>
                     {moneyAllowed(printScope) && (
                       <td className={`${TD} whitespace-nowrap text-right`}>
                         {/* Без единицы: она стоит своей колонкой слева. */}

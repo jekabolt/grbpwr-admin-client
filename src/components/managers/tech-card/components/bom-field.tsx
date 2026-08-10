@@ -165,6 +165,9 @@ function useNoPriceWarning() {
   };
 }
 
+// Выпущенная карта заморожена целиком — вместе с кнопкой «обновить цены из каталога» на костинге.
+const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
+
 const join = (...parts: Array<string | undefined>) => parts.filter((p) => !!p?.trim()).join(' · ');
 const widthLabel = (v?: string) => (v?.trim() ? `${v.trim()} cm` : '');
 const weightLabel = (v?: string) => (v?.trim() ? `${v.trim()} g/m²` : '');
@@ -337,9 +340,19 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     | common_TechCardBomSection
     | undefined;
   const [createOpen, setCreateOpen] = useState(false);
+  // Состояние выпуска читается ИЗ ФОРМЫ, а не приходит пропом: BOM целиком лежит внутри общего
+  // `<fieldset disabled={frozen}>` вкладки и своего гейта не имеет, а подсказка про цену обязана
+  // называть действие, которое на этой карте вообще существует.
+  const frozen = useWatch({ control, name: 'approvalState' }) === RELEASED_STATE;
 
   const linked = materialId > 0;
-  const { data } = useMaterials('', false);
+  // ВКЛЮЧАЯ АРХИВНЫЕ — здесь список не предлагают, по нему ищут УЖЕ привязанный артикул. Без
+  // архивных строка с заархивированным материалом теряла его latestPrice и снова показывала
+  // «no price», хотя печатный tech-pack на тех же данных цену печатал (он всегда грузил список
+  // вместе с архивом). Предлагает к привязке MaterialPicker — у него свой вызов useMaterials со
+  // своим тумблером архива, так что архивные по-прежнему не всплывают в выборе. Лишнего запроса
+  // это не добавляет: ('', true) уже держат в кеше соседние вкладки тех-карты.
+  const { data } = useMaterials('', true);
   const linkedMaterial = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
@@ -396,12 +409,18 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
   const stockValue = onHand.get(materialId);
 
   // Куда идти с этой ценой. «Заведите в справочнике» — правда ровно в одном случае из трёх, а
-  // перенести каталожную цену на карту умеет только кнопка reprice на вкладке costing.
+  // перенести каталожную цену на карту умеет только кнопка reprice на вкладке costing — которой на
+  // ВЫПУЩЕННОЙ карте нет (costing-field прячет её на released: карта заморожена целиком). Совет,
+  // который некуда выполнить, — та же ложь, что «set it in materials» на проценённом артикуле,
+  // только этажом выше, поэтому действие называется по состоянию карты.
+  const priceAction = frozen
+    ? 'Перенести её на карту можно только после возврата в draft: на выпущенной карте цены заморожены вместе с остальной спецификацией.'
+    : 'Перенести: «обновить цены из каталога» на вкладке costing.';
   const priceHint =
     linePrice.source === 'catalog'
-      ? 'Цена взята из справочника и на этой карте не зафиксирована — артикул проценили уже после привязки. Зафиксировать: «обновить цены из каталога» на вкладке costing.'
+      ? `Цена взята из справочника и на этой карте не зафиксирована — артикул проценили уже после привязки. ${priceAction}`
       : linePrice.drift
-        ? `На карте зафиксировано ${linePrice.label}, в справочнике сейчас ${formatBomMoney(linePrice.drift.value, linePrice.drift.currency)}. Перенести: «обновить цены из каталога» на вкладке costing.`
+        ? `На карте зафиксировано ${linePrice.label}, в справочнике сейчас ${formatBomMoney(linePrice.drift.value, linePrice.drift.currency, linePrice.drift.unit)}. ${priceAction}`
         : '';
 
   // The composition cell carries the deep-link anchor + pulse the labels tab uses to point an
@@ -649,7 +668,10 @@ function BomTile({
   };
 
   const linked = (row.materialId ?? 0) > 0;
-  const { data } = useMaterials('', false);
+  // Архивные включены по той же причине, что и в редакторе строки: плитка ИЩЕТ привязанный
+  // артикул, а не предлагает его. Список общий с редактором и с печатным tech-pack — один кеш,
+  // одна цена, одна картинка.
+  const { data } = useMaterials('', true);
   const material = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === row.materialId)
     : undefined;
@@ -700,7 +722,12 @@ function BomTile({
       ) : price.drift ? (
         // Расхождение видно на строке, а не всплывает на костинге через две вкладки: ради этого
         // случая ручная кнопка «обновить цены из каталога» и остаётся.
-        <Pill tone='attention'>каталог {price.drift.label}</Pill>
+        // `min-w-0 truncate` обязательны: у Pill свой `whitespace-nowrap`, и длинное значение
+        // («каталог 1250.00 USD / kg») распирало бы 160-пиксельную колонку плиточной сетки —
+        // соседний Text усекается, а плашка тянула бы трек за собой.
+        <Pill tone='attention' className='min-w-0 truncate'>
+          каталог {price.drift.label}
+        </Pill>
       ) : null}
     </>
   );
