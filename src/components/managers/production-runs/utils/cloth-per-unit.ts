@@ -357,8 +357,12 @@ const sourceLabelOf = (s: string) => SOURCE_LABEL[s] ?? s;
 /**
  * Норма пары (колорвей, слот) из карточки. Соединение — тем же ключом, что у настила: bomLineKey
  * (предпочтительно, стабильный) с фолбэком на bomItemId; строки рецептуры без данных о расходе
- * (ни скаляра, ни пер-размерных) не считаются нормой. Строк может быть НЕСКОЛЬКО (пер-детальные
- * нормы) — они СУММИРУЮТСЯ на изделие, каждая гроссится по СВОЕМУ источнику.
+ * (ни скаляра, ни пер-размерных) не считаются нормой.
+ *
+ * СТРОКИ, ПРИВЯЗАННЫЕ К ДЕТАЛИ (pieceId / pieceLineKey / pieceIndex), НЕ УЧАСТВУЮТ — зеркало
+ * серверного правила (T8, entity.IsPieceMaterialAssignment): расход — свойство ИЗДЕЛИЯ, строка
+ * детали лишь назначает ей материал, и легаси-число на ней не прибавляется к норме. Оставшихся
+ * строк изделия может быть несколько — они суммируются, каждая гроссится по СВОЕМУ источнику.
  */
 export function pairNormInput(
   techCard: common_TechCard,
@@ -373,6 +377,10 @@ export function pairNormInput(
   const cw = (techCard.colorways ?? []).find((c) => wireInt(c.colorwayId) === colorwayId);
   const usageRows: UsageNormRow[] = (cw?.usages ?? [])
     .filter((u) => {
+      // Назначение материала детали, не норма: любое из трёх представлений привязки к детали
+      // (pieceIndex — explicit presence, 0 — настоящая деталь).
+      const pieceBound = wireInt(u.pieceId) > 0 || !!u.pieceLineKey || u.pieceIndex != null;
+      if (pieceBound) return false;
       const byKey = !!bomLineKey && u.bomLineKey === bomLineKey;
       const byId = bomItemId > 0 && wireInt(u.bomItemId) === bomItemId;
       return byKey || byId;

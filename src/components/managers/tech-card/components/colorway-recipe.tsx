@@ -122,7 +122,17 @@ const PIECE_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_INSULATION',
 ]);
 
+// Рулонные секции здесь — с решения владельца (2026-08-10): расход ткани — свойство ИЗДЕЛИЯ, и его
+// норма живёт на строке «на изделие». Строка детали справочная («из какой ткани кроится», см.
+// PieceFabricRow) и блока расхода не несёт — не будь ткани в этом наборе, норме было бы негде жить.
 const GARMENT_SECTIONS = new Set([
+  'TECH_CARD_BOM_SECTION_FABRIC',
+  'TECH_CARD_BOM_SECTION_LINING',
+  // Дублерин — ТАКАЯ ЖЕ рулонная секция, и пропустить её значило бы оставить полуоткрытой ту самую
+  // дыру, которую эта правка закрывает: клеевую детали назначить можно (она в PIECE_SECTIONS), а
+  // норме её расхода было бы негде жить. Наборы обязаны совпадать по рулонным секциям целиком.
+  'TECH_CARD_BOM_SECTION_INTERLINING',
+  'TECH_CARD_BOM_SECTION_INSULATION',
   'TECH_CARD_BOM_SECTION_THREAD',
   'TECH_CARD_BOM_SECTION_HARDWARE',
   'TECH_CARD_BOM_SECTION_TRIM',
@@ -905,7 +915,17 @@ function NormSummary({
   // КАЖДОГО колорвея одновременно. Закрытая раскрывашка обязана стоить ноль, поэтому тяжёлая часть
   // (DxfNormRecheck) монтируется только открытой и приезжает lazy().
   const [open, setOpen] = useState(false);
-  const perSize = draft.sizeConsumptions.filter((s) => s.sizeId && (s.consumption ?? '').trim());
+  // ПОРЯДОК — РАЗМЕРНЫЙ РЯД КАРТОЧКИ, не порядок сохранённых строк: «m · l · s · xs · xl» из
+  // порядка записи прочитать нельзя, и глазом не поймать, что чисел пять из пяти. Размер вне ряда
+  // (легаси) уходит в конец в порядке записи — sort стабилен, копия из-за мутирующего sort.
+  const sizeOrder = new Map(sizeIds.map((id, i) => [id, i]));
+  const perSize = [...draft.sizeConsumptions]
+    .filter((s) => s.sizeId && (s.consumption ?? '').trim())
+    .sort(
+      (a, b) =>
+        (sizeOrder.get(a.sizeId ?? 0) ?? sizeIds.length) -
+        (sizeOrder.get(b.sizeId ?? 0) ?? sizeIds.length),
+    );
   const scalar = draft.consumption.trim();
   if (!scalar && perSize.length === 0) return null;
 
@@ -919,14 +939,23 @@ function NormSummary({
   // применение раскладки его не чистит), и показать его крупно с бейджем «из раскладки» значило бы
   // назвать нормой число, которого ни один расчёт не берёт. Он остаётся подписью — он всё ещё
   // работает, но только на размеры вне ряда.
+  // Числа — колонкой: моноширинно и одной разрядностью (0.88 → 0.880 рядом с 0.917) — дробная
+  // часть добивается нулями до самой длинной, ноль хвоста числу не врёт, а ряд выравнивается.
+  // Размер — ПРОПИСНЫМИ, единица — строчной фразой ПОСЛЕ ряда, не в заголовке: «(М)» в
+  // верхнерегистровом заголовке читалось разом как «метры» и как размер M, и различить было нечем.
+  const fracLen = (v: string) => /^\d+\.(\d+)$/.exec(v.trim())?.[1]?.length ?? 0;
+  const maxFrac = perSize.reduce((m, s) => Math.max(m, fracLen(s.consumption ?? '')), 0);
+  const padDecimal = (v: string) => {
+    const m = /^(\d+)(?:\.(\d+))?$/.exec(v.trim());
+    if (!m || maxFrac === 0) return v.trim();
+    return `${m[1]}.${(m[2] ?? '').padEnd(maxFrac, '0')}`;
+  };
   const perSizeText = perSize
     .map(
       (s) =>
-        `${formatSizeName(sizeNameById.get(s.sizeId ?? 0) ?? `#${s.sizeId}`)} ${s.consumption}`,
+        `${formatSizeName(sizeNameById.get(s.sizeId ?? 0) ?? `#${s.sizeId}`).toUpperCase()} ${padDecimal(s.consumption ?? '')}`,
     )
     .join(' · ');
-  const value =
-    perSize.length > 0 ? perSizeText : scalar ? `${scalar}${unit ? ` ${unit}` : ''}` : '';
   const scalarFallback = perSize.length > 0 && scalar ? `${scalar}${unit ? ` ${unit}` : ''}` : '';
 
   // Разбор говорит РОВНО то, что известно этой строке, и ни слова сверх. Марочная норма знает свои
@@ -1036,13 +1065,23 @@ function NormSummary({
   return (
     <div className='flex flex-col gap-1'>
       <div className='flex flex-wrap items-baseline gap-1.5'>
-        <FieldLabel>
-          расход{perSize.length > 0 ? ' по размерам' : ''}
-          {unit ? ` (${unit})` : ''}
-        </FieldLabel>
-        <Text size='small' component='span'>
-          {value || '—'}
-        </Text>
+        <FieldLabel>расход{perSize.length > 0 ? ' по размерам' : ''}</FieldLabel>
+        {perSize.length > 0 ? (
+          <>
+            <Text size='small' component='span' className='font-mono tabular-nums'>
+              {perSizeText}
+            </Text>
+            {unit && (
+              <Text size='nano' variant='label' component='span'>
+                {`в ${unit} на изделие`}
+              </Text>
+            )}
+          </>
+        ) : (
+          <Text size='small' component='span'>
+            {scalar ? `${scalar}${unit ? ` ${unit}` : ''}` : '—'}
+          </Text>
+        )}
         <Pill tone={isMarker || isDxf ? 'mut' : 'attention'}>{label}</Pill>
         {scalarFallback && (
           <Text size='nano' variant='label' component='span'>
@@ -1983,6 +2022,144 @@ function SlotUsageRow({
   );
 }
 
+// ── СТРОКА ДЕТАЛИ: «ИЗ КАКОЙ ТКАНИ КРОИТСЯ» — И ВСЁ ─────────────────────────────────────────────
+//
+// Решение владельца (2026-08-10): расход ткани — свойство ИЗДЕЛИЯ, детали — справочно. Блока
+// расхода здесь нет НАМЕРЕННО: ни нормы, ни «по выкройкам…», ни «из раскладки», ни ручного ввода,
+// ни пина артикула. «По выкройкам» на такой строке собирал комплект по СКОУПУ ТКАНИ — то есть
+// считал площадь всего изделия — и записывал её в одну деталь; на девяти деталях это девятикратный
+// расход, и числа выглядят правдоподобно. Норма и все инструменты живут на строке той же ткани в
+// разделе «на изделие»: там комплект деталей ткани и есть изделие, и тот же расчёт ВЕРЕН.
+function PieceFabricRow({
+  draft,
+  bomItems,
+  usedKeys,
+  materials,
+  sizeIds,
+  sizeNameById,
+  canEdit,
+  onChange,
+  onRemove,
+}: {
+  draft: UsageDraft;
+  bomItems: BomLine[];
+  usedKeys: Set<string>;
+  materials: common_Material[];
+  sizeIds: number[];
+  sizeNameById: Map<number, string>;
+  canEdit: boolean;
+  onChange: (patch: Partial<UsageDraft>) => void;
+  onRemove: () => void;
+}) {
+  const slot = draft.bomLineKey
+    ? bomItems.find((item) => item.lineKey === draft.bomLineKey)
+    : undefined;
+  const material = effectiveMaterial(draft, slot, materials);
+  // Пин показывается ФАКТОМ, но не правится: его судьба — отдельный разговор (он и про строку «на
+  // изделие» тоже), а спрятать существующий пин молча значило бы показывать не ту ткань.
+  const pinnedDifferent = draft.materialId > 0 && draft.materialId !== slot?.materialId;
+  const unit = slot?.unit?.trim() || '';
+
+  // ЛЕГАСИ-ЧИСЛО НА ДЕТАЛИ. Сервер строки одного слота СУММИРУЕТ: в себестоимости каждая строка
+  // рецепта добавляет свой UnitTotal (internal/dto/techcard_production.go, colorwayCost), в
+  // потребности прогона — свой вклад в тот же слот (production_material_plan.go). Спрятать число,
+  // которое продолжает считать деньги, — ложь, поэтому оно показано как легаси и его дают убрать.
+  const sizeOrder = new Map(sizeIds.map((id, i) => [id, i]));
+  const legacyPerSize = [...draft.sizeConsumptions]
+    .filter((s) => s.sizeId && (s.consumption ?? '').trim())
+    .sort(
+      (a, b) =>
+        (sizeOrder.get(a.sizeId ?? 0) ?? sizeIds.length) -
+        (sizeOrder.get(b.sizeId ?? 0) ?? sizeIds.length),
+    );
+  const legacyScalar = draft.consumption.trim() || draft.quantity.trim();
+  const legacyText =
+    legacyPerSize.length > 0
+      ? `${legacyPerSize
+          .map(
+            (s) =>
+              `${formatSizeName(sizeNameById.get(s.sizeId ?? 0) ?? `#${s.sizeId}`).toUpperCase()} ${(s.consumption ?? '').trim()}`,
+          )
+          .join(' · ')}${unit ? ` — в ${unit}` : ''}`
+      : legacyScalar
+        ? `${legacyScalar}${unit ? ` ${unit}` : ''}`
+        : '';
+  // normMarkerId: 0 — явное «снять штамп»: числа больше нет, и штамп его применения без числа
+  // был бы ложью (сервер читает 0 как «сними штамп и дату», см. toWire).
+  const clearLegacy = () =>
+    onChange({
+      consumption: '',
+      quantity: '',
+      sizeConsumptions: [],
+      normMarkerId: 0,
+      ...MANUAL_PROVENANCE,
+    });
+
+  return (
+    <div className='flex flex-col gap-1.5 py-2 first:pt-0 last:pb-0'>
+      <div className='flex items-start gap-2'>
+        <div className='min-w-0 flex-1 lg:max-w-sm'>
+          <SlotPicker
+            value={draft.bomLineKey}
+            slots={bomItems}
+            allowedSections={PIECE_SECTIONS}
+            usedKeys={usedKeys}
+            canEdit={canEdit}
+            // Перенос на другой слот чистит и легаси-число с его провенансом: оно было про изделие
+            // из ПРЕЖНЕЙ ткани (и в её единице) — на новом слоте оно не значит ничего.
+            onChange={(bomLineKey) =>
+              onChange({
+                bomLineKey,
+                materialId: 0,
+                consumption: '',
+                quantity: '',
+                sizeConsumptions: [],
+                normMarkerId: 0,
+                ...MANUAL_PROVENANCE,
+              })
+            }
+          />
+        </div>
+        {canEdit && (
+          <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
+            unlink
+          </Button>
+        )}
+      </div>
+      {pinnedDifferent && (
+        <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
+      )}
+      {/* Слот живёт в форме и мог быть удалён на вкладке BOM, пока строка на него смотрит, —
+          сказать здесь, а не дать сохранению упасть на неразрешимом line_key. */}
+      {!!draft.bomLineKey && !slot && (
+        <Pill tone='warn'>слот удалён на вкладке BOM — выберите другой</Pill>
+      )}
+      {legacyText && (
+        <div className='flex flex-col gap-1'>
+          <div className='flex flex-wrap items-center gap-1.5'>
+            <Pill tone='attention'>легаси-расход на детали</Pill>
+            <Text size='small' component='span' className='font-mono tabular-nums'>
+              {legacyText}
+            </Text>
+          </div>
+          <Text size='nano' variant='label' component='p'>
+            это число сервер прибавляет к норме ткани — в себестоимость и в потребность прогона:
+            строки одного слота суммируются. Расход изделия ведётся на строке этой ткани в разделе
+            «на изделие» — заведите норму там, а это число уберите
+          </Text>
+          {canEdit && (
+            <span>
+              <Button type='button' variant='secondary' size='xs' onClick={clearLegacy}>
+                убрать число
+              </Button>
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // One ruled group per declared cut piece. The group owns any number of distinct slot usages; rows
 // are separated by #e6e6e6 hairlines, while the piece label uses the heavier subgroup rule.
 function PieceRecipeCard({
@@ -1990,10 +2167,6 @@ function PieceRecipeCard({
   rows,
   bomItems,
   materials,
-  markers,
-  cardMarkersAllColorways,
-  recipeLinks,
-  colorwayId,
   sizeIds,
   sizeNameById,
   canEdit,
@@ -2006,13 +2179,6 @@ function PieceRecipeCard({
   rows: IndexedUsage[];
   bomItems: BomLine[];
   materials: common_Material[];
-  markers?: common_TechCardMarkerSummary[];
-  /** Раскладки по всем колорвеям — только для объяснения пустоты, см. SlotUsageRow. */
-  cardMarkersAllColorways?: common_TechCardMarkerSummary[];
-  /** Привязки «деталь → слот» из строк рецепта — второй источник комплекта деталей. */
-  recipeLinks?: readonly RecipePieceLink[];
-  // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
-  colorwayId?: number;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
@@ -2048,17 +2214,12 @@ function PieceRecipeCard({
       ) : (
         <div className='divide-y divide-hairline'>
           {rows.map(({ draft, index }) => (
-            <SlotUsageRow
+            <PieceFabricRow
               key={`${usageKey(draft)}:${index}`}
               draft={draft}
               bomItems={bomItems}
-              allowedSections={PIECE_SECTIONS}
               usedKeys={usedKeys}
               materials={materials}
-              markers={markers}
-              cardMarkersAllColorways={cardMarkersAllColorways}
-              recipeLinks={recipeLinks}
-              colorwayId={colorwayId}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
               canEdit={canEdit}
@@ -2825,35 +2986,41 @@ function ColorwayRecipeEditor({
             </Text>
           </CalloutBox>
         ) : (
-          // Wider than the block's 10px stack on purpose: each card is itself a dense ruled group,
-          // so at stack spacing one piece's last row and the next piece's label read as one list.
-          <div className='flex flex-col gap-5'>
-            {pieces.map((piece) => {
-              const rows = usagesByPiece.get(piece.lineKey) ?? [];
-              return (
-                <PieceRecipeCard
-                  key={piece.lineKey}
-                  piece={piece}
-                  rows={rows}
-                  bomItems={bomItems}
-                  materials={materials}
-                  markers={cwMarkers}
-                  cardMarkersAllColorways={allCardMarkers}
-                  recipeLinks={recipeLinks}
-                  colorwayId={colorwayId}
-                  sizeIds={sizeIds}
-                  sizeNameById={sizeNameById}
-                  canEdit={canEdit}
-                  canAdd={canAddTo(PIECE_SECTIONS, rows)}
-                  onAdd={() =>
-                    addUsage(piece.lineKey, piece.name?.trim() || '', PIECE_SECTIONS, rows)
-                  }
-                  onChange={patchUsage}
-                  onRemove={removeUsage}
-                />
-              );
-            })}
-          </div>
+          <>
+            {/* Модель сказана ОДИН раз на группу, а не на каждой строке: строки деталей блока
+                расхода не несут (см. PieceFabricRow), и оператор должен знать, куда он переехал. */}
+            <Text size='micro' variant='label'>
+              строка детали отвечает на один вопрос — из какой ткани деталь кроится. Расход ткани —
+              свойство изделия: норма и инструменты («по выкройкам…», «из раскладки») живут в
+              разделе «на изделие» ниже
+            </Text>
+            {/* Wider than the block's 10px stack on purpose: each card is itself a dense ruled
+                group, so at stack spacing one piece's last row and the next piece's label read as
+                one list. */}
+            <div className='flex flex-col gap-5'>
+              {pieces.map((piece) => {
+                const rows = usagesByPiece.get(piece.lineKey) ?? [];
+                return (
+                  <PieceRecipeCard
+                    key={piece.lineKey}
+                    piece={piece}
+                    rows={rows}
+                    bomItems={bomItems}
+                    materials={materials}
+                    sizeIds={sizeIds}
+                    sizeNameById={sizeNameById}
+                    canEdit={canEdit}
+                    canAdd={canAddTo(PIECE_SECTIONS, rows)}
+                    onAdd={() =>
+                      addUsage(piece.lineKey, piece.name?.trim() || '', PIECE_SECTIONS, rows)
+                    }
+                    onChange={patchUsage}
+                    onRemove={removeUsage}
+                  />
+                );
+              })}
+            </div>
+          </>
         )}
 
         <CompositionBar {...derived} />
@@ -2867,7 +3034,7 @@ function ColorwayRecipeEditor({
 
       <Section
         title={`${title} · на изделие`}
-        question='thread, hardware, trim, decoration and whole-garment interlining'
+        question='ткани с нормой расхода на изделие; нитки, фурнитура, тесьма, декор, дублерин'
         action={
           canEdit ? (
             <Button
