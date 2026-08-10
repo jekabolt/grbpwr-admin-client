@@ -13,14 +13,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { ulid } from 'utils/ulid';
-import {
-  bomPurposeLabel,
-  fabricScopes,
-  isRollGoodsSection,
-  scopeKeyOfBinding,
-  type FabricScope,
-  type RollGoodsLine,
-} from './bom-purpose';
+import { bomPurposeLabel, type FabricScope, type RollGoodsLine } from './bom-purpose';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import {
   findPiece,
@@ -29,8 +22,8 @@ import {
   useDxfGeometry,
   useDxfIndex,
   type FoundPiece,
-  type PieceBlockRef,
 } from './nesting/dxf-geometry';
+import { pieceBlockRefs, rollGoodsScopes, type PieceAliasRow } from './piece-block-refs';
 import {
   CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
   UNSET_CUT_SYMMETRY,
@@ -219,12 +212,7 @@ export function PiecesTab({
   // DXF block → piece aliases (0262). They are what lets this block say where a piece came from:
   // a piece with an alias is drawn in a real CAD file, and that file — not the word in the `grain`
   // field — is what the раскладка orients the piece by.
-  const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as Array<{
-    bomLineKey?: string;
-    fabricPurpose?: string;
-    blockName?: string;
-    pieceLineKey?: string;
-  }>;
+  const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as PieceAliasRow[];
   // Скоупы ткани карточки — то, ПО ЧЕМУ хранится и связь блока с деталью, и привязка листа
   // выкройки (0267: назначение, а где карточка ещё не разложена — строка BOM). Нужны здесь и для
   // предпросмотра (одно и то же имя блока в файле верха и в файле подклада — РАЗНЫЕ детали), и для
@@ -255,20 +243,7 @@ export function PiecesTab({
   const [filter, setFilter] = useState<string>('all');
   const [pairingOnly, setPairingOnly] = useState(false);
 
-  const scopes = useMemo(
-    () =>
-      fabricScopes(
-        bomItems
-          .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
-          .map((b) => ({
-            lineKey: b.lineKey!,
-            purpose: b.purpose,
-            name: b.name,
-            section: b.section,
-          })),
-      ),
-    [bomItems],
-  );
+  const scopes = useMemo(() => rollGoodsScopes(bomItems), [bomItems]);
 
   // Подпись скоупа для чипа фильтра и заголовка группы: у назначения — само назначение, у
   // неразобранной строки — её название (то же правило, что у панели выкроек, без списка артикулов
@@ -278,27 +253,10 @@ export function PiecesTab({
     return bomPurposeLabel(s.key);
   };
 
-  // Which DXF blocks each piece is drawn as, by lineKey. Case-folded on the key the same way the
-  // matching dialog and the server do, so a piece is found whichever spelling the alias carries.
-  // Скоуп едет вместе с именем: без него связь — это просто строка, а строка «полочка» есть и на
-  // верхе, и на подкладе.
-  const blocksByPiece = useMemo(() => {
-    const m = new Map<string, PieceBlockRef[]>();
-    for (const a of aliases) {
-      const key = (a.pieceLineKey ?? '').trim().toLowerCase();
-      const block = (a.blockName ?? '').trim();
-      if (!key || !block) continue;
-      // Разрешённый скоуп, а не сырой ключ: связь, записанная на строку до того, как её разложили
-      // в назначение, принадлежит теперь этому назначению — ровно как у листов выкроек.
-      const scopeKey = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes);
-      const list = m.get(key) ?? [];
-      if (!list.some((r) => r.scopeKey === scopeKey && r.block === block)) {
-        list.push({ scopeKey, block });
-      }
-      m.set(key, list);
-    }
-    return m;
-  }, [aliases, scopes]);
+  // Which DXF blocks each piece is drawn as, by lineKey — ОБЩЕЙ функцией (piece-block-refs.ts),
+  // той же, что строит карту силуэтов рецепт колорвея: ключ, порядок refs и резолв скоупа входят
+  // в контракт показа, и своя копия этой арифметики рисовала бы одну деталь двумя контурами.
+  const blocksByPiece = useMemo(() => pieceBlockRefs(aliases, scopes), [aliases, scopes]);
 
   // ВСЯ пачка DXF карточки, посчитанная ОБЩЕЙ функцией (card-dxf-pack.ts) — той же самой, что
   // читает панель выкроек над этим блоком. Список обязан совпасть побайтово: ключ кэша разбора —
