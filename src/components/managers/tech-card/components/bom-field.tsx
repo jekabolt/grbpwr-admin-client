@@ -73,6 +73,7 @@ import {
   purposeEditorOptions,
   techCardBomPurposeOptions,
 } from './bom-purpose';
+import { formatBomMoney, resolveBomPrice } from './bom-price';
 import {
   defaultRoleFor,
   looksLikeArticleName,
@@ -163,6 +164,9 @@ function useNoPriceWarning() {
     );
   };
 }
+
+// Выпущенная карта заморожена целиком — вместе с кнопкой «обновить цены из каталога» на костинге.
+const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 const join = (...parts: Array<string | undefined>) => parts.filter((p) => !!p?.trim()).join(' · ');
 const widthLabel = (v?: string) => (v?.trim() ? `${v.trim()} cm` : '');
@@ -336,9 +340,19 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     | common_TechCardBomSection
     | undefined;
   const [createOpen, setCreateOpen] = useState(false);
+  // Состояние выпуска читается ИЗ ФОРМЫ, а не приходит пропом: BOM целиком лежит внутри общего
+  // `<fieldset disabled={frozen}>` вкладки и своего гейта не имеет, а подсказка про цену обязана
+  // называть действие, которое на этой карте вообще существует.
+  const frozen = useWatch({ control, name: 'approvalState' }) === RELEASED_STATE;
 
   const linked = materialId > 0;
-  const { data } = useMaterials('', false);
+  // ВКЛЮЧАЯ АРХИВНЫЕ — здесь список не предлагают, по нему ищут УЖЕ привязанный артикул. Без
+  // архивных строка с заархивированным материалом теряла его latestPrice и снова показывала
+  // «no price», хотя печатный tech-pack на тех же данных цену печатал (он всегда грузил список
+  // вместе с архивом). Предлагает к привязке MaterialPicker — у него свой вызов useMaterials со
+  // своим тумблером архива, так что архивные по-прежнему не всплывают в выборе. Лишнего запроса
+  // это не добавляет: ('', true) уже держат в кеше соседние вкладки тех-карты.
+  const { data } = useMaterials('', true);
   const linkedMaterial = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
@@ -371,24 +385,43 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     }
   };
 
+  const rowValue = (field: string): string =>
+    (getValues(`bomItems.${index}.${field}` as never) as string) ?? '';
+
   // Prefer the live catalog value; fall back to whatever this line already holds (the linked
   // material is archived/deleted, or the catalog list hasn't loaded yet) so the plate never
   // flashes blank while linked.
   const mirror = (catalogValue: string | undefined, field: string): string | undefined =>
-    catalogValue?.trim()
-      ? catalogValue
-      : (getValues(`bomItems.${index}.${field}` as never) as string);
+    catalogValue?.trim() ? catalogValue : rowValue(field);
 
-  // #3: on a linked line the unit price, its currency and the unit are ONE derived fact — the
-  // catalog's latest price — folded into a single read-only "8.00 EUR / m". On an unlinked line the
-  // operator types the price, so currency stays an editable pick beside it.
-  const priceValue = mirror(linkedMaterial?.latestPrice?.price?.value, 'unitPrice');
-  const currencyValue = mirror(linkedMaterial?.latestPrice?.currency, 'currency') ?? '';
   const unitValue = mirror(linkedMaterial?.unit, 'unit') ?? '';
-  const priceDisplay = priceValue
-    ? `${priceValue}${currencyValue ? ` ${currencyValue}` : ''}${unitValue ? ` / ${unitValue}` : ''}`
-    : '';
+  // #3: the unit price, its currency and the unit fold into a single read-only "8.00 EUR / m".
+  // WHICH price that is comes from the shared ladder (bom-price.ts) — the line's own frozen
+  // snapshot first, the article's current catalog price second — the very ladder the server costs
+  // by. The plate used to read the catalog number straight off `latestPrice`, so a line whose
+  // snapshot had drifted showed one figure here and another on the tile; the ladder now lives in
+  // ONE place and both surfaces print the number this line is actually costed at, with the catalog
+  // figure named beside it when the two disagree.
+  const linePrice = resolveBomPrice(
+    { unitPrice: rowValue('unitPrice'), currency: rowValue('currency'), unit: rowValue('unit') },
+    linkedMaterial,
+  );
   const stockValue = onHand.get(materialId);
+
+  // Куда идти с этой ценой. «Заведите в справочнике» — правда ровно в одном случае из трёх, а
+  // перенести каталожную цену на карту умеет только кнопка reprice на вкладке costing — которой на
+  // ВЫПУЩЕННОЙ карте нет (costing-field прячет её на released: карта заморожена целиком). Совет,
+  // который некуда выполнить, — та же ложь, что «set it in materials» на проценённом артикуле,
+  // только этажом выше, поэтому действие называется по состоянию карты.
+  const priceAction = frozen
+    ? 'Перенести её на карту можно только после возврата в draft: на выпущенной карте цены заморожены вместе с остальной спецификацией.'
+    : 'Перенести: «обновить цены из каталога» на вкладке costing.';
+  const priceHint =
+    linePrice.source === 'catalog'
+      ? `Цена взята из справочника и на этой карте не зафиксирована — артикул проценили уже после привязки. ${priceAction}`
+      : linePrice.drift
+        ? `На карте зафиксировано ${linePrice.label}, в справочнике сейчас ${formatBomMoney(linePrice.drift.value, linePrice.drift.currency, linePrice.drift.unit)}. ${priceAction}`
+        : '';
 
   // The composition cell carries the deep-link anchor + pulse the labels tab uses to point an
   // operator at a missing composition (care-gen). Read-only line on the catalog plate when linked,
@@ -483,7 +516,7 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
                 )}
                 <Text variant='label' size='micro' className='truncate'>
                   {join(
-                    priceDisplay,
+                    linePrice.label,
                     stockValue ? `${stockValue}${unitValue ? ` ${unitValue}` : ''} on hand` : '',
                   ) || 'no price'}
                 </Text>
@@ -493,11 +526,24 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
               <Button type='button' size='xs' variant='secondary' onClick={() => pick(0)}>
                 unlink
               </Button>
-              {/* A linked line that carries no price silently zeroes the cost estimate and, from
-                  there, COGS (linking price-less materials is now blocked, but lines linked before
-                  that guard still exist). */}
-              {!priceDisplay && <Pill tone='attention'>no price — set it in materials</Pill>}
+              {/* Цена строки, названная своим именем. Раньше здесь стояла одна плашка
+                  «no price — set it in materials» на все случаи: она загоралась и тогда, когда цена
+                  в справочнике УЖЕ была, и отправляла владельца ровно туда, где он её только что
+                  завёл. Строка без цены нигде по-прежнему молча обнуляет оценку и COGS — и только
+                  она теперь и зовёт в справочник. */}
+              {linePrice.source === 'none' ? (
+                <Pill tone='attention'>no price — set it in materials</Pill>
+              ) : linePrice.source === 'catalog' ? (
+                <Pill tone='attention'>цена из каталога</Pill>
+              ) : linePrice.drift ? (
+                <Pill tone='attention'>каталог {linePrice.drift.label}</Pill>
+              ) : null}
             </div>
+            {priceHint && (
+              <Text variant='label' size='micro' className='mt-1'>
+                {priceHint}
+              </Text>
+            )}
           </div>
 
           <ThisStyleFields index={index} />
@@ -622,7 +668,10 @@ function BomTile({
   };
 
   const linked = (row.materialId ?? 0) > 0;
-  const { data } = useMaterials('', false);
+  // Архивные включены по той же причине, что и в редакторе строки: плитка ИЩЕТ привязанный
+  // артикул, а не предлагает его. Список общий с редактором и с печатным tech-pack — один кеш,
+  // одна цена, одна картинка.
+  const { data } = useMaterials('', true);
   const material = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === row.materialId)
     : undefined;
@@ -636,10 +685,11 @@ function BomTile({
   );
   const hasError = rowErrors.length > 0;
 
-  const price = row.unitPrice?.trim();
-  const priceLabel = price
-    ? `${price}${row.currency?.trim() ? ` ${row.currency.trim()}` : ''}${row.unit?.trim() ? ` / ${row.unit.trim()}` : ''}`
-    : '';
+  // Цена, по которой строка реально считается: снапшот карты → иначе текущая каталожная цена
+  // привязанного артикула (bom-price.ts — та же лестница, что у сервера и у панели редактора).
+  // Плитка читала ТОЛЬКО снапшот, поэтому любая строка, чей артикул проценили после привязки,
+  // горела «no price» при живой цене в справочнике.
+  const price = resolveBomPrice(row, material);
   const imageUrl = materialImageUrl(material);
   const section = sectionShort(row.section);
   const cls = classShort(material?.materialClass);
@@ -654,15 +704,32 @@ function BomTile({
     (!row.fabricDirection || row.fabricDirection === 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN');
 
   // #64: an unlinked line is the release blocker, so it reads as the blocker marker; a linked line
-  // shows its price, or flags a missing one.
+  // shows the price it is costed at and says which of the two rungs that price came from — only
+  // the snapshot is fixed on this card. Плашки НЕ раскрывашки и не тултипы: на RELEASED карте вся
+  // плитка лежит внутри `<fieldset disabled>` и сама является `<button>`, так что любой текст,
+  // спрятанный за наведением или кликом, там мёртв — источник цены и дрейф написаны словами.
   const priceStatus = !linked ? (
     <Pill tone='warn'>! link a material</Pill>
-  ) : priceLabel ? (
-    <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-      {priceLabel}
-    </Text>
-  ) : (
+  ) : price.source === 'none' ? (
     <Pill tone='attention'>no price</Pill>
+  ) : (
+    <>
+      <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
+        {price.label}
+      </Text>
+      {price.source === 'catalog' ? (
+        <Pill tone='attention'>из каталога</Pill>
+      ) : price.drift ? (
+        // Расхождение видно на строке, а не всплывает на костинге через две вкладки: ради этого
+        // случая ручная кнопка «обновить цены из каталога» и остаётся.
+        // `min-w-0 truncate` обязательны: у Pill свой `whitespace-nowrap`, и длинное значение
+        // («каталог 1250.00 USD / kg») распирало бы 160-пиксельную колонку плиточной сетки —
+        // соседний Text усекается, а плашка тянула бы трек за собой.
+        <Pill tone='attention' className='min-w-0 truncate'>
+          каталог {price.drift.label}
+        </Pill>
+      ) : null}
+    </>
   );
 
   return (
