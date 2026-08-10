@@ -115,14 +115,14 @@ export default function DxfApplyDialog({
   const [layer, setLayer] = useState<string | null>(null);
   const [seamMm, setSeamMm] = useState<string>('');
 
-  // Из формы здесь нужны РОВНО два поля: стандарт припуска карточки (предзаполнение) и базовый
-  // размер (по его норме считается себестоимость стиля). Детали кроя и скоуп ткани разрешает лёгкая
+  // Из формы здесь нужно РОВНО одно поле: стандарт припуска карточки (предзаполнение). Базовый
+  // размер диалог больше не смотрит — себестоимость стиля считается средним по размерному ряду
+  // (T6), и норма на весь ряд самодостаточна. Детали кроя и скоуп ткани разрешает лёгкая
   // обёртка и передаёт готовыми — иначе два места считали бы одно и то же и однажды разошлись.
   const cardSeamMm = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? null) as
     | number
     | string
     | null;
-  const baseSampleSizeId = (useWatch({ control, name: 'baseSampleSizeId' }) ?? 0) as number;
 
   // Разбор ВСЕЙ пачки карточки, общий с панелями выкроек и деталей кроя (ключ кэша — содержимое
   // пачки). Взводится только открытым диалогом: это мегабайты с CDN и разбор в воркере.
@@ -400,10 +400,7 @@ export default function DxfApplyDialog({
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.sizeId}>
-                    <td>
-                      {sizeName(r.sizeId)}
-                      {baseSampleSizeId === r.sizeId ? ' · базовый' : ''}
-                    </td>
+                    <td>{sizeName(r.sizeId)}</td>
                     <td>{Math.round(r.areaCm2)}</td>
                     <td>{r.conv ? `${r.conv.value} ${r.conv.unit}` : '—'}</td>
                   </tr>
@@ -437,12 +434,10 @@ export default function DxfApplyDialog({
                 {outcome.areas.hulled.join(', ')}
               </CalloutBox>
             )}
-            {baseSampleSizeId === 0 && (
-              <CalloutBox tone='note'>
-                У карточки не назван базовый размер — себестоимость стиля считается по норме
-                базового размера, и без него она останется непосчитанной.
-              </CalloutBox>
-            )}
+            <CalloutBox tone='note'>
+              Себестоимость стиля — среднее по размерному ряду: норма пишется на весь ряд, этого
+              достаточно, базовый размер не нужен.
+            </CalloutBox>
             {/* Отказ по единице. Кг-слот называет, ЧЕГО не хватает — ширины или плотности:
                 «единица не принимает длину» отправила бы оператора менять единицу вместо того,
                 чтобы заполнить артикул. Пустая единица — своя починка: единица нормы = единица

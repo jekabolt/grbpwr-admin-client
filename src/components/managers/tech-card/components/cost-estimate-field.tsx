@@ -328,6 +328,10 @@ function Breakdown({ estimate }: { estimate: StyleCostEstimate }) {
           {`Строки с пометкой «${NO_PRICE}» или «${noFx()}» (${excluded}) в сумму не входят — unit cost занижен ровно на них.`}
         </Text>
       )}
+      <Text size='micro' variant='label'>
+        У строки с нормами по размерам «расход» — среднее по размерному ряду (простое среднее норм
+        по всем размерам ряда). Это не прогноз партии: план партии считается по её линиям.
+      </Text>
 
       {estimate.caveat && (
         <CalloutBox tone='note'>

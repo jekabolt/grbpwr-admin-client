@@ -56,6 +56,17 @@ import { useMaterialPlan } from './useProductionRuns';
 
 const ZERO_TS = '0001-01-01T00:00:00Z';
 
+// Слово слоя по секции слота (T4): деталь со слоями даёт по строке наряда на слой, и подпись — то,
+// что не даёт шеллу и подкладу прочитаться дублем. Кат-план несёт proto-энум секции; глубже секции
+// наряд роль не знает (назначение по его проводу не едет), и этого достаточно.
+const CUT_LAYER_WORD: Record<string, string> = {
+  TECH_CARD_BOM_SECTION_FABRIC: 'fabric',
+  TECH_CARD_BOM_SECTION_LINING: 'lining',
+  TECH_CARD_BOM_SECTION_INTERLINING: 'interlining',
+  TECH_CARD_BOM_SECTION_INSULATION: 'insulation',
+};
+const cutLayerWord = (section?: string): string => CUT_LAYER_WORD[section ?? ''] ?? '';
+
 // Отметка времени для ревизии документа: минуты достаточно, секунды — шум. UTC назван вслух, потому
 // что штамп сверяют с другим листом, напечатанным в другом часовом поясе.
 const stampAt = (ts?: string): string =>
@@ -645,9 +656,11 @@ export function RunPackDocument({
                       // Ключ несёт И колорвей, И цвет выхода: у aux-строк colorway_id = 0, и без
                       // output_variant_id две строки одной детали в разных цветах становятся
                       // неразличимы для React — он переиспользует чужую напечатанную строку.
+                      // И СЛОТ (T4): деталь со слоями (шелл + подклад) даёт несколько строк одного
+                      // колорвея — без bomItemId их ключи совпали бы.
                       key={`${wireInt(r.pieceId)}-${wireInt(r.colorwayId)}-${wireInt(
                         r.outputVariantId,
-                      )}-${r.pieceLineKey || i}`}
+                      )}-${wireInt(r.bomItemId)}-${r.pieceLineKey || i}`}
                       className='break-inside-avoid'
                     >
                       <td className={TD}>
@@ -696,8 +709,12 @@ export function RunPackDocument({
                       <td className={TD}>
                         <div className='font-medium'>{r.slotName || 'slot not named'}</div>
                         <div>{r.materialName || 'article not assigned'}</div>
+                        {/* Подпись слоя (T4): деталь со слоями даёт несколько строк одного
+                            колорвея, и без слова секции шелл и подклад читаются как дубль. */}
                         <div className='text-nano uppercase text-labelColor'>
-                          {r.pinned ? 'recipe pin' : 'slot default'}
+                          {[cutLayerWord(r.section), r.pinned ? 'recipe pin' : 'slot default']
+                            .filter(Boolean)
+                            .join(' · ')}
                         </div>
                         {/* ДОГАДКА СЕРВЕРА, НАПЕЧАТАННАЯ КАК ДОГАДКА. slot_inferred = рецепт эту
                             деталь не называет вовсе, и слот подставлен потому, что рулонный слот у
@@ -750,7 +767,7 @@ export function RunPackDocument({
                   <td className={`${TD} text-center font-bold`}>
                     {scopeColorwayId > 0
                       ? cutRows.reduce((sum, r) => sum + wireInt(r.piecesToCutTotal), 0)
-                      : (cutPlan?.piecesToCutTotal ?? '?')}
+                      : cutPlan?.piecesToCutTotal ?? '?'}
                   </td>
                 </tr>
               </tbody>
@@ -908,7 +925,9 @@ export function RunPackDocument({
                           {lay.bomItemName || 'slot'} · {lay.materialName || 'article not assigned'}
                         </div>
                       </td>
-                      <td className={TD}>{PRINT_LAY_MODE_LABEL[lay.mode ?? ''] ?? 'mode not set'}</td>
+                      <td className={TD}>
+                        {PRINT_LAY_MODE_LABEL[lay.mode ?? ''] ?? 'mode not set'}
+                      </td>
                       <td className={TD}>
                         {(lay.sections ?? []).length === 0
                           ? '—'
