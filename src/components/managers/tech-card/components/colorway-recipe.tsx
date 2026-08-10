@@ -61,6 +61,7 @@ import {
 import {
   bomUnitKind,
   bomUnitStep,
+  cardMarkers,
   markersForLine,
   markersOfColorway,
 } from './nesting/marker-io';
@@ -1485,6 +1486,7 @@ function SlotUsageRow({
   sizeNameById,
   canEdit,
   markers,
+  cardMarkersAllColorways,
   colorwayId,
   onChange,
   onRemove,
@@ -1495,6 +1497,13 @@ function SlotUsageRow({
   usedKeys: Set<string>;
   materials: common_Material[];
   markers?: common_TechCardMarkerSummary[];
+  /**
+   * Раскладки карточки ПО ВСЕМ колорвеям — только чтобы объяснить пустоту. `markers` выше уже
+   * сужены до своего колорвея (markersOfColorway), и это правильно: длина раскладки измерена на
+   * артикуле СВОЕГО колорвея. Но тогда «раскладки на этот слот нет» — полуправда, когда пять
+   * раскладок лежат в соседнем колорвее, и оператор видит их на вкладке выкроек.
+   */
+  cardMarkersAllColorways?: common_TechCardMarkerSummary[];
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
@@ -1799,13 +1808,27 @@ function SlotUsageRow({
                 пропсах). Про выкройки отвечает сама подсказка «по выкройкам» (dxf-apply.tsx): у неё
                 есть комплект деталей, и утверждать за неё отсюда значило бы однажды сказать «выкроек
                 нет» рядом с её же кнопкой. */}
-            {!hasNorm && markersForLine(markers, draft.bomLineKey).length === 0 && (
-              <Text size='nano' variant='label' component='p'>
-                расход не вводят руками, его считают: с раскладки — измеренной длиной настила, либо
-                по выкройкам — площадью деталей кроя ÷ раскройную ширину. Раскладки на этот слот
-                пока нет, поэтому предложить снять с неё нечего.
-              </Text>
-            )}
+            {!hasNorm &&
+              markersForLine(markers, draft.bomLineKey).length === 0 &&
+              (() => {
+                // РАСКЛАДКА МОЖЕТ БЫТЬ — ПРОСТО НЕ ЗДЕСЬ, и это надо сказать прямо. `markers` уже
+                // сужены до своего колорвея, поэтому «раскладки нет» без этой ветки прозвучало бы
+                // на карточке, где раскладки видны на вкладке выкроек, — оператор считает экран
+                // сломанным, и он прав по-своему.
+                const foreign = markersForLine(
+                  cardMarkersAllColorways ?? [],
+                  draft.bomLineKey,
+                ).length;
+                return (
+                  <Text size='nano' variant='label' component='p'>
+                    расход не вводят руками, его считают: с раскладки — измеренной длиной настила,
+                    либо по выкройкам — площадью деталей кроя ÷ раскройную ширину.{' '}
+                    {foreign > 0
+                      ? `Раскладки на этот слот сняты (${foreign}), но в ДРУГОМ колорвее: их длина измерена на его артикуле, и предложить её здесь значило бы подменить ширину полотна — отличие выглядело бы совершенно нормальным числом. Снимите раскладку в этом колорвее либо посчитайте по выкройкам.`
+                      : 'Раскладки на этот слот пока нет, поэтому предложить снять с неё нечего.'}
+                  </Text>
+                );
+              })()}
             {/* РУЧНОЙ ВВОД ОСТАЁТСЯ НАВСЕГДА — и остаётся ЗА РАСКРЫВАШКОЙ, когда норму уже дал
                 инструмент или когда её нет вовсе. Он нужен: без него первый же странный DXF
                 остановил бы производство, а тесьме на метраж выкроек не бывает. Но предлагать его
@@ -1958,6 +1981,7 @@ function PieceRecipeCard({
   bomItems,
   materials,
   markers,
+  cardMarkersAllColorways,
   colorwayId,
   sizeIds,
   sizeNameById,
@@ -1972,6 +1996,8 @@ function PieceRecipeCard({
   bomItems: BomLine[];
   materials: common_Material[];
   markers?: common_TechCardMarkerSummary[];
+  /** Раскладки по всем колорвеям — только для объяснения пустоты, см. SlotUsageRow. */
+  cardMarkersAllColorways?: common_TechCardMarkerSummary[];
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
   sizeIds: number[];
@@ -2017,6 +2043,7 @@ function PieceRecipeCard({
               usedKeys={usedKeys}
               materials={materials}
               markers={markers}
+              cardMarkersAllColorways={cardMarkersAllColorways}
               colorwayId={colorwayId}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
@@ -2571,6 +2598,10 @@ function ColorwayRecipeEditor({
   // редактора рецепта, включая MarkerApplyHint, так что второго места, где прогонная однодневка
   // могла бы попасть в предложение «применить расход в рецепт», в этом файле нет.
   const cwMarkers = useMemo(() => markersOfColorway(markers, colorwayId), [markers, colorwayId]);
+  // Раскладки карточки БЕЗ сужения по колорвею (прогонные однодневки всё равно отсеяны) — нужны
+  // ровно одному месту: объяснению пустой строки. Без них строка сказала бы «раскладки нет» на
+  // карточке, где они лежат в соседнем колорвее и видны на вкладке выкроек.
+  const allCardMarkers = useMemo(() => cardMarkers(markers), [markers]);
   const stagingKey = `recipe:${colorwayId}`;
   const title = colorwayTitle(colorway);
   const [dirty, setDirty] = useState(false);
@@ -2783,6 +2814,7 @@ function ColorwayRecipeEditor({
                   bomItems={bomItems}
                   materials={materials}
                   markers={cwMarkers}
+                  cardMarkersAllColorways={allCardMarkers}
                   colorwayId={colorwayId}
                   sizeIds={sizeIds}
                   sizeNameById={sizeNameById}
@@ -2845,6 +2877,7 @@ function ColorwayRecipeEditor({
                 usedKeys={garmentUsedKeys}
                 materials={materials}
                 markers={cwMarkers}
+                cardMarkersAllColorways={allCardMarkers}
                 colorwayId={colorwayId}
                 sizeIds={sizeIds}
                 sizeNameById={sizeNameById}
