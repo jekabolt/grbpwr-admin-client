@@ -12,7 +12,14 @@ export const runPackPath = (id: number) => ROUTES.productionRunPrint.replace(':i
 
 // Lifecycle statuses. RECEIVED is reached only through ReceiveProductionRun (which posts
 // stock) — never offered as a manual edit; UNKNOWN is never surfaced.
+//
+// ЧЕРНОВИК СТОИТ ПЕРВЫМ, потому что он предшествует плану и ничего цеху не обещает: черновик не
+// резервирует материал, не проходит гейт готовности при создании и не порождает наряд. Все три
+// обязательства навешиваются на переходе draft → planned — а значит и создавать черновик, и
+// повышать его до плана надо уметь с производственных экранов, а не только из костинга, где он
+// заводится. Статус, которого нет в этом списке, нельзя ни выбрать, ни снять.
 export const runStatusOptions: { value: common_ProductionRunStatus; label: string }[] = [
+  { value: 'PRODUCTION_RUN_STATUS_DRAFT', label: 'черновик' },
   { value: 'PRODUCTION_RUN_STATUS_PLANNED', label: 'planned' },
   { value: 'PRODUCTION_RUN_STATUS_IN_PROGRESS', label: 'in progress' },
   { value: 'PRODUCTION_RUN_STATUS_CLOSED', label: 'closed' },
@@ -21,6 +28,11 @@ export const runStatusOptions: { value: common_ProductionRunStatus; label: strin
 
 export const runStatusLabel = (s?: common_ProductionRunStatus | string): string => {
   switch (s) {
+    // Без этой ветки статус проваливался в default и печатался прочерком — то есть партия
+    // существующего статуса читалась как партия без статуса. Дороже всего это было ровно там, где
+    // черновик и заводится: кнопки базы расчёта на вкладке костинга подписывались «партия #12 · —».
+    case 'PRODUCTION_RUN_STATUS_DRAFT':
+      return 'черновик';
     case 'PRODUCTION_RUN_STATUS_PLANNED':
       return 'planned';
     case 'PRODUCTION_RUN_STATUS_IN_PROGRESS':
@@ -57,6 +69,14 @@ export const runStatusTone = (s?: common_ProductionRunStatus | string): string =
       return 'border-textColor bg-textColor text-bgColor';
     case 'PRODUCTION_RUN_STATUS_CANCELLED':
       return 'border-error text-error bg-error/10';
+    // ЧЕРНОВИК — самый тихий бейдж на странице, и это выбор, а не совпадение с default'ом.
+    // Синий в этой системе значит «в полёте, нужен человек», зелёный — «сделано», сплошная плашка
+    // ink — «закрытая запись». Черновик не является ни одним из трёх: он ничего не занял и никому
+    // ничего не обещал, поэтому берёт нейтральный серый — тот же, что у planned. Различает их
+    // СЛОВО («черновик» против «planned»), а не цвет: DESIGN.md прямо запрещает нести состояние
+    // одним лишь цветом, и здесь это правило работает в обе стороны — два соседних некритичных
+    // состояния не обязаны красить страницу в два разных оттенка, чтобы отличаться.
+    case 'PRODUCTION_RUN_STATUS_DRAFT':
     case 'PRODUCTION_RUN_STATUS_PLANNED':
     default:
       // labelColor (#666, ~5.7:1), NOT textInactiveColor (#ccc, ~1.6:1): DESIGN.md reserves #ccc for
@@ -68,9 +88,17 @@ export const runStatusTone = (s?: common_ProductionRunStatus | string): string =
 
 // received/closed are terminal facts (stock + cost_price posted): delete is rejected by the
 // backend, so the UI hides/disables it for these.
+//
+// ЧЕРНОВИК СЮДА НЕ ВХОДИТ, и это самое сильное утверждение из трёх: черновик — самое редактируемое
+// состояние, какое у партии бывает. Он не держит ни резерва ткани, ни наряда, ни квитанции, так
+// что запретить у него правку или удаление значило бы запереть единственный статус, который для
+// свободной правки и заведён.
 export const isRunLocked = (s?: common_ProductionRunStatus | string): boolean =>
   s === 'PRODUCTION_RUN_STATUS_RECEIVED' || s === 'PRODUCTION_RUN_STATUS_CLOSED';
 
+// ЧЕРНОВИК НЕ ПРИНИМАЕТСЯ: принять можно то, что шьют, а черновик ещё никому не заказан — ткань не
+// занята, наряда нет. Кнопка «принять» на нём предлагала бы провести на склад партию, которой цех
+// не видел.
 export const isRunReceivable = (s?: common_ProductionRunStatus | string): boolean =>
   s === 'PRODUCTION_RUN_STATUS_PLANNED' ||
   s === 'PRODUCTION_RUN_STATUS_IN_PROGRESS' ||
@@ -79,6 +107,15 @@ export const isRunReceivable = (s?: common_ProductionRunStatus | string): boolea
 // A run is OPEN while it is still expected to produce something. Same two statuses as receivable —
 // named separately because "can I still receive it" and "is it still outstanding" are different
 // questions that happen to share an answer, and the overdue rule below is about the second one.
+//
+// ЧЕРНОВИК НЕ ОТКРЫТ. «Открыта» значит «производство идёт и что-то должно приехать»; черновик не
+// должен ничего и никому — это прикидка денег. Ответ «нет» здесь ГАСИТ ЕГО РОВНО ТАМ, ГДЕ НАДО:
+// он не попадает ни в счётчик «в работе», ни в блок «требует действия», ни в опоздания (overdueDays
+// ниже спрашивает именно этот предикат), ни в сверку партий с датой дропа на тех-карте. Черновик,
+// у которого «прошла обещанная дата», был бы упрёком за невыполнение того, чего никто не обещал.
+//
+// ЦЕНА ЭТОГО ОТВЕТА — что `!isRunOpen` перестаёт означать «завершена»: см. список партий, где
+// черновики выделены в СВОЙ раздел, а не свалены в «завершённые и отменённые».
 export const isRunOpen = isRunReceivable;
 
 // The proto zero instant. grpc-gateway serialises an unset google.protobuf.Timestamp as this rather

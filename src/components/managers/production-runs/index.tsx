@@ -142,8 +142,16 @@ export function ProductionRuns() {
   }, [runs]);
 
   // Open batches are the work; everything terminal is a record and starts collapsed.
+  //
+  // ТРИ КОРЗИНЫ, А НЕ ДВЕ. Пока «не открыта» значило «закончена», деление надвое было честным. С
+  // появлением черновика оно врёт: черновик не открыт (он ничего не должен и не может опоздать),
+  // но и записью не является — это самая правимая партия из всех. Свалить его в «завершённые и
+  // отменённые — записи; из правок остаётся только реверс квитанции» значило бы спрятать свежую
+  // прикидку в свёрнутый архив под подписью, прямо противоположной правде.
+  const isDraftRun = (r: common_ProductionRun) => r.run?.status === 'PRODUCTION_RUN_STATUS_DRAFT';
+  const draftRuns = runs.filter(isDraftRun);
   const openRuns = runs.filter((r) => isRunOpen(r.run?.status));
-  const doneRuns = runs.filter((r) => !isRunOpen(r.run?.status));
+  const doneRuns = runs.filter((r) => !isRunOpen(r.run?.status) && !isDraftRun(r));
 
   const openCreate = () => setCreateOpen(true);
   const del = useDeleteProductionRun();
@@ -373,6 +381,20 @@ export function ProductionRuns() {
             >
               <RunTable
                 runs={openRuns}
+                showTechCard
+                canReadCosting={canReadCosting}
+                renderAction={openRunAction}
+              />
+            </Section>
+          )}
+          {draftRuns.length > 0 && (
+            <Section
+              key='draft'
+              title={`черновики (${draftRuns.length})`}
+              question='— расчёт: ткань не занята, наряда нет; готовность проверится при переводе в план'
+            >
+              <RunTable
+                runs={draftRuns}
                 showTechCard
                 canReadCosting={canReadCosting}
                 renderAction={openRunAction}
