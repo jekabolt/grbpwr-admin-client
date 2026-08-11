@@ -137,6 +137,9 @@ export function useFabricDxfPieces(
       }
       out.push({
         name,
+        // line_key — адрес детали на сервере (0297). Пустой ключ означает деталь, которую ещё не
+        // сохраняли: площадь такой детали публиковать некуда, и публикация её просто не увидит.
+        lineKey: (p.lineKey ?? '').trim(),
         perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
         refs,
       });

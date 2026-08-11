@@ -1559,9 +1559,12 @@ function SlotUsageRow({
   cardMarkersAllColorways,
   recipeLinks,
   colorwayId,
+  techCardId,
   onChange,
   onRemove,
 }: {
+  /** id карточки — только чтобы применение нормы могло опубликовать измеренные площади (Ф0). */
+  techCardId: number;
   draft: UsageDraft;
   bomItems: BomLine[];
   allowedSections: Set<string>;
@@ -1873,6 +1876,7 @@ function SlotUsageRow({
                 // остаться с одним «ввести руками…». Где норма уже есть — молчим: там это шум.
                 explainWhenIdle={!hasNorm}
                 recipeLinks={recipeLinks}
+                techCardId={techCardId}
                 onApply={(patch) => onChange(patch)}
               />
             )}
@@ -3234,6 +3238,7 @@ function ColorwayRecipeEditor({
                 cardMarkersAllColorways={allCardMarkers}
                 recipeLinks={recipeLinks}
                 colorwayId={colorwayId}
+                techCardId={techCardId}
                 sizeIds={sizeIds}
                 sizeNameById={sizeNameById}
                 canEdit={canEdit}

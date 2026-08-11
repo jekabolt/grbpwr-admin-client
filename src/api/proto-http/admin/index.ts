@@ -6745,6 +6745,10 @@ export type common_TechCardCosting = {
   // contributes to NO currency bucket, so unit_cost/unit_cost_base are withheld from cost seeding
   // and should not be trusted as complete.
   hasUnpriced: boolean | undefined;
+  // OUTPUT-ONLY: the root rollup was costed, in part, by AREA ESTIMATE (Ф1, ступень 0). Same
+  // meaning and same warning as TechCardColorwayCost.has_estimate: netto, lower bound, shown but
+  // never seeded into the catalogue.
+  hasEstimate: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: common_TechCardColorwayCost[] | undefined;
   // OUTPUT-ONLY base-currency rollup. The unit/order cost of the primary colourway folded into
@@ -6791,6 +6795,13 @@ export type common_TechCardColorwayCost = {
   // contributes to NO currency bucket, so unit_cost is withheld from cost seeding for this
   // colourway and should not be trusted as complete.
   hasUnpriced: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one roll slot of THIS colourway was costed by AREA ESTIMATE
+  // (Ф1, ступень 0) — площадь деталей ÷ раскройную ширину — instead of an authored norm.
+  // ЭТО NETTO, НИЖНЯЯ ГРАНИЦА. Межлекальных выпадов и концов настила в ней нет и быть не может: их
+  // знает только раскладка. Число показывать МОЖНО и нужно (иначе карточка стоит ноль при полностью
+  // заполненной спецификации), но подписывать им каталожную себестоимость — нельзя: сервер сам не
+  // сеет cost_price с этим флагом, и клиент обязан показывать цифру как ОЦЕНКУ, а не как цену.
+  hasEstimate: boolean | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -7596,10 +7607,12 @@ export type common_TechCardMarkerPieceSetStatus =
 export type common_TechCardPieceAreaScope = {
   scopeKey: string | undefined;
   areas: common_TechCardPieceArea[] | undefined;
-  // stale = выкройки этого скоупа менялись после замера: отпечаток набора листов, посчитанный
-  // сервером СЕЙЧАС, не совпал с тем, под которым мерили. Вычисляется на чтении, отдельной колонки
-  // состояния нет — хранимый флаг был бы неверен ровно в тот момент, когда лист перезалили, а
-  // карточку никто не открывал.
+  // stale = источник этого скоупа менялся после замера: отпечаток (листы И привязки блок→деталь),
+  // посчитанный сервером СЕЙЧАС, не совпал с тем, под которым мерили.
+  // НА ЖИВОЙ КАРТОЧКЕ вычисляется на чтении, отдельной колонки состояния нет — хранимый флаг был бы
+  // неверен ровно в тот момент, когда лист перезалили, а карточку никто не открывал. В СЛЕПКЕ
+  // РЕЛИЗА он, наоборот, заморожен: слепок и есть утверждение «вот так это выглядело на релизе»,
+  // и пересчитывать его по сегодняшним файлам значило бы менять историю.
   stale: boolean | undefined;
   // Условия и провенанс замера — одни на скоуп (их пишет одна транзакция).
   contourLayer: string | undefined;
