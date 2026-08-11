@@ -46,6 +46,7 @@ import {
 } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
+import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex } from './pattern-size-index';
 import { markerColorways } from './nesting/colorway-widths';
@@ -455,29 +456,27 @@ export function PatternsField({
   // разложили в назначение P — и если сопоставлять сырой ключ с ключами групп, лист вываливается в
   // «без материала» ровно в момент, когда оператор навёл порядок в BOM. scopeKeyOfBinding ведёт его
   // за своей строкой в группу назначения, поэтому разбор BOM ничего не теряет.
-  const dxfByScope = useMemo(() => {
-    const m = new Map<string, Entry[]>();
-    for (const e of dxfEntries) {
-      const key = scopeKeyOfBinding(e.row.fabricPurpose, e.row.bomLineKey, scopes);
-      const list = m.get(key) ?? [];
-      list.push(e);
-      m.set(key, list);
-    }
-    return m;
-  }, [dxfEntries, scopes]);
+  //
+  // Само правило живёт в nesting/dxf-by-scope.ts, а не здесь: тот же вопрос («какие листы у этой
+  // ткани») задаёт очередь раскроя партии на вкладке костинга, и вторая копия резолвера разъехалась
+  // бы с этой молча — расхождение видно только на полуразобранной карточке.
+  const dxfByScopeMap = useMemo(
+    () => dxfByScope(dxfEntries, scopes, (e) => e.row),
+    [dxfEntries, scopes],
+  );
 
   // Один блок на скоуп. Скоуп без файлов остаётся в списке: пустая строка «нет DXF» — это и есть
   // дыра, а не повод не рисовать материал.
   const scopeGroups = useMemo(
-    () => scopes.map((s) => ({ scope: s, entries: dxfByScope.get(s.key) ?? [] })),
-    [scopes, dxfByScope],
+    () => scopes.map((s) => ({ scope: s, entries: dxfByScopeMap.get(s.key) ?? [] })),
+    [scopes, dxfByScopeMap],
   );
   // DXF без живой привязки: залитые до 0260 (ключа нет вовсе) и те, чью строку BOM удалили или
   // переклассифицировали. Раскладка для них — догадка, поэтому они собраны отдельно и с ошибкой.
-  const looseDxf = useMemo(() => dxfByScope.get('') ?? [], [dxfByScope]);
+  const looseDxf = useMemo(() => dxfByScopeMap.get('') ?? [], [dxfByScopeMap]);
 
   const filesOf = (list: Entry[]): NestingFile[] =>
-    list.map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
+    list.map(({ row }) => ({ name: patternSheetName(row), url: row.url! }));
 
   // ВСЕ DXF карточки со своими скоупами — одна пачка на один разбор, посчитанная ОБЩЕЙ функцией
   // (см. card-dxf-pack.ts): панель деталей кроя под этим блоком просит ту же самую, поэтому обе

@@ -11,7 +11,7 @@ import {
 import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useMemo, useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -33,6 +33,11 @@ import { HelpMark, LineProblems } from './costing-vocab';
 import { useDevExpenses } from './dev-expenses-field';
 import { MarkerConsumptionBand } from './marker-apply';
 import { TechCardFormData } from './schema';
+
+// Весь граф раскладки (dxf-parser + clipper2 + воркер) живёт в ленивом чанке — см. место рендера.
+const BatchMarkerQueue = lazy(() =>
+  import('./batch-marker-queue').then((m) => ({ default: m.BatchMarkerQueue })),
+);
 
 // "no country picked" for the VAT-scenario select — '' cannot be a Radix Select.Item value.
 const DOMESTIC = '__domestic__';
@@ -962,6 +967,38 @@ export function CostingField({
           </div>
         </CalloutBox>
       )}
+
+      {/* ═══ РАСКРОЙ ПАРТИИ — состав выше превращается в НАБОР РАСКЛАДОК и в измеренный расход.
+          Аффорданс появляется только когда база расчёта — партия: раскладывать «стиль вообще»
+          нечего, пары (колорвей, размер) называет именно партия.
+
+          ЛЕНИВЫЙ ИМПОРТ ОБЯЗАТЕЛЕН. За этим компонентом стоит весь граф раскладки — dxf-parser,
+          clipper2 и воркер, — и статический импорт затащил бы его в главный бандл каждому, кто
+          открыл любую страницу админки. Ровно по той же причине лениво грузится модалка раскладки
+          из вкладки выкроек.
+
+          ЗА ПРЕДЕЛАМИ `fieldset disabled` НИЖЕ, но НЕ потому, что очередь работает на выпущенной
+          карточке: сервер карточных раскладок на неё не принимает, и компонент говорит это прямым
+          текстом. Место здесь ради самого текста — под общим fieldset'ом он выглядел бы как
+          погашенная кнопка без причины, то есть как поломка. */}
+      {batchRunId > 0 && batchRun && techCardId ? (
+        <Suspense
+          fallback={
+            <Text size='micro' variant='label'>
+              загружаем движок раскладки…
+            </Text>
+          }
+        >
+          <BatchMarkerQueue
+            key={batchRunId}
+            techCard={techCard}
+            techCardId={techCardId}
+            run={batchRun}
+            canEdit={canWrite(SECTION.techCards)}
+            frozen={frozen}
+          />
+        </Suspense>
+      ) : null}
 
       {/* ЗАМОРОЗКА РЕЛИЗА НАЧИНАЕТСЯ ЗДЕСЬ, а не выше. Всё, что ниже, — содержимое карточки: статьи,
           цели маржи, заметки; на выпущенной карточке они правке не подлежат, и сервер тот же ответ

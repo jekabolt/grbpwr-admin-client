@@ -37,7 +37,7 @@ import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
-import type { MarkerColorway } from './colorway-widths';
+import { slotCutWidth as slotCutWidthOf, type MarkerColorway } from './colorway-widths';
 import {
   buildMarkerLayout,
   compositionLabel,
@@ -81,6 +81,7 @@ import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { normBlock } from './block-code';
 import { ModalRailSection, type RailSectionStatus } from './modal-sections';
+import { markerUnits, selectMarkerPieces, unitsOfPieces } from './piece-selection';
 import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
@@ -447,33 +448,23 @@ export function NestingModal({
   // Файл без градации: одно число «изделий», размер даёт слот. Прежнее поведение целиком.
   const ungradedUnits = Math.max(1, Math.round(qtyByToken[''] ?? 1));
   const graded = compRows.length > 0;
+  // ТИРАЖ НАСТИЛА И ФОРМУЛА БЛОБА — из общего модуля (piece-selection.ts), а не выражением здесь.
+  // Ту же формулу собирает очередь раскроя партии на вкладке костинга, БЕЗ этой модалки, и вторая
+  // её копия была бы вторым ответом на вопрос «сколько экземпляров этой детали кроят».
+  const units = useMemo(
+    () => markerUnits({ graded, rows: activeRows, ungradedUnits }),
+    [graded, activeRows, ungradedUnits],
+  );
   // Сколько ИЗДЕЛИЙ кроит настил — делитель расхода и множитель неградуируемых деталей.
-  const unitsTotal = graded ? activeRows.reduce((s, r) => s + r.qty, 0) : ungradedUnits;
-  // Количество — на КАЖДОЕ написание строки: свёрнутая строка «M / m» раздаёт свой тираж и
-  // деталям с хвостом M, и деталям с хвостом m — это детали одного изделия.
-  const unitsByToken = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of activeRows) for (const t of r.tokens) m.set(t, r.qty);
-    return m;
-  }, [activeRows]);
-  // ФОРМУЛА БЛОБА, одна на весь экран: экземпляров детали = qty × (размер детали в составе ?
-  // количество этого размера : всего изделий). Деталь без размерного хвоста кроится на каждое
-  // изделие состава — потому и умножается на итог, а не на чью-то отдельную строку.
-  const unitsOfPiece = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const p of allPieces) {
-      const tok = split.codeById.get(p.id)?.size ?? '';
-      m.set(p.id, tok === '' ? unitsTotal : unitsByToken.get(tok) ?? 0);
-    }
-    return m;
-  }, [allPieces, split, unitsTotal, unitsByToken]);
+  const unitsTotal = units.unitsTotal;
+  const unitsOfPiece = useMemo(
+    () => unitsOfPieces(allPieces, (id) => split.codeById.get(id)?.size ?? '', units),
+    [allPieces, split, units],
+  );
   // В раскладку идут детали ВСЕХ размеров состава плюс неградуируемые. Размер с количеством 0 —
   // это «не кроим», и его детали не попадают ни в поиск, ни в блоб.
   const selectedPieces = useMemo(
-    () =>
-      allPieces.filter(
-        (p) => (p.layer ?? '') === contourLayer && (unitsOfPiece.get(p.id) ?? 0) >= 1,
-      ),
+    () => selectMarkerPieces(allPieces, contourLayer, unitsOfPiece),
     [allPieces, contourLayer, unitsOfPiece],
   );
   // СОСТАВ, КОТОРЫЙ УЕДЕТ НА СЕРВЕР — в id размеров карточки и отсортированный по ним (тот же
@@ -1098,21 +1089,19 @@ export function NestingModal({
   // роль кроится «вообще»; ширина пина — то, на чём кроится ЭТОТ колорвей. Раскладка меряет
   // второе. Рулон и кромка берутся из одного источника: ширина пина с кромкой слота описала бы
   // рулон, которого не существует.
+  // Половина «от слота» живёт в colorway-widths рядом с половиной «от пина»: очередь раскроя
+  // партии считает ту же ширину без этой модалки, и вторая копия формулы разошлась бы молча ровно
+  // на кромку.
   const slotCutWidth = (b?: MarkerBomLine): number => {
     if (!b) return NaN;
     const pin = chosenColorway?.widthByLine.get(b.lineKey);
     if (pin && Number.isFinite(pin.cutCm)) return pin.cutCm;
-    const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
-    if (!Number.isFinite(roll) || roll <= 0) return NaN;
-    const sel = parseDecimalNumber(b.selvedgeCm);
-    const cut = roll - 2 * (Number.isFinite(sel) && sel > 0 ? sel : 0);
-    return cut > 0 ? cut : NaN;
+    return slotCutWidthOf(b).cutCm;
   };
   const slotSelvedge = (b?: MarkerBomLine): number => {
     const pin = b ? chosenColorway?.widthByLine.get(b.lineKey) : undefined;
     if (pin && Number.isFinite(pin.cutCm)) return pin.selvedgeCm;
-    const s = b ? parseDecimalNumber(b.selvedgeCm) : NaN;
-    return Number.isFinite(s) && s > 0 ? s : 0;
+    return b ? slotCutWidthOf(b).selvedgeCm : 0;
   };
   const slotWidth = slotCutWidth(slot);
   const widthMismatch =

@@ -52,6 +52,26 @@ function cutWidthOf(m: common_Material | undefined): { cutCm: number; selvedgeCm
   return { cutCm: cut > 0 ? Math.round(cut * 10) / 10 : NaN, selvedgeCm: selvedge };
 }
 
+// Раскройная ширина САМОГО СЛОТА — то, чем меряют, когда колорвей своего артикула не приколол.
+//
+// Числа берутся со строки BOM, а не с артикула: строка несёт обогащение чтения (0259), в котором
+// ширина артикула уже разрешена, ПЛЮС собственный override. Формула та же, что у пина выше, и стоит
+// она здесь по той же причине, по которой пин стоит здесь: «раскройная ширина» обязана считаться
+// одним выражением, иначе на одной поверхности к рулону вычтут кромку, а на другой нет — и
+// расхождение будет ровно в те 2–4 %, которые никто не заметит.
+export function slotCutWidth(line: {
+  effectiveFabricWidthCm?: string;
+  fabricWidth?: string;
+  selvedgeCm?: string;
+}): { cutCm: number; selvedgeCm: number } {
+  const roll = parseDecimalNumber(line.effectiveFabricWidthCm || line.fabricWidth || '');
+  const sv = parseDecimalNumber(line.selvedgeCm ?? '');
+  const selvedge = Number.isFinite(sv) && sv > 0 ? sv : 0;
+  if (!Number.isFinite(roll) || roll <= 0) return { cutCm: NaN, selvedgeCm: selvedge };
+  const cut = roll - 2 * selvedge;
+  return { cutCm: cut > 0 ? cut : NaN, selvedgeCm: selvedge };
+}
+
 // Собрать список колорвеев карточки с их шириной по слотам.
 //
 // Источник — СЕРВЕРНОЕ чтение карточки: рецепт колорвея пишется отдельным RPC
