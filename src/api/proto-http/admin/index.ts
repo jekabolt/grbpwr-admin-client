@@ -7230,6 +7230,16 @@ export type common_TechCard = {
   // Save/DeleteTechCardMarker RPCs, never through the tech-card save (and marker writes do not
   // bump lock_version — saving a раскладка must not 409 the operator's own open card form).
   markers: common_TechCardMarkerSummary[] | undefined;
+  // OUTPUT-ONLY измеренные площади деталей кроя (Ф0, 0297), сгруппированные по скоупу ткани — то,
+  // из чего сервер ВЫВОДИТ норму расхода, когда её никто не вписал руками.
+  // ЗДЕСЬ ОНИ ЖИВУТ ИМЕННО ПОТОМУ, ЧТО ЭТО ЧИТАЕМАЯ ПРОЕКЦИЯ, А НЕ ВХОД ЗАПИСИ: площади пишет
+  // отдельный RPC (SaveTechCardPieceAreas) с подтверждением условий замера оператором, а полная
+  // замена карточки не должна иметь возможности их стереть — ровно та же дисциплина, что у
+  // markers и output_variants выше.
+  // И ЭТО ЖЕ КЛАДЁТ ИХ В СЛЕПОК РЕЛИЗА, который есть protojson ЭТОГО сообщения. Без них
+  // released-карточка теряла бы способность считать материалы: у детали кроя в контракте нет id,
+  // только line_key, и любой ключ на piece_id был бы в слепке нулевым.
+  pieceAreaScopes: common_TechCardPieceAreaScope[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -7579,6 +7589,43 @@ export type common_TechCardMarkerPieceSetStatus =
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED";
+// TechCardPieceAreaScope — площади деталей ОДНОГО скоупа ткани, с вердиктом об устаревании.
+// Скоуп, а не карточка: после T4 одна деталь законно кроится из нескольких слоёв материала, и у
+// подкладочной версии свой контур и своя площадь. Ключ тот же, что у привязок блоков (0267) и у
+// индекса размеров (0280) — COALESCE(назначение, line_key строки BOM).
+export type common_TechCardPieceAreaScope = {
+  scopeKey: string | undefined;
+  areas: common_TechCardPieceArea[] | undefined;
+  // stale = выкройки этого скоупа менялись после замера: отпечаток набора листов, посчитанный
+  // сервером СЕЙЧАС, не совпал с тем, под которым мерили. Вычисляется на чтении, отдельной колонки
+  // состояния нет — хранимый флаг был бы неверен ровно в тот момент, когда лист перезалили, а
+  // карточку никто не открывал.
+  stale: boolean | undefined;
+  // Условия и провенанс замера — одни на скоуп (их пишет одна транзакция).
+  contourLayer: string | undefined;
+  seamAllowanceMm: googletype_Decimal | undefined;
+  parsedBy: string | undefined;
+  parsedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardPieceArea — площадь ОДНОГО ЭКЗЕМПЛЯРА контура детали, см².
+// ИМЕННО ОДНОГО ЭКЗЕМПЛЯРА, без pieces_per_garment: количество на изделие живёт на детали кроя,
+// меняется отдельной правкой карточки и к геометрии файла отношения не имеет. Умножает читатель.
+export type common_TechCardPieceArea = {
+  // Деталь кроя — по стабильному line_key. Не по id: в слепке релиза у детали id нет.
+  pieceLineKey: string | undefined;
+  // 0 = деталь НЕ ГРАДУИРУЕТСЯ и входит в комплект каждого размера целиком (то же правило, что у
+  // неградуируемых деталей раскладки в MarkerSizeAreasPerGarment).
+  sizeId: number | undefined;
+  areaCm2: googletype_Decimal | undefined;
+  // Контур заменён выпуклой оболочкой при раздутии припуском: площадь завышена, но воспроизводима.
+  hulled: boolean | undefined;
+  // На слое было несколько совпадающих по площади кандидатов, взят первый: число зависит от порядка
+  // листов в пачке, и сравнивать его с чем-либо нельзя. НЕ то же самое, что hulled — состояния
+  // разные и ведут к разным фразам на экране.
+  ambiguousPick: boolean | undefined;
+};
+
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
@@ -8145,6 +8192,12 @@ export type GetBomWastageSuggestionResponse = {
   detail: string | undefined;
   // Разбор ПО НАСТИЛАМ, вошедшие и невошедшие, от свежего замера к старому.
   drifts: common_BomWastageLayDrift[] | undefined;
+  // ОКНО ОТБОРА: сколько настилов-кандидатов РАССМОТРЕНО (свежие N — скан истории артикула
+  // ограничен) и сколько измеренных кандидатов есть ВСЕГО. considered < total означает, что
+  // медиана стоит на свежем окне, — и это видно, а не подразумевается: «медиана по N» без
+  // названного окна непроверяема.
+  consideredLayCount: number | undefined;
+  totalMeasuredLayCount: number | undefined;
 };
 
 // ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ (T7 волна 2) — СОСЕД калибровки коэффициента выше, И ЭТО ДРУГОЕ
@@ -9538,6 +9591,29 @@ export type PutTechCardPatternSizeIndexRequest = {
 export type PutTechCardPatternSizeIndexResponse = {
   sheetFingerprint: string | undefined;
   resolvedSizeCount: number | undefined;
+};
+
+export type SaveTechCardPieceAreasRequest = {
+  techCardId: number | undefined;
+  // The fabric scope: назначение (0265) when the card has been sorted, else the BOM line's line_key —
+  // the same key entity.FabricScopeKey computes.
+  scopeKey: string | undefined;
+  // line_keys of the sheets the client actually measured. Checked against the server's own current
+  // membership of the scope; a mismatch in either direction is refused.
+  sheetLineKeys: string[] | undefined;
+  // The WHOLE measured set of this scope. Empty is refused: a parse that found nothing is a failed
+  // read, and storing it would turn it into a confident zero area — a free garment.
+  areas: common_TechCardPieceArea[] | undefined;
+  // Conditions the areas were measured under. They are not decoration: the seam layer must be
+  // inflated by the allowance and the cutting layer must not, and getting it wrong shifts the norm
+  // by the allowance around every piece's whole perimeter.
+  contourLayer: string | undefined;
+  seamAllowanceMm: googletype_Decimal | undefined;
+};
+
+export type SaveTechCardPieceAreasResponse = {
+  sheetFingerprint: string | undefined;
+  stored: number | undefined;
 };
 
 export type ReceiveMaterialStockRequest = {
@@ -11857,6 +11933,31 @@ export interface AdminService {
   // the same session as the upload. A production planner must not be able to write it — the index
   // feeds the gate, and the right to rewrite it is the right to clear one's own blocker.
   PutTechCardPatternSizeIndex(request: PutTechCardPatternSizeIndexRequest): Promise<PutTechCardPatternSizeIndexResponse>;
+  // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
+  // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody
+  // type one.
+  // THE PROBLEM IT SOLVES. A card can be complete — priced BOM, parsed patterns, every piece
+  // assigned to a fabric in the colourway recipe — and still cost zero, because money is computed
+  // only from a recipe row carrying an explicit norm, and a piece-bound row deliberately carries
+  // none (T8: «расход — свойство изделия»). The missing link was never data the operator failed to
+  // enter; it was the area, which existed only in the browser's memory because DXF is parsed there
+  // and only there.
+  // SAME DIVISION OF LABOUR AS THE SIZE INDEX ABOVE: the client measures, the server stores, and the
+  // half that could be forged in the dangerous direction is computed server-side. The client says
+  // WHICH SHEETS it measured; the server fingerprints that set from its own tech_card_size_pattern
+  // rows and refuses a mismatch in both directions. Re-uploading any sheet then makes the areas read
+  // as STALE by itself.
+  // ONE SCOPE PER CALL, FULL REPLACE OF THAT SCOPE. A card's fabrics are parsed independently and a
+  // pack download can succeed for one sheet and fail for another, so a card-wide replace would let a
+  // failed lining download silently delete a good main-fabric measurement.
+  // A PARTIAL SET IS REFUSED, NOT STORED. A missing piece lowers the garment's area, a lower area
+  // lowers the norm, and an understated norm is discovered in the warehouse rather than on screen.
+  // AREAS ARE PER ONE INSTANCE OF THE CONTOUR — pieces_per_garment is applied by the reader. It
+  // lives on the piece, changes with an ordinary card edit, and baking it in here would make a
+  // stored number quietly wrong after every such edit.
+  // wr(tech_cards): the same right as the size index — this writes a derived fact about the card's
+  // patterns, from the patterns tab, and it feeds costing and the release gate.
+  SaveTechCardPieceAreas(request: SaveTechCardPieceAreasRequest): Promise<SaveTechCardPieceAreasResponse>;
   // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
   // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
   // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
@@ -16676,6 +16777,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "PutTechCardPatternSizeIndex",
       }) as Promise<PutTechCardPatternSizeIndexResponse>;
+    },
+    SaveTechCardPieceAreas(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/piece-areas`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveTechCardPieceAreas",
+      }) as Promise<SaveTechCardPieceAreasResponse>;
     },
     ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes
