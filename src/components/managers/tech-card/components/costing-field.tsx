@@ -1,16 +1,17 @@
 import { common_ColorwayPrice, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
+import { runColorwayRows } from 'components/managers/production-runs/components/run-composition';
 import { useProductionRun, useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import {
   useCostingMigrationExceptions,
   useRepriceTechCardBom,
   useTechCardVatScenario,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -26,6 +27,7 @@ import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { BatchComposition } from './batch-composition';
 import { operationMinutes, SummaryOp } from './construction-tab';
 import { HelpMark, LineProblems } from './costing-vocab';
 import { useDevExpenses } from './dev-expenses-field';
@@ -143,9 +145,27 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
  * 🔒 costing: the tab is hidden without costing:read; the fieldsets below are disabled without
  * costing:write. Everything read-only stays drawn in that case.
  */
-export function CostingField({ techCard }: { techCard?: common_TechCard }) {
+export function CostingField({
+  techCard,
+  frozen = false,
+}: {
+  techCard?: common_TechCard;
+  /**
+   * Карточка ВЫПУЩЕНА (approval_state = RELEASED), и её содержимое правке больше не подлежит.
+   *
+   * Заморозку теперь несёт эта вкладка сама, а не общий `<fieldset disabled>` формы, из-под которого
+   * она выехала. Причина — в блоке БАЗЫ РАСЧЁТА ниже: партия не является содержимым карточки, и
+   * планируют её как раз ПОСЛЕ релиза. Под общим fieldset'ом браузер гасил и переключатель базы, и
+   * сетку состава — то есть ровно на тех карточках, ради которых они и написаны.
+   */
+  frozen?: boolean;
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const { canWriteCosting } = usePermissions();
+  // ДВА РАЗНЫХ ПРАВА ВСТРЕЧАЮТСЯ НА ЭТОЙ ВКЛАДКЕ. Статьи костинга пишет costing:write; партию —
+  // даже черновую, даже заведённую ради расчёта — планирует production:write. Аккаунт с одним и без
+  // другого нормален (экономист считает деньги, координатор заводит партии), и слить их в одно
+  // право значило бы либо раздать планирование, либо отобрать расчёт.
+  const { canWriteCosting, canWrite } = usePermissions();
   const { dictionary } = useDictionary();
   const techCardId = techCard?.id;
 
@@ -164,10 +184,31 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   // Это РАЗНЫЕ вопросы, и путать их дороже всего: партия из одних XL, посчитанная по средней ряда,
   // выглядит нормально и врёт на всю разницу градации. Поэтому база выбирается явно и подписана.
   const [batchRunId, setBatchRunId] = useState(0);
+  // Открыт ли редактор состава ДЛЯ ЕЩЁ НЕ СОЗДАННОЙ партии. Для уже выбранной базы состав
+  // показывается всегда: «сколько каких размеров каждого колорвея» — это и есть вопрос вкладки,
+  // и прятать ответ на него за вторую кнопку значит отвечать не сразу.
+  const [composing, setComposing] = useState(false);
   const { data: runsData } = useProductionRuns(techCardId ?? 0, '', 0, false, !!techCardId);
   const runs = runsData?.runs ?? [];
   const { data: batchData } = useProductionRun(batchRunId, batchRunId > 0);
   const batchRun = batchData?.run;
+  // Планировать партии — производственное право, и без сохранённой карточки планировать нечего:
+  // techCardId 0 уехал бы в CreateProductionRun партией без стиля.
+  const canPlanRuns = canWrite(SECTION.production) && !!techCardId;
+  // Тот же вывод строк, что у модалки создания прогона и у сетки на странице партии (архивные и
+  // беспродуктовые колорвеи не предлагаются) — один экземпляр правил на три поверхности.
+  const runColorways = useMemo(
+    () => runColorwayRows(techCard?.colorways, dictionary?.colors),
+    [techCard?.colorways, dictionary?.colors],
+  );
+  // Кнопок базы — шесть, но ВЫБРАННАЯ партия обязана быть среди них всегда: только что созданный
+  // черновик иначе стал бы базой, у которой на экране нет ни одной нажатой кнопки, и экран
+  // показывал бы «стиль» при расчёте по партии.
+  const basisRuns = useMemo(() => {
+    const head = runs.slice(0, 6);
+    const selected = runs.find((r) => r.id === batchRunId);
+    return selected && !head.some((r) => r.id === selected.id) ? [...head, selected] : head;
+  }, [runs, batchRunId]);
   const { data: vatScenario, isFetching: vatScenarioLoading } = useTechCardVatScenario(
     techCardId,
     vatScenarioCountry,
@@ -816,42 +857,120 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       {/* ═══ БАЗА РАСЧЁТА (Ф2). Стиль и партия — РАЗНЫЕ вопросы об одной карточке, и экран обязан
           говорить, на какой сейчас отвечает: партия из одних XL, показанная как средняя по ряду,
           выглядит нормально и врёт на всю разницу градации. */}
-      {runs.length > 0 && (
+      {(runs.length > 0 || canPlanRuns) && (
         <CalloutBox tone='note'>
-          <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
-            <Text size='micro' variant='label' component='span'>
-              база расчёта
-            </Text>
-            <Button
-              type='button'
-              size='xs'
-              variant={batchRunId === 0 ? 'default' : 'secondary'}
-              onClick={() => setBatchRunId(0)}
-            >
-              стиль · средняя по ряду
-            </Button>
-            {runs.slice(0, 6).map((r) => (
-              <Button
-                key={r.id}
-                type='button'
-                size='xs'
-                variant={batchRunId === r.id ? 'default' : 'secondary'}
-                onClick={() => setBatchRunId(r.id ?? 0)}
-              >
-                {`партия #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
-              </Button>
-            ))}
-            {batchRunId > 0 && (
-              <Text size='micro' component='span'>
-                {batchCost?.value
-                  ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} за изделие — взвешенно по миксу ЭТОЙ партии (колорвеи × размеры), с её пинами`
-                  : batchReason || 'цена партии не посчитана'}
+          <div className='flex flex-col gap-2'>
+            <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+              <Text size='micro' variant='label' component='span'>
+                база расчёта
               </Text>
-            )}
+              {runs.length > 0 && (
+                <Button
+                  type='button'
+                  size='xs'
+                  variant={batchRunId === 0 ? 'default' : 'secondary'}
+                  onClick={() => {
+                    setBatchRunId(0);
+                    setComposing(false);
+                  }}
+                >
+                  стиль · средняя по ряду
+                </Button>
+              )}
+              {basisRuns.map((r) => (
+                <Button
+                  key={r.id}
+                  type='button'
+                  size='xs'
+                  variant={batchRunId === r.id ? 'default' : 'secondary'}
+                  onClick={() => {
+                    setBatchRunId(r.id ?? 0);
+                    setComposing(false);
+                  }}
+                >
+                  {`партия #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
+                </Button>
+              ))}
+              {/* СОСТАВИТЬ ПАРТИЮ, НЕ УХОДЯ СО СТРАНИЦЫ. Черновик не занимает ткань и не проходит
+                  гейт — это прикидка денег, и заводится она там, где деньги и считают. Аффорданса
+                  нет, когда составлять не из чего: у карточки без живых колорвеев с продуктом
+                  клетку сетки нечем ключевать (product_id), и об этом сказано строкой ниже —
+                  один раз, а не кнопкой, которая молча ничего не делает. */}
+              {canPlanRuns && runColorways.length > 0 && (
+                // Эта кнопка — ДЕЙСТВИЕ, а не база, и нажатой она поэтому не выглядит никогда:
+                // пока черновик не создан, расчёт по-прежнему ведётся по стилю, и «выбранной»
+                // обязана читаться именно кнопка стиля. Открытость редактора видна по самому
+                // редактору ниже, а закрывает его «отмена» в его заголовке.
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='secondary'
+                  onClick={() => {
+                    setBatchRunId(0);
+                    setComposing(true);
+                  }}
+                >
+                  + новая партия
+                </Button>
+              )}
+              {canPlanRuns && runColorways.length === 0 && (
+                <Text size='micro' variant='label' component='span'>
+                  у карточки нет живых колорвеев с продуктом — составлять партию не из чего
+                </Text>
+              )}
+              {batchRunId > 0 && (
+                <Text size='micro' component='span'>
+                  {batchCost?.value
+                    ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} за изделие — взвешенно по миксу ЭТОЙ партии (колорвеи × размеры), с её пинами`
+                    : batchReason || 'цена партии не посчитана'}
+                </Text>
+              )}
+            </div>
+
+            {/* СОСТАВ. `key` — это и есть сброс состояния редактора: смена базы есть смена
+                предмета, а не обновление того же, и набранное для одной партии не должно
+                перетечь в другую. Сохранение внутри инвалидирует префикс productionRunKeys.all,
+                под которым лежат И список, И detail(id) выбранной партии, — поэтому цифра
+                «за изделие» выше пересчитывается сама, без второго вызова отсюда. */}
+            {batchRunId > 0 ? (
+              batchRun ? (
+                <BatchComposition
+                  key={batchRunId}
+                  techCard={techCard}
+                  run={batchRun}
+                  canPlan={canPlanRuns}
+                />
+              ) : (
+                <Text size='micro' variant='label'>
+                  загружаем состав партии…
+                </Text>
+              )
+            ) : composing ? (
+              <BatchComposition
+                key='new'
+                techCard={techCard}
+                canPlan={canPlanRuns}
+                // Созданный черновик СРАЗУ становится базой: иначе оператор набрал бы партию и
+                // остался смотреть на среднюю по ряду — то есть на ответ к другому вопросу.
+                onCreated={(id) => {
+                  setBatchRunId(id);
+                  setComposing(false);
+                }}
+                onCancel={() => setComposing(false)}
+              />
+            ) : null}
           </div>
         </CalloutBox>
       )}
 
+      {/* ЗАМОРОЗКА РЕЛИЗА НАЧИНАЕТСЯ ЗДЕСЬ, а не выше. Всё, что ниже, — содержимое карточки: статьи,
+          цели маржи, заметки; на выпущенной карточке они правке не подлежат, и сервер тот же ответ
+          даёт независимо. Блок базы расчёта выше заморозке не подлежит НИКОГДА: партия карточке не
+          принадлежит, и планируют её как раз после релиза.
+
+          Классы повторяют внешний контейнер (flex-col gap-3): fieldset встаёт между ним и его
+          бывшими детьми, и без этого все промежутки между блоками вкладки схлопнулись бы в один. */}
+      <fieldset disabled={frozen} className='m-0 flex min-w-0 flex-col gap-3 border-0 p-0'>
       {/* ═══ ВЕРДИКТ — the gap as a number, its cause, and the way to close it. */}
       <CalloutBox tone={verdict.tone}>
         <div className='flex flex-wrap items-center gap-x-5 gap-y-2'>
@@ -1324,6 +1443,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           </Text>
         </div>
       </details>
+      </fieldset>
     </div>
   );
 }
