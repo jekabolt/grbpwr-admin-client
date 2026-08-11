@@ -8,6 +8,7 @@ import {
   StyleCostMaterialLine,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { stampWhen } from 'components/managers/production-runs/components/useLays';
 import { techCardBomSectionOptions } from 'constants/filter';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useState } from 'react';
@@ -19,7 +20,9 @@ import { Pill } from 'ui/components/pill';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { laysProvenancePhrase } from './bom-wastage-suggestion';
 import { LineProblems, noFx, NO_PRICE, PriceOrigin } from './costing-vocab';
+import { wireInt } from './schema';
 import { styleReadViewKeys } from './useStyleReadViews';
 
 const num = (s?: string) => {
@@ -59,6 +62,12 @@ const statTone = (d?: number): 'up' | 'down' | undefined =>
 // ─────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Провенанс процента раскроя ОДНОЙ строки BOM (0296), снятый с карточки: смета его не возит,
+ * а карточка — возит, и bom_item_id строки сметы называет строку BOM напрямую.
+ */
+type BomWastageProv = { source?: string; layCount?: number; appliedAt?: string };
+
+/**
  * Расход материала и то, что в нём уже сидит.
  *
  * Kept verbatim from the previous table (0261) because the distinction is load-bearing. On a
@@ -67,20 +76,23 @@ const statTone = (d?: number): 'up' | 'down' | undefined =>
  * decomposition of what that length contains. Rendering both as a bare number made a marker row
  * read as an uplift it never received.
  */
-function WastageCell({ m }: { m: StyleCostMaterialLine }) {
+function WastageCell({ m, prov }: { m: StyleCostMaterialLine; prov?: BomWastageProv }) {
   if (m.wastageSource !== 'marker') {
     const pct = decimalToInput(m.wastagePct);
     if (!pct) return <EmptyCell />;
-    // T7, волна 1: провенанс процента — тем же приёмом, что источник нормы в рецепте. Утверждение
-    // «введено руками» здесь клиентское, но честное: другого писателя у bom_item.wastage_percent
-    // сегодня не существует. Когда бекенд начнёт считать медиану по настилам и появится
-    // wastage_source, эта подпись станет ветвлением («медиана по N раскроям» / «введено руками»)
-    // — место для него ровно здесь.
+    // T7, волна 2: ветвление, под которое волна 1 держала место. Провенанс приходит НЕ в строке
+    // сметы (StyleCostEstimate его не несёт), а с самой карточки: смета считается от сохранённых
+    // строк BOM, и их bom_item_id прямо называет строку с wastage_source. Фраза 'lays' — общая с
+    // бейджем у поля BOM (laysProvenancePhrase): две подписи одного факта не должны разъезжаться
+    // словами. Всё, что не 'lays' — включая строку без провенанса с сервера до 0296, — руками:
+    // другого писателя у этого поля тогда не существовало.
     return (
       <span className='flex flex-col items-end gap-0.5'>
         <span>{pct}</span>
         <Text size='micro' variant='label' component='span'>
-          введено руками
+          {prov?.source === 'lays'
+            ? laysProvenancePhrase(prov.layCount, stampWhen(prov.appliedAt))
+            : 'введено руками'}
         </Text>
       </span>
     );
@@ -120,7 +132,14 @@ const BREAKDOWN_LEAD = BREAKDOWN_COLS - 2;
  * цифру, было нельзя в принципе. Теперь строки идут группами, у каждой группы своя подсумма и
  * доля, а закрывающая строка — это ровно тот unit cost, который сервер отдал в `unit_cost_base`.
  */
-function Breakdown({ estimate }: { estimate: StyleCostEstimate }) {
+function Breakdown({
+  estimate,
+  wastageProv,
+}: {
+  estimate: StyleCostEstimate;
+  /** bom_item_id → провенанс процента раскроя строки (см. BomWastageProv). */
+  wastageProv: Map<number, BomWastageProv>;
+}) {
   const cur = estimate.baseCurrency || '';
   const materials = estimate.materials ?? [];
   const articles = estimate.articles ?? [];
@@ -218,7 +237,8 @@ function Breakdown({ estimate }: { estimate: StyleCostEstimate }) {
                   </RightCell>
                 </td>
                 <td>
-                  <WastageCell m={m} />
+                  {/* int64 на проводе — строка; wireInt сводит оба конца к числу до Map.get. */}
+                  <WastageCell m={m} prov={wastageProv.get(wireInt(m.bomItemId))} />
                 </td>
                 <td>{decimalToInput(m.lineTotalBase) || <EmptyCell />}</td>
                 <td>
@@ -591,6 +611,18 @@ export function CostEstimateField({
   const colorways: common_AdminColorwayRef[] = techCard?.colorways ?? [];
   const [openId, setOpenId] = useState(0);
 
+  // Провенанс процента раскроя по строкам BOM (0296) — С СОХРАНЁННОЙ карточки, не из формы:
+  // смета считается от сохранённого состояния, и бейдж обязан описывать то же состояние, что и
+  // числа рядом. id — int64, с провода приходит строкой (wireInt на обоих концах).
+  const wastageProv = new Map<number, BomWastageProv>(
+    (techCard?.techCard?.bomItems ?? [])
+      .filter((b) => wireInt(b.id) > 0)
+      .map((b) => [
+        wireInt(b.id),
+        { source: b.wastageSource, layCount: b.wastageLayCount, appliedAt: b.wastageAppliedAt },
+      ]),
+  );
+
   // Ключ — общий с `useStyleCostEstimate` (styleReadViewKeys), поэтому кэш один: сохранение рецепта
   // колорвея инвалидирует ровно эту запись (useColorwayRecipe), а второго запроса за теми же
   // данными не случается. retry:false — 403 должен всплыть сразу, а не притворяться сетевым сбоем.
@@ -794,7 +826,7 @@ export function CostEstimateField({
               {open && row.estimate && (
                 <tr>
                   <td colSpan={MATRIX_COLS}>
-                    <Breakdown estimate={row.estimate} />
+                    <Breakdown estimate={row.estimate} wastageProv={wastageProv} />
                   </td>
                 </tr>
               )}
