@@ -1,5 +1,7 @@
 import { common_ColorwayPrice, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { runStatusLabel } from 'components/managers/production-runs/components/options';
+import { useProductionRun, useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import {
   useCostingMigrationExceptions,
   useRepriceTechCardBom,
@@ -153,6 +155,19 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   // destinations"). '' keeps the page's own read, i.e. the domestic country; picking a country
   // fetches the same card netted at that country's rate, as a scenario beside the default.
   const [vatScenarioCountry, setVatScenarioCountry] = useState('');
+  // БАЗА РАСЧЁТА: стиль или конкретная ПАРТИЯ (Ф2).
+  //
+  // Стиль отвечает на вопрос «сколько стоит это изделие вообще» — средняя по объявленному
+  // размерному ряду, одна на карточку. Партия отвечает на другой: «сколько будет стоить ВОТ ЭТО
+  // производство» — взвешенно по её собственному миксу колорвеев и размеров, с её пинами.
+  //
+  // Это РАЗНЫЕ вопросы, и путать их дороже всего: партия из одних XL, посчитанная по средней ряда,
+  // выглядит нормально и врёт на всю разницу градации. Поэтому база выбирается явно и подписана.
+  const [batchRunId, setBatchRunId] = useState(0);
+  const { data: runsData } = useProductionRuns(techCardId ?? 0, '', 0, false, !!techCardId);
+  const runs = runsData?.runs ?? [];
+  const { data: batchData } = useProductionRun(batchRunId, batchRunId > 0);
+  const batchRun = batchData?.run;
   const { data: vatScenario, isFetching: vatScenarioLoading } = useTechCardVatScenario(
     techCardId,
     vatScenarioCountry,
@@ -791,8 +806,52 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                     ) : undefined,
                 };
 
+  // Партия отвечает своей ценой: снапшот плана и «сегодня по той же формуле». Пусто — сервер
+  // называет причину словами (Ф2 BE-3), и показать надо ЕЁ, а не собственную догадку по пустоте.
+  const batchCost = batchRun?.plannedUnitCostToday ?? batchRun?.plannedUnitCost;
+  const batchReason = batchRun?.plannedCostReason ?? '';
+
   return (
     <div className='flex flex-col gap-3'>
+      {/* ═══ БАЗА РАСЧЁТА (Ф2). Стиль и партия — РАЗНЫЕ вопросы об одной карточке, и экран обязан
+          говорить, на какой сейчас отвечает: партия из одних XL, показанная как средняя по ряду,
+          выглядит нормально и врёт на всю разницу градации. */}
+      {runs.length > 0 && (
+        <CalloutBox tone='note'>
+          <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+            <Text size='micro' variant='label' component='span'>
+              база расчёта
+            </Text>
+            <Button
+              type='button'
+              size='xs'
+              variant={batchRunId === 0 ? 'default' : 'secondary'}
+              onClick={() => setBatchRunId(0)}
+            >
+              стиль · средняя по ряду
+            </Button>
+            {runs.slice(0, 6).map((r) => (
+              <Button
+                key={r.id}
+                type='button'
+                size='xs'
+                variant={batchRunId === r.id ? 'default' : 'secondary'}
+                onClick={() => setBatchRunId(r.id ?? 0)}
+              >
+                {`партия #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
+              </Button>
+            ))}
+            {batchRunId > 0 && (
+              <Text size='micro' component='span'>
+                {batchCost?.value
+                  ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} за изделие — взвешенно по миксу ЭТОЙ партии (колорвеи × размеры), с её пинами`
+                  : batchReason || 'цена партии не посчитана'}
+              </Text>
+            )}
+          </div>
+        </CalloutBox>
+      )}
+
       {/* ═══ ВЕРДИКТ — the gap as a number, its cause, and the way to close it. */}
       <CalloutBox tone={verdict.tone}>
         <div className='flex flex-wrap items-center gap-x-5 gap-y-2'>

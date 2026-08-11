@@ -8555,7 +8555,13 @@ export type common_ProductionRunStatus =
   // At least one partial receipt is booked and the operator has not yet declared the run complete
   // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
   // writable through UpdateProductionRun.
-  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED";
+  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED"
+  // DRAFT (Ф2): расчётная партия — состав набран, деньги считаются, производство НЕ начато.
+  // Отличается от PLANNED ровно тремя обязательствами, которых у неё НЕТ: она не резервирует ткань,
+  // не проходит гейт готовности и не печатает наряд. Всё это появляется на переходе draft → planned.
+  // Так и должно быть: прикидка «сколько будет стоить сто чёрных и полсотни белых» не имеет права
+  // занимать сырьё на складе, иначе соседний прогон увидит нехватку из-за чужого черновика.
+  | "PRODUCTION_RUN_STATUS_DRAFT";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -8706,6 +8712,14 @@ export type common_ProductionRun = {
   // ТОЛЬКО на одиночном чтении (GetProductionRun); на списках пусто всегда — это лишний расчёт
   // костинга на строку. Деньги: снимается stripProductionRunCosting наравне с planned_unit_cost.
   plannedUnitCostToday: googletype_Decimal | undefined;
+  // ПОЧЕМУ цены партии нет — словами, а не догадкой по пустоте.
+  // До этого поля пустая цена была неотличима от «ноль» и от «пока не считали»: сервер возвращал
+  // невалидный decimal, и клиент выводил причину сам, из соседних признаков. Причин же несколько, и
+  // ведут они в РАЗНЫЕ места: у партии нет строк с количеством; ячейка (колорвей, размер) не
+  // считается; строка называет колорвей, которого у карточки нет; ячейки разошлись по валютам.
+  // ПУСТАЯ СТРОКА = цена посчитана (или её никто не спрашивал). Непустая — готовое предложение для
+  // экрана; клиент его показывает, а не переводит.
+  plannedCostReason: string | undefined;
 };
 
 // ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
