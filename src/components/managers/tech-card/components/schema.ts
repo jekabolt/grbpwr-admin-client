@@ -1587,8 +1587,17 @@ export function mapFormToTechCardInsert(
       composition: b.composition?.trim() || '',
       spec: b.spec?.trim() || '',
       unit: b.unit?.trim() || '',
-      unitPrice: inputToDecimal(b.unitPrice),
-      currency: b.currency?.trim() || '',
+      // ДЕНЬГИ СТРОКИ — ТОЛЬКО ОТ РЕДАКТОРА С costing:write, тем же verbatim-протоколом
+      // «поля нет = сохрани что было», что у пары провенанса ниже и у costing в конце файла.
+      // Аккаунту без права сервер вырезает цены на чтении, форма держит пустоту — и отправка
+      // этой пустоты либо затирала бы цену (валюта шла явным ''), либо валила бы ВЕСЬ сейв:
+      // непустой unit_price от не-костингового аккаунта сервер отвергает целиком
+      // (PermissionDenied, techCardInsertHasCostingData), а цена могла оказаться в форме и без
+      // ввода руками — например из черновика, снятого аккаунтом с правом. undefined выбрасывает
+      // ключ из JSON, и серверный anti-erase (preserveStoredCosting) возвращает хранимые
+      // цену и валюту по line_key.
+      unitPrice: canWriteCosting ? inputToDecimal(b.unitPrice) : undefined,
+      currency: canWriteCosting ? b.currency?.trim() || '' : undefined,
       comment: b.comment?.trim() || '',
       fabricWidth: inputToDecimal(b.fabricWidth),
       fabricWeightGsm: inputToDecimal(b.fabricWeightGsm),

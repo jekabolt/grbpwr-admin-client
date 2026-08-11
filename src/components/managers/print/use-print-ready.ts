@@ -51,6 +51,11 @@ export function usePrintReady(
 
   const [assetsReady, setAssetsReady] = useState(false);
   const [timedOut, setTimedOut] = useState(false);
+  // «Не загрузилось» — НЕ «долго грузится». Отклонённый decode() (404, битый файл) картинкой уже
+  // не станет, сколько ни жди: ждать его — значит запереть печать (нарушение правила 2), а молчать
+  // о нём — напечатать лист с пустым местом вместо схемы (нарушение правила 4). Поэтому отказ
+  // считается отдельно и попадает в degraded сразу, не дожидаясь таймаута.
+  const [brokenImages, setBrokenImages] = useState(0);
 
   useEffect(() => {
     const t = window.setTimeout(() => setTimedOut(true), timeoutMs);
@@ -68,24 +73,29 @@ export function usePrintReady(
     const images = Promise.allSettled(
       Array.from(document.images).map((img) => (img.decode ? img.decode() : Promise.resolve())),
     );
-    Promise.all([fonts, images]).then(() => {
-      if (!cancelled) setAssetsReady(true);
+    Promise.all([fonts, images]).then(([, settled]) => {
+      if (cancelled) return;
+      setBrokenImages(settled.filter((r) => r.status === 'rejected').length);
+      setAssetsReady(true);
     });
     return () => {
       cancelled = true;
     };
   }, [dataSettled, key]);
 
+  // Отказ картинок готовности не мешает (правило 1: error — не pending), но обязан быть назван.
   const ready = (dataSettled && assetsReady) || timedOut;
 
   const degraded = useMemo(() => {
     const out = failed.map((d) => d.label);
+    if (brokenImages > 0)
+      out.push(`${brokenImages} image${brokenImages === 1 ? '' : 's'} failed to load`);
     if (timedOut) {
       out.push(...pending.map((d) => d.label));
       if (!assetsReady) out.push('images');
     }
     return out;
-  }, [key, timedOut, assetsReady]);
+  }, [key, timedOut, assetsReady, brokenImages]);
 
   return { ready, degraded };
 }

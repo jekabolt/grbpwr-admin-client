@@ -447,9 +447,8 @@ export function TechPackDocument({
   // Скоуп только по размерам — тоже скоуп, и он тоже обязан быть назван на бумаге: лист с
   // урезанной градацией иначе читается как «у стиля такая градация».
   const sizesNarrowed = sizeIds.length !== (tc.sizeIds ?? []).length;
-  // Версия карты — штамп на бумаге и в QR выкроек: два листа, напечатанных до и после правки,
-  // должны быть различимы, даже пока вьюер не умеет сверять её сам.
-  const cardLockVersion = wireInt(techCard.lockVersion);
+  // Версии карты (lockVersion) в QR выкроек больше нет: штамп для сверки теперь считается от
+  // состава самой группы листов — см. комментарий у PatternQR ниже.
 
   // Панели по размерам: ключ — line_key детали, значение — размер → сколько кроить. Строки
   // чужих колорвеев отбрасываются тем же правилом, что и везде (productId ‖ outputVariantId).
@@ -910,9 +909,10 @@ export function TechPackDocument({
           он сегодняшний. */}
       {printScope.revision.source === 'release' && (
         <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
-          frozen: card spec, pieces, operations, BOM, colourway recipes, markers, care. live (not
-          frozen): size chart, on-garment assembly, packaging recipe, article colours from the
-          material catalog
+          frozen: card spec, pieces, operations, BOM (incl. prices), colourway recipes, markers,
+          care, the pattern sheet list. live (not frozen): size chart, on-garment assembly,
+          packaging recipe, article colours from the material catalog, the pattern files behind the
+          QR — the viewer says so if they changed since this revision
         </p>
       )}
       {printScope.revision.source === 'live' && latestRelease && (
@@ -1277,6 +1277,17 @@ export function TechPackDocument({
           standard artifact of a garment tech pack; previously never fetched/printed. */}
       {has(sizeIds) && measurements.length > 0 && chartHasAnyValue && b('qc') && (
         <Sheet title={`measurements (${unitAbbr})`}>
+          {/* ЖИВАЯ ЧАСТЬ РЕЛИЗНОЙ БУМАГИ, помеченная НА СВОЁМ ЛИСТЕ, а не только сводкой на
+              первой странице: размерная таблица живёт в GetStyleSizeChart и в снапшот релиза не
+              попадает (снапшот — это common.TechCard, проверено по контракту). Тетради печатаются
+              и выдаются по отдельности, поэтому лист, вынутый из середины стопки, обязан сам
+              сказать, что он сегодняшний. */}
+          {printScope.revision.source === 'release' && (
+            <p className='mb-1 text-nano uppercase text-labelColor'>
+              live data — the size chart is not part of the revision snapshot and is printed as of
+              today
+            </p>
+          )}
           {/* ТРАНСПОНИРОВАНА: точки замера в строки, размеры в колонки.
               Раньше колонка была на КАЖДУЮ точку замера категории — на карточке с полутора
               десятками POM таблица уезжала за правое поле A4 и печаталась обрезанной, причём
@@ -1382,6 +1393,16 @@ export function TechPackDocument({
               <div className='flex flex-wrap gap-4'>
                 {patternGroups.map((g) => {
                   const maxVersion = g.sheets.reduce((m, p) => Math.max(m, p.version ?? 0), 0);
+                  // &v= + &n= — штамп СОСТАВА ГРУППЫ на бумаге, который вьюер сверяет с живым
+                  // манифестом (pattern-viewer/page.tsx) — тем же приёмом, что наряд на партию
+                  // сверяет ?v= с run_lock_version. Версии листов нумеруются per-size, поэтому
+                  // max здесь не годится: замена листа не-максимального размера его не меняет.
+                  // Сумма растёт на любой замене файла (новый url = новый номер), число листов
+                  // ловит удаление и добавление. Версия КАРТЫ (lockVersion) сюда не пишется
+                  // осознанно: она прыгает на каждой правке карточки, и вьюер кричал бы
+                  // «выкройки изменились» из-за правки операций. Пара пишется всегда: v=0 у
+                  // легаси-листов без номера — тоже сверяемое значение (замена присвоит номер).
+                  const versionStamp = g.sheets.reduce((s, p) => s + (p.version ?? 0), 0);
                   const sizesLine = patternGroupSizes(g.sheets);
                   return (
                     <figure
@@ -1390,12 +1411,9 @@ export function TechPackDocument({
                     >
                       <PatternQR
                         size={96}
-                        // &v= — штамп версии карты на бумаге. Сверять его вьюер выкроек пока не
-                        // умеет (публичный манифест версию не несёт — это бэк), но два листа с
-                        // разными v уже различимы: «у тебя какая версия?» получает ответ.
                         value={`${viewerOrigin()}/p/${patternViewerToken}?g=${encodeURIComponent(
                           g.wireKey,
-                        )}${cardLockVersion > 0 ? `&v=${cardLockVersion}` : ''}`}
+                        )}&v=${versionStamp}&n=${g.sheets.length}`}
                       />
                       <figcaption className='mt-1 max-w-[150px] text-micro uppercase'>
                         <div className='break-words font-semibold'>{g.label}</div>
@@ -1414,8 +1432,12 @@ export function TechPackDocument({
               <p className='mt-2 text-nano text-labelColor'>
                 scan the QR to open this pattern in the viewer: sheet choice, size switching and
                 download all live there
+                {/* Снапшот замораживает СПИСОК листов, но не файлы за токеном: токен минтится на
+                    ответе чтения и в снапшот не попадает по контракту (см. GetTechCardResponse),
+                    так что вьюер всегда отдаёт сегодняшние файлы. Молчать об этом под шапкой
+                    Rev.N нельзя; штамп в QR даёт вьюеру сказать это и самому. */}
                 {printScope.revision.source === 'release'
-                  ? ' — the viewer serves the CURRENT files, not the ones frozen in this revision'
+                  ? ' — the viewer serves the CURRENT files, not the ones frozen in this revision; if they differ from this paper, the viewer says so on scan'
                   : ''}
               </p>
             </>
@@ -1487,9 +1509,15 @@ export function TechPackDocument({
                 // Та же лестница, что на плитке и в панели редактора (bom-price.ts): снапшот
                 // строки → иначе текущая каталожная цена артикула. Бумага печатала только снапшот,
                 // поэтому проценённый уже после привязки артикул уезжал на фабрику с прочерком.
+                // НА РЕЛИЗНОЙ БУМАГЕ каталожной ступени НЕТ: цена строки заморожена в снапшоте, а
+                // каталожный фолбэк подставил бы под шапку Rev.N сегодняшнюю цену — ровно та смесь
+                // версий, от которой релизная печать и существует. Непроценённая в релизе строка
+                // честно печатает прочерк.
                 const price = resolveBomPrice(
                   { unitPrice: dec(b.unitPrice), currency: b.currency ?? '', unit: b.unit ?? '' },
-                  materialById.get(wireInt(b.materialId)),
+                  printScope.revision.source === 'release'
+                    ? undefined
+                    : materialById.get(wireInt(b.materialId)),
                 );
                 return (
                   <tr key={i} className='break-inside-avoid'>
@@ -1991,6 +2019,14 @@ export function TechPackDocument({
           was structurally impossible to render regardless of what this component did. */}
       {has(activeAssembly) && b('sew') && (
         <Sheet title='assembly — on-garment items'>
+          {/* Как у размерной таблицы выше: сборка живёт в ListStyleAssembly и в снапшот релиза не
+              попадает — лист тетради «пошив» обязан пометить себя сам. */}
+          {printScope.revision.source === 'release' && (
+            <p className='mb-1 text-nano uppercase text-labelColor'>
+              live data — on-garment assembly is not part of the revision snapshot and is printed as
+              of today
+            </p>
+          )}
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
@@ -2045,6 +2081,9 @@ export function TechPackDocument({
           packaging={tc.packaging}
           recipeRows={packagingRows}
           recipeIsGlobalFallback={packagingIsFallback}
+          // Рецепт (в отличие от описательной половины из tc.packaging) в снапшот релиза не
+          // входит — на релизной бумаге его таблица помечается сегодняшней.
+          recipeIsLive={printScope.revision.source === 'release'}
           plannedTotal={batchTotal}
         />
       )}

@@ -27,10 +27,24 @@ const BOOKLET_LABELS: Record<BookletId, string> = {
   internal: 'внутреннее',
 };
 
-const PROFILE_OPTIONS: { value: PrintProfile; label: string }[] = [
+// Профиль МОДАЛКИ шире профиля query: «в цех по релизу» — это не четвёртое значение ?profile=,
+// а комбинация profile=factory + release=N, которую контракт печати всегда умел, но собрать её
+// из этой модалки было нельзя. Итог был опасен асимметрично: «фабрика» печатала без выбора
+// релиза, «по релизу» — снапшот С ЦЕНАМИ и поставщиками, и замороженную ревизию для внешней
+// фабрики приходилось печатать с коммерческими данными. Названия четырёх строк называют обе
+// оси сразу (замороженный релиз × есть ли деньги), чтобы соседние строки нельзя было
+// перепутать. Названия НЕ обещают «живую карту» профилям без релиза: страница печати сама
+// подставляет релиз, к которому привязана выбранная партия, — и честно печатает это на бумаге.
+type ModalProfile = PrintProfile | 'factory-release';
+
+const PROFILE_OPTIONS: { value: ModalProfile; label: string }[] = [
   { value: 'factory', label: 'комплект в цех — без себестоимости' },
-  { value: 'internal', label: 'внутренний — всё' },
-  { value: 'release', label: 'по релизу — замороженный снапшот' },
+  {
+    value: 'factory-release',
+    label: 'в цех по релизу — замороженный снапшот, без себестоимости',
+  },
+  { value: 'internal', label: 'внутренний — всё, включая цены' },
+  { value: 'release', label: 'внутренний по релизу — замороженный снапшот, с ценами' },
 ];
 
 const printPath = (techCardId: number) => ROUTES.techCardPrint.replace(':id', String(techCardId));
@@ -76,7 +90,7 @@ export function PrintOptionsModal({
   const [runId, setRunId] = useState(0);
   const [colorwayId, setColorwayId] = useState(0);
   const [sizeSel, setSizeSel] = useState<Set<number>>(new Set());
-  const [profile, setProfile] = useState<PrintProfile>('factory');
+  const [profile, setProfile] = useState<ModalProfile>('factory');
   const [releaseId, setReleaseId] = useState(0);
   const [booklets, setBooklets] = useState<Set<BookletId>>(new Set(ALL_BOOKLETS));
 
@@ -178,9 +192,12 @@ export function PrintOptionsModal({
       return next;
     });
 
+  // Оба релизных профиля (внутренний и цеховой) требуют выбранный релиз одинаково.
+  const releasePicked = profile === 'release' || profile === 'factory-release';
+
   const blockReason = mustPickColorway
     ? `в этой партии ${runColorwayIds.length} ${colorwaysWord(runColorwayIds.length)} — комплект печатается на один, выберите какой`
-    : profile === 'release' && releaseId === 0
+    : releasePicked && releaseId === 0
       ? releases.length > 0
         ? 'профиль «по релизу» требует выбрать релиз'
         : 'у карты нет релизов — печать «по релизу» невозможна'
@@ -194,8 +211,10 @@ export function PrintOptionsModal({
       colorwayId,
       // В порядке градации карты — порядок клика оператора не должен переставлять колонки.
       sizeIds: gradeSizeIds.filter((id) => sizeSel.has(id)),
-      releaseId: profile === 'release' ? releaseId : 0,
-      profile,
+      releaseId: releasePicked ? releaseId : 0,
+      // «В цех по релизу» на проводе — это factory (деньги режет профиль) + release= (снапшот
+      // выбирает страница печати): четвёртого значения ?profile= нет и не нужно.
+      profile: profile === 'factory-release' ? 'factory' : profile,
       // Все тетради = «не задано»: query без booklets печатает весь документ, как раньше.
       booklets:
         booklets.size === ALL_BOOKLETS.length ? null : ALL_BOOKLETS.filter((b) => booklets.has(b)),
@@ -281,11 +300,11 @@ export function PrintOptionsModal({
             fullWidth
             value={profile}
             items={PROFILE_OPTIONS}
-            onValueChange={(v: string) => setProfile(v as PrintProfile)}
+            onValueChange={(v: string) => setProfile(v as ModalProfile)}
           />
         </label>
 
-        {profile === 'release' && (
+        {releasePicked && (
           <label className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
               релиз

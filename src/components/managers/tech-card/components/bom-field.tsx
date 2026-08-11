@@ -507,6 +507,10 @@ function BomItemRow({
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const warnNoPrice = useNoPriceWarning();
+  // Деньги строки видит и правит только costing:write: сервер вырезает их на чтении без
+  // costing:read, а сейв без costing:write их вовсе не отправляет (schema.ts, verbatim-протокол) —
+  // инпут без права был бы полем, которое молча выбрасывает ввод.
+  const { canWriteCosting } = usePermissions();
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
@@ -814,8 +818,12 @@ function BomItemRow({
           <InputField name={`bomItems.${index}.spec`} label='spec (free text)' />
           <DecimalField name={`bomItems.${index}.fabricWidth`} label='width (cm)' />
           <DecimalField name={`bomItems.${index}.fabricWeightGsm`} label='weight (g/m²)' />
-          <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
-          <CurrencySelect name={`bomItems.${index}.currency`} label='currency' />
+          {canWriteCosting && (
+            <>
+              <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
+              <CurrencySelect name={`bomItems.${index}.currency`} label='currency' />
+            </>
+          )}
         </div>
         <div className='mt-2'>
           {compositionAnchor(<CompositionPicker name={`bomItems.${index}.composition`} />)}

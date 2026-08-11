@@ -1554,6 +1554,7 @@ function SlotUsageRow({
   sizeIds,
   sizeNameById,
   canEdit,
+  active,
   markers,
   cardMarkersAllColorways,
   recipeLinks,
@@ -1581,6 +1582,8 @@ function SlotUsageRow({
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
+  /** Редактор этого колорвея сейчас виден — см. ColorwayRecipeEditor.active. */
+  active: boolean;
   onChange: (patch: Partial<UsageDraft>) => void;
   onRemove: () => void;
 }) {
@@ -1845,13 +1848,17 @@ function SlotUsageRow({
             {/* 0294: тот же мост, но от ВЫКРОЕК — для карточки, на которой раскладки ещё нет.
                 Число netto, и диалог сам не даёт применить его на слот без процента раскроя.
 
-                МОНТИРУЕТСЯ ТОЛЬКО НА РЕДАКТИРУЕМОЙ КАРТОЧКЕ, и это не косметика: подсказка держит
-                три подписки на массивы формы (BOM, детали кроя, связи блоков), а редакторы ВСЕХ
-                колорвеев смонтированы одновременно (скрытые — не размонтированные). На выпущенной
-                карточке применять всё равно нечего, а платить за подписки она бы продолжала: правка
-                любой строки BOM будила бы каждую скрытую подсказку. Ранний выход внутри компонента
-                эту цену не убирает — хуки уже подписаны к моменту возврата. */}
-            {canEdit && (
+                МОНТИРУЕТСЯ ТОЛЬКО НА РЕДАКТИРУЕМОЙ КАРТОЧКЕ И ТОЛЬКО В АКТИВНОМ КОЛОРВЕЕ, и это
+                не косметика: подсказка держит три подписки на массивы формы (BOM, детали кроя,
+                связи блоков), а редакторы ВСЕХ колорвеев смонтированы одновременно (скрытые — не
+                размонтированные). Без гейта по active семь колорвеев по четыре измеряемых слота —
+                это под восемьдесят лишних подписок, и правка любой строки BOM будила бы каждую
+                скрытую подсказку; контракт хука (use-fabric-dxf-pieces) прямо требует монтироваться
+                только когда ответ нужен. Тот же приём, что у силуэтов деталей (shapes отдаются
+                только активному редактору). Ранний выход внутри компонента цену не убирает — хуки
+                уже подписаны к моменту возврата; потерять при переключении плитки тут нечего —
+                подсказка ничего не хранит, черновик живёт выше. */}
+            {canEdit && active && (
               <DxfApplyHint
                 control={control}
                 lineKey={draft.bomLineKey}
@@ -2868,6 +2875,7 @@ function ColorwayRecipeEditor({
   markers,
   pieces,
   shapes,
+  active,
   sizeIds,
   sizeNameById,
   swatchHex,
@@ -2886,6 +2894,13 @@ function ColorwayRecipeEditor({
    * все сразу, и рендерить в спрятанном DOM по 20–40 полигонов на колорвей никто не просил.
    */
   shapes: Map<string, FoundPiece | null> | null;
+  /**
+   * Этот редактор сейчас ВИДЕН (его колорвей выбран плиткой). Тот же приём, что у `shapes` выше,
+   * но явным флагом: `shapes === null` активность не кодирует (у активного редактора они тоже
+   * null, пока DXF не разобраны). Нужен строкам рецепта, чтобы не монтировать в скрытых
+   * редакторах подсказку «по выкройкам» с её подписками на массивы формы (см. SlotUsageRow).
+   */
+  active: boolean;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   swatchHex?: string;
@@ -3222,6 +3237,7 @@ function ColorwayRecipeEditor({
                 sizeIds={sizeIds}
                 sizeNameById={sizeNameById}
                 canEdit={canEdit}
+                active={active}
                 onChange={(patch) => patchUsage(index, patch)}
                 onRemove={() => removeUsage(index)}
               />
@@ -3645,6 +3661,7 @@ export function ColorwayRecipes({
             // null всем скрытым: редакторы смонтированы все сразу, и без этого 7 колорвеев ×
             // 40 деталей положили бы в спрятанный DOM ~300 полигонов по сотням точек.
             shapes={activeId === cw.colorwayId ? shapeByKey : null}
+            active={activeId === cw.colorwayId}
             sizeIds={sizeIds}
             sizeNameById={sizeNameById}
             swatchHex={hexByCode.get(cw.colorCode ?? '')}

@@ -20,6 +20,7 @@ export function PackagingSheet({
   packaging,
   recipeRows = [],
   recipeIsGlobalFallback = false,
+  recipeIsLive = false,
   plannedTotal = 0,
 }: {
   title: string;
@@ -27,6 +28,13 @@ export function PackagingSheet({
   recipeRows?: PackagingRecipeLine[];
   /** Рецепт стиля не заведён, печатается глобальный — это надо назвать, а не выдать за стилевой. */
   recipeIsGlobalFallback?: boolean;
+  /**
+   * Бумага печатается по снапшоту релиза, но РЕЦЕПТ упаковки в снапшот не входит (он живёт в
+   * ListPackagingRecipe, снапшот — common.TechCard) и печатается сегодняшним. Описательная
+   * половина (`packaging`) при этом ИЗ снапшота — пометить надо ровно таблицу рецепта, а не лист
+   * целиком, иначе пометка врала бы про замороженную половину.
+   */
+  recipeIsLive?: boolean;
   /**
    * Тираж партии ЦЕЛИКОМ (по выбранному колорвею, но по ВСЕМ его размерам). 0 — печать без
    * прогона: считаемая половина отсутствует, а не обнуляется.
@@ -96,6 +104,12 @@ export function PackagingSheet({
           {recipeIsGlobalFallback && (
             <p className='mt-3 text-nano uppercase text-labelColor'>
               no style-specific packaging recipe — the global one is printed
+            </p>
+          )}
+          {recipeIsLive && (
+            <p className='mt-3 text-nano uppercase text-labelColor'>
+              live data — the packaging recipe below is not part of the revision snapshot and is
+              printed as of today
             </p>
           )}
           <table className='mt-1 w-full border-collapse text-micro'>
