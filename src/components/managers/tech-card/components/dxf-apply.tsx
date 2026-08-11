@@ -34,6 +34,7 @@ export function DxfApplyHint({
   canEdit,
   explainWhenIdle = false,
   recipeLinks,
+  techCardId,
   onApply,
 }: {
   control: Control<TechCardFormData>;
@@ -61,6 +62,12 @@ export function DxfApplyHint({
    * деталям в рецепте, а не на вкладке деталей кроя, оставалась без кнопки вовсе.
    */
   recipeLinks?: readonly RecipePieceLink[];
+  /**
+   * id карточки — нужен ТОЛЬКО для публикации измеренных площадей на сервер (Ф0/0297), которая
+   * происходит в момент подтверждённого применения нормы. 0/undefined = карточка ещё не сохранена:
+   * площади публиковать некуда, и применение нормы это никак не задевает.
+   */
+  techCardId?: number;
   onApply: (patch: {
     consumption?: string;
     quantity?: string;
@@ -115,6 +122,8 @@ export function DxfApplyHint({
             sizeIds={sizeIds}
             sizeNameById={sizeNameById}
             canEdit={canEdit}
+            techCardId={techCardId ?? 0}
+            lineKey={lineKey}
             onClose={() => setOpen(false)}
             onApply={onApply}
           />

@@ -49,6 +49,9 @@ import {
   MAX_SEAM_ALLOWANCE_MM,
   mmToEngineCm,
 } from './nesting/allowance-units';
+import { useSnackBarStore } from 'lib/stores/store';
+import { publishPieceAreas } from './piece-areas';
+import { serverScopeKeyOfSheet } from './pattern-size-index';
 import { sizeTokensOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { applyLayerOptions, applySeamPrefill } from './nesting/dxf-apply-conditions';
@@ -74,9 +77,15 @@ export default function DxfApplyDialog({
   sizeIds,
   sizeNameById,
   canEdit,
+  techCardId,
+  lineKey,
   onClose,
   onApply,
 }: {
+  /** id карточки; 0 = ещё не сохранена, публиковать площади некуда. */
+  techCardId: number;
+  /** line_key строки BOM этой ткани — из него резолвится скоуп словами сервера. */
+  lineKey: string;
   // Форма приходит ЯВНЫМ control'ом, а не через useFormContext ЗДЕСЬ: два поля ниже читаются
   // именно из неё, и пробрасывать их сквозь обёртку значило бы дублировать. (Пачку DXF собирает
   // useCardDxfPack, и она контекст всё-таки берёт — у неё нет другого способа, и она вызвана в
@@ -219,10 +228,65 @@ export default function DxfApplyDialog({
     !workshop.isPending &&
     downloadFailures.length === 0;
 
+  const { showMessage } = useSnackBarStore();
+  const patternRows = (useWatch({ control, name: 'patterns' }) ?? []) as {
+    lineKey?: string;
+    fabricPurpose?: string;
+    bomLineKey?: string;
+  }[];
+  const bomRows = (useWatch({ control, name: 'bomItems' }) ?? []) as {
+    lineKey?: string;
+    purpose?: string;
+  }[];
+  // Скоуп ЭТОЙ строки словами сервера: назначение, иначе её собственный line_key.
+  const lineScopeKey = useMemo(() => {
+    const row = bomRows.find((b) => (b.lineKey ?? '') === lineKey);
+    return serverScopeKeyOfSheet({ fabricPurpose: row?.purpose, bomLineKey: row?.lineKey });
+  }, [bomRows, lineKey]);
+
   const sizeName = (id: number) => sizeNameById.get(id) ?? `#${id}`;
+
+  // КУДА ПУБЛИКОВАТЬ ПЛОЩАДИ. Скоуп называется ТЕМ ЖЕ словом, что на сервере (serverScopeKeyOfSheet
+  // по листам этой ткани), а не ключом строки BOM: сервер собирает состав скоупа по СВОИМ строкам, и
+  // ключ, написанный не тем словом, не найдёт ни одного листа. Карточка без id (ещё не сохранена)
+  // публиковать не может — площадям не на чем висеть.
+  const publishTarget = useMemo(() => {
+    const id = Number(techCardId) || 0;
+    if (id <= 0) return null;
+    const mine = (patternRows ?? []).filter((sh) => serverScopeKeyOfSheet(sh) === lineScopeKey);
+    if (!lineScopeKey || mine.length === 0) return null;
+    return { techCardId: id, scopeKey: lineScopeKey, sheets: mine };
+  }, [techCardId, patternRows, lineScopeKey]);
 
   const apply = () => {
     if (!applicable) return;
+    // ПЛОЩАДИ УЕЗЖАЮТ НА СЕРВЕР ЗДЕСЬ, И ИМЕННО ЗДЕСЬ (Ф0/Ф1).
+    //
+    // Это единственная точка, где оператор ПОДТВЕРДИЛ условия замера — слой контура и припуск, — а
+    // те же площади уже посчитаны для нормы. Писать их фоном при открытии вкладки значило бы
+    // сохранять данные на действии чтения, да ещё с угаданными условиями: ошибка в слое молча
+    // меняет площадь на величину припуска по всему периметру каждой детали.
+    //
+    // Публикация НЕ БЛОКИРУЕТ применение нормы и не может его отменить: норма уже посчитана и
+    // подтверждена, а площади — это то, из чего сервер потом выведет ОЦЕНКУ для слотов, где нормы
+    // никто не вписал. Отказ сервера (например, неполный комплект скоупа) остаётся сообщением, а не
+    // провалом операции, которую человек только что подтвердил.
+    if (publishTarget && outcome?.ok) {
+      void publishPieceAreas({
+        techCardId: publishTarget.techCardId,
+        scopeKey: publishTarget.scopeKey,
+        sheets: publishTarget.sheets,
+        areas: outcome.areas.pieceRows,
+        contourLayer: chosenLayer,
+        seamAllowanceMm: Number(seamValue) || 0,
+        hulledPieceKeys: new Set(outcome.areas.hulled),
+        ambiguousPieceKeys: new Set(outcome.areas.ambiguousPickPieces),
+      }).then((res) => {
+        if (!res.ok) {
+          showMessage(`норма применена, но площади не сохранены: ${res.reason}`, 'error');
+        }
+      });
+    }
     onApply({
       // Скаляр СНИМАЕТСЯ явно: одна оставшаяся строка заставила бы сервер игнорировать ряд.
       consumption: '',

@@ -34,6 +34,13 @@ import { aliasIdentity } from './use-block-sizes';
 export type DxfNormPiece = {
   /** Для сообщений: как деталь названа на карточке. */
   name: string;
+  /**
+   * Стабильный line_key детали — адрес, по которому площадь ложится на сервер (0297).
+   *
+   * Именно line_key, а не id: в слепке релиза у детали кроя id нет вовсе, и ключ на id сделал бы
+   * площади невидимыми ровно там, где по ним считаются деньги выпущенной карточки.
+   */
+  lineKey?: string;
   /** `pieces_per_garment` карточки. Ниже единицы не бывает — деталь либо есть, либо её не заявляли. */
   perGarment: number;
   /** Привязки «деталь → блок чертежа»; побеждает первая, которая нашлась (как в findPiece). */
@@ -46,8 +53,28 @@ export type DxfNormSizeRow = {
   areaCm2: number;
 };
 
+/** Площадь ОДНОГО экземпляра контура одной детали одного размера, см². */
+export type DxfPieceAreaRow = {
+  /** line_key детали кроя. */
+  pieceLineKey: string;
+  /** 0 = деталь не градуируется и входит в комплект каждого размера целиком. */
+  sizeId: number;
+  /** ДО умножения на количество на изделие: кратность живёт на детали и меняется отдельно. */
+  areaCm2: number;
+};
+
 export type DxfNormAreas = {
   rows: DxfNormSizeRow[];
+  /**
+   * Площади ПО ОДНОМУ ЭКЗЕМПЛЯРУ КОНТУРА — то, что уезжает на сервер (0297) и из чего он выводит
+   * норму сам.
+   *
+   * ПОЧЕМУ ОТДЕЛЬНАЯ ПРОЕКЦИЯ, А НЕ `rows`. `rows` уже свернул комплект в площадь ИЗДЕЛИЯ, умножив
+   * каждый контур на pieces_per_garment. Отправить её значило бы записать кратность внутрь
+   * геометрии — и получить число, которое молча врёт после первой же правки «этой детали идёт
+   * две», причём в ту сторону, которая обнаруживается на складе. Умножает читатель.
+   */
+  pieceRows: DxfPieceAreaRow[];
   /** Размеры, у которых в сегодняшних выкройках нашлись не все детали (числа им не дано). */
   sizesIncomplete: number[];
   /** Σ (кол-во × площадь) деталей БЕЗ размерного хвоста — общая часть каждого размера. */
@@ -301,6 +328,32 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     rows.push({ sizeId, areaCm2: sum });
   }
 
+  // Пер-детальная проекция для сервера: тот же выбранный контур, та же площадь, БЕЗ умножения на
+  // кратность. Градуированная деталь отдаёт строку на каждый размер; неградуируемая — одну строку
+  // с размером 0, потому что она и есть одна на все размеры.
+  const pieceRows: DxfPieceAreaRow[] = [];
+  {
+    const emitted = new Set<string>();
+    for (const sizeId of input.sizeIds) {
+      if (incomplete.has(sizeId)) continue;
+      for (let i = 0; i < resolved.length; i++) {
+        const contour = contourByKey.get(`${sizeId}|${i}`);
+        if (!contour) continue;
+        const lineKey = (resolved[i].piece.lineKey ?? '').trim();
+        if (!lineKey) continue;
+        const outSize = resolved[i].graded ? sizeId : 0;
+        const key = `${lineKey}|${outSize}`;
+        if (emitted.has(key)) continue;
+        emitted.add(key);
+        pieceRows.push({
+          pieceLineKey: lineKey,
+          sizeId: outSize,
+          areaCm2: areaOf.get(contour) ?? contour.areaCm2,
+        });
+      }
+    }
+  }
+
   // Σ по безразмерным деталям — общая часть каждого размера, нужна объяснению разбора. Берётся из
   // той же карты выбранных контуров (первый размер, для которого выборка полна): безразмерная
   // деталь по построению одна и та же во всех размерах.
@@ -342,6 +395,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     ok: true,
     areas: {
       rows,
+      pieceRows,
       sizesIncomplete: [...incomplete].sort((a, b) => a - b),
       sizelessCm2,
       gradedPieces,

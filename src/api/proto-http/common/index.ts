@@ -3368,6 +3368,13 @@ export type TechCardColorwayCost = {
   // contributes to NO currency bucket, so unit_cost is withheld from cost seeding for this
   // colourway and should not be trusted as complete.
   hasUnpriced: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one roll slot of THIS colourway was costed by AREA ESTIMATE
+  // (Ф1, ступень 0) — площадь деталей ÷ раскройную ширину — instead of an authored norm.
+  // ЭТО NETTO, НИЖНЯЯ ГРАНИЦА. Межлекальных выпадов и концов настила в ней нет и быть не может: их
+  // знает только раскладка. Число показывать МОЖНО и нужно (иначе карточка стоит ноль при полностью
+  // заполненной спецификации), но подписывать им каталожную себестоимость — нельзя: сервер сам не
+  // сеет cost_price с этим флагом, и клиент обязан показывать цифру как ОЦЕНКУ, а не как цену.
+  hasEstimate: boolean | undefined;
 };
 
 // TechCardCosting holds the manually-entered per-unit cost articles (Sheet «Калькуляция»).
@@ -3405,6 +3412,10 @@ export type TechCardCosting = {
   // contributes to NO currency bucket, so unit_cost/unit_cost_base are withheld from cost seeding
   // and should not be trusted as complete.
   hasUnpriced: boolean | undefined;
+  // OUTPUT-ONLY: the root rollup was costed, in part, by AREA ESTIMATE (Ф1, ступень 0). Same
+  // meaning and same warning as TechCardColorwayCost.has_estimate: netto, lower bound, shown but
+  // never seeded into the catalogue.
+  hasEstimate: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: TechCardColorwayCost[] | undefined;
   // OUTPUT-ONLY base-currency rollup. The unit/order cost of the primary colourway folded into
@@ -3735,6 +3746,16 @@ export type TechCard = {
   // Save/DeleteTechCardMarker RPCs, never through the tech-card save (and marker writes do not
   // bump lock_version — saving a раскладка must not 409 the operator's own open card form).
   markers: TechCardMarkerSummary[] | undefined;
+  // OUTPUT-ONLY измеренные площади деталей кроя (Ф0, 0297), сгруппированные по скоупу ткани — то,
+  // из чего сервер ВЫВОДИТ норму расхода, когда её никто не вписал руками.
+  // ЗДЕСЬ ОНИ ЖИВУТ ИМЕННО ПОТОМУ, ЧТО ЭТО ЧИТАЕМАЯ ПРОЕКЦИЯ, А НЕ ВХОД ЗАПИСИ: площади пишет
+  // отдельный RPC (SaveTechCardPieceAreas) с подтверждением условий замера оператором, а полная
+  // замена карточки не должна иметь возможности их стереть — ровно та же дисциплина, что у
+  // markers и output_variants выше.
+  // И ЭТО ЖЕ КЛАДЁТ ИХ В СЛЕПОК РЕЛИЗА, который есть protojson ЭТОГО сообщения. Без них
+  // released-карточка теряла бы способность считать материалы: у детали кроя в контракте нет id,
+  // только line_key, и любой ключ на piece_id был бы в слепке нулевым.
+  pieceAreaScopes: TechCardPieceAreaScope[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this
@@ -3931,6 +3952,45 @@ export type TechCardMarkerCompositionEntry = {
   // the sizes that ARE in the состав: a disagreement means the files moved since the норма was taken,
   // and the continuation is invalid.
   areaPerGarmentCm2: googletype_Decimal | undefined;
+};
+
+// TechCardPieceAreaScope — площади деталей ОДНОГО скоупа ткани, с вердиктом об устаревании.
+// Скоуп, а не карточка: после T4 одна деталь законно кроится из нескольких слоёв материала, и у
+// подкладочной версии свой контур и своя площадь. Ключ тот же, что у привязок блоков (0267) и у
+// индекса размеров (0280) — COALESCE(назначение, line_key строки BOM).
+export type TechCardPieceAreaScope = {
+  scopeKey: string | undefined;
+  areas: TechCardPieceArea[] | undefined;
+  // stale = источник этого скоупа менялся после замера: отпечаток (листы И привязки блок→деталь),
+  // посчитанный сервером СЕЙЧАС, не совпал с тем, под которым мерили.
+  // НА ЖИВОЙ КАРТОЧКЕ вычисляется на чтении, отдельной колонки состояния нет — хранимый флаг был бы
+  // неверен ровно в тот момент, когда лист перезалили, а карточку никто не открывал. В СЛЕПКЕ
+  // РЕЛИЗА он, наоборот, заморожен: слепок и есть утверждение «вот так это выглядело на релизе»,
+  // и пересчитывать его по сегодняшним файлам значило бы менять историю.
+  stale: boolean | undefined;
+  // Условия и провенанс замера — одни на скоуп (их пишет одна транзакция).
+  contourLayer: string | undefined;
+  seamAllowanceMm: googletype_Decimal | undefined;
+  parsedBy: string | undefined;
+  parsedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardPieceArea — площадь ОДНОГО ЭКЗЕМПЛЯРА контура детали, см².
+// ИМЕННО ОДНОГО ЭКЗЕМПЛЯРА, без pieces_per_garment: количество на изделие живёт на детали кроя,
+// меняется отдельной правкой карточки и к геометрии файла отношения не имеет. Умножает читатель.
+export type TechCardPieceArea = {
+  // Деталь кроя — по стабильному line_key. Не по id: в слепке релиза у детали id нет.
+  pieceLineKey: string | undefined;
+  // 0 = деталь НЕ ГРАДУИРУЕТСЯ и входит в комплект каждого размера целиком (то же правило, что у
+  // неградуируемых деталей раскладки в MarkerSizeAreasPerGarment).
+  sizeId: number | undefined;
+  areaCm2: googletype_Decimal | undefined;
+  // Контур заменён выпуклой оболочкой при раздутии припуском: площадь завышена, но воспроизводима.
+  hulled: boolean | undefined;
+  // На слое было несколько совпадающих по площади кандидатов, взят первый: число зависит от порядка
+  // листов в пачке, и сравнивать его с чем-либо нельзя. НЕ то же самое, что hulled — состояния
+  // разные и ведут к разным фразам на экране.
+  ambiguousPick: boolean | undefined;
 };
 
 // TechCardMarker is a full stored marker: the summary plus the self-contained layout.
