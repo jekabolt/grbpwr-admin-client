@@ -26,9 +26,10 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
+import { stampWhen } from 'components/managers/production-runs/components/useLays';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useFieldArray,
   useFormContext,
@@ -56,10 +57,11 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { decimalToInput } from 'utils/decimal';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
+import { BomWastageSuggestion, laysProvenancePhrase } from './bom-wastage-suggestion';
 import {
   KIND_HOME_SECTION,
   UNSET_KIND,
@@ -298,13 +300,14 @@ function SlotIdentityFields({ index }: { index: number }) {
 // a linked line is a catalog fact, rendered as a plate (below) rather than as disabled inputs.
 // No top padding: the GroupLabel's own top margin is the box's inner top space.
 //
-// ПРОЦЕНТ РАСКРОЯ (T7, волна 1). У поля «est. cutting wastage %» здесь стоит разбор: что это за
-// число, откуда его брать и с чем его НЕЛЬЗЯ путать. Прежняя подпись («depends on marker
+// ПРОЦЕНТ РАСКРОЯ (T7, волны 1+2). У поля «est. cutting wastage %» здесь стоит разбор: что это
+// за число, откуда его брать и с чем его НЕЛЬЗЯ путать. Прежняя подпись («depends on marker
 // efficiency») не говорила ни того, ни другого — и главное, ничем не защищала от переноса сюда
 // коэффициента раскроя артикула: у того ДРУГАЯ база (измеренная длина раскладки, выпады уже
 // внутри), и его ~4% на месте нужных ~20% занижают закупку на все межлекальные выпады — линейно
-// и незаметно. Расчёт медианы по факту прошлых раскроев приедет отдельной волной на бекенде;
-// здесь — ровно то, что известно клиенту сегодня, без выдуманных чисел и умолчаний.
+// и незаметно. Волна 2 привезла расчёт: медиану «факт ÷ netto» по настилам артикула считает
+// сервер (GetBomWastageSuggestion), панель ниже показывает её с составом выборки и кладёт в поле
+// по нажатию — вместе со счётчиком настилов, по которому сервер и признаёт применение.
 function ThisStyleFields({
   index,
   material,
@@ -317,13 +320,73 @@ function ThisStyleFields({
    *  раскладка ЭТОГО слота: она сильнее любого процента, потому что её длина измерена. */
   markers?: common_TechCardMarkerSummary[];
 }) {
-  const { control } = useFormContext<TechCardFormData>();
+  const { control, setValue } = useFormContext<TechCardFormData>();
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
   const lineKey = (useWatch({ control, name: `bomItems.${index}.lineKey` }) as string) ?? '';
+  // Артикул слота — ИЗ ФОРМЫ, а не из пропа material: тот резолвится по загруженному списку
+  // каталога и на холодном старте ещё пуст, а панель предложения не должна секунду утверждать
+  // «строка не привязана» про привязанную строку.
+  const rowMaterialId =
+    (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const wastageValue = (
     (useWatch({ control, name: `bomItems.${index}.wastagePercent` }) as string) ?? ''
   ).trim();
+  // Провенанс процента (0296): 'lays' — применено из предложения, всё прочее — руками.
+  const wastageSource = useWatch({ control, name: `bomItems.${index}.wastageSource` }) as
+    | string
+    | undefined;
+  const wastageLayCount =
+    (useWatch({ control, name: `bomItems.${index}.wastageLayCount` }) as number | undefined) ?? 0;
+  const wastageAppliedAt = useWatch({ control, name: `bomItems.${index}.wastageAppliedAt` }) as
+    | string
+    | undefined;
   const rollGoods = isRollGoodsSection(rowSection);
+
+  // РУЧНАЯ ПРАВКА ЗНАЧЕНИЯ ГАСИТ ПРОВЕНАНС «lays» СРАЗУ, НЕ ДОЖИДАЯСЬ СЕРВЕРА — та же дисциплина,
+  // что у ручной правки нормы в рецепте (colorway-recipe: правка числа пишет source=''). Сервер
+  // сделал бы то же самое при сохранении (смена значения → 'manual', что бы клиент ни прислал),
+  // но до сохранения бейдж «медиана по N раскроям» стоял бы рядом с числом, которое человек
+  // только что выдумал, — то есть врал бы ровно в момент, когда провенанс важнее всего.
+  //
+  // Якорь — значение, ПРИ КОТОРОМ источник стал 'lays' (загрузка карточки или нажатие
+  // «подставить»); сравнение числовое, чтобы «22.00» и «22» не читались как правка. Ссылку
+  // обновляет и applySuggestion ниже — иначе повторное применение уехавшей медианы выглядело бы
+  // для этого эффекта как ручная правка и само же гасило бы только что поставленный источник.
+  const laysAnchor = useRef<string | null>(null);
+  useEffect(() => {
+    if (wastageSource !== 'lays') {
+      laysAnchor.current = null;
+      return;
+    }
+    if (laysAnchor.current === null) {
+      laysAnchor.current = wastageValue;
+      return;
+    }
+    const a = parseDecimalNumber(laysAnchor.current);
+    const v = parseDecimalNumber(wastageValue);
+    const same =
+      Number.isFinite(a) && Number.isFinite(v) ? a === v : laysAnchor.current === wastageValue;
+    if (!same) {
+      setValue(`bomItems.${index}.wastageSource`, 'manual', { shouldDirty: true });
+      setValue(`bomItems.${index}.wastageLayCount`, 0, { shouldDirty: true });
+    }
+  }, [wastageSource, wastageValue, index, setValue]);
+
+  // Применение предложения: ПАРА (процент, счётчик) кладётся вместе — по её совпадению с текущей
+  // медианой сервер отличает применение от ручного ввода. Процент — строкой ответа КАК ЕСТЬ, без
+  // переформатирования: любая косметика здесь рискует разминуться с медианой при серверной
+  // сверке. Штамп применения ставит сервер; здешний след старого штампа чистится, чтобы бейдж не
+  // датировал новое применение старой датой.
+  const applySuggestion = (percent: string, layCount: number) => {
+    laysAnchor.current = percent;
+    setValue(`bomItems.${index}.wastagePercent`, percent, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setValue(`bomItems.${index}.wastageSource`, 'lays', { shouldDirty: true });
+    setValue(`bomItems.${index}.wastageLayCount`, layCount, { shouldDirty: true });
+    setValue(`bomItems.${index}.wastageAppliedAt`, '', { shouldDirty: false });
+  };
   // Прогонные однодневки отсеивает markersForLine (cardMarkers внутри) — совет «снимите норму с
   // раскладки» на основании раскладки чужого заказа был бы советом взять число, которого нормой
   // быть не может.
@@ -343,13 +406,19 @@ function ThisStyleFields({
         />
         <div className='flex flex-col gap-0.5'>
           <DecimalField name={`bomItems.${index}.wastagePercent`} label='est. cutting wastage %' />
-          {/* ПРОВЕНАНС — тем же приёмом, что у источника нормы и у припуска в dxf-диалоге.
-              Утверждение локальное и потому честное: единственный писатель этого поля сегодня —
-              рука; когда бекенд начнёт считать медиану по настилам, здесь появится и второй
-              источник («медиана по N раскроям»), но выдумывать его раньше расчёта нельзя. */}
+          {/* ПРОВЕНАНС — тем же приёмом, что у источника нормы (волна 2 достроила ветвление,
+              под которое волна 1 оставляла место): 'lays' — «медиана по N раскроям» со штампом
+              применения, всё прочее — «введено руками». Свежеприменённое (ещё не сохранённое)
+              значение штампа не имеет — дату ставит сервер при сохранении, и честная подпись
+              говорит это, а не выдумывает дату. Фраза — общая с ячейкой костинга
+              (laysProvenancePhrase), чтобы две подписи одного факта не разъехались словами. */}
           {wastageValue !== '' && (
             <Text size='nano' variant='label'>
-              введено руками
+              {wastageSource === 'lays'
+                ? `${laysProvenancePhrase(wastageLayCount, stampWhen(wastageAppliedAt))}${
+                    stampWhen(wastageAppliedAt) ? '' : ' — применится при сохранении'
+                  }`
+                : 'введено руками'}
             </Text>
           )}
         </div>
@@ -365,7 +434,10 @@ function ThisStyleFields({
           </Text>
           {slotMarkers.length > 0 ? (
             // Раскладка слота есть — процент этой строке скоро не понадобится вовсе, и это
-            // сильнее любой калибровки: звать оператора к измеренному числу, а не к оценке.
+            // сильнее любой калибровки (состояние 1 лестницы): звать оператора к измеренному
+            // числу, а не к оценке. Панель предложения при живой раскладке НЕ монтируется — и
+            // RPC не уходит: предлагать процент полю, которому осталось жить до применения
+            // раскладки, значит звать человека настраивать то, что пора выключить.
             <CalloutBox tone='note'>
               У карточки есть раскладка этого слота — снимите норму с неё в рецепте колорвея
               (вкладка colorways): длина раскладки ИЗМЕРЕНА и уже содержит межлекальные выпады,
@@ -373,15 +445,16 @@ function ThisStyleFields({
               раскроя.
             </CalloutBox>
           ) : (
-            // Фактов нет — и это ОСНОВНОЕ состояние после выката, а не исключение: на живой базе
-            // ноль настилов с замером. Никаких «обычно 15–20%» как подсказки к вводу: молча
-            // подставленное умолчание входит в закупку линейно и не видно ни в одном числе.
-            <Text variant='label' size='micro'>
-              Посчитать процент по факту пока не из чего: медиана по прошлым раскроям появится после
-              первых настилов с замером полотна — снимите раскладку и внесите факт расхода на
-              настиле прогона. До тех пор процент оценивается руками; типовой диапазон нарочно не
-              подсказан — на конкретной модели он врёт, а ошибка входит в закупку линейно.
-            </Text>
+            // Волна 2: место статичного «посчитать пока не из чего» заняла живая панель — она
+            // сама говорит и «фактов {n} из 3, вот что сделать», и «вне диапазона», и «готово,
+            // по N раскроям из M». Ленивость — по построению: этот компонент живёт только в
+            // открытом редакторе одной строки, так что открытие вкладки BOM запросов не стреляет.
+            <BomWastageSuggestion
+              materialId={rowMaterialId}
+              currentPercent={wastageValue}
+              currentSource={wastageSource}
+              onApply={applySuggestion}
+            />
           )}
           {coefSet && (
             // Главная ошибка, от которой волна 1 защищает: рядом с полем живёт ДРУГОЙ множитель
