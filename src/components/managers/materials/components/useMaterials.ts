@@ -14,6 +14,8 @@ const materialKeys = {
   prices: (materialId: number) => [...materialKeys.all, 'prices', materialId] as const,
   cuttingSuggestion: (materialId: number) =>
     [...materialKeys.all, 'cutting-coefficient-suggestion', materialId] as const,
+  bomWastageSuggestion: (materialId: number) =>
+    [...materialKeys.all, 'bom-wastage-suggestion', materialId] as const,
 };
 
 // ListMaterials.section is a plain string, not the TechCardBomSection enum — mirroring the
@@ -90,6 +92,30 @@ export function useCuttingCoefficientSuggestion(materialId: number, enabled: boo
   return useQuery({
     queryKey: materialKeys.cuttingSuggestion(materialId),
     queryFn: () => adminService.GetMaterialCuttingCoefficientSuggestion({ materialId }),
+    enabled: enabled && materialId > 0,
+    retry: false,
+  });
+}
+
+// T7 волна 2 — ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ (bom_item.wastage_percent) по факту настилов артикула.
+// СОСЕД предыдущего хука, НЕ синоним: оба медианят факты настилов одного артикула, но знаменатели
+// разные — коэффициент делит факт на ПЛАН-геометрию (длина раскладки × слои, выпады уже внутри,
+// медиана 2–6%), процент делит факт на NETTO (норма «по выкройкам» без единого выпада, медиана
+// 15–30%). Перепутать ответы — занизить закупку на все межлекальные выпады, поэтому у хука свой
+// ключ, свой тип и ни одной общей строки с соседом.
+//
+// enabled даёт вызывающий, и лениться обязан именно он: панель монтируется только в открытом
+// редакторе ОДНОЙ строки BOM (та же дисциплина, что у соседа в модалке артикула) — открытие
+// вкладки BOM с десятком строк не стреляет десятью запросами. materialId > 0 продублирован
+// здесь, потому что генератор бросает исключение на material_id = 0 ещё до запроса.
+//
+// retry:false — по той же причине, что у соседа: RPC классифицирован production:read, 403 для
+// читателя без этого права — состояние «предложения нет на этом доступе», а не сетевой сбой,
+// и ретраить его значит показать ошибку с задержкой вместо тихой строки сразу.
+export function useBomWastageSuggestion(materialId: number, enabled: boolean) {
+  return useQuery({
+    queryKey: materialKeys.bomWastageSuggestion(materialId),
+    queryFn: () => adminService.GetBomWastageSuggestion({ materialId }),
     enabled: enabled && materialId > 0,
     retry: false,
   });

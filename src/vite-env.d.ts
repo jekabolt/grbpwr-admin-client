@@ -9,6 +9,12 @@ interface ImportMetaEnv {
   /** Seller VAT/NIP printed on commercial invoices. Unset -> invoices carry a visible
    *  "SELLER VAT ID NOT CONFIGURED" marker instead of a number. */
   readonly VITE_SELLER_VAT_ID?: string;
+  /** Origin baked into printed QR codes of the public viewers (/p/{token} patterns,
+   *  /r/{token} run pack) — see src/utils/viewer-origin.ts. Set it on EVERY deployed
+   *  contour to that contour's stable admin host; unset it falls back to
+   *  window.location.origin, so paper printed from a Vercel preview points at an
+   *  ephemeral SSO-protected alias and the QR dies silently later. */
+  readonly VITE_PATTERN_VIEWER_ORIGIN?: string;
 }
 
 interface ImportMeta {

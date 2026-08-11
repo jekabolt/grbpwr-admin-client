@@ -3,20 +3,27 @@ import { adminService } from 'api/api';
 import { common_ProductionRun } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Row } from 'ui/components/row';
 import { Section } from 'ui/components/section';
 import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { Toolbar } from 'ui/components/toolbar';
 import { CreateRunModal } from './components/create-run-modal';
-import { isRunOpen, isRunReceivable, runDetailPath } from './components/options';
+import { isRunLocked, isRunOpen, isRunReceivable, runDetailPath } from './components/options';
+import { ProductionRunModal } from './components/production-run-modal';
 import { ReceiveModal } from './components/receive-modal';
 import { DEFAULT_STALE_DAYS, runAttention } from './components/run-attention';
 import { RunTable, looksAuxiliary, runQty } from './components/run-rows';
-import { useProductionRuns } from './components/useProductionRuns';
+import {
+  deleteRunErrorMessage,
+  useDeleteProductionRun,
+  useProductionRuns,
+} from './components/useProductionRuns';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 
@@ -51,15 +58,20 @@ export function ProductionRuns() {
       },
       { replace: true },
     );
-  // Creating a run is «карточка → релиз → колорвеи → количества → покрытие» with the readiness gate
-  // recomputing on every change, so it owns its own modal (Ф6.4) and stays on the list: it is the
-  // one action that starts from nothing.
+  // TWO surfaces, deliberately (Ф6.4). Creating a run is «карточка → релиз → колорвеи →
+  // количества → покрытие» with the readiness gate recomputing on every change; editing one is a
+  // read-modify-write of its header. One component serving both made both worse, and the create
+  // half is where the gate lives — so the header editor never grew it.
   //
-  // EDITING and DELETING a run are NOT here any more. Both live on the run's own page, beside the
-  // thing they change; a list row now carries exactly one control — the next step for that batch —
-  // because three buttons per row is twenty-four buttons competing with the data they sit in.
+  // Every modal a row can open lives here, on the list that owns it: the row is the fastest place
+  // to fix a batch's header or throw away one booked by mistake, and sending an operator to the
+  // run's own page for that was a click they did not owe anybody. What the rework changed is the
+  // ORDER of the controls, not the set: the next step for the batch comes first, the edits after.
+  const [editing, setEditing] = useState<common_ProductionRun | undefined>();
+  const [editOpen, setEditOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [receiving, setReceiving] = useState<common_ProductionRun | undefined>();
+  const [deleting, setDeleting] = useState<common_ProductionRun | undefined>();
 
   // Auto-open the create modal once when arriving via ?new=1 (guarded by write permission),
   // then strip the param — otherwise refresh/back re-opens the modal uninvited.
@@ -134,26 +146,69 @@ export function ProductionRuns() {
   const doneRuns = runs.filter((r) => !isRunOpen(r.run?.status));
 
   const openCreate = () => setCreateOpen(true);
+  const del = useDeleteProductionRun();
+  const { showMessage } = useSnackBarStore();
+  const confirmDelete = () => {
+    if (!deleting?.id) return;
+    del.mutate(deleting.id, {
+      onSuccess: () => showMessage('Run deleted', 'success'),
+      onError: (e) => showMessage(deleteRunErrorMessage(e), 'error'),
+      onSettled: () => setDeleting(undefined),
+    });
+  };
 
-  // ONE control per row: the next step for that batch. Receiving is the only action a list can
-  // usefully offer, so a receivable batch gets it — EXCEPT an auxiliary one. An aux run books its
-  // output into a material bucket (or one bucket per colour) that only its tech card knows about,
-  // and this list holds no tech cards; its own page passes that context to the same modal, so an
-  // aux-shaped row is sent there instead of opening a product-shaped receive over it.
-  const openRunAction = (r: common_ProductionRun) =>
-    canEdit && isRunReceivable(r.run?.status) && !looksAuxiliary(r) ? (
-      <span className='flex justify-end'>
-        <Button type='button' variant='secondary' size='xs' onClick={() => setReceiving(r)}>
-          принять
-        </Button>
-      </span>
-    ) : (
-      <span className='flex justify-end'>
-        <Button asChild variant='secondary' size='xs'>
-          <Link to={runDetailPath(r.id ?? 0)}>открыть</Link>
-        </Button>
+  // The row's controls, in the order they are reached for: the batch's NEXT STEP first, then the
+  // two edits.
+  //
+  // `принять` is withheld from an AUXILIARY run. It books its output into a material bucket (or one
+  // per colour) that only its tech card names, and this list holds no tech cards; the run's own page
+  // passes that context to the same modal, so an aux-shaped row links there instead of opening a
+  // product-shaped receive over it.
+  //
+  // `edit` and `delete` are withheld from a received/closed run: the server rejects EVERY update to
+  // one before it looks at the payload (ErrProductionRunReceivedImmutable), so those buttons could
+  // only ever produce an error. A cancelled run is not locked and keeps both.
+  const openRunAction = (r: common_ProductionRun) => {
+    const locked = isRunLocked(r.run?.status);
+    const canReceive = canEdit && isRunReceivable(r.run?.status) && !looksAuxiliary(r);
+    const canModify = canEdit && !locked;
+    if (!canReceive && !canModify) {
+      return (
+        <span className='flex justify-end'>
+          <Button asChild variant='secondary' size='xs'>
+            <Link to={runDetailPath(r.id ?? 0)}>открыть</Link>
+          </Button>
+        </span>
+      );
+    }
+    return (
+      <span className='flex flex-wrap justify-end gap-1'>
+        {canReceive && (
+          <Button type='button' variant='secondary' size='xs' onClick={() => setReceiving(r)}>
+            принять
+          </Button>
+        )}
+        {canModify && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            onClick={() => {
+              setEditing(r);
+              setEditOpen(true);
+            }}
+          >
+            edit
+          </Button>
+        )}
+        {canModify && (
+          <Button type='button' variant='secondary' size='xs' onClick={() => setDeleting(r)}>
+            delete
+          </Button>
+        )}
       </span>
     );
+  };
 
   return (
     <div className='flex flex-col gap-6 pb-16'>
@@ -332,7 +387,12 @@ export function ProductionRuns() {
               collapsible
               defaultOpen={openRuns.length === 0}
             >
-              <RunTable runs={doneRuns} showTechCard canReadCosting={canReadCosting} />
+              <RunTable
+                runs={doneRuns}
+                showTechCard
+                canReadCosting={canReadCosting}
+                renderAction={openRunAction}
+              />
             </Section>
           )}
         </>
@@ -343,11 +403,23 @@ export function ProductionRuns() {
         onOpenChange={setCreateOpen}
         initialTechCardId={Number(techCardId) || 0}
       />
+      <ProductionRunModal open={editOpen} onOpenChange={setEditOpen} run={editing} />
       <ReceiveModal
         open={receiving != null}
         onOpenChange={(v) => !v && setReceiving(undefined)}
         run={receiving}
       />
+      <ConfirmationModal
+        open={deleting != null}
+        onOpenChange={(v) => !v && setDeleting(undefined)}
+        onConfirm={confirmDelete}
+        title={`delete PR-${deleting?.id ?? ''}?`}
+        confirmLabel='delete'
+      >
+        <Text size='small'>
+          Delete this production run? This action is irreversible. Received runs can't be deleted.
+        </Text>
+      </ConfirmationModal>
     </div>
   );
 }

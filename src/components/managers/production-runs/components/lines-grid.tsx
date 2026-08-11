@@ -9,7 +9,8 @@ import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
-import { updateRunErrorMessage, useUpdateRunSection } from './useProductionRuns';
+import { runDate } from './options';
+import { updateRunErrorMessage, useProductionRuns, useUpdateRunSection } from './useProductionRuns';
 
 const cell = 'border border-textInactiveColor bg-bgColor px-2 py-1 text-textBaseSize';
 const key = (productId: number, sizeId: number) => `${productId}:${sizeId}`;
@@ -144,9 +145,127 @@ export function LinesGrid({
   };
 
   // Здесь была кнопка «prefill from size run»: она штамповала в сетку типовой калькуляционный
-  // тираж карты. Тираж удалён с карточки целиком — и замены у кнопки нет НАРОЧНО. План партии
-  // набирают руками: сколько шить в этот раз, знает человек, а не карточка, и подсказка из
-  // «типового» микса ровно это знание и подменяла.
+  // тираж карты. Тираж удалён с карточки целиком, и обратно он не вернётся: у стиля нет «своей»
+  // партии, а подсказка из «типового» микса подменяла собой знание человека о ТЕКУЩЕМ заказе.
+  // Ниже — замена от честного источника: ПРОШЛЫЙ ПРОГОН этого же стиля. Он ничего не нормирует и
+  // ничего не предписывает — это просто то, что уже шили в прошлый раз, и снекбар говорит об этом
+  // вслух, с номером прогона, чтобы цифру нельзя было принять за норму или за заказ.
+  const techCardId = run.run?.techCardId ?? 0;
+  // Фильтр по карточке СЕРВЕРНЫЙ (ListProductionRunsRequest.tech_card_id) — «весь мир» сюда не
+  // едет. Страница у хука одна и жёсткая (limit 200), и ключ запроса совпадает с ключом вкладки
+  // «производство» на самой карточке, так что React Query отдаёт обеим один ответ вместо двух
+  // запросов. 200 партий ОДНОГО стиля — это годы работы; если их когда-нибудь станет больше,
+  // худшее, что случится, — кнопка предложит не самый свежий прогон из загруженной страницы.
+  // Запрос включён только для редактируемой сетки: у read-only прогона кнопки нет, и тянуть под
+  // неё список незачем.
+  const { data: runsData, isFetching: runsFetching } = useProductionRuns(
+    techCardId,
+    '',
+    0,
+    false,
+    editable && techCardId > 0,
+  );
+
+  // Последний по времени прогон ЭТОГО стиля, кроме текущего и кроме отменённых: отменённый — это
+  // решение «так шить не будем», копировать из него нечего. Сортируем сами по created_at (id как
+  // тай-брейк): порядок ответа списка не документирован, а «последний» — ровно то слово, которым
+  // кнопка себя называет, и оно должно быть правдой, а не совпадением с порядком выдачи.
+  const sourceRun = useMemo(() => {
+    const candidates = (runsData?.runs ?? []).filter(
+      (r) =>
+        (r.id ?? 0) > 0 &&
+        r.id !== run.id &&
+        r.run?.status !== 'PRODUCTION_RUN_STATUS_CANCELLED' &&
+        (r.run?.lines ?? []).some((l) => (l.plannedQty ?? 0) > 0),
+    );
+    const at = (t?: string) => {
+      const ms = Date.parse(t ?? '');
+      return Number.isFinite(ms) ? ms : 0;
+    };
+    return [...candidates].sort(
+      (a, b) => at(b.createdAt) - at(a.createdAt) || (b.id ?? 0) - (a.id ?? 0),
+    )[0];
+  }, [runsData?.runs, run.id]);
+
+  // Копирование количеств (колор-модель × размер) из прошлого прогона в ПУСТЫЕ клетки.
+  //
+  // Только пустые — намеренно, и это НЕ то, что делал старый префилл: тот собирал карту заново
+  // (`setQty(() => ({...}))`) и стирал всё набранное руками. «Дозаполнить» не должно быть способом
+  // потерять свои же цифры, поэтому клетка с любым значением остаётся как есть.
+  //
+  // СТРОКИ СЕТКИ НЕ СОЗДАЁМ. Колор-модель, которой в гриде нет, — это решение «что шьём в этот
+  // раз», а не заполнение клетки: дописать её молча значило бы расширить план партии кнопкой
+  // «дозаполнить», и человек узнал бы об этом уже из сохранённых линий. Такие колор-модели (и
+  // размеры вне колонок сетки) пропускаем и называем числом в снекбаре — строка добавляется
+  // вручную через «+ colour-model…», после чего кнопку можно нажать ещё раз: повтор безопасен
+  // именно потому, что заполняются только пустые клетки.
+  const copyFromPreviousRun = () => {
+    if (!sourceRun) return;
+    const rowIds = new Set(rows.map((r) => r.productId));
+    const cols = new Set(columns);
+    const next = { ...qty };
+    let filledCells = 0;
+    let copiedQty = 0;
+    const skippedColorways = new Set<number>();
+    let skippedSizes = 0;
+    for (const l of sourceRun.run?.lines ?? []) {
+      const pid = l.productId ?? 0;
+      const sid = l.sizeId ?? 0;
+      const planned = l.plannedQty ?? 0;
+      if (planned <= 0 || sid <= 0) continue;
+      if (!rowIds.has(pid)) {
+        skippedColorways.add(pid);
+        continue;
+      }
+      if (!cols.has(sid)) {
+        skippedSizes += 1;
+        continue;
+      }
+      const k = key(pid, sid);
+      if (next[k]?.trim()) continue;
+      next[k] = String(planned);
+      filledCells += 1;
+      copiedQty += planned;
+    }
+    const skipped = [
+      skippedColorways.size > 0 ? `колор-моделей вне сетки — ${skippedColorways.size}` : '',
+      skippedSizes > 0 ? `клеток с размером вне колонок — ${skippedSizes}` : '',
+    ].filter(Boolean);
+    const from = `PR-${sourceRun.id}${runDate(sourceRun.createdAt) ? ` от ${runDate(sourceRun.createdAt)}` : ''}`;
+    if (filledCells === 0) {
+      // Ничего не заполнено — это ответ, а не сбой, и он обязан назвать причину: пустых клеток,
+      // которые прошлый прогон умеет закрыть, просто не осталось.
+      showMessage(
+        `Из ${from} копировать нечего: пустых клеток под его количества нет${
+          skipped.length ? ` (не перенесено: ${skipped.join(', ')})` : ''
+        }`,
+        'error',
+      );
+      return;
+    }
+    setDirty(true);
+    setQty(next);
+    showMessage(
+      `Скопировано из ${from}: ${copiedQty} шт в ${filledCells} пустых клеток${
+        skipped.length ? `; не перенесено: ${skipped.join(', ')}` : ''
+      }. Проверьте — это прошлая партия, а не норма`,
+      'success',
+    );
+  };
+
+  // Почему кнопка неактивна — одной строкой, тем же текстом в title и на экране: title у disabled
+  // кнопки в части браузеров не всплывает вовсе, а исчезнувшая без объяснения помощь читается как
+  // поломка. Пустая сетка объясняется своим собственным пустым состоянием ниже, второй раз это не
+  // повторяем — но в title причина есть всегда.
+  const copyBlockedReason =
+    rows.length === 0
+      ? 'сначала добавьте колор-модель — копирование заполняет строки, которые уже есть в сетке'
+      : runsFetching && !sourceRun
+        ? 'ищем прошлые прогоны этого стиля…'
+        : !sourceRun
+          ? 'у этого стиля нет прошлых прогонов с количествами (отменённые не в счёт) — сетку набирают руками'
+          : undefined;
+
   const rowTotal = (productId: number) =>
     columns.reduce((sum, s) => sum + (Number(qty[key(productId, s)]) || 0), 0);
   const colTotal = (sizeId: number) =>
@@ -228,6 +347,19 @@ export function LinesGrid({
         </Text>
         {editable && (
           <div className='flex items-center gap-2'>
+            {/* Источник назван прямо на кнопке: «скопировать» без имени — это доверие вслепую, а
+                номер прогона видно ещё до нажатия. */}
+            <Button
+              type='button'
+              variant='secondary'
+              size='lg'
+              className='uppercase'
+              disabled={!!copyBlockedReason || update.isPending}
+              title={copyBlockedReason ?? `количества из прошлого прогона PR-${sourceRun?.id}`}
+              onClick={copyFromPreviousRun}
+            >
+              {sourceRun ? `copy from PR-${sourceRun.id}` : 'copy from previous run'}
+            </Button>
             <Button
               type='button'
               variant='main'
@@ -241,6 +373,12 @@ export function LinesGrid({
           </div>
         )}
       </div>
+
+      {editable && copyBlockedReason && rows.length > 0 ? (
+        <Text variant='inactive' size='small'>
+          {copyBlockedReason}
+        </Text>
+      ) : null}
 
       {rows.length === 0 ? (
         <Text variant='inactive' size='small'>

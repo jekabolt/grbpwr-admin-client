@@ -13,14 +13,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { ulid } from 'utils/ulid';
-import {
-  bomPurposeLabel,
-  fabricScopes,
-  isRollGoodsSection,
-  scopeKeyOfBinding,
-  type FabricScope,
-  type RollGoodsLine,
-} from './bom-purpose';
+import { bomPurposeLabel, type FabricScope, type RollGoodsLine } from './bom-purpose';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import {
   findPiece,
@@ -29,8 +22,8 @@ import {
   useDxfGeometry,
   useDxfIndex,
   type FoundPiece,
-  type PieceBlockRef,
 } from './nesting/dxf-geometry';
+import { pieceBlockRefs, rollGoodsScopes, type PieceAliasRow } from './piece-block-refs';
 import {
   CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
   UNSET_CUT_SYMMETRY,
@@ -44,8 +37,9 @@ import {
   isCutSymmetryMarked,
   pieceCodeOptions,
 } from './piece-codes';
+import { derivePieceLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { normalizePieceName } from './piece-picker';
-import { TechCardFormData } from './schema';
+import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 
 type FormPiece = NonNullable<TechCardFormData['pieces']>[number];
@@ -219,12 +213,7 @@ export function PiecesTab({
   // DXF block → piece aliases (0262). They are what lets this block say where a piece came from:
   // a piece with an alias is drawn in a real CAD file, and that file — not the word in the `grain`
   // field — is what the раскладка orients the piece by.
-  const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as Array<{
-    bomLineKey?: string;
-    fabricPurpose?: string;
-    blockName?: string;
-    pieceLineKey?: string;
-  }>;
+  const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as PieceAliasRow[];
   // Скоупы ткани карточки — то, ПО ЧЕМУ хранится и связь блока с деталью, и привязка листа
   // выкройки (0267: назначение, а где карточка ещё не разложена — строка BOM). Нужны здесь и для
   // предпросмотра (одно и то же имя блока в файле верха и в файле подклада — РАЗНЫЕ детали), и для
@@ -255,20 +244,7 @@ export function PiecesTab({
   const [filter, setFilter] = useState<string>('all');
   const [pairingOnly, setPairingOnly] = useState(false);
 
-  const scopes = useMemo(
-    () =>
-      fabricScopes(
-        bomItems
-          .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
-          .map((b) => ({
-            lineKey: b.lineKey!,
-            purpose: b.purpose,
-            name: b.name,
-            section: b.section,
-          })),
-      ),
-    [bomItems],
-  );
+  const scopes = useMemo(() => rollGoodsScopes(bomItems), [bomItems]);
 
   // Подпись скоупа для чипа фильтра и заголовка группы: у назначения — само назначение, у
   // неразобранной строки — её название (то же правило, что у панели выкроек, без списка артикулов
@@ -278,27 +254,10 @@ export function PiecesTab({
     return bomPurposeLabel(s.key);
   };
 
-  // Which DXF blocks each piece is drawn as, by lineKey. Case-folded on the key the same way the
-  // matching dialog and the server do, so a piece is found whichever spelling the alias carries.
-  // Скоуп едет вместе с именем: без него связь — это просто строка, а строка «полочка» есть и на
-  // верхе, и на подкладе.
-  const blocksByPiece = useMemo(() => {
-    const m = new Map<string, PieceBlockRef[]>();
-    for (const a of aliases) {
-      const key = (a.pieceLineKey ?? '').trim().toLowerCase();
-      const block = (a.blockName ?? '').trim();
-      if (!key || !block) continue;
-      // Разрешённый скоуп, а не сырой ключ: связь, записанная на строку до того, как её разложили
-      // в назначение, принадлежит теперь этому назначению — ровно как у листов выкроек.
-      const scopeKey = scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, scopes);
-      const list = m.get(key) ?? [];
-      if (!list.some((r) => r.scopeKey === scopeKey && r.block === block)) {
-        list.push({ scopeKey, block });
-      }
-      m.set(key, list);
-    }
-    return m;
-  }, [aliases, scopes]);
+  // Which DXF blocks each piece is drawn as, by lineKey — ОБЩЕЙ функцией (piece-block-refs.ts),
+  // той же, что строит карту силуэтов рецепт колорвея: ключ, порядок refs и резолв скоупа входят
+  // в контракт показа, и своя копия этой арифметики рисовала бы одну деталь двумя контурами.
+  const blocksByPiece = useMemo(() => pieceBlockRefs(aliases, scopes), [aliases, scopes]);
 
   // ВСЯ пачка DXF карточки, посчитанная ОБЩЕЙ функцией (card-dxf-pack.ts) — той же самой, что
   // читает панель выкроек над этим блоком. Список обязан совпасть побайтово: ключ кэша разбора —
@@ -552,6 +511,46 @@ export function PiecesTab({
   const selUnanswered = sel ? cutSymmetryUnanswered(sel.cutSymmetry, sel.piecesPerGarment) : false;
   const selArrow = grainlineArrow(sel?.grainline);
 
+  // СЛОИ ВЫБРАННОЙ ДЕТАЛИ ПО КОЛОРВЕЯМ (T4) — read-only проекция РЕЦЕПТА: вкладка деталей
+  // показывает, рецепт (COLORWAYS) редактирует — направление T3. Связь живёт в детальных строках
+  // tech_card_colorway_usage (замороженная tech_card_piece_material не читается), роль слоя —
+  // вывод из строки BOM (piece-layer-role.ts, зеркало entity.DerivePieceLayerRole).
+  const selLayerRows = useMemo(() => {
+    if (!selKey) return [] as Array<{ colorway: string; layers: string }>;
+    const bomItems = techCard?.techCard?.bomItems ?? [];
+    const resolveSlot = (u: { bomItemId?: number; bomLineKey?: string; bomItemIndex?: number }) => {
+      const id = wireInt(u.bomItemId);
+      if (id > 0) {
+        const byId = bomItems.find((b) => wireInt(b.id) === id);
+        if (byId) return byId;
+      }
+      if (u.bomLineKey) {
+        const byKey = bomItems.find((b) => b.lineKey === u.bomLineKey);
+        if (byKey) return byKey;
+      }
+      return u.bomItemIndex != null && u.bomItemIndex >= 0 ? bomItems[u.bomItemIndex] : undefined;
+    };
+    const out: Array<{ colorway: string; layers: string }> = [];
+    for (const c of techCard?.colorways ?? []) {
+      const bound = (c.usages ?? []).filter((u) => (u.pieceLineKey ?? '').trim() === selKey);
+      if (bound.length === 0) continue;
+      const parts: string[] = [];
+      const seen = new Set<string>();
+      for (const u of bound) {
+        const slot = resolveSlot(u);
+        if (!slot || seen.has(slot.lineKey ?? `${slot.id}`)) continue;
+        seen.add(slot.lineKey ?? `${slot.id}`);
+        const role = derivePieceLayerRole(slot.section, slot.purpose);
+        const caption = role.rollGoods ? pieceLayerRoleLabel(role) : '';
+        parts.push(caption ? `${slot.name?.trim() || '—'} · ${caption}` : slot.name?.trim() || '—');
+      }
+      if (parts.length === 0) continue;
+      const cwName = c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? ''}`;
+      out.push({ colorway: cwName, layers: parts.join(', ') });
+    }
+    return out;
+  }, [selKey, techCard?.colorways, techCard?.techCard?.bomItems]);
+
   // Удаление выбранной детали передаёт выбор СОСЕДУ (предыдущему по индексу, иначе следующему), а
   // не первой детали списка: при чистке хвоста в 40 строк панель, прыгающая каждый раз в начало,
   // заставляла бы заново прокручивать плитки после каждого удаления. Сосед берётся из снимка
@@ -567,7 +566,7 @@ export function PiecesTab({
     <>
       <Section
         title='детали кроя'
-        question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из какой ткани кроится каждая деталь в конкретном колорвее — редактора пока НЕТ ни на одной вкладке, столбец в cut list из-за этого пустой'
+        question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из каких тканей (слоёв) кроится деталь в конкретном колорвее — правится строками детали в рецепте на вкладке colorways; здесь это видно в панели выбранной детали'
         action={
           <div className='flex flex-wrap items-center gap-2'>
             {unmarked.pairing > 0 && (
@@ -934,6 +933,25 @@ export function PiecesTab({
                       откреплена от выноски
                     </Pill>
                   )}
+                </div>
+              )}
+
+              {/* Слои детали по колорвеям — read-only проекция рецепта (T4): из каких тканей она
+                  кроится и в какой роли каждая. Правится НЕ здесь: строками детали в рецепте
+                  колорвея (вкладка COLORWAYS). */}
+              {selLayerRows.length > 0 && (
+                <div className='flex flex-col gap-0.5'>
+                  <Text size='micro' variant='label' component='span' className='uppercase'>
+                    слои детали — из рецепта
+                  </Text>
+                  {selLayerRows.map((r, i) => (
+                    <Text key={i} size='micro' component='p'>
+                      <span className='font-medium'>{r.colorway}</span>: {r.layers}
+                    </Text>
+                  ))}
+                  <Text size='nano' variant='label' component='p'>
+                    редактируется на вкладке colorways — строками этой детали в рецепте колорвея
+                  </Text>
                 </div>
               )}
 

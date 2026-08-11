@@ -12,6 +12,15 @@ import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import {
+  ClothReport,
+  FROZEN_FACT_NOTE,
+  clothRefusalText,
+  fmtDeltaPct,
+  fmtQty,
+  normBasisText,
+  normRefusalText,
+} from '../utils/cloth-per-unit';
+import {
   LAY_ACTUAL_METHOD_LABEL,
   MATERIAL_UNIT_LABEL,
   allLayChecks,
@@ -68,6 +77,7 @@ export function LayCard({
   reaffirming,
   onPlotter,
   plottingKey,
+  cloth,
 }: {
   lay: common_ProductionRunLay;
   index: number;
@@ -82,6 +92,13 @@ export function LayCard({
   onPlotter?: (section: common_ProductionRunLaySection, key: string) => void;
   /** Ключ секции, которая сейчас готовится. Блокирует ТУ ЖЕ кнопку, а не все сразу. */
   plottingKey?: string;
+  /**
+   * Ткань на изделие (Ф4): факт полотна против выкроенного/принятого этого настила, посчитанный
+   * РОДИТЕЛЕМ через utils/cloth-per-unit (та же арифметика, что в блоке приёмки кроя — двух копий
+   * формулы не существует). undefined = строки приёмки ещё читаются: карточка молчит, а не
+   * отказывает — отказ «кроя нет» на недогруженном списке был бы ложью.
+   */
+  cloth?: ClothReport;
 }) {
   const checks = lay.checks ?? [];
   const sections = lay.sections ?? [];
@@ -93,7 +110,7 @@ export function LayCard({
   const stale = lay.quantitiesStale === true;
 
   const totalPlies = lay.totalPlies ?? 0;
-  const cloth = cmToM(lay.clothLengthCm);
+  const clothLen = cmToM(lay.clothLengthCm);
   const endLoss = cmToM(lay.endLossTotalCm);
   const planned = cmToM(lay.plannedLengthCm);
 
@@ -156,12 +173,12 @@ export function LayCard({
         label='ткань + концевые = план настила'
         value={
           planned
-            ? `${cloth || '—'} + ${endLoss || '—'} = ${planned} м`
+            ? `${clothLen || '—'} + ${endLoss || '—'} = ${planned} м`
             : '— пересчитается на сервере'
         }
       />
       <StackHeightRow lay={lay} checks={checks} />
-      <LotAndFactRows lay={lay} />
+      <LotAndFactRows lay={lay} cloth={cloth} sizeLabel={sizeLabel} />
 
       {/* ПЛОТТЕР — НА СЕКЦИЮ, А НЕ НА НАСТИЛ. Три секции это три РАЗНЫЕ раскладки, которые режут по
           очереди своими проходами; один файл «на настил» пришлось бы либо склеить из трёх (такой
@@ -271,7 +288,15 @@ function StackHeightRow({
 // Пока цех не отчитался, обе строки схлопываются в ОДНУ приглушённую: два пустых поля подряд
 // («рулон не назван», «факт не введён») занимали бы половину карточки, ничего при этом не сообщая.
 // Как только появляется хоть одна половина, поля разъезжаются и каждое отвечает за себя.
-function LotAndFactRows({ lay }: { lay: common_ProductionRunLay }) {
+function LotAndFactRows({
+  lay,
+  cloth,
+  sizeLabel,
+}: {
+  lay: common_ProductionRunLay;
+  cloth?: ClothReport;
+  sizeLabel: (sizeId: number) => string;
+}) {
   const lot = layLotState(lay);
   const raw = layActualQty(lay);
   const hasFact = raw !== '';
@@ -280,7 +305,15 @@ function LotAndFactRows({ lay }: { lay: common_ProductionRunLay }) {
   const qty = hasFact ? String(Number(raw)) : '';
 
   if (lot === 'none' && !hasFact) {
-    return <Row tone='label' label='рулон и факт расхода' value='цех ещё не отчитался' />;
+    return (
+      <>
+        <Row tone='label' label='рулон и факт расхода' value='цех ещё не отчитался' />
+        {/* Даже под схлопнутой строкой «на изделие» обязано сказать про необратимость: на закрытой
+            партии невнесённый замер не внести уже никогда, и молчание здесь заставило бы оператора
+            искать кнопку, которой нет. На открытой партии ClothRows молчит сам (см. его гейт). */}
+        <ClothRows cloth={cloth} sizeLabel={sizeLabel} />
+      </>
+    );
   }
 
   // UNKNOWN — это «единицу не распознали», а не «единицы нет»: число с нераспознанной единицей всё
@@ -350,6 +383,205 @@ function LotAndFactRows({ lay }: { lay: common_ProductionRunLay }) {
           при наличии факта пустой дрейф — самостоятельная новость: сравнить не с чем, потому что
           нет плана или единицы несводимы, и это НЕ «сошлось, 0%». */}
       {hasFact ? <DriftRow drift={lay.actualDriftPercent} /> : null}
+
+      {/* ТКАНЬ НА ИЗДЕЛИЕ (Ф4) — буквально следующая строка того же рассказа: рулон → факт →
+          дрейф к плану настила → во что этот факт обошёлся НА ИЗДЕЛИЕ. */}
+      <ClothRows cloth={cloth} sizeLabel={sizeLabel} />
+    </>
+  );
+}
+
+// ТКАНЬ НА ИЗДЕЛИЕ. Это НЕ ПЕРЕСКАЗ ДРЕЙФА: DriftRow выше — факт против ГЕОМЕТРИЧЕСКОГО плана
+// НАСТИЛА (владелец — сервер, actualDriftPercent); здесь другая пара чисел — факт НА ИЗДЕЛИЕ
+// против выкроенного/принятого и НОРМЫ на изделие из рецептуры. Оба процента законны одновременно
+// и потому подписаны разными словами: «дрейф к плану настила» и «к норме на изделие».
+//
+// Каждый отказ называет СЕБЯ, и ни один не подставляет ноль; арифметика и слова — из
+// utils/cloth-per-unit, общие с блоком приёмки кроя.
+function ClothRows({
+  cloth,
+  sizeLabel,
+}: {
+  cloth?: ClothReport;
+  sizeLabel: (sizeId: number) => string;
+}) {
+  if (!cloth) return null; // строки приёмки ещё читаются — молчим, а не отказываем
+  const { perUnit, norm } = cloth;
+
+  if (!perUnit.ok) {
+    const r = perUnit.refusal;
+    if (r.kind === 'no-fact') {
+      // На открытой партии строка «факт расхода — не введён» выше уже ответила, и вторая строка
+      // была бы вторым ответом на тот же вопрос (тот же принцип, что у DriftRow). А вот
+      // НЕОБРАТИМОСТЬ — новость, которой больше негде прозвучать.
+      if (!r.frozen) return null;
+      return (
+        <>
+          <Row tone='label' label='на изделие' value='замера нет — уже не посчитается' />
+          <Text size='nano' variant='label'>
+            {FROZEN_FACT_NOTE}
+          </Text>
+        </>
+      );
+    }
+    if (r.kind === 'no-receipts') {
+      return (
+        <>
+          <Row tone='label' label='на изделие' value='крой не отчитан' />
+          <Text size='nano' variant='label'>
+            приёмка кроя — в блоке ниже; пустая клетка там значит «не считали», а не ноль, поэтому
+            делить пока не на что.
+          </Text>
+        </>
+      );
+    }
+    if (r.kind === 'zero-cut') {
+      return (
+        <>
+          <Row className='text-error' label='на изделие — выкроено 0' value='не делится' />
+          {/* «Посчитанный ноль» не утверждается: cut_qty NOT NULL, пустое поле формы уезжает нулём,
+              и сохранённая строка не различает «посчитали, вышло 0» и «не заполнили». */}
+          <Text size='nano' variant='label'>
+            полотно потрачено, изделий не записано; ноль мог быть и не введён — сохранённая строка
+            не различает посчитанный ноль и незаполненное поле
+          </Text>
+        </>
+      );
+    }
+    // mixed-units в карточке ОДНОГО настила недостижим (у замера одна единица) — защита на случай
+    // будущего вызова с несколькими настилами.
+    return <Row tone='label' label={`на изделие — ${clothRefusalText(r)}`} value='не считается' />;
+  }
+
+  const u = perUnit.unitLabel;
+  return (
+    <>
+      <Row
+        label={`на изделие · крой${perUnit.mixed ? ' — среднее по составу настила' : ''}`}
+        value={`${fmtQty(perUnit.perCut)} ${u}/изд`}
+      />
+      {perUnit.missingSizes.length > 0 ? (
+        // Направление ошибки называется вместе с числом: неполный знаменатель ЗАВЫШАЕТ «на
+        // изделие», и оператор обязан знать, куда число поедет при дозаполнении.
+        <Text size='nano' className='text-warning'>
+          приёмка не по всем размерам настила (нет: {perUnit.missingSizes.map(sizeLabel).join(', ')}
+          ) — знаменатель занижен, «на изделие» завышено и будет уменьшаться по мере ввода
+        </Text>
+      ) : null}
+      <Row
+        label='на изделие · годное'
+        // «Принято 0» НЕ ГОВОРИТ «годных нет», и утверждать это нельзя: колонка accepted_qty —
+        // NOT NULL DEFAULT 0, а сохранённая строка с незаполненной приёмкой возвращается нулём,
+        // неотличимым от посчитанного нуля (различие «пусто ≠ ноль» живёт только на НЕсохранённом
+        // черновике). Данные двух этих состояний не различают — значит и экран не должен.
+        className={perUnit.perAccepted == null ? 'text-error' : undefined}
+        value={
+          perUnit.perAccepted == null
+            ? 'принято 0 — годных нет либо приёмка в пошив не заполнена'
+            : `${fmtQty(perUnit.perAccepted)} ${u}/изд`
+        }
+      />
+      {/* «Принято больше выкроенного» — невозможное состояние данных: принять в пошив больше, чем
+          выкроили, нельзя. Его не красит НИКАКАЯ другая строка (цепочка чисел в приёмке отмечает
+          только принято < выкроено), поэтому аномалия называется здесь, рядом со своим числом. */}
+      {perUnit.acceptedOverCut ? (
+        <Text size='nano' className='text-error'>
+          принято {perUnit.acceptedTotal} при выкроенных {perUnit.cutTotal} — так не бывает:
+          какое-то из чисел врёт, проверьте строки приёмки
+        </Text>
+      ) : null}
+      {perUnit.scrapPerGood != null ? (
+        <Row
+          className='text-error'
+          label='цена брака кроя в ткани'
+          value={`+${fmtQty(perUnit.scrapPerGood)} ${u} на годное`}
+        />
+      ) : null}
+      {/* «Принято меньше выкроенного» имеет ДВЕ причины, и данные их не различают: брак кроя и
+          незаполненная приёмка (accepted_qty — NOT NULL DEFAULT 0). Признак считается по ОТДЕЛЬНЫМ
+          строкам (настил + размер), а не по сумме на размер — сумма прятала бы незаполненную
+          строку за принятыми соседнего настила. Настил здесь один (карточка и есть он), поэтому
+          называются только размеры; таблица пар называет и настил. Полностью нулевую приёмку
+          (perAccepted == null) уже объяснила строка «годное» — второй раз не говорим. */}
+      {perUnit.acceptedZeroRows.length > 0 && perUnit.perAccepted != null ? (
+        <Text size='nano' className='text-warning'>
+          у размеров {perUnit.acceptedZeroRows.map((z) => sizeLabel(z.sizeId)).join(', ')} принято
+          ровно 0 — если приёмку в пошив там просто не заполнили, годное занижено и «цена брака»
+          завышена
+        </Text>
+      ) : null}
+      <NormRow norm={norm} sizeLabel={sizeLabel} />
+    </>
+  );
+}
+
+// Сравнение с нормой. Норма гроссится процентом раскроя слота ТОЛЬКО для источников без отходов
+// внутри (manual/dxf) — правило костинга (wastageApplies); cutting_coefficient не применяется
+// нигде на пути настилов (см. шапку utils/cloth-per-unit).
+function NormRow({
+  norm,
+  sizeLabel,
+}: {
+  norm: ClothReport['norm'];
+  sizeLabel: (sizeId: number) => string;
+}) {
+  if (!norm) return null; // карточка ещё читается — молчим, а не отказываем
+  if (!norm.ok) {
+    return (
+      <>
+        <Row
+          tone='label'
+          label={`к норме на изделие — ${normRefusalText(norm.refusal, sizeLabel)}`}
+          value='? не считается'
+        />
+        {/* И отказ обязан говорить, в ЧЬЕЙ рецептуре искали: «нормы нет» в ревизии прогона —
+            не то же, что в живой карточке. Молчит только 'card-failed' — там неизвестно, какая
+            карточка вообще была бы. */}
+        {norm.basis ? (
+          <Text
+            size='nano'
+            className={
+              norm.basis.kind === 'live-broken-snapshot' ? 'text-warning' : 'text-labelColor'
+            }
+          >
+            {normBasisText(norm.basis)}
+          </Text>
+        ) : null}
+      </>
+    );
+  }
+  const d = fmtDeltaPct(norm.deltaPct);
+  return (
+    <>
+      <Row
+        label='к норме на изделие'
+        value={`норма ${fmtQty(norm.normPerUnit)} ${norm.unitLabel}/изд · ${d.text}`}
+        // Красный — потому что расход выше нормы это ПОТЕРЯ; минус зелёным не красится по той же
+        // причине, что у дрейфа: «меньше нормы» — повод спросить, всё ли отчитано.
+        className={d.over ? 'text-error' : undefined}
+      />
+      {/* При смешанном источнике (partlyGrossed) подпись обязана говорить, что процент начислен
+          ТОЛЬКО на слагаемые без отходов внутри: «по раскладке + руками · догроссена процентом»
+          читалось бы как (0.6 + 0.4) × 1.1, тогда как посчитано 0.6 + 0.4 × 1.1. */}
+      <Text size='nano' variant='label'>
+        норма {norm.sourceLabel}
+        {norm.grossed
+          ? norm.partlyGrossed
+            ? ` · процент раскроя слота ${fmtQty(norm.wastagePct ?? 0)}% начислен только на часть без отходов внутри, «по раскладке» взята как есть`
+            : ` · догроссена процентом раскроя слота ${fmtQty(norm.wastagePct ?? 0)}%`
+          : ' · отходы кроя уже внутри нормы'}
+        {norm.weighted ? ' · взвешена по выкроенному составу' : ''}
+      </Text>
+      {/* С ЧЕМ сравнивали (Ф: ревизия прогона / живая карточка). Отдельной строкой и с тревожным
+          тоном на нечитаемом снапшоте: молчаливый фолбэк на живую карту выдавал бы её за
+          замороженную ревизию — ровно то, от чего print-page защищается тем же третьим
+          состоянием. */}
+      <Text
+        size='nano'
+        className={norm.basis.kind === 'live-broken-snapshot' ? 'text-warning' : 'text-labelColor'}
+      >
+        {normBasisText(norm.basis)}
+      </Text>
     </>
   );
 }

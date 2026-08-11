@@ -336,6 +336,18 @@ const bomItemSchema = z
     fabricWeightGsm: z.string().optional().default(''),
     fabricDirection: z.string().optional().default('TECH_CARD_FABRIC_DIRECTION_UNKNOWN'),
     wastagePercent: z.string().optional().default(''),
+    // ПРОВЕНАНС ПРОЦЕНТА РАСКРОЯ (0296, T7 волна 2): 'lays' — применено из предложения «медиана
+    // факта настилов над netto», 'manual'/'' — руками. БЕЗ .default(): undefined здесь несёт
+    // смысл «эта форма не знает» (черновик, восстановленный из localStorage-снимка старого
+    // бандла) и обязан уйти на провод ОТСУТСТВИЕМ пары — иначе первый же сейв такого черновика
+    // стёр бы аудит применения на строках, которых человек не касался (см. mapFormToTechCardInsert).
+    wastageSource: z.string().optional(),
+    // Штамп применения: по скольким настилам стояла медиана. Живёт ПАРОЙ с wastageSource —
+    // на проводе присутствие решается для обоих разом (дисциплина kind/kind_note).
+    wastageLayCount: z.number().optional(),
+    // OUTPUT-ONLY: когда применено. Возится через форму только чтобы показать дату в бейдже;
+    // на провод не уходит никогда — её ставит сервер при смене тройки (source, count, percent).
+    wastageAppliedAt: z.string().optional(),
     // READ-ONLY enrichment the single-card read fills (0259): the width the раскладка should
     // prefill (this line's own fabricWidth, else the linked article's) and the article's кромка
     // per edge. Carried through the form so the nesting modal can read them without a second
@@ -986,6 +998,13 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
         ? b.fabricDirection
         : 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN',
     wastagePercent: decimalToInput(b.wastagePercent),
+    // Провенанс — ДОСЛОВНО, включая undefined: «сервер не сказал» и «сказал manual» — разные
+    // утверждения, и различие доезжает до записи (см. пару в mapFormToTechCardInsert). '' не
+    // нормализуется в 'manual': бейджу хватает точного сравнения с 'lays', а самодеятельная
+    // нормализация здесь однажды разошлась бы со спеллингом сервера.
+    wastageSource: b.wastageSource,
+    wastageLayCount: b.wastageLayCount,
+    wastageAppliedAt: b.wastageAppliedAt,
     effectiveFabricWidthCm: decimalToInput(b.effectiveFabricWidthCm),
     selvedgeCm: decimalToInput(b.selvedgeCm),
     // material_id and id are int64 on the wire (techcard.proto), and grpc-gateway serialises int64
@@ -1568,14 +1587,42 @@ export function mapFormToTechCardInsert(
       composition: b.composition?.trim() || '',
       spec: b.spec?.trim() || '',
       unit: b.unit?.trim() || '',
-      unitPrice: inputToDecimal(b.unitPrice),
-      currency: b.currency?.trim() || '',
+      // ДЕНЬГИ СТРОКИ — ТОЛЬКО ОТ РЕДАКТОРА С costing:write, тем же verbatim-протоколом
+      // «поля нет = сохрани что было», что у пары провенанса ниже и у costing в конце файла.
+      // Аккаунту без права сервер вырезает цены на чтении, форма держит пустоту — и отправка
+      // этой пустоты либо затирала бы цену (валюта шла явным ''), либо валила бы ВЕСЬ сейв:
+      // непустой unit_price от не-костингового аккаунта сервер отвергает целиком
+      // (PermissionDenied, techCardInsertHasCostingData), а цена могла оказаться в форме и без
+      // ввода руками — например из черновика, снятого аккаунтом с правом. undefined выбрасывает
+      // ключ из JSON, и серверный anti-erase (preserveStoredCosting) возвращает хранимые
+      // цену и валюту по line_key.
+      unitPrice: canWriteCosting ? inputToDecimal(b.unitPrice) : undefined,
+      currency: canWriteCosting ? b.currency?.trim() || '' : undefined,
       comment: b.comment?.trim() || '',
       fabricWidth: inputToDecimal(b.fabricWidth),
       fabricWeightGsm: inputToDecimal(b.fabricWeightGsm),
       fabricDirection: (b.fabricDirection ||
         'TECH_CARD_FABRIC_DIRECTION_UNKNOWN') as common_TechCardFabricDirection,
       wastagePercent: inputToDecimal(b.wastagePercent),
+      // ПАРА ПРОВЕНАНСА (0296) — verbatim-протокол присутствия, тот же, что у kind/kind_note
+      // выше и у consumption_source в рецепте: undefined означает «эта форма не знает» (черновик
+      // из localStorage-снимка старого бандла) и уходит ОТСУТСТВИЕМ обоих ключей —
+      // JSON.stringify выбрасывает их, сервер сохраняет что было, аудит чужого применения
+      // переживает сейв. Известный источник шлётся ПАРОЙ: счётчик настилов осмыслен только при
+      // 'lays' и на 'manual' обнуляется (серверная CHECK-пара). Сброс «правка числа руками →
+      // manual» дублировать не нужно: локально его делает эффект в bom-field (честный бейдж до
+      // сохранения), а на сервере он случается по факту смены значения, что бы клиент ни прислал.
+      wastageSource:
+        b.wastageSource === undefined ? undefined : b.wastageSource === 'lays' ? 'lays' : 'manual',
+      wastageLayCount:
+        b.wastageSource === undefined
+          ? undefined
+          : b.wastageSource === 'lays'
+            ? (b.wastageLayCount ?? 0)
+            : 0,
+      // Штамп применения ставит СЕРВЕР при смене тройки (source, count, percent); прислать его
+      // отсюда значило бы датировать применение каждым сохранением карточки.
+      wastageAppliedAt: undefined,
       materialId: b.materialId || 0,
       // Stable identity (§2.3): keep the server PK + the resolved line_key.
       id: b.id || 0,

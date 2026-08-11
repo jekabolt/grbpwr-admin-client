@@ -3,6 +3,7 @@ import {
   common_Material,
   common_TechCardBomKind,
   common_TechCardBomSection,
+  common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
@@ -15,7 +16,7 @@ import { MaterialModal } from 'components/managers/materials/components/material
 import {
   MaterialPicker,
   MaterialPickerDialog,
-  useMaterialOnHand,
+  useMaterialStockFacts,
 } from 'components/managers/materials/components/material-picker';
 import {
   MaterialThumb,
@@ -25,9 +26,10 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { CompositionPicker } from 'components/managers/product/components/composition/composition-picker';
 import { techCardBomSectionOptions, techCardFabricDirectionOptions } from 'constants/filter';
 import { ROUTES } from 'constants/routes';
+import { stampWhen } from 'components/managers/production-runs/components/useLays';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   useFieldArray,
   useFormContext,
@@ -55,9 +57,11 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { flattenFieldErrors } from 'utils/field-errors';
 import { ulid } from 'utils/ulid';
 import { sectionShort } from './bom-line-picker';
+import { BomWastageSuggestion, laysProvenancePhrase } from './bom-wastage-suggestion';
 import {
   KIND_HOME_SECTION,
   UNSET_KIND,
@@ -73,6 +77,7 @@ import {
   purposeEditorOptions,
   techCardBomPurposeOptions,
 } from './bom-purpose';
+import { formatBomMoney, resolveBomPrice } from './bom-price';
 import {
   defaultRoleFor,
   looksLikeArticleName,
@@ -80,6 +85,8 @@ import {
   roleCollision,
   roleSuggestions,
 } from './bom-roles';
+import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
+import { markersForLine } from './nesting/marker-io';
 import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 
@@ -116,13 +123,8 @@ const emptyBomItem = {
 };
 
 // Fabric width/weight read from the typed CTI attrs, falling back to the legacy flat fields —
-// shared by the link-time snapshot and the linked-line catalog plate so the two never drift apart.
-function materialFabricWidth(m?: common_Material): string | undefined {
-  return m?.fabricAttrs?.widthCm?.value || m?.fabricWidth?.value;
-}
-function materialFabricWeight(m?: common_Material): string | undefined {
-  return m?.fabricAttrs?.weightGsm?.value || m?.fabricWeightGsm?.value;
-}
+// shared by the link-time snapshot, the linked-line catalog plate AND the length→kg weight basis
+// (nesting/fabric-weight.ts, where the pair now lives) so the three never drift apart.
 
 // The catalog facts a BOM line snapshots off the article it links (S23: the line stays
 // self-contained). ONE helper, so creating a line FROM the picker and linking an article onto an
@@ -167,6 +169,9 @@ function useNoPriceWarning() {
     );
   };
 }
+
+// Выпущенная карта заморожена целиком — вместе с кнопкой «обновить цены из каталога» на костинге.
+const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 const join = (...parts: Array<string | undefined>) => parts.filter((p) => !!p?.trim()).join(' · ');
 const widthLabel = (v?: string) => (v?.trim() ? `${v.trim()} cm` : '');
@@ -294,7 +299,102 @@ function SlotIdentityFields({ index }: { index: number }) {
 // This style's use of the article — the ONLY three controls a linked line owns. Everything else on
 // a linked line is a catalog fact, rendered as a plate (below) rather than as disabled inputs.
 // No top padding: the GroupLabel's own top margin is the box's inner top space.
-function ThisStyleFields({ index }: { index: number }) {
+//
+// ПРОЦЕНТ РАСКРОЯ (T7, волны 1+2). У поля «est. cutting wastage %» здесь стоит разбор: что это
+// за число, откуда его брать и с чем его НЕЛЬЗЯ путать. Прежняя подпись («depends on marker
+// efficiency») не говорила ни того, ни другого — и главное, ничем не защищала от переноса сюда
+// коэффициента раскроя артикула: у того ДРУГАЯ база (измеренная длина раскладки, выпады уже
+// внутри), и его ~4% на месте нужных ~20% занижают закупку на все межлекальные выпады — линейно
+// и незаметно. Волна 2 привезла расчёт: медиану «факт ÷ netto» по настилам артикула считает
+// сервер (GetBomWastageSuggestion), панель ниже показывает её с составом выборки и кладёт в поле
+// по нажатию — вместе со счётчиком настилов, по которому сервер и признаёт применение.
+function ThisStyleFields({
+  index,
+  material,
+  markers,
+}: {
+  index: number;
+  /** Привязанный артикул строки — ради его коэффициента раскроя (предупреждение о путанице). */
+  material?: common_Material;
+  /** Карточные раскладки (techCard.markers) — лестница «откуда взять процент» смотрит, есть ли
+   *  раскладка ЭТОГО слота: она сильнее любого процента, потому что её длина измерена. */
+  markers?: common_TechCardMarkerSummary[];
+}) {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
+  const lineKey = (useWatch({ control, name: `bomItems.${index}.lineKey` }) as string) ?? '';
+  // Артикул слота — ИЗ ФОРМЫ, а не из пропа material: тот резолвится по загруженному списку
+  // каталога и на холодном старте ещё пуст, а панель предложения не должна секунду утверждать
+  // «строка не привязана» про привязанную строку.
+  const rowMaterialId =
+    (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
+  const wastageValue = (
+    (useWatch({ control, name: `bomItems.${index}.wastagePercent` }) as string) ?? ''
+  ).trim();
+  // Провенанс процента (0296): 'lays' — применено из предложения, всё прочее — руками.
+  const wastageSource = useWatch({ control, name: `bomItems.${index}.wastageSource` }) as
+    | string
+    | undefined;
+  const wastageLayCount =
+    (useWatch({ control, name: `bomItems.${index}.wastageLayCount` }) as number | undefined) ?? 0;
+  const wastageAppliedAt = useWatch({ control, name: `bomItems.${index}.wastageAppliedAt` }) as
+    | string
+    | undefined;
+  const rollGoods = isRollGoodsSection(rowSection);
+
+  // РУЧНАЯ ПРАВКА ЗНАЧЕНИЯ ГАСИТ ПРОВЕНАНС «lays» СРАЗУ, НЕ ДОЖИДАЯСЬ СЕРВЕРА — та же дисциплина,
+  // что у ручной правки нормы в рецепте (colorway-recipe: правка числа пишет source=''). Сервер
+  // сделал бы то же самое при сохранении (смена значения → 'manual', что бы клиент ни прислал),
+  // но до сохранения бейдж «медиана по N раскроям» стоял бы рядом с числом, которое человек
+  // только что выдумал, — то есть врал бы ровно в момент, когда провенанс важнее всего.
+  //
+  // Якорь — значение, ПРИ КОТОРОМ источник стал 'lays' (загрузка карточки или нажатие
+  // «подставить»); сравнение числовое, чтобы «22.00» и «22» не читались как правка. Ссылку
+  // обновляет и applySuggestion ниже — иначе повторное применение уехавшей медианы выглядело бы
+  // для этого эффекта как ручная правка и само же гасило бы только что поставленный источник.
+  const laysAnchor = useRef<string | null>(null);
+  useEffect(() => {
+    if (wastageSource !== 'lays') {
+      laysAnchor.current = null;
+      return;
+    }
+    if (laysAnchor.current === null) {
+      laysAnchor.current = wastageValue;
+      return;
+    }
+    const a = parseDecimalNumber(laysAnchor.current);
+    const v = parseDecimalNumber(wastageValue);
+    const same =
+      Number.isFinite(a) && Number.isFinite(v) ? a === v : laysAnchor.current === wastageValue;
+    if (!same) {
+      setValue(`bomItems.${index}.wastageSource`, 'manual', { shouldDirty: true });
+      setValue(`bomItems.${index}.wastageLayCount`, 0, { shouldDirty: true });
+    }
+  }, [wastageSource, wastageValue, index, setValue]);
+
+  // Применение предложения: ПАРА (процент, счётчик) кладётся вместе — по её совпадению с текущей
+  // медианой сервер отличает применение от ручного ввода. Процент — строкой ответа КАК ЕСТЬ, без
+  // переформатирования: любая косметика здесь рискует разминуться с медианой при серверной
+  // сверке. Штамп применения ставит сервер; здешний след старого штампа чистится, чтобы бейдж не
+  // датировал новое применение старой датой.
+  const applySuggestion = (percent: string, layCount: number) => {
+    laysAnchor.current = percent;
+    setValue(`bomItems.${index}.wastagePercent`, percent, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+    setValue(`bomItems.${index}.wastageSource`, 'lays', { shouldDirty: true });
+    setValue(`bomItems.${index}.wastageLayCount`, layCount, { shouldDirty: true });
+    setValue(`bomItems.${index}.wastageAppliedAt`, '', { shouldDirty: false });
+  };
+  // Прогонные однодневки отсеивает markersForLine (cardMarkers внутри) — совет «снимите норму с
+  // раскладки» на основании раскладки чужого заказа был бы советом взять число, которого нормой
+  // быть не может.
+  const slotMarkers = markersForLine(markers, lineKey);
+  // «Задан» — по правилу сервера: всё меньше единицы EffectiveCuttingCoefficient читает как «не
+  // задано», и предупреждать о числе, которое ни один расчёт не берёт, значило бы пугать пустотой.
+  const coefRaw = decimalToInput(material?.cuttingCoefficient);
+  const coefSet = Number.isFinite(Number(coefRaw)) && Number(coefRaw) >= 1;
   return (
     <div className='border border-borderColor px-2 pb-2'>
       <GroupLabel>how this style uses it</GroupLabel>
@@ -304,12 +404,77 @@ function ThisStyleFields({ index }: { index: number }) {
           label='fabric direction'
           items={techCardFabricDirectionOptions}
         />
-        <DecimalField name={`bomItems.${index}.wastagePercent`} label='est. cutting wastage %' />
+        <div className='flex flex-col gap-0.5'>
+          <DecimalField name={`bomItems.${index}.wastagePercent`} label='est. cutting wastage %' />
+          {/* ПРОВЕНАНС — тем же приёмом, что у источника нормы (волна 2 достроила ветвление,
+              под которое волна 1 оставляла место): 'lays' — «медиана по N раскроям» со штампом
+              применения, всё прочее — «введено руками». Свежеприменённое (ещё не сохранённое)
+              значение штампа не имеет — дату ставит сервер при сохранении, и честная подпись
+              говорит это, а не выдумывает дату. Фраза — общая с ячейкой костинга
+              (laysProvenancePhrase), чтобы две подписи одного факта не разъехались словами. */}
+          {wastageValue !== '' && (
+            <Text size='nano' variant='label'>
+              {wastageSource === 'lays'
+                ? `${laysProvenancePhrase(wastageLayCount, stampWhen(wastageAppliedAt))}${
+                    stampWhen(wastageAppliedAt) ? '' : ' — применится при сохранении'
+                  }`
+                : 'введено руками'}
+            </Text>
+          )}
+        </div>
       </div>
-      <Text variant='label' size='micro' className='mt-1'>
-        Wastage is an estimate — the real figure depends on marker efficiency at cutting and is set
-        per production run.
-      </Text>
+      {rollGoods ? (
+        <div className='mt-1 space-y-1'>
+          <Text variant='label' size='micro'>
+            Множитель на NETTO-норму: к закупке и в себестоимость идёт норма × (1 + %/100). Он
+            оплачивает то, чего в netto нет: межлекальные выпады, концы настила, стыки и обход
+            пороков. Кромка сюда НЕ входит — она уже оплачена делением площади на раскройную ширину.
+            Норму «из раскладки» процент не гроссит вовсе: измеренная длина уже содержит выпады. На
+            прогоне процент можно переопределить фактическим.
+          </Text>
+          {slotMarkers.length > 0 ? (
+            // Раскладка слота есть — процент этой строке скоро не понадобится вовсе, и это
+            // сильнее любой калибровки (состояние 1 лестницы): звать оператора к измеренному
+            // числу, а не к оценке. Панель предложения при живой раскладке НЕ монтируется — и
+            // RPC не уходит: предлагать процент полю, которому осталось жить до применения
+            // раскладки, значит звать человека настраивать то, что пора выключить.
+            <CalloutBox tone='note'>
+              У карточки есть раскладка этого слота — снимите норму с неё в рецепте колорвея
+              (вкладка colorways): длина раскладки ИЗМЕРЕНА и уже содержит межлекальные выпады,
+              процент перестанет применяться. Усадку и пороки артикула доначислит его коэффициент
+              раскроя.
+            </CalloutBox>
+          ) : (
+            // Волна 2: место статичного «посчитать пока не из чего» заняла живая панель — она
+            // сама говорит и «фактов {n} из 3, вот что сделать», и «вне диапазона», и «готово,
+            // по N раскроям из M». Ленивость — по построению: этот компонент живёт только в
+            // открытом редакторе одной строки, так что открытие вкладки BOM запросов не стреляет.
+            <BomWastageSuggestion
+              materialId={rowMaterialId}
+              currentPercent={wastageValue}
+              currentSource={wastageSource}
+              onApply={applySuggestion}
+            />
+          )}
+          {coefSet && (
+            // Главная ошибка, от которой волна 1 защищает: рядом с полем живёт ДРУГОЙ множитель
+            // отходов. Предупреждение стоит только когда коэффициент у артикула правда есть —
+            // то есть ровно когда есть число, которое можно перепутать.
+            <CalloutBox tone='warning'>
+              Не путать с коэффициентом раскроя артикула ({coefRaw}): тот — множитель к ИЗМЕРЕННОЙ
+              длине раскладки, межлекальных выпадов в нём нет. Вписать его сюда — занизить закупку
+              на все выпады.
+            </CalloutBox>
+          )}
+        </div>
+      ) : (
+        // Не рулонная строка: у фурнитуры и ниток нет ни раскладок, ни netto-геометрии — вся
+        // раскройная лестница выше была бы рассказом про чужое. Остаётся сама арифметика поля.
+        <Text variant='label' size='micro' className='mt-1'>
+          Множитель на норму строки: к закупке и в себестоимость идёт норма × (1 + %/100) — запас на
+          отходы и обрезки. На прогоне может быть переопределён фактическим.
+        </Text>
+      )}
       <div className='mt-2'>
         <TextareaField
           name={`bomItems.${index}.comment`}
@@ -331,24 +496,46 @@ function ThisStyleFields({ index }: { index: number }) {
 // and, on the right, the three fields that genuinely belong to this style. An UNLINKED line keeps
 // the full manual form, because with no catalog article behind it those fields really are the
 // operator's.
-function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }) {
+function BomItemRow({
+  index,
+  highlight,
+  markers,
+}: {
+  index: number;
+  highlight?: boolean;
+  markers?: common_TechCardMarkerSummary[];
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const warnNoPrice = useNoPriceWarning();
+  // Деньги строки видит и правит только costing:write: сервер вырезает их на чтении без
+  // costing:read, а сейв без costing:write их вовсе не отправляет (schema.ts, verbatim-протокол) —
+  // инпут без права был бы полем, которое молча выбрасывает ввод.
+  const { canWriteCosting } = usePermissions();
   const materialId =
     (useWatch({ control, name: `bomItems.${index}.materialId` }) as number | undefined) || 0;
   const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as
     | common_TechCardBomSection
     | undefined;
   const [createOpen, setCreateOpen] = useState(false);
+  // Состояние выпуска читается ИЗ ФОРМЫ, а не приходит пропом: BOM целиком лежит внутри общего
+  // `<fieldset disabled={frozen}>` вкладки и своего гейта не имеет, а подсказка про цену обязана
+  // называть действие, которое на этой карте вообще существует.
+  const frozen = useWatch({ control, name: 'approvalState' }) === RELEASED_STATE;
 
   const linked = materialId > 0;
-  const { data } = useMaterials('', false);
+  // ВКЛЮЧАЯ АРХИВНЫЕ — здесь список не предлагают, по нему ищут УЖЕ привязанный артикул. Без
+  // архивных строка с заархивированным материалом теряла его latestPrice и снова показывала
+  // «no price», хотя печатный tech-pack на тех же данных цену печатал (он всегда грузил список
+  // вместе с архивом). Предлагает к привязке MaterialPicker — у него свой вызов useMaterials со
+  // своим тумблером архива, так что архивные по-прежнему не всплывают в выборе. Лишнего запроса
+  // это не добавляет: ('', true) уже держат в кеше соседние вкладки тех-карты.
+  const { data } = useMaterials('', true);
   const linkedMaterial = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === materialId)
     : undefined;
-  // Warehouse balance for the plate's "· 41.6 m on hand". Only fetched once a line is actually
-  // linked AND being edited (this row only mounts inside the open editor dialog).
-  const onHand = useMaterialOnHand(linked);
+  // Warehouse facts for the plate's «склад: 41.6 m · средняя ≈ 1.05 EUR / m». Only fetched once a
+  // line is actually linked AND being edited (this row only mounts inside the open editor dialog).
+  const stockFacts = useMaterialStockFacts(linked);
 
   // Snapshot a catalog material's meta onto this line (S23: the line stays self-contained). Fabric
   // dims read from the typed CTI attrs, falling back to the legacy flat fields.
@@ -375,24 +562,57 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
     }
   };
 
+  const rowValue = (field: string): string =>
+    (getValues(`bomItems.${index}.${field}` as never) as string) ?? '';
+
   // Prefer the live catalog value; fall back to whatever this line already holds (the linked
   // material is archived/deleted, or the catalog list hasn't loaded yet) so the plate never
   // flashes blank while linked.
   const mirror = (catalogValue: string | undefined, field: string): string | undefined =>
-    catalogValue?.trim()
-      ? catalogValue
-      : (getValues(`bomItems.${index}.${field}` as never) as string);
+    catalogValue?.trim() ? catalogValue : rowValue(field);
 
-  // #3: on a linked line the unit price, its currency and the unit are ONE derived fact — the
-  // catalog's latest price — folded into a single read-only "8.00 EUR / m". On an unlinked line the
-  // operator types the price, so currency stays an editable pick beside it.
-  const priceValue = mirror(linkedMaterial?.latestPrice?.price?.value, 'unitPrice');
-  const currencyValue = mirror(linkedMaterial?.latestPrice?.currency, 'currency') ?? '';
-  const unitValue = mirror(linkedMaterial?.unit, 'unit') ?? '';
-  const priceDisplay = priceValue
-    ? `${priceValue}${currencyValue ? ` ${currencyValue}` : ''}${unitValue ? ` / ${unitValue}` : ''}`
+  // #3: the unit price, its currency and the unit fold into a single read-only "8.00 EUR / m".
+  // WHICH price that is comes from the shared ladder (bom-price.ts) — the line's own frozen
+  // snapshot first, the article's current catalog price second — the very ladder the server costs
+  // by. The plate used to read the catalog number straight off `latestPrice`, so a line whose
+  // snapshot had drifted showed one figure here and another on the tile; the ladder now lives in
+  // ONE place and both surfaces print the number this line is actually costed at, with the catalog
+  // figure named beside it when the two disagree.
+  const linePrice = resolveBomPrice(
+    { unitPrice: rowValue('unitPrice'), currency: rowValue('currency'), unit: rowValue('unit') },
+    linkedMaterial,
+  );
+  // СКЛАД — не третья ступень лестницы цены, а отдельный факт о материале, поэтому он и не живёт в
+  // resolveBomPrice: по средней строка не считается и себестоимостью она не становится. Обе
+  // величины берутся из ОДНОЙ строки ledger'а и меряны в единице МАТЕРИАЛА, которая может не
+  // совпадать с единицей строки, — подпись едет со своим числом, ступени не смешиваются.
+  const stock = stockFacts.get(materialId);
+  const stockUnit = stock?.unit ?? '';
+  const onHandLabel = stock?.onHand ? `${stock.onHand}${stockUnit ? ` ${stockUnit}` : ''}` : '';
+  // Валюта средней подписывается ВСЕГДА, даже когда совпадает с валютой строки: это база (склад
+  // усредняет закупки в разных валютах, приводя каждую к базовой), и без подписи два числа рядом
+  // прочтутся как одни и те же деньги. Знак ≈ говорит, что это оценка того, что уже лежит, а не
+  // котировка следующей закупки. Никаких конвертаций и процентов расхождения на клиенте: валюты
+  // разные, вычитать их нельзя.
+  const avgLabel = stock?.avgUnitCostBase
+    ? `средняя ≈ ${stock.avgUnitCostBase} ${stock.baseCurrency}${stockUnit ? ` / ${stockUnit}` : ''}`
     : '';
-  const stockValue = onHand.get(materialId);
+  const stockLine = join(onHandLabel, avgLabel);
+
+  // Куда идти с этой ценой. «Заведите в справочнике» — правда ровно в одном случае из трёх, а
+  // перенести каталожную цену на карту умеет только кнопка reprice на вкладке costing — которой на
+  // ВЫПУЩЕННОЙ карте нет (costing-field прячет её на released: карта заморожена целиком). Совет,
+  // который некуда выполнить, — та же ложь, что «set it in materials» на проценённом артикуле,
+  // только этажом выше, поэтому действие называется по состоянию карты.
+  const priceAction = frozen
+    ? 'Перенести её на карту можно только после возврата в draft: на выпущенной карте цены заморожены вместе с остальной спецификацией.'
+    : 'Перенести: «обновить цены из каталога» на вкладке costing.';
+  const priceHint =
+    linePrice.source === 'catalog'
+      ? `Цена взята из справочника и на этой карте не зафиксирована — артикул проценили уже после привязки. ${priceAction}`
+      : linePrice.drift
+        ? `На карте зафиксировано ${linePrice.label}, в справочнике сейчас ${formatBomMoney(linePrice.drift.value, linePrice.drift.currency, linePrice.drift.unit)}. ${priceAction}`
+        : '';
 
   // The composition cell carries the deep-link anchor + pulse the labels tab uses to point an
   // operator at a missing composition (care-gen). Read-only line on the catalog plate when linked,
@@ -485,26 +705,48 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
                       'composition not set'}
                   </Text>,
                 )}
+                {/* ЦЕНА — та ступень лестницы, по которой строка реально считается. */}
                 <Text variant='label' size='micro' className='truncate'>
-                  {join(
-                    priceDisplay,
-                    stockValue ? `${stockValue}${unitValue ? ` ${unitValue}` : ''} on hand` : '',
-                  ) || 'no price'}
+                  {linePrice.label || 'no price'}
                 </Text>
+                {/* СКЛАД — своей строкой, а не хвостом через «·» к цене. Котировка говорит, во что
+                    обойдётся СЛЕДУЮЩАЯ закупка, средняя — во что обошлось то, что уже лежит и что
+                    будет израсходовано; это разные величины в разных валютах, и поставленные
+                    подряд через точку они читаются как «было → стало». Расхождение между ними —
+                    информация, но увидеть её владелец должен как два подписанных числа, а не как
+                    разницу, которой не существует. */}
+                {stockLine ? (
+                  <Text variant='label' size='micro' className='truncate'>
+                    склад: {stockLine}
+                  </Text>
+                ) : null}
               </div>
             </div>
             <div className='mt-2 flex flex-wrap items-center gap-1.5'>
               <Button type='button' size='xs' variant='secondary' onClick={() => pick(0)}>
                 unlink
               </Button>
-              {/* A linked line that carries no price silently zeroes the cost estimate and, from
-                  there, COGS (linking price-less materials is now blocked, but lines linked before
-                  that guard still exist). */}
-              {!priceDisplay && <Pill tone='attention'>no price — set it in materials</Pill>}
+              {/* Цена строки, названная своим именем. Раньше здесь стояла одна плашка
+                  «no price — set it in materials» на все случаи: она загоралась и тогда, когда цена
+                  в справочнике УЖЕ была, и отправляла владельца ровно туда, где он её только что
+                  завёл. Строка без цены нигде по-прежнему молча обнуляет оценку и COGS — и только
+                  она теперь и зовёт в справочник. */}
+              {linePrice.source === 'none' ? (
+                <Pill tone='attention'>no price — set it in materials</Pill>
+              ) : linePrice.source === 'catalog' ? (
+                <Pill tone='attention'>цена из каталога</Pill>
+              ) : linePrice.drift ? (
+                <Pill tone='attention'>каталог {linePrice.drift.label}</Pill>
+              ) : null}
             </div>
+            {priceHint && (
+              <Text variant='label' size='micro' className='mt-1'>
+                {priceHint}
+              </Text>
+            )}
           </div>
 
-          <ThisStyleFields index={index} />
+          <ThisStyleFields index={index} material={linkedMaterial} markers={markers} />
         </div>
         {colorwayHint}
         {createModal}
@@ -576,15 +818,21 @@ function BomItemRow({ index, highlight }: { index: number; highlight?: boolean }
           <InputField name={`bomItems.${index}.spec`} label='spec (free text)' />
           <DecimalField name={`bomItems.${index}.fabricWidth`} label='width (cm)' />
           <DecimalField name={`bomItems.${index}.fabricWeightGsm`} label='weight (g/m²)' />
-          <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
-          <CurrencySelect name={`bomItems.${index}.currency`} label='currency' />
+          {canWriteCosting && (
+            <>
+              <DecimalField name={`bomItems.${index}.unitPrice`} label='unit price' />
+              <CurrencySelect name={`bomItems.${index}.currency`} label='currency' />
+            </>
+          )}
         </div>
         <div className='mt-2'>
           {compositionAnchor(<CompositionPicker name={`bomItems.${index}.composition`} />)}
         </div>
       </div>
 
-      <ThisStyleFields index={index} />
+      {/* Непривязанная строка: артикула нет, поэтому нет и предупреждения о его коэффициенте —
+          но лестница «откуда взять процент» работает и здесь, раскладка привязана к слоту. */}
+      <ThisStyleFields index={index} markers={markers} />
       {colorwayHint}
       {createModal}
     </div>
@@ -626,7 +874,10 @@ function BomTile({
   };
 
   const linked = (row.materialId ?? 0) > 0;
-  const { data } = useMaterials('', false);
+  // Архивные включены по той же причине, что и в редакторе строки: плитка ИЩЕТ привязанный
+  // артикул, а не предлагает его. Список общий с редактором и с печатным tech-pack — один кеш,
+  // одна цена, одна картинка.
+  const { data } = useMaterials('', true);
   const material = linked
     ? (data?.materials ?? []).find((m) => wireInt(m.id) === row.materialId)
     : undefined;
@@ -640,10 +891,11 @@ function BomTile({
   );
   const hasError = rowErrors.length > 0;
 
-  const price = row.unitPrice?.trim();
-  const priceLabel = price
-    ? `${price}${row.currency?.trim() ? ` ${row.currency.trim()}` : ''}${row.unit?.trim() ? ` / ${row.unit.trim()}` : ''}`
-    : '';
+  // Цена, по которой строка реально считается: снапшот карты → иначе текущая каталожная цена
+  // привязанного артикула (bom-price.ts — та же лестница, что у сервера и у панели редактора).
+  // Плитка читала ТОЛЬКО снапшот, поэтому любая строка, чей артикул проценили после привязки,
+  // горела «no price» при живой цене в справочнике.
+  const price = resolveBomPrice(row, material);
   const imageUrl = materialImageUrl(material);
   const section = sectionShort(row.section);
   const cls = classShort(material?.materialClass);
@@ -658,15 +910,32 @@ function BomTile({
     (!row.fabricDirection || row.fabricDirection === 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN');
 
   // #64: an unlinked line is the release blocker, so it reads as the blocker marker; a linked line
-  // shows its price, or flags a missing one.
+  // shows the price it is costed at and says which of the two rungs that price came from — only
+  // the snapshot is fixed on this card. Плашки НЕ раскрывашки и не тултипы: на RELEASED карте вся
+  // плитка лежит внутри `<fieldset disabled>` и сама является `<button>`, так что любой текст,
+  // спрятанный за наведением или кликом, там мёртв — источник цены и дрейф написаны словами.
   const priceStatus = !linked ? (
     <Pill tone='warn'>! link a material</Pill>
-  ) : priceLabel ? (
-    <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-      {priceLabel}
-    </Text>
-  ) : (
+  ) : price.source === 'none' ? (
     <Pill tone='attention'>no price</Pill>
+  ) : (
+    <>
+      <Text component='span' variant='label' size='micro' className='min-w-0 truncate'>
+        {price.label}
+      </Text>
+      {price.source === 'catalog' ? (
+        <Pill tone='attention'>из каталога</Pill>
+      ) : price.drift ? (
+        // Расхождение видно на строке, а не всплывает на костинге через две вкладки: ради этого
+        // случая ручная кнопка «обновить цены из каталога» и остаётся.
+        // `min-w-0 truncate` обязательны: у Pill свой `whitespace-nowrap`, и длинное значение
+        // («каталог 1250.00 USD / kg») распирало бы 160-пиксельную колонку плиточной сетки —
+        // соседний Text усекается, а плашка тянула бы трек за собой.
+        <Pill tone='attention' className='min-w-0 truncate'>
+          каталог {price.drift.label}
+        </Pill>
+      ) : null}
+    </>
   );
 
   return (
@@ -797,6 +1066,7 @@ type BlockingUser = { colorwayId: number; sku: string };
 export function BomField({
   highlightComposition = 0,
   colorways,
+  markers,
 }: {
   highlightComposition?: number;
   /**
@@ -806,6 +1076,12 @@ export function BomField({
    * that has to be checked before a delete rather than fixed up after it.
    */
   colorways?: common_AdminColorwayRef[];
+  /**
+   * Карточные раскладки как READ (techCard.markers) — для лестницы у поля «est. cutting
+   * wastage %»: раскладка слота делает процент ненужным, и об этом надо говорить там, где
+   * процент вводят. Форма о раскладках не знает ничего — они приходят только с чтением карточки.
+   */
+  markers?: common_TechCardMarkerSummary[];
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { showMessage } = useSnackBarStore();
@@ -1163,7 +1439,7 @@ export function BomField({
             sectionShort(bomWatch[editing]?.section),
           )}
         >
-          <BomItemRow index={editing} highlight={highlightActive} />
+          <BomItemRow index={editing} highlight={highlightActive} markers={markers} />
         </ConfirmationModal>
       )}
 

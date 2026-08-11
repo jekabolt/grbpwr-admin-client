@@ -24,7 +24,12 @@
 // пересчитаны»), диалог называет копирование — и ни один не пытается свести их сам: молчаливое
 // авто-применение подменило бы решение человека числом, которого он не выбирал.
 import { adminService } from 'api/api';
-import type { common_TechCard, common_TechCardMarkerSummary } from 'api/proto-http/admin';
+import type {
+  common_Material,
+  common_TechCard,
+  common_TechCardMarkerSummary,
+} from 'api/proto-http/admin';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMemo, useState } from 'react';
 import { useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
@@ -37,6 +42,15 @@ import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
 import { sizeTokensOf } from './nesting/block-code';
 import {
+  weightBasisLabel,
+  weightBasisNote,
+  weightBasisOf,
+  weightMissingShort,
+  weightRefusalText,
+  type WeightBasisResolution,
+} from './nesting/fabric-weight';
+import {
+  bomUnitKind,
   compositionLabel,
   compositionOf,
   consumptionCm,
@@ -69,6 +83,7 @@ export function MarkerApplyHint({
   unit,
   wastagePercent,
   articleWidth,
+  weightBasis,
   sizeIds,
   sizeNameById,
   canEdit,
@@ -85,6 +100,10 @@ export function MarkerApplyHint({
   // Effective article's CUTTING width in cm (roll − 2×кромка) — the same quantity a marker
   // records in fabricWidthCm, so the two are comparable. '' = unknown.
   articleWidth: string;
+  // Основа перевода длины в ВЕС для кг-слота (Ф3): полная ширина рулона × плотность артикула.
+  // Резолвится РОДИТЕЛЕМ (weightBasisOf — у него material/slot/pin), сюда приходит готовой,
+  // чтобы это место не могло выбрать не те числа.
+  weightBasis: WeightBasisResolution;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
@@ -113,6 +132,11 @@ export function MarkerApplyHint({
   const [areaBusy, setAreaBusy] = useState(false);
   const [areaError, setAreaError] = useState('');
 
+  // Кг-слот (Ф3): единица и основа веса решаются ОДИН раз на весь диалог — каждое обращение к
+  // toBomUnit ниже конвертирует одной и той же основой, иначе превью и запись могли бы разойтись.
+  const unitKind = bomUnitKind(unit);
+  const fabric = weightBasis.ok ? weightBasis.basis : undefined;
+
   // Порядок предпочтения — ОДИН на весь файл и живёт в betterMarker: НОРМА → свой колорвей →
   // свежесть (Ф3.4). Назначение нормы — решение человека, принадлежность и дата — эвристики, и
   // решение бьёт эвристику. Список показывается В ЭТОМ ЖЕ порядке (селектор ниже), чтобы «что
@@ -130,9 +154,6 @@ export function MarkerApplyHint({
   // подмену назначенной нормы применимой раскладкой нельзя делать МОЛЧА: о ней говорят пилюля
   // «норма не даёт расхода» на строке и колаут в диалоге (оба через notTheNorm/normRefusal).
   const preferred = useMemo(() => ranked.find((m) => !scalarNormRefusal(m)) ?? ranked[0], [ranked]);
-  // The card's fit reference — a scalar norm taken from a non-base size deserves a callout.
-  const baseSampleSizeId = (useWatch<TechCardFormData>({ name: 'baseSampleSizeId' }) ??
-    0) as number;
   // Сырьё продолжения: СЕГОДНЯШНИЕ строки выкроек карточки и её BOM (по нему резолвится, какие
   // листы обслуживают ткань этой раскладки — с 0267 лист привязан к НАЗНАЧЕНИЮ, а не к строке).
   // Читаются здесь, потому что форма карточки есть только здесь; сам отбор живёт в marker-rebuild.
@@ -158,7 +179,7 @@ export function MarkerApplyHint({
   const normRefusal = normMarker ? scalarNormRefusal(normMarker) : '';
   // consumptionCm сам отказывает на смешанной — арифметики до отказа тут не случается.
   const normCons = normMarker ? consumptionCm(normMarker) : null;
-  const normConv = normCons != null ? toBomUnit(normCons, unit) : null;
+  const normConv = normCons != null ? toBomUnit(normCons, unit, fabric) : null;
   const notTheNorm = normMarker != null && (chosen.id ?? 0) !== (normMarker.id ?? 0);
   // ОТКАЗ ИДЁТ ПЕРЕД АРИФМЕТИКОЙ. Смешанная раскладка не выдаёт расход на изделие: её длина —
   // средняя по составу, и записанная в рецепт она завышает мелкие размеры и занижает крупные —
@@ -166,7 +187,14 @@ export function MarkerApplyHint({
   // означает «числа нет», и каждая ветка обязана это пережить, а не подставить ноль.
   const chosenRefusal = scalarNormRefusal(chosen);
   const chosenCons = consumptionCm(chosen);
-  const conv = chosenCons != null ? toBomUnit(chosenCons, unit) : null;
+  const conv = chosenCons != null ? toBomUnit(chosenCons, unit, fabric) : null;
+  // НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — НЕ НОРМА, и в маркерном пути тоже (то же правило, что у dxf-пути:
+  // dxfNormValueRows требует value > 0). Метры и килограммы пишутся в тысячных (DECIMAL(10,3)),
+  // и крошечная величина честно округляется в 0.000 — записанная строкой «0», она читалась бы
+  // как «строка с нормой», которая ничего не требует, и дефицит на прогоне вышел бы нулевым.
+  // Проверяется ВЕЗДЕ, где решается применимость и где пишется значение (см. applyPossible,
+  // confirmDisabled, apply), в обоих режимах.
+  const convZero = conv != null && !(conv.value > 0);
   // ПЛАН ПРИМЕНЕНИЯ ПО РАЗМЕРАМ (Ф2.4). Строка на каждый размер ряда, у каждой — ПРОИСХОЖДЕНИЕ:
   // измерено этой раскладкой, продолжено по площади выкроек, либо среднее по настилу. Раньше
   // здесь стояла карта «размер → однородная раскладка» и всё; теперь одна СМЕШАННАЯ раскладка
@@ -185,15 +213,23 @@ export function MarkerApplyHint({
   // Применимость = у КАЖДОГО размера есть число И каждое конвертируется в единицу линии.
   // Гейт единицы держится отдельно от покрытия: без него на линии с «пог.м» кнопка жила, а клик
   // молча не делал ничего — apply() выходил на первом же неконвертируемом размере.
-  const perSizeApplicable =
-    plan.complete && plan.rows.every((r) => toBomUnit(r.consumptionCm ?? 0, unit) != null);
+  const perSizeConvs = plan.rows.map((r) =>
+    r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit, fabric) : null,
+  );
+  const perSizeConvertible = plan.complete && perSizeConvs.every((c) => c != null);
+  // Ноль после округления гасит применимость и здесь, у ЛЮБОГО размера: ряд пишется целиком или
+  // никак, и один «0.000» в нём — та же нулевая норма (см. convZero), только спрятанная в
+  // середине таблицы.
+  const perSizeZero = perSizeConvertible && perSizeConvs.some((c) => !(c!.value > 0));
+  const perSizeApplicable = perSizeConvertible && !perSizeZero;
   // Продолжать имеет смысл, когда есть чем (раскладка публикует площади состава) и есть зачем
   // (какой-то размер ряда остался без числа).
   const continuationOffered =
     canContinue(chosen) && plan.unansweredSizes.length > 0 && plan.continuation !== 'ok';
   // Один предикат «применить возможно» на кнопку и на пояснения — чтобы заметки об отходах не
   // могли рассказывать про норму, которую тот же экран отказался выдавать.
-  const applyPossible = mode === 'scalar' ? conv != null && !chosenRefusal : perSizeApplicable;
+  const applyPossible =
+    mode === 'scalar' ? conv != null && !convZero && !chosenRefusal : perSizeApplicable;
   const wastage = parseDecimalNumber(wastagePercent);
 
   const sizeName = (id?: number) => sizeNameById.get(id ?? 0) ?? `#${id}`;
@@ -203,11 +239,31 @@ export function MarkerApplyHint({
   // Label and number from the same marker — the CHOSEN one (the hint used to number by
   // `chosen` and label by the auto-picked marker, which diverged the moment the selector
   // was touched).
-  const preview = conv
-    ? `${conv.value} ${conv.unit}`
-    : chosenCons != null
-      ? `${chosenCons} см`
-      : '—';
+  // Ноль после округления в превью не показывается ЧИСЛОМ: «0 кг» на строке читался бы как
+  // норма. Показывается измеренная длина в см — она-то ненулевая, и по ней видно, ЧТО округлилось.
+  const preview =
+    conv && !convZero
+      ? `${conv.value} ${conv.unit}`
+      : chosenCons != null
+        ? `${chosenCons} см`
+        : '—';
+  // Отказ по единице. Кг-слот обязан называть, ЧЕГО не хватает — ширины или плотности: «единица
+  // не принимает длину» отправила бы оператора менять единицу вместо того, чтобы заполнить
+  // артикул. Остальным единицам называется весь словарь, который мы умеем писать. Пустая единица
+  // — своя починка на вкладке BOM: единица нормы = единица слота, фолбэка в единицу артикула нет.
+  const unitRefusal =
+    unitKind === 'kg' && !weightBasis.ok
+      ? weightRefusalText(weightBasis.missing, weightBasis.pinned)
+      : unit
+        ? `единица линии BOM (${unit}) не принимает ни длину, ни вес — применить можно в метрах, сантиметрах или килограммах`
+        : 'у линии BOM не заполнена единица — норма пишется в единице слота, и применить её не в чем; заполните единицу на вкладке BOM';
+  // ОТКАЗ ПО НУЛЮ — своя причина, и совет разведён по РАЗМЕРНОСТИ единицы: на весовой строке
+  // «выберите единицу мельче (см)» превратило бы её в длиновую и разъехалось с закупочной ценой
+  // за килограмм (цена и остаток склада живут в единице артикула/строки).
+  const zeroRefusal =
+    unitKind === 'kg'
+      ? `после перевода в «${unit}» норма округляется в ноль — вес на изделие меньше половины грамма. Ноль означал бы «ткань не нужна». Слот весовой: единицу на сантиметры не менять (это сменит размерность строки и разойдётся с закупочной ценой за килограмм) — проверьте плотность и ширину артикула и саму раскладку`
+      : `после перевода в «${unit || '—'}» норма округляется в ноль — длина слишком мала для этой единицы. Ноль означал бы «ткань не нужна»; выберите единицу мельче (см) либо проверьте раскладку`;
 
   // Width honesty (design §1): a marker computed for another width is a different norm. Both
   // sides are CUTTING widths — the article's roll minus its кромка, and the width the layout
@@ -253,12 +309,11 @@ export function MarkerApplyHint({
   // смешанной нормы нет одного размера, и она сюда не доходит — её гасит отказ.
   const chosenComp = compositionOf(chosen);
   const chosenSizeId = chosenComp.length === 1 ? chosenComp[0].sizeId : 0;
-  const offBaseSize =
-    baseSampleSizeId > 0 && chosenSizeId > 0 && chosenSizeId !== baseSampleSizeId;
   // Маркер размера, которого НЕТ в размерном ряду карточки (остался от снятого размера или
   // никогда в ряд не входил), — норма ниоткуда: spreadPct его не видит (он считается по размерам
-  // ряда), а offBaseSize молчит, пока базовый размер не заполнен. Нарочно НЕ зависит от
-  // baseSampleSizeId — это отдельный, более сильный факт.
+  // ряда). Прежний сосед offBaseSize («норма не с базового размера») умер вместе с ролью
+  // базового размера в костинге (T6): себестоимость стиля — среднее по ряду, и «не тот размер»
+  // перестал быть фактом о цене; spreadPct покрывает существенный разброс честнее.
   const offRunSize = chosenSizeId > 0 && sizeIds.length > 0 && !sizeIds.includes(chosenSizeId);
 
   // УСЛОВИЯ СЪЁМКИ на том маркере, который реально уйдёт в рецепт (Ф3). Ни одно из двух не
@@ -302,7 +357,8 @@ export function MarkerApplyHint({
 
   const apply = () => {
     if (mode === 'scalar') {
-      if (!conv || chosenRefusal) return;
+      // convZero — тот же гейт, что на кнопке: «0» не пишется значением никогда (см. convZero).
+      if (!conv || convZero || chosenRefusal) return;
       // The scalar mode CLEARS per-size grading (trap №1): a lone per-size row would make
       // the server ignore this very scalar.
       //
@@ -316,10 +372,10 @@ export function MarkerApplyHint({
       const rows: { sizeId: number; consumption: string }[] = [];
       const used: common_TechCardMarkerSummary[] = [];
       for (const r of plan.rows) {
-        // План уже отказал за каждый размер, который назвать нечем; null проверяется всё равно —
-        // молча записать в рецепт ноль хуже, чем не записать ничего.
-        const c = r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit) : null;
-        if (!c) return;
+        // План уже отказал за каждый размер, который назвать нечем; null и ноль после округления
+        // проверяются всё равно — молча записать в рецепт «0» хуже, чем не записать ничего.
+        const c = r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit, fabric) : null;
+        if (!c || !(c.value > 0)) return;
         rows.push({ sizeId: r.sizeId, consumption: String(c.value) });
         if (r.marker && !used.includes(r.marker)) used.push(r.marker);
       }
@@ -471,6 +527,19 @@ export function MarkerApplyHint({
           {compositionOf(chosen).length > 1 ? 'смешанный состав' : 'состав не читается'}
         </Pill>
       )}
+      {/* Кг-слот (Ф3): основа веса называется ПРЯМО НА СТРОКЕ. Успех — какой шириной и
+          плотностью посчитано (ширина полная, с кромкой); отказ — чего именно не хватает,
+          потому что лечится он заполнением артикула, а не сменой единицы. */}
+      {unitKind === 'kg' && fabric && conv && (
+        <Pill tone='mut' title={weightBasisNote(fabric)}>
+          вес: {weightBasisLabel(fabric)}
+        </Pill>
+      )}
+      {unitKind === 'kg' && !weightBasis.ok && (
+        <Pill tone='warn' title={weightRefusalText(weightBasis.missing, weightBasis.pinned)}>
+          {weightMissingShort(weightBasis.missing)}
+        </Pill>
+      )}
       {canEdit && (
         <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
           применить…
@@ -491,7 +560,7 @@ export function MarkerApplyHint({
         title='применить расход из раскладки'
         confirmLabel='применить'
         confirmDisabled={
-          (mode === 'scalar' && (!conv || !!chosenRefusal)) ||
+          (mode === 'scalar' && (!conv || convZero || !!chosenRefusal)) ||
           (mode === 'perSize' && !perSizeApplicable)
         }
         closeOnConfirm={false}
@@ -562,25 +631,24 @@ export function MarkerApplyHint({
 
           {/* Отказ сервера, слово в слово. Он длинный намеренно: называет и правило, и что
               делать — применить однородную раскладку либо дождаться Ф2.4. Показывается ВМЕСТО
-              «единица не поддерживает»: когда числа нет вовсе, единица уже не при чём. */}
+              отказа по единице: когда числа нет вовсе, единица уже не при чём. */}
           {mode === 'scalar' && chosenRefusal ? (
             <CalloutBox tone='error'>{chosenRefusal}</CalloutBox>
           ) : (
-            mode === 'scalar' &&
-            !conv && (
-              <CalloutBox tone='error'>
-                единица линии BOM ({unit || '—'}) не поддерживает раскладку — расход измерен в
-                сантиметрах длины
-              </CalloutBox>
-            )
+            mode === 'scalar' && !conv && <CalloutBox tone='error'>{unitRefusal}</CalloutBox>
+          )}
+          {/* НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — отдельная причина с отдельными словами (см. zeroRefusal):
+              отказ по единице здесь врал бы — единица-то принимает, число слишком мало. */}
+          {mode === 'scalar' && !chosenRefusal && convZero && (
+            <CalloutBox tone='warning'>{zeroRefusal}</CalloutBox>
           )}
           {/* Тот же отказ по единице — и в «по размерам»: покрытие полное, а применить нечем.
               Без него кнопка гаснет молча, и объяснить это некому. */}
-          {mode === 'perSize' && plan.complete && !perSizeApplicable && (
-            <CalloutBox tone='error'>
-              единица линии BOM ({unit || '—'}) не поддерживает раскладку — расход измерен в
-              сантиметрах длины
-            </CalloutBox>
+          {mode === 'perSize' && plan.complete && !perSizeConvertible && (
+            <CalloutBox tone='error'>{unitRefusal}</CalloutBox>
+          )}
+          {mode === 'perSize' && perSizeZero && (
+            <CalloutBox tone='warning'>{zeroRefusal}</CalloutBox>
           )}
           {/* Применяется НЕ НОРМА — и это надо сказать до нажатия, а не объяснять потом. Два
               разных случая, и путать их нельзя: экран сам обошёл норму, потому что она не выдаёт
@@ -608,12 +676,14 @@ export function MarkerApplyHint({
           {mode === 'perSize' && (
             <div className='space-y-0.5'>
               {plan.rows.map((r) => {
-                const c = r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit) : null;
+                const c = r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit, fabric) : null;
                 return (
                   <div key={r.sizeId} className='flex flex-wrap items-baseline gap-1.5'>
                     <Text size='nano' variant='label' component='span'>
                       {sizeName(r.sizeId)}:{' '}
-                      {c
+                      {/* Ноль после округления числом не показывается (см. zeroRefusal) —
+                          вместо него измеренные сантиметры, по которым видно, что округлилось. */}
+                      {c && c.value > 0
                         ? `${c.value} ${c.unit}`
                         : r.consumptionCm != null
                           ? `${r.consumptionCm} см`
@@ -712,14 +782,12 @@ export function MarkerApplyHint({
               слота — {artW} см: расход не переносится между ширинами без пересчёта
             </CalloutBox>
           )}
-          {mode === 'scalar' && (offRunSize || offBaseSize || spreadPct > 5) && (
+          {mode === 'scalar' && (offRunSize || spreadPct > 5) && (
             <CalloutBox tone={offRunSize ? 'warning' : 'note'}>
               {[
                 offRunSize
                   ? `единая норма взята с размера ${sizeName(chosenSizeId)}, которого НЕТ в размерном ряду карточки`
-                  : offBaseSize
-                    ? `единая норма взята с размера ${sizeName(chosenSizeId)}, а базовый размер карточки — ${sizeName(baseSampleSizeId)}`
-                    : '',
+                  : '',
                 spreadPct > 5
                   ? `расход по размерам расходится на ${spreadPct.toFixed(0)}% — рассмотрите режим «по размерам»`
                   : '',
@@ -755,6 +823,11 @@ export function MarkerApplyHint({
               старая норма у размеров {perSizeLegacy.join(', ')}: условия съёмки (припуск, слои,
               переворот) не записаны
             </CalloutBox>
+          )}
+          {/* Кг-слот: формула веса целиком, с числами, ДО нажатия — применённое число иначе
+              невозможно проверить: ошибка ширины или плотности входит в него линейно. */}
+          {applyPossible && unitKind === 'kg' && fabric && (
+            <CalloutBox tone='note'>{weightBasisNote(fabric)}</CalloutBox>
           )}
           {/* Заметки об отходах — только когда применить ВОЗМОЖНО. Под отказом строка «в норме
               уже сидят отходы …» описывала бы норму, которой нет, прямо под колаутом об этом. */}
@@ -815,12 +888,75 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
   const markers = techCard?.markers ?? [];
   const bomLines = techCard?.techCard?.bomItems ?? [];
   const colorways = techCard?.colorways ?? [];
+  // Каталог материалов — ТОЛЬКО ради основы веса кг-слотов (Ф3): плотность живёт на артикуле и
+  // никогда на строке BOM (у той лежит свой снимок, см. fabric-weight.ts). Ключ запроса общий с
+  // вкладкой колорвеев, так что чаще всего это чтение из кэша.
+  //
+  // И ЗАПРАШИВАЕТСЯ ТОЛЬКО КОГДА В КАРТОЧКЕ ЕСТЬ КГ-СЛОТ. Полоса живёт на карточке, где кг может не
+  // быть ни одного, а `ListMaterials` — это весь каталог; безусловный запрос платил бы за вес там,
+  // где вес никто не считает. Условие читается из пропа, до всех хуков, поэтому порядок хуков не
+  // меняется — меняется только `enabled`.
+  const needsWeightBasis = bomLines.some((b) => bomUnitKind(b.unit) === 'kg');
+  // Статусы запроса читаются НАРАВНЕ с данными: на холодном кэше карта артикулов пуста, и без
+  // них строка с реальными 220 г/м² получала бы отказ «нет плотности артикула», а упавший запрос
+  // делал бы этот ложный отказ постоянным. Статусы осмысленны только при needsWeightBasis
+  // (отключённый запрос в react-query v5 вечно isPending) — читаются они ниже строго под
+  // bomUnitKind === 'kg', то есть только когда запрос включён.
+  const {
+    data: materialsData,
+    isPending: materialsPending,
+    isError: materialsError,
+  } = useMaterials('', true, needsWeightBasis);
+  const materialById = useMemo(() => {
+    const m = new Map<number, common_Material>();
+    for (const mat of materialsData?.materials ?? []) if (mat.id) m.set(Number(mat.id), mat);
+    return m;
+  }, [materialsData]);
 
   const rows = useMemo(() => {
     return bomLines
       .filter((b) => b.lineKey && markersForLine(markers, b.lineKey).length > 0)
       .map((b) => {
         const lineMarkers = markersForLine(markers, b.lineKey!);
+        // Полоса — КАРТОЧНАЯ и мультислотовая: основа веса резолвится ПО СТРОКЕ, из ЕЁ
+        // собственного артикула (пином владеет рецепт колорвея, здесь его нет). Ширина — общим
+        // резолвером (fullRollWidthOf внутри weightBasisOf): поле строки, потом COALESCE-
+        // обогащение 0259, потом артикул; здесь оба поля с провода и равны, когда строка своё
+        // заполнила. Плотность — с артикула.
+        const kgKind = bomUnitKind(b.unit) === 'kg';
+        const articleId = Number(b.materialId ?? 0);
+        const article = articleId ? materialById.get(articleId) : undefined;
+        // ТРИ СОСТОЯНИЯ КАТАЛОГА РАЗЛИЧАЮТСЯ ДО основы веса, и ни одно не называется «нет
+        // плотности артикула»: «каталог читается» — загрузка, а не отказ; «каталог не
+        // прочитался» — ошибка чтения, а не пустая карточка материала; «артикула нет в выдаче» —
+        // про его плотность сказать нечего вовсе. Ложный отказ «нет плотности» на холодном кэше
+        // выглядел бы как дефект данных и отправлял бы заполнять уже заполненное.
+        const catalog = !kgKind
+          ? null
+          : materialsPending
+            ? ('loading' as const)
+            : materialsError
+              ? ('error' as const)
+              : articleId > 0 && !article
+                ? ('missing' as const)
+                : null;
+        const weightBasis = weightBasisOf(article, {
+          effectiveFabricWidthCm: b.effectiveFabricWidthCm?.value ?? '',
+          fabricWidth: b.fabricWidth?.value ?? '',
+        });
+        const fabric = weightBasis.ok ? weightBasis.basis : undefined;
+        // Кг-витрина строки — одним полем, чтобы рендер не решал заново, что показывать: основа
+        // при числе; состояние каталога, когда артикул не прочитан; нехватка — только когда
+        // каталог прочитан и артикул найден (иначе «чего не хватает» — догадка, не факт).
+        // null = слот не в килограммах, пилюль нет вовсе.
+        const kg = kgKind
+          ? {
+              basis: fabric ?? null,
+              missing: catalog == null && !weightBasis.ok ? weightBasis.missing : null,
+              catalog,
+              articleId,
+            }
+          : null;
         // ТОТ ЖЕ компаратор, что в подсказке рецепта: НОРМА → свежесть. Здесь стояла голая
         // сортировка по updatedAt, и это была не мелочь: полоса называла «самую свежую»
         // раскладку там, где рецепт применяли из назначенной нормы, — два экрана про одну ткань
@@ -832,7 +968,7 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
         const best = ranked.find((m) => !scalarNormRefusal(m)) ?? ranked[0];
         const refusal = scalarNormRefusal(best);
         const cons = consumptionCm(best);
-        const conv = cons != null ? toBomUnit(cons, b.unit ?? '') : null;
+        const conv = cons != null ? toBomUnit(cons, b.unit ?? '', fabric) : null;
         // Пропуск лучшего маркера — ФАКТ, а не служебная деталь: пропущенной может оказаться и
         // САМА НАЗНАЧЕННАЯ НОРМА (смешанный состав расхода на изделие не выдаёт), и тогда полоса
         // показывает число не с неё. В диалоге применения пропуск виден в селекторе с причиной;
@@ -844,6 +980,14 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
         // другой ширины, и «расхождение» — это расхождение тканей, а не рецепта с раскладкой).
         const scalars = new Set<string>();
         const scalarCws = new Set<number>();
+        // СКАЛЯРЫ КОЛОРВЕЕВ С ПИНОМ НА ДРУГОЙ АРТИКУЛ — ВНЕ ЛЮБОЙ СВЕРКИ, и это то же правило,
+        // что у ширины строкой выше, только для веса: рецепт через пин законно получал число на
+        // ЕГО ткани (её полная ширина × её плотность), а полоса пересчитывает ту же раскладку
+        // основой артикула СЛОТА — сравнение объявляло бы устаревшим сравнение двух РАЗНЫХ
+        // тканей (150 см × 200 г/м² против 160 см × 250 г/м² — «расхождение» на треть без
+        // единой правки). Показываются они отдельной подписью, а не прячутся: число в рецепте
+        // есть, просто сверять его этой полосе не по чему.
+        const pinnedScalars = new Set<string>();
         // Скаляры, ПРИМЕНЁННЫЕ ИЗ РАСКЛАДКИ, с колорвеем каждого — сырьё для §6.4 ниже. Ручные
         // числа сюда не попадают: рецепт, набранный руками, ничего про норму не обещал.
         const markerScalars: { cw: number; value: string }[] = [];
@@ -852,8 +996,14 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
           const cwId = Number(cw.colorwayId ?? 0);
           for (const u of cw.usages ?? []) {
             if ((u.bomLineKey ?? '') !== b.lineKey) continue;
-            if ((u.sizeConsumptions ?? []).length > 0) perSize = true;
-            else if (u.consumption?.value) {
+            if ((u.sizeConsumptions ?? []).length > 0) {
+              perSize = true;
+            } else if (u.consumption?.value) {
+              const pinId = Number(u.materialId ?? 0);
+              if (pinId > 0 && pinId !== articleId) {
+                pinnedScalars.add(u.consumption.value);
+                continue;
+              }
               scalars.add(u.consumption.value);
               scalarCws.add(cwId);
               if ((u.consumptionSource ?? '') === 'marker')
@@ -861,13 +1011,24 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
             }
           }
         }
-        const current = perSize
+        const comparable = perSize
           ? 'по размерам'
           : scalars.size === 0
-            ? '—'
+            ? pinnedScalars.size > 0
+              ? ''
+              : '—'
             : scalars.size === 1
               ? [...scalars][0]
               : `расходятся (${[...scalars].join(' / ')})`;
+        const current =
+          !perSize && pinnedScalars.size > 0
+            ? [
+                comparable,
+                `пин на другой артикул: ${[...pinnedScalars].join(' / ')} — не сверяется, другая ткань`,
+              ]
+                .filter(Boolean)
+                .join(' · ')
+            : comparable;
         const bestCw = Number(best.colorwayId ?? 0);
         const delta =
           conv &&
@@ -891,9 +1052,11 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
         // объявить её разошедшейся значило бы гадать. Колорвейный скоуп соблюдается той же
         // проверкой, что у дельты: норма своего колорвея ничего не утверждает о чужом рецепте —
         // у того другой артикул, другая ширина, и «расхождение» было бы расхождением тканей.
+        // Скаляры колорвеев с пином на ДРУГОЙ артикул отсеяны ещё на сборе (pinnedScalars):
+        // их переводили основой пина, а normConv ниже посчитан основой артикула слота.
         const normMarker = lineMarkers.find((m) => m.isNorm === true);
         const normCons = normMarker ? consumptionCm(normMarker) : null;
-        const normConv = normCons != null ? toBomUnit(normCons, b.unit ?? '') : null;
+        const normConv = normCons != null ? toBomUnit(normCons, b.unit ?? '', fabric) : null;
         const normCw = Number(normMarker?.colorwayId ?? 0);
         // 0.0005 — шум представления: колонка DECIMAL(10,3), а число туда положил тот же apply
         // строкой из toBomUnit. Всё, что крупнее, — другое измерение, а не другая запись.
@@ -916,9 +1079,9 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
                 applied: staleApplied,
               }
             : null;
-        return { line: b, best, conv, cons, refusal, current, delta, skipped, stale };
+        return { line: b, best, conv, cons, refusal, current, delta, skipped, stale, kg };
       });
-  }, [bomLines, markers, colorways]);
+  }, [bomLines, markers, colorways, materialById, materialsPending, materialsError]);
 
   if (rows.length === 0) return null;
 
@@ -927,7 +1090,7 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
       <Text size='nano' variant='label' component='p'>
         расход из раскладок (маркеров) — применяется в рецепте колорвея, вкладка colourways
       </Text>
-      {rows.map(({ line, best, conv, cons, refusal, current, delta, skipped, stale }) => (
+      {rows.map(({ line, best, conv, cons, refusal, current, delta, skipped, stale, kg }) => (
         <div key={line.lineKey} className='space-y-1'>
           <div className='flex flex-wrap items-center gap-1.5'>
             <Text size='micro' component='span' className='min-w-0 truncate'>
@@ -941,6 +1104,46 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
             ) : (
               <Pill tone='mut'>
                 из раскладки: {conv ? `${conv.value} ${conv.unit}` : `${cons} см`}
+              </Pill>
+            )}
+            {/* Кг-число обязано называть основу (Ф3): полная ширина рулона с кромкой ×
+                плотность — иначе его не проверить ничем. Отказ называет нехватку, потому что
+                лечится она заполнением артикула, а не сменой единицы слота. */}
+            {kg?.basis && conv && (
+              <Pill tone='mut' title={weightBasisNote(kg.basis)}>
+                вес: {weightBasisLabel(kg.basis)}
+              </Pill>
+            )}
+            {/* ТРИ СОСТОЯНИЯ КАТАЛОГА — СЛОВАМИ, и ни одно не называется «нет плотности»:
+                загрузка — не отказ (тон mut), ошибка чтения и артикул вне выдачи — отказы, но
+                про заполненность карточки материала они не утверждают ничего. */}
+            {kg?.catalog === 'loading' && !refusal && (
+              <Pill
+                tone='mut'
+                title='каталог материалов ещё читается — плотность и ширина артикула пока не прочитаны. Это загрузка, а не отказ: карточка материала может быть заполнена полностью'
+              >
+                вес: каталог читается…
+              </Pill>
+            )}
+            {kg?.catalog === 'error' && !refusal && (
+              <Pill
+                tone='warn'
+                title='каталог материалов не прочитался — плотность и ширину артикула прочитать не удалось. Это ошибка чтения, а не пустая карточка материала: перезагрузите страницу'
+              >
+                кг: каталог не прочитался
+              </Pill>
+            )}
+            {kg?.catalog === 'missing' && !refusal && (
+              <Pill
+                tone='warn'
+                title={`артикула #${kg.articleId} в каталоге материалов нет (удалён или недоступен) — основу веса взять неоткуда. Про его плотность это не говорит ничего`}
+              >
+                кг: артикул не найден в каталоге
+              </Pill>
+            )}
+            {kg?.missing && !refusal && (
+              <Pill tone='warn' title={weightRefusalText(kg.missing)}>
+                {weightMissingShort(kg.missing)}
               </Pill>
             )}
             {/* Чьё это число: назначенной нормы или просто лучшей раскладки. Без подписи полоса
@@ -991,6 +1194,13 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
               {stale.unit} против нормы «{stale.name}» — {stale.value} {stale.unit}. Связи рецепта
               с раскладкой нет: переназначение нормы ничего не пересчитывает, и прежнее число будет
               стоять, пока норму не применят заново
+              {/* НА КГ-СЛОТЕ У РАСХОЖДЕНИЯ ЕСТЬ ВТОРАЯ ПРИЧИНА, и приписывать его одной раскладке
+                  нельзя: обе стороны переведены в вес, но применённое — основой ТОГО дня, а
+                  правая — сегодняшней. Правка плотности или ширины артикула даёт то же
+                  расхождение, не тронув ни одной раскладки. */}
+              {kg?.basis
+                ? `. Слот в килограммах: правая часть переведена сегодняшней основой (${weightBasisLabel(kg.basis)}) — правка ширины или плотности артикула даёт такое же расхождение сама по себе`
+                : ''}
             </CalloutBox>
           )}
         </div>

@@ -64,6 +64,36 @@ export function PatternViewerPage() {
   const activeGroup = groups.find((g) => (g.key ?? '') === wanted) ?? groups[0];
   const activeKey = activeGroup?.key ?? '';
 
+  // ВЕРСИЯ, ЗАШИТАЯ В БУМАГУ — тот же приём, что у наряда на партию (run-pack-viewer/page.tsx):
+  // печать пишет в ?v= и ?n= штамп состава группы (сумму версий листов и их число — версии
+  // нумеруются per-size, поэтому одной цифры мало: max не заметил бы замену не-максимального
+  // размера, а удаление листа не меняет ни одной версии), страница сверяет его с живым
+  // манифестом. Это единственное место, где старая бумага может узнать, что выкройки за её QR
+  // уже другие. Непарсящийся или отсутствующий параметр = молчание, как и там: тревога,
+  // выдуманная из отсутствия параметра, обесценила бы настоящую. Требуются ОБА параметра —
+  // бумага, печатанная до этой пары, несла в ?v= версию карты, и сверять её не с чем.
+  const stamp = useMemo(() => {
+    const parse = (name: string): number | null => {
+      const raw = search.get(name);
+      if (raw === null) return null;
+      const n = Number.parseInt(raw, 10);
+      return Number.isFinite(n) && n >= 0 ? n : null;
+    };
+    const v = parse('v');
+    const n = parse('n');
+    return v !== null && n !== null ? { v, n } : null;
+  }, [search]);
+  // Сверяется группа, НА КОТОРУЮ УКАЗЫВАЕТ БУМАГА (?g), а не активная: оператор волен листать
+  // группы на экране, и это не делает бумагу в его руках ни свежее, ни старее.
+  const paperKey = search.get('g') ?? '';
+  const paperGroup = paperKey ? groups.find((g) => (g.key ?? '') === paperKey) : undefined;
+  const currentV = (paperGroup?.sheets ?? []).reduce((s, p) => s + (p.version ?? 0), 0);
+  const currentN = (paperGroup?.sheets ?? []).length;
+  // Группы с ключом бумаги больше нет — это тоже дрейф, а не повод молча открыть первую:
+  // перегруппировка выкроек меняет именно то, что QR обещал показать.
+  const drifted =
+    stamp !== null && !!paperKey && (!paperGroup || stamp.v !== currentV || stamp.n !== currentN);
+
   if (state.phase === 'loading') {
     return (
       <Shell>
@@ -143,6 +173,22 @@ export function PatternViewerPage() {
   return (
     <Shell>
       <SectionStack>
+        {/* ВЫКРОЙКИ ИЗМЕНИЛИСЬ ПОСЛЕ ПЕЧАТИ — первым, до всего остального: это единственная
+            новость, которая отменяет достоверность бумаги в руках (то же правило и почти те же
+            слова, что у наряда на партию). Контент ниже НЕ прячется: экран и есть свежая правда,
+            по которой надо работать вместо устаревшего листа. */}
+        {drifted && (
+          <CalloutBox tone='warning' className='space-y-1'>
+            <Text size='large' component='p' className='uppercase'>
+              <b>выкройки изменились после печати</b>
+            </Text>
+            <Text component='p'>
+              {paperGroup
+                ? `бумага в руках напечатана для листов версии ${stamp?.v} (${stamp?.n} шт.), а сейчас они версии ${currentV} (${currentN} шт.). Контуры на бумаге устарели — кроите по листам с ЭТОГО экрана и перепечатайте тех-пак.`
+                : 'бумага в руках указывает на группу листов, которой на карточке больше нет — выкройки перегруппированы после печати. Кроите по листам с ЭТОГО экрана и перепечатайте тех-пак.'}
+            </Text>
+          </CalloutBox>
+        )}
         <Section>
           <div className='space-y-2.5'>
             <div>

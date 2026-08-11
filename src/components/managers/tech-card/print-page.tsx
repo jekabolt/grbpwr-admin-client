@@ -1,6 +1,20 @@
+import { PrintDegradedNotice } from 'components/managers/print/degraded-notice';
+import { buildPrintScope, parsePrintQuery } from 'components/managers/print/scope';
+import {
+  useProductionRun,
+  useRunCutPlan,
+} from 'components/managers/production-runs/components/useProductionRuns';
+import {
+  depStatus,
+  usePrintReady,
+  type PrintDep,
+} from 'components/managers/print/use-print-ready';
+import { useTechCardRelease } from 'components/managers/tech-card/components/useSamples';
+import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardPrint } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { ROUTES } from 'constants/routes';
-import { Link, useParams } from 'react-router-dom';
+import { useMemo, useState } from 'react';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { TechPackDocument } from './components/tech-pack-document';
@@ -11,9 +25,11 @@ import { usePackagingRecipe, useStyleAssembly } from './components/useAssemblyPa
 // (no portal / absolute / #root hiding — those print blank in Safari): we just hide the
 // toolbar and let the document paginate. The doc's own max-width/padding is dropped in
 // print so it fills the @page content box.
+// @page (размер, поля и margin boxes колонтитула) объявлен ОДИН раз — в print/page-furniture.tsx,
+// который рендерит сам документ. Два объявления @page в одном документе разрешались бы порядком
+// подключения, а не смыслом.
 const PRINT_CSS = `
 @media print {
-  @page { size: A4 portrait; margin: 12mm; }
   html, body { background: #fff !important; }
   .techpack-toolbar { display: none !important; }
   .techpack-doc { border: 0 !important; box-shadow: none !important; }
@@ -25,6 +41,11 @@ const PRINT_CSS = `
 export function TechCardPrint() {
   const { id } = useParams<{ id: string }>();
   const numId = id ? parseInt(id, 10) : undefined;
+  // Скоуп печати приезжает query-параметрами: ?run=&colorway=&sizes=&profile=&booklets=&release=.
+  // Без них печать неотличима от прежней — это осознанное свойство, а не переходный период:
+  // внутренний тех-пак обо всём сразу остаётся валидным документом.
+  const [searchParams] = useSearchParams();
+  const query = useMemo(() => parsePrintQuery(searchParams), [searchParams.toString()]);
   // useTechCardPrint, not useTechCard: печать also needs the response-level pattern_viewer_token
   // (the per-scope QR codes of the patterns section), which the editor's hook deliberately drops.
   const { data: printData, isLoading, isError } = useTechCardPrint(numId);
@@ -33,8 +54,94 @@ export function TechCardPrint() {
   // live behind their own per-style RPC — GetTechCard alone (above) never returns them, so the
   // printed pack had nothing to render for either section no matter what TechPackDocument did
   // with the data. Fetch both here, alongside the tech card, and hand them down.
-  const { data: assemblyData } = useStyleAssembly(numId ?? 0);
-  const { data: packagingRecipeData } = usePackagingRecipe();
+  const {
+    data: assemblyData,
+    isLoading: assemblyLoading,
+    isError: assemblyError,
+  } = useStyleAssembly(numId ?? 0);
+  const {
+    data: packagingRecipeData,
+    isLoading: recipeLoading,
+    isError: recipeError,
+  } = usePackagingRecipe();
+
+  // Прогон — только когда он запрошен. Скоуп на партию даёт документу тираж, размеры и
+  // (в Ф5) ревизию, по которой партия кроится.
+  const {
+    data: runData,
+    isLoading: runLoading,
+    isError: runError,
+  } = useProductionRun(query.runId, query.runId > 0);
+
+  // Кат-лист партии: сколько панелей кроить по каждому размеру. Считает СЕРВЕР — тот же ответ
+  // печатает наряд. Пересчитать «шт/изделие × тираж» на клиенте значило бы завести вторую
+  // реализацию «сколько выкроить», и она разошлась бы с первой ровно в тот день, когда это
+  // заметит цех.
+  const {
+    data: cutPlan,
+    isLoading: cutPlanLoading,
+    isError: cutPlanError,
+  } = useRunCutPlan(query.runId, query.runId > 0);
+
+  // РЕВИЗИЯ, ПО КОТОРОЙ ПЕЧАТАЕМ. Явный ?release= выигрывает у привязки прогона: первый —
+  // осознанный выбор оператора, вторая — умолчание партии. Прогон, привязанный к релизу, обязан
+  // печатать тот же снапшот, по которому сервер считает его кат-лист, иначе комплект в цех несёт
+  // кат-лист одной ревизии и операции другой.
+  const releaseId = query.releaseId || wireInt(runData?.run?.run?.releaseId);
+  const {
+    data: releaseData,
+    isLoading: releaseLoading,
+    isError: releaseError,
+  } = useTechCardRelease(releaseId || undefined);
+  // ПРИНАДЛЕЖНОСТЬ РЕЛИЗА ЭТОЙ КАРТЕ. `release_id` прогона и его `tech_card_id` — независимые
+  // ссылки без кросс-чека на записи (бэковый cutspec это документирует и потому сверяет их сам,
+  // деградируя на живую карту). Без сверки `/tech-cards/5/print?release=<релиз карты 77>` печатал
+  // бы весь документ карты 77, но со сборкой и токеном выкроек карты 5 — химеру из двух стилей,
+  // причём вьюер на неизвестный ключ группы молча открывает первую.
+  const releaseForeign =
+    !!releaseData?.release && wireInt(releaseData.release.techCardId) !== (numId ?? 0);
+  const snapshot = releaseForeign ? undefined : releaseData?.snapshot;
+  // Снапшот не прочитан — это ТРЕТЬЕ состояние, не «нет релиза» и не «есть». Печатаем живую
+  // карту, но говорим об этом вслух: молчаливый фолбэк выдал бы её за замороженную ревизию.
+  const snapshotBroken = !!releaseId && !snapshot && !releaseLoading;
+
+  const scope = useMemo(() => {
+    const card = snapshot ?? techCard;
+    if (!card) return undefined;
+    return buildPrintScope({
+      techCard: card,
+      query,
+      run: runData?.run,
+      runPackToken: runData?.runPackToken,
+      revision: snapshot
+        ? { source: 'release', number: wireInt(releaseData?.release?.releaseNumber) }
+        : { source: 'live' },
+    });
+  }, [snapshot, techCard, query, runData?.run, runData?.runPackToken, releaseData?.release]);
+
+  // Статусы запросов, которые документ делает САМ (размерная таблица, материалы, релизы, модели,
+  // медиа, словарь ухода). Гейт печати обязан их ждать — именно они рисуют прочерки вместо мерок
+  // и пустую колонку цвета при раннем клике. Документ отдаёт их наверх одним колбэком; setState
+  // из useState стабилен, поэтому цикла рендеров это не создаёт.
+  const [docDeps, setDocDeps] = useState<PrintDep[]>([]);
+
+  const { ready, degraded } = usePrintReady([
+    { label: 'tech card', status: depStatus(isLoading, isError) },
+    { label: 'on-garment assembly', status: depStatus(assemblyLoading, assemblyError) },
+    { label: 'packaging recipe', status: depStatus(recipeLoading, recipeError) },
+    // Прогон попадает в гейт только когда он вообще запрошен: незапрошенный запрос вечно
+    // «не загружается», и без этого условия кнопка ждала бы то, чего никто не звал.
+    ...(query.runId > 0
+      ? [{ label: 'production run', status: depStatus(runLoading, runError) }]
+      : []),
+    ...(releaseId ? [{ label: 'release snapshot', status: depStatus(releaseLoading, releaseError) }] : []),
+    // Кат-лист НЕ обязателен: без него тех-пак остаётся документом стиля, а отсутствие
+    // количеств лист называет вслух. Отказ в гейте — это degraded, а не блокировка.
+    ...(query.runId > 0
+      ? [{ label: 'cut list', status: depStatus(cutPlanLoading, cutPlanError) }]
+      : []),
+    ...docDeps,
+  ]);
 
   return (
     <div className='mx-auto flex max-w-[230mm] flex-col gap-4 p-4 pb-10'>
@@ -51,13 +158,16 @@ export function TechCardPrint() {
         </div>
         <div className='flex items-center gap-3'>
           <Text variant='inactive' size='small'>
-            choose “save as PDF” as the destination
+            choose “save as PDF” as the destination · колонтитул и номера страниц печатает только
+            Chrome
           </Text>
           <Button
             variant='main'
             size='lg'
             className='uppercase'
-            disabled={!techCard}
+            // Не «пришла ли карта», а «готов ли весь лист»: данные, шрифты и картинки. По
+            // таймауту гейт отпускает кнопку сам и называет недостающее плашкой на бумаге.
+            disabled={!techCard || !ready}
             onClick={() => window.print()}
           >
             save as pdf
@@ -82,11 +192,39 @@ export function TechCardPrint() {
         </div>
       ) : (
         <div className='techpack-doc border border-textInactiveColor shadow-sm'>
+          {/* Обёртка не косметика: PRINT_CSS снимает padding с ПРЯМЫХ детей .techpack-doc, и
+              плашка без неё напечаталась бы текстом впритык к рамке. */}
+          <div className='px-8 pt-6'>
+            <PrintDegradedNotice items={degraded} />
+          </div>
+          {scope?.colorwayMissing || scope?.runMissing ? (
+            <div className='px-8'>
+              <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
+                {scope.colorwayMissing
+                  ? `colourway #${query.colorwayId} is not on this card — printed for all colourways`
+                  : `production run #${query.runId} not received — printed without a batch scope`}
+              </p>
+            </div>
+          ) : null}
+          {snapshotBroken && (
+            <div className='px-8'>
+              <p className='mb-4 break-inside-avoid border-2 border-black px-2 py-1.5 text-control font-semibold uppercase'>
+                {releaseForeign
+                  ? `release #${releaseId} belongs to another tech card — ignored, the LIVE card was printed`
+                  : `revision snapshot could not be read${
+                      releaseData?.snapshotError ? ` (${releaseData.snapshotError})` : ''
+                    } — the LIVE card was printed, not the frozen revision`}
+              </p>
+            </div>
+          )}
           <TechPackDocument
-            techCard={techCard}
+            techCard={snapshot ?? techCard}
+            scope={scope}
             assembly={assemblyData?.items ?? []}
             packagingRecipe={packagingRecipeData?.items ?? []}
             patternViewerToken={printData?.patternViewerToken ?? ''}
+            onDataStatus={setDocDeps}
+            cutPlan={cutPlanError ? undefined : cutPlan}
           />
         </div>
       )}

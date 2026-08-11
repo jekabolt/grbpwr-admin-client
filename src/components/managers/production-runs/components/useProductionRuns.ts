@@ -1,5 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { adminService } from 'api/api';
+import { devExpenseKeys } from 'components/managers/tech-card/components/useStyleReadViews';
 import {
   CheckProductionRunReadinessRequest,
   common_ProductionRunInsert,
@@ -44,6 +45,11 @@ export function useUpdateRunSection() {
     onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });
       qc.invalidateQueries({ queryKey: productionRunKeys.detail(v.id) });
+      // A run's planned qty is the denominator of the tech card's R&D «на изделие» figure
+      // (ListTechCardDevExpenses.summary.order_qty is Σ planned over non-cancelled runs), and
+      // that response is cached under its own key — so without this the costing tab divides by
+      // a stale plan for the whole staleTime window.
+      qc.invalidateQueries({ queryKey: devExpenseKeys.all });
     },
     // A rejected save leaves the screen showing the version the server just refused. Refetch on
     // failure too, so "обновите страницу" lands on a page that is already reloading itself instead
@@ -200,7 +206,14 @@ export function useSaveProductionRun() {
             expectedLockVersion: input.lockVersion,
           })
         : adminService.CreateProductionRun({ run: input.run }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: productionRunKeys.all }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: productionRunKeys.all });
+      // A run's planned qty is the denominator of the tech card's R&D «на изделие» figure
+      // (ListTechCardDevExpenses.summary.order_qty is Σ planned over non-cancelled runs), and
+      // that response is cached under its own key — so without this the costing tab divides by
+      // a stale plan for the whole staleTime window.
+      qc.invalidateQueries({ queryKey: devExpenseKeys.all });
+    },
   });
 }
 
@@ -208,7 +221,14 @@ export function useDeleteProductionRun() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => adminService.DeleteProductionRun({ id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: productionRunKeys.all }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: productionRunKeys.all });
+      // A run's planned qty is the denominator of the tech card's R&D «на изделие» figure
+      // (ListTechCardDevExpenses.summary.order_qty is Σ planned over non-cancelled runs), and
+      // that response is cached under its own key — so without this the costing tab divides by
+      // a stale plan for the whole staleTime window.
+      qc.invalidateQueries({ queryKey: devExpenseKeys.all });
+    },
   });
 }
 

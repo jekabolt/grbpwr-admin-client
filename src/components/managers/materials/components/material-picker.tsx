@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { adminService } from 'api/api';
 import { common_Material } from 'api/proto-http/admin';
 import { techCardBomSectionOptions } from 'constants/filter';
+import { useDictionary } from 'lib/providers/dictionary-provider';
 import { cn } from 'lib/utility';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -35,11 +36,36 @@ const numId = (v: unknown): number => Number(v) || 0;
 const materialLabel = (m: common_Material): string =>
   `${m.code ? `${m.code} · ` : ''}${m.name ?? `#${m.id}`}`;
 
-// On-hand balance per material id, for the swatch grid's "€8.00 · 41 m" caption and its "in stock"
-// filter. Lazy (`enabled`) because the combobox variant — which is on almost every screen — must not
-// pull the warehouse ledger. Key + args mirror useWarehouse's `useMaterialStock({})` verbatim so the
-// two share ONE react-query cache entry rather than double-fetching.
-export function useMaterialOnHand(enabled = true) {
+/**
+ * Складские факты одного материала — все из ОДНОЙ строки ledger'а и потому неразделимые.
+ *
+ * Остаток и средняя меряны в одной единице и относятся к одной оценке, поэтому они едут вместе, а
+ * не тремя независимыми картами: подписать среднюю чужой единицей или чужой валютой — ровно та
+ * ошибка, которую `bom-price.ts` запрещает для цены строки («каждая ступень отдаёт свою тройку»).
+ */
+export type MaterialStockFacts = {
+  /** Остаток в единице материала. */
+  onHand: string;
+  /**
+   * Скользящая средняя себестоимость единицы — ВСЕГДА в базовой валюте: склад усредняет закупки,
+   * сделанные в разных валютах, приводя каждую к базовой по курсу на момент приёмки. Это НЕ
+   * котировка: во что обойдётся следующая закупка, говорит `latestPrice` артикула, а это — во что
+   * обошлось то, что уже лежит. Костинг-гейтед, как и latest_price: у аккаунта без costing:read
+   * значения просто нет, и тогда строка пустая — ни нулей, ни прочерков вместо цифры.
+   */
+  avgUnitCostBase: string;
+  /** Валюта средней. Пустая ровно тогда, когда пуста сама средняя: подписывать нечего. */
+  baseCurrency: string;
+  /** Единица материала — общая и для остатка, и для средней. */
+  unit: string;
+};
+
+// Складские факты по id материала: остаток для "in stock"-фильтра и подписи свотча, средняя — для
+// строки BOM. Lazy (`enabled`), потому что комбобокс-вариант стоит почти на каждом экране и тянуть
+// ради него весь ledger нельзя. Ключ и аргументы дословно повторяют `useMaterialStock({})` из
+// useWarehouse, чтобы обе стороны делили ОДНУ запись кеша react-query, а не ходили дважды.
+export function useMaterialStockFacts(enabled = true) {
+  const { dictionary } = useDictionary();
   const { data } = useQuery({
     queryKey: ['warehouse', 'stock', {}],
     queryFn: () =>
@@ -51,14 +77,27 @@ export function useMaterialOnHand(enabled = true) {
       }),
     enabled,
   });
+  // Валюта берётся со СТРОКИ склада — сервер оценивал именно в ней; словарь только страхует пустое
+  // поле, чтобы средняя никогда не оказалась напечатанной без подписи.
+  const fallbackBase = dictionary?.baseCurrency || 'EUR';
   return useMemo(() => {
-    const map = new Map<number, string>();
+    const map = new Map<number, MaterialStockFacts>();
     (data?.rows ?? []).forEach((r) => {
       const id = numId(r.material?.id);
-      if (id) map.set(id, decimalToInput(r.onHand));
+      if (!id) return;
+      // Ноль читается как «значения нет»: так выглядит и костинг-гейт, и склад, принятый по нулевой
+      // цене, а «≈ 0 EUR / m» рядом с живой котировкой — цифра, которой нельзя верить.
+      const avgRaw = decimalToInput(r.avgUnitCostBase).trim();
+      const avg = Number(avgRaw) > 0 ? avgRaw : '';
+      map.set(id, {
+        onHand: decimalToInput(r.onHand),
+        avgUnitCostBase: avg,
+        baseCurrency: avg ? r.baseCurrency?.trim() || fallbackBase : '',
+        unit: r.material?.unit?.trim() ?? '',
+      });
     });
     return map;
-  }, [data]);
+  }, [data, fallbackBase]);
 }
 
 // "8.00 EUR / m" — the catalog price as one readable fact. latest_price is costing-gated, so this is
@@ -510,7 +549,7 @@ function MaterialGridDialog({
   const [inStockOnly, setInStockOnly] = useState(false);
   const [supplier, setSupplier] = useState('');
   const [pending, setPending] = useState(numId(value));
-  const onHand = useMaterialOnHand();
+  const stockFacts = useMaterialStockFacts();
 
   const suppliers = useMemo(
     () =>
@@ -524,7 +563,7 @@ function MaterialGridDialog({
     const needle = q.trim().toLowerCase();
     return materials.filter((m) => {
       if (supplier && (m.supplier ?? '').trim() !== supplier) return false;
-      if (inStockOnly && !(Number(onHand.get(numId(m.id))) > 0)) return false;
+      if (inStockOnly && !(Number(stockFacts.get(numId(m.id))?.onHand) > 0)) return false;
       if (!needle) return true;
       return (
         (m.name ?? '').toLowerCase().includes(needle) ||
@@ -532,7 +571,7 @@ function MaterialGridDialog({
         (m.supplierRef ?? '').toLowerCase().includes(needle)
       );
     });
-  }, [materials, q, supplier, inStockOnly, onHand]);
+  }, [materials, q, supplier, inStockOnly, stockFacts]);
 
   const commit = () => onPick(materials.find((m) => numId(m.id) === pending));
 
@@ -602,7 +641,7 @@ function MaterialGridDialog({
             {filtered.map((m) => {
               const id = numId(m.id);
               const url = materialImageUrl(m);
-              const stock = onHand.get(id);
+              const stock = stockFacts.get(id)?.onHand;
               const sub = [
                 materialSpec(m),
                 materialPriceLabel(m),

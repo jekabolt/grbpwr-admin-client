@@ -2565,17 +2565,22 @@ export type TechCardColorwayUsage = {
   sizeConsumptions: TechCardBomSizeConsumption[] | undefined;
   lineTotal: googletype_Decimal | undefined;
   sizeRunTotal: googletype_Decimal | undefined;
-  // explicit presence: 0-based index into TechCardInsert.pieces saying which cut-piece this
-  // consumption norm is about; unset = whole garment (informational, NF-05).
+  // explicit presence: 0-based index into TechCardInsert.pieces saying which cut-piece this row
+  // ASSIGNS the slot's material to («деталь X кроится из артикула Y» — T8: a piece-bound row is a
+  // MATERIAL ASSIGNMENT, never a norm; the consumption norm lives ONLY on the garment-level row,
+  // piece unset). Unset = garment-level row — the slot's norm carrier. Legacy positional form.
   pieceIndex?: number;
   // bom_line_key references the owning style's BOM line by its stable line_key (S2/S3) — the durable
   // reference the recipe write-path resolves to a real bom_item_id. Preferred over bom_item_index
   // (which stays for the transition / legacy read). bom_item_id is the resolved FK on read.
   bomLineKey: string | undefined;
   bomItemId: number | undefined;
-  // piece_line_key references the cut-piece this norm is about by its stable TechCardPiece.line_key
-  // (WS4). The recipe write-path resolves it to the real piece_id FK (usage.piece_id RESTRICT).
-  // Preferred over the positional piece_index (kept for the transition). piece_id is the resolved FK.
+  // piece_line_key references the cut-piece this row ASSIGNS the slot's material to, by its stable
+  // TechCardPiece.line_key (WS4). T8: this binding is «из чего кроится деталь» — a material
+  // assignment, NOT a norm; a piece-bound row carries no consumption of its own, and the server
+  // refuses to read one as «нормы нет» for the slot. The recipe write-path resolves it to the real
+  // piece_id FK (usage.piece_id RESTRICT). Preferred over the positional piece_index (kept for the
+  // transition). piece_id is the resolved FK.
   pieceLineKey: string | undefined;
   pieceId: number | undefined;
   // material_id pins the CONCRETE catalog article this colourway takes for the slot (the BOM line
@@ -2860,6 +2865,24 @@ export type TechCardBomItem = {
   // and left the other alone could hand MySQL a row it must refuse. Sending either field means both
   // are being written; sending neither means «не трогай» both.
   kindNote?: string;
+  // ПРОВЕНАНС ПРОЦЕНТА РАСКРОЯ (0296, T7 волна 2): откуда взялось число в wastage_percent.
+  // "manual" (или "") — введено руками; "lays" — применено из предложения «медиана факта настилов
+  // над netto» (GetBomWastageSuggestion). Тот же приём, что consumption_source на юзедже.
+  // `optional` — несущее, тот же verbatim-протокол, что у purpose/kind выше: карточка сохраняется
+  // ПОЛНОЙ ЗАМЕНОЙ строк, и вкладка со старым бандлом этих полей не шлёт вовсе — отсутствие пары
+  // означает «сохрани что было», иначе первый же сейв старого клиента стёр бы аудит у всех строк.
+  // ВАЖНО: сервер сам сбрасывает провенанс в 'manual', когда ЗНАЧЕНИЕ wastage_percent изменилось,
+  // а провенанс при этом не прислан, — правка числа руками через старый бандл не должна донашивать
+  // бейдж «по фактам» (та же логика, что у price_source при смене цены).
+  wastageSource?: string;
+  // Штамп применения: по скольким настилам стояла медиана в момент применения. Шлётся ВМЕСТЕ с
+  // wastage_source='lays' (клиент эхонит lay_count из ответа предложения); на 'manual' обязан
+  // отсутствовать/обнуляться. Пара живёт как одно целое — см. kind/kind_note.
+  wastageLayCount?: number;
+  // OUTPUT-ONLY, СЕРВЕРНЫЙ ШТАМП: когда предложение применено. Клиент шлёт что угодно — сервер
+  // игнорирует; ставится когда тройка (source='lays', lay_count, wastage_percent) МЕНЯЕТСЯ, и
+  // гасится вместе со сбросом в 'manual' — дисциплина norm_applied_at (:20 юзеджа).
+  wastageAppliedAt: wellKnownTimestamp | undefined;
 };
 
 // MaterialFabricAttrs are the typed attributes of a fabric-class material (material_fabric_attr).
@@ -4413,6 +4436,29 @@ export type MaterialCoefficientSuggestionStatus =
   | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_OUT_OF_RANGE"
   // Предложение есть, и его можно сохранить как есть.
   | "MATERIAL_COEFFICIENT_SUGGESTION_STATUS_READY";
+// ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ (T7 волна 2) — СОСЕД калибровки коэффициента выше, И ЭТО ДРУГОЕ
+// ЧИСЛО С ДРУГИМ ЗНАМЕНАТЕЛЕМ. Не сливать:
+// калибровка КОЭФФИЦИЕНТА: дрейф = факт ÷ ПЛАН-ГЕОМЕТРИЯ настила (длина раскладки × слои +
+// концевые). Длина раскладки уже содержит межлекальные выпады, поэтому медиана меряет ТОЛЬКО
+// усадку/пороки/сращивание (2–6%) и ложится в material.cutting_coefficient.
+// предложение ПРОЦЕНТА: дрейф = факт ÷ NETTO настила (состав раскладки × netto-норма «по
+// выкройкам», БЕЗ выпадов). Медиана меряет ВСЁ, чего нет в netto: межлекальные выпады + концы
+// настила + усадку/пороки (15–30%) и ложится в bom_item.wastage_percent.
+// Вписать медиану коэффициента в поле процента — занизить закупку на все межлекальные выпады,
+// линейно и молча. Поэтому у этого предложения свой статус, своя строка дрейфа и НИ ОДНОГО общего
+// сообщения с калибровкой коэффициента.
+export type BomWastageSuggestionStatus =
+  // Сервер всегда присылает одно из трёх ниже; ноль остаётся за «поле не заполнено» и читается
+  // клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
+  | "BOM_WASTAGE_SUGGESTION_STATUS_UNSPECIFIED"
+  // Настилов с netto И фактом меньше трёх. Это СОСТОЯНИЕ, а не ошибка: «фактов пока N из 3» — и
+  // после выката это основной ответ (настилов с замером может не быть месяцами).
+  | "BOM_WASTAGE_SUGGESTION_STATUS_TOO_FEW_FACTS"
+  // Медиана посчитана, но поле её не примет (wastage_percent живёт в [0, 100]). ИЗМЕРЕНИЕ отдаётся
+  // (median_over_netto_percent), число-предложение — НЕТ, и оно НЕ ПРИЖИМАЕТСЯ к границе.
+  | "BOM_WASTAGE_SUGGESTION_STATUS_OUT_OF_RANGE"
+  // Предложение есть, и его можно вписать в поле как есть.
+  | "BOM_WASTAGE_SUGGESTION_STATUS_READY";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -4889,6 +4935,32 @@ export type MaterialCoefficientLayDrift = {
   driftPercent: googletype_Decimal | undefined;
   // Причина невхождения. НЕПУСТА РОВНО У НЕВОШЕДШИХ: строка без числа и без объяснения неотличима
   // от бага.
+  skipped: string | undefined;
+  actualAt: wellKnownTimestamp | undefined;
+};
+
+// Вклад ОДНОГО настила в предложение процента раскроя. Разбор едет наружу целиком, вошедшие и
+// невошедшие вместе, и каждый настил называет свою КАРТОЧКУ: медиана «по 3 настилам» может стоять
+// на одной чужой модели, и человек обязан это видеть, прежде чем применять число к своей.
+export type BomWastageLayDrift = {
+  layId: number | undefined;
+  layKey: string | undefined;
+  layName: string | undefined;
+  runId: number | undefined;
+  techCardId: number | undefined;
+  techCardName: string | undefined;
+  // ЗНАМЕНАТЕЛЬ: netto настила — сколько ткани дала бы норма «по выкройкам» без единого выпада —
+  // в единице факта (actual_uom). Пусто, когда netto взять неоткуда; причина тогда в skipped.
+  nettoQty: googletype_Decimal | undefined;
+  // true = netto взят из ШТАМПА, поставленного в момент записи факта (переживает переход карточки
+  // на marker-норму); false = пересчитан по ЖИВОЙ dxf-норме карточки — она могла уйти от той, при
+  // которой мерили.
+  nettoStamped: boolean | undefined;
+  actualQty: googletype_Decimal | undefined;
+  actualUom: MaterialUnit | undefined;
+  // ДРЕЙФ В ПРОЦЕНТАХ НАД NETTO (+22.00 = «ушло на 22% больше, чем безотходная норма»). Пусто
+  // ровно у невошедших — причина в skipped.
+  driftPercent: googletype_Decimal | undefined;
   skipped: string | undefined;
   actualAt: wellKnownTimestamp | undefined;
 };

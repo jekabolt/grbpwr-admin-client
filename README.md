@@ -63,6 +63,7 @@ Create a `.env` in the repo root. The app reads Vite-prefixed variables:
 | `VITE_SERVER_URL` | `src/api/api.ts` | Base URL of the backend HTTP/gRPC gateway. **Required.** |
 | `VITE_MEDIA_PROXY_URL` | `src/lib/features/getCropped.ts` | Optional. Override for the media proxy used when cropping remote images. |
 | `VITE_API_BASE_URL` | `vite.config.ts` | Optional. Target for the dev-server `/api` proxy. Defaults to `http://localhost:3999`. |
+| `VITE_PATTERN_VIEWER_ORIGIN` | `src/utils/viewer-origin.ts` | Origin baked into the QR codes on printed paper for BOTH public viewers (`/p/{token}` pattern viewer, `/r/{token}` run pack). **Set it on every deployed contour** (Vercel Production *and* Preview/beta) to that contour's stable admin host, e.g. `https://admin.grbpwr.com` / `https://admin.beta.grbpwr.com`. Unset, it falls back to `window.location.origin` — printing from a Vercel preview then bakes an ephemeral SSO-protected alias into the paper, and the QR dies silently later, in a workshop. |
 
 Example:
 

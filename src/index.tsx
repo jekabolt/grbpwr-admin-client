@@ -242,6 +242,13 @@ const PatternViewerPage = lazyRoute(() =>
 const RunPackViewerPage = lazyRoute(() =>
   import('components/run-pack-viewer/page').then((m) => ({ default: m.RunPackViewerPage })),
 );
+// Стенд печати: обе бумаги на синтетических данных, без бэкенда и без логина. Существует потому,
+// что между «код компилируется» и «компонент выполняется» лежит целый класс ошибок — печать уже
+// роняли TDZ-ошибкой, которую пропустили и tsc, и четыре прохода ревью, а поймал бы один рендер.
+// Лениво и только в дев-сборке: в прод-бандл фикстура не попадает.
+const PrintSmokePage = lazyRoute(() =>
+  import('components/managers/print/print-smoke').then((m) => ({ default: m.PrintSmokePage })),
+);
 
 // Configure QueryClient with best practices
 const queryClient = new QueryClient({
@@ -433,6 +440,19 @@ root.render(
                     manifest). Its ?v= carries the run's lock version at print time, so the page
                     can tell the floor the paper in its hands is out of date. */}
                 <Route path={ROUTES.runPackViewer} element={<RunPackViewerPage />} />
+                {/* Стенд печати. DictionaryProvider свой: без токена он ничего не запрашивает и
+                    отдаёт пустой словарь — ровно то состояние, в котором документ обязан
+                    печататься, называя недостающее, а не падать. */}
+                {import.meta.env.DEV && (
+                  <Route
+                    path='/__print-smoke'
+                    element={
+                      <DictionaryProvider>
+                        <PrintSmokePage />
+                      </DictionaryProvider>
+                    }
+                  />
+                )}
               </Routes>
             </Suspense>
           </BrowserRouter>

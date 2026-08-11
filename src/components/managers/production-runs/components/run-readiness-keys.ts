@@ -47,6 +47,13 @@ export const RUN_REQ_TAB: Record<string, string> = {
   norm_piece_set: 'pieces',
   norm_width_vs_article: 'bom',
   norm_multiple: 'patterns',
+  // Слои деталей (T4): роль слоя — вывод из строки BOM, чинится либо составом рецепта (конфликт
+  // основных, деталь без основной — вкладка колорвеев, якорь ?colorway= уже работает), либо
+  // назначением строки (не разложено — вкладка BOM, якорь ?bom=<lineKey>). Дип-линка на деталь
+  // нет — находка называет деталь именем в тексте.
+  piece_role_conflict: 'colorways',
+  piece_main_fabric: 'colorways',
+  piece_fabric_sorted: 'bom',
   sizes_in_range: 'patterns',
   sizes_in_dxf: 'patterns',
   stock_shortage: 'bom',
