@@ -30,7 +30,7 @@ import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { BatchComposition } from './batch-composition';
 import { bomPurposeLabel } from './bom-purpose';
 import { operationMinutes, SummaryOp } from './construction-tab';
-import { HelpMark, LineProblems } from './costing-vocab';
+import { ESTIMATE_WHY, HelpMark, LineProblems, TIER_ESTIMATE } from './costing-vocab';
 import { serverScopeKeyOfSheet, wireFabricPurpose } from './pattern-size-index';
 import { unmeasuredDxfScopeKeys } from './piece-areas-state';
 import { useDevExpenses } from './dev-expenses-field';
@@ -472,12 +472,30 @@ export function CostingField({
   // A cost the server itself calls incomplete (an uncostable BOM line, a currency with no rate) is
   // understated by an unknown amount, so a margin computed from it cannot certify anything.
   const costIncomplete = !!rollup?.hasUnpriced || !!rollup?.hasUnconvertedCurrencies;
+  // ── СТУПЕНЬ ЦИФРЫ (Ф5). `has_estimate` — сервер посчитал часть рулонных слотов ОЦЕНКОЙ СНИЗУ
+  // (площадь деталей ÷ раскройную ширину) и сам отказывается сеять таким числом cost_price.
+  //
+  // ЭТО НЕ «НЕПОЛНАЯ» ЦИФРА, И ПОТОМУ ОНА НЕ В `costIncomplete`. У неполной неизвестен ЗНАК ошибки:
+  // строка без цены могла бы стоить и три копейки, и половину изделия. У оценки знак известен
+  // ТОЧНО — netto не содержит межлекальных выпадов, значит себестоимость занижена, а маржа
+  // завышена. Поэтому оценка показывается числом (её и просили: карточка не должна стоить ноль при
+  // полной спецификации), но НИЧЕГО НЕ УДОСТОВЕРЯЕТ.
+  //
+  // До этой правки вкладка про ступень не знала вовсе, хотя полоса себестоимости справа читала
+  // ровно тот же флаг: карточка, посчитанная оценкой, писала зелёным «цель 50% выполнена» и
+  // считала окупаемость R&D по марже, которой не бывает на фабрике.
+  const lowerBound = hasCosting && !!rollup?.hasEstimate;
   // ...and every GREEN thing on the tab has to consult that, not just the verdict sentence. Without
   // this gate the panel said «маржу по этой себестоимости считать нельзя» while, two blocks down,
   // the margin cell rendered `tone='up'`, the closing waterfall bar rendered green, and the
   // break-even footnote quoted a confident unit count — all from the same understated cost. A
   // pending currency switch is the same class of "the money on screen is not comparable yet".
-  const certifiable = hasCosting && !costIncomplete && !currencyDirty;
+  //
+  // `lowerBound` живёт здесь наравне с неполнотой: удостоверять — значит утверждать, что цифра
+  // рядом верна, а нижняя граница верна только КАК ГРАНИЦА. Один гейт на все три зелёные вещи
+  // экрана — заводить для оценки второй список мест было бы ровно тем расхождением, из-за которого
+  // этот гейт и появился.
+  const certifiable = hasCosting && !costIncomplete && !currencyDirty && !lowerBound;
   // Stronger than `certifiable`: an understated cost is still a real amount in a known currency and
   // is worth showing (flagged). A cost mid-currency-switch is not — it is EUR materials about to be
   // printed with a PLN sign. Every derived amount below is withheld until the server re-denominates
@@ -502,9 +520,18 @@ export function CostingField({
       key: 'materials',
       name: 'материалы',
       amount: materials,
-      aside:
-        unitCost > 0 ? `${Math.round((materials / unitCost) * 100)}% себестоимости` : undefined,
-      help: 'Считает сервер из BOM × рецептов колорвеев, ПРИ СОХРАНЕНИИ карты: правки BOM, рецепта колорвея или цены материала не попадают в эту цифру, пока карта не сохранена и перечитана. Руками здесь не задаётся.',
+      // Ступень стоит У САМОЙ ДЛИННОЙ ПОЛОСЫ, а не только в заголовке: вердикт называет
+      // «материалы» местом, куда идти за деньгами, и пришедший сюда по его совету обязан здесь же
+      // увидеть, что часть этой полосы — выведенное netto, а не измеренный факт.
+      aside: [
+        unitCost > 0 ? `${Math.round((materials / unitCost) * 100)}% себестоимости` : '',
+        lowerBound ? TIER_ESTIMATE : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      help: `Считает сервер из BOM × рецептов колорвеев, ПРИ СОХРАНЕНИИ карты: правки BOM, рецепта колорвея или цены материала не попадают в эту цифру, пока карта не сохранена и перечитана. Руками здесь не задаётся.${
+        lowerBound ? ` ${ESTIMATE_WHY}` : ''
+      }`,
       // A Link, not a button: the tab lives in the URL (?tab=), and an anchor survives both the
       // frozen fieldset a RELEASED card is wrapped in and a costing:read-only account.
       lever: (
@@ -901,14 +928,43 @@ export function CostingField({
         : marginPct == null
           ? {
               figure: money(unitCost),
-              figureLabel: 'себестоимость',
+              // Ступень стоит и здесь: маржи в этой ветке нет вовсе, но цифра себестоимости —
+              // есть, и правило «ступень у каждой цифры» не знает исключения «зато маржа не
+              // посчиталась». Ветка ниже (`lowerBound`) сюда не достаёт по построению: она
+              // говорит о марже, а её тут нет.
+              figureLabel: lowerBound ? `себестоимость · ${TIER_ESTIMATE}` : 'себестоимость',
               tone: 'note',
               sentence: 'нетто-маржа не считается',
               cause:
                 retailReason ||
                 (netted ? 'нет розничной цены' : `нет ставки VAT для ${vatCountry || 'страны'}`),
             }
-          : !hasTarget
+          : // ── ОЦЕНКА СНИЗУ ГОВОРИТ ЗА ВСЕ ТРИ МАРЖИНАЛЬНЫЕ ВЕТКИ, И ЭТО НЕ ПЕРЕСТРАХОВКА.
+            // Ниже стоят три ветки про цель: «цели нет», «цель выполнена» и «не хватает столько-то».
+            // Каждая — утверждение О МАРЖЕ, а маржа, посчитанная от нижней границы, сама является
+            // границей ВЕРХНЕЙ. «Цель 50% выполнена» на карточке, где ткань посчитана netto, — это
+            // согласование цены по числу, которого на фабрике не бывает.
+            //
+            // Ветка стоит ПОСЛЕ `marginPct == null`: «нет розничной цены» — другой недостающий факт,
+            // и подменять его ступенью значило бы спрятать причину, по которой маржи нет вовсе.
+            //
+            // Цифрой остаётся СЕБЕСТОИМОСТЬ, а не процент маржи: она — то, что действительно
+            // посчитано (пусть и снизу), тогда как процент здесь лишь производная от неё.
+            lowerBound
+            ? {
+                figure: money(unitCost),
+                figureLabel: `себестоимость · ${TIER_ESTIMATE}`,
+                tone: 'warning',
+                sentence:
+                  `маржа не выше ${marginPct.toFixed(1)}%` +
+                  (hasTarget ? ` при цели ${targetPct.toFixed(0)}%` : ''),
+                cause:
+                  'расход части тканей выведен из геометрии (площадь деталей ÷ раскройную ширину): ' +
+                  'межлекальных выпадов в этом числе нет, поэтому себестоимость занижена, а маржа ' +
+                  'завышена. Норму даёт раскладка — выберите партию базой расчёта вверху вкладки и ' +
+                  'постройте её, либо впишите расход руками в рецепте колорвея.',
+              }
+            : !hasTarget
             ? {
                 figure: `${marginPct.toFixed(1)}%`,
                 figureLabel: 'маржа нетто',
@@ -1133,6 +1189,10 @@ export function CostingField({
       <div className='flex flex-wrap items-center gap-1.5'>
         <Pill tone={isReleased ? 'attention' : 'mut'}>{stateLabel}</Pill>
         {cur && <Pill tone='mut'>{cur}</Pill>}
+        {/* Ступень — теми же словами, что на полосе себестоимости справа (общий словарь). Полоса
+            носит эту пилюлю с Ф6.1, вкладка — нет, и человек, видевший обе, читал два разных
+            ответа об одной цифре. */}
+        {lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
         {draftPreview && <Pill tone='attention'>черновик</Pill>}
         <Text size='micro' variant='label'>
           плановая себестоимость · нормы по размерам входят СРЕДНИМ ПО РАЗМЕРНОМУ РЯДУ (это не
@@ -1223,14 +1283,20 @@ export function CostingField({
                   Плановый unit cost за изделие: материалы из BOM + CMT + логистика + overhead, всё
                   это умножено на процент брака. VAT в него не входит — поэтому маржа и считается от
                   нетто-розницы.
+                  {lowerBound ? ` ${ESTIMATE_WHY}` : ''}
                 </HelpMark>
               </span>
             }
             value={unitCost.toFixed(2)}
+            // Ступень ВЫТЕСНЯЕТ валютную приписку, а не приписывается к ней: «база EUR 41.20» — это
+            // где ЕЩЁ живёт та же цифра, а «оценка снизу» — ЧЕМ она является. Второе важнее, и в
+            // одну строку `sub` помещается только одно из двух.
             sub={
-              usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
-                ? `план · база ${baseCur} ${serverUnitCostBase.toFixed(2)}`
-                : 'план, за изделие'
+              lowerBound
+                ? `${TIER_ESTIMATE} — настоящая выше`
+                : usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
+                  ? `план · база ${baseCur} ${serverUnitCostBase.toFixed(2)}`
+                  : 'план, за изделие'
             }
           />
           <Stat
@@ -1247,9 +1313,12 @@ export function CostingField({
             sub={
               marginPct == null
                 ? retailReason || 'нет нетто-розницы'
-                : `${marginPct.toFixed(1)}%${hasTarget ? ` · цель ${targetPct.toFixed(0)}%` : ''}${
-                    grossMarginPct != null ? ` · к списку ${grossMarginPct.toFixed(1)}%` : ''
-                  }`
+                : // «не выше» — не украшение, а знак неравенства: маржа от нижней границы
+                  // себестоимости сама является верхней границей, и число без этой оговорки
+                  // читается как достигнутое.
+                  `${lowerBound ? 'не выше ' : ''}${marginPct.toFixed(1)}%${
+                    hasTarget ? ` · цель ${targetPct.toFixed(0)}%` : ''
+                  }${grossMarginPct != null ? ` · к списку ${grossMarginPct.toFixed(1)}%` : ''}`
             }
           />
         </StatGrid>
@@ -1443,8 +1512,18 @@ export function CostingField({
               // Measured against the SERVER's figure, not the live preview: `cc.unitCost` is a
               // server rollup, and subtracting a browser-side draft from it made every tile's delta
               // twitch while someone typed a CMT quote that had not reached the server yet.
+              // Ступень ЭТОГО колорвея. Она своя у каждого: детали на ткань назначает его рецепт,
+              // поэтому один цвет может считаться нормой, а соседний — оценкой снизу.
+              const ccLowerBound = !!cc.hasEstimate;
+              // РАЗНЫЕ СТУПЕНИ НЕ ВЫЧИТАЮТСЯ. Корень rollup'а — ОСНОВНОЙ колорвей; если он посчитан
+              // нормой, а этот оценкой (или наоборот), разность содержит не разницу между цветами, а
+              // разницу между способами счёта: «дешевле на 4.10» читалось бы как экономия ткани там,
+              // где у одного из двух просто нет выпадов в числе.
+              const tierMismatch = ccLowerBound !== !!rollup?.hasEstimate;
               const delta =
-                !broken && ccUnit > 0 && serverUnitCost > 0 ? ccUnit - serverUnitCost : undefined;
+                !broken && !tierMismatch && ccUnit > 0 && serverUnitCost > 0
+                  ? ccUnit - serverUnitCost
+                  : undefined;
               const swatch = colorwaySwatch(cc.colorwayId);
               return (
                 <Tile key={cc.colorwayId || `base-${i}`} tone={broken ? 'error' : 'default'}>
@@ -1460,6 +1539,7 @@ export function CostingField({
                       {colorwayLabel(cc.colorwayId)}
                     </Text>
                     {cc.colorwayId === 0 && <Pill tone='mut'>основной</Pill>}
+                    {ccLowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
                   </div>
                   {/* Same withholding as the axis above: these are server rollups denominated in
                       the SAVED currency, so mid-switch they must not be printed under the new one. */}
@@ -1473,7 +1553,9 @@ export function CostingField({
                     {!showMoney
                       ? `пересчитается в ${cur} при сохранении`
                       : `материалы ${ccMaterials > 0 ? ccMaterials.toFixed(2) : '—'}${
-                          ccMarginPct != null ? ` · маржа ${ccMarginPct.toFixed(1)}%` : ''
+                          ccMarginPct != null
+                            ? ` · маржа ${ccLowerBound ? 'не выше ' : ''}${ccMarginPct.toFixed(1)}%`
+                            : ''
                         }`}
                   </Text>
                   {showMoney && delta != null && Math.abs(delta) >= 0.005 && (

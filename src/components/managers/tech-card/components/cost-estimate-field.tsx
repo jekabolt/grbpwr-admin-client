@@ -21,7 +21,7 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { laysProvenancePhrase } from './bom-wastage-suggestion';
-import { LineProblems, noFx, NO_PRICE, PriceOrigin } from './costing-vocab';
+import { LineProblems, noFx, NO_PRICE, PriceOrigin, TIER_ESTIMATE } from './costing-vocab';
 import { wireInt } from './schema';
 import { styleReadViewKeys } from './useStyleReadViews';
 
@@ -66,6 +66,59 @@ const statTone = (d?: number): 'up' | 'down' | undefined =>
  * а карточка — возит, и bom_item_id строки сметы называет строку BOM напрямую.
  */
 type BomWastageProv = { source?: string; layCount?: number; appliedAt?: string };
+
+/**
+ * ОЦЕНКА РАСХОДА ПО ПЛОЩАДИ, привязанная к строке сметы (Ф5).
+ *
+ * Строка, посчитанная оценкой, приходит в смете ПОЛУПУСТОЙ: сервер кладёт в неё сумму, но ни
+ * расхода, ни цены — их у неё нет как полей (`StyleCostEstimate` ступень на проводе пока не
+ * называет, это половина Ф5-BE). На экране это читалось как поломка данных: строка с деньгами, у
+ * которой «расход —» и «цена —», выглядит ровно как строка, у которой их забыли заполнить.
+ *
+ * Недостающие числа лежат рядом и уже приехали: `AdminColorwayRef.area_estimates` публикует
+ * `per_garment` в единице СЛОТА для каждого рулонного слота колорвея, у которого нет своей строки
+ * рецепта. Это ТОТ ЖЕ расчёт, из которого сложены деньги (сервер считает их одним вызовом —
+ * colorwayAreaEstimates), а не второй ответ рядом.
+ *
+ * Признак «эта строка — оценка» получается из ДВУХ фактов сразу: у слота есть посчитанная оценка
+ * (refusal пуст) И сама строка не назвала расхода. Одного первого не хватает по определению —
+ * оценка существует ровно там, где нормы никто не вписал, — но проверка расхода делает связь
+ * невосприимчивой к тому, что сервер однажды начнёт публиковать оценку и для заявленных слотов
+ * (ровно это нужно, чтобы показать «оценка занижала на N%», и это следующая фаза).
+ */
+type AreaEst = { perGarment: string; unit: string; pieceCount: number; parsedAt?: string };
+
+/**
+ * bom_item_id → оценка слота. Ключ приходится перекладывать: оценка приезжает по `bom_line_key`
+ * (стабильный ключ строки, живущий и в слепке релиза, где id нет), а строка сметы называет строку
+ * BOM через `bom_item_id`. Соединяет их сама карточка — она несёт оба ключа на каждой строке BOM.
+ */
+function areaEstimateMap(
+  colorway: common_AdminColorwayRef | undefined,
+  bomItems: BomItemLite[],
+): Map<number, AreaEst> {
+  const out = new Map<number, AreaEst>();
+  for (const e of colorway?.areaEstimates ?? []) {
+    // Отказ — это НЕ оценка. У слота с refusal нет ни числа, ни денег: сервер его не считал, и
+    // подписать такую строку «оценка снизу» значило бы объявить ступенью пустоту.
+    if ((e.refusal ?? '').trim()) continue;
+    const perGarment = decimalToInput(e.perGarment).trim();
+    if (!perGarment) continue;
+    const bom = bomItems.find((b) => (b.lineKey ?? '') === (e.bomLineKey ?? ''));
+    const id = wireInt(bom?.id);
+    if (!id) continue;
+    out.set(id, {
+      perGarment,
+      unit: e.unit?.trim() || bom?.unit?.trim() || '',
+      pieceCount: e.pieceCount ?? 0,
+      parsedAt: e.parsedAt ?? undefined,
+    });
+  }
+  return out;
+}
+
+/** Ровно те поля строки BOM, которыми связываются два ключа — больше карточке здесь знать нечего. */
+type BomItemLite = { id?: number; lineKey?: string; unit?: string };
 
 /**
  * Расход материала и то, что в нём уже сидит.
@@ -135,10 +188,13 @@ const BREAKDOWN_LEAD = BREAKDOWN_COLS - 2;
 function Breakdown({
   estimate,
   wastageProv,
+  areaEst,
 }: {
   estimate: StyleCostEstimate;
   /** bom_item_id → провенанс процента раскроя строки (см. BomWastageProv). */
   wastageProv: Map<number, BomWastageProv>;
+  /** bom_item_id → оценка расхода по площади ЭТОГО колорвея (см. areaEstimateMap). */
+  areaEst: Map<number, AreaEst>;
 }) {
   const cur = estimate.baseCurrency || '';
   const materials = estimate.materials ?? [];
@@ -206,50 +262,89 @@ function Breakdown({
               </td>
             </tr>
           ) : (
-            materials.map((m, i) => (
-              <tr key={m.bomItemId || `m${i}`}>
-                <td>
-                  {m.materialName || `#${m.bomItemId}`}
-                  {/* Секция — приписка к названию, а не своя колонка: она нужна, только чтобы
+            materials.map((m, i) => {
+              // СТУПЕНЬ СТРОКИ — см. AreaEst: оценка есть у слота И расхода строка не назвала.
+              const est = areaEst.get(wireInt(m.bomItemId));
+              const consumption = decimalToInput(m.consumption).trim();
+              const byArea = !!est && !consumption;
+              return (
+                <tr key={m.bomItemId || `m${i}`}>
+                  <td>
+                    {m.materialName || `#${m.bomItemId}`}
+                    {/* Секция — приписка к названию, а не своя колонка: она нужна, только чтобы
                       найти строку в BOM, и отдельный столбец под это тратил ширину зря. */}
-                  <Text size='micro' variant='label' component='span'>
-                    {` · ${sectionLabel(m.section)}`}
-                  </Text>
-                </td>
-                <td>
-                  {decimalToInput(m.consumption) || '—'} {m.unit || ''}
-                </td>
-                <td>
-                  {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
-                </td>
-                <td>
-                  <RightCell>
-                    <PriceOrigin source={m.priceSource} date={m.priceDate} />
-                  </RightCell>
-                </td>
-                <td>
-                  <RightCell>
-                    <LineProblems
-                      noPrice={m.priceSource === 'STYLE_COST_PRICE_SOURCE_NONE'}
-                      noFxRate={m.hasBase === false}
-                      currency={m.currency}
-                    />
-                  </RightCell>
-                </td>
-                <td>
-                  {/* int64 на проводе — строка; wireInt сводит оба конца к числу до Map.get. */}
-                  <WastageCell m={m} prov={wastageProv.get(wireInt(m.bomItemId))} />
-                </td>
-                <td>{decimalToInput(m.lineTotalBase) || <EmptyCell />}</td>
-                <td>
-                  {m.hasBase === false ? (
-                    <EmptyCell />
-                  ) : (
-                    share(num(decimalToInput(m.lineTotalBase)))
-                  )}
-                </td>
-              </tr>
-            ))
+                    <Text size='micro' variant='label' component='span'>
+                      {` · ${sectionLabel(m.section)}`}
+                    </Text>
+                    {byArea && (
+                      <span className='ml-1 inline-flex align-middle'>
+                        <Pill tone='attention'>{TIER_ESTIMATE}</Pill>
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {/* Расход оценочной строки берётся из area_estimates: сам сервер в строку сметы
+                      его пока не кладёт, и пустая ячейка рядом с непустой суммой читалась как
+                      потерянные данные. Это ТО ЖЕ число, из которого посчитаны деньги строки. */}
+                    {byArea ? (
+                      <span className='flex flex-col items-end gap-0.5'>
+                        <span>{`${est?.perGarment} ${est?.unit || ''}`.trim()}</span>
+                        <Text size='micro' variant='label' component='span'>
+                          {est?.pieceCount
+                            ? `по площади ${est.pieceCount} ${
+                                est.pieceCount === 1 ? 'детали' : 'деталей'
+                              }`
+                            : 'по площади деталей'}
+                        </Text>
+                      </span>
+                    ) : (
+                      `${consumption || '—'} ${m.unit || ''}`
+                    )}
+                  </td>
+                  <td>
+                    {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
+                  </td>
+                  <td>
+                    <RightCell>
+                      <PriceOrigin source={m.priceSource} date={m.priceDate} />
+                    </RightCell>
+                  </td>
+                  <td>
+                    <RightCell>
+                      <LineProblems
+                        noPrice={m.priceSource === 'STYLE_COST_PRICE_SOURCE_NONE'}
+                        noFxRate={m.hasBase === false}
+                        currency={m.currency}
+                      />
+                    </RightCell>
+                  </td>
+                  <td>
+                    {/* У ОЦЕНКИ ВЫПАДОВ НЕТ — и молчание об этом было бы худшим из ответов: пустая
+                      ячейка wastage читается как «отходов ноль», тогда как правда обратная —
+                      отходы существуют, просто это число их не содержит. */}
+                    {byArea ? (
+                      <span className='flex flex-col items-end gap-0.5'>
+                        <Pill tone='attention'>netto</Pill>
+                        <Text size='micro' variant='label' component='span'>
+                          выпадов нет в числе — их знает раскладка
+                        </Text>
+                      </span>
+                    ) : (
+                      // int64 на проводе — строка; wireInt сводит оба конца к числу до Map.get.
+                      <WastageCell m={m} prov={wastageProv.get(wireInt(m.bomItemId))} />
+                    )}
+                  </td>
+                  <td>{decimalToInput(m.lineTotalBase) || <EmptyCell />}</td>
+                  <td>
+                    {m.hasBase === false ? (
+                      <EmptyCell />
+                    ) : (
+                      share(num(decimalToInput(m.lineTotalBase)))
+                    )}
+                  </td>
+                </tr>
+              );
+            })
           )}
 
           <tr className='bg-bgZebra'>
@@ -508,6 +603,8 @@ type MatrixRow = {
   deltaPct?: number;
   /** Самая крупная по модулю статья отклонения — куда смотреть первым делом. */
   top?: { kind: string; delta: number };
+  /** Оценки расхода по площади ЭТОГО колорвея, по bom_item_id строки сметы (см. areaEstimateMap). */
+  areaEst?: Map<number, AreaEst>;
 };
 
 /**
@@ -721,6 +818,9 @@ export function CostEstimateField({
       delta,
       deltaPct,
       top: movers[0],
+      // Оценки — СВОИ У КАЖДОГО КОЛОРВЕЯ (детали на ткань назначает его рецепт), поэтому карта
+      // строится на строке, а не одна на таблицу.
+      areaEst: areaEstimateMap(c, techCard?.techCard?.bomItems ?? []),
     };
   });
 
@@ -826,7 +926,11 @@ export function CostEstimateField({
               {open && row.estimate && (
                 <tr>
                   <td colSpan={MATRIX_COLS}>
-                    <Breakdown estimate={row.estimate} wastageProv={wastageProv} />
+                    <Breakdown
+                      estimate={row.estimate}
+                      wastageProv={wastageProv}
+                      areaEst={row.areaEst ?? new Map()}
+                    />
                   </td>
                 </tr>
               )}

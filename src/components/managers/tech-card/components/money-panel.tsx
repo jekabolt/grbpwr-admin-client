@@ -10,7 +10,7 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { COSTING_COST_KEYS, COSTING_COST_PATHS } from './costing-field';
-import { NO_PRICE, noFx, normSourceLabel } from './costing-vocab';
+import { NO_PRICE, noFx, normSourceLabel, TIER_ESTIMATE, TIER_PLAN } from './costing-vocab';
 import { TechCardFormData, wireInt } from './schema';
 
 /**
@@ -109,7 +109,10 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
   // (consumption_source ниже), и он у строк разный; свернуть их в одно слово карточки — это
   // вывод, а не чтение, и он был бы вторым выводом рядом с серверным. Факта же на тех-карте нет
   // вовсе: он принадлежит прогону.
-  const tier = !unitCost ? 'нет расчёта' : rollup?.hasEstimate ? 'оценка' : 'план';
+  // Слова — из общего словаря (costing-vocab), а не свои: ровно эту пилюлю вкладка КОСТИНГ теперь
+  // печатает у своей цифры, и два написания одной ступени на двух поверхностях одного экрана —
+  // это то, ради чего словарь заведён.
+  const tier = !unitCost ? 'нет расчёта' : rollup?.hasEstimate ? TIER_ESTIMATE : TIER_PLAN;
   const tierTone = rollup?.hasEstimate && unitCost ? 'attention' : 'mut';
 
   const materialsPerUnit = decimalToInput(rollup?.materialsPerUnit).trim();
