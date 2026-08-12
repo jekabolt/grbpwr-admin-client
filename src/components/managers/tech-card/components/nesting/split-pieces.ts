@@ -6,7 +6,14 @@
 // Токены размеров там строятся из манифеста, поэтому функции достаточно любого {has(token)}.
 // Авторизованные потребители продолжают импортировать из use-block-sizes — он реэкспортирует.
 import type { PieceDTO } from 'lib/nesting/types';
-import { deriveBlockSizes, normBlock, splitBlockSize, type BlockCode } from './block-code';
+import {
+  deriveBlockSizes,
+  normBlock,
+  splitBlockSize,
+  uniBaseOf,
+  uniOf,
+  type BlockCode,
+} from './block-code';
 
 export type SizeGroup = {
   // Размер, как он написан в файле; '' — блоки без размерного хвоста.
@@ -62,9 +69,15 @@ export function splitPiecesBySize(
   for (const p of pieces) {
     const raw = (p.blockName ?? '').trim();
     const size = verdict.get(raw) ?? '';
+    // Признак и ключ считаются ТЕМИ ЖЕ функциями, что внутри вердикта, и на обеих ветках: ветка
+    // «размер опознан» у uni-имени сегодня недостижима (deriveBlockSizes их пропускает), но
+    // построена она не на этом факте, а на общем правиле — иначе первое же ослабление пропуска
+    // тихо вернуло бы uni-блоку размер.
+    const uni = uniOf(raw);
+    const uniBase = uniBaseOf(raw, (t) => dictTokens.has(t));
     const code: BlockCode = size
-      ? { raw, identity: raw.slice(0, raw.length - size.length - 1), size }
-      : { raw, identity: raw, size: '' };
+      ? { raw, identity: raw.slice(0, raw.length - size.length - 1), size, uni, uniBase }
+      : { raw, identity: raw, size: '', uni, uniBase };
     codeById.set(p.id, code);
     const ident = normBlock(code.identity);
     if (ident) {

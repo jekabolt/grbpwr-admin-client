@@ -44,6 +44,16 @@ export type BlockCode = {
   identity: string;
   // Размерный хвост, как он написан в файле. '' — размера в имени нет.
   size: string;
+  // В имени стоит токен UNI — лекальщик ЗАЯВИЛ, что деталь не градуируется. Это не то же самое,
+  // что «размера в имени не нашлось»: второе — молчание разбора, первое — утверждение автора.
+  // Пока эти два состояния были одним, и карман, и криво выгруженный ряд одинаково падали в
+  // группу '' — и отказать по одному значило отказать по обоим.
+  uni: boolean;
+  // Имя без токена UNI и без базового размера при нём — ключ, по которому uni-копии одной детали
+  // узнают друг друга (PCK_L_UNI_M и PCK_L_UNI_S — одна и та же деталь, выгруженная дважды).
+  // '' у не-uni. ИДЕНТИЧНОСТЬЮ НЕ ЯВЛЯЕТСЯ и ею стать не может: под identity лежат сохранённые
+  // алиасы (UNIQUE по (card, scope, block)), и подмена ключа порвала бы связь деталь↔чертёж.
+  uniBase: string;
 };
 
 // Названия размеров в словаре пишутся как «xs_44ta_m»: код, числовой эквивалент, система.
@@ -64,23 +74,87 @@ export function sizeTokensOf(dictionaryName: string | undefined): string[] {
 // размер показываем так, как он написан в файле.
 const bareToken = (s: string) => s.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
 
+const UNI = 'uni';
+
+// ЛЕКАЛЬЩИК ЗАЯВИЛ, ЧТО ДЕТАЛЬ НЕ ГРАДУИРУЕТСЯ: отдельный `_`-токен UNI в имени блока.
+//
+// ОТДЕЛЬНЫЙ ТОКЕН, А НЕ ПОДСТРОКА, и это единственное, что делает признак безопасным: «UNIFORM»,
+// «TUNIC», «UNION» несут те же три буквы подряд, и поиск подстрокой объявил бы неградуируемой
+// половину обычного файла — то есть выкинул бы её из размерного ряда молча. Оформление снимается
+// тем же bareToken, которым сравниваются размеры: реальный файл пишет пометки в скобках («<UNI>»),
+// и признак обязан переживать это так же, как «BP_<S>» переживает базовый размер.
+export function uniOf(name: string): boolean {
+  return (name ?? '')
+    .trim()
+    .split('_')
+    .some((t) => bareToken(t) === UNI);
+}
+
+// КЛЮЧ, ПО КОТОРОМУ UNI-КОПИИ ОДНОЙ ДЕТАЛИ УЗНАЮТ ДРУГ ДРУГА.
+//
+// Настоящий файл лекальщика метит деталь токеном, НЕ УБИРАЯ базовый размер: `PCK_L_UNI_M`. CLO,
+// склеивающий по-размерные выгрузки в один DXF, честно приносит `PCK_L_UNI_M` и `PCK_L_UNI_S` —
+// одну и ту же деталь, нарисованную дважды. Их надо узнать друг в друге (иначе настил выкроит
+// карман дважды), но НЕЛЬЗЯ смешать с соседями: `FP_L` — это левая полочка, и съесть у неё «L»
+// значит потерять правую.
+//
+// Отсюда правило, узкое намеренно: удаляются все токены UNI и — только если он стоял СРАЗУ ЗА
+// последним из них и при этом сам последний в имени — размерный хвост при нём. Модификатор, не
+// прилегающий к UNI, не трогается никогда: `PCK_L_UNI` → `PCK_L`, а не `PCK`.
+//
+// Пустой остаток (имя целиком состоит из пометки) возвращает сырое имя — тот же прецедент, что у
+// пустой идентичности ниже: безымянный ключ склеил бы в одну деталь всё, что так названо.
+export function uniBaseOf(name: string, isSizeToken: (token: string) => boolean): string {
+  const raw = (name ?? '').trim();
+  const parts = raw.split('_');
+  const drop = new Set<number>();
+  let lastUni = -1;
+  for (let i = 0; i < parts.length; i++) {
+    if (bareToken(parts[i]) === UNI) {
+      drop.add(i);
+      lastUni = i;
+    }
+  }
+  if (lastUni < 0) return '';
+  const tail = lastUni + 1;
+  const tailBare = tail < parts.length ? bareToken(parts[tail]) : '';
+  if (tail === parts.length - 1 && tailBare && isSizeToken(tailBare)) drop.add(tail);
+  const base = parts.filter((_, i) => !drop.has(i)).join('_');
+  return base || raw;
+}
+
 export function splitBlockSize(
   block: string,
   // Достаточно членства: и Set, и Map подходят.
   sizeTokens: { has(token: string): boolean },
 ): BlockCode {
   const raw = block.trim();
+  // ЗАЯВЛЕНИЕ АВТОРА БЬЁТ ФОРМУ ИМЕНИ, поэтому проверка стоит ПЕРВОЙ. У `PCK_L_UNI_M` последний
+  // токен — настоящий размерный хвост, и обычная ветка ниже отрезала бы его, оставив деталь
+  // размера M. Но автор сказал, что деталь одна на весь ряд: размер здесь — базовый, на котором
+  // её нарисовали, а не размер, для которого она кроится.
+  if (uniOf(raw)) {
+    return {
+      raw,
+      // Идентичность — сырое имя ЦЕЛИКОМ: под ней лежат сохранённые алиасы (см. BlockCode.uniBase).
+      identity: raw,
+      size: '',
+      uni: true,
+      uniBase: uniBaseOf(raw, (t) => sizeTokens.has(t)),
+    };
+  }
   const parts = raw.split('_');
   // Одиночный токен размером быть не может: иначе блок с именем «M» превратился бы в деталь с
   // пустым именем.
-  if (parts.length < 2) return { raw, identity: raw, size: '' };
+  if (parts.length < 2) return { raw, identity: raw, size: '', uni: false, uniBase: '' };
   const last = parts[parts.length - 1];
-  if (!sizeTokens.has(bareToken(last))) return { raw, identity: raw, size: '' };
+  if (!sizeTokens.has(bareToken(last)))
+    return { raw, identity: raw, size: '', uni: false, uniBase: '' };
   const identity = parts.slice(0, -1).join('_');
   // «_XS» (ведущее подчёркивание) оставило бы пустую идентичность: такой блок стал бы
   // безымянным и молча пропал бы из диалога, хотя до этого прекрасно сопоставлялся.
-  if (!identity) return { raw, identity: raw, size: '' };
-  return { raw, identity, size: last };
+  if (!identity) return { raw, identity: raw, size: '', uni: false, uniBase: '' };
+  return { raw, identity, size: last, uni: false, uniBase: '' };
 }
 
 // Место размера в градации — по очищенному токену, чтобы «<S>» и «S» были одним размером.
@@ -123,6 +197,15 @@ export function deriveBlockSizes(
   for (const rawName of blockNames) {
     const name = (rawName ?? '').trim();
     if (!name || infoByBlock.has(name)) continue;
+    // UNI-БЛОК В ВЫВОДЕ ГРАДАЦИИ НЕ УЧАСТВУЕТ НИ ОДНОЙ СТОРОНОЙ — ни основой, ни хвостом, ни
+    // вердиктом. Пропуск живёт ЗДЕСЬ, а не у потребителей, и это существенно: у deriveBlockSizes
+    // три независимых входа (splitPiecesBySize, копия codeOf в size-areas-from-dxf, прямой вызов
+    // из missingSizesIn), и правило, дописанное в одном из них, разошлось бы с двумя другими —
+    // то есть один и тот же файл резался бы на идентичности по-разному в трёх местах.
+    //
+    // Не просто «не получает вердикта»: uni-хвост, попавший в частотную карту, повышал бы порог
+    // `need` и мог бы выбить из размерного ряда настоящий редкий размер соседей.
+    if (uniOf(name)) continue;
     const parts = name.split('_');
     if (parts.length < 2) continue;
     const stem = parts.slice(0, -1).join('_');
