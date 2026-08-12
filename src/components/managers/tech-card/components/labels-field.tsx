@@ -31,7 +31,9 @@ const ORIGIN = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 // per-card field, so it is a constant here rather than read from a label row.
 const BRAND = 'GRBPWR';
 
-const emptyLabel = {
+// Exported because the header's care picker creates the care label when a card has none — it must
+// seed the SAME row shape this tab appends, or the two paths drift the moment a field is added.
+export const emptyLabel = {
   labelType: 'TECH_CARD_LABEL_TYPE_MAIN',
   content: '',
   placement: '',
@@ -142,7 +144,10 @@ type BomComp = { section?: string; composition?: string; materialId?: number };
 // empty legacy string) has a blank composition string, which would leave care generation and the
 // preview empty even though the material's fibres are set — this reads the material's derived
 // composition code (structured entries → parseable JSON) as the fallback.
-function withMaterialComposition<T extends BomComp>(bomItems: T[], materials: common_Material[]): T[] {
+function withMaterialComposition<T extends BomComp>(
+  bomItems: T[],
+  materials: common_Material[],
+): T[] {
   return bomItems.map((b) => {
     if (b.composition?.trim() || !b.materialId) return b;
     const m = materials.find((mm) => wireInt(mm.id) === b.materialId);
