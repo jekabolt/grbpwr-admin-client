@@ -36,13 +36,20 @@ import type {
   common_TechCardColorwayUsage,
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import type {
+  LayEditorContext,
+  LaySlotOption,
+} from 'components/managers/production-runs/components/lay-editor';
+import { isRunLocked } from 'components/managers/production-runs/components/options';
 import { layKeys, useRunLays } from 'components/managers/production-runs/components/useLays';
 import {
   useSizeNames,
   useSizeOrdering,
 } from 'components/managers/model/components/use-size-systems';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
+import { SECTION } from 'constants/routes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 import { useQueryClient } from '@tanstack/react-query';
@@ -71,6 +78,7 @@ import {
   type RollGoodsLine,
 } from './bom-purpose';
 import { bomPurposeLabel } from './bom-purpose-labels';
+import { BatchLayProposal } from './nesting/batch-lay-proposal';
 import {
   planBatchMarkers,
   type BatchCell,
@@ -174,6 +182,12 @@ export function BatchMarkerQueue({
   const { control } = useFormContext<TechCardFormData>();
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  // ПРАВО НА НАСТИЛ — ЭТО ПРАВО НА ПРОИЗВОДСТВО, а не на тех-карты. Настил принадлежит прогону, и
+  // `canEdit` этого компонента (tech_cards:write) про него не говорит НИЧЕГО: раскройщик, которому
+  // открыты партии и закрыты карточки, обязан собрать настил, а тот, кому открыты карточки и
+  // закрыты партии, — не обязан увидеть кнопку, за которой стоит отказ сервера.
+  const { canWrite } = usePermissions();
+  const canWriteRuns = canWrite(SECTION.production);
   const sizeById = useSizeNames();
   const orderSizes = useSizeOrdering();
   const dictTokens = useDictionarySizeTokens();
@@ -297,6 +311,20 @@ export function BatchMarkerQueue({
     () => new Map(orderSizes([...new Set(cells.map((c) => c.sizeId))]).map((id, i) => [id, i])),
     [cells, orderSizes],
   );
+  // Подпись размера — ОДНА на весь компонент. Её читают план, сверка с рецептом и предложение
+  // настила; три инлайновых копии одного выражения разошлись бы ровно тогда, когда формат размера
+  // однажды поменяют в одном из трёх мест.
+  const sizeName = useCallback(
+    (id: number) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+    [sizeById],
+  );
+  // Имя колорвея — тем же правилом, что и вся вкладка раскладок (colorwayLabelOf внутри
+  // markerColorways). Форме настила оно нужно отдельной функцией: она подписывает им заголовок и
+  // выбор колорвея.
+  const colorwayName = useCallback(
+    (id: number) => colorways.find((c) => c.colorwayId === id)?.label || `#${id}`,
+    [colorways],
+  );
 
   // ── состояние очереди ────────────────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<Phase>('idle');
@@ -322,6 +350,9 @@ export function BatchMarkerQueue({
   const batchRunId = Number(run.id ?? 0);
   const laysQuery = useRunLays(batchRunId, batchRunId > 0 && mode === 'batch');
   const runMarkers = useMemo(() => laysQuery.data?.runMarkers ?? [], [laysQuery.data]);
+  // Настилы прогона — тот же ответ, что и раскладки. Читает их предложение настила (Ф6.9): по ним
+  // видно, собран ли настил по этой раскладке уже, и с каких концевых потерь начал этот цех.
+  const lays = useMemo(() => laysQuery.data?.lays ?? [], [laysQuery.data]);
   // РАСКЛАДКИ, ЗАНЯТЫЕ СЕКЦИЯМИ НАСТИЛОВ. Секция настила ссылается на раскладку по id, а её
   // плановая длина, число полотен и проверки посчитаны по ТОЙ геометрии; перезаписать такую
   // раскладку значит оставить производственную строку ссылаться на то же место с другим
@@ -349,6 +380,60 @@ export function BatchMarkerQueue({
   const [off, setOff] = useState<Record<string, boolean>>({});
   const [runs, setRuns] = useState<Record<string, JobRun>>({});
   const stale = !!parsed && parsed.signature !== prepSignature;
+
+  // ── окружение ФОРМЫ НАСТИЛА ──────────────────────────────────────────────────────────────
+  //
+  // Форма настила на весь клиент одна (`LayEditor`), и монтируется она отсюда ровно теми же
+  // данными, какими её монтирует страница партии. Собирается окружение ЗДЕСЬ, потому что здесь
+  // лежат обе его половины: рулонные слоты и колорвеи — с карточки, раскройные раскладки и
+  // порядок настилов — с прогона.
+  //
+  // Партия ЗАКРЫТА — настил не правится: он план, а не история (то же правило, что на странице
+  // партии, и тот же предикат).
+  const runLocked = isRunLocked(run.run?.status);
+  const layColorwayOptions = useMemo(
+    () =>
+      [...new Set(cells.map((c) => c.colorwayId))]
+        .filter((id) => id > 0)
+        .map((id) => ({ colorwayId: id, label: colorwayName(id) })),
+    [cells, colorwayName],
+  );
+  // Слоты — рулонные строки BOM, тем же предикатом, что и весь раскрой. `materialId` едет вместе с
+  // ними ради выбора РУЛОНА в форме: лоты спрашиваются по артикулу, и у слота без каталожной связи
+  // список рулонов взять неоткуда — форма говорит это вслух.
+  const laySlotOptions = useMemo<LaySlotOption[]>(
+    () =>
+      rollLines.map((l) => ({
+        lineKey: l.lineKey,
+        name: l.name.trim() || materialById.get(l.materialId)?.name?.trim() || l.lineKey,
+        materialId: l.materialId,
+      })),
+    [rollLines, materialById],
+  );
+  const layEditorContext = useMemo<LayEditorContext>(
+    () => ({
+      runId: batchRunId,
+      techCardId,
+      colorwayLabel: colorwayName,
+      colorwayOptions: layColorwayOptions,
+      slotOptions: laySlotOptions,
+      runMarkers,
+      // Источники копирования — только КАРТОЧНЫЕ раскладки, ровно как на странице партии: копировать
+      // прогонную в её же прогон незачем, она уже в нём.
+      cardMarkers: markers,
+      nextDisplayOrder: lays.length + 1,
+    }),
+    [
+      batchRunId,
+      techCardId,
+      colorwayName,
+      layColorwayOptions,
+      laySlotOptions,
+      runMarkers,
+      markers,
+      lays.length,
+    ],
+  );
 
   const clientRef = useRef<NestingWorkerClient | null>(null);
   // Скачанные листы по ткани. Разбор воркер держит ровно один, и повторный разбор той же ткани
@@ -420,7 +505,7 @@ export function BatchMarkerQueue({
       scopes: parsed.scopes,
       looseSheets,
       colorways,
-      sizeLabel: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+      sizeLabel: sizeName,
       // Порядок ГРАДАЦИИ, а не алфавита: состав «3M+2L» и состав «2L+3M» — одно и то же соотношение,
       // но второе читается как порча данных.
       sizeOrderOf: (id) => sizeOrder.get(id) ?? 1e6,
@@ -440,6 +525,7 @@ export function BatchMarkerQueue({
     cells,
     colorways,
     sizeById,
+    sizeName,
     sizeOrder,
     dictTokens,
     markers,
@@ -956,7 +1042,7 @@ export function BatchMarkerQueue({
         // количествами в партии. Размер, по которому раскладка не снялась, в сверку не входит ни
         // слева, ни справа — иначе половина сравнения описывала бы другую партию.
         b.lines.flatMap((l) => l.job.sizes),
-        (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+        sizeName,
       );
       const deltaPct =
         measured && current && current.kind !== 'perSizeGap' && current.value > 0
@@ -1002,7 +1088,7 @@ export function BatchMarkerQueue({
         plannedQty,
       };
     });
-  }, [plan, runs, cells, rollLines, materialById, techCard, sizeOrder]);
+  }, [plan, runs, cells, rollLines, materialById, techCard, sizeName, sizeOrder]);
 
   // ── рендер ────────────────────────────────────────────────────────────────────────────────
   const running = phase === 'running';
@@ -1385,36 +1471,50 @@ export function BatchMarkerQueue({
                               : `завышала на ${Math.abs(g.deltaPct).toFixed(0)}%`
                           }`}
               </Text>
+              {/* ═══ СЛЕДУЮЩИЙ ШАГ НАСТИЛА ПАРТИИ — СТРОКА РАСКРОЯ ПРОГОНА.
+                  Раскладка измерена, и всё, чего не хватает производственной строке, — это число
+                  слоёв (выводится из партии) и концевые потери (не выводятся ниоткуда, см.
+                  batch-lay-proposal). Форма настила при этом ОДНА на клиент: здесь монтируется та
+                  же самая, что на странице партии, и запись делает она.
+
+                  Нормой прогонная раскладка не станет физически (CHECK chk_tcm_run_not_norm) —
+                  поэтому шага «назначить нормой» у настила партии нет и в помине. */}
+              {g.head.mode === 'batch' && batchRunId > 0 ? (
+                <BatchLayProposal
+                  job={g.head}
+                  markerId={runs[g.head.id]?.markerId ?? 0}
+                  cells={cells}
+                  lays={lays}
+                  sizeLabel={sizeName}
+                  canEdit={canWriteRuns}
+                  locked={runLocked}
+                  laysLoading={laysLoading}
+                  editor={layEditorContext}
+                  fallback={
+                    <Text size='micro' variant='label'>
+                      собрать раскрой руками, вместе с остальными тканями партии, можно на{' '}
+                      <Button asChild variant='underline' size='xs'>
+                        <Link to={`/production-runs/${run.id ?? 0}`}>странице партии ↗</Link>
+                      </Button>
+                    </Text>
+                  }
+                />
+              ) : null}
             </div>
           ))}
-          {/* СЛЕДУЮЩИЙ ШАГ — назначить раскладку НОРМОЙ, и делается он там, где уже живёт
-              подтверждение с его последствиями (переназначение нормы рецепты НЕ пересчитывает).
-              Ссылка, а не вторая кнопка: копия того диалога разошлась бы с оригиналом.
-
-              У настила партии этого шага нет и быть не может: он принадлежит прогону, а прогонная
-              раскладка нормой не становится физически (CHECK chk_tcm_run_not_norm). Его место —
-              страница партии, где из раскладок собирают настилы.
-
-              TODO(следующая фаза): предложить отсюда СОЗДАТЬ строку настила прогона
-              (production_run_lay) по этой раскладке — число полотен и концевые потери считает уже
-              она, и они не выводятся из геометрии маркера. */}
-          <Text size='micro' variant='label'>
-            {mode === 'batch' ? (
-              <>
-                настил принадлежит партии — собрать из него раскрой можно на{' '}
-                <Button asChild variant='underline' size='xs'>
-                  <Link to={`/production-runs/${run.id ?? 0}`}>странице партии ↗</Link>
-                </Button>
-              </>
-            ) : (
-              <>
-                назначить раскладку нормой ткани и применить расход в рецепт —{' '}
-                <Button asChild variant='underline' size='xs'>
-                  <Link to='?tab=patterns'>раскладки карточки ↗</Link>
-                </Button>
-              </>
-            )}
-          </Text>
+          {/* СЛЕДУЮЩИЙ ШАГ РАЗМЕРНОЙ НОРМЫ — назначить раскладку НОРМОЙ, и делается он там, где уже
+              живёт подтверждение с его последствиями (переназначение нормы рецепты НЕ
+              пересчитывает). Ссылка, а не вторая кнопка: копия того диалога разошлась бы с
+              оригиналом. У настила партии свой шаг, и он стоит выше — на каждой ткани отдельно,
+              потому что настил собирается на ткань, а не на всю партию сразу. */}
+          {mode !== 'batch' ? (
+            <Text size='micro' variant='label'>
+              назначить раскладку нормой ткани и применить расход в рецепт —{' '}
+              <Button asChild variant='underline' size='xs'>
+                <Link to='?tab=patterns'>раскладки карточки ↗</Link>
+              </Button>
+            </Text>
+          ) : null}
         </div>
       ) : null}
     </div>
