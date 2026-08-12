@@ -87,6 +87,28 @@ export type CommitOutcome = {
 export type PersistedStaging = Array<{ key: string; label: string; snapshot: unknown }>;
 
 /**
+ * Одинаковы ли два снимка ПО ЗНАЧЕНИЮ.
+ *
+ * По ссылке сравнивать нельзя: часть панелей собирает объект снимка прямо в вызове stage (размерная
+ * таблица), то есть на каждый рендер он новый при неизменном содержимом — и любое сравнение ссылок
+ * вечно отвечает «изменилось». Ровно на этом ответе строилось решение «панель уехала, пока шёл
+ * коммит», и оно оказывалось ложным после каждого чужого рендера.
+ *
+ * Снимки — простые сериализуемые данные (их же пишет черновик в localStorage), поэтому JSON здесь
+ * законный способ сравнить. `undefined` с обеих сторон — это «панель снимков не даёт»; такие
+ * считаются одинаковыми, а вопрос «двигалась ли она» решается выше и не этой функцией.
+ */
+function sameSnapshot(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (a === undefined || b === undefined) return false;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Identity-stable for the provider's lifetime EXCEPT across a hydrate() — safe in a useEffect dep
  * list, and deliberately not inert there (see `hydratedAt`).
  */
@@ -142,11 +164,35 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
 
     return {
       stage: (change) => {
-        // Bumped OUTSIDE the updater below (a state updater must stay pure — React can call it
-        // twice). Counting every stage call is the point: the in-place branch swaps in a newer
-        // closure without changing anything a reader can see, so the count is the only trace that
-        // the panel's payload moved.
-        stageGen.current.set(change.key, (stageGen.current.get(change.key) ?? 0) + 1);
+        // СЧЁТЧИК ОБЯЗАН СЧИТАТЬ ПРАВКИ ОПЕРАТОРА, А НЕ ПЕРЕРИСОВКИ.
+        //
+        // commitAll читает его до и после коммита и по расхождению решает «панель уехала вперёд,
+        // пока я писал» — то есть НЕ гасит правку и просит сохранить ещё раз. Пока счётчик считал
+        // КАЖДЫЙ вызов stage, это решение было ложным по построению: коммит рецепта дожидается
+        // инвалидации чтения карточки, свежий ответ приносит новый общий tech_card.lock_version,
+        // панель перерисовывается, её эффект вызывает stage заново — с тем же самым содержимым.
+        // Счётчик двигался, панель не гасилась, `dirty` оставался, и следующий сейв повторял всё
+        // ровно так же: «changed while the save was running. Press Save again» на КАЖДОЕ
+        // сохранение, без единого шанса выйти.
+        //
+        // Поэтому «уехала» теперь определяется по тому, что читатель может увидеть: подпись, порядок
+        // и СОДЕРЖИМОЕ снимка — по значению, а не по ссылке (панель размерной таблицы собирает
+        // объект снимка заново на каждый рендер, так что сравнение ссылок для неё вечно «изменилось»).
+        //
+        // Панель БЕЗ снимка остаётся на прежнем правиле «любой stage = движение»: доказать обратное
+        // о ней нечем, а пропущенная правка на лету — это молча потерянные нажатия, ради которых
+        // счётчик и заводился.
+        const prevChange = changesRef.current.find((c) => c.key === change.key);
+        const moved =
+          !prevChange ||
+          change.snapshot === undefined ||
+          prevChange.label !== change.label ||
+          prevChange.order !== change.order ||
+          !sameSnapshot(prevChange.snapshot, change.snapshot);
+        // Bumped OUTSIDE the updater below (a state updater must stay pure — React can call it twice).
+        if (moved) {
+          stageGen.current.set(change.key, (stageGen.current.get(change.key) ?? 0) + 1);
+        }
         setChanges((prev) => {
           const existing = prev.find((c) => c.key === change.key);
           // Bail out when nothing a reader can see has moved. `commit` is a fresh closure on every
@@ -156,7 +202,7 @@ export function TechCardStagingProvider({ children }: { children: ReactNode }) {
             existing &&
             existing.label === change.label &&
             existing.order === change.order &&
-            existing.snapshot === change.snapshot
+            sameSnapshot(existing.snapshot, change.snapshot)
           ) {
             // Same visible state, newer closure: replace in place WITHOUT a new array identity, so
             // the header does not re-render and no dependent effect re-fires.
