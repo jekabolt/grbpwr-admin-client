@@ -19,6 +19,10 @@ type PieceRow = {
   lineKey?: string;
   name?: string;
   piecesPerGarment?: number;
+  // Галка «не градуируется — во всех размерах». Едет в расчёт наравне с токеном UNI в имени
+  // блока: без неё скоуп из одних карманов отказывал бы «похоже, выгружен только один размер»
+  // на карточке, где оператор уже ответил, что размера здесь и не будет.
+  ungraded?: boolean;
   materials?: { bomLineKey?: string; fusingBomLineKey?: string }[];
 };
 type AliasRow = {
@@ -144,6 +148,7 @@ export function useFabricDxfPieces(
         lineKey: (p.lineKey ?? '').trim(),
         perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
         refs,
+        ungraded: !!p.ungraded,
       });
     }
     return { pieces: out, unaliasedPieces: missing };

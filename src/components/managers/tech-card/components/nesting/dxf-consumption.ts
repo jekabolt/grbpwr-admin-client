@@ -27,6 +27,7 @@
 import type { PieceDTO } from 'lib/nesting/types';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { DxfIndex, PieceBlockRef } from './dxf-geometry';
+import { uniOf } from './block-code';
 import { toBomUnit, type FabricWeightBasis } from './marker-io';
 import { aliasIdentity } from './use-block-sizes';
 
@@ -45,6 +46,14 @@ export type DxfNormPiece = {
   perGarment: number;
   /** Привязки «деталь → блок чертежа»; побеждает первая, которая нашлась (как в findPiece). */
   refs: readonly PieceBlockRef[];
+  /**
+   * Галка «не градуируется — во всех размерах» с карточки детали (`tech_card_piece.ungraded`).
+   *
+   * Второй, равноправный источник того же заявления: токен UNI его несёт из файла, галка — руками.
+   * Отсутствие поля — это «оператор не отвечал», а не «градуируется»: старые карточки его не
+   * несут вовсе, и читать их молчание как ответ значило бы решить за них.
+   */
+  ungraded?: boolean;
 };
 
 export type DxfNormSizeRow = {
@@ -177,7 +186,25 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   }
 
   // ── что каждая деталь несёт в чертеже ────────────────────────────────────────────────────
-  type Resolved = { piece: DxfNormPiece; bySize: Map<string, PieceDTO[]>; graded: boolean };
+  //
+  // СОСТОЯНИЙ У ДЕТАЛИ ТРИ, А НЕ ДВА, и различать их обязан именно этот расчёт.
+  //
+  //   graded              — размерный хвост в имени блока: своя геометрия у каждого размера;
+  //   explicit-ungraded   — АВТОР СКАЗАЛ, что деталь одна на весь ряд (токен UNI в имени блока
+  //                         либо галка на карточке);
+  //   unclassified-sizeless — размера в имени нет, и не сказал никто: скорее всего, выгружен
+  //                         один размер, и «норма ряда» по такому файлу была бы выдумкой.
+  //
+  // Пока состояний было два, последние два были одним, и отказ ниже накрывал оба разом. Скоуп из
+  // одних карманов и обтачек — законный (мешковина, шлёвки, планка), и норма у него честно одна
+  // на все размеры: одинаковость там ИСТИННА, а не выведена из отсутствия данных.
+  type Resolved = {
+    piece: DxfNormPiece;
+    bySize: Map<string, PieceDTO[]>;
+    graded: boolean;
+    /** Деталь ЗАЯВЛЕНА неградуируемой: токен во всех её контурах либо галка на карточке. */
+    explicit: boolean;
+  };
   const resolved: Resolved[] = [];
   const unmatched: string[] = [];
   for (const piece of input.pieces) {
@@ -221,7 +248,19 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
         reason: `деталь «${piece.name}» нарисована и с размерным хвостом, и без него — понять, справочный это контур базового размера или деталь, одинаковая во всех размерах, нечем. Разница — целая деталь в площади каждого размера`,
       };
     }
-    resolved.push({ piece, bySize: norm, graded });
+    // ТОКЕН ЧИТАЕТСЯ У КАЖДОГО КОНТУРА, А НЕ У ПЕРВОГО. Деталь законно нарисована несколькими
+    // блоками (разные листы, разные ревизии), и пометка, стоящая лишь на одном из них, — это не
+    // заявление автора, а его недоделка: считать по ней весь скоуп «объявленным» значило бы снять
+    // отказ по половине улики.
+    const contours = [...norm.values()].flat();
+    const tokenSaysUngraded =
+      contours.length > 0 && contours.every((c) => uniOf(c.blockName ?? ''));
+    resolved.push({
+      piece,
+      bySize: norm,
+      graded,
+      explicit: piece.ungraded === true || tokenSaysUngraded,
+    });
   }
   if (unmatched.length > 0) {
     // Частичная площадь ЗАНИЖАЕТ норму, и молча: экран показал бы число, склад — недостачу.
@@ -426,8 +465,14 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // сколько S», сделанное не по выкройкам, а по их отсутствию. Ровно та нечестность, ради которой
   // диалог и пишет ряд, а не скаляр. Один размер в ряду — случай другой: одинаковость там истинна
   // (шапка, сумка), и отказывать нечему.
+  //
+  // …И РОВНО ПОЭТОМУ ОТКАЗ СНИМАЕТСЯ, КОГДА ОДИНАКОВОСТЬ ЗАЯВЛЕНА. Скоуп, где КАЖДАЯ деталь
+  // explicit-ungraded, — это не «выгружен один размер», а сумка из кармана и обтачки: одно число
+  // всем размерам там ПРАВДА, и отказывать не в чем. Условие полное намеренно: одна
+  // unclassified-деталь рядом с объявленными означает, что про неё как раз ничего не сказано, —
+  // и её-то размер, возможно, и не выгрузили. Отказ в этом случае остаётся ДОСЛОВНО прежним.
   const gradedPieces = resolved.filter((r) => r.graded).length;
-  if (gradedPieces === 0 && input.sizeIds.length > 1) {
+  if (gradedPieces === 0 && input.sizeIds.length > 1 && !resolved.every((r) => r.explicit)) {
     return {
       ok: false,
       reason:

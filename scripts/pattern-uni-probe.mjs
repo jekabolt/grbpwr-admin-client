@@ -13,7 +13,8 @@ const outfile = resolve(tmpdir(), `uni-probe-${process.pid}.mjs`);
 await esbuild({
   entryPoints: [resolve(HERE, 'pattern-uni-entry.ts')], bundle: true, platform: 'node',
   format: 'esm', target: 'node20', outfile, logLevel: 'warning', absWorkingDir: REPO,
-  alias: { components: resolve(REPO,'src/components'), lib: resolve(REPO,'src/lib'), api: resolve(REPO,'src/api') },
+  alias: { components: resolve(REPO,'src/components'), lib: resolve(REPO,'src/lib'), api: resolve(REPO,'src/api'),
+           utils: resolve(REPO,'src/utils'), constants: resolve(REPO,'src/constants'), ui: resolve(REPO,'src/ui') },
 });
 const m = await import(pathToFileURL(outfile).href);
 
@@ -285,6 +286,161 @@ console.log('\nT2.e · края: одно имя из двух файлов, п�
      'исключены ОБА контура проигравшего блока — и на слое 1, и на слое 14',
      JSON.stringify([...rl.dedupe.excludedIds]));
   ck(!rl.dedupe.excludedIds.has(1), 'победитель на месте');
+}
+
+// ══ T4 · три состояния детали, снятие ЛОЖНЫХ отказов нормы ═════════════════════════════════
+
+// DxfIndex собирается ТЕМ ЖЕ правилом, что useDxfIndex: ключ `{скоуп}|{идентичность}` → размер →
+// контуры. Хук здесь не зовём (он на хуках React), но правило переписано, а не позаимствовано, —
+// иначе пробник проверял бы сам себя.
+const SCOPE = 'S';
+const indexOf = (pieces) => {
+  const split = m.splitPiecesBySize(pieces, m.DICT);
+  const byKey = new Map();
+  for (const p of pieces) {
+    const code = split.codeById.get(p.id);
+    const identity = m.normBlock(code?.identity ?? p.blockName ?? '');
+    if (!identity) continue;
+    const key = `${SCOPE}|${identity.toLowerCase()}`;
+    const bySize = byKey.get(key) ?? new Map();
+    const size = code?.size ?? '';
+    bySize.set(size, [...(bySize.get(size) ?? []), p]);
+    byKey.set(key, bySize);
+  }
+  return { split, byKey, contourLayer: '1', grainLayer: '', filesOfScope: new Map() };
+};
+const SIZE_IDS = [1, 2, 3, 4, 5];
+const TOKENS = { 1: ['xs'], 2: ['s'], 3: ['m'], 4: ['l'], 5: ['xl'] };
+const normFor = (pieces, cardPieces) =>
+  m.dxfNormAreas({
+    index: indexOf(pieces), pieces: cardPieces, unaliasedPieces: [], sizeIds: SIZE_IDS,
+    tokensOfSize: (id) => TOKENS[id] ?? [], contourLayer: '1', allowanceCm: 0,
+  });
+const cardPiece = (name, block, over = {}) =>
+  ({ name, lineKey: name.toLowerCase(), perGarment: 1, refs: [{ scopeKey: SCOPE, block }], ...over });
+
+// Дословный текст прежнего отказа — переписан сюда РУКАМИ, а не считан из модуля: иначе правка
+// формулировки прошла бы мимо проверки «отказ остался прежним».
+const OLD_REFUSAL =
+  'в выкройках этой ткани ни одна деталь не градуируется по размерам — площадь каждого размера ' +
+  'вышла бы одинаковой, и это была бы не норма размера, а копия соседней. Похоже, выгружен только один размер';
+
+console.log('\nT4.1 · скоуп из одних UNI-деталей получает норму: одно ЧЕСТНОЕ число всем размерам');
+{
+  const pieces = m.PCK_UNI.map((n, i) => m.piece(i + 1, n, { areaCm2: 100 + i }));
+  const card = m.PCK_UNI.map((n) => cardPiece(n, n));
+  const out = normFor(pieces, card);
+  ck(out.ok === true, 'ok: true (прежде здесь стоял отказ «выгружен только один размер»)',
+     out.ok ? '' : out.reason);
+  if (out.ok) {
+    ck(out.areas.rows.length === 5, 'норма выдана ВСЕМ пяти размерам', String(out.areas.rows.length));
+    const areas = new Set(out.areas.rows.map((r) => r.areaCm2));
+    ck(areas.size === 1, 'площадь у всех размеров ОДНА (деталь одна на весь ряд)',
+       JSON.stringify([...areas]));
+    ck(out.areas.rows[0].areaCm2 === 100 + 101 + 102 + 103, 'площадь = сумма четырёх карманов',
+       String(out.areas.rows[0].areaCm2));
+    ck(out.areas.gradedPieces === 0, 'градуированных деталей ноль — и это законно');
+    ck(out.areas.pieceRows.length === 4, 'пер-детальных строк четыре, по одной на деталь',
+       String(out.areas.pieceRows.length));
+    ck(out.areas.pieceRows.every((r) => r.sizeId === 0),
+       'все строки идут с sizeId 0 — сервер запрещает пер-размерные строки у ungraded',
+       JSON.stringify(out.areas.pieceRows.map((r) => r.sizeId)));
+  }
+}
+
+console.log('\nT4.2 · те же детали БЕЗ токена, но с галкой на карточке — тоже норма');
+{
+  const names = ['PCK_L', 'PCK_L_#', 'PCK_R', 'PCK_R_#'];
+  const pieces = names.map((n, i) => m.piece(i + 1, n, { areaCm2: 100 + i }));
+  const withFlag = names.map((n) => cardPiece(n, n, { ungraded: true }));
+  const out = normFor(pieces, withFlag);
+  ck(out.ok === true, 'галка — равноправное заявление, отказа нет', out.ok ? '' : out.reason);
+  ck(out.ok && out.areas.rows.length === 5, 'норма у всех пяти размеров');
+  // Та же геометрия БЕЗ галки — отказ обязан вернуться дословно.
+  const bare = normFor(pieces, names.map((n) => cardPiece(n, n)));
+  ck(bare.ok === false, 'без галки и без токена — отказ');
+  ck(!bare.ok && bare.reason === OLD_REFUSAL, 'текст отказа ДОСЛОВНО прежний', !bare.ok ? bare.reason : '');
+}
+
+console.log('\nT4.3 · unclassified-sizeless: отказ остаётся, и одной необъявленной детали хватает');
+{
+  const names = ['POCKET'];
+  const out = normFor(m.piecesOf(names, { areaCm2: 100 }), [cardPiece('POCKET', 'POCKET')]);
+  ck(out.ok === false, 'деталь без токена и без галки — отказ');
+  ck(!out.ok && out.reason === OLD_REFUSAL, 'текст ДОСЛОВНО прежний', !out.ok ? out.reason : '');
+  // СМЕШАННЫЙ скоуп: три uni-детали + одна необъявленная. Условие полное намеренно — именно у
+  // необъявленной детали, возможно, и не выгрузили остальные размеры.
+  const mixNames = [...m.PCK_UNI.slice(0, 3), 'POCKET'];
+  const mix = normFor(
+    mixNames.map((n, i) => m.piece(i + 1, n, { areaCm2: 100 })),
+    mixNames.map((n) => cardPiece(n, n)),
+  );
+  ck(mix.ok === false, 'одна unclassified деталь среди объявленных — отказ остаётся');
+  ck(!mix.ok && mix.reason === OLD_REFUSAL, 'и снова тот же текст');
+  // Один размер в ряду — случай другой, и он отказом не был никогда.
+  const single = m.dxfNormAreas({
+    index: indexOf(m.piecesOf(['POCKET'], { areaCm2: 100 })), pieces: [cardPiece('POCKET', 'POCKET')],
+    unaliasedPieces: [], sizeIds: [3], tokensOfSize: (id) => TOKENS[id] ?? [],
+    contourLayer: '1', allowanceCm: 0,
+  });
+  ck(single.ok === true, 'ряд из одного размера норму получает, как и раньше',
+     single.ok ? '' : single.reason);
+}
+
+console.log('\nT4.4 · РЕГРЕССИЯ: градуированный скоуп считается ровно как раньше');
+{
+  const names = ['BP_XS', 'BP_S', 'BP_M', 'BP_L', 'BP_XL', 'SL_R_XS', 'SL_R_S', 'SL_R_M', 'SL_R_L', 'SL_R_XL'];
+  const pieces = m.piecesOf(names);
+  const out = normFor(pieces, [cardPiece('спинка', 'BP'), cardPiece('рукав', 'SL_R')]);
+  ck(out.ok === true, 'норма выдана', out.ok ? '' : out.reason);
+  ck(out.ok && out.areas.gradedPieces === 2, 'обе детали градуируются',
+     out.ok ? String(out.areas.gradedPieces) : '');
+  // Площадь размера = сумма двух контуров этого размера (areaFor: xs 100, s 110, m 120, l 130, xl 140).
+  ck(out.ok && out.areas.rows.every((r) => r.areaCm2 === 2 * (90 + 10 * SIZE_IDS.indexOf(r.sizeId) + 10)),
+     'площади по размерам растут, как в файле',
+     out.ok ? JSON.stringify(out.areas.rows) : '');
+  ck(out.ok && out.areas.pieceRows.every((r) => r.sizeId > 0),
+     'у градуированной детали строки идут ПО РАЗМЕРАМ, а не с нулём');
+}
+
+console.log('\nT4.5 · sizeAreasFromParsed: доказательство берётся из БЛОБА, а не из галки');
+{
+  const uniNames = ['PCK_L_UNI_M', 'PCK_R_UNI_M'];
+  const parsed = uniNames.map((n, i) => m.piece(i + 1, n, { areaCm2: 100 + i }));
+  const marker = (names) => ({
+    summary: { id: 1, seamAllowanceMm: { value: '0' }, contourLayer: '1', grainLayer: '' },
+    layout: { schemaVersion: 4, pieces: names.map((n, i) => ({ pieceId: i + 1, name: n, blockName: n, quantity: 1, areaCm2: 100 + i })), placements: [] },
+  });
+  const uni = m.sizeAreasFromParsed({
+    marker: marker(uniNames), parsed, sizeIds: SIZE_IDS,
+    tokensOfSize: (id) => TOKENS[id] ?? [], isSizeToken: m.isSizeToken,
+  });
+  ck(uni.ok === true, 'блоб из одних UNI-блоков продолжается на весь ряд', uni.ok ? '' : uni.reason);
+  if (uni.ok) {
+    ck(uni.areas.areaBySize.size === 5, 'a_s есть у всех пяти размеров', String(uni.areas.areaBySize.size));
+    ck(new Set([...uni.areas.areaBySize.values()]).size === 1, 'и оно у всех одно');
+    ck(uni.areas.agnosticCm2 === 201, 'общая часть = сумма неградуируемых', String(uni.areas.agnosticCm2));
+  }
+  // Старый блоб без токена — отказ ДОСЛОВНО прежний: блоб галку не хранит и доказательством её не
+  // сделать никакими правками карточки.
+  const OLD_MARKER_REFUSAL =
+    'в раскладке ни одна деталь не градуируется по размерам — площадь любого размера получилась ' +
+    'бы одинаковой, и это была бы не норма размера, а копия соседней';
+  const plain = m.sizeAreasFromParsed({
+    marker: marker(['POCKET_L', 'POCKET_R']),
+    parsed: m.piecesOf(['POCKET_L', 'POCKET_R'], { areaCm2: 100 }),
+    sizeIds: SIZE_IDS, tokensOfSize: (id) => TOKENS[id] ?? [], isSizeToken: m.isSizeToken,
+  });
+  ck(plain.ok === false, 'блоб без токенов — отказ');
+  ck(!plain.ok && plain.reason === OLD_MARKER_REFUSAL, 'текст отказа прежний', !plain.ok ? plain.reason : '');
+  // Смешанный блоб: один блок с токеном, другой без — доказательства нет.
+  const half = m.sizeAreasFromParsed({
+    marker: marker(['PCK_L_UNI_M', 'POCKET_R']),
+    parsed: m.piecesOf(['PCK_L_UNI_M', 'POCKET_R'], { areaCm2: 100 }),
+    sizeIds: SIZE_IDS, tokensOfSize: (id) => TOKENS[id] ?? [], isSizeToken: m.isSizeToken,
+  });
+  ck(half.ok === false && half.reason === OLD_MARKER_REFUSAL,
+     'один блок с токеном не объявляет весь блоб', half.ok ? 'ok' : half.reason);
 }
 
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);

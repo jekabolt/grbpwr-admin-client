@@ -9,6 +9,7 @@ import {
   uniBaseOf,
   uniOf,
 } from 'components/managers/tech-card/components/nesting/block-code';
+import { dxfNormAreas } from 'components/managers/tech-card/components/nesting/dxf-consumption';
 import {
   dedupeUniPieces,
   markerUnits,
@@ -16,15 +17,18 @@ import {
   uniConflictReason,
   unitsOfPieces,
 } from 'components/managers/tech-card/components/nesting/piece-selection';
+import { sizeAreasFromParsed } from 'components/managers/tech-card/components/nesting/size-areas-from-dxf';
 import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
 import type { PieceDTO } from 'lib/nesting/types';
 
 export {
   dedupeUniPieces,
   deriveBlockSizes,
+  dxfNormAreas,
   markerUnits,
   normBlock,
   selectMarkerPieces,
+  sizeAreasFromParsed,
   splitBlockSize,
   splitPiecesBySize,
   uniBaseOf,

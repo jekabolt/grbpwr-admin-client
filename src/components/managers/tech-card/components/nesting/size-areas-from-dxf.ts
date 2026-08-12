@@ -41,7 +41,7 @@ import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { mmToEngineCm } from './allowance-units';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { PieceDTO } from 'lib/nesting/types';
-import { deriveBlockSizes, normBlock } from './block-code';
+import { deriveBlockSizes, normBlock, uniOf } from './block-code';
 import {
   readMarkerConditions,
   rebuildParseOpts,
@@ -154,8 +154,14 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   const graded = new Map<string, Graded>();
   const agnosticIdentities = new Set<string>();
   let agnosticCm2 = 0;
+  // ЗАЯВЛЕНИЕ «ДЕТАЛЬ НЕ ГРАДУИРУЕТСЯ» БЕРЁТСЯ ЗДЕСЬ ТОЛЬКО ИЗ БЛОБА, и это не придирка. Продолжать
+  // мы собираемся СНЯТУЮ раскладку, а галка с карточки — сегодняшнее состояние формы, которое
+  // раскладка не видела и не хранит: подставить её сюда значило бы объяснить старый замер новым
+  // ответом. Токен же уехал в блоб вместе с именем блока — он часть той самой съёмки.
+  let storedAllUni = stored.length > 0;
   for (const sp of stored) {
     const raw = normBlock(sp.blockName ?? '');
+    if (!uniOf(raw)) storedAllUni = false;
     if (!raw) {
       // Блоб схемы 1 или файл-«россыпь» без блоков: опознать деталь в сегодняшнем файле нечем, а
       // без неё площадь любого размера неполна — и неполная площадь ЗАНИЖАЕТ норму.
@@ -216,7 +222,11 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   // Арифметика дала бы одинаковое a_s каждому размеру — формально верно (все изделия кроят одни и
   // те же контуры), но как ПРОДОЛЖЕНИЕ на размер вне состава это заявление «XL стоит ровно столько
   // же, сколько S», сделанное не по выкройкам, а по их отсутствию.
-  if (graded.size === 0) {
+  //
+  // Исключение ровно одно: КАЖДЫЙ сохранённый блок несёт токен UNI. Тогда одинаковость не выведена
+  // из отсутствия размеров, а заявлена лекальщиком в момент съёмки, и продолжать её честно. Старый
+  // блоб без единого токена такого доказательства не несёт — отказ ему остаётся дословно прежним.
+  if (graded.size === 0 && !storedAllUni) {
     return {
       ok: false,
       reason:
