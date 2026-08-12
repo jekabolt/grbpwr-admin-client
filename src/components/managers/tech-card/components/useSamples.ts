@@ -5,8 +5,13 @@ import {
   common_SampleInsert,
   common_SampleSubstitutionInsert,
 } from 'api/proto-http/admin';
-import { useTechCardFittings } from 'components/managers/tech-cards/components/useTechCardQuery';
+import { warehouseKeys } from 'components/managers/materials/components/useWarehouse';
+import {
+  techCardKeys,
+  useTechCardFittings,
+} from 'components/managers/tech-cards/components/useTechCardQuery';
 import { useMemo } from 'react';
+import { devExpenseKeys } from './useStyleReadViews';
 
 // Samples (сэмплы) of a tech card (new-flow NF-04). A sample is one sewn prototype; its `number`
 // is server-assigned (MAX+1 per card) and its composed cost is filled only by GetSample.
@@ -149,20 +154,42 @@ export function useTechCardRelease(releaseId?: number) {
   });
 }
 
-export function useDeleteSample() {
-  const qc = useQueryClient();
+/**
+ * СУХОЙ ПРОГОН УДАЛЕНИЯ: тот же RPC с dry_run = true. Ничего не меняет — это ЧТЕНИЕ вердикта, и
+ * ровно его печатает диалог подтверждения вместо того, чтобы предлагать оператору поверить глаголу.
+ *
+ * useMutation, а не useQuery, по тому же доводу, что и у колорвея: вердикт НЕЛЬЗЯ кэшировать —
+ * между двумя открытиями диалога на семпл могли списать ткань или записать примерку, и показанное
+ * из кэша «удаляемо» было бы враньём. Вдобавок у useQuery с `enabled: false` в react-query v5
+ * `isPending` висит true вечно, и диалог, открывающийся по событию, рисовал бы вечный спиннер.
+ */
+export function useSampleDeletionPreview() {
   return useMutation({
-    mutationFn: (id: number) => adminService.DeleteSample({ id }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: sampleKeys.all }),
+    mutationFn: (id: number) => adminService.DeleteSample({ id, dryRun: true }),
   });
 }
 
-// Friendly copy for the delete guard: the backend rejects deleting a sample that has material
-// movements (FailedPrecondition → 400) or one that's gone (404).
-export function deleteSampleErrorMessage(e: unknown): string {
-  const status = (e as { status?: number } | undefined)?.status;
-  if (status === 404) return 'Sample not found';
-  if (status === 400 || status === 412)
-    return 'This sample has material movements — reverse them before deleting';
-  return e instanceof Error ? e.message : 'Failed to delete sample';
+/**
+ * НАСТОЯЩЕЕ УДАЛЕНИЕ. Сервер пере-проверяет тот же предикат внутри транзакции, поэтому «сухой
+ * прогон сказал да» — не гарантия: прилетевший FailedPrecondition несёт по одному field violation
+ * НА КАЖДЫЙ блокер, и разбирает их вызывающий (диалог показывает свежие блокеры).
+ */
+export function useDeleteSample(techCardId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => adminService.DeleteSample({ id, dryRun: false }),
+    // ЧТО ИНВАЛИДИРУЕМ — по словарю самого вердикта (каскад / сироты), а не «на всякий случай».
+    onSuccess: () =>
+      Promise.all([
+        qc.invalidateQueries({ queryKey: sampleKeys.all }),
+        // orphan_material_movement: движения ПЕРЕЖИВАЮТ семпл и теряют его — лента, открытая
+        // рядом, продолжала бы показывать удалённый семпл в колонке цели.
+        qc.invalidateQueries({ queryKey: warehouseKeys.all }),
+        // orphan_dev_expense: расходы остаются на карточке, но теряют адрес «за какой семпл».
+        qc.invalidateQueries({ queryKey: devExpenseKeys.list(techCardId) }),
+        // Примерки живут ПОД detail(id) карточки; у самого удаляемого семпла их быть не может
+        // (блокер), но соседние строки этого списка ссылались на него как на предыдущий раунд.
+        qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
+      ]),
+  });
 }

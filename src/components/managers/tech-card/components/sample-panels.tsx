@@ -16,12 +16,15 @@ import {
 import { MaterialPicker } from 'components/managers/materials/components/material-picker';
 import { resolveMaterialPurpose } from 'components/managers/materials/components/purpose-options';
 import { MovementsList } from 'components/managers/materials/components/movements-tab';
+import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import {
+  useIssueMaterialStock,
   useMaterialMovements,
   useMaterialStock,
   warehouseKeys,
 } from 'components/managers/materials/components/useWarehouse';
 import { ROUTES } from 'constants/routes';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -941,6 +944,7 @@ export function SampleMovements({
   sizeId,
   canEdit,
   canReadCosting,
+  scrapped = false,
 }: {
   sampleId: number;
   techCard?: common_TechCard;
@@ -948,6 +952,8 @@ export function SampleMovements({
   sizeId?: number;
   canEdit: boolean;
   canReadCosting: boolean;
+  /** Статус семпла — «списан». Возврат материала по такому семплу склад не принимает. */
+  scrapped?: boolean;
 }) {
   const wo = useSampleWriteoff({ techCard, colorwayId, sizeId, canReadCosting });
   const issuer = useWriteoffBatch();
@@ -1007,8 +1013,159 @@ export function SampleMovements({
         <WriteoffReceipt lines={posted} money={wo.money} canReadCosting={canReadCosting} />
       ) : null}
 
+      <SampleReturns sampleId={sampleId} canEdit={canEdit} scrapped={scrapped} />
+
       <GroupLabel>ledger</GroupLabel>
       <MovementsList filter={{ sampleId }} />
+    </div>
+  );
+}
+
+/**
+ * ВОЗВРАТ МАТЕРИАЛА С СЕМПЛА НА СКЛАД.
+ *
+ * Раньше эта панель умела только выдавать. Вернуть было можно лишь со ЭКРАНА МАТЕРИАЛОВ: найти
+ * материал, открыть модалку выдачи, поставить галочку «return» и вписать id семпла руками — то есть
+ * знать id строки, которую оператор на экране семпла даже не видит.
+ *
+ * Теперь это половина ответа на отказ удаления: сервер удаляет семпл ⟺ чистый расход по каждому
+ * материалу равен нулю, и говорит «верните материал на склад из панели МАТЕРИАЛЫ этого семпла».
+ * Кнопка обязана быть ровно здесь, иначе совет ссылается на место, которого нет.
+ *
+ * ЧТО ПОКАЗЫВАЕМ — не список движений, а ОСТАТОК по материалу: выдано минус возвращено. Это ровно
+ * то, чем меряет и сервер (тот же предикат в вердикте удаления, тот же потолок в самом складе),
+ * поэтому строка отсюда не может попросить больше, чем склад готов принять. Ноль в списке не
+ * показываем: вернувшийся материал — это не задача.
+ */
+function SampleReturns({
+  sampleId,
+  canEdit,
+  scrapped,
+}: {
+  sampleId: number;
+  canEdit: boolean;
+  /** Семпл списан. Склад НЕ примет по нему возврат (checkSampleOpen), поэтому кнопки здесь нет —
+      иначе она была бы кнопкой, отвечающей серверной ошибкой на каждое нажатие. */
+  scrapped: boolean;
+}) {
+  const { showMessage } = useSnackBarStore();
+  const issue = useIssueMaterialStock();
+  // Тот же фильтр и лимит, что у MovementsList прямо под этим блоком, — React Query отдаёт обоим
+  // один ответ, второго запроса не будет.
+  const { data } = useMaterialMovements({ sampleId }, 50);
+  const { data: matData } = useMaterials('', true);
+  const [pending, setPending] = useState(0);
+
+  // Имя и ЕДИНИЦА материала: «2.4» без единицы — это не количество, а число, и оператор не сможет
+  // сверить его ни с накладной, ни с рулоном. Единица в справочнике необязательна, и тогда её
+  // просто нет — «шт» по догадке было бы хуже пустоты.
+  const materialInfo = useMemo(() => {
+    const map = new Map<number, { label: string; unit: string }>();
+    (matData?.materials ?? []).forEach((m) => {
+      if (!m.id) return;
+      map.set(Number(m.id), {
+        label: `${m.code ? `${m.code} · ` : ''}${m.name ?? `#${m.id}`}`,
+        unit: (m.unit ?? '').trim(),
+      });
+    });
+    return map;
+  }, [matData]);
+
+  // Остаток по материалу. Считаем по ВСЕМ загруженным страницам ленты; хвост за 50-й строкой
+  // (столько движений на одном семпле — уже аномалия) сюда не попадёт, и это видно по числу:
+  // сервер посчитает своё и откажет, а не примет чужую цифру на веру.
+  const outstanding = useMemo(() => {
+    const net = new Map<number, number>();
+    for (const p of data?.pages ?? []) {
+      for (const m of p.movements) {
+        const id = m.materialId ?? 0;
+        const qty = parseDecimalNumber(m.quantity?.value ?? '0');
+        if (!id || !Number.isFinite(qty)) continue;
+        if (m.movementType === 'MATERIAL_MOVEMENT_TYPE_ISSUE_SAMPLE')
+          net.set(id, (net.get(id) ?? 0) + qty);
+        else if (m.movementType === 'MATERIAL_MOVEMENT_TYPE_RETURN_SAMPLE')
+          net.set(id, (net.get(id) ?? 0) - qty);
+      }
+    }
+    return [...net.entries()]
+      .map(([materialId, qty]) => ({ materialId, qty: Number(qty.toFixed(3)) }))
+      .filter((r) => r.qty > 0)
+      .sort((a, b) =>
+        (materialInfo.get(a.materialId)?.label ?? '').localeCompare(
+          materialInfo.get(b.materialId)?.label ?? '',
+        ),
+      );
+  }, [data, materialInfo]);
+
+  if (outstanding.length === 0) return null;
+
+  const returnAll = async (materialId: number, qty: number) => {
+    setPending(materialId);
+    try {
+      await issue.mutateAsync({
+        materialId,
+        quantity: inputToDecimal(String(qty)),
+        productionRunId: 0,
+        sampleId,
+        isReturn: true,
+        // Датой возврата ставим сегодня — как во всех остальных движениях склада. Пустая строка
+        // тоже принимается, но кладёт в ленту строку без даты, и она встаёт в порядок иначе.
+        occurredAt: todayISO(),
+        comment: 'возврат с семпла',
+        productId: 0,
+        lotId: 0,
+      });
+      showMessage('материал вернулся на склад', 'success');
+    } catch (e) {
+      showMessage(e instanceof Error ? e.message : 'не удалось вернуть материал', 'error');
+    } finally {
+      setPending(0);
+    }
+  };
+
+  return (
+    <div className='flex flex-col gap-1'>
+      <GroupLabel>на семпле сейчас</GroupLabel>
+      {outstanding.map((r) => {
+        const info = materialInfo.get(r.materialId);
+        return (
+          <Row
+            key={r.materialId}
+            label={
+              <Text size='micro' component='span'>
+                {info?.label ?? `материал #${r.materialId}`}
+              </Text>
+            }
+            value={
+              <span className='flex items-center gap-2'>
+                <Text size='micro' variant='label' component='span'>
+                  {info?.unit ? `${r.qty} ${info.unit}` : r.qty}
+                </Text>
+                {canEdit && !scrapped && (
+                  <Button
+                    type='button'
+                    variant='secondary'
+                    size='sm'
+                    // Пока летит один возврат, остальные кнопки тоже заперты: два возврата подряд
+                    // считаются от ОДНОГО остатка, и второй ушёл бы с цифрой, которой уже нет.
+                    disabled={pending !== 0}
+                    onClick={() => returnAll(r.materialId, r.qty)}
+                  >
+                    {pending === r.materialId ? 'возвращаем…' : 'вернуть на склад'}
+                  </Button>
+                )}
+              </span>
+            }
+          />
+        );
+      })}
+      {/* Зачем это здесь вообще: пока строка не обнулится, семпл не удаляется. Сказать это надо
+          в том месте, где действие, а не только в диалоге удаления, куда оператор ещё не дошёл. */}
+      <Text size='micro' variant='label'>
+        {scrapped
+          ? 'семпл списан — склад не принимает по нему возврат: материал ушёл вместе с семплом. пока это так, семпл не удаляется, и он же остаётся записью о съеденной ткани.'
+          : 'пока здесь что-то есть, семпл не удаляется — материал числится за ним. если ткань действительно израсходована, семпл и есть запись об этом, и удалять его нечего.'}
+      </Text>
     </div>
   );
 }

@@ -52,13 +52,12 @@ import {
   sampleStatusOptions,
   sampleThumbUrl,
 } from './sample-options';
+import { SampleDeleteControl } from './sample-delete';
 import { SamplePicker } from './sample-picker';
 import { SampleSubstitutions, SubstitutionRows } from './sample-substitutions';
 import { TechCardFormData } from './schema';
 import {
-  deleteSampleErrorMessage,
   saveSampleErrorMessage,
-  useDeleteSample,
   useSample,
   useSampleFittings,
   useSamples,
@@ -588,7 +587,6 @@ function SampleEditor({
   const { pathname, search } = useLocation();
   const returnTo = pathname + search;
   const save = useSaveSample();
-  const del = useDeleteSample();
   const sampleId = sample.id ?? 0;
   const staging = useTechCardStaging();
   // Read-only view of what is staged, kept OUT of the staging effect's deps on purpose — see the
@@ -604,7 +602,6 @@ function SampleEditor({
   const releases = releasesData?.releases ?? [];
 
   const [d, setD] = useState<Draft>(draftFrom(sample));
-  const [deleteOpen, setDeleteOpen] = useState(false);
   const [discardOpen, setDiscardOpen] = useState(false);
   // Any list refetch (a write-off, a colleague's edit) re-delivers `sample` — without the dirty
   // guard that reset silently overwrote in-progress edits with server state.
@@ -821,16 +818,12 @@ function SampleEditor({
     setDirty(false);
   };
 
-  const confirmDelete = () =>
-    del.mutate(sampleId, {
-      onSuccess: () => {
-        // Nothing may stay staged against a row that no longer exists.
-        staging?.unstage(stagingKey);
-        showMessage('Sample deleted', 'success');
-        onClose();
-      },
-      onError: (e) => showMessage(deleteSampleErrorMessage(e), 'error'),
-    });
+  // Удаление живёт в SampleDeleteControl (сухой прогон + вердикт); здесь остаётся только уборка
+  // ЗА ним: ничего не должно остаться застейдженным против строки, которой больше нет.
+  const afterDelete = () => {
+    staging?.unstage(stagingKey);
+    onClose();
+  };
 
   // What stands between this sample and being finished. Read off the same data the sections below
   // show, so a blocker is always something you can go and look at — never a state the panel alone
@@ -1072,6 +1065,11 @@ function SampleEditor({
                 sizeId={d.sizeId}
                 canEdit={canEdit}
                 canReadCosting={canReadCosting}
+                // Статус берём из ЧЕРНОВИКА, а не из сохранённого семпла: оператор мог только что
+                // снять «списан» — эта правка ещё стоит в очереди на Save карточки, но склад уже
+                // судит по строке в базе. Поэтому кнопка возврата появляется только когда «списан»
+                // снят И сохранён; черновик со снятым статусом её не откроет.
+                scrapped={sample.sample?.status === 'scrapped'}
               />
             </div>
           )}
@@ -1219,23 +1217,15 @@ function SampleEditor({
             </>
           )}
           {canEdit && (
-            <Button type='button' variant='secondary' size='sm' onClick={() => setDeleteOpen(true)}>
-              delete
-            </Button>
+            <SampleDeleteControl
+              sampleId={sampleId}
+              label={`#${sample.number ?? sampleId}`}
+              techCardId={techCardId}
+              onDeleted={afterDelete}
+            />
           )}
         </div>
       </div>
-
-      <ConfirmationModal
-        open={deleteOpen}
-        onOpenChange={setDeleteOpen}
-        onConfirm={confirmDelete}
-        width='sm'
-        title={`delete sample #${sample.number ?? ''}?`}
-        confirmLabel='delete'
-      >
-        <Text size='micro'>Delete this sample? Its material movements block deletion.</Text>
-      </ConfirmationModal>
 
       <ConfirmationModal
         open={discardOpen}
