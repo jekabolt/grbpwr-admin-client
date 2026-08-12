@@ -164,5 +164,128 @@ console.log('\nT1.e · ЛОВУШКА FP_L: левая полочка при ж�
   ck(c?.uni === false && c?.uniBase === '', 'FP_L не uni и uniBase пуст');
 }
 
+// ══ T2 · дедуп uni-дублей в подборе деталей настила ════════════════════════════════════════
+
+// Один вход настила: разбор + тираж + отбор — тем же кодом и в том же порядке, что в модалке
+// раскладки и в очереди раскроя партии.
+const layPieces = (pieces, rows, contourLayer = '1') => {
+  const split = m.splitPiecesBySize(pieces, m.DICT);
+  const dedupe = m.dedupeUniPieces(pieces, split.codeById, contourLayer);
+  const units = m.markerUnits({ graded: true, rows, ungradedUnits: 1 });
+  const unitsOfPiece = m.unitsOfPieces(pieces, (id) => split.codeById.get(id)?.size ?? '', units);
+  const plain = m.selectMarkerPieces(pieces, contourLayer, unitsOfPiece);
+  return { split, dedupe, units, unitsOfPiece, plain,
+           selected: plain.filter((p) => !dedupe.excludedIds.has(p.id)) };
+};
+const ROWS_2 = [{ tokens: ['M'], qty: 2 }, { tokens: ['L'], qty: 1 }];
+
+console.log('\nT2.a · склейка CLO: две копии одного кармана кроятся ОДИН раз');
+{
+  const names = ['PCK_L_UNI_M', 'PCK_L_UNI_S', ...m.GRADED];
+  // Площади РАВНЫ: это одна деталь, выгруженная дважды (areaFor по хвосту дал бы разные).
+  const pieces = names.map((n, i) => m.piece(i + 1, n, i < 2 ? { areaCm2: 200 } : {}));
+  const r = layPieces(pieces, ROWS_2);
+  ck(r.dedupe.conflicts.length === 0, 'конфликта нет — копии совпадают',
+     JSON.stringify(r.dedupe.conflicts));
+  ck(r.dedupe.excludedIds.size === 1, 'исключена ровно одна копия', String(r.dedupe.excludedIds.size));
+  const pck = r.selected.filter((p) => p.blockName.startsWith('PCK'));
+  ck(pck.length === 1, 'в выборке остался ОДИН карман (до дедупа было бы два)',
+     JSON.stringify(r.plain.filter((p) => p.blockName.startsWith('PCK')).map((p) => p.blockName)));
+  ck(pck[0]?.blockName === 'PCK_L_UNI_M',
+     'победил лексикографически наименьший (детерминизм против порядка файлов)', pck[0]?.blockName);
+  ck(r.units.unitsTotal === 3, 'тираж настила — 3 изделия', String(r.units.unitsTotal));
+  ck(r.unitsOfPiece.get(pck[0].id) === r.units.unitsTotal,
+     'карман кроится на КАЖДОЕ изделие состава (unitsTotal), а не на размер',
+     String(r.unitsOfPiece.get(pck[0].id)));
+  // Проигравший исключён ЦЕЛИКОМ — иначе счётчики на экране двоятся.
+  ck(r.selected.every((p) => p.blockName !== 'PCK_L_UNI_S'), 'проигравшая копия не поехала в настил');
+}
+
+console.log('\nT2.b · те же копии, нарисованные по-разному (+1 %) — ОТКАЗ, а не выбор');
+{
+  const names = ['PCK_L_UNI_M', 'PCK_L_UNI_S', ...m.GRADED];
+  const pieces = names.map((n, i) =>
+    m.piece(i + 1, n, i === 0 ? { areaCm2: 200 } : i === 1 ? { areaCm2: 202 } : {}));
+  const r = layPieces(pieces, ROWS_2);
+  ck(r.dedupe.conflicts.length === 1, 'ровно один конфликт', JSON.stringify(r.dedupe.conflicts));
+  ck(r.dedupe.conflicts[0]?.kind === 'area', 'kind = area', r.dedupe.conflicts[0]?.kind);
+  ck(r.dedupe.conflicts[0]?.uniBase === 'PCK_L', 'конфликт назван по uniBase', r.dedupe.conflicts[0]?.uniBase);
+  ck(JSON.stringify(r.dedupe.conflicts[0]?.blocks) === '["PCK_L_UNI_M","PCK_L_UNI_S"]',
+     'отказ называет ОБА блока', JSON.stringify(r.dedupe.conflicts[0]?.blocks));
+  ck(r.dedupe.excludedIds.size === 0, 'при конфликте не исключается ничего (путь целиком закрыт)');
+  ck(m.uniConflictReason(r.dedupe.conflicts).includes('PCK_L_UNI_S'), 'текст отказа несёт имена блоков');
+  // Дребезг тесселяции конфликтом не является: 0.4 % внутри допуска pickOnLayer.
+  const near = names.map((n, i) =>
+    m.piece(i + 1, n, i === 0 ? { areaCm2: 200 } : i === 1 ? { areaCm2: 200.8 } : {}));
+  const rn = layPieces(near, ROWS_2);
+  ck(rn.dedupe.conflicts.length === 0 && rn.dedupe.excludedIds.size === 1,
+     '0.4 % — дребезг, а не редакция: дедуп проходит', JSON.stringify(rn.dedupe.conflicts));
+}
+
+console.log('\nT2.c · градуированная копия рядом с uni — ОТКАЗ (решение владельца)');
+{
+  const graded = ['PCK_L_XS', 'PCK_L_S', 'PCK_L_M', 'PCK_L_L', 'PCK_L_XL'];
+  const names = [...graded, 'PCK_L_UNI_M', ...m.GRADED];
+  const r = layPieces(m.piecesOf(names), ROWS_2);
+  ck(r.dedupe.conflicts.length === 1, 'ровно один конфликт', JSON.stringify(r.dedupe.conflicts));
+  ck(r.dedupe.conflicts[0]?.kind === 'graded-vs-uni', 'kind = graded-vs-uni', r.dedupe.conflicts[0]?.kind);
+  ck(r.dedupe.conflicts[0]?.uniBase === 'PCK_L', 'конфликт назван деталью PCK_L');
+  ck(JSON.stringify(r.dedupe.conflicts[0]?.blocks) === '["PCK_L_UNI_M"]',
+     'назван uni-блок, спорящий с рядом', JSON.stringify(r.dedupe.conflicts[0]?.blocks));
+  // Одной uni-копии достаточно: проверка не ждёт второй.
+  ck(r.dedupe.excludedIds.size === 0, 'ничего не исключено — отказ гасит путь целиком');
+}
+
+console.log('\nT2.d · скоуп БЕЗ uni-деталей — no-op, выборка поэлементно прежняя');
+{
+  const r = layPieces(m.piecesOf(m.GRADED), ROWS_2);
+  ck(r.dedupe.excludedIds.size === 0, 'excludedIds пуст');
+  ck(r.dedupe.conflicts.length === 0, 'конфликтов нет');
+  ck(r.selected.length === r.plain.length && r.selected.every((p, i) => p === r.plain[i]),
+     'выборка — ТЕ ЖЕ объекты в том же порядке', `${r.selected.length} / ${r.plain.length}`);
+}
+
+console.log('\nT2.e · края: одно имя из двух файлов, пустой остаток, слои проигравшего');
+{
+  // Одно и то же имя блока в двух листах — это НЕ дубль uni, а две ревизии одного листа: их
+  // разбирает выбор контура на слое, а не дедуп. Исключить одну из них здесь значило бы решать
+  // чужую задачу молча.
+  const twoFiles = [
+    m.piece(1, 'PCK_L_UNI_M', { areaCm2: 200, fileIndex: 0 }),
+    m.piece(2, 'PCK_L_UNI_M', { areaCm2: 200, fileIndex: 1 }),
+    ...m.piecesOf(m.GRADED).map((p) => m.piece(p.id + 10, p.blockName)),
+  ];
+  const rt = layPieces(twoFiles, ROWS_2);
+  ck(rt.dedupe.excludedIds.size === 0, 'одно имя из двух файлов — дедупа нет',
+     String(rt.dedupe.excludedIds.size));
+  ck(rt.dedupe.conflicts.length === 0, 'и конфликта нет');
+
+  // Пустой остаток (uniBase === raw): группа состоит из самой себя.
+  const bare = [m.piece(1, 'UNI', { areaCm2: 50 }), m.piece(2, 'UNI_M', { areaCm2: 60 }),
+                ...m.piecesOf(m.GRADED).map((p) => m.piece(p.id + 10, p.blockName))];
+  const rb = layPieces(bare, ROWS_2);
+  ck(rb.dedupe.excludedIds.size === 0 && rb.dedupe.conflicts.length === 0,
+     'UNI и UNI_M — разные группы из самих себя, дедупа нет');
+
+  // Ни у одной копии нет контура на рабочем слое: исключать нечего, спорить не о чем.
+  const offLayer = [m.piece(1, 'PCK_L_UNI_M', { areaCm2: 200, layer: '14' }),
+                    m.piece(2, 'PCK_L_UNI_S', { areaCm2: 900, layer: '14' }),
+                    ...m.piecesOf(m.GRADED).map((p) => m.piece(p.id + 10, p.blockName))];
+  const ro = layPieces(offLayer, ROWS_2);
+  ck(ro.dedupe.excludedIds.size === 0 && ro.dedupe.conflicts.length === 0,
+     'копии лежат не на рабочем слое — ни дедупа, ни конфликта');
+
+  // Проигравший исключается ВСЕМИ слоями: иначе он всплывёт в списке деталей и в счётчиках.
+  const layers = [m.piece(1, 'PCK_L_UNI_M', { areaCm2: 200, layer: '1' }),
+                  m.piece(2, 'PCK_L_UNI_S', { areaCm2: 200, layer: '1' }),
+                  m.piece(3, 'PCK_L_UNI_S', { areaCm2: 190, layer: '14' }),
+                  ...m.piecesOf(m.GRADED).map((p) => m.piece(p.id + 10, p.blockName))];
+  const rl = layPieces(layers, ROWS_2);
+  ck(rl.dedupe.excludedIds.has(2) && rl.dedupe.excludedIds.has(3),
+     'исключены ОБА контура проигравшего блока — и на слое 1, и на слое 14',
+     JSON.stringify([...rl.dedupe.excludedIds]));
+  ck(!rl.dedupe.excludedIds.has(1), 'победитель на месте');
+}
+
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);
 process.exit(bad ? 1 : 0);

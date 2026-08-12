@@ -13,7 +13,7 @@
 //
 // Модуль лёгкий (типы движка + разбор имён блоков) — его можно импортировать откуда угодно.
 import type { PieceDTO } from 'lib/nesting/types';
-import { normBlock } from './block-code';
+import { normBlock, type BlockCode } from './block-code';
 import { aliasIdentity, type BlockSplit } from './split-pieces';
 
 /**
@@ -93,6 +93,138 @@ export function selectMarkerPieces(
   return pieces.filter(
     (p) => (p.layer ?? '') === contourLayer && (unitsOfPiece.get(p.id) ?? 0) >= 1,
   );
+}
+
+/**
+ * ОДНА UNI-ДЕТАЛЬ, НАРИСОВАННАЯ НЕСКОЛЬКО РАЗ, КРОИТСЯ ОДИН РАЗ — и расхождение между копиями
+ * является отказом, а не выбором.
+ *
+ * Откуда берутся копии. CLO выгружает выкройки ПО РАЗМЕРАМ, а склейка кладёт их в один файл: у
+ * неградуируемого кармана `PCK_L_UNI_M` и `PCK_L_UNI_S` — это одна и та же деталь, приехавшая
+ * дважды. Пока токен UNI ничего не значил, такая пара СЛУЧАЙНО читалась как градация (основа
+ * `PCK_L_UNI`, два хвоста) и раскладывалась по одному карману на размер — то есть верно. Как
+ * только UNI отменяет размер (см. block-code.ts), обе копии становятся безразмерными, а
+ * безразмерная деталь по формуле блоба кроится на КАЖДОЕ изделие состава: настил получил бы
+ * ДВОЙНЫЕ карманы. Ошибка выглядит совершенно нормально — длина есть, детали на месте, счётчики
+ * сходятся, — и стоит она ткани.
+ *
+ * Почему не «взять любую». Победитель выбирается лексикографически наименьшим именем среди тех, у
+ * кого есть контур на рабочем слое: порядок файлов в пачке зависит от того, как их скачали, и
+ * «первый попавшийся» дал бы двум прогонам одной карточки разные контуры. Проигравшие исключаются
+ * ЦЕЛИКОМ, всеми своими контурами на всех слоях, — иначе счётчики деталей и списки на экране
+ * двоятся, показывая деталь, которой в раскладке нет.
+ *
+ * Почему разная площадь — отказ. Копии заявлены ОДНОЙ деталью самим автором (один uniBase). Если
+ * они нарисованы по-разному, заявление ложно, и любой выбор здесь — это молчаливое решение, какая
+ * из двух выкроек является нормой. Допуск тот же, что у `pickOnLayer` (0.5 %): дребезг тесселяции
+ * — не редакция выкройки.
+ *
+ * Почему «градуированная копия + uni» — тоже отказ. Решение владельца: файл, где одна и та же
+ * деталь есть и рядом размеров (`PCK_L_XS…PCK_L_XL`), и с пометкой «не градуируется»
+ * (`PCK_L_UNI_M`), описывает две несовместимые вещи. Мы не знаем, какая из них правда.
+ *
+ * Дедуп живёт на пути НАСТИЛА, а не на стороне сохранённого блоба: блоб хранит геометрию, которую
+ * реально укладывали, и вычищать из него детали задним числом значило бы переписывать замер.
+ */
+export type UniConflict = {
+  kind: 'area' | 'graded-vs-uni';
+  /** Общий ключ группы — имя без токена UNI, как оно написано в файле. */
+  uniBase: string;
+  /** Имена блоков, которые спорят, — отказ обязан называть виновника, а не «где-то в файле». */
+  blocks: string[];
+};
+
+const UNI_AREA_TOLERANCE = 0.005; // тот же допуск, что pickOnLayer в dxf-consumption.ts
+
+export function dedupeUniPieces(
+  pieces: readonly PieceDTO[],
+  /** Разбор имён ЭТОГО скоупа: uni-признак, uniBase и размерный вердикт живут там. */
+  codeById: ReadonlyMap<number, BlockCode>,
+  /** Рабочий слой контура: на нём выбирают победителя и сравнивают площади. */
+  contourLayer: string,
+): { excludedIds: Set<number>; conflicts: UniConflict[] } {
+  const excludedIds = new Set<number>();
+  const conflicts: UniConflict[] = [];
+
+  type Block = { raw: string; ids: number[]; areaOnLayer: number | null };
+  const groups = new Map<string, Map<string, Block>>(); // ключ группы → имя блока (ci) → блок
+  const labelOf = new Map<string, string>(); // ключ группы → uniBase в написании файла
+  // Идентичности, ПОЛУЧИВШИЕ размерный вердикт в этом же скоупе, — вторая половина конфликта
+  // graded-vs-uni. Берутся из того же разбора, а не из формы имени: вердикт структурный.
+  const gradedIdentities = new Set<string>();
+
+  for (const p of pieces) {
+    const code = codeById.get(p.id);
+    if (!code) continue;
+    if (code.size) {
+      gradedIdentities.add(normBlock(code.identity).toLowerCase());
+      continue;
+    }
+    if (!code.uni) continue;
+    const base = normBlock(code.uniBase);
+    if (!base) continue;
+    const gkey = base.toLowerCase();
+    const raw = normBlock(code.raw);
+    const bkey = raw.toLowerCase();
+    const byBlock = groups.get(gkey) ?? new Map<string, Block>();
+    const block = byBlock.get(bkey) ?? { raw, ids: [], areaOnLayer: null };
+    block.ids.push(p.id);
+    if ((p.layer ?? '') === contourLayer) {
+      block.areaOnLayer = Math.max(block.areaOnLayer ?? 0, p.areaCm2);
+    }
+    byBlock.set(bkey, block);
+    groups.set(gkey, byBlock);
+    if (!labelOf.has(gkey)) labelOf.set(gkey, base);
+  }
+
+  for (const [gkey, byBlock] of groups) {
+    const uniBase = labelOf.get(gkey) ?? gkey;
+    const names = [...byBlock.values()].map((b) => b.raw).sort();
+    // Конфликт с градуированной копией проверяется ДО дедупа и не зависит от числа копий: одной
+    // uni-детали рядом с полным размерным рядом той же основы уже достаточно.
+    if (gradedIdentities.has(gkey)) {
+      conflicts.push({ kind: 'graded-vs-uni', uniBase, blocks: names });
+      continue;
+    }
+    // Одно имя — дедупить нечего. Тот же блок из двух файлов сюда и попадает одной записью: это
+    // две ревизии одного листа, и разбирается этот случай не здесь, а выбором контура на слое.
+    // Пустой остаток (`uniBase === raw`) тоже оседает здесь: группа состоит из самой себя.
+    if (byBlock.size < 2) continue;
+    const onLayer = [...byBlock.entries()].filter(([, b]) => b.areaOnLayer != null);
+    // Ни у одной копии нет контура на рабочем слое — в раскладку не поедет ни одна, исключать
+    // нечего и сравнивать нечего.
+    if (onLayer.length === 0) continue;
+    const areas = onLayer.map(([, b]) => b.areaOnLayer as number);
+    const min = Math.min(...areas);
+    const max = Math.max(...areas);
+    if (min > 0 && (max - min) / min > UNI_AREA_TOLERANCE) {
+      conflicts.push({ kind: 'area', uniBase, blocks: names });
+      continue;
+    }
+    const winner = onLayer.map(([k]) => k).sort()[0];
+    for (const [k, b] of byBlock) {
+      if (k === winner) continue;
+      for (const id of b.ids) excludedIds.add(id);
+    }
+  }
+
+  return { excludedIds, conflicts };
+}
+
+/**
+ * Отказ ОДНИМИ СЛОВАМИ на обоих путях настила — модалка раскладки и очередь раскроя партии.
+ *
+ * Два текста об одном и том же входе читались бы как две разные беды, а чинится он одним и тем же
+ * действием в одном и том же файле.
+ */
+export function uniConflictReason(conflicts: readonly UniConflict[]): string {
+  return conflicts
+    .map((c) =>
+      c.kind === 'area'
+        ? `детали «${c.blocks.join('», «')}» помечены одной и той же неградуируемой деталью (${c.uniBase}), а нарисованы с разной площадью — какая из них норма, сказать нечем. Оставьте в выкройках одну копию либо снимите пометку UNI с той, что отличается`
+        : `деталь «${c.uniBase}» есть в выкройках и размерным рядом, и с пометкой UNI («${c.blocks.join('», «')}») — эти два заявления противоречат друг другу: либо деталь градуируется, либо нет. Уберите лишние блоки из выкроек`,
+    )
+    .join('; ');
 }
 
 /** Сопоставление «блок чертежа → деталь кроя», как его записала карточка. */

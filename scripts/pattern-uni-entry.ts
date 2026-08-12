@@ -9,10 +9,29 @@ import {
   uniBaseOf,
   uniOf,
 } from 'components/managers/tech-card/components/nesting/block-code';
+import {
+  dedupeUniPieces,
+  markerUnits,
+  selectMarkerPieces,
+  uniConflictReason,
+  unitsOfPieces,
+} from 'components/managers/tech-card/components/nesting/piece-selection';
 import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
 import type { PieceDTO } from 'lib/nesting/types';
 
-export { deriveBlockSizes, normBlock, splitBlockSize, splitPiecesBySize, uniBaseOf, uniOf };
+export {
+  dedupeUniPieces,
+  deriveBlockSizes,
+  markerUnits,
+  normBlock,
+  selectMarkerPieces,
+  splitBlockSize,
+  splitPiecesBySize,
+  uniBaseOf,
+  uniConflictReason,
+  uniOf,
+  unitsOfPieces,
+};
 
 // Словарь размеров ЦЕЛИКОМ (как его отдаёт useDictionarySizeTokens), а не ряд карточки: разбор
 // обязан узнавать размер, которого в карточке ещё нет.

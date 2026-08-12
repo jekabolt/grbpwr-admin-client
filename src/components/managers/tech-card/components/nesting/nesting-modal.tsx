@@ -83,9 +83,11 @@ import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { ModalRailSection, type RailSectionStatus } from './modal-sections';
 import {
+  dedupeUniPieces,
   markerUnits,
   pieceLineKeysByPieceId,
   selectMarkerPieces,
+  uniConflictReason,
   unitsOfPieces,
 } from './piece-selection';
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
@@ -330,10 +332,21 @@ export function NestingModal({
     layerOpts.find((o) => o.layer === contourLayer)?.allowance ?? null;
   // Слой, на котором ЗАМЕРЕНА линия шва, — второй из двух выходов, которые обязан назвать отказ.
   const seamLayerPick = useMemo(() => seamLineLayer(layerOpts), [layerOpts]);
+  // UNI-ДУБЛИ: одна неградуируемая деталь, приехавшая из по-размерных выгрузок несколькими
+  // именами, кроится ОДИН раз. Считается ДО списка размеров и до отбора деталей, потому что
+  // исключённые копии не должны попадать НИ В ОДИН счёт: увидев «6 деталей без размера» вместо
+  // трёх, оператор поверит числу, а не раскладке.
+  const uniDedupe = useMemo(
+    () => dedupeUniPieces(allPieces, split.codeById, contourLayer),
+    [allPieces, split, contourLayer],
+  );
+  // Конфликт — ОТКАЗ, а не выбор: см. dedupeUniPieces. Прогон и сохранение с ним не идут.
+  const uniRefusal = uniDedupe.conflicts.length > 0 ? uniConflictReason(uniDedupe.conflicts) : null;
   const sizeOpts = useMemo(() => {
     const seen = new Map<string, number>();
     for (const p of allPieces) {
       if ((p.layer ?? '') !== contourLayer) continue;
+      if (uniDedupe.excludedIds.has(p.id)) continue;
       const s = split.codeById.get(p.id)?.size ?? '';
       seen.set(s, (seen.get(s) ?? 0) + 1);
     }
@@ -342,7 +355,7 @@ export function NestingModal({
       .sort(
         (a, b) => (split.orderOfSize.get(a.size) ?? 1e6) - (split.orderOfSize.get(b.size) ?? 1e6),
       );
-  }, [allPieces, split, contourLayer]);
+  }, [allPieces, split, contourLayer, uniDedupe]);
   const missingOnLayer = useMemo(
     () => blocksMissingOnLayer(allPieces, contourLayer),
     [allPieces, contourLayer],
@@ -431,8 +444,11 @@ export function NestingModal({
   // В раскладку идут детали ВСЕХ размеров состава плюс неградуируемые. Размер с количеством 0 —
   // это «не кроим», и его детали не попадают ни в поиск, ни в блоб.
   const selectedPieces = useMemo(
-    () => selectMarkerPieces(allPieces, contourLayer, unitsOfPiece),
-    [allPieces, contourLayer, unitsOfPiece],
+    () =>
+      selectMarkerPieces(allPieces, contourLayer, unitsOfPiece).filter(
+        (p) => !uniDedupe.excludedIds.has(p.id),
+      ),
+    [allPieces, contourLayer, unitsOfPiece, uniDedupe],
   );
   // СОСТАВ, КОТОРЫЙ УЕДЕТ НА СЕРВЕР — в id размеров карточки и отсортированный по ним (тот же
   // порядок канонизирует сервер, и он часть байтов блоба). Токены, не резолвящиеся в размер,
@@ -1418,6 +1434,7 @@ export function NestingModal({
     // её открытой для пэйлоада, который гарантированно отвергнут, значит обещать отказ вместо
     // сохранения. Инвариант держится этим файлом, а не порядком сбросов в соседнем эффекте.
     !doubleAllowanceRefusal &&
+    !uniRefusal &&
     !sizeUnsaved &&
     !sizeUnresolved &&
     sizesWithoutPieces.length === 0 &&
@@ -1449,6 +1466,12 @@ export function NestingModal({
     if (doubleAllowanceRefusal)
       out.push(
         'двойной припуск — прогон не запускается; полный текст в секции «2 · как читаем файл», у выбора контурного слоя',
+      );
+    // Полный текст стоит в секции «1 · что кроим», у состава: там же лежат счётчики, которые
+    // этот конфликт делает недостоверными. Второй экземпляр абзаца на том же экране был бы дублем.
+    if (uniRefusal)
+      out.push(
+        'в выкройках спорят копии неградуируемой детали — полный текст в секции «1 · что кроим», под составом',
       );
     // Не было в цепочке вовсе: отказ по невыбранной ткани блокировал сохранение молча, а тултип
     // падал в терминальную ветку про «завершённую раскладку». Формулировка — та же, что в рейле.
@@ -1833,6 +1856,9 @@ export function NestingModal({
       composition.length > MAX_MARKER_COMPOSITION_SIZES
         ? `в составе ${composition.length} размеров — потолок сервера ${MAX_MARKER_COMPOSITION_SIZES}`
         : '',
+      // Не про выбор оператора, а про файл, — но стоит здесь, потому что ломает именно счёт
+      // изделий и деталей, который живёт в этой секции.
+      uniRefusal ? 'копии неградуируемой детали спорят между собой' : '',
     ].filter(Boolean),
     warnings: [
       colorwayNoPin ? `колорвей «${chosenColorway?.label}» не назначил артикул на эту ткань` : '',
@@ -2115,6 +2141,9 @@ export function NestingModal({
                     изделие состава, то есть по {unitsTotal} шт
                   </Text>
                 )}
+                {/* Отказ, а не предупреждение: пока копии спорят, любое число здесь описывает
+                    раскладку, которой мы не выбирали. Прогон и сохранение выключены. */}
+                {uniRefusal && <CalloutBox tone='error'>{uniRefusal}</CalloutBox>}
                 {/* Здесь стояла строка «итог: изделий · уникальных деталей · экземпляров» — третья
                   копия одного и того же счёта. Канонический счёт теперь один: шапка списка в
                   секции «детали» (изделия, выбранные, к раскладке) и её свёрнутая сводка. */}
@@ -3133,16 +3162,19 @@ export function NestingModal({
                     checkedCount === 0 ||
                     running ||
                     overCap ||
-                    !!doubleAllowanceRefusal
+                    !!doubleAllowanceRefusal ||
+                    !!uniRefusal
                   }
                   title={
-                    doubleAllowanceRefusal
-                      ? doubleAllowanceRefusal
-                      : overCap
-                        ? // Числа потолков намеренно не повторяются: они напечатаны в шапке
-                          // списка деталей и в тексте отказа на панели.
-                          'сверх потолка сервера — такую раскладку не сохранить: уберите детали или уменьшите состав'
-                        : undefined
+                    uniRefusal
+                      ? uniRefusal
+                      : doubleAllowanceRefusal
+                        ? doubleAllowanceRefusal
+                        : overCap
+                          ? // Числа потолков намеренно не повторяются: они напечатаны в шапке
+                            // списка деталей и в тексте отказа на панели.
+                            'сверх потолка сервера — такую раскладку не сохранить: уберите детали или уменьшите состав'
+                          : undefined
                   }
                   onClick={requestRun}
                 >
