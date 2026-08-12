@@ -1,6 +1,6 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -14,6 +14,7 @@ import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { ulid } from 'utils/ulid';
 import { bomPurposeLabel, type FabricScope, type RollGoodsLine } from './bom-purpose';
+import { uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import {
   findPiece,
@@ -57,6 +58,11 @@ type FormCallout = {
 // grainline holds.
 const selectCls =
   'block min-h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none';
+
+// Выпущенная карточка заморожена целиком: тот же ответ, каким родительская страница выключает
+// `<fieldset disabled={frozen}>` вокруг этой вкладки (index.tsx). Нужен здесь ОТДЕЛЬНО, потому что
+// fieldset глушит контролы, а не эффекты.
+const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 // Русская форма счётчика деталей для сводки группы: «1 деталь · 2 детали · 5 деталей».
 const ruPieces = (n: number): string => {
@@ -209,7 +215,10 @@ export function PiecesTab({
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'pieces' });
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
-  const { errors } = useFormState({ control });
+  // `isSubmitting` нужен предзаполнению галки UNI ниже: сохранение забирает СНИМОК формы и по
+  // успеху делает `reset` тем, что уехало (index.tsx), — значит запись, сделанная во время рейса,
+  // молча пропадает вместе с ним.
+  const { errors, isSubmitting } = useFormState({ control });
   // DXF block → piece aliases (0262). They are what lets this block say where a piece came from:
   // a piece with an alias is drawn in a real CAD file, and that file — not the word in the `grain`
   // field — is what the раскладка orients the piece by.
@@ -277,6 +286,89 @@ export function PiecesTab({
     for (const [key, refs] of blocksByPiece) m.set(key, findPiece(index, refs));
     return m;
   }, [index, blocksByPiece]);
+
+  // Детали, КОТОРЫЕ УЖЕ ЛЕЖАТ НА СЕРВЕРЕ, по их ключу. Ими гейтится предзаполнение галки ниже:
+  // у такой детали ответ про градацию ХРАНИМЫЙ, и переспрашивать его не у кого.
+  const savedPieceKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const p of techCard?.techCard?.pieces ?? []) {
+      const key = (p.lineKey ?? '').trim().toLowerCase();
+      if (key) set.add(key);
+    }
+    return set;
+  }, [techCard?.techCard?.pieces]);
+
+  // ПРЕДЗАПОЛНЕНИЕ ГАЛКИ «НЕ ГРАДУИРУЕТСЯ» ПО ТОКЕНУ `UNI` В ИМЕНИ БЛОКА.
+  //
+  // Лекальщик отвечает на этот вопрос прямо в чертеже (`PCK_L_UNI_M`), и переспрашивать оператора
+  // незачем: ответ уже дан, его надо перенести в карточку и НАЗВАТЬ ИСТОЧНИК — подпись под галкой.
+  //
+  // ПРЕДЗАПОЛНЯЕТСЯ ТОЛЬКО ТО, ЧЕГО ОПЕРАТОР ЕЩЁ НЕ РЕШАЛ, — деталь, которой нет в сохранённой
+  // карточке (она заведена в этой сессии: диалогом сопоставления или руками). ХРАНИМОЕ значение не
+  // трогается НИКОГДА, и это главное правило здесь. Реф «уже обработано» жил ровно столько, сколько
+  // маунт вкладки, и потому обещание «снял галку — она не вернётся» держалось только до
+  // перезагрузки: снятый и сохранённый false карточка читала снова, эффект видел живой токен и
+  // ставил пометку обратно — сохранение возвращало то, что оператор снял, и объяснить это было
+  // нечем. Тот же реф пачкал форму на КАЖДОМ открытии вкладки у любой карточки с uni-именами:
+  // непрошеный unsaved-prompt и замороженная публикация площадей (useUnsavedAreaSource) без
+  // единого действия человека.
+  //
+  // ГЕЙТ ЗАМОРОЗКИ ОБЯЗАТЕЛЕН, и это не перестраховка. Вкладка целиком лежит внутри
+  // `<fieldset disabled={frozen}>`, но fieldset глушит КОНТРОЛЫ, а не эффекты: на выпущенной
+  // карточке этот `setValue` прошёл бы сквозь него и молча пометил деталь замороженной карточки —
+  // правку, которой никто не делал и которую негде увидеть.
+  //
+  // Ждём разбор (`index`): предзаполнять по связям, пока чертежи не прочитаны, значит отвечать за
+  // файлы, которых мы ещё не видели. И ждём КОНЦА СОХРАНЕНИЯ: карточка уезжает снимком формы, а по
+  // успеху `form.reset` возвращает форму к тому, что уехало (index.tsx). Разбор, дочитавшийся во
+  // время рейса, ставил галку в форму, помечал деталь обработанной — и reset стирал её обратно в
+  // false. Повторно эффект уже не срабатывал, и деталь уезжала непомеченной при живом токене в
+  // чертеже. Поэтому во время рейса не пишем ничего, а после него ПОВТОРЯЕМ решение по тем
+  // деталям, чью пометку reset откатил: снять её в этот момент оператор не мог — контролы были в
+  // рейсе вместе с формой.
+  const frozen = techCard?.techCard?.approvalState === RELEASED_STATE;
+  const uniPrefilled = useRef(new Set<string>());
+  const uniWritten = useRef(new Set<string>());
+  const sawSubmitting = useRef(false);
+  useEffect(() => {
+    if (isSubmitting) {
+      sawSubmitting.current = true;
+      return;
+    }
+    if (!index || frozen) return;
+    // Флаг снимается только на прогоне, который реально принимает решения: разбор мог быть ещё не
+    // готов в момент, когда сохранение закончилось.
+    const afterSubmit = sawSubmitting.current;
+    sawSubmitting.current = false;
+    // Значения читаются императивно, а не из `pieces`: иначе эффект пересчитывался бы на каждое
+    // нажатие клавиши в любом поле карточки, а решает он ровно два входа — разбор и связи.
+    const rows = (getValues('pieces') ?? []) as FormPiece[];
+    rows.forEach((p, pi) => {
+      const key = (p.lineKey ?? '').trim().toLowerCase();
+      if (!key) return;
+      if (afterSubmit && !p.ungraded && uniWritten.current.has(key)) {
+        // Наша пометка не пережила сохранение — решение считается непринятым и принимается заново.
+        uniPrefilled.current.delete(key);
+        uniWritten.current.delete(key);
+      }
+      if (uniPrefilled.current.has(key)) return;
+      // Деталь есть на сервере — её ответ уже дан и хранится. Даже если это `false` от карточки,
+      // сохранённой до 0302: отличить «оператор снял» от «никто не спрашивал» отсюда нечем, а
+      // цена ошибки несимметрична — во втором случае человек поставит галку сам и один раз, в
+      // первом мы молча отменяем его решение при каждом открытии.
+      if (savedPieceKeys.has(key)) return;
+      const refs = blocksByPiece.get(key) ?? [];
+      // ВСЕ блоки детали, а не первый: деталь, у которой один чертёж помечен, а другой нет, —
+      // это расхождение чертежей, и отвечать за автора здесь нечем.
+      if (refs.length === 0 || !refs.every((r) => uniOf(r.block))) return;
+      uniPrefilled.current.add(key);
+      if (p.ungraded) return;
+      setValue(`pieces.${pi}.ungraded`, true, { shouldDirty: true });
+      // Запомнить, что пометку поставили МЫ: только по этому признаку выше отличается откат
+      // сохранением от снятия галки человеком. Снятое человеком остаётся снятым.
+      uniWritten.current.add(key);
+    });
+  }, [index, blocksByPiece, frozen, isSubmitting, savedPieceKeys, getValues, setValue]);
 
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
   // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
@@ -510,6 +602,10 @@ export function PiecesTab({
   const selOddPair = sel ? cutSymmetryCountInvalid(sel.cutSymmetry, sel.piecesPerGarment) : false;
   const selUnanswered = sel ? cutSymmetryUnanswered(sel.cutSymmetry, sel.piecesPerGarment) : false;
   const selArrow = grainlineArrow(sel?.grainline);
+  // ВСЕ блоки детали помечены токеном UNI — источник, из которого галка предзаполнилась. Подпись
+  // говорит именно «откуда взялось», а не «стоит»: при живом токене снятие галки законно, и
+  // выглядеть оно должно осознанным действием, а не случайным кликом по контролу без объяснения.
+  const selUniByToken = selRefs.length > 0 && selRefs.every((r) => uniOf(r.block));
 
   // СЛОИ ВЫБРАННОЙ ДЕТАЛИ ПО КОЛОРВЕЯМ (T4) — read-only проекция РЕЦЕПТА: вкладка деталей
   // показывает, рецепт (COLORWAYS) редактирует — направление T3. Связь живёт в детальных строках
@@ -1022,6 +1118,35 @@ export function PiecesTab({
                     />
                   </div>
                 </div>
+                <div>
+                  <Text size='micro' variant='label' component='label' className='uppercase'>
+                    не градуируется
+                  </Text>
+                  <div className='flex min-h-[22px] items-center'>
+                    <input
+                      type='checkbox'
+                      aria-label='не градуируется — во всех размерах'
+                      checked={!!sel.ungraded}
+                      onChange={(e) =>
+                        setValue(`pieces.${selIndex}.ungraded`, e.target.checked, {
+                          shouldDirty: true,
+                        })
+                      }
+                    />
+                  </div>
+                  {selUniByToken && (
+                    // Подпись обязана говорить правду в ОБОИХ состояниях. При снятой галке живой
+                    // токен никуда не делся, и молчание об этом читалось бы как «UNI в файле нет»;
+                    // а прежний текст «определено по имени блока» под пустым чекбоксом обещал бы
+                    // пометку, которой нет. Снятие — законное решение оператора, и подпись его
+                    // именно так и называет.
+                    <Text size='nano' variant='label'>
+                      {sel.ungraded
+                        ? 'определено по имени блока в DXF (UNI)'
+                        : 'в имени блока стоит UNI — пометка снята вручную'}
+                    </Text>
+                  )}
+                </div>
               </div>
               {selOddPair && (
                 <Text size='micro' variant='error'>
@@ -1117,6 +1242,21 @@ export function PiecesTab({
                   поэтому её количество обязано быть чётным; крой по сгибу парным не бывает по
                   построению (контур симметричен сам себе), а «со сгибом и нужна дважды» — это
                   манжеты: со сгибом × 2.
+                </Text>
+                {/* Что означает «не градуируется» и чем это отличается от «размера в имени не
+                    нашлось». Сказано здесь же, одним абзацем: галка отвечает на вопрос про
+                    ДЕТАЛЬ, а не про файл. */}
+                <Text size='micro' variant='label'>
+                  не градуируется — деталь одна на весь размерный ряд: карман, шлёвка, обтачка
+                  нарисованы один раз и входят в комплект КАЖДОГО размера целиком. Крой так себя и
+                  вёл всегда, а вот норма расхода у скоупа из одних таких деталей отказывалась
+                  считаться словами «похоже, выгружен только один размер» — потому что
+                  «безразмерная» и «размер не распознали» были для разбора одним и тем же. Галка
+                  превращает это в заявление. Токен UNI в имени блока DXF отвечает на тот же вопрос
+                  и предзаполняет галку у детали, заведённой из чертежа; у детали, уже сохранённой в
+                  карточке, ответ берётся из неё самой — снятую галку токен обратно не поставит.
+                  Замер площадей у помеченной детали бывает только общий: пер-размерные строки
+                  сервер отвергает.
                 </Text>
                 {/* Said once, under the fields. The four values are the ones the server's CHECK
                     accepts — anything else fails the whole card save, which is why this stopped

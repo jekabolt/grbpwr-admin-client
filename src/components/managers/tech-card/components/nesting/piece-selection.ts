@@ -13,7 +13,13 @@
 //
 // Модуль лёгкий (типы движка + разбор имён блоков) — его можно импортировать откуда угодно.
 import type { PieceDTO } from 'lib/nesting/types';
-import { normBlock } from './block-code';
+import {
+  normBlock,
+  uniGradedConflicts,
+  uniGroupsOf,
+  type BlockCode,
+  type UniConflict,
+} from './block-code';
 import { aliasIdentity, type BlockSplit } from './split-pieces';
 
 /**
@@ -93,6 +99,149 @@ export function selectMarkerPieces(
   return pieces.filter(
     (p) => (p.layer ?? '') === contourLayer && (unitsOfPiece.get(p.id) ?? 0) >= 1,
   );
+}
+
+/**
+ * ОДНА UNI-ДЕТАЛЬ, НАРИСОВАННАЯ НЕСКОЛЬКО РАЗ, КРОИТСЯ ОДИН РАЗ — и расхождение между копиями
+ * является отказом, а не выбором.
+ *
+ * Откуда берутся копии. CLO выгружает выкройки ПО РАЗМЕРАМ, а склейка кладёт их в один файл: у
+ * неградуируемого кармана `PCK_L_UNI_M` и `PCK_L_UNI_S` — это одна и та же деталь, приехавшая
+ * дважды. Пока токен UNI ничего не значил, такая пара СЛУЧАЙНО читалась как градация (основа
+ * `PCK_L_UNI`, два хвоста) и раскладывалась по одному карману на размер — то есть верно. Как
+ * только UNI отменяет размер (см. block-code.ts), обе копии становятся безразмерными, а
+ * безразмерная деталь по формуле блоба кроится на КАЖДОЕ изделие состава: настил получил бы
+ * ДВОЙНЫЕ карманы. Ошибка выглядит совершенно нормально — длина есть, детали на месте, счётчики
+ * сходятся, — и стоит она ткани.
+ *
+ * Почему не «взять любую». Победитель выбирается лексикографически наименьшим именем среди тех, у
+ * кого есть контур на рабочем слое: порядок файлов в пачке зависит от того, как их скачали, и
+ * «первый попавшийся» дал бы двум прогонам одной карточки разные контуры. Проигравшие исключаются
+ * ЦЕЛИКОМ, всеми своими контурами на всех слоях, — иначе счётчики деталей и списки на экране
+ * двоятся, показывая деталь, которой в раскладке нет.
+ *
+ * Почему разная геометрия — отказ. Копии заявлены ОДНОЙ деталью самим автором (один uniBase). Если
+ * они нарисованы по-разному, заявление ложно, и любой выбор здесь — это молчаливое решение, какая
+ * из двух выкроек является нормой. Допуск тот же, что у `pickOnLayer` (0.5 %): дребезг тесселяции
+ * — не редакция выкройки.
+ *
+ * Сравнивается МУЛЬТИМНОЖЕСТВО площадей рабочего слоя — сколько контуров и какие, — а не одно
+ * число на блок. Кратность входит в геометрию наравне с площадью: выгрузка размера M законно несёт
+ * деталь ДВАЖДЫ (два одинаковых кармана), а выгрузка S — один раз. Пока сверялся максимум, такие
+ * копии считались совпавшими, победитель определялся алфавитом, и настил либо терял настоящую
+ * вторую копию, либо оставлял лишнюю — на экране это неотличимо, потому что счётчики берутся из
+ * той же выборки. Нулевая и невалидная площадь — тоже отказ: сравнить её не с чем (доля от нуля не
+ * определена), и нормой она быть не может.
+ *
+ * Почему «градуированная копия + uni» — тоже отказ. Решение владельца: файл, где одна и та же
+ * деталь есть и рядом размеров (`PCK_L_XS…PCK_L_XL`), и с пометкой «не градуируется»
+ * (`PCK_L_UNI_M`), описывает две несовместимые вещи. Мы не знаем, какая из них правда.
+ *
+ * Дедуп живёт на пути НАСТИЛА, а не на стороне сохранённого блоба: блоб хранит геометрию, которую
+ * реально укладывали, и вычищать из него детали задним числом значило бы переписывать замер.
+ *
+ * САМ ВЕРДИКТ («какие имена называют одну деталь», «спорит ли она с градуированной») живёт в
+ * block-code.ts — там же, где uniOf/uniBaseOf, и там же, откуда его берут норма и продолжение
+ * раскладки. Здесь остаётся только ОТВЕТ настила: сравнить геометрию копий, выбрать победителя,
+ * исключить проигравших.
+ */
+const UNI_AREA_TOLERANCE = 0.005; // тот же допуск, что pickOnLayer в dxf-consumption.ts
+
+/**
+ * Одинаково ли нарисованы копии: одинаковое ЧИСЛО контуров на рабочем слое и одинаковые площади.
+ *
+ * `false` при любой невалидной площади (не число, ноль, отрицательная): относительный разброс от
+ * нуля не определён, а прежний guard `min > 0` пропускал пару «0 против 100» как совпавшую — то
+ * есть ровно на битой геометрии выбор и делался молча.
+ */
+function sameGeometry(lists: readonly (readonly number[])[]): boolean {
+  if (lists.some((l) => l.some((a) => !Number.isFinite(a) || a <= 0))) return false;
+  if (new Set(lists.map((l) => l.length)).size > 1) return false;
+  const sorted = lists.map((l) => [...l].sort((x, y) => x - y));
+  for (let i = 0; i < sorted[0].length; i++) {
+    const col = sorted.map((l) => l[i]);
+    const min = Math.min(...col);
+    const max = Math.max(...col);
+    if ((max - min) / min > UNI_AREA_TOLERANCE) return false;
+  }
+  return true;
+}
+
+export function dedupeUniPieces(
+  pieces: readonly PieceDTO[],
+  /** Разбор имён ЭТОГО скоупа: uni-признак, uniBase и размерный вердикт живут там. */
+  codeById: ReadonlyMap<number, BlockCode>,
+  /** Рабочий слой контура: на нём выбирают победителя и сравнивают площади. */
+  contourLayer: string,
+): { excludedIds: Set<number>; conflicts: UniConflict[] } {
+  const excludedIds = new Set<number>();
+
+  type Block = { raw: string; ids: number[]; areasOnLayer: number[] };
+  const byBlockOfGroup = new Map<string, Map<string, Block>>(); // ключ группы → имя (ci) → блок
+  const entries: { raw: string; uniBase: string }[] = [];
+  // Идентичности, ПОЛУЧИВШИЕ размерный вердикт в этом же скоупе, — вторая половина конфликта
+  // graded-vs-uni. Берутся из того же разбора, а не из формы имени: вердикт структурный.
+  const gradedIdentities = new Set<string>();
+
+  for (const p of pieces) {
+    const code = codeById.get(p.id);
+    if (!code) continue;
+    if (code.size) {
+      gradedIdentities.add(normBlock(code.identity).toLowerCase());
+      continue;
+    }
+    if (!code.uni) continue;
+    const base = normBlock(code.uniBase);
+    const raw = normBlock(code.raw);
+    if (!base || !raw) continue;
+    entries.push({ raw, uniBase: base });
+    const gkey = base.toLowerCase();
+    const bkey = raw.toLowerCase();
+    const byBlock = byBlockOfGroup.get(gkey) ?? new Map<string, Block>();
+    const block = byBlock.get(bkey) ?? { raw, ids: [], areasOnLayer: [] };
+    block.ids.push(p.id);
+    // Копим СПИСОК, а не максимум: сколько контуров детали лежит на рабочем слое — столько штук и
+    // положит настил, и копия с другой кратностью это уже другая деталь (см. шапку).
+    if ((p.layer ?? '') === contourLayer) block.areasOnLayer.push(p.areaCm2);
+    byBlock.set(bkey, block);
+    byBlockOfGroup.set(gkey, byBlock);
+  }
+
+  const groups = uniGroupsOf(entries);
+  const conflicts: UniConflict[] = uniGradedConflicts(groups, gradedIdentities);
+  const conflicted = new Set(conflicts.map((c) => normBlock(c.subject).toLowerCase()));
+
+  for (const [gkey, byBlock] of byBlockOfGroup) {
+    // Группа, уже отказавшая по столкновению с градуированной, дедупу не подлежит: путь закрыт
+    // целиком, и исключать что-либо значило бы наполовину исполнить решение, которое мы отвергли.
+    if (conflicted.has(gkey)) continue;
+    // Одно имя — дедупить нечего. Тот же блок из двух файлов сюда и попадает одной записью: это
+    // две ревизии одного листа, и разбирается этот случай не здесь, а выбором контура на слое.
+    // Пустой остаток (`uniBase === raw`) тоже оседает здесь: группа состоит из самой себя.
+    if (byBlock.size < 2) continue;
+    const onLayer = [...byBlock.entries()].filter(([, b]) => b.areasOnLayer.length > 0);
+    // Ни у одной копии нет контура на рабочем слое — в раскладку не поедет ни одна, исключать
+    // нечего и сравнивать нечего.
+    if (onLayer.length === 0) continue;
+    const group = groups.get(gkey);
+    // Сравнивать можно только когда есть ЧТО с чем: единственный блок с контурами на слое забирает
+    // группу без разговора (у остальных на рабочем слое ничего нет, и в настил они не поедут).
+    if (onLayer.length >= 2 && !sameGeometry(onLayer.map(([, b]) => b.areasOnLayer))) {
+      conflicts.push({
+        kind: 'area',
+        subject: group?.uniBase ?? gkey,
+        blocks: group?.blocks ?? [...byBlock.values()].map((b) => b.raw).sort(),
+      });
+      continue;
+    }
+    const winner = onLayer.map(([k]) => k).sort()[0];
+    for (const [k, b] of byBlock) {
+      if (k === winner) continue;
+      for (const id of b.ids) excludedIds.add(id);
+    }
+  }
+
+  return { excludedIds, conflicts };
 }
 
 /** Сопоставление «блок чертежа → деталь кроя», как его записала карточка. */

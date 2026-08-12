@@ -27,6 +27,15 @@
 import type { PieceDTO } from 'lib/nesting/types';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { DxfIndex, PieceBlockRef } from './dxf-geometry';
+import {
+  normBlock,
+  uniConflictReason,
+  uniDuplicateConflicts,
+  uniGradedConflicts,
+  uniGroupsOf,
+  uniOf,
+  type UniConflict,
+} from './block-code';
 import { toBomUnit, type FabricWeightBasis } from './marker-io';
 import { aliasIdentity } from './use-block-sizes';
 
@@ -45,6 +54,14 @@ export type DxfNormPiece = {
   perGarment: number;
   /** Привязки «деталь → блок чертежа»; побеждает первая, которая нашлась (как в findPiece). */
   refs: readonly PieceBlockRef[];
+  /**
+   * Галка «не градуируется — во всех размерах» с карточки детали (`tech_card_piece.ungraded`).
+   *
+   * Второй, равноправный источник того же заявления: токен UNI его несёт из файла, галка — руками.
+   * Отсутствие поля — это «оператор не отвечал», а не «градуируется»: старые карточки его не
+   * несут вовсе, и читать их молчание как ответ значило бы решить за них.
+   */
+  ungraded?: boolean;
 };
 
 export type DxfNormSizeRow = {
@@ -177,9 +194,34 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   }
 
   // ── что каждая деталь несёт в чертеже ────────────────────────────────────────────────────
-  type Resolved = { piece: DxfNormPiece; bySize: Map<string, PieceDTO[]>; graded: boolean };
+  //
+  // СОСТОЯНИЙ У ДЕТАЛИ ТРИ, А НЕ ДВА, и различать их обязан именно этот расчёт.
+  //
+  //   graded              — размерный хвост в имени блока: своя геометрия у каждого размера;
+  //   explicit-ungraded   — АВТОР СКАЗАЛ, что деталь одна на весь ряд (токен UNI в имени блока
+  //                         либо галка на карточке);
+  //   unclassified-sizeless — размера в имени нет, и не сказал никто: скорее всего, выгружен
+  //                         один размер, и «норма ряда» по такому файлу была бы выдумкой.
+  //
+  // Пока состояний было два, последние два были одним, и отказ ниже накрывал оба разом. Скоуп из
+  // одних карманов и обтачек — законный (мешковина, шлёвки, планка), и норма у него честно одна
+  // на все размеры: одинаковость там ИСТИННА, а не выведена из отсутствия данных.
+  type Resolved = {
+    piece: DxfNormPiece;
+    bySize: Map<string, PieceDTO[]>;
+    graded: boolean;
+    /** Деталь ЗАЯВЛЕНА неградуируемой: токен во всех её контурах либо галка на карточке. */
+    explicit: boolean;
+  };
   const resolved: Resolved[] = [];
   const unmatched: string[] = [];
+  // Половинки вердикта о столкновениях вокруг uniBase. Обе берутся ИЗ ТОГО ЖЕ разбора, по которому
+  // построен индекс (`split.codeById`): посчитать uniBase здесь заново значило бы завести второй
+  // разбор имени, который однажды ответит иначе, чем тот, по которому уже разложены детали.
+  const codeById = input.index.split.codeById;
+  const uniEntries: { raw: string; uniBase: string }[] = [];
+  const gradedIdentities = new Set<string>();
+  const declaredVsGraded: UniConflict[] = [];
   for (const piece of input.pieces) {
     let bySize: Map<string, PieceDTO[]> | undefined;
     for (const r of piece.refs) {
@@ -221,7 +263,50 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
         reason: `деталь «${piece.name}» нарисована и с размерным хвостом, и без него — понять, справочный это контур базового размера или деталь, одинаковая во всех размерах, нечем. Разница — целая деталь в площади каждого размера`,
       };
     }
-    resolved.push({ piece, bySize: norm, graded });
+    // ТОКЕН ЧИТАЕТСЯ У КАЖДОГО КОНТУРА, А НЕ У ПЕРВОГО. Деталь законно нарисована несколькими
+    // блоками (разные листы, разные ревизии), и пометка, стоящая лишь на одном из них, — это не
+    // заявление автора, а его недоделка: считать по ней весь скоуп «объявленным» значило бы снять
+    // отказ по половине улики.
+    const contours = [...norm.values()].flat();
+    const tokenSaysUngraded =
+      contours.length > 0 && contours.every((c) => uniOf(c.blockName ?? ''));
+    // Слагаемые этой суммы — вот они, и вердикт о столкновении строится по НИМ, а не по всему
+    // файлу: uni-блок, который к этой ткани не привязан, в норму не входит и спорить ему не с чем.
+    // (Настил спрашивает шире — он укладывает все контуры скоупа; каждый путь проверяет свою
+    // популяцию, и это одно и то же правило на разных множествах, а не два разных правила.)
+    // ГАЛКА ПРОТИВ ГЕОМЕТРИИ — ОТКАЗ, А НЕ ТИХИЙ ПРИОРИТЕТ.
+    //
+    // Оператор пометил деталь «не градуируется», а в выкройках у неё полный размерный ряд. Пометка
+    // геометрию не отменяет: `graded` выводится из имён блоков, `pieceRows` шлёт строку на КАЖДЫЙ
+    // размер, и сервер (0302) отвергает такой сейв площадей ЦЕЛИКОМ — `ungraded_piece_measured_by_
+    // _size`, — то есть оператор теряет весь замер и не понимает почему.
+    //
+    // Молча отдать победу галке (послать одну строку с sizeId 0) нельзя ровно по той же причине,
+    // по которой владелец просил блокировать «градуированную копию + uni»: у детали есть РАЗНАЯ
+    // геометрия по размерам, и объявить её одинаковой значит выкинуть измеренную разницу. Молча
+    // отдать победу геометрии — значит проигнорировать ответ оператора. Спрашивать здесь некого,
+    // поэтому отказ, и он называет деталь и оба выхода.
+    if (piece.ungraded === true && graded) {
+      const blocks = [
+        ...new Set(contours.map((c) => normBlock(c.blockName ?? '')).filter(Boolean)),
+      ].sort();
+      declaredVsGraded.push({ kind: 'declared-vs-graded', subject: piece.name, blocks });
+    }
+    if (graded) {
+      const identity = normBlock(codeById.get(contours[0]?.id ?? -1)?.identity ?? '');
+      if (identity) gradedIdentities.add(identity.toLowerCase());
+    } else if (tokenSaysUngraded) {
+      for (const c of contours) {
+        const code = codeById.get(c.id);
+        if (code?.uniBase) uniEntries.push({ raw: code.raw, uniBase: code.uniBase });
+      }
+    }
+    resolved.push({
+      piece,
+      bySize: norm,
+      graded,
+      explicit: piece.ungraded === true || tokenSaysUngraded,
+    });
   }
   if (unmatched.length > 0) {
     // Частичная площадь ЗАНИЖАЕТ норму, и молча: экран показал бы число, склад — недостачу.
@@ -229,6 +314,35 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       ok: false,
       reason: `в сегодняшних выкройках нет деталей: ${unmatched.join(', ')} — площадь изделия вышла бы неполной, а неполная норма занижает закупку`,
     };
+  }
+
+  // ── ОДНА ДЕТАЛЬ, ЗАЯВЛЕННАЯ ДВАЖДЫ, — ОТКАЗ, А НЕ УДВОЕННАЯ ПЛОЩАДЬ ────────────────────────
+  //
+  // Диалог сопоставления в потоке создания заводит деталь кроя НА КАЖДЫЙ блок, а склеенная
+  // по-размерная выгрузка CLO приносит один и тот же карман под двумя именами (`PCK_L_UNI_M` и
+  // `PCK_L_UNI_S`). Обе детали резолвятся независимо, обе оказываются заявленно неградуируемыми, и
+  // каждая кладёт `perGarment × площадь` в КАЖДЫЙ размер: норма и печатный кат-лист удваиваются,
+  // тогда как настил (dedupeUniPieces) кроит ОДНУ копию. Разницу между бумагой и настилом не видно
+  // ни в одном числе на экране — видно на складе.
+  //
+  // НАСТИЛ НА ЭТОТ ВХОД ДЕДУПИТ, А НОРМА ОТКАЗЫВАЕТ, и это не разнобой. Настил укладывает контуры и
+  // вправе взять один — от какого имени пришёл контур, ткани безразлично. Здесь складываются
+  // ЗАЯВЛЕННЫЕ ДЕТАЛИ КАРТОЧКИ: у каждой свой line_key, своё количество на изделие и свой адрес
+  // площади на сервере (0297), а сервер сверяет комплект целиком. Выбросить одну молча значит и
+  // отправить неполный набор, и решить за оператора, какая из двух его записей лишняя.
+  const uniGroups = uniGroupsOf(uniEntries);
+  const gradedVsUni = uniGradedConflicts(uniGroups, gradedIdentities);
+  // Группе, уже уличённой в споре с размерным рядом, второе предложение про дубли ничего не
+  // добавляет: беда одна, чинится одним действием, а два абзаца читаются как две.
+  const flagged = new Set(gradedVsUni.map((c) => c.subject.toLowerCase()));
+  const uniConflicts = [
+    // Первым — спор с ответом САМОГО оператора: он и чинится быстрее всех, одним кликом.
+    ...declaredVsGraded,
+    ...gradedVsUni,
+    ...uniDuplicateConflicts(uniGroups).filter((c) => !flagged.has(c.subject.toLowerCase())),
+  ];
+  if (uniConflicts.length > 0) {
+    return { ok: false, reason: uniConflictReason(uniConflicts) };
   }
 
   // ── выбор контура под размер ─────────────────────────────────────────────────────────────
@@ -426,8 +540,14 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // сколько S», сделанное не по выкройкам, а по их отсутствию. Ровно та нечестность, ради которой
   // диалог и пишет ряд, а не скаляр. Один размер в ряду — случай другой: одинаковость там истинна
   // (шапка, сумка), и отказывать нечему.
+  //
+  // …И РОВНО ПОЭТОМУ ОТКАЗ СНИМАЕТСЯ, КОГДА ОДИНАКОВОСТЬ ЗАЯВЛЕНА. Скоуп, где КАЖДАЯ деталь
+  // explicit-ungraded, — это не «выгружен один размер», а сумка из кармана и обтачки: одно число
+  // всем размерам там ПРАВДА, и отказывать не в чем. Условие полное намеренно: одна
+  // unclassified-деталь рядом с объявленными означает, что про неё как раз ничего не сказано, —
+  // и её-то размер, возможно, и не выгрузили. Отказ в этом случае остаётся ДОСЛОВНО прежним.
   const gradedPieces = resolved.filter((r) => r.graded).length;
-  if (gradedPieces === 0 && input.sizeIds.length > 1) {
+  if (gradedPieces === 0 && input.sizeIds.length > 1 && !resolved.every((r) => r.explicit)) {
     return {
       ok: false,
       reason:

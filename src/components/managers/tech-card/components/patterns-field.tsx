@@ -44,7 +44,7 @@ import {
   scopeKeyOfBinding,
   strictestDirection,
 } from './bom-purpose';
-import { sizeTokensOf } from './nesting/block-code';
+import { sizeTokensOf, uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
@@ -200,7 +200,12 @@ type SizeAudit =
   //
   // graded=false — в именах блоков размеров нет вовсе (не градуированный файл). Это НЕ «нет всех
   // размеров»: сказать так значило бы повторить ошибку счётчика с другой стороны.
-  | { phase: 'ready'; found: Set<string> };
+  //
+  // `uniOnly` — ВСЕ блоки скоупа помечены токеном UNI, то есть автор ЗАЯВИЛ, что эти детали не
+  // градуируются. Пустой набор размеров у такого скоупа — ответ, а не пробел, и полоса покрытия
+  // обязана говорить о нём другими словами. Признак берётся из имён блоков: ручная галка на
+  // детали сюда не доезжает и врать «UNI» вместо неё нельзя.
+  | { phase: 'ready'; found: Set<string>; uniOnly: boolean };
 
 // Выкройки карточки (§2) — DXF, разложенные ПО МАТЕРИАЛАМ.
 //
@@ -534,14 +539,26 @@ export function PatternsField({
   // гонять незачем. Ключ — скоуп из самого разбора (`scopeByFile`), тот же, по которому группа
   // ищет свои файлы.
   const foundByScope = useMemo(() => {
-    const out = new Map<string, Set<string>>();
+    const out = new Map<string, { tokens: Set<string>; uniOnly: boolean }>();
     if (!bundle) return out;
     const byScope = new Map<string, PieceDTO[]>();
     for (const p of bundle.pieces) {
       const k = bundle.scopeByFile.get(p.fileIndex ?? -1) ?? '';
       byScope.set(k, [...(byScope.get(k) ?? []), p]);
     }
-    for (const [k, list] of byScope) out.set(k, splitPiecesBySize(list, dictTokens).sizeTokenSet);
+    for (const [k, list] of byScope) {
+      // Заявление автора считается по именам блоков, а не по разбору: у скоупа из одних uni-имён
+      // размерных токенов не будет по построению, и без этого признака полоса покрытия объявила
+      // бы «файл не градуирован» про файл, который градуировать нечего.
+      //
+      // Контур БЕЗ имени блока — против заявления, а не мимо него: он ничего не заявляет, и скоуп
+      // «uni-блоки плюс россыпь безымянных» не «не градуируется», а разобран наполовину. Фильтр по
+      // непустым именам объявлял бы такой скоуп помеченным, умалчивая про остальное.
+      out.set(k, {
+        tokens: splitPiecesBySize(list, dictTokens).sizeTokenSet,
+        uniOnly: list.length > 0 && list.every((p) => uniOf((p.blockName ?? '').trim())),
+      });
+    }
     return out;
   }, [bundle, dictTokens]);
 
@@ -553,8 +570,14 @@ export function PatternsField({
       if (bundle) {
         // Скоупа нет в карте — значит из его файлов не вышло НИ ОДНОЙ детали (пустой чертёж,
         // непрочитанный слой). Это законный ответ «размеров в именах блоков нет», а не отсутствие
-        // проверки: проверка была, ответ пустой.
-        out[sig] = { phase: 'ready', found: foundByScope.get(g.scope.key) ?? new Set<string>() };
+        // проверки: проверка была, ответ пустой. Пустой скоуп заявлением тоже не является —
+        // `uniOnly` у него false, и полоса скажет прежние слова.
+        const scoped = foundByScope.get(g.scope.key);
+        out[sig] = {
+          phase: 'ready',
+          found: scoped?.tokens ?? new Set<string>(),
+          uniOnly: scoped?.uniOnly ?? false,
+        };
       } else if (geometry.isError) {
         out[sig] = { phase: 'error', message: geometry.error?.message ?? 'причина неизвестна' };
       } else if (armed) {
@@ -1010,9 +1033,14 @@ export function PatternsField({
       );
     }
     if (a.found.size === 0) {
+      // ДВА РАЗНЫХ ФАКТА ОДНОЙ ФОРМЫ. «Размеров в именах нет» — это молчание разбора, и тон у него
+      // соответствующий; «все блоки помечены UNI» — это ответ автора, и он не про нехватку: такие
+      // детали идут во ВСЕ размеры целиком, покрывать им нечего.
       return (
         <Text size='nano' variant='label' component='span'>
-          в именах блоков размеров нет — файл не градуирован
+          {a.uniOnly
+            ? 'детали не градуируются (UNI) — идут во все размеры'
+            : 'в именах блоков размеров нет — файл не градуирован'}
         </Text>
       );
     }

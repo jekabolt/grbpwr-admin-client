@@ -55,6 +55,7 @@ import {
   type RollGoodsLine,
 } from './bom-purpose';
 import { formatBomMoney, resolveBomPrice } from './bom-price';
+import { uniOf } from './nesting/block-code';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 
 import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
@@ -179,8 +180,9 @@ const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
 // Lowercase extension of a pattern sheet: filename first, url path as the legacy fallback —
 // the same source order as the server manifest's sheetExt and the viewer's sheetKind. The
 // caption branches on it because a SIZELESS sheet means two different things by format: a DXF
-// is graded (sizes live in its block names), a PDF simply has no size — «градуированный» on a
-// PDF would promise a size switcher the viewer will not show.
+// carries its sizes inside (in its block names) OR declares its pieces ungraded (the UNI token),
+// while a PDF simply has no size — «градуированный» on a PDF would promise a size switcher the
+// viewer will not show.
 const patternExt = (p: { filename?: string; url?: string }): string => {
   const fromName = /\.([a-z0-9]+)$/i.exec((p.filename ?? '').trim());
   if (fromName) return fromName[1].toLowerCase();
@@ -838,8 +840,19 @@ export function TechPackDocument({
   const patternGroups: Array<{
     wireKey: string;
     label: string;
+    /** Uni подтверждён СОДЕРЖИМЫМ этого скоупа — см. uniScopeKeys ниже. */
+    uniKnown: boolean;
     sheets: common_TechCardSizePattern[];
   }> = [];
+  // СКОУПЫ, ГДЕ UNI ДЕЙСТВИТЕЛЬНО ЕСТЬ. Доказательство — сохранённая связь блок→деталь: в ней лежит
+  // ИМЯ БЛОКА ИЗ ФАЙЛА, то есть ровно то, чем лекальщик заявил неградуируемость. Разобрать DXF на
+  // бумаге нечем (печать данные не качает), а карточка без единого uni-имени обязана печататься
+  // ровно как раньше — поэтому подпись про UNI не ставится «на всякий случай».
+  const uniScopeKeys = new Set<string>();
+  for (const a of tc?.pieceDxfAliases?.items ?? []) {
+    if (!uniOf((a.blockName ?? '').trim())) continue;
+    uniScopeKeys.add(scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, patternScopes));
+  }
   const seenScopeKeys = new Set<string>();
   for (const s of patternScopes) {
     if (seenScopeKeys.has(s.key)) continue; // duplicate line_key guard — one figure per key
@@ -849,17 +862,30 @@ export function TechPackDocument({
     patternGroups.push({
       wireKey: s.byPurpose ? wireFabricPurpose(s.key) : s.key,
       label: s.byPurpose ? bomPurposeLabel(s.key) : (s.lines[0]?.name ?? '').trim() || 'BOM line',
+      uniKnown: uniScopeKeys.has(s.key),
       sheets,
     });
   }
   const unboundSheets = sheetsByScope.get('') ?? [];
   if (unboundSheets.length > 0) {
-    patternGroups.push({ wireKey: '_unbound', label: 'unbound sheets', sheets: unboundSheets });
+    patternGroups.push({
+      wireKey: '_unbound',
+      label: 'unbound sheets',
+      uniKnown: uniScopeKeys.has(''),
+      sheets: unboundSheets,
+    });
   }
   // Which sizes a group covers: named sizes in the card's size-range order (strays after),
   // plus «градуированные» for sizeless DXF and «без размера» for sizeless PDF — two different
   // facts, branched on the file format the same way the viewer's sheet list does.
-  const patternGroupSizes = (sheets: common_TechCardSizePattern[]): string => {
+  //
+  // Безразмерный DXF подписывается «graded» ровно до тех пор, пока uni в этом скоупе не подтверждён
+  // содержимым (`uniKnown`): файл ОДНИХ uni-деталей размеров не несёт вовсе, и «градуирован» про
+  // него — неправда, но формат листа этих двух случаев не различает (строка выкройки хранит только
+  // размер и файл). Поэтому там, где uni доказан, подпись называет ОБА варианта — «multi-size or
+  // UNI», — а там, где его нет, бумага остаётся прежней. Печать карточек, которых эта фича не
+  // касается, меняться не имеет права.
+  const patternGroupSizes = (sheets: common_TechCardSizePattern[], uniKnown: boolean): string => {
     const named = new Set<number>();
     let graded = false;
     let sizeless = false;
@@ -873,7 +899,7 @@ export function TechPackDocument({
     return [
       ...inRange.map(sizeName),
       ...stray.map(sizeName),
-      graded ? 'graded' : '',
+      graded ? (uniKnown ? 'multi-size or UNI' : 'graded') : '',
       sizeless ? 'sizeless' : '',
     ]
       .filter(Boolean)
@@ -1427,7 +1453,7 @@ export function TechPackDocument({
                   // «выкройки изменились» из-за правки операций. Пара пишется всегда: v=0 у
                   // легаси-листов без номера — тоже сверяемое значение (замена присвоит номер).
                   const versionStamp = g.sheets.reduce((s, p) => s + (p.version ?? 0), 0);
-                  const sizesLine = patternGroupSizes(g.sheets);
+                  const sizesLine = patternGroupSizes(g.sheets, g.uniKnown);
                   return (
                     <figure
                       key={g.wireKey}
@@ -1630,6 +1656,15 @@ export function TechPackDocument({
                       <div className='font-medium'>{p.name || '—'}</div>
                       {p.detached && (
                         <div className='text-labelColor'>sketch callout link lost</div>
+                      )}
+                      {/* НЕ ГРАДУИРУЕТСЯ — то, что цех обязан прочесть до раскроя: этой детали
+                          не бывает «своего» размера, один и тот же контур идёт в комплект
+                          каждого. Единственное место, куда доезжает РУЧНАЯ галка (манифест
+                          публичного вьюера её не несёт), — поэтому она печатается словами, а не
+                          выводится читателем из имён блоков. Язык листа — фабричный английский,
+                          как у соседней строки про потерянную выноску. */}
+                      {p.ungraded && (
+                        <div className='text-labelColor'>not graded — same in all sizes</div>
                       )}
                     </td>
                     {/* КОЛИЧЕСТВО И ЕГО ПОЯСНЕНИЕ В ОДНОЙ КЛЕТКЕ — это и есть весь смысл Ф1.3 на

@@ -110,6 +110,10 @@ export default function PieceAreasDialog({
     lineKey?: string;
     name?: string;
     piecesPerGarment?: number;
+    // Галка «не градуируется» — второй источник того же заявления, что токен UNI в имени блока
+    // (см. DxfNormPiece.ungraded). Замер площадей обязан читать её тем же способом, что диалог
+    // нормы: иначе два экрана по одной карточке дали бы разные отказы.
+    ungraded?: boolean;
   }[];
 
   // Детали ЭТОГО скоупа: те, у кого есть связь с блоком его чертежа. Дедуп по имени блока — тот же,
@@ -138,6 +142,7 @@ export default function PieceAreasDialog({
         // входит в объяснение разбора ниже — поэтому берётся честное, а не единица.
         perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
         refs,
+        ungraded: !!p.ungraded,
       });
     }
     return out;

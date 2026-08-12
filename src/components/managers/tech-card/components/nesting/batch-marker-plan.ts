@@ -63,7 +63,9 @@ import type { ScopedSheet } from './dxf-by-scope';
 import { applySeamPrefill } from './dxf-apply-conditions';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { compositionOf, type MarkerCompositionEntry } from './marker-io';
+import { uniConflictReason } from './block-code';
 import {
+  dedupeUniPieces,
   markerUnits,
   pieceLineKeysByPieceId,
   selectMarkerPieces,
@@ -524,6 +526,15 @@ export function planBatchMarkers(args: {
     }
 
     const prep = prepareScope(scope, args);
+    // UNI-ДУБЛИ — ОДИН ОТВЕТ НА ТКАНЬ, а не по разу на задание: копии неградуируемой детали и
+    // рабочий слой от колорвея и состава не зависят вовсе. Спор копий гасит ВСЮ ткань: настил
+    // партии, посчитанный по одной из двух выкроек наугад, неотличим от настоящего — все
+    // счётчики сойдутся, а ткани не хватит (или останется) ровно на разницу.
+    const uniDedupe = dedupeUniPieces(scope.pieces, prep.split.codeById, prep.contourLayer);
+    if (uniDedupe.conflicts.length > 0) {
+      scopeRefusal(uniConflictReason(uniDedupe.conflicts));
+      continue;
+    }
     // ГЕОМЕТРИЯ СОСТАВА ОБЩАЯ НА ВСЕ КОЛОРВЕИ. Колорвей меняет ПОЛОТНО (ширину и кромку), а не
     // лекала: все колорвеи стиля кроят одни и те же детали. Считать разворот по долевой и раздутие
     // припуском заново на каждый колорвей значило бы держать в памяти вкладки N копий одних и тех
@@ -690,7 +701,7 @@ export function planBatchMarkers(args: {
       // репозиторию — на этом уже спотыкались в nesting-modal.
       let geom = geomByComposition.get(geomKey);
       if (!geom) {
-        geom = jobGeometry(scope, prep, sizes);
+        geom = jobGeometry(scope, prep, sizes, uniDedupe.excludedIds);
         geomByComposition.set(geomKey, geom);
       }
       const built = buildJobConfig({
@@ -998,6 +1009,13 @@ function jobGeometry(
   scope: PlanScope,
   prep: ScopePrep,
   sizes: readonly JobSizeRow[],
+  /**
+   * Проигравшие копии uni-детали (dedupeUniPieces). Приходит СВЕРХУ, посчитанное один раз на
+   * ткань: от состава этот ответ не зависит, а второй его экземпляр был бы вторым ответом на
+   * вопрос «сколько экземпляров этой детали кроят» — ровно то расхождение, ради которого формула
+   * тиража живёт в общем модуле.
+   */
+  uniExcludedIds: ReadonlySet<number>,
 ): { pieces: PieceDTO[]; unitsOfPiece: Map<number, number> } {
   const rows: MarkerCompositionRow[] = sizes.map((r) => ({ tokens: r.tokens, qty: r.units }));
   const units = markerUnits({ graded: true, rows, ungradedUnits: 1 });
@@ -1006,7 +1024,9 @@ function jobGeometry(
     (id) => prep.split.codeById.get(id)?.size ?? '',
     units,
   );
-  const selected = selectMarkerPieces(scope.pieces, prep.contourLayer, unitsOfPiece);
+  const selected = selectMarkerPieces(scope.pieces, prep.contourLayer, unitsOfPiece).filter(
+    (p) => !uniExcludedIds.has(p.id),
+  );
   if (selected.length === 0) return { pieces: [], unitsOfPiece };
   const oriented = orientToGrain(selected, prep.grainLayer);
   return {

@@ -82,7 +82,9 @@ import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { ModalRailSection, type RailSectionStatus } from './modal-sections';
+import { uniConflictReason } from './block-code';
 import {
+  dedupeUniPieces,
   markerUnits,
   pieceLineKeysByPieceId,
   selectMarkerPieces,
@@ -330,10 +332,21 @@ export function NestingModal({
     layerOpts.find((o) => o.layer === contourLayer)?.allowance ?? null;
   // Слой, на котором ЗАМЕРЕНА линия шва, — второй из двух выходов, которые обязан назвать отказ.
   const seamLayerPick = useMemo(() => seamLineLayer(layerOpts), [layerOpts]);
+  // UNI-ДУБЛИ: одна неградуируемая деталь, приехавшая из по-размерных выгрузок несколькими
+  // именами, кроится ОДИН раз. Считается ДО списка размеров и до отбора деталей, потому что
+  // исключённые копии не должны попадать НИ В ОДИН счёт: увидев «6 деталей без размера» вместо
+  // трёх, оператор поверит числу, а не раскладке.
+  const uniDedupe = useMemo(
+    () => dedupeUniPieces(allPieces, split.codeById, contourLayer),
+    [allPieces, split, contourLayer],
+  );
+  // Конфликт — ОТКАЗ, а не выбор: см. dedupeUniPieces. Прогон и сохранение с ним не идут.
+  const uniRefusal = uniDedupe.conflicts.length > 0 ? uniConflictReason(uniDedupe.conflicts) : null;
   const sizeOpts = useMemo(() => {
     const seen = new Map<string, number>();
     for (const p of allPieces) {
       if ((p.layer ?? '') !== contourLayer) continue;
+      if (uniDedupe.excludedIds.has(p.id)) continue;
       const s = split.codeById.get(p.id)?.size ?? '';
       seen.set(s, (seen.get(s) ?? 0) + 1);
     }
@@ -342,7 +355,7 @@ export function NestingModal({
       .sort(
         (a, b) => (split.orderOfSize.get(a.size) ?? 1e6) - (split.orderOfSize.get(b.size) ?? 1e6),
       );
-  }, [allPieces, split, contourLayer]);
+  }, [allPieces, split, contourLayer, uniDedupe]);
   const missingOnLayer = useMemo(
     () => blocksMissingOnLayer(allPieces, contourLayer),
     [allPieces, contourLayer],
@@ -354,6 +367,23 @@ export function NestingModal({
   // детали из раскладки молча.
   const gradedOpts = useMemo(() => sizeOpts.filter((o) => o.size !== ''), [sizeOpts]);
   const ungradedCount = sizeOpts.find((o) => o.size === '')?.count ?? 0;
+  // ВСЕ безразмерные детали настила помечены токеном UNI — тогда «без размера в имени блока» про
+  // них неправда: автор ЗАЯВИЛ, что деталь одна на весь ряд, и разбор ничего не терял. Условие
+  // полное намеренно: одна непомеченная деталь в группе — и подпись возвращается к прежней, потому
+  // что именно у неё размер, возможно, просто не опознан. Считается по тем же деталям, что и
+  // счётчик: слой контура и исключённые uni-копии, иначе число и слова разойдутся.
+  const ungradedAllUni = useMemo(() => {
+    let any = false;
+    for (const p of allPieces) {
+      if ((p.layer ?? '') !== contourLayer) continue;
+      if (uniDedupe.excludedIds.has(p.id)) continue;
+      const code = split.codeById.get(p.id);
+      if ((code?.size ?? '') !== '') continue;
+      if (!code?.uni) return false;
+      any = true;
+    }
+    return any;
+  }, [allPieces, split, contourLayer, uniDedupe]);
   // СТРОКА СОСТАВА — ЭТО РАЗМЕР КАРТОЧКИ, А НЕ НАПИСАНИЕ ТОКЕНА. Реальные файлы пишут один
   // размер несколькими графиками: BP_M и SL_R_m, скобочный базовый BP_<S> рядом с FP_S, буква и
   // число одного ряда. Пока строки ключевались сырым хвостом, такие написания давали ДВЕ строки
@@ -431,8 +461,11 @@ export function NestingModal({
   // В раскладку идут детали ВСЕХ размеров состава плюс неградуируемые. Размер с количеством 0 —
   // это «не кроим», и его детали не попадают ни в поиск, ни в блоб.
   const selectedPieces = useMemo(
-    () => selectMarkerPieces(allPieces, contourLayer, unitsOfPiece),
-    [allPieces, contourLayer, unitsOfPiece],
+    () =>
+      selectMarkerPieces(allPieces, contourLayer, unitsOfPiece).filter(
+        (p) => !uniDedupe.excludedIds.has(p.id),
+      ),
+    [allPieces, contourLayer, unitsOfPiece, uniDedupe],
   );
   // СОСТАВ, КОТОРЫЙ УЕДЕТ НА СЕРВЕР — в id размеров карточки и отсортированный по ним (тот же
   // порядок канонизирует сервер, и он часть байтов блоба). Токены, не резолвящиеся в размер,
@@ -1418,6 +1451,7 @@ export function NestingModal({
     // её открытой для пэйлоада, который гарантированно отвергнут, значит обещать отказ вместо
     // сохранения. Инвариант держится этим файлом, а не порядком сбросов в соседнем эффекте.
     !doubleAllowanceRefusal &&
+    !uniRefusal &&
     !sizeUnsaved &&
     !sizeUnresolved &&
     sizesWithoutPieces.length === 0 &&
@@ -1449,6 +1483,12 @@ export function NestingModal({
     if (doubleAllowanceRefusal)
       out.push(
         'двойной припуск — прогон не запускается; полный текст в секции «2 · как читаем файл», у выбора контурного слоя',
+      );
+    // Полный текст стоит в секции «1 · что кроим», у состава: там же лежат счётчики, которые
+    // этот конфликт делает недостоверными. Второй экземпляр абзаца на том же экране был бы дублем.
+    if (uniRefusal)
+      out.push(
+        'в выкройках спорят копии неградуируемой детали — полный текст в секции «1 · что кроим», под составом',
       );
     // Не было в цепочке вовсе: отказ по невыбранной ткани блокировал сохранение молча, а тултип
     // падал в терминальную ветку про «завершённую раскладку». Формулировка — та же, что в рейле.
@@ -1833,6 +1873,9 @@ export function NestingModal({
       composition.length > MAX_MARKER_COMPOSITION_SIZES
         ? `в составе ${composition.length} размеров — потолок сервера ${MAX_MARKER_COMPOSITION_SIZES}`
         : '',
+      // Не про выбор оператора, а про файл, — но стоит здесь, потому что ломает именно счёт
+      // изделий и деталей, который живёт в этой секции.
+      uniRefusal ? 'копии неградуируемой детали спорят между собой' : '',
     ].filter(Boolean),
     warnings: [
       colorwayNoPin ? `колорвей «${chosenColorway?.label}» не назначил артикул на эту ткань` : '',
@@ -2111,10 +2154,14 @@ export function NestingModal({
                 )}
                 {graded && ungradedCount > 0 && (
                   <Text size='nano' variant='label' component='p'>
-                    {ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ
-                    изделие состава, то есть по {unitsTotal} шт
+                    {ungradedAllUni
+                      ? `${ungradedCount} деталей UNI — не градуируются, кроятся на каждое изделие (по ${unitsTotal} шт)`
+                      : `${ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ изделие состава, то есть по ${unitsTotal} шт`}
                   </Text>
                 )}
+                {/* Отказ, а не предупреждение: пока копии спорят, любое число здесь описывает
+                    раскладку, которой мы не выбирали. Прогон и сохранение выключены. */}
+                {uniRefusal && <CalloutBox tone='error'>{uniRefusal}</CalloutBox>}
                 {/* Здесь стояла строка «итог: изделий · уникальных деталей · экземпляров» — третья
                   копия одного и того же счёта. Канонический счёт теперь один: шапка списка в
                   секции «детали» (изделия, выбранные, к раскладке) и её свёрнутая сводка. */}
@@ -2705,7 +2752,13 @@ export function NestingModal({
                         <Text size='nano' variant='label' component='p'>
                           {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} см
                           {graded
-                            ? ` · ${split.codeById.get(p.id)?.size || 'без размера'} · ×${
+                            ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
+                              // размера» читалось бы про неё как недостача. Подпись берётся с
+                              // самой детали, а не с группы: в списке они лежат вперемешку.
+                              ` · ${
+                                split.codeById.get(p.id)?.size ||
+                                (split.codeById.get(p.id)?.uni ? 'UNI' : 'без размера')
+                              } · ×${
                                 Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
                               }`
                             : ''}
@@ -3133,16 +3186,19 @@ export function NestingModal({
                     checkedCount === 0 ||
                     running ||
                     overCap ||
-                    !!doubleAllowanceRefusal
+                    !!doubleAllowanceRefusal ||
+                    !!uniRefusal
                   }
                   title={
-                    doubleAllowanceRefusal
-                      ? doubleAllowanceRefusal
-                      : overCap
-                        ? // Числа потолков намеренно не повторяются: они напечатаны в шапке
-                          // списка деталей и в тексте отказа на панели.
-                          'сверх потолка сервера — такую раскладку не сохранить: уберите детали или уменьшите состав'
-                        : undefined
+                    uniRefusal
+                      ? uniRefusal
+                      : doubleAllowanceRefusal
+                        ? doubleAllowanceRefusal
+                        : overCap
+                          ? // Числа потолков намеренно не повторяются: они напечатаны в шапке
+                            // списка деталей и в тексте отказа на панели.
+                            'сверх потолка сервера — такую раскладку не сохранить: уберите детали или уменьшите состав'
+                          : undefined
                   }
                   onClick={requestRun}
                 >
