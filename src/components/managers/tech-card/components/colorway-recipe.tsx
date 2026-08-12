@@ -49,6 +49,7 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import { normSourceLabel } from './costing-vocab';
 import { DxfApplyHint } from './dxf-apply';
 import { MarkerApplyHint } from './marker-apply';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
@@ -956,7 +957,9 @@ function NormSummary({
   const source = draft.consumptionSource;
   const isMarker = source === 'marker';
   const isDxf = source === 'dxf';
-  const label = isMarker ? 'из раскладки' : isDxf ? 'по выкройкам' : 'введено руками';
+  // Слова — из общего словаря костинга: полоса себестоимости называет тот же источник теми же
+  // тремя словами, и вторая копия литералов разошлась бы с этой при первой же правке.
+  const label = normSourceLabel(source);
   // ПЕР-РАЗМЕРНАЯ НОРМА ПОБЕЖДАЕТ СКАЛЯР — ровно как на сервере: при непустых size_consumptions
   // LineTotal невалиден, себестоимость стиля берёт СРЕДНЕЕ ПО РАЗМЕРНОМУ РЯДУ (T6; весь ряд или
   // строка непосчитана), а план прогона читает

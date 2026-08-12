@@ -32,6 +32,24 @@ const ORIGIN_LABEL: Partial<Record<StyleCostPriceSource, string>> = {
 };
 
 /**
+ * ОТКУДА ВЗЯЛАСЬ НОРМА РАСХОДА — те же три слова везде на тех-карте.
+ *
+ * Слова уже стояли на экране (NormSummary в рецепте колорвея); здесь они переехали в общий
+ * словарь, потому что их понадобилось назвать во втором месте (полоса себестоимости), а вторая
+ * копия трёх строковых литералов — это ровно тот случай, из-за которого этот файл и заведён:
+ * одно состояние с двумя именами в двух местах одного экрана.
+ *
+ * Пустое/«manual» — это НЕ отсутствие источника, а конкретный источник «набрали руками», и
+ * называется он вслух: у такого числа нет геометрии, по которой его можно проверить.
+ */
+const NORM_SOURCE_LABEL: Record<string, string> = {
+  marker: 'из раскладки',
+  dxf: 'по выкройкам',
+};
+export const normSourceLabel = (source?: string) =>
+  NORM_SOURCE_LABEL[(source ?? '').trim().toLowerCase()] ?? 'введено руками';
+
+/**
  * Where a material line's price came from, and when. Renders `—` for NONE rather than a red
  * badge: the fact that there is no price is stated once, in the problem column, and stating it
  * twice in two colours was half of why the old table was hard to scan.

@@ -55,14 +55,17 @@ const num = (s?: string) => {
 // touch one and they degrade to a labelled browser-side preview until the card is saved.
 // (target_margin_pct and notes are deliberately absent: neither moves the unit cost, and the target
 // itself is read back from the server-resolved effective_target_margin_pct.)
-const COSTING_COST_KEYS = [
+// Экспортированы, а не скопированы: полоса себестоимости (money-panel) задаёт форме РОВНО ТОТ ЖЕ
+// вопрос — «форма всё ещё то, из чего сервер считал rollup». Второй список полей разошёлся бы с
+// этим при первой же новой статье костинга, и разошёлся бы молча.
+export const COSTING_COST_KEYS = [
   'cmtCost',
   'logisticsCost',
   'overheadCost',
   'defectPercent',
   'currency',
 ] as const;
-const COSTING_COST_PATHS = COSTING_COST_KEYS.map((k) => `costing.${k}` as const);
+export const COSTING_COST_PATHS = COSTING_COST_KEYS.map((k) => `costing.${k}` as const);
 
 const BREAK_EVEN_NO_FX =
   'R&D учитывается в базовой валюте, а маржа выше — в валюте костинга. Пересчитать нечем: ' +

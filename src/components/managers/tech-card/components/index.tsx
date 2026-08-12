@@ -62,6 +62,7 @@ import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
 import { LabelsField } from './labels-field';
+import { MoneyPanel } from './money-panel';
 import { PackagingRecipeField } from './packaging-recipe-field';
 import { LifecycleStrip } from './lifecycle-strip';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
@@ -2039,6 +2040,28 @@ export function TechCardForm({
           ) : null}
         </form>
       </div>
+
+      {/* ПОЛОСА СЕБЕСТОИМОСТИ — НА КАЖДОЙ ВКЛАДКЕ. «Нам надо оптимально всё организовать, чтобы не
+          прыгать с вкладки на вкладку»: сегодня ответ на вопрос «сколько стоит изделие» размазан
+          по BOM → колорвеям → костингу → производству.
+
+          СТОИТ ЗДЕСЬ, А НЕ ВНУТРИ ВКЛАДКИ И НЕ ВНУТРИ `<fieldset disabled={frozen}>`, по двум
+          отдельным причинам:
+           • вкладки все смонтированы и лишь скрыты CSS'ом, так что полоса внутри любой из них
+             исчезала бы на остальных тринадцати;
+           • disabled-fieldset гасит ЛЮБОЙ вложенный нативный контрол, а переключатель полосы —
+             это <button>: на RELEASED-карточке он умер бы вместе с самой полосой. Ровно из-за
+             этого отсюда уже выехали SAMPLES, PRODUCTION и костинг.
+          Сама полоса position:fixed, поэтому её место в разметке на раскладку не влияет — оно
+          влияет только на контекст формы (она внутри <Form>, ей нужно dirty-состояние статей) и
+          на порядок табуляции, где дополнительной панели место после формы.
+
+          ГЕЙТ ТОТ ЖЕ, ЧТО У ВКЛАДКИ КОСТИНГА: деньги не должны появиться у аккаунта, которому их
+          видеть нельзя. И только на сохранённой карточке — до первого сохранения серверного
+          расчёта не существует, а показывать вместо него нули полоса не имеет права. */}
+      {canReadCosting && isEditMode && numId && techCard ? (
+        <MoneyPanel techCard={techCard} />
+      ) : null}
 
       {/* Create a packaging material inline for the aux output picker (prefilled section). The
           created material is selected straight into the field the button sits under — without
