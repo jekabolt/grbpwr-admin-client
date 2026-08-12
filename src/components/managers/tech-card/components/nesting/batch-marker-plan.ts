@@ -4,39 +4,45 @@
 // ткани с уже РАЗОБРАННЫМИ выкройками и сегодняшние раскладки карточки. Выход: список заданий для
 // движка, каждое со своей ценой прогона, и список ОТКАЗОВ, каждый со своей причиной.
 //
-// ═══ ОДНО ЗАДАНИЕ = (КОЛОРВЕЙ × ТКАНЬ × РАЗМЕР), И ЭТО РЕШЕНИЕ, А НЕ УДОБСТВО ═══════════════════
+// ═══ ДВА РЕЖИМА, ОДИН КОНВЕЙЕР ═════════════════════════════════════════════════════════════════
 //
-// Соблазн — снять ОДНУ смешанную раскладку на весь микс партии: она короче суммы однородных (мелкие
-// детали одного размера садятся в выпады другого), и звучит как «настоящий настил». Нормой она быть
-// не может: смешанный настил меряется на КОНКРЕТНОМ соотношении размеров этой партии, и норма с
-// него привязала бы себестоимость стиля к случайному миксу одного заказа. Следующая партия с другим
-// миксом получила бы то же число — и оно было бы неверным ровно на разницу соотношений. Поэтому
-// здесь снимаются ОДНОРАЗМЕРНЫЕ раскладки: они переиспользуются между партиями, а сервер выдаёт с
-// них скалярную норму без оговорок (смешанной он её не выдаёт вовсе — scalarNormRefusal).
+// Режим решает РОВНО ОДНО: каков СОСТАВ настила и КОМУ он принадлежит. Всё остальное — разбор,
+// геометрия, отбор деталей, оценка, конфиг движка, отказы, замена, имя — общее, и разводить эти
+// два пути было бы гарантией того, что починенное в одном не починится в другом.
 //
-// Смешанный настил под КОНКРЕТНУЮ партию — отдельный продукт (раскройная раскладка прогона,
-// production_run_id > 0), и в этой волне его нет.
+//   · 'norms' — РАЗМЕРНЫЕ НОРМЫ. Задание = (колорвей × ткань × размер), состав {размер × 1},
+//     раскладка КАРТОЧНАЯ (production_run_id = 0). Такая переиспользуется между партиями, и сервер
+//     выдаёт с неё расход на изделие без оговорок. Цена выбора названа вслух на экране: настил на
+//     ОДНО изделие кладётся реже настоящего многокомплектного, поэтому измеренный расход идёт с
+//     запасом, а КПД ниже цехового. Ошибка направлена в безопасную сторону, но она есть.
 //
-// ═══ КАЖДАЯ РАСКЛАДКА ЗДЕСЬ — КАРТОЧНАЯ (production_run_id = 0) ════════════════════════════════
+//   · 'batch' — НАСТИЛ ПАРТИИ. Задание = (колорвей × ткань), состав — СОБСТВЕННОЕ СООТНОШЕНИЕ
+//     РАЗМЕРОВ ЭТОЙ ПАРТИИ, ужатое на НОД (60 M + 40 L → 3 M + 2 L), раскладка ПРОГОННАЯ
+//     (production_run_id = id выбранной партии). Это то, как ткань режут на самом деле, и её КПД —
+//     реальный процент раскроя партии, которого никто не вводил руками.
 //
-// Партия решает только, КАКИЕ пары (колорвей, размер) стоит раскладывать. Владельцем результата она
-// не становится: прогонная раскладка нормой быть не может физически (CHECK chk_tcm_run_not_norm) и
-// умирает вместе с прогоном по FK CASCADE — то есть не может стать тем, ради чего эта фаза и
-// написана.
+// ═══ ПОЧЕМУ СМЕШАННЫЙ НАСТИЛ ОБЯЗАН БЫТЬ ПРОГОННЫМ ═════════════════════════════════════════════
 //
-// ═══ ТИРАЖ НАСТИЛА — ОДНО ИЗДЕЛИЕ КАЖДОГО РАЗМЕРА ══════════════════════════════════════════════
+// Схема запрещает прогонной раскладке быть нормой (CHECK chk_tcm_run_not_norm), и это ровно то, что
+// здесь нужно. Соотношение смешанного настила — СЛУЧАЙНОСТЬ ОДНОГО ЗАКАЗА: следующая партия с
+// другим миксом получила бы то же число, неверное ровно на разницу соотношений. Привязав такую
+// раскладку к прогону, мы делаем «стать нормой стиля» физически невозможным, а не оговорённым.
+// Обратная сторона той же медали: прогонная раскладка умирает вместе с прогоном по FK CASCADE — и
+// потому размерные нормы режима 'norms' остаются карточными, они переживают партию намеренно.
 //
-// Состав задания — {размер × 1}, и количество из партии сюда НЕ ЕДЕТ. Причина инженерная: тираж
-// умножает ЭКЗЕМПЛЯРЫ, а поиск — это перебор порядков размещения, чья сложность растёт от их числа.
-// Файл реального пиджака даёт 40–45 контуров НА ОДНО изделие; тираж партии в 30 штук превратил бы
-// задание в тысячу с лишним экземпляров, и поиск не успел бы сделать ни одного поколения за любой
-// разумный бюджет (предпросчёт NFP при этом не подорожал бы вовсе — он платится за ПАРЫ ДЕТАЛЕЙ, —
-// так что прогноз выглядел бы прежним и врал бы).
+// ═══ ЦЕНА ПОИСКА И ПОЧЕМУ СООТНОШЕНИЕ НЕ МАСШТАБИРУЕТСЯ ТИХО ═══════════════════════════════════
 //
-// ЦЕНА ЭТОГО ВЫБОРА НАЗВАНА ВСЛУХ НА ЭКРАНЕ: настил на одно изделие кладётся РЕДЕ настоящего
-// многокомплектного, поэтому измеренный расход выходит с запасом, а КПД — ниже цехового. Ошибка
-// направлена в безопасную сторону (заниженная норма обнаруживается не на экране, а на складе, когда
-// ткань кончилась), но она есть, и молчать о ней нельзя.
+// Две цены, и растут они от разного. ПОИСК — перебор порядков размещения, его сложность растёт от
+// числа ЭКЗЕМПЛЯРОВ на полотне. ПРЕДПРОСЧЁТ NFP платится за пары УНИКАЛЬНЫХ контуров: от тиража
+// одного размера он не дорожает вовсе, но каждый НОВЫЙ размер состава приносит свой набор контуров
+// — то есть смешанный настил дороже однородного и здесь. Обе цены считает одна и та же оценка
+// (estimateJob/estimateRun), и её результат стоит в колонке «прогноз» ДО запуска.
+//
+// Отсюда два следствия. Первое: класть настил на полный тираж партии (30 изделий × 45 контуров)
+// бессмысленно — поиск не сделает ни одного поколения. Второе: соотношение ужимается на НОД — и
+// БОЛЬШЕ НИКАК. Ужать 3 M + 2 L до «1 M + 1 L», потому что так дешевле, значит измерить настил,
+// которого никто не кроит; вместо этого цена называется вслух, и оператор либо платит, либо снимает
+// галочку.
 import type { common_TechCardMarkerSummary, googletype_Decimal } from 'api/proto-http/admin';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
@@ -56,18 +62,41 @@ import type { MarkerColorway } from './colorway-widths';
 import type { ScopedSheet } from './dxf-by-scope';
 import { applySeamPrefill } from './dxf-apply-conditions';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { compositionOf } from './marker-io';
+import { compositionOf, type MarkerCompositionEntry } from './marker-io';
 import {
   markerUnits,
   pieceLineKeysByPieceId,
   selectMarkerPieces,
   unitsOfPieces,
+  type MarkerCompositionRow,
   type PieceAlias,
 } from './piece-selection';
 import { splitPiecesBySize, type BlockSplit } from './split-pieces';
 
 /** Клетка состава партии: сколько изделий одного размера одного колорвея в неё заказано. */
 export type BatchCell = { colorwayId: number; sizeId: number; qty: number };
+
+/**
+ * ЧТО СНИМАЕМ: размерные нормы карточки либо настил ЭТОЙ партии. Единственное, что режим меняет по
+ * существу, — состав настила и владелец раскладки; см. шапку модуля.
+ */
+export type MarkerMode = 'norms' | 'batch';
+
+/** Одна строка состава задания: размер, его тираж В НАСТИЛЕ и его вес В ПАРТИИ. */
+export type JobSizeRow = {
+  sizeId: number;
+  sizeLabel: string;
+  /** Написания размера в именах блоков — ими задание отбирает свои детали. */
+  tokens: string[];
+  /** Сколько ИЗДЕЛИЙ этого размера кроит ОДИН настил. В режиме норм всегда 1. */
+  units: number;
+  /**
+   * Сколько изделий этой пары (колорвей, размер) заказала партия. Тираж настила это число НЕ
+   * задаёт (см. шапку), но оно обязано доехать: им взвешивается итог по ткани, иначе партия из 99
+   * маленьких и одного большого усредняется с равным весом.
+   */
+  batchQty: number;
+};
 
 /**
  * Ткань партии глазами планировщика: скоуп (назначение либо неразобранная строка BOM), его листы и
@@ -121,12 +150,21 @@ export type PlanRefusal = {
   reason: string;
 };
 
-/** Раскладка, которую задание ЗАМЕНИТ (та же ткань, тот же колорвей, тот же размер). */
-export type MarkerReplacement = { id: number; name: string; isNorm: boolean };
+/**
+ * Раскладка, которую задание ЗАМЕНИТ (та же ткань, тот же колорвей, тот же состав/владелец).
+ *
+ * `isDraft` тут не украшение: черновик — это НЕДОСЧИТАННОЕ задание, и предлагать его пересъёмку
+ * надо ровно наоборот тому, как предлагается пересъёмка готовой раскладки (та предвыбрана
+ * выключенной, потому что стоит бюджета и двигает применённое число).
+ */
+export type MarkerReplacement = { id: number; name: string; isNorm: boolean; isDraft: boolean };
 
 export type MarkerJob = {
-  /** Стабильный ключ задания: (колорвей, ткань, размер). */
+  /** Стабильный ключ задания: (колорвей, ткань, размер) либо (колорвей, ткань) у настила партии. */
   id: string;
+  mode: MarkerMode;
+  /** Владелец раскладки: 0 = карточная (норма), >0 = прогонная (настил ЭТОЙ партии). */
+  productionRunId: number;
   colorwayId: number;
   colorwayLabel: string;
   scopeKey: string;
@@ -134,18 +172,22 @@ export type MarkerJob = {
   role: string;
   bomLineKey: string;
   unit: string;
+  /** Размер задания в режиме норм; 0 у смешанного настила (у него нет ОДНОГО размера). */
   sizeId: number;
+  /** «M» либо «3M+2L» — подпись состава одной строкой. */
   sizeLabel: string;
-  /** Написание размера в именах блоков — им задание отбирает свои детали. */
-  sizeToken: string;
+  /** Состав настила: по строке на размер, в порядке градации. */
+  sizes: JobSizeRow[];
+  /** Сколько ИЗДЕЛИЙ кроит один настил (Σ units) — делитель расхода на изделие. */
+  unitsTotal: number;
+  /** Состав в том виде, в каком он уедет в блоб и в шапку (marker-io.legacyPairOf). */
+  composition: MarkerCompositionEntry[];
   /**
-   * Сколько изделий ЭТОЙ пары (колорвей, размер) заказано партией.
-   *
-   * Тираж настила это число НЕ задаёт (настил снимается на одно изделие — см. шапку), но оно
-   * обязано доехать: без него итог по ткани усредняет размеры С РАВНЫМ ВЕСОМ, и партия из 99
-   * маленьких и одного большого получает расход большого пополам с маленьким. Такое «среднее» ещё
-   * и сравнивается с рецептом — то есть выдуманный процент расхождения объявляется фактом.
+   * Размер градации каждой РАЗОБРАННОЙ детали — в блоб схемы 4. Нужен только смешанному настилу
+   * (buildMarkerLayout сам решает, писать ли его), но считается всегда: одна ветка вместо двух.
    */
+  sizeIdByPieceId: ReadonlyMap<number, number>;
+  /** Сколько изделий этого колорвея покрывает задание — сумма batchQty его строк состава. */
   batchQty: number;
   /** Имя, под которым раскладка ляжет на карточку (у замены — её собственное). */
   markerName: string;
@@ -230,6 +272,19 @@ function forecastOf(e: RunEstimate): JobForecast {
   };
 }
 
+/**
+ * ЗАМЫСЕЛ ОДНОГО ЗАДАНИЯ до того, как он встретился с тканью: чей настил и из чего он состоит.
+ *
+ * Вся разница между режимами живёт ровно в том, как собирается этот список, — дальше конвейер
+ * один. Внутренний тип: наружу уезжает уже `MarkerJob`, посчитанный и оценённый.
+ */
+type JobSpec = {
+  key: string;
+  colorwayId: number;
+  /** Строки состава: размер, его тираж В НАСТИЛЕ и его вес В ПАРТИИ. */
+  rows: { sizeId: number; units: number; batchQty: number }[];
+};
+
 /** Разбор одного скоупа, посчитанный один раз на все его задания. */
 type ScopePrep = {
   split: BlockSplit;
@@ -250,8 +305,20 @@ const norm = (t: string) => t.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
 // tech_card_marker.name — VARCHAR(191). Режем с запасом: отказ по длине пришёл бы ПОСЛЕ прогона.
 const MAX_MARKER_NAME = 180;
 
-/** Ключ уникальности имени у сервера для КАРТОЧНОЙ раскладки: (размер, имя). */
-const nameKey = (sizeId: number, name: string) => `${sizeId}\u001f${name.trim()}`;
+// Потолок сервера на число размеров в составе. То же число знает модалка раскладки; здесь оно
+// нужно затем, чтобы отказ по нему пришёл ДО прогона, а не после полностью оплаченного.
+const MAX_COMPOSITION_SIZES = 32;
+
+/**
+ * Ключ уникальности имени у сервера: (карточка, ПРОГОН, размер, имя).
+ *
+ * Прогон входит в серверный ключ и обязан входить сюда: настил партии живёт в СВОЁМ пространстве
+ * имён, и засчитывать ему занятость карточного имени значило бы без нужды дописывать «#2» к
+ * именам, которые ни с чем не сталкиваются. У смешанного настила размер = 0 (size_id там NULL) —
+ * тем же правилом, каким сервер канонизирует свой ключ.
+ */
+const nameKey = (runId: number, sizeId: number, name: string) =>
+  `${runId}\u001f${sizeId}\u001f${name.trim()}`;
 
 /**
  * Имя новой раскладки. РАЗЛИЧАЮЩАЯ ЧАСТЬ ИДЁТ ПЕРВОЙ И НЕ СРЕЗАЕТСЯ.
@@ -265,6 +332,7 @@ const nameKey = (sizeId: number, name: string) => `${sizeId}\u001f${name.trim()}
  * добавляется различающий суффикс.
  */
 function uniqueMarkerName(
+  runId: number,
   sizeId: number,
   parts: { sizeLabel: string; colorwayLabel: string; scopeLabel: string },
   taken: Set<string>,
@@ -274,27 +342,48 @@ function uniqueMarkerName(
   const tail = budget > 0 ? parts.scopeLabel.slice(0, budget) : '';
   const base = [head, tail].filter(Boolean).join(' · ');
   let name = base;
-  for (let n = 2; taken.has(nameKey(sizeId, name)); n++) {
+  for (let n = 2; taken.has(nameKey(runId, sizeId, name)); n++) {
     const suffix = ` #${n}`;
     name = `${base.slice(0, MAX_MARKER_NAME - suffix.length)}${suffix}`;
   }
-  taken.add(nameKey(sizeId, name));
+  taken.add(nameKey(runId, sizeId, name));
   return name;
 }
 
+/** НОД списка количеств — то, на что и только на что ужимается соотношение партии (см. шапку). */
+function gcdOf(values: readonly number[]): number {
+  const gcd2 = (a: number, b: number): number => (b === 0 ? a : gcd2(b, a % b));
+  return values.reduce((g, v) => gcd2(g, Math.max(0, Math.round(v))), 0) || 1;
+}
+
 export function planBatchMarkers(args: {
+  /** Что снимаем: размерные нормы карточки либо настил ЭТОЙ партии (см. шапку модуля). */
+  mode: MarkerMode;
+  /**
+   * Прогон, которому принадлежит настил партии. В режиме норм это число НЕ ЧИТАЕТСЯ вовсе: нормой
+   * может быть только карточная раскладка, и задание получает 0.
+   */
+  productionRunId: number;
   /** Клетки партии с ненулевым количеством. */
   cells: readonly BatchCell[];
   scopes: readonly PlanScope[];
   /** Колорвеи карточки с шириной их ПИНОВ по каждому слоту. */
   colorways: readonly MarkerColorway[];
   sizeLabel: (sizeId: number) => string;
+  /** Порядок ГРАДАЦИИ размера — им сортируется состав настила («L, M, S» читалось бы как порча). */
+  sizeOrderOf: (sizeId: number) => number;
   /** Написания, которыми размер карточки может быть записан в имени блока (уже нормализованные). */
   sizeTokensOf: (sizeId: number) => string[];
   /** Весь словарь размеров — им разбор решает, какой хвост имени является размером. */
   dictTokens: { has(token: string): boolean };
   /** КАРТОЧНЫЕ раскладки (прогонные отфильтрованы вызывающим через cardMarkers). */
   markers: readonly common_TechCardMarkerSummary[];
+  /**
+   * Раскладки ЭТОГО прогона — кандидаты на замену в режиме настила и вторая половина занятых имён.
+   * Отдельным списком, потому что `markers` намеренно отфильтрован от прогонных: смешивать их в
+   * один список значило бы предложить заменить карточную норму настилом партии.
+   */
+  runMarkers: readonly common_TechCardMarkerSummary[];
   /**
    * DXF, не принадлежащие НИ ОДНОЙ живой ткани: залитые до 0260 (ключа привязки нет вовсе) либо
    * те, чью строку BOM удалили или переклассифицировали.
@@ -345,11 +434,17 @@ export function planBatchMarkers(args: {
   // Ключ берётся ТОТ ЖЕ, что у сервера: у одноразмерной раскладки size_key = её размер, у
   // смешанной — 0 (size_id там NULL). Записать смешанную под каждый её размер значило бы
   // придумывать столкновения, которых схема не знает, и без нужды дописывать «#2» к именам.
+  //
+  // Прогонные раскладки сеются в СВОЁ пространство имён (run_key = id прогона): столкнуться с
+  // карточными они не могут, и приписывать им чужую занятость значило бы плодить «#2» на пустом
+  // месте.
   const takenNames = new Set<string>();
-  for (const m of args.markers) {
+  const seedName = (runId: number, m: common_TechCardMarkerSummary) => {
     const comp = compositionOf(m);
-    takenNames.add(nameKey(comp.length === 1 ? comp[0].sizeId : 0, m.name ?? ''));
-  }
+    takenNames.add(nameKey(runId, comp.length === 1 ? comp[0].sizeId : 0, m.name ?? ''));
+  };
+  for (const m of args.markers) seedName(0, m);
+  for (const m of args.runMarkers) seedName(args.productionRunId, m);
 
   if (args.looseSheets.length > 0) {
     refusals.push({
@@ -408,11 +503,13 @@ export function planBatchMarkers(args: {
     }
 
     const prep = prepareScope(scope, args);
-    // ГЕОМЕТРИЯ ОДНОГО РАЗМЕРА ОБЩАЯ НА ВСЕ КОЛОРВЕИ. Колорвей меняет ПОЛОТНО (ширину и кромку), а
-    // не лекала: все колорвеи стиля кроят одни и те же детали. Считать разворот по долевой и
-    // раздутие припуском заново на каждый колорвей значило бы держать в памяти вкладки N копий
-    // одних и тех же контуров и заплатить за них N раз.
-    const geomByToken = new Map<
+    // ГЕОМЕТРИЯ СОСТАВА ОБЩАЯ НА ВСЕ КОЛОРВЕИ. Колорвей меняет ПОЛОТНО (ширину и кромку), а не
+    // лекала: все колорвеи стиля кроят одни и те же детали. Считать разворот по долевой и раздутие
+    // припуском заново на каждый колорвей значило бы держать в памяти вкладки N копий одних и тех
+    // же контуров и заплатить за них N раз. Ключ кеша — сам состав (написания размеров и их
+    // тиражи), поэтому у настилов партии он делится ровно между колорвеями с ОДИНАКОВЫМ
+    // соотношением, а у размерных норм — между всеми колорвеями одного размера, как и прежде.
+    const geomByComposition = new Map<
       string,
       { pieces: PieceDTO[]; unitsOfPiece: Map<number, number> }
     >();
@@ -441,11 +538,57 @@ export function planBatchMarkers(args: {
       });
     }
 
-    for (const pair of pairs) {
-      const cw = colorwayById.get(pair.colorwayId);
-      const colorwayLabel = cw?.label ?? `#${pair.colorwayId}`;
-      const sizeLabel = args.sizeLabel(pair.sizeId);
-      const key = `${pair.colorwayId}|${scope.key}|${pair.sizeId}`;
+    // ═══ ЧТО ИМЕННО РАСКЛАДЫВАЕТСЯ НА ЭТОЙ ТКАНИ ═══════════════════════════════════════════
+    //
+    // ЕДИНСТВЕННОЕ МЕСТО, ГДЕ РЕЖИМЫ РАСХОДЯТСЯ. Дальше идёт один и тот же конвейер: ширина,
+    // геометрия, отбор деталей, оценка, конфиг, отказы, замена, имя. Задание отличается только
+    // СОСТАВОМ настила и его владельцем.
+    const specs: JobSpec[] = [];
+    if (args.mode === 'norms') {
+      // Размерная норма: одно задание на пару (колорвей, размер), настил на ОДНО изделие.
+      for (const pair of pairs) {
+        specs.push({
+          key: `${pair.colorwayId}|${scope.key}|${pair.sizeId}`,
+          colorwayId: pair.colorwayId,
+          rows: [{ sizeId: pair.sizeId, units: 1, batchQty: pair.qty }],
+        });
+      }
+    } else {
+      // НАСТИЛ ПАРТИИ: одно задание на колорвей, состав — СОБСТВЕННОЕ соотношение размеров этой
+      // партии, ужатое на НОД. 60 M + 40 L → 3 M + 2 L: та же пропорция, тот же настил, в 20 раз
+      // дешевле поиск. Ужимать сверх НОДа нельзя — это была бы уже другая партия (см. шапку).
+      const byColorway = new Map<number, typeof pairs>();
+      for (const pair of pairs) {
+        const list = byColorway.get(pair.colorwayId) ?? [];
+        list.push(pair);
+        byColorway.set(pair.colorwayId, list);
+      }
+      for (const [colorwayId, list] of byColorway) {
+        const g = gcdOf(list.map((p) => p.qty));
+        specs.push({
+          key: `${colorwayId}|${scope.key}|mix`,
+          colorwayId,
+          rows: list
+            .map((p) => ({
+              sizeId: p.sizeId,
+              units: Math.max(1, Math.round(p.qty / g)),
+              batchQty: p.qty,
+            }))
+            .sort((a, b) => args.sizeOrderOf(a.sizeId) - args.sizeOrderOf(b.sizeId)),
+        });
+      }
+    }
+
+    for (const spec of specs) {
+      const cw = colorwayById.get(spec.colorwayId);
+      const colorwayLabel = cw?.label ?? `#${spec.colorwayId}`;
+      // Подпись состава одной строкой: «M» у нормы, «3M+2L» у настила партии. Она же уезжает в имя
+      // раскладки, поэтому собирается ДО отказов — их текст тоже ею подписан.
+      const sizeLabel =
+        args.mode === 'norms'
+          ? args.sizeLabel(spec.rows[0].sizeId)
+          : spec.rows.map((r) => `${r.units}${args.sizeLabel(r.sizeId)}`).join('+');
+      const key = spec.key;
       const refuse = (reason: string) =>
         refusals.push({ key, scopeLabel: scope.label, colorwayLabel, sizeLabel, reason });
 
@@ -474,17 +617,53 @@ export function planBatchMarkers(args: {
         continue;
       }
 
-      // Размер, которого в файле нет, уже отказан выше — ОДНОЙ строкой на ткань, а не по разу на
-      // каждый колорвей.
-      const tokens = tokensBySize.get(pair.sizeId);
-      if (!tokens) continue;
+      // РАЗМЕР БЕЗ ДЕТАЛЕЙ В ЭТОЙ ТКАНИ. Норму такого размера просто не снять — отказ уже
+      // произнесён выше ОДНОЙ строкой на ткань, и второй раз на каждый колорвей его повторять
+      // незачем.
+      //
+      // НАСТИЛ ПАРТИИ ЭТОТ СЛУЧАЙ ОТМЕНЯЕТ ЦЕЛИКОМ, и это то же правило, что у детали шире
+      // полотна: выбросить размер из соотношения значит измерить настил, которого никто не кроит,
+      // — а на экране он будет неотличим от настоящего, потому что все счётчики сойдутся.
+      const missing = spec.rows.filter((r) => !tokensBySize.has(r.sizeId));
+      if (missing.length > 0) {
+        if (args.mode === 'batch') {
+          refuse(
+            `в выкройках этой ткани нет деталей размеров ${missing
+              .map((r) => args.sizeLabel(r.sizeId))
+              .join(
+                ', ',
+              )} — а партия их кроит. Настил без них имел бы ДРУГОЕ соотношение размеров, то есть мерил бы партию, которой никто не шьёт. Догрузите выкройки этих размеров либо снимайте размерные нормы.`,
+          );
+        }
+        continue;
+      }
+      if (spec.rows.length > MAX_COMPOSITION_SIZES) {
+        refuse(
+          `в составе настила ${spec.rows.length} размеров, потолок сервера — ${MAX_COMPOSITION_SIZES}: такую раскладку он не примет. Разбейте партию на части.`,
+        );
+        continue;
+      }
 
-      const geomKey = tokens.join('\u001f'); // U+001F, а не NUL: NUL делает файл «бинарным» для grep
-      // и прячет его из поиска по репозиторию — на этом уже спотыкались в nesting-modal.
-      let geom = geomByToken.get(geomKey);
+      const sizes: JobSizeRow[] = spec.rows.map((r) => ({
+        sizeId: r.sizeId,
+        sizeLabel: args.sizeLabel(r.sizeId),
+        tokens: tokensBySize.get(r.sizeId) as string[],
+        units: r.units,
+        batchQty: r.batchQty,
+      }));
+      const unitsTotal = sizes.reduce((n, r) => n + r.units, 0);
+
+      // ГЕОМЕТРИЯ КЕШИРУЕТСЯ ПО СОСТАВУ, а не по размеру: у настила партии в неё входят ещё и
+      // тиражи (неградуируемая деталь кроится на КАЖДОЕ изделие состава, то есть её экземпляров
+      // столько же, сколько изделий). Ключ обязан нести и написания, и числа — иначе два разных
+      // соотношения одних и тех же размеров поделили бы один кеш.
+      const geomKey = sizes.map((r) => `${r.tokens.join('/')}=${r.units}`).join('\u001f');
+      // U+001F, а не NUL: NUL делает файл «бинарным» для grep и прячет его из поиска по
+      // репозиторию — на этом уже спотыкались в nesting-modal.
+      let geom = geomByComposition.get(geomKey);
       if (!geom) {
-        geom = jobGeometry(scope, prep, tokens);
-        geomByToken.set(geomKey, geom);
+        geom = jobGeometry(scope, prep, sizes);
+        geomByComposition.set(geomKey, geom);
       }
       const built = buildJobConfig({
         scope,
@@ -502,18 +681,28 @@ export function planBatchMarkers(args: {
       // сервер отдаёт в своём порядке: при двух раскладках на ту же (ткань, колорвей, размер) —
       // скажем, ручной пробной и НАЗНАЧЕННОЙ НОРМОЙ — перезаписывалась та, что оказалась раньше в
       // массиве, и какая именно, на экране не было написано.
-      const match = findReplacements(args.markers, {
-        bomLineKey: scope.lineKey,
-        colorwayId: pair.colorwayId,
-        sizeId: pair.sizeId,
-      });
+      //
+      // ИЩЕТСЯ В СВОЁМ ПРОСТРАНСТВЕ. Норма ищет среди КАРТОЧНЫХ раскладок и сверяет размер; настил
+      // партии — среди раскладок ЭТОГО прогона и размер не сверяет вовсе: у прогона на (ткань,
+      // колорвей) настил один, а его состав меняется вместе с составом партии.
+      const match =
+        args.mode === 'norms'
+          ? findReplacements(args.markers, {
+              bomLineKey: scope.lineKey,
+              colorwayId: spec.colorwayId,
+              sizeId: spec.rows[0].sizeId,
+            })
+          : findRunReplacements(args.runMarkers, {
+              bomLineKey: scope.lineKey,
+              colorwayId: spec.colorwayId,
+            });
       if (match.length > 1) {
         refuse(
-          `на эту ткань, колорвей и размер уже снято ${match.length} раскладки: ${match
-            .map((m) => `«${m.name}»${m.isNorm ? ' (НОРМА)' : ''}`)
+          `на эту ткань и колорвей уже снято ${match.length} раскладки: ${match
+            .map((m) => `«${m.name}»${m.isNorm ? ' (НОРМА)' : ''}${m.isDraft ? ' (ЧЕРНОВИК)' : ''}`)
             .join(
               ', ',
-            )}. Какую из них пересчитывать — решает человек: удалите лишнюю на вкладке «выкройки» либо переснимите нужную оттуда же.`,
+            )}. Какую из них пересчитывать — решает человек: удалите лишнюю (раскладки карточки — вкладка «выкройки», раскладки партии — страница прогона).`,
         );
         continue;
       }
@@ -524,10 +713,29 @@ export function planBatchMarkers(args: {
           `эта раскладка сейчас НОРМА ткани — пересъёмка двигает число, по которому считается себестоимость; применять новую норму в рецепт придётся руками`,
         );
       }
-      const shared = sharedMarkerFor(args.markers, scope.lineKey, pair.sizeId);
-      if (!replaces && shared) {
+      if (replaces?.isDraft) {
         notes.push(
-          `на этот слот и размер уже есть ОБЩАЯ раскладка «${shared}» (без колорвея) — она снята на ширине слота, и новая её не заменит, а встанет рядом`,
+          `сейчас это ЧЕРНОВИК — уложились не все детали. Пересчёт заменит его по id; чтобы он стал полной раскладкой, бюджета должно хватить на всю укладку`,
+        );
+      }
+      if (args.mode === 'norms') {
+        const shared = sharedMarkerFor(args.markers, scope.lineKey, spec.rows[0].sizeId);
+        if (!replaces && shared) {
+          notes.push(
+            `на этот слот и размер уже есть ОБЩАЯ раскладка «${shared}» (без колорвея) — она снята на ширине слота, и новая её не заменит, а встанет рядом`,
+          );
+        }
+      }
+      // ЦЕНА СМЕШАННОГО НАСТИЛА НАЗЫВАЕТСЯ ВСЛУХ. Экземпляров в нём столько, сколько изделий в
+      // соотношении, и поиск дорожает вместе с ними (предпросчёт NFP — нет: он платится за пары
+      // УНИКАЛЬНЫХ контуров, а они те же). Тихо ужать соотношение нельзя, поэтому единственный
+      // честный ход — назвать прогноз и оставить оператору галочку.
+      if (args.mode === 'batch' && unitsTotal > 1) {
+        const secs = built.estimate?.predictedElapsedMs;
+        notes.push(
+          `настил кроит ${unitsTotal} изделий (${sizeLabel}) — это соотношение партии, ужатое на НОД; ${built.pieceCount} уникальных контуров, ${built.instanceCount} экземпляров на полотне${
+            secs != null ? `, прогноз ~${Math.ceil(secs / 1000)} с` : ''
+          }. Дорого — снимите галочку: сильнее соотношение не ужимается, иначе это была бы другая партия`,
         );
       }
       if (built.estimate?.outlook === 'starved') {
@@ -540,30 +748,73 @@ export function planBatchMarkers(args: {
         );
       }
 
+      // Размер градации КАЖДОЙ уложенной детали — в блоб схемы 4 (нужен смешанному составу).
+      // Считается по тем же токенам, которыми отбирались детали: второго правила «чей это размер»
+      // здесь быть не должно.
+      const sizeIdByToken = new Map<string, number>();
+      for (const r of sizes) for (const t of r.tokens) sizeIdByToken.set(t, r.sizeId);
+      const sizeIdByPieceId = new Map<number, number>();
+      for (const piece of built.pieces) {
+        const sid = sizeIdByToken.get(prep.split.codeById.get(piece.id)?.size ?? '') ?? 0;
+        if (sid > 0) sizeIdByPieceId.set(piece.id, sid);
+      }
+
+      const composition = sizes
+        .map((r) => ({ sizeId: r.sizeId, quantity: r.units }))
+        .sort((a, b) => a.sizeId - b.sizeId);
+      const runKey = args.mode === 'batch' ? args.productionRunId : 0;
+      // КЛЮЧ ИМЕНИ ПОВТОРЯЕТ ПРАВИЛО ХРАНЕНИЯ, а не режим. Однородный состав уезжает легаси-парой
+      // (size_id, sets) — и его size_key у сервера равен размеру; смешанный кладёт size_id в NULL,
+      // и ключ там 0. Решает это одна функция (legacyPairOf), и здесь повторяется её условие, а не
+      // «norms ⇒ размер, batch ⇒ 0»: настил партии из ОДНОГО размера (колорвей заказан в одном
+      // размере) хранится однородным, и ключ у него размерный.
+      const nameSizeKey = composition.length === 1 ? composition[0].sizeId : 0;
+      // ЗАМЕЩАЕМОЕ ИМЯ ОСВОБОЖДАЕТСЯ. Строка, которую мы перезапишем по id, своё имя больше не
+      // занимает — иначе к переснятой раскладке без всякой причины прилипало бы «#2».
+      if (replaces) takenNames.delete(nameKey(runKey, nameSizeKey, replaces.name));
+
       jobs.push({
         id: key,
-        // Имя ЗАМЕЩАЕМОЙ раскладки сохраняется как есть: переименовать чужую запись мимоходом —
-        // значит отобрать у оператора то, чем он их различает. Уникальность её имени уже доказана
-        // тем, что она лежит в базе.
+        mode: args.mode,
+        // ВЛАДЕЛЕЦ. Норма — карточная всегда: прогонная раскладка нормой быть не может физически
+        // (CHECK chk_tcm_run_not_norm) и умирает вместе с прогоном. Настил партии — прогонный по
+        // той же причине, только с обратным знаком: его соотношение принадлежит ОДНОМУ заказу, и
+        // запрет схемы здесь ровно то, что нужно.
+        productionRunId: args.mode === 'batch' ? args.productionRunId : 0,
+        // ИМЯ. У размерной нормы имя ЗАМЕЩАЕМОЙ раскладки сохраняется как есть: переименовать
+        // чужую запись мимоходом — значит отобрать у оператора то, чем он их различает, а её
+        // размер и так неизменен.
+        //
+        // У НАСТИЛА ПАРТИИ ИМЯ ПЕРЕСОБИРАЕТСЯ ВСЕГДА, и это не непоследовательность: в имени стоит
+        // СОСТАВ («3M+2L · BEI · основная ткань»), а состав меняется вместе с составом партии.
+        // Сохранив прежнее имя, мы получили бы раскладку, чьё имя утверждает соотношение, на
+        // котором её не мерили, — то есть ровно ту ложь, ради устранения которой этот режим и
+        // написан. Ручного переименования раскладок в клиенте нет, так что терять тут нечего.
         markerName:
-          replaces?.name ||
+          (args.mode === 'norms' ? replaces?.name : '') ||
           uniqueMarkerName(
-            pair.sizeId,
+            runKey,
+            nameSizeKey,
             { sizeLabel, colorwayLabel, scopeLabel: scope.label },
             takenNames,
           ),
-        batchQty: pair.qty,
+        batchQty: sizes.reduce((n, r) => n + Math.max(0, r.batchQty), 0),
         pieceLineKeyById: prep.pieceLineKeyById,
-        colorwayId: pair.colorwayId,
+        colorwayId: spec.colorwayId,
         colorwayLabel,
         scopeKey: scope.key,
         scopeLabel: scope.label,
         role: scope.role,
         bomLineKey: scope.lineKey,
         unit: scope.unit,
-        sizeId: pair.sizeId,
+        // Один размер — у нормы; у смешанного настила ОДНОГО размера нет, и 0 здесь — ответ, а не
+        // пробел (ровно его же сервер держит в size_id как NULL).
+        sizeId: args.mode === 'norms' ? spec.rows[0].sizeId : 0,
         sizeLabel,
-        sizeToken: tokens[0],
+        sizes,
+        unitsTotal,
+        composition,
+        sizeIdByPieceId,
         widthCm,
         selvedgeCm,
         articleName,
@@ -652,7 +903,7 @@ function prepareScope(
 }
 
 /**
- * Контуры одного размера РОВНО В ТОМ ВИДЕ, В КАКОМ ИХ УЛОЖИТ ДВИЖОК.
+ * Контуры СОСТАВА РОВНО В ТОМ ВИДЕ, В КАКОМ ИХ УЛОЖИТ ДВИЖОК.
  *
  * Порядок преобразований — тот же, что у модалки и у воркера, и он не переставляется: сначала
  * разворот по долевой, потом раздутие припуском. Обе функции чистые и зовутся здесь ровно ради
@@ -660,14 +911,20 @@ function prepareScope(
  * копии, теми же аргументами — геометрия через границу воркера не ходит.
  *
  * От колорвея НЕ ЗАВИСИТ (лекала у стиля одни), поэтому результат делится между его заданиями.
+ *
+ * ФОРМУЛА ТИРАЖА — ОБЩАЯ С МОДАЛКОЙ (piece-selection.ts), и оба режима зовут её одинаково. Вся
+ * разница между размерной нормой и настилом партии умещается в аргумент: одна строка состава с
+ * тиражом 1 против нескольких строк с тиражами соотношения. Деталь БЕЗ размерного хвоста при этом
+ * получает `unitsTotal` — она кроится на каждое изделие состава, и подсунуть ей единицу значило бы
+ * выкроить настил без карманов.
  */
 function jobGeometry(
   scope: PlanScope,
   prep: ScopePrep,
-  tokens: string[],
+  sizes: readonly JobSizeRow[],
 ): { pieces: PieceDTO[]; unitsOfPiece: Map<number, number> } {
-  // Состав — ОДИН размер и ОДНО изделие (см. шапку модуля).
-  const units = markerUnits({ graded: true, rows: [{ tokens, qty: 1 }], ungradedUnits: 1 });
+  const rows: MarkerCompositionRow[] = sizes.map((r) => ({ tokens: r.tokens, qty: r.units }));
+  const units = markerUnits({ graded: true, rows, ungradedUnits: 1 });
   const unitsOfPiece = unitsOfPieces(
     scope.pieces,
     (id) => prep.split.codeById.get(id)?.size ?? '',
@@ -706,7 +963,7 @@ function buildJobConfig(args: {
   const { scope, prep, widthCm } = args;
   const { pieces, unitsOfPiece } = args.geom;
   if (pieces.length === 0) {
-    return { ok: false, reason: 'на выбранном контурном слое нет ни одной детали этого размера' };
+    return { ok: false, reason: 'на выбранном контурном слое нет ни одной детали этого состава' };
   }
 
   // ═══ ДЕТАЛЬ ШИРЕ ПОЛОТНА ОТМЕНЯЕТ ВСЁ ЗАДАНИЕ ═══════════════════════════════════════════════
@@ -808,7 +1065,34 @@ function findReplacements(
     if (comp.length !== 1 || comp[0].sizeId !== target.sizeId) continue;
     const id = Number(m.id ?? 0);
     if (!id) continue;
-    out.push({ id, name: m.name ?? '', isNorm: m.isNorm === true });
+    out.push({ id, name: m.name ?? '', isNorm: m.isNorm === true, isDraft: m.isDraft === true });
+  }
+  return out;
+}
+
+/**
+ * Настил ЭТОГО ПРОГОНА, который задание переснимет: та же ткань, тот же колорвей.
+ *
+ * СОСТАВ НЕ СВЕРЯЕТСЯ, и это не небрежность. У прогона на пару (ткань, колорвей) настил ровно
+ * один; его соотношение — производное от состава партии, и когда партию правят, соотношение
+ * МЕНЯЕТСЯ. Сверять состав значило бы при каждой правке партии оставлять рядом со свежим настилом
+ * прежний, снятый на соотношении, которого больше нет, — и первым же вопросом стало бы «а какой из
+ * них показывает расход партии».
+ *
+ * Список сюда приходит уже отфильтрованным по прогону (вызывающий), поэтому карточную норму эта
+ * функция не увидит физически.
+ */
+function findRunReplacements(
+  runMarkers: readonly common_TechCardMarkerSummary[],
+  target: { bomLineKey: string; colorwayId: number },
+): MarkerReplacement[] {
+  const out: MarkerReplacement[] = [];
+  for (const m of runMarkers) {
+    if ((m.bomLineKey ?? '') !== target.bomLineKey) continue;
+    if (Number(m.colorwayId ?? 0) !== target.colorwayId) continue;
+    const id = Number(m.id ?? 0);
+    if (!id) continue;
+    out.push({ id, name: m.name ?? '', isNorm: m.isNorm === true, isDraft: m.isDraft === true });
   }
   return out;
 }

@@ -25,8 +25,10 @@ import {
   conditionsOf,
   consumptionCm,
   decNum,
+  isDraftMarker,
   isLegacyNorm,
   pieceSetChanged,
+  refusalWord,
   scalarNormRefusal,
   totalUnitsOf,
   type MarkerConditions,
@@ -404,6 +406,7 @@ export function MarkersSection({
               const allow = allowanceText(cond);
               const lines = conditionLines(cond);
               const legacy = isLegacyNorm(m);
+              const draft = isDraftMarker(m);
               const conflict = (m.normConflict ?? '').trim();
               // НЕИЗВЕСТНОСТЬ — НЕ ИЗМЕНЕНИЕ, и поле поэтому трёхзначное: маркер, снятый до Ф3,
               // отпечатка не несёт, и объявить его «изменившимся» значило бы разом пометить ВСЕ
@@ -416,8 +419,26 @@ export function MarkersSection({
                       <span className='max-w-[180px] truncate'>{m.name}</span>
                       <Pill tone='mut'>{SOURCE_LABEL[m.source ?? ''] ?? m.source}</Pill>
                     </span>
-                    {(m.isNorm || pieceSetChanged(m) || legacy || conflict || setUnknown) && (
+                    {(m.isNorm ||
+                      draft ||
+                      pieceSetChanged(m) ||
+                      legacy ||
+                      conflict ||
+                      setUnknown) && (
                       <span className='mt-0.5 flex flex-wrap items-center gap-1'>
+                        {draft && (
+                          // ЧЕРНОВИК ОБЯЗАН БЫТЬ ВИДЕН ЗДЕСЬ. От измеренной раскладки он
+                          // отличается в этой таблице ровно одним — пустой колонкой расхода, — а
+                          // пустая колонка читается как «ещё не посчитали». Тон тот же, что у
+                          // соседней пилюли отказа в колонке расхода («смешанный состав»): это
+                          // одна и та же категория — раскладка, числа с которой не берут.
+                          <Pill tone='warn' title={scalarNormRefusal(m)}>
+                            черновик
+                            {Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
+                              ? ` · ${m.placedCount ?? 0} из ${m.totalCount ?? 0}`
+                              : ''}
+                          </Pill>
+                        )}
                         {m.isNorm && (
                           // ЧЁРНАЯ, а не цветная: назначение нормы — РЕШЕНИЕ человека, а не
                           // состояние «сломано / в полёте / готово», и цвет в этой системе несёт
@@ -499,7 +520,7 @@ export function MarkersSection({
                       // Слово, а не пустая ячейка: пустая читается как «ещё не посчитали», тогда
                       // как здесь считать НЕЧЕГО — и причина висит подсказкой на самой пилюле.
                       <Pill tone='warn' title={refusal}>
-                        {comp.length > 1 ? 'смешанный состав' : 'состав не читается'}
+                        {refusalWord(m)}
                       </Pill>
                     ) : (
                       <EmptyCell />
@@ -552,10 +573,16 @@ export function MarkersSection({
                         // должно уметь перехватить норму, а стейлый бандл — снять её, не зная о
                         // признаке. Снятие оставлено рядом с назначением: без него ошибочно
                         // назначенную норму нечем убрать, когда назначать вместо неё нечего.
+                        //
+                        // ЧЕРНОВИКУ КНОПКА ПОГАШЕНА С ПРИЧИНОЙ. Сервер откажет ему в любом случае
+                        // (SetTechCardMarkerNorm плюс CHECK chk_tcm_draft_not_norm), но отказ
+                        // после нажатия читается как сбой, а не как правило.
                         <Button
                           type='button'
                           variant='secondary'
                           size='xs'
+                          disabled={draft}
+                          title={draft ? scalarNormRefusal(m) : undefined}
                           onClick={() =>
                             setNorming({
                               id: m.id ?? 0,

@@ -34,8 +34,10 @@ import type {
   common_ProductionRun,
   common_TechCard,
   common_TechCardColorwayUsage,
+  common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
+import { layKeys, useRunLays } from 'components/managers/production-runs/components/useLays';
 import {
   useSizeNames,
   useSizeOrdering,
@@ -55,6 +57,7 @@ import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import CheckboxCommon from 'ui/components/checkbox';
+import { Chip, ChipRow } from 'ui/components/chip';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
@@ -72,6 +75,7 @@ import {
   planBatchMarkers,
   type BatchCell,
   type MarkerJob,
+  type MarkerMode,
   type PlanScope,
 } from './nesting/batch-marker-plan';
 import { sizeTokensOf } from './nesting/block-code';
@@ -82,10 +86,14 @@ import {
   bomUnitKind,
   buildMarkerLayout,
   cardMarkers,
+  consumptionForSize,
   dec,
+  decNum,
+  latestPerSize,
   legacyPairOf,
+  markersForLine,
+  markersOfColorway,
   toBomUnit,
-  type MarkerCompositionEntry,
 } from './nesting/marker-io';
 import { useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { TechCardFormData } from './schema';
@@ -96,7 +104,11 @@ import type { TechCardFormData } from './schema';
 const HARD_STOP_MS = 1500;
 // Кадры прогресса чаще этого не перерисовываем: очередь рисует таблицу целиком.
 const PROGRESS_MIN_MS = 250;
-type JobStatus = 'queued' | 'running' | 'saving' | 'done' | 'failed' | 'skipped';
+// «черновик» — ОТДЕЛЬНОЕ состояние, а не оттенок «готово» и не оттенок «отказа». Раскладка
+// сохранена и её видно, но числа с неё не берут: часть деталей не легла, и длина короче настоящей.
+// Свалить её в 'done' значило бы пустить её в итог по ткани; свалить в 'failed' — выбросить то, за
+// что уже заплачено минутами поиска.
+type JobStatus = 'queued' | 'running' | 'saving' | 'done' | 'draft' | 'failed' | 'skipped';
 
 type JobRun = {
   status: JobStatus;
@@ -283,6 +295,24 @@ export function BatchMarkerQueue({
   // Подготовка вместе с подписью данных, по которым она снята: см. prepSignature.
   const [parsed, setParsed] = useState<{ scopes: PlanScope[]; signature: string } | null>(null);
   const [budgetS, setBudgetS] = useState(NEST_DEFAULTS.timeBudgetMs / 1000);
+  // ЧТО СНИМАЕМ. Выбор делается ДО прогона и меняет ровно две вещи: состав настила и владельца
+  // раскладки (см. шапку планировщика). Умолчание — размерные нормы: они переиспользуются между
+  // партиями, а настил партии живёт ровно столько, сколько живёт партия.
+  const [mode, setMode] = useState<MarkerMode>('norms');
+  // РАСКЛАДКИ ЭТОГО ПРОГОНА — ОТДЕЛЬНЫМ ЗАПРОСОМ, и другого способа нет. Прогонные маркеры в
+  // `techCard.markers` НЕ ПРИЕЗЖАЮТ: их отфильтровывает сам сервер (контракт
+  // ListProductionRunLays.run_markers говорит это прямым текстом — «карточный список их теперь не
+  // показывает»), а клиентский cardMarkers — лишь вторая линия обороны для устаревшего бэкенда.
+  // Искать их в поле карточки значило бы всегда получать пустой список: пересчёт настила не нашёл
+  // бы собственную вчерашнюю раскладку, отправил бы её с id = 0 и получил отказ по уникальности
+  // имени ПОСЛЕ полностью оплаченного прогона.
+  //
+  // Запрос включается только в режиме настила: в режиме норм прогонные раскладки не нужны никому, а
+  // это лишний вызов на каждой открытой карточке. Ключ общий со страницей партии, так что чаще
+  // всего это чтение из кэша.
+  const batchRunId = Number(run.id ?? 0);
+  const { data: laysData } = useRunLays(batchRunId, batchRunId > 0 && mode === 'batch');
+  const runMarkers = useMemo(() => laysData?.runMarkers ?? [], [laysData]);
   const [off, setOff] = useState<Record<string, boolean>>({});
   const [runs, setRuns] = useState<Record<string, JobRun>>({});
   const stale = !!parsed && parsed.signature !== prepSignature;
@@ -327,13 +357,20 @@ export function BatchMarkerQueue({
   //
   // ВЫПУЩЕННАЯ КАРТОЧКА НЕ ПРИНИМАЕТ КАРТОЧНЫХ РАСКЛАДОК, и это не осторожность экрана, а слово
   // сервера: SaveMarker требует изменяемую карточку для всего, что не принадлежит прогону
-  // (production_run_id = 0 — а здесь все раскладки такие: только карточная может стать НОРМОЙ,
-  // прогонной это запрещено CHECK'ом chk_tcm_run_not_norm). То есть на релизнутой карточке каждое
-  // задание отработало бы полный бюджет и получило отказ на сохранении — десятки минут счёта в
-  // мусор. Поэтому запрет стоит ДО запуска и называет обходной путь.
-  const releasedRefusal = frozen
-    ? 'карточка выпущена: сервер не принимает на неё карточные раскладки (SaveMarker требует изменяемую карточку). Раскладку под конкретный настил снимают со страницы партии — она принадлежит прогону; переснять норму стиля можно, только сняв карточку с релиза.'
-    : '';
+  // (production_run_id = 0). Размерная норма — ровно такая: нормой может стать только карточная
+  // раскладка, прогонной это запрещено CHECK'ом chk_tcm_run_not_norm. То есть на релизнутой
+  // карточке каждое задание режима норм отработало бы полный бюджет и получило отказ на
+  // сохранении — десятки минут счёта в мусор. Поэтому запрет стоит ДО запуска.
+  //
+  // И ЭТО ОТКАЗ РЕЖИМА, А НЕ ЭКРАНА. Настил партии принадлежит ПРОГОНУ (production_run_id > 0), и
+  // правило изменяемой карточки на него не распространяется — прежний текст сам же и отправлял за
+  // такой раскладкой на страницу партии. Выпущенная карточка — обычное состояние ровно в тот
+  // момент, когда партию кроят, так что запрещать здесь ещё и настил значило бы закрыть режим там,
+  // где он и нужен.
+  const releasedRefusal =
+    frozen && mode === 'norms'
+      ? 'карточка выпущена: сервер не принимает на неё карточные раскладки (SaveMarker требует изменяемую карточку), а размерная норма может быть только карточной. Переснять норму стиля можно, лишь сняв карточку с релиза; настил ЭТОЙ партии снимается и на выпущенной — переключите режим.'
+      : '';
   const rightsRefusal = !canEdit ? 'нет прав на изменение тех-карт — раскладку не сохранить' : '';
   const savedRefusal = !techCardId
     ? 'карточка ещё не сохранена — привязать раскладку не к чему'
@@ -344,25 +381,35 @@ export function BatchMarkerQueue({
   const plan = useMemo(() => {
     if (!parsed) return null;
     return planBatchMarkers({
+      mode,
+      productionRunId: Number(run.id ?? 0),
       cells,
       scopes: parsed.scopes,
       looseSheets,
       colorways,
       sizeLabel: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+      // Порядок ГРАДАЦИИ, а не алфавита: состав «3M+2L» и состав «2L+3M» — одно и то же соотношение,
+      // но второе читается как порча данных.
+      sizeOrderOf: (id) => sizeOrder.get(id) ?? 1e6,
       sizeTokensOf: (id) => sizeTokensOf(sizeById.get(id)),
       dictTokens,
       markers,
+      runMarkers,
       timeBudgetMs: Math.max(1, budgetS) * 1000,
       cardSeamAllowanceRaw: cardSeamRaw,
       workshopSeamAllowance: workshop.data?.settings?.defaultSeamAllowanceMm,
     });
   }, [
+    mode,
+    run.id,
     parsed,
     cells,
     colorways,
     sizeById,
+    sizeOrder,
     dictTokens,
     markers,
+    runMarkers,
     budgetS,
     cardSeamRaw,
     workshop.data,
@@ -370,7 +417,11 @@ export function BatchMarkerQueue({
 
   // Задание с уже снятой раскладкой ПРЕДВЫБРАНО ВЫКЛЮЧЕННЫМ: пересъёмка стоит бюджета и двигает
   // число, которое, возможно, уже применено в рецепт. Галочка остаётся — переснять законно.
-  const isOn = (j: MarkerJob) => (j.id in off ? !off[j.id] : !j.replaces);
+  //
+  // ЧЕРНОВИК — ИСКЛЮЧЕНИЕ, и ровно обратное: он не «уже снят», он НЕДОСЧИТАН, и единственное, что с
+  // ним делают, — пересчитывают с бо́льшим бюджетом. Оставить его выключенным значило бы прятать
+  // недоделанную работу за галочкой, которую надо догадаться поставить.
+  const isOn = (j: MarkerJob) => (j.id in off ? !off[j.id] : !j.replaces || j.replaces.isDraft);
   const selectedJobs = useMemo(
     () => (plan?.jobs ?? []).filter(isOn),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -551,7 +602,11 @@ export function BatchMarkerQueue({
   // конце» значило бы выбросить весь уже оплаченный счёт при первом же «остановить», закрытой
   // вкладке или упавшем воркере.
   const saveJob = async (job: MarkerJob, result: NestResult): Promise<number> => {
-    const composition: MarkerCompositionEntry[] = [{ sizeId: job.sizeId, quantity: 1 }];
+    const composition = job.composition;
+    // КОЛИЧЕСТВО ДЕТАЛИ НА ОДНО ИЗДЕЛИЕ — здесь всегда 1, и это не упрощение. Блоб хранит именно
+    // «сколько раз эта деталь кроится на изделие», а тираж состава сервер накладывает сам
+    // (деталь с size_id — q своего размера, деталь без него — total_units). Очередь дублей на
+    // изделие не заводит: их источник — ручная правка в модалке, которой здесь нет.
     const perSetQty = new Map<number, number>(job.config.pieces.map((p) => [p.pieceId, 1]));
     const urlBySource = new Map(
       (sheetsByScope.get(job.scopeKey) ?? []).map((s) => [s.name, s.url]),
@@ -567,7 +622,13 @@ export function BatchMarkerQueue({
           job.seamAllowanceMm > 0
             ? `припуск на шов: ${job.seamAllowanceMm.toFixed(1)} мм (${job.seamAllowanceWhy}) — сохранён контур КРОЯ`
             : 'припуск на шов: 0 — раскладывалась ЛИНИЯ ШВА, расход занижен относительно кроя',
-          `снято очередью раскроя партии #${run.id ?? 0}: настил на ОДНО изделие размера ${job.sizeLabel}. Многокомплектный настил кладётся плотнее, поэтому измеренный здесь расход идёт с запасом.`,
+          // ЧЕМ ИМЕННО ЭТО ИЗМЕРЕНО — в сам блоб, а не только на экран: раскладку открывают через
+          // месяцы, и «настил на одно изделие» против «настил партии» — это разница между нормой с
+          // запасом и реальным раскроем. Оговорка про запас едет ТОЛЬКО с размерной нормой: у
+          // настила партии её не бывает, он и есть плотная укладка.
+          job.mode === 'batch'
+            ? `снято очередью раскроя партии #${run.id ?? 0}: НАСТИЛ ПАРТИИ, состав ${job.sizeLabel} (соотношение размеров партии, ужатое на НОД) — измеренный КПД и есть реальный процент раскроя этой партии.`
+            : `снято очередью раскроя партии #${run.id ?? 0}: настил на ОДНО изделие размера ${job.sizeLabel}. Многокомплектный настил кладётся плотнее, поэтому измеренный здесь расход идёт с запасом.`,
         ],
       },
       unit: job.detectedUnit,
@@ -587,6 +648,10 @@ export function BatchMarkerQueue({
       // Без него сохранённая раскладка держится на ИМЕНИ БЛОКА и перестаёт сходиться после
       // переименования детали, а раскладки этой очереди становятся НОРМАМИ уже сегодня.
       pieceLineKeyById: job.pieceLineKeyById as Map<number, string>,
+      // Размер градации каждой детали. Нужен смешанному настилу (сервер отвергает деталь, чей
+      // размер не назван в составе), и buildMarkerLayout сам решает, писать ли его: у однородного
+      // состава блоб обязан остаться байт в байт прежним.
+      sizeIdByPieceId: job.sizeIdByPieceId,
     });
     const pair = legacyPairOf(composition);
     const res = await adminService.SaveTechCardMarker({
@@ -595,14 +660,20 @@ export function BatchMarkerQueue({
       id: job.replaces?.id ?? 0,
       techCardId,
       marker: {
-        // СОГЛАСИЕ СОХРАНИТЬ НЕПОЛНУЮ УКЛАДКУ — волна 1 его НЕ ДАЁТ. Задание, не уложившее все
-        // детали, здесь падает в «неудачу» с числом и советом поднять бюджет, а не ложится
-        // черновиком: черновик обязан быть видим и перезапускаем на экране, а этого экрана ещё нет.
-        // Поле уже на проводе (0299), чтобы код волны 2 не ждал прото-раунда.
-        isDraft: false,
-        // КАРТОЧНАЯ, ВСЕГДА. Прогонная раскладка нормой быть не может (chk_tcm_run_not_norm) и
-        // умирает вместе с прогоном — то есть не может стать тем, ради чего эта фаза написана.
-        productionRunId: 0,
+        // СОГЛАСИЕ СОХРАНИТЬ НЕПОЛНУЮ УКЛАДКУ (0299) — очередь даёт его ВСЕГДА, и это осознанно.
+        //
+        // Поле НЕ ОПИСЫВАЕТ раскладку: колонку сервер выводит сам из пары placed_count/total_count
+        // и с запроса её не копирует. То есть `true` на полной укладке хранит обычную раскладку, а
+        // пересчёт, уложивший всё, снимает признак сам собой — ничего «разчерновичивать» не нужно
+        // и нечем. Отсюда и форма согласия: это ПОЛИТИКА ОЧЕРЕДИ («неполная укладка сохраняется
+        // черновиком, а не выбрасывается»), а не суждение о конкретном результате, и второй
+        // локальный предикат placed !== total здесь мог бы разойтись с серверным.
+        isDraft: true,
+        // ВЛАДЕЛЕЦ РАСКЛАДКИ — решение планировщика, а не этого места. Размерная норма карточная
+        // (0): прогонная нормой быть не может (chk_tcm_run_not_norm) и умирает вместе с прогоном.
+        // Настил партии — наоборот, прогонный: его соотношение принадлежит ОДНОМУ заказу, и
+        // запрет схемы здесь именно то, что нужно.
+        productionRunId: job.productionRunId,
         sizeId: pair.sizeId,
         // Имя выдал ПЛАНИРОВЩИК: только он видит разом все задания и все сегодняшние раскладки
         // карточки, а уникальность у сервера — (карточка, прогон, размер, имя), и её нарушение
@@ -699,19 +770,11 @@ export function BatchMarkerQueue({
           if (stopRef.current) break;
           continue;
         }
-        if (result.placedCount !== result.totalCount) {
-          // НЕПОЛНАЯ РАСКЛАДКА НЕ СОХРАНЯЕТСЯ. Сервер её тоже не примет без явного согласия
-          // (0299, is_draft), а поля `is_draft` в сегодняшнем клиентском прото нет вовсе — то
-          // есть отправить черновик отсюда физически нечем.
-          // TODO(волна 2): после `make proto` — предлагать сохранить такую раскладку ЧЕРНОВИКОМ
-          // (is_draft), чтобы оплаченный прогон не пропадал вместе с окном.
-          patch(job.id, {
-            status: 'failed',
-            result,
-            error: `уложил ${result.placedCount} из ${result.totalCount} деталей — поднимите бюджет поиска (сейчас ${budgetS} с) либо снимите эту раскладку руками во вкладке «выкройки»`,
-          });
-          continue;
-        }
+        // НЕПОЛНАЯ УКЛАДКА СОХРАНЯЕТСЯ ЧЕРНОВИКОМ, а не выбрасывается. Исполнитель у раскладки
+        // ровно один — воркер этой вкладки, — и минуты, которые он уже потратил, не восстановятся
+        // ничем; выброшенный результат к тому же не оставлял следа, и «задание считалось» надо было
+        // помнить головой. Числа с черновика не берёт никто: сервер не публикует ни расхода, ни
+        // площадей, а клиент отдельно не пускает его ни в норму, ни в применение по размерам.
         await saveWithRetry(job, result);
       }
     } finally {
@@ -722,6 +785,11 @@ export function BatchMarkerQueue({
         qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
         qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       }
+      // НАСТИЛЫ ПАРТИИ ЖИВУТ В ДРУГОМ КЛЮЧЕ. Прогонные раскладки приезжают не с карточкой, а с
+      // ListProductionRunLays, и без этой инвалидации следующий план не увидел бы того, что очередь
+      // только что сохранила: пересчёт отправил бы новую раскладку с id = 0 и получил отказ по
+      // уникальности имени. Тот же ключ читает и страница партии.
+      if (batchRunId > 0) qc.invalidateQueries({ queryKey: layKeys.list(batchRunId) });
       if (!aliveRef.current) return;
       setPhase('ready');
       stopRef.current = false;
@@ -737,10 +805,17 @@ export function BatchMarkerQueue({
    * Результат при отказе ОСТАЁТСЯ на строке — его можно досохранить кнопкой, не пересчитывая.
    */
   const saveWithRetry = async (job: MarkerJob, result: NestResult) => {
+    // ЧЕРНОВИК ИЛИ ИЗМЕРЕНИЕ — решают СЧЁТЧИКИ ДВИЖКА, тем же сравнением, каким сервер выводит
+    // колонку is_draft. Одно место на весь файл: строка, итог по ткани и повторное сохранение
+    // обязаны считать раскладку черновиком одинаково.
+    const partial = result.placedCount !== result.totalCount;
+    const draftError = partial
+      ? `уложил ${result.placedCount} из ${result.totalCount} деталей — сохранено ЧЕРНОВИКОМ: расход по нему не считается. Поднимите бюджет поиска (сейчас ${budgetS} с) и пересчитайте — пересчёт заменит эту же раскладку`
+      : '';
     patch(job.id, { status: 'saving', result, error: '' });
     try {
       const markerId = await saveJob(job, result);
-      patch(job.id, { status: 'done', result, markerId });
+      patch(job.id, { status: partial ? 'draft' : 'done', result, markerId, error: draftError });
       return;
     } catch (e) {
       if (!aliveRef.current) return;
@@ -752,7 +827,7 @@ export function BatchMarkerQueue({
     }
     try {
       const markerId = await saveJob(job, result);
-      patch(job.id, { status: 'done', result, markerId });
+      patch(job.id, { status: partial ? 'draft' : 'done', result, markerId, error: draftError });
     } catch (e) {
       patch(job.id, { status: 'failed', result, error: saveErrorText(e) });
     }
@@ -779,14 +854,23 @@ export function BatchMarkerQueue({
     type Line = {
       job: MarkerJob;
       result: NestResult;
+      /** Расход на ОДНО изделие, см: длина настила, делённая на число изделий его состава. */
+      perUnitCm: number;
     };
     const byKey = new Map<string, { job: MarkerJob; lines: Line[] }>();
     for (const job of plan.jobs) {
       const r = runs[job.id];
+      // ЧЕРНОВИК В ИТОГ НЕ ВХОДИТ. Его длина короче настоящей ровно на то, что заняли бы не
+      // уложенные детали, и подмешать её в средний расход значило бы занизить весь итог по ткани —
+      // молча и правдоподобно. Строка про него стоит ниже отдельным предупреждением.
       if (!r || r.status !== 'done' || !r.result) continue;
       const key = `${job.scopeKey}|${job.colorwayId}`;
       const bucket = byKey.get(key) ?? { job, lines: [] };
-      bucket.lines.push({ job, result: r.result });
+      bucket.lines.push({
+        job,
+        result: r.result,
+        perUnitCm: r.result.usedLengthCm / Math.max(1, job.unitsTotal),
+      });
       byKey.set(key, bucket);
     }
     return [...byKey.values()].map((b) => {
@@ -794,20 +878,23 @@ export function BatchMarkerQueue({
       b.lines.sort(
         (x, y) => (sizeOrder.get(x.job.sizeId) ?? 0) - (sizeOrder.get(y.job.sizeId) ?? 0),
       );
-      // РАСХОД НА ИЗДЕЛИЕ — СРЕДНЕЕ, ВЗВЕШЕННОЕ КОЛИЧЕСТВАМИ ПАРТИИ. Настил кроит ровно одно
-      // изделие, поэтому длина настила и есть расход РАЗМЕРА; но партия шьётся не поровну, и
-      // среднее арифметическое отвечает на вопрос, которого никто не задавал. Партия из 99×S по
-      // 1 м и 1×XL по 2 м расходует 1.01 м на изделие, а невзвешенное среднее печатает 1.50 —
-      // и тут же объявляет, что прежняя оценка «занижала на 49 %», хотя она была точна.
+      // РАСХОД НА ИЗДЕЛИЕ — СРЕДНЕЕ, ВЗВЕШЕННОЕ КОЛИЧЕСТВАМИ ПАРТИИ. Формула одна на оба режима, и
+      // это не совпадение: слагаемое — расход одного изделия (длина настила ÷ число изделий его
+      // состава), вес — сколько таких изделий заказано. У размерной нормы настил кроит одно
+      // изделие, и слагаемое равно всей длине; у настила партии строка ровно одна, и взвешивание
+      // вырождается в неё саму — потому что соотношение партии УЖЕ учтено внутри настила.
       //
-      // Размеры, для которых раскладка не снялась (отказ, пропуск), в веса НЕ ВХОДЯТ: делить на
-      // количество, длины которого мы не измеряли, значит занизить среднее ровно на его долю.
+      // Невзвешенное среднее отвечало бы на вопрос, которого никто не задавал: партия из 99×S по
+      // 1 м и 1×XL по 2 м расходует 1.01 м на изделие, а среднее арифметическое печатает 1.50 — и
+      // тут же объявляет, что прежняя оценка «занижала на 49 %», хотя она была точна.
+      //
+      // Размеры, для которых раскладка не снялась (отказ, пропуск, черновик), в веса НЕ ВХОДЯТ:
+      // делить на количество, длины которого мы не измеряли, значит занизить среднее на его долю.
       const totalQty = b.lines.reduce((s, l) => s + Math.max(0, l.job.batchQty), 0);
       const avgCm =
         totalQty > 0
-          ? b.lines.reduce((s, l) => s + l.result.usedLengthCm * Math.max(0, l.job.batchQty), 0) /
-            totalQty
-          : b.lines.reduce((s, l) => s + l.result.usedLengthCm, 0) / Math.max(1, b.lines.length);
+          ? b.lines.reduce((s, l) => s + l.perUnitCm * Math.max(0, l.job.batchQty), 0) / totalQty
+          : b.lines.reduce((s, l) => s + l.perUnitCm, 0) / Math.max(1, b.lines.length);
       // ЗНАМЕНАТЕЛЬ — ВЕСЬ ЗАКАЗ КОЛОРВЕЯ, а не сумма запланированных заданий. Размер, по которому
       // задание вообще не создалось (нет деталей в выкройках, не влезает в ширину), из суммы
       // заданий выпал бы — и покрытие отрапортовало бы «посчитано всё», умолчав ровно про ту
@@ -832,6 +919,33 @@ export function BatchMarkerQueue({
         measured && current && current.value > 0
           ? ((measured.value - current.value) / current.value) * 100
           : null;
+      // ═══ СКОЛЬКО РАЗМЕРНАЯ НОРМА НЕ ДОГОВАРИВАЕТ ═══════════════════════════════════════════
+      //
+      // Ради этой строки настил партии и снимается. Размерные нормы сняты на ОДНОМ изделии, а
+      // одно изделие кладётся реже настоящего настила — то есть норма систематически идёт с
+      // запасом, и НАСКОЛЬКО, до сих пор не знал никто.
+      //
+      // Оба числа берутся ГОТОВЫМИ: слева — измеренная длина настила ÷ его изделия, справа —
+      // пер-размерный расход, ОПУБЛИКОВАННЫЙ сервером на строках состава норм (consumptionForSize).
+      // Считать норму здесь заново значило бы завести второй ответ на вопрос, у которого уже есть
+      // владелец, — и первым же расхождением стало бы «костинг говорит одно, раскрой другое».
+      //
+      // Взвешивание — тем же миксом партии, что и слева: сравнивать реальный настил партии со
+      // средним по ряду значит сравнивать две разные партии.
+      const normPerUnitCm =
+        b.job.mode === 'batch'
+          ? weightedNormCm(markersForLine(techCard?.markers, b.job.bomLineKey), b.job)
+          : null;
+      const normMeasured =
+        normPerUnitCm != null
+          ? toBomUnit(normPerUnitCm, b.job.unit, basis.ok ? basis.basis : undefined)
+          : null;
+      // Знаменатель — ЭТАЛОН (число, о котором говорится «занижала»), тот же, что и в сверке с
+      // рецептом строкой ниже: два процента рядом обязаны означать одно и то же.
+      const normDeltaPct =
+        measured && normMeasured && normMeasured.value > 0
+          ? ((measured.value - normMeasured.value) / normMeasured.value) * 100
+          : null;
       return {
         head: b.job,
         lines: b.lines,
@@ -839,6 +953,8 @@ export function BatchMarkerQueue({
         measured,
         current,
         deltaPct,
+        normMeasured,
+        normDeltaPct,
         totalQty,
         plannedQty,
       };
@@ -848,6 +964,7 @@ export function BatchMarkerQueue({
   // ── рендер ────────────────────────────────────────────────────────────────────────────────
   const running = phase === 'running';
   const jobs = plan?.jobs ?? [];
+  const draftCount = jobs.filter((j) => runs[j.id]?.status === 'draft').length;
 
   return (
     <div className='flex w-full min-w-0 flex-col gap-1.5'>
@@ -909,6 +1026,31 @@ export function BatchMarkerQueue({
         раскрой партии — раскладки по колорвеям и размерам
       </GroupLabel>
 
+      {/* ЧТО СНИМАЕМ — ВЫБОР ДО ПРОГОНА, а не после. Оба режима считает один и тот же движок по
+          одним и тем же выкройкам; отличаются они составом настила и владельцем раскладки, и это
+          именно то, что оператор обязан решить заранее: переделка стоит минут поиска. Чипы, а не
+          вкладки: это два ответа на один вопрос, а не два раздела. */}
+      <ChipRow>
+        <Chip
+          selected={mode === 'norms'}
+          pressed={mode === 'norms'}
+          disabled={running}
+          title='по раскладке на каждый (колорвей × размер), настил на ОДНО изделие. Такая норма переиспользуется между партиями и живёт на карточке'
+          onClick={() => !running && setMode('norms')}
+        >
+          размерные нормы
+        </Chip>
+        <Chip
+          selected={mode === 'batch'}
+          pressed={mode === 'batch'}
+          disabled={running}
+          title='одна раскладка на (колорвей × ткань), состав — соотношение размеров ЭТОЙ партии, ужатое на НОД. Принадлежит партии и нормой стать не может'
+          onClick={() => !running && setMode('batch')}
+        >
+          настил партии
+        </Chip>
+      </ChipRow>
+
       {blocked ? (
         <Text size='micro' className='text-error'>
           {blocked}
@@ -916,9 +1058,10 @@ export function BatchMarkerQueue({
       ) : (
         <Text size='micro' variant='label'>
           движок раскладки работает в ЭТОЙ вкладке: вкладки карточки не размонтируются, поэтому
-          очередь считает и когда вы ушли на другую, — но уход со страницы карточки её убивает.
-          Настил снимается на ОДНО изделие каждого размера: многокомплектный кладётся плотнее, так
-          что измеренный расход идёт с запасом, а КПД ниже цехового.
+          очередь считает и когда вы ушли на другую, — но уход со страницы карточки её убивает.{' '}
+          {mode === 'batch'
+            ? 'Настил кладётся на СОБСТВЕННОЕ соотношение размеров партии, ужатое на НОД (60 M + 40 L → 3 M + 2 L): его КПД и есть реальный процент раскроя этой партии. Раскладка принадлежит партии и нормой стиля стать не может — соотношение у каждой партии своё.'
+            : 'Настил снимается на ОДНО изделие каждого размера: многокомплектный кладётся плотнее, так что измеренный расход идёт с запасом, а КПД ниже цехового. Реальный процент раскроя показывает режим «настил партии».'}
         </Text>
       )}
 
@@ -949,7 +1092,8 @@ export function BatchMarkerQueue({
                 <th className='border-b border-hairline px-1 py-1 text-left uppercase'> </th>
                 <th className='border-b border-hairline px-1 py-1 text-left uppercase'>колорвей</th>
                 <th className='border-b border-hairline px-1 py-1 text-left uppercase'>ткань</th>
-                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>размер</th>
+                {/* СОСТАВ, а не «размер»: у настила партии одного размера нет — там «3M+2L». */}
+                <th className='border-b border-hairline px-1 py-1 text-left uppercase'>состав</th>
                 <th className='border-b border-hairline px-1 py-1 text-right uppercase'>ширина</th>
                 <th className='border-b border-hairline px-1 py-1 text-right uppercase'>детали</th>
                 <th className='border-b border-hairline px-1 py-1 text-left uppercase'>прогноз</th>
@@ -985,14 +1129,33 @@ export function BatchMarkerQueue({
                       {`${j.widthCm} см`}
                     </td>
                     <td className='border-b border-hairline px-1 py-1 text-right tabular-nums'>
-                      {j.pieceCount}
+                      <div className='flex flex-col'>
+                        <span>{j.pieceCount}</span>
+                        {/* ЭКЗЕМПЛЯРЫ — ВТОРОЕ ЧИСЛО: слева уникальные контуры (ими платится
+                            предпросчёт NFP), справа сколько их всего ляжет на полотно (это цена
+                            поиска). У смешанного настила растут ОБА, и по-разному: контуры — на
+                            набор каждого размера состава, экземпляры — на весь тираж. Сколько это
+                            секунд, считает прогноз слева. */}
+                        {j.instanceCount !== j.pieceCount ? (
+                          <Text size='micro' variant='label' component='span'>
+                            {`${j.instanceCount} экз.`}
+                          </Text>
+                        ) : null}
+                      </div>
                     </td>
                     <td className='border-b border-hairline px-1 py-1'>
                       <div className='flex flex-col gap-0.5'>
                         <span>{forecastText(j)}</span>
                         {j.replaces ? (
-                          <Pill tone={j.replaces.isNorm ? 'warn' : 'mut'}>
-                            {j.replaces.isNorm ? 'уже снята · НОРМА' : 'уже снята'}
+                          // ЧЕРНОВИК — НЕ «уже снята». Тот же бейдж на недосчитанной раскладке
+                          // читался бы как «работа сделана», и оператор снял бы галочку с
+                          // единственного задания, которое как раз надо пересчитать.
+                          <Pill tone={j.replaces.isNorm || j.replaces.isDraft ? 'warn' : 'mut'}>
+                            {j.replaces.isDraft
+                              ? 'лежит ЧЕРНОВИК'
+                              : j.replaces.isNorm
+                                ? 'уже снята · НОРМА'
+                                : 'уже снята'}
                           </Pill>
                         ) : null}
                         {j.notes.map((n) => (
@@ -1003,20 +1166,33 @@ export function BatchMarkerQueue({
                       </div>
                     </td>
                     <td className='border-b border-hairline px-1 py-1'>
-                      <span>{statusText(r)}</span>
+                      <div className='flex flex-col items-start gap-0.5'>
+                        <span>{statusText(r)}</span>
+                        {/* ЧЕРНОВИК ВИДЕН СЛОВОМ, а не только цветом строки: от готовой раскладки
+                            он отличается ровно отсутствием числа, а отсутствие числа само по себе
+                            читается как «ещё не посчитали». */}
+                        {r?.status === 'draft' ? (
+                          <Pill
+                            tone='warn'
+                            title='часть деталей не легла: раскладка сохранена, но расход по ней не считается — ни скалярный, ни по размерам. Пересчёт с бо́льшим бюджетом заменит её'
+                          >
+                            черновик
+                          </Pill>
+                        ) : null}
+                      </div>
                       {r?.error ? (
-                        <Text size='micro' className='text-error'>
+                        <Text
+                          size='micro'
+                          className={r.status === 'draft' ? 'text-labelColor' : 'text-error'}
+                        >
                           {r.error}
                         </Text>
                       ) : null}
                       {/* ЗА ЭТОЙ СТРОКОЙ ЛЕЖИТ ПОСЧИТАННАЯ РАСКЛАДКА. Сохранение сорвалось —
                           геометрия от этого не испортилась, и заставлять оператора платить
-                          минутами поиска за чужую пятисотку незачем. Кнопка есть только там, где
-                          результат полон: неполную сервер не примет в любом случае. */}
-                      {r?.status === 'failed' &&
-                      r.result &&
-                      r.result.placedCount === r.result.totalCount &&
-                      !running ? (
+                          минутами поиска за чужую пятисотку незачем. Досохранить можно и неполную:
+                          она ляжет черновиком, ровно как легла бы в очереди. */}
+                      {r?.status === 'failed' && r.result && !running ? (
                         <Button
                           type='button'
                           size='xs'
@@ -1059,6 +1235,19 @@ export function BatchMarkerQueue({
         </Text>
       ) : null}
 
+      {/* ЧЕРНОВИКИ НАЗЫВАЮТСЯ ОТДЕЛЬНО, а не растворяются в таблице. Их не видно в итоге по ткани
+          (и правильно — их длина короче настоящей), поэтому без этой строки экран выглядел бы так,
+          будто часть заданий просто не считалась. */}
+      {draftCount > 0 ? (
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            {`сохранено черновиков: ${draftCount}. Они видны ${
+              mode === 'batch' ? 'на странице партии' : 'в списке раскладок карточки'
+            } и их можно пересчитать, но расход по ним не считается нигде — ни в итоге ниже, ни в костинге, ни в рецепте: часть деталей не легла, и длина короче настоящей. Поднимите бюджет поиска и запустите эти строки заново.`}
+          </Text>
+        </CalloutBox>
+      ) : null}
+
       {/* ═══ ИЗМЕРЕННЫЙ РАСХОД — то, ради чего всё считалось. */}
       {results.length > 0 ? (
         <div className='mt-2 flex flex-col gap-2'>
@@ -1070,7 +1259,13 @@ export function BatchMarkerQueue({
               {g.lines.map((l) => (
                 <Row
                   key={l.job.id}
-                  label={`${l.job.sizeLabel} · ${l.job.batchQty} шт`}
+                  // У настила партии в строке стоит ЕГО СОСТАВ, а не размер: «настил 3M+2L» —
+                  // это и есть предмет замера, и КПД рядом относится именно к нему.
+                  label={
+                    l.job.mode === 'batch'
+                      ? `настил ${l.job.sizeLabel} · покрывает ${l.job.batchQty} шт партии`
+                      : `${l.job.sizeLabel} · ${l.job.batchQty} шт`
+                  }
                   value={`${l.result.usedLengthCm.toFixed(0)} см · КПД ${pct(l.result.efficiency)}`}
                 />
               ))}
@@ -1081,6 +1276,23 @@ export function BatchMarkerQueue({
                 }
                 value={g.measured ? `${g.measured.value} ${g.measured.unit}` : meters(g.avgCm)}
               />
+              {/* ═══ ГЛАВНАЯ СТРОКА РЕЖИМА «НАСТИЛ ПАРТИИ»: НАСКОЛЬКО РАЗМЕРНАЯ НОРМА
+                  НЕ ДОГОВАРИВАЕТ. Слева — измеренный настил на реальном соотношении, справа — те
+                  же размерные нормы, взвешенные тем же миксом. Разницу между ними до сих пор не
+                  видел никто: обе цифры выглядят одинаково «измеренными». */}
+              {g.head.mode === 'batch' ? (
+                <Text size='micro' variant='label'>
+                  {g.normMeasured == null
+                    ? 'сравнить с размерными нормами нечем: они сняты не на все размеры этого настила, сняты на другой ширине полотна либо расхода не дают (например, лежит черновик). Снимите режим «размерные нормы» на те же размеры'
+                    : g.normDeltaPct == null
+                      ? `размерные нормы на этот микс дают ${g.normMeasured.value} ${g.normMeasured.unit}`
+                      : `размерная норма давала ${g.normMeasured.value} ${g.normMeasured.unit} — ${
+                          g.normDeltaPct >= 0
+                            ? `занижала на ${Math.abs(g.normDeltaPct).toFixed(0)}%`
+                            : `завышала на ${Math.abs(g.normDeltaPct).toFixed(0)}%`
+                        } (процент — от нормы, как и в сверке с рецептом ниже)`}
+                </Text>
+              ) : null}
               {/* ЧАСТИЧНОЕ ПОКРЫТИЕ НАЗЫВАЕТСЯ ВСЛУХ. Взвешенное среднее по ПОЛОВИНЕ партии — это
                   ответ про половину, и молча выдавать его за расход партии нельзя: сравнение с
                   рецептом ниже опиралось бы на вес, которого нет. */}
@@ -1110,12 +1322,31 @@ export function BatchMarkerQueue({
           ))}
           {/* СЛЕДУЮЩИЙ ШАГ — назначить раскладку НОРМОЙ, и делается он там, где уже живёт
               подтверждение с его последствиями (переназначение нормы рецепты НЕ пересчитывает).
-              Ссылка, а не вторая кнопка: копия того диалога разошлась бы с оригиналом. */}
+              Ссылка, а не вторая кнопка: копия того диалога разошлась бы с оригиналом.
+
+              У настила партии этого шага нет и быть не может: он принадлежит прогону, а прогонная
+              раскладка нормой не становится физически (CHECK chk_tcm_run_not_norm). Его место —
+              страница партии, где из раскладок собирают настилы.
+
+              TODO(следующая фаза): предложить отсюда СОЗДАТЬ строку настила прогона
+              (production_run_lay) по этой раскладке — число полотен и концевые потери считает уже
+              она, и они не выводятся из геометрии маркера. */}
           <Text size='micro' variant='label'>
-            назначить раскладку нормой ткани и применить расход в рецепт —{' '}
-            <Button asChild variant='underline' size='xs'>
-              <Link to='?tab=patterns'>раскладки карточки ↗</Link>
-            </Button>
+            {mode === 'batch' ? (
+              <>
+                настил принадлежит партии — собрать из него раскрой можно на{' '}
+                <Button asChild variant='underline' size='xs'>
+                  <Link to={`/production-runs/${run.id ?? 0}`}>странице партии ↗</Link>
+                </Button>
+              </>
+            ) : (
+              <>
+                назначить раскладку нормой ткани и применить расход в рецепт —{' '}
+                <Button asChild variant='underline' size='xs'>
+                  <Link to='?tab=patterns'>раскладки карточки ↗</Link>
+                </Button>
+              </>
+            )}
           </Text>
         </div>
       ) : null}
@@ -1177,6 +1408,12 @@ function statusText(r: JobRun | undefined): string {
       return r.result
         ? `готово · ${r.result.usedLengthCm.toFixed(0)} см · КПД ${pct(r.result.efficiency)}`
         : 'готово';
+    case 'draft':
+      // Ни длины, ни КПД: они относятся к НЕПОЛНОЙ укладке, и напечатанные в той же колонке, что у
+      // готовой раскладки, читались бы как замер. Что именно не сошлось — говорит строка ошибки.
+      return r.result
+        ? `сохранено · ${r.result.placedCount} из ${r.result.totalCount}`
+        : 'сохранено';
     case 'failed':
       return 'отказ';
     case 'skipped':
@@ -1188,6 +1425,48 @@ function saveErrorText(e: unknown): string {
   const vs = extractFieldViolations(e);
   if (vs.length > 0) return vs.map((v) => v.description).join('; ');
   return e instanceof Error && e.message ? e.message : 'не удалось сохранить раскладку';
+}
+
+/**
+ * РАЗМЕРНАЯ НОРМА, ВЗВЕШЕННАЯ МИКСОМ ЭТОЙ ПАРТИИ, см на изделие. null = сравнивать не с чем.
+ *
+ * Эталон для настила партии: «сколько ткани обещали размерные нормы на ровно тот же микс». Числа
+ * берутся ТОЛЬКО опубликованные — `consumptionForSize` отдаёт то, что сервер посчитал на строках
+ * состава раскладки, — и ни одно из них здесь не выводится заново. Раскладку на каждый размер
+ * выбирает общий компаратор (`latestPerSize`: норма → свой колорвей → свежесть), тот же, которым
+ * пользуется применение в рецепт: показывать один эталон, а применять другой было бы хуже, чем не
+ * показывать вовсе.
+ *
+ * ВСЕ РАЗМЕРЫ ИЛИ НИ ОДНОГО. Норма, посчитанная по трём размерам из пяти, описывает другую партию —
+ * и ровно на разницу их долей разошлась бы с левой частью сравнения.
+ *
+ * И ВСЕ — НА ТОМ ЖЕ ПОЛОТНЕ. Длина не переносится между ширинами: норма, снятая на 140 см, против
+ * настила на 150 даёт разницу, которая к плотности укладки отношения не имеет вовсе, — а строка на
+ * экране объявила бы её тем самым «сколько норма не договаривает». Сверяются РАСКРОЙНЫЕ ширины
+ * (обе стороны хранят именно их), допуск — полсантиметра, как и в диалоге применения.
+ */
+function weightedNormCm(
+  lineMarkers: common_TechCardMarkerSummary[],
+  job: MarkerJob,
+): number | null {
+  // Чужие колорвеи — вон: у них свой приколотый артикул, своя ширина, и «расхождение» вышло бы
+  // расхождением тканей. Общие раскладки (colorway_id = 0) остаются: они и снимались на ширине
+  // слота, то есть на том же полотне, что достаётся колорвею без пина.
+  const bySize = latestPerSize(markersOfColorway(lineMarkers, job.colorwayId), job.colorwayId);
+  let qty = 0;
+  let sum = 0;
+  for (const row of job.sizes) {
+    const m = bySize.get(row.sizeId);
+    if (!m) return null;
+    const w = decNum(m.fabricWidthCm);
+    if (!(w > 0) || Math.abs(w - job.widthCm) > 0.5) return null;
+    const cm = consumptionForSize(m, row.sizeId);
+    if (cm == null || !(cm > 0)) return null;
+    const q = Math.max(0, row.batchQty);
+    qty += q;
+    sum += q * cm;
+  }
+  return qty > 0 ? sum / qty : null;
 }
 
 /**
