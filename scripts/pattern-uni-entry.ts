@@ -18,6 +18,7 @@ import {
   unitsOfPieces,
 } from 'components/managers/tech-card/components/nesting/piece-selection';
 import { sizeAreasFromParsed } from 'components/managers/tech-card/components/nesting/size-areas-from-dxf';
+import { planSizeMerge } from 'components/managers/tech-card/components/nesting/size-merge';
 import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
 import {
   isBlankPiece,
@@ -35,6 +36,7 @@ export {
   mapTechCardToForm,
   markerUnits,
   normBlock,
+  planSizeMerge,
   selectMarkerPieces,
   sizeAreasFromParsed,
   splitBlockSize,

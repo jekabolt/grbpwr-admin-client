@@ -179,8 +179,9 @@ const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
 // Lowercase extension of a pattern sheet: filename first, url path as the legacy fallback —
 // the same source order as the server manifest's sheetExt and the viewer's sheetKind. The
 // caption branches on it because a SIZELESS sheet means two different things by format: a DXF
-// is graded (sizes live in its block names), a PDF simply has no size — «градуированный» on a
-// PDF would promise a size switcher the viewer will not show.
+// carries its sizes inside (in its block names) OR declares its pieces ungraded (the UNI token),
+// while a PDF simply has no size — «градуированный» on a PDF would promise a size switcher the
+// viewer will not show.
 const patternExt = (p: { filename?: string; url?: string }): string => {
   const fromName = /\.([a-z0-9]+)$/i.exec((p.filename ?? '').trim());
   if (fromName) return fromName[1].toLowerCase();
@@ -859,6 +860,11 @@ export function TechPackDocument({
   // Which sizes a group covers: named sizes in the card's size-range order (strays after),
   // plus «градуированные» for sizeless DXF and «без размера» for sizeless PDF — two different
   // facts, branched on the file format the same way the viewer's sheet list does.
+  //
+  // Безразмерный DXF больше не подписывается «graded», и это не придирка к слову: файл ОДНИХ
+  // uni-деталей размеров не несёт вовсе, а бумага утверждала обратное — «градуирован» про лист,
+  // где градации нет по заявлению автора. Формат листа различить эти два случая не может (строка
+  // выкройки хранит только размер и файл), поэтому подпись называет ОБА: «multi-size or UNI».
   const patternGroupSizes = (sheets: common_TechCardSizePattern[]): string => {
     const named = new Set<number>();
     let graded = false;
@@ -873,7 +879,7 @@ export function TechPackDocument({
     return [
       ...inRange.map(sizeName),
       ...stray.map(sizeName),
-      graded ? 'graded' : '',
+      graded ? 'multi-size or UNI' : '',
       sizeless ? 'sizeless' : '',
     ]
       .filter(Boolean)
@@ -1630,6 +1636,15 @@ export function TechPackDocument({
                       <div className='font-medium'>{p.name || '—'}</div>
                       {p.detached && (
                         <div className='text-labelColor'>sketch callout link lost</div>
+                      )}
+                      {/* НЕ ГРАДУИРУЕТСЯ — то, что цех обязан прочесть до раскроя: этой детали
+                          не бывает «своего» размера, один и тот же контур идёт в комплект
+                          каждого. Единственное место, куда доезжает РУЧНАЯ галка (манифест
+                          публичного вьюера её не несёт), — поэтому она печатается словами, а не
+                          выводится читателем из имён блоков. Язык листа — фабричный английский,
+                          как у соседней строки про потерянную выноску. */}
+                      {p.ungraded && (
+                        <div className='text-labelColor'>not graded — same in all sizes</div>
                       )}
                     </td>
                     {/* КОЛИЧЕСТВО И ЕГО ПОЯСНЕНИЕ В ОДНОЙ КЛЕТКЕ — это и есть весь смысл Ф1.3 на

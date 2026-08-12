@@ -1,6 +1,6 @@
 // UNI: деталь без градации входит во ВСЕ размеры — правила прогоняются на ЖИВОМ коде.
 //
-// Секции дописываются задачами по порядку (T1 → T2 → T4 → T3); чужие assert'ы не редактируются:
+// Секции дописываются задачами по порядку (T1 → T2 → T4 → T3 → T5); чужие assert'ы не редактируются:
 // упавший старый assert — это регресс, и чинить его надо в коде, а не здесь.
 import { build as esbuild } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -484,6 +484,36 @@ console.log('\nT3.d · строка с одной только галкой — 
   const form = readForm([{ lineKey: 'A', ungraded: true }]);
   ck(wirePieces(form).length === 1, 'строка не выброшена на сохранении',
      String(wirePieces(form).length));
+}
+
+// ══ T5 · копирайт: uni — это не «размер не опознан» ════════════════════════════════════════
+
+console.log('\nT5.f · склейка размеров молчит про UNI-файл и ругается на безымянный');
+{
+  // Два файла: карманы UNI и градуированный ряд. Про первый «в именах блоков не опознан размер»
+  // — неправда: размера там нет ПО ЗАЯВЛЕНИЮ автора, а не по недосмотру.
+  const uniFile = ['PCK_L_UNI_M', 'PCK_R_UNI_M'].map((n, i) =>
+    m.piece(i + 1, n, { fileIndex: 0, originX: 0, originY: 0 }));
+  const gradedFile = m.GRADED.map((n, i) =>
+    m.piece(i + 10, n, { fileIndex: 1, originX: 0, originY: 0 }));
+  const plan = m.planSizeMerge([...uniFile, ...gradedFile], ['pockets.dxf', 'main.dxf'], m.DICT, 'mm');
+  ck(!plan.warnings.some((w) => w.startsWith('pockets.dxf: в именах блоков')),
+     'про UNI-файл предупреждения нет', JSON.stringify(plan.warnings));
+
+  // Тот же файл без токена — предупреждение осталось дословно: там размер действительно не опознан.
+  const plainFile = ['POCKET_L', 'POCKET_R'].map((n, i) =>
+    m.piece(i + 1, n, { fileIndex: 0, originX: 0, originY: 0 }));
+  const plain = m.planSizeMerge([...plainFile, ...gradedFile], ['pockets.dxf', 'main.dxf'], m.DICT, 'mm');
+  ck(plain.warnings.includes('pockets.dxf: в именах блоков не опознан размер'),
+     'без токена предупреждение прежнее', JSON.stringify(plain.warnings));
+
+  // Смешанный файл (один блок с токеном, другой без) — предупреждение ОСТАЁТСЯ: не опознан
+  // именно не-uni блок, и молчать о нём нельзя.
+  const mixedFile = ['PCK_L_UNI_M', 'POCKET_R'].map((n, i) =>
+    m.piece(i + 1, n, { fileIndex: 0, originX: 0, originY: 0 }));
+  const mixed = m.planSizeMerge([...mixedFile, ...gradedFile], ['pockets.dxf', 'main.dxf'], m.DICT, 'mm');
+  ck(mixed.warnings.includes('pockets.dxf: в именах блоков не опознан размер'),
+     'смешанный файл предупреждает по-прежнему', JSON.stringify(mixed.warnings));
 }
 
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);

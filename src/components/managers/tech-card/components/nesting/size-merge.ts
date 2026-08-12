@@ -34,6 +34,12 @@ export type SizeMergeRow = {
   /** Размеры, найденные в именах блоков этого файла. */
   sizes: string[];
   blocks: number;
+  /**
+   * Все блоки файла помечены токеном UNI — файл ЗАЯВЛЯЕТ, что его детали не градуируются.
+   * Отсутствие размеров у такого файла — не пробел разбора, а ответ автора, и предупреждать о
+   * нём нечем. Пустой файл сюда не попадает (нет блоков — нет заявления).
+   */
+  uniOnly: boolean;
   /** Блоки этого файла уже принёс другой файл — вклад нулевой (частый случай: XL повторяет L). */
   duplicateOf?: string;
   /** Сколько деталей этого файла приходится доставлять в общий кадр. */
@@ -103,14 +109,22 @@ export function planSizeMerge(
   //
   // Дубль опознаётся по ИМЕНАМ блоков, а не по размеру: повторная выгрузка приезжает под теми же
   // именами, и склейка её не возьмёт (первое имя выигрывает), — значит вклад файла нулевой.
-  const perFile = fileNames.map(() => ({ blocks: new Set<string>(), sizes: new Set<string>() }));
+  const perFile = fileNames.map(() => ({
+    blocks: new Set<string>(),
+    sizes: new Set<string>(),
+    // Блоки файла, помеченные токеном UNI. Считается ПО БЛОКАМ, а не по контурам: у блока их
+    // несколько (крой, шов, внутренние линии), и счёт контуров сравнивать было бы не с чем.
+    uniBlocks: new Set<string>(),
+  }));
   for (const p of pieces) {
     const block = (p.blockName ?? '').trim();
     const fi = p.fileIndex ?? 0;
     if (!block || !perFile[fi]) continue;
     perFile[fi].blocks.add(block);
-    const size = split.codeById.get(p.id)?.size ?? '';
+    const code = split.codeById.get(p.id);
+    const size = code?.size ?? '';
     if (size) perFile[fi].sizes.add(size);
+    if (code?.uni) perFile[fi].uniBlocks.add(block);
   }
   const claimed = new Map<string, number>(); // имя блока → индекс файла, который его дал первым
   perFile.forEach((f, fi) => {
@@ -178,6 +192,7 @@ export function planSizeMerge(
         (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
       ),
       blocks: own.length,
+      uniOnly: own.length > 0 && perFile[fi].uniBlocks.size === own.length,
       duplicateOf,
       moved: movedPerFile[fi] ?? 0,
     };
@@ -188,7 +203,11 @@ export function planSizeMerge(
     // Размер вычитывается из ХВОСТА имени блока, а хвост опознаётся тем, что МЕНЯЕТСЯ у своей
     // основы (deriveBlockSizes). На одном файле меняться нечему, поэтому молчим: «размера нет»
     // там было бы неправдой про файл, у которого он есть.
-    else if (r.sizes.length === 0 && fileNames.length > 1)
+    //
+    // И молчим у файла, все блоки которого несут UNI: у него размера нет ПО ЗАЯВЛЕНИЮ автора, а
+    // не потому, что разбор не справился, — «не опознан размер» звучало бы там как поломка.
+    // Смешанный файл предупреждает по-прежнему: не опознан именно НЕ-uni блок, и он реален.
+    else if (r.sizes.length === 0 && !r.uniOnly && fileNames.length > 1)
       warnings.push(`${r.name}: в именах блоков не опознан размер`);
     else if (r.sizes.length > 1)
       warnings.push(`${r.name}: файл несёт сразу несколько размеров (${r.sizes.join(', ')})`);

@@ -510,16 +510,22 @@ export function PieceMatchModal({
   const sheet = sheets[Math.min(activeFile, Math.max(0, sheets.length - 1))];
 
   // Sizes present in the ACTIVE sheet — a second file can legitimately carry a different subset.
+  //
+  // У группы считается ещё и `uniCount` — сколько её контуров помечены токеном UNI. Группировка от
+  // этого не меняется НИ НА ЙОТУ (связывание блоков обязано остаться прежним): признак нужен
+  // только подписи и предупреждению, которые иначе называют заявление автора недосмотром.
   const sizeOptions = useMemo(() => {
     if (!sheet) return [];
-    const seen = new Map<string, number>();
+    const seen = new Map<string, { count: number; uniCount: number }>();
     for (const p of sheet.pieces) {
-      const s = split.codeById.get(p.id)?.size ?? '';
-      seen.set(s, (seen.get(s) ?? 0) + 1);
+      const code = split.codeById.get(p.id);
+      const s = code?.size ?? '';
+      const prev = seen.get(s) ?? { count: 0, uniCount: 0 };
+      seen.set(s, { count: prev.count + 1, uniCount: prev.uniCount + (code?.uni ? 1 : 0) });
     }
     const rank = (s: string) => split.orderOfSize.get(s) ?? 1e6;
     return [...seen.entries()]
-      .map(([size, count]) => ({ size, count }))
+      .map(([size, v]) => ({ size, ...v }))
       .sort((a, b) => rank(a.size) - rank(b.size));
   }, [sheet, split]);
   // The chosen size, falling back to the BIGGEST group when the operator has not picked or the
@@ -1005,18 +1011,25 @@ export function PieceMatchModal({
                 </CalloutBox>
               )}
               {/* Осталась группа «без размера», хотя все словарные размеры уже заведены — значит
-                  хвост этих блоков размером не является вовсе. */}
+                  хвост этих блоков размером не является вовсе.
+                  UNI-контуры в это число НЕ входят: у них размера нет ПО ЗАЯВЛЕНИЮ автора, и
+                  «не опознан» звучало бы про них как поломка разбора. Когда кроме них в группе
+                  никого нет, предупреждения не остаётся вовсе. */}
               {missingSizes.length === 0 &&
                 sizeOptions.length > 1 &&
-                sizeOptions.some((o) => o.size === '') && (
-                  <CalloutBox tone='warning'>
-                    <Text size='micro' component='p'>
-                      у {sizeOptions.find((o) => o.size === '')?.count ?? 0} контуров размер в
-                      имени не опознан — такие блоки заведут свои детали кроя, не общие с
-                      остальными размерами
-                    </Text>
-                  </CalloutBox>
-                )}
+                (() => {
+                  const rest = sizeOptions.find((o) => o.size === '');
+                  const unnamed = rest ? rest.count - rest.uniCount : 0;
+                  if (unnamed <= 0) return null;
+                  return (
+                    <CalloutBox tone='warning'>
+                      <Text size='micro' component='p'>
+                        у {unnamed} контуров размер в имени не опознан — такие блоки заведут свои
+                        детали кроя, не общие с остальными размерами
+                      </Text>
+                    </CalloutBox>
+                  );
+                })()}
               {missingOnLayer.length > 0 && (
                 <CalloutBox tone='warning'>
                   <Text size='micro' component='p'>
@@ -1044,7 +1057,10 @@ export function PieceMatchModal({
                       title={`${o.count} контуров`}
                       onClick={() => setActiveSize(o.size)}
                     >
-                      {o.size || 'без размера'}
+                      {/* Группа целиком из помеченных контуров — это «UNI», а не «без размера»:
+                          размер у них не потерян, его и не должно быть. Смешанная группа
+                          подписывается прежним словом — там размер и правда не опознан. */}
+                      {o.size || (o.count > 0 && o.uniCount === o.count ? 'UNI' : 'без размера')}
                     </Button>
                   ))}
                 </div>

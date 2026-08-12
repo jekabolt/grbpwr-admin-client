@@ -46,15 +46,45 @@ export function DxfSheetView({
     [allPieces, contourLayer],
   );
 
+  // ГРУППА «БЕЗ РАЗМЕРА» И UNI-ДЕТАЛИ — ЭТО РАЗНЫЕ ВЕЩИ, и переключатель обязан их различать.
+  //
+  // Помеченная деталь входит в комплект КАЖДОГО размера, поэтому при живых размерных группах она
+  // не заводит отдельную опцию: карман виден на листе M вместе с деталями M (см. `shown`). Если бы
+  // он остался отдельной кнопкой, оператор, выбрав M, смотрел бы на неполный комплект и не имел
+  // способа это заметить. Остаток группы '' — это НЕПОМЕЧЕННЫЕ безразмерные детали, у которых
+  // размер, возможно, просто не опознан: их опция остаётся, потому что показать их негде больше.
   const sizeOpts = useMemo(() => {
     const seen = new Map<string, number>();
+    let sizeless = 0;
+    let sizelessUni = 0;
     for (const p of onLayer) {
-      const s = split.codeById.get(p.id)?.size ?? '';
+      const code = split.codeById.get(p.id);
+      const s = code?.size ?? '';
+      if (!s) {
+        sizeless += 1;
+        if (code?.uni) sizelessUni += 1;
+        continue;
+      }
       seen.set(s, (seen.get(s) ?? 0) + 1);
     }
-    return [...seen.entries()]
-      .map(([size, count]) => ({ size, count }))
-      .sort((a, b) => (split.orderOfSize.get(a.size) ?? 1e6) - (split.orderOfSize.get(b.size) ?? 1e6));
+    const graded = seen.size > 0;
+    // Счётчик размера ВКЛЮЧАЕТ помеченные детали — ровно те, что видны на его листе. Иначе
+    // подсказка кнопки («N деталей») спорила бы со строкой под чертежом, считающей показанное.
+    const opts = [...seen.entries()].map(([size, count]) => ({
+      size,
+      count: count + sizelessUni,
+      uni: false,
+    }));
+    // Файл из одних uni: опция всё-таки нужна — иначе смотреть было бы не на что. Она и
+    // подписывается тем, что есть на самом деле.
+    const rest = graded ? sizeless - sizelessUni : sizeless;
+    if (rest > 0) {
+      const uni = !graded && sizelessUni === sizeless;
+      opts.push({ size: '', count: rest, uni });
+    }
+    return opts.sort(
+      (a, b) => (split.orderOfSize.get(a.size) ?? 1e6) - (split.orderOfSize.get(b.size) ?? 1e6),
+    );
   }, [onLayer, split]);
   const [activeSize, setActiveSize] = useState<string | null>(null);
   // Крупнейшая группа по умолчанию: группа «без размера» это остаток, а не размер.
@@ -65,7 +95,16 @@ export function DxfSheetView({
         null,
       )?.size ?? '');
   const shown = useMemo(
-    () => onLayer.filter((p) => (split.codeById.get(p.id)?.size ?? '') === shownSize),
+    () =>
+      onLayer.filter((p) => {
+        const code = split.codeById.get(p.id);
+        const s = code?.size ?? '';
+        if (s === shownSize) return true;
+        // Помеченная деталь идёт в комплект КАЖДОГО размера — значит и на лист каждого размера.
+        // Без этого лист размера M показывал бы изделие без карманов, и ошибка была бы не видна
+        // ни по одному признаку: контуры просто отсутствуют.
+        return !!shownSize && !s && !!code?.uni;
+      }),
     [onLayer, split, shownSize],
   );
 
@@ -124,7 +163,7 @@ export function DxfSheetView({
                     title={`${o.count} деталей`}
                     onClick={() => setActiveSize(o.size)}
                   >
-                    {o.size || 'без размера'}
+                    {o.size || (o.uni ? 'UNI · во всех размерах' : 'без размера')}
                   </Button>
                 ))}
               </div>

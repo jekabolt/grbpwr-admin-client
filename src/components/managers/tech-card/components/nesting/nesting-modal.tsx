@@ -367,6 +367,23 @@ export function NestingModal({
   // детали из раскладки молча.
   const gradedOpts = useMemo(() => sizeOpts.filter((o) => o.size !== ''), [sizeOpts]);
   const ungradedCount = sizeOpts.find((o) => o.size === '')?.count ?? 0;
+  // ВСЕ безразмерные детали настила помечены токеном UNI — тогда «без размера в имени блока» про
+  // них неправда: автор ЗАЯВИЛ, что деталь одна на весь ряд, и разбор ничего не терял. Условие
+  // полное намеренно: одна непомеченная деталь в группе — и подпись возвращается к прежней, потому
+  // что именно у неё размер, возможно, просто не опознан. Считается по тем же деталям, что и
+  // счётчик: слой контура и исключённые uni-копии, иначе число и слова разойдутся.
+  const ungradedAllUni = useMemo(() => {
+    let any = false;
+    for (const p of allPieces) {
+      if ((p.layer ?? '') !== contourLayer) continue;
+      if (uniDedupe.excludedIds.has(p.id)) continue;
+      const code = split.codeById.get(p.id);
+      if ((code?.size ?? '') !== '') continue;
+      if (!code?.uni) return false;
+      any = true;
+    }
+    return any;
+  }, [allPieces, split, contourLayer, uniDedupe]);
   // СТРОКА СОСТАВА — ЭТО РАЗМЕР КАРТОЧКИ, А НЕ НАПИСАНИЕ ТОКЕНА. Реальные файлы пишут один
   // размер несколькими графиками: BP_M и SL_R_m, скобочный базовый BP_<S> рядом с FP_S, буква и
   // число одного ряда. Пока строки ключевались сырым хвостом, такие написания давали ДВЕ строки
@@ -2137,8 +2154,9 @@ export function NestingModal({
                 )}
                 {graded && ungradedCount > 0 && (
                   <Text size='nano' variant='label' component='p'>
-                    {ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ
-                    изделие состава, то есть по {unitsTotal} шт
+                    {ungradedAllUni
+                      ? `${ungradedCount} деталей UNI — не градуируются, кроятся на каждое изделие (по ${unitsTotal} шт)`
+                      : `${ungradedCount} деталей без размера в имени блока — они кроятся на КАЖДОЕ изделие состава, то есть по ${unitsTotal} шт`}
                   </Text>
                 )}
                 {/* Отказ, а не предупреждение: пока копии спорят, любое число здесь описывает
@@ -2734,7 +2752,13 @@ export function NestingModal({
                         <Text size='nano' variant='label' component='p'>
                           {p.bboxW.toFixed(1)} × {p.bboxH.toFixed(1)} см
                           {graded
-                            ? ` · ${split.codeById.get(p.id)?.size || 'без размера'} · ×${
+                            ? // У помеченной детали размера нет ПО ЗАЯВЛЕНИЮ автора, и «без
+                              // размера» читалось бы про неё как недостача. Подпись берётся с
+                              // самой детали, а не с группы: в списке они лежат вперемешку.
+                              ` · ${
+                                split.codeById.get(p.id)?.size ||
+                                (split.codeById.get(p.id)?.uni ? 'UNI' : 'без размера')
+                              } · ×${
                                 Math.max(1, Math.round(s.qty)) * (unitsOfPiece.get(p.id) ?? 0)
                               }`
                             : ''}
