@@ -34,6 +34,7 @@ import {
   uniGradedConflicts,
   uniGroupsOf,
   uniOf,
+  type UniConflict,
 } from './block-code';
 import { toBomUnit, type FabricWeightBasis } from './marker-io';
 import { aliasIdentity } from './use-block-sizes';
@@ -220,6 +221,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   const codeById = input.index.split.codeById;
   const uniEntries: { raw: string; uniBase: string }[] = [];
   const gradedIdentities = new Set<string>();
+  const declaredVsGraded: UniConflict[] = [];
   for (const piece of input.pieces) {
     let bySize: Map<string, PieceDTO[]> | undefined;
     for (const r of piece.refs) {
@@ -272,6 +274,24 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     // файлу: uni-блок, который к этой ткани не привязан, в норму не входит и спорить ему не с чем.
     // (Настил спрашивает шире — он укладывает все контуры скоупа; каждый путь проверяет свою
     // популяцию, и это одно и то же правило на разных множествах, а не два разных правила.)
+    // ГАЛКА ПРОТИВ ГЕОМЕТРИИ — ОТКАЗ, А НЕ ТИХИЙ ПРИОРИТЕТ.
+    //
+    // Оператор пометил деталь «не градуируется», а в выкройках у неё полный размерный ряд. Пометка
+    // геометрию не отменяет: `graded` выводится из имён блоков, `pieceRows` шлёт строку на КАЖДЫЙ
+    // размер, и сервер (0302) отвергает такой сейв площадей ЦЕЛИКОМ — `ungraded_piece_measured_by_
+    // _size`, — то есть оператор теряет весь замер и не понимает почему.
+    //
+    // Молча отдать победу галке (послать одну строку с sizeId 0) нельзя ровно по той же причине,
+    // по которой владелец просил блокировать «градуированную копию + uni»: у детали есть РАЗНАЯ
+    // геометрия по размерам, и объявить её одинаковой значит выкинуть измеренную разницу. Молча
+    // отдать победу геометрии — значит проигнорировать ответ оператора. Спрашивать здесь некого,
+    // поэтому отказ, и он называет деталь и оба выхода.
+    if (piece.ungraded === true && graded) {
+      const blocks = [
+        ...new Set(contours.map((c) => normBlock(c.blockName ?? '')).filter(Boolean)),
+      ].sort();
+      declaredVsGraded.push({ kind: 'declared-vs-graded', subject: piece.name, blocks });
+    }
     if (graded) {
       const identity = normBlock(codeById.get(contours[0]?.id ?? -1)?.identity ?? '');
       if (identity) gradedIdentities.add(identity.toLowerCase());
@@ -316,6 +336,8 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   // добавляет: беда одна, чинится одним действием, а два абзаца читаются как две.
   const flagged = new Set(gradedVsUni.map((c) => c.subject.toLowerCase()));
   const uniConflicts = [
+    // Первым — спор с ответом САМОГО оператора: он и чинится быстрее всех, одним кликом.
+    ...declaredVsGraded,
     ...gradedVsUni,
     ...uniDuplicateConflicts(uniGroups).filter((c) => !flagged.has(c.subject.toLowerCase())),
   ];

@@ -684,5 +684,32 @@ console.log('\nR3 · ДЕДУП сравнивает мультимножест�
   ck(layPieces(nan, ROWS_2).dedupe.conflicts.length === 1, 'невалидная площадь — тоже конфликт');
 }
 
+console.log('\nR4 · ГАЛКА против фактической градации — отказ, а не отказ сервера потом');
+{
+  const pieces = m.piecesOf(m.GRADED);
+  const card = (over) => [
+    cardPiece('спинка', 'BP', over), cardPiece('рукав', 'SL_R'),
+  ];
+  // Без галки — как было: деталь градуируется, строки идут по размерам.
+  const plain = normFor(pieces, card({}));
+  ck(plain.ok === true, 'без галки норма считается', plain.ok ? '' : plain.reason);
+  ck(plain.ok && plain.areas.pieceRows.every((r) => r.sizeId > 0),
+     'и шлёт пер-размерные строки, как раньше');
+  // С галкой на детали, у которой в файле ПОЛНЫЙ размерный ряд: прежде это доезжало до сервера и
+  // он отвергал ВЕСЬ сейв площадей (ungraded_piece_measured_by_size).
+  const flagged = normFor(pieces, card({ ungraded: true }));
+  ck(flagged.ok === false, 'галка при живой градации — ОТКАЗ на клиенте',
+     flagged.ok ? JSON.stringify(flagged.areas.pieceRows.slice(0, 2)) : '');
+  ck(!flagged.ok && flagged.reason.includes('спинка'), 'отказ называет ДЕТАЛЬ',
+     !flagged.ok ? flagged.reason : '');
+  ck(!flagged.ok && flagged.reason.includes('BP_XS'), 'и называет её блоки');
+  ck(!flagged.ok && flagged.reason.includes('Снимите галку'), 'и говорит, что делать');
+  // Галка на детали, которая ДЕЙСТВИТЕЛЬНО не градуируется, — законна и работает (T4.2).
+  const honest = ['PCK_L', 'PCK_R'].map((n, i) => m.piece(i + 1, n, { areaCm2: 100 }));
+  const ok = normFor(honest, ['PCK_L', 'PCK_R'].map((n) => cardPiece(n, n, { ungraded: true })));
+  ck(ok.ok === true, 'галка на честно неградуируемой детали — по-прежнему норма',
+     ok.ok ? '' : ok.reason);
+}
+
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);
 process.exit(bad ? 1 : 0);
