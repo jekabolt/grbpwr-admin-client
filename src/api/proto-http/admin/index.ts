@@ -4597,9 +4597,55 @@ export type ListOpenFittingChangeRequestsResponse = {
 
 export type DeleteSampleRequest = {
   id: number | undefined;
+  // dry_run = true: посчитать вердикт и НЕ удалять. Ответ идентичен по форме, deleted = false.
+  dryRun: boolean | undefined;
+};
+
+// SampleDeletionEntry — одна запись вердикта удаления семпла: стабильный код, готовая фраза,
+// количество. Фраза собирается на СЕРВЕРЕ и печатается клиентом дословно — второй словарь на
+// клиенте разошёлся бы с этим в первый же день, и два экрана стали бы называть один факт
+// по-разному.
+export type SampleDeletionEntry = {
+  // Стабильный код. Блокеры: material_outstanding | material_over_returned | fitting | referenced.
+  // Каскад: media | substitution. Сироты: orphan_material_movement | orphan_dev_expense |
+  // orphan_task | orphan_next_round | orphan_style_cost.
+  // orphan_style_cost — единственная сирота, за которой стоят ДЕНЬГИ, а не строки: количество
+  // материала вернулось на склад, а стоимость — нет (часть выдачи ушла без известной цены, и
+  // возврат её оценить не может). Сводка стиля считает сэмплирование джойном по семплу, поэтому
+  // вместе с семплом эта сумма из отчёта уйдёт. count там всегда 1: это одна сумма, а не набор.
+  // referenced — сетка безопасности против ушедшей вперёд схемы: FK с RESTRICT, которого нет в
+  // перечислении сервера. Он называет своё незнание, а не факт, и приходит с count = 0.
+  reason: string | undefined;
+  // Готовая фраза для экрана: «не возвращено на склад: 2.4 m «Wool Melton 340»».
+  text: string | undefined;
+  // Сколько объектов стоит за записью (материалов, примерок, фотографий). 0 значит «отсюда не
+  // видно» и приходит только с reason = referenced.
+  count: number | undefined;
+  // ВЫХОД из блокера, готовой фразой: «верните материал на склад из панели МАТЕРИАЛЫ этого семпла».
+  // Заполнен только у блокеров (каскаду и сиротам выходить неоткуда — они не отказ).
+  // Едет вместе с фактом, а не пишется на клиенте, потому что зависит от состояния, которого клиент
+  // не знает целиком: у семпла в статусе «списан» совет «верните материал» невыполним — склад
+  // возврат по нему не примет, и выход начинается со смены статуса. Тот же текст сервер кладёт в
+  // field violation отказа, так что диалог и ошибка говорят одно и то же слово в слово.
+  howToFix: string | undefined;
 };
 
 export type DeleteSampleResponse = {
+  // Разрешает ли вердикт удаление. При dry_run = false и deletable = false ответа не будет вовсе —
+  // придёт FailedPrecondition; поле осмысленно прежде всего в сухом прогоне.
+  deletable: boolean | undefined;
+  // Что держит удаление. Пусто ⟺ deletable.
+  blockers: SampleDeletionEntry[] | undefined;
+  // Что уйдёт ВМЕСТЕ с семплом (ON DELETE CASCADE — его собственные строки): фотографии, замены
+  // материалов.
+  cascade: SampleDeletionEntry[] | undefined;
+  // ТРЕТЬЯ КАТЕГОРИЯ, ни блокер, ни каскад: записи с ON DELETE SET NULL переживут удаление и
+  // ПОТЕРЯЮТ семпл. Движения склада остаются намеренно — лента прихода-расхода это учёт, и стирать
+  // из неё строки задним числом значит переписывать остатки прошлых дней; к моменту удаления они
+  // уже сошлись в ноль. Dev-расходы остаются деньгами карточки и теряют только адрес.
+  orphans: SampleDeletionEntry[] | undefined;
+  // Действительно ли строка удалена. false в сухом прогоне.
+  deleted: boolean | undefined;
 };
 
 export type GetSampleRequest = {
@@ -11836,6 +11882,25 @@ export interface AdminService {
   // SAMPLES (new-flow NF-04): sewn prototypes of a style, with a composed cost.
   AddSample(request: AddSampleRequest): Promise<AddSampleResponse>;
   UpdateSample(request: UpdateSampleRequest): Promise<UpdateSampleResponse>;
+  // DeleteSample удаляет семпл — прототип, которого не должно было быть (дубль, опечатка,
+  // заведён не на ту карточку).
+  // ГРАНИЦА: удалить можно ⟺ материал ВОЗВРАЩЁН на склад (чистый расход по каждому материалу = 0)
+  // И на семпле нет примерок. Возврат делает оператор РУКАМИ, отдельным жестом из панели
+  // МАТЕРИАЛЫ: удаление само на склад не ходит — тихо оприходовать ткань за оператора значит
+  // записать в учёте факт, которого никто не совершал, а на этой ленте стоит оценка запасов.
+  // Примерка пережила бы удаление по схеме (fitting.sample_id — SET NULL), но примерка без семпла
+  // это вердикт, снятый ни с чего, поэтому отказ называет их и просит удалить первыми.
+  // ПОЧЕМУ НЕ ПРОСТО «нет движений», как было раньше: мастер создания семпла списывает ткань по
+  // BOM в том же жесте, поэтому по старому правилу почти каждый семпл рождался неудаляемым
+  // навсегда, а «удалить» на экране было кнопкой, которая никогда не срабатывает.
+  // dry_run = true отвечает на тот же вопрос и НИЧЕГО не меняет — это и есть чтение диалога
+  // подтверждения: он печатает, что держит удаление, что уйдёт вместе с семплом и что его
+  // переживёт, вместо того чтобы предлагать оператору поверить глаголу. dry_run = false
+  // пере-проверяет тот же предикат ВНУТРИ транзакции и удаляет: предикат, доказанный вне
+  // транзакции, — гонка, а эта гонка удаляет.
+  // Отказ — FailedPrecondition с одним field violation НА КАЖДЫЙ блокер, и совет в нём свой у
+  // каждого: «верните материал» невыполним для семпла в статусе «списан» (склад запрещает возврат
+  // по нему), и тогда совет начинается со смены статуса.
   DeleteSample(request: DeleteSampleRequest): Promise<DeleteSampleResponse>;
   GetSample(request: GetSampleRequest): Promise<GetSampleResponse>;
   ListSamples(request: ListSamplesRequest): Promise<ListSamplesResponse>;
@@ -15002,6 +15067,9 @@ export function createAdminServiceClient(
       const path = `api/admin/sample/${request.id}`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
+      if (request.dryRun) {
+        queryParams.push(`dryRun=${encodeURIComponent(request.dryRun.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
