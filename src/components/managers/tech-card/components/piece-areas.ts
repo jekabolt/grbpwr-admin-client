@@ -1,7 +1,40 @@
 import { adminService } from 'api/api';
+import { useFormState, type Control } from 'react-hook-form';
 import { extractFieldViolations } from 'utils/field-errors';
 import type { DxfPieceAreaRow } from './nesting/dxf-consumption';
 import { serverScopeKeyOfSheet } from './pattern-size-index';
+import type { TechCardFormData } from './schema';
+
+// ── МОЖНО ЛИ ВООБЩЕ ПУБЛИКОВАТЬ ПЛОЩАДИ ПРЯМО СЕЙЧАС ───────────────────────────────────────────
+//
+// Правило живёт ЗДЕСЬ, рядом с самой публикацией, потому что точек входа у неё ДВЕ — замер площадей
+// на вкладке выкроек и применение нормы «по выкройкам», — и обе обязаны спрашивать одно и то же.
+// Одна проверка на два места: разойдись они, дыру закрыли бы наполовину, а комментарий у закрытой
+// половины утверждал бы, что закрыта вся.
+//
+// ЧТО ИМЕННО ЛОМАЕТСЯ БЕЗ НЕЁ. Выкройки и связи блок→деталь правятся В ФОРМЕ (piece-match-modal
+// пишет setValue), а полноту присланного комплекта сервер доказывает против СВОИХ, сохранённых
+// связей. Отсюда два живых сценария, и второй хуже первого:
+//   1. связи созданы и не сохранены — сервер отвечает «у скоупа нет связей блок→деталь» про набор,
+//      который оператор видит связанным, и читает это как поломку;
+//   2. деталь ПЕРЕПРИВЯЗАНА в форме к другому блоку, а состав деталей не изменился — тогда
+//      серверная сверка «в обе стороны» проходит против СТАРЫХ связей, и площади, снятые с
+//      геометрии, которой сохранённая карточка не заявляет, записываются МОЛЧА. Отказаться от
+//      правок формы после этого — значит остаться с неверными площадями без единого следа.
+//
+// Поэтому ответ один: пока источник правлен и не сохранён, публиковать нельзя ничем.
+export function useUnsavedAreaSource(control: Control<TechCardFormData>): boolean {
+  const { dirtyFields } = useFormState({ control, name: ['patterns', 'pieceDxfAliases'] });
+  // Спрашивается ЗНАЧЕНИЕ, а не наличие ключа: у массивов RHF заводит запись сразу и кладёт в неё
+  // пустой массив или объект из `false`, так что `!!dirtyFields.patterns` был бы вечной «правкой».
+  const anyDirty = (v: unknown): boolean =>
+    Array.isArray(v)
+      ? v.some(anyDirty)
+      : v !== null && typeof v === 'object'
+        ? Object.values(v as Record<string, unknown>).some(anyDirty)
+        : v === true;
+  return anyDirty(dirtyFields.patterns) || anyDirty(dirtyFields.pieceDxfAliases);
+}
 
 // ПУБЛИКАЦИЯ ПЛОЩАДЕЙ ДЕТАЛЕЙ (Ф0, 0297) — то, из чего сервер выводит норму расхода сам.
 //
