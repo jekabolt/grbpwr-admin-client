@@ -45,7 +45,7 @@ import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
 import { mmToEngineCm } from './nesting/allowance-units';
 import { useSnackBarStore } from 'lib/stores/store';
-import { publishPieceAreas } from './piece-areas';
+import { publishPieceAreas, useUnsavedAreaSource } from './piece-areas';
 import { serverScopeKeyOfSheet } from './pattern-size-index';
 import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
@@ -199,6 +199,8 @@ export default function DxfApplyDialog({
   //
   // Листы берутся ВСЕ, включая наследие в PDF: отпечаток сервер считает по своим строкам
   // `tech_card_size_pattern`, а они форматом не отбираются.
+  // Правлен ли ИСТОЧНИК замера и не сохранён — общее правило обеих точек публикации (piece-areas.ts).
+  const sourceDirty = useUnsavedAreaSource(control);
   const publishTarget = useMemo(() => {
     const id = Number(techCardId) || 0;
     if (id <= 0 || !lineScopeKey) return null;
@@ -229,7 +231,22 @@ export default function DxfApplyDialog({
     // подтверждена, а площади — это то, из чего сервер потом выведет ОЦЕНКУ для слотов, где нормы
     // никто не вписал. Отказ сервера (например, неполный комплект скоупа) остаётся сообщением, а не
     // провалом операции, которую человек только что подтвердил.
-    if (publishTarget && outcome?.ok) {
+    //
+    // …НО НЕ С НЕСОХРАНЁННЫМ ИСТОЧНИКОМ. Комплект деталей здесь собран из ФОРМЫ
+    // (useFabricDxfPieces читает pieceDxfAliases), а полноту присланного набора сервер доказывает
+    // против СВОИХ, сохранённых связей. Если деталь только что перепривязали к другому блоку, а
+    // состав деталей не изменился, серверная сверка «в обе стороны» пройдёт против СТАРЫХ связей —
+    // и площади, снятые с геометрии, которой сохранённая карточка не заявляет, лягут в базу МОЛЧА.
+    // Отказаться после этого от правок формы значит остаться с неверными площадями без следа.
+    //
+    // Норму это НЕ отменяет: её человек только что подтвердил, она посчитана и применяется ниже.
+    // Не уезжают только площади — и об этом говорится вслух, вместе с тем, что делать.
+    if (publishTarget && outcome?.ok && sourceDirty) {
+      showMessage(
+        'норма применена; площади НЕ сохранены: выкройки или связи блок→деталь правлены и не сохранены — сервер сверяет комплект по сохранённым связям. Сохраните карточку и замерьте площади на вкладке выкроек',
+        'error',
+      );
+    } else if (publishTarget && outcome?.ok) {
       void publishPieceAreas({
         techCardId: publishTarget.techCardId,
         scopeKey: publishTarget.scopeKey,

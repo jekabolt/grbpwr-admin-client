@@ -42,10 +42,13 @@ for (const path of files) {
   const r = await m.measureAreaField({
     sheets: [{ name, open: async () => buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) }],
     file: name,
+    // Припуск задаётся явно, как у остальных проб: по умолчанию 0 — столько же, сколько берёт
+    // диалог замера в приложении. Прибор обязан мерить ту же величину, что и измеряемое.
+    seamAllowanceCm: process.env.AF_SEAM ? Number(process.env.AF_SEAM) : undefined,
   });
 
   console.log(`\n══ ${r.file} ══`);
-  console.log(`  контуров ${r.parsed} | слой кроя «${r.contourLayer}» | долевая «${r.grainLayer}» | припуск ${r.seamAllowanceMm} мм`);
+  console.log(`  контуров ${r.parsed} | слой кроя «${r.contourLayer}» | долевая «${r.grainLayer}» | припуск ${r.seamAllowanceCm} см`);
   console.log(`  на слое деталей ${r.onLayer} | размеров в файле ${r.sizeTokens.length}${r.sizeTokens.length ? ` (${r.sizeTokens.join(', ')})` : ''}`);
   console.log(`  подмножество съёмки: размер «${r.subsetToken || '—'}» → ${r.subset.length} дет.; полный набор → ${r.full.length} дет.`);
   console.log(`  выпуклой оболочкой заменено: полный ${r.hulledFull}, подмножество ${r.hulledSubset}`);

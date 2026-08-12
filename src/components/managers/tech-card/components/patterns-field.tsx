@@ -49,6 +49,7 @@ import { useCardDxfPack } from './nesting/card-dxf-pack';
 import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex } from './pattern-size-index';
+import { useUnsavedAreaSource } from './piece-areas';
 import { scopeAreaState, serverScopeKeysOfSheets, type ScopeAreaState } from './piece-areas-state';
 import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
@@ -624,16 +625,10 @@ export function PatternsField({
   // них не знает и продолжает отвечать `stale: false` — про источник, которого на экране уже нет.
   // Пересчитать отпечаток здесь нечем (сервер его наружу не отдаёт), поэтому единственное честное
   // поведение — сказать, что ответ относится к сохранённому состоянию.
-  const { dirtyFields } = useFormState({ control, name: ['patterns', 'pieceDxfAliases'] });
-  // Спрашивается ЗНАЧЕНИЕ, а не наличие ключа: у массивов RHF заводит запись сразу и кладёт в неё
-  // пустой массив или объект из `false`, так что `!!dirtyFields.patterns` был бы вечным «правкой».
-  const anyDirty = (v: unknown): boolean =>
-    Array.isArray(v)
-      ? v.some(anyDirty)
-      : v !== null && typeof v === 'object'
-        ? Object.values(v as Record<string, unknown>).some(anyDirty)
-        : v === true;
-  const sourceDirty = anyDirty(dirtyFields.patterns) || anyDirty(dirtyFields.pieceDxfAliases);
+  // Правлен ли ИСТОЧНИК замера и не сохранён. Правило одно на обе точки публикации площадей и
+  // живёт рядом с самой публикацией (piece-areas.ts) — местная копия однажды разошлась бы с той,
+  // которой пользуется применение нормы, и дыру закрыли бы наполовину.
+  const sourceDirty = useUnsavedAreaSource(control);
 
   // Размеры карточки, которых в разобранных файлах не оказалось. Считается КАЖДЫЙ РАЗ, а не
   // хранится: ряд правится на этой же вкладке, прямо над панелью.
@@ -1683,12 +1678,15 @@ export function PatternsField({
             // Назначение законно владеет НЕСКОЛЬКИМИ строками BOM, и ширины у них могут не совпасть.
             // Тогда ширины нет: делить площадь на «какую-нибудь из двух» и печатать результат как
             // факт — хуже, чем не печатать ничего.
+            //
+            // СТРОКА БЕЗ ШИРИНЫ ТОЖЕ ГАСИТ ОТВЕТ, а не выбывает из голосования. Соблазн считать
+            // «незаполненная не спорит» и делить на единственную известную — это ровно подстановка
+            // номинала вместо неизвестного: у той строки может быть своя ширина, просто её не
+            // внесли, и напечатанная длина утверждала бы про скоуп то, чего никто не проверял.
             cuttingWidthCm={(() => {
-              const widths = new Set(
-                measuring.scope.lines
-                  .map((l) => slotCutWidth(l).cutCm)
-                  .filter((w) => Number.isFinite(w) && w > 0),
-              );
+              const cut = measuring.scope.lines.map((l) => slotCutWidth(l).cutCm);
+              if (cut.some((w) => !Number.isFinite(w) || w <= 0)) return undefined;
+              const widths = new Set(cut);
               return widths.size === 1 ? [...widths][0] : undefined;
             })()}
             onClose={() => setMeasuring(null)}
