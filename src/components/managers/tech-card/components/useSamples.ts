@@ -187,6 +187,10 @@ export function useDeleteSample(techCardId: number) {
         qc.invalidateQueries({ queryKey: warehouseKeys.all }),
         // orphan_dev_expense: расходы остаются на карточке, но теряют адрес «за какой семпл».
         qc.invalidateQueries({ queryKey: devExpenseKeys.list(techCardId) }),
+        // Экономика стиля несёт блок «сэмплы»: их число и материал, который они съели. Вместе с
+        // семплом оттуда уходит и то и другое — а у этого запроса staleTime две минуты, так что без
+        // сброса панель денег ещё минуты две показывала бы расход на семпл, которого уже нет.
+        qc.invalidateQueries({ queryKey: ['styleEconomics', techCardId] }),
         // Примерки живут ПОД detail(id) карточки; у самого удаляемого семпла их быть не может
         // (блокер), но соседние строки этого списка ссылались на него как на предыдущий раунд.
         qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) }),
