@@ -1004,6 +1004,59 @@ export type ArchiveColorwayByIDRequest = {
 export type ArchiveColorwayByIDResponse = {
 };
 
+export type DeleteColorwayByIDRequest = {
+  colorwayId: number | undefined;
+  // expected_version ведёт себя РОВНО как на ArchiveColorwayByID: поле принимается и НЕ проверяется
+  // — при расхождении не происходит ничего, отказа по версии нет. Это не недоделка, а вывод:
+  // версия колорвея — это tech_card.lock_version, и ни один факт, который решает удаляемость
+  // (продажа, строка партии, настил, остаток), её не двигает. Проверка не закрыла бы ни одной
+  // настоящей гонки и при этом отказывала бы на правке рецепта СОСЕДНЕГО колорвея той же карточки.
+  // Гонку закрывает пере-проверка фактов внутри транзакции удаления.
+  expectedVersion: number | undefined;
+  // dry_run = true: посчитать вердикт и НЕ удалять. Ответ идентичен по форме, deleted = false.
+  dryRun: boolean | undefined;
+};
+
+// ColorwayDeletionEntry — одна запись вердикта удаления: стабильный код, готовая фраза, количество.
+// Строковый код, а не enum, — по соглашению refusal у оценки расхода (common/techcard.proto): код
+// не заводит нулевого значения, которое в замороженном ответе читалось бы как «причины нет».
+// Фразу собирает сервер: формулировка одна на систему, второй перевод на клиенте с ней разойдётся.
+export type ColorwayDeletionEntry = {
+  // Стабильный код. Блокеры: sold | production_run | lay | stock | inventory_target | fitting |
+  // referenced. Каскад: variant | variant_price | price | media | tag | translation | recipe_usage |
+  // size_consumption | piece_material | packaging_recipe | lab_dip_round | cost_event | waitlist |
+  // stock_history | style_link. Сироты: orphan_marker | orphan_material_movement | orphan_sample |
+  // orphan_task.
+  // inventory_target и fitting СУЖАЮТ границу владельца: по ней такой колорвей удаляется, но у
+  // обоих FK стоит RESTRICT, и СУБД откажет в любом случае — выбор был только между названным
+  // фактом и сырым MySQL 1451. referenced — сетка безопасности против ушедшей вперёд схемы: FK,
+  // которого нет в перечислении сервера; она называет своё незнание, а не факт.
+  reason: string | undefined;
+  // Готовая фраза для экрана: «продан: 3 заказа», «стоит в партии #12 (черновик)».
+  text: string | undefined;
+  // Сколько объектов стоит за записью (заказов, партий, строк рецепта, раскладок). 0 значит «отсюда
+  // не видно» и приходит только с reason = referenced: MySQL сообщает имя ограничения, а не
+  // мощность, и поставить туда 1 значило бы выдумать число.
+  count: number | undefined;
+};
+
+export type DeleteColorwayByIDResponse = {
+  // Разрешает ли вердикт удаление. При dry_run = false и deletable = false ответа не будет вовсе —
+  // придёт FailedPrecondition; поле осмысленно прежде всего в сухом прогоне.
+  deletable: boolean | undefined;
+  // Что держит удаление. Пусто ⟺ deletable.
+  blockers: ColorwayDeletionEntry[] | undefined;
+  // Что уйдёт ВМЕСТЕ с колорвеем (ON DELETE CASCADE — его собственные строки). Это список, который
+  // печатает диалог подтверждения.
+  cascade: ColorwayDeletionEntry[] | undefined;
+  // ТРЕТЬЯ КАТЕГОРИЯ, ни блокер, ни каскад: записи с ON DELETE SET NULL переживут удаление и
+  // ПОТЕРЯЮТ колорвей. Раскладка, снятая под этот артикул, останется длиной, померенной ни на чём.
+  // Отказать не за что, но оператор обязан узнать это ДО подтверждения, а не после.
+  orphans: ColorwayDeletionEntry[] | undefined;
+  // Действительно ли строка удалена. false в сухом прогоне.
+  deleted: boolean | undefined;
+};
+
 export type PublishColorwayRequest = {
   colorwayId: number | undefined;
   expectedVersion: number | undefined;
@@ -7360,6 +7413,42 @@ export type common_AdminColorwayRef = {
   // по которым посчитана стоимость, — не меньше и не больше; замеренный чехол сегодня не стоит
   // ничего ни на одном экране, и это отдельная стройка (расход на вариант выпуска), а не поле.
   areaEstimates: common_TechCardSlotAreaEstimate[] | undefined;
+  // OUTPUT-ONLY ТЕНЕВЫЕ оценки: та же самая оценка по площади, посчитанная для рулонного слота, у
+  // которого норма ЗАЯВЛЕНА человеком. Справочная цифра рядом с авторской нормой — НИКОГДА не сама
+  // норма.
+  // ЗАЧЕМ ОТДЕЛЬНОЕ ПОЛЕ, А НЕ ФЛАЖОК В area_estimates. Правило «введённое сильнее выведенного»
+  // означает, что в area_estimates слот с авторской нормой не попадает НИКОГДА, и на этом стоит
+  // склейка клиента: он сшивает usages и area_estimates в один список по тканям, полагаясь на то,
+  // что у одной ткани найдётся ровно одно из двух. Дослав теневую строку в тот же список, сервер
+  // сломал бы КАЖДОГО сегодняшнего клиента: у слота с нормой появилась бы вторая строка, и какая из
+  // двух цифр окажется на экране, зависело бы от порядка склейки. Отдельное поле снимает вопрос
+  // насовсем: клиент, который про него не знает, теней не получает вовсе, а его пустое (нулевое)
+  // значение — пустой список — читается как «теней нет», что и есть правда для любого ответа,
+  // снятого до этого поля, включая замороженные слепки релизов.
+  // ПО ТОЙ ЖЕ ПРИЧИНЕ ТЕНЬ НЕ ПОМЕЧЕНА СКАЛЯРОМ ВНУТРИ СТРОКИ. Булев (или enum) «это тень» был бы
+  // ВТОРЫМ утверждением о том же факте, и его нулевое значение пришлось бы толковать: у строки из
+  // слепка, снятого до этого поля, он прочитался бы как «активная», то есть ровно как умолчание
+  // «считай нормой». Список, в котором строка приехала, И ЕСТЬ её ступень; разойтись с самим собой
+  // он не может.
+  // ЧТО ЭТА ЦИФРА ЗНАЧИТ. То же, что и активная оценка: NETTO, нижняя граница расхода по измеренным
+  // площадям деталей — межлекальных выпадов и концов настила в ней нет и быть не может. Смысл
+  // публикации ровно один: показать, НАСКОЛЬКО нижняя граница ниже нормы, которую вписал человек
+  // («оценка занижала на 27%»), — чтобы было видно, стоит ли ей доверять там, где нормы ещё нет.
+  // С ЧЕМ ЕЁ СРАВНИВАТЬ МОЖНО И С ЧЕМ НЕЛЬЗЯ. Можно — с АВТОРСКОЙ НОРМОЙ ТОГО ЖЕ слота того же
+  // колорвея (она в usages, ключ склейки тот же bom_line_key). НЕЛЬЗЯ — с другой оценкой: ни с
+  // оценкой соседнего слота, ни с оценкой того же слота в другом колорвее, ни с активной оценкой из
+  // area_estimates. Каждая оценка прячет СВОЙ объём межлекальных выпадов, и знак разности двух
+  // оценок бывает противоположен знаку правды.
+  // ОТКАЗЫВАЕТ ТЕМ ЖЕ СЛОВАРЁМ И В ТОМ ЖЕ ПОРЯДКЕ, что активная оценка, — включая no_price. Второй
+  // ступени отказов нет: оценка это ОДИН ответ (геометрия и цена одного и того же артикула), и слот,
+  // про который она отказалась говорить, одинаково нем на обеих ступенях. На карточке, где слот с
+  // авторской нормой не имеет цены, костинг и без того не считается по этой же причине — тень
+  // повторяет то, что уже сказано рядом, а не выдаёт новую загадку.
+  // НА ДЕНЬГИ НЕ ВЛИЯЕТ НИЧЕМ. Тень не входит ни в один итог: TechCardCosting считается по авторской
+  // норме этого слота ровно как считался, has_estimate от тени не поднимается, product.cost_price
+  // ею не засевается, чек-лист релиза её не называет, план материалов её не видит. Публикация
+  // ШИРЕ множества, которое СЧИТАЕТСЯ, — и это разделение намеренное.
+  shadowAreaEstimates: common_TechCardSlotAreaEstimate[] | undefined;
 };
 
 // ColorwayLabDipRound is ONE round of the lab-dip approval loop, as it actually happens: a dyehouse
@@ -7406,6 +7495,12 @@ export type common_ColorwayLabDipRound = {
 // менять историю). Замороженная оценка при этом НЕ становится нормой производства: она лежит
 // ОТДЕЛЬНО от usages, читатели замороженных денег (ReleaseFrozenColorwayCosts) отказываются от
 // колорвея с has_estimate, а costing-проекция снапшота собирает нормы только из usages.
+// СТУПЕНЬ ЭТОЙ СТРОКИ — ЭТО ПОЛЕ, В КОТОРОМ ОНА ПРИЕХАЛА, и другого признака у неё нет.
+// AdminColorwayRef.area_estimates — АКТИВНАЯ оценка: у слота нет авторской нормы, и именно эта
+// цифра стоит в костинге. AdminColorwayRef.shadow_area_estimates — ТЕНЬ: норма у слота есть,
+// вписана человеком, а тень лежит рядом справочно и в деньги не входит. Скалярной пометки внутри
+// строки нет намеренно (почему — сказано у shadow_area_estimates), поэтому строку, вынутую из
+// своего списка, восстановить как активную или теневую уже нельзя: не перемешивать.
 export type common_TechCardSlotAreaEstimate = {
   // Строка BOM — по СТАБИЛЬНОМУ ключу, тем же, которым клиент сшивает свой список по тканям. Не по
   // id: в слепке релиза часть строк приходит без него, а line_key есть всегда.
@@ -11470,6 +11565,27 @@ export interface AdminService {
   // ArchiveColorwayByID retires a colourway (archive-not-delete, R6/R9): ACTIVE|HIDDEN -> ARCHIVED
   // (terminal). Was DeleteColorwayByID.
   ArchiveColorwayByID(request: ArchiveColorwayByIDRequest): Promise<ArchiveColorwayByIDResponse>;
+  // DeleteColorwayByID УДАЛЯЕТ колорвей физически — узкая дырка в правиле «архивируем, не удаляем»
+  // (R6/R9). Правило верно для всего, что когда-либо жило: у проданного колорвея заморожен SKU и на
+  // него ссылается история заказов. Но колорвей, который НИКОГДА не продавался и НИКОГДА не
+  // производился, — это опечатка, а не запись, и архив-единственный-выход навсегда засоряет список
+  // колорвеев карточки брошенными цветами.
+  // ГРАНИЦА: удалить можно ⟺ не продан И не стоит ни в одной партии (включая ЧЕРНОВУЮ) И не стоит ни
+  // в одном настиле И нет остатка. Всё остальное — только архив, и отказ НАЗЫВАЕТ факт, который
+  // держит («продан: 3 заказа», «стоит в партии #12 (черновик)»), а не отвечает «нельзя».
+  // ДВА СУЖЕНИЯ ЭТОЙ ГРАНИЦЫ, наложенные схемой, а не решением: план запаса (inventory_target) и
+  // примерка (fitting) ссылаются на продукт через FK с ON DELETE RESTRICT, поэтому СУБД откажет
+  // независимо от четвёрки выше. Сервер называет и их — выбор был не «блокировать или нет», а
+  // «названный факт или сырой MySQL 1451». Третий остаточный код, referenced, — не факт вовсе, см.
+  // ColorwayDeletionEntry.reason.
+  // dry_run = true отвечает на тот же вопрос и НИЧЕГО не меняет — это и есть чтение диалога
+  // подтверждения: диалог печатает, что умрёт и что осиротеет, вместо того чтобы предлагать
+  // оператору поверить глаголу. dry_run = false пере-проверяет тот же предикат ВНУТРИ транзакции и
+  // удаляет: предикат, доказанный вне транзакции, — гонка, а эта гонка удаляет.
+  // Отказ — FailedPrecondition с одним field violation НА КАЖДЫЙ блокер, никогда не сырой MySQL 1451.
+  // Единственный отказ, который факт НЕ называет, — reason = referenced: FK, о котором сервер не
+  // знает (схема ушла вперёд его перечисления). Он честно говорит именно это и чинится кодом.
+  DeleteColorwayByID(request: DeleteColorwayByIDRequest): Promise<DeleteColorwayByIDResponse>;
   // PublishColorway transitions a DRAFT colourway to ACTIVE (R6), enforcing the sellable
   // preconditions (built base SKU, ≥1 valid-SKU variant, complete sku_season+model_no, dictionary
   // colour, country, price, default translation).
@@ -12683,6 +12799,32 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ArchiveColorwayByID",
       }) as Promise<ArchiveColorwayByIDResponse>;
+    },
+    DeleteColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.expectedVersion) {
+        queryParams.push(`expectedVersion=${encodeURIComponent(request.expectedVersion.toString())}`)
+      }
+      if (request.dryRun) {
+        queryParams.push(`dryRun=${encodeURIComponent(request.dryRun.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteColorwayByID",
+      }) as Promise<DeleteColorwayByIDResponse>;
     },
     PublishColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
