@@ -77,7 +77,12 @@ const searchCls =
 // isn't there yet. Shared by the single and multi variants so "выбрать или создать" behaves
 // identically everywhere a piece is chosen. Width and chrome belong to the popover shell — this
 // renders content only.
-function PieceList({
+//
+// Экспортируется ради карточки ткани в рецепте колорвея («назначить детали»): там выбор — тот же
+// набор деталей той же карточки, и вторая реализация списка разошлась бы с этой первой же правкой
+// (поиск, отметка выбранного, «деталей ещё нет»). Создавать детали оттуда нельзя (allowCreate=false):
+// рецепт пишется UpdateColorwayRecipe, который деталь завести не может, — см. PieceSinglePicker.
+export function PieceList({
   pieces,
   selected,
   onToggle,
@@ -88,19 +93,20 @@ function PieceList({
   pieces: PieceRef[];
   selected: string[];
   onToggle: (lineKey: string) => void;
-  allowCreate: boolean;
-  onCreate: (name: string) => void;
+  /** Опущено там, где деталь завести нельзя (рецепт колорвея) — список тогда только выбирает. */
+  allowCreate?: boolean;
+  onCreate?: (name: string) => void;
   multiple: boolean;
 }) {
   const [query, setQuery] = useState('');
   const q = normalizePieceName(query);
   const matches = q ? pieces.filter((p) => normalizePieceName(p.name).includes(q)) : pieces;
   const exact = pieces.some((p) => normalizePieceName(p.name) === q);
-  const canCreate = allowCreate && !!q && !exact;
+  const canCreate = !!allowCreate && !!q && !exact;
 
   const create = () => {
     if (!canCreate) return;
-    onCreate(query.trim());
+    onCreate?.(query.trim());
     setQuery('');
   };
 
