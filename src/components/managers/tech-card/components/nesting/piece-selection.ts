@@ -120,10 +120,18 @@ export function selectMarkerPieces(
  * ЦЕЛИКОМ, всеми своими контурами на всех слоях, — иначе счётчики деталей и списки на экране
  * двоятся, показывая деталь, которой в раскладке нет.
  *
- * Почему разная площадь — отказ. Копии заявлены ОДНОЙ деталью самим автором (один uniBase). Если
+ * Почему разная геометрия — отказ. Копии заявлены ОДНОЙ деталью самим автором (один uniBase). Если
  * они нарисованы по-разному, заявление ложно, и любой выбор здесь — это молчаливое решение, какая
  * из двух выкроек является нормой. Допуск тот же, что у `pickOnLayer` (0.5 %): дребезг тесселяции
  * — не редакция выкройки.
+ *
+ * Сравнивается МУЛЬТИМНОЖЕСТВО площадей рабочего слоя — сколько контуров и какие, — а не одно
+ * число на блок. Кратность входит в геометрию наравне с площадью: выгрузка размера M законно несёт
+ * деталь ДВАЖДЫ (два одинаковых кармана), а выгрузка S — один раз. Пока сверялся максимум, такие
+ * копии считались совпавшими, победитель определялся алфавитом, и настил либо терял настоящую
+ * вторую копию, либо оставлял лишнюю — на экране это неотличимо, потому что счётчики берутся из
+ * той же выборки. Нулевая и невалидная площадь — тоже отказ: сравнить её не с чем (доля от нуля не
+ * определена), и нормой она быть не может.
  *
  * Почему «градуированная копия + uni» — тоже отказ. Решение владельца: файл, где одна и та же
  * деталь есть и рядом размеров (`PCK_L_XS…PCK_L_XL`), и с пометкой «не градуируется»
@@ -139,6 +147,26 @@ export function selectMarkerPieces(
  */
 const UNI_AREA_TOLERANCE = 0.005; // тот же допуск, что pickOnLayer в dxf-consumption.ts
 
+/**
+ * Одинаково ли нарисованы копии: одинаковое ЧИСЛО контуров на рабочем слое и одинаковые площади.
+ *
+ * `false` при любой невалидной площади (не число, ноль, отрицательная): относительный разброс от
+ * нуля не определён, а прежний guard `min > 0` пропускал пару «0 против 100» как совпавшую — то
+ * есть ровно на битой геометрии выбор и делался молча.
+ */
+function sameGeometry(lists: readonly (readonly number[])[]): boolean {
+  if (lists.some((l) => l.some((a) => !Number.isFinite(a) || a <= 0))) return false;
+  if (new Set(lists.map((l) => l.length)).size > 1) return false;
+  const sorted = lists.map((l) => [...l].sort((x, y) => x - y));
+  for (let i = 0; i < sorted[0].length; i++) {
+    const col = sorted.map((l) => l[i]);
+    const min = Math.min(...col);
+    const max = Math.max(...col);
+    if ((max - min) / min > UNI_AREA_TOLERANCE) return false;
+  }
+  return true;
+}
+
 export function dedupeUniPieces(
   pieces: readonly PieceDTO[],
   /** Разбор имён ЭТОГО скоупа: uni-признак, uniBase и размерный вердикт живут там. */
@@ -148,7 +176,7 @@ export function dedupeUniPieces(
 ): { excludedIds: Set<number>; conflicts: UniConflict[] } {
   const excludedIds = new Set<number>();
 
-  type Block = { raw: string; ids: number[]; areaOnLayer: number | null };
+  type Block = { raw: string; ids: number[]; areasOnLayer: number[] };
   const byBlockOfGroup = new Map<string, Map<string, Block>>(); // ключ группы → имя (ci) → блок
   const entries: { raw: string; uniBase: string }[] = [];
   // Идентичности, ПОЛУЧИВШИЕ размерный вердикт в этом же скоупе, — вторая половина конфликта
@@ -170,11 +198,11 @@ export function dedupeUniPieces(
     const gkey = base.toLowerCase();
     const bkey = raw.toLowerCase();
     const byBlock = byBlockOfGroup.get(gkey) ?? new Map<string, Block>();
-    const block = byBlock.get(bkey) ?? { raw, ids: [], areaOnLayer: null };
+    const block = byBlock.get(bkey) ?? { raw, ids: [], areasOnLayer: [] };
     block.ids.push(p.id);
-    if ((p.layer ?? '') === contourLayer) {
-      block.areaOnLayer = Math.max(block.areaOnLayer ?? 0, p.areaCm2);
-    }
+    // Копим СПИСОК, а не максимум: сколько контуров детали лежит на рабочем слое — столько штук и
+    // положит настил, и копия с другой кратностью это уже другая деталь (см. шапку).
+    if ((p.layer ?? '') === contourLayer) block.areasOnLayer.push(p.areaCm2);
     byBlock.set(bkey, block);
     byBlockOfGroup.set(gkey, byBlock);
   }
@@ -191,15 +219,14 @@ export function dedupeUniPieces(
     // две ревизии одного листа, и разбирается этот случай не здесь, а выбором контура на слое.
     // Пустой остаток (`uniBase === raw`) тоже оседает здесь: группа состоит из самой себя.
     if (byBlock.size < 2) continue;
-    const onLayer = [...byBlock.entries()].filter(([, b]) => b.areaOnLayer != null);
+    const onLayer = [...byBlock.entries()].filter(([, b]) => b.areasOnLayer.length > 0);
     // Ни у одной копии нет контура на рабочем слое — в раскладку не поедет ни одна, исключать
     // нечего и сравнивать нечего.
     if (onLayer.length === 0) continue;
     const group = groups.get(gkey);
-    const areas = onLayer.map(([, b]) => b.areaOnLayer as number);
-    const min = Math.min(...areas);
-    const max = Math.max(...areas);
-    if (min > 0 && (max - min) / min > UNI_AREA_TOLERANCE) {
+    // Сравнивать можно только когда есть ЧТО с чем: единственный блок с контурами на слое забирает
+    // группу без разговора (у остальных на рабочем слое ничего нет, и в настил они не поедут).
+    if (onLayer.length >= 2 && !sameGeometry(onLayer.map(([, b]) => b.areasOnLayer))) {
       conflicts.push({
         kind: 'area',
         subject: group?.uniBase ?? gkey,

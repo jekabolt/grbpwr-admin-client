@@ -633,5 +633,56 @@ console.log('\nR1 · БЛОБ: продолжение старой склеен�
      distinct.ok ? String(distinct.areas.agnosticCm2) : '');
 }
 
+console.log('\nR3 · ДЕДУП сравнивает мультимножество контуров, а не максимум площади');
+{
+  const tail = m.GRADED.map((n, i) => m.piece(i + 10, n));
+  // Выгрузка M несёт карман ДВАЖДЫ, выгрузка S — один раз. Максимумы совпадают, и прежнее правило
+  // молча выбрало бы победителя по алфавиту: настил потерял бы вторую штуку.
+  const uneven = [
+    m.piece(1, 'PCK_L_UNI_M', { areaCm2: 200 }),
+    m.piece(2, 'PCK_L_UNI_M', { areaCm2: 200 }),
+    m.piece(3, 'PCK_L_UNI_S', { areaCm2: 200 }),
+    ...tail,
+  ];
+  const ru = layPieces(uneven, ROWS_2);
+  ck(ru.dedupe.conflicts.length === 1 && ru.dedupe.conflicts[0].kind === 'area',
+     'разная КРАТНОСТЬ контуров — конфликт', JSON.stringify(ru.dedupe.conflicts));
+  ck(ru.dedupe.excludedIds.size === 0, 'при конфликте не исключается ничего');
+
+  // Равная кратность и равные площади — по-прежнему дедуп, и победитель забирает ОБА своих контура.
+  const even = [
+    m.piece(1, 'PCK_L_UNI_M', { areaCm2: 200 }),
+    m.piece(2, 'PCK_L_UNI_M', { areaCm2: 150 }),
+    m.piece(3, 'PCK_L_UNI_S', { areaCm2: 150 }),
+    m.piece(4, 'PCK_L_UNI_S', { areaCm2: 200 }),
+    ...tail,
+  ];
+  const re = layPieces(even, ROWS_2);
+  ck(re.dedupe.conflicts.length === 0, 'порядок внутри копии не важен — множества равны',
+     JSON.stringify(re.dedupe.conflicts));
+  ck(re.dedupe.excludedIds.size === 2 && re.dedupe.excludedIds.has(3) && re.dedupe.excludedIds.has(4),
+     'исключены оба контура проигравшего, оба контура победителя на месте',
+     JSON.stringify([...re.dedupe.excludedIds]));
+  ck(re.selected.filter((p) => p.blockName.startsWith('PCK')).length === 2,
+     'в настил поехали ДВЕ штуки кармана — настоящая кратность сохранена',
+     String(re.selected.filter((p) => p.blockName.startsWith('PCK')).length));
+
+  // Нулевая площадь — отказ, а не «совпало». Прежний guard `min > 0` пропускал 0 против 100.
+  const zero = [
+    m.piece(1, 'PCK_L_UNI_M', { areaCm2: 0 }),
+    m.piece(2, 'PCK_L_UNI_S', { areaCm2: 100 }),
+    ...tail,
+  ];
+  const rz = layPieces(zero, ROWS_2);
+  ck(rz.dedupe.conflicts.length === 1 && rz.dedupe.conflicts[0].kind === 'area',
+     'нулевая площадь против живой — конфликт', JSON.stringify(rz.dedupe.conflicts));
+  const nan = [
+    m.piece(1, 'PCK_L_UNI_M', { areaCm2: Number.NaN }),
+    m.piece(2, 'PCK_L_UNI_S', { areaCm2: 100 }),
+    ...tail,
+  ];
+  ck(layPieces(nan, ROWS_2).dedupe.conflicts.length === 1, 'невалидная площадь — тоже конфликт');
+}
+
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);
 process.exit(bad ? 1 : 0);
