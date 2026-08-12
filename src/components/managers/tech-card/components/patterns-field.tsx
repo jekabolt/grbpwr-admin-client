@@ -50,7 +50,7 @@ import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex } from './pattern-size-index';
 import { scopeAreaState, serverScopeKeysOfSheets, type ScopeAreaState } from './piece-areas-state';
-import { markerColorways } from './nesting/colorway-widths';
+import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
 import { TechCardFormData } from './schema';
@@ -1670,6 +1670,27 @@ export function PatternsField({
             sizeIds={sizeIds}
             sizeNameById={sizeById}
             current={areaStateOf(measuring.scope.key)}
+            // Выкройки или связи блок→деталь правлены и НЕ СОХРАНЕНЫ. Диалог обязан на этом
+            // остановиться: сопоставление пишет только в форму (setValue), сервер несохранённых
+            // связей не видит физически — и отвечает отказом «у скоупа нет связей блок→деталь»
+            // на набор, который оператор прямо перед собой видит связанным.
+            sourceDirty={sourceDirty}
+            // РАСКРОЙНАЯ ШИРИНА СКОУПА — ТОЛЬКО ЧТОБЫ НАЗВАТЬ ПОРЯДОК ВЕЛИЧИНЫ, в расчёт площадей
+            // она не входит. Считается ОБЩИМ резолвером (slotCutWidth: рулон − 2×кромка), а не
+            // вторым выражением здесь: разойдись они, к рулону на одной поверхности вычли бы кромку,
+            // а на другой нет — те самые 2–4%, которых никто не заметит.
+            //
+            // Назначение законно владеет НЕСКОЛЬКИМИ строками BOM, и ширины у них могут не совпасть.
+            // Тогда ширины нет: делить площадь на «какую-нибудь из двух» и печатать результат как
+            // факт — хуже, чем не печатать ничего.
+            cuttingWidthCm={(() => {
+              const widths = new Set(
+                measuring.scope.lines
+                  .map((l) => slotCutWidth(l).cutCm)
+                  .filter((w) => Number.isFinite(w) && w > 0),
+              );
+              return widths.size === 1 ? [...widths][0] : undefined;
+            })()}
             onClose={() => setMeasuring(null)}
           />
         </Suspense>
