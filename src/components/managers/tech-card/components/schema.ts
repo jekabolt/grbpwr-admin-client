@@ -209,6 +209,7 @@ export function isBlankPiece(p: {
   fused?: boolean;
   piecesPerGarment?: number;
   cutSymmetry?: string;
+  ungraded?: boolean;
   materials?: { bomLineKey?: string; fusingBomLineKey?: string; note?: string }[];
 }): boolean {
   if (p.name?.trim() || p.grainline?.trim() || p.note?.trim()) return false;
@@ -218,6 +219,10 @@ export function isBlankPiece(p: {
   // котором оператор успел ответить только на вопрос «как кроится», выбрасывался бы на сохранении
   // МОЛЧА — потеря данных без единого сообщения, ради экономии одной проверки.
   if (isCutSymmetryMarked(p.cutSymmetry)) return false;
+  // Тот же прецедент, что строкой выше: «не градуируется» — это ОТВЕТ оператора, а строка с одним
+  // только ответом содержимым является. Без этой проверки галку, поставленную до имени (а её
+  // ставит и предзаполнение по токену UNI), сохранение выбросило бы вместе со всей строкой.
+  if (p.ungraded) return false;
   return !(p.materials ?? []).some(
     (m) => m.bomLineKey?.trim() || m.fusingBomLineKey?.trim() || m.note?.trim(),
   );
@@ -247,6 +252,11 @@ const pieceSchema = z
     // перечисления, как `fabricDirection` на строке BOM, а не короткое слово: круглый рейс без
     // словаря переводов — это то, что делает сохранение неспособным подменить ответ оператора.
     cutSymmetry: z.string().optional().default(UNSET_CUT_SYMMETRY),
+    // ДЕТАЛЬ НЕ ГРАДУИРУЕТСЯ (UNI): один и тот же контур входит в комплект КАЖДОГО размера. Это
+    // свойство ДЕТАЛИ, а не вывод из имени блока: токен UNI в чертеже только предзаполняет ответ
+    // (pieces-tab), а хозяин ответа — оператор. Раньше безразмерность угадывалась по тому, что в
+    // имени блока нет размерного токена, — и угадывание молчит ровно там, где ошибается.
+    ungraded: z.boolean().optional().default(false),
     grainline: z.string().optional().default(''),
     fused: z.boolean().optional().default(false),
     calloutNumber: z.number().optional().default(0),
@@ -1137,6 +1147,9 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       // приезжает как `_UNKNOWN` (или отсутствует у карточки, сохранённой до 0275) — оба случая
       // сходятся в одно «не размечено», и именно оно потом уедет обратно нетронутым.
       cutSymmetry: p.cutSymmetry || UNSET_CUT_SYMMETRY,
+      // Круглый рейс, как у cutSymmetry рядом: сервер отдаёт поле на чтении всегда, карточка,
+      // сохранённая до 0302, приезжает без него — оба случая сходятся в «не помечена».
+      ungraded: p.ungraded ?? false,
       grainline: p.grainline || '',
       fused: p.fused ?? false,
       calloutNumber: p.calloutNumber ?? 0,
@@ -1524,6 +1537,13 @@ export function mapFormToTechCardInsert(
         // невозможным и необъяснимым: контрол показывает «не размечено», а карточка после перезагрузки
         // снова помечена.
         cutSymmetry: (p.cutSymmetry || UNSET_CUT_SYMMETRY) as common_TechCardPieceCutSymmetry,
+        // `ungraded` шлётся ВСЕГДА, и по той же причине, что `cutSymmetry` выше: поле объявлено
+        // `optional` ради ЧУЖОЙ устаревшей вкладки — ОТСУТСТВИЕ сервер читает как «оставь
+        // хранимое», ЯВНЫЙ `false` как «сними пометку». Круглый рейс прочитанного выполняет оба
+        // обязательства: чужую пометку сохранение не трогает, а снятая оператором галка уезжает
+        // снятием. Промолчать было бы «безопаснее» ровно до первого снятия галки, которое стало бы
+        // невозможным и необъяснимым — контрол пуст, а карточка после перезагрузки снова помечена.
+        ungraded: p.ungraded ?? false,
         grainline: p.grainline?.trim() || '',
         fused: p.fused ?? false,
         // НЕ 0, а «поля нет». Ноль сервер принимает как настоящий номер (dto: `!= nil`), не находит

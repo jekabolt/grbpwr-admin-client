@@ -1,6 +1,6 @@
 // UNI: деталь без градации входит во ВСЕ размеры — правила прогоняются на ЖИВОМ коде.
 //
-// Секции дописываются задачами по порядку (T1 → T2 → T4); чужие assert'ы не редактируются:
+// Секции дописываются задачами по порядку (T1 → T2 → T4 → T3); чужие assert'ы не редактируются:
 // упавший старый assert — это регресс, и чинить его надо в коде, а не здесь.
 import { build as esbuild } from 'esbuild';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -441,6 +441,49 @@ console.log('\nT4.5 · sizeAreasFromParsed: доказательство бер�
   });
   ck(half.ok === false && half.reason === OLD_MARKER_REFUSAL,
      'один блок с токеном не объявляет весь блоб', half.ok ? 'ok' : half.reason);
+}
+
+// ══ T3 · галка «не градуируется» на детали кроя ════════════════════════════════════════════
+
+// Круглый рейс поля: чтение карточки → форма → сохраняющий маппер. Вход маппера чтения — ровно
+// тот кусок ответа сервера, который нас касается; остальное он заполняет умолчаниями сам.
+const readForm = (pieces) => m.mapTechCardToForm({ techCard: { pieces } });
+const wirePieces = (form) => m.mapFormToTechCardInsert(form).pieces ?? [];
+
+console.log('\nT3.a · круглый рейс: прочитанная пометка уезжает обратно пометкой');
+{
+  const form = readForm([{ lineKey: 'A', name: 'карман', ungraded: true }]);
+  ck(form.pieces?.[0]?.ungraded === true, 'форма прочитала true', String(form.pieces?.[0]?.ungraded));
+  const wire = wirePieces(form);
+  ck(wire[0]?.ungraded === true, 'сейв-маппер шлёт true', String(wire[0]?.ungraded));
+}
+
+console.log('\nT3.b · снятая галка уезжает ЯВНЫМ false, а не молчанием');
+{
+  const form = readForm([{ lineKey: 'A', name: 'карман', ungraded: true }]);
+  form.pieces[0].ungraded = false; // оператор снял галку
+  const wire = wirePieces(form);
+  // Ключ ОБЯЗАН присутствовать: отсутствие поля сервер читает как «оставь хранимое», и снятие
+  // галки стало бы невозможным — контрол пуст, а карточка после перезагрузки снова помечена.
+  ck('ungraded' in (wire[0] ?? {}), 'поле присутствует на проводе', JSON.stringify(wire[0]?.ungraded));
+  ck(wire[0]?.ungraded === false, 'и оно именно false', String(wire[0]?.ungraded));
+}
+
+console.log('\nT3.c · карточка, сохранённая до 0302: поля нет — читается как «не помечена»');
+{
+  const form = readForm([{ lineKey: 'A', name: 'карман' }]);
+  ck(form.pieces?.[0]?.ungraded === false, 'форма показывает false', String(form.pieces?.[0]?.ungraded));
+  ck(wirePieces(form)[0]?.ungraded === false, 'на провод уезжает явный false');
+}
+
+console.log('\nT3.d · строка с одной только галкой — содержимое, а не пустышка');
+{
+  ck(m.isBlankPiece({ ungraded: true }) === false, 'isBlankPiece({ungraded:true}) = false');
+  ck(m.isBlankPiece({}) === true, 'пустая строка по-прежнему пустая');
+  // И она обязана пережить сохранение: сейв-маппер выбрасывает ровно пустые строки.
+  const form = readForm([{ lineKey: 'A', ungraded: true }]);
+  ck(wirePieces(form).length === 1, 'строка не выброшена на сохранении',
+     String(wirePieces(form).length));
 }
 
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);

@@ -19,12 +19,20 @@ import {
 } from 'components/managers/tech-card/components/nesting/piece-selection';
 import { sizeAreasFromParsed } from 'components/managers/tech-card/components/nesting/size-areas-from-dxf';
 import { splitPiecesBySize } from 'components/managers/tech-card/components/nesting/split-pieces';
+import {
+  isBlankPiece,
+  mapFormToTechCardInsert,
+  mapTechCardToForm,
+} from 'components/managers/tech-card/components/schema';
 import type { PieceDTO } from 'lib/nesting/types';
 
 export {
   dedupeUniPieces,
   deriveBlockSizes,
   dxfNormAreas,
+  isBlankPiece,
+  mapFormToTechCardInsert,
+  mapTechCardToForm,
   markerUnits,
   normBlock,
   selectMarkerPieces,

@@ -23,8 +23,20 @@ import type { TechCardFormData } from './schema';
 //      правок формы после этого — значит остаться с неверными площадями без единого следа.
 //
 // Поэтому ответ один: пока источник правлен и не сохранён, публиковать нельзя ничем.
+//
+// ТРЕТИЙ ИСТОЧНИК — ГАЛКА «НЕ ГРАДУИРУЕТСЯ». Она решает, СКОЛЬКО строк площадей у детали бывает:
+// у помеченной — одна общая на весь ряд, и пер-размерные строки сервер отвергает (0302). Значит её
+// правка меняет форму самого замера, а не только число, — и опубликовать замер, снятый до ответа,
+// значит записать набор строк, которого сохранённая карточка не заявляет.
+//
+// Следят РОВНО ЗА НЕЙ, а не за `dirtyFields.pieces` целиком: имя, заметка и количество на изделие
+// к геометрии отношения не имеют, и «правил имя детали» замораживало бы публикацию площадей на
+// ровном месте — то есть отказывало бы там, где отказывать не за что.
 export function useUnsavedAreaSource(control: Control<TechCardFormData>): boolean {
-  const { dirtyFields } = useFormState({ control, name: ['patterns', 'pieceDxfAliases'] });
+  const { dirtyFields } = useFormState({
+    control,
+    name: ['patterns', 'pieceDxfAliases', 'pieces'],
+  });
   // Спрашивается ЗНАЧЕНИЕ, а не наличие ключа: у массивов RHF заводит запись сразу и кладёт в неё
   // пустой массив или объект из `false`, так что `!!dirtyFields.patterns` был бы вечной «правкой».
   const anyDirty = (v: unknown): boolean =>
@@ -33,7 +45,11 @@ export function useUnsavedAreaSource(control: Control<TechCardFormData>): boolea
       : v !== null && typeof v === 'object'
         ? Object.values(v as Record<string, unknown>).some(anyDirty)
         : v === true;
-  return anyDirty(dirtyFields.patterns) || anyDirty(dirtyFields.pieceDxfAliases);
+  return (
+    anyDirty(dirtyFields.patterns) ||
+    anyDirty(dirtyFields.pieceDxfAliases) ||
+    (dirtyFields.pieces ?? []).some((p) => p?.ungraded === true)
+  );
 }
 
 // ПУБЛИКАЦИЯ ПЛОЩАДЕЙ ДЕТАЛЕЙ (Ф0, 0297) — то, из чего сервер выводит норму расхода сам.

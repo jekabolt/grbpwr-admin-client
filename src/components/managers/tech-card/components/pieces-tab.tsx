@@ -1,6 +1,6 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -14,6 +14,7 @@ import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { ulid } from 'utils/ulid';
 import { bomPurposeLabel, type FabricScope, type RollGoodsLine } from './bom-purpose';
+import { uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
 import {
   findPiece,
@@ -57,6 +58,11 @@ type FormCallout = {
 // grainline holds.
 const selectCls =
   'block min-h-[22px] w-full appearance-none rounded-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize transition-colors focus:border-textColor focus:outline-none';
+
+// Выпущенная карточка заморожена целиком: тот же ответ, каким родительская страница выключает
+// `<fieldset disabled={frozen}>` вокруг этой вкладки (index.tsx). Нужен здесь ОТДЕЛЬНО, потому что
+// fieldset глушит контролы, а не эффекты.
+const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
 // Русская форма счётчика деталей для сводки группы: «1 деталь · 2 детали · 5 деталей».
 const ruPieces = (n: number): string => {
@@ -277,6 +283,40 @@ export function PiecesTab({
     for (const [key, refs] of blocksByPiece) m.set(key, findPiece(index, refs));
     return m;
   }, [index, blocksByPiece]);
+
+  // ПРЕДЗАПОЛНЕНИЕ ГАЛКИ «НЕ ГРАДУИРУЕТСЯ» ПО ТОКЕНУ `UNI` В ИМЕНИ БЛОКА.
+  //
+  // Лекальщик отвечает на этот вопрос прямо в чертеже (`PCK_L_UNI_M`), и переспрашивать оператора
+  // незачем: ответ уже дан, его надо перенести в карточку и НАЗВАТЬ ИСТОЧНИК — подпись под галкой.
+  // Токен при этом не хозяин ответа, а его источник: снятая руками галка не возвращается, потому
+  // что ключ детали, однажды обработанный, больше не трогается за всю жизнь вкладки.
+  //
+  // ГЕЙТ ЗАМОРОЗКИ ОБЯЗАТЕЛЕН, и это не перестраховка. Вкладка целиком лежит внутри
+  // `<fieldset disabled={frozen}>`, но fieldset глушит КОНТРОЛЫ, а не эффекты: на выпущенной
+  // карточке этот `setValue` прошёл бы сквозь него и молча пометил деталь замороженной карточки —
+  // правку, которой никто не делал и которую негде увидеть.
+  //
+  // Ждём разбор (`index`): предзаполнять по связям, пока чертежи не прочитаны, значит отвечать за
+  // файлы, которых мы ещё не видели.
+  const frozen = techCard?.techCard?.approvalState === RELEASED_STATE;
+  const uniPrefilled = useRef(new Set<string>());
+  useEffect(() => {
+    if (!index || frozen) return;
+    // Значения читаются императивно, а не из `pieces`: иначе эффект пересчитывался бы на каждое
+    // нажатие клавиши в любом поле карточки, а решает он ровно два входа — разбор и связи.
+    const rows = (getValues('pieces') ?? []) as FormPiece[];
+    rows.forEach((p, pi) => {
+      const key = (p.lineKey ?? '').trim().toLowerCase();
+      if (!key || uniPrefilled.current.has(key)) return;
+      const refs = blocksByPiece.get(key) ?? [];
+      // ВСЕ блоки детали, а не первый: деталь, у которой один чертёж помечен, а другой нет, —
+      // это расхождение чертежей, и отвечать за автора здесь нечем.
+      if (refs.length === 0 || !refs.every((r) => uniOf(r.block))) return;
+      uniPrefilled.current.add(key);
+      if (p.ungraded) return;
+      setValue(`pieces.${pi}.ungraded`, true, { shouldDirty: true });
+    });
+  }, [index, blocksByPiece, frozen, getValues, setValue]);
 
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
   // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
@@ -510,6 +550,10 @@ export function PiecesTab({
   const selOddPair = sel ? cutSymmetryCountInvalid(sel.cutSymmetry, sel.piecesPerGarment) : false;
   const selUnanswered = sel ? cutSymmetryUnanswered(sel.cutSymmetry, sel.piecesPerGarment) : false;
   const selArrow = grainlineArrow(sel?.grainline);
+  // ВСЕ блоки детали помечены токеном UNI — источник, из которого галка предзаполнилась. Подпись
+  // говорит именно «откуда взялось», а не «стоит»: при живом токене снятие галки законно, и
+  // выглядеть оно должно осознанным действием, а не случайным кликом по контролу без объяснения.
+  const selUniByToken = selRefs.length > 0 && selRefs.every((r) => uniOf(r.block));
 
   // СЛОИ ВЫБРАННОЙ ДЕТАЛИ ПО КОЛОРВЕЯМ (T4) — read-only проекция РЕЦЕПТА: вкладка деталей
   // показывает, рецепт (COLORWAYS) редактирует — направление T3. Связь живёт в детальных строках
@@ -1022,6 +1066,28 @@ export function PiecesTab({
                     />
                   </div>
                 </div>
+                <div>
+                  <Text size='micro' variant='label' component='label' className='uppercase'>
+                    не градуируется
+                  </Text>
+                  <div className='flex min-h-[22px] items-center'>
+                    <input
+                      type='checkbox'
+                      aria-label='не градуируется — во всех размерах'
+                      checked={!!sel.ungraded}
+                      onChange={(e) =>
+                        setValue(`pieces.${selIndex}.ungraded`, e.target.checked, {
+                          shouldDirty: true,
+                        })
+                      }
+                    />
+                  </div>
+                  {selUniByToken && (
+                    <Text size='nano' variant='label'>
+                      определено по имени блока в DXF (UNI)
+                    </Text>
+                  )}
+                </div>
               </div>
               {selOddPair && (
                 <Text size='micro' variant='error'>
@@ -1117,6 +1183,20 @@ export function PiecesTab({
                   поэтому её количество обязано быть чётным; крой по сгибу парным не бывает по
                   построению (контур симметричен сам себе), а «со сгибом и нужна дважды» — это
                   манжеты: со сгибом × 2.
+                </Text>
+                {/* Что означает «не градуируется» и чем это отличается от «размера в имени не
+                    нашлось». Сказано здесь же, одним абзацем: галка отвечает на вопрос про
+                    ДЕТАЛЬ, а не про файл. */}
+                <Text size='micro' variant='label'>
+                  не градуируется — деталь одна на весь размерный ряд: карман, шлёвка, обтачка
+                  нарисованы один раз и входят в комплект КАЖДОГО размера целиком. Крой так себя и
+                  вёл всегда, а вот норма расхода у скоупа из одних таких деталей отказывалась
+                  считаться словами «похоже, выгружен только один размер» — потому что
+                  «безразмерная» и «размер не распознали» были для разбора одним и тем же. Галка
+                  превращает это в заявление. Токен UNI в имени блока DXF отвечает на тот же вопрос
+                  и предзаполняет её; снять галку при живом токене можно, и снятие сохранится. Замер
+                  площадей у помеченной детали бывает только общий: пер-размерные строки сервер
+                  отвергает.
                 </Text>
                 {/* Said once, under the fields. The four values are the ones the server's CHECK
                     accepts — anything else fails the whole card save, which is why this stopped
