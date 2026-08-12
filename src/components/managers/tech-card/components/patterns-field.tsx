@@ -69,6 +69,11 @@ const DxfSheetViewer = lazy(() =>
 const PieceMatchModal = lazy(() =>
   import('./nesting/piece-match-modal').then((m) => ({ default: m.PieceMatchModal })),
 );
+// Склейка по-размерных выгрузок — оттуда же: она разбирает файлы тем же воркером и показывает
+// результат тем же листом, что и просмотр.
+const MergeSizesModal = lazy(() =>
+  import('./nesting/merge-sizes-modal').then((m) => ({ default: m.MergeSizesModal })),
+);
 // Замер площадей деталей — тот же ленивый чанк по той же причине: он тянет разбор геометрии и
 // офсет припуска. Разбор пачки при этом общий с панелью (кэш ключуется содержимым), так что
 // открытый диалог второй раз ничего не качает.
@@ -283,6 +288,9 @@ export function PatternsField({
   // Files dropped onto a material group, staged for the naming modal (click uploads stage inside
   // PatternUploadButton; drops land here because the modal must know which cloth was aimed at).
   const [droppedOn, setDroppedOn] = useState<{ scopeKey: string; files: File[] } | null>(null);
+  // Открыта склейка по-размерных выгрузок. Готовый файл она отдаёт в ту же модалку названия и
+  // материала, что и обычная загрузка: склейка отвечает за ЧЕРТЁЖ, а не за то, куда он ляжет.
+  const [merging, setMerging] = useState(false);
   // The pattern sheet open in the in-app viewer (null = closed). Legacy PDF and DXF rows share
   // this state and split into the two viewers at the bottom.
   const [viewing, setViewing] = useState<PatternRow | null>(null);
@@ -1436,14 +1444,28 @@ export function PatternsField({
             </Text>
           )}
           {canUpload && (
-            <PatternUploadButton
-              label='+ DXF'
-              dxfOnly
-              fabricScopes={uploadScopes}
-              defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
-              onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
-              className='[&_button]:px-1.5 [&_button]:py-px [&_button]:text-nano [&_button]:tracking-label'
-            />
+            <>
+              {/* Склейка стоит РЯДОМ с загрузкой, а не внутри неё: это другой вход — не «положить
+                  файл», а «собрать файл из пяти». Внутри «+ DXF» её пришлось бы объяснять каждому,
+                  кто просто хочет положить готовый чертёж. */}
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                onClick={() => setMerging(true)}
+                title='CLO выгружает припуск только для текущего размера — соберите размеры в один чертёж'
+              >
+                склеить размеры
+              </Button>
+              <PatternUploadButton
+                label='+ DXF'
+                dxfOnly
+                fabricScopes={uploadScopes}
+                defaultScopeKey={selectedKey ?? uploadScopes[0]?.key}
+                onUploaded={(p) => append({ sizeId: storageSizeId, lineKey: ulid(), ...toRow(p) })}
+                className='[&_button]:px-1.5 [&_button]:py-px [&_button]:text-nano [&_button]:tracking-label'
+              />
+            </>
           )}
         </div>
       </div>
@@ -1559,6 +1581,22 @@ export function PatternsField({
         две разные строки BOM). Колорвей на файл не влияет — лекала общие, — но артикул и его ширину
         каждый колорвей подставляет свои.
       </Text>
+
+      {/* Склейка по-размерных выгрузок. Отдаёт ОДИН собранный файл в ту же модалку названия и
+          материала — грузится он как любая другая выкройка, потому что после склейки он и есть
+          обычный градуированный чертёж. */}
+      {merging && (
+        <Suspense fallback={null}>
+          <MergeSizesModal
+            open={merging}
+            onClose={() => setMerging(false)}
+            onReady={(file) => {
+              setMerging(false);
+              setDroppedOn({ scopeKey: selectedKey ?? uploadScopes[0]?.key ?? '', files: [file] });
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* Naming modal for drops onto a material (click uploads carry their own inside the
           button). Размер не спрашивается: их в файле несколько. */}
