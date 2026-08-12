@@ -104,7 +104,13 @@ function areaEstimateMap(
     if ((e.refusal ?? '').trim()) continue;
     const perGarment = decimalToInput(e.perGarment).trim();
     if (!perGarment) continue;
-    const bom = bomItems.find((b) => (b.lineKey ?? '') === (e.bomLineKey ?? ''));
+    // ПУСТОЙ КЛЮЧ НЕ СОЕДИНЯЕТ. Без этой проверки оценка без bom_line_key нашла бы ПЕРВУЮ строку
+    // BOM, у которой ключа тоже нет, — и подписала бы чужую строку чужой нормой. Сегодня ключ есть
+    // у каждой сохранённой строки (сервер по нему же сверяет BOM), поэтому это страховка от
+    // будущего, а не обход известного случая: цена ошибки здесь — молча переставленная цифра.
+    const key = (e.bomLineKey ?? '').trim();
+    if (!key) continue;
+    const bom = bomItems.find((b) => (b.lineKey ?? '').trim() === key);
     const id = wireInt(bom?.id);
     if (!id) continue;
     out.set(id, {
@@ -216,6 +222,10 @@ function Breakdown({
   const defectAmount = Math.max(0, unitCost - materialsSubtotal - articlesSubtotal);
   const defectPct = num(decimalToInput(estimate.defectPct));
 
+  // Ступень ВСЕЙ сметы — тем же предикатом, что у ячейки расхода ниже (одно правило на вопрос).
+  const planIsLowerBound = materials.some(
+    (m) => areaEst.has(wireInt(m.bomItemId)) && !decimalToInput(m.consumption).trim(),
+  );
   const share = (n: number) => (unitCost > 0 ? `${((n / unitCost) * 100).toFixed(0)}%` : '—');
   const excluded =
     materials.filter((m) => m.hasBase === false || m.priceSource === 'STYLE_COST_PRICE_SOURCE_NONE')
@@ -459,11 +469,23 @@ function Breakdown({
         </CalloutBox>
       )}
 
-      <VarianceByKind comparison={comparison} cur={cur} />
+      {/* Ступень итога — у самого итога, а не только на строках, из которых он сложен: unit cost в
+          закрывающей строке таблицы выше — это ровно то число, которое ниже сравнивают с фактом и с
+          проведённым snapshot'ом. */}
+      {planIsLowerBound && (
+        <CalloutBox tone='note'>
+          <Text size='micro'>
+            {`Итог этой сметы — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей ÷ раскройную ширину, межлекальных выпадов в нём нет. Настоящий unit cost ВЫШЕ, поэтому все Δ ниже (к факту, к snapshot'у) преувеличены в сторону перерасхода, а по знаку могут быть обратными.`}
+          </Text>
+        </CalloutBox>
+      )}
+
+      <VarianceByKind comparison={comparison} cur={cur} planIsLowerBound={planIsLowerBound} />
       <SnapshotReconciliation
         comparison={comparison}
         cur={cur}
         planUnitCost={unitCost > 0 ? unitCost : undefined}
+        planIsLowerBound={planIsLowerBound}
       />
     </div>
   );
@@ -475,11 +497,14 @@ function SnapshotReconciliation({
   comparison,
   cur,
   planUnitCost,
+  planIsLowerBound,
 }: {
   comparison?: StyleCostComparison;
   cur: string;
   /** Тот же unit cost, что стоит в итоге таблицы — страховка, если сравнение пришло без плана. */
   planUnitCost?: number;
+  /** План — нижняя граница (оценка по площади): Δ К ПЛАНУ тогда преувеличена, и слово это говорит. */
+  planIsLowerBound?: boolean;
 }) {
   if (!comparison?.hasSnapshot) return null;
 
@@ -506,7 +531,13 @@ function SnapshotReconciliation({
         <Stat
           label={`snapshot${comparison.snapshotSource ? ` · ${comparison.snapshotSource}` : ''}`}
           value={snapshot != null ? `${snapshot.toFixed(2)}${cur ? ` ${cur}` : ''}` : '—'}
-          sub={snapshotVsPlan != null ? `Δ к плану ${money(snapshotVsPlan)}` : undefined}
+          sub={
+            snapshotVsPlan != null
+              ? // «не более» — потому что план занижен: настоящая разница с проведённым COGS
+                // меньше показанной ровно на то, чего в оценке нет.
+                `Δ к плану ${planIsLowerBound ? 'не более ' : ''}${money(snapshotVsPlan)}`
+              : undefined
+          }
         />
         {comparison.hasActual && (
           <Stat
@@ -529,7 +560,16 @@ function SnapshotReconciliation({
  * With no production actuals there is nothing to vary, so the same bars show where the PLAN
  * cost sits instead (ink, not a fake zero variance).
  */
-function VarianceByKind({ comparison, cur }: { comparison?: StyleCostComparison; cur: string }) {
+function VarianceByKind({
+  comparison,
+  cur,
+  planIsLowerBound,
+}: {
+  comparison?: StyleCostComparison;
+  cur: string;
+  /** План материалов — нижняя граница: у ЭТОГО вида затрат знак отклонения недоказуем. */
+  planIsLowerBound?: boolean;
+}) {
   const byKind = comparison?.byKind ?? [];
   if (byKind.length === 0) return null;
   const hasActual = !!comparison?.hasActual;
@@ -565,15 +605,22 @@ function VarianceByKind({ comparison, cur }: { comparison?: StyleCostComparison;
         </Text>
       ) : (
         <div className='flex flex-col'>
-          {sorted.map((r) => (
-            <BarRow
-              key={r.kind}
-              name={r.kind}
-              pct={max > 0 ? (measure(r) / max) * 100 : 0}
-              tone={hasActual ? (r.delta > 0 ? 'down' : 'up') : 'ink'}
-              value={hasActual ? signed(r.delta) : `${r.estimate.toFixed(2)} ${cur}`}
-            />
-          ))}
+          {sorted.map((r) => {
+            // ОЦЕНКА ЗАНИЖАЕТ ТОЛЬКО МАТЕРИАЛЫ. Пошив, логистика и накладные — введённые руками
+            // суммы, к площади деталей отношения не имеющие, и гасить у них цвет значило бы
+            // отбирать вывод, который как раз доказан. Поэтому оговорка точечная: она снимает
+            // цвет (утверждение о знаке) ровно с той полосы, чей план — нижняя граница.
+            const unproven = hasActual && planIsLowerBound && r.kind === 'materials';
+            return (
+              <BarRow
+                key={r.kind}
+                name={unproven ? `${r.kind} · план занижен` : r.kind}
+                pct={max > 0 ? (measure(r) / max) * 100 : 0}
+                tone={!hasActual ? 'ink' : unproven ? 'ink' : r.delta > 0 ? 'down' : 'up'}
+                value={hasActual ? signed(r.delta) : `${r.estimate.toFixed(2)} ${cur}`}
+              />
+            );
+          })}
         </div>
       )}
     </>
@@ -605,6 +652,15 @@ type MatrixRow = {
   top?: { kind: string; delta: number };
   /** Оценки расхода по площади ЭТОГО колорвея, по bom_item_id строки сметы (см. areaEstimateMap). */
   areaEst?: Map<number, AreaEst>;
+  /**
+   * План этой строки — НИЖНЯЯ ГРАНИЦА: хотя бы одна материальная строка посчитана оценкой по
+   * площади. Тогда и `delta`, и `deltaPct`, и «главное отклонение» перестают быть отклонением
+   * факта от плана: факт сравнивается с заниженным планом, и знак у разности может быть
+   * ПРОТИВОПОЛОЖЕН правде (оценка 80, настоящий план 100, факт 90 читались как перерасход +10,
+   * тогда как это экономия −10). Числа остаются — они единственные, что есть, — но без тона и с
+   * названной ступенью.
+   */
+  lowerBound?: boolean;
 };
 
 /**
@@ -790,6 +846,7 @@ export function CostEstimateField({
     // строку несвежей; данных нет → это настоящий сбой.
     if (!estimate) return r.isError ? { ...base, state: 'error' } : base;
 
+    const areaEst = areaEstimateMap(c, techCard?.techCard?.bomItems ?? []);
     const comparison = estimate.comparison;
     const plan = opt(decimalToInput(estimate.unitCostBase));
     const hasActual = !!comparison?.hasActual;
@@ -820,7 +877,13 @@ export function CostEstimateField({
       top: movers[0],
       // Оценки — СВОИ У КАЖДОГО КОЛОРВЕЯ (детали на ткань назначает его рецепт), поэтому карта
       // строится на строке, а не одна на таблицу.
-      areaEst: areaEstimateMap(c, techCard?.techCard?.bomItems ?? []),
+      areaEst: areaEst,
+      // ОДИН предикат «эта строка — оценка» на всю таблицу: тот же, что у ячейки расхода в разборе
+      // ниже (Breakdown). Второе правило для того же вопроса разошлось бы с первым ровно тогда,
+      // когда сервер начнёт называть ступень сам.
+      lowerBound: (estimate.materials ?? []).some(
+        (m) => areaEst.has(wireInt(m.bomItemId)) && !decimalToInput(m.consumption).trim(),
+      ),
     };
   });
 
@@ -883,6 +946,10 @@ export function CostEstimateField({
                         {row.sku}
                       </Text>
                     )}
+                    {/* Ступень — В СВЁРНУТОЙ строке, а не только в разборе: развернуть её человек
+                        может и не собираться, а «план» в колонке рядом читается как полноценный
+                        план всегда. */}
+                    {row.lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
                     {row.state === 'forbidden' && <Pill tone='warn'>нет доступа</Pill>}
                     {row.state === 'error' && <Pill tone='warn'>не загрузилось</Pill>}
                     {/* warn (красный) занят «показать нечего»; здесь цифры ЕСТЬ, просто несвежие —
@@ -890,12 +957,32 @@ export function CostEstimateField({
                     {row.stale && <Pill tone='attention'>не обновилось</Pill>}
                   </span>
                 </td>
-                <td>{row.plan != null ? row.plan.toFixed(2) : <MatrixValue row={row} />}</td>
+                <td>
+                  {row.plan != null ? (
+                    // «≥» у ПЛАНА, а не «≤»: нижняя граница себестоимости — это «не меньше чем»,
+                    // и знак тут противоположен знаку у маржи на вкладке костинга. Один и тот же
+                    // факт, две разные стороны неравенства — перепутать их значило бы соврать
+                    // ровно наоборот.
+                    `${row.lowerBound ? '≥ ' : ''}${row.plan.toFixed(2)}`
+                  ) : (
+                    <MatrixValue row={row} />
+                  )}
+                </td>
                 <td>{row.actual != null ? row.actual.toFixed(2) : <MatrixValue row={row} />}</td>
-                <td className={row.delta != null ? deltaTone(row.delta) : undefined}>
+                {/* ТОНА НЕТ У ДЕЛЬТЫ ОТ НИЖНЕЙ ГРАНИЦЫ — см. MatrixRow.lowerBound: знак разности
+                    может быть противоположен правде, а красный/зелёный — это утверждение о знаке. */}
+                <td
+                  className={
+                    row.delta != null && !row.lowerBound ? deltaTone(row.delta) : undefined
+                  }
+                >
                   {row.delta != null ? signed(row.delta) : <MatrixValue row={row} />}
                 </td>
-                <td className={row.delta != null ? deltaTone(row.delta) : undefined}>
+                <td
+                  className={
+                    row.delta != null && !row.lowerBound ? deltaTone(row.delta) : undefined
+                  }
+                >
                   {row.deltaPct != null ? `${signed(row.deltaPct, 1)}%` : <MatrixValue row={row} />}
                 </td>
                 <td>
@@ -906,7 +993,7 @@ export function CostEstimateField({
                       прогонов не было
                     </Text>
                   ) : row.top ? (
-                    <span className={deltaTone(row.top.delta)}>
+                    <span className={row.lowerBound ? undefined : deltaTone(row.top.delta)}>
                       {`${row.top.kind} ${signed(row.top.delta)}`}
                     </span>
                   ) : (
@@ -960,6 +1047,15 @@ export function CostEstimateField({
             : ''
         }`}
       </Text>
+      {/* ИТОГ СМЕШИВАЕТ СТУПЕНИ, И МОЛЧАТЬ ОБ ЭТОМ НЕЛЬЗЯ. Среднее по колорвеям складывает
+          полноценные планы с нижними границами; разделять их на два средних — значит показать два
+          числа, ни одно из которых не отвечает на вопрос «сколько стоит стиль». Поэтому среднее
+          остаётся одно, а рядом сказано, из чего оно сложено. */}
+      {rows.some((r) => r.lowerBound) && (
+        <Text size='micro' variant='label'>
+          {`У ${rows.filter((r) => r.lowerBound).length} из ${rows.length} колорвеев план — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей, без межлекальных выпадов. Их план занижен, поэтому Δ к факту у таких строк без цвета — знак разности может быть обратным, — и итог ниже смешивает две ступени.`}
+        </Text>
+      )}
       <Text size='micro' variant='label'>
         {`Все суммы в ${cur || 'базовой валюте стиля'}, свёрнуты по курсам костинга. План ≠ факт ≠ проведённый snapshot COGS — три разные цифры, и они намеренно не сливаются.`}
       </Text>
