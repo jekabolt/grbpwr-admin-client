@@ -63,12 +63,12 @@ import type { ScopedSheet } from './dxf-by-scope';
 import { applySeamPrefill } from './dxf-apply-conditions';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { compositionOf, type MarkerCompositionEntry } from './marker-io';
+import { uniConflictReason } from './block-code';
 import {
   dedupeUniPieces,
   markerUnits,
   pieceLineKeysByPieceId,
   selectMarkerPieces,
-  uniConflictReason,
   unitsOfPieces,
   type MarkerCompositionRow,
   type PieceAlias,

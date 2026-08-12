@@ -13,7 +13,13 @@
 //
 // Модуль лёгкий (типы движка + разбор имён блоков) — его можно импортировать откуда угодно.
 import type { PieceDTO } from 'lib/nesting/types';
-import { normBlock, type BlockCode } from './block-code';
+import {
+  normBlock,
+  uniGradedConflicts,
+  uniGroupsOf,
+  type BlockCode,
+  type UniConflict,
+} from './block-code';
 import { aliasIdentity, type BlockSplit } from './split-pieces';
 
 /**
@@ -125,15 +131,12 @@ export function selectMarkerPieces(
  *
  * Дедуп живёт на пути НАСТИЛА, а не на стороне сохранённого блоба: блоб хранит геометрию, которую
  * реально укладывали, и вычищать из него детали задним числом значило бы переписывать замер.
+ *
+ * САМ ВЕРДИКТ («какие имена называют одну деталь», «спорит ли она с градуированной») живёт в
+ * block-code.ts — там же, где uniOf/uniBaseOf, и там же, откуда его берут норма и продолжение
+ * раскладки. Здесь остаётся только ОТВЕТ настила: сравнить геометрию копий, выбрать победителя,
+ * исключить проигравших.
  */
-export type UniConflict = {
-  kind: 'area' | 'graded-vs-uni';
-  /** Общий ключ группы — имя без токена UNI, как оно написано в файле. */
-  uniBase: string;
-  /** Имена блоков, которые спорят, — отказ обязан называть виновника, а не «где-то в файле». */
-  blocks: string[];
-};
-
 const UNI_AREA_TOLERANCE = 0.005; // тот же допуск, что pickOnLayer в dxf-consumption.ts
 
 export function dedupeUniPieces(
@@ -144,11 +147,10 @@ export function dedupeUniPieces(
   contourLayer: string,
 ): { excludedIds: Set<number>; conflicts: UniConflict[] } {
   const excludedIds = new Set<number>();
-  const conflicts: UniConflict[] = [];
 
   type Block = { raw: string; ids: number[]; areaOnLayer: number | null };
-  const groups = new Map<string, Map<string, Block>>(); // ключ группы → имя блока (ci) → блок
-  const labelOf = new Map<string, string>(); // ключ группы → uniBase в написании файла
+  const byBlockOfGroup = new Map<string, Map<string, Block>>(); // ключ группы → имя (ci) → блок
+  const entries: { raw: string; uniBase: string }[] = [];
   // Идентичности, ПОЛУЧИВШИЕ размерный вердикт в этом же скоупе, — вторая половина конфликта
   // graded-vs-uni. Берутся из того же разбора, а не из формы имени: вердикт структурный.
   const gradedIdentities = new Set<string>();
@@ -162,30 +164,29 @@ export function dedupeUniPieces(
     }
     if (!code.uni) continue;
     const base = normBlock(code.uniBase);
-    if (!base) continue;
-    const gkey = base.toLowerCase();
     const raw = normBlock(code.raw);
+    if (!base || !raw) continue;
+    entries.push({ raw, uniBase: base });
+    const gkey = base.toLowerCase();
     const bkey = raw.toLowerCase();
-    const byBlock = groups.get(gkey) ?? new Map<string, Block>();
+    const byBlock = byBlockOfGroup.get(gkey) ?? new Map<string, Block>();
     const block = byBlock.get(bkey) ?? { raw, ids: [], areaOnLayer: null };
     block.ids.push(p.id);
     if ((p.layer ?? '') === contourLayer) {
       block.areaOnLayer = Math.max(block.areaOnLayer ?? 0, p.areaCm2);
     }
     byBlock.set(bkey, block);
-    groups.set(gkey, byBlock);
-    if (!labelOf.has(gkey)) labelOf.set(gkey, base);
+    byBlockOfGroup.set(gkey, byBlock);
   }
 
-  for (const [gkey, byBlock] of groups) {
-    const uniBase = labelOf.get(gkey) ?? gkey;
-    const names = [...byBlock.values()].map((b) => b.raw).sort();
-    // Конфликт с градуированной копией проверяется ДО дедупа и не зависит от числа копий: одной
-    // uni-детали рядом с полным размерным рядом той же основы уже достаточно.
-    if (gradedIdentities.has(gkey)) {
-      conflicts.push({ kind: 'graded-vs-uni', uniBase, blocks: names });
-      continue;
-    }
+  const groups = uniGroupsOf(entries);
+  const conflicts: UniConflict[] = uniGradedConflicts(groups, gradedIdentities);
+  const conflicted = new Set(conflicts.map((c) => normBlock(c.subject).toLowerCase()));
+
+  for (const [gkey, byBlock] of byBlockOfGroup) {
+    // Группа, уже отказавшая по столкновению с градуированной, дедупу не подлежит: путь закрыт
+    // целиком, и исключать что-либо значило бы наполовину исполнить решение, которое мы отвергли.
+    if (conflicted.has(gkey)) continue;
     // Одно имя — дедупить нечего. Тот же блок из двух файлов сюда и попадает одной записью: это
     // две ревизии одного листа, и разбирается этот случай не здесь, а выбором контура на слое.
     // Пустой остаток (`uniBase === raw`) тоже оседает здесь: группа состоит из самой себя.
@@ -194,11 +195,16 @@ export function dedupeUniPieces(
     // Ни у одной копии нет контура на рабочем слое — в раскладку не поедет ни одна, исключать
     // нечего и сравнивать нечего.
     if (onLayer.length === 0) continue;
+    const group = groups.get(gkey);
     const areas = onLayer.map(([, b]) => b.areaOnLayer as number);
     const min = Math.min(...areas);
     const max = Math.max(...areas);
     if (min > 0 && (max - min) / min > UNI_AREA_TOLERANCE) {
-      conflicts.push({ kind: 'area', uniBase, blocks: names });
+      conflicts.push({
+        kind: 'area',
+        subject: group?.uniBase ?? gkey,
+        blocks: group?.blocks ?? [...byBlock.values()].map((b) => b.raw).sort(),
+      });
       continue;
     }
     const winner = onLayer.map(([k]) => k).sort()[0];
@@ -209,22 +215,6 @@ export function dedupeUniPieces(
   }
 
   return { excludedIds, conflicts };
-}
-
-/**
- * Отказ ОДНИМИ СЛОВАМИ на обоих путях настила — модалка раскладки и очередь раскроя партии.
- *
- * Два текста об одном и том же входе читались бы как две разные беды, а чинится он одним и тем же
- * действием в одном и том же файле.
- */
-export function uniConflictReason(conflicts: readonly UniConflict[]): string {
-  return conflicts
-    .map((c) =>
-      c.kind === 'area'
-        ? `детали «${c.blocks.join('», «')}» помечены одной и той же неградуируемой деталью (${c.uniBase}), а нарисованы с разной площадью — какая из них норма, сказать нечем. Оставьте в выкройках одну копию либо снимите пометку UNI с той, что отличается`
-        : `деталь «${c.uniBase}» есть в выкройках и размерным рядом, и с пометкой UNI («${c.blocks.join('», «')}») — эти два заявления противоречат друг другу: либо деталь градуируется, либо нет. Уберите лишние блоки из выкроек`,
-    )
-    .join('; ');
 }
 
 /** Сопоставление «блок чертежа → деталь кроя», как его записала карточка. */

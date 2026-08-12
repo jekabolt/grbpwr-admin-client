@@ -7,6 +7,10 @@ import {
   normBlock,
   splitBlockSize,
   uniBaseOf,
+  uniConflictReason,
+  uniDuplicateConflicts,
+  uniGradedConflicts,
+  uniGroupsOf,
   uniOf,
 } from 'components/managers/tech-card/components/nesting/block-code';
 import { dxfNormAreas } from 'components/managers/tech-card/components/nesting/dxf-consumption';
@@ -14,7 +18,6 @@ import {
   dedupeUniPieces,
   markerUnits,
   selectMarkerPieces,
-  uniConflictReason,
   unitsOfPieces,
 } from 'components/managers/tech-card/components/nesting/piece-selection';
 import { sizeAreasFromParsed } from 'components/managers/tech-card/components/nesting/size-areas-from-dxf';
@@ -43,6 +46,9 @@ export {
   splitPiecesBySize,
   uniBaseOf,
   uniConflictReason,
+  uniDuplicateConflicts,
+  uniGradedConflicts,
+  uniGroupsOf,
   uniOf,
   unitsOfPieces,
 };

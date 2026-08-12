@@ -210,7 +210,7 @@ console.log('\nT2.b · те же копии, нарисованные по-ра�
   const r = layPieces(pieces, ROWS_2);
   ck(r.dedupe.conflicts.length === 1, 'ровно один конфликт', JSON.stringify(r.dedupe.conflicts));
   ck(r.dedupe.conflicts[0]?.kind === 'area', 'kind = area', r.dedupe.conflicts[0]?.kind);
-  ck(r.dedupe.conflicts[0]?.uniBase === 'PCK_L', 'конфликт назван по uniBase', r.dedupe.conflicts[0]?.uniBase);
+  ck(r.dedupe.conflicts[0]?.subject === 'PCK_L', 'конфликт назван по uniBase', r.dedupe.conflicts[0]?.subject);
   ck(JSON.stringify(r.dedupe.conflicts[0]?.blocks) === '["PCK_L_UNI_M","PCK_L_UNI_S"]',
      'отказ называет ОБА блока', JSON.stringify(r.dedupe.conflicts[0]?.blocks));
   ck(r.dedupe.excludedIds.size === 0, 'при конфликте не исключается ничего (путь целиком закрыт)');
@@ -230,7 +230,7 @@ console.log('\nT2.c · градуированная копия рядом с uni
   const r = layPieces(m.piecesOf(names), ROWS_2);
   ck(r.dedupe.conflicts.length === 1, 'ровно один конфликт', JSON.stringify(r.dedupe.conflicts));
   ck(r.dedupe.conflicts[0]?.kind === 'graded-vs-uni', 'kind = graded-vs-uni', r.dedupe.conflicts[0]?.kind);
-  ck(r.dedupe.conflicts[0]?.uniBase === 'PCK_L', 'конфликт назван деталью PCK_L');
+  ck(r.dedupe.conflicts[0]?.subject === 'PCK_L', 'конфликт назван деталью PCK_L');
   ck(JSON.stringify(r.dedupe.conflicts[0]?.blocks) === '["PCK_L_UNI_M"]',
      'назван uni-блок, спорящий с рядом', JSON.stringify(r.dedupe.conflicts[0]?.blocks));
   // Одной uni-копии достаточно: проверка не ждёт второй.
@@ -514,6 +514,71 @@ console.log('\nT5.f · склейка размеров молчит про UNI-�
   const mixed = m.planSizeMerge([...mixedFile, ...gradedFile], ['pockets.dxf', 'main.dxf'], m.DICT, 'mm');
   ck(mixed.warnings.includes('pockets.dxf: в именах блоков не опознан размер'),
      'смешанный файл предупреждает по-прежнему', JSON.stringify(mixed.warnings));
+}
+
+// ══ R · находки ревью объединённого диффа: ×2 в числах ткани ═══════════════════════════════
+//
+// Каждая — «настил кроит одну деталь, а число рядом говорит про две». Ни одна из них не видна на
+// экране: длина есть, детали на месте, счётчики сходятся.
+
+console.log('\nR2 · НОРМА: две детали кроя на одну uni-деталь — отказ, а не двойная площадь');
+{
+  const names = ['PCK_L_UNI_M', 'PCK_L_UNI_S', ...m.GRADED];
+  const pieces = names.map((n, i) => m.piece(i + 1, n, i < 2 ? { areaCm2: 200 } : {}));
+  // ЧТО СЧИТАЕТСЯ ПРАВДОЙ: карман один, и площадь XS = карман + BP_XS + SL_R_XS = 200+100+100.
+  const one = normFor(pieces, [
+    cardPiece('карман', 'PCK_L_UNI_M'), cardPiece('спинка', 'BP'), cardPiece('рукав', 'SL_R'),
+  ]);
+  ck(one.ok === true, 'одна деталь кроя на карман — норма считается', one.ok ? '' : one.reason);
+  ck(one.ok && one.areas.rows.find((r) => r.sizeId === 1)?.areaCm2 === 400,
+     'площадь XS = 400 см² — именно это число и удваивалось',
+     one.ok ? JSON.stringify(one.areas.rows[0]) : '');
+  // Диалог сопоставления в CREATE-потоке заводит деталь НА КАЖДЫЙ блок — вот их две.
+  const two = normFor(pieces, [
+    cardPiece('карман M', 'PCK_L_UNI_M'), cardPiece('карман S', 'PCK_L_UNI_S'),
+    cardPiece('спинка', 'BP'), cardPiece('рукав', 'SL_R'),
+  ]);
+  ck(two.ok === false, 'две детали кроя на один uniBase — ОТКАЗ', two.ok ? 'ok!' : '');
+  ck(!two.ok && two.reason.includes('PCK_L_UNI_M') && two.reason.includes('PCK_L_UNI_S'),
+     'отказ называет ОБА блока', !two.ok ? two.reason : '');
+  ck(!two.ok && two.reason.includes('вдвое'), 'и говорит, чем это кончится');
+  // Настил на ТОМ ЖЕ входе дедупит (кроит одну копию) — расхождение бумаги и настила закрыто с
+  // обеих сторон, и закрыто ОДНИМ правилом с разными ответами.
+  const lay = layPieces(pieces, ROWS_2);
+  ck(lay.dedupe.conflicts.length === 0 && lay.dedupe.excludedIds.size === 1,
+     'настил на том же файле по-прежнему дедупит, а не отказывает',
+     JSON.stringify(lay.dedupe.conflicts));
+}
+
+console.log('\nR2b · НОРМА: размерный ряд и UNI на одну основу — отказ');
+{
+  const gradedPck = ['PCK_L_XS', 'PCK_L_S', 'PCK_L_M', 'PCK_L_L', 'PCK_L_XL'];
+  const names = [...gradedPck, 'PCK_L_UNI_M', ...m.GRADED];
+  const out = normFor(m.piecesOf(names), [
+    cardPiece('карман ряд', 'PCK_L'), cardPiece('карман uni', 'PCK_L_UNI_M'),
+    cardPiece('спинка', 'BP'), cardPiece('рукав', 'SL_R'),
+  ]);
+  ck(out.ok === false, 'градуированная деталь рядом с uni — ОТКАЗ', out.ok ? 'ok!' : '');
+  ck(!out.ok && out.reason.includes('противоречат друг другу'),
+     'теми же словами, что на пути настила', !out.ok ? out.reason : '');
+  ck(!out.ok && out.reason.includes('PCK_L_UNI_M'), 'с именем спорящего блока');
+}
+
+console.log('\nR2c · РЕГРЕССИЯ: разные uniBase не сталкиваются, лишний блок в файле не мешает');
+{
+  // Четыре кармана настоящего файла: uniBase у всех РАЗНЫЕ, и отказывать не в чем.
+  const pieces = m.PCK_UNI.map((n, i) => m.piece(i + 1, n, { areaCm2: 100 + i }));
+  const out = normFor(pieces, m.PCK_UNI.map((n) => cardPiece(n, n)));
+  ck(out.ok === true, 'четыре разных uniBase — норма как была', out.ok ? '' : out.reason);
+  // Вторая копия ЛЕЖИТ В ФАЙЛЕ, но деталью кроя не объявлена: в сумму она не входит, и спорить
+  // ей не с чем. Проверяем популяцию правила, а не только само правило.
+  const withSpare = ['PCK_L_UNI_M', 'PCK_L_UNI_S', ...m.GRADED]
+    .map((n, i) => m.piece(i + 1, n, i < 2 ? { areaCm2: 200 } : {}));
+  const spare = normFor(withSpare, [
+    cardPiece('карман', 'PCK_L_UNI_M'), cardPiece('спинка', 'BP'), cardPiece('рукав', 'SL_R'),
+  ]);
+  ck(spare.ok === true, 'непривязанная копия в норму не входит и отказа не даёт',
+     spare.ok ? '' : spare.reason);
 }
 
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);

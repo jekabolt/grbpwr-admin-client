@@ -82,12 +82,12 @@ import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { ModalRailSection, type RailSectionStatus } from './modal-sections';
+import { uniConflictReason } from './block-code';
 import {
   dedupeUniPieces,
   markerUnits,
   pieceLineKeysByPieceId,
   selectMarkerPieces,
-  uniConflictReason,
   unitsOfPieces,
 } from './piece-selection';
 import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';

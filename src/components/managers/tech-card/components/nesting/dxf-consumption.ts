@@ -27,7 +27,14 @@
 import type { PieceDTO } from 'lib/nesting/types';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { DxfIndex, PieceBlockRef } from './dxf-geometry';
-import { uniOf } from './block-code';
+import {
+  normBlock,
+  uniConflictReason,
+  uniDuplicateConflicts,
+  uniGradedConflicts,
+  uniGroupsOf,
+  uniOf,
+} from './block-code';
 import { toBomUnit, type FabricWeightBasis } from './marker-io';
 import { aliasIdentity } from './use-block-sizes';
 
@@ -207,6 +214,12 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   };
   const resolved: Resolved[] = [];
   const unmatched: string[] = [];
+  // Половинки вердикта о столкновениях вокруг uniBase. Обе берутся ИЗ ТОГО ЖЕ разбора, по которому
+  // построен индекс (`split.codeById`): посчитать uniBase здесь заново значило бы завести второй
+  // разбор имени, который однажды ответит иначе, чем тот, по которому уже разложены детали.
+  const codeById = input.index.split.codeById;
+  const uniEntries: { raw: string; uniBase: string }[] = [];
+  const gradedIdentities = new Set<string>();
   for (const piece of input.pieces) {
     let bySize: Map<string, PieceDTO[]> | undefined;
     for (const r of piece.refs) {
@@ -255,6 +268,19 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     const contours = [...norm.values()].flat();
     const tokenSaysUngraded =
       contours.length > 0 && contours.every((c) => uniOf(c.blockName ?? ''));
+    // Слагаемые этой суммы — вот они, и вердикт о столкновении строится по НИМ, а не по всему
+    // файлу: uni-блок, который к этой ткани не привязан, в норму не входит и спорить ему не с чем.
+    // (Настил спрашивает шире — он укладывает все контуры скоупа; каждый путь проверяет свою
+    // популяцию, и это одно и то же правило на разных множествах, а не два разных правила.)
+    if (graded) {
+      const identity = normBlock(codeById.get(contours[0]?.id ?? -1)?.identity ?? '');
+      if (identity) gradedIdentities.add(identity.toLowerCase());
+    } else if (tokenSaysUngraded) {
+      for (const c of contours) {
+        const code = codeById.get(c.id);
+        if (code?.uniBase) uniEntries.push({ raw: code.raw, uniBase: code.uniBase });
+      }
+    }
     resolved.push({
       piece,
       bySize: norm,
@@ -268,6 +294,33 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       ok: false,
       reason: `в сегодняшних выкройках нет деталей: ${unmatched.join(', ')} — площадь изделия вышла бы неполной, а неполная норма занижает закупку`,
     };
+  }
+
+  // ── ОДНА ДЕТАЛЬ, ЗАЯВЛЕННАЯ ДВАЖДЫ, — ОТКАЗ, А НЕ УДВОЕННАЯ ПЛОЩАДЬ ────────────────────────
+  //
+  // Диалог сопоставления в потоке создания заводит деталь кроя НА КАЖДЫЙ блок, а склеенная
+  // по-размерная выгрузка CLO приносит один и тот же карман под двумя именами (`PCK_L_UNI_M` и
+  // `PCK_L_UNI_S`). Обе детали резолвятся независимо, обе оказываются заявленно неградуируемыми, и
+  // каждая кладёт `perGarment × площадь` в КАЖДЫЙ размер: норма и печатный кат-лист удваиваются,
+  // тогда как настил (dedupeUniPieces) кроит ОДНУ копию. Разницу между бумагой и настилом не видно
+  // ни в одном числе на экране — видно на складе.
+  //
+  // НАСТИЛ НА ЭТОТ ВХОД ДЕДУПИТ, А НОРМА ОТКАЗЫВАЕТ, и это не разнобой. Настил укладывает контуры и
+  // вправе взять один — от какого имени пришёл контур, ткани безразлично. Здесь складываются
+  // ЗАЯВЛЕННЫЕ ДЕТАЛИ КАРТОЧКИ: у каждой свой line_key, своё количество на изделие и свой адрес
+  // площади на сервере (0297), а сервер сверяет комплект целиком. Выбросить одну молча значит и
+  // отправить неполный набор, и решить за оператора, какая из двух его записей лишняя.
+  const uniGroups = uniGroupsOf(uniEntries);
+  const gradedVsUni = uniGradedConflicts(uniGroups, gradedIdentities);
+  // Группе, уже уличённой в споре с размерным рядом, второе предложение про дубли ничего не
+  // добавляет: беда одна, чинится одним действием, а два абзаца читаются как две.
+  const flagged = new Set(gradedVsUni.map((c) => c.subject.toLowerCase()));
+  const uniConflicts = [
+    ...gradedVsUni,
+    ...uniDuplicateConflicts(uniGroups).filter((c) => !flagged.has(c.subject.toLowerCase())),
+  ];
+  if (uniConflicts.length > 0) {
+    return { ok: false, reason: uniConflictReason(uniConflicts) };
   }
 
   // ── выбор контура под размер ─────────────────────────────────────────────────────────────
