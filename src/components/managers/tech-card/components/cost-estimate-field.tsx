@@ -127,6 +127,23 @@ function areaEstimateMap(
 type BomItemLite = { id?: number; lineKey?: string; unit?: string };
 
 /**
+ * ЭТА СТРОКА СМЕТЫ ПОСЧИТАНА ОЦЕНКОЙ — единственное правило на весь файл.
+ *
+ * Спрашивают об этом трижды и на трёх уровнях: ячейка расхода в разборе, ступень всего разбора
+ * (от неё зависят цвета отклонений) и ступень свёрнутой строки матрицы. Три копии одного условия
+ * разошлись бы ровно в тот день, когда сервер начнёт называть ступень сам и условие станет
+ * однострочным «m.costTier === ESTIMATE»: одну копию поправят, две забудут.
+ */
+const lineIsAreaEstimate = (m: StyleCostMaterialLine, areaEst: Map<number, AreaEst>) =>
+  areaEst.has(wireInt(m.bomItemId)) && !decimalToInput(m.consumption).trim();
+
+/** ...и та же ступень для СМЕТЫ ЦЕЛИКОМ: хотя бы одна материальная строка — оценка. */
+const estimateIsLowerBound = (
+  materials: StyleCostMaterialLine[] | undefined,
+  areaEst: Map<number, AreaEst>,
+) => (materials ?? []).some((m) => lineIsAreaEstimate(m, areaEst));
+
+/**
  * Расход материала и то, что в нём уже сидит.
  *
  * Kept verbatim from the previous table (0261) because the distinction is load-bearing. On a
@@ -222,10 +239,8 @@ function Breakdown({
   const defectAmount = Math.max(0, unitCost - materialsSubtotal - articlesSubtotal);
   const defectPct = num(decimalToInput(estimate.defectPct));
 
-  // Ступень ВСЕЙ сметы — тем же предикатом, что у ячейки расхода ниже (одно правило на вопрос).
-  const planIsLowerBound = materials.some(
-    (m) => areaEst.has(wireInt(m.bomItemId)) && !decimalToInput(m.consumption).trim(),
-  );
+  // Ступень ВСЕЙ сметы — общим предикатом (см. estimateIsLowerBound).
+  const planIsLowerBound = estimateIsLowerBound(materials, areaEst);
   const share = (n: number) => (unitCost > 0 ? `${((n / unitCost) * 100).toFixed(0)}%` : '—');
   const excluded =
     materials.filter((m) => m.hasBase === false || m.priceSource === 'STYLE_COST_PRICE_SOURCE_NONE')
@@ -276,7 +291,7 @@ function Breakdown({
               // СТУПЕНЬ СТРОКИ — см. AreaEst: оценка есть у слота И расхода строка не назвала.
               const est = areaEst.get(wireInt(m.bomItemId));
               const consumption = decimalToInput(m.consumption).trim();
-              const byArea = !!est && !consumption;
+              const byArea = lineIsAreaEstimate(m, areaEst);
               return (
                 <tr key={m.bomItemId || `m${i}`}>
                   <td>
@@ -533,9 +548,11 @@ function SnapshotReconciliation({
           value={snapshot != null ? `${snapshot.toFixed(2)}${cur ? ` ${cur}` : ''}` : '—'}
           sub={
             snapshotVsPlan != null
-              ? // «не более» — потому что план занижен: настоящая разница с проведённым COGS
-                // меньше показанной ровно на то, чего в оценке нет.
-                `Δ к плану ${planIsLowerBound ? 'не более ' : ''}${money(snapshotVsPlan)}`
+              ? // «≤» — тем же знаком, что у маржи на вкладке костинга, и в том же смысле:
+                // НАСТОЯЩЕЕ значение не больше напечатанного. Слова («не более») читались бы про
+                // модуль и на отрицательной разнице означали бы обратное; знак неравенства
+                // алгебраичен и не зависит от того, в какую сторону смотрит цифра.
+                `Δ к плану ${planIsLowerBound ? '≤ ' : ''}${money(snapshotVsPlan)}`
               : undefined
           }
         />
@@ -878,12 +895,8 @@ export function CostEstimateField({
       // Оценки — СВОИ У КАЖДОГО КОЛОРВЕЯ (детали на ткань назначает его рецепт), поэтому карта
       // строится на строке, а не одна на таблицу.
       areaEst: areaEst,
-      // ОДИН предикат «эта строка — оценка» на всю таблицу: тот же, что у ячейки расхода в разборе
-      // ниже (Breakdown). Второе правило для того же вопроса разошлось бы с первым ровно тогда,
-      // когда сервер начнёт называть ступень сам.
-      lowerBound: (estimate.materials ?? []).some(
-        (m) => areaEst.has(wireInt(m.bomItemId)) && !decimalToInput(m.consumption).trim(),
-      ),
+      // Тот же предикат, что у разбора и у ячейки расхода — см. estimateIsLowerBound.
+      lowerBound: estimateIsLowerBound(estimate.materials, areaEst),
     };
   });
 
@@ -911,6 +924,13 @@ export function CostEstimateField({
     meanDelta != null && meanPlan != null && meanPlan > 0
       ? (meanDelta / meanPlan) * 100
       : undefined;
+  // СТУПЕНЬ ИТОГА — ПО ТОМУ ЖЕ МНОЖЕСТВУ, ПО КОТОРОМУ ОН ПОСЧИТАН. Проверять `rows` целиком было
+  // бы вторым множеством: колорвей-оценка, у которого нет факта, в среднее не входит, и оговорка о
+  // нём стояла бы под числом, которого он не касался. И наоборот — при единственном колорвее с
+  // оценкой итог повторяет его строку, а строка уже помечена: молчащий итог печатал бы те же
+  // цифры точными.
+  const lowerBoundInTotal = totalBase.filter((r) => r.lowerBound).length;
+  const totalIsLowerBound = lowerBoundInTotal > 0;
   const totalLabel =
     both.length > 0
       ? `среднее по ${both.length} ${both.length === 1 ? 'колорвею' : 'колорвеям'} с планом и фактом`
@@ -1027,13 +1047,29 @@ export function CostEstimateField({
         <tbody>
           <TotalRow>
             <td>{totalLabel}</td>
-            <td>{meanPlan != null ? meanPlan.toFixed(2) : '—'}</td>
-            <td>{meanActual != null ? meanActual.toFixed(2) : '—'}</td>
-            <td className={meanDelta != null ? deltaTone(meanDelta) : undefined}>
-              {meanDelta != null ? signed(meanDelta) : '—'}
+            <td>
+              {meanPlan != null
+                ? `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}`
+                : '—'}
             </td>
-            <td className={meanDelta != null ? deltaTone(meanDelta) : undefined}>
-              {meanDeltaPct != null ? `${signed(meanDeltaPct, 1)}%` : '—'}
+            <td>{meanActual != null ? meanActual.toFixed(2) : '—'}</td>
+            {/* Цвет — утверждение о знаке, а знак средней Δ от смешанных ступеней недоказуем ровно
+                так же, как у строки: план занижен на неизвестную величину. */}
+            <td
+              className={
+                meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined
+              }
+            >
+              {meanDelta != null ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDelta)}` : '—'}
+            </td>
+            <td
+              className={
+                meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined
+              }
+            >
+              {meanDeltaPct != null
+                ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDeltaPct, 1)}%`
+                : '—'}
             </td>
             <td colSpan={2} />
           </TotalRow>
@@ -1051,9 +1087,9 @@ export function CostEstimateField({
           полноценные планы с нижними границами; разделять их на два средних — значит показать два
           числа, ни одно из которых не отвечает на вопрос «сколько стоит стиль». Поэтому среднее
           остаётся одно, а рядом сказано, из чего оно сложено. */}
-      {rows.some((r) => r.lowerBound) && (
+      {totalIsLowerBound && (
         <Text size='micro' variant='label'>
-          {`У ${rows.filter((r) => r.lowerBound).length} из ${rows.length} колорвеев план — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей, без межлекальных выпадов. Их план занижен, поэтому Δ к факту у таких строк без цвета — знак разности может быть обратным, — и итог ниже смешивает две ступени.`}
+          {`У ${lowerBoundInTotal} из ${totalBase.length} колорвеев, попавших в итог, план — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей, без межлекальных выпадов. Такой план занижен, поэтому Δ к факту у этих строк и у итога идут без цвета — знак разности может быть обратным.`}
         </Text>
       )}
       <Text size='micro' variant='label'>

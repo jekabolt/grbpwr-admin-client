@@ -479,6 +479,11 @@ export function CostingField({
   const targetUnitCost =
     marginBase != null && hasTarget ? marginBase * (1 - targetPct / 100) : undefined;
   const gap = targetUnitCost != null ? unitCost - targetUnitCost : undefined;
+  // РЕШЕНИЕ И ПОКАЗ ОБЯЗАНЫ СОГЛАСОВАТЬСЯ ПО ТОЧНОСТИ. `onTarget` сравнивает сырые числа, а
+  // разрыв печатается с двумя знаками: маржа, недотянувшая до цели на полкопейки, давала красное
+  // «не хватает −0.00» — то есть тревогу о сумме, которой на экране нет. Полкопейки — тот же
+  // порог, которым весь этот экран отличает остаток округления от денег.
+  const gapWorthShowing = (gap ?? 0) >= 0.005;
   // A cost the server itself calls incomplete (an uncostable BOM line, a currency with no rate) is
   // understated by an unknown amount, so a margin computed from it cannot certify anything.
   const costIncomplete = !!rollup?.hasUnpriced || !!rollup?.hasUnconvertedCurrencies;
@@ -965,7 +970,7 @@ export function CostingField({
             // цифра остаётся разрывом со словом «минимум», а тон красный. Если же цель проходит,
             // утверждать нечего: настоящая себестоимость выше, и цифрой становится она сама.
             lowerBound
-            ? !hasTarget || onTarget
+            ? !hasTarget || onTarget || !gapWorthShowing
               ? {
                   figure: money(unitCost),
                   figureLabel: `себестоимость · ${TIER_ESTIMATE}`,
@@ -991,7 +996,10 @@ export function CostingField({
                 sentence: `${money(grossMargin ?? 0)} с изделия`,
                 cause: 'цель маржи не задана — ни своя у стиля, ни дефолт компании',
               }
-            : onTarget
+            : // Тот же порог полкопейки, что и в ветке оценки выше: недобор, который печатается
+              // как «−0.00», это остаток округления, а не дыра в марже, и красная плашка о нём
+              // отправляет искать деньги, которых нет.
+              onTarget || !gapWorthShowing
               ? {
                   figure: `${marginPct.toFixed(1)}%`,
                   figureLabel: 'маржа нетто',
@@ -1558,14 +1566,23 @@ export function CostingField({
               // нормой, а этот оценкой (или наоборот), разность содержит не разницу между цветами, а
               // разницу между способами счёта: «дешевле на 4.10» читалось бы как экономия ткани там,
               // где у одного из двух просто нет выпадов в числе.
-              const tierMismatch = ccLowerBound !== !!rollup?.hasEstimate;
-              // ...И `costIncomplete` — про ВТОРУЮ сторону вычитания. `broken` проверяет только саму
+              // ДВЕ ОЦЕНКИ ВЫЧИТАТЬ ТОЖЕ НЕЛЬЗЯ, хотя ступень у них одна. Первая редакция этой
+              // правки гасила дельту только при РАЗНЫХ ступенях — на том основании, что одинаковые
+              // сравнимы. Это неверно: каждая оценка прячет СВОЙ, неизвестный объём выпадов.
+              // Оценки 80 и 90 при скрытых выпадах 30 и 10 дают настоящие 110 и 100 — знак
+              // фактической разницы ОБРАТНЫЙ показанному, а плитка красит его уверенным цветом.
+              //
+              // `costIncomplete` — про вторую сторону вычитания: `broken` проверяет только саму
               // плитку, поэтому здоровый колорвей продолжал показывать «−4.10 к плану стиля», где
               // «план стиля» — это корень, о котором вкладка сверху уже сказала «маржу по этой
-              // себестоимости считать нельзя»: разность с неизвестно насколько заниженным числом
-              // не значит ничего, а знак у неё при этом уверенный.
+              // себестоимости считать нельзя».
               const delta =
-                !broken && !tierMismatch && !costIncomplete && ccUnit > 0 && serverUnitCost > 0
+                !broken &&
+                !ccLowerBound &&
+                !rollup?.hasEstimate &&
+                !costIncomplete &&
+                ccUnit > 0 &&
+                serverUnitCost > 0
                   ? ccUnit - serverUnitCost
                   : undefined;
               const swatch = colorwaySwatch(cc.colorwayId);
