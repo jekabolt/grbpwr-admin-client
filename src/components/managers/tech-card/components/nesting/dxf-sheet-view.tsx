@@ -9,6 +9,7 @@
 // размеры: на градуированном чертеже это каша из пяти размеров сразу, в которой ничего не
 // разобрать. Здесь та же геометрия, по которой считается раскладка и заводятся детали кроя, —
 // значит увиденное и посчитанное не могут разойтись.
+import type { PieceDTO } from 'lib/nesting/types';
 import { useMemo, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -16,6 +17,7 @@ import Text from 'ui/components/text';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet } from './piece-sheet';
+import { dedupeUniPieces } from './piece-selection';
 import { splitPiecesBySize } from './split-pieces';
 import { useNesting, type NestingFile } from './use-nesting';
 
@@ -46,46 +48,59 @@ export function DxfSheetView({
     [allPieces, contourLayer],
   );
 
-  // ГРУППА «БЕЗ РАЗМЕРА» И UNI-ДЕТАЛИ — ЭТО РАЗНЫЕ ВЕЩИ, и переключатель обязан их различать.
+  // ЧТО ЛЕЖИТ НА ЛИСТЕ КАЖДОГО РАЗМЕРА — ОДИН РАСЧЁТ НА КНОПКИ, ЧЕРТЁЖ И СЧЁТЧИК.
   //
-  // Помеченная деталь входит в комплект КАЖДОГО размера, поэтому при живых размерных группах она
-  // не заводит отдельную опцию: карман виден на листе M вместе с деталями M (см. `shown`). Если бы
-  // он остался отдельной кнопкой, оператор, выбрав M, смотрел бы на неполный комплект и не имел
-  // способа это заметить. Остаток группы '' — это НЕПОМЕЧЕННЫЕ безразмерные детали, у которых
-  // размер, возможно, просто не опознан: их опция остаётся, потому что показать их негде больше.
-  const sizeOpts = useMemo(() => {
-    const seen = new Map<string, number>();
-    let sizeless = 0;
-    let sizelessUni = 0;
+  // Три числа обязаны сходиться: подсказка кнопки, нарисованное и строка «деталей в размере». Пока
+  // каждое считалось своим выражением, они расходились по двум причинам сразу, и обе видны только
+  // если знать, что искать:
+  //
+  //   • ГРУППА '' И UNI-ДЕТАЛИ — РАЗНЫЕ ВЕЩИ. Помеченная деталь входит в комплект КАЖДОГО размера,
+  //     поэтому при живых размерных группах она не заводит отдельной кнопки, а едет на лист каждого
+  //     размера. Остаток группы '' — это НЕПОМЕЧЕННЫЕ безразмерные детали, у которых размер,
+  //     возможно, просто не опознан: их кнопка остаётся, показать их больше негде. Значит и клик по
+  //     ней обязан показывать РОВНО их, а не все безразмерные подряд.
+  //   • ДЕДУП UNI-КОПИЙ — ТОТ ЖЕ, ЧТО У НАСТИЛА (dedupeUniPieces). Склеенный CLO приносит один
+  //     карман под двумя именами; раскладка и очередь раскроя кроят его ОДИН раз, а просмотр рисовал
+  //     оба и считал два — то есть лист спорил с тем, что уедет в цех. Конфликт (разная площадь
+  //     копий, градуированная копия рядом с uni) хелпер решает отказом и не исключает ничего: путь
+  //     настила в этом случае встанет с объяснением, а просмотру честнее показать обе копии, чем
+  //     молча выбрать одну.
+  const view = useMemo(() => {
+    const excluded = dedupeUniPieces(allPieces, split.codeById, contourLayer).excludedIds;
+    const bySize = new Map<string, PieceDTO[]>();
+    const uni: PieceDTO[] = [];
+    const unclassified: PieceDTO[] = [];
     for (const p of onLayer) {
+      if (excluded.has(p.id)) continue;
       const code = split.codeById.get(p.id);
       const s = code?.size ?? '';
-      if (!s) {
-        sizeless += 1;
-        if (code?.uni) sizelessUni += 1;
+      if (s) {
+        bySize.set(s, [...(bySize.get(s) ?? []), p]);
         continue;
       }
-      seen.set(s, (seen.get(s) ?? 0) + 1);
+      (code?.uni ? uni : unclassified).push(p);
     }
-    const graded = seen.size > 0;
-    // Счётчик размера ВКЛЮЧАЕТ помеченные детали — ровно те, что видны на его листе. Иначе
-    // подсказка кнопки («N деталей») спорила бы со строкой под чертежом, считающей показанное.
-    const opts = [...seen.entries()].map(([size, count]) => ({
+    const graded = bySize.size > 0;
+    const opts = [...bySize.entries()].map(([size, list]) => ({
       size,
-      count: count + sizelessUni,
+      // Счётчик размера ВКЛЮЧАЕТ помеченные детали — ровно те, что видны на его листе.
+      count: list.length + uni.length,
       uni: false,
     }));
-    // Файл из одних uni: опция всё-таки нужна — иначе смотреть было бы не на что. Она и
-    // подписывается тем, что есть на самом деле.
-    const rest = graded ? sizeless - sizelessUni : sizeless;
-    if (rest > 0) {
-      const uni = !graded && sizelessUni === sizeless;
-      opts.push({ size: '', count: rest, uni });
+    // Файл из одних uni: кнопка всё-таки нужна — иначе смотреть было бы не на что, — и подписана
+    // она тем, что есть на самом деле.
+    const rest = graded ? unclassified : [...uni, ...unclassified];
+    if (rest.length > 0) {
+      opts.push({ size: '', count: rest.length, uni: !graded && unclassified.length === 0 });
     }
-    return opts.sort(
+    opts.sort(
       (a, b) => (split.orderOfSize.get(a.size) ?? 1e6) - (split.orderOfSize.get(b.size) ?? 1e6),
     );
-  }, [onLayer, split]);
+    const piecesOfSize = (size: string): PieceDTO[] =>
+      size ? [...(bySize.get(size) ?? []), ...uni] : rest;
+    return { sizeOpts: opts, piecesOfSize };
+  }, [allPieces, onLayer, split, contourLayer]);
+  const sizeOpts = view.sizeOpts;
   const [activeSize, setActiveSize] = useState<string | null>(null);
   // Крупнейшая группа по умолчанию: группа «без размера» это остаток, а не размер.
   const shownSize = sizeOpts.some((o) => o.size === activeSize)
@@ -94,19 +109,7 @@ export function DxfSheetView({
         (best, o) => (!best || o.count > best.count ? o : best),
         null,
       )?.size ?? '');
-  const shown = useMemo(
-    () =>
-      onLayer.filter((p) => {
-        const code = split.codeById.get(p.id);
-        const s = code?.size ?? '';
-        if (s === shownSize) return true;
-        // Помеченная деталь идёт в комплект КАЖДОГО размера — значит и на лист каждого размера.
-        // Без этого лист размера M показывал бы изделие без карманов, и ошибка была бы не видна
-        // ни по одному признаку: контуры просто отсутствуют.
-        return !!shownSize && !s && !!code?.uni;
-      }),
-    [onLayer, split, shownSize],
-  );
+  const shown = useMemo(() => view.piecesOfSize(shownSize), [view, shownSize]);
 
   const grainLayer = useMemo(() => defaultGrainLayer(grainLayerOptions(allPieces)), [allPieces]);
   const innerNames = useMemo(() => {
