@@ -347,7 +347,17 @@ const bomItemSchema = z
     wastageLayCount: z.number().optional(),
     // OUTPUT-ONLY: когда применено. Возится через форму только чтобы показать дату в бейдже;
     // на провод не уходит никогда — её ставит сервер при смене тройки (source, count, percent).
-    wastageAppliedAt: z.string().optional(),
+    //
+    // .nullish(), а НЕ .optional(): это единственное поле формы, которое читается с провода как
+    // message (google.protobuf.Timestamp), а grpc-gateway маршалит с EmitUnpopulated — пустой
+    // message приходит ЯВНЫМ null, не отсутствием ключа (та же ложь генерённого типа, что у
+    // int64-как-строки в wireInt выше: TS объявляет `string | undefined`, компилятор проверить не
+    // может). `.optional()` пропускает только undefined, поэтому null ронял валидацию всей формы
+    // с «Invalid input» на bomItems.N.wastageAppliedAt — а штамп пуст почти на каждой строке BOM,
+    // и сохранение тех-карты было заблокировано целиком. Ниже, в mapTechCardToForm, null ещё и
+    // нормализуется в undefined; здесь схема остаётся терпимой к нему ради черновиков из
+    // localStorage, снятых до этой правки.
+    wastageAppliedAt: z.string().nullish(),
     // READ-ONLY enrichment the single-card read fills (0259): the width the раскладка should
     // prefill (this line's own fabricWidth, else the linked article's) and the article's кромка
     // per edge. Carried through the form so the nesting modal can read them without a second
@@ -1004,7 +1014,10 @@ function mapBomItemToForm(b: NonNullable<common_TechCardInsert['bomItems']>[numb
     // нормализация здесь однажды разошлась бы со спеллингом сервера.
     wastageSource: b.wastageSource,
     wastageLayCount: b.wastageLayCount,
-    wastageAppliedAt: b.wastageAppliedAt,
+    // `?? undefined` — не косметика: незаполненный Timestamp приезжает с гейтвея ЯВНЫМ null
+    // (EmitUnpopulated маршалит пустой message как null, в отличие от proto3-optional пары выше,
+    // которая просто отсутствует). Форма держит «штампа нет» одним значением — undefined.
+    wastageAppliedAt: b.wastageAppliedAt ?? undefined,
     effectiveFabricWidthCm: decimalToInput(b.effectiveFabricWidthCm),
     selvedgeCm: decimalToInput(b.selvedgeCm),
     // material_id and id are int64 on the wire (techcard.proto), and grpc-gateway serialises int64
