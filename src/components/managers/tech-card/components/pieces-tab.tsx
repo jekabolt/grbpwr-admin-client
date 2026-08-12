@@ -215,7 +215,10 @@ export function PiecesTab({
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const { fields, append, remove } = useFieldArray({ control, name: 'pieces' });
   const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as FormPiece[];
-  const { errors } = useFormState({ control });
+  // `isSubmitting` нужен предзаполнению галки UNI ниже: сохранение забирает СНИМОК формы и по
+  // успеху делает `reset` тем, что уехало (index.tsx), — значит запись, сделанная во время рейса,
+  // молча пропадает вместе с ним.
+  const { errors, isSubmitting } = useFormState({ control });
   // DXF block → piece aliases (0262). They are what lets this block say where a piece came from:
   // a piece with an alias is drawn in a real CAD file, and that file — not the word in the `grain`
   // field — is what the раскладка orients the piece by.
@@ -316,17 +319,39 @@ export function PiecesTab({
   // правку, которой никто не делал и которую негде увидеть.
   //
   // Ждём разбор (`index`): предзаполнять по связям, пока чертежи не прочитаны, значит отвечать за
-  // файлы, которых мы ещё не видели.
+  // файлы, которых мы ещё не видели. И ждём КОНЦА СОХРАНЕНИЯ: карточка уезжает снимком формы, а по
+  // успеху `form.reset` возвращает форму к тому, что уехало (index.tsx). Разбор, дочитавшийся во
+  // время рейса, ставил галку в форму, помечал деталь обработанной — и reset стирал её обратно в
+  // false. Повторно эффект уже не срабатывал, и деталь уезжала непомеченной при живом токене в
+  // чертеже. Поэтому во время рейса не пишем ничего, а после него ПОВТОРЯЕМ решение по тем
+  // деталям, чью пометку reset откатил: снять её в этот момент оператор не мог — контролы были в
+  // рейсе вместе с формой.
   const frozen = techCard?.techCard?.approvalState === RELEASED_STATE;
   const uniPrefilled = useRef(new Set<string>());
+  const uniWritten = useRef(new Set<string>());
+  const sawSubmitting = useRef(false);
   useEffect(() => {
+    if (isSubmitting) {
+      sawSubmitting.current = true;
+      return;
+    }
     if (!index || frozen) return;
+    // Флаг снимается только на прогоне, который реально принимает решения: разбор мог быть ещё не
+    // готов в момент, когда сохранение закончилось.
+    const afterSubmit = sawSubmitting.current;
+    sawSubmitting.current = false;
     // Значения читаются императивно, а не из `pieces`: иначе эффект пересчитывался бы на каждое
     // нажатие клавиши в любом поле карточки, а решает он ровно два входа — разбор и связи.
     const rows = (getValues('pieces') ?? []) as FormPiece[];
     rows.forEach((p, pi) => {
       const key = (p.lineKey ?? '').trim().toLowerCase();
-      if (!key || uniPrefilled.current.has(key)) return;
+      if (!key) return;
+      if (afterSubmit && !p.ungraded && uniWritten.current.has(key)) {
+        // Наша пометка не пережила сохранение — решение считается непринятым и принимается заново.
+        uniPrefilled.current.delete(key);
+        uniWritten.current.delete(key);
+      }
+      if (uniPrefilled.current.has(key)) return;
       // Деталь есть на сервере — её ответ уже дан и хранится. Даже если это `false` от карточки,
       // сохранённой до 0302: отличить «оператор снял» от «никто не спрашивал» отсюда нечем, а
       // цена ошибки несимметрична — во втором случае человек поставит галку сам и один раз, в
@@ -339,8 +364,11 @@ export function PiecesTab({
       uniPrefilled.current.add(key);
       if (p.ungraded) return;
       setValue(`pieces.${pi}.ungraded`, true, { shouldDirty: true });
+      // Запомнить, что пометку поставили МЫ: только по этому признаку выше отличается откат
+      // сохранением от снятия галки человеком. Снятое человеком остаётся снятым.
+      uniWritten.current.add(key);
     });
-  }, [index, blocksByPiece, frozen, savedPieceKeys, getValues, setValue]);
+  }, [index, blocksByPiece, frozen, isSubmitting, savedPieceKeys, getValues, setValue]);
 
   // Usage.pieceIndex renumbering on piece removal now belongs to the colourway recipe (server-owned,
   // edited via UpdateColorwayRecipe) — the RHF `colorways` array is always empty, so the old
