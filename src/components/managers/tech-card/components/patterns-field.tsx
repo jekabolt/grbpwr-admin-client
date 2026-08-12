@@ -1729,6 +1729,10 @@ export function PatternsField({
             sheets={measuring.sheets}
             aliases={pieceDxfAliases.filter((a) => aliasInScope(a, measuring.scope))}
             sizeIds={sizeIds}
+            // Ряд, который СЕРВЕР считает рядом карточки. Замер идёт по ряду ФОРМЫ, а принимает его
+            // сервер по своему — и модалка «↔ детали кроя» растит ряд формы сама, молча, от одного
+            // своего открытия. Без этой пары диалогу нечем заметить расхождение до отказа сервера.
+            savedSizeIds={savedSizeIds}
             sizeNameById={sizeById}
             current={areaStateOf(measuring.scope.key)}
             // Выкройки или связи блок→деталь правлены и НЕ СОХРАНЕНЫ. Диалог обязан на этом

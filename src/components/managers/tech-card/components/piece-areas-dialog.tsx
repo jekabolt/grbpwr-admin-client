@@ -36,7 +36,11 @@ import {
   DxfMeasureConditionsFields,
   useDxfMeasureConditions,
 } from './nesting/dxf-measure-conditions';
-import { pieceAreaSheetsRefusal, publishPieceAreas } from './piece-areas';
+import {
+  pieceAreaSheetsRefusal,
+  pieceAreaSizeRangeRefusal,
+  publishPieceAreas,
+} from './piece-areas';
 import { serverKeyOfScope, type ScopeAreaState } from './piece-areas-state';
 import type { TechCardFormData } from './schema';
 
@@ -56,6 +60,7 @@ export default function PieceAreasDialog({
   sheets,
   aliases,
   sizeIds,
+  savedSizeIds,
   sizeNameById,
   current,
   sourceDirty = false,
@@ -71,7 +76,14 @@ export default function PieceAreasDialog({
   sheets: readonly SheetRow[];
   /** Связи блок→деталь этого скоупа, уже отфильтрованные панелью. */
   aliases: readonly AliasRow[];
+  /** Ряд размеров ФОРМЫ — по нему и меряют: строка на каждый размер каждой градуируемой детали. */
   sizeIds: number[];
+  /**
+   * Ряд размеров, СОХРАНЁННЫЙ на сервере. Не для замера, а для сверки с рядом формы: принимает
+   * замер сервер по своему ряду, и разойтись эти два ряда могут без единой осознанной правки —
+   * см. pieceAreaSizeRangeRefusal. undefined = карточка не прочитана, сверять не с чем.
+   */
+  savedSizeIds?: number[];
   sizeNameById: Map<number, string>;
   /** Что сервер знает про площади этой ткани сейчас — чтобы повтор замера не выглядел первым. */
   current: ScopeAreaState;
@@ -188,11 +200,27 @@ export default function PieceAreasDialog({
   const incompleteSizes = outcome?.ok ? outcome.areas.sizesIncompleteWhy : [];
 
   const sizeName = (id: number) => sizeNameById.get(id) ?? `#${id}`;
+
+  // РЯД ФОРМЫ ПРОТИВ РЯДА СЕРВЕРА — отдельная остановка, потому что расходятся они молча: модалка
+  // «↔ детали кроя» заводит размеры из чертежа в форму сама. Правило живёт рядом с публикацией, и
+  // судит оно НЕ ряды сами по себе, а то, чем расхождение грозит ЭТОМУ замеру, — поэтому получает
+  // его строки: набор из одних безразмерных строк сервер примет при любом ряде.
+  //
+  // Без useMemo сознательно: это разность двух множеств из единиц элементов, и мемоизация стоила бы
+  // дороже самой разности — зато список зависимостей не пришлось бы держать в согласии с `sizeName`.
+  const sizeRangeRefusal = pieceAreaSizeRangeRefusal(
+    sizeIds,
+    savedSizeIds,
+    sizeName,
+    outcome?.ok ? outcome.areas.pieceRows : [],
+  );
+
   const rows = outcome?.ok ? outcome.areas.rows : [];
   const runnable =
     !!outcome?.ok &&
     !conditions.blocked &&
     !sheetsRefusal &&
+    !sizeRangeRefusal &&
     !sourceDirty &&
     unsavedPieces.length === 0 &&
     incompleteSizes.length === 0 &&
@@ -280,6 +308,12 @@ export default function PieceAreasDialog({
         <DxfMeasureConditionsFields state={conditions} />
 
         {sheetsRefusal && <CalloutBox tone='warning'>{sheetsRefusal}</CalloutBox>}
+
+        {/* РЯД РАЗМЕРОВ РАЗОШЁЛСЯ С СОХРАНЁННЫМ — ОТКАЗ, И ЕГО НАДО НАЗЫВАТЬ ЗДЕСЬ, А НЕ ОТДАВАТЬ
+            СЕРВЕРУ. Сервер такой замер отвергает целиком (`size_not_in_range`), но отказ приходит
+            на английском, называет ULID детали вместо размера и ни словом не упоминает
+            несохранённую карточку — то есть не даёт сделать ровно то единственное, что нужно. */}
+        {sizeRangeRefusal && <CalloutBox tone='warning'>{sizeRangeRefusal}</CalloutBox>}
 
         {/* НЕСОХРАНЁННЫЙ ИСТОЧНИК — ОТКАЗ, А НЕ ПРИМЕЧАНИЕ, и это не осторожность, а арифметика:
             сопоставление «↔ детали кроя» пишет ТОЛЬКО в форму (setValue), а полноту присланного
