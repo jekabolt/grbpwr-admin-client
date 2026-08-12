@@ -28,8 +28,11 @@ import DecimalField from 'ui/form/fields/decimal-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { BatchComposition } from './batch-composition';
+import { bomPurposeLabel } from './bom-purpose';
 import { operationMinutes, SummaryOp } from './construction-tab';
 import { HelpMark, LineProblems } from './costing-vocab';
+import { serverScopeKeyOfSheet, wireFabricPurpose } from './pattern-size-index';
+import { unmeasuredDxfScopeKeys } from './piece-areas-state';
 import { useDevExpenses } from './dev-expenses-field';
 import { MarkerConsumptionBand } from './marker-apply';
 import { TechCardFormData } from './schema';
@@ -618,6 +621,66 @@ export function CostingField({
   const noColorways = storedColorways.length === 0;
   const recipeGaveNothing =
     bomHasLines && materials === 0 && !rollup?.hasUnpriced && !rollup?.hasUnconvertedCurrencies;
+
+  // ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ ПРАВДЫ: слот с деталями кроя МОЖЕТ получить цену без строки «на изделие».
+  //
+  // Сервер считает такому слоту ОЦЕНКУ СНИЗУ — площадь деталей ÷ раскройную ширину (Ф1, ступень 0),
+  // — но только если площади деталей замерены. Замер живёт исключительно в браузере (DXF сервер не
+  // читает) и до сих пор ехал на сервер лишь попутно, при применении нормы «по выкройкам». То есть
+  // экран, говоря «нет строк расхода на изделие», называл ровно половину: вторая половина — «и
+  // площади не замерены, поэтому оценить нечем», а лечится она на вкладке выкроек.
+  //
+  // ПОЧЕМУ УСЛОВИЕ ИМЕННО ТАКОЕ. Про рецепты эта вкладка ничего не знает (они читаются отдельным RPC
+  // по колорвею), поэтому «детали назначены на ткань» здесь непроверяемо напрямую. Зато
+  // `recipeGaveNothing` — это состояние, в котором рецепт НЕ ДАЛ НИ ОДНОГО ЧИСЛА при заполненном
+  // BOM, то есть ровно то, ради чего оценка и существует. Без этой оговорки строка загоралась бы на
+  // любой здоровой карточке с выкройками и нормальными нормами — то есть требовала бы замерить
+  // площади, которые никому не нужны.
+  //
+  // `hasEstimate` — СТОП-СЛОВО СЕРВЕРА: он уже посчитал часть слотов оценкой, значит площади есть и
+  // работают, и звать замерять их было бы неправдой.
+  //
+  // Карточка БЕЗ КОЛОРВЕЕВ исключена: оценка считается по слоту рецепта, а рецепт живёт на
+  // колорвее — мерить площади там нечего оценивать, и строка звала бы делать вторую работу вместо
+  // первой. Про «детали слоту назначены» здесь утверждать нечем, поэтому текст ниже называет это
+  // УСЛОВИЕМ оценки, а не свершившимся фактом.
+  const unmeasuredCloth = useMemo(() => {
+    // ГЕЙТ ПО СВЯЗЯМ БЛОК→ДЕТАЛЬ. Оценка живёт на деталях, а деталь попадает в площадь только через
+    // связь с блоком чертежа — эти связи клиенту ВИДНЫ (тот же список читает очередь раскроя), и
+    // без них замер отвечает «к этой ткани не привязана ни одна деталь». Без гейта вердикт звал на
+    // вкладку выкроек, где открытый по его совету диалог сразу отказывал: совет, который сам себя и
+    // опровергает.
+    //
+    // Гейт НЕ доказывает, что деталь назначена слоту в рецепте (про рецепт эта вкладка не знает),
+    // поэтому текст ниже остаётся условным и оценку не обещает.
+    const aliasScopes = new Set(
+      (techCard?.techCard?.pieceDxfAliases?.items ?? [])
+        .filter((a) => !!(a.blockName ?? '').trim() && !!(a.pieceLineKey ?? '').trim())
+        .map((a) =>
+          serverScopeKeyOfSheet({ fabricPurpose: a.fabricPurpose, bomLineKey: a.bomLineKey }),
+        )
+        .filter(Boolean),
+    );
+    const keys = unmeasuredDxfScopeKeys(
+      techCard?.techCard?.patterns,
+      techCard?.pieceAreaScopes,
+    ).filter((key) => aliasScopes.has(key));
+    return keys.map((key) => {
+      // Имя скоупа человеку: назначение — своим словом, неразобранная строка — своим названием.
+      const byPurpose = bomLines.find((b) => b.purpose && wireFabricPurpose(b.purpose) === key);
+      if (byPurpose?.purpose) return bomPurposeLabel(byPurpose.purpose);
+      const byLine = bomLines.find((b) => (b.lineKey ?? '') === key);
+      return byLine?.name?.trim() || key;
+    });
+  }, [
+    techCard?.techCard?.patterns,
+    techCard?.techCard?.pieceDxfAliases,
+    techCard?.pieceAreaScopes,
+    bomLines,
+  ]);
+  const areasWouldPrice =
+    recipeGaveNothing && !noColorways && !rollup?.hasEstimate && unmeasuredCloth.length > 0;
+
   if (recipeGaveNothing) {
     problems.push({
       key: 'norecipe',
@@ -639,6 +702,29 @@ export function CostingField({
       action: (
         <Button asChild size='xs' variant='secondary'>
           <Link to='?tab=colorways'>к колорвеям</Link>
+        </Button>
+      ),
+    });
+  }
+  if (areasWouldPrice) {
+    problems.push({
+      key: 'noareas',
+      // НЕ «блок»: расчёт уже заблокирован строкой выше, и вторая красная строка про ту же дыру
+      // считала бы одну поломку дважды. Это второй ВЫХОД из неё, а не вторая причина.
+      blocking: false,
+      text: (
+        <>
+          <b>площади деталей не замерены — оценки расхода по выкройкам не будет.</b> Слот умеет
+          получить цену и БЕЗ строки «на изделие»: если ему назначены детали кроя, сервер считает
+          оценку снизу — площадь деталей ÷ раскройную ширину (netto, без межлекальных выпадов). Но
+          площади нужно один раз замерить по DXF, и делает это только браузер. Без годного замера
+          (не мерили вовсе либо замер устарел — файлы или связи менялись после него):{' '}
+          {unmeasuredCloth.join(', ')}.
+        </>
+      ),
+      action: (
+        <Button asChild size='xs' variant='secondary'>
+          <Link to='?tab=patterns'>к выкройкам</Link>
         </Button>
       ),
     });
@@ -765,7 +851,15 @@ export function CostingField({
           : recipeGaveNothing && noColorways
             ? 'BOM заполнен, но у карточки нет колорвеев — расход задаётся в рецепте колорвея'
             : recipeGaveNothing
-              ? 'BOM заполнен, но в рецептах колорвеев нет строк расхода на изделие — расход задаётся на ткани, а не на детали'
+              ? // ВТОРАЯ ПОЛОВИНА ФАКТА — ТУТ ЖЕ. «Нет строк расхода на изделие» было правдой ровно
+                // наполовину с тех пор, как сервер научился считать слот с деталями по ПЛОЩАДИ:
+                // выход есть и без такой строки, но он требует замеренных площадей, а их не было
+                // ни у одной карточки беты. Оговорка появляется только когда замерить и правда
+                // есть что (выкройки в DXF на месте, площадей нет) — иначе она звала бы на вкладку,
+                // где делать нечего.
+                areasWouldPrice
+                ? 'BOM заполнен, но в рецептах колорвеев нет строк расхода на изделие, а годного замера площадей деталей нет — по площадям сервер считает оценку снизу и без такой строки, если детали назначены слоту (вкладка выкроек)'
+                : 'BOM заполнен, но в рецептах колорвеев нет строк расхода на изделие — расход задаётся на ткани, а не на детали'
             : 'у строк BOM нет цены, либо рецепт не назначен ни на один колорвей — цифры появятся после сохранения',
         action:
           bomHasLines && recipeGaveNothing ? (
