@@ -113,6 +113,10 @@ type BlockRow = {
   // Размеры, в которых эта деталь нашлась. Показывается рядом с именем: это и есть видимое
   // доказательство, что строка смерженная, а не «случайно попался только один размер».
   sizes: string[];
+  // Имя без токена UNI и без базового размера при нём — ключ, по которому uni-копии ОДНОЙ детали
+  // узнают друг друга (`PCK_L_UNI_M` и `PCK_L_UNI_S` из склеенных по-размерных выгрузок). '' у
+  // не-uni блоков. Служит ИМЕНЕМ ПО УМОЛЧАНИЮ для новой детали — см. defaultPieceName.
+  uniBase: string;
   // What the dialog proposes and why. 'exact' | 'loose' need no badge — they ARE the name;
   // 'similar' and 'other-fabric' are guesses and say so.
   suggested: string; // piece lineKey, '' = none
@@ -121,6 +125,20 @@ type BlockRow = {
   fromSlot?: string;
   choice: string; // piece lineKey, '' = unmapped, NEW = create a piece named after the block
 };
+
+// ИМЯ НОВОЙ ДЕТАЛИ ПО УМОЛЧАНИЮ — имя блока, а у помеченного токеном UNI его uniBase.
+//
+// Склейка по-размерных выгрузок CLO приносит ОДНУ неградуируемую деталь под двумя именами
+// (`PCK_L_UNI_M` и `PCK_L_UNI_S`), и диалог заводил по детали кроя на каждое: две строки в
+// карточке, два комплекта площадей и удвоенный карман в счётчиках — при том, что настил кроит
+// один (dedupeUniPieces). Общее имя по умолчанию сводит их в ОДНУ деталь тем же механизмом,
+// которым диалог всегда объединял строки с одинаковым именем: вторая привязывается к уже
+// созданной. Ключ АЛИАСА при этом не меняется — он и остаётся сырым именем блока, как его
+// хранит сервер, так что связь деталь↔чертёж сохраняется у обеих копий.
+//
+// Имя — предложение, а не приговор: оно стоит в поле «название новой детали» и правится там же.
+const defaultPieceName = (row: { block: string; uniBase: string }): string =>
+  row.uniBase || row.block;
 
 // Sentinel for «создать новую деталь», deliberately unable to collide with a piece lineKey: a
 // ULID is 26 chars of upper-case Crockford base32, so a '+' and lower case can never be one.
@@ -263,7 +281,7 @@ export function PieceMatchModal({
   // count to offer the block again in the SAME pass. Rebuilding `rows` from the effect instead
   // would wipe whatever the operator has already chosen.
   const [blockCounts, setBlockCounts] = useState<
-    Map<string, { block: string; instances: number; sizes: string[] }>
+    Map<string, { block: string; instances: number; sizes: string[]; uniBase: string }>
   >(
     new Map(),
   );
@@ -388,6 +406,7 @@ export function PieceMatchModal({
     const perFile = new Map<string, Map<string, number>>();
     const spelling = new Map<string, string>(); // ci key → first spelling seen, stored verbatim
     const sizesByCi = new Map<string, Set<string>>(); // ci key → размеры, в которых деталь есть
+    const uniBaseByCi = new Map<string, string>(); // ci key → uniBase у помеченных блоков
     for (const p of contourPieces) {
       // The IDENTITY, not the raw block: one DXF carries the whole grade («BP_1_XS», «BP_1_M»…),
       // and those are one cut piece in five sizes, not five pieces. Stripping the size suffix
@@ -396,6 +415,8 @@ export function PieceMatchModal({
       if (!b) continue; // a file with no per-piece blocks has nothing to map
       const ci = b.toLowerCase();
       if (!spelling.has(ci)) spelling.set(ci, b);
+      const uniBase = split.codeById.get(p.id)?.uniBase ?? '';
+      if (uniBase && !uniBaseByCi.has(ci)) uniBaseByCi.set(ci, normBlock(uniBase));
       const sz = split.codeById.get(p.id)?.size ?? '';
       if (sz) {
         const set = sizesByCi.get(ci) ?? new Set<string>();
@@ -416,12 +437,20 @@ export function PieceMatchModal({
     for (const file of perFile.values()) {
       for (const [ci, n] of file) counts.set(ci, Math.max(counts.get(ci) ?? 0, n));
     }
-    const all = new Map<string, { block: string; instances: number; sizes: string[] }>();
+    const all = new Map<
+      string,
+      { block: string; instances: number; sizes: string[]; uniBase: string }
+    >();
     for (const [ci, instances] of counts) {
       const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
         (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
       );
-      all.set(ci, { block: spelling.get(ci)!, instances, sizes });
+      all.set(ci, {
+        block: spelling.get(ci)!,
+        instances,
+        sizes,
+        uniBase: uniBaseByCi.get(ci) ?? '',
+      });
     }
     setBlockCounts(all);
     const next: BlockRow[] = [];
@@ -464,7 +493,16 @@ export function PieceMatchModal({
       const sizes = [...(sizesByCi.get(ci) ?? [])].sort(
         (a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6),
       );
-      next.push({ block, instances, sizes, suggested, basis, fromSlot, choice: preselect });
+      next.push({
+        block,
+        instances,
+        sizes,
+        uniBase: uniBaseByCi.get(ci) ?? '',
+        suggested,
+        basis,
+        fromSlot,
+        choice: preselect,
+      });
     }
     next.sort((a, b) => a.block.localeCompare(b.block, 'ru'));
     setRows(next);
@@ -577,7 +615,11 @@ export function PieceMatchModal({
       if (mapped) return nameByPieceKey.get(mapped.toLowerCase()) ?? p.blockName ?? '';
     }
     const row = rowByCi.get(ci);
-    if (row?.choice === CREATE) return `+ ${row.block}`;
+    // Подпись на листе называет ТО ИМЯ, под которым деталь будет заведена: у uni-копий оно общее
+    // (см. defaultPieceName), и «+ PCK_L_UNI_M» на одном контуре рядом с «+ PCK_L_UNI_S» на
+    // другом обещал бы две детали там, где создаётся одна.
+    if (row?.choice === CREATE)
+      return `+ ${(draftNames[ci] ?? '').trim() || defaultPieceName(row)}`;
     if (row?.choice) return nameByPieceKey.get(row.choice.toLowerCase()) ?? row.block;
     // Идентичность, а не сырое имя: иначе на листе — главной поверхности диалога — блок
     // подписан «BP_1_XS», а строка таблицы, заголовок инспектора и «+ создать» рядом говорят
@@ -608,6 +650,7 @@ export function PieceMatchModal({
           block: found.block,
           instances: found.instances,
           sizes: found.sizes,
+          uniBase: found.uniBase,
           suggested: '',
           basis: 'none',
           choice: '',
@@ -733,11 +776,17 @@ export function PieceMatchModal({
         let pieceLineKey = r.choice;
         if (r.choice === CREATE) {
           const typed = (draftNames[r.block.toLowerCase()] ?? '').trim();
-          const name = typed || r.block;
+          const name = typed || defaultPieceName(r);
           const existing = keyByName.get(name.toLowerCase());
           if (existing) {
             // The operator typed the name of a piece that already exists — bind to it.
             pieceLineKey = existing;
+            // Вторая копия uni-детали приходит сюда же (общий uniBase дал общее имя). Количество
+            // на изделие берётся МАКСИМУМОМ по её блокам — тем же правилом, каким выше берётся
+            // максимум по файлам: копии одной детали обязаны быть одинаковыми, а если экспорт
+            // соврал, занизить крой хуже, чем завысить. Правится это на вкладке деталей.
+            const mine = created.find((c) => c.lineKey === existing);
+            if (mine) mine.piecesPerGarment = Math.max(mine.piecesPerGarment ?? 1, r.instances);
           } else {
             pieceLineKey = ulid();
             keyByName.set(name.toLowerCase(), pieceLineKey);
@@ -1146,7 +1195,7 @@ export function PieceMatchModal({
                       {focus.row.choice === CREATE &&
                         nameField(
                           'название новой детали',
-                          draftNames[focus.ci] ?? focus.row.block,
+                          draftNames[focus.ci] ?? defaultPieceName(focus.row),
                           (v) => setDraftNames((prev) => ({ ...prev, [focus.ci]: v })),
                         )}
                       {/* Bound to an existing piece in this same pass — renaming it here is the
