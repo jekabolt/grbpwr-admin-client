@@ -20,9 +20,63 @@ import { serverScopeKeyOfSheet } from './pattern-size-index';
 // заявить покрытие по файлам, которых нет, отсюда нельзя, а перезаливка любого листа делает площади
 // устаревшими сама, без чьего-либо участия.
 
-export type PublishPieceAreasResult =
-  | { ok: true; stored: number }
-  | { ok: false; reason: string };
+export type PublishPieceAreasResult = { ok: true; stored: number } | { ok: false; reason: string };
+
+/** Лист выкройки в терминах публикации: сырая привязка и стабильный ключ строки. */
+export type PieceAreaSheet = { lineKey?: string; fabricPurpose?: string; bomLineKey?: string };
+
+/**
+ * ЛИСТЫ, ПО КОТОРЫМ МЕРИЛИ, И СКОУП, ПОД КОТОРЫМ ПИШЕМ, ДОЛЖНЫ БЫТЬ ОДНИМ И ТЕМ ЖЕ. Причина отказа
+ * либо `null`.
+ *
+ * Здесь встречаются ДВА разных ответа на вопрос «чья это ткань», и их несовпадение — не мелочь:
+ *
+ *   • РАЗРЕШЁННЫЙ скоуп (то, по чему сгруппированы файлы и по чему считалась геометрия): лист,
+ *     привязанный к строке L, принадлежит назначению P, если L разложена в P;
+ *   • СЫРОЙ скоуп сервера (`entity.FabricScopeKey`): тот же лист лежит в скоупе L, потому что
+ *     сервер смотрит на само поле, а не на сегодняшний BOM.
+ *
+ * Пока карточка разложена целиком, оба ответа совпадают. На ПОЛУразобранной — нет, и тогда прежний
+ * код просто отфильтровывал «чужие» листы и публиковал остаток: геометрия бралась с обоих, а
+ * отпечаток отвечал за один. Перезалив «невидимый» лист, оператор менял площади и НЕ делал замер
+ * устаревшим — то есть получал молча неверную себестоимость, ровно ту, ради предотвращения которой
+ * отпечаток и считает сервер.
+ *
+ * Второе следствие того же: слот, разложенный в назначение, ищет площади под ключом назначения.
+ * Замер, записанный под ключом строки, он не найдёт НИКОГДА — запись «удалась» и не значит ничего.
+ *
+ * Поэтому правило одно на оба входа в замер: все листы этой ткани обязаны сырьём указывать на тот
+ * же скоуп, под которым мы пишем; иначе отказ с адресом починки.
+ */
+export function pieceAreaSheetsRefusal(
+  sheets: readonly PieceAreaSheet[],
+  scopeKey: string,
+): string | null {
+  const key = scopeKey.trim();
+  if (!key) return 'не определён скоуп ткани';
+  if (sheets.length === 0) return 'у этой ткани нет листов выкроек';
+  const keys = new Set(sheets.map(serverScopeKeyOfSheet));
+  if (keys.size > 1) {
+    return 'листы этой ткани привязаны по-разному: часть — к назначению, часть — к строке BOM. Сервер хранит их в РАЗНЫХ скоупах, и замер отвечал бы за файлы, которых в его скоупе нет. Допривяжите листы к назначению (кнопка «⇄» в строке листа)';
+  }
+  const only = [...keys][0] ?? '';
+  if (!only) {
+    return 'листы этой ткани не несут привязки к материалу — площадям не на чем висеть. Выберите материал в строке листа («⇄»)';
+  }
+  if (only !== key) {
+    return `листы этой ткани привязаны к строке BOM, а сама ткань разложена в назначение: сервер сложит замер в скоуп «${only}», а слот будет искать его в «${key}» — и не найдёт. Допривяжите листы к назначению (кнопка «⇄» в строке листа)`;
+  }
+  if (sheets.some((sh) => !(sh.lineKey ?? '').trim())) {
+    return 'у части листов ещё нет идентификатора — сохраните карточку и повторите замер';
+  }
+  return null;
+}
+
+// НИЖНЯЯ ГРАНИЦА ПЛОЩАДИ НА ПРОВОДЕ. На провод число уходит с двумя знаками, а колонка держит
+// CHECK area_cm2 > 0: 0.004 см² превращается в «0.00» и роняет ВЕСЬ замер одной строкой, причём
+// сообщением про ограничение БД, в котором нет ни детали, ни размера. Проверяем сами и называем
+// виновника — это единственное место, где ещё известно, кто он.
+const MIN_WIRE_AREA_CM2 = 0.005;
 
 /**
  * Публикует площади ОДНОГО скоупа ткани.
@@ -33,36 +87,58 @@ export type PublishPieceAreasResult =
  * КОМПЛЕКТ ОБЯЗАН БЫТЬ ПОЛНЫМ, и проверяет это сервер: он сверяет присланные детали с привязками
  * блоков своего скоупа в обе стороны. Недостающая деталь занижает площадь изделия, заниженная
  * площадь занижает норму, и обнаруживается это на складе, а не на экране. Поэтому здесь нет и не
- * должно быть «отправим что нашлось».
+ * должно быть «отправим что нашлось» — и по той же причине отсюда ушла ТИХАЯ ФИЛЬТРАЦИЯ строк с
+ * непригодной площадью: выбросить такую строку значило бы объявить неполный набор полным.
  */
 export async function publishPieceAreas(args: {
   techCardId: number;
   scopeKey: string;
-  sheets: { lineKey?: string; fabricPurpose?: string; bomLineKey?: string }[];
+  /**
+   * ВСЕ листы этой ткани (любого формата, включая наследие в PDF): именно из них сервер считает
+   * отпечаток скоупа, и прислать подмножество значит подписаться под чужим набором.
+   */
+  sheets: PieceAreaSheet[];
+  /**
+   * Строки замера, как их посчитал `dxfNormAreas` — вместе с признаками «оболочка» и
+   * «неоднозначный выбор» НА САМОЙ СТРОКЕ. Раньше признаки приходили сюда двумя отдельными
+   * множествами имён, а искались в них по line_key детали, — то есть не находились никогда, и
+   * сервер получал два нуля вместо провенанса замера.
+   */
   areas: DxfPieceAreaRow[];
   contourLayer: string;
   seamAllowanceMm: number;
-  /** Детали, у которых контур заменён выпуклой оболочкой при раздутии припуском. */
-  hulledPieceKeys?: Set<string>;
-  /** Детали, у которых на слое было несколько совпадающих кандидатов. */
-  ambiguousPieceKeys?: Set<string>;
+  /** Имя детали по её line_key — чтобы отказ называл деталь, а не ULID. */
+  nameOfPiece?: (pieceLineKey: string) => string;
 }): Promise<PublishPieceAreasResult> {
   const scopeKey = args.scopeKey.trim();
-  if (!scopeKey) return { ok: false, reason: 'не определён скоуп ткани' };
-  const rows = args.areas.filter((a) => a.pieceLineKey && a.areaCm2 > 0);
+  const sheetsRefusal = pieceAreaSheetsRefusal(args.sheets, scopeKey);
+  if (sheetsRefusal) return { ok: false, reason: sheetsRefusal };
+  const rows = args.areas;
   if (rows.length === 0) {
-    return { ok: false, reason: 'разбор не дал ни одной площади — проверьте слой контура и связи блоков с деталями' };
+    return {
+      ok: false,
+      reason:
+        'разбор не дал ни одной площади — проверьте слой контура и связи блоков с деталями',
+    };
   }
-  // Листы ЭТОГО скоупа, названные так, как их хранит сервер. Он сверит набор со своим и откажет при
-  // расхождении: площади, посчитанные по другому набору файлов, отвечали бы за файлы, которых никто
-  // не читал.
-  const sheetLineKeys = args.sheets
-    .filter((sh) => serverScopeKeyOfSheet(sh) === scopeKey)
-    .map((sh) => (sh.lineKey ?? '').trim())
-    .filter(Boolean);
-  if (sheetLineKeys.length === 0) {
-    return { ok: false, reason: 'у этой ткани нет листов выкроек на сервере' };
+  const named = (key: string) => args.nameOfPiece?.(key) || key;
+  const unaddressed = rows.filter((a) => !(a.pieceLineKey ?? '').trim());
+  if (unaddressed.length > 0) {
+    return {
+      ok: false,
+      reason: `${unaddressed.length} деталей ещё не сохранены на сервере — площадь ложится на деталь по её ключу, а его пока нет. Сохраните карточку и повторите замер`,
+    };
   }
+  const tooSmall = rows.filter((a) => !(a.areaCm2 >= MIN_WIRE_AREA_CM2));
+  if (tooSmall.length > 0) {
+    return {
+      ok: false,
+      reason: `площадь этих деталей нулевая или меньше сотой доли см²: ${[
+        ...new Set(tooSmall.map((a) => named(a.pieceLineKey))),
+      ].join(', ')} — на проводе она станет нулём, которого не примет ни сервер, ни здравый смысл. Похоже, выбран не тот слой контура`,
+    };
+  }
+  const sheetLineKeys = args.sheets.map((sh) => (sh.lineKey ?? '').trim()).filter(Boolean);
   try {
     const res = await adminService.SaveTechCardPieceAreas({
       techCardId: args.techCardId,
@@ -74,8 +150,8 @@ export async function publishPieceAreas(args: {
         pieceLineKey: a.pieceLineKey,
         sizeId: a.sizeId,
         areaCm2: { value: a.areaCm2.toFixed(2) },
-        hulled: args.hulledPieceKeys?.has(a.pieceLineKey) ?? false,
-        ambiguousPick: args.ambiguousPieceKeys?.has(a.pieceLineKey) ?? false,
+        hulled: a.hulled,
+        ambiguousPick: a.ambiguousPick,
       })),
     });
     return { ok: true, stored: Number(res?.stored ?? rows.length) };
