@@ -21,6 +21,7 @@ import SelectComponent from 'ui/components/select';
 import { inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { LAY_MODE_LABEL, stampWhen } from './lay-card';
+import { layGeometry } from './lay-geometry';
 import { LaySectionRows, SectionDraft, newSectionDraft, sectionPlies } from './lay-section-rows';
 import {
   FACT_UNIT_OPTIONS,
@@ -44,6 +45,32 @@ import {
 export type LaySlotOption = { lineKey: string; name: string; materialId: number };
 export type LayColorwayOption = { colorwayId: number; label: string };
 
+// 2 см на конец — калибровка из модели («20 слоёв × 3 м ⇒ ~1.3%»). Живёт КОНСТАНТОЙ, потому что
+// читателей у неё двое: сама форма и очередь раскроя партии, которая показывает план настила ДО
+// её открытия. Второй литерал «2» означал бы, что предпросмотр обещает одно, а форма подставляет
+// другое — молча и правдоподобно.
+export const LAY_END_LOSS_DEFAULT_CM = '2';
+
+/**
+ * ОКРУЖЕНИЕ РЕДАКТОРА: всё, что не зависит от того, какой именно настил правят.
+ *
+ * Отдельным типом, потому что монтируют редактор ТЕПЕРЬ ИЗ ДВУХ МЕСТ — плана настилов партии и
+ * очереди раскроя на вкладке костинга, — и второй вызывающий обязан прислать ровно тот же набор,
+ * а не «сколько вспомнил». Форма настила при этом по-прежнему ровно одна.
+ */
+export type LayEditorContext = {
+  runId: number;
+  techCardId: number;
+  colorwayLabel: (colorwayId: number) => string;
+  /** Колорвеи прогона — обе половины идентичности нового настила выбираются здесь. */
+  colorwayOptions: LayColorwayOption[];
+  /** Рулонные слоты карточки. */
+  slotOptions: LaySlotOption[];
+  runMarkers: common_TechCardMarkerSummary[];
+  cardMarkers: common_TechCardMarkerSummary[];
+  nextDisplayOrder: number;
+};
+
 // ЕДИНСТВЕННОЕ место во всём плане настилов, где живёт состояние формы.
 //
 // `LayPlan` знает только «какой настил открыт», `LayCard` не знает ничего, `MarkerPicker` — только
@@ -62,29 +89,37 @@ export function LayEditor({
   existing,
   seedColorwayId,
   seedBomLineKey,
+  seedSections,
+  seedMode,
+  seedEndLossCm,
   colorwayLabel,
   colorwayOptions,
   slotOptions,
   runMarkers,
   cardMarkers,
   nextDisplayOrder,
-}: {
+}: LayEditorContext & {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  runId: number;
-  techCardId: number;
   /** undefined = новый настил. */
   existing?: common_ProductionRunLay;
   seedColorwayId: number;
   seedBomLineKey: string;
-  colorwayLabel: (colorwayId: number) => string;
-  /** Колорвеи прогона — обе половины идентичности нового настила выбираются здесь. */
-  colorwayOptions: LayColorwayOption[];
-  /** Рулонные слоты карточки. */
-  slotOptions: LaySlotOption[];
-  runMarkers: common_TechCardMarkerSummary[];
-  cardMarkers: common_TechCardMarkerSummary[];
-  nextDisplayOrder: number;
+  /**
+   * ЗАСЕВ СЕКЦИЙ — предложение вызывающего, а не запись. Очередь раскроя партии знает и раскладку
+   * (она только что её сняла), и число слоёв (оно выводится из партии, см. batch-lay-proposal), и
+   * предлагать оператору набрать это руками значило бы заставить его переписать то, что уже
+   * посчитано. Форма остаётся местом, где настил СОЗДАЮТ: засеянные строки правятся и удаляются
+   * как любые другие, а запись по-прежнему происходит по кнопке человека.
+   *
+   * Читается только у НОВОГО настила: у существующего секции приезжают с сервера, и подменить их
+   * засевом значило бы стереть чужую правку молча.
+   */
+  seedSections?: readonly { markerId: number; plies: number }[];
+  /** Режим настилания, предложенный вызывающим. Без него — умолчание формы (лицом вверх). */
+  seedMode?: common_ProductionLayMode;
+  /** Концевые потери, см на один конец одного слоя. Без них — умолчание формы. */
+  seedEndLossCm?: string;
 }) {
   const { showMessage } = useSnackBarStore();
   const save = useSaveLay();
@@ -105,26 +140,40 @@ export function LayEditor({
   const [colorwayId, setColorwayId] = useState(() => existing?.colorwayId ?? seedColorwayId);
   const [bomLineKey, setBomLineKey] = useState(() => existing?.bomLineKey || seedBomLineKey);
   const [mode, setMode] = useState<common_ProductionLayMode>(
-    () => existing?.mode ?? 'PRODUCTION_LAY_MODE_FACE_UP',
+    () => existing?.mode ?? seedMode ?? 'PRODUCTION_LAY_MODE_FACE_UP',
   );
-  // 2 см на конец — калибровка из модели («20 слоёв × 3 м ⇒ ~1.3%»). Значение проставлено ЯВНО и
-  // названо в подсказке: тихий ноль занижал бы потребность, а занижение потерь дороже завышения.
+  // Умолчание (LAY_END_LOSS_DEFAULT_CM) проставлено ЯВНО и названо в подсказке: тихий ноль занижал
+  // бы потребность, а занижение потерь дороже завышения.
   // У СУЩЕСТВУЮЩЕГО настила подставлять его нельзя: тогда правка примечания молча переписала бы
   // цифру, которую оператор осознанно оставил незаполненной.
+  //
+  // Засев вызывающего бьёт умолчание, но НЕ бьёт сохранённое значение — по той же причине: цех
+  // уже назвал своё число, и оно принадлежит ему.
   const [endLoss, setEndLoss] = useState(() =>
-    existing ? existing.endLossCm?.value ?? '' : '2',
+    existing ? existing.endLossCm?.value ?? '' : seedEndLossCm ?? LAY_END_LOSS_DEFAULT_CM,
   );
   const [name, setName] = useState(() => existing?.name ?? '');
   const [note, setNote] = useState(() => existing?.note ?? '');
-  const [sections, setSections] = useState<SectionDraft[]>(() =>
-    (existing?.sections ?? []).length > 0
-      ? (existing?.sections ?? []).map((s) => ({
-          sectionKey: s.sectionKey || ulid(),
-          markerId: s.markerId ?? 0,
-          plies: String(s.plies ?? ''),
-        }))
-      : [newSectionDraft()],
-  );
+  const [sections, setSections] = useState<SectionDraft[]>(() => {
+    if ((existing?.sections ?? []).length > 0) {
+      return (existing?.sections ?? []).map((s) => ({
+        sectionKey: s.sectionKey || ulid(),
+        markerId: s.markerId ?? 0,
+        plies: String(s.plies ?? ''),
+      }));
+    }
+    // Ключ секции минтится ЗДЕСЬ, а не приезжает с засевом: по нему сервер диффит секции, и на её
+    // id вешают факт расхода и приёмку кроя. Вызывающий предлагает СОДЕРЖИМОЕ строки, а её
+    // долговечная идентичность заводится там же, где заводятся все остальные (newSectionDraft).
+    if (seedSections && seedSections.length > 0) {
+      return seedSections.map((s) => ({
+        ...newSectionDraft(),
+        markerId: s.markerId,
+        plies: s.plies > 0 ? String(s.plies) : '',
+      }));
+    }
+    return [newSectionDraft()];
+  });
 
   // ── ЛОТ И ФАКТ РАСХОДА (Ф5б.1 / Ф5б.2) ─────────────────────────────────────
   // Всё это цеховая половина настила, и она заводится тем же ленивым засевом: правка настила —
@@ -190,18 +239,15 @@ export function LayEditor({
     );
 
   // ── живые итоги, §7.1 ──────────────────────────────────────────────────────
-  // cloth = Σ (used_length × plies);  end_loss_total = 2 × end_loss × Σ plies;  planned = сумма.
-  // Считаются ровно по тем числам, что оператор видит на экране, поэтому расходиться с сервером им
-  // не на чем — кроме высоты стопки, у которой на клиенте нет входных данных (см. ниже).
-  const totalPlies = sections.reduce((s, x) => s + sectionPlies(x), 0);
-  const clothCm = sections.reduce((sum, x) => {
-    const m = runMarkers.find((mm) => (mm.id ?? 0) === x.markerId);
-    const len = Number(m?.usedLengthCm?.value);
-    return sum + (Number.isFinite(len) ? len * sectionPlies(x) : 0);
-  }, 0);
-  const endLossNum = Number(endLoss);
-  const endLossTotalCm = Number.isFinite(endLossNum) ? 2 * endLossNum * totalPlies : 0;
-  const plannedCm = clothCm + endLossTotalCm;
+  // Формула ОДНА на клиент (`layGeometry`) — её же показывает очередь раскроя партии в своём
+  // предложении настила. Считается ровно по тем числам, что оператор видит на экране, поэтому
+  // расходиться с сервером ей не на чем — кроме высоты стопки, у которой на клиенте нет входных
+  // данных (см. ниже).
+  const { totalPlies, clothCm, endLossTotalCm, plannedCm } = layGeometry({
+    sections: sections.map((s) => ({ markerId: s.markerId, plies: sectionPlies(s) })),
+    endLossCm: endLoss,
+    markers: runMarkers,
+  });
 
   const problems: string[] = [];
   if (!bomLineKey) problems.push('не выбрана ткань (слот BOM), которую этот настил кроит');
@@ -400,8 +446,10 @@ export function LayEditor({
             }
           />
           <Text size='micro' variant='label'>
-            типовое значение 2–5 см; полные потери = 2 × это число × сумма слоёв. Значение 2
-            проставлено по умолчанию — поправьте под свой цех.
+            типовое значение 2–5 см; полные потери = 2 × это число × сумма слоёв.{' '}
+            {isNew && seedEndLossCm
+              ? `Значение ${seedEndLossCm} взято из настилов этой партии — это ваше число, а не измерение; поправьте, если стол другой.`
+              : `Значение ${LAY_END_LOSS_DEFAULT_CM} проставлено по умолчанию — поправьте под свой цех.`}
           </Text>
         </div>
 

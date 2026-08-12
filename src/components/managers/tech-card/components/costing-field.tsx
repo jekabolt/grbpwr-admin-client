@@ -120,8 +120,32 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
   const gross = agreed(colorways.map((c) => pick(c.prices)));
   const net = agreed(colorways.map((c) => pick(c.netPrices)));
 
-  if (gross.distinct.length === 0)
-    return { gross: undefined, net: undefined, reason: `нет ${currency}-цены у колорвеев` };
+  if (gross.distinct.length === 0) {
+    // ОТСУТСТВИЕ НАЗЫВАЕТ ТО, ЧТО НАШЛОСЬ ВМЕСТО. «Нет EUR-цены» — правда, от которой нечего
+    // делать: у колорвея цена в карточке ВИДНА, и человек читает строку как поломку экрана.
+    // А случаев за ней два, и чинятся они по-разному: цена есть, но в ДРУГОЙ валюте (тогда либо
+    // добавить цену в валюте костинга, либо вести костинг в той) — или цены нет вовсе ни в одной
+    // (тогда идти публиковать продукт). Пересчитать чужую валюту по курсу здесь НЕЛЬЗЯ: розница в
+    // другой валюте — это цена другого рынка, а не то же число в других единицах, и маржа против
+    // пересчитанного была бы сценарием, выданным за факт — ровно то, за что в этом же файле уже
+    // разведены gross и net.
+    const others = Array.from(
+      new Set(
+        colorways.flatMap((c) =>
+          (c.prices ?? [])
+            .filter((p) => p.currency && p.currency !== currency && parseDecimalNumber(p.price?.value) > 0)
+            .map((p) => p.currency as string),
+        ),
+      ),
+    );
+    return {
+      gross: undefined,
+      net: undefined,
+      reason: others.length
+        ? `у колорвеев нет цены в ${currency} — она задана в ${others.join(' / ')}. Добавьте цену в ${currency} или ведите костинг в той же валюте`
+        : `у колорвеев не задана розничная цена ни в одной валюте`,
+    };
+  }
   if (gross.distinct.length > 1)
     return {
       gross: undefined,
