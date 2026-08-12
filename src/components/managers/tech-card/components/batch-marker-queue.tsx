@@ -74,6 +74,7 @@ import { bomPurposeLabel } from './bom-purpose-labels';
 import {
   planBatchMarkers,
   type BatchCell,
+  type JobSizeRow,
   type MarkerJob,
   type MarkerMode,
   type PlanScope,
@@ -135,6 +136,14 @@ const blankRun = (): JobRun => ({
 });
 
 const pct = (v: number) => `${(v * 100).toFixed(1)}%`;
+// Свёрнутый по миксу ряд — уже не то число, что лежит в колонке: печатать все его знаки значило бы
+// выдать среднее за записанное. Тысячные — шаг записи нормы (DECIMAL(10,3)), дальше округлять
+// нечего; хвост нулей не рисуем.
+const round3 = (v: number) => String(Math.round(v * 1000) / 1000);
+// Пометка, что число в рецепте — СВЁРНУТЫЙ РЯД, а не одно записанное значение. Без неё «в рецепте
+// 1.10» читается как «в поле стоит 1.10», а в поле стоят M = 1.00 и L = 2.00.
+const perSizeWord = (kind: 'scalar' | 'perSize') =>
+  kind === 'perSize' ? ' (ряд по размерам, свёрнут миксом партии)' : '';
 const meters = (cm: number) => `${(cm / 100).toFixed(2)} м`;
 
 /** Слово для источника расхода, лежащего в рецепте. */
@@ -311,8 +320,32 @@ export function BatchMarkerQueue({
   // это лишний вызов на каждой открытой карточке. Ключ общий со страницей партии, так что чаще
   // всего это чтение из кэша.
   const batchRunId = Number(run.id ?? 0);
-  const { data: laysData } = useRunLays(batchRunId, batchRunId > 0 && mode === 'batch');
-  const runMarkers = useMemo(() => laysData?.runMarkers ?? [], [laysData]);
+  const laysQuery = useRunLays(batchRunId, batchRunId > 0 && mode === 'batch');
+  const runMarkers = useMemo(() => laysQuery.data?.runMarkers ?? [], [laysQuery.data]);
+  // РАСКЛАДКИ, ЗАНЯТЫЕ СЕКЦИЯМИ НАСТИЛОВ. Секция настила ссылается на раскладку по id, а её
+  // плановая длина, число полотен и проверки посчитаны по ТОЙ геометрии; перезаписать такую
+  // раскладку значит оставить производственную строку ссылаться на то же место с другим
+  // содержимым. Планировщик поэтому их не трогает — см. предикат замены.
+  const referencedMarkerIds = useMemo(() => {
+    const ids = new Set<number>();
+    for (const lay of laysQuery.data?.lays ?? []) {
+      for (const sec of lay.sections ?? []) {
+        const id = Number(sec.markerId ?? 0);
+        if (id > 0) ids.add(id);
+      }
+    }
+    return ids;
+  }, [laysQuery.data]);
+  // СПИСОК РАСКЛАДОК ПАРТИИ ЕЩЁ НЕ ПРОЧИТАН — планировать НЕЛЬЗЯ, и это не косметика загрузки.
+  // План, снятый по пустому списку, не находит собственную прошлую раскладку: задание уходит с
+  // `id = 0`, полностью оплачивает прогон и получает отказ по уникальности имени. Тот же гейт
+  // закрывает окно ПОСЛЕ сохранения: инвалидация ключа настилов запускает перезапрос, и до его
+  // конца план описывает вчерашнее состояние прогона.
+  //
+  // `isPending` у выключенного запроса в react-query v5 висит вечно, поэтому оба флага читаются
+  // строго под условием включения — тем же, что стоит в самом хуке.
+  const laysLoading =
+    batchRunId > 0 && mode === 'batch' && (laysQuery.isPending || laysQuery.isFetching);
   const [off, setOff] = useState<Record<string, boolean>>({});
   const [runs, setRuns] = useState<Record<string, JobRun>>({});
   const stale = !!parsed && parsed.signature !== prepSignature;
@@ -395,6 +428,7 @@ export function BatchMarkerQueue({
       dictTokens,
       markers,
       runMarkers,
+      referencedMarkerIds,
       timeBudgetMs: Math.max(1, budgetS) * 1000,
       cardSeamAllowanceRaw: cardSeamRaw,
       workshopSeamAllowance: workshop.data?.settings?.defaultSeamAllowanceMm,
@@ -410,6 +444,7 @@ export function BatchMarkerQueue({
     dictTokens,
     markers,
     runMarkers,
+    referencedMarkerIds,
     budgetS,
     cardSeamRaw,
     workshop.data,
@@ -713,7 +748,7 @@ export function BatchMarkerQueue({
     // ПРОТУХШИЙ ПЛАН НЕ ЗАПУСКАЕТСЯ. Разбор — снимок; ширина, состав тканей или сами листы могли
     // измениться на соседней смонтированной вкладке, и раскладка по старому снимку записала бы
     // норму на полотне, которого у ткани уже нет.
-    if (!plan || selectedJobs.length === 0 || blocked || stale) return;
+    if (!plan || selectedJobs.length === 0 || blocked || stale || laysLoading) return;
     stopRef.current = false;
     setPhase('running');
     // Задания идут СГРУППИРОВАННЫМИ ПО ТКАНИ: воркер держит один разбор, и чередование тканей
@@ -914,9 +949,17 @@ export function BatchMarkerQueue({
         !!pinId,
       );
       const measured = toBomUnit(avgCm, b.job.unit, basis.ok ? basis.basis : undefined);
-      const current = recipeConsumption(techCard, b.job.colorwayId, b.job.bomLineKey);
+      const current = recipeConsumption(
+        techCard,
+        b.job,
+        // ТЕ ЖЕ ВЕСА, ЧТО У ИЗМЕРЕННОЙ СТОРОНЫ: строки, которые реально посчитались, с их
+        // количествами в партии. Размер, по которому раскладка не снялась, в сверку не входит ни
+        // слева, ни справа — иначе половина сравнения описывала бы другую партию.
+        b.lines.flatMap((l) => l.job.sizes),
+        (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
+      );
       const deltaPct =
-        measured && current && current.value > 0
+        measured && current && current.kind !== 'perSizeGap' && current.value > 0
           ? ((measured.value - current.value) / current.value) * 100
           : null;
       // ═══ СКОЛЬКО РАЗМЕРНАЯ НОРМА НЕ ДОГОВАРИВАЕТ ═══════════════════════════════════════════
@@ -1013,11 +1056,17 @@ export function BatchMarkerQueue({
                 type='button'
                 size='xs'
                 variant='secondary'
-                disabled={selectedJobs.length === 0 || !!blocked || stale}
-                title={stale ? 'данные карточки изменились — подготовьте заново' : undefined}
+                disabled={selectedJobs.length === 0 || !!blocked || stale || laysLoading}
+                title={
+                  stale
+                    ? 'данные карточки изменились — подготовьте заново'
+                    : laysLoading
+                      ? 'читаем раскладки партии — пока список не прочитан, план не знает, что в партии уже снято'
+                      : undefined
+                }
                 onClick={start}
               >
-                {`запустить (${selectedJobs.length})`}
+                {laysLoading ? 'читаем раскладки партии…' : `запустить (${selectedJobs.length})`}
               </Button>
             </div>
           )
@@ -1262,9 +1311,13 @@ export function BatchMarkerQueue({
                   // У настила партии в строке стоит ЕГО СОСТАВ, а не размер: «настил 3M+2L» —
                   // это и есть предмет замера, и КПД рядом относится именно к нему.
                   label={
-                    l.job.mode === 'batch'
-                      ? `настил ${l.job.sizeLabel} · покрывает ${l.job.batchQty} шт партии`
-                      : `${l.job.sizeLabel} · ${l.job.batchQty} шт`
+                    l.job.mode !== 'batch'
+                      ? `${l.job.sizeLabel} · ${l.job.batchQty} шт`
+                      : l.job.unitsTotal > 1
+                        ? `настил ${l.job.sizeLabel} · покрывает ${l.job.batchQty} шт партии`
+                        : // НАСТИЛОМ ЭТО НЕ НАЗЫВАЕТСЯ: соотношение свелось к одному изделию, и
+                          // подпись «настил» приписала бы одиночной укладке цеховую плотность.
+                          `ОДНО изделие ${l.job.sizeLabel} · покрывает ${l.job.batchQty} шт партии`
                   }
                   value={`${l.result.usedLengthCm.toFixed(0)} см · КПД ${pct(l.result.efficiency)}`}
                 />
@@ -1280,7 +1333,15 @@ export function BatchMarkerQueue({
                   НЕ ДОГОВАРИВАЕТ. Слева — измеренный настил на реальном соотношении, справа — те
                   же размерные нормы, взвешенные тем же миксом. Разницу между ними до сих пор не
                   видел никто: обе цифры выглядят одинаково «измеренными». */}
-              {g.head.mode === 'batch' ? (
+              {/* СОСТАВ СВЁЛСЯ К ОДНОМУ ИЗДЕЛИЮ — говорим это раньше любых процентов. КПД такой
+                  укладки не является процентом раскроя партии: одиночное изделие кладётся реже
+                  настоящего настила, ровно как в режиме размерных норм. */}
+              {g.head.mode === 'batch' && g.head.unitsTotal === 1 ? (
+                <Text size='micro' className='text-error'>
+                  {`в партии этот колорвей заказан в одном размере (${g.head.sizeLabel}) — настила здесь нет: движок положил ОДНО изделие. Это та же разреженная укладка, что и размерная норма, поэтому КПД ниже цехового, а расход идёт с запасом; реальным процентом раскроя партии это число называть нельзя`}
+                </Text>
+              ) : null}
+              {g.head.mode === 'batch' && g.head.unitsTotal > 1 ? (
                 <Text size='micro' variant='label'>
                   {g.normMeasured == null
                     ? 'сравнить с размерными нормами нечем: они сняты не на все размеры этого настила, сняты на другой ширине полотна либо расхода не дают (например, лежит черновик). Снимите режим «размерные нормы» на те же размеры'
@@ -1301,22 +1362,28 @@ export function BatchMarkerQueue({
                   {`посчитано ${g.totalQty} из ${g.plannedQty} изделий этого колорвея — по остальным размерам раскладка не снялась (см. отказы выше), и число выше описывает только посчитанную часть партии`}
                 </Text>
               ) : null}
+              {/* СВЕРКА С РЕЦЕПТОМ — с тем числом, по которому расчёт РЕАЛЬНО идёт: пер-размерный
+                  ряд, если он есть, иначе скаляр (см. recipeConsumption). Ряд, не покрывающий
+                  размеры партии, — отдельный ответ: сравнить с ним нечего, а усечённая сумма
+                  описывала бы другую партию. */}
               <Text size='micro' variant='label'>
                 {g.current == null
                   ? 'в рецепте этого колорвея расхода по этой ткани нет — сравнивать не с чем'
-                  : g.measured == null
-                    ? `в рецепте ${g.current.value} ${g.head.unit} (${sourceWord(g.current.source)}); перевести измеренную длину в единицу слота нечем — ${
-                        bomUnitKind(g.head.unit) === 'kg'
-                          ? 'кг-слоту нужны полная ширина рулона и плотность артикула'
-                          : `единица «${g.head.unit || '—'}» длину не принимает`
-                      }`
-                    : g.deltaPct == null
-                      ? `в рецепте ${g.current.value} ${g.head.unit} (${sourceWord(g.current.source)})`
-                      : `${sourceWord(g.current.source)} давала ${g.current.value} ${g.head.unit} — ${
-                          g.deltaPct >= 0
-                            ? `занижала на ${Math.abs(g.deltaPct).toFixed(0)}%`
-                            : `завышала на ${Math.abs(g.deltaPct).toFixed(0)}%`
-                        }`}
+                  : g.current.kind === 'perSizeGap'
+                    ? `в рецепте расход задан ПО РАЗМЕРАМ (${sourceWord(g.current.source)}), но в нём нет размеров ${g.current.missing.join(', ')} этой партии — сравнивать не с чем: усечённый ряд описывал бы другую партию`
+                    : g.measured == null
+                      ? `в рецепте ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} (${sourceWord(g.current.source)}); перевести измеренную длину в единицу слота нечем — ${
+                          bomUnitKind(g.head.unit) === 'kg'
+                            ? 'кг-слоту нужны полная ширина рулона и плотность артикула'
+                            : `единица «${g.head.unit || '—'}» длину не принимает`
+                        }`
+                      : g.deltaPct == null
+                        ? `в рецепте ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} (${sourceWord(g.current.source)})`
+                        : `${sourceWord(g.current.source)} давала ${round3(g.current.value)} ${g.head.unit}${perSizeWord(g.current.kind)} — ${
+                            g.deltaPct >= 0
+                              ? `занижала на ${Math.abs(g.deltaPct).toFixed(0)}%`
+                              : `завышала на ${Math.abs(g.deltaPct).toFixed(0)}%`
+                          }`}
               </Text>
             </div>
           ))}
@@ -1476,17 +1543,65 @@ function weightedNormCm(
  * Читается ровно одна строка: НОРМОНОСЕЦ, то есть строка уровня ИЗДЕЛИЯ. Строка, привязанная к
  * детали кроя, — это назначение материала («деталь X кроится из артикула Y»), а не норма, и брать с
  * неё расход значило бы прочитать чужой факт (сервер её так и читает — IsPieceMaterialAssignment).
+ *
+ * ═══ ПЕР-РАЗМЕРНЫЙ РЯД БЬЁТ СКАЛЯР, И ЭТО НЕ ПРЕДПОЧТЕНИЕ, А ПРАВИЛО РАСЧЁТА ══════════════════
+ *
+ * `usagePerGarmentQty` игнорирует скаляр, как только `size_consumptions` непуст, — а применение по
+ * размерам СПЕЦИАЛЬНО оставляет прежний скаляр лежать на месте (стирает его только скалярный
+ * режим). То есть строка сплошь и рядом несёт ОБА числа, из которых работает только одно. Читая
+ * скаляр, экран сравнивал измеренное с числом, которого костинг не видит: живой ряд M = 1.00 /
+ * L = 2.00 при партии 90 M + 10 L даёт 1.10, лежащий рядом мёртвый скаляр 1.50 — и «завышала на
+ * 27 %» печаталось там, где расхождения нет вовсе.
+ *
+ * Ряд сворачивается ТЕМ ЖЕ МИКСОМ ПАРТИИ, что и измеренная сторона: сравнивать реальный настил со
+ * средним по ряду значит сравнивать две разные партии. Неполное покрытие — отдельный ответ, а не
+ * усечённая сумма: ряд без одного из размеров партии не описывает ни того, ни другого.
  */
+type RecipeNorm =
+  | { kind: 'scalar' | 'perSize'; value: number; source: string }
+  | { kind: 'perSizeGap'; source: string; missing: string[] };
+
 function recipeConsumption(
   card: common_TechCard | undefined,
-  colorwayId: number,
-  bomLineKey: string,
-): { value: number; source: string } | null {
-  for (const u of normCarriers(card, colorwayId, bomLineKey)) {
+  job: MarkerJob,
+  /**
+   * Размеры, ПО КОТОРЫМ РЕАЛЬНО СНЯТ измеренный ответ, с их количествами в партии. Берутся не из
+   * `job.sizes`, а из всех посчитанных строк группы: в режиме норм группа держит по строке на
+   * размер, и свернуть ряд рецепта по составу ОДНОЙ из них значило бы сравнить среднее по трём
+   * размерам с нормой одного.
+   */
+  measuredSizes: readonly JobSizeRow[],
+  sizeName: (sizeId: number) => string,
+): RecipeNorm | null {
+  for (const u of normCarriers(card, job.colorwayId, job.bomLineKey)) {
+    const rows = u.sizeConsumptions ?? [];
+    const source = u.consumptionSource ?? '';
+    if (rows.length > 0) {
+      const bySize = new Map<number, number>();
+      for (const r of rows) {
+        const n = Number(r.consumption?.value ?? '');
+        if (Number(r.sizeId ?? 0) > 0 && Number.isFinite(n) && n > 0) {
+          bySize.set(Number(r.sizeId), n);
+        }
+      }
+      const missing = measuredSizes
+        .filter((x) => !bySize.has(x.sizeId))
+        .map((x) => sizeName(x.sizeId));
+      if (missing.length > 0) return { kind: 'perSizeGap', source, missing };
+      let qty = 0;
+      let sum = 0;
+      for (const x of measuredSizes) {
+        const q = Math.max(0, x.batchQty);
+        qty += q;
+        sum += q * (bySize.get(x.sizeId) as number);
+      }
+      if (qty > 0) return { kind: 'perSize', value: sum / qty, source };
+      continue;
+    }
     const raw = u.consumption?.value;
     const n = Number(raw ?? '');
     if (!raw || !Number.isFinite(n) || n <= 0) continue;
-    return { value: n, source: u.consumptionSource ?? '' };
+    return { kind: 'scalar', value: n, source };
   }
   return null;
 }

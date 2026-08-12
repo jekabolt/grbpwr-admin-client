@@ -1340,6 +1340,12 @@ export function TechPackDocument({
             <tbody>
               {scopedMarkers.map((mk, i) => {
                 const scalar = dec(mk.consumptionPerUnitCm);
+                // ЧЕРНОВИК (0299) НА БУМАГЕ ОБЯЗАН БЫТЬ ПОДПИСАН. Этот лист уходит на раскройный
+                // стол, а частичная раскладка отличается от измеренной ровно двумя вещами: длина
+                // короче настоящей и клетка нормы пуста. Пустая клетка на бумаге читается как «ещё
+                // не посчитали», короткая длина — как норма; вместе они дают заниженный расчёт
+                // ткани, сделанный по бумаге, которую никто не оспорит.
+                const draft = mk.isDraft === true;
                 // Скаляр НАМЕРЕННО не приходит у смешанной раскладки: сервер отказывается свести
                 // расход к одному числу, когда в настиле лежат разные размеры, и объясняет отказ
                 // текстом. Пустая клетка вместо этого читалась бы как «нормы нет».
@@ -1350,18 +1356,36 @@ export function TechPackDocument({
                   <tr key={mk.id ?? i} className='break-inside-avoid'>
                     <td className={TD}>
                       <div className='font-medium'>{mk.name || `#${mk.id ?? ''}`}</div>
+                      {draft && (
+                        <div className='font-bold uppercase'>
+                          ⚠ draft — partial layout, do not cut
+                          {wireInt(mk.totalCount) > wireInt(mk.placedCount)
+                            ? ` (${wireInt(mk.placedCount)} of ${wireInt(mk.totalCount)} pieces placed)`
+                            : ''}
+                        </div>
+                      )}
                       {mk.normConflict && (
                         <div className='font-bold uppercase'>⚠ {mk.normConflict}</div>
                       )}
                     </td>
                     <td className={TD}>{mk.bomItemName || '—'}</td>
                     <td className={`${TD} text-right`}>{dec(mk.fabricWidthCm) || '—'}</td>
-                    <td className={`${TD} text-right`}>{dec(mk.usedLengthCm) || '—'}</td>
+                    <td className={`${TD} text-right`}>
+                      {dec(mk.usedLengthCm) || '—'}
+                      {/* Длина черновика — НЕ длина изделия: недостающие детали ещё займут место,
+                          которого в этом числе нет. Оговорка стоит вплотную к числу, а не в
+                          примечании внизу листа: бумагу читают по колонке. */}
+                      {draft && <div className='uppercase'>incomplete</div>}
+                    </td>
                     <td className={`${TD} text-right`}>
                       {dec(mk.efficiencyPct) ? `${dec(mk.efficiencyPct)} %` : '—'}
                     </td>
                     <td className={TD}>
-                      {scalar !== '' ? (
+                      {draft ? (
+                        // Норму черновик не даёт ни в каком виде — сервер её и не публикует. Слово
+                        // вместо прочерка: прочерк читается как «не заполнили».
+                        <span className='uppercase'>no norm — draft</span>
+                      ) : scalar !== '' ? (
                         `${scalar} cm`
                       ) : perSize.length > 0 ? (
                         <div className='flex flex-col gap-0.5'>

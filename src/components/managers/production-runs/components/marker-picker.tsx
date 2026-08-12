@@ -194,23 +194,42 @@ export function MarkerPicker({
             у этого слота нет карточных раскладок, которые можно скопировать
           </Text>
         ) : (
-          copySources.map((m) => (
-            <Button
-              key={m.id}
-              type='button'
-              variant='secondary'
-              size='xs'
-              disabled={copying || disabled}
-              className='w-full'
-              onClick={() => {
-                onCopy(m.id ?? 0);
-                setOpen(false);
-              }}
-            >
-              {copying ? 'копирую…' : `копировать «${m.name || `#${m.id}`}»`}
-              {m.isNorm ? ' — норма' : ''}
-            </Button>
-          ))
+          copySources.map((m) => {
+            // ЧЕРНОВИК НЕ КОПИРУЕТСЯ В ПРОГОН, и кнопка гасится ЗДЕСЬ, а не отказом сервера после
+            // нажатия. Копия уехала бы с частичными счётчиками и `is_draft: false` — то есть
+            // клиент попросил бы сохранить неполную укладку без согласия на черновик и получил бы
+            // отказ, из которого не следует, что не так с ИСХОДНОЙ раскладкой. Прятать её нельзя:
+            // оператор ищет ту раскладку, которую только что видел на карточке.
+            const draft = m.isDraft === true;
+            return (
+              <div key={m.id} className='flex flex-col gap-0.5'>
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  disabled={copying || disabled || draft}
+                  className='w-full'
+                  onClick={() => {
+                    onCopy(m.id ?? 0);
+                    setOpen(false);
+                  }}
+                >
+                  {copying ? 'копирую…' : `копировать «${m.name || `#${m.id}`}»`}
+                  {m.isNorm ? ' — норма' : ''}
+                  {draft ? ' — черновик' : ''}
+                </Button>
+                {draft ? (
+                  <Text size='micro' className='text-error'>
+                    черновик: уложены не все детали
+                    {(m.totalCount ?? 0) > (m.placedCount ?? 0)
+                      ? ` (${m.placedCount ?? 0} из ${m.totalCount ?? 0})`
+                      : ''}{' '}
+                    — копировать в прогон нечего, пересчитайте раскладку с бо́льшим бюджетом
+                  </Text>
+                ) : null}
+              </div>
+            );
+          })
         )}
 
         {/* Третий путь появления раскройного маркера — «снять новую» в модалке раскладки. Она
