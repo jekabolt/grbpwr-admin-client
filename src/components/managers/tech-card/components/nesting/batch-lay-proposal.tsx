@@ -24,11 +24,7 @@
 // заполненными полями. Второй формы здесь нет и быть не может: настил — это ключ идемпотентности,
 // оптимистичная блокировка, полная замена секций, лот и факт расхода, и вторая её реализация
 // разошлась бы с первой на первой же правке. Запись происходит по кнопке человека внутри формы.
-import type {
-  common_ProductionLayMode,
-  common_ProductionRunLay,
-  common_TechCardMarkerSummary,
-} from 'api/proto-http/admin';
+import type { common_ProductionLayMode, common_ProductionRunLay } from 'api/proto-http/admin';
 import {
   LAY_END_LOSS_DEFAULT_CM,
   LayEditor,
@@ -36,6 +32,12 @@ import {
 } from 'components/managers/production-runs/components/lay-editor';
 import { layGeometry } from 'components/managers/production-runs/components/lay-geometry';
 import { markerFitness } from 'components/managers/production-runs/components/marker-picker';
+import {
+  VERDICT_GLYPH,
+  VERDICT_TEXT,
+  allLayChecks,
+  layVerdict,
+} from 'components/managers/production-runs/components/useLays';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
@@ -43,6 +45,7 @@ import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import type { BatchCell, JobSizeRow, MarkerJob } from './batch-marker-plan';
 import { decNum } from './marker-io';
+import { wireInt } from '../schema';
 
 /**
  * РЕЖИМ НАСТИЛАНИЯ, КОТОРЫЙ ПРЕДЛАГАЕТСЯ, И ПОЧЕМУ ИМЕННО ОН.
@@ -63,8 +66,13 @@ import { decNum } from './marker-io';
  * в реальных файлах левая и правая полочки нарисованы отдельными блоками (FP_L против FP_R), и
  * тогда всё сходится, — но проверить это здесь нечем, потому что зеркальность детали живёт в
  * словаре деталей кроя, а не в геометрии. Отвечает на это сервер, проверкой `lay_mirror_expansion`
- * НА СЕКЦИИ настила, и её вердикт видно в той же форме, что откроется по кнопке: чертёж с одной
- * половиной пары кроят как раз лицом к лицу, и режим там переключается одним чипом.
+ * НА СЕКЦИИ настила: чертёж с одной половиной пары кроят как раз лицом к лицу.
+ *
+ * ЕЁ ВЕРДИКТ ПОКАЗЫВАЕТСЯ ЗДЕСЬ ЖЕ, на этом экране, а не «в форме». Форма рисует список проверок
+ * только у СУЩЕСТВУЮЩЕГО настила (`allLayChecks(existing)`), а созданный она закрывает тостом
+ * «Настил создан» — то есть на пути СОЗДАНИЯ ни одна серверная проверка не была бы видна ни разу,
+ * и настил, кроящий сто левых полочек, выглядел бы удавшимся. Поэтому проверки сохранённого
+ * настила читаются ниже прямо из ответа сервера, вместе с высотой стопки и шириной рулона.
  */
 export const BATCH_LAY_MODE: common_ProductionLayMode = 'PRODUCTION_LAY_MODE_FACE_UP';
 
@@ -178,6 +186,9 @@ export function batchEndLossPrefill(lays: readonly common_ProductionRunLay[]): {
 
 const meters = (cm: number) => `${(cm / 100).toFixed(2)} м`;
 
+/** Как настил называется на экране. Безымянный — законное состояние, и молчать про него нельзя. */
+const layName = (l: common_ProductionRunLay) => l.name || l.bomItemName || l.layKey || 'без имени';
+
 /**
  * Блок предложения под итогом по одной ткани одного колорвея.
  *
@@ -193,8 +204,8 @@ export function BatchLayProposal({
   canEdit,
   locked,
   laysLoading,
+  queueRunning,
   editor,
-  fallback,
 }: {
   /** Задание настила партии, чья раскладка только что снята. */
   job: MarkerJob;
@@ -211,24 +222,48 @@ export function BatchLayProposal({
   locked: boolean;
   /** Список настилов ещё читается: предлагать по непрочитанному списку значит предлагать дубль. */
   laysLoading: boolean;
+  /**
+   * Очередь ещё считает. Список настилов перечитывается ОДИН РАЗ, по её окончании (инвалидация
+   * стоит в `finally` у `start()`), поэтому до конца очереди свежесохранённой раскладки в списке
+   * может не быть — и это надо сказать словами, а не отправлять человека обновлять страницу.
+   */
+  queueRunning: boolean;
   editor: LayEditorContext;
-  /** Путь «сделать это руками» — он остаётся всегда, в том числе за каждым отказом. */
-  fallback: React.ReactNode;
 }) {
-  // Форма монтируется ТОЛЬКО открытой (как и на странице партии), поэтому засев состояния делают
-  // ленивые инициализаторы useState, а не эффект: закрытие размонтирует редактор, следующее
-  // открытие пересеет его свежими числами.
-  const [open, setOpen] = useState(false);
+  // Что открыто: '' — ничего, 'new' — новый настил, иначе lay_key существующего. Ключ, а не сам
+  // объект: настил перечитывается с сервера, и держать его копию в состоянии значило бы править
+  // форму по снимку, который успел устареть.
+  const [openKey, setOpenKey] = useState('');
 
-  const marker = editor.runMarkers.find((m) => (m.id ?? 0) === markerId);
+  const marker = editor.runMarkers.find((m) => wireInt(m.id) === markerId);
   const fit = marker ? markerFitness(marker, job.bomLineKey, job.colorwayId) : null;
   const plies = derivePlies(job.sizes);
   const uncovered = uncoveredBatchSizes(job, cells, sizeLabel);
+  // СОСТАВ, СВЁДШИЙСЯ К ОДНОМУ ИЗДЕЛИЮ, — вырожденный случай, и он вырожден ровно так же, как в
+  // измерении: очередь прямо над этим блоком отказывается называть его КПД процентом раскроя
+  // партии. Предложить его как производство молча значило бы принять как факт то, что строкой
+  // выше объявлено негодным.
+  const singleGarment = job.unitsTotal <= 1;
+
+  // ДУБЛЬ ЛОВИТСЯ ПО ПАРЕ (КОЛОРВЕЙ, СЛОТ), А НЕ ПО НОМЕРУ РАСКЛАДКИ. Это главное здесь.
+  //
+  // Обычный цикл работы — «поднимите бюджет и пересчитайте» — МЕНЯЕТ номер раскладки: как только
+  // на прежнюю сослалась секция настила, планировщик исключает её из замены (её нельзя подменять
+  // под живой производственной строкой), задание сохраняется НОВОЙ раскладкой, и предикат «есть ли
+  // настил с ЭТИМ маркером» становится пустым. Кнопка нарисовалась бы как в первый раз, и прогон
+  // получил бы два настила, каждый из которых планирует ВСЮ партию: потребность в ткани удвоена,
+  // покрытие удвоено, в кат-лист уезжают два одинаковых настила по двадцать слоёв.
+  //
+  // Поэтому вопрос задаётся другой: есть ли у этой пары настил ВООБЩЕ. Настил партии на пару один
+  // — его состав и есть соотношение партии, — и второй по той же паре из этого экрана не
+  // предлагается никогда. Что делать со старым, решает человек, и обе законные развязки ведут в
+  // одну и ту же форму: заменить раскладку в его секции (пересъёмка) либо удалить его на странице
+  // партии.
   const pairLays = lays.filter(
-    (l) => (l.colorwayId ?? 0) === job.colorwayId && (l.bomLineKey ?? '') === job.bomLineKey,
+    (l) => wireInt(l.colorwayId) === job.colorwayId && (l.bomLineKey ?? '') === job.bomLineKey,
   );
   const already = pairLays.find((l) =>
-    (l.sections ?? []).some((s) => (s.markerId ?? 0) === markerId && markerId > 0),
+    (l.sections ?? []).some((s) => markerId > 0 && wireInt(s.markerId) === markerId),
   );
   const endLoss = batchEndLossPrefill(lays);
 
@@ -244,29 +279,39 @@ export function BatchLayProposal({
     : !canEdit
       ? 'нет прав на изменение производства — настил не сохранить'
       : '';
-  const refusal = laysLoading
-    ? 'читаем настилы партии — пока список не прочитан, предложить настил нельзя: он мог бы оказаться дублем уже существующего'
-    : markerId <= 0
-      ? 'раскладка этой ткани сохранялась не в этой сессии — её номер здесь неизвестен, а угадывать его по имени нельзя: одноимённых раскладок у партии бывает несколько'
-      : !marker
-        ? 'сохранённая раскладка ещё не приехала в списке раскладок партии — обновите страницу партии или подождите перечитывания'
-        : fit && !fit.eligible
-          ? `эта раскладка в секцию настила не встанет: ${fit.reason}`
-          : !plies.ok
-            ? plies.reason
-            : uncovered.length > 0
-              ? `настил НЕ ПОКРОЕТ размеры ${uncovered.join(', ')} этой партии: их нет в составе раскладки. Строка настила по нему сказала бы, что колорвей раскроен, — а он раскроен частично`
-              : writeRefusal;
+  // ПОРЯДОК — ОТ НЕПОЧИНИМОГО К ПРОХОДЯЩЕМУ САМО. Закрытая партия не станет открытой оттого, что
+  // раскладку пересняли в этой сессии, и сказать про сессию первой значило бы послать человека
+  // чинить то, что чинить не нужно.
+  const refusal =
+    writeRefusal ||
+    (!plies.ok
+      ? plies.reason
+      : uncovered.length > 0
+        ? `настил НЕ ПОКРОЕТ размеры ${uncovered.join(', ')} этой партии: их нет в составе раскладки. Строка настила по нему сказала бы, что колорвей раскроен, — а он раскроен частично`
+        : markerId <= 0
+          ? 'раскладка этой ткани сохранялась не в этой сессии — её номер здесь неизвестен, а угадывать его по имени нельзя: одноимённых раскладок у партии бывает несколько'
+          : laysLoading
+            ? 'читаем настилы партии — пока список не прочитан, предложить настил нельзя: он мог бы оказаться дублем уже существующего'
+            : !marker
+              ? queueRunning
+                ? 'раскладка сохранена, но список раскладок партии перечитывается по окончании ОЧЕРЕДИ — дождитесь, пока она досчитает остальные ткани'
+                : 'сохранённая раскладка не найдена в списке раскладок партии — откройте страницу партии, чтобы прочитать его заново'
+              : fit && !fit.eligible
+                ? `эта раскладка в секцию настила не встанет: ${fit.reason}`
+                : '');
   // ЖДЁМ — НЕ ЗНАЧИТ СЛОМАНО. Оба состояния чтения (список ещё едет, раскладка в нём ещё не
   // появилась) проходят сами, и красный цвет объявил бы их поломкой; красное здесь только то, что
   // человеку придётся чинить руками.
-  const refusalTransient = laysLoading || (markerId > 0 && !marker);
+  const refusalTransient = !writeRefusal && (laysLoading || (markerId > 0 && !marker));
 
-  // ПРЕДПРОСМОТР ГЕОМЕТРИИ СЧИТАЕТСЯ ТОЛЬКО ДЛЯ ПРЕДЛАГАЕМОГО НАСТИЛА. У уже собранного свои
-  // слои и свои концевые — их посчитал и опубликовал сервер (`planned_length_cm`), — и напечатать
-  // рядом с ним ЭТИ метры значило бы приписать существующей строке чужой план.
+  // ПРЕДПРОСМОТР ГЕОМЕТРИИ — ТОЛЬКО ТАМ, ГДЕ НАСТИЛ ДЕЙСТВИТЕЛЬНО ПРЕДЛАГАЕТСЯ.
+  //
+  // План над красным отказом — это план того, чего построить нельзя, и читается он как разрешение.
+  // У уже собранного настила свои слои и свои концевые, посчитанные сервером
+  // (`planned_length_cm`), — напечатать рядом с ним ЭТИ метры значило бы приписать существующей
+  // строке чужой план.
   const geo =
-    plies.ok && marker && !already
+    plies.ok && marker && !refusal && pairLays.length === 0
       ? layGeometry({
           sections: [{ markerId, plies: plies.plies }],
           endLossCm: endLoss.value ?? LAY_END_LOSS_DEFAULT_CM,
@@ -275,6 +320,10 @@ export function BatchLayProposal({
       : null;
   const markerLenCm = decNum(marker?.usedLengthCm);
   const endLossCm = Number(endLoss.value ?? LAY_END_LOSS_DEFAULT_CM);
+  // Настил, открытый на правку. Пропал из списка (удалили в соседнем окне) — форма не открывается:
+  // редактировать нечего, а `existing: undefined` превратило бы правку в создание второго.
+  const openLay = openKey && openKey !== 'new' ? lays.find((l) => l.layKey === openKey) : undefined;
+  const editorOpen = openKey === 'new' || !!openLay;
 
   return (
     <div className='flex flex-col gap-0.5'>
@@ -283,12 +332,25 @@ export function BatchLayProposal({
       {/* СОСТАВ И СЛОИ — СЛОВАМИ И ЧИСЛАМИ. Число слоёв здесь единственное, что выведено, и
           показать его без арифметики значило бы попросить поверить на слово. */}
       <Text size='micro' variant='label'>
-        {`партия заказывает ${job.sizes
-          .map((r) => `${r.batchQty} ${r.sizeLabel}`)
-          .join(
-            ' + ',
-          )}; раскладка снята на состав ${job.sizeLabel} — то же соотношение, ужатое на НОД`}
+        {`партия заказывает ${job.sizes.map((r) => `${r.batchQty} ${r.sizeLabel}`).join(' + ')};` +
+          (singleGarment
+            ? ` раскладка снята на ОДНО изделие ${job.sizeLabel}`
+            : ` раскладка снята на состав ${job.sizeLabel} — то же соотношение, ужатое на НОД`)}
       </Text>
+      {/* ВЫРОЖДЕННЫЙ СЛУЧАЙ НАЗЫВАЕТСЯ ЗДЕСЬ ЖЕ, А НЕ ТОЛЬКО В ИЗМЕРЕНИИ ВЫШЕ. Оговорка про
+          «настила здесь нет» стоит над этим блоком красным, и предложить под ней обычную кнопку с
+          обычными метрами значило бы принять за производство ровно то, что строкой выше объявлено
+          негодным замером. Отказывать при этом не за что: сто слоёв одного размера — совершенно
+          нормальный настил, неверна не идея, а ДЛИНА, которой он посчитан. */}
+      {singleGarment ? (
+        <Text size='micro' className='text-error'>
+          {`в партии этот колорвей заказан в одном размере, поэтому измерена РАЗРЕЖЕННАЯ однокомплектная укладка, а не настил: её длина идёт с запасом, и план настила наследует этот запас целиком.${
+            plies.ok
+              ? ` ${plies.plies} слоёв — это весь заказ одной стопкой: проверьте высоту стопки (её считает сервер при сохранении) и при необходимости разложите настил на секции.`
+              : ''
+          }`}
+        </Text>
+      ) : null}
       {plies.ok ? (
         <Text size='micro' variant='label'>
           {`слоёв = количество в партии ÷ количество в составе: ${plies.steps.join(
@@ -325,37 +387,73 @@ export function BatchLayProposal({
             зеркального размещения не заводит — значит ОДИН слой даёт ровно состав. Лицом к лицу
             потребовало бы чётного числа слоёв (а их тут {geo.totalPlies}) и запрещено на
             направленной ткани. Если в чертеже нарисована только одна деталь зеркальной пары, это
-            скажет проверка секции «развёртка зеркальных деталей» — тогда режим меняют в той же
-            форме.
+            скажет проверка секции «развёртка зеркальных деталей»: она появится здесь же, как только
+            настил сохранится, а режим переключается в той же форме.
           </Text>
         </>
       ) : null}
 
-      {/* НАСТИЛ ПО ЭТОЙ ЖЕ РАСКЛАДКЕ УЖЕ ЕСТЬ — предлагать второй значит предлагать дубль: секции
-          обоих ссылались бы на одну геометрию, а потребность в ткани сложилась бы дважды. */}
-      {already ? (
+      {/* У ПАРЫ УЖЕ ЕСТЬ НАСТИЛ — ВТОРОЙ ОТСЮДА НЕ ПРЕДЛАГАЕТСЯ НИКОГДА. Настил партии на пару
+          (колорвей, слот) один: его состав и есть соотношение партии, поэтому каждый второй
+          планировал бы ВСЮ ту же партию ещё раз. Различаются только слова: раскладка та же самая
+          или пересчитанная. */}
+      {pairLays.length > 0 ? (
         <div className='flex flex-col items-start gap-0.5'>
           <Text size='micro' variant='label'>
-            {`настил «${already.name || already.bomItemName || already.layKey || 'без имени'}» уже собран по ЭТОЙ раскладке — второй по ней был бы дублем: потребность в ткани сложилась бы дважды.${
-              plies.ok
-                ? ` Сверьте, что в нём стоит ${plies.plies} сл.: столько нужно партии по расчёту выше`
-                : ''
-            }`}
+            {already
+              ? `настил «${layName(already)}» уже собран по ЭТОЙ раскладке — второго по ней быть не должно.`
+              : `на эту ткань и колорвей в партии уже есть настил — и он планирует ту же самую партию. Если раскладку ПЕРЕСЧИТАЛИ, у неё теперь другой номер: замените её в СЕКЦИИ существующего настила, а не заводите второй — иначе оба спланируют весь заказ, и потребность в ткани удвоится.`}
+            {/* ИМЯ СВЕЖЕЙ РАСКЛАДКИ — иначе «замените в секции» отправляет искать её в пикере
+                среди одноимённых: пересъёмка, которая не смогла заменить прежнюю, получает то же
+                имя с суффиксом «#2», и различить их по одному названию невозможно. */}
+            {!already && marker?.name ? ` Свежая раскладка называется «${marker.name}».` : ''}
+            {plies.ok ? ` Партии нужно ${plies.plies} сл.` : ''}
           </Text>
+          {/* Слои не вывелись — причина обязана доехать и сюда: без неё совет «сверьте число
+              слоёв» повисает без числа, и непонятно, потерялось оно или его не бывает. */}
+          {!plies.ok ? (
+            <Text size='micro' className='text-error'>
+              {plies.reason}
+            </Text>
+          ) : null}
           {writeRefusal ? (
             <Text size='micro' className='text-error'>
               {writeRefusal}
             </Text>
           ) : null}
-          <Button
-            type='button'
-            size='xs'
-            variant='secondary'
-            disabled={!!writeRefusal}
-            onClick={() => setOpen(true)}
-          >
-            открыть этот настил
-          </Button>
+          {/* ВЕРДИКТЫ СЕРВЕРА — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ИХ ВИДНО НА ЭТОМ ПУТИ. Список проверок в
+              форме рисуется только у СУЩЕСТВУЮЩЕГО настила, а созданный закрывает её тостом — то
+              есть «развёртка зеркальных деталей», «ширина рулона» и высота стопки после создания
+              не показывались бы нигде. Здесь они читаются с настила, который сервер уже вернул. */}
+          {pairLays.map((l) => {
+            const checks = allLayChecks(l).filter((c) => layVerdict(c.status) !== 'ok');
+            return (
+              <div key={l.layKey || l.id} className='flex flex-col items-start gap-0.5'>
+                <Text size='micro' variant='label'>
+                  {`«${layName(l)}» — ${l.totalPlies ?? 0} сл., план ${meters(decNum(l.plannedLengthCm))}`}
+                </Text>
+                {checks.map((c, i) => {
+                  const v = layVerdict(c.status);
+                  return (
+                    <Text key={`${c.key || 'check'}-${i}`} size='micro' className={VERDICT_TEXT[v]}>
+                      {VERDICT_GLYPH[v]} {v === 'unknown' ? 'не проверено: ' : ''}
+                      {c.label || c.key}
+                      {c.detail ? ` — ${c.detail}` : ''}
+                    </Text>
+                  );
+                })}
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='secondary'
+                  disabled={!!writeRefusal}
+                  onClick={() => setOpenKey(l.layKey ?? '')}
+                >
+                  {`открыть «${layName(l)}»`}
+                </Button>
+              </div>
+            );
+          })}
         </div>
       ) : refusal ? (
         <Text
@@ -367,41 +465,32 @@ export function BatchLayProposal({
         </Text>
       ) : (
         <div className='flex flex-col items-start gap-0.5'>
-          {/* ЧУЖОЙ НАСТИЛ НА ТОЙ ЖЕ ПАРЕ НАЗЫВАЕТСЯ ВСЛУХ — он законен (разные ткани, разные
-              размерные блоки), но новый встанет РЯДОМ, а не вместо, и потребность сложится. */}
-          {pairLays.length > 0 ? (
-            <Text size='micro' variant='label'>
-              {`на эту ткань и колорвей в партии уже есть ${pairLays
-                .map((l) => `«${l.name || l.bomItemName || l.layKey}»`)
-                .join(
-                  ', ',
-                )} — с другими раскладками. Новый настил встанет рядом, и потребность в ткани сложится`}
-            </Text>
-          ) : null}
-          <Button type='button' size='xs' variant='secondary' onClick={() => setOpen(true)}>
+          <Button type='button' size='xs' variant='secondary' onClick={() => setOpenKey('new')}>
             собрать настил из этой раскладки
           </Button>
           <Text size='micro' variant='label'>
             откроется та же форма настила, что на странице партии, с заполненными полями —
-            предлагаем, а не создаём: запись происходит по вашей кнопке в форме.
+            предлагаем, а не создаём: запись происходит по вашей кнопке в форме. Проверки сервера
+            (развёртка зеркальных деталей, ширина рулона, высота стопки) появятся здесь же, как
+            только настил сохранится.
           </Text>
         </div>
       )}
 
-      {fallback}
-
-      {open ? (
+      {editorOpen ? (
         <LayEditor
           {...editor}
           // `key` по цели правки: форма ремонтируется при смене настила, и засев делают ленивые
           // инициализаторы useState — ровно как на странице партии.
-          key={already?.layKey || `new:${job.colorwayId}:${job.bomLineKey}:${markerId}`}
+          key={openLay?.layKey || `new:${job.colorwayId}:${job.bomLineKey}:${markerId}`}
           open
-          onOpenChange={setOpen}
-          existing={already}
+          onOpenChange={(o) => {
+            if (!o) setOpenKey('');
+          }}
+          existing={openLay}
           seedColorwayId={job.colorwayId}
           seedBomLineKey={job.bomLineKey}
-          seedSections={plies.ok && !already ? [{ markerId, plies: plies.plies }] : undefined}
+          seedSections={plies.ok && !openLay ? [{ markerId, plies: plies.plies }] : undefined}
           seedMode={BATCH_LAY_MODE}
           seedEndLossCm={endLoss.value}
         />
