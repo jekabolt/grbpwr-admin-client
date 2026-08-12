@@ -55,6 +55,7 @@ import {
   type RollGoodsLine,
 } from './bom-purpose';
 import { formatBomMoney, resolveBomPrice } from './bom-price';
+import { uniOf } from './nesting/block-code';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 
 import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
@@ -839,8 +840,19 @@ export function TechPackDocument({
   const patternGroups: Array<{
     wireKey: string;
     label: string;
+    /** Uni подтверждён СОДЕРЖИМЫМ этого скоупа — см. uniScopeKeys ниже. */
+    uniKnown: boolean;
     sheets: common_TechCardSizePattern[];
   }> = [];
+  // СКОУПЫ, ГДЕ UNI ДЕЙСТВИТЕЛЬНО ЕСТЬ. Доказательство — сохранённая связь блок→деталь: в ней лежит
+  // ИМЯ БЛОКА ИЗ ФАЙЛА, то есть ровно то, чем лекальщик заявил неградуируемость. Разобрать DXF на
+  // бумаге нечем (печать данные не качает), а карточка без единого uni-имени обязана печататься
+  // ровно как раньше — поэтому подпись про UNI не ставится «на всякий случай».
+  const uniScopeKeys = new Set<string>();
+  for (const a of tc?.pieceDxfAliases?.items ?? []) {
+    if (!uniOf((a.blockName ?? '').trim())) continue;
+    uniScopeKeys.add(scopeKeyOfBinding(a.fabricPurpose, a.bomLineKey, patternScopes));
+  }
   const seenScopeKeys = new Set<string>();
   for (const s of patternScopes) {
     if (seenScopeKeys.has(s.key)) continue; // duplicate line_key guard — one figure per key
@@ -850,22 +862,30 @@ export function TechPackDocument({
     patternGroups.push({
       wireKey: s.byPurpose ? wireFabricPurpose(s.key) : s.key,
       label: s.byPurpose ? bomPurposeLabel(s.key) : (s.lines[0]?.name ?? '').trim() || 'BOM line',
+      uniKnown: uniScopeKeys.has(s.key),
       sheets,
     });
   }
   const unboundSheets = sheetsByScope.get('') ?? [];
   if (unboundSheets.length > 0) {
-    patternGroups.push({ wireKey: '_unbound', label: 'unbound sheets', sheets: unboundSheets });
+    patternGroups.push({
+      wireKey: '_unbound',
+      label: 'unbound sheets',
+      uniKnown: uniScopeKeys.has(''),
+      sheets: unboundSheets,
+    });
   }
   // Which sizes a group covers: named sizes in the card's size-range order (strays after),
   // plus «градуированные» for sizeless DXF and «без размера» for sizeless PDF — two different
   // facts, branched on the file format the same way the viewer's sheet list does.
   //
-  // Безразмерный DXF больше не подписывается «graded», и это не придирка к слову: файл ОДНИХ
-  // uni-деталей размеров не несёт вовсе, а бумага утверждала обратное — «градуирован» про лист,
-  // где градации нет по заявлению автора. Формат листа различить эти два случая не может (строка
-  // выкройки хранит только размер и файл), поэтому подпись называет ОБА: «multi-size or UNI».
-  const patternGroupSizes = (sheets: common_TechCardSizePattern[]): string => {
+  // Безразмерный DXF подписывается «graded» ровно до тех пор, пока uni в этом скоупе не подтверждён
+  // содержимым (`uniKnown`): файл ОДНИХ uni-деталей размеров не несёт вовсе, и «градуирован» про
+  // него — неправда, но формат листа этих двух случаев не различает (строка выкройки хранит только
+  // размер и файл). Поэтому там, где uni доказан, подпись называет ОБА варианта — «multi-size or
+  // UNI», — а там, где его нет, бумага остаётся прежней. Печать карточек, которых эта фича не
+  // касается, меняться не имеет права.
+  const patternGroupSizes = (sheets: common_TechCardSizePattern[], uniKnown: boolean): string => {
     const named = new Set<number>();
     let graded = false;
     let sizeless = false;
@@ -879,7 +899,7 @@ export function TechPackDocument({
     return [
       ...inRange.map(sizeName),
       ...stray.map(sizeName),
-      graded ? 'multi-size or UNI' : '',
+      graded ? (uniKnown ? 'multi-size or UNI' : 'graded') : '',
       sizeless ? 'sizeless' : '',
     ]
       .filter(Boolean)
@@ -1433,7 +1453,7 @@ export function TechPackDocument({
                   // «выкройки изменились» из-за правки операций. Пара пишется всегда: v=0 у
                   // легаси-листов без номера — тоже сверяемое значение (замена присвоит номер).
                   const versionStamp = g.sheets.reduce((s, p) => s + (p.version ?? 0), 0);
-                  const sizesLine = patternGroupSizes(g.sheets);
+                  const sizesLine = patternGroupSizes(g.sheets, g.uniKnown);
                   return (
                     <figure
                       key={g.wireKey}
