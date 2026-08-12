@@ -62,6 +62,7 @@ import { HeaderMetaFields } from './header-meta-fields';
 import { IssuesField } from './issues-field';
 import { AssemblyField } from './assembly-field';
 import { LabelsField } from './labels-field';
+import { MoneyPanel } from './money-panel';
 import { PackagingRecipeField } from './packaging-recipe-field';
 import { LifecycleStrip } from './lifecycle-strip';
 import { TechCardTasksPanel } from './tech-card-tasks-panel';
@@ -1869,68 +1870,7 @@ export function TechCardForm({
               )}
             </SectionStack>
 
-            {/* COSTING — mounted only with costing:read (field-shaped) */}
-            {canReadCosting && (
-              <SectionStack hidden={activeTab !== 'costing'}>
-                {/* Three sections, three KINDS OF MONEY. They used to be titled `costing` /
-                  `cost estimate (per colourway — plan vs actual)` / `R&D development cost`, which
-                  named the feature and not the figure — so nothing on screen said that «plan 48.60»
-                  in the second block is the same number as «unit cost 48.60» in the first, or that
-                  R&D is in neither. The `question` clause is the whole fix. */}
-                <Section title='план стиля' question='— что изделие должно стоить по BOM и статьям'>
-                  {/* Costing gap at the point of action. The tech-card payload only carries the plan
-                    costing rollup (not each colorway's product cost_price), so this is a style-level
-                    signal; per-colorway precision lives on each product's detail page. */}
-                  {!(
-                    techCard?.techCard?.costing?.unitCost?.value ||
-                    techCard?.techCard?.costing?.materialsPerUnit?.value ||
-                    (techCard?.techCard?.costing?.colorwayCosts?.length ?? 0) > 0 ||
-                    (techCard?.techCard?.costing?.materialsTotal?.length ?? 0) > 0
-                  ) && (
-                    <CalloutBox tone='warning' className='mb-2.5'>
-                      <Text size='micro'>
-                        Себестоимость этого стиля не задана — маржу, окупаемость и экономику его
-                        колорвеев посчитать не из чего, а проданные товары считаются в аналитике
-                        «без себестоимости» и занижают покрытие по магазину. Добавьте материалы в
-                        BOM или впишите статью ниже.
-                      </Text>
-                    </CalloutBox>
-                  )}
-                  <CostingField techCard={techCard} />
-                </Section>
-                {isEditMode && numId && (
-                  <Section
-                    title='оценка по колорвею'
-                    question='— тот же расчёт построчно, и факт из прогонов рядом с планом'
-                  >
-                    {/* `active` gates the per-colourway fan-out. Every tab of this form is MOUNTED
-                      at once and merely CSS-hidden, so without this the matrix would fire one
-                      GetStyleCostEstimate per colourway on every tech-card open, on every tab. */}
-                    <CostEstimateField
-                      techCardId={numId}
-                      techCard={techCard}
-                      active={activeTab === 'costing'}
-                    />
-                  </Section>
-                )}
-                {/* R&D / development spend — folded in from its own tab: a section OF costing, not a
-                  separate rail entry. Placed after the unit-cost blocks because it is amortised
-                  style dev cost, deliberately NOT part of the product COGS. Edit-mode only (its own
-                  RPC needs a saved card id). */}
-                <Section
-                  title='R&D'
-                  question='— периодные деньги стиля: в unit cost и COGS не входят никогда'
-                >
-                  {isEditMode && numId ? (
-                    <DevExpensesField techCardId={numId} />
-                  ) : (
-                    <Text variant='inactive' size='small'>
-                      сначала сохраните тех-карту — потом сюда можно писать расходы на разработку
-                    </Text>
-                  )}
-                </Section>
-              </SectionStack>
-            )}
+            {/* COSTING — вынесена ЗА этот fieldset, см. блок под его закрывающим тегом. */}
 
             {/* ISSUES */}
             <div hidden={activeTab !== 'issues'}>
@@ -1987,6 +1927,85 @@ export function TechCardForm({
             </SectionStack>
           </fieldset>
 
+          {/* COSTING — mounted only with costing:read (field-shaped).
+            OUTSIDE the frozen fieldset, by the same argument that moved SAMPLES and PRODUCTION out,
+            and it took a shipped feature to notice: `<fieldset disabled>` kills every native control
+            beneath it, and the costing tab had grown one that a RELEASED card must keep — the
+            переключатель «стиль / партия» and the состав партии beside it. A released card is
+            EXACTLY when batches are planned, so freezing the batch affordance froze the feature on
+            the only cards that need it. A nested fieldset cannot undo it either (HTML disables every
+            descendant of a disabled fieldset except its first legend), so the block has to live out
+            here — and what the freeze really governs, the card's own costing articles, is now gated
+            explicitly: CostingField wraps its own inputs, and the two sections below take a fieldset
+            of their own.
+
+            Three sections, three KINDS OF MONEY. They used to be titled `costing` /
+            `cost estimate (per colourway — plan vs actual)` / `R&D development cost`, which named
+            the feature and not the figure — so nothing on screen said that «plan 48.60» in the
+            second block is the same number as «unit cost 48.60» in the first, or that R&D is in
+            neither. The `question` clause is the whole fix. */}
+          {canReadCosting && (
+            <SectionStack hidden={activeTab !== 'costing'}>
+              <Section title='план стиля' question='— что изделие должно стоить по BOM и статьям'>
+                {/* Costing gap at the point of action. The tech-card payload only carries the plan
+                  costing rollup (not each colorway's product cost_price), so this is a style-level
+                  signal; per-colorway precision lives on each product's detail page. */}
+                {!(
+                  techCard?.techCard?.costing?.unitCost?.value ||
+                  techCard?.techCard?.costing?.materialsPerUnit?.value ||
+                  (techCard?.techCard?.costing?.colorwayCosts?.length ?? 0) > 0 ||
+                  (techCard?.techCard?.costing?.materialsTotal?.length ?? 0) > 0
+                ) && (
+                  <CalloutBox tone='warning' className='mb-2.5'>
+                    <Text size='micro'>
+                      Себестоимость этого стиля не задана — маржу, окупаемость и экономику его
+                      колорвеев посчитать не из чего, а проданные товары считаются в аналитике «без
+                      себестоимости» и занижают покрытие по магазину. Добавьте материалы в BOM или
+                      впишите статью ниже.
+                    </Text>
+                  </CalloutBox>
+                )}
+                <CostingField techCard={techCard} frozen={frozen} />
+              </Section>
+              {/* Эти две секции — СОДЕРЖИМОЕ КАРТОЧКИ (статьи разработки, расчёт по колорвею), и
+                заморозку релиза они несут по-прежнему; свой fieldset заменяет им внешний, из-под
+                которого выехал весь блок. */}
+              <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
+                {isEditMode && numId && (
+                  <Section
+                    title='оценка по колорвею'
+                    question='— тот же расчёт построчно, и факт из прогонов рядом с планом'
+                  >
+                    {/* `active` gates the per-colourway fan-out. Every tab of this form is MOUNTED
+                      at once and merely CSS-hidden, so without this the matrix would fire one
+                      GetStyleCostEstimate per colourway on every tech-card open, on every tab. */}
+                    <CostEstimateField
+                      techCardId={numId}
+                      techCard={techCard}
+                      active={activeTab === 'costing'}
+                    />
+                  </Section>
+                )}
+                {/* R&D / development spend — folded in from its own tab: a section OF costing, not a
+                  separate rail entry. Placed after the unit-cost blocks because it is amortised
+                  style dev cost, deliberately NOT part of the product COGS. Edit-mode only (its own
+                  RPC needs a saved card id). */}
+                <Section
+                  title='R&D'
+                  question='— периодные деньги стиля: в unit cost и COGS не входят никогда'
+                >
+                  {isEditMode && numId ? (
+                    <DevExpensesField techCardId={numId} />
+                  ) : (
+                    <Text variant='inactive' size='small'>
+                      сначала сохраните тех-карту — потом сюда можно писать расходы на разработку
+                    </Text>
+                  )}
+                </Section>
+              </fieldset>
+            </SectionStack>
+          )}
+
           {/* SAMPLES — edit-mode only (needs a saved card id). OUTSIDE the frozen fieldset: a
             released card must still allow reading — paging the material ledger, opening/closing
             sample rows — so editing is gated explicitly instead of by the disabled fieldset
@@ -2021,6 +2040,28 @@ export function TechCardForm({
           ) : null}
         </form>
       </div>
+
+      {/* ПОЛОСА СЕБЕСТОИМОСТИ — НА КАЖДОЙ ВКЛАДКЕ. «Нам надо оптимально всё организовать, чтобы не
+          прыгать с вкладки на вкладку»: сегодня ответ на вопрос «сколько стоит изделие» размазан
+          по BOM → колорвеям → костингу → производству.
+
+          СТОИТ ЗДЕСЬ, А НЕ ВНУТРИ ВКЛАДКИ И НЕ ВНУТРИ `<fieldset disabled={frozen}>`, по двум
+          отдельным причинам:
+           • вкладки все смонтированы и лишь скрыты CSS'ом, так что полоса внутри любой из них
+             исчезала бы на остальных тринадцати;
+           • disabled-fieldset гасит ЛЮБОЙ вложенный нативный контрол, а переключатель полосы —
+             это <button>: на RELEASED-карточке он умер бы вместе с самой полосой. Ровно из-за
+             этого отсюда уже выехали SAMPLES, PRODUCTION и костинг.
+          Сама полоса position:fixed, поэтому её место в разметке на раскладку не влияет — оно
+          влияет только на контекст формы (она внутри <Form>, ей нужно dirty-состояние статей) и
+          на порядок табуляции, где дополнительной панели место после формы.
+
+          ГЕЙТ ТОТ ЖЕ, ЧТО У ВКЛАДКИ КОСТИНГА: деньги не должны появиться у аккаунта, которому их
+          видеть нельзя. И только на сохранённой карточке — до первого сохранения серверного
+          расчёта не существует, а показывать вместо него нули полоса не имеет права. */}
+      {canReadCosting && isEditMode && numId && techCard ? (
+        <MoneyPanel techCard={techCard} />
+      ) : null}
 
       {/* Create a packaging material inline for the aux output picker (prefilled section). The
           created material is selected straight into the field the button sits under — without

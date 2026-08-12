@@ -8,9 +8,11 @@ import {
   common_TechCard,
   common_TechCardColorwayUsage,
   common_TechCardLabDipStatus,
+  common_TechCardSlotAreaEstimate,
   UpdateColorwayRequest,
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   composeArticleFromMaterial,
   materialCompositionCode,
@@ -27,6 +29,7 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { techCardLabDipStatusOptions } from 'constants/filter';
 import { composition as compositionDict } from 'constants/garment-composition';
+import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -49,6 +52,8 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import { ColorwayDeleteControl } from './colorway-delete';
+import { normSourceLabel } from './costing-vocab';
 import { DxfApplyHint } from './dxf-apply';
 import { MarkerApplyHint } from './marker-apply';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
@@ -87,7 +92,7 @@ import {
   isUnsortedLayerRole,
   pieceLayerRoleLabel,
 } from './piece-layer-role';
-import { PieceRef, useFormPieces } from './piece-picker';
+import { PieceList, PieceRef, useFormPieces } from './piece-picker';
 import { TechCardFormData, wireInt } from './schema';
 import type { RecipePieceLink } from './use-fabric-dxf-pieces';
 import {
@@ -143,9 +148,11 @@ const PIECE_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_INSULATION',
 ]);
 
+// СЕКЦИИ, КОТОРЫЕ ЗАВОДЯТСЯ В РЕЦЕПТ — то есть получают КАРТОЧКУ ТКАНИ, есть на них строки или нет.
 // Рулонные секции здесь — с решения владельца (2026-08-10): расход ткани — свойство ИЗДЕЛИЯ, и его
-// норма живёт на строке «на изделие». Строка детали справочная («из какой ткани кроится», см.
-// PieceFabricRow) и блока расхода не несёт — не будь ткани в этом наборе, норме было бы негде жить.
+// норма живёт на карточке САМОЙ ТКАНИ, а не на детали. Строка детали справочная («из какой ткани
+// кроится», см. PieceLinkRow) и блока расхода не несёт — не будь ткани в этом наборе, норме было бы
+// негде жить.
 const GARMENT_SECTIONS = new Set([
   'TECH_CARD_BOM_SECTION_FABRIC',
   'TECH_CARD_BOM_SECTION_LINING',
@@ -247,17 +254,14 @@ const MANUAL_PROVENANCE = {
   wasteCutPct: '',
 } as const;
 
-// ОДНА И ТА ЖЕ ЕДИНИЦА НОРМЫ у двух слотов — ПО СМЫСЛУ, а не по строке. «м» и «metres» — одна
-// единица (bomUnitKind сводит весь словарь синонимов записи), «м» и «см» — разные. Единицы вне
-// словаря сравниваются нормализованными строками: «шт» и «пар» — тоже РАЗНЫЕ единицы, хотя обе
-// нам неизвестны. Неизвестная против известной — разные всегда (число в «м» не становится числом
-// в «шт» от того, что второе мы не умеем писать).
-function sameNormUnit(a?: string, b?: string): boolean {
-  const ka = bomUnitKind(a);
-  const kb = bomUnitKind(b);
-  if (ka != null || kb != null) return ka === kb;
-  return (a ?? '').trim().toLowerCase() === (b ?? '').trim().toLowerCase();
-}
+// ПЕРЕНОСА НОРМЫ МЕЖДУ СЛОТАМИ БОЛЬШЕ НЕТ, и вместе с ним ушла проверка «та же ли это единица»
+// (sameNormUnit). Строку рецепта переносил SlotPicker — выпадашка слота ВНУТРИ строки; с переходом
+// на карточку ткани слот перестал быть полем: карточка И ЕСТЬ слот, а «перенести» читается как
+// «убрать здесь и завести там». Ловушка, которую та проверка закрывала (число 1.42 из слота в
+// метрах, продолжившее жить в слоте в сантиметрах), исчезла вместе с жестом — при разрыве связи
+// число уходит вместе со строкой, а новая строка рождается пустой. Единственный оставшийся способ
+// сменить ткань под уже посчитанной нормой — пин артикула, и его собственная ловушка (кг-норма
+// закодировала основу веса КОНКРЕТНОГО артикула) закрыта отдельно, в обработчике пина.
 
 // Lab-dip editing state (M8). Initialised from the colourway ref's labDip* fields; only the three
 // WRITABLE leaves below travel back through UpdateColorway under LAB_DIP_UPDATE_MASK — see LabDipTimeline.
@@ -315,15 +319,82 @@ function usageKey(u: Pick<UsageDraft, 'pieceLineKey' | 'bomLineKey'>): string {
   return `${u.pieceLineKey || ''}\u0000${u.bomLineKey}`;
 }
 
+// ДУБЛИ СЧИТАЮТСЯ ПОШТУЧНО, А НЕ СХЛОПЫВАЮТСЯ В КЛЮЧ. Прежняя версия складывала оба списка в
+// Map<usageKey, signature>, и у двух строк с одинаковой парой (деталь, слот) ключ один: поздняя
+// затирала раннюю. База [1, 2], правка первой на 3 → после схлопывания обе стороны видели «2», и
+// `lines` оставался нулём: карточка не считала правку работой, «сохранить» её не отправлял, правка
+// пропадала молча. Дубли — состояние ненормальное, но существующее (легаси и чужие записи), и
+// сервер их СУММИРУЕТ, так что каждая из них влияет на деньги и обязана считаться отдельно.
+//
+// Сравнение внутри одного ключа — ПОЗИЦИОННОЕ: список строк рецепта упорядочен, полная замена
+// отправляет его целиком в том же порядке, и «первая из двух» — это осмысленный адрес.
 function changedLines(base: UsageDraft[], next: UsageDraft[]): number {
-  const sig = (u: UsageDraft) => JSON.stringify(toWire(u));
-  const before = new Map(base.map((u) => [usageKey(u), sig(u)]));
-  const after = new Map(next.map((u) => [usageKey(u), sig(u)]));
+  const group = (rows: UsageDraft[]) => {
+    const m = new Map<string, string[]>();
+    for (const u of rows) {
+      const k = usageKey(u);
+      const list = m.get(k) ?? [];
+      list.push(JSON.stringify(toWire(u)));
+      m.set(k, list);
+    }
+    return m;
+  };
+  const before = group(base);
+  const after = group(next);
   let n = 0;
-  // added (no such key before) or edited (same key, different payload)
-  for (const [k, s] of after) if (before.get(k) !== s) n += 1;
-  for (const k of before.keys()) if (!after.has(k)) n += 1; // removed
+  for (const [k, list] of after) {
+    const prev = before.get(k) ?? [];
+    // добавленная или изменённая на своей позиции
+    for (let i = 0; i < list.length; i += 1) if (prev[i] !== list[i]) n += 1;
+    // из дублей убрали часть — каждая убранная тоже правка
+    if (prev.length > list.length) n += prev.length - list.length;
+  }
+  for (const [k, prev] of before) if (!after.has(k)) n += prev.length; // удалённые целиком
   return n;
+}
+
+// ПУСТАЯ ВО ВСЕХ ПОЛЯХ СТРОКА «НА ИЗДЕЛИЕ» — ЭТО НЕ СТРОКА. Ни расхода, ни количества, ни одной
+// непустой ячейки размера, ни пина артикула: сохранять её значит завести на сервере запись, которая
+// ничего не утверждает, но участвует в суммировании строк слота и в счётчиках экрана.
+//
+// Такая строка РОЖДАЕТСЯ ЗАКОННО и живёт на экране: нажатие «по размерам» на пустой карточке
+// открывает сетку из пустых клеток — в неё сейчас будут печатать, и не дать ей появиться значило
+// бы, что кнопка ничего не делает. Но до провода она доехать не имеет права, поэтому фильтр стоит
+// на выходе (savableUsage), а не на входе.
+//
+// СТРОКА ДЕТАЛИ ПУСТОЙ НЕ БЫВАЕТ НИКОГДА, и это не оговорка, а весь смысл решения владельца
+// (2026-08-10): её содержание — сама привязка «эта деталь кроится из этой ткани», а чисел она не
+// несёт ПО УСТРОЙСТВУ. Посчитать её пустой значило бы, что каждое «назначить детали» тихо
+// выбрасывается при сохранении, — то есть ровно тот дефект, из-за которого владелец назначил ткань
+// девяти деталям и не увидел ничего.
+function isBlankUsage(u: UsageDraft): boolean {
+  if (u.pieceLineKey) return false;
+  return (
+    !u.consumption.trim() &&
+    !u.quantity.trim() &&
+    !u.sizeConsumptions.some((s) => (s.consumption ?? '').trim()) &&
+    !u.materialId &&
+    // ЛЕГАСИ-ПОЛЯ ТОЖЕ СОДЕРЖИМОЕ, и это не педантизм: строка, у которой заполнено только
+    // размещение или цвет/пантон, — это то, что человек однажды напечатал, а «пустая» строка
+    // отсюда уезжает не в никуда, а под нож полной замены. Новую строку это не воскрешает:
+    // patchGarmentSlot рождает её с пустым placement (изделие одно, подставлять туда нечего),
+    // так что проверка «ничего не изменилось» по-прежнему ловит холостое нажатие.
+    !u.placement.trim() &&
+    !u.color.trim() &&
+    !u.pantone.trim()
+  );
+}
+
+// ЧТО ВООБЩЕ УЕДЕТ НА СЕРВЕР. Одно правило на два места — на сам список записи и на счётчик правок:
+// разойдись они, карточка либо обещала бы сохранить то, что выбросит, либо вечно висела бы
+// «staged» из-за строки, которую всё равно не отправляет.
+//
+// Строка без bom_line_key не отправляется, потому что отправить её НЕЧЕМ: полная замена
+// валидирует каждую строку, а неразрешимая ссылка роняет весь рецепт. Это НЕ безобидно — такая
+// строка на сервере есть, и сохранение её удалит; экран обязан сказать это вслух (см. раздел
+// «строки без слота»), а не тихо считать её сохранённой.
+function savableUsage(u: UsageDraft): boolean {
+  return !!u.bomLineKey && !isBlankUsage(u);
 }
 
 // UpdateColorway is a field-masked write. This mask lists ONLY the three WRITABLE lab-dip leaves INSIDE
@@ -777,22 +848,35 @@ function UsagePerSizeLocal({
   article,
   unit,
   canEdit,
+  rowAlive,
   sizeNameById,
   onChange,
 }: {
   draft: UsageDraft;
   sizeIds: number[];
   article?: BomLine;
-  // ЕДИНИЦА НОРМЫ, резолвленная строкой (SlotUsageRow: единица слота, и только она) — здесь
+  // ЕДИНИЦА НОРМЫ, резолвленная блоком расхода (SlotNormBlock: единица слота, и только она) — здесь
   // подписываются поля ввода САМОЙ нормы, и брать единицу с эффективного артикула значило бы
   // подписать «кг» число, которое сервер хранит и считает в единице строки.
   unit: string;
   canEdit: boolean;
+  /** Строка рецепта под этим редактором СУЩЕСТВУЕТ. false — черновик синтетический, см. ниже. */
+  rowAlive: boolean;
   sizeNameById: Map<number, string>;
   onChange: (patch: Partial<UsageDraft>) => void;
 }) {
   const perSize = draft.sizeConsumptions.length > 0;
   const lastPerSize = useRef<{ sizeId: number; consumption: string }[]>([]);
+  // ЗАПАС «ЧТО БЫЛО ПО РАЗМЕРАМ» УМИРАЕТ ВМЕСТЕ СО СТРОКОЙ. Он существует ради одного жеста —
+  // «один на изделие» → передумал → «по размерам» возвращает сетку, — и до перехода на карточку
+  // ткани это было безопасно само собой: редактор жил внутри строки и размонтировался вместе с ней.
+  // Теперь редактор принадлежит КАРТОЧКЕ, карточка переживает удаление строки, и реф пережил бы её
+  // тоже: удалил пер-размерную строку, сохранил, нажал «по размерам» — и новая строка засеялась бы
+  // числами, которых в данных больше нет, с видом законной нормы. Признак жизни строки приходит
+  // сверху (hasRow), и его падение чистит запас.
+  useEffect(() => {
+    if (!rowAlive) lastPerSize.current = [];
+  }, [rowAlive]);
 
   const consumptionBySize = new Map<number, string>();
   for (const e of draft.sizeConsumptions)
@@ -902,6 +986,108 @@ function UsagePerSizeLocal({
   );
 }
 
+// ── ОЦЕНКА РАСХОДА ПО ПЛОЩАДИ: СЕРАЯ СТРОКА ТАМ, ГДЕ НОРМЫ НЕТ (Ф1, §6.4) ───────────────────────
+//
+// Слот, у которого норму никто не вписал, до сих пор показывал прочерк — при том, что деньги за
+// него в костинге УЖЕ посчитаны: сервер оценивает расход по площадям назначенных деталей. Экран,
+// на котором расход пуст, а себестоимость не пуста, читается как поломка — и владелец читал его
+// именно так.
+//
+// ТРИ ПРАВИЛА, И ВСЕ ТРИ — ПРО ТО, ЧТОБЫ НЕ ЗАВЕСТИ ВТОРОЕ ЧИСЛО.
+//  1. ЗДЕСЬ НИЧЕГО НЕ СЧИТАЕТСЯ. Печатается то, что пришло. Вывести это на клиенте значило бы
+//     реализовать формулу (площади ÷ раскройная ширина, среднее по ряду, лестница пина) второй
+//     раз — и однажды рецепт напечатал бы одну цифру, а заголовок костинга другую, ничем этого
+//     не выдав. По той же причине здесь нет ни одного `if` про «а если ширины нет»: причину
+//     отказа формулирует сервер, одной фразой на систему (refusalText).
+//  2. ЧИСЛО НЕ РЕДАКТИРУЕТСЯ И НЕ ХРАНИТСЯ. Оно вычислено из сегодняшних площадей и сегодняшних
+//     назначений; дать его править значит превратить его в число-призрак, которое переживёт смену
+//     выкроек и будет утверждать про них неправду. Превратить оценку в норму можно только двумя
+//     названными действиями — уточнить раскладкой или вписать своё, — и оба заводят СВОЮ строку.
+//  3. УСТАРЕВШИЙ ЗАМЕР ВИДЕН КАК УСТАРЕВШИЙ. Сервер в этом случае и числа не даёт (refusal =
+//     areas_stale), но пилюля называет причину своим словом: «замер устарел» отправляет
+//     перемерить площади, а общее «не посчитано» отправило бы искать везде сразу.
+function NormEstimate({ estimate }: { estimate?: common_TechCardSlotAreaEstimate }) {
+  const value = decimalToInput(estimate?.perGarment).trim();
+  const unit = estimate?.unit?.trim() || '';
+  const refusal = estimate?.refusal?.trim() || '';
+  const refusalText = estimate?.refusalText?.trim() || '';
+  const stale = estimate?.stale === true;
+  const pieceCount = estimate?.pieceCount ?? 0;
+
+  // Оценки нет вовсе (слот не рулонный, колорвей её не получил, старый ответ сервера) — прежний
+  // честный прочерк. «Нет ответа» и «ответ: не считается» — разные состояния, и второе всегда
+  // приходит с текстом.
+  if (!estimate || (!value && !refusalText)) {
+    return (
+      <div className='flex flex-wrap items-baseline gap-1.5'>
+        <FieldLabel>расход</FieldLabel>
+        <Text size='small' variant='label' component='span'>
+          —
+        </Text>
+      </div>
+    );
+  }
+
+  // Условия замера — то, без чего площадь не число, а мнение: слой контура, припуск, дата разбора.
+  // Сервер прислал их echo'м вместе с оценкой, чтобы строка описывала себя целиком.
+  const seam = decimalToInput(estimate.seamAllowanceMm).trim();
+  const parsedDay = formatTechCardDate(estimate.parsedAt);
+  const basis = [
+    pieceCount > 0
+      ? `${pieceCount} ${plural(pieceCount, 'деталь', 'детали', 'деталей')} назначено`
+      : '',
+    estimate.contourLayer?.trim() ? `слой ${estimate.contourLayer.trim()}` : '',
+    seam ? `припуск ${seam} мм` : '',
+    parsedDay !== '—' ? `выкройки разобраны ${parsedDay}` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
+  return (
+    <div className='flex flex-col gap-1'>
+      <div className='flex flex-wrap items-baseline gap-1.5'>
+        <FieldLabel>расход</FieldLabel>
+        {/* СЕРЫМ — и это не оформление, а утверждение: чёрное на этой карточке носит норма, серое
+            носит вывод. Цветом состояния оценку красить нечем — она не ошибка и не мид-флайт. */}
+        <Text size='small' variant='label' component='span' className='font-mono tabular-nums'>
+          {value ? `${value}${unit ? ` ${unit}` : ''}` : '—'}
+        </Text>
+        {stale ? (
+          <Pill tone='attention' title={refusalText || undefined}>
+            замер устарел
+          </Pill>
+        ) : value ? (
+          <Pill tone='mut'>оценка по площади</Pill>
+        ) : (
+          <Pill tone='mut'>оценка не посчитана</Pill>
+        )}
+      </div>
+      {value && basis && (
+        <Text size='nano' variant='label' component='p'>
+          {basis}
+        </Text>
+      )}
+      {value && (
+        <Text size='nano' variant='label' component='p'>
+          это NETTO и нижняя граница: межлекальных выпадов и концов настила в ней нет — их знает
+          только раскладка. Число считает сервер по сегодняшним площадям, оно не хранится и не
+          правится: уточните раскладкой либо впишите своё — вписанная норма всегда сильнее
+          выведенной
+        </Text>
+      )}
+      {/* ОТКАЗ ПЕЧАТАЕТСЯ ДОСЛОВНО И БЕЗ ДОБАВОК. Сервер уже назвал причину и уже назвал действие,
+          одной фразой на систему; переписать её здесь значило бы завести второй перевод, который
+          разойдётся с формулировками костинга. Машинный код причины (`refusal`) уходит в title —
+          он нужен поддержке, а на экране оператора это шум. */}
+      {refusalText && (
+        <Text size='nano' variant='label' component='p' title={refusal || undefined}>
+          {refusalText}
+        </Text>
+      )}
+    </div>
+  );
+}
+
 // ── ЧИСЛО И ЕГО ПРОИСХОЖДЕНИЕ, ПЕРВЫМ ЭЛЕМЕНТОМ СТРОКИ ──────────────────────────────────────────
 //
 // Показывает норму как РЕЗУЛЬТАТ, а не как поле ввода: значение, бейдж источника и раскрывашку с
@@ -921,6 +1107,7 @@ function NormSummary({
   articleWidth,
   recipeLinks,
   weightBasis,
+  estimate,
 }: {
   draft: UsageDraft;
   unit: string;
@@ -931,8 +1118,10 @@ function NormSummary({
   articleWidth: string;
   /** Привязки «деталь → слот» из строк рецепта — второй источник комплекта деталей. */
   recipeLinks?: readonly RecipePieceLink[];
-  /** Основа веса кг-слота (Ф3) — резолвится строкой (SlotUsageRow), одна на все инструменты. */
+  /** Основа веса кг-слота (Ф3) — резолвится строкой расхода (SlotNormBlock), одна на все. */
   weightBasis: WeightBasisResolution;
+  /** Серверная оценка расхода по площади — рисуется ТОЛЬКО там, где нормы нет (см. ниже). */
+  estimate?: common_TechCardSlotAreaEstimate;
 }) {
   // Открыта ли раскрывашка — локальный стейт через onToggle: пересчёт dxf-нормы по текущим данным
   // тянет подписки на массивы формы и мегабайты DXF, а NormSummary смонтирован для КАЖДОЙ строки
@@ -951,12 +1140,31 @@ function NormSummary({
         (sizeOrder.get(b.sizeId ?? 0) ?? sizeIds.length),
     );
   const scalar = draft.consumption.trim();
-  if (!scalar && perSize.length === 0) return null;
+  // ПУСТОЙ РАСХОД НАЗЫВАЕТСЯ ПРОЧЕРКОМ, А НЕ МОЛЧАНИЕМ (и это изменение вместе с переходом на
+  // карточку ткани). Раньше блок расхода существовал только там, где строку рецепта уже завели, и
+  // отсутствие числа было отсутствием ВСЕГО блока. Теперь карточка есть у каждого слота BOM, и
+  // «нормы ещё нет» — её самое частое состояние: не сказать этого прочерком значило бы показать
+  // ткань, у которой про расход не написано ничего, — ровно то, на что жаловался владелец.
+  //
+  // Ни бейджа источника, ни раскрывашки «из чего сложилось» здесь нет намеренно: у пустой нормы
+  // источника не бывает, а разбор сочинил бы «число набрано руками» про число, которого никто не
+  // набирал. Инструменты (раскладка, выкройки, ручной ввод) идут НИЖЕ и говорят за себя сами.
+  //
+  // ЗДЕСЬ ЖЕ ЖИВЁТ СЕРВЕРНАЯ ОЦЕНКА (Ф1) — и только здесь: она существует ровно там, где строки
+  // рецепта нет, потому что авторская норма всегда сильнее выведенной (сервер по тому же правилу
+  // оценку для слота со строкой не публикует вовсе). Отдельного места ей не заводится намеренно:
+  // «сколько уходит ткани» — один вопрос, и два ответа в разных углах экрана — это ровно та
+  // двусмысленность, которую карточка ткани убрала.
+  if (!scalar && perSize.length === 0) {
+    return <NormEstimate estimate={estimate} />;
+  }
 
   const source = draft.consumptionSource;
   const isMarker = source === 'marker';
   const isDxf = source === 'dxf';
-  const label = isMarker ? 'из раскладки' : isDxf ? 'по выкройкам' : 'введено руками';
+  // Слова — из общего словаря костинга: полоса себестоимости называет тот же источник теми же
+  // тремя словами, и вторая копия литералов разошлась бы с этой при первой же правке.
+  const label = normSourceLabel(source);
   // ПЕР-РАЗМЕРНАЯ НОРМА ПОБЕЖДАЕТ СКАЛЯР — ровно как на сервере: при непустых size_consumptions
   // LineTotal невалиден, себестоимость стиля берёт СРЕДНЕЕ ПО РАЗМЕРНОМУ РЯДУ (T6; весь ряд или
   // строка непосчитана), а план прогона читает
@@ -1286,177 +1494,27 @@ function articleForUsage(
   };
 }
 
-// The slot's identifying CODE for the picker: the default article's code (or its name), so a slot
-// reads by what it IS, not by a row number. Falls back to the slot's own role for an article-less
-// line — same rule the master fabric picker used.
-function slotCode(b: BomLine): string {
-  const m = b.material;
-  if (m)
-    return composeArticleFromMaterial(m, true) || m.name?.trim() || b.name?.trim() || 'material';
-  return b.name?.trim() || 'без названия';
-}
-
-// The meta line under the code: the ROLE first (it is what tells two slots with the same default
-// article apart), then the material's own spec + colour.
-function slotSpecLine(b: BomLine): string {
-  const m = b.material;
-  const role = b.name?.trim();
-  return [role, m ? materialSpec(m) : '', m?.color?.trim()].filter(Boolean).join(' · ');
-}
-
-// The slot chooser — the master fabric picker, carried over to slots. Replaces the native <select>:
-// a select can render only text, and a slot is picked by its article's photo + spec + role, not by
-// a row label. A field-box trigger (the shared `cell` box) shows the current pick as thumbnail +
-// code + meta; the menu is the app's one popover shell (portalled, focus-trapped, Esc to close).
-// Options already used in this recipe group are disabled with «уже в рецепте»; the current pick
-// stays visible even when the section filter (or its removal from the BOM) would hide it, so a
-// save never silently drops a stored reference.
-function SlotPicker({
-  value,
-  slots,
-  allowedSections,
-  usedKeys,
-  canEdit,
-  onChange,
-}: {
-  value: string;
-  slots: BomLine[];
-  allowedSections: Set<string>;
-  usedKeys: Set<string>;
-  canEdit: boolean;
-  onChange: (bomLineKey: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const selected = value ? slots.find((slot) => slot.lineKey === value) : undefined;
-  const unknown = !!value && !selected;
-  const eligible = slots.filter(
-    (slot) => allowedSections.has(slot.section ?? '') || slot.lineKey === value,
-  );
-
-  const pick = (bomLineKey: string) => {
-    onChange(bomLineKey);
-    setOpen(false);
+// ЭФФЕКТИВНЫЙ АРТИКУЛ СТРОКИ И ВСЁ, ЧТО ИЗ НЕГО СЛЕДУЕТ — ОДНОЙ ФУНКЦИЕЙ, потому что мест, которым
+// это нужно, стало два: шапка карточки (она называет ткань и правит пин) и КАЖДАЯ строка расхода
+// этого слота — а строк бывает больше одной, и у второй законно может стоять СВОЙ пин. Считать это
+// в двух местах порознь значит дать шапке и норме описывать разные ткани: ширина, плотность и цена
+// разъедутся молча, и разъедутся ровно там, где стоит пин, — то есть в самом опасном случае.
+function resolveSlotArticle(draft: UsageDraft, slot: BomLine, materials: common_Material[]) {
+  const material = effectiveMaterial(draft, slot, materials);
+  const materialId = effectiveMaterialId(draft, slot);
+  // "Pinned" = пин на ДРУГОЙ артикул, чем у слота: пин обратно на свой же артикул — та же ткань,
+  // и переопределение ширины на строке всё ещё описывает её. То же условие уходит в cuttingWidthOf.
+  const pinnedDifferent = draft.materialId > 0 && draft.materialId !== slot.materialId;
+  return {
+    material,
+    materialId,
+    pinnedDifferent,
+    // ОСНОВА ВЕСА кг-слота (Ф3) и РАСКРОЙНАЯ ширина считаются здесь и только здесь: ни раскладка,
+    // ни выкройки, ни пересчёт не должны выбирать ширину и плотность сами.
+    weightBasis: weightBasisOf(material, slot, pinnedDifferent),
+    articleWidth: cuttingWidthOf(material, slot, pinnedDifferent),
+    article: articleForUsage(slot, material, materialId),
   };
-
-  return (
-    <GenericPopover
-      open={open && canEdit}
-      onOpenChange={setOpen}
-      noTail
-      title='слот'
-      className='w-[280px]'
-      triggerProps={{
-        disabled: !canEdit,
-        'aria-label': 'слот',
-        className: cn(cell, 'flex items-center gap-2 text-left'),
-      }}
-      openElement={(isOpen) => (
-        <>
-          {selected ? (
-            <MaterialThumb material={selected.material} size='sm' className='h-5 w-5' />
-          ) : null}
-          <span className='min-w-0 flex-1'>
-            {selected ? (
-              <>
-                <Text
-                  component='span'
-                  size='control'
-                  className='block truncate font-mono tabular-nums'
-                >
-                  {slotCode(selected)}
-                </Text>
-                {slotSpecLine(selected) && (
-                  <Text component='span' size='micro' variant='label' className='block truncate'>
-                    {slotSpecLine(selected)}
-                  </Text>
-                )}
-              </>
-            ) : (
-              <Text component='span' variant='label' className='block truncate'>
-                {unknown ? '(unknown / removed slot)' : '— выбрать слот —'}
-              </Text>
-            )}
-          </span>
-          <Text component='span' variant='inactive' className='shrink-0'>
-            {isOpen ? '▴' : '▾'}
-          </Text>
-        </>
-      )}
-    >
-      {/* full-bleed list inside the popover body's px-2 py-1.5 padding */}
-      <div role='listbox' aria-label='слот' className='-mx-2 -my-1.5'>
-        {/* the stored-but-removed slot, surfaced as the current selection so it is never dropped */}
-        {unknown && (
-          <div
-            role='option'
-            aria-selected
-            className='flex w-full items-center gap-2 border-b border-hairline bg-bgZebra px-2 py-1 text-left'
-          >
-            <MaterialThumb size='sm' className='h-8 w-8' />
-            <Text component='span' variant='label' size='micro' className='min-w-0 flex-1 truncate'>
-              (unknown / removed slot)
-            </Text>
-            <Text component='span' variant='inactive' className='shrink-0'>
-              ✓
-            </Text>
-          </div>
-        )}
-
-        {eligible.length === 0 && !unknown ? (
-          <div className='px-2 py-2.5'>
-            <Text variant='label' size='micro'>
-              нет подходящих слотов в BOM
-            </Text>
-          </div>
-        ) : (
-          eligible.map((b) => {
-            const current = value === b.lineKey;
-            const used = !current && usedKeys.has(b.lineKey ?? '');
-            const offGroup = !allowedSections.has(b.section ?? '');
-            const spec = slotSpecLine(b);
-            return (
-              <button
-                key={b.lineKey}
-                type='button'
-                role='option'
-                aria-selected={current}
-                disabled={used}
-                onClick={() => pick(b.lineKey ?? '')}
-                className={cn(
-                  'flex w-full items-center gap-2 border-b border-hairline px-2 py-1 text-left',
-                  current && 'bg-bgZebra',
-                  used && 'cursor-not-allowed text-labelColor',
-                )}
-              >
-                <MaterialThumb material={b.material} size='sm' className='h-8 w-8' />
-                <span className='min-w-0 flex-1'>
-                  <Text
-                    component='span'
-                    size='control'
-                    className='block truncate font-mono tabular-nums'
-                  >
-                    {slotCode(b)}
-                  </Text>
-                  {(spec || used || offGroup) && (
-                    <Text component='span' size='micro' variant='label' className='block truncate'>
-                      {[spec, used ? 'уже в рецепте' : '', offGroup ? 'не для этой группы' : '']
-                        .filter(Boolean)
-                        .join(' · ')}
-                    </Text>
-                  )}
-                </span>
-                {current && (
-                  <Text component='span' variant='inactive' className='shrink-0'>
-                    ✓
-                  </Text>
-                )}
-              </button>
-            );
-          })
-        )}
-      </div>
-    </GenericPopover>
-  );
 }
 
 function ArticlePinSelect({
@@ -1545,28 +1603,63 @@ const orphanKey = (u: UsageDraft) => usageKey(u);
 
 type IndexedUsage = { draft: UsageDraft; index: number };
 
-function SlotUsageRow({
+// ── РАСХОД ОДНОЙ ТКАНИ НА ИЗДЕЛИЕ ───────────────────────────────────────────────────────────────
+//
+// Это БЫВШАЯ строка раздела «на изделие» (SlotUsageRow) — целиком, со всем стеком нормы: число и
+// его происхождение (NormSummary), мост из раскладки (MarkerApplyHint), мост по выкройкам
+// (DxfApplyHint), пер-размерная сетка, ручной ввод, пилюли провенанса / штампа / дрейфа. Она
+// переехала ВНУТРЬ карточки ткани и отдала карточке ровно две вещи: выбор слота (карточка И ЕСТЬ
+// слот) и плашку артикула с пином (она в шапке карточки — там же, где имя ткани).
+//
+// СТРОКИ РЕЦЕПТА МОЖЕТ ЕЩЁ НЕ БЫТЬ, и это нормальное состояние, а не пустой экран: карточка есть у
+// каждого слота BOM, а строка рождается первым же изменением (patchGarmentSlot). Поэтому здесь нет
+// ни одной ветки «строки нет» — весь стек работает с пустым черновиком ровно так же, как с
+// сохранённым, а onChange уходит в «найди строку этого слота или заведи её».
+function SlotNormBlock({
+  slot,
   draft,
-  bomItems,
-  allowedSections,
-  usedKeys,
+  hasRow,
   materials,
-  sizeIds,
-  sizeNameById,
-  canEdit,
-  active,
+  readOnly,
+  estimate,
   markers,
   cardMarkersAllColorways,
   recipeLinks,
   colorwayId,
+  techCardId,
+  sizeIds,
+  sizeNameById,
+  canEdit,
+  active,
   onChange,
   onRemove,
 }: {
+  /** id карточки — только чтобы применение нормы могло опубликовать измеренные площади (Ф0). */
+  techCardId: number;
+  /** Слот этой нормы. Всегда РАЗРЕШЁН: карточку рисует сама строка BOM, а не ссылка на неё. */
+  slot: BomLine;
   draft: UsageDraft;
-  bomItems: BomLine[];
-  allowedSections: Set<string>;
-  usedKeys: Set<string>;
+  /** Строка рецепта уже существует. false — черновик синтетический, и отвязывать нечего. */
+  hasRow: boolean;
+  /**
+   * Каталог артикулов: эффективный артикул СВОЕЙ строки резолвится здесь, а не приходит с карточки.
+   * У второй строки того же слота законно бывает СВОЙ пин, и посчитанные по чужому пину ширина,
+   * плотность и цена описывали бы не ту ткань, из которой эта норма снята.
+   */
   materials: common_Material[];
+  /**
+   * ТОЛЬКО ЧТЕНИЕ. Карточка секции, которую рецепт не заводит (упаковка, этикетка), существует
+   * ради ПОЧИНКИ легаси-строк, а не ради заведения новых: ввод здесь создал бы и сохранил строку
+   * расхода в секции, которую GARMENT_SECTIONS исключает. Убрать существующую строку при этом
+   * можно — это и есть починка.
+   */
+  readOnly?: boolean;
+  /**
+   * Серверная ОЦЕНКА расхода по площади (Ф1) для этого слота. Публикуется РОВНО там, где строки
+   * рецепта нет: авторская норма всегда сильнее выведенной, и сервер по этому же правилу для слота
+   * со строкой оценку не присылает вовсе.
+   */
+  estimate?: common_TechCardSlotAreaEstimate;
   markers?: common_TechCardMarkerSummary[];
   /**
    * Раскладки карточки ПО ВСЕМ колорвеям — только чтобы объяснить пустоту. `markers` выше уже
@@ -1587,20 +1680,16 @@ function SlotUsageRow({
   onChange: (patch: Partial<UsageDraft>) => void;
   onRemove: () => void;
 }) {
-  const slot = draft.bomLineKey
-    ? bomItems.find((item) => item.lineKey === draft.bomLineKey)
-    : undefined;
-  const material = effectiveMaterial(draft, slot, materials);
-  const materialId = effectiveMaterialId(draft, slot);
-  const article = articleForUsage(slot, material, materialId);
-  const isMeasured = measured(slot?.section);
-  // "Pinned" = пин на ДРУГОЙ артикул, чем у слота: пин обратно на свой же артикул — та же ткань,
-  // и переопределение ширины на строке всё ещё описывает её. То же условие уходит в cuttingWidthOf.
-  const pinnedDifferent = draft.materialId > 0 && draft.materialId !== slot?.materialId;
-  // ОСНОВА ВЕСА кг-слота (Ф3) резолвится ЗДЕСЬ — единственным местом, у которого есть и
-  // эффективный артикул, и строка, и факт пина, — и раздаётся готовой всем инструментам ниже
-  // (раскладка, выкройки, пересчёт): ни одно из них не должно выбирать ширину и плотность само.
-  const weightBasis = weightBasisOf(material, slot, pinnedDifferent);
+  // Артикул СВОЕЙ строки — со своим пином (см. materials выше). Резолвится ОДИН раз на строку.
+  const { material, article, articleWidth, weightBasis } = resolveSlotArticle(
+    draft,
+    slot,
+    materials,
+  );
+  // Правка нормы и УБРАТЬ строку — разные права. На карточке секции вне рецепта первое запрещено,
+  // второе нет: карточка там существует ровно ради того, чтобы легаси-строку можно было убрать.
+  const normEditable = canEdit && !readOnly;
+  const isMeasured = measured(slot.section);
   const legacyCountedMeasured =
     isMeasured &&
     !!draft.quantity.trim() &&
@@ -1622,8 +1711,11 @@ function SlotUsageRow({
   // заполнить единицу на вкладке BOM, — а не догадка, которую негде проверить. Плашка артикула
   // и цена законно остаются в единицах самого артикула (articleForUsage / unitPrice) — их не
   // трогать.
-  const unit = slot?.unit?.trim() || '';
-  const missingArticle = !!slot && materialId === 0;
+  const unit = slot.unit?.trim() || '';
+  // РУЛОННАЯ ЛИ ЭТО СЕКЦИЯ — вход двух гейтов ниже. PIECE_SECTIONS здесь не «где бывают детали»,
+  // а именно рулонность: набор дословно совпадает с ROLL_GOODS_SECTIONS сервера (см. копии в
+  // bom-purpose.ts и piece-layer-role.ts).
+  const rollGoods = PIECE_SECTIONS.has(slot.section ?? '');
 
   // ── ШТАМП НОРМЫ И РАСХОЖДЕНИЕ (Ф6.8) ────────────────────────────────────────────────────
   //
@@ -1660,422 +1752,350 @@ function SlotUsageRow({
     .filter(Boolean)
     .join('; ');
 
-  // The colourway PIN — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — demoted from a second
-  // always-on select to a small popover on the article card: one visible picker per row (the slot),
-  // exactly like the master fabric picker; pinning is the exception, not a parallel question.
-  const pinned = draft.materialId > 0;
-  const [pinOpen, setPinOpen] = useState(false);
   // Форма карточки нужна диалогу «по выкройкам»: выкройки, детали кроя и их связи с блоками живут
   // в ней, а не в рецепте (рецепт — серверный, правится своим RPC).
   const { control } = useFormContext<TechCardFormData>();
   // Норма ЕСТЬ и её дал ИНСТРУМЕНТ (раскладка или выкройки) — тогда ручной ввод уходит за
   // раскрывашку. Нормы нет вовсе — туда же: на пустой строке первым надо предлагать посчитать, а не
-  // угадать. Инлайном остаётся только уже набранное руками число (см. комментарий у раскрывашки).
+  // угадать. Инлайном остаётся уже набранное руками число (см. комментарий у раскрывашки) — и весь
+  // НЕРУЛОННЫЙ слот целиком: у нитки, тесьмы и фурнитуры ручной ввод не аварийный выход, а
+  // единственный способ (раскладок на нитку не снимают, выкроек у неё нет), и прятать его там за
+  // раскрывашку значило бы спрятать сам смысл строки.
   const derivedNorm = draft.consumptionSource === 'marker' || draft.consumptionSource === 'dxf';
   const hasNorm =
     !!draft.consumption.trim() ||
     draft.sizeConsumptions.some((s) => (s.consumption ?? '').trim() !== '');
-  const manualInline = !derivedNorm && hasNorm;
+  const manualInline = (!derivedNorm && hasNorm) || !rollGoods;
+  // Оценка ПОКАЗАНА ЧИСЛОМ — тогда ручной ввод перестаёт быть аварийным выходом и становится вторым
+  // из двух названных действий («вписать своё»). Отказ оценки числом не является: он объясняет,
+  // чего не хватает, и ручной ввод при нём — по-прежнему просто ручной ввод.
+  const estimateShown = !hasNorm && !!decimalToInput(estimate?.perGarment).trim();
+  // Раскладки ИМЕННО ЭТОГО слота — считаются здесь, чтобы решить, монтировать ли подсказку вовсе.
+  // MarkerApplyHint на пустом списке и так возвращает null, но платит за это шестью useState и
+  // двумя подписками на массивы формы; карточка теперь есть у КАЖДОГО слота BOM, а не только у
+  // тех, где норму уже завели, так что «смонтировать и вернуть null» подорожало ровно во столько
+  // раз, во сколько слотов больше строк.
+  const lineMarkers = markersForLine(markers, draft.bomLineKey).length;
 
   return (
-    <div className='flex flex-col gap-3 py-2 first:pt-0 last:pb-0 sm:flex-row sm:items-start'>
-      <div className='w-full sm:w-28 sm:shrink-0'>
-        <RecipeMaterialCard slot={slot} material={material} materialId={materialId} />
-        {canEdit && slot && (
-          <div className='mt-1'>
-            <GenericPopover
-              open={pinOpen}
-              onOpenChange={setPinOpen}
-              noTail
-              title='артикул колорвея'
-              className='w-[280px]'
-              triggerProps={{
-                'aria-label': 'артикул колорвея',
-                className: cn(
-                  buttonVariants({ variant: 'secondary', size: 'xs' }),
-                  'w-full justify-center',
-                ),
-              }}
-              openElement={pinned ? 'пин ✎' : 'другой артикул…'}
-            >
-              <div className='flex flex-col gap-1.5'>
-                <ArticlePinSelect
-                  draft={draft}
-                  slot={slot}
-                  materials={materials}
-                  canEdit={canEdit}
-                  // СМЕНА ПИНА НА КГ-СЛОТЕ СНИМАЕТ ЧИСЛО НОРМЫ (и провенанс вместе с ним — как
-                  // это делает смена слота, SlotPicker ниже). Кг-норма ЗАКОДИРОВАЛА в себе основу веса КОНКРЕТНОГО
-                  // артикула (полная ширина × плотность, toBomUnit): маркер 2 м на артикуле
-                  // 150 см × 200 г/м² записан как 0.6 кг, и после пина на 180 см × 250 г/м²
-                  // строка продолжала бы обещать 0.6 при правильных 0.9 — прогон объявил бы
-                  // честный факт перерасходом +50%. На слотах в метрах/сантиметрах число НЕ
-                  // трогается: длина от артикула не зависит (за шириной раскладки следит
-                  // отдельная проверка ширины). Сравниваются ЭФФЕКТИВНЫЕ артикулы: «default» ↔
-                  // явный пин на артикул самого слота — та же ткань, и чистить нечего.
-                  //
-                  // НИ В КОЕМ СЛУЧАЕ не «сбросить провенанс, оставив число»: марочное число
-                  // содержит отходы ВНУТРИ, и, став manual, оно получило бы сверху процент
-                  // раскроя слота — двойной учёт. Либо число уходит вместе с источником, либо
-                  // не трогается ничего.
-                  onChange={(materialId) => {
-                    const patch: Partial<UsageDraft> = { materialId };
-                    const effectiveBefore = draft.materialId || slot?.materialId || 0;
-                    const effectiveAfter = materialId || slot?.materialId || 0;
-                    if (bomUnitKind(unit) === 'kg' && effectiveBefore !== effectiveAfter) {
-                      patch.consumption = '';
-                      patch.sizeConsumptions = [];
-                      Object.assign(patch, MANUAL_PROVENANCE);
-                    }
-                    onChange(patch);
-                    setPinOpen(false);
-                  }}
-                />
-                <Text size='micro' variant='label'>
-                  Переопределяет артикул слота только в этом колорвее. «default» возвращает артикул
-                  из BOM.
-                </Text>
-              </div>
-            </GenericPopover>
-          </div>
-        )}
-      </div>
-      <div className='flex min-w-0 flex-1 flex-col gap-2.5'>
-        {/* The section already badges the article card to the left — repeating it here made every
-            fabric row open with three FABRIC chips. This row is just the action now. */}
-        {canEdit && (
-          <div className='flex items-center justify-end'>
-            <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
-              unlink
-            </Button>
-          </div>
-        )}
-
-        <label className='flex min-w-0 flex-col gap-1 lg:max-w-sm'>
-          <FieldLabel>слот</FieldLabel>
-          <SlotPicker
-            value={draft.bomLineKey}
-            slots={bomItems}
-            allowedSections={allowedSections}
-            usedKeys={usedKeys}
-            canEdit={canEdit}
-            // Moving the row to another slot drops the marker provenance too. A раскладка is
-            // measured on ONE cloth: carried across, its «marker» flag would keep costing from
-            // grossing the new slot's wastage onto a length that never contained the new
-            // cloth's cutting waste — understating the line, with no marker on the new slot for
-            // the operator to notice it by. Same class of desync as retyping the number.
-            //
-            // ЕСЛИ ЕДИНИЦА НОВОГО СЛОТА — ДРУГАЯ, СНИМАЮТСЯ И САМИ ЧИСЛА (скаляр, пер-размерные
-            // и quantity). Тот же класс рассинхрона, что у провенанса выше, только хуже: единица
-            // нормы — это единица СЛОТА, число её с собой не несёт, и перенос «1.42» из слота в
-            // метрах в слот в сантиметрах молча превращал МЕТРЫ в САНТИМЕТРЫ — записанной в
-            // рецепт ошибкой масштаба в 100 раз, которую половина прогонов честно предъявила бы
-            // как ±99…9900% к норме. Сравнение — по смыслу (sameNormUnit): «м» → «metres»
-            // переезжает с числом, «м» → «см» и «шт» → «пар» — без. Слот, которого больше нет
-            // (или без единицы), против слота с единицей — тоже «другая»: единицу старого числа
-            // проверить нечем, а не угадывать — правило всех инструментов этой строки.
-            onChange={(bomLineKey) => {
-              const next = bomItems.find((item) => item.lineKey === bomLineKey);
-              const patch: Partial<UsageDraft> = {
-                bomLineKey,
-                materialId: 0,
-                ...MANUAL_PROVENANCE,
-              };
-              if (!sameNormUnit(unit, next?.unit)) {
-                patch.consumption = '';
-                patch.sizeConsumptions = [];
-                patch.quantity = '';
-              }
-              onChange(patch);
-            }}
+    <div className='flex min-w-0 flex-col gap-2'>
+      {/* ПИН — СВОЙСТВО СТРОКИ, А НЕ КАРТОЧКИ, поэтому пилюля стоит здесь: у второй строки того же
+          слота законно бывает другой артикул, и один пин в шапке описывал бы обе. Правится он всё
+          так же в шапке — но правится пин ПЕРВОЙ строки, и это честно: карточка называет ткань по
+          ней же. */}
+      {draft.materialId > 0 && (
+        <span>
+          <Pill tone='mut'>
+            пин: {material?.name?.trim() || `артикул #${draft.materialId}`}
+          </Pill>
+        </span>
+      )}
+      {isMeasured && !legacyCountedMeasured ? (
+        <div className='flex flex-col gap-1.5'>
+          {/* ЧИСЛО И ОТКУДА ОНО — ПЕРВЫМ, ИНСТРУМЕНТЫ ВТОРЫМИ, РУКИ ПОСЛЕДНИМИ.
+              До 0294 первым элементом строки стоял пустой инпут, а «применить из раскладки» —
+              припиской под ним. Экран этим сообщал, что расход ткани ВВОДЯТ, и ручной ввод
+              оказывался путём наименьшего сопротивления — при том, что и раскладка, и выкройки
+              дают проверяемое число, а набранное руками ещё и умножается на процент раскроя «на
+              глаз». Порядок здесь — это и есть утверждение о том, чему верить. */}
+          <NormSummary
+            draft={draft}
+            unit={unit}
+            sizeIds={sizeIds}
+            sizeNameById={sizeNameById}
+            slotWastagePercent={slot.wastagePercent ?? ''}
+            articleWidth={articleWidth}
+            recipeLinks={recipeLinks}
+            weightBasis={weightBasis}
+            estimate={estimate}
           />
-        </label>
-
-        {pinned && (
-          <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
-        )}
-        {missingArticle && <Pill tone='warn'>нет артикула — блокер производства</Pill>}
-        {/* The slot list is live form state now, so a slot can be deleted on the BOM tab while a
-            recipe row still points at it — the BOM tab's delete guard only sees recipes the SERVER
-            has, and this row may never have been saved. Say so here rather than let the save fail
-            on a line_key the server cannot resolve. */}
-        {!!draft.bomLineKey && !slot && (
-          <Pill tone='warn'>слот удалён на вкладке BOM — выберите другой</Pill>
-        )}
-
-        {isMeasured && !legacyCountedMeasured ? (
-          <div className='flex flex-col gap-1.5'>
-            {/* ЧИСЛО И ОТКУДА ОНО — ПЕРВЫМ, ИНСТРУМЕНТЫ ВТОРЫМИ, РУКИ ПОСЛЕДНИМИ.
-                До 0294 первым элементом строки стоял пустой инпут, а «применить из раскладки» —
-                припиской под ним. Экран этим сообщал, что расход ткани ВВОДЯТ, и ручной ввод
-                оказывался путём наименьшего сопротивления — при том, что и раскладка, и выкройки
-                дают проверяемое число, а набранное руками ещё и умножается на процент раскроя «на
-                глаз». Порядок здесь — это и есть утверждение о том, чему верить. */}
-            <NormSummary
-              draft={draft}
-              unit={unit}
-              sizeIds={sizeIds}
-              sizeNameById={sizeNameById}
-              slotWastagePercent={slot?.wastagePercent ?? ''}
-              articleWidth={cuttingWidthOf(material, slot, pinnedDifferent)}
-              recipeLinks={recipeLinks}
-              weightBasis={weightBasis}
-            />
-            {/* Ф4: измеренный маркером расход этого слота, применяемый в ЭТОТ драфт — через
-                тот же onChange, которым staged-рецепт и живёт. */}
+          {/* Ф4: измеренный маркером расход этого слота, применяемый в ЭТОТ драфт — через
+              тот же onChange, которым staged-рецепт и живёт. */}
+          {lineMarkers > 0 && (
             <MarkerApplyHint
               markers={markers}
               colorwayId={colorwayId}
               lineKey={draft.bomLineKey}
               unit={unit}
-              wastagePercent={slot?.wastagePercent ?? ''}
+              wastagePercent={slot.wastagePercent ?? ''}
               // The article's CUTTING width — roll minus the кромка on both edges — because
-              // that is the width a marker is laid on and records. The pinned/linked material's
-              // catalog figures come first (a colourway pin can be a different cloth), the
-              // slot's own otherwise ("pinned" = pinned to a DIFFERENT article, see pinnedDifferent).
-              articleWidth={cuttingWidthOf(material, slot, pinnedDifferent)}
+              // that is the width a marker is laid on and records.
+              articleWidth={articleWidth}
               // Основа веса кг-слота — та же, что у остальных инструментов строки (см. выше).
               weightBasis={weightBasis}
               sizeIds={sizeIds}
               sizeNameById={sizeNameById}
-              canEdit={canEdit}
+              canEdit={normEditable}
               // Патч уходит в черновик ЦЕЛИКОМ — вместе с ним и штамп нормы (normMarkerId, Ф6.8)
               // наравне с consumptionSource. Перечислять поля здесь поимённо значило бы завести
               // список, который обязан догонять marker-apply: провенанс и число разъехались бы
               // ровно в тот день, когда кто-то добавит там поле и забудет здесь.
               onApply={(patch) => onChange(patch)}
             />
-            {/* 0294: тот же мост, но от ВЫКРОЕК — для карточки, на которой раскладки ещё нет.
-                Число netto, и диалог сам не даёт применить его на слот без процента раскроя.
-
-                МОНТИРУЕТСЯ ТОЛЬКО НА РЕДАКТИРУЕМОЙ КАРТОЧКЕ И ТОЛЬКО В АКТИВНОМ КОЛОРВЕЕ, и это
-                не косметика: подсказка держит три подписки на массивы формы (BOM, детали кроя,
-                связи блоков), а редакторы ВСЕХ колорвеев смонтированы одновременно (скрытые — не
-                размонтированные). Без гейта по active семь колорвеев по четыре измеряемых слота —
-                это под восемьдесят лишних подписок, и правка любой строки BOM будила бы каждую
-                скрытую подсказку; контракт хука (use-fabric-dxf-pieces) прямо требует монтироваться
-                только когда ответ нужен. Тот же приём, что у силуэтов деталей (shapes отдаются
-                только активному редактору). Ранний выход внутри компонента цену не убирает — хуки
-                уже подписаны к моменту возврата; потерять при переключении плитки тут нечего —
-                подсказка ничего не хранит, черновик живёт выше. */}
-            {canEdit && active && (
-              <DxfApplyHint
-                control={control}
-                lineKey={draft.bomLineKey}
-                unit={unit}
-                wastagePercent={slot?.wastagePercent ?? ''}
-                articleWidth={cuttingWidthOf(material, slot, pinnedDifferent)}
-                weightBasis={weightBasis}
-                sizeIds={sizeIds}
-                sizeNameById={sizeNameById}
-                canEdit={canEdit}
-                // Строка без нормы обязана услышать, ЧЕГО не хватает для расчёта по выкройкам, а не
-                // остаться с одним «ввести руками…». Где норма уже есть — молчим: там это шум.
-                explainWhenIdle={!hasNorm}
-                recipeLinks={recipeLinks}
-                onApply={(patch) => onChange(patch)}
-              />
-            )}
-            {/* ПУСТАЯ СТРОКА ОБЯЗАНА СКАЗАТЬ, ЧЕГО ЖДЁТ, А НЕ ПРЕДЛАГАТЬ ОДИН ЛИШЬ РУЧНОЙ ВВОД.
-                Каждый инструмент выше возвращает ПУСТОТУ, когда ему нечего предложить: нет снятой
-                раскладки на слот — нет подсказки; нет деталей кроя этой ткани или размерного ряда —
-                нет кнопки «по выкройкам». Пустота вместо кнопки была осознанной (кнопка, которая
-                всегда отказывает, читается как поломка), но объяснения вместо неё не осталось: на
-                строке без нормы весь блок расхода схлопывался в одну свёрнутую «ввести руками…», и
-                экран выглядел ровно так же, как до появления инструментов, — то есть предлагал
-                угадать, ничего не сказав про то, что число вообще-то считается.
-
-                Здесь говорится ТОЛЬКО про раскладку — про неё эта строка и знает (маркеры у неё в
-                пропсах). Про выкройки отвечает сама подсказка «по выкройкам» (dxf-apply.tsx): у неё
-                есть комплект деталей, и утверждать за неё отсюда значило бы однажды сказать «выкроек
-                нет» рядом с её же кнопкой. */}
-            {!hasNorm &&
-              markersForLine(markers, draft.bomLineKey).length === 0 &&
-              (() => {
-                // РАСКЛАДКА МОЖЕТ БЫТЬ — ПРОСТО НЕ ЗДЕСЬ, и это надо сказать прямо. `markers` уже
-                // сужены до своего колорвея, поэтому «раскладки нет» без этой ветки прозвучало бы
-                // на карточке, где раскладки видны на вкладке выкроек, — оператор считает экран
-                // сломанным, и он прав по-своему.
-                const foreign = markersForLine(
-                  cardMarkersAllColorways ?? [],
-                  draft.bomLineKey,
-                ).length;
-                return (
-                  <Text size='nano' variant='label' component='p'>
-                    расход не вводят руками, его считают: с раскладки — измеренной длиной настила,
-                    либо по выкройкам — площадью деталей кроя ÷ раскройную ширину.{' '}
-                    {foreign > 0
-                      ? `Раскладки на этот слот сняты (${foreign}), но в ДРУГОМ колорвее: их длина измерена на его артикуле, и предложить её здесь значило бы подменить ширину полотна — отличие выглядело бы совершенно нормальным числом. Снимите раскладку в этом колорвее либо посчитайте по выкройкам.`
-                      : 'Раскладки на этот слот пока нет, поэтому предложить снять с неё нечего.'}
-                  </Text>
-                );
-              })()}
-            {/* РУЧНОЙ ВВОД ОСТАЁТСЯ НАВСЕГДА — и остаётся ЗА РАСКРЫВАШКОЙ, когда норму уже дал
-                инструмент или когда её нет вовсе. Он нужен: без него первый же странный DXF
-                остановил бы производство, а тесьме на метраж выкроек не бывает. Но предлагать его
-                первым значит предлагать угадать там, где можно посчитать.
-
-                УЖЕ НАБРАННОЕ РУКАМИ ЧИСЛО ПОКАЗЫВАЕТСЯ ИНЛАЙНОМ. Спрятать его под раскрывашку
-                значило бы наказать за легаси того, кто пришёл поправить свою же строку. */}
-            {manualInline ? (
-              <UsagePerSizeLocal
-                draft={draft}
-                sizeIds={sizeIds}
-                article={article}
-                unit={unit}
-                canEdit={canEdit}
-                sizeNameById={sizeNameById}
-                onChange={onChange}
-              />
-            ) : (
-              <details className='border border-hairline px-2 py-1'>
-                <summary className='cursor-pointer text-micro uppercase'>ввести руками…</summary>
-                <div className='pt-1.5'>
-                  <UsagePerSizeLocal
-                    draft={draft}
-                    sizeIds={sizeIds}
-                    article={article}
-                    unit={unit}
-                    canEdit={canEdit}
-                    sizeNameById={sizeNameById}
-                    onChange={onChange}
-                  />
-                </div>
-              </details>
-            )}
-          </div>
-        ) : (
-          <label className='flex flex-col gap-1'>
-            <FieldLabel>quantity{unit ? ` (${unit})` : ''}</FieldLabel>
-            <input
-              className={cell}
-              inputMode='decimal'
-              disabled={!canEdit}
-              value={draft.quantity}
-              onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
-            />
-          </label>
-        )}
-
-        {/* Provenance of the norm (0261): a marker-measured figure is priced WITHOUT the
-            article's wastage gross-up, and that is a costing-visible difference the operator
-            must be able to see on the row that causes it. */}
-        {draft.consumptionSource === 'marker' && (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            <Pill tone='mut'>из раскладки</Pill>
-            <Text size='nano' variant='label' component='span'>
-              {draft.wasteSelvedgePct || draft.wasteCutPct
-                ? `отходы уже внутри: кромка ${draft.wasteSelvedgePct || '0'}% + выпады ${draft.wasteCutPct || '0'}%`
-                : 'отходы уже внутри нормы; разложение не записано'}
-              {slot?.wastagePercent?.trim()
-                ? ` · ${slot.wastagePercent}% слота не начисляются`
-                : ''}
-            </Text>
-            {/* МАРОЧНАЯ СТРОКА БЕЗ ШТАМПА — НЕ ТО ЖЕ, ЧТО МАРОЧНАЯ СО ШТАМПОМ, и молчать об этом
-                нельзя. До 0291 штамп не ставили, а пер-размерное применение из нескольких раскладок
-                ставит 0 намеренно: такие строки честно говорят «снято с раскладки», но КАКОЙ — уже
-                не помнят, и индикатор «раскладку перемеряли» за ними не следит. Раньше здесь не
-                показывалось ничего, и строка выглядела прослеживаемой наравне со штампованной. */}
-            {(draft.normMarkerId ?? 0) === 0 && (
-              <Pill
-                tone='mut'
-                title='у этой нормы не записано, из какой именно раскладки её сняли (применение до Ф6.8 либо несколько раскладок на размерный ряд). Число верное, но следить за изменениями раскладки нечем — примените заново, если нужна прослеживаемость'
-              >
-                ссылка на раскладку потеряна
-              </Pill>
-            )}
-          </div>
-        )}
-
-        {/* 0294: отдельного блока про источник «по выкройкам» здесь НЕТ намеренно. Бейдж стоит у
-            числа (NormSummary), а разбор netto→brutto и предупреждение о пустом проценте раскроя —
-            в его раскрывашке. Второй такой же бейдж строкой ниже читался бы как повтор, а не как
-            слоистость: у марочной нормы блок ниже говорит то, чего у числа нет (разложение отходов,
-            штамп, дрейф), а у нормы с выкроек добавить нечего. */}
-
-        {/* Ф6.8: ПРОИСХОЖДЕНИЕ ЧИСЛА И ЕГО СВЕЖЕСТЬ. Пилюля выше говорит «расход марочный»; эта
-            строка говорит, ЧЕЙ он и не устарел ли. Без штампа (пер-размерные нормы и всё,
-            применённое до Ф6.8) не показывается ничего — их большинство, и они не сломаны,
-            им просто нечего сказать. Расхождение — 'attention' (синий): это «изменилось, нужен
-            человек», а не блокер и не убыток; красный тут врал бы про цену вопроса. */}
-        {stampedId > 0 && (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            {normDrifted && (
-              <Pill
-                tone='attention'
-                title={`раскладку ${stampedName} перемеряли после того, как с неё сняли эту норму — число в строке может относиться к прежней геометрии. Пересчёта нет и не будет: примените расход заново, если хотите свежий`}
-              >
-                раскладка изменена после применения
-              </Pill>
-            )}
-            {!stampedMarker && (
-              <Pill
-                tone='mut'
-                title={`раскладки ${stampedName} среди раскладок этого колорвея больше нет — её удалили. Ссылки (FK) на раскладку не заводили намеренно: число в строке КОПИЯ и остаётся верным, но пересмотреть его источник уже нельзя`}
-              >
-                раскладка удалена
-              </Pill>
-            )}
-            <Text size='nano' variant='label' component='span'>
-              {normStampText}
-            </Text>
-          </div>
-        )}
-
-        {/* Ф6.6: РУЧНАЯ НОРМА — тот же вопрос с другой стороны, и он обязан быть подписан ТАМ, ГДЕ
-            ЧИСЛО ВВОДЯТ. Ручной ввод — аварийный выход, и он нужен: без него первый же странный DXF
-            останавливает производство. Поэтому гейт готовности прогона такую норму ПРОПУСКАЕТ
-            (norm_provenance = предупреждение, не блокер) — но помечает, и здесь стоит тот же знак,
-            чтобы «почему у меня жёлтая строка на прогоне» имело ответ на этой же странице.
-            Только для рулонных слотов: у счётного трима ручной ввод — единственный способ, и метка
-            на каждой пуговице была бы шумом, а не сигналом. */}
-        {isMeasured &&
-          !legacyCountedMeasured &&
-          draft.consumptionSource !== 'marker' &&
-          draft.consumptionSource !== 'dxf' && (
-            <div className='flex flex-wrap items-center gap-1.5'>
-              <Pill tone='attention'>расход введён руками</Pill>
-              <Text size='nano' variant='label' component='span'>
-                норма не снята с раскладки
-                {slot?.wastagePercent?.trim()
-                  ? ` · костинг начисляет сверху ${slot.wastagePercent}% раскроя слота`
-                  : ''}
-              </Text>
-            </div>
           )}
+          {/* 0294: тот же мост, но от ВЫКРОЕК — для карточки, на которой раскладки ещё нет.
+              Число netto, и диалог сам не даёт применить его на слот без процента раскроя.
 
-        {draft.lineTotal && (
-          <Text size='micro' variant='label'>
-            {`per garment ${draft.lineTotal}`}
+              МОНТИРУЕТСЯ ТОЛЬКО НА РЕДАКТИРУЕМОЙ КАРТОЧКЕ, ТОЛЬКО В АКТИВНОМ КОЛОРВЕЕ И ТОЛЬКО НА
+              РУЛОННОМ СЛОТЕ, и это не косметика: подсказка держит три подписки на массивы формы
+              (BOM, детали кроя, связи блоков), а редакторы ВСЕХ колорвеев смонтированы
+              одновременно (скрытые — не размонтированные). Гейт по рулонности не теряет ничего:
+              useFabricDxfPieces строит скоупы ТОЛЬКО по рулонным строкам (isRollGoodsSection), то
+              есть на нитке и фурнитуре комплект деталей пуст по построению и кнопки не бывает —
+              раньше за это платили подписками. Тот же приём, что у силуэтов деталей (shapes
+              отдаются только активному редактору). Ранний выход внутри компонента цену не убирает —
+              хуки уже подписаны к моменту возврата; потерять при переключении плитки тут нечего —
+              подсказка ничего не хранит, черновик живёт выше. */}
+          {normEditable && active && rollGoods && (
+            <DxfApplyHint
+              control={control}
+              lineKey={draft.bomLineKey}
+              unit={unit}
+              wastagePercent={slot.wastagePercent ?? ''}
+              articleWidth={articleWidth}
+              weightBasis={weightBasis}
+              sizeIds={sizeIds}
+              sizeNameById={sizeNameById}
+              canEdit={normEditable}
+              // Строка без нормы обязана услышать, ЧЕГО не хватает для расчёта по выкройкам, а не
+              // остаться с одним «ввести руками…». Где норма уже есть — молчим: там это шум.
+              explainWhenIdle={!hasNorm}
+              recipeLinks={recipeLinks}
+              techCardId={techCardId}
+              onApply={(patch) => onChange(patch)}
+            />
+          )}
+          {/* ПУСТАЯ НОРМА ОБЯЗАНА СКАЗАТЬ, ЧЕГО ЖДЁТ, А НЕ ПРЕДЛАГАТЬ ОДИН ЛИШЬ РУЧНОЙ ВВОД.
+              Каждый инструмент выше возвращает ПУСТОТУ, когда ему нечего предложить: нет снятой
+              раскладки на слот — нет подсказки; нет деталей кроя этой ткани или размерного ряда —
+              нет кнопки «по выкройкам». Пустота вместо кнопки была осознанной (кнопка, которая
+              всегда отказывает, читается как поломка), но объяснения вместо неё не осталось: на
+              строке без нормы весь блок расхода схлопывался в одну свёрнутую «ввести руками…», и
+              экран выглядел ровно так же, как до появления инструментов, — то есть предлагал
+              угадать, ничего не сказав про то, что число вообще-то считается.
+
+              Здесь говорится ТОЛЬКО про раскладку — про неё эта строка и знает (маркеры у неё в
+              пропсах). Про выкройки отвечает сама подсказка «по выкройкам» (dxf-apply.tsx): у неё
+              есть комплект деталей, и утверждать за неё отсюда значило бы однажды сказать «выкроек
+              нет» рядом с её же кнопкой.
+
+              Только для РУЛОННОГО слота: на нитке и тесьме обещание «посчитаем по выкройкам»
+              было бы ложным (площади деталей к ним не применяются), а ручной ввод у них и так
+              стоит развёрнутым — сказать там нечего. */}
+          {rollGoods &&
+            !hasNorm &&
+            lineMarkers === 0 &&
+            (() => {
+              // РАСКЛАДКА МОЖЕТ БЫТЬ — ПРОСТО НЕ ЗДЕСЬ, и это надо сказать прямо. `markers` уже
+              // сужены до своего колорвея, поэтому «раскладки нет» без этой ветки прозвучало бы
+              // на карточке, где раскладки видны на вкладке выкроек, — оператор считает экран
+              // сломанным, и он прав по-своему.
+              const foreign = markersForLine(
+                cardMarkersAllColorways ?? [],
+                draft.bomLineKey,
+              ).length;
+              return (
+                <Text size='nano' variant='label' component='p'>
+                  расход не вводят руками, его считают: с раскладки — измеренной длиной настила,
+                  либо по выкройкам — площадью деталей кроя ÷ раскройную ширину.{' '}
+                  {foreign > 0
+                    ? `Раскладки на этот слот сняты (${foreign}), но в ДРУГОМ колорвее: их длина измерена на его артикуле, и предложить её здесь значило бы подменить ширину полотна — отличие выглядело бы совершенно нормальным числом. Снимите раскладку в этом колорвее либо посчитайте по выкройкам.`
+                    : 'Раскладки на этот слот пока нет, поэтому предложить снять с неё нечего.'}
+                </Text>
+              );
+            })()}
+          {/* РУЧНОЙ ВВОД ОСТАЁТСЯ НАВСЕГДА — и остаётся ЗА РАСКРЫВАШКОЙ, когда норму уже дал
+              инструмент или когда её нет вовсе. Он нужен: без него первый же странный DXF
+              остановил бы производство, а тесьме на метраж выкроек не бывает. Но предлагать его
+              первым значит предлагать угадать там, где можно посчитать.
+
+              УЖЕ НАБРАННОЕ РУКАМИ ЧИСЛО ПОКАЗЫВАЕТСЯ ИНЛАЙНОМ. Спрятать его под раскрывашку
+              значило бы наказать за легаси того, кто пришёл поправить свою же строку. */}
+          {manualInline ? (
+            <UsagePerSizeLocal
+              draft={draft}
+              sizeIds={sizeIds}
+              article={article}
+              unit={unit}
+              canEdit={normEditable}
+              rowAlive={hasRow}
+              sizeNameById={sizeNameById}
+              onChange={onChange}
+            />
+          ) : (
+            <details className='border border-hairline px-2 py-1'>
+              {/* «ВПИСАТЬ СВОЁ» — там, где сервер уже показал оценку: это второе из двух действий,
+                  которыми оценку превращают в норму (первое — уточнить раскладкой, кнопка выше).
+                  Без оценки формулировка прежняя: ручной ввод — аварийный выход, а не предложение. */}
+              <summary className='cursor-pointer text-micro uppercase'>
+                {estimateShown ? 'вписать своё…' : 'ввести руками…'}
+              </summary>
+              <div className='pt-1.5'>
+                <UsagePerSizeLocal
+                  draft={draft}
+                  sizeIds={sizeIds}
+                  article={article}
+                  unit={unit}
+                  canEdit={normEditable}
+                  rowAlive={hasRow}
+                  sizeNameById={sizeNameById}
+                  onChange={onChange}
+                />
+              </div>
+            </details>
+          )}
+        </div>
+      ) : (
+        <label className='flex flex-col gap-1 lg:max-w-xs'>
+          {/* Слово «расход» — то же, что у измеряемых слотов, и это не оговорка: у пуговицы расход
+              тоже расход, просто считается штуками. Прежнее «quantity» было единственным местом на
+              карточке, где та же величина называлась по-английски и другим словом. */}
+          <FieldLabel>расход на изделие{unit ? ` (${unit})` : ''}</FieldLabel>
+          <input
+            className={cell}
+            inputMode='decimal'
+            disabled={!normEditable}
+            value={draft.quantity}
+            onChange={(e) => onChange({ quantity: sanitizeDecimal(e.target.value) })}
+          />
+        </label>
+      )}
+
+      {/* Provenance of the norm (0261): a marker-measured figure is priced WITHOUT the
+          article's wastage gross-up, and that is a costing-visible difference the operator
+          must be able to see on the row that causes it. */}
+      {draft.consumptionSource === 'marker' && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Pill tone='mut'>из раскладки</Pill>
+          <Text size='nano' variant='label' component='span'>
+            {draft.wasteSelvedgePct || draft.wasteCutPct
+              ? `отходы уже внутри: кромка ${draft.wasteSelvedgePct || '0'}% + выпады ${draft.wasteCutPct || '0'}%`
+              : 'отходы уже внутри нормы; разложение не записано'}
+            {slot.wastagePercent?.trim() ? ` · ${slot.wastagePercent}% слота не начисляются` : ''}
           </Text>
-        )}
-      </div>
+          {/* МАРОЧНАЯ СТРОКА БЕЗ ШТАМПА — НЕ ТО ЖЕ, ЧТО МАРОЧНАЯ СО ШТАМПОМ, и молчать об этом
+              нельзя. До 0291 штамп не ставили, а пер-размерное применение из нескольких раскладок
+              ставит 0 намеренно: такие строки честно говорят «снято с раскладки», но КАКОЙ — уже
+              не помнят, и индикатор «раскладку перемеряли» за ними не следит. Раньше здесь не
+              показывалось ничего, и строка выглядела прослеживаемой наравне со штампованной. */}
+          {(draft.normMarkerId ?? 0) === 0 && (
+            <Pill
+              tone='mut'
+              title='у этой нормы не записано, из какой именно раскладки её сняли (применение до Ф6.8 либо несколько раскладок на размерный ряд). Число верное, но следить за изменениями раскладки нечем — примените заново, если нужна прослеживаемость'
+            >
+              ссылка на раскладку потеряна
+            </Pill>
+          )}
+        </div>
+      )}
+
+      {/* 0294: отдельного блока про источник «по выкройкам» здесь НЕТ намеренно. Бейдж стоит у
+          числа (NormSummary), а разбор netto→brutto и предупреждение о пустом проценте раскроя —
+          в его раскрывашке. Второй такой же бейдж строкой ниже читался бы как повтор, а не как
+          слоистость: у марочной нормы блок ниже говорит то, чего у числа нет (разложение отходов,
+          штамп, дрейф), а у нормы с выкроек добавить нечего. */}
+
+      {/* Ф6.8: ПРОИСХОЖДЕНИЕ ЧИСЛА И ЕГО СВЕЖЕСТЬ. Пилюля выше говорит «расход марочный»; эта
+          строка говорит, ЧЕЙ он и не устарел ли. Без штампа (пер-размерные нормы и всё,
+          применённое до Ф6.8) не показывается ничего — их большинство, и они не сломаны,
+          им просто нечего сказать. Расхождение — 'attention' (синий): это «изменилось, нужен
+          человек», а не блокер и не убыток; красный тут врал бы про цену вопроса. */}
+      {stampedId > 0 && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          {normDrifted && (
+            <Pill
+              tone='attention'
+              title={`раскладку ${stampedName} перемеряли после того, как с неё сняли эту норму — число в строке может относиться к прежней геометрии. Пересчёта нет и не будет: примените расход заново, если хотите свежий`}
+            >
+              раскладка изменена после применения
+            </Pill>
+          )}
+          {!stampedMarker && (
+            <Pill
+              tone='mut'
+              title={`раскладки ${stampedName} среди раскладок этого колорвея больше нет — её удалили. Ссылки (FK) на раскладку не заводили намеренно: число в строке КОПИЯ и остаётся верным, но пересмотреть его источник уже нельзя`}
+            >
+              раскладка удалена
+            </Pill>
+          )}
+          <Text size='nano' variant='label' component='span'>
+            {normStampText}
+          </Text>
+        </div>
+      )}
+
+      {/* Ф6.6: РУЧНАЯ НОРМА — тот же вопрос с другой стороны, и он обязан быть подписан ТАМ, ГДЕ
+          ЧИСЛО ВВОДЯТ. Ручной ввод — аварийный выход, и он нужен: без него первый же странный DXF
+          останавливает производство. Поэтому гейт готовности прогона такую норму ПРОПУСКАЕТ
+          (norm_provenance = предупреждение, не блокер) — но помечает, и здесь стоит тот же знак,
+          чтобы «почему у меня жёлтая строка на прогоне» имело ответ на этой же странице.
+          Только для рулонных слотов: у счётного трима ручной ввод — единственный способ, и метка
+          на каждой пуговице была бы шумом, а не сигналом. Пустая норма молчит тоже: «введён
+          руками» про число, которого нет, — неправда, а прочерк уже сказан выше. */}
+      {isMeasured && rollGoods && !legacyCountedMeasured && hasNorm && !derivedNorm && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Pill tone='attention'>расход введён руками</Pill>
+          <Text size='nano' variant='label' component='span'>
+            норма не снята с раскладки
+            {slot.wastagePercent?.trim()
+              ? ` · костинг начисляет сверху ${slot.wastagePercent}% раскроя слота`
+              : ''}
+          </Text>
+        </div>
+      )}
+
+      {draft.lineTotal && (
+        <Text size='micro' variant='label'>
+          {`per garment ${draft.lineTotal}`}
+        </Text>
+      )}
+
+      {/* «УБРАТЬ РАСХОД» — бывший unlink строки «на изделие», и он всё ещё нужен: без него норму
+          можно обнулить, но нельзя вернуть слот в состояние «строки рецепта нет вовсе» (а это
+          разные вещи для полной замены строк). Виден только когда строка ЕСТЬ. */}
+      {canEdit && hasRow && (
+        <div className='flex justify-end'>
+          <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
+            убрать расход
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
 
 // ── СТРОКА ДЕТАЛИ: «ИЗ КАКОЙ ТКАНИ КРОИТСЯ» — И ВСЁ ─────────────────────────────────────────────
 //
-// Решение владельца (2026-08-10): расход ткани — свойство ИЗДЕЛИЯ, детали — справочно. Блока
-// расхода здесь нет НАМЕРЕННО: ни нормы, ни «по выкройкам…», ни «из раскладки», ни ручного ввода,
-// ни пина артикула. «По выкройкам» на такой строке собирал комплект по СКОУПУ ТКАНИ — то есть
-// считал площадь всего изделия — и записывал её в одну деталь; на девяти деталях это девятикратный
-// расход, и числа выглядят правдоподобно. Норма и все инструменты живут на строке той же ткани в
-// разделе «на изделие»: там комплект деталей ткани и есть изделие, и тот же расчёт ВЕРЕН.
-function PieceFabricRow({
+// Решение владельца (2026-08-10) в силе и после перестройки в карточку ткани: расход ткани —
+// свойство ИЗДЕЛИЯ, деталь справочна. Блока расхода здесь нет НАМЕРЕННО: ни нормы, ни «по
+// выкройкам…», ни «из раскладки», ни ручного ввода. «По выкройкам» на такой строке собирал
+// комплект по СКОУПУ ТКАНИ — то есть считал площадь всего изделия — и записывал её в одну деталь;
+// на девяти деталях это девятикратный расход, и числа выглядят правдоподобно.
+//
+// ЧТО ЗАБРАЛА КАРТОЧКА. Выпадашки слота больше нет: ткань — это карточка, внутри которой лежит
+// строка, и второй выбор ткани внутри неё был бы ровно тем промахом мимо секции, который вся эта
+// перестройка и закрывает. Бейджа роли слоя тоже нет: роль — свойство ТКАНИ (вывод из её строки
+// BOM), карточка называет её один раз в шапке, а переписанная у каждой из девяти деталей она была
+// девятью копиями одного факта. Здесь осталось ровно то, что про ДЕТАЛЬ: силуэт, имя, её
+// собственный пин артикула, её легаси-число и разрыв связи.
+function PieceLinkRow({
   draft,
-  bomItems,
-  usedKeys,
+  piece,
+  shape,
+  slot,
   materials,
   sizeIds,
   sizeNameById,
   canEdit,
-  onChange,
   onRemove,
+  onChange,
 }: {
   draft: UsageDraft;
-  bomItems: BomLine[];
-  usedKeys: Set<string>;
+  /** Деталь, на которую смотрит строка. Всегда живая: сироты живут в своём разделе. */
+  piece?: PieceRef;
+  /** Контур из разобранных DXF; null — привязки нет, кэш холодный или редактор скрыт. */
+  shape: FoundPiece | null;
+  slot: BomLine;
   materials: common_Material[];
   sizeIds: number[];
   sizeNameById: Map<number, string>;
@@ -2083,18 +2103,11 @@ function PieceFabricRow({
   onChange: (patch: Partial<UsageDraft>) => void;
   onRemove: () => void;
 }) {
-  const slot = draft.bomLineKey
-    ? bomItems.find((item) => item.lineKey === draft.bomLineKey)
-    : undefined;
   const material = effectiveMaterial(draft, slot, materials);
-  // Пин показывается ФАКТОМ, но не правится: его судьба — отдельный разговор (он и про строку «на
-  // изделие» тоже), а спрятать существующий пин молча значило бы показывать не ту ткань.
-  const pinnedDifferent = draft.materialId > 0 && draft.materialId !== slot?.materialId;
-  const unit = slot?.unit?.trim() || '';
-  // РОЛЬ СЛОЯ (T4) — проекция строки BOM, не своё поле: основная / подкладка / дублерин выводятся
-  // из назначения (piece-layer-role.ts, зеркало entity.DerivePieceLayerRole). «Не разложено» —
-  // fabric без назначения: роль слоя неизвестна, и чинится это на вкладке BOM, а не здесь.
-  const layerRole = derivePieceLayerRole(slot?.section, slot?.purpose);
+  // Пин показывается ФАКТОМ, но не правится: пин колорвея правится в шапке карточки, на строке
+  // «на изделие», и второе место для того же поля разошлось бы с первым.
+  const pinnedDifferent = draft.materialId > 0 && draft.materialId !== slot.materialId;
+  const unit = slot.unit?.trim() || '';
 
   // ЛЕГАСИ-ЧИСЛО НА ДЕТАЛИ. Сервер строки одного слота СУММИРУЕТ: в себестоимости каждая строка
   // рецепта добавляет свой UnitTotal (internal/dto/techcard_production.go, colorwayCost), в
@@ -2132,59 +2145,26 @@ function PieceFabricRow({
     });
 
   return (
-    <div className='flex flex-col gap-1.5 py-2 first:pt-0 last:pb-0'>
-      <div className='flex items-start gap-2'>
-        <div className='min-w-0 flex-1 lg:max-w-sm'>
-          <SlotPicker
-            value={draft.bomLineKey}
-            slots={bomItems}
-            allowedSections={PIECE_SECTIONS}
-            usedKeys={usedKeys}
-            canEdit={canEdit}
-            // Перенос на другой слот чистит и легаси-число с его провенансом: оно было про изделие
-            // из ПРЕЖНЕЙ ткани (и в её единице) — на новом слоте оно не значит ничего.
-            onChange={(bomLineKey) =>
-              onChange({
-                bomLineKey,
-                materialId: 0,
-                consumption: '',
-                quantity: '',
-                sizeConsumptions: [],
-                normMarkerId: 0,
-                ...MANUAL_PROVENANCE,
-              })
-            }
-          />
-        </div>
+    <div className='flex flex-col gap-1 py-1 first:pt-0 last:pb-0'>
+      <div className='flex items-center gap-2'>
+        <span className='flex min-w-0 flex-1 items-center'>
+          {/* Силуэт — ведущий глиф строки детали, слева от имени. */}
+          <PieceSilhouette found={shape} />
+          <Text size='micro' component='span' className='truncate uppercase'>
+            {piece?.name?.trim() || draft.pieceLineKey}
+          </Text>
+        </span>
+        {pinnedDifferent && (
+          <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
+        )}
         {canEdit && (
           <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
-            unlink
+            убрать
           </Button>
         )}
       </div>
-      {/* Бейдж роли слоя: серым — известная роль, синим — «не разложено» (П3: не ошибка, а
-          вопрос человеку; жёсткая краснота тут закричала бы на половине живых карточек). */}
-      {!!slot && layerRole.rollGoods && (
-        <span>
-          {isUnsortedLayerRole(layerRole) ? (
-            <Pill tone='attention' title='задай назначение строке на вкладке BOM'>
-              роль слоя неизвестна — назначение не задано
-            </Pill>
-          ) : (
-            <Pill tone='mut'>слой: {pieceLayerRoleLabel(layerRole)}</Pill>
-          )}
-        </span>
-      )}
-      {pinnedDifferent && (
-        <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
-      )}
-      {/* Слот живёт в форме и мог быть удалён на вкладке BOM, пока строка на него смотрит, —
-          сказать здесь, а не дать сохранению упасть на неразрешимом line_key. */}
-      {!!draft.bomLineKey && !slot && (
-        <Pill tone='warn'>слот удалён на вкладке BOM — выберите другой</Pill>
-      )}
       {legacyText && (
-        <div className='flex flex-col gap-1'>
+        <div className='flex flex-col gap-1 pb-1'>
           <div className='flex flex-wrap items-center gap-1.5'>
             <Pill tone='attention'>легаси-расход на детали</Pill>
             <Text size='small' component='span' className='font-mono tabular-nums'>
@@ -2193,8 +2173,8 @@ function PieceFabricRow({
           </div>
           <Text size='nano' variant='label' component='p'>
             это число сервер прибавляет к норме ткани — в себестоимость и в потребность прогона:
-            строки одного слота суммируются. Расход изделия ведётся на строке этой ткани в разделе
-            «на изделие» — заведите норму там, а это число уберите
+            строки одного слота суммируются. Расход изделия ведётся расходом этой ткани выше —
+            заведите норму там, а это число уберите
           </Text>
           {canEdit && (
             <span>
@@ -2233,145 +2213,618 @@ function PieceSilhouette({ found }: { found: FoundPiece | null }) {
   );
 }
 
-// One ruled group per declared cut piece. The group owns any number of distinct slot usages; rows
-// are separated by #e6e6e6 hairlines, while the piece label uses the heavier subgroup rule.
-function PieceRecipeCard({
-  piece,
-  shape,
-  rows,
-  bomItems,
+// Русское числительное при существительном — без библиотеки: карточка теперь называет числа вслух
+// («9 деталей»), и «9 деталь» читается как опечатка ровно там, где нужно доверие к числам.
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+// ПРАВИЛА ЦЕЛОСТНОСТИ СЛОЁВ (T4) — те же три, что держит сервер (отказ рецепта
+// duplicate_main_fabric, блокер наряда, находки гейта piece_role_conflict / piece_main_fabric):
+// роль каждого слоя — вывод из строки BOM; клеевая (interlining) — слой дублирования, в правила
+// кроя не входит.
+//
+// СЧИТАЮТСЯ ПО ДЕТАЛИ, ПОКАЗЫВАЮТСЯ НА ТКАНИ. Утверждение «на этой детали две основные» верно
+// только про деталь целиком, то есть про ВСЕ её строки рецепта, а не про строки одной карточки, —
+// поэтому считает их редактор, один раз на весь рецепт, а карточка ткани лишь выбирает из готовой
+// карты свои детали. Считать это в карточке значило бы либо соврать (карточка видит свою половину
+// конфликта), либо пересчитать все детали в каждой из восьми карточек.
+type PieceLayerIssue = {
+  /** Две (и больше) явно основных ткани на одной детали — сервер откажет сейву. */
+  twoMains: boolean;
+  /** Основная рядом с «не разложено» (или две «не разложено») — недоказуемый близнец первой. */
+  unsortedConflict: boolean;
+  /** Слои есть, основной нет — и нет «не разложено», которая могла бы ею оказаться. */
+  mainless: boolean;
+  /** Имена слотов-участников, для текста предупреждения. */
+  mainNames: string[];
+  unsortedNames: string[];
+  layerRoleNames: string[];
+};
+
+const slotDisplayName = (s: BomLine) => `«${s.name?.trim() || s.lineKey}»`;
+
+function pieceLayerIssuesOf(
+  usagesByPiece: Map<string, IndexedUsage[]>,
+  bomItems: BomLine[],
+): Map<string, PieceLayerIssue> {
+  const out = new Map<string, PieceLayerIssue>();
+  for (const [pieceLineKey, rows] of usagesByPiece) {
+    const layerSlots = rows
+      .map(({ draft }) =>
+        draft.bomLineKey ? bomItems.find((b) => b.lineKey === draft.bomLineKey) : undefined,
+      )
+      .filter((s): s is BomLine => !!s && s.section !== 'TECH_CARD_BOM_SECTION_INTERLINING')
+      .filter((s) => derivePieceLayerRole(s.section, s.purpose).rollGoods);
+    const mains = layerSlots.filter((s) =>
+      isMainLayerRole(derivePieceLayerRole(s.section, s.purpose)),
+    );
+    const unsorted = layerSlots.filter((s) =>
+      isUnsortedLayerRole(derivePieceLayerRole(s.section, s.purpose)),
+    );
+    // П1: две основные — ошибка данных; основная рядом с «не разложено» (или две «не разложено») —
+    // её недоказуемый близнец. Оба останавливают наряд, и сервер откажет сейву двух явных main.
+    const twoMains = mains.length >= 2;
+    const unsortedConflict =
+      !twoMains && unsorted.length >= 1 && mains.length + unsorted.length >= 2;
+    // П2: слои есть, основного нет — и нет «не разложено», которая могла бы им оказаться.
+    const mainless = layerSlots.length > 0 && mains.length === 0 && unsorted.length === 0;
+    if (!twoMains && !unsortedConflict && !mainless) continue;
+    out.set(pieceLineKey, {
+      twoMains,
+      unsortedConflict,
+      mainless,
+      mainNames: mains.map(slotDisplayName),
+      unsortedNames: unsorted.map(slotDisplayName),
+      layerRoleNames: layerSlots.map((s) =>
+        pieceLayerRoleLabel(derivePieceLayerRole(s.section, s.purpose)),
+      ),
+    });
+  }
+  return out;
+}
+
+/** Уникальные значения в порядке первого появления — для склейки имён из нескольких деталей. */
+const uniq = (xs: string[]) => [...new Set(xs.filter(Boolean))];
+
+// ── КАРТОЧКА ТКАНИ: ОДНА СТРОКА РЕЦЕПТА = ОДИН МАТЕРИАЛ ─────────────────────────────────────────
+//
+// Единица этого экрана — ТКАНЬ, а не деталь. Карточка несёт расход на изделие, цену, происхождение
+// числа и СВЁРНУТЫЙ список деталей, которые из этой ткани кроятся; заголовок «на изделие» исчез,
+// потому что «на изделие» — это и есть расход, а не отдельный раздел.
+//
+// ПОЧЕМУ КАРТОЧКА ЕСТЬ У КАЖДОГО СЛОТА BOM, даже пустого. Прежний экран показывал только строки,
+// которые уже завели, и заводили их двумя разными кнопками в двух разделах: «+ добавить материал к
+// детали» писала строку БЕЗ нормы, «+ добавить материал на изделие» — строку С нормой. Оператор,
+// честно назначивший ткань каждой детали, получал костинг по нулям и не находил второй раздел
+// вовсе. Теперь мимо не попасть: у ткани ровно одно место, оно видно всегда, и в нём написано
+// «расход —», пока нормы нет.
+function FabricRecipeCard({
+  slot,
+  garmentRows,
+  pieceRows,
+  pieces,
+  shapes,
+  layerIssues,
   materials,
+  estimate,
+  markers,
+  cardMarkersAllColorways,
+  recipeLinks,
+  colorwayId,
+  techCardId,
   sizeIds,
   sizeNameById,
   canEdit,
-  canAdd,
-  onAdd,
-  onChange,
-  onRemove,
+  active,
+  onPatchSlot,
+  onRemoveRow,
+  onTogglePiece,
 }: {
-  piece: PieceRef;
-  /** Контур из разобранных DXF; null — привязки нет, кэш холодный или редактор скрыт. */
-  shape: FoundPiece | null;
-  rows: IndexedUsage[];
-  bomItems: BomLine[];
+  slot: BomLine;
+  /** Строки «на изделие» этого слота. Первая несёт норму; вторая и далее — дубли (см. ниже). */
+  garmentRows: IndexedUsage[];
+  /** Строки деталей этого слота, уже в порядке деталей карточки. */
+  pieceRows: { row: IndexedUsage; piece?: PieceRef }[];
+  /** Все детали кроя карточки — набор выбора для «назначить детали». */
+  pieces: PieceRef[];
+  shapes: Map<string, FoundPiece | null> | null;
+  /** Готовая карта нарушений целостности слоёв по ДЕТАЛЯМ — считает редактор (см. выше). */
+  layerIssues: Map<string, PieceLayerIssue>;
   materials: common_Material[];
+  /** Серверная оценка расхода этого слота (Ф1) — есть только там, где строки рецепта нет. */
+  estimate?: common_TechCardSlotAreaEstimate;
+  markers?: common_TechCardMarkerSummary[];
+  cardMarkersAllColorways?: common_TechCardMarkerSummary[];
+  recipeLinks?: readonly RecipePieceLink[];
+  colorwayId?: number;
+  techCardId: number;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
-  canAdd: boolean;
-  onAdd: () => void;
-  onChange: (index: number, patch: Partial<UsageDraft>) => void;
-  onRemove: (index: number) => void;
+  active: boolean;
+  /** index < 0 значит «строки этого слота ещё нет» — патч её и рождает (patchGarmentSlot). */
+  onPatchSlot: (index: number, patch: Partial<UsageDraft>) => void;
+  onRemoveRow: (index: number) => void;
+  onTogglePiece: (piece: PieceRef) => void;
 }) {
-  const usedKeys = new Set(rows.map(({ draft }) => draft.bomLineKey).filter(Boolean));
+  const [pinOpen, setPinOpen] = useState(false);
+  const garment = garmentRows[0];
+  // ЧЕРНОВИК СИНТЕТИЧЕСКИЙ, ПОКА СТРОКИ НЕТ. Он нужен только чтобы прочитать с него пин (его нет)
+  // и отдать вниз пустую норму; первое же изменение уйдёт в onPatchSlot(-1, …) и заведёт настоящую
+  // строку. Заводить её на монтировании карточки нельзя категорически: восемь слотов BOM разом
+  // объявили бы рецепт изменённым и повесили бы на карточку staged, которого никто не делал.
+  const draft = garment?.draft ?? { ...blankDraft('', ''), bomLineKey: slot.lineKey ?? '' };
+  // Артикул ПЕРВОЙ строки — им карточка называет ткань и им же правит пин. У второй строки того же
+  // слота законно бывает свой пин, и её собственный артикул резолвит она сама (SlotNormBlock).
+  const { material, materialId, pinnedDifferent, article } = resolveSlotArticle(
+    draft,
+    slot,
+    materials,
+  );
+  const unit = slot.unit?.trim() || '';
+  const rollGoods = PIECE_SECTIONS.has(slot.section ?? '');
+  const layerRole = derivePieceLayerRole(slot.section, slot.purpose);
+  const missingArticle = materialId === 0;
+  // СЕКЦИЯ ВНЕ РЕЦЕПТА (упаковка, этикетка): карточки бы не было, но строки на неё уже заведены —
+  // молча спрятать их значило бы продолжать их сохранять, ничего о них не показывая. Такая карточка
+  // существует РАДИ ПОЧИНКИ и только: блок расхода на ней только читается, а завести здесь новую
+  // строку нельзя — иначе экран сам создавал бы то, что GARMENT_SECTIONS исключает. Убрать
+  // существующую можно: это и есть починка.
+  const offRecipeSection = !GARMENT_SECTIONS.has(slot.section ?? '');
+  // Пин тоже РОЖДАЕТ строку, когда её нет, — значит на карточке вне рецепта он доступен ровно
+  // тогда, когда чинить есть что.
+  const pinAllowed = canEdit && (!offRecipeSection || !!garment);
 
-  // ПРАВИЛА ЦЕЛОСТНОСТИ СЛОЁВ (T4), агрегатом по детали — те же, что держит сервер (отказ рецепта
-  // duplicate_main_fabric, блокер наряда, находки гейта piece_role_conflict / piece_main_fabric):
-  // роль каждого слоя — вывод из строки BOM; клеевая (interlining) — слой дублирования, в правила
-  // кроя не входит.
-  const layerSlots = rows
-    .map(({ draft }) =>
-      draft.bomLineKey ? bomItems.find((b) => b.lineKey === draft.bomLineKey) : undefined,
-    )
-    .filter((s): s is BomLine => !!s && s.section !== 'TECH_CARD_BOM_SECTION_INTERLINING')
-    .filter((s) => derivePieceLayerRole(s.section, s.purpose).rollGoods);
-  const slotName = (s: BomLine) => `«${s.name?.trim() || s.lineKey}»`;
-  const mains = layerSlots.filter((s) =>
-    isMainLayerRole(derivePieceLayerRole(s.section, s.purpose)),
+  // ШАПКА НАЗЫВАЕТ ТКАНЬ ТАК, КАК ЕЁ НАЗЫВАЕТ ЦЕХ: роль слоя (она и есть ответ на «какая это
+  // ткань» — основная, подкладка, дублерин), затем имя артикула. Роль — проекция строки BOM
+  // (piece-layer-role.ts), у нерулонной секции её нет, и там шапку открывает сама секция.
+  const roleWord = rollGoods ? pieceLayerRoleLabel(layerRole) : sectionShort(slot.section);
+  const named = material?.name?.trim() || slot.name?.trim() || 'без названия';
+  const heading = [roleWord, `«${named}»`].filter(Boolean).join(' · ');
+  const code = material ? composeArticleFromMaterial(material, true) : '';
+  const spec = material
+    ? [materialSpec(material), material.color?.trim()].filter(Boolean).join(' · ')
+    : '';
+  // ШИРИНА В ШАПКЕ — ПОЛНАЯ, РУЛОННАЯ, и названа словом «рулон»: раскройная (рулон − 2×кромка)
+  // участвует в делении площади и живёт в разборе нормы, а голое «140 см» рядом с ценой за метр
+  // читалось бы то как одно, то как другое.
+  const rollWidth = rollGoods ? fullRollWidthOf(material, slot, pinnedDifferent) : '';
+  const price = article?.unitPrice?.trim()
+    ? `${article.unitPrice}${article.currency ? ` ${article.currency}` : ''}${unit ? ` / ${unit}` : ''}`
+    : '';
+  const meta = [code, spec, rollWidth ? `рулон ${rollWidth} см` : '', price]
+    .filter(Boolean)
+    .join(' · ');
+
+  const assignedKeys = pieceRows.map(({ row }) => row.draft.pieceLineKey);
+  const pieceNames = pieceRows.map(
+    ({ row, piece }) => piece?.name?.trim() || row.draft.pieceLineKey,
   );
-  const unsorted = layerSlots.filter((s) =>
-    isUnsortedLayerRole(derivePieceLayerRole(s.section, s.purpose)),
+  // Восемь имён и многоточие: свёрнутый список обязан отвечать «какие детали», не разворачиваясь,
+  // но полный список из сорока имён в одну строку не читается и ломает верстку.
+  const preview = pieceNames.slice(0, 8).join(', ') + (pieceNames.length > 8 ? '…' : '');
+
+  // Нарушения целостности слоёв — только по СВОИМ деталям и склеенные по видам: девять деталей без
+  // основной ткани — это одна проблема и один текст, а не девять одинаковых абзацев.
+  //
+  // И ТОЛЬКО НА КАРТОЧКЕ, КОТОРАЯ В КОНФЛИКТЕ УЧАСТВУЕТ. Само нарушение — свойство ДЕТАЛИ, и деталь
+  // перечислена на всех своих карточках; напечатать «две основные на BP» на карточке подкладки
+  // значило бы дать предупреждение тому, кто не может ничего с ним сделать (у подкладки назначение
+  // задано и оно верное). Поэтому: «две основные» и «слои не разобраны» показывает только основная
+  // или неразобранная ткань — каждая из двух сторон конфликта видит его у себя; «нет основной»
+  // показывает любой СЛОЙ детали (кроме клеевой, она в правила кроя не входит) — основной, который
+  // мог бы это сказать, там по условию нет.
+  const selfIsMain = rollGoods && isMainLayerRole(layerRole);
+  const selfIsUnsorted = rollGoods && isUnsortedLayerRole(layerRole);
+  const selfIsLayer = rollGoods && slot.section !== 'TECH_CARD_BOM_SECTION_INTERLINING';
+  const selfName = slotDisplayName(slot);
+  const issueRows = pieceRows
+    .map(({ row, piece }) => ({
+      name: piece?.name?.trim() || row.draft.pieceLineKey,
+      issue: layerIssues.get(row.draft.pieceLineKey),
+    }))
+    .filter((x): x is { name: string; issue: PieceLayerIssue } => !!x.issue);
+  const twoMainsRows = selfIsMain ? issueRows.filter((x) => x.issue.twoMains) : [];
+  const unsortedRows =
+    selfIsMain || selfIsUnsorted ? issueRows.filter((x) => x.issue.unsortedConflict) : [];
+  const mainlessRows = selfIsLayer ? issueRows.filter((x) => x.issue.mainless) : [];
+  // Имена слотов-соперников — БЕЗ СВОЕГО: карточка и так называет себя заголовком, а «конфликтует
+  // с A и с собой» читается как опечатка.
+  const rivalNames = (names: string[]) => uniq(names).filter((n) => n !== selfName);
+
+  // ЛЕГАСИ-ЧИСЛО НА ДЕТАЛИ СЧИТАЕТ ДЕНЬГИ, И ПОТОМУ НАЗЫВАЕТСЯ ДО РАСКРЫТИЯ СПИСКА. Свёрнутая
+  // раскрывашка — правильный дом для справочного состава кроя, но не для числа, которое сервер
+  // молча прибавляет к норме ткани (строки одного слота суммируются — colorwayCost и
+  // production_material_plan). Само число и кнопка «убрать» живут на своей строке внутри списка;
+  // здесь — только факт, что они есть, и у каких деталей.
+  const legacyPieceNames = uniq(
+    pieceRows
+      .filter(
+        ({ row }) =>
+          !!row.draft.consumption.trim() ||
+          !!row.draft.quantity.trim() ||
+          row.draft.sizeConsumptions.some((s) => (s.consumption ?? '').trim() !== ''),
+      )
+      .map(({ row, piece }) => piece?.name?.trim() || row.draft.pieceLineKey),
   );
-  // П1: две основные — ошибка данных; основная рядом с «не разложено» (или две «не разложено») —
-  // её недоказуемый близнец. Оба останавливают наряд, и сервер откажет сейву двух явных main.
-  const twoMains = mains.length >= 2;
-  const unsortedConflict = !twoMains && unsorted.length >= 1 && mains.length + unsorted.length >= 2;
-  // П2: слои есть, основной нет — и нет «не разложено», которая могла бы ею оказаться.
-  const mainless = layerSlots.length > 0 && mains.length === 0 && unsorted.length === 0;
+
+  const piecePicker = (label: string) => (
+    <GenericPopover
+      title='детали из этой ткани'
+      className='w-64'
+      triggerProps={{
+        'aria-label': 'назначить детали',
+        className: buttonVariants({ variant: 'secondary', size: 'xs' }),
+      }}
+      openElement={label}
+    >
+      {/* Тот же список, что у пикера деталей операции (PieceList): поиск, отметка выбранного,
+          «деталей ещё нет». Создавать детали отсюда нельзя — рецепт пишется UpdateColorwayRecipe,
+          который деталь завести не может, и «+ создать» намолотил бы ключей, которые сейв молча
+          выбрасывает. */}
+      <PieceList
+        pieces={pieces}
+        selected={assignedKeys}
+        multiple
+        onToggle={(lineKey) => {
+          const piece = pieces.find((p) => p.lineKey === lineKey);
+          if (piece) onTogglePiece(piece);
+        }}
+      />
+    </GenericPopover>
+  );
 
   return (
     <div>
       <GroupLabel
         action={
-          canEdit ? (
-            <Button type='button' variant='secondary' size='xs' disabled={!canAdd} onClick={onAdd}>
-              + добавить материал к детали
-            </Button>
+          pinAllowed ? (
+            <div className='flex items-center gap-1.5'>
+              {/* ПИН АРТИКУЛА — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — стоит в шапке,
+                  рядом с именем ткани, которое он и переопределяет. Прежде он висел на плашке
+                  артикула внутри строки; плашка уехала в шапку целиком, и пин уехал с ней. */}
+              <GenericPopover
+                open={pinOpen}
+                onOpenChange={setPinOpen}
+                noTail
+                title='артикул колорвея'
+                className='w-[280px]'
+                triggerProps={{
+                  'aria-label': 'артикул колорвея',
+                  className: buttonVariants({ variant: 'secondary', size: 'xs' }),
+                }}
+                openElement={draft.materialId > 0 ? 'пин ✎' : 'другой артикул…'}
+              >
+                <div className='flex flex-col gap-1.5'>
+                  <ArticlePinSelect
+                    draft={draft}
+                    slot={slot}
+                    materials={materials}
+                    canEdit={canEdit}
+                    // СМЕНА ПИНА НА КГ-СЛОТЕ СНИМАЕТ ЧИСЛО НОРМЫ (и провенанс вместе с ним).
+                    // Кг-норма ЗАКОДИРОВАЛА в себе основу веса КОНКРЕТНОГО артикула (полная
+                    // ширина × плотность, toBomUnit): маркер 2 м на артикуле 150 см × 200 г/м²
+                    // записан как 0.6 кг, и после пина на 180 см × 250 г/м² строка продолжала бы
+                    // обещать 0.6 при правильных 0.9 — прогон объявил бы честный факт
+                    // перерасходом +50%. На слотах в метрах/сантиметрах число НЕ трогается: длина
+                    // от артикула не зависит (за шириной раскладки следит отдельная проверка
+                    // ширины). Сравниваются ЭФФЕКТИВНЫЕ артикулы: «default» ↔ явный пин на
+                    // артикул самого слота — та же ткань, и чистить нечего.
+                    //
+                    // НИ В КОЕМ СЛУЧАЕ не «сбросить провенанс, оставив число»: марочное число
+                    // содержит отходы ВНУТРИ, и, став manual, оно получило бы сверху процент
+                    // раскроя слота — двойной учёт. Либо число уходит вместе с источником, либо
+                    // не трогается ничего.
+                    onChange={(nextMaterialId) => {
+                      const patch: Partial<UsageDraft> = { materialId: nextMaterialId };
+                      const effectiveBefore = draft.materialId || slot.materialId || 0;
+                      const effectiveAfter = nextMaterialId || slot.materialId || 0;
+                      if (bomUnitKind(unit) === 'kg' && effectiveBefore !== effectiveAfter) {
+                        patch.consumption = '';
+                        patch.sizeConsumptions = [];
+                        Object.assign(patch, MANUAL_PROVENANCE);
+                      }
+                      onPatchSlot(garment?.index ?? -1, patch);
+                      setPinOpen(false);
+                    }}
+                  />
+                  <Text size='micro' variant='label'>
+                    Переопределяет артикул слота только в этом колорвее. «default» возвращает
+                    артикул из BOM.
+                  </Text>
+                </div>
+              </GenericPopover>
+            </div>
           ) : undefined
         }
       >
-        {/* Силуэт — ведущий глиф строки детали, слева от имени. */}
-        <PieceSilhouette found={shape} />
-        {piece.name?.trim() || 'без названия'}
+        {heading}
       </GroupLabel>
-      {twoMains && (
-        <div className='flex flex-col gap-1 py-1.5'>
-          <Pill tone='warn'>две основные ткани на одной детали</Pill>
-          <Text size='nano' variant='label' component='p'>
-            {mains.map(slotName).join(' и ')} — обе с назначением «основной материал». Цельная
-            деталь кроится из одной основной: сервер не примет такой рецепт, а наряд остановится.
-            Задай второй ткани её назначение на вкладке BOM (подкладка, дублерин, контраст…) — или
-            разбей деталь на две
-          </Text>
-        </div>
-      )}
-      {unsortedConflict && (
-        <div className='flex flex-col gap-1 py-1.5'>
-          <Pill tone='warn'>назначения слоёв не разобраны</Pill>
-          <Text size='nano' variant='label' component='p'>
-            у детали несколько слоёв, и у {unsorted.map(slotName).join(', ')} не задано назначение —
-            не доказать, что это не вторая основная, и наряд остановится. Задай назначение на
-            вкладке BOM
-          </Text>
-        </div>
-      )}
-      {mainless && (
-        <div className='flex flex-col gap-1 py-1.5'>
-          <Pill tone='attention'>у детали нет основной ткани</Pill>
-          <Text size='nano' variant='label' component='p'>
-            деталь привязана к{' '}
-            {layerSlots
-              .map((s) => pieceLayerRoleLabel(derivePieceLayerRole(s.section, s.purpose)))
-              .join(', ')}
-            , но не к основной. Добавь строку с тканью назначения «основной материал» — или
-            подтверди, что состав детали такой и есть
-          </Text>
-        </div>
-      )}
-      {rows.length === 0 ? (
-        <Row
-          tone='label'
-          label={
-            <Text size='micro' variant='label' component='span'>
-              материалы не назначены
+
+      <div className='flex gap-3 pt-1'>
+        <MaterialThumb material={material} />
+        <div className='flex min-w-0 flex-1 flex-col gap-2'>
+          {meta && (
+            <Text size='micro' variant='label' component='p' className='truncate'>
+              {meta}
             </Text>
-          }
-        />
-      ) : (
-        <div className='divide-y divide-hairline'>
-          {rows.map(({ draft, index }) => (
-            <PieceFabricRow
-              key={`${usageKey(draft)}:${index}`}
-              draft={draft}
-              bomItems={bomItems}
-              usedKeys={usedKeys}
-              materials={materials}
-              sizeIds={sizeIds}
-              sizeNameById={sizeNameById}
-              canEdit={canEdit}
-              onChange={(patch) => onChange(index, patch)}
-              onRemove={() => onRemove(index)}
-            />
-          ))}
+          )}
+          {/* Пин здесь НЕ повторяется: он свойство строки и стоит в её блоке расхода (SlotNormBlock). */}
+          {(missingArticle || offRecipeSection) && (
+            <div className='flex flex-wrap items-center gap-1.5'>
+              {missingArticle && <Pill tone='warn'>нет артикула — блокер производства</Pill>}
+              {offRecipeSection && (
+                <Pill
+                  tone='attention'
+                  title='рецепт колорвея заводится на ткани, нитки, фурнитуру, тесьму и декор; строки этой секции остались от прежней модели. Перенести строку некуда — уберите её и заведите расход на нужной ткани'
+                >
+                  секция не заводится в рецепт
+                </Pill>
+              )}
+            </div>
+          )}
+
+          {/* КАЖДАЯ СТРОКА «НА ИЗДЕЛИЕ» ЭТОГО СЛОТА — СО СВОИМ ПОЛНЫМ БЛОКОМ РАСХОДА. Строк должно
+              быть не больше одной, но бывает больше (легаси, чужая правка), и сервер их СУММИРУЕТ:
+              каждая считает деньги. Показывать вторую одним числом с кнопкой «убрать» значило бы
+              спрятать её пер-размерные нормы, её пин, её провенанс, штамп и дрейф — а пер-размерная
+              вообще печаталась бы как «без числа», то есть как пустая, будучи полной. Раз строка
+              уезжает на сервер, она обязана быть видна и правима целиком.
+
+              Первая при этом остаётся ГЛАВНОЙ ровно в одном смысле: ею подписана шапка карточки и
+              её пин правит кнопка в шапке. У остальных пин виден пилюлей внутри их блока. */}
+          {(garmentRows.length > 0 ? garmentRows : [null]).map((row, i) => {
+            const rowDraft = row?.draft ?? draft;
+            return (
+              // КЛЮЧ — ПОЗИЦИЯ В СПИСКЕ СТРОК ЭТОГО СЛОТА, А НЕ ИДЕНТИЧНОСТЬ СТРОКИ, и это ровно
+              // тот случай, ради которого позиционный ключ и существует. Строка рождается ПЕРВЫМ
+              // НАЖАТИЕМ КЛАВИШИ в поле расхода: ключ, собранный из usageKey, менялся бы с
+              // «пусто» на настоящий прямо посреди ввода, React снёс бы поддерево и создал
+              // заново — поле теряло бы фокус на первом же символе каждой новой нормы. Позиция
+              // при этом устойчива: пустой блок и рождённая им строка — одна и та же нулевая
+              // позиция; переупорядочивания у списка нет, только добавление и удаление с конца
+              // логической цепочки «первая — дубли».
+              // eslint-disable-next-line react/no-array-index-key
+              <div key={i}>
+                {i > 0 && (
+                  <div className='flex flex-col gap-1 pb-1'>
+                    <Pill tone='warn'>вторая строка расхода на эту ткань</Pill>
+                    <Text size='nano' variant='label' component='p'>
+                      на один слот заведено больше одной строки без детали; сервер их СУММИРУЕТ —
+                      расход этой ткани складывается из всех. Оставьте одну
+                    </Text>
+                  </div>
+                )}
+                <SlotNormBlock
+                  slot={slot}
+                  draft={rowDraft}
+                  hasRow={!!row}
+                  materials={materials}
+                  readOnly={offRecipeSection}
+                  // Оценка существует только там, где строки НЕТ, — на дубль её вешать нечего.
+                  estimate={row ? undefined : estimate}
+                  markers={markers}
+                  cardMarkersAllColorways={cardMarkersAllColorways}
+                  recipeLinks={recipeLinks}
+                  colorwayId={colorwayId}
+                  techCardId={techCardId}
+                  sizeIds={sizeIds}
+                  sizeNameById={sizeNameById}
+                  canEdit={canEdit}
+                  active={active}
+                  onChange={(patch) => onPatchSlot(row?.index ?? -1, patch)}
+                  onRemove={() => {
+                    if (row) onRemoveRow(row.index);
+                  }}
+                />
+              </div>
+            );
+          })}
+
+          {/* Роль слоя неизвестна — вопрос человеку, а не ошибка (П3): на половине живых карточек
+              назначение не проставлено (0265 не бэкфилился), и жёсткая краснота тут закричала бы
+              на всём. Стоит на КАРТОЧКЕ: роль — свойство ткани, чинится на вкладке BOM. */}
+          {rollGoods && isUnsortedLayerRole(layerRole) && (
+            <div className='flex flex-wrap items-center gap-1.5'>
+              <Pill tone='attention'>роль слоя неизвестна — назначение не задано</Pill>
+              <Text size='nano' variant='label' component='span'>
+                задай назначение этой строке на вкладке BOM: из него выводится, основная это ткань,
+                подкладка или дублерин
+              </Text>
+            </div>
+          )}
+
+          {twoMainsRows.length > 0 && (
+            <div className='flex flex-col gap-1'>
+              <Pill tone='warn'>две основные ткани на одной детали</Pill>
+              <Text size='nano' variant='label' component='p'>
+                {uniq(twoMainsRows.map((x) => x.name)).join(', ')} — на каждой, кроме этой ткани,
+                стоит ещё одна с назначением «основной материал»:{' '}
+                {rivalNames(twoMainsRows.flatMap((x) => x.issue.mainNames)).join(', ')}. Цельная
+                деталь кроится из одной основной: сервер не примет такой рецепт, а наряд
+                остановится. Задай второй ткани её назначение на вкладке BOM (подкладка, дублерин,
+                контраст…) — или разбей деталь на две
+              </Text>
+            </div>
+          )}
+          {unsortedRows.length > 0 && (
+            <div className='flex flex-col gap-1'>
+              <Pill tone='warn'>назначения слоёв не разобраны</Pill>
+              <Text size='nano' variant='label' component='p'>
+                у {uniq(unsortedRows.map((x) => x.name)).join(', ')} несколько слоёв, и у{' '}
+                {[
+                  ...(selfIsUnsorted ? [selfName] : []),
+                  ...rivalNames(unsortedRows.flatMap((x) => x.issue.unsortedNames)),
+                ].join(', ')}{' '}
+                не задано назначение — не доказать, что это не вторая основная, и наряд
+                остановится. Задай назначение на вкладке BOM
+              </Text>
+            </div>
+          )}
+          {mainlessRows.length > 0 && (
+            <div className='flex flex-col gap-1'>
+              <Pill tone='attention'>у детали нет основной ткани</Pill>
+              <Text size='nano' variant='label' component='p'>
+                {uniq(mainlessRows.map((x) => x.name)).join(', ')} привязаны к{' '}
+                {uniq(mainlessRows.flatMap((x) => x.issue.layerRoleNames)).join(', ')}, но не к
+                основной. Добавь этим деталям ткань назначения «основной материал» — или подтверди,
+                что состав детали такой и есть
+              </Text>
+            </div>
+          )}
+
+          {legacyPieceNames.length > 0 && (
+            <div className='flex flex-col gap-1'>
+              <Pill tone='attention'>своё число расхода на деталях</Pill>
+              <Text size='nano' variant='label' component='p'>
+                {legacyPieceNames.join(', ')} несут собственный расход, оставшийся от прежней
+                модели. Сервер СУММИРУЕТ строки одного слота — эти числа прибавляются к расходу
+                этой ткани сверху, и в себестоимость, и в потребность прогона. Разверните список
+                деталей и уберите их
+              </Text>
+            </div>
+          )}
+
+          {/* СПИСОК ДЕТАЛЕЙ — СВЁРНУТЫЙ И НА `<details>`, а не на кнопке: на выпущенной (RELEASED)
+              карточке вкладка целиком лежит внутри `<fieldset disabled>`, а он глушит любую
+              кнопку — раскрывашка на `<button>` там умерла бы молча, и заморозка карточки прятала
+              бы состав кроя ровно тогда, когда его только и остаётся что читать. */}
+          {/* СПИСОК ЖИВЁТ ТАМ, ГДЕ ЖИВУТ СТРОКИ, А НЕ ТАМ, ГДЕ ИХ МОЖНО ЗАВОДИТЬ. Гейт по рулонности
+              решает, можно ли СОЗДАТЬ связь детали с этой тканью (пикер ниже), — но не то, видно ли
+              уже существующие: секцию строки BOM меняют на вкладке BOM, и связи, заведённые при
+              FABRIC, продолжают жить после переезда в THREAD или PACKAGING. Они уезжают в каждое
+              сохранение и участвуют в костинге; закрыв их гейтом, экран показывал бы предупреждение
+              «уберите легаси-число» рядом с наглухо запертой дверью. */}
+          {(rollGoods || pieceRows.length > 0) && (
+            <div className='flex flex-col items-start gap-1'>
+              {pieceRows.length === 0 ? (
+                <Text size='nano' variant='label' component='p'>
+                  детали не назначены — из этой ткани пока ничего не кроится
+                </Text>
+              ) : (
+                <details>
+                  <summary className='cursor-pointer'>
+                    <Text size='nano' variant='label' component='span' className='uppercase'>
+                      {`${pieceRows.length} ${plural(pieceRows.length, 'деталь', 'детали', 'деталей')}: ${preview}`}
+                    </Text>
+                  </summary>
+                  <div className='divide-y divide-hairline pt-1'>
+                    {pieceRows.map(({ row, piece }) => (
+                      <PieceLinkRow
+                        key={`${usageKey(row.draft)}:${row.index}`}
+                        draft={row.draft}
+                        piece={piece}
+                        shape={shapes?.get(pieceRefKey(row.draft.pieceLineKey)) ?? null}
+                        slot={slot}
+                        materials={materials}
+                        sizeIds={sizeIds}
+                        sizeNameById={sizeNameById}
+                        canEdit={canEdit}
+                        onChange={(patch) => onPatchSlot(row.index, patch)}
+                        onRemove={() => onRemoveRow(row.index)}
+                      />
+                    ))}
+                  </div>
+                  <Text size='nano' variant='label' component='p' className='pt-1'>
+                    строка детали отвечает на один вопрос — из какой ткани деталь кроится, и своей
+                    нормы не несёт: расход один на ткань, сколько бы деталей из неё ни кроили
+                  </Text>
+                </details>
+              )}
+              {/* ПИКЕР СТОИТ ЗДЕСЬ И ТОЛЬКО ЗДЕСЬ — вторым ребёнком этого блока в ОБЕИХ ветках
+                  выше, и это не вкусовщина, а условие его работоспособности: назначение первой
+                  детали переключает ветку (текст → раскрывашка), и пикер, живущий внутри ветки,
+                  размонтировался бы на первом же клике — попап закрывался бы после каждой галочки,
+                  а отмечать деталей надо девять. React согласует детей по позиции: первый ребёнок
+                  меняет тип, второй остаётся тем же экземпляром, и попап переживает выбор. */}
+              {canEdit &&
+                rollGoods &&
+                (pieces.length > 0 ? (
+                  piecePicker(
+                    pieceRows.length === 0 ? 'назначить детали' : 'изменить набор деталей',
+                  )
+                ) : (
+                  <Text size='nano' variant='label' component='p'>
+                    деталей кроя на карточке ещё нет — объявите их на вкладке деталей, и их можно
+                    будет назначить этой ткани
+                  </Text>
+                ))}
+              {/* Секция уехала из рулонной уже после того, как связи завели. Новые назначать
+                  нельзя (деталь кроят из полотна, а не из нитки), а эти — убрать можно и нужно. */}
+              {!rollGoods && pieceRows.length > 0 && (
+                <Text size='nano' variant='label' component='p'>
+                  секция этой строки BOM больше не рулонная — новые детали ей не назначают. Связи
+                  выше остались от прежней секции: разверните список и уберите их
+                </Text>
+              )}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
 
-// A usage whose non-empty piece key no longer resolves on the PIECES tab. Empty piece keys belong in
-// «на изделие», and additional slots on a live piece belong in that piece's list. KEEP retains the
-// orphan in the full-replace save exactly as-is; UNLINK removes it.
+// ── ПОЧИНКА СТРОКИ, ПОТЕРЯВШЕЙ СЛОТ ────────────────────────────────────────────────────────────
+//
+// ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ТКАНЬ ВЫБИРАЮТ ВЫПАДАШКОЙ, и оно намеренно не внутри живой карточки: там
+// карточка И ЕСТЬ слот, и второй выбор ткани внутри неё был бы ровно тем промахом мимо секции,
+// который вся эта перестройка закрывает. Но у строки, чей слот удалили на вкладке BOM, карточки
+// нет вовсе — а сохранение такую строку ВЫБРАСЫВАЕТ (её ссылку нечем разрешить), то есть без
+// починки правка соседней нормы молча уносит её с собой. Раньше её чинил SlotPicker внутри строки;
+// его больше нет, и один способ назначить слот обязан остаться.
+//
+// ЧИСЛА ПРИ ПОЧИНКЕ СНИМАЮТСЯ, и это не потеря, а единственный честный исход: норма хранится в
+// единице СЛОТА, старого слота больше нет, и проверить, в чём было записано «1.42», нечем — перенос
+// в слот в сантиметрах дал бы ошибку масштаба в сто раз, записанную в рецепт. Число видно рядом, в
+// подписи строки: его переносят глазами, а провенанс и штамп не переносятся вовсе (они про
+// раскладку, снятую на другой ткани).
+function StraySlotAssign({
+  slots,
+  canEdit,
+  onAssign,
+}: {
+  slots: BomLine[];
+  canEdit: boolean;
+  onAssign: (bomLineKey: string) => void;
+}) {
+  return (
+    <select
+      className={cn(cell, 'w-56')}
+      value=''
+      disabled={!canEdit || slots.length === 0}
+      aria-label='назначить слот'
+      onChange={(e) => {
+        if (e.target.value) onAssign(e.target.value);
+      }}
+    >
+      <option value=''>
+        {slots.length === 0 ? '— в BOM нет подходящих строк —' : '— назначить слот —'}
+      </option>
+      {slots.map((b) => (
+        <option key={b.lineKey} value={b.lineKey}>
+          {[sectionShort(b.section), b.name?.trim() || b.material?.name?.trim() || b.lineKey]
+            .filter(Boolean)
+            .join(' · ')}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+// A usage whose non-empty piece key no longer resolves on the PIECES tab. Empty piece keys belong
+// with their fabric card, and additional slots on a live piece belong in that piece's list. KEEP
+// retains the orphan in the full-replace save exactly as-is; UNLINK removes it.
+//
+// «ОСТАВИТЬ» ОБЕЩАЕТ СОХРАНЕНИЕ — И ПОТОМУ НЕ ПРЕДЛАГАЕТСЯ ТАМ, ГДЕ СОХРАНЕНИЯ НЕ БУДЕТ. Сирота,
+// у которой вдобавок нет слота, полной заменой НЕ отправляется (её ссылку нечем разрешить), то есть
+// «оставить · сохранится как есть» было прямой ложью: строка исчезала на первом же сохранении, а
+// экран уверял, что она цела. Такой строке предлагается только разрыв — и говорится, почему.
 function OrphanRecipeCard({
   draft,
   bomItems,
@@ -2422,6 +2875,17 @@ function OrphanRecipeCard({
               {consumption}
             </Text>
           )}
+          {!savableUsage(draft) && (
+            <div className='flex flex-col gap-1'>
+              <Pill tone='warn'>слот тоже потерян — строка не сохранится</Pill>
+              <Text size='nano' variant='label' component='p'>
+                у этой строки нет ни живой детали, ни разрешимой ссылки на строку BOM. Полная замена
+                рецепта отправить её не может и удалит на первом же сохранении — «оставить» здесь
+                ничего не сохранит, поэтому и не предлагается. Заведите расход заново на нужной
+                ткани, а эту уберите
+              </Text>
+            </div>
+          )}
           {canEdit &&
             (kept ? (
               <Text size='micro' variant='label'>
@@ -2429,9 +2893,12 @@ function OrphanRecipeCard({
               </Text>
             ) : (
               <div className='flex flex-wrap items-center gap-1.5'>
-                <Button type='button' variant='secondary' size='sm' onClick={onKeep}>
-                  keep
-                </Button>
+                {/* «Оставить» — только там, где сохранение действительно её сохранит. */}
+                {savableUsage(draft) && (
+                  <Button type='button' variant='secondary' size='sm' onClick={onKeep}>
+                    keep
+                  </Button>
+                )}
                 <Button type='button' variant='secondary' size='sm' onClick={onUnlink}>
                   unlink
                 </Button>
@@ -2897,8 +3364,21 @@ function ColorwayRecipeEditor({
   /**
    * Этот редактор сейчас ВИДЕН (его колорвей выбран плиткой). Тот же приём, что у `shapes` выше,
    * но явным флагом: `shapes === null` активность не кодирует (у активного редактора они тоже
-   * null, пока DXF не разобраны). Нужен строкам рецепта, чтобы не монтировать в скрытых
-   * редакторах подсказку «по выкройкам» с её подписками на массивы формы (см. SlotUsageRow).
+   * null, пока DXF не разобраны).
+   *
+   * У НЕАКТИВНОГО КОЛОРВЕЯ СПИСОК КАРТОЧЕК НЕ РИСУЕТСЯ ВООБЩЕ. Сам редактор остаётся смонтирован —
+   * в нём живёт черновик рецепта, который обязан пережить прыжок к другому колорвею и обратно, — но
+   * его тяжёлое поддерево не строится: одна активная рулонная карточка с деталями и раскладками
+   * стоит около двух с половиной десятков хуков, а редакторы ВСЕХ колорвеев смонтированы
+   * одновременно, и четыре слота на шести колорвеях давали под пять сотен вызовов хуков и
+   * несколько десятков живых подписок на форму — ради того, что видно у одного. Точечные гейты
+   * (раскладка, выкройки) этот случай не покрывали: они убирали инструменты, а не карточки.
+   *
+   * ЧТО ПРИ ЭТОМ ТЕРЯЕТСЯ — только состояние РАСКРЫТИЯ и попапов: открытая «из чего сложилось»,
+   * развёрнутый список деталей, развёрнутый ручной ввод, незакрытый пикер, запас «что было по
+   * размерам» (UsagePerSizeLocal). Ни одна из этих вещей не является черновиком: сами числа,
+   * привязки деталей, пины, «оставленные» сироты и признак staged живут в состоянии редактора и
+   * переключение переживают полностью.
    */
   active: boolean;
   sizeIds: number[];
@@ -2978,11 +3458,6 @@ function ColorwayRecipeEditor({
     });
     return m;
   }, [usages, pieceKeySet]);
-  const garmentUsages = useMemo<IndexedUsage[]>(
-    () =>
-      usages.map((draft, index) => ({ draft, index })).filter(({ draft }) => !draft.pieceLineKey),
-    [usages],
-  );
   const orphans = useMemo(
     () =>
       usages
@@ -2991,14 +3466,104 @@ function ColorwayRecipeEditor({
     [usages, pieceKeySet],
   );
 
-  // A usage whose stored BOM reference no longer resolves can read back without bom_line_key. Do not
-  // send that as an all-NULL slot: the recipe write validates every submitted row.
-  const saveUsages = useMemo(() => usages.filter((usage) => usage.bomLineKey), [usages]);
+  // ── ЧТО ЛЕЖИТ НА КАЖДОЙ ТКАНИ ───────────────────────────────────────────────────────────────
+  //
+  // Единственная перекладка модели, которую делает этот экран: строки рецепта, чья идентичность —
+  // пара (деталь, слот), группируются ПО СЛОТУ. Данные не меняются ни на байт: строка «на изделие»
+  // — это по-прежнему строка с пустым pieceLineKey, строка детали — с непустым, и на провод уходит
+  // тот же полный список (saveUsages). Меняется только то, кто кого содержит на экране.
+  const pieceByKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
+  const pieceOrder = useMemo(() => new Map(pieces.map((p, i) => [p.lineKey, i])), [pieces]);
+  const rowsBySlot = useMemo(() => {
+    const m = new Map<string, { garment: IndexedUsage[]; pieces: IndexedUsage[] }>();
+    usages.forEach((draft, index) => {
+      if (!draft.bomLineKey) return; // строка без слота — в «строки без слота» ниже
+      if (draft.pieceLineKey && !pieceKeySet.has(draft.pieceLineKey)) return; // сирота
+      const e = m.get(draft.bomLineKey) ?? { garment: [], pieces: [] };
+      (draft.pieceLineKey ? e.pieces : e.garment).push({ draft, index });
+      m.set(draft.bomLineKey, e);
+    });
+    // Детали внутри карточки идут в порядке ДЕТАЛЕЙ КАРТОЧКИ, а не в порядке записи строк рецепта:
+    // свёрнутая подпись «9 деталей: BP, BP_1, …» читается как состав кроя, и её порядок обязан
+    // совпадать с тем, в котором те же детали перечислены на своей вкладке.
+    for (const e of m.values()) {
+      e.pieces.sort(
+        (a, b) =>
+          (pieceOrder.get(a.draft.pieceLineKey) ?? pieces.length) -
+          (pieceOrder.get(b.draft.pieceLineKey) ?? pieces.length),
+      );
+    }
+    return m;
+  }, [usages, pieceKeySet, pieceOrder, pieces.length]);
+
+  // КАРТОЧКА У КАЖДОГО ПОДХОДЯЩЕГО СЛОТА BOM, есть на нём строки или нет — это и есть решение,
+  // закрывающее «промахнуться секцией»: у ткани ровно одно место, и оно видно всегда. Плюс любой
+  // слот, на который смотрит живая строка, даже если его секция в рецепт не заводится (легаси):
+  // спрятать карточку значило бы продолжать сохранять строку, ничего о ней не показывая.
+  // Порядок — порядок BOM: рецепт читается той же последовательностью, что и BOM, который оператор
+  // только что заполнил.
+  const cardSlots = useMemo(
+    () =>
+      bomItems.filter(
+        (b) => GARMENT_SECTIONS.has(b.section ?? '') || rowsBySlot.has(b.lineKey ?? ''),
+      ),
+    [bomItems, rowsBySlot],
+  );
+  const bomKeySet = useMemo(
+    () => new Set(bomItems.map((b) => b.lineKey ?? '').filter(Boolean)),
+    [bomItems],
+  );
+  // Куда МОЖНО переселить потерянную строку: те же секции, что заводятся в рецепт. Предлагать
+  // упаковку и этикетку значило бы починкой создавать ровно ту карточку вне рецепта, которую
+  // соседний гейт держит только для чтения.
+  const assignableSlots = useMemo(
+    () => bomItems.filter((b) => !!b.lineKey && GARMENT_SECTIONS.has(b.section ?? '')),
+    [bomItems],
+  );
+  // Строки, чей слот в BOM не разрешается (удалён на вкладке BOM) или вовсе не назван. Карточки у
+  // них быть не может, а показать их обязаны: пустой bomLineKey сейв отфильтрует, а вот
+  // неразрешимый — отправит, и сервер откажет всему рецепту на строке, которой не видно.
+  const strayRows = useMemo(
+    () =>
+      usages
+        .map((draft, index) => ({ draft, index }))
+        .filter(({ draft }) => !(draft.pieceLineKey && !pieceKeySet.has(draft.pieceLineKey)))
+        .filter(({ draft }) => !draft.bomLineKey || !bomKeySet.has(draft.bomLineKey)),
+    [usages, pieceKeySet, bomKeySet],
+  );
+  // Нарушения целостности слоёв — ОДИН расчёт по всем деталям на весь рецепт (см. pieceLayerIssuesOf).
+  const layerIssues = useMemo(
+    () => pieceLayerIssuesOf(usagesByPiece, bomItems),
+    [usagesByPiece, bomItems],
+  );
+  // СЕРВЕРНЫЕ ОЦЕНКИ РАСХОДА (Ф1) — по слоту. Приезжают рядом с usages, а не внутри них, потому что
+  // существуют ровно там, где строки рецепта НЕТ; склейка по bom_line_key — та же ось, по которой
+  // собран весь этот экран. Ничего не пересчитываем и не достраиваем: что сервер сказал, то и
+  // покажем (см. NormEstimate).
+  const estimateBySlot = useMemo(() => {
+    const m = new Map<string, common_TechCardSlotAreaEstimate>();
+    for (const e of colorway.areaEstimates ?? []) {
+      const key = e.bomLineKey?.trim();
+      if (key) m.set(key, e);
+    }
+    return m;
+  }, [colorway.areaEstimates]);
+
+  // Что реально уедет на сервер — ОДНО правило (savableUsage), и оно же считает правки ниже.
+  const saveUsages = useMemo(() => usages.filter(savableUsage), [usages]);
 
   // Dirty says a control was touched; STAGED says the recipe would actually write something else, and
   // `lines` is what the header's label counts — re-derived over the piece model. Typing a value and
   // typing it back must not leave the header claiming work that is not there.
-  const lines = useMemo(() => changedLines(baseline, usages), [baseline, usages]);
+  //
+  // СЧИТАЕТСЯ ПО ТОМУ ЖЕ ФИЛЬТРУ, ЧТО И ЗАПИСЬ. Иначе пустая строка, законно появившаяся от нажатия
+  // «по размерам», считалась бы правкой, которую сохранение не отправляет: карточка вечно висела бы
+  // «staged», а сохранение не меняло бы ничего. Базис фильтруется тоже — он серверный и такого
+  // содержать не должен, но правило обязано быть симметричным, чтобы разница была разницей.
+  const lines = useMemo(
+    () => changedLines(baseline.filter(savableUsage), usages.filter(savableUsage)),
+    [baseline, usages],
+  );
   const staged = dirty && lines > 0;
   // Memoised so re-staging for an unrelated reason (a lock version, a title) hands the store the SAME
   // snapshot object and it can skip the re-render — the whole draft list travels, so blank piece
@@ -3014,31 +3579,85 @@ function ColorwayRecipeEditor({
   // the save either way — this only dismisses the keep/unlink prompt.
   const [keptKeys, setKeptKeys] = useState<Set<string>>(() => new Set());
 
-  const patchUsage = (index: number, patch: Partial<UsageDraft>) => {
+  // ПАТЧ ПО СЛОТУ, А НЕ ПО ИНДЕКСУ. Карточка есть у каждого слота BOM, а строка рецепта — не у
+  // каждой карточки: index < 0 значит «строки ещё нет», и первое же изменение (применённая норма,
+  // цифра руками, пин артикула) её и рождает. Прежние две кнопки «+ добавить материал…» этим
+  // заменены целиком — заводить строку отдельным жестом больше не нужно, а значит и промахнуться
+  // разделом негде.
+  //
+  // Строка ИЩЕТСЯ ВНУТРИ обновления, а не снаружи: диалог применения шлёт число и провенанс одним
+  // патчем, но соседние поля могут прийти двумя в одном тике, и снаружи оба увидели бы index = -1
+  // и завели бы на слот две строки. Внутри обновления вторая уже находит первую.
+  //
+  // СТРОКУ РОЖДАЕТ ИЗМЕНЕНИЕ ЗНАЧЕНИЯ, А НЕ ФАКТ ВЫЗОВА ОБРАБОТЧИКА, и это не педантизм: поле ввода
+  // зовёт onChange на КАЖДОЕ нажатие клавиши, а sanitizeDecimal на отвергнутом символе возвращает ту
+  // же пустую строку — «нажал букву в пустом поле» материализовало бы строку рецепта, которую никто
+  // не заводил. Поэтому патч сначала прикладывается к чистому черновику и сравнивается с ним: не
+  // изменилось ничего — не появилось и строки.
+  const patchGarmentSlot = (bomLineKey: string, index: number, patch: Partial<UsageDraft>) => {
+    if (!bomLineKey) return;
     setDirty(true);
-    setUsages((prev) => prev.map((usage, i) => (i === index ? { ...usage, ...patch } : usage)));
+    setUsages((prev) => {
+      const at =
+        index >= 0
+          ? index
+          : prev.findIndex((u) => !u.pieceLineKey && u.bomLineKey === bomLineKey);
+      if (at >= 0) return prev.map((u, i) => (i === at ? { ...u, ...patch } : u));
+      // placement у строки «на изделие» пустой — ровно как его заводила прежняя кнопка «+ добавить
+      // материал на изделие»: имя детали туда подставлять нечего, изделие одно.
+      const blank = { ...blankDraft('', ''), bomLineKey };
+      const born = { ...blank, ...patch };
+      if (JSON.stringify(born) === JSON.stringify(blank)) return prev;
+      return [...prev, born];
+    });
   };
-  const addUsage = (
-    pieceLineKey: string,
-    placement: string,
-    allowedSections: Set<string>,
-    rows: IndexedUsage[],
-  ) => {
-    const used = new Set(rows.map(({ draft }) => draft.bomLineKey).filter(Boolean));
-    const slot = bomItems.find(
-      (item) =>
-        !!item.lineKey && allowedSections.has(item.section ?? '') && !used.has(item.lineKey),
-    );
-    if (!slot?.lineKey) return;
+  // «НАЗНАЧИТЬ ДЕТАЛИ» — тот же жест, что писала кнопка «+ добавить материал к детали», только с
+  // другой стороны: ткань известна (это карточка), выбирают деталь. Строка рождается ровно той же
+  // (usage с pieceLineKey и placement = имя детали), поэтому обратная связь с расчётом «по
+  // выкройкам» (useFabricDxfPieces читает эти же строки как привязки) работает без изменений.
+  //
+  // Снятие галочки убирает ВСЕ строки этой пары: дубль (деталь + ткань дважды) — это одна и та же
+  // связь, записанная дважды, и оставить половину значило бы не выполнить снятие.
+  const togglePieceOnSlot = (bomLineKey: string, piece: PieceRef) => {
+    if (!bomLineKey) return;
     setDirty(true);
-    setUsages((prev) => [
-      ...prev,
-      { ...blankDraft(pieceLineKey, placement), bomLineKey: slot.lineKey ?? '' },
-    ]);
+    setUsages((prev) => {
+      const match = (u: UsageDraft) =>
+        u.pieceLineKey === piece.lineKey && u.bomLineKey === bomLineKey;
+      if (prev.some(match)) return prev.filter((u) => !match(u));
+      return [
+        ...prev,
+        { ...blankDraft(piece.lineKey, piece.name?.trim() || ''), bomLineKey },
+      ];
+    });
   };
   const removeUsage = (i: number) => {
     setDirty(true);
     setUsages((prev) => prev.filter((_, idx) => idx !== i));
+  };
+  // ПОЧИНКА СТРОКИ БЕЗ СЛОТА (см. StraySlotAssign): назначить слот и СНЯТЬ числа. Единица нормы —
+  // это единица слота, старого слота нет, и в чём было записано число, проверить нечем: перенести
+  // его значило бы записать в рецепт ошибку масштаба, которую никто уже не поймает. Провенанс и
+  // штамп не переносятся по той же причине — они про раскладку, снятую на другой ткани.
+  const assignStraySlot = (index: number, bomLineKey: string) => {
+    if (!bomLineKey) return;
+    setDirty(true);
+    setUsages((prev) =>
+      prev.map((u, i) =>
+        i === index
+          ? {
+              ...u,
+              bomLineKey,
+              materialId: 0,
+              consumption: '',
+              quantity: '',
+              sizeConsumptions: [],
+              normMarkerId: 0,
+              ...MANUAL_PROVENANCE,
+            }
+          : u,
+      ),
+    );
   };
   const keepOrphan = (u: UsageDraft) => setKeptKeys((prev) => new Set(prev).add(orphanKey(u)));
 
@@ -3105,84 +3724,169 @@ function ColorwayRecipeEditor({
     () => !!shapes && pieces.some((p) => !!shapes.get(pieceRefKey(p.lineKey))),
     [shapes, pieces],
   );
-  const garmentUsedKeys = new Set(
-    garmentUsages.map(({ draft }) => draft.bomLineKey).filter(Boolean),
-  );
-  const canAddTo = (allowedSections: Set<string>, rows: IndexedUsage[]) => {
-    const used = new Set(rows.map(({ draft }) => draft.bomLineKey).filter(Boolean));
-    return bomItems.some(
-      (item) =>
-        !!item.lineKey && allowedSections.has(item.section ?? '') && !used.has(item.lineKey),
-    );
-  };
 
   return (
     <SectionStack>
       <Section
-        title={`${title} · детали`}
+        title={`${title} · ткани и расход`}
         question={[
           colorway.baseSku,
-          `${pieces.length} ${pieces.length === 1 ? 'piece' : 'pieces'}`,
-          `${saveUsages.length} material rows`,
+          `${cardSlots.length} ${plural(cardSlots.length, 'материал', 'материала', 'материалов')}`,
+          `${saveUsages.length} ${plural(saveUsages.length, 'строка', 'строки', 'строк')} рецепта`,
         ]
           .filter(Boolean)
           .join(' · ')}
         action={staged ? <Pill tone='attention'>staged</Pill> : undefined}
       >
-        {bomItems.length === 0 && (
-          <Text size='micro' variant='label'>
-            add BOM slots on the BOM tab first, then assign them to pieces or the whole garment here
-          </Text>
-        )}
+        {/* МОДЕЛЬ СКАЗАНА ОДИН РАЗ, В ШАПКЕ РАЗДЕЛА. Прежде она была сказана дважды и разными
+            словами — в разделе «детали» и в разделе «на изделие», — и это само по себе было частью
+            жалобы: два раздела читались как два способа завести одно и то же, а нормой обладал
+            только один из них, ниже по странице. */}
+        <Text size='micro' variant='label'>
+          одна ткань — одна карточка: расход на изделие, цена и детали, которые из неё кроятся.
+          Расход — свойство ИЗДЕЛИЯ: он один на ткань, сколько бы деталей из неё ни кроили; список
+          деталей отвечает только на вопрос «что из неё кроится» и своей нормы не несёт
+        </Text>
 
-        {pieces.length === 0 ? (
+        {bomItems.length === 0 ? (
           <CalloutBox tone='note'>
             <Text size='micro' component='span'>
-              Declare cut pieces on the PIECES tab to assign piece-level material slots.
+              в BOM ещё нет ни одной строки. Рецепт колорвея назначает артикулы и расход именно
+              строкам BOM — заведите их на вкладке <b>BOM</b>, и здесь появится карточка на каждую
             </Text>
           </CalloutBox>
+        ) : cardSlots.length === 0 ? (
+          <Text size='micro' variant='label'>
+            в BOM нет ни одной строки тех секций, что заводятся в рецепт (ткани, подкладка,
+            дублерин, утеплитель, нитки, фурнитура, тесьма, декор)
+          </Text>
         ) : (
           <>
-            {/* Модель сказана ОДИН раз на группу, а не на каждой строке: строки деталей блока
-                расхода не несут (см. PieceFabricRow), и оператор должен знать, куда он переехал. */}
-            <Text size='micro' variant='label'>
-              строка детали отвечает на один вопрос — из какой ткани деталь кроится. Расход ткани —
-              свойство изделия: норма и инструменты («по выкройкам…», «из раскладки») живут в
-              разделе «на изделие» ниже
-            </Text>
-            {/* Wider than the block's 10px stack on purpose: each card is itself a dense ruled
-                group, so at stack spacing one piece's last row and the next piece's label read as
-                one list. */}
-            <div className='flex flex-col gap-5'>
-              {pieces.map((piece) => {
-                const rows = usagesByPiece.get(piece.lineKey) ?? [];
-                return (
-                  <PieceRecipeCard
-                    key={piece.lineKey}
-                    piece={piece}
-                    shape={shapes?.get(pieceRefKey(piece.lineKey)) ?? null}
-                    rows={rows}
-                    bomItems={bomItems}
-                    materials={materials}
-                    sizeIds={sizeIds}
-                    sizeNameById={sizeNameById}
-                    canEdit={canEdit}
-                    canAdd={canAddTo(PIECE_SECTIONS, rows)}
-                    onAdd={() =>
-                      addUsage(piece.lineKey, piece.name?.trim() || '', PIECE_SECTIONS, rows)
-                    }
-                    onChange={patchUsage}
-                    onRemove={removeUsage}
-                  />
-                );
-              })}
-            </div>
-            {hasSilhouettes && (
+            {pieces.length === 0 && (
               <Text size='micro' variant='label'>
-                силуэты — из разобранных DXF, по срединному размеру ряда
+                деталей кроя на карточке ещё нет — расход завести можно уже сейчас, а «какие детали
+                кроятся из этой ткани» появится, когда детали объявят на вкладке деталей кроя
+              </Text>
+            )}
+            {/* ТЯЖЁЛОЕ ПОДДЕРЕВО — ТОЛЬКО У ОТКРЫТОГО КОЛОРВЕЯ. Редакторы всех колорвеев
+                смонтированы одновременно (черновик обязан пережить прыжок по плиткам), но рисовать
+                у каждого по четыре карточки с их нормами, инструментами и подписками на форму —
+                значит платить за шесть экранов, чтобы показать один. Черновик при этом живёт ВЫШЕ,
+                в состоянии редактора: числа, привязки деталей, пины и staged переключение
+                переживают целиком (что теряется — перечислено у пропа `active`). */}
+            {active ? (
+              <>
+                {/* Шире, чем 10px стека блока, намеренно: каждая карточка сама по себе — плотная
+                    группа с собственной линейкой, и на стековом расстоянии последняя строка одной
+                    читалась бы как первая строка следующей. */}
+                <div className='flex flex-col gap-5'>
+                  {cardSlots.map((slot) => {
+                    const rows = rowsBySlot.get(slot.lineKey ?? '');
+                    return (
+                      <FabricRecipeCard
+                        key={slot.lineKey}
+                        slot={slot}
+                        garmentRows={rows?.garment ?? []}
+                        pieceRows={(rows?.pieces ?? []).map((row) => ({
+                          row,
+                          piece: pieceByKey.get(row.draft.pieceLineKey),
+                        }))}
+                        pieces={pieces}
+                        shapes={shapes}
+                        layerIssues={layerIssues}
+                        materials={materials}
+                        estimate={estimateBySlot.get(slot.lineKey ?? '')}
+                        markers={cwMarkers}
+                        cardMarkersAllColorways={allCardMarkers}
+                        recipeLinks={recipeLinks}
+                        colorwayId={colorwayId}
+                        techCardId={techCardId}
+                        sizeIds={sizeIds}
+                        sizeNameById={sizeNameById}
+                        canEdit={canEdit}
+                        active={active}
+                        onPatchSlot={(index, patch) =>
+                          patchGarmentSlot(slot.lineKey ?? '', index, patch)
+                        }
+                        onRemoveRow={removeUsage}
+                        onTogglePiece={(piece) => togglePieceOnSlot(slot.lineKey ?? '', piece)}
+                      />
+                    );
+                  })}
+                </div>
+                {hasSilhouettes && (
+                  <Text size='micro' variant='label'>
+                    силуэты — из разобранных DXF, по срединному размеру ряда
+                  </Text>
+                )}
+              </>
+            ) : (
+              <Text size='micro' variant='label'>
+                выберите этот колорвей плиткой выше, чтобы открыть его ткани
               </Text>
             )}
           </>
+        )}
+
+        {/* СТРОКИ, КОТОРЫМ НЕГДЕ ЛЕЖАТЬ, И ЧТО С НИМИ ДЕЛАТЬ. Карточку рисует строка BOM, поэтому
+            строке, чей слот удалили на вкладке BOM (или которая слота вообще не называет), карточки
+            не досталось.
+
+            ЭТО НЕ КОСМЕТИКА, А ПОТЕРЯ ДАННЫХ: полная замена отправляет только строки с разрешимым
+            слотом, то есть правка ЛЮБОЙ соседней нормы уносит такую строку с собой — молча и без
+            повода. Поэтому здесь ровно две правды и оба выхода: сказано, что сохранение её удалит,
+            и дано чем это починить — назначить слот (единственное место на экране, где ткань
+            выбирают выпадашкой) либо убрать самому. */}
+        {strayRows.length > 0 && (
+          <div>
+            <GroupLabel>строки без слота</GroupLabel>
+            <Text size='nano' variant='label' component='p' className='pb-1'>
+              эти строки не называют ни одной живой строки BOM — слот удалили на вкладке BOM либо он
+              не был назван вовсе. <b>Сохранение рецепта их удалит</b>: отправить строку с
+              неразрешимой ссылкой нельзя, и уйдёт она вместе с любой соседней правкой. Назначьте
+              слот (число при этом снимется — в какой единице оно было записано, проверить уже
+              нечем) либо уберите строку сами
+            </Text>
+            {strayRows.map(({ draft, index }) => (
+              <Row
+                key={`${usageKey(draft)}:${index}`}
+                label={
+                  <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
+                    <Pill tone='warn'>слот потерян</Pill>
+                    <Text size='micro' variant='label' component='span' className='truncate'>
+                      {[
+                        draft.pieceLineKey
+                          ? pieceByKey.get(draft.pieceLineKey)?.name || draft.pieceLineKey
+                          : 'на изделие',
+                        draft.consumption.trim() || draft.quantity.trim(),
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </Text>
+                  </span>
+                }
+                value={
+                  canEdit ? (
+                    <span className='flex items-center gap-1.5'>
+                      <StraySlotAssign
+                        slots={assignableSlots}
+                        canEdit={canEdit}
+                        onAssign={(bomLineKey) => assignStraySlot(index, bomLineKey)}
+                      />
+                      <Button
+                        type='button'
+                        variant='secondary'
+                        size='xs'
+                        onClick={() => removeUsage(index)}
+                      >
+                        убрать
+                      </Button>
+                    </span>
+                  ) : undefined
+                }
+              />
+            ))}
+          </div>
         )}
 
         <CompositionBar {...derived} />
@@ -3191,58 +3895,6 @@ function ColorwayRecipeEditor({
           <Text size='micro' variant='label'>
             {save.isPending ? 'saving…' : 'staged'} · included in the card’s Save
           </Text>
-        )}
-      </Section>
-
-      <Section
-        title={`${title} · на изделие`}
-        question='ткани с нормой расхода на изделие; нитки, фурнитура, тесьма, декор, дублерин'
-        action={
-          canEdit ? (
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              disabled={!canAddTo(GARMENT_SECTIONS, garmentUsages)}
-              onClick={() => addUsage('', '', GARMENT_SECTIONS, garmentUsages)}
-            >
-              + добавить материал на изделие
-            </Button>
-          ) : undefined
-        }
-      >
-        {garmentUsages.length === 0 ? (
-          <Row
-            tone='label'
-            label={
-              <Text size='micro' variant='label' component='span'>
-                материалы на изделие не назначены
-              </Text>
-            }
-          />
-        ) : (
-          <div className='divide-y divide-hairline'>
-            {garmentUsages.map(({ draft, index }) => (
-              <SlotUsageRow
-                key={`${usageKey(draft)}:${index}`}
-                draft={draft}
-                bomItems={bomItems}
-                allowedSections={GARMENT_SECTIONS}
-                usedKeys={garmentUsedKeys}
-                materials={materials}
-                markers={cwMarkers}
-                cardMarkersAllColorways={allCardMarkers}
-                recipeLinks={recipeLinks}
-                colorwayId={colorwayId}
-                sizeIds={sizeIds}
-                sizeNameById={sizeNameById}
-                canEdit={canEdit}
-                active={active}
-                onChange={(patch) => patchUsage(index, patch)}
-                onRemove={() => removeUsage(index)}
-              />
-            ))}
-          </div>
         )}
       </Section>
 
@@ -3441,7 +4093,22 @@ export function ColorwayRecipes({
   canEdit: boolean;
 }) {
   const { dictionary } = useDictionary();
-  const colorways = techCard?.colorways ?? [];
+  const { canWrite } = usePermissions();
+  // УДАЛЕНИЕ КОЛОРВЕЯ ГЕЙТИТСЯ ПРАВОМ НА ПРОДУКТЫ, А НЕ `canEdit`. Это то же право, которым
+  // LifecycleControls открывает архивирование, и это не совпадение: удаление и архивирование —
+  // два исхода одного решения о судьбе ПРОДУКТА, и разъехавшиеся права дали бы аккаунт, который
+  // может стереть продукт, но не может его спрятать. `canEdit` тут не годится ещё и потому, что в
+  // нём сидит `!frozen`: см. комментарий о RELEASED в colorway-delete.tsx.
+  const canDeleteProduct = canWrite(SECTION.products);
+  // УДАЛЁННЫЕ ПРЯЧЕМ СРАЗУ, не дожидаясь рефетча карточки. Инвалидация уже запущена, но между ней и
+  // приехавшим ответом список ещё содержит стёртый колорвей — а он к этому моменту не существует:
+  // его плитка, его редактор и его выбор указывали бы на продукт, которого нет. Фильтр монотонный
+  // (id, однажды удалённый, не вернётся), поэтому после рефетча он превращается в no-op.
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<number>>(() => new Set());
+  const colorways = useMemo(
+    () => (techCard?.colorways ?? []).filter((c) => !deletedIds.has(c.colorwayId ?? 0)),
+    [techCard?.colorways, deletedIds],
+  );
   // The card's cut pieces, LIVE from form state — the same source every other piece picker reads —
   // so a piece added seconds ago in the table above appears in each recipe immediately, without a
   // save round-trip. addPiece mints the stable lineKey up front, and under the card's one save the
@@ -3600,6 +4267,18 @@ export function ColorwayRecipes({
     });
   }, []);
 
+  // ПОСЛЕ УДАЛЕНИЯ ВЫБОР ОБЯЗАН ПЕРЕЕХАТЬ. `selected` может быть и null — тогда активен
+  // colorways[0], и если стёрли именно его, вкладка осталась бы смотреть на несуществующий продукт
+  // молча. Поэтому сравниваем с ВЫЧИСЛЕННЫМ activeId, а не с `selected`, и адресуем соседа
+  // ЯВНО, из текущего списка: `setSelected(null)` снова упёрлось бы в colorways[0], то есть в тот
+  // же удалённый элемент, пока не приедет рефетч.
+  const handleDeleted = (deletedId: number) => {
+    setDeletedIds((prev) => new Set(prev).add(deletedId));
+    if (activeId !== deletedId) return;
+    const survivor = colorways.find((c) => c.colorwayId !== deletedId);
+    setSelected(survivor?.colorwayId ?? null);
+  };
+
   return (
     <div className='flex flex-col gap-2.5'>
       {/* This half shares the tab with the cut-piece table above it, so it has to announce itself —
@@ -3614,14 +4293,32 @@ export function ColorwayRecipes({
 
       <Tiles min={120}>
         {colorways.map((cw) => (
-          <ColorwayTile
-            key={cw.colorwayId}
-            colorway={cw}
-            hex={hexByCode.get(cw.colorCode ?? '')}
-            status={statuses[cw.colorwayId ?? 0]}
-            selected={activeId === cw.colorwayId}
-            onSelect={() => setSelected(cw.colorwayId ?? null)}
-          />
+          // Плитка и удаление — СОСЕДИ, а не вложение: Tile с onClick рендерится как <button>, и
+          // контрол внутри него был бы кнопкой в кнопке (невалидная разметка, и клик по удалению
+          // всплывал бы в выбор плитки).
+          <div key={cw.colorwayId} className='flex min-w-0 flex-col gap-1'>
+            <ColorwayTile
+              colorway={cw}
+              hex={hexByCode.get(cw.colorCode ?? '')}
+              status={statuses[cw.colorwayId ?? 0]}
+              selected={activeId === cw.colorwayId}
+              onSelect={() => setSelected(cw.colorwayId ?? null)}
+            />
+            {/* ТОЛЬКО ПОД ВЫБРАННОЙ ПЛИТКОЙ. Удаление — жест по одному продукту, тому самому, чей
+                рецепт открыт ниже; сетка из N необратимых контролов и приглашает промахнуться, и
+                перестаёт читаться как сетка цветов. Так же это делает жест двухшаговым: сначала
+                выбрать продукт, потом стереть его. */}
+            {canDeleteProduct && activeId === cw.colorwayId && (
+              <ColorwayDeleteControl
+                colorwayId={cw.colorwayId ?? 0}
+                code={colorwayTitle(cw)}
+                techCardId={techCardId}
+                lockVersion={cw.lockVersion ?? lockVersion}
+                isLastColorway={colorways.length === 1}
+                onDeleted={() => handleDeleted(cw.colorwayId ?? 0)}
+              />
+            )}
+          </div>
         ))}
         {canEdit && (
           <Tile

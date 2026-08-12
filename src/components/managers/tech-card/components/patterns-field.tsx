@@ -46,9 +46,12 @@ import {
 } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
+import { dxfByScope, patternSheetName } from './nesting/dxf-by-scope';
 import { SheetThumb, useDxfGeometry, useDxfIndex, type DxfIndex } from './nesting/dxf-geometry';
 import { publishPatternSizeIndex } from './pattern-size-index';
-import { markerColorways } from './nesting/colorway-widths';
+import { useUnsavedAreaSource } from './piece-areas';
+import { scopeAreaState, serverScopeKeysOfSheets, type ScopeAreaState } from './piece-areas-state';
+import { markerColorways, slotCutWidth } from './nesting/colorway-widths';
 import { splitPiecesBySize, useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { NestingFile } from './nesting/use-nesting';
 import { TechCardFormData } from './schema';
@@ -71,6 +74,10 @@ const PieceMatchModal = lazy(() =>
 const MergeSizesModal = lazy(() =>
   import('./nesting/merge-sizes-modal').then((m) => ({ default: m.MergeSizesModal })),
 );
+// Замер площадей деталей — тот же ленивый чанк по той же причине: он тянет разбор геометрии и
+// офсет припуска. Разбор пачки при этом общий с панелью (кэш ключуется содержимым), так что
+// открытый диалог второй раз ничего не качает.
+const PieceAreasDialog = lazy(() => import('./piece-areas-dialog'));
 
 // Секции BOM, к которым МОЖНО привязать выкройку. Это ровно те же четыре «рулонные» семьи,
 // что стор гросс-апит вейстеджем и что кладёт маркер (rollGoodsSections): подклад, бортовку и
@@ -331,6 +338,13 @@ export function PatternsField({
     fabricName: string;
     files: NestingFile[];
   } | null>(null);
+  // «замерить площади деталей» одной ткани (null = закрыт). Диалог монтируется только открытым:
+  // монтирование и есть «взвести разбор».
+  const [measuring, setMeasuring] = useState<{
+    scope: FabricScope<FabricLine>;
+    label: string;
+    sheets: PatternRow[];
+  } | null>(null);
 
   // Сопоставление блоков DXF с деталями кроя, как его записал диалог «сопоставить детали».
   // Раскладке оно нужно, чтобы сохранённый маркер нёс piece_line_key и пережил переименование
@@ -463,29 +477,33 @@ export function PatternsField({
   // разложили в назначение P — и если сопоставлять сырой ключ с ключами групп, лист вываливается в
   // «без материала» ровно в момент, когда оператор навёл порядок в BOM. scopeKeyOfBinding ведёт его
   // за своей строкой в группу назначения, поэтому разбор BOM ничего не теряет.
-  const dxfByScope = useMemo(() => {
-    const m = new Map<string, Entry[]>();
-    for (const e of dxfEntries) {
-      const key = scopeKeyOfBinding(e.row.fabricPurpose, e.row.bomLineKey, scopes);
-      const list = m.get(key) ?? [];
-      list.push(e);
-      m.set(key, list);
-    }
-    return m;
-  }, [dxfEntries, scopes]);
+  //
+  // Само правило живёт в nesting/dxf-by-scope.ts, а не здесь: тот же вопрос («какие листы у этой
+  // ткани») задаёт очередь раскроя партии на вкладке костинга, и вторая копия резолвера разъехалась
+  // бы с этой молча — расхождение видно только на полуразобранной карточке.
+  const dxfByScopeMap = useMemo(
+    () => dxfByScope(dxfEntries, scopes, (e) => e.row),
+    [dxfEntries, scopes],
+  );
+  // ВСЕ листы скоупа, включая наследие в PDF. Отдельно от `dxfByScopeMap`, потому что вопросы
+  // разные: раскладке и разбору нужны файлы, которые можно прочитать, а замеру площадей — СОСТАВ
+  // СКОУПА, каким его видит сервер. Отпечаток он считает по своим строкам `tech_card_size_pattern`,
+  // а они форматом не отбираются: прислать только DXF значило бы подписаться под набором, которого
+  // у сервера нет, и получить отказ о «другом наборе листов» на ровном месте.
+  const allByScopeMap = useMemo(() => dxfByScope(entries, scopes, (e) => e.row), [entries, scopes]);
 
   // Один блок на скоуп. Скоуп без файлов остаётся в списке: пустая строка «нет DXF» — это и есть
   // дыра, а не повод не рисовать материал.
   const scopeGroups = useMemo(
-    () => scopes.map((s) => ({ scope: s, entries: dxfByScope.get(s.key) ?? [] })),
-    [scopes, dxfByScope],
+    () => scopes.map((s) => ({ scope: s, entries: dxfByScopeMap.get(s.key) ?? [] })),
+    [scopes, dxfByScopeMap],
   );
   // DXF без живой привязки: залитые до 0260 (ключа нет вовсе) и те, чью строку BOM удалили или
   // переклассифицировали. Раскладка для них — догадка, поэтому они собраны отдельно и с ошибкой.
-  const looseDxf = useMemo(() => dxfByScope.get('') ?? [], [dxfByScope]);
+  const looseDxf = useMemo(() => dxfByScopeMap.get('') ?? [], [dxfByScopeMap]);
 
   const filesOf = (list: Entry[]): NestingFile[] =>
-    list.map(({ row }) => ({ name: row.name || row.filename || 'выкройка.dxf', url: row.url! }));
+    list.map(({ row }) => ({ name: patternSheetName(row), url: row.url! }));
 
   // ВСЕ DXF карточки со своими скоупами — одна пачка на один разбор, посчитанная ОБЩЕЙ функцией
   // (см. card-dxf-pack.ts): панель деталей кроя под этим блоком просит ту же самую, поэтому обе
@@ -593,6 +611,32 @@ export function PatternsField({
     }
     return m;
   }, [scopes]);
+
+  // ЗАМЕР ПЛОЩАДЕЙ ДЕТАЛЕЙ — состояние читается ИЗ ОТВЕТА СЕРВЕРА, а не выводится здесь.
+  //
+  // Устаревание считает сервер: он сверяет отпечаток источника (листы И связи блок→деталь) с тем,
+  // под которым мерили, и отдаёт `stale` на чтении карточки. Своё понятие свежести было бы вторым
+  // правилом на тот же вопрос, и первое же расхождение показало бы «замерено» там, где сервер уже
+  // не считает замер годным (или наоборот). Ключи здесь СЕРВЕРНЫЕ — их даёт сырая привязка листов,
+  // потому что именно из неё сервер выводит имя скоупа.
+  // Спрашивается по ВСЕМ листам скоупа (PDF в том числе): скоуп на сервере — это состав, а не
+  // подмножество читаемых файлов.
+  const sheetsOfScope = (scopeKey: string): PatternRow[] =>
+    (allByScopeMap.get(scopeKey) ?? []).map((e) => e.row);
+  const areaStateOf = (scopeKey: string): ScopeAreaState =>
+    scopeAreaState(serverScopeKeysOfSheets(sheetsOfScope(scopeKey)), cardRead?.pieceAreaScopes);
+
+  // ФОРМА МОГЛА УЙТИ ВПЕРЁД СЕРВЕРА, И ТОГДА «ЗАМЕРЕНО» — НЕ ОТВЕТ, А ВЧЕРАШНЯЯ НОВОСТЬ.
+  //
+  // Свежесть замера сервер считает по СОХРАНЁННЫМ листам и связям. Пока правки лежат в форме
+  // (заменили файл листа, переставили связь блок→деталь, перепривязали лист к другой ткани), он о
+  // них не знает и продолжает отвечать `stale: false` — про источник, которого на экране уже нет.
+  // Пересчитать отпечаток здесь нечем (сервер его наружу не отдаёт), поэтому единственное честное
+  // поведение — сказать, что ответ относится к сохранённому состоянию.
+  // Правлен ли ИСТОЧНИК замера и не сохранён. Правило одно на обе точки публикации площадей и
+  // живёт рядом с самой публикацией (piece-areas.ts) — местная копия однажды разошлась бы с той,
+  // которой пользуется применение нормы, и дыру закрыли бы наполовину.
+  const sourceDirty = useUnsavedAreaSource(control);
 
   // Размеры карточки, которых в разобранных файлах не оказалось. Считается КАЖДЫЙ РАЗ, а не
   // хранится: ряд правится на этой же вкладке, прямо над панелью.
@@ -1014,6 +1058,42 @@ export function PatternsField({
     );
   }
 
+  /**
+   * Состояние замера площадей ОДНОЙ ткани, строкой на плитке.
+   *
+   * Стоит рядом с покрытием размеров намеренно: это второй факт, который вкладка выкроек знает о
+   * материале и который стоит денег в другом месте экрана. «Не замерены» — не поломка файла, а
+   * незакрытая возможность (костинг не сможет оценить расход по геометрии), поэтому нейтральный
+   * тон; «устарели» — синяя пилюля: состояние mid-flight, требующее человека.
+   */
+  function renderAreaState(scopeKey: string) {
+    const st = areaStateOf(scopeKey);
+    // Несохранённая правка выкроек или связей делает серверный ответ ответом про ВЧЕРАШНИЙ
+    // источник — и это надо сказать там же, где показан сам ответ.
+    const asOf = st.phase !== 'none' && sourceDirty ? ' · по сохранённым данным' : '';
+    if (st.phase === 'stale' || st.phase === 'partial') {
+      return (
+        <span className='flex flex-wrap items-center gap-1'>
+          <Pill tone='attention'>
+            {st.phase === 'stale' ? 'площади устарели' : 'площади замерены не полностью'}
+          </Pill>
+          <Text size='nano' variant='label' component='span'>
+            {st.phase === 'stale'
+              ? `замер был по другим файлам или связям${asOf}`
+              : `часть листов этой ткани без замера: ${st.missing}${asOf}`}
+          </Text>
+        </span>
+      );
+    }
+    return (
+      <Text size='nano' variant='label' component='span'>
+        {st.phase === 'fresh'
+          ? `площади деталей замерены · ${st.pieces}${asOf}`
+          : 'площади деталей не замерены'}
+      </Text>
+    );
+  }
+
   // ── ПОЛКА: одна плитка на материал карточки ─────────────────────────────────────────────
   //
   // Плитка отвечает на три вопроса разом, и все три раньше требовали чтения: чем этот материал
@@ -1086,7 +1166,12 @@ export function PatternsField({
                 : 'своего DXF нет — возможно, в файле основной ткани'
           }
         >
-          {has && <span className='mt-1 block'>{renderCoverage(g.entries)}</span>}
+          {has && (
+            <>
+              <span className='mt-1 block'>{renderCoverage(g.entries)}</span>
+              <span className='mt-1 block'>{renderAreaState(key)}</span>
+            </>
+          )}
         </Tile>
       </div>
     );
@@ -1250,6 +1335,35 @@ export function PatternsField({
                   }
                 >
                   ↔ детали кроя
+                </Button>
+              )}
+              {/* ЗАМЕР ПЛОЩАДЕЙ — ОТДЕЛЬНОЕ ДЕЙСТВИЕ, И ЖИВЁТ ОНО ЗДЕСЬ.
+                  До него площади можно было записать только применив норму «по выкройкам» на строке
+                  рецепта «на изделие» — то есть на строке, которой у проблемной карточки нет:
+                  серверная оценка снизу существует ровно для слота БЕЗ такой строки, и путь к ней
+                  начинался с её заведения. Круг замкнутый, и разомкнуть его можно только там, где
+                  лежат сами файлы и их разбор.
+                  Гейт — `canEdit` (право писать И не выпущенная карточка), а не `canPublishIndex`:
+                  индекс размеров описывает файлы и на релизе законен, а площади — вход
+                  себестоимости, и менять их на выпущенной карточке нельзя. Карточка без id тоже не
+                  мерит: площадям не на чем висеть. */}
+              {has && canEdit && !!techCardId && (
+                <Button
+                  type='button'
+                  variant='secondary'
+                  size='xs'
+                  title={`замерить площади деталей «${label}» по DXF — из них костинг считает оценку снизу, когда нормы «на изделие» нет`}
+                  onClick={() =>
+                    setMeasuring({
+                      scope: g.scope,
+                      label,
+                      // ВСЕ листы скоупа, а не только DXF: сервер считает отпечаток по своему
+                      // составу скоупа, и подмножество он отвергнет как чужой набор.
+                      sheets: sheetsOfScope(g.scope.key),
+                    })
+                  }
+                >
+                  ∑ площади деталей
                 </Button>
               )}
               {canUpload && (
@@ -1566,6 +1680,54 @@ export function PatternsField({
             styleNumber={styleNumber}
             pieceAliases={nesting.aliases}
             onClose={() => setNesting(null)}
+          />
+        </Suspense>
+      )}
+
+      {/* Замер площадей деталей одной ткани. Пишет ТОЛЬКО площади: ни нормы, ни рецепта, ни одного
+          поля формы карточки он не трогает — поэтому и стоит рядом с файлами, а не в деньгах. */}
+      {measuring && techCardId && (
+        <Suspense
+          fallback={
+            <Text size='micro' variant='label'>
+              загрузка модуля разбора DXF…
+            </Text>
+          }
+        >
+          <PieceAreasDialog
+            techCardId={techCardId}
+            scope={measuring.scope}
+            scopeLabel={measuring.label}
+            sheets={measuring.sheets}
+            aliases={pieceDxfAliases.filter((a) => aliasInScope(a, measuring.scope))}
+            sizeIds={sizeIds}
+            sizeNameById={sizeById}
+            current={areaStateOf(measuring.scope.key)}
+            // Выкройки или связи блок→деталь правлены и НЕ СОХРАНЕНЫ. Диалог обязан на этом
+            // остановиться: сопоставление пишет только в форму (setValue), сервер несохранённых
+            // связей не видит физически — и отвечает отказом «у скоупа нет связей блок→деталь»
+            // на набор, который оператор прямо перед собой видит связанным.
+            sourceDirty={sourceDirty}
+            // РАСКРОЙНАЯ ШИРИНА СКОУПА — ТОЛЬКО ЧТОБЫ НАЗВАТЬ ПОРЯДОК ВЕЛИЧИНЫ, в расчёт площадей
+            // она не входит. Считается ОБЩИМ резолвером (slotCutWidth: рулон − 2×кромка), а не
+            // вторым выражением здесь: разойдись они, к рулону на одной поверхности вычли бы кромку,
+            // а на другой нет — те самые 2–4%, которых никто не заметит.
+            //
+            // Назначение законно владеет НЕСКОЛЬКИМИ строками BOM, и ширины у них могут не совпасть.
+            // Тогда ширины нет: делить площадь на «какую-нибудь из двух» и печатать результат как
+            // факт — хуже, чем не печатать ничего.
+            //
+            // СТРОКА БЕЗ ШИРИНЫ ТОЖЕ ГАСИТ ОТВЕТ, а не выбывает из голосования. Соблазн считать
+            // «незаполненная не спорит» и делить на единственную известную — это ровно подстановка
+            // номинала вместо неизвестного: у той строки может быть своя ширина, просто её не
+            // внесли, и напечатанная длина утверждала бы про скоуп то, чего никто не проверял.
+            cuttingWidthCm={(() => {
+              const cut = measuring.scope.lines.map((l) => slotCutWidth(l).cutCm);
+              if (cut.some((w) => !Number.isFinite(w) || w <= 0)) return undefined;
+              const widths = new Set(cut);
+              return widths.size === 1 ? [...widths][0] : undefined;
+            })()}
+            onClose={() => setMeasuring(null)}
           />
         </Suspense>
       )}

@@ -1,14 +1,17 @@
 import { common_ColorwayPrice, common_TechCard } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { runStatusLabel } from 'components/managers/production-runs/components/options';
+import { runColorwayRows } from 'components/managers/production-runs/components/run-composition';
+import { useProductionRun, useProductionRuns } from 'components/managers/production-runs/components/useProductionRuns';
 import {
   useCostingMigrationExceptions,
   useRepriceTechCardBom,
   useTechCardVatScenario,
 } from 'components/managers/tech-cards/components/useTechCardQuery';
-import { ROUTES } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
-import { useState } from 'react';
+import { Suspense, lazy, useMemo, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { Link } from 'react-router-dom';
 import { Button } from 'ui/components/button';
@@ -24,11 +27,20 @@ import CurrencySelect from 'ui/form/fields/currency-select';
 import DecimalField from 'ui/form/fields/decimal-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { BatchComposition } from './batch-composition';
+import { bomPurposeLabel } from './bom-purpose';
 import { operationMinutes, SummaryOp } from './construction-tab';
-import { HelpMark, LineProblems } from './costing-vocab';
+import { ESTIMATE_WHY, HelpMark, LineProblems, TIER_ESTIMATE } from './costing-vocab';
+import { serverScopeKeyOfSheet, wireFabricPurpose } from './pattern-size-index';
+import { unmeasuredDxfScopeKeys } from './piece-areas-state';
 import { useDevExpenses } from './dev-expenses-field';
 import { MarkerConsumptionBand } from './marker-apply';
 import { TechCardFormData } from './schema';
+
+// Весь граф раскладки (dxf-parser + clipper2 + воркер) живёт в ленивом чанке — см. место рендера.
+const BatchMarkerQueue = lazy(() =>
+  import('./batch-marker-queue').then((m) => ({ default: m.BatchMarkerQueue })),
+);
 
 // "no country picked" for the VAT-scenario select — '' cannot be a Radix Select.Item value.
 const DOMESTIC = '__domestic__';
@@ -43,14 +55,27 @@ const num = (s?: string) => {
 // touch one and they degrade to a labelled browser-side preview until the card is saved.
 // (target_margin_pct and notes are deliberately absent: neither moves the unit cost, and the target
 // itself is read back from the server-resolved effective_target_margin_pct.)
-const COSTING_COST_KEYS = [
+// Экспортированы, а не скопированы: полоса себестоимости (money-panel) задаёт форме РОВНО ТОТ ЖЕ
+// вопрос — «форма всё ещё то, из чего сервер считал rollup». Второй список полей разошёлся бы с
+// этим при первой же новой статье костинга, и разошёлся бы молча.
+export const COSTING_COST_KEYS = [
   'cmtCost',
   'logisticsCost',
   'overheadCost',
   'defectPercent',
   'currency',
 ] as const;
-const COSTING_COST_PATHS = COSTING_COST_KEYS.map((k) => `costing.${k}` as const);
+export const COSTING_COST_PATHS = COSTING_COST_KEYS.map((k) => `costing.${k}` as const);
+
+// ЧТО ДЕЛАТЬ С ОЦЕНКОЙ — одной фразой, общей для обеих веток вердикта ниже. Обе называют один и
+// тот же следующий шаг, и разъехаться словами им незачем: кнопки здесь нет намеренно (вердикт
+// живёт внутри `fieldset disabled` выпущенной карточки, где кнопка была бы мёртвой, а блок базы
+// расчёта с этими действиями стоит ВЫШЕ и заморозке не подлежит).
+const ESTIMATE_CTA =
+  'расход части тканей выведен из геометрии (площадь деталей ÷ раскройную ширину): межлекальных ' +
+  'выпадов в этом числе нет, поэтому себестоимость занижена, а маржа завышена. Норму даёт ' +
+  'раскладка — выберите партию базой расчёта вверху вкладки и постройте её, либо впишите расход ' +
+  'руками в рецепте колорвея.';
 
 const BREAK_EVEN_NO_FX =
   'R&D учитывается в базовой валюте, а маржа выше — в валюте костинга. Пересчитать нечем: ' +
@@ -95,8 +120,32 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
   const gross = agreed(colorways.map((c) => pick(c.prices)));
   const net = agreed(colorways.map((c) => pick(c.netPrices)));
 
-  if (gross.distinct.length === 0)
-    return { gross: undefined, net: undefined, reason: `нет ${currency}-цены у колорвеев` };
+  if (gross.distinct.length === 0) {
+    // ОТСУТСТВИЕ НАЗЫВАЕТ ТО, ЧТО НАШЛОСЬ ВМЕСТО. «Нет EUR-цены» — правда, от которой нечего
+    // делать: у колорвея цена в карточке ВИДНА, и человек читает строку как поломку экрана.
+    // А случаев за ней два, и чинятся они по-разному: цена есть, но в ДРУГОЙ валюте (тогда либо
+    // добавить цену в валюте костинга, либо вести костинг в той) — или цены нет вовсе ни в одной
+    // (тогда идти публиковать продукт). Пересчитать чужую валюту по курсу здесь НЕЛЬЗЯ: розница в
+    // другой валюте — это цена другого рынка, а не то же число в других единицах, и маржа против
+    // пересчитанного была бы сценарием, выданным за факт — ровно то, за что в этом же файле уже
+    // разведены gross и net.
+    const others = Array.from(
+      new Set(
+        colorways.flatMap((c) =>
+          (c.prices ?? [])
+            .filter((p) => p.currency && p.currency !== currency && parseDecimalNumber(p.price?.value) > 0)
+            .map((p) => p.currency as string),
+        ),
+      ),
+    );
+    return {
+      gross: undefined,
+      net: undefined,
+      reason: others.length
+        ? `у колорвеев нет цены в ${currency} — она задана в ${others.join(' / ')}. Добавьте цену в ${currency} или ведите костинг в той же валюте`
+        : `у колорвеев не задана розничная цена ни в одной валюте`,
+    };
+  }
   if (gross.distinct.length > 1)
     return {
       gross: undefined,
@@ -141,9 +190,27 @@ function useRetail(techCard: common_TechCard | undefined, currency: string) {
  * 🔒 costing: the tab is hidden without costing:read; the fieldsets below are disabled without
  * costing:write. Everything read-only stays drawn in that case.
  */
-export function CostingField({ techCard }: { techCard?: common_TechCard }) {
+export function CostingField({
+  techCard,
+  frozen = false,
+}: {
+  techCard?: common_TechCard;
+  /**
+   * Карточка ВЫПУЩЕНА (approval_state = RELEASED), и её содержимое правке больше не подлежит.
+   *
+   * Заморозку теперь несёт эта вкладка сама, а не общий `<fieldset disabled>` формы, из-под которого
+   * она выехала. Причина — в блоке БАЗЫ РАСЧЁТА ниже: партия не является содержимым карточки, и
+   * планируют её как раз ПОСЛЕ релиза. Под общим fieldset'ом браузер гасил и переключатель базы, и
+   * сетку состава — то есть ровно на тех карточках, ради которых они и написаны.
+   */
+  frozen?: boolean;
+}) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
-  const { canWriteCosting } = usePermissions();
+  // ДВА РАЗНЫХ ПРАВА ВСТРЕЧАЮТСЯ НА ЭТОЙ ВКЛАДКЕ. Статьи костинга пишет costing:write; партию —
+  // даже черновую, даже заведённую ради расчёта — планирует production:write. Аккаунт с одним и без
+  // другого нормален (экономист считает деньги, координатор заводит партии), и слить их в одно
+  // право значило бы либо раздать планирование, либо отобрать расчёт.
+  const { canWriteCosting, canWrite } = usePermissions();
   const { dictionary } = useDictionary();
   const techCardId = techCard?.id;
 
@@ -153,6 +220,40 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   // destinations"). '' keeps the page's own read, i.e. the domestic country; picking a country
   // fetches the same card netted at that country's rate, as a scenario beside the default.
   const [vatScenarioCountry, setVatScenarioCountry] = useState('');
+  // БАЗА РАСЧЁТА: стиль или конкретная ПАРТИЯ (Ф2).
+  //
+  // Стиль отвечает на вопрос «сколько стоит это изделие вообще» — средняя по объявленному
+  // размерному ряду, одна на карточку. Партия отвечает на другой: «сколько будет стоить ВОТ ЭТО
+  // производство» — взвешенно по её собственному миксу колорвеев и размеров, с её пинами.
+  //
+  // Это РАЗНЫЕ вопросы, и путать их дороже всего: партия из одних XL, посчитанная по средней ряда,
+  // выглядит нормально и врёт на всю разницу градации. Поэтому база выбирается явно и подписана.
+  const [batchRunId, setBatchRunId] = useState(0);
+  // Открыт ли редактор состава ДЛЯ ЕЩЁ НЕ СОЗДАННОЙ партии. Для уже выбранной базы состав
+  // показывается всегда: «сколько каких размеров каждого колорвея» — это и есть вопрос вкладки,
+  // и прятать ответ на него за вторую кнопку значит отвечать не сразу.
+  const [composing, setComposing] = useState(false);
+  const { data: runsData } = useProductionRuns(techCardId ?? 0, '', 0, false, !!techCardId);
+  const runs = runsData?.runs ?? [];
+  const { data: batchData } = useProductionRun(batchRunId, batchRunId > 0);
+  const batchRun = batchData?.run;
+  // Планировать партии — производственное право, и без сохранённой карточки планировать нечего:
+  // techCardId 0 уехал бы в CreateProductionRun партией без стиля.
+  const canPlanRuns = canWrite(SECTION.production) && !!techCardId;
+  // Тот же вывод строк, что у модалки создания прогона и у сетки на странице партии (архивные и
+  // беспродуктовые колорвеи не предлагаются) — один экземпляр правил на три поверхности.
+  const runColorways = useMemo(
+    () => runColorwayRows(techCard?.colorways, dictionary?.colors),
+    [techCard?.colorways, dictionary?.colors],
+  );
+  // Кнопок базы — шесть, но ВЫБРАННАЯ партия обязана быть среди них всегда: только что созданный
+  // черновик иначе стал бы базой, у которой на экране нет ни одной нажатой кнопки, и экран
+  // показывал бы «стиль» при расчёте по партии.
+  const basisRuns = useMemo(() => {
+    const head = runs.slice(0, 6);
+    const selected = runs.find((r) => r.id === batchRunId);
+    return selected && !head.some((r) => r.id === selected.id) ? [...head, selected] : head;
+  }, [runs, batchRunId]);
   const { data: vatScenario, isFetching: vatScenarioLoading } = useTechCardVatScenario(
     techCardId,
     vatScenarioCountry,
@@ -402,15 +503,38 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
   const targetUnitCost =
     marginBase != null && hasTarget ? marginBase * (1 - targetPct / 100) : undefined;
   const gap = targetUnitCost != null ? unitCost - targetUnitCost : undefined;
+  // РЕШЕНИЕ И ПОКАЗ ОБЯЗАНЫ СОГЛАСОВАТЬСЯ ПО ТОЧНОСТИ. `onTarget` сравнивает сырые числа, а
+  // разрыв печатается с двумя знаками: маржа, недотянувшая до цели на полкопейки, давала красное
+  // «не хватает −0.00» — то есть тревогу о сумме, которой на экране нет. Полкопейки — тот же
+  // порог, которым весь этот экран отличает остаток округления от денег.
+  const gapWorthShowing = (gap ?? 0) >= 0.005;
   // A cost the server itself calls incomplete (an uncostable BOM line, a currency with no rate) is
   // understated by an unknown amount, so a margin computed from it cannot certify anything.
   const costIncomplete = !!rollup?.hasUnpriced || !!rollup?.hasUnconvertedCurrencies;
+  // ── СТУПЕНЬ ЦИФРЫ (Ф5). `has_estimate` — сервер посчитал часть рулонных слотов ОЦЕНКОЙ СНИЗУ
+  // (площадь деталей ÷ раскройную ширину) и сам отказывается сеять таким числом cost_price.
+  //
+  // ЭТО НЕ «НЕПОЛНАЯ» ЦИФРА, И ПОТОМУ ОНА НЕ В `costIncomplete`. У неполной неизвестен ЗНАК ошибки:
+  // строка без цены могла бы стоить и три копейки, и половину изделия. У оценки знак известен
+  // ТОЧНО — netto не содержит межлекальных выпадов, значит себестоимость занижена, а маржа
+  // завышена. Поэтому оценка показывается числом (её и просили: карточка не должна стоить ноль при
+  // полной спецификации), но НИЧЕГО НЕ УДОСТОВЕРЯЕТ.
+  //
+  // До этой правки вкладка про ступень не знала вовсе, хотя полоса себестоимости справа читала
+  // ровно тот же флаг: карточка, посчитанная оценкой, писала зелёным «цель 50% выполнена» и
+  // считала окупаемость R&D по марже, которой не бывает на фабрике.
+  const lowerBound = hasCosting && !!rollup?.hasEstimate;
   // ...and every GREEN thing on the tab has to consult that, not just the verdict sentence. Without
   // this gate the panel said «маржу по этой себестоимости считать нельзя» while, two blocks down,
   // the margin cell rendered `tone='up'`, the closing waterfall bar rendered green, and the
   // break-even footnote quoted a confident unit count — all from the same understated cost. A
   // pending currency switch is the same class of "the money on screen is not comparable yet".
-  const certifiable = hasCosting && !costIncomplete && !currencyDirty;
+  //
+  // `lowerBound` живёт здесь наравне с неполнотой: удостоверять — значит утверждать, что цифра
+  // рядом верна, а нижняя граница верна только КАК ГРАНИЦА. Один гейт на все три зелёные вещи
+  // экрана — заводить для оценки второй список мест было бы ровно тем расхождением, из-за которого
+  // этот гейт и появился.
+  const certifiable = hasCosting && !costIncomplete && !currencyDirty && !lowerBound;
   // Stronger than `certifiable`: an understated cost is still a real amount in a known currency and
   // is worth showing (flagged). A cost mid-currency-switch is not — it is EUR materials about to be
   // printed with a PLN sign. Every derived amount below is withheld until the server re-denominates
@@ -435,9 +559,18 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       key: 'materials',
       name: 'материалы',
       amount: materials,
-      aside:
-        unitCost > 0 ? `${Math.round((materials / unitCost) * 100)}% себестоимости` : undefined,
-      help: 'Считает сервер из BOM × рецептов колорвеев, ПРИ СОХРАНЕНИИ карты: правки BOM, рецепта колорвея или цены материала не попадают в эту цифру, пока карта не сохранена и перечитана. Руками здесь не задаётся.',
+      // Ступень стоит У САМОЙ ДЛИННОЙ ПОЛОСЫ, а не только в заголовке: вердикт называет
+      // «материалы» местом, куда идти за деньгами, и пришедший сюда по его совету обязан здесь же
+      // увидеть, что часть этой полосы — выведенное netto, а не измеренный факт.
+      aside: [
+        unitCost > 0 ? `${Math.round((materials / unitCost) * 100)}% себестоимости` : '',
+        lowerBound ? TIER_ESTIMATE : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
+      help: `Считает сервер из BOM × рецептов колорвеев, ПРИ СОХРАНЕНИИ карты: правки BOM, рецепта колорвея или цены материала не попадают в эту цифру, пока карта не сохранена и перечитана. Руками здесь не задаётся.${
+        lowerBound ? ` ${ESTIMATE_WHY}` : ''
+      }`,
       // A Link, not a button: the tab lives in the URL (?tab=), and an anchor survives both the
       // frozen fieldset a RELEASED card is wrapped in and a costing:read-only account.
       lever: (
@@ -537,6 +670,134 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
     detail?: React.ReactNode;
   };
   const problems: Problem[] = [];
+  // РЕЦЕПТ НЕ ДАЛ РАСХОДА — и раньше об этом не говорила НИ ОДНА строка экрана.
+  //
+  // Сервер считает материалы, обходя строки рецепта колорвея (dto colorwayCost). Строка, привязанная
+  // к детали кроя (`IsPieceMaterialAssignment`), пропускается ЦЕЛИКОМ и НЕ поднимает has_unpriced:
+  // по решению владельца (T8) она отвечает только «из какой ткани кроится деталь» и нормы не несёт.
+  // Колорвей, у которого заполнены ТОЛЬКО такие строки, для расчёта — пустой рецепт: материалов 0,
+  // ни одной проблемы, вердикт «заполните BOM» на полностью заполненном BOM. Ровно в эту стену
+  // упёрся владелец на карточке 38, где девять деталей назначены на ткань с ценой.
+  //
+  // Признак выводится из уже пришедших чисел, без второго запроса за рецептами: материалов НОЛЬ при
+  // непустом BOM и БЕЗ флага has_unpriced означает, что ни одна строка не дала числа и ни одна не
+  // была отброшена из-за цены — то есть считать было нечего.
+  //
+  // Валютная неполнота ИСКЛЮЧЕНА из признака: строка в чужой валюте тоже не попадает в
+  // materials_per_unit, но у неё своя проблема ниже и свой ответ («нет курса»), и списать её на
+  // пустой рецепт значило бы отправить человека заводить строку, которая уже заведена.
+  const bomHasLines = bomLines.length > 0;
+  const noColorways = storedColorways.length === 0;
+  const recipeGaveNothing =
+    bomHasLines && materials === 0 && !rollup?.hasUnpriced && !rollup?.hasUnconvertedCurrencies;
+
+  // ВТОРАЯ ПОЛОВИНА ТОЙ ЖЕ ПРАВДЫ: слот с деталями кроя МОЖЕТ получить цену без строки «на изделие».
+  //
+  // Сервер считает такому слоту ОЦЕНКУ СНИЗУ — площадь деталей ÷ раскройную ширину (Ф1, ступень 0),
+  // — но только если площади деталей замерены. Замер живёт исключительно в браузере (DXF сервер не
+  // читает) и до сих пор ехал на сервер лишь попутно, при применении нормы «по выкройкам». То есть
+  // экран, говоря «нет строк расхода на изделие», называл ровно половину: вторая половина — «и
+  // площади не замерены, поэтому оценить нечем», а лечится она на вкладке выкроек.
+  //
+  // ПОЧЕМУ УСЛОВИЕ ИМЕННО ТАКОЕ. Про рецепты эта вкладка ничего не знает (они читаются отдельным RPC
+  // по колорвею), поэтому «детали назначены на ткань» здесь непроверяемо напрямую. Зато
+  // `recipeGaveNothing` — это состояние, в котором рецепт НЕ ДАЛ НИ ОДНОГО ЧИСЛА при заполненном
+  // BOM, то есть ровно то, ради чего оценка и существует. Без этой оговорки строка загоралась бы на
+  // любой здоровой карточке с выкройками и нормальными нормами — то есть требовала бы замерить
+  // площади, которые никому не нужны.
+  //
+  // `hasEstimate` — СТОП-СЛОВО СЕРВЕРА: он уже посчитал часть слотов оценкой, значит площади есть и
+  // работают, и звать замерять их было бы неправдой.
+  //
+  // Карточка БЕЗ КОЛОРВЕЕВ исключена: оценка считается по слоту рецепта, а рецепт живёт на
+  // колорвее — мерить площади там нечего оценивать, и строка звала бы делать вторую работу вместо
+  // первой. Про «детали слоту назначены» здесь утверждать нечем, поэтому текст ниже называет это
+  // УСЛОВИЕМ оценки, а не свершившимся фактом.
+  const unmeasuredCloth = useMemo(() => {
+    // ГЕЙТ ПО СВЯЗЯМ БЛОК→ДЕТАЛЬ. Оценка живёт на деталях, а деталь попадает в площадь только через
+    // связь с блоком чертежа — эти связи клиенту ВИДНЫ (тот же список читает очередь раскроя), и
+    // без них замер отвечает «к этой ткани не привязана ни одна деталь». Без гейта вердикт звал на
+    // вкладку выкроек, где открытый по его совету диалог сразу отказывал: совет, который сам себя и
+    // опровергает.
+    //
+    // Гейт НЕ доказывает, что деталь назначена слоту в рецепте (про рецепт эта вкладка не знает),
+    // поэтому текст ниже остаётся условным и оценку не обещает.
+    const aliasScopes = new Set(
+      (techCard?.techCard?.pieceDxfAliases?.items ?? [])
+        .filter((a) => !!(a.blockName ?? '').trim() && !!(a.pieceLineKey ?? '').trim())
+        .map((a) =>
+          serverScopeKeyOfSheet({ fabricPurpose: a.fabricPurpose, bomLineKey: a.bomLineKey }),
+        )
+        .filter(Boolean),
+    );
+    const keys = unmeasuredDxfScopeKeys(
+      techCard?.techCard?.patterns,
+      techCard?.pieceAreaScopes,
+    ).filter((key) => aliasScopes.has(key));
+    return keys.map((key) => {
+      // Имя скоупа человеку: назначение — своим словом, неразобранная строка — своим названием.
+      const byPurpose = bomLines.find((b) => b.purpose && wireFabricPurpose(b.purpose) === key);
+      if (byPurpose?.purpose) return bomPurposeLabel(byPurpose.purpose);
+      const byLine = bomLines.find((b) => (b.lineKey ?? '') === key);
+      return byLine?.name?.trim() || key;
+    });
+  }, [
+    techCard?.techCard?.patterns,
+    techCard?.techCard?.pieceDxfAliases,
+    techCard?.pieceAreaScopes,
+    bomLines,
+  ]);
+  const areasWouldPrice =
+    recipeGaveNothing && !noColorways && !rollup?.hasEstimate && unmeasuredCloth.length > 0;
+
+  if (recipeGaveNothing) {
+    problems.push({
+      key: 'norecipe',
+      blocking: true,
+      text: noColorways ? (
+        <>
+          <b>у карточки нет колорвеев — расход задавать не на чем.</b> Рецепт (какая ткань и сколько
+          её идёт на изделие) живёт на колорвее, поэтому материалы считаются нулевыми независимо от
+          того, насколько полон BOM.
+        </>
+      ) : (
+        <>
+          <b>рецепт колорвея не даёт расхода — нет ни одной строки «на изделие».</b> Строка детали
+          отвечает только на вопрос «из какой ткани кроится деталь» и нормы не несёт: расход — это
+          свойство изделия. Пока у ткани не назван расход на изделие, материалы считаются нулевыми,
+          и себестоимость ниже — не заниженная, а несчитанная.
+        </>
+      ),
+      action: (
+        <Button asChild size='xs' variant='secondary'>
+          <Link to='?tab=colorways'>к колорвеям</Link>
+        </Button>
+      ),
+    });
+  }
+  if (areasWouldPrice) {
+    problems.push({
+      key: 'noareas',
+      // НЕ «блок»: расчёт уже заблокирован строкой выше, и вторая красная строка про ту же дыру
+      // считала бы одну поломку дважды. Это второй ВЫХОД из неё, а не вторая причина.
+      blocking: false,
+      text: (
+        <>
+          <b>площади деталей не замерены — оценки расхода по выкройкам не будет.</b> Слот умеет
+          получить цену и БЕЗ строки «на изделие»: если ему назначены детали кроя, сервер считает
+          оценку снизу — площадь деталей ÷ раскройную ширину (netto, без межлекальных выпадов). Но
+          площади нужно один раз замерить по DXF, и делает это только браузер. Без годного замера
+          (не мерили вовсе либо замер устарел — файлы или связи менялись после него):{' '}
+          {unmeasuredCloth.join(', ')}.
+        </>
+      ),
+      action: (
+        <Button asChild size='xs' variant='secondary'>
+          <Link to='?tab=patterns'>к выкройкам</Link>
+        </Button>
+      ),
+    });
+  }
   if (rollup?.hasUnpriced) {
     problems.push({
       key: 'unpriced',
@@ -651,12 +912,34 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         figureLabel: 'себестоимость',
         tone: 'note',
         sentence: 'себестоимость ещё не посчитана',
-        cause: 'заполните BOM или впишите статью в разбивке ниже — цифры появятся после сохранения',
-        action: (
-          <Button asChild size='xs' variant='secondary'>
-            <Link to='?tab=bom'>заполнить BOM</Link>
-          </Button>
-        ),
+        // ВЕРДИКТ ОБЯЗАН НАЗЫВАТЬ БЛИЖАЙШИЙ НЕДОСТАЮЩИЙ ФАКТ, А НЕ ПЕРВЫЙ ПОПАВШИЙСЯ ЭКРАН.
+        // «Заполните BOM» на заполненном BOM — не подсказка, а отправка туда, где всё уже сделано:
+        // человек проверяет спецификацию, находит её полной и остаётся без следующего шага.
+        cause: !bomHasLines
+          ? 'заполните BOM или впишите статью в разбивке ниже — цифры появятся после сохранения'
+          : recipeGaveNothing && noColorways
+            ? 'BOM заполнен, но у карточки нет колорвеев — расход задаётся в рецепте колорвея'
+            : recipeGaveNothing
+              ? // ВТОРАЯ ПОЛОВИНА ФАКТА — ТУТ ЖЕ. «Нет строк расхода на изделие» было правдой ровно
+                // наполовину с тех пор, как сервер научился считать слот с деталями по ПЛОЩАДИ:
+                // выход есть и без такой строки, но он требует замеренных площадей, а их не было
+                // ни у одной карточки беты. Оговорка появляется только когда замерить и правда
+                // есть что (выкройки в DXF на месте, площадей нет) — иначе она звала бы на вкладку,
+                // где делать нечего.
+                areasWouldPrice
+                ? 'BOM заполнен, но в рецептах колорвеев нет строк расхода на изделие, а годного замера площадей деталей нет — по площадям сервер считает оценку снизу и без такой строки, если детали назначены слоту (вкладка выкроек)'
+                : 'BOM заполнен, но в рецептах колорвеев нет строк расхода на изделие — расход задаётся на ткани, а не на детали'
+            : 'у строк BOM нет цены, либо рецепт не назначен ни на один колорвей — цифры появятся после сохранения',
+        action:
+          bomHasLines && recipeGaveNothing ? (
+            <Button asChild size='xs' variant='secondary'>
+              <Link to='?tab=colorways'>к колорвеям</Link>
+            </Button>
+          ) : (
+            <Button asChild size='xs' variant='secondary'>
+              <Link to='?tab=bom'>заполнить BOM</Link>
+            </Button>
+          ),
       }
     : currencyDirty
       ? {
@@ -684,14 +967,52 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
         : marginPct == null
           ? {
               figure: money(unitCost),
-              figureLabel: 'себестоимость',
+              // Ступень стоит и здесь: маржи в этой ветке нет вовсе, но цифра себестоимости —
+              // есть, и правило «ступень у каждой цифры» не знает исключения «зато маржа не
+              // посчиталась». Ветка ниже (`lowerBound`) сюда не достаёт по построению: она
+              // говорит о марже, а её тут нет.
+              figureLabel: lowerBound ? `себестоимость · ${TIER_ESTIMATE}` : 'себестоимость',
               tone: 'note',
               sentence: 'нетто-маржа не считается',
               cause:
                 retailReason ||
                 (netted ? 'нет розничной цены' : `нет ставки VAT для ${vatCountry || 'страны'}`),
             }
-          : !hasTarget
+          : // ── ОЦЕНКА СНИЗУ ГОВОРИТ ЗА ВСЕ ТРИ МАРЖИНАЛЬНЫЕ ВЕТКИ, И ЭТО НЕ ПЕРЕСТРАХОВКА.
+            // Ниже стоят три ветки про цель: «цели нет», «цель выполнена» и «не хватает столько-то».
+            // Каждая — утверждение О МАРЖЕ, а маржа, посчитанная от нижней границы, сама является
+            // границей ВЕРХНЕЙ. «Цель 50% выполнена» на карточке, где ткань посчитана netto, — это
+            // согласование цены по числу, которого на фабрике не бывает.
+            //
+            // Ветка стоит ПОСЛЕ `marginPct == null`: «нет розничной цены» — другой недостающий факт,
+            // и подменять его ступенью значило бы спрятать причину, по которой маржи нет вовсе.
+            //
+            // НЕДОБОР ПО НИЖНЕЙ ГРАНИЦЕ — ФАКТ, А ПЕРЕВЫПОЛНЕНИЕ — ГИПОТЕЗА, и ветка обязана
+            // различать эти два случая, иначе оговорка съедает единственную тревогу, ради которой
+            // экран и существует. Если цель не проходит уже на заниженной себестоимости, то на
+            // настоящей она не пройдёт тем более: разрыв реален, он лишь ПРЕУМЕНЬШЕН — поэтому
+            // цифра остаётся разрывом со словом «минимум», а тон красный. Если же цель проходит,
+            // утверждать нечего: настоящая себестоимость выше, и цифрой становится она сама.
+            lowerBound
+            ? !hasTarget || onTarget || !gapWorthShowing
+              ? {
+                  figure: money(unitCost),
+                  figureLabel: `себестоимость · ${TIER_ESTIMATE}`,
+                  tone: 'warning',
+                  sentence:
+                    `маржа не выше ${marginPct.toFixed(1)}%` +
+                    (hasTarget ? ` — цель ${targetPct.toFixed(0)}% проходит только по ней` : ''),
+                  cause: ESTIMATE_CTA,
+                }
+              : {
+                  figure: `−${(gap ?? 0).toFixed(2)}`,
+                  figureLabel: `не хватает минимум, ${cur || 'на изделие'}`,
+                  tone: 'error',
+                  figureTone: 'text-error',
+                  sentence: `маржа не выше ${marginPct.toFixed(1)}% при цели ${targetPct.toFixed(0)}%`,
+                  cause: `разрыв посчитан от ЗАНИЖЕННОЙ себестоимости, настоящий больше. ${ESTIMATE_CTA}`,
+                }
+            : !hasTarget
             ? {
                 figure: `${marginPct.toFixed(1)}%`,
                 figureLabel: 'маржа нетто',
@@ -699,7 +1020,10 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                 sentence: `${money(grossMargin ?? 0)} с изделия`,
                 cause: 'цель маржи не задана — ни своя у стиля, ни дефолт компании',
               }
-            : onTarget
+            : // Тот же порог полкопейки, что и в ветке оценки выше: недобор, который печатается
+              // как «−0.00», это остаток округления, а не дыра в марже, и красная плашка о нём
+              // отправляет искать деньги, которых нет.
+              onTarget || !gapWorthShowing
               ? {
                   figure: `${marginPct.toFixed(1)}%`,
                   figureLabel: 'маржа нетто',
@@ -732,8 +1056,162 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                     ) : undefined,
                 };
 
+  // Партия отвечает своей ценой: снапшот плана и «сегодня по той же формуле». Пусто — сервер
+  // называет причину словами (Ф2 BE-3), и показать надо ЕЁ, а не собственную догадку по пустоте.
+  const batchCost = batchRun?.plannedUnitCostToday ?? batchRun?.plannedUnitCost;
+  const batchReason = batchRun?.plannedCostReason ?? '';
+
   return (
     <div className='flex flex-col gap-3'>
+      {/* ═══ БАЗА РАСЧЁТА (Ф2). Стиль и партия — РАЗНЫЕ вопросы об одной карточке, и экран обязан
+          говорить, на какой сейчас отвечает: партия из одних XL, показанная как средняя по ряду,
+          выглядит нормально и врёт на всю разницу градации. */}
+      {(runs.length > 0 || canPlanRuns) && (
+        <CalloutBox tone='note'>
+          <div className='flex flex-col gap-2'>
+            <div className='flex flex-wrap items-center gap-x-4 gap-y-2'>
+              <Text size='micro' variant='label' component='span'>
+                база расчёта
+              </Text>
+              {runs.length > 0 && (
+                <Button
+                  type='button'
+                  size='xs'
+                  variant={batchRunId === 0 ? 'default' : 'secondary'}
+                  onClick={() => {
+                    setBatchRunId(0);
+                    setComposing(false);
+                  }}
+                >
+                  стиль · средняя по ряду
+                </Button>
+              )}
+              {basisRuns.map((r) => (
+                <Button
+                  key={r.id}
+                  type='button'
+                  size='xs'
+                  variant={batchRunId === r.id ? 'default' : 'secondary'}
+                  onClick={() => {
+                    setBatchRunId(r.id ?? 0);
+                    setComposing(false);
+                  }}
+                >
+                  {`партия #${r.id}${r.run?.status ? ` · ${runStatusLabel(r.run.status)}` : ''}`}
+                </Button>
+              ))}
+              {/* СОСТАВИТЬ ПАРТИЮ, НЕ УХОДЯ СО СТРАНИЦЫ. Черновик не занимает ткань и не проходит
+                  гейт — это прикидка денег, и заводится она там, где деньги и считают. Аффорданса
+                  нет, когда составлять не из чего: у карточки без живых колорвеев с продуктом
+                  клетку сетки нечем ключевать (product_id), и об этом сказано строкой ниже —
+                  один раз, а не кнопкой, которая молча ничего не делает. */}
+              {canPlanRuns && runColorways.length > 0 && (
+                // Эта кнопка — ДЕЙСТВИЕ, а не база, и нажатой она поэтому не выглядит никогда:
+                // пока черновик не создан, расчёт по-прежнему ведётся по стилю, и «выбранной»
+                // обязана читаться именно кнопка стиля. Открытость редактора видна по самому
+                // редактору ниже, а закрывает его «отмена» в его заголовке.
+                <Button
+                  type='button'
+                  size='xs'
+                  variant='secondary'
+                  onClick={() => {
+                    setBatchRunId(0);
+                    setComposing(true);
+                  }}
+                >
+                  + новая партия
+                </Button>
+              )}
+              {canPlanRuns && runColorways.length === 0 && (
+                <Text size='micro' variant='label' component='span'>
+                  у карточки нет живых колорвеев с продуктом — составлять партию не из чего
+                </Text>
+              )}
+              {batchRunId > 0 && (
+                <Text size='micro' component='span'>
+                  {batchCost?.value
+                    ? `${batchCost.value} ${batchRun?.plannedCurrency || cur} за изделие — взвешенно по миксу ЭТОЙ партии (колорвеи × размеры), с её пинами`
+                    : batchReason || 'цена партии не посчитана'}
+                </Text>
+              )}
+            </div>
+
+            {/* СОСТАВ. `key` — это и есть сброс состояния редактора: смена базы есть смена
+                предмета, а не обновление того же, и набранное для одной партии не должно
+                перетечь в другую. Сохранение внутри инвалидирует префикс productionRunKeys.all,
+                под которым лежат И список, И detail(id) выбранной партии, — поэтому цифра
+                «за изделие» выше пересчитывается сама, без второго вызова отсюда. */}
+            {batchRunId > 0 ? (
+              batchRun ? (
+                <BatchComposition
+                  key={batchRunId}
+                  techCard={techCard}
+                  run={batchRun}
+                  canPlan={canPlanRuns}
+                />
+              ) : (
+                <Text size='micro' variant='label'>
+                  загружаем состав партии…
+                </Text>
+              )
+            ) : composing ? (
+              <BatchComposition
+                key='new'
+                techCard={techCard}
+                canPlan={canPlanRuns}
+                // Созданный черновик СРАЗУ становится базой: иначе оператор набрал бы партию и
+                // остался смотреть на среднюю по ряду — то есть на ответ к другому вопросу.
+                onCreated={(id) => {
+                  setBatchRunId(id);
+                  setComposing(false);
+                }}
+                onCancel={() => setComposing(false)}
+              />
+            ) : null}
+          </div>
+        </CalloutBox>
+      )}
+
+      {/* ═══ РАСКРОЙ ПАРТИИ — состав выше превращается в НАБОР РАСКЛАДОК и в измеренный расход.
+          Аффорданс появляется только когда база расчёта — партия: раскладывать «стиль вообще»
+          нечего, пары (колорвей, размер) называет именно партия.
+
+          ЛЕНИВЫЙ ИМПОРТ ОБЯЗАТЕЛЕН. За этим компонентом стоит весь граф раскладки — dxf-parser,
+          clipper2 и воркер, — и статический импорт затащил бы его в главный бандл каждому, кто
+          открыл любую страницу админки. Ровно по той же причине лениво грузится модалка раскладки
+          из вкладки выкроек.
+
+          ЗА ПРЕДЕЛАМИ `fieldset disabled` НИЖЕ, но НЕ потому, что очередь работает на выпущенной
+          карточке: сервер карточных раскладок на неё не принимает, и компонент говорит это прямым
+          текстом. Место здесь ради самого текста — под общим fieldset'ом он выглядел бы как
+          погашенная кнопка без причины, то есть как поломка. */}
+      {batchRunId > 0 && batchRun && techCardId ? (
+        <Suspense
+          fallback={
+            <Text size='micro' variant='label'>
+              загружаем движок раскладки…
+            </Text>
+          }
+        >
+          <BatchMarkerQueue
+            key={batchRunId}
+            techCard={techCard}
+            techCardId={techCardId}
+            run={batchRun}
+            canEdit={canWrite(SECTION.techCards)}
+            frozen={frozen}
+          />
+        </Suspense>
+      ) : null}
+
+      {/* ЗАМОРОЗКА РЕЛИЗА НАЧИНАЕТСЯ ЗДЕСЬ, а не выше. Всё, что ниже, — содержимое карточки: статьи,
+          цели маржи, заметки; на выпущенной карточке они правке не подлежат, и сервер тот же ответ
+          даёт независимо. Блок базы расчёта выше заморозке не подлежит НИКОГДА: партия карточке не
+          принадлежит, и планируют её как раз после релиза.
+
+          Классы повторяют внешний контейнер (flex-col gap-3): fieldset встаёт между ним и его
+          бывшими детьми, и без этого все промежутки между блоками вкладки схлопнулись бы в один. */}
+      <fieldset disabled={frozen} className='m-0 flex min-w-0 flex-col gap-3 border-0 p-0'>
       {/* ═══ ВЕРДИКТ — the gap as a number, its cause, and the way to close it. */}
       <CalloutBox tone={verdict.tone}>
         <div className='flex flex-wrap items-center gap-x-5 gap-y-2'>
@@ -762,8 +1240,22 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
       <div className='flex flex-wrap items-center gap-1.5'>
         <Pill tone={isReleased ? 'attention' : 'mut'}>{stateLabel}</Pill>
         {cur && <Pill tone='mut'>{cur}</Pill>}
+        {/* Ступень — теми же словами, что на полосе себестоимости справа (общий словарь). Полоса
+            носит эту пилюлю с Ф6.1, вкладка — нет, и человек, видевший обе, читал два разных
+            ответа об одной цифре. */}
+        {lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
         {draftPreview && <Pill tone='attention'>черновик</Pill>}
+        {/* ОДНА БАЗА НА ЭКРАНЕ. Переключатель вверху меняет базу расчёта, но перерисовать по
+            партии сервер сегодня умеет ровно одну цифру — её цену за изделие (planned_unit_cost);
+            ни разбивки, ни маржи, ни колорвейного разреза по партии он не отдаёт. Пока это так,
+            экран обязан хотя бы СКАЗАТЬ, что всё ниже — про стиль: молчащая подпись при нажатой
+            кнопке «партия #12» читается как «вот её деньги», а это средняя по размерному ряду,
+            которая на партии из одних XL врёт на всю разницу градации. */}
         <Text size='micro' variant='label'>
+          {batchRunId > 0
+            ? `база расчёта — партия #${batchRunId}, но всё ниже описывает СТИЛЬ: ` +
+              'цену партии сервер отдаёт одной цифрой выше, разбивки и маржи по её миксу пока нет. '
+            : ''}
           плановая себестоимость · нормы по размерам входят СРЕДНИМ ПО РАЗМЕРНОМУ РЯДУ (это не
           прогноз партии — план партии считается по её линиям) · пересчитывается при сохранении
           карты
@@ -852,19 +1344,32 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                   Плановый unit cost за изделие: материалы из BOM + CMT + логистика + overhead, всё
                   это умножено на процент брака. VAT в него не входит — поэтому маржа и считается от
                   нетто-розницы.
+                  {lowerBound ? ` ${ESTIMATE_WHY}` : ''}
                 </HelpMark>
               </span>
             }
             value={unitCost.toFixed(2)}
+            // Ступень ВЫТЕСНЯЕТ валютную приписку, а не приписывается к ней: «база EUR 41.20» — это
+            // где ЕЩЁ живёт та же цифра, а «оценка снизу» — ЧЕМ она является. Второе важнее, и в
+            // одну строку `sub` помещается только одно из двух.
             sub={
-              usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
-                ? `план · база ${baseCur} ${serverUnitCostBase.toFixed(2)}`
-                : 'план, за изделие'
+              lowerBound
+                ? `${TIER_ESTIMATE} — настоящая выше`
+                : usingServerCost && baseCur && !sameCurrency && serverUnitCostBase > 0
+                  ? `план · база ${baseCur} ${serverUnitCostBase.toFixed(2)}`
+                  : 'план, за изделие'
             }
           />
           <Stat
             label='= маржа'
-            value={grossMargin != null ? grossMargin.toFixed(2) : '—'}
+            // «≤» — ТА ЖЕ ОГОВОРКА, ЧТО СЛОВАМИ В `sub`, но у самой цифры: подпись под ячейкой
+            // читают не всегда, а число — всегда. Без знака ячейка утверждала точные «42.00» ровно
+            // там, где вердикт двумя блоками выше говорит «не выше».
+            value={
+              grossMargin != null
+                ? `${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)}`
+                : '—'
+            }
             // `certifiable`, not just `hasTarget`: a green «up» on a margin the verdict has already
             // called uncomputable is the contradiction this gate exists to prevent.
             tone={
@@ -876,9 +1381,12 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
             sub={
               marginPct == null
                 ? retailReason || 'нет нетто-розницы'
-                : `${marginPct.toFixed(1)}%${hasTarget ? ` · цель ${targetPct.toFixed(0)}%` : ''}${
-                    grossMarginPct != null ? ` · к списку ${grossMarginPct.toFixed(1)}%` : ''
-                  }`
+                : // «не выше» — не украшение, а знак неравенства: маржа от нижней границы
+                  // себестоимости сама является верхней границей, и число без этой оговорки
+                  // читается как достигнутое.
+                  `${lowerBound ? 'не выше ' : ''}${marginPct.toFixed(1)}%${
+                    hasTarget ? ` · цель ${targetPct.toFixed(0)}%` : ''
+                  }${grossMarginPct != null ? ` · к списку ${grossMarginPct.toFixed(1)}%` : ''}`
             }
           />
         </StatGrid>
@@ -944,7 +1452,10 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           name={hasTarget ? `маржа · цель ${targetPct.toFixed(0)}%` : 'маржа'}
           left={0}
           width={Math.max(0, (grossMargin / retailScale) * 100)}
-          value={`${grossMargin.toFixed(2)} · ${marginPct.toFixed(0)}%`}
+          // Та же оговорка, что у ячейки маржи выше: полоса водопада — вторая поверхность того же
+          // числа, и молчащая здесь она возвращала бы точное утверждение, которое экран только что
+          // отозвал.
+          value={`${lowerBound ? '≤ ' : ''}${grossMargin.toFixed(2)} · ${marginPct.toFixed(0)}%`}
           // Green only when the figure can actually certify something. On an understated cost the
           // bar goes neutral ink rather than red: «below target» is a claim we cannot make either,
           // and painting it red would be as wrong as painting it green.
@@ -1072,8 +1583,32 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
               // Measured against the SERVER's figure, not the live preview: `cc.unitCost` is a
               // server rollup, and subtracting a browser-side draft from it made every tile's delta
               // twitch while someone typed a CMT quote that had not reached the server yet.
+              // Ступень ЭТОГО колорвея. Она своя у каждого: детали на ткань назначает его рецепт,
+              // поэтому один цвет может считаться нормой, а соседний — оценкой снизу.
+              const ccLowerBound = !!cc.hasEstimate;
+              // РАЗНЫЕ СТУПЕНИ НЕ ВЫЧИТАЮТСЯ. Корень rollup'а — ОСНОВНОЙ колорвей; если он посчитан
+              // нормой, а этот оценкой (или наоборот), разность содержит не разницу между цветами, а
+              // разницу между способами счёта: «дешевле на 4.10» читалось бы как экономия ткани там,
+              // где у одного из двух просто нет выпадов в числе.
+              // ДВЕ ОЦЕНКИ ВЫЧИТАТЬ ТОЖЕ НЕЛЬЗЯ, хотя ступень у них одна. Первая редакция этой
+              // правки гасила дельту только при РАЗНЫХ ступенях — на том основании, что одинаковые
+              // сравнимы. Это неверно: каждая оценка прячет СВОЙ, неизвестный объём выпадов.
+              // Оценки 80 и 90 при скрытых выпадах 30 и 10 дают настоящие 110 и 100 — знак
+              // фактической разницы ОБРАТНЫЙ показанному, а плитка красит его уверенным цветом.
+              //
+              // `costIncomplete` — про вторую сторону вычитания: `broken` проверяет только саму
+              // плитку, поэтому здоровый колорвей продолжал показывать «−4.10 к плану стиля», где
+              // «план стиля» — это корень, о котором вкладка сверху уже сказала «маржу по этой
+              // себестоимости считать нельзя».
               const delta =
-                !broken && ccUnit > 0 && serverUnitCost > 0 ? ccUnit - serverUnitCost : undefined;
+                !broken &&
+                !ccLowerBound &&
+                !rollup?.hasEstimate &&
+                !costIncomplete &&
+                ccUnit > 0 &&
+                serverUnitCost > 0
+                  ? ccUnit - serverUnitCost
+                  : undefined;
               const swatch = colorwaySwatch(cc.colorwayId);
               return (
                 <Tile key={cc.colorwayId || `base-${i}`} tone={broken ? 'error' : 'default'}>
@@ -1089,6 +1624,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                       {colorwayLabel(cc.colorwayId)}
                     </Text>
                     {cc.colorwayId === 0 && <Pill tone='mut'>основной</Pill>}
+                    {ccLowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
                   </div>
                   {/* Same withholding as the axis above: these are server rollups denominated in
                       the SAVED currency, so mid-switch they must not be printed under the new one. */}
@@ -1102,7 +1638,9 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
                     {!showMoney
                       ? `пересчитается в ${cur} при сохранении`
                       : `материалы ${ccMaterials > 0 ? ccMaterials.toFixed(2) : '—'}${
-                          ccMarginPct != null ? ` · маржа ${ccMarginPct.toFixed(1)}%` : ''
+                          ccMarginPct != null
+                            ? ` · маржа ${ccLowerBound ? 'не выше ' : ''}${ccMarginPct.toFixed(1)}%`
+                            : ''
                         }`}
                   </Text>
                   {showMoney && delta != null && Math.abs(delta) >= 0.005 && (
@@ -1206,6 +1744,7 @@ export function CostingField({ techCard }: { techCard?: common_TechCard }) {
           </Text>
         </div>
       </details>
+      </fieldset>
     </div>
   );
 }

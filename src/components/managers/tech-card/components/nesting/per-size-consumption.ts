@@ -31,7 +31,14 @@
 // нельзя допустить. Поэтому у каждой строки плана есть ПРОИСХОЖДЕНИЕ, и «среднее» — отдельное
 // значение, а не пробел.
 import type { common_TechCardMarkerSummary } from 'api/proto-http/admin';
-import { consumptionForSize, decNum, sizeNormsOf, totalUnitsOf } from './marker-io';
+import {
+  consumptionForSize,
+  decNum,
+  draftRefusal,
+  isDraftMarker,
+  sizeNormsOf,
+  totalUnitsOf,
+} from './marker-io';
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -54,6 +61,13 @@ export type ContinuationBasis = {
 // молча и в дорогую сторону. Ровно поэтому сервер пишет площади «все строки или ни одной»
 // (entity.WithMarkerSizeAreas), и читатель обязан сохранить это правило, а не переоткрыть его.
 export function continuationBasisOf(s: common_TechCardMarkerSummary): ContinuationBasis | null {
+  // ЧЕРНОВИК БАЗИСОМ НЕ БЫВАЕТ. Константа продолжения — это k = L / Σ q·a, и у черновика ЧИСЛИТЕЛЬ
+  // короче настоящего ровно на ту длину, которую заняли бы не уложенные детали. Продолжить его на
+  // остальной ряд значит размножить заниженную норму по всем размерам сразу — то есть сделать
+  // ошибку хуже, чем она была. Сегодня сервер площадей черновика не публикует вовсе, и basis вышел
+  // бы null сам собой; проверка стоит явно, потому что она про ДЛИНУ, а не про площади, и обязана
+  // пережить день, когда площади начнут приходить.
+  if (isDraftMarker(s)) return null;
   const rows = sizeNormsOf(s);
   if (rows.length === 0) return null;
   const used = decNum(s.usedLengthCm);
@@ -205,6 +219,15 @@ export type PerSizePlan = {
   unansweredSizes: number[];
   /** Размеры, продолженные по площади. */
   continuedSizes: number[];
+  /**
+   * Раскладка, которой хотели продолжать, — ЧЕРНОВИК; текст отказа со ссылкой на неё. '' = не
+   * черновик. Отдельным полем, а не веткой `continuation`: черновик перекрывает продолжение
+   * НЕЗАВИСИМО от того, считали ли площади (`continuation` при незапрошенных площадях остаётся
+   * 'off'), а объяснить это надо в обоих случаях — иначе кнопка «продолжить по выкройкам» просто
+   * отсутствует без единого слова. Текстом, а не флагом, потому что отказ обязан НАЗВАТЬ раскладку:
+   * оператор, только что снявший её, будет искать именно её.
+   */
+  draftBasisRefusal: string;
 };
 
 export type PerSizePlanInput = {
@@ -297,6 +320,8 @@ export function perSizePlan(input: PerSizePlanInput): PerSizePlan {
     meanSizes: rows.filter((r) => r.origin === 'mean').map((r) => r.sizeId),
     continuedSizes: rows.filter((r) => r.origin === 'area').map((r) => r.sizeId),
     unansweredSizes: rows.filter((r) => r.consumptionCm == null).map((r) => r.sizeId),
+    draftBasisRefusal:
+      continueFrom && isDraftMarker(continueFrom) ? draftRefusal(continueFrom) : '',
   };
 }
 
@@ -312,6 +337,12 @@ export function perSizeRefusal(plan: PerSizePlan, sizeName: (id: number) => stri
   if (plan.complete) return '';
   if (plan.unansweredSizes.length === 0) return '';
   const names = plan.unansweredSizes.map(sizeName).join(', ');
+  // ЧЕРНОВИК — ПЕРВАЯ ПРИЧИНА, и она сильнее остальных: у него нет ни своей нормы, ни права быть
+  // базисом продолжения, так что «нет площадей» и «размера нет в составе» здесь были бы правдой,
+  // ведущей чинить не то (пересохранять раскладку, догружать выкройки).
+  if (plan.draftBasisRefusal) {
+    return `${plan.draftBasisRefusal} Размеры ${names} остались без нормы: продолжать по черновику нечего — его длина короче настоящей на не уложенные детали.`;
+  }
   if (plan.continuation === 'blocked' && plan.areaCheck) {
     return `${plan.areaCheck.reason}. Без продолжения размеры ${names} остались без нормы`;
   }

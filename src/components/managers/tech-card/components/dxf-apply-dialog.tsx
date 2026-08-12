@@ -33,28 +33,27 @@
 // (изделие × размер) и берёт норму размера, а при её отсутствии — скаляр НА ЛЮБОЙ размер: одна
 // цифра, снятая с площади M, поехала бы в потребность XL. Скаляр здесь был бы ровно той
 // нечестностью, за которую сервер отказывает смешанной раскладке в средней норме.
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
+import { useQueryClient } from '@tanstack/react-query';
+import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
-import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
-import { useWorkshopSettings } from '../../workshop/useWorkshopSettings';
-import {
-  clampSeamAllowanceMm,
-  engineCmToMm,
-  MAX_SEAM_ALLOWANCE_MM,
-  mmToEngineCm,
-} from './nesting/allowance-units';
+import { mmToEngineCm } from './nesting/allowance-units';
+import { useSnackBarStore } from 'lib/stores/store';
+import { publishPieceAreas, useUnsavedAreaSource } from './piece-areas';
+import { serverScopeKeyOfSheet } from './pattern-size-index';
+import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from './bom-purpose';
 import { sizeTokensOf } from './nesting/block-code';
-import { useCardDxfPack } from './nesting/card-dxf-pack';
-import { applyLayerOptions, applySeamPrefill } from './nesting/dxf-apply-conditions';
-import { layerAllowanceLabel } from './nesting/contour-layer';
+import {
+  DxfMeasureConditionsFields,
+  useDxfMeasureConditions,
+} from './nesting/dxf-measure-conditions';
 import { dxfNormAreas, dxfNormValueRows, type DxfNormPiece } from './nesting/dxf-consumption';
-import { useDxfGeometry, useDxfIndex } from './nesting/dxf-geometry';
 import {
   weightBasisNote,
   weightRefusalText,
@@ -74,9 +73,15 @@ export default function DxfApplyDialog({
   sizeIds,
   sizeNameById,
   canEdit,
+  techCardId,
+  lineKey,
   onClose,
   onApply,
 }: {
+  /** id карточки; 0 = ещё не сохранена, публиковать площади некуда. */
+  techCardId: number;
+  /** line_key строки BOM этой ткани — из него резолвится скоуп словами сервера. */
+  lineKey: string;
   // Форма приходит ЯВНЫМ control'ом, а не через useFormContext ЗДЕСЬ: два поля ниже читаются
   // именно из неё, и пробрасывать их сквозь обёртку значило бы дублировать. (Пачку DXF собирает
   // useCardDxfPack, и она контекст всё-таки берёт — у неё нет другого способа, и она вызвана в
@@ -112,72 +117,20 @@ export default function DxfApplyDialog({
     normMarkerId?: number;
   }) => void;
 }) {
-  const [layer, setLayer] = useState<string | null>(null);
-  const [seamMm, setSeamMm] = useState<string>('');
-
-  // Из формы здесь нужно РОВНО одно поле: стандарт припуска карточки (предзаполнение). Базовый
-  // размер диалог больше не смотрит — себестоимость стиля считается средним по размерному ряду
-  // (T6), и норма на весь ряд самодостаточна. Детали кроя и скоуп ткани разрешает лёгкая
-  // обёртка и передаёт готовыми — иначе два места считали бы одно и то же и однажды разошлись.
-  const cardSeamMm = (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? null) as
-    | number
-    | string
-    | null;
-
-  // Разбор ВСЕЙ пачки карточки, общий с панелями выкроек и деталей кроя (ключ кэша — содержимое
-  // пачки). Взводится только открытым диалогом: это мегабайты с CDN и разбор в воркере.
-  const pack = useCardDxfPack();
-  const geometry = useDxfGeometry(pack, true);
-  const index = useDxfIndex(geometry.data);
-
-  const layers = useMemo(() => {
-    if (!geometry.data || !index) return [];
-    // Список слоёв (и построение индекса замера по неотфильтрованному разбору) — общим кодом с
-    // пересчётом по текущим данным (dxf-recheck.tsx): условия пересчёта там обязаны быть теми же,
-    // что предложил бы этот диалог, и «теми же» их делает один вызов, а не два похожих.
-    return applyLayerOptions(geometry.data, index);
-  }, [geometry.data, index]);
-  const chosenLayer = layer ?? index?.contourLayer ?? '';
-  const chosenOption = layers.find((o) => o.layer === chosenLayer);
-
-  // ЦЕХ СПРАШИВАЕТСЯ НАРАВНЕ С КАРТОЧКОЙ И ФАЙЛОМ. Без него подпись «ни карточка, ни цех, ни файл
-  // припуска не назвали» врала бы: цех мог назвать, его просто не спросили — и норма разошлась бы с
-  // раскладкой того же файла, где порядок источников полный. Запрос дешёвый и идёт только с открытым
-  // диалогом (RBAC: чтение настроек разрешено любому аккаунту).
-  const workshop = useWorkshopSettings();
-
-  const prefill = useMemo(
-    () =>
-      applySeamPrefill(chosenOption, cardSeamMm, workshop.data?.settings?.defaultSeamAllowanceMm),
-    [chosenOption, cardSeamMm, workshop.data],
-  );
-  // РУЧНОЙ ВВОД ПРИПУСКА ПРОВЕРЯЕТСЯ, А НЕ ГЛОТАЕТСЯ. Мусор («1.2.3») давал NaN и молча превращался
-  // в 0 мм, а 900 мм принимались — при том, что и раскладка, и сервер держат потолок в
-  // MAX_SEAM_ALLOWANCE_MM. Результат уходит прямо в норму, и защиты на сервере у него нет.
-  const seamTyped = seamMm.trim() === '' ? null : Number(seamMm);
-  const seamInvalid = seamTyped != null && (!Number.isFinite(seamTyped) || seamTyped < 0);
-  const seamOverMax =
-    seamTyped != null && Number.isFinite(seamTyped) && seamTyped > MAX_SEAM_ALLOWANCE_MM;
-  const seamValue = seamTyped == null ? prefill.value : clampSeamAllowanceMm(seamTyped);
-
-  // ДВОЙНОЙ ПРИПУСК — тот же отказ, что в раскладке, и теми же словами: если замер сказал, что на
-  // слое лежит ЛИНИЯ КРОЯ, добавленный сверху офсет посчитает припуск ДВАЖДЫ и раздует площадь по
-  // всему периметру каждой детали. Прифилл ставит здесь 0 сам, но оператор может напечатать своё.
-  const measured = chosenOption?.allowance ?? null;
-  const contourIsCutLine = measured?.verdict === 'cut' && (measured.allowanceCm ?? 0) > 0;
-  const doubleAllowance = contourIsCutLine && seamValue > 0;
+  // УСЛОВИЯ ЗАМЕРА — ОБЩИМ КОДОМ с отдельным действием «замерить площади деталей» на вкладке
+  // выкроек (nesting/dxf-measure-conditions.tsx): разбор пачки, выбор слоя, прифилл припуска и все
+  // запреты. Оба входа пишут ОДНУ И ТУ ЖЕ таблицу площадей, и мерить они обязаны по одному контуру
+  // — иначе одна карточка, померенная двумя кнопками, дала бы две площади без единого слова о том,
+  // почему. Из формы там читается стандарт припуска карточки; детали кроя и скоуп ткани сюда
+  // приходят готовыми от лёгкой обёртки.
+  const conditions = useDxfMeasureConditions(control);
+  const { index, layer: chosenLayer, seamMm: seamValue } = conditions;
 
   const widthCm = parseDecimalNumber(articleWidth);
   const wastage = parseDecimalNumber(wastagePercent);
   const wastageMissing = !Number.isFinite(wastage);
   const unitKind = bomUnitKind(unit);
   const fabric = weightBasis.ok ? weightBasis.basis : undefined;
-
-  // ЧАСТИЧНО НЕ СКАЧАННАЯ ПАЧКА — не «просто предупреждение». Если свежий лист не скачался, а старая
-  // ревизия в пачке есть, комплект соберётся по НЕЙ, и норма встанет по прошлой геометрии молча.
-  const downloadFailures = (geometry.data?.warnings ?? []).filter(
-    (w) => w.includes('не удалось скачать') || w.includes('не разобрал'),
-  );
 
   const outcome = useMemo(() => {
     if (!index) return null;
@@ -203,26 +156,117 @@ export default function DxfApplyDialog({
     return dxfNormValueRows(outcome.areas.rows, widthCm, unit, fabric);
   }, [outcome, widthCm, unit, fabric]);
   const complete = rows.length === sizeIds.length && rows.every((r) => r.value != null);
-  // ПРИМЕНЕНИЕ ЖДЁТ НАСТРОЙКИ ЦЕХА. Порядок источников припуска — замер → карточка → ЦЕХ → умолчание
-  // раскладки, и пока запрос цеха в пути, прифилл показывает умолчание. Оператор, успевший нажать
-  // «применить» в это окно, снял бы норму по припуску, которого никто не назначал: цех хранит 12 мм,
-  // подставилось 10, разница ушла по всему периметру каждой детали в себестоимость и в закупку.
-  // Ошибку запроса применение НЕ блокирует (иначе упавшая настройка остановила бы работу), но
-  // подпись прифилла в этом состоянии врёт про «цех не назвал» — об этом говорит отдельная плашка.
-  const applicable =
-    complete &&
-    !wastageMissing &&
-    canEdit &&
-    !seamInvalid &&
-    !seamOverMax &&
-    !doubleAllowance &&
-    !workshop.isPending &&
-    downloadFailures.length === 0;
+  // Запреты УСЛОВИЙ ЗАМЕРА (припуск не число, припуск выше потолка, двойной припуск, частично
+  // скачанная пачка, ещё не прочитанные настройки цеха) держит общий хук — они одни и те же для
+  // любого, кто мерит по DXF. Здесь остаётся то, что есть только у нормы: полный ряд, процент
+  // раскроя слота и право писать в карточку.
+  const applicable = complete && !wastageMissing && canEdit && !conditions.blocked;
+
+  const { showMessage } = useSnackBarStore();
+  const queryClient = useQueryClient();
+  const patternRows = (useWatch({ control, name: 'patterns' }) ?? []) as {
+    lineKey?: string;
+    fabricPurpose?: string;
+    bomLineKey?: string;
+  }[];
+  const bomRows = (useWatch({ control, name: 'bomItems' }) ?? []) as {
+    lineKey?: string;
+    purpose?: string;
+    name?: string;
+    section?: string;
+  }[];
+  // Скоуп ЭТОЙ строки словами сервера: назначение, иначе её собственный line_key.
+  const lineScopeKey = useMemo(() => {
+    const row = bomRows.find((b) => (b.lineKey ?? '') === lineKey);
+    return serverScopeKeyOfSheet({ fabricPurpose: row?.purpose, bomLineKey: row?.lineKey });
+  }, [bomRows, lineKey]);
 
   const sizeName = (id: number) => sizeNameById.get(id) ?? `#${id}`;
 
+  // КУДА ПУБЛИКОВАТЬ ПЛОЩАДИ, И ПО КАКИМ ЛИСТАМ ОТВЕЧАТЬ.
+  //
+  // Скоуп называется ТЕМ ЖЕ словом, что на сервере (`serverScopeKeyOfSheet`), а не ключом строки
+  // BOM: сервер собирает состав скоупа по СВОИМ строкам, и ключ, написанный не тем словом, не
+  // найдёт ни одного листа. Карточка без id (ещё не сохранена) публиковать не может.
+  //
+  // ЛИСТЫ БЕРУТСЯ ПО РАЗРЕШЁННОМУ СКОУПУ, А НЕ ПО СЫРОМУ КЛЮЧУ, и это правка, а не стиль. Геометрия
+  // приходит из карточного индекса, который группирует файлы по РАЗРЕШЁННОМУ скоупу (лист строки L
+  // принадлежит назначению P, если L разложена в P). Прежний фильтр по сырому ключу отбирал из них
+  // подмножество и публиковал его как полный набор: площадь считалась в том числе по листу, за
+  // который отпечаток не отвечал, — перезалив его, оператор менял площади и НЕ делал замер
+  // устаревшим. Теперь набор один и тот же, а расхождение сырых привязок внутри него — отказ, общий
+  // с отдельным действием на вкладке выкроек (`pieceAreaSheetsRefusal`).
+  //
+  // Листы берутся ВСЕ, включая наследие в PDF: отпечаток сервер считает по своим строкам
+  // `tech_card_size_pattern`, а они форматом не отбираются.
+  // Правлен ли ИСТОЧНИК замера и не сохранён — общее правило обеих точек публикации (piece-areas.ts).
+  const sourceDirty = useUnsavedAreaSource(control);
+  const publishTarget = useMemo(() => {
+    const id = Number(techCardId) || 0;
+    if (id <= 0 || !lineScopeKey) return null;
+    const scopes = fabricScopes(
+      bomRows
+        .filter((b) => isRollGoodsSection(b.section) && !!b.lineKey)
+        .map((b) => ({ lineKey: b.lineKey as string, purpose: b.purpose, name: b.name })),
+    );
+    const resolvedKey = scopes.find((s) => s.lines.some((l) => l.lineKey === lineKey))?.key ?? '';
+    if (!resolvedKey) return null;
+    const mine = (patternRows ?? []).filter(
+      (sh) => scopeKeyOfBinding(sh.fabricPurpose, sh.bomLineKey, scopes) === resolvedKey,
+    );
+    if (mine.length === 0) return null;
+    return { techCardId: id, scopeKey: lineScopeKey, sheets: mine };
+  }, [techCardId, patternRows, bomRows, lineKey, lineScopeKey]);
+
   const apply = () => {
     if (!applicable) return;
+    // ПЛОЩАДИ УЕЗЖАЮТ НА СЕРВЕР ЗДЕСЬ, И ИМЕННО ЗДЕСЬ (Ф0/Ф1).
+    //
+    // Это единственная точка, где оператор ПОДТВЕРДИЛ условия замера — слой контура и припуск, — а
+    // те же площади уже посчитаны для нормы. Писать их фоном при открытии вкладки значило бы
+    // сохранять данные на действии чтения, да ещё с угаданными условиями: ошибка в слое молча
+    // меняет площадь на величину припуска по всему периметру каждой детали.
+    //
+    // Публикация НЕ БЛОКИРУЕТ применение нормы и не может его отменить: норма уже посчитана и
+    // подтверждена, а площади — это то, из чего сервер потом выведет ОЦЕНКУ для слотов, где нормы
+    // никто не вписал. Отказ сервера (например, неполный комплект скоупа) остаётся сообщением, а не
+    // провалом операции, которую человек только что подтвердил.
+    //
+    // …НО НЕ С НЕСОХРАНЁННЫМ ИСТОЧНИКОМ. Комплект деталей здесь собран из ФОРМЫ
+    // (useFabricDxfPieces читает pieceDxfAliases), а полноту присланного набора сервер доказывает
+    // против СВОИХ, сохранённых связей. Если деталь только что перепривязали к другому блоку, а
+    // состав деталей не изменился, серверная сверка «в обе стороны» пройдёт против СТАРЫХ связей —
+    // и площади, снятые с геометрии, которой сохранённая карточка не заявляет, лягут в базу МОЛЧА.
+    // Отказаться после этого от правок формы значит остаться с неверными площадями без следа.
+    //
+    // Норму это НЕ отменяет: её человек только что подтвердил, она посчитана и применяется ниже.
+    // Не уезжают только площади — и об этом говорится вслух, вместе с тем, что делать.
+    if (publishTarget && outcome?.ok && sourceDirty) {
+      showMessage(
+        'норма применена; площади НЕ сохранены: выкройки или связи блок→деталь правлены и не сохранены — сервер сверяет комплект по сохранённым связям. Сохраните карточку и замерьте площади на вкладке выкроек',
+        'error',
+      );
+    } else if (publishTarget && outcome?.ok) {
+      void publishPieceAreas({
+        techCardId: publishTarget.techCardId,
+        scopeKey: publishTarget.scopeKey,
+        sheets: publishTarget.sheets,
+        areas: outcome.areas.pieceRows,
+        contourLayer: chosenLayer,
+        seamAllowanceMm: Number(seamValue) || 0,
+        nameOfPiece: (key) =>
+          pieces.find((p) => (p.lineKey ?? '').trim() === key)?.name ?? key,
+      }).then((res) => {
+        if (!res.ok) {
+          showMessage(`норма применена, но площади не сохранены: ${res.reason}`, 'error');
+          return;
+        }
+        // Состояние замера показывает вкладка выкроек, и читает она его ИЗ ОТВЕТА СЕРВЕРА (свежесть
+        // считает он). Без сброса чтения плитка ткани продолжала бы писать «площади не замерены»
+        // над только что записанным замером — до перезагрузки страницы.
+        queryClient.invalidateQueries({ queryKey: techCardKeys.detail(publishTarget.techCardId) });
+      });
+    }
     onApply({
       // Скаляр СНИМАЕТСЯ явно: одна оставшаяся строка заставила бы сервер игнорировать ряд.
       consumption: '',
@@ -289,98 +333,9 @@ export default function DxfApplyDialog({
           </CalloutBox>
         )}
 
-        {/* ПУСТАЯ ПАЧКА НАЗЫВАЕТСЯ ПУСТОЙ. `useDxfGeometry` при нуле файлов — это отключённый
-            запрос, а у отключённого запроса в react-query v5 `isPending` вечно true: без этой ветки
-            диалог «качал и разбирал выкройки» бесконечно, хотя качать нечего. Состояние достижимое:
-            связи блок→деталь остаются на карточке и после удаления всех DXF. */}
-        {pack.length === 0 ? (
-          <CalloutBox tone='warning'>
-            На карточке нет ни одного DXF — площади считать не по чему. Загрузите выкройки на
-            вкладке выкроек; связи деталей с блоками у вас уже есть.
-          </CalloutBox>
-        ) : (
-          geometry.isPending && <Text size='micro'>качаем и разбираем выкройки…</Text>
-        )}
-        {geometry.isError && (
-          <CalloutBox tone='warning'>
-            не удалось разобрать выкройки: {geometry.error?.message || 'неизвестная ошибка'}
-          </CalloutBox>
-        )}
-        {/* ЧАСТИЧНО СКАЧАННАЯ ПАЧКА ХУЖЕ НЕСКАЧАННОЙ: комплект деталей может собраться по СТАРОЙ
-            ревизии листа, и норма встанет по прошлой геометрии, ничем себя не выдав. Поэтому не
-            предупреждение, а запрет применения. */}
-        {downloadFailures.length > 0 && (
-          <CalloutBox tone='warning'>
-            Часть выкроек не скачалась или не разобралась: {downloadFailures.join('; ')}. Норма
-            могла бы собраться по другому листу — например, по прежней ревизии, — и была бы
-            неотличима от верной. Повторите позже.
-          </CalloutBox>
-        )}
-
-        {layers.length > 1 && (
-          <Selector
-            label='слой контура'
-            value={chosenLayer}
-            options={layers.map((o) => ({
-              value: o.layer,
-              label: `слой ${o.layer || '—'} · деталей ${o.pieces}${
-                o.checked > 0 ? ` · градуируется ${o.graded}/${o.checked}` : ''
-              }${layerAllowanceLabel(o) ? ` · ${layerAllowanceLabel(o)}` : ''}`,
-            }))}
-            onChange={(v: string | number) => {
-              setLayer(String(v));
-              setSeamMm('');
-            }}
-          />
-        )}
-
-        <label className='flex flex-col gap-1'>
-          <Text size='micro' variant='label' component='span'>
-            припуск на шов, мм
-          </Text>
-          <input
-            className='h-8 w-full border border-borderColor px-2 text-small'
-            inputMode='decimal'
-            value={seamMm === '' ? String(prefill.value) : seamMm}
-            onChange={(e) => setSeamMm(e.target.value.replace(/[^\d.,]/g, '').replace(',', '.'))}
-          />
-          <Text size='nano' variant='label' component='span'>
-            {seamMm.trim() === '' ? prefill.why : 'введено руками'}
-          </Text>
-        </label>
-
-        {/* ЦЕХ — ТРЕТИЙ ИСТОЧНИК ПРИПУСКА, и его молчание надо отличать от невозможности спросить.
-            Пока запрос в пути, применение запрещено (см. applicable): подставленное умолчание уехало
-            бы в норму. Если запрос УПАЛ, применять можно — иначе сломанная настройка остановила бы
-            работу, — но подпись «ни карточка, ни цех, ни файл не назвали» в этом состоянии неверна,
-            и молчать об этом нельзя. */}
-        {workshop.isPending && <Text size='micro'>читаем стандарт припуска цеха…</Text>}
-        {workshop.isError && (
-          <CalloutBox tone='warning'>
-            Настройки цеха не читаются, поэтому цеховой стандарт припуска в предзаполнении НЕ
-            участвовал. Если он задан, норма выйдет посчитанной по другому припуску — проверьте
-            число в поле выше.
-          </CalloutBox>
-        )}
-
-        {seamInvalid && (
-          <CalloutBox tone='warning'>
-            Припуск читается не как число. Пустое поле означает предзаполнение ({prefill.value} мм),
-            а не ноль: молча посчитать ноль значило бы отдать норму по линии шва.
-          </CalloutBox>
-        )}
-        {seamOverMax && (
-          <CalloutBox tone='warning'>
-            Припуск больше {MAX_SEAM_ALLOWANCE_MM} мм — тот же потолок, что у раскладки и у сервера.
-            Столько не бывает; похоже, введены сантиметры вместо миллиметров.
-          </CalloutBox>
-        )}
-        {/* ТОТ ЖЕ ОТКАЗ, ЧТО В РАСКЛАДКЕ, И ПО ТОЙ ЖЕ ПРИЧИНЕ — правило одно, а не две политики. */}
-        {doubleAllowance && measured && (
-          <CalloutBox tone='warning'>
-            {`Слой ${measured.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(engineCmToMm(measured.allowanceCm) ?? 0).toFixed(1)} мм снаружи линии шва. Добавленный сверху припуск ${seamValue.toFixed(1)} мм посчитает его ДВАЖДЫ и раздует площадь по всему периметру каждой детали. Выходов два: поставить 0 (контур уже с припуском) либо выбрать слой с линией шва.`}
-          </CalloutBox>
-        )}
+        {/* Условия замера — общий блок с отдельным действием на вкладке выкроек: состояние
+            разбора, слой контура, припуск и все отказы условий, одними словами на оба входа. */}
+        <DxfMeasureConditionsFields state={conditions} />
 
         {!(widthCm > 0) && (
           <CalloutBox tone='warning'>

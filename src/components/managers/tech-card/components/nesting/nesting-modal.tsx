@@ -37,7 +37,7 @@ import { estimateJob, estimateRun } from 'lib/nesting/nest/estimate';
 import { renderLayoutDxf } from 'lib/nesting/render/dxf';
 import { renderLayoutSvg } from 'lib/nesting/render/svg';
 import { LayoutEditor } from './layout-editor';
-import type { MarkerColorway } from './colorway-widths';
+import { slotCutWidth as slotCutWidthOf, type MarkerColorway } from './colorway-widths';
 import {
   buildMarkerLayout,
   compositionLabel,
@@ -47,6 +47,8 @@ import {
   exportFileName,
   legacyPairOf,
   markerToView,
+  isDraftMarker,
+  refusalWord,
   scalarNormRefusal,
   type MarkerBomLine,
   type MarkerCompositionEntry,
@@ -79,9 +81,14 @@ import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { normBlock } from './block-code';
 import { ModalRailSection, type RailSectionStatus } from './modal-sections';
-import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
+import {
+  markerUnits,
+  pieceLineKeysByPieceId,
+  selectMarkerPieces,
+  unitsOfPieces,
+} from './piece-selection';
+import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
@@ -297,54 +304,15 @@ export function NestingModal({
   // рождения. Видно это только в маркере, открытом ПОСЛЕ переименования детали кроя, — то есть
   // тогда, когда ответ уже не восстановить.
   //
-  // Считается ЗДЕСЬ, а не у вызывающего, по той же причине, по которой алиасы фильтруются ТАМ:
-  // идентичность блока (имя без размерного хвоста) знает только тот, кто видит разбор — хвост
-  // опознаётся по размерному ряду словаря, а не по имени. Вызывающий знает скоуп, эта модалка
-  // знает файл; ключ собирается из двух половин ровно один раз.
-  const pieceLineKeyById = useMemo(() => {
-    // Алиас пишется под ИДЕНТИЧНОСТЬЮ блока (диалог сопоставления складывает туда имя без
-    // размерного хвоста), но встречаются и старые записи, где размер остался в имени. Поэтому
-    // индекс двухслойный: сначала имя как записано, следом — оно же, свёрнутое к идентичности.
-    // Свёртка НИКОГДА не перекрывает прямое совпадение и снимается вовсе при неоднозначности:
-    // «FP_L» и «FP_XL» сворачиваются в одно «FP», и подставить в блоб наугад одну из двух
-    // деталей кроя хуже, чем оставить поле пустым — пустое читается как «неизвестно», а
-    // неверное читается как ответ.
-    // Неоднозначность ОТКАЗЫВАЕТ на обоих слоях, а не только на свёрнутом. Два алиаса,
-    // привязанных к РАЗНЫМ строкам BOM одного назначения, — законная запись: карточка её прямо
-    // разрешает и запрещает только противоречие внутри одного скоупа. Сюда же они приезжают
-    // отфильтрованными по скоупу, то есть одинаковыми ключами с разными деталями кроя, и
-    // «последний победил» подставил бы в блоб ту, что оказалась позже в массиве, — то есть
-    // случайную. Пусто читается как «неизвестно», неверное читается как ответ.
-    const byBlock = new Map<string, string | null>();
-    const folded = new Map<string, string | null>();
-    const put = (m: Map<string, string | null>, k: string, v: string) => {
-      m.set(k, m.has(k) && m.get(k) !== v ? null : v);
-    };
-    for (const a of pieceAliases ?? []) {
-      const raw = normBlock(a.blockName ?? '');
-      const val = (a.pieceLineKey ?? '').trim();
-      if (!raw || !val) continue;
-      put(byBlock, raw.toLowerCase(), val);
-      // Свёртка спрашивает ФАЙЛ, а не форму имени: «FP_L» — это левая полочка целиком, и её
-      // алиас обязан остаться прямым совпадением, а не уехать на свёрнутый слой под «FP».
-      const ident = aliasIdentity(raw, split).toLowerCase();
-      if (!ident || ident === raw.toLowerCase()) continue;
-      put(folded, ident, val);
-    }
-    const out = new Map<number, string>();
-    if (byBlock.size === 0) return out;
-    for (const p of allPieces) {
-      const key = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '').toLowerCase();
-      if (!key) continue;
-      // `null` — это «две детали спорят», и он ОБЯЗАН гасить ключ, а не проваливаться на
-      // свёрнутый слой: ?? пропускает только undefined, поэтому спор на прямом слое не
-      // подменяется догадкой со свёрнутого.
-      const direct = byBlock.get(key);
-      const val = (direct === undefined ? folded.get(key) : direct) ?? '';
-      if (val) out.set(p.id, val);
-    }
-    return out;
-  }, [pieceAliases, allPieces, split]);
+  // Считается ИЗ ДВУХ ПОЛОВИН, и обе приходят снаружи этой функции: скоуп алиасов знает
+  // вызывающий (у одного имени блока на подкладе и на верхе разные детали кроя), идентичность
+  // блока знает разбор. Само правило живёт в piece-selection.ts — ту же карту собирает очередь
+  // раскроя партии, у которой этой модалки нет вовсе, и вторая копия правила разъехалась бы
+  // молча: в блоб попала бы «случайная из двух спорящих» деталь вместо пустого «неизвестно».
+  const pieceLineKeyById = useMemo(
+    () => pieceLineKeysByPieceId(allPieces, split, pieceAliases),
+    [pieceAliases, allPieces, split],
+  );
   const [activeLayer, setActiveLayer] = useState<string | null>(null);
   const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
     ? (activeLayer as string)
@@ -447,33 +415,23 @@ export function NestingModal({
   // Файл без градации: одно число «изделий», размер даёт слот. Прежнее поведение целиком.
   const ungradedUnits = Math.max(1, Math.round(qtyByToken[''] ?? 1));
   const graded = compRows.length > 0;
+  // ТИРАЖ НАСТИЛА И ФОРМУЛА БЛОБА — из общего модуля (piece-selection.ts), а не выражением здесь.
+  // Ту же формулу собирает очередь раскроя партии на вкладке костинга, БЕЗ этой модалки, и вторая
+  // её копия была бы вторым ответом на вопрос «сколько экземпляров этой детали кроят».
+  const units = useMemo(
+    () => markerUnits({ graded, rows: activeRows, ungradedUnits }),
+    [graded, activeRows, ungradedUnits],
+  );
   // Сколько ИЗДЕЛИЙ кроит настил — делитель расхода и множитель неградуируемых деталей.
-  const unitsTotal = graded ? activeRows.reduce((s, r) => s + r.qty, 0) : ungradedUnits;
-  // Количество — на КАЖДОЕ написание строки: свёрнутая строка «M / m» раздаёт свой тираж и
-  // деталям с хвостом M, и деталям с хвостом m — это детали одного изделия.
-  const unitsByToken = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const r of activeRows) for (const t of r.tokens) m.set(t, r.qty);
-    return m;
-  }, [activeRows]);
-  // ФОРМУЛА БЛОБА, одна на весь экран: экземпляров детали = qty × (размер детали в составе ?
-  // количество этого размера : всего изделий). Деталь без размерного хвоста кроится на каждое
-  // изделие состава — потому и умножается на итог, а не на чью-то отдельную строку.
-  const unitsOfPiece = useMemo(() => {
-    const m = new Map<number, number>();
-    for (const p of allPieces) {
-      const tok = split.codeById.get(p.id)?.size ?? '';
-      m.set(p.id, tok === '' ? unitsTotal : unitsByToken.get(tok) ?? 0);
-    }
-    return m;
-  }, [allPieces, split, unitsTotal, unitsByToken]);
+  const unitsTotal = units.unitsTotal;
+  const unitsOfPiece = useMemo(
+    () => unitsOfPieces(allPieces, (id) => split.codeById.get(id)?.size ?? '', units),
+    [allPieces, split, units],
+  );
   // В раскладку идут детали ВСЕХ размеров состава плюс неградуируемые. Размер с количеством 0 —
   // это «не кроим», и его детали не попадают ни в поиск, ни в блоб.
   const selectedPieces = useMemo(
-    () =>
-      allPieces.filter(
-        (p) => (p.layer ?? '') === contourLayer && (unitsOfPiece.get(p.id) ?? 0) >= 1,
-      ),
+    () => selectMarkerPieces(allPieces, contourLayer, unitsOfPiece),
     [allPieces, contourLayer, unitsOfPiece],
   );
   // СОСТАВ, КОТОРЫЙ УЕДЕТ НА СЕРВЕР — в id размеров карточки и отсортированный по ним (тот же
@@ -842,6 +800,26 @@ export function NestingModal({
   // and efficiency_pct is a 0..100 column. Clamp once, use everywhere.
   const effPct = effective ? Math.min(100, effective.efficiency * 100) : 0;
 
+  // ═══ ЧАСТИЧНАЯ ГЕОМЕТРИЯ НЕ ВЫПУСКАЕТСЯ В ЦЕХ ══════════════════════════════════════════════
+  //
+  // Раскладка, у которой легла ЧАСТЬ деталей, — это ЧЕРНОВИК (0299): она законно хранится, её
+  // законно видно и её законно пересчитывают. Чего с ней делать НЕЛЬЗЯ — так это отдавать в
+  // производство: SVG на печать и DXF на плоттер описывают изделие, у которого не хватает деталей,
+  // и по этим файлам режут ткань. Ошибка при этом не выглядит ошибкой — файл открывается, контуры
+  // на месте, слои те же; недостающих деталей в нём просто НЕТ.
+  //
+  // Предикат один на два случая, и это намеренно: сохранённый черновик (счётчики приезжают со
+  // сводки) и НЕДОСЧИТАННЫЙ ЖИВОЙ ПРОГОН в этом же окне (счётчики от движка) — одна и та же
+  // частичная геометрия, и запрет обязан быть одинаков. Модалка и раньше не давала СОХРАНИТЬ
+  // такую раскладку, но экспорт оставался открытым — то есть закрытой была дверь в базу, а не в
+  // цех.
+  const partialGeometry =
+    !!effective && effective.totalCount > 0 && effective.placedCount !== effective.totalCount;
+  const viewIsDraft = isDraftMarker(view?.summary);
+  const partialExportRefusal = partialGeometry
+    ? `уложено ${effective?.placedCount ?? 0} из ${effective?.totalCount ?? 0} деталей: экспорт частичной раскладки запрещён — по такому файлу выкроят изделие без недостающих деталей. Поднимите бюджет поиска и пересчитайте${viewIsDraft ? ' (это ЧЕРНОВИК)' : ''}`
+    : '';
+
   // «НЕ ВЛЕЗЛО» — a different fact from «нарушения», and the panel has to keep them apart.
   //
   // A violation is a marker the engine BUILT whose clearances a human may still accept: the
@@ -995,11 +973,14 @@ export function NestingModal({
     // недоступен: чертежа в нём просто не окажется, и сказать об этом внутри файла нечем. Значит
     // его честность — только этот гейт. Без него починка DXF просто переносит ложь в соседнюю
     // кнопку (спека §7.4, дефект D).
-    if (s && !viewDegraded && !running && !drawingBlocked) download(s, 'image/svg+xml', 'svg');
+    if (s && !viewDegraded && !running && !drawingBlocked && !partialGeometry)
+      download(s, 'image/svg+xml', 'svg');
   };
   // Plotter export: R12 DXF of the finished layout, true contours, cm — the EFFECTIVE
   // placements, so a hand-adjusted marker cuts exactly what the operator sees.
-  const dxfReady = (viewData != null && !viewDegraded && !drawingBlocked) || run.phase === 'done';
+  const dxfReady =
+    !partialGeometry &&
+    ((viewData != null && !viewDegraded && !drawingBlocked) || run.phase === 'done');
   const downloadDxf = () => {
     if (!dxfReady || !effective) return;
     download(renderLayoutDxf(effective, displayPieces, displayWidth), 'application/dxf', 'dxf');
@@ -1098,21 +1079,19 @@ export function NestingModal({
   // роль кроится «вообще»; ширина пина — то, на чём кроится ЭТОТ колорвей. Раскладка меряет
   // второе. Рулон и кромка берутся из одного источника: ширина пина с кромкой слота описала бы
   // рулон, которого не существует.
+  // Половина «от слота» живёт в colorway-widths рядом с половиной «от пина»: очередь раскроя
+  // партии считает ту же ширину без этой модалки, и вторая копия формулы разошлась бы молча ровно
+  // на кромку.
   const slotCutWidth = (b?: MarkerBomLine): number => {
     if (!b) return NaN;
     const pin = chosenColorway?.widthByLine.get(b.lineKey);
     if (pin && Number.isFinite(pin.cutCm)) return pin.cutCm;
-    const roll = parseDecimalNumber(b.effectiveFabricWidthCm || b.fabricWidth);
-    if (!Number.isFinite(roll) || roll <= 0) return NaN;
-    const sel = parseDecimalNumber(b.selvedgeCm);
-    const cut = roll - 2 * (Number.isFinite(sel) && sel > 0 ? sel : 0);
-    return cut > 0 ? cut : NaN;
+    return slotCutWidthOf(b).cutCm;
   };
   const slotSelvedge = (b?: MarkerBomLine): number => {
     const pin = b ? chosenColorway?.widthByLine.get(b.lineKey) : undefined;
     if (pin && Number.isFinite(pin.cutCm)) return pin.selvedgeCm;
-    const s = b ? parseDecimalNumber(b.selvedgeCm) : NaN;
-    return Number.isFinite(s) && s > 0 ? s : 0;
+    return b ? slotCutWidthOf(b).selvedgeCm : 0;
   };
   const slotWidth = slotCutWidth(slot);
   const widthMismatch =
@@ -1604,6 +1583,10 @@ export function NestingModal({
         techCardId,
         marker: {
           productionRunId,
+          // СОГЛАСИЕ СОХРАНИТЬ НЕПОЛНУЮ УКЛАДКУ — здесь всегда false: эта кнопка гасится, пока
+          // placed !== total (canSave), то есть неполную раскладку модалка не предлагает вовсе.
+          // Черновики — предмет очереди раскроя партии, где «не уложилось» нормальный исход.
+          isDraft: false,
           // ЛЕГАСИ-ПАРА ИЛИ СОСТАВ — ровно одно из двух, и это правило сервера
           // (dto.markerCompositionOfInsert), а не вкусовщина: состав приезжает ТОЛЬКО блобом,
           // отдельного поля на вставке нет намеренно — две копии на проводе подняли бы вопрос
@@ -1739,6 +1722,9 @@ export function NestingModal({
         techCardId,
         marker: {
           productionRunId,
+          // Пересохранение уже сохранённой раскладки: неполной она быть не могла (её бы не приняли),
+          // а согласие на черновик — это про НОВЫЙ результат, которого здесь нет.
+          isDraft: false,
           sizeId: s.sizeId ?? 0,
           name: s.name ?? '',
           source: 'manual',
@@ -2843,6 +2829,17 @@ export function NestingModal({
               посчитана без них; сохранить норму нельзя, пока каждая деталь не легла.
             </CalloutBox>
           )}
+          {/* ЧЕРНОВИК НАЗЫВАЕТСЯ ЧЕРНОВИКОМ В ЕДИНСТВЕННОМ ОКНЕ, ГДЕ ЕГО ГЕОМЕТРИЮ ВИДНО.
+              Открытая раскладка выглядит нормальной: контуры на месте, длина и КПД напечатаны — а
+              то, что это 30 деталей из 45, читалось только по счётчику «размещено», который рядом
+              с «эффективность» выглядит бухгалтерской подробностью. Здесь же сказано, что экспорта
+              не будет: печать и плоттер — это дорога в цех. */}
+          {partialGeometry && (
+            <CalloutBox tone='error'>
+              {viewIsDraft ? 'ЧЕРНОВИК: ' : 'частичная раскладка: '}
+              {partialExportRefusal}
+            </CalloutBox>
+          )}
           {violations.length > 0 && !running && (
             <CalloutBox tone='warning'>
               нарушения: {violations.length}
@@ -2882,17 +2879,16 @@ export function NestingModal({
                   }
                   sub={
                     viewRefusal
-                      ? // Причина ИЗ СОСТАВА, а не одна на всё: нечитаемый состав (испорченная
-                        // строка, частичный рестор) — другой отказ, и звать его «смешанным»
-                        // значит отправить оператора чинить не то.
+                      ? // Причина ИЗ ОДНОГО СЛОВАРЯ (refusalWord): черновик, смешанный состав либо
+                        // нечитаемый состав — это три РАЗНЫХ отказа, и назвать один другим значит
+                        // отправить оператора чинить не то. До правки черновик здесь представлялся
+                        // «смешанным составом» или «состав не читается» — то есть единственное
+                        // место, где короткая длина видна рядом с КПД, про черновик молчало.
                         //
                         // Читается ТЕМ ЖЕ источником, что и сам отказ, — сводкой строки. viewData
                         // берёт состав из БЛОБА в первую очередь, и у маркера, чья проекция
-                        // размеров потеряна, а блоб цел, диагноз разошёлся бы с отказом: сервер
-                        // говорит «не читается», подпись — «смешанный».
-                        compositionOf(view.summary).length > 1
-                        ? 'смешанный состав — нормы нет'
-                        : 'состав не читается — нормы нет'
+                        // размеров потеряна, а блоб цел, диагноз разошёлся бы с отказом.
+                        `${refusalWord(view.summary)} — нормы нет`
                       : `изделий: ${viewData.totalUnits || 1}`
                   }
                 />
@@ -3187,15 +3183,16 @@ export function NestingModal({
             <Button
               type='button'
               variant='secondary'
-              disabled={!effective || running || viewDegraded || drawingBlocked}
+              disabled={!effective || running || viewDegraded || drawingBlocked || partialGeometry}
               title={
-                viewDegraded
+                partialExportRefusal ||
+                (viewDegraded
                   ? 'геометрия маркера нечитаема — доступна только сводка'
                   : drawing.phase === 'running'
                     ? 'восстанавливаем чертёж детали по выкройкам…'
                     : drawing.phase === 'error'
                       ? `чертёж не восстановлен: ${rebuildText}`
-                      : undefined
+                      : undefined)
               }
               onClick={downloadSvg}
             >
@@ -3206,13 +3203,14 @@ export function NestingModal({
               variant='secondary'
               disabled={!dxfReady}
               title={
-                viewDegraded
+                partialExportRefusal ||
+                (viewDegraded
                   ? 'геометрия маркера нечитаема — доступна только сводка'
                   : drawing.phase === 'running'
                     ? 'восстанавливаем чертёж детали по выкройкам…'
                     : drawing.phase === 'error'
                       ? `чертёж не восстановлен: ${rebuildText}`
-                      : 'DXF R12 для реза — контуры на слое CUT, чертёж INNER/SEAM, кромка STRIP, подписи LABELS'
+                      : 'DXF R12 для реза — контуры на слое CUT, чертёж INNER/SEAM, кромка STRIP, подписи LABELS')
               }
               onClick={downloadDxf}
             >
@@ -3226,8 +3224,13 @@ export function NestingModal({
               <Button
                 type='button'
                 variant='secondary'
-                disabled={!effective || running}
-                title={`то же, что система выдавала до починки: контуры и кромка, БЕЗ линии шва и надсечек. Причина: ${rebuildText}`}
+                // Плоттерный выход — тот же запрет: контурный файл частичной раскладки режет ткань
+                // ровно так же, как полный, только изделие в нём неполное.
+                disabled={!effective || running || partialGeometry}
+                title={
+                  partialExportRefusal ||
+                  `то же, что система выдавала до починки: контуры и кромка, БЕЗ линии шва и надсечек. Причина: ${rebuildText}`
+                }
                 onClick={downloadContoursOnly}
               >
                 DXF: только контуры

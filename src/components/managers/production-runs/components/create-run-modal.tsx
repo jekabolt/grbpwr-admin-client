@@ -24,6 +24,7 @@ import { extractFieldViolations } from 'utils/field-errors';
 import { decimalToInput, inputToDecimal, sanitizeDecimal } from 'utils/decimal';
 import { ulid } from 'utils/ulid';
 import { runDetailPath, runStatusLabel, runStatusOptions } from './options';
+import { runColorwayRows, runGridKey, unpublishedColorwayCount } from './run-composition';
 import {
   CoverageTable,
   FindingGroup,
@@ -53,9 +54,7 @@ import { useRunReadiness, useSaveProductionRun } from './useProductionRuns';
 // Поэтому отказ create разбирается здесь как ПЕРВОКЛАССНЫЙ результат, а не как «неожиданная ошибка».
 
 const cell = 'w-full border border-textInactiveColor bg-bgColor px-2 py-1.5 text-textBaseSize';
-const qtyKey = (colorwayId: number, sizeId: number) => `${colorwayId}:${sizeId}`;
 const dateToIso = (d: string) => (d ? new Date(`${d}T00:00:00Z`).toISOString() : undefined);
-const ARCHIVED = 'COLORWAY_LIFECYCLE_STATUS_ARCHIVED';
 
 type Draft = {
   techCardId: number;
@@ -144,26 +143,14 @@ export function CreateRunModal({
   const sizeIds = useMemo(() => card?.techCard?.sizeIds ?? [], [card]);
 
   // Колорвеи карточки — тот же источник, что у сетки прогона на детальной странице
-  // (techCard.colorways). Архивные не предлагаются: гейт судил бы их `colorway_live` блокером, а
-  // предложить строку, единственный смысл которой — покраснеть, значит завести мёртвый контрол.
-  // Колорвей без продукта тоже не предлагается: клетка сетки ключуется product_id, и без него
-  // приёмке потом нечего засчитывать.
+  // (techCard.colorways), и тот же ВЫВОД: правила «архивный не предлагаем» и «без продукта не
+  // предлагаем» живут в run-composition.ts одним экземпляром на все три поверхности, где эту сетку
+  // набирают.
   const colorways = useMemo(
-    () =>
-      (card?.colorways ?? [])
-        .filter((c) => (c.colorwayId ?? 0) > 0 && c.status !== ARCHIVED)
-        .map((c) => {
-          const dc = dictionary?.colors?.find((x) => x.code === c.colorCode);
-          return {
-            id: c.colorwayId!,
-            label: `${c.colorCode ? `${c.colorCode} · ` : ''}${dc?.name ?? c.colorCode ?? `#${c.colorwayId}`}`,
-          };
-        }),
+    () => runColorwayRows(card?.colorways, dictionary?.colors),
     [card?.colorways, dictionary?.colors],
   );
-  const unpublishedCount = (card?.colorways ?? []).filter(
-    (c) => (c.colorwayId ?? 0) === 0 && c.status !== ARCHIVED,
-  ).length;
+  const unpublishedCount = unpublishedColorwayCount(card?.colorways);
   const colorwayLabel = useMemo(() => {
     const m = new Map(colorways.map((c) => [c.id, c.label]));
     return (id: number) => m.get(id) ?? (id > 0 ? `#${id}` : '—');
@@ -176,7 +163,7 @@ export function CreateRunModal({
     const out: ProductionRunReadinessCell[] = [];
     for (const cw of selected) {
       for (const s of sizeIds) {
-        const n = Number(qty[qtyKey(cw, s)]);
+        const n = Number(qty[runGridKey(cw, s)]);
         if (Number.isFinite(n) && n > 0) out.push({ colorwayId: cw, sizeId: s, plannedQty: n });
       }
     }
@@ -297,12 +284,24 @@ export function CreateRunModal({
   // создать законный прогон из-за колорвея, лежащего в стороне. Отдельным полем сервер его отдаёт
   // ровно потому, что «!ready && blockingEnabled» — предложение, в котором клиенту ошибаться нельзя.
   const gateBlocks = !!report?.blockingEnabled && !!report?.wouldBlock;
+  // ЧЕРНОВИК ГЕЙТОМ НЕ ГАСИТСЯ, и это не послабление, а отказ изобретать правило.
+  //
+  // Сервер пропускает проверку готовности для черновика ЦЕЛИКОМ: черновик не резервирует материал,
+  // не порождает наряд и потому ничем не рискует. Клиент, который на нём всё ещё запирает кнопку,
+  // запрещает то, что сервер разрешает, — и запрет этот нельзя ни обойти, ни понять, потому что
+  // вердикт над ним говорит правду о ДРУГОМ действии.
+  //
+  // Вердикт при этом остаётся на экране и остаётся полезным: ровно он будет судить перевод
+  // черновика в план, когда за партию возьмутся всерьёз. Меняется только его СИЛА — с запрета на
+  // предупреждение, — и об этом сказано словами внизу, у самой кнопки.
+  const isDraftRun = d.status === 'PRODUCTION_RUN_STATUS_DRAFT';
+  const gateBlocksSubmit = gateBlocks && !isDraftRun;
 
   const set = (patch: Partial<Draft>) => setD((prev) => ({ ...prev, ...patch }));
   const toggle = (id: number) =>
     setSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   const setCell = (colorwayId: number, sizeId: number, v: string) =>
-    setQty((prev) => ({ ...prev, [qtyKey(colorwayId, sizeId)]: v.replace(/[^0-9]/g, '') }));
+    setQty((prev) => ({ ...prev, [runGridKey(colorwayId, sizeId)]: v.replace(/[^0-9]/g, '') }));
 
   // Префилла «из типового тиража» здесь больше нет: тираж удалён с тех-карты, и подставлять
   // в план партии нечего. Замены нет НАРОЧНО — количества на прогоне набирают руками, это и был
@@ -504,7 +503,12 @@ export function CreateRunModal({
                       // ПОГАШЕНИЕ. В блокирующем режиме неготовый колорвей нельзя ДОБАВИТЬ — но
                       // всегда можно снять: disabled на уже отмеченной галочке запер бы оператора
                       // в состоянии, из которого нет выхода ни вперёд (create отобьют), ни назад.
-                      const lockedOut = blockingEnabled && known === false && !isSelected;
+                      // У ЧЕРНОВИКА погашения нет по той же причине, по которой у него не гаснет
+                      // кнопка «создать»: сервер его гейтом не судит, и запретить положить колорвей
+                      // в расчёт значило бы запретить посчитать деньги по тому, что как раз и надо
+                      // починить.
+                      const lockedOut =
+                        blockingEnabled && known === false && !isSelected && !isDraftRun;
                       const findings = (cw?.findings ?? []).filter((f) => !isOk(f));
                       return (
                         <div key={c.id} className='border-b border-hairline py-1'>
@@ -604,14 +608,14 @@ export function CreateRunModal({
                                   <input
                                     className='w-14 border border-textInactiveColor bg-bgColor px-1 text-right text-textBaseSize'
                                     inputMode='numeric'
-                                    value={qty[qtyKey(cw, s)] ?? ''}
+                                    value={qty[runGridKey(cw, s)] ?? ''}
                                     onChange={(e) => setCell(cw, s, e.target.value)}
                                   />
                                 </td>
                               ))}
                               <td className='border border-hairline px-2 py-1 text-right tabular-nums'>
                                 {sizeIds.reduce(
-                                  (sum, s) => sum + (Number(qty[qtyKey(cw, s)]) || 0),
+                                  (sum, s) => sum + (Number(qty[runGridKey(cw, s)]) || 0),
                                   0,
                                 )}
                               </td>
@@ -827,11 +831,15 @@ export function CreateRunModal({
                   объяснение уехало за край экрана, читается как поломка интерфейса. Когда блокер
                   сидит не на колорвее, а на карточке, снимать нечего — и это надо сказать, а не
                   промолчать, иначе совет «снимите колорвеи» отправляет чинить не то. */}
-              {gateBlocks
+              {gateBlocksSubmit
                 ? blockedSelection.length > 0
                   ? ` · снимите ${blockedSelection.length} ${pluralRu(blockedSelection.length, 'неготовый колорвей', 'неготовых колорвея', 'неготовых колорвеев')}, чтобы создать`
                   : ' · гейт блокирует создание: причина не на колорвее, а на карточке или прогоне — см. вердикт выше'
-                : ''}
+                : /* Вердикт есть, но он не запрещает: сказать это надо ЗДЕСЬ, у кнопки, иначе
+                     красный вердикт над живой кнопкой читается как сломанный интерфейс. */
+                  gateBlocks
+                  ? ' · черновик ничего не резервирует; готовность проверится при переводе в план'
+                  : ''}
             </Text>
             <Button type='button' variant='secondary' size='lg' onClick={() => onOpenChange(false)}>
               отмена
@@ -840,7 +848,7 @@ export function CreateRunModal({
               type='button'
               variant='main'
               size='lg'
-              disabled={create.isPending || !d.techCardId || gateBlocks}
+              disabled={create.isPending || !d.techCardId || gateBlocksSubmit}
               onClick={submit}
             >
               {create.isPending ? 'создаём…' : 'создать'}

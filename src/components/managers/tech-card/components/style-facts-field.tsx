@@ -2,15 +2,19 @@ import { adminService } from 'api/api';
 import { common_CareEntry } from 'api/proto-http/admin';
 import { useModel } from 'components/managers/models/components/useModelQuery';
 import { CareSymbol } from 'components/managers/product/components/care/care-card';
+import { CarePicker } from 'components/managers/product/components/care/care-picker';
 import { useCareVocabulary } from 'components/managers/product/components/care/use-care-vocabulary';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useEffect, useRef, useState } from 'react';
 import { useFormContext, useFormState, useWatch } from 'react-hook-form';
+import { Button } from 'ui/components/button';
 import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
+import { FormLabel } from 'ui/form';
 import SelectField from 'ui/form/fields/select-field';
+import { emptyLabel } from './labels-field';
 import { TechCardFormData } from './schema';
 import { parseSeasonToSku } from './season-util';
 import { COMMIT_ORDER, useTechCardStaging } from './useTechCardStaging';
@@ -25,6 +29,10 @@ const FIT_OPTIONS = ['regular', 'slim', 'loose', 'relaxed', 'skinny', 'cropped',
 const ORIGIN_LABEL = 'TECH_CARD_LABEL_TYPE_ORIGIN';
 const CARE_LABEL = 'TECH_CARD_LABEL_TYPE_CARE';
 const HEIGHT = 'BODY_MEASUREMENT_NAME_HEIGHT';
+
+// Derived from the schema rather than restated, so a new label field cannot slip past the
+// "is this row still blank" check below.
+type LabelRowValue = NonNullable<TechCardFormData['labels']>[number];
 
 // What the storefront will actually print from these fields. It is the same copy, built from the
 // same values — the care line is worded by the care dictionary, the same rows the storefront
@@ -103,7 +111,7 @@ function StorefrontPreview() {
 // The care symbols AS THE SERVER RESOLVED THEM (TechCard.care_entries) — the structured projection
 // of the stored code string, already in canonical print order (wash, bleach, dry, iron,
 // professional) and named by the same care_symbol dictionary the label generator and the storefront
-// read. Read-only by contract: care is written as the code string, on the labels tab.
+// read. Read-only by contract: care is written as the code string, on the care label.
 //
 // It is not a duplicate of the picker's own rendering. The picker shows what someone TYPED; this
 // shows what the backend made of it after the last save — a stored token the vocabulary does not
@@ -122,6 +130,127 @@ function ResolvedCareEntries({ entries }: { entries?: common_CareEntry[] }) {
       <Text size='micro' variant='label' className='mt-1'>
         {rows.map((e) => e.name?.trim() || e.code).join(' · ')}
       </Text>
+    </div>
+  );
+}
+
+// The header's care picker. It edits the SAME field the LABELS tab does — the care label's
+// `content` — by being handed that exact RHF path, so the two tabs are two views of one value and
+// not two values to reconcile. (The picker that was removed from the header owned its OWN field;
+// that is what made it a duplicate, not the fact that it stood on the header. Care being reachable
+// only from the labels tab reads as "care can no longer be edited" to anyone who never went there.)
+// `careIdx` is resolved by the PARENT and handed down, not looked up again here: the parent's mirror
+// reads the same row to feed `careInstructions`, and two independent lookups over the same array are
+// two chances to disagree the day a card carries more than one care label.
+function HeaderCarePicker({
+  canEdit,
+  careIdx,
+  careCount,
+  careRow,
+}: {
+  canEdit: boolean;
+  careIdx: number;
+  /** How many care labels the card carries — >1 makes «the same field» a lie, see below. */
+  careCount: number;
+  /**
+   * The care row itself, resolved by the parent off the array it already watches. Deliberately NOT
+   * a local `useWatch` on `labels.${careIdx}`: RHF's useWatch does not re-read when its `name`
+   * changes — it only moves on the next emit — so the render right after the row is created would
+   * still be showing whichever row used to sit at that index.
+   */
+  careRow?: LabelRowValue;
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+
+  const writeLabels = (rows: NonNullable<TechCardFormData['labels']>) =>
+    setValue('labels', rows, { shouldDirty: true });
+
+  // A card with no care label yet gets one from here rather than sending the operator to the labels
+  // tab to create an empty row first.
+  //
+  // Written with setValue on the ARRAY NAME — deliberately not a second useFieldArray('labels').
+  // Field-array instances do not broadcast their own mutations: only `setValue` on a name that is IN
+  // `control._names.array` pushes through `_subjects.array`, and that broadcast is what re-syncs
+  // LabelsField's array instead of leaving the labels tab rendering a stale row list.
+  //
+  // That makes this depend on LabelsField being MOUNTED when the button is pressed — it is what puts
+  // 'labels' in `_names.array`, and that set is not append-only (`unregister` and `reset` clear it).
+  // Today the tech card mounts every tab and only `hidden`s them, so the dependency holds. If the
+  // labels panel is ever mounted conditionally, this call silently falls back to a plain leaf write:
+  // the row would still save while staying INVISIBLE on the labels tab. Move it onto a handler owned
+  // by LabelsField if that day comes.
+  const createCareLabel = () => {
+    const rows = (getValues('labels') ?? []) as NonNullable<TechCardFormData['labels']>;
+    writeLabels([...rows, { ...emptyLabel, labelType: CARE_LABEL }]);
+  };
+
+  // The undo for the button above. Adding a label row moves the LABELS sign-off to «changed after
+  // approval» — so an operator who pressed «создать», thought better of it and walked away would
+  // have unblessed a signed-off section from a tab that offered no way back. Only offered while the
+  // row is still ENTIRELY blank: a care label carries the composition text in `note` (that is what
+  // «сгенерировать состав» writes), and dropping the row would take that with it.
+  const removable =
+    careIdx >= 0 &&
+    !careRow?.content?.trim() &&
+    !careRow?.note?.trim() &&
+    !careRow?.placement?.trim() &&
+    !careRow?.attachment?.trim() &&
+    !careRow?.size?.trim() &&
+    !careRow?.bomItemId;
+  const removeCareLabel = () => {
+    const rows = (getValues('labels') ?? []) as NonNullable<TechCardFormData['labels']>;
+    writeLabels(rows.filter((_, i) => i !== careIdx));
+  };
+
+  if (careIdx < 0) {
+    return (
+      <div className='space-y-1'>
+        <FormLabel>care symbols</FormLabel>
+        <div className='flex min-h-9 items-center gap-2 border border-borderColor p-1.5'>
+          <Text variant='label' size='micro'>
+            — на карточке нет этикетки «care» —
+          </Text>
+          {canEdit && (
+            <Button
+              type='button'
+              variant='secondary'
+              size='xs'
+              className='ml-auto shrink-0'
+              onClick={createCareLabel}
+            >
+              создать
+            </Button>
+          )}
+        </div>
+        <Text size='micro' variant='label'>
+          символы ухода хранятся на этикетке «care» (вкладка LABELS) — здесь то же самое поле.
+          «создать» добавит туда строку.
+        </Text>
+      </div>
+    );
+  }
+
+  return (
+    <div className='space-y-1'>
+      <CarePicker name={`labels.${careIdx}.content`} label='care symbols' editMode={canEdit} />
+      {careCount > 1 ? (
+        // Nothing forbids a second care label, and the mirror, the printed tag and this picker all
+        // read the FIRST one. Saying «the same field» here would then be false for whoever is editing
+        // the other row on the labels tab, so name which row actually reaches the storefront.
+        <Text size='micro' className='text-error'>
+          этикеток «care» на карточке: {careCount} — сюда и на витрину идёт первая, остальные
+          редактируются только на вкладке LABELS
+        </Text>
+      ) : (
+        <Text size='micro' variant='label'>
+          то же поле, что и на вкладке LABELS (этикетка «care»)
+        </Text>
+      )}
+      {canEdit && removable && (
+        <Button type='button' variant='simple' size='xs' onClick={removeCareLabel}>
+          убрать пустую этикетку
+        </Button>
+      )}
     </div>
   );
 }
@@ -147,16 +276,16 @@ export function StyleFactsField({
   const [saving, setSaving] = useState(false);
   const staging = useTechCardStaging();
 
-  // Care is now authored once, on the LABELS tab (the care label). The style-level careInstructions
-  // (what the storefront + the preview below read) mirrors that single source, so removing the old
-  // header care picker never drops the storefront care. Reconciled without dirtying on mount — and a
-  // legacy card that authored care in the old header keeps it until a care label is actually filled,
-  // so nothing is silently wiped.
-  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
-    labelType?: string;
-    content?: string;
-  }>;
-  const careFromLabel = labels.find((l) => l.labelType === CARE_LABEL)?.content?.trim() ?? '';
+  // Care is authored once, on the care label — reachable from this panel and from the LABELS tab,
+  // both writing that one field. The style-level careInstructions (what the storefront + the preview
+  // below read) mirrors that single source, so neither entry point can leave the storefront care
+  // behind. Reconciled without dirtying on mount — and a legacy card that authored care in the old
+  // header field keeps it until a care label is actually filled, so nothing is silently wiped.
+  const labels = (useWatch({ control, name: 'labels' }) ?? []) as LabelRowValue[];
+  // ONE lookup: it is both what the mirror below copies and what the header's picker writes into.
+  const careIdx = labels.findIndex((l) => l.labelType === CARE_LABEL);
+  const careFromLabel = careIdx < 0 ? '' : labels[careIdx].content?.trim() ?? '';
+  const careCount = labels.filter((l) => l.labelType === CARE_LABEL).length;
   const firstCareSync = useRef(true);
   useEffect(() => {
     const cur = (getValues('careInstructions') || '').trim();
@@ -341,11 +470,17 @@ export function StyleFactsField({
     <div className='grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2'>
       <div className='space-y-2.5'>
         <Text size='micro' variant='label'>
-          Fit is a style fact shared by every colourway. Care is entered once on the LABELS tab (the
-          care label) and mirrors here automatically; composition is derived from the BOM’s
-          shell-fabric materials (see the composition on the BOM tab).
+          Fit is a style fact shared by every colourway. Care is stored once — on the care label —
+          and can be picked here or on the LABELS tab, it is the same field either way; composition
+          is derived from the BOM’s shell-fabric materials (see the composition on the BOM tab).
         </Text>
         <SelectField name='fit' label='fit' items={FIT_OPTIONS} readOnly={!canEdit} />
+        <HeaderCarePicker
+          canEdit={canEdit}
+          careIdx={careIdx}
+          careCount={careCount}
+          careRow={careIdx < 0 ? undefined : labels[careIdx]}
+        />
         <ResolvedCareEntries entries={careEntries} />
         {canEdit && changed.length > 0 && (
           <div className='flex flex-wrap items-center gap-2'>

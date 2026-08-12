@@ -21,7 +21,7 @@ import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
 import { laysProvenancePhrase } from './bom-wastage-suggestion';
-import { LineProblems, noFx, NO_PRICE, PriceOrigin } from './costing-vocab';
+import { LineProblems, noFx, NO_PRICE, PriceOrigin, TIER_ESTIMATE } from './costing-vocab';
 import { wireInt } from './schema';
 import { styleReadViewKeys } from './useStyleReadViews';
 
@@ -66,6 +66,82 @@ const statTone = (d?: number): 'up' | 'down' | undefined =>
  * а карточка — возит, и bom_item_id строки сметы называет строку BOM напрямую.
  */
 type BomWastageProv = { source?: string; layCount?: number; appliedAt?: string };
+
+/**
+ * ОЦЕНКА РАСХОДА ПО ПЛОЩАДИ, привязанная к строке сметы (Ф5).
+ *
+ * Строка, посчитанная оценкой, приходит в смете ПОЛУПУСТОЙ: сервер кладёт в неё сумму, но ни
+ * расхода, ни цены — их у неё нет как полей (`StyleCostEstimate` ступень на проводе пока не
+ * называет, это половина Ф5-BE). На экране это читалось как поломка данных: строка с деньгами, у
+ * которой «расход —» и «цена —», выглядит ровно как строка, у которой их забыли заполнить.
+ *
+ * Недостающие числа лежат рядом и уже приехали: `AdminColorwayRef.area_estimates` публикует
+ * `per_garment` в единице СЛОТА для каждого рулонного слота колорвея, у которого нет своей строки
+ * рецепта. Это ТОТ ЖЕ расчёт, из которого сложены деньги (сервер считает их одним вызовом —
+ * colorwayAreaEstimates), а не второй ответ рядом.
+ *
+ * Признак «эта строка — оценка» получается из ДВУХ фактов сразу: у слота есть посчитанная оценка
+ * (refusal пуст) И сама строка не назвала расхода. Одного первого не хватает по определению —
+ * оценка существует ровно там, где нормы никто не вписал, — но проверка расхода делает связь
+ * невосприимчивой к тому, что сервер однажды начнёт публиковать оценку и для заявленных слотов
+ * (ровно это нужно, чтобы показать «оценка занижала на N%», и это следующая фаза).
+ */
+type AreaEst = { perGarment: string; unit: string; pieceCount: number; parsedAt?: string };
+
+/**
+ * bom_item_id → оценка слота. Ключ приходится перекладывать: оценка приезжает по `bom_line_key`
+ * (стабильный ключ строки, живущий и в слепке релиза, где id нет), а строка сметы называет строку
+ * BOM через `bom_item_id`. Соединяет их сама карточка — она несёт оба ключа на каждой строке BOM.
+ */
+function areaEstimateMap(
+  colorway: common_AdminColorwayRef | undefined,
+  bomItems: BomItemLite[],
+): Map<number, AreaEst> {
+  const out = new Map<number, AreaEst>();
+  for (const e of colorway?.areaEstimates ?? []) {
+    // Отказ — это НЕ оценка. У слота с refusal нет ни числа, ни денег: сервер его не считал, и
+    // подписать такую строку «оценка снизу» значило бы объявить ступенью пустоту.
+    if ((e.refusal ?? '').trim()) continue;
+    const perGarment = decimalToInput(e.perGarment).trim();
+    if (!perGarment) continue;
+    // ПУСТОЙ КЛЮЧ НЕ СОЕДИНЯЕТ. Без этой проверки оценка без bom_line_key нашла бы ПЕРВУЮ строку
+    // BOM, у которой ключа тоже нет, — и подписала бы чужую строку чужой нормой. Сегодня ключ есть
+    // у каждой сохранённой строки (сервер по нему же сверяет BOM), поэтому это страховка от
+    // будущего, а не обход известного случая: цена ошибки здесь — молча переставленная цифра.
+    const key = (e.bomLineKey ?? '').trim();
+    if (!key) continue;
+    const bom = bomItems.find((b) => (b.lineKey ?? '').trim() === key);
+    const id = wireInt(bom?.id);
+    if (!id) continue;
+    out.set(id, {
+      perGarment,
+      unit: e.unit?.trim() || bom?.unit?.trim() || '',
+      pieceCount: e.pieceCount ?? 0,
+      parsedAt: e.parsedAt ?? undefined,
+    });
+  }
+  return out;
+}
+
+/** Ровно те поля строки BOM, которыми связываются два ключа — больше карточке здесь знать нечего. */
+type BomItemLite = { id?: number; lineKey?: string; unit?: string };
+
+/**
+ * ЭТА СТРОКА СМЕТЫ ПОСЧИТАНА ОЦЕНКОЙ — единственное правило на весь файл.
+ *
+ * Спрашивают об этом трижды и на трёх уровнях: ячейка расхода в разборе, ступень всего разбора
+ * (от неё зависят цвета отклонений) и ступень свёрнутой строки матрицы. Три копии одного условия
+ * разошлись бы ровно в тот день, когда сервер начнёт называть ступень сам и условие станет
+ * однострочным «m.costTier === ESTIMATE»: одну копию поправят, две забудут.
+ */
+const lineIsAreaEstimate = (m: StyleCostMaterialLine, areaEst: Map<number, AreaEst>) =>
+  areaEst.has(wireInt(m.bomItemId)) && !decimalToInput(m.consumption).trim();
+
+/** ...и та же ступень для СМЕТЫ ЦЕЛИКОМ: хотя бы одна материальная строка — оценка. */
+const estimateIsLowerBound = (
+  materials: StyleCostMaterialLine[] | undefined,
+  areaEst: Map<number, AreaEst>,
+) => (materials ?? []).some((m) => lineIsAreaEstimate(m, areaEst));
 
 /**
  * Расход материала и то, что в нём уже сидит.
@@ -135,10 +211,13 @@ const BREAKDOWN_LEAD = BREAKDOWN_COLS - 2;
 function Breakdown({
   estimate,
   wastageProv,
+  areaEst,
 }: {
   estimate: StyleCostEstimate;
   /** bom_item_id → провенанс процента раскроя строки (см. BomWastageProv). */
   wastageProv: Map<number, BomWastageProv>;
+  /** bom_item_id → оценка расхода по площади ЭТОГО колорвея (см. areaEstimateMap). */
+  areaEst: Map<number, AreaEst>;
 }) {
   const cur = estimate.baseCurrency || '';
   const materials = estimate.materials ?? [];
@@ -160,6 +239,8 @@ function Breakdown({
   const defectAmount = Math.max(0, unitCost - materialsSubtotal - articlesSubtotal);
   const defectPct = num(decimalToInput(estimate.defectPct));
 
+  // Ступень ВСЕЙ сметы — общим предикатом (см. estimateIsLowerBound).
+  const planIsLowerBound = estimateIsLowerBound(materials, areaEst);
   const share = (n: number) => (unitCost > 0 ? `${((n / unitCost) * 100).toFixed(0)}%` : '—');
   const excluded =
     materials.filter((m) => m.hasBase === false || m.priceSource === 'STYLE_COST_PRICE_SOURCE_NONE')
@@ -206,50 +287,89 @@ function Breakdown({
               </td>
             </tr>
           ) : (
-            materials.map((m, i) => (
-              <tr key={m.bomItemId || `m${i}`}>
-                <td>
-                  {m.materialName || `#${m.bomItemId}`}
-                  {/* Секция — приписка к названию, а не своя колонка: она нужна, только чтобы
+            materials.map((m, i) => {
+              // СТУПЕНЬ СТРОКИ — см. AreaEst: оценка есть у слота И расхода строка не назвала.
+              const est = areaEst.get(wireInt(m.bomItemId));
+              const consumption = decimalToInput(m.consumption).trim();
+              const byArea = lineIsAreaEstimate(m, areaEst);
+              return (
+                <tr key={m.bomItemId || `m${i}`}>
+                  <td>
+                    {m.materialName || `#${m.bomItemId}`}
+                    {/* Секция — приписка к названию, а не своя колонка: она нужна, только чтобы
                       найти строку в BOM, и отдельный столбец под это тратил ширину зря. */}
-                  <Text size='micro' variant='label' component='span'>
-                    {` · ${sectionLabel(m.section)}`}
-                  </Text>
-                </td>
-                <td>
-                  {decimalToInput(m.consumption) || '—'} {m.unit || ''}
-                </td>
-                <td>
-                  {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
-                </td>
-                <td>
-                  <RightCell>
-                    <PriceOrigin source={m.priceSource} date={m.priceDate} />
-                  </RightCell>
-                </td>
-                <td>
-                  <RightCell>
-                    <LineProblems
-                      noPrice={m.priceSource === 'STYLE_COST_PRICE_SOURCE_NONE'}
-                      noFxRate={m.hasBase === false}
-                      currency={m.currency}
-                    />
-                  </RightCell>
-                </td>
-                <td>
-                  {/* int64 на проводе — строка; wireInt сводит оба конца к числу до Map.get. */}
-                  <WastageCell m={m} prov={wastageProv.get(wireInt(m.bomItemId))} />
-                </td>
-                <td>{decimalToInput(m.lineTotalBase) || <EmptyCell />}</td>
-                <td>
-                  {m.hasBase === false ? (
-                    <EmptyCell />
-                  ) : (
-                    share(num(decimalToInput(m.lineTotalBase)))
-                  )}
-                </td>
-              </tr>
-            ))
+                    <Text size='micro' variant='label' component='span'>
+                      {` · ${sectionLabel(m.section)}`}
+                    </Text>
+                    {byArea && (
+                      <span className='ml-1 inline-flex align-middle'>
+                        <Pill tone='attention'>{TIER_ESTIMATE}</Pill>
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    {/* Расход оценочной строки берётся из area_estimates: сам сервер в строку сметы
+                      его пока не кладёт, и пустая ячейка рядом с непустой суммой читалась как
+                      потерянные данные. Это ТО ЖЕ число, из которого посчитаны деньги строки. */}
+                    {byArea ? (
+                      <span className='flex flex-col items-end gap-0.5'>
+                        <span>{`${est?.perGarment} ${est?.unit || ''}`.trim()}</span>
+                        <Text size='micro' variant='label' component='span'>
+                          {est?.pieceCount
+                            ? `по площади ${est.pieceCount} ${
+                                est.pieceCount === 1 ? 'детали' : 'деталей'
+                              }`
+                            : 'по площади деталей'}
+                        </Text>
+                      </span>
+                    ) : (
+                      `${consumption || '—'} ${m.unit || ''}`
+                    )}
+                  </td>
+                  <td>
+                    {decimalToInput(m.unitPrice) || '—'} {m.currency || ''}
+                  </td>
+                  <td>
+                    <RightCell>
+                      <PriceOrigin source={m.priceSource} date={m.priceDate} />
+                    </RightCell>
+                  </td>
+                  <td>
+                    <RightCell>
+                      <LineProblems
+                        noPrice={m.priceSource === 'STYLE_COST_PRICE_SOURCE_NONE'}
+                        noFxRate={m.hasBase === false}
+                        currency={m.currency}
+                      />
+                    </RightCell>
+                  </td>
+                  <td>
+                    {/* У ОЦЕНКИ ВЫПАДОВ НЕТ — и молчание об этом было бы худшим из ответов: пустая
+                      ячейка wastage читается как «отходов ноль», тогда как правда обратная —
+                      отходы существуют, просто это число их не содержит. */}
+                    {byArea ? (
+                      <span className='flex flex-col items-end gap-0.5'>
+                        <Pill tone='attention'>netto</Pill>
+                        <Text size='micro' variant='label' component='span'>
+                          выпадов нет в числе — их знает раскладка
+                        </Text>
+                      </span>
+                    ) : (
+                      // int64 на проводе — строка; wireInt сводит оба конца к числу до Map.get.
+                      <WastageCell m={m} prov={wastageProv.get(wireInt(m.bomItemId))} />
+                    )}
+                  </td>
+                  <td>{decimalToInput(m.lineTotalBase) || <EmptyCell />}</td>
+                  <td>
+                    {m.hasBase === false ? (
+                      <EmptyCell />
+                    ) : (
+                      share(num(decimalToInput(m.lineTotalBase)))
+                    )}
+                  </td>
+                </tr>
+              );
+            })
           )}
 
           <tr className='bg-bgZebra'>
@@ -364,11 +484,23 @@ function Breakdown({
         </CalloutBox>
       )}
 
-      <VarianceByKind comparison={comparison} cur={cur} />
+      {/* Ступень итога — у самого итога, а не только на строках, из которых он сложен: unit cost в
+          закрывающей строке таблицы выше — это ровно то число, которое ниже сравнивают с фактом и с
+          проведённым snapshot'ом. */}
+      {planIsLowerBound && (
+        <CalloutBox tone='note'>
+          <Text size='micro'>
+            {`Итог этой сметы — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей ÷ раскройную ширину, межлекальных выпадов в нём нет. Настоящий unit cost ВЫШЕ, поэтому все Δ ниже (к факту, к snapshot'у) преувеличены в сторону перерасхода, а по знаку могут быть обратными.`}
+          </Text>
+        </CalloutBox>
+      )}
+
+      <VarianceByKind comparison={comparison} cur={cur} planIsLowerBound={planIsLowerBound} />
       <SnapshotReconciliation
         comparison={comparison}
         cur={cur}
         planUnitCost={unitCost > 0 ? unitCost : undefined}
+        planIsLowerBound={planIsLowerBound}
       />
     </div>
   );
@@ -380,11 +512,14 @@ function SnapshotReconciliation({
   comparison,
   cur,
   planUnitCost,
+  planIsLowerBound,
 }: {
   comparison?: StyleCostComparison;
   cur: string;
   /** Тот же unit cost, что стоит в итоге таблицы — страховка, если сравнение пришло без плана. */
   planUnitCost?: number;
+  /** План — нижняя граница (оценка по площади): Δ К ПЛАНУ тогда преувеличена, и слово это говорит. */
+  planIsLowerBound?: boolean;
 }) {
   if (!comparison?.hasSnapshot) return null;
 
@@ -411,7 +546,15 @@ function SnapshotReconciliation({
         <Stat
           label={`snapshot${comparison.snapshotSource ? ` · ${comparison.snapshotSource}` : ''}`}
           value={snapshot != null ? `${snapshot.toFixed(2)}${cur ? ` ${cur}` : ''}` : '—'}
-          sub={snapshotVsPlan != null ? `Δ к плану ${money(snapshotVsPlan)}` : undefined}
+          sub={
+            snapshotVsPlan != null
+              ? // «≤» — тем же знаком, что у маржи на вкладке костинга, и в том же смысле:
+                // НАСТОЯЩЕЕ значение не больше напечатанного. Слова («не более») читались бы про
+                // модуль и на отрицательной разнице означали бы обратное; знак неравенства
+                // алгебраичен и не зависит от того, в какую сторону смотрит цифра.
+                `Δ к плану ${planIsLowerBound ? '≤ ' : ''}${money(snapshotVsPlan)}`
+              : undefined
+          }
         />
         {comparison.hasActual && (
           <Stat
@@ -434,7 +577,16 @@ function SnapshotReconciliation({
  * With no production actuals there is nothing to vary, so the same bars show where the PLAN
  * cost sits instead (ink, not a fake zero variance).
  */
-function VarianceByKind({ comparison, cur }: { comparison?: StyleCostComparison; cur: string }) {
+function VarianceByKind({
+  comparison,
+  cur,
+  planIsLowerBound,
+}: {
+  comparison?: StyleCostComparison;
+  cur: string;
+  /** План материалов — нижняя граница: у ЭТОГО вида затрат знак отклонения недоказуем. */
+  planIsLowerBound?: boolean;
+}) {
   const byKind = comparison?.byKind ?? [];
   if (byKind.length === 0) return null;
   const hasActual = !!comparison?.hasActual;
@@ -470,15 +622,22 @@ function VarianceByKind({ comparison, cur }: { comparison?: StyleCostComparison;
         </Text>
       ) : (
         <div className='flex flex-col'>
-          {sorted.map((r) => (
-            <BarRow
-              key={r.kind}
-              name={r.kind}
-              pct={max > 0 ? (measure(r) / max) * 100 : 0}
-              tone={hasActual ? (r.delta > 0 ? 'down' : 'up') : 'ink'}
-              value={hasActual ? signed(r.delta) : `${r.estimate.toFixed(2)} ${cur}`}
-            />
-          ))}
+          {sorted.map((r) => {
+            // ОЦЕНКА ЗАНИЖАЕТ ТОЛЬКО МАТЕРИАЛЫ. Пошив, логистика и накладные — введённые руками
+            // суммы, к площади деталей отношения не имеющие, и гасить у них цвет значило бы
+            // отбирать вывод, который как раз доказан. Поэтому оговорка точечная: она снимает
+            // цвет (утверждение о знаке) ровно с той полосы, чей план — нижняя граница.
+            const unproven = hasActual && planIsLowerBound && r.kind === 'materials';
+            return (
+              <BarRow
+                key={r.kind}
+                name={unproven ? `${r.kind} · план занижен` : r.kind}
+                pct={max > 0 ? (measure(r) / max) * 100 : 0}
+                tone={!hasActual ? 'ink' : unproven ? 'ink' : r.delta > 0 ? 'down' : 'up'}
+                value={hasActual ? signed(r.delta) : `${r.estimate.toFixed(2)} ${cur}`}
+              />
+            );
+          })}
         </div>
       )}
     </>
@@ -508,6 +667,17 @@ type MatrixRow = {
   deltaPct?: number;
   /** Самая крупная по модулю статья отклонения — куда смотреть первым делом. */
   top?: { kind: string; delta: number };
+  /** Оценки расхода по площади ЭТОГО колорвея, по bom_item_id строки сметы (см. areaEstimateMap). */
+  areaEst?: Map<number, AreaEst>;
+  /**
+   * План этой строки — НИЖНЯЯ ГРАНИЦА: хотя бы одна материальная строка посчитана оценкой по
+   * площади. Тогда и `delta`, и `deltaPct`, и «главное отклонение» перестают быть отклонением
+   * факта от плана: факт сравнивается с заниженным планом, и знак у разности может быть
+   * ПРОТИВОПОЛОЖЕН правде (оценка 80, настоящий план 100, факт 90 читались как перерасход +10,
+   * тогда как это экономия −10). Числа остаются — они единственные, что есть, — но без тона и с
+   * названной ступенью.
+   */
+  lowerBound?: boolean;
 };
 
 /**
@@ -693,6 +863,7 @@ export function CostEstimateField({
     // строку несвежей; данных нет → это настоящий сбой.
     if (!estimate) return r.isError ? { ...base, state: 'error' } : base;
 
+    const areaEst = areaEstimateMap(c, techCard?.techCard?.bomItems ?? []);
     const comparison = estimate.comparison;
     const plan = opt(decimalToInput(estimate.unitCostBase));
     const hasActual = !!comparison?.hasActual;
@@ -721,6 +892,11 @@ export function CostEstimateField({
       delta,
       deltaPct,
       top: movers[0],
+      // Оценки — СВОИ У КАЖДОГО КОЛОРВЕЯ (детали на ткань назначает его рецепт), поэтому карта
+      // строится на строке, а не одна на таблицу.
+      areaEst: areaEst,
+      // Тот же предикат, что у разбора и у ячейки расхода — см. estimateIsLowerBound.
+      lowerBound: estimateIsLowerBound(estimate.materials, areaEst),
     };
   });
 
@@ -748,6 +924,13 @@ export function CostEstimateField({
     meanDelta != null && meanPlan != null && meanPlan > 0
       ? (meanDelta / meanPlan) * 100
       : undefined;
+  // СТУПЕНЬ ИТОГА — ПО ТОМУ ЖЕ МНОЖЕСТВУ, ПО КОТОРОМУ ОН ПОСЧИТАН. Проверять `rows` целиком было
+  // бы вторым множеством: колорвей-оценка, у которого нет факта, в среднее не входит, и оговорка о
+  // нём стояла бы под числом, которого он не касался. И наоборот — при единственном колорвее с
+  // оценкой итог повторяет его строку, а строка уже помечена: молчащий итог печатал бы те же
+  // цифры точными.
+  const lowerBoundInTotal = totalBase.filter((r) => r.lowerBound).length;
+  const totalIsLowerBound = lowerBoundInTotal > 0;
   const totalLabel =
     both.length > 0
       ? `среднее по ${both.length} ${both.length === 1 ? 'колорвею' : 'колорвеям'} с планом и фактом`
@@ -783,6 +966,10 @@ export function CostEstimateField({
                         {row.sku}
                       </Text>
                     )}
+                    {/* Ступень — В СВЁРНУТОЙ строке, а не только в разборе: развернуть её человек
+                        может и не собираться, а «план» в колонке рядом читается как полноценный
+                        план всегда. */}
+                    {row.lowerBound && <Pill tone='attention'>{TIER_ESTIMATE}</Pill>}
                     {row.state === 'forbidden' && <Pill tone='warn'>нет доступа</Pill>}
                     {row.state === 'error' && <Pill tone='warn'>не загрузилось</Pill>}
                     {/* warn (красный) занят «показать нечего»; здесь цифры ЕСТЬ, просто несвежие —
@@ -790,12 +977,32 @@ export function CostEstimateField({
                     {row.stale && <Pill tone='attention'>не обновилось</Pill>}
                   </span>
                 </td>
-                <td>{row.plan != null ? row.plan.toFixed(2) : <MatrixValue row={row} />}</td>
+                <td>
+                  {row.plan != null ? (
+                    // «≥» у ПЛАНА, а не «≤»: нижняя граница себестоимости — это «не меньше чем»,
+                    // и знак тут противоположен знаку у маржи на вкладке костинга. Один и тот же
+                    // факт, две разные стороны неравенства — перепутать их значило бы соврать
+                    // ровно наоборот.
+                    `${row.lowerBound ? '≥ ' : ''}${row.plan.toFixed(2)}`
+                  ) : (
+                    <MatrixValue row={row} />
+                  )}
+                </td>
                 <td>{row.actual != null ? row.actual.toFixed(2) : <MatrixValue row={row} />}</td>
-                <td className={row.delta != null ? deltaTone(row.delta) : undefined}>
+                {/* ТОНА НЕТ У ДЕЛЬТЫ ОТ НИЖНЕЙ ГРАНИЦЫ — см. MatrixRow.lowerBound: знак разности
+                    может быть противоположен правде, а красный/зелёный — это утверждение о знаке. */}
+                <td
+                  className={
+                    row.delta != null && !row.lowerBound ? deltaTone(row.delta) : undefined
+                  }
+                >
                   {row.delta != null ? signed(row.delta) : <MatrixValue row={row} />}
                 </td>
-                <td className={row.delta != null ? deltaTone(row.delta) : undefined}>
+                <td
+                  className={
+                    row.delta != null && !row.lowerBound ? deltaTone(row.delta) : undefined
+                  }
+                >
                   {row.deltaPct != null ? `${signed(row.deltaPct, 1)}%` : <MatrixValue row={row} />}
                 </td>
                 <td>
@@ -806,7 +1013,7 @@ export function CostEstimateField({
                       прогонов не было
                     </Text>
                   ) : row.top ? (
-                    <span className={deltaTone(row.top.delta)}>
+                    <span className={row.lowerBound ? undefined : deltaTone(row.top.delta)}>
                       {`${row.top.kind} ${signed(row.top.delta)}`}
                     </span>
                   ) : (
@@ -826,7 +1033,11 @@ export function CostEstimateField({
               {open && row.estimate && (
                 <tr>
                   <td colSpan={MATRIX_COLS}>
-                    <Breakdown estimate={row.estimate} wastageProv={wastageProv} />
+                    <Breakdown
+                      estimate={row.estimate}
+                      wastageProv={wastageProv}
+                      areaEst={row.areaEst ?? new Map()}
+                    />
                   </td>
                 </tr>
               )}
@@ -836,13 +1047,29 @@ export function CostEstimateField({
         <tbody>
           <TotalRow>
             <td>{totalLabel}</td>
-            <td>{meanPlan != null ? meanPlan.toFixed(2) : '—'}</td>
-            <td>{meanActual != null ? meanActual.toFixed(2) : '—'}</td>
-            <td className={meanDelta != null ? deltaTone(meanDelta) : undefined}>
-              {meanDelta != null ? signed(meanDelta) : '—'}
+            <td>
+              {meanPlan != null
+                ? `${totalIsLowerBound ? '≥ ' : ''}${meanPlan.toFixed(2)}`
+                : '—'}
             </td>
-            <td className={meanDelta != null ? deltaTone(meanDelta) : undefined}>
-              {meanDeltaPct != null ? `${signed(meanDeltaPct, 1)}%` : '—'}
+            <td>{meanActual != null ? meanActual.toFixed(2) : '—'}</td>
+            {/* Цвет — утверждение о знаке, а знак средней Δ от смешанных ступеней недоказуем ровно
+                так же, как у строки: план занижен на неизвестную величину. */}
+            <td
+              className={
+                meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined
+              }
+            >
+              {meanDelta != null ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDelta)}` : '—'}
+            </td>
+            <td
+              className={
+                meanDelta != null && !totalIsLowerBound ? deltaTone(meanDelta) : undefined
+              }
+            >
+              {meanDeltaPct != null
+                ? `${totalIsLowerBound ? '≤ ' : ''}${signed(meanDeltaPct, 1)}%`
+                : '—'}
             </td>
             <td colSpan={2} />
           </TotalRow>
@@ -856,6 +1083,15 @@ export function CostEstimateField({
             : ''
         }`}
       </Text>
+      {/* ИТОГ СМЕШИВАЕТ СТУПЕНИ, И МОЛЧАТЬ ОБ ЭТОМ НЕЛЬЗЯ. Среднее по колорвеям складывает
+          полноценные планы с нижними границами; разделять их на два средних — значит показать два
+          числа, ни одно из которых не отвечает на вопрос «сколько стоит стиль». Поэтому среднее
+          остаётся одно, а рядом сказано, из чего оно сложено. */}
+      {totalIsLowerBound && (
+        <Text size='micro' variant='label'>
+          {`У ${lowerBoundInTotal} из ${totalBase.length} колорвеев, попавших в итог, план — «${TIER_ESTIMATE}»: расход части тканей выведен из площади деталей, без межлекальных выпадов. Такой план занижен, поэтому Δ к факту у этих строк и у итога идут без цвета — знак разности может быть обратным.`}
+        </Text>
+      )}
       <Text size='micro' variant='label'>
         {`Все суммы в ${cur || 'базовой валюте стиля'}, свёрнуты по курсам костинга. План ≠ факт ≠ проведённый snapshot COGS — три разные цифры, и они намеренно не сливаются.`}
       </Text>

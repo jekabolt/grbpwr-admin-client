@@ -1004,6 +1004,59 @@ export type ArchiveColorwayByIDRequest = {
 export type ArchiveColorwayByIDResponse = {
 };
 
+export type DeleteColorwayByIDRequest = {
+  colorwayId: number | undefined;
+  // expected_version ведёт себя РОВНО как на ArchiveColorwayByID: поле принимается и НЕ проверяется
+  // — при расхождении не происходит ничего, отказа по версии нет. Это не недоделка, а вывод:
+  // версия колорвея — это tech_card.lock_version, и ни один факт, который решает удаляемость
+  // (продажа, строка партии, настил, остаток), её не двигает. Проверка не закрыла бы ни одной
+  // настоящей гонки и при этом отказывала бы на правке рецепта СОСЕДНЕГО колорвея той же карточки.
+  // Гонку закрывает пере-проверка фактов внутри транзакции удаления.
+  expectedVersion: number | undefined;
+  // dry_run = true: посчитать вердикт и НЕ удалять. Ответ идентичен по форме, deleted = false.
+  dryRun: boolean | undefined;
+};
+
+// ColorwayDeletionEntry — одна запись вердикта удаления: стабильный код, готовая фраза, количество.
+// Строковый код, а не enum, — по соглашению refusal у оценки расхода (common/techcard.proto): код
+// не заводит нулевого значения, которое в замороженном ответе читалось бы как «причины нет».
+// Фразу собирает сервер: формулировка одна на систему, второй перевод на клиенте с ней разойдётся.
+export type ColorwayDeletionEntry = {
+  // Стабильный код. Блокеры: sold | production_run | lay | stock | inventory_target | fitting |
+  // referenced. Каскад: variant | variant_price | price | media | tag | translation | recipe_usage |
+  // size_consumption | piece_material | packaging_recipe | lab_dip_round | cost_event | waitlist |
+  // stock_history | style_link. Сироты: orphan_marker | orphan_material_movement | orphan_sample |
+  // orphan_task.
+  // inventory_target и fitting СУЖАЮТ границу владельца: по ней такой колорвей удаляется, но у
+  // обоих FK стоит RESTRICT, и СУБД откажет в любом случае — выбор был только между названным
+  // фактом и сырым MySQL 1451. referenced — сетка безопасности против ушедшей вперёд схемы: FK,
+  // которого нет в перечислении сервера; она называет своё незнание, а не факт.
+  reason: string | undefined;
+  // Готовая фраза для экрана: «продан: 3 заказа», «стоит в партии #12 (черновик)».
+  text: string | undefined;
+  // Сколько объектов стоит за записью (заказов, партий, строк рецепта, раскладок). 0 значит «отсюда
+  // не видно» и приходит только с reason = referenced: MySQL сообщает имя ограничения, а не
+  // мощность, и поставить туда 1 значило бы выдумать число.
+  count: number | undefined;
+};
+
+export type DeleteColorwayByIDResponse = {
+  // Разрешает ли вердикт удаление. При dry_run = false и deletable = false ответа не будет вовсе —
+  // придёт FailedPrecondition; поле осмысленно прежде всего в сухом прогоне.
+  deletable: boolean | undefined;
+  // Что держит удаление. Пусто ⟺ deletable.
+  blockers: ColorwayDeletionEntry[] | undefined;
+  // Что уйдёт ВМЕСТЕ с колорвеем (ON DELETE CASCADE — его собственные строки). Это список, который
+  // печатает диалог подтверждения.
+  cascade: ColorwayDeletionEntry[] | undefined;
+  // ТРЕТЬЯ КАТЕГОРИЯ, ни блокер, ни каскад: записи с ON DELETE SET NULL переживут удаление и
+  // ПОТЕРЯЮТ колорвей. Раскладка, снятая под этот артикул, останется длиной, померенной ни на чём.
+  // Отказать не за что, но оператор обязан узнать это ДО подтверждения, а не после.
+  orphans: ColorwayDeletionEntry[] | undefined;
+  // Действительно ли строка удалена. false в сухом прогоне.
+  deleted: boolean | undefined;
+};
+
 export type PublishColorwayRequest = {
   colorwayId: number | undefined;
   expectedVersion: number | undefined;
@@ -6745,6 +6798,10 @@ export type common_TechCardCosting = {
   // contributes to NO currency bucket, so unit_cost/unit_cost_base are withheld from cost seeding
   // and should not be trusted as complete.
   hasUnpriced: boolean | undefined;
+  // OUTPUT-ONLY: the root rollup was costed, in part, by AREA ESTIMATE (Ф1, ступень 0). Same
+  // meaning and same warning as TechCardColorwayCost.has_estimate: netto, lower bound, shown but
+  // never seeded into the catalogue.
+  hasEstimate: boolean | undefined;
   totalSam: googletype_Decimal | undefined;
   colorwayCosts: common_TechCardColorwayCost[] | undefined;
   // OUTPUT-ONLY base-currency rollup. The unit/order cost of the primary colourway folded into
@@ -6791,6 +6848,13 @@ export type common_TechCardColorwayCost = {
   // contributes to NO currency bucket, so unit_cost is withheld from cost seeding for this
   // colourway and should not be trusted as complete.
   hasUnpriced: boolean | undefined;
+  // OUTPUT-ONLY: set when at least one roll slot of THIS colourway was costed by AREA ESTIMATE
+  // (Ф1, ступень 0) — площадь деталей ÷ раскройную ширину — instead of an authored norm.
+  // ЭТО NETTO, НИЖНЯЯ ГРАНИЦА. Межлекальных выпадов и концов настила в ней нет и быть не может: их
+  // знает только раскладка. Число показывать МОЖНО и нужно (иначе карточка стоит ноль при полностью
+  // заполненной спецификации), но подписывать им каталожную себестоимость — нельзя: сервер сам не
+  // сеет cost_price с этим флагом, и клиент обязан показывать цифру как ОЦЕНКУ, а не как цену.
+  hasEstimate: boolean | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -7230,6 +7294,16 @@ export type common_TechCard = {
   // Save/DeleteTechCardMarker RPCs, never through the tech-card save (and marker writes do not
   // bump lock_version — saving a раскладка must not 409 the operator's own open card form).
   markers: common_TechCardMarkerSummary[] | undefined;
+  // OUTPUT-ONLY измеренные площади деталей кроя (Ф0, 0297), сгруппированные по скоупу ткани — то,
+  // из чего сервер ВЫВОДИТ норму расхода, когда её никто не вписал руками.
+  // ЗДЕСЬ ОНИ ЖИВУТ ИМЕННО ПОТОМУ, ЧТО ЭТО ЧИТАЕМАЯ ПРОЕКЦИЯ, А НЕ ВХОД ЗАПИСИ: площади пишет
+  // отдельный RPC (SaveTechCardPieceAreas) с подтверждением условий замера оператором, а полная
+  // замена карточки не должна иметь возможности их стереть — ровно та же дисциплина, что у
+  // markers и output_variants выше.
+  // И ЭТО ЖЕ КЛАДЁТ ИХ В СЛЕПОК РЕЛИЗА, который есть protojson ЭТОГО сообщения. Без них
+  // released-карточка теряла бы способность считать материалы: у детали кроя в контракте нет id,
+  // только line_key, и любой ключ на piece_id был бы в слепке нулевым.
+  pieceAreaScopes: common_TechCardPieceAreaScope[] | undefined;
 };
 
 // TechCardRevision is one entry in the spec-document changelog (what changed in
@@ -7321,6 +7395,60 @@ export type common_AdminColorwayRef = {
   pantoneSystem: string | undefined;
   devHex: string | undefined;
   swatchMediaId: number | undefined;
+  // OUTPUT-ONLY оценки расхода по площади (Ф1) для рулонных слотов ЭТОГО колорвея, у которых НЕТ
+  // строки рецепта — по одной на слот, включая те, где оценки не вышло (тогда refusal называет
+  // недостающий факт). См. TechCardSlotAreaEstimate.
+  // ВИСИТ НА КОЛОРВЕЕ, А НЕ НА КАРТОЧКЕ, потому что оценка — свойство ПАРЫ (колорвей, слот): детали
+  // на ткань назначает рецепт колорвея, а ширину и цену задаёт пришпиленный им артикул, поэтому два
+  // цвета одного стиля законно съедают разное. На карточке этот список пришлось бы носить с
+  // colorway_id в каждой строке и он приглашал бы нарисовать один стилевой расход на ткань.
+  // И РЯДОМ С usages, А НЕ ВНУТРИ НИХ: оценка существует ровно там, где строки рецепта на слот НЕТ
+  // (строку, вписанную человеком, оценка не трогает), так что ехать ей на строке физически не на
+  // чем. Клиент склеивает два списка по bom_line_key в один список по тканям — ровно тот, который
+  // рисует экран.
+  // ВСПОМОГАТЕЛЬНАЯ КАРТОЧКА (aux) ОЦЕНКУ НЕ ПОЛУЧАЕТ, и это не забытый случай. Её цвета живут не в
+  // колорвеях, а в output_variants — отдельной коллекции без рецепта, — поэтому пары (колорвей,
+  // слот) у неё нет. Ровно по той же причине её не считает и ДЕНЕЖНЫЙ путь: костинг раскладывается
+  // по colorway_costs, то есть по тем же колорвеям. Публикация здесь покрывает РОВНО те колорвеи,
+  // по которым посчитана стоимость, — не меньше и не больше; замеренный чехол сегодня не стоит
+  // ничего ни на одном экране, и это отдельная стройка (расход на вариант выпуска), а не поле.
+  areaEstimates: common_TechCardSlotAreaEstimate[] | undefined;
+  // OUTPUT-ONLY ТЕНЕВЫЕ оценки: та же самая оценка по площади, посчитанная для рулонного слота, у
+  // которого норма ЗАЯВЛЕНА человеком. Справочная цифра рядом с авторской нормой — НИКОГДА не сама
+  // норма.
+  // ЗАЧЕМ ОТДЕЛЬНОЕ ПОЛЕ, А НЕ ФЛАЖОК В area_estimates. Правило «введённое сильнее выведенного»
+  // означает, что в area_estimates слот с авторской нормой не попадает НИКОГДА, и на этом стоит
+  // склейка клиента: он сшивает usages и area_estimates в один список по тканям, полагаясь на то,
+  // что у одной ткани найдётся ровно одно из двух. Дослав теневую строку в тот же список, сервер
+  // сломал бы КАЖДОГО сегодняшнего клиента: у слота с нормой появилась бы вторая строка, и какая из
+  // двух цифр окажется на экране, зависело бы от порядка склейки. Отдельное поле снимает вопрос
+  // насовсем: клиент, который про него не знает, теней не получает вовсе, а его пустое (нулевое)
+  // значение — пустой список — читается как «теней нет», что и есть правда для любого ответа,
+  // снятого до этого поля, включая замороженные слепки релизов.
+  // ПО ТОЙ ЖЕ ПРИЧИНЕ ТЕНЬ НЕ ПОМЕЧЕНА СКАЛЯРОМ ВНУТРИ СТРОКИ. Булев (или enum) «это тень» был бы
+  // ВТОРЫМ утверждением о том же факте, и его нулевое значение пришлось бы толковать: у строки из
+  // слепка, снятого до этого поля, он прочитался бы как «активная», то есть ровно как умолчание
+  // «считай нормой». Список, в котором строка приехала, И ЕСТЬ её ступень; разойтись с самим собой
+  // он не может.
+  // ЧТО ЭТА ЦИФРА ЗНАЧИТ. То же, что и активная оценка: NETTO, нижняя граница расхода по измеренным
+  // площадям деталей — межлекальных выпадов и концов настила в ней нет и быть не может. Смысл
+  // публикации ровно один: показать, НАСКОЛЬКО нижняя граница ниже нормы, которую вписал человек
+  // («оценка занижала на 27%»), — чтобы было видно, стоит ли ей доверять там, где нормы ещё нет.
+  // С ЧЕМ ЕЁ СРАВНИВАТЬ МОЖНО И С ЧЕМ НЕЛЬЗЯ. Можно — с АВТОРСКОЙ НОРМОЙ ТОГО ЖЕ слота того же
+  // колорвея (она в usages, ключ склейки тот же bom_line_key). НЕЛЬЗЯ — с другой оценкой: ни с
+  // оценкой соседнего слота, ни с оценкой того же слота в другом колорвее, ни с активной оценкой из
+  // area_estimates. Каждая оценка прячет СВОЙ объём межлекальных выпадов, и знак разности двух
+  // оценок бывает противоположен знаку правды.
+  // ОТКАЗЫВАЕТ ТЕМ ЖЕ СЛОВАРЁМ И В ТОМ ЖЕ ПОРЯДКЕ, что активная оценка, — включая no_price. Второй
+  // ступени отказов нет: оценка это ОДИН ответ (геометрия и цена одного и того же артикула), и слот,
+  // про который она отказалась говорить, одинаково нем на обеих ступенях. На карточке, где слот с
+  // авторской нормой не имеет цены, костинг и без того не считается по этой же причине — тень
+  // повторяет то, что уже сказано рядом, а не выдаёт новую загадку.
+  // НА ДЕНЬГИ НЕ ВЛИЯЕТ НИЧЕМ. Тень не входит ни в один итог: TechCardCosting считается по авторской
+  // норме этого слота ровно как считался, has_estimate от тени не поднимается, product.cost_price
+  // ею не засевается, чек-лист релиза её не называет, план материалов её не видит. Публикация
+  // ШИРЕ множества, которое СЧИТАЕТСЯ, — и это разделение намеренное.
+  shadowAreaEstimates: common_TechCardSlotAreaEstimate[] | undefined;
 };
 
 // ColorwayLabDipRound is ONE round of the lab-dip approval loop, as it actually happens: a dyehouse
@@ -7340,6 +7468,79 @@ export type common_ColorwayLabDipRound = {
   comment: string | undefined;
   swatchMediaId: number | undefined;
   createdAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardSlotAreaEstimate — ОЦЕНКА РАСХОДА ОДНОГО РУЛОННОГО СЛОТА в ЭТОМ колорвее: сколько ткани
+// уходит на изделие, если норму никто не вписал, а детали кроя на слот назначены и их площади
+// измерены (Ф1, ступень 0).
+// ЗАЧЕМ ЭТО НА ПРОВОДЕ. Рецепт колорвея рисуется одним списком по тканям, и у слота, посчитанного
+// оценкой, строки рецепта НЕТ вовсе — деньги за него уже вошли в костинг, а расход на экране был бы
+// пуст. Вывести его на клиенте нельзя: это был бы ВТОРОЙ расчёт того же числа (площади ÷ раскройную
+// ширину, усреднение по размерному ряду, лестница пина), и однажды рецепт напечатал бы одну цифру,
+// а заголовок костинга — другую, ничем этого не выдав. Поэтому считает сервер, ОДНИМ проходом с
+// деньгами: per_garment — это ровно тот множитель, на который умножена цена в TechCardCosting.
+// БАЗИС — СТИЛЕВОЙ, то есть СРЕДНЕЕ ПО ОБЪЯВЛЕННОМУ РАЗМЕРНОМУ РЯДУ, а не один выбранный размер (то
+// же правило, что у авторской нормы с T6). Опубликовать здесь норму базового размера значило бы
+// разойтись со стоимостью на весь градационный разброс.
+// ЭТО NETTO, НИЖНЯЯ ГРАНИЦА: межлекальных выпадов и концов настила в ней нет и быть не может — их
+// знает только раскладка. Показывать как ОЦЕНКУ, не как норму; закупать по ней нельзя (план
+// материалов честно остаётся блокером — см. MaterialPlanReason).
+// НЕ ДЕНЬГИ, И ПОЭТОМУ НЕ ВЫРЕЗАЕТСЯ КОСТИНГ-РОЛЬЮ. Расход — это метры ткани на изделие, ровно та же
+// «структура», что consumption у строки рецепта и у сметы: аккаунт без costing:read видит, ИЗ ЧЕГО
+// сшито и сколько уходит, но не почём. По той же причине здесь нет ни цены, ни суммы: их место — в
+// TechCardCosting, который такому аккаунту вырезается целиком.
+// В СЛЕПКЕ РЕЛИЗА ЗАМОРАЖИВАЕТСЯ ВМЕСТЕ С КАРТОЧКОЙ, и это осознанно: слепок и есть утверждение
+// «вот так это выглядело на релизе», а входы этой оценки — piece_area_scopes с их stale — в том же
+// слепке уже заморожены (там же сказано, почему пересчитывать их по сегодняшним файлам значило бы
+// менять историю). Замороженная оценка при этом НЕ становится нормой производства: она лежит
+// ОТДЕЛЬНО от usages, читатели замороженных денег (ReleaseFrozenColorwayCosts) отказываются от
+// колорвея с has_estimate, а costing-проекция снапшота собирает нормы только из usages.
+// СТУПЕНЬ ЭТОЙ СТРОКИ — ЭТО ПОЛЕ, В КОТОРОМ ОНА ПРИЕХАЛА, и другого признака у неё нет.
+// AdminColorwayRef.area_estimates — АКТИВНАЯ оценка: у слота нет авторской нормы, и именно эта
+// цифра стоит в костинге. AdminColorwayRef.shadow_area_estimates — ТЕНЬ: норма у слота есть,
+// вписана человеком, а тень лежит рядом справочно и в деньги не входит. Скалярной пометки внутри
+// строки нет намеренно (почему — сказано у shadow_area_estimates), поэтому строку, вынутую из
+// своего списка, восстановить как активную или теневую уже нельзя: не перемешивать.
+export type common_TechCardSlotAreaEstimate = {
+  // Строка BOM — по СТАБИЛЬНОМУ ключу, тем же, которым клиент сшивает свой список по тканям. Не по
+  // id: в слепке релиза часть строк приходит без него, а line_key есть всегда.
+  bomLineKey: string | undefined;
+  // Скоуп площадей, на которых стоит (или стоял бы) ответ: COALESCE(назначение, line_key строки
+  // BOM) — тот же ключ, что у TechCard.piece_area_scopes, где лежат сами площади подеталь.
+  scopeKey: string | undefined;
+  // Расход на ИЗДЕЛИЕ в ЕДИНИЦЕ СЛОТА (unit ниже). Пусто, когда есть refusal.
+  perGarment: googletype_Decimal | undefined;
+  // Единица слота — свойство строки BOM, а не пришпиленного артикула: пин подменяет цену, но строка
+  // с расходящейся единицей вообще не ценится. Заполнена всегда, в том числе при отказе.
+  unit: string | undefined;
+  // ПОЧЕМУ ОЦЕНКИ НЕТ — типизированной причиной, а не пустотой. Каждая причина ведёт в РАЗНОЕ место:
+  // no_pieces_assigned        — ни одна деталь кроя не назначена на эту ткань в этом колорвее
+  // no_measured_areas         — площади этого скоупа не измерены (вкладка выкроек)
+  // areas_incomplete_for_size — у части деталей нет площади на размер ряда: комплект неполон
+  // areas_stale               — выкройки менялись после замера
+  // no_cutting_width          — у ткани не заполнена ширина полотна
+  // unit_not_convertible      — единица слота не переводится из длины (кг считаются по раскладке)
+  // no_price                  — у ткани нет цены ни в строке, ни в каталоге
+  // no_basis                  — нет размера, на котором считать
+  // pin_conflict              — детали слота пришпилены к РАЗНЫМ артикулам
+  // Пустая строка = оценка посчитана. Единый «не посчитано» отправлял бы искать везде сразу.
+  refusal: string | undefined;
+  // Та же причина ГОТОВОЙ ФРАЗОЙ для экрана (сервер её не переводит на лету — она одна на систему,
+  // и второй перевод на клиенте разошёлся бы с формулировками костинга).
+  refusalText: string | undefined;
+  // Сколько деталей кроя колорвей назначил на этот слот. Ноль — это и есть no_pieces_assigned;
+  // ненулевое при отказе означает «назначения есть, не хватает другого факта».
+  pieceCount: number | undefined;
+  // Площади этого скоупа устарели: отпечаток источника (листы И привязки блок→деталь) не совпал с
+  // тем, под которым мерили. Отказ тогда areas_stale — устаревшие площади НЕ «примерно те же».
+  stale: boolean | undefined;
+  // Условия замера, без которых площадь — не число, а мнение: слой контура и припуск, которым его
+  // раздували. Echo of the scope in TechCard.piece_area_scopes (одно чтение, один источник — разойтись
+  // им негде), чтобы строка рецепта описывала себя целиком, без второго join'а на экране.
+  contourLayer: string | undefined;
+  seamAllowanceMm: googletype_Decimal | undefined;
+  parsedBy: string | undefined;
+  parsedAt: wellKnownTimestamp | undefined;
 };
 
 // CompositionEntry is one fibre share of a style's structured composition (S17), resolved with its
@@ -7509,6 +7710,25 @@ export type common_TechCardMarkerSummary = {
   // все сегодняшние). Только на выход. Карточные списки такие маркеры не показывают вовсе, поэтому
   // увидеть ненулевое значение можно ровно в одном месте — ListProductionRunLays.run_markers.
   productionRunId: number | undefined;
+  // ЧЕРНОВИК (0299). OUTPUT-ONLY и, в отличие от одноимённого поля на TechCardMarkerInsert, здесь это
+  // не согласие, а состояние строки: сервер пишет колонку из placed_count < total_count и ниоткуда
+  // больше. Часть деталей легла, часть не успела (стоимость поиска растёт как квадрат их числа), и
+  // такая раскладка ХРАНИТСЯ, чтобы её было видно и можно было пересчитать. Раскладок, где не легло
+  // ничего, здесь не бывает — их не сохранить в принципе (см. is_draft на TechCardMarkerInsert).
+  // FALSE НЕ ДОКАЗЫВАЕТ ПОЛНОТУ. Из двух счётчиков сервер сверяет с блобом только placed_count;
+  // total_count — утверждение клиента, и заниженный знаменатель читается как полная раскладка. Долг
+  // назван на TechCardMarkerInsert.is_draft.
+  // ЧИСЛА ПО НЕЙ НЕТ, и это главное, что должен знать клиент. consumption_per_unit_cm не приходит, на
+  // строках состава не приходят ни consumption_per_unit_cm, ни area_per_garment_cm2 (площадь ушла
+  // вместе с расходом: её публикуют как БАЗИС, продолжаемый на размеры вне состава, и у черновика она
+  // занижена ровно так же). Причина — словами в scalar_apply_refusal, и она называет действие:
+  // поднять бюджет поиска и пересчитать. Сам состав — какие размеры и сколько изделий — остаётся: это
+  // то, что раскладку ПРОСИЛИ разложить, и для черновика это тоже правда.
+  // Нормой такая раскладка не назначается, штампом norm_marker_id в рецепте не бывает и в секцию
+  // настила не встаёт — сервер отказывает на всех трёх путях. Экран обязан пометить её как черновик:
+  // единственное отличие от измеренной раскладки в остальных полях — отсутствие числа, а отсутствие
+  // числа само по себе выглядит как «ещё не посчитали».
+  isDraft: boolean | undefined;
 };
 
 // TechCardMarkerCompositionEntry is one line of a раскладка's СОСТАВ: how many GARMENTS of one size
@@ -7579,6 +7799,45 @@ export type common_TechCardMarkerPieceSetStatus =
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_UNKNOWN"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES"
   | "TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED";
+// TechCardPieceAreaScope — площади деталей ОДНОГО скоупа ткани, с вердиктом об устаревании.
+// Скоуп, а не карточка: после T4 одна деталь законно кроится из нескольких слоёв материала, и у
+// подкладочной версии свой контур и своя площадь. Ключ тот же, что у привязок блоков (0267) и у
+// индекса размеров (0280) — COALESCE(назначение, line_key строки BOM).
+export type common_TechCardPieceAreaScope = {
+  scopeKey: string | undefined;
+  areas: common_TechCardPieceArea[] | undefined;
+  // stale = источник этого скоупа менялся после замера: отпечаток (листы И привязки блок→деталь),
+  // посчитанный сервером СЕЙЧАС, не совпал с тем, под которым мерили.
+  // НА ЖИВОЙ КАРТОЧКЕ вычисляется на чтении, отдельной колонки состояния нет — хранимый флаг был бы
+  // неверен ровно в тот момент, когда лист перезалили, а карточку никто не открывал. В СЛЕПКЕ
+  // РЕЛИЗА он, наоборот, заморожен: слепок и есть утверждение «вот так это выглядело на релизе»,
+  // и пересчитывать его по сегодняшним файлам значило бы менять историю.
+  stale: boolean | undefined;
+  // Условия и провенанс замера — одни на скоуп (их пишет одна транзакция).
+  contourLayer: string | undefined;
+  seamAllowanceMm: googletype_Decimal | undefined;
+  parsedBy: string | undefined;
+  parsedAt: wellKnownTimestamp | undefined;
+};
+
+// TechCardPieceArea — площадь ОДНОГО ЭКЗЕМПЛЯРА контура детали, см².
+// ИМЕННО ОДНОГО ЭКЗЕМПЛЯРА, без pieces_per_garment: количество на изделие живёт на детали кроя,
+// меняется отдельной правкой карточки и к геометрии файла отношения не имеет. Умножает читатель.
+export type common_TechCardPieceArea = {
+  // Деталь кроя — по стабильному line_key. Не по id: в слепке релиза у детали id нет.
+  pieceLineKey: string | undefined;
+  // 0 = деталь НЕ ГРАДУИРУЕТСЯ и входит в комплект каждого размера целиком (то же правило, что у
+  // неградуируемых деталей раскладки в MarkerSizeAreasPerGarment).
+  sizeId: number | undefined;
+  areaCm2: googletype_Decimal | undefined;
+  // Контур заменён выпуклой оболочкой при раздутии припуском: площадь завышена, но воспроизводима.
+  hulled: boolean | undefined;
+  // На слое было несколько совпадающих по площади кандидатов, взят первый: число зависит от порядка
+  // листов в пачке, и сравнивать его с чем-либо нельзя. НЕ то же самое, что hulled — состояния
+  // разные и ведут к разным фразам на экране.
+  ambiguousPick: boolean | undefined;
+};
+
 export type UpdateTechCardRequest = {
   id: number | undefined;
   techCard: common_TechCardInsert | undefined;
@@ -8145,6 +8404,12 @@ export type GetBomWastageSuggestionResponse = {
   detail: string | undefined;
   // Разбор ПО НАСТИЛАМ, вошедшие и невошедшие, от свежего замера к старому.
   drifts: common_BomWastageLayDrift[] | undefined;
+  // ОКНО ОТБОРА: сколько настилов-кандидатов РАССМОТРЕНО (свежие N — скан истории артикула
+  // ограничен) и сколько измеренных кандидатов есть ВСЕГО. considered < total означает, что
+  // медиана стоит на свежем окне, — и это видно, а не подразумевается: «медиана по N» без
+  // названного окна непроверяема.
+  consideredLayCount: number | undefined;
+  totalMeasuredLayCount: number | undefined;
 };
 
 // ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ (T7 волна 2) — СОСЕД калибровки коэффициента выше, И ЭТО ДРУГОЕ
@@ -8489,7 +8754,13 @@ export type common_ProductionRunStatus =
   // At least one partial receipt is booked and the operator has not yet declared the run complete
   // (production-costing Phase 5). Receipt commands own this state and RECEIVED — neither is
   // writable through UpdateProductionRun.
-  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED";
+  | "PRODUCTION_RUN_STATUS_PARTIALLY_RECEIVED"
+  // DRAFT (Ф2): расчётная партия — состав набран, деньги считаются, производство НЕ начато.
+  // Отличается от PLANNED ровно тремя обязательствами, которых у неё НЕТ: она не резервирует ткань,
+  // не проходит гейт готовности и не печатает наряд. Всё это появляется на переходе draft → planned.
+  // Так и должно быть: прикидка «сколько будет стоить сто чёрных и полсотни белых» не имеет права
+  // занимать сырьё на складе, иначе соседний прогон увидит нехватку из-за чужого черновика.
+  | "PRODUCTION_RUN_STATUS_DRAFT";
 // ProductionRunLine is one colour-model × size line of a run: which product (colourway) at which
 // size, the planned quantity, and — once received — the received and defective counts (unset until
 // received) that drive plan/fact. product_id may be 0 while planning (the colourway may not be
@@ -8640,6 +8911,14 @@ export type common_ProductionRun = {
   // ТОЛЬКО на одиночном чтении (GetProductionRun); на списках пусто всегда — это лишний расчёт
   // костинга на строку. Деньги: снимается stripProductionRunCosting наравне с planned_unit_cost.
   plannedUnitCostToday: googletype_Decimal | undefined;
+  // ПОЧЕМУ цены партии нет — словами, а не догадкой по пустоте.
+  // До этого поля пустая цена была неотличима от «ноль» и от «пока не считали»: сервер возвращал
+  // невалидный decimal, и клиент выводил причину сам, из соседних признаков. Причин же несколько, и
+  // ведут они в РАЗНЫЕ места: у партии нет строк с количеством; ячейка (колорвей, размер) не
+  // считается; строка называет колорвей, которого у карточки нет; ячейки разошлись по валютам.
+  // ПУСТАЯ СТРОКА = цена посчитана (или её никто не спрашивал). Непустая — готовое предложение для
+  // экрана; клиент его показывает, а не переводит.
+  plannedCostReason: string | undefined;
 };
 
 // ProductionRunActuals is the computed-on-read plan/fact summary of a run: actual totals from the
@@ -9540,6 +9819,29 @@ export type PutTechCardPatternSizeIndexResponse = {
   resolvedSizeCount: number | undefined;
 };
 
+export type SaveTechCardPieceAreasRequest = {
+  techCardId: number | undefined;
+  // The fabric scope: назначение (0265) when the card has been sorted, else the BOM line's line_key —
+  // the same key entity.FabricScopeKey computes.
+  scopeKey: string | undefined;
+  // line_keys of the sheets the client actually measured. Checked against the server's own current
+  // membership of the scope; a mismatch in either direction is refused.
+  sheetLineKeys: string[] | undefined;
+  // The WHOLE measured set of this scope. Empty is refused: a parse that found nothing is a failed
+  // read, and storing it would turn it into a confident zero area — a free garment.
+  areas: common_TechCardPieceArea[] | undefined;
+  // Conditions the areas were measured under. They are not decoration: the seam layer must be
+  // inflated by the allowance and the cutting layer must not, and getting it wrong shifts the norm
+  // by the allowance around every piece's whole perimeter.
+  contourLayer: string | undefined;
+  seamAllowanceMm: googletype_Decimal | undefined;
+};
+
+export type SaveTechCardPieceAreasResponse = {
+  sheetFingerprint: string | undefined;
+  stored: number | undefined;
+};
+
 export type ReceiveMaterialStockRequest = {
   materialId: number | undefined;
   quantity: googletype_Decimal | undefined;
@@ -10041,6 +10343,33 @@ export type common_TechCardMarkerInsert = {
   // Раскройный маркер не может быть нормой: CHECK chk_tcm_run_not_norm держит это инвариантом, а не
   // соглашением, поэтому смерть прогона физически не может унести норму карточки.
   productionRunId: number | undefined;
+  // СОГЛАСИЕ СОХРАНИТЬ ЧАСТИЧНО УЛОЖЕННУЮ РАСКЛАДКУ (0299), а не описание её. Движок раскладки
+  // работает В БРАУЗЕРЕ, и его стоимость растёт КАК КВАДРАТ числа деталей, так что на большом наборе
+  // поиск успевает разложить часть деталей и упирается в бюджет. Без этого поля такой исход не
+  // оставляет ничего: сохранение отказывает (placed_count != total_count), минуты единственного
+  // исполнителя выбрасывают, а оператор не видит даже следа того, что задание считалось.
+  // ЧТО ИМЕННО МОЖНО СОХРАНИТЬ — РАСКЛАДКУ, ГДЕ ЧАСТЬ ДЕТАЛЕЙ ЛЕГЛА, и не меньше того. Прогон, не
+  // уложивший НИ ОДНОЙ детали, маркера не оставляет вовсе, и это не оговорка: used_length_cm обязан
+  // быть положительным, а SaveTechCardMarker отказывает на пустом срезе placements. Запись «поиск
+  // упёрся в бюджет до первого размещения» — событие клиента, и жить она должна у клиента; схема
+  // маркеров её выразить не может и не пытается.
+  // ЧТО ЧЕРНОВИК НЕ МОЖЕТ. Стать нормой (SetTechCardMarkerNorm отказывает; CHECK
+  // chk_tcm_draft_not_norm держит это инвариантом), назвать расход — ни скалярный
+  // consumption_per_unit_cm, ни пер-размерный на строках состава (оба withheld, причина в
+  // scalar_apply_refusal), быть штампом norm_marker_id в рецепте и встать в секцию настила. Он может
+  // ровно одно: существовать, быть видимым и быть пересчитанным.
+  // СЕРВЕР НЕ КОПИРУЕТ ЭТО ПОЛЕ В КОЛОНКУ — она выводится из пары placed_count/total_count. Поэтому
+  // true на полной раскладке не помечает её черновиком (сохранится обычной), а пересчёт, уложивший
+  // все детали, снимает признак сам, без отдельного подтверждения.
+  // И РОВНО ПОЭТОМУ ВАЖНО, ЧТО СЕРВЕР ПРОВЕРЯЕТ ТОЛЬКО ЧИСЛИТЕЛЬ. placed_count обязан равняться
+  // числу элементов layout.placements — сервер хранит этот блоб и считает сам. total_count остаётся
+  // УТВЕРЖДЕНИЕМ КЛИЕНТА: кратность деталей живёт в карточке, а не в одном числе. Значит клиент,
+  // приславший заниженный total_count, и сегодня выдаёт неполную раскладку за полную — так же, как до
+  // 0299. Это унаследованный долг, а не обещание контракта; закрыть его сможет клиент, который
+  // сохраняет в блобе и НЕУЛОЖЕННЫЕ детали (тогда знаменатель выводится как Σ quantity × состав).
+  // Устаревший бандл админки поля не знает, шлёт false и получает прежний отказ — безопасное
+  // направление: не зная о черновиках, он не может их наплодить.
+  isDraft: boolean | undefined;
 };
 
 // TechCardMarkerLayout is the self-contained geometry of a marker, stored as an opaque proto-JSON
@@ -11236,6 +11565,27 @@ export interface AdminService {
   // ArchiveColorwayByID retires a colourway (archive-not-delete, R6/R9): ACTIVE|HIDDEN -> ARCHIVED
   // (terminal). Was DeleteColorwayByID.
   ArchiveColorwayByID(request: ArchiveColorwayByIDRequest): Promise<ArchiveColorwayByIDResponse>;
+  // DeleteColorwayByID УДАЛЯЕТ колорвей физически — узкая дырка в правиле «архивируем, не удаляем»
+  // (R6/R9). Правило верно для всего, что когда-либо жило: у проданного колорвея заморожен SKU и на
+  // него ссылается история заказов. Но колорвей, который НИКОГДА не продавался и НИКОГДА не
+  // производился, — это опечатка, а не запись, и архив-единственный-выход навсегда засоряет список
+  // колорвеев карточки брошенными цветами.
+  // ГРАНИЦА: удалить можно ⟺ не продан И не стоит ни в одной партии (включая ЧЕРНОВУЮ) И не стоит ни
+  // в одном настиле И нет остатка. Всё остальное — только архив, и отказ НАЗЫВАЕТ факт, который
+  // держит («продан: 3 заказа», «стоит в партии #12 (черновик)»), а не отвечает «нельзя».
+  // ДВА СУЖЕНИЯ ЭТОЙ ГРАНИЦЫ, наложенные схемой, а не решением: план запаса (inventory_target) и
+  // примерка (fitting) ссылаются на продукт через FK с ON DELETE RESTRICT, поэтому СУБД откажет
+  // независимо от четвёрки выше. Сервер называет и их — выбор был не «блокировать или нет», а
+  // «названный факт или сырой MySQL 1451». Третий остаточный код, referenced, — не факт вовсе, см.
+  // ColorwayDeletionEntry.reason.
+  // dry_run = true отвечает на тот же вопрос и НИЧЕГО не меняет — это и есть чтение диалога
+  // подтверждения: диалог печатает, что умрёт и что осиротеет, вместо того чтобы предлагать
+  // оператору поверить глаголу. dry_run = false пере-проверяет тот же предикат ВНУТРИ транзакции и
+  // удаляет: предикат, доказанный вне транзакции, — гонка, а эта гонка удаляет.
+  // Отказ — FailedPrecondition с одним field violation НА КАЖДЫЙ блокер, никогда не сырой MySQL 1451.
+  // Единственный отказ, который факт НЕ называет, — reason = referenced: FK, о котором сервер не
+  // знает (схема ушла вперёд его перечисления). Он честно говорит именно это и чинится кодом.
+  DeleteColorwayByID(request: DeleteColorwayByIDRequest): Promise<DeleteColorwayByIDResponse>;
   // PublishColorway transitions a DRAFT colourway to ACTIVE (R6), enforcing the sellable
   // preconditions (built base SKU, ≥1 valid-SKU variant, complete sku_season+model_no, dictionary
   // colour, country, price, default translation).
@@ -11857,6 +12207,31 @@ export interface AdminService {
   // the same session as the upload. A production planner must not be able to write it — the index
   // feeds the gate, and the right to rewrite it is the right to clear one's own blocker.
   PutTechCardPatternSizeIndex(request: PutTechCardPatternSizeIndexRequest): Promise<PutTechCardPatternSizeIndexResponse>;
+  // SaveTechCardPieceAreas stores the MEASURED AREAS of one fabric scope's cut pieces (Ф0) — the
+  // geometry the server needs to DERIVE a fabric consumption norm instead of demanding that somebody
+  // type one.
+  // THE PROBLEM IT SOLVES. A card can be complete — priced BOM, parsed patterns, every piece
+  // assigned to a fabric in the colourway recipe — and still cost zero, because money is computed
+  // only from a recipe row carrying an explicit norm, and a piece-bound row deliberately carries
+  // none (T8: «расход — свойство изделия»). The missing link was never data the operator failed to
+  // enter; it was the area, which existed only in the browser's memory because DXF is parsed there
+  // and only there.
+  // SAME DIVISION OF LABOUR AS THE SIZE INDEX ABOVE: the client measures, the server stores, and the
+  // half that could be forged in the dangerous direction is computed server-side. The client says
+  // WHICH SHEETS it measured; the server fingerprints that set from its own tech_card_size_pattern
+  // rows and refuses a mismatch in both directions. Re-uploading any sheet then makes the areas read
+  // as STALE by itself.
+  // ONE SCOPE PER CALL, FULL REPLACE OF THAT SCOPE. A card's fabrics are parsed independently and a
+  // pack download can succeed for one sheet and fail for another, so a card-wide replace would let a
+  // failed lining download silently delete a good main-fabric measurement.
+  // A PARTIAL SET IS REFUSED, NOT STORED. A missing piece lowers the garment's area, a lower area
+  // lowers the norm, and an understated norm is discovered in the warehouse rather than on screen.
+  // AREAS ARE PER ONE INSTANCE OF THE CONTOUR — pieces_per_garment is applied by the reader. It
+  // lives on the piece, changes with an ordinary card edit, and baking it in here would make a
+  // stored number quietly wrong after every such edit.
+  // wr(tech_cards): the same right as the size index — this writes a derived fact about the card's
+  // patterns, from the patterns tab, and it feeds costing and the release gate.
+  SaveTechCardPieceAreas(request: SaveTechCardPieceAreasRequest): Promise<SaveTechCardPieceAreasResponse>;
   // ListTechCardFabricDirectionGaps is the worklist of кампания Д1: every roll-goods BOM line whose
   // НАПРАВЛЕНИЕ ТКАНИ nobody has set, grouped by tech card. fabric_direction has existed on
   // tech_card_bom_item since 0073 and fed nothing but the MATERIALS digest, so it is unset on almost
@@ -12424,6 +12799,32 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ArchiveColorwayByID",
       }) as Promise<ArchiveColorwayByIDResponse>;
+    },
+    DeleteColorwayByID(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.colorwayId) {
+        throw new Error("missing required field request.colorway_id");
+      }
+      const path = `api/admin/colorways/${request.colorwayId}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.expectedVersion) {
+        queryParams.push(`expectedVersion=${encodeURIComponent(request.expectedVersion.toString())}`)
+      }
+      if (request.dryRun) {
+        queryParams.push(`dryRun=${encodeURIComponent(request.dryRun.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteColorwayByID",
+      }) as Promise<DeleteColorwayByIDResponse>;
     },
     PublishColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       if (!request.colorwayId) {
@@ -16676,6 +17077,26 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "PutTechCardPatternSizeIndex",
       }) as Promise<PutTechCardPatternSizeIndexResponse>;
+    },
+    SaveTechCardPieceAreas(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.techCardId) {
+        throw new Error("missing required field request.tech_card_id");
+      }
+      const path = `api/admin/tech-card/${request.techCardId}/piece-areas`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveTechCardPieceAreas",
+      }) as Promise<SaveTechCardPieceAreasResponse>;
     },
     ListTechCardFabricDirectionGaps(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/tech-card/fabric-direction-gaps`; // eslint-disable-line quotes

@@ -34,6 +34,13 @@ import { aliasIdentity } from './use-block-sizes';
 export type DxfNormPiece = {
   /** Для сообщений: как деталь названа на карточке. */
   name: string;
+  /**
+   * Стабильный line_key детали — адрес, по которому площадь ложится на сервер (0297).
+   *
+   * Именно line_key, а не id: в слепке релиза у детали кроя id нет вовсе, и ключ на id сделал бы
+   * площади невидимыми ровно там, где по ним считаются деньги выпущенной карточки.
+   */
+  lineKey?: string;
   /** `pieces_per_garment` карточки. Ниже единицы не бывает — деталь либо есть, либо её не заявляли. */
   perGarment: number;
   /** Привязки «деталь → блок чертежа»; побеждает первая, которая нашлась (как в findPiece). */
@@ -46,10 +53,55 @@ export type DxfNormSizeRow = {
   areaCm2: number;
 };
 
+/** Площадь ОДНОГО экземпляра контура одной детали одного размера, см². */
+export type DxfPieceAreaRow = {
+  /** line_key детали кроя. */
+  pieceLineKey: string;
+  /** 0 = деталь не градуируется и входит в комплект каждого размера целиком. */
+  sizeId: number;
+  /** ДО умножения на количество на изделие: кратность живёт на детали и меняется отдельно. */
+  areaCm2: number;
+  /**
+   * Контур этой строки заменён выпуклой оболочкой при раздутии припуском — площадь С ЗАПАСОМ.
+   *
+   * ФЛАГИ ЖИВУТ НА СТРОКЕ, А НЕ СПИСКОМ ИМЁН РЯДОМ, и это исправление, а не украшение. Публикация
+   * площадей (piece-areas.ts) метит ими строки СЕРВЕРНОЙ таблицы, ключ которой — line_key детали;
+   * прежние отчётные списки `hulled`/`ambiguousPickPieces` собраны из ИМЁН (имя блока чертежа и имя
+   * детали карточки соответственно), то есть ни один из них с line_key не сравнивался никогда. На
+   * провод из-за этого уезжали нули: сервер получал «оболочки не было, двусмысленности не было» на
+   * замерах, где были обе.
+   */
+  hulled: boolean;
+  /** На выбранном слое было несколько совпадающих по площади кандидатов, взят первый. */
+  ambiguousPick: boolean;
+};
+
 export type DxfNormAreas = {
   rows: DxfNormSizeRow[];
+  /**
+   * Площади ПО ОДНОМУ ЭКЗЕМПЛЯРУ КОНТУРА — то, что уезжает на сервер (0297) и из чего он выводит
+   * норму сам.
+   *
+   * ПОЧЕМУ ОТДЕЛЬНАЯ ПРОЕКЦИЯ, А НЕ `rows`. `rows` уже свернул комплект в площадь ИЗДЕЛИЯ, умножив
+   * каждый контур на pieces_per_garment. Отправить её значило бы записать кратность внутрь
+   * геометрии — и получить число, которое молча врёт после первой же правки «этой детали идёт
+   * две», причём в ту сторону, которая обнаруживается на складе. Умножает читатель.
+   */
+  pieceRows: DxfPieceAreaRow[];
   /** Размеры, у которых в сегодняшних выкройках нашлись не все детали (числа им не дано). */
   sizesIncomplete: number[];
+  /**
+   * ЧЕГО ИМЕННО не хватило такому размеру: первая деталь, которой на выбранном слое не нашлось.
+   *
+   * Нужно тому, кто ОТКАЗЫВАЕТ по неполноте, а не просто сообщает о ней. Публикация площадей —
+   * ровно такой случай: набор без размера L записался бы как полный, сервер посчитал бы по нему
+   * оценку, и заниженная себестоимость обнаружилась бы не на экране. Отказ обязан называть пару
+   * (деталь, размер), иначе оператору предлагается искать её перебором.
+   *
+   * Пустое имя — размер выпал во ВТОРОМ проходе (сумма площадей не положительна), где виновника по
+   * построению нет: там не «детали не нашлось», там нашлось, но площадь нулевая.
+   */
+  sizesIncompleteWhy: { sizeId: number; piece: string }[];
   /** Σ (кол-во × площадь) деталей БЕЗ размерного хвоста — общая часть каждого размера. */
   sizelessCm2: number;
   /** Сколько видов деталей градуируется по размерам. 0 = у всех размеров вышло бы одно число. */
@@ -212,10 +264,18 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   const sizesIncomplete: number[] = [];
   const sizesAmbiguousPick: number[] = [];
   const ambiguousPieceNames = new Set<string>();
+  // Двусмысленный выбор — свойство ПАРЫ (размер, деталь), а не детали вообще: та же деталь в
+  // соседнем размере может лежать на слое ровно в одном экземпляре. Пер-детальная проекция для
+  // сервера метит именно свою строку, поэтому пара запоминается тем же ключом, что и контур.
+  const multiByKey = new Set<string>(); // `${sizeId}|${pieceIndex}`
 
+  const sizesIncompleteWhy: { sizeId: number; piece: string }[] = [];
   for (const sizeId of input.sizeIds) {
     const tokens = input.tokensOfSize(sizeId).map(bare).filter(Boolean);
     let complete = true;
+    // Кто именно не нашёлся — запоминается ЗДЕСЬ, где это ещё известно: цикл обрывается на первой
+    // недостающей детали, и восстановить её потом можно только вторым таким же проходом.
+    let missingPiece = '';
     const staged: (Pick & { multi: boolean })[] = [];
     for (let i = 0; i < resolved.length; i++) {
       const { bySize, graded } = resolved[i];
@@ -231,6 +291,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
       }
       if (!picked) {
         complete = false;
+        missingPiece = resolved[i].piece.name;
         break;
       }
       staged.push({
@@ -242,6 +303,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     }
     if (!complete) {
       sizesIncomplete.push(sizeId);
+      sizesIncompleteWhy.push({ sizeId, piece: missingPiece });
       continue;
     }
     // Размер, собравшийся ХОТЬ ОДНИМ контуром из нескольких кандидатов, — в отчёт (не в отказ):
@@ -254,6 +316,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     }
     for (const s of staged) {
       contourByKey.set(`${sizeId}|${s.pieceIndex}`, s.contour);
+      if (s.multi) multiByKey.add(`${sizeId}|${s.pieceIndex}`);
       picks.push({ pieceIndex: s.pieceIndex, sizeKey: s.sizeKey, contour: s.contour });
     }
   }
@@ -296,9 +359,43 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     }
     if (!ok || !(sum > 0)) {
       incomplete.add(sizeId);
+      // Виновника здесь нет: детали нашлись, но сумма их площадей не положительна. Пустое имя —
+      // это и есть «сказать нечего», а не «забыли записать».
+      sizesIncompleteWhy.push({ sizeId, piece: '' });
       continue;
     }
     rows.push({ sizeId, areaCm2: sum });
+  }
+
+  // Пер-детальная проекция для сервера: тот же выбранный контур, та же площадь, БЕЗ умножения на
+  // кратность. Градуированная деталь отдаёт строку на каждый размер; неградуируемая — одну строку
+  // с размером 0, потому что она и есть одна на все размеры.
+  const pieceRows: DxfPieceAreaRow[] = [];
+  {
+    const emitted = new Set<string>();
+    // Оболочку `applySeamAllowance` докладывает ИМЕНАМИ контуров, и это единственный её ответ:
+    // сопоставляем по нему, ровно как отчётный список `hulled` ниже.
+    const hulledNames = new Set(seam.hulled);
+    for (const sizeId of input.sizeIds) {
+      if (incomplete.has(sizeId)) continue;
+      for (let i = 0; i < resolved.length; i++) {
+        const contour = contourByKey.get(`${sizeId}|${i}`);
+        if (!contour) continue;
+        const lineKey = (resolved[i].piece.lineKey ?? '').trim();
+        if (!lineKey) continue;
+        const outSize = resolved[i].graded ? sizeId : 0;
+        const key = `${lineKey}|${outSize}`;
+        if (emitted.has(key)) continue;
+        emitted.add(key);
+        pieceRows.push({
+          pieceLineKey: lineKey,
+          sizeId: outSize,
+          areaCm2: areaOf.get(contour) ?? contour.areaCm2,
+          hulled: hulledNames.has(contour.name),
+          ambiguousPick: multiByKey.has(`${sizeId}|${i}`),
+        });
+      }
+    }
   }
 
   // Σ по безразмерным деталям — общая часть каждого размера, нужна объяснению разбора. Берётся из
@@ -342,7 +439,9 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
     ok: true,
     areas: {
       rows,
+      pieceRows,
       sizesIncomplete: [...incomplete].sort((a, b) => a - b),
+      sizesIncompleteWhy: sizesIncompleteWhy.sort((a, b) => a.sizeId - b.sizeId),
       sizelessCm2,
       gradedPieces,
       hulled: seam.hulled,

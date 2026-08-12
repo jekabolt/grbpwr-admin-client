@@ -1348,6 +1348,9 @@ function mapCostingOut(c?: TechCardFormData['costing']): common_TechCardCosting 
     orderCost: undefined,
     hasUnconvertedCurrencies: undefined,
     hasUnpriced: undefined,
+    // Ступень (Ф1): признак того, что часть слотов посчитана ОЦЕНКОЙ по площади, а не нормой.
+    // Output-only, как соседи: сервер вычисляет его на чтении, запись карточки его не несёт.
+    hasEstimate: undefined,
     totalSam: undefined,
     colorwayCosts: undefined,
     // Base-currency roll-up (server-folded via costing FX rates) — output-only.

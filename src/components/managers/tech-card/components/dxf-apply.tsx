@@ -34,6 +34,7 @@ export function DxfApplyHint({
   canEdit,
   explainWhenIdle = false,
   recipeLinks,
+  techCardId,
   onApply,
 }: {
   control: Control<TechCardFormData>;
@@ -61,6 +62,12 @@ export function DxfApplyHint({
    * деталям в рецепте, а не на вкладке деталей кроя, оставалась без кнопки вовсе.
    */
   recipeLinks?: readonly RecipePieceLink[];
+  /**
+   * id карточки — нужен ТОЛЬКО для публикации измеренных площадей на сервер (Ф0/0297), которая
+   * происходит в момент подтверждённого применения нормы. 0/undefined = карточка ещё не сохранена:
+   * площади публиковать некуда, и применение нормы это никак не задевает.
+   */
+  techCardId?: number;
   onApply: (patch: {
     consumption?: string;
     quantity?: string;
@@ -89,7 +96,7 @@ export function DxfApplyHint({
       <Text size='nano' variant='label' component='p'>
         {sizeIds.length === 0
           ? 'по выкройкам расход посчитать нельзя: у карточки не заявлен размерный ряд — норма пишется на каждый размер, и писать её пока не для кого'
-          : 'по выкройкам расход посчитать нельзя: ни одна деталь кроя не отнесена к этой ткани — ни строкой рецепта («+ добавить материал к детали» здесь же), ни материалом детали на вкладке деталей кроя. Без этого площадь изделия складывать не из чего'}
+          : 'по выкройкам расход посчитать нельзя: ни одна деталь кроя не отнесена к этой ткани — ни строкой рецепта («назначить детали» на карточке этой ткани, чуть ниже), ни материалом детали на вкладке деталей кроя. Без этого площадь изделия складывать не из чего'}
       </Text>
     );
   }
@@ -115,6 +122,8 @@ export function DxfApplyHint({
             sizeIds={sizeIds}
             sizeNameById={sizeNameById}
             canEdit={canEdit}
+            techCardId={techCardId ?? 0}
+            lineKey={lineKey}
             onClose={() => setOpen(false)}
             onApply={onApply}
           />

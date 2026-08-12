@@ -15,6 +15,17 @@
 // №2 wastage_percent grosses on top of measured consumption, which already includes
 //    inter-piece waste — the dialog warns and names the number, but never rewrites it.
 //
+// ЧЕТВЁРТОЕ ПРАВИЛО, И ЭТО ЕДИНСТВЕННОЕ, ЧТО МОЖЕТ ЗАКРЫТЬ ЕГО ДВЕРЬ: НОРМА НЕ БЕРЁТСЯ С
+// ЧЕРНОВИКА. Черновик (0299) — раскладка, у которой легла часть деталей: длина у неё короче
+// настоящей ровно на то, что заняли бы остальные. Скалярную дверь закрыл сервер сам
+// (consumption_per_unit_cm он на черновике не публикует, причина лежит в scalar_apply_refusal), а
+// ПЕР-РАЗМЕРНУЮ закрыть может только этот файл: `continueByAreas` считает площади по СЕГОДНЯШНИМ
+// выкройкам сам и умножает их на длину настила — то есть все слагаемые нормы у клиента на руках, а
+// сервер, получая готовые числа, отличить их от измеренных не может ничем (norm_marker_id при
+// нескольких источниках уходит нулём НАМЕРЕННО — см. apply). Поэтому черновик исключается здесь, из
+// КАЖДОГО применимого набора, и исключается ВИДИМО: он остаётся в селекторе с названной причиной,
+// потому что оператор, только что его посчитавший, будет искать именно его.
+//
 // Ф3 добавляет третье правило: НОРМА ВЕДЁТ. Из раскладок одной ткани человек назначает
 // нормировочную (`is_norm`, отдельный RPC), и `betterMarker` ставит её ПЕРВЫМ ключом — решение
 // бьёт эвристики «свой колорвей» и «свежесть». Отсюда же следует главное ограничение (§6.4):
@@ -57,11 +68,13 @@ import {
   consumptionForSize,
   decNum,
   betterMarker,
+  isDraftMarker,
   isLegacyNorm,
   latestPerSize,
   markersForLine,
   markerWasteDecomposition,
   pieceSetChanged,
+  refusalWord,
   scalarNormRefusal,
   toBomUnit,
 } from './nesting/marker-io';
@@ -524,7 +537,7 @@ export function MarkerApplyHint({
       )}
       {chosenRefusal && (
         <Pill tone='warn' title={chosenRefusal}>
-          {compositionOf(chosen).length > 1 ? 'смешанный состав' : 'состав не читается'}
+          {refusalWord(chosen)}
         </Pill>
       )}
       {/* Кг-слот (Ф3): основа веса называется ПРЯМО НА СТРОКЕ. Успех — какой шириной и
@@ -587,11 +600,12 @@ export function MarkerApplyHint({
                   // до выбора, а не после. «Старая норма» намеренно осталась ниже, на выбранном
                   // маркере: до Ф3 её несёт КАЖДАЯ строка, и в списке это был бы шум, а не сигнал.
                   label: `${m.isNorm === true ? 'норма · ' : ''}«${m.name}» · ${compLabel(m)} · ${
-                    c != null
-                      ? `${c} см/ед`
-                      : compositionOf(m).length > 1
-                        ? 'нормы нет — смешанный состав'
-                        : 'нормы нет — состав не читается'
+                    c != null ? `${c} см/ед` : `нормы нет — ${refusalWord(m)}`
+                  }${
+                    isDraftMarker(m) &&
+                    Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
+                      ? ` (уложено ${m.placedCount ?? 0} из ${m.totalCount ?? 0})`
+                      : ''
                   }${pieceSetChanged(m) ? ' · набор изменился' : ''}`,
                 };
               })}
@@ -621,7 +635,7 @@ export function MarkerApplyHint({
               title={
                 perSizeOffered
                   ? undefined
-                  : 'ни один размер карточки не нормирован раскладкой: нужна раскладка, чей состав режет хотя бы один из этих размеров. Смешанная годится — если она снята после того, как площади по размерам стали записываться (иначе поделить её длину по размерам нечем)'
+                  : 'ни один размер карточки не нормирован раскладкой: нужна раскладка, чей состав режет хотя бы один из этих размеров. Смешанная годится — если она снята после того, как площади по размерам стали записываться (иначе поделить её длину по размерам нечем). ЧЕРНОВИК не годится ни в каком виде: у него не легла часть деталей, и длина короче настоящей'
               }
               onClick={() => perSizeOffered && setMode('perSize')}
             >
@@ -650,6 +664,17 @@ export function MarkerApplyHint({
           {mode === 'perSize' && perSizeZero && (
             <CalloutBox tone='warning'>{zeroRefusal}</CalloutBox>
           )}
+          {/* ЧЕРНОВИК В РЕЖИМЕ «ПО РАЗМЕРАМ» ОТКАЗЫВАЕТ ОТДЕЛЬНЫМИ СЛОВАМИ. Скалярный отказ висит
+              выше своей веткой, а здесь его не видно вовсе — и без этой строки выбранный черновик
+              выглядел бы как раскладка, которая почему-то ничего не даёт. Он не нормирует ни один
+              свой размер и не может быть базисом продолжения: константа распределения выводится из
+              ДЛИНЫ настила, а она у него короче настоящей. */}
+          {mode === 'perSize' && isDraftMarker(chosen) && (
+            <CalloutBox tone='error'>
+              {chosenRefusal} Продолжить по нему остальной ряд тоже нельзя: распределение выводится
+              из длины настила, и по черновику оно занизило бы сразу все размеры
+            </CalloutBox>
+          )}
           {/* Применяется НЕ НОРМА — и это надо сказать до нажатия, а не объяснять потом. Два
               разных случая, и путать их нельзя: экран сам обошёл норму, потому что она не выдаёт
               расхода на изделие (тогда это предупреждение), либо оператор выбрал другую раскладку
@@ -658,11 +683,9 @@ export function MarkerApplyHint({
           {mode === 'scalar' && notTheNorm && normMarker && (
             <CalloutBox tone={normRefusal ? 'warning' : 'note'}>
               {normRefusal
-                ? `назначенная норма «${normMarker.name}» расхода на изделие не даёт (${
-                    compositionOf(normMarker).length > 1
-                      ? 'смешанный состав'
-                      : 'состав не читается'
-                  }) — применится «${chosen.name}», а не она`
+                ? `назначенная норма «${normMarker.name}» расхода на изделие не даёт (${refusalWord(
+                    normMarker,
+                  )}) — применится «${chosen.name}», а не она`
                 : `применится «${chosen.name}», а НЕ назначенная норма «${normMarker.name}»${
                     normConv ? ` (${normConv.value} ${normConv.unit})` : ''
                   }`}
@@ -1098,8 +1121,7 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
             </Text>
             {refusal ? (
               <Pill tone='warn' title={refusal}>
-                из раскладки: нормы нет —{' '}
-                {compositionOf(best).length > 1 ? 'смешанный состав' : 'состав не читается'}
+                из раскладки: нормы нет — {refusalWord(best)}
               </Pill>
             ) : (
               <Pill tone='mut'>
@@ -1174,9 +1196,12 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
                 tone={skipped.isNorm === true ? 'warn' : 'mut'}
                 title={scalarNormRefusal(skipped)}
               >
-                {skipped.isNorm === true ? 'назначенная норма' : 'свежее измерение'} «{skipped.name}
-                » расхода не даёт —{' '}
-                {compositionOf(skipped).length > 1 ? 'смешанный состав' : 'состав не читается'}
+                {skipped.isNorm === true
+                  ? 'назначенная норма'
+                  : isDraftMarker(skipped)
+                    ? 'свежий ЧЕРНОВИК'
+                    : 'свежее измерение'}{' '}
+                «{skipped.name}» расхода не даёт — {refusalWord(skipped)}
               </Pill>
             )}
             <Text size='nano' variant='label' component='span'>

@@ -123,7 +123,14 @@ export async function measureAreaField(input: {
   const opted = layerOptions(parsed, split.codeById, index);
   const contourLayer = defaultContourLayer(opted);
   const grainLayer = defaultGrainLayer(grainLayerOptions(parsed));
-  const seamCm = input.seamAllowanceCm ?? 1;
+  // ПРИПУСК ПО УМОЛЧАНИЮ — НОЛЬ, КАК В ПРОДЕ, и это не вкусовщина, а условие того, чтобы прибор
+  // мерил ту же величину, что и измеряемое. Диалог замера площадей передаёт припуск карточки с
+  // фолбэком 0 (piece-areas-dialog.tsx: `mmToEngineCm(conditions.seamMm) ?? 0`), а здесь стоял
+  // молчаливый `?? 1`: на реальном файле студии сантиметр отступа даёт около +1400 см² на изделие,
+  // то есть +12%. Прибор с таким расхождением «подтверждает» инфляцию, которой в приложении нет,
+  // и опровергает верные числа — ровно та ошибка, ради которой scripts/ вообще завели под tsc.
+  // Другое значение задаётся явно (AF_SEAM у пробы), и оно печатается в шапке отчёта.
+  const seamCm = input.seamAllowanceCm ?? 0;
 
   // Один контур на блок выбранного слоя — ровно так набирает детали модалка.
   const seen = new Set<string>();
