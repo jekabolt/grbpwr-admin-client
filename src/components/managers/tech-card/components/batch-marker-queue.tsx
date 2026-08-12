@@ -61,6 +61,7 @@ import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { extractFieldViolations } from 'utils/field-errors';
 import {
+  aliasInScope,
   fabricScopes,
   isRollGoodsSection,
   markerScopeDirection,
@@ -95,10 +96,6 @@ import type { TechCardFormData } from './schema';
 const HARD_STOP_MS = 1500;
 // Кадры прогресса чаще этого не перерисовываем: очередь рисует таблицу целиком.
 const PROGRESS_MIN_MS = 250;
-// tech_card_marker.name — VARCHAR(191); режем с запасом, чтобы отказ по длине не приходил ПОСЛЕ
-// оплаченного прогона.
-const MAX_MARKER_NAME = 180;
-
 type JobStatus = 'queued' | 'running' | 'saving' | 'done' | 'failed' | 'skipped';
 
 type JobRun = {
@@ -214,11 +211,52 @@ export function BatchMarkerQueue({
   );
   const scopeDefs = useMemo(() => fabricScopes(rollLines), [rollLines]);
   const sheetsByScope = useMemo(() => dxfSheetsByScope(patterns, scopeDefs), [patterns, scopeDefs]);
+  // Листы, не принадлежащие ни одной живой ткани. Ключ '' — законный ответ резолвера, и без него
+  // они просто не участвовали бы в раскрое молча (подготовка обходит только живые скоупы).
+  const looseSheets = useMemo(() => sheetsByScope.get('') ?? [], [sheetsByScope]);
   const colorways = useMemo(
     () => markerColorways(techCard, materialById),
     [techCard, materialById],
   );
   const markers = useMemo(() => cardMarkers(techCard?.markers), [techCard?.markers]);
+  // Сопоставление «блок DXF → деталь кроя», как его записал диалог сопоставления. Фильтруется по
+  // ткани ЗДЕСЬ, потому что скоуп знает эта сторона: у одного имени блока на подкладе и на верхе
+  // разные детали кроя. Вторую половину (идентичность блока) добавит разбор — см. планировщик.
+  const pieceDxfAliases = (useWatch({ control, name: 'pieceDxfAliases' }) ?? []) as Array<{
+    bomLineKey?: string;
+    fabricPurpose?: string;
+    blockName?: string;
+    pieceLineKey?: string;
+  }>;
+
+  // ПОДГОТОВКА ПРОТУХАЕТ. Разбор — это СНИМОК: ширины артикулов, набор листов и состав тканей могут
+  // измениться на соседней вкладке, которая всё это время смонтирована. Запустить очередь по
+  // устаревшему снимку значит снять раскладку на ширине, которой у ткани уже нет, — и записать её
+  // как норму. Подпись покрывает ровно то, от чего зависит план: состав скоупов, их листы, ширины и
+  // кромки (слота и пинов), направление, единицу и сопоставление деталей.
+  const prepSignature = useMemo(() => {
+    const scopes = scopeDefs.map((s) => {
+      const line = s.lines.length === 1 ? s.lines[0] : undefined;
+      const w = line ? slotCutWidth(line) : { cutCm: NaN, selvedgeCm: 0 };
+      const sheets = (sheetsByScope.get(s.key) ?? []).map((x) => x.url).join(',');
+      return `${s.key}|${s.lines.map((l) => l.lineKey).join('+')}|${w.cutCm}|${w.selvedgeCm}|${line?.unit ?? ''}|${line?.fabricDirection ?? ''}|${sheets}`;
+    });
+    const pins = colorways
+      .map(
+        (c) =>
+          `${c.colorwayId}:${[...c.widthByLine]
+            .map(([k, v]) => `${k}=${v.cutCm}/${v.selvedgeCm}`)
+            .join(',')}`,
+      )
+      .join(';');
+    const aliases = pieceDxfAliases
+      .map(
+        (a) =>
+          `${a.fabricPurpose ?? ''}/${a.bomLineKey ?? ''}/${a.blockName ?? ''}=${a.pieceLineKey ?? ''}`,
+      )
+      .join(';');
+    return `${scopes.join('#')}||${pins}||${aliases}||${looseSheets.map((s) => s.url).join(',')}`;
+  }, [scopeDefs, sheetsByScope, colorways, pieceDxfAliases, looseSheets]);
 
   /** Клетки партии с ненулевым количеством: (колорвей = product_id, размер). */
   const cells: BatchCell[] = useMemo(
@@ -242,11 +280,12 @@ export function BatchMarkerQueue({
   // ── состояние очереди ────────────────────────────────────────────────────────────────────
   const [phase, setPhase] = useState<Phase>('idle');
   const [prepError, setPrepError] = useState('');
-  const [prepNote, setPrepNote] = useState('');
-  const [parsed, setParsed] = useState<PlanScope[] | null>(null);
+  // Подготовка вместе с подписью данных, по которым она снята: см. prepSignature.
+  const [parsed, setParsed] = useState<{ scopes: PlanScope[]; signature: string } | null>(null);
   const [budgetS, setBudgetS] = useState(NEST_DEFAULTS.timeBudgetMs / 1000);
   const [off, setOff] = useState<Record<string, boolean>>({});
   const [runs, setRuns] = useState<Record<string, JobRun>>({});
+  const stale = !!parsed && parsed.signature !== prepSignature;
 
   const clientRef = useRef<NestingWorkerClient | null>(null);
   // Скачанные листы по ткани. Разбор воркер держит ровно один, и повторный разбор той же ткани
@@ -257,17 +296,27 @@ export function BatchMarkerQueue({
   const stopRef = useRef(false);
   const skipRef = useRef(false);
   const cancelRef = useRef<(() => void) | null>(null);
+  // Компонент ещё на экране. `start()` — обычная асинхронная функция, она НЕ ПРИВЯЗАНА к
+  // жизненному циклу: убить воркер мало, цикл продолжится, поднимет новый воркер (клиент
+  // пересоздаётся лениво), перепарсит следующую ткань и запишет на сервер раскладки ПРЕДЫДУЩЕЙ
+  // партии — уже после того, как оператор с неё ушёл. Ссылку читает и цикл, и `patch`.
+  const aliveRef = useRef(true);
 
   const client = useCallback((): NestingWorkerClient => {
     if (!clientRef.current) clientRef.current = new NestingWorkerClient();
     return clientRef.current;
   }, []);
 
-  // Воркер умирает вместе с компонентом. Смена базы расчёта размонтирует его (родитель держит
-  // `key={batchRunId}`), и без этого брошенный воркер продолжал бы жечь ядро на раскладке партии,
-  // которую уже никто не смотрит.
+  // Размонтирование ОСТАНАВЛИВАЕТ ОЧЕРЕДЬ, а не только глушит воркер. Смена базы расчёта
+  // размонтирует компонент (родитель держит `key={batchRunId}`), и всё, что цикл сделал бы дальше,
+  // относилось бы к партии, которой на экране больше нет.
   useEffect(
     () => () => {
+      aliveRef.current = false;
+      stopRef.current = true;
+      cancelRef.current?.();
+      cancelRef.current = null;
+      liveParse.current = null;
       clientRef.current?.terminate();
       clientRef.current = null;
     },
@@ -296,7 +345,8 @@ export function BatchMarkerQueue({
     if (!parsed) return null;
     return planBatchMarkers({
       cells,
-      scopes: parsed,
+      scopes: parsed.scopes,
+      looseSheets,
       colorways,
       sizeLabel: (id) => formatSizeName(sizeById.get(id) ?? `#${id}`),
       sizeTokensOf: (id) => sizeTokensOf(sizeById.get(id)),
@@ -331,10 +381,11 @@ export function BatchMarkerQueue({
   const prepare = async () => {
     setPhase('preparing');
     setPrepError('');
-    setPrepNote('');
     setRuns({});
+    // Подпись снимается ДО первого await: план обязан помнить, по каким данным он снят, а не по
+    // тем, какими они стали, пока качались файлы.
+    const signature = prepSignature;
     const out: PlanScope[] = [];
-    const notes: string[] = [];
     try {
       for (const scope of scopeDefs) {
         const sheets = sheetsByScope.get(scope.key) ?? [];
@@ -353,6 +404,10 @@ export function BatchMarkerQueue({
           slotArticleName: article?.name?.trim() || line?.name?.trim() || '',
           direction: markerScopeDirection(line?.lineKey ?? '', rollLines),
           sheets,
+          failedSheets: [],
+          // Алиасы ЭТОЙ ткани — тем же резолвером скоупа, каким их фильтрует панель выкроек: алиас,
+          // записанный до разбора BOM, лежит на СТРОКЕ, а его ткань уже могла стать назначением.
+          aliases: pieceDxfAliases.filter((a) => aliasInScope(a, scope)),
           pieces: [],
           detectedUnit: 'mm',
           parseWarnings: [],
@@ -363,9 +418,16 @@ export function BatchMarkerQueue({
           out.push(base);
           continue;
         }
-        const files = await sheetFiles(scope.key, sheets, notes);
-        if (files.length === 0) {
-          out.push({ ...base, parseWarnings: [`${base.label}: ни один DXF не скачался`] });
+        const { files, failed } = await sheetFiles(scope.key, sheets);
+        // Недокачанные листы едут ОТДЕЛЬНЫМ полем (планировщик по ним отказывает) И В
+        // parseWarnings: если задание всё же когда-нибудь сохранится, блоб обязан нести признак
+        // того, из чего он собран.
+        if (failed.length > 0 || files.length === 0) {
+          out.push({
+            ...base,
+            failedSheets: failed.length > 0 ? failed : sheets.map((s) => s.name),
+            parseWarnings: [`не скачались листы: ${failed.join(', ') || 'все'}`],
+          });
           continue;
         }
         const res = await client().parse(files, {
@@ -373,6 +435,7 @@ export function BatchMarkerQueue({
           tol: NEST_DEFAULTS.tol,
           tolChain: NEST_DEFAULTS.tolChain,
         });
+        if (!aliveRef.current) return;
         liveParse.current = { scopeKey: scope.key, parseId: res.parseId };
         out.push({
           ...base,
@@ -381,47 +444,57 @@ export function BatchMarkerQueue({
           parseWarnings: res.warnings,
         });
       }
-      setParsed(out);
-      setPrepNote(notes.join('; '));
+      if (!aliveRef.current) return;
+      setParsed({ scopes: out, signature });
       setPhase('ready');
     } catch (e) {
+      if (!aliveRef.current) return;
       setPrepError(e instanceof Error && e.message ? e.message : 'не удалось разобрать выкройки');
       setPhase('idle');
     }
   };
 
   /**
-   * Листы ткани как File[] — из кеша вкладки либо с CDN. Одна недоступная ссылка не роняет ткань.
+   * Листы ткани как File[] — из кеша вкладки либо с CDN.
+   *
+   * ЧЕГО НЕ ХВАТИЛО, ВОЗВРАЩАЕТСЯ ЗНАЧЕНИЕМ. `allSettled` здесь не «терпимость к сбою», а способ
+   * узнать ИМЯ пропавшего листа: раньше провал уезжал в общую строку на экране, ткань разбиралась
+   * по остатку, и раскладка выходила полной по всем счётчикам — без рукавов.
    *
    * Ключ кеша — СОДЕРЖИМОЕ пачки (адреса листов), а не ключ ткани: выкройку перезаливают прямо на
    * соседней вкладке той же карточки, и кеш по ключу ткани молча раскладывал бы вчерашний чертёж,
-   * не показав ни одного признака.
+   * не показав ни одного признака. Кешируется ТОЛЬКО полная пачка — неполную незачем: по ней всё
+   * равно откажут, а повтор подготовки обязан попробовать скачать заново.
    */
   const sheetFiles = async (
     scopeKey: string,
     sheets: ScopedSheet[],
-    notes: string[],
-  ): Promise<File[]> => {
+  ): Promise<{ files: File[]; failed: string[] }> => {
     const cacheKey = `${scopeKey}|${sheets.map((s) => s.url).join('|')}`;
     const cached = filesRef.current.get(cacheKey);
-    if (cached) return cached;
+    if (cached) return { files: cached, failed: [] };
     const settled = await Promise.allSettled(
       sheets.map(async (s) => new File([await fetchMediaBlob(s.url)], s.name)),
     );
     const files: File[] = [];
+    const failed: string[] = [];
     settled.forEach((r, i) => {
       if (r.status === 'fulfilled') files.push(r.value);
-      else notes.push(`${sheets[i].name}: не удалось скачать`);
+      else failed.push(sheets[i].name);
     });
-    if (files.length > 0) filesRef.current.set(cacheKey, files);
-    return files;
+    if (failed.length === 0) filesRef.current.set(cacheKey, files);
+    return { files, failed };
   };
   /** Тот же ключ, каким кеш заполнялся, — переразбор в очереди берёт файлы по нему. */
   const filesKeyOf = (scopeKey: string) =>
     `${scopeKey}|${(sheetsByScope.get(scopeKey) ?? []).map((s) => s.url).join('|')}`;
 
-  const patch = (id: string, next: Partial<JobRun>) =>
+  // Обновление состояния ПОСЛЕ размонтирования — не только предупреждение React: это правка
+  // экрана, которого нет, из цикла, который обязан был остановиться.
+  const patch = (id: string, next: Partial<JobRun>) => {
+    if (!aliveRef.current) return;
     setRuns((prev) => ({ ...prev, [id]: { ...(prev[id] ?? blankRun()), ...next } }));
+  };
 
   // ── прогон одной раскладки ────────────────────────────────────────────────────────────────
   const nestOne = (job: MarkerJob, parseId: number): Promise<NestResult | null> => {
@@ -510,10 +583,10 @@ export function BatchMarkerQueue({
       tolChain: NEST_DEFAULTS.tolChain,
       parseWarnings: job.parseWarnings,
       composition,
-      // TODO(волна 2): piece_line_key в блобе. Модалка резолвит его из сопоставления «блок → деталь
-      // кроя» (pieceDxfAliases, отфильтрованных по скоупу, со свёрткой размерного хвоста); без него
-      // маркер не переживает переименование детали кроя. Пустое поле читается как «неизвестно» —
-      // ровно как у всех раскладок, снятых до того, как модалка стала его заполнять.
+      // ДЕТАЛЬ КРОЯ ЗА КАЖДЫМ КОНТУРОМ — тем же правилом, что у модалки (piece-selection.ts).
+      // Без него сохранённая раскладка держится на ИМЕНИ БЛОКА и перестаёт сходиться после
+      // переименования детали, а раскладки этой очереди становятся НОРМАМИ уже сегодня.
+      pieceLineKeyById: job.pieceLineKeyById as Map<number, string>,
     });
     const pair = legacyPairOf(composition);
     const res = await adminService.SaveTechCardMarker({
@@ -526,10 +599,10 @@ export function BatchMarkerQueue({
         // умирает вместе с прогоном — то есть не может стать тем, ради чего эта фаза написана.
         productionRunId: 0,
         sizeId: pair.sizeId,
-        // Имя ЗАМЕЩАЕМОЙ раскладки сохраняется: переименовать чужую запись мимоходом — значит
-        // отобрать у оператора то, чем он их различает (плюс имя уникально в паре с размером, и
-        // навязанное могло бы столкнуться с соседним).
-        name: job.replaces?.name || markerName(job),
+        // Имя выдал ПЛАНИРОВЩИК: только он видит разом все задания и все сегодняшние раскладки
+        // карточки, а уникальность у сервера — (карточка, прогон, размер, имя), и её нарушение
+        // приходит отказом ПОСЛЕ полностью оплаченного прогона.
+        name: job.markerName,
         source: 'auto',
         bomLineKey: job.bomLineKey,
         colorwayId: job.colorwayId,
@@ -561,7 +634,10 @@ export function BatchMarkerQueue({
 
   // ── сама очередь ──────────────────────────────────────────────────────────────────────────
   const start = async () => {
-    if (!plan || selectedJobs.length === 0 || blocked) return;
+    // ПРОТУХШИЙ ПЛАН НЕ ЗАПУСКАЕТСЯ. Разбор — снимок; ширина, состав тканей или сами листы могли
+    // измениться на соседней смонтированной вкладке, и раскладка по старому снимку записала бы
+    // норму на полотне, которого у ткани уже нет.
+    if (!plan || selectedJobs.length === 0 || blocked || stale) return;
     stopRef.current = false;
     setPhase('running');
     // Задания идут СГРУППИРОВАННЫМИ ПО ТКАНИ: воркер держит один разбор, и чередование тканей
@@ -572,6 +648,9 @@ export function BatchMarkerQueue({
     setRuns(Object.fromEntries(queue.map((j) => [j.id, blankRun()])));
     try {
       for (const job of queue) {
+        // Проверяется КАЖДУЮ итерацию, а не только stopRef: размонтирование ставит оба флага, но
+        // «жив» — сильнее: при нём цикл обязан выйти, ничего больше не записав на сервер.
+        if (!aliveRef.current) return;
         if (stopRef.current) {
           patch(job.id, { status: 'skipped', error: 'очередь остановлена' });
           continue;
@@ -598,11 +677,13 @@ export function BatchMarkerQueue({
             tol: NEST_DEFAULTS.tol,
             tolChain: NEST_DEFAULTS.tolChain,
           });
+          if (!aliveRef.current) return;
           liveParse.current = { scopeKey: job.scopeKey, parseId: res.parseId };
           parseId = res.parseId;
         }
 
         const result = await nestOne(job, parseId);
+        if (!aliveRef.current) return;
         if (!result) {
           patch(job.id, { status: 'skipped', error: 'прогон прерван' });
           if (stopRef.current) break;
@@ -626,13 +707,7 @@ export function BatchMarkerQueue({
           });
           continue;
         }
-        patch(job.id, { status: 'saving', result });
-        try {
-          const markerId = await saveJob(job, result);
-          patch(job.id, { status: 'done', result, markerId });
-        } catch (e) {
-          patch(job.id, { status: 'failed', result, error: saveErrorText(e) });
-        }
+        await saveWithRetry(job, result);
       }
     } finally {
       // Карточка перечитывается ОДИН РАЗ в конце, а не после каждого сохранения: инвалидация
@@ -642,8 +717,39 @@ export function BatchMarkerQueue({
         qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
         qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       }
+      if (!aliveRef.current) return;
       setPhase('ready');
       stopRef.current = false;
+    }
+  };
+
+  /**
+   * Сохранение с ОДНИМ повтором — и повторяется только то, что имеет смысл повторять.
+   *
+   * За плечами каждой строки лежат десятки секунд поиска, а сорваться сохранение может на
+   * обрыве сети или пятисотке. Полевое нарушение (сервер разобрал пэйлоад и назвал поле) повторять
+   * бессмысленно: второй такой же запрос получит тот же отказ, и повтор лишь съест время очереди.
+   * Результат при отказе ОСТАЁТСЯ на строке — его можно досохранить кнопкой, не пересчитывая.
+   */
+  const saveWithRetry = async (job: MarkerJob, result: NestResult) => {
+    patch(job.id, { status: 'saving', result, error: '' });
+    try {
+      const markerId = await saveJob(job, result);
+      patch(job.id, { status: 'done', result, markerId });
+      return;
+    } catch (e) {
+      if (!aliveRef.current) return;
+      if (extractFieldViolations(e).length > 0) {
+        patch(job.id, { status: 'failed', result, error: saveErrorText(e) });
+        return;
+      }
+      patch(job.id, { status: 'saving', result, error: `${saveErrorText(e)} — повторяем…` });
+    }
+    try {
+      const markerId = await saveJob(job, result);
+      patch(job.id, { status: 'done', result, markerId });
+    } catch (e) {
+      patch(job.id, { status: 'failed', result, error: saveErrorText(e) });
     }
   };
 
@@ -683,10 +789,28 @@ export function BatchMarkerQueue({
       b.lines.sort(
         (x, y) => (sizeOrder.get(x.job.sizeId) ?? 0) - (sizeOrder.get(y.job.sizeId) ?? 0),
       );
-      // Расход на изделие: настил кроит РОВНО ОДНО изделие, поэтому длина настила и есть расход.
-      // Берём среднее по снятым размерам — по ним и заказывают ткань на смешанный ряд.
+      // РАСХОД НА ИЗДЕЛИЕ — СРЕДНЕЕ, ВЗВЕШЕННОЕ КОЛИЧЕСТВАМИ ПАРТИИ. Настил кроит ровно одно
+      // изделие, поэтому длина настила и есть расход РАЗМЕРА; но партия шьётся не поровну, и
+      // среднее арифметическое отвечает на вопрос, которого никто не задавал. Партия из 99×S по
+      // 1 м и 1×XL по 2 м расходует 1.01 м на изделие, а невзвешенное среднее печатает 1.50 —
+      // и тут же объявляет, что прежняя оценка «занижала на 49 %», хотя она была точна.
+      //
+      // Размеры, для которых раскладка не снялась (отказ, пропуск), в веса НЕ ВХОДЯТ: делить на
+      // количество, длины которого мы не измеряли, значит занизить среднее ровно на его долю.
+      const totalQty = b.lines.reduce((s, l) => s + Math.max(0, l.job.batchQty), 0);
       const avgCm =
-        b.lines.reduce((s, l) => s + l.result.usedLengthCm, 0) / Math.max(1, b.lines.length);
+        totalQty > 0
+          ? b.lines.reduce((s, l) => s + l.result.usedLengthCm * Math.max(0, l.job.batchQty), 0) /
+            totalQty
+          : b.lines.reduce((s, l) => s + l.result.usedLengthCm, 0) / Math.max(1, b.lines.length);
+      // ЗНАМЕНАТЕЛЬ — ВЕСЬ ЗАКАЗ КОЛОРВЕЯ, а не сумма запланированных заданий. Размер, по которому
+      // задание вообще не создалось (нет деталей в выкройках, не влезает в ширину), из суммы
+      // заданий выпал бы — и покрытие отрапортовало бы «посчитано всё», умолчав ровно про ту
+      // часть партии, для которой ткани посчитать не удалось. Каждое изделие партии кроится из
+      // каждой ткани карточки, поэтому знаменатель один и тот же для всех тканей.
+      const plannedQty = cells
+        .filter((c) => c.colorwayId === b.job.colorwayId)
+        .reduce((s, c) => s + Math.max(0, c.qty), 0);
       const line = rollLines.find((l) => l.lineKey === b.job.bomLineKey);
       // Основа веса — с ТОГО артикула, чью ширину мерили: пин колорвея, иначе артикул слота.
       // Иначе кг-сверка сравнивала бы две разные ткани — 150 см × 200 г/м² против 160 × 250.
@@ -703,9 +827,18 @@ export function BatchMarkerQueue({
         measured && current && current.value > 0
           ? ((measured.value - current.value) / current.value) * 100
           : null;
-      return { head: b.job, lines: b.lines, avgCm, measured, current, deltaPct };
+      return {
+        head: b.job,
+        lines: b.lines,
+        avgCm,
+        measured,
+        current,
+        deltaPct,
+        totalQty,
+        plannedQty,
+      };
     });
-  }, [plan, runs, rollLines, materialById, techCard, sizeOrder]);
+  }, [plan, runs, cells, rollLines, materialById, techCard, sizeOrder]);
 
   // ── рендер ────────────────────────────────────────────────────────────────────────────────
   const running = phase === 'running';
@@ -748,11 +881,18 @@ export function BatchMarkerQueue({
                   onChange={(e) => setBudgetS(Math.max(1, Number(e.target.value) || 0))}
                 />
               </label>
+              {/* ПЕРЕПОДГОТОВКА — ЯВНОЕ ДЕЙСТВИЕ, а не автоматика. Пересобрать план сам по себе
+                  экран не имеет права: разбор стоит скачивания всех DXF карточки, и делать это на
+                  каждое нажатие клавиши в BOM соседней вкладки нельзя. */}
+              <Button type='button' size='xs' variant='secondary' onClick={prepare}>
+                {stale ? 'подготовить заново' : 'переподготовить'}
+              </Button>
               <Button
                 type='button'
                 size='xs'
                 variant='secondary'
-                disabled={selectedJobs.length === 0 || !!blocked}
+                disabled={selectedJobs.length === 0 || !!blocked || stale}
+                title={stale ? 'данные карточки изменились — подготовьте заново' : undefined}
                 onClick={start}
               >
                 {`запустить (${selectedJobs.length})`}
@@ -777,17 +917,25 @@ export function BatchMarkerQueue({
         </Text>
       )}
 
+      {/* ПОДГОТОВКА ПРОТУХЛА. Разбор — снимок; ширина артикула, состав тканей или сами листы
+          правятся на соседней вкладке, которая всё это время смонтирована. Раскладка по старому
+          снимку записала бы норму на полотне, которого у ткани уже нет, — поэтому «запустить»
+          гаснет, а причина стоит словами. */}
+      {stale ? (
+        <CalloutBox tone='warning'>
+          <Text size='micro'>
+            данные карточки изменились после подготовки (ширина, состав тканей или набор выкроек) —
+            план снят по устаревшему снимку. Подготовьте заново, иначе раскладка будет измерена не
+            на том полотне.
+          </Text>
+        </CalloutBox>
+      ) : null}
+
       {prepError ? (
         <Text size='micro' className='text-error'>
           {prepError}
         </Text>
       ) : null}
-      {prepNote ? (
-        <Text size='micro' className='text-error'>
-          {prepNote}
-        </Text>
-      ) : null}
-
       {plan && jobs.length > 0 ? (
         <div className='w-full overflow-x-auto'>
           <table className='w-full border-collapse'>
@@ -856,6 +1004,24 @@ export function BatchMarkerQueue({
                           {r.error}
                         </Text>
                       ) : null}
+                      {/* ЗА ЭТОЙ СТРОКОЙ ЛЕЖИТ ПОСЧИТАННАЯ РАСКЛАДКА. Сохранение сорвалось —
+                          геометрия от этого не испортилась, и заставлять оператора платить
+                          минутами поиска за чужую пятисотку незачем. Кнопка есть только там, где
+                          результат полон: неполную сервер не примет в любом случае. */}
+                      {r?.status === 'failed' &&
+                      r.result &&
+                      r.result.placedCount === r.result.totalCount &&
+                      !running ? (
+                        <Button
+                          type='button'
+                          size='xs'
+                          variant='secondary'
+                          disabled={!!blocked}
+                          onClick={() => void saveWithRetry(j, r.result as NestResult)}
+                        >
+                          сохранить ещё раз
+                        </Button>
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -899,17 +1065,25 @@ export function BatchMarkerQueue({
               {g.lines.map((l) => (
                 <Row
                   key={l.job.id}
-                  label={l.job.sizeLabel}
+                  label={`${l.job.sizeLabel} · ${l.job.batchQty} шт`}
                   value={`${l.result.usedLengthCm.toFixed(0)} см · КПД ${pct(l.result.efficiency)}`}
                 />
               ))}
               <Row
                 emphasis
                 label={
-                  g.lines.length > 1 ? 'на изделие — среднее по снятым размерам' : 'на изделие'
+                  g.lines.length > 1 ? 'на изделие — взвешенно по количествам партии' : 'на изделие'
                 }
                 value={g.measured ? `${g.measured.value} ${g.measured.unit}` : meters(g.avgCm)}
               />
+              {/* ЧАСТИЧНОЕ ПОКРЫТИЕ НАЗЫВАЕТСЯ ВСЛУХ. Взвешенное среднее по ПОЛОВИНЕ партии — это
+                  ответ про половину, и молча выдавать его за расход партии нельзя: сравнение с
+                  рецептом ниже опиралось бы на вес, которого нет. */}
+              {g.totalQty > 0 && g.plannedQty > g.totalQty ? (
+                <Text size='micro' className='text-error'>
+                  {`посчитано ${g.totalQty} из ${g.plannedQty} изделий этого колорвея — по остальным размерам раскладка не снялась (см. отказы выше), и число выше описывает только посчитанную часть партии`}
+                </Text>
+              ) : null}
               <Text size='micro' variant='label'>
                 {g.current == null
                   ? 'в рецепте этого колорвея расхода по этой ткани нет — сравнивать не с чем'
@@ -1003,13 +1177,6 @@ function statusText(r: JobRun | undefined): string {
     case 'skipped':
       return 'пропущено';
   }
-}
-
-function markerName(j: MarkerJob): string {
-  return [j.colorwayLabel, j.scopeLabel, j.sizeLabel]
-    .filter(Boolean)
-    .join(' · ')
-    .slice(0, MAX_MARKER_NAME);
 }
 
 function saveErrorText(e: unknown): string {

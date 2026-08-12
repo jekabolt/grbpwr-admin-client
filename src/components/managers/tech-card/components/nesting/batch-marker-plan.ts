@@ -40,9 +40,15 @@
 import type { common_TechCardMarkerSummary, googletype_Decimal } from 'api/proto-http/admin';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { orientToGrain } from 'lib/nesting/geom/grain-orient';
-import { estimateJob, estimateRun, type RunEstimate } from 'lib/nesting/nest/estimate';
+import {
+  crossSpanCm,
+  estimateJob,
+  estimateRun,
+  fittingRotations,
+  type RunEstimate,
+} from 'lib/nesting/nest/estimate';
 import type { FabricDirection, NestConfig, PieceDTO, Unit } from 'lib/nesting/types';
-import { NEST_DEFAULTS } from 'lib/nesting/types';
+import { NEST_DEFAULTS, allowedRotations } from 'lib/nesting/types';
 import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { buildAllowanceIndex, type ContourAllowance } from './contour-allowance';
 import { defaultContourLayer, layerOptions, type SeamAllowancePrefill } from './contour-layer';
@@ -51,7 +57,13 @@ import type { ScopedSheet } from './dxf-by-scope';
 import { applySeamPrefill } from './dxf-apply-conditions';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { compositionOf } from './marker-io';
-import { markerUnits, selectMarkerPieces, unitsOfPieces } from './piece-selection';
+import {
+  markerUnits,
+  pieceLineKeysByPieceId,
+  selectMarkerPieces,
+  unitsOfPieces,
+  type PieceAlias,
+} from './piece-selection';
 import { splitPiecesBySize, type BlockSplit } from './split-pieces';
 
 /** Клетка состава партии: сколько изделий одного размера одного колорвея в неё заказано. */
@@ -83,6 +95,14 @@ export type PlanScope = {
   /** Направление ткани скоупа: строгое побеждает (strictestDirection). */
   direction: FabricDirection;
   sheets: ScopedSheet[];
+  /**
+   * Листы, которые НЕ СКАЧАЛИСЬ. Непусто = разбор этой ткани неполон, и всякая раскладка по нему
+   * описывала бы изделие без деталей с пропавшего листа. Отдельным полем, а не строкой в
+   * `parseWarnings`: предупреждение читают, а это ОТКАЗ.
+   */
+  failedSheets: string[];
+  /** Сопоставление «блок → деталь кроя», уже отфильтрованное по ЭТОЙ ткани вызывающим. */
+  aliases: readonly PieceAlias[];
   /** Разобранные детали ВСЕХ листов скоупа. Пусто = разбор не дал ни одного контура. */
   pieces: PieceDTO[];
   /** Единица чертежа, как её прочитал разбор ($INSUNITS) — уезжает в блоб маркера. */
@@ -118,6 +138,22 @@ export type MarkerJob = {
   sizeLabel: string;
   /** Написание размера в именах блоков — им задание отбирает свои детали. */
   sizeToken: string;
+  /**
+   * Сколько изделий ЭТОЙ пары (колорвей, размер) заказано партией.
+   *
+   * Тираж настила это число НЕ задаёт (настил снимается на одно изделие — см. шапку), но оно
+   * обязано доехать: без него итог по ткани усредняет размеры С РАВНЫМ ВЕСОМ, и партия из 99
+   * маленьких и одного большого получает расход большого пополам с маленьким. Такое «среднее» ещё
+   * и сравнивается с рецептом — то есть выдуманный процент расхождения объявляется фактом.
+   */
+  batchQty: number;
+  /** Имя, под которым раскладка ляжет на карточку (у замены — её собственное). */
+  markerName: string;
+  /**
+   * Деталь кроя за каждой разобранной деталью — едет в блоб, чтобы раскладка пережила
+   * переименование детали. Пусто = сопоставления нет, и это законное «неизвестно».
+   */
+  pieceLineKeyById: ReadonlyMap<number, string>;
   /** Раскройная ширина (рулон − 2×кромка), см. */
   widthCm: number;
   selvedgeCm: number;
@@ -197,6 +233,8 @@ function forecastOf(e: RunEstimate): JobForecast {
 /** Разбор одного скоупа, посчитанный один раз на все его задания. */
 type ScopePrep = {
   split: BlockSplit;
+  /** Деталь кроя за каждой разобранной деталью — от колорвея и размера не зависит. */
+  pieceLineKeyById: ReadonlyMap<number, string>;
   contourLayer: string;
   contourMeasure: ContourAllowance | null;
   grainLayer: string;
@@ -208,6 +246,41 @@ type ScopePrep = {
 };
 
 const norm = (t: string) => t.replace(/[^\p{L}\p{N}]+/gu, '').toLowerCase();
+
+// tech_card_marker.name — VARCHAR(191). Режем с запасом: отказ по длине пришёл бы ПОСЛЕ прогона.
+const MAX_MARKER_NAME = 180;
+
+/** Ключ уникальности имени у сервера для КАРТОЧНОЙ раскладки: (размер, имя). */
+const nameKey = (sizeId: number, name: string) => `${sizeId}\u001f${name.trim()}`;
+
+/**
+ * Имя новой раскладки. РАЗЛИЧАЮЩАЯ ЧАСТЬ ИДЁТ ПЕРВОЙ И НЕ СРЕЗАЕТСЯ.
+ *
+ * Имя собиралось как «колорвей · ткань · размер» и резалось с хвоста — то есть первым терялся
+ * РАЗМЕР, а при длинном названии артикула и ткань. Уникальность у сервера — (карточка, прогон,
+ * размер, имя), так что одинаковые имена у разных размеров сервер бы стерпел, но две ткани одного
+ * размера столкнулись бы — и столкнулись бы отказом ПОСЛЕ полного прогона. Поэтому режется только
+ * подпись ткани (единственная неограниченная часть), а на случай, когда и после этого имя занято
+ * (обрезка двух длинных артикулов в одно и то же, либо ручная раскладка с таким же именем),
+ * добавляется различающий суффикс.
+ */
+function uniqueMarkerName(
+  sizeId: number,
+  parts: { sizeLabel: string; colorwayLabel: string; scopeLabel: string },
+  taken: Set<string>,
+): string {
+  const head = [parts.sizeLabel, parts.colorwayLabel].filter(Boolean).join(' · ');
+  const budget = MAX_MARKER_NAME - head.length - 3;
+  const tail = budget > 0 ? parts.scopeLabel.slice(0, budget) : '';
+  const base = [head, tail].filter(Boolean).join(' · ');
+  let name = base;
+  for (let n = 2; taken.has(nameKey(sizeId, name)); n++) {
+    const suffix = ` #${n}`;
+    name = `${base.slice(0, MAX_MARKER_NAME - suffix.length)}${suffix}`;
+  }
+  taken.add(nameKey(sizeId, name));
+  return name;
+}
 
 export function planBatchMarkers(args: {
   /** Клетки партии с ненулевым количеством. */
@@ -222,6 +295,15 @@ export function planBatchMarkers(args: {
   dictTokens: { has(token: string): boolean };
   /** КАРТОЧНЫЕ раскладки (прогонные отфильтрованы вызывающим через cardMarkers). */
   markers: readonly common_TechCardMarkerSummary[];
+  /**
+   * DXF, не принадлежащие НИ ОДНОЙ живой ткани: залитые до 0260 (ключа привязки нет вовсе) либо
+   * те, чью строку BOM удалили или переклассифицировали.
+   *
+   * Приезжают отдельным списком и получают отдельный отказ. Молчать про них нельзя: оператор,
+   * загрузивший выкройки и увидевший «раскроено всё», обязан узнать, что часть листов не
+   * участвовала — иначе «всё» читается как утверждение о полноте, которым оно не является.
+   */
+  looseSheets: readonly ScopedSheet[];
   /** Бюджет поиска на ОДНО задание, мс. */
   timeBudgetMs: number;
   /**
@@ -237,15 +319,51 @@ export function planBatchMarkers(args: {
   const refusals: PlanRefusal[] = [];
   const colorwayById = new Map(args.colorways.map((c) => [c.colorwayId, c]));
 
-  // Пары (колорвей, размер) партии — без количеств: тираж настила они не задают (см. шапку).
-  const pairs: { colorwayId: number; sizeId: number }[] = [];
-  const seenPair = new Set<string>();
+  // Пары (колорвей, размер) партии. ТИРАЖ НАСТИЛА они не задают (см. шапку), но КОЛИЧЕСТВО едет
+  // дальше: им взвешивается итог по ткани. Две линии на одну пару (законно: сетка их не создаёт, а
+  // страница партии может) складываются — это один и тот же заказ на одну и ту же пару.
+  const pairs: { colorwayId: number; sizeId: number; qty: number }[] = [];
+  const byPair = new Map<string, { colorwayId: number; sizeId: number; qty: number }>();
   for (const c of args.cells) {
     if (c.qty <= 0 || c.colorwayId <= 0 || c.sizeId <= 0) continue;
     const k = `${c.colorwayId}:${c.sizeId}`;
-    if (seenPair.has(k)) continue;
-    seenPair.add(k);
-    pairs.push({ colorwayId: c.colorwayId, sizeId: c.sizeId });
+    const prev = byPair.get(k);
+    if (prev) {
+      prev.qty += c.qty;
+      continue;
+    }
+    const row = { colorwayId: c.colorwayId, sizeId: c.sizeId, qty: c.qty };
+    byPair.set(k, row);
+    pairs.push(row);
+  }
+
+  // ЗАНЯТЫЕ ИМЕНА — уникальность у сервера (tech_card_id, run_key, size_key, name), то есть имя
+  // обязано быть уникальным ВНУТРИ РАЗМЕРА. Столкновение здесь стоит дороже обычного: оно
+  // всплывает отказом сервера ПОСЛЕ полностью оплаченного прогона. Сеем множество сегодняшними
+  // раскладками карточки и дополняем его именами, которые выдаём сами.
+  //
+  // Ключ берётся ТОТ ЖЕ, что у сервера: у одноразмерной раскладки size_key = её размер, у
+  // смешанной — 0 (size_id там NULL). Записать смешанную под каждый её размер значило бы
+  // придумывать столкновения, которых схема не знает, и без нужды дописывать «#2» к именам.
+  const takenNames = new Set<string>();
+  for (const m of args.markers) {
+    const comp = compositionOf(m);
+    takenNames.add(nameKey(comp.length === 1 ? comp[0].sizeId : 0, m.name ?? ''));
+  }
+
+  if (args.looseSheets.length > 0) {
+    refusals.push({
+      key: 'loose',
+      scopeLabel: 'выкройки без ткани',
+      colorwayLabel: '',
+      sizeLabel: '',
+      reason: `${args.looseSheets.length} ${args.looseSheets.length === 1 ? 'лист' : 'листов'} не привязан ни к одной строке BOM (${args.looseSheets
+        .map((s) => s.name)
+        .slice(0, 4)
+        .join(
+          ', ',
+        )}) — раскладывать их не на чем: ширина и кромка приходят с артикула. Привяжите их к ткани на вкладке «выкройки».`,
+    });
   }
 
   for (const scope of args.scopes) {
@@ -261,6 +379,17 @@ export function planBatchMarkers(args: {
     if (scope.sheets.length === 0) {
       scopeRefusal(
         'у этой ткани нет ни одного DXF — раскладывать нечего. Загрузите выкройки на вкладке «выкройки».',
+      );
+      continue;
+    }
+    // НЕДОКАЧАННЫЙ ЛИСТ ОТМЕНЯЕТ ВСЮ ТКАНЬ. Разбор по остатку укладывает «100 %» изделия, у которого
+    // нет деталей с пропавшего листа: `placed == total` сходится, потому что этих деталей нет ни в
+    // задании, ни в счётчике. Раньше провал скачивания жил только строкой на экране, не гасил ни
+    // одного задания и даже не доезжал в `parseWarnings` сохранённого блоба — то есть сохранённая
+    // раскладка выглядела чистой полной нормой. Модалка этот случай блокирует ровно так же.
+    if (scope.failedSheets.length > 0) {
+      scopeRefusal(
+        `не скачались листы выкроек (${scope.failedSheets.join(', ')}) — разбор неполон, и раскладка по нему описывала бы изделие без этих деталей. Повторите подготовку; если лист не открывается и вручную, перезалейте его.`,
       );
       continue;
     }
@@ -323,15 +452,23 @@ export function planBatchMarkers(args: {
       // ШИРИНА. Пин колорвея, иначе артикул слота — тем же порядком, что и в модалке раскладки.
       // Никакого умолчания в 140 см здесь нет и быть не может: ширина есть ВХОД алгоритма, и
       // раскладка, посчитанная на выдуманной ширине, даёт правдоподобную и неверную длину.
+      //
+      // ПИН БЕЗ ШИРИНЫ ОТКАЗЫВАЕТ ВСЕГДА, и это не строгость ради строгости. Здесь стоял фолбэк
+      // «пин есть, но ширины у него нет ⇒ меряем по артикулу слота» — то есть по ДРУГОЙ ткани,
+      // которую этот колорвей не закупает. Ошибка выглядит совершенно нормальным числом: длина
+      // правдоподобная, слот верный, колорвей подписан, — и расходится с правдой ровно на разницу
+      // ширин. Наличие пина (`has`) и его пригодность (`cutCm` конечна) — РАЗНЫЕ вопросы, и
+      // отвечать на второй «нет» значит отказать, а не подставить чужой ответ на первый.
       const pin = cw?.widthByLine.get(scope.lineKey);
-      const pinned = !!pin && Number.isFinite(pin.cutCm);
-      const widthCm = pinned ? pin.cutCm : scope.slotCutCm;
-      const selvedgeCm = pinned ? pin.selvedgeCm : scope.slotSelvedgeCm;
-      const articleName = (pinned ? pin.articleName : scope.slotArticleName) || 'без названия';
+      const pinnedArticle = !!pin;
+      const widthCm = pinnedArticle ? pin.cutCm : scope.slotCutCm;
+      const selvedgeCm = pinnedArticle ? pin.selvedgeCm : scope.slotSelvedgeCm;
+      const articleName =
+        (pinnedArticle ? pin.articleName : scope.slotArticleName) || 'без названия';
       if (!Number.isFinite(widthCm) || widthCm <= 0) {
         refuse(
-          pinned || cw?.widthByLine.has(scope.lineKey)
-            ? `ширина полотна не известна: у артикула «${articleName}», приколотого этим колорвеем, не заполнена ширина рулона`
+          pinnedArticle
+            ? `ширина полотна не известна: у артикула «${articleName}», приколотого этим колорвеем, не заполнена ширина рулона. Ширину артикула слота сюда подставить нельзя — это другая ткань.`
             : 'ширина полотна не известна: у артикула не заполнена ширина рулона',
         );
         continue;
@@ -356,18 +493,31 @@ export function planBatchMarkers(args: {
         widthCm,
         timeBudgetMs: args.timeBudgetMs,
       });
-      if (!built) {
-        refuse(
-          `ни одна деталь размера ${sizeLabel} не помещается в раскройную ширину ${widthCm} см — на этом полотне такую раскладку не выкроить`,
-        );
+      if (!built.ok) {
+        refuse(built.reason);
         continue;
       }
 
-      const replaces = findReplacement(args.markers, {
+      // ЗАМЕНА ОБЯЗАНА БЫТЬ ОДНОЗНАЧНОЙ. Раньше бралось первое совпадение из списка, который
+      // сервер отдаёт в своём порядке: при двух раскладках на ту же (ткань, колорвей, размер) —
+      // скажем, ручной пробной и НАЗНАЧЕННОЙ НОРМОЙ — перезаписывалась та, что оказалась раньше в
+      // массиве, и какая именно, на экране не было написано.
+      const match = findReplacements(args.markers, {
         bomLineKey: scope.lineKey,
         colorwayId: pair.colorwayId,
         sizeId: pair.sizeId,
       });
+      if (match.length > 1) {
+        refuse(
+          `на эту ткань, колорвей и размер уже снято ${match.length} раскладки: ${match
+            .map((m) => `«${m.name}»${m.isNorm ? ' (НОРМА)' : ''}`)
+            .join(
+              ', ',
+            )}. Какую из них пересчитывать — решает человек: удалите лишнюю на вкладке «выкройки» либо переснимите нужную оттуда же.`,
+        );
+        continue;
+      }
+      const replaces = match[0] ?? null;
       const notes: string[] = [];
       if (replaces?.isNorm) {
         notes.push(
@@ -392,6 +542,18 @@ export function planBatchMarkers(args: {
 
       jobs.push({
         id: key,
+        // Имя ЗАМЕЩАЕМОЙ раскладки сохраняется как есть: переименовать чужую запись мимоходом —
+        // значит отобрать у оператора то, чем он их различает. Уникальность её имени уже доказана
+        // тем, что она лежит в базе.
+        markerName:
+          replaces?.name ||
+          uniqueMarkerName(
+            pair.sizeId,
+            { sizeLabel, colorwayLabel, scopeLabel: scope.label },
+            takenNames,
+          ),
+        batchQty: pair.qty,
+        pieceLineKeyById: prep.pieceLineKeyById,
         colorwayId: pair.colorwayId,
         colorwayLabel,
         scopeKey: scope.key,
@@ -405,7 +567,7 @@ export function planBatchMarkers(args: {
         widthCm,
         selvedgeCm,
         articleName,
-        pinned,
+        pinned: pinnedArticle,
         direction: scope.direction,
         contourLayer: prep.contourLayer,
         grainLayer: prep.grainLayer,
@@ -477,6 +639,9 @@ function prepareScope(
   tokens.sort((a, b) => (split.orderOfSize.get(a) ?? 1e6) - (split.orderOfSize.get(b) ?? 1e6));
   return {
     split,
+    // Обе половины ключа детали кроя сходятся ровно здесь: скоуп алиасов отфильтровал вызывающий,
+    // разбор дал идентичности блоков. Правило — общее с модалкой раскладки (piece-selection.ts).
+    pieceLineKeyById: pieceLineKeysByPieceId(scope.pieces, split, scope.aliases),
     contourLayer,
     contourMeasure,
     grainLayer,
@@ -517,29 +682,73 @@ function jobGeometry(
   };
 }
 
-/** Задание движка на один размер ОДНОГО ПОЛОТНА: от ширины зависит и отбор деталей, и цена. */
+/**
+ * Задание движка на один размер ОДНОГО ПОЛОТНА: от ширины зависит и отбор деталей, и цена.
+ *
+ * `{ ok: false }` — ОТКАЗ, а не пустой результат: см. ниже про деталь шире полотна.
+ */
 function buildJobConfig(args: {
   scope: PlanScope;
   prep: ScopePrep;
   geom: { pieces: PieceDTO[]; unitsOfPiece: Map<number, number> };
   widthCm: number;
   timeBudgetMs: number;
-}): {
-  config: NestConfig;
-  estimate: JobForecast | null;
-  pieces: PieceDTO[];
-  pieceCount: number;
-  instanceCount: number;
-} | null {
+}):
+  | {
+      ok: true;
+      config: NestConfig;
+      estimate: JobForecast | null;
+      pieces: PieceDTO[];
+      pieceCount: number;
+      instanceCount: number;
+    }
+  | { ok: false; reason: string } {
   const { scope, prep, widthCm } = args;
   const { pieces, unitsOfPiece } = args.geom;
-  if (pieces.length === 0) return null;
-  // Деталь, не влезающая в полотно ни в одном разрешённом повороте, снимается ДО прогона — ровно
-  // как галочка в модалке. Оставить её значило бы заказать прогон, который заведомо не уложит всё,
-  // и получить «уложил 31 из 45» после полного бюджета.
-  const usable = widthCm; // отступ от кромки 0 — тот же дефолт, что у модалки (NEST_DEFAULTS)
-  const fits = pieces.filter((p) => Math.min(p.bboxH, p.bboxW) <= usable + 1e-9);
-  if (fits.length === 0) return null;
+  if (pieces.length === 0) {
+    return { ok: false, reason: 'на выбранном контурном слое нет ни одной детали этого размера' };
+  }
+
+  // ═══ ДЕТАЛЬ ШИРЕ ПОЛОТНА ОТМЕНЯЕТ ВСЁ ЗАДАНИЕ ═══════════════════════════════════════════════
+  //
+  // Здесь стоял ФИЛЬТР: не влезшая деталь молча выбрасывалась, а конфиг, счётчики и блоб строились
+  // по остатку. Итог был катастрофическим и при этом безупречным на вид — движок укладывал 40 из
+  // 40, `placed == total` сходилось, серверная сверка «placed_count == число размещений» тоже
+  // (выброшенной детали нет НИ ТАМ, НИ ТАМ), и раскладка сохранялась как полная. То есть маркер
+  // утверждал, что кроит изделие, у которого на самом деле нет спинки, — и становился НОРМОЙ, по
+  // которой считают деньги и заказывают ткань.
+  //
+  // Молчаливое усечение изделия не имеет безопасной формы. Единственный честный ответ — отказать
+  // ВСЕМ заданием и назвать деталь: чинится это либо другим полотном, либо самой выкройкой, и оба
+  // решения принимает человек.
+  //
+  // ПРАВИЛО ВЛЕЗАНИЯ — ДВИЖКОВОЕ, А НЕ САМОДЕЛЬНОЕ. `min(bboxH, bboxW)` игнорировал политику
+  // поворотов: при запрещённом поперечном крое деталь, которая пролезает только на 90°, считалась
+  // влезшей — задание уходило в прогон и сжигало весь бюджет, чтобы вернуть «уложил 39 из 40».
+  // Берём ровно то, чем меряет движок (`allowedRotations` + `fittingRotations` + `crossSpanCm`).
+  const rotations = allowedRotations(scope.direction, NEST_DEFAULTS.allowCrossGrain);
+  const usable = widthCm - 2 * NEST_DEFAULTS.edgeMarginCm;
+  const tooWide = pieces.filter(
+    (p) => fittingRotations((r) => crossSpanCm(p, r), rotations, usable).length === 0,
+  );
+  if (tooWide.length > 0) {
+    const named = tooWide
+      .slice(0, 3)
+      .map((p) => {
+        const across = Math.min(...rotations.map((r) => crossSpanCm(p, r)));
+        return `«${p.blockName || p.name}» ${across.toFixed(1)} см поперёк`;
+      })
+      .join(', ');
+    const more = tooWide.length > 3 ? ` и ещё ${tooWide.length - 3}` : '';
+    return {
+      ok: false,
+      reason:
+        `${tooWide.length === 1 ? 'деталь не влезает' : `${tooWide.length} деталей не влезают`} в раскройную ширину ${usable.toFixed(1)} см: ${named}${more}. ` +
+        `Раскладка без них описывала бы изделие без этих деталей, поэтому задание не запускается: нужна ткань шире, ` +
+        `разрешённый поперечный крой либо правка выкройки.`,
+    };
+  }
+  const fits = pieces;
 
   const config: NestConfig = {
     pieces: fits.map((p) => ({
@@ -562,13 +771,14 @@ function buildJobConfig(args: {
   };
   const job = estimateJob(pieces, config);
   return {
+    ok: true,
     config,
     // Та же функция, которую движок зовёт внутри себя: прогноз и прогон не могут разойтись, потому
     // что модель одна. Пустое задание оценке не по чему считать — это не ноль, а «нечего».
     estimate: job.length > 0 ? forecastOf(estimateRun(job, config)) : null,
-    // В блоб уезжают ВСЕ контуры задания, включая не влезшие в ширину: их движок пометит
-    // unplaced, прогон при этом окажется неполным и сохранён не будет. Отдаём `fits` — ровно то,
-    // что уехало в конфиг, чтобы блоб и задание описывали один набор.
+    // Блоб и конфиг описывают ОДИН И ТОТ ЖЕ набор — теперь буквально один массив: деталь, не
+    // влезающая в полотно, уже отменила задание выше, поэтому «отобранного подмножества» здесь
+    // больше не существует.
     pieces: fits,
     pieceCount: fits.length,
     instanceCount: config.pieces.reduce((s, p) => s + p.quantity, 0),
@@ -586,10 +796,11 @@ function buildJobConfig(args: {
  * Смешанная раскладка кандидатом не является: её длина общая на весь настил, и «заменить» её
  * одноразмерной значило бы потерять остальные размеры её состава.
  */
-function findReplacement(
+function findReplacements(
   markers: readonly common_TechCardMarkerSummary[],
   target: { bomLineKey: string; colorwayId: number; sizeId: number },
-): MarkerReplacement | null {
+): MarkerReplacement[] {
+  const out: MarkerReplacement[] = [];
   for (const m of markers) {
     if ((m.bomLineKey ?? '') !== target.bomLineKey) continue;
     if (Number(m.colorwayId ?? 0) !== target.colorwayId) continue;
@@ -597,9 +808,9 @@ function findReplacement(
     if (comp.length !== 1 || comp[0].sizeId !== target.sizeId) continue;
     const id = Number(m.id ?? 0);
     if (!id) continue;
-    return { id, name: m.name ?? '', isNorm: m.isNorm === true };
+    out.push({ id, name: m.name ?? '', isNorm: m.isNorm === true });
   }
-  return null;
+  return out;
 }
 
 /** Имя ОБЩЕЙ раскладки (без колорвея) на этот слот и размер — для предупреждения на строке. */

@@ -79,10 +79,14 @@ import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import { engineCmToMm, mmToEngineCm } from './allowance-units';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
-import { normBlock } from './block-code';
 import { ModalRailSection, type RailSectionStatus } from './modal-sections';
-import { markerUnits, selectMarkerPieces, unitsOfPieces } from './piece-selection';
-import { aliasIdentity, splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
+import {
+  markerUnits,
+  pieceLineKeysByPieceId,
+  selectMarkerPieces,
+  unitsOfPieces,
+} from './piece-selection';
+import { splitPiecesBySize, useDictionarySizeTokens } from './use-block-sizes';
 import { useNesting, type NestingFile } from './use-nesting';
 
 // Prior «ручная правка» notes are replaced, not stacked, on each re-save of a marker.
@@ -298,54 +302,15 @@ export function NestingModal({
   // рождения. Видно это только в маркере, открытом ПОСЛЕ переименования детали кроя, — то есть
   // тогда, когда ответ уже не восстановить.
   //
-  // Считается ЗДЕСЬ, а не у вызывающего, по той же причине, по которой алиасы фильтруются ТАМ:
-  // идентичность блока (имя без размерного хвоста) знает только тот, кто видит разбор — хвост
-  // опознаётся по размерному ряду словаря, а не по имени. Вызывающий знает скоуп, эта модалка
-  // знает файл; ключ собирается из двух половин ровно один раз.
-  const pieceLineKeyById = useMemo(() => {
-    // Алиас пишется под ИДЕНТИЧНОСТЬЮ блока (диалог сопоставления складывает туда имя без
-    // размерного хвоста), но встречаются и старые записи, где размер остался в имени. Поэтому
-    // индекс двухслойный: сначала имя как записано, следом — оно же, свёрнутое к идентичности.
-    // Свёртка НИКОГДА не перекрывает прямое совпадение и снимается вовсе при неоднозначности:
-    // «FP_L» и «FP_XL» сворачиваются в одно «FP», и подставить в блоб наугад одну из двух
-    // деталей кроя хуже, чем оставить поле пустым — пустое читается как «неизвестно», а
-    // неверное читается как ответ.
-    // Неоднозначность ОТКАЗЫВАЕТ на обоих слоях, а не только на свёрнутом. Два алиаса,
-    // привязанных к РАЗНЫМ строкам BOM одного назначения, — законная запись: карточка её прямо
-    // разрешает и запрещает только противоречие внутри одного скоупа. Сюда же они приезжают
-    // отфильтрованными по скоупу, то есть одинаковыми ключами с разными деталями кроя, и
-    // «последний победил» подставил бы в блоб ту, что оказалась позже в массиве, — то есть
-    // случайную. Пусто читается как «неизвестно», неверное читается как ответ.
-    const byBlock = new Map<string, string | null>();
-    const folded = new Map<string, string | null>();
-    const put = (m: Map<string, string | null>, k: string, v: string) => {
-      m.set(k, m.has(k) && m.get(k) !== v ? null : v);
-    };
-    for (const a of pieceAliases ?? []) {
-      const raw = normBlock(a.blockName ?? '');
-      const val = (a.pieceLineKey ?? '').trim();
-      if (!raw || !val) continue;
-      put(byBlock, raw.toLowerCase(), val);
-      // Свёртка спрашивает ФАЙЛ, а не форму имени: «FP_L» — это левая полочка целиком, и её
-      // алиас обязан остаться прямым совпадением, а не уехать на свёрнутый слой под «FP».
-      const ident = aliasIdentity(raw, split).toLowerCase();
-      if (!ident || ident === raw.toLowerCase()) continue;
-      put(folded, ident, val);
-    }
-    const out = new Map<number, string>();
-    if (byBlock.size === 0) return out;
-    for (const p of allPieces) {
-      const key = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '').toLowerCase();
-      if (!key) continue;
-      // `null` — это «две детали спорят», и он ОБЯЗАН гасить ключ, а не проваливаться на
-      // свёрнутый слой: ?? пропускает только undefined, поэтому спор на прямом слое не
-      // подменяется догадкой со свёрнутого.
-      const direct = byBlock.get(key);
-      const val = (direct === undefined ? folded.get(key) : direct) ?? '';
-      if (val) out.set(p.id, val);
-    }
-    return out;
-  }, [pieceAliases, allPieces, split]);
+  // Считается ИЗ ДВУХ ПОЛОВИН, и обе приходят снаружи этой функции: скоуп алиасов знает
+  // вызывающий (у одного имени блока на подкладе и на верхе разные детали кроя), идентичность
+  // блока знает разбор. Само правило живёт в piece-selection.ts — ту же карту собирает очередь
+  // раскроя партии, у которой этой модалки нет вовсе, и вторая копия правила разъехалась бы
+  // молча: в блоб попала бы «случайная из двух спорящих» деталь вместо пустого «неизвестно».
+  const pieceLineKeyById = useMemo(
+    () => pieceLineKeysByPieceId(allPieces, split, pieceAliases),
+    [pieceAliases, allPieces, split],
+  );
   const [activeLayer, setActiveLayer] = useState<string | null>(null);
   const contourLayer = layerOpts.some((o) => o.layer === activeLayer)
     ? (activeLayer as string)
