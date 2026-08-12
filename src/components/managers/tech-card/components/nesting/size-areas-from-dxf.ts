@@ -41,7 +41,16 @@ import { orientToGrain } from 'lib/nesting/geom/grain-orient';
 import { mmToEngineCm } from './allowance-units';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
 import type { PieceDTO } from 'lib/nesting/types';
-import { deriveBlockSizes, normBlock, uniOf } from './block-code';
+import {
+  deriveBlockSizes,
+  normBlock,
+  uniBaseOf,
+  uniConflictReason,
+  uniDuplicateConflicts,
+  uniGradedConflicts,
+  uniGroupsOf,
+  uniOf,
+} from './block-code';
 import {
   readMarkerConditions,
   rebuildParseOpts,
@@ -159,9 +168,12 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
   // раскладка не видела и не хранит: подставить её сюда значило бы объяснить старый замер новым
   // ответом. Токен же уехал в блоб вместе с именем блока — он часть той самой съёмки.
   let storedAllUni = stored.length > 0;
+  // Сохранённые uni-имена — для вердикта о склеенной выгрузке (см. отказ сразу за циклом).
+  const storedUniEntries: { raw: string; uniBase: string }[] = [];
   for (const sp of stored) {
     const raw = normBlock(sp.blockName ?? '');
     if (!uniOf(raw)) storedAllUni = false;
+    else storedUniEntries.push({ raw, uniBase: uniBaseOf(raw, input.isSizeToken) });
     if (!raw) {
       // Блоб схемы 1 или файл-«россыпь» без блоков: опознать деталь в сегодняшнем файле нечем, а
       // без неё площадь любого размера неполна — и неполная площадь ЗАНИЖАЕТ норму.
@@ -203,6 +215,40 @@ export function sizeAreasFromParsed(input: SizeAreasInput): SizeAreasOutcome {
     }
     g.sizes.set(size, area);
     graded.set(identity, g);
+  }
+
+  // ── СТАРЫЙ БЛОБ ИЗ СКЛЕЕННОЙ ВЫГРУЗКИ: ОТКАЗ, А НЕ ДВОЙНОЙ КАРМАН ──────────────────────────
+  //
+  // Раскладка, снятая ДО того, как токен UNI начал что-то значить, хранит обе копии одной детали
+  // (`PCK_L_UNI_M` и `PCK_L_UNI_S`) — и тогда это было ВЕРНО: разбор читал их как градацию (основа
+  // `PCK_L_UNI`, два хвоста), по карману на размер, и настил положил ровно по одному на изделие.
+  // Сегодня тот же блоб читается иначе: обе копии безразмерны, и каждая ложится в `agnosticCm2`,
+  // то есть в ОБЩУЮ часть КАЖДОГО размера. Площадь изделия молча вырастает на целый карман, а
+  // размеры вне состава уносят это удвоение в свою норму.
+  //
+  // Прежние проверки сюда не достают по построению: они ловят ОДНУ идентичность «и с хвостом, и
+  // без», а здесь идентичности РАЗНЫЕ — это два разных имени, назвавшихся одной деталью.
+  //
+  // ОТКАЗ, А НЕ ДЕДУП, и это выбор, а не осторожность. Дедуп пришлось бы делать по геометрии, а
+  // здесь её нет: блоб хранит площадь и количество на изделие, записанные для КАЖДОЙ копии
+  // отдельно (в модалке количество ставится на каждую разобранную деталь). Схлопнуть их — значит
+  // выбрать одно из двух количеств, ровно ту догадку, которую отказ десятью строками выше уже
+  // запретил для градуированной детали («какое из них у размера вне состава, сказать нечем»).
+  // Блоб — это ЗАМЕР прошлого прогона; переписывать его, чтобы он подошёл сегодняшнему парсеру,
+  // значит объяснять старое измерение новым ответом. План принял это следствие сознательно:
+  // раскладка пересниматься умеет, и новая (уже с дедупом Т1б) выйдет честной.
+  {
+    const groups = uniGroupsOf(storedUniEntries);
+    const gradedCi = new Set([...graded.keys()].map((k) => normBlock(k).toLowerCase()));
+    const gradedVsUni = uniGradedConflicts(groups, gradedCi);
+    const flagged = new Set(gradedVsUni.map((c) => c.subject.toLowerCase()));
+    const conflicts = [
+      ...gradedVsUni,
+      ...uniDuplicateConflicts(groups).filter((c) => !flagged.has(c.subject.toLowerCase())),
+    ];
+    if (conflicts.length > 0) {
+      return { ok: false, reason: `${uniConflictReason(conflicts)}. Переснимите раскладку` };
+    }
   }
 
   // ── сторона ФАЙЛА: площадь каждой градуированной детали в каждом размере ───────────────

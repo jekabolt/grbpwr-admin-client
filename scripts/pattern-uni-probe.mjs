@@ -581,5 +581,57 @@ console.log('\nR2c · РЕГРЕССИЯ: разные uniBase не сталки
      spare.ok ? '' : spare.reason);
 }
 
+console.log('\nR1 · БЛОБ: продолжение старой склеенной раскладки отказывает, а не удваивает');
+{
+  const markerOf = (names, areaCm2 = 200) => ({
+    summary: { id: 1, seamAllowanceMm: { value: '0' }, contourLayer: '1', grainLayer: '' },
+    layout: {
+      schemaVersion: 4,
+      pieces: names.map((n, i) => ({ pieceId: i + 1, name: n, blockName: n, quantity: 1, areaCm2 })),
+      placements: [],
+    },
+  });
+  const ask = (storedNames, parsedNames) =>
+    m.sizeAreasFromParsed({
+      marker: markerOf(storedNames),
+      parsed: (parsedNames ?? storedNames).map((n, i) => m.piece(i + 1, n, { areaCm2: 200 })),
+      sizeIds: SIZE_IDS, tokensOfSize: (id) => TOKENS[id] ?? [], isSizeToken: m.isSizeToken,
+    });
+
+  // ЧТО СЧИТАЕТСЯ ПРАВДОЙ: один карман на изделие — общая часть каждого размера 200 см².
+  const one = ask(['PCK_L_UNI_M']);
+  ck(one.ok === true, 'блоб с одной копией продолжается', one.ok ? '' : one.reason);
+  ck(one.ok && one.areas.agnosticCm2 === 200, 'общая часть = 200 см² (одна деталь)',
+     one.ok ? String(one.areas.agnosticCm2) : '');
+
+  // Тот же карман, сохранённый ДО этого деплоя двумя копиями: тогда разбор читал их как градацию
+  // и настил положил по одному на изделие. Сегодня обе безразмерны — и обе легли бы в общую часть.
+  const two = ask(['PCK_L_UNI_M', 'PCK_L_UNI_S']);
+  ck(two.ok === false, 'блоб с двумя копиями одной детали — ОТКАЗ (было бы 400 см²)',
+     two.ok ? String(two.areas.agnosticCm2) : '');
+  ck(!two.ok && two.reason.includes('PCK_L_UNI_M') && two.reason.includes('PCK_L_UNI_S'),
+     'отказ называет обе копии', !two.ok ? two.reason : '');
+  ck(!two.ok && two.reason.includes('Переснимите раскладку'), 'и называет выход');
+
+  // Прежние проверки сюда не достают по построению: они ловят ОДНУ идентичность «и с хвостом, и
+  // без», а тут идентичности разные. Убеждаемся, что сработала именно новая.
+  ck(!two.ok && !two.reason.includes('и с размерным хвостом, и без'),
+     'сработал вердикт о копиях, а не старая проверка про хвост');
+
+  // Размерный ряд и UNI на одну основу — тот же отказ и на этом пути.
+  const gradedPck = ['PCK_L_XS', 'PCK_L_S', 'PCK_L_M', 'PCK_L_L', 'PCK_L_XL'];
+  const mixed = ask([...gradedPck, 'PCK_L_UNI_M', ...m.GRADED], [...gradedPck, 'PCK_L_UNI_M', ...m.GRADED]);
+  ck(mixed.ok === false, 'ряд + UNI в блобе — отказ', mixed.ok ? 'ok!' : '');
+  ck(!mixed.ok && mixed.reason.includes('противоречат друг другу'), 'теми же словами',
+     !mixed.ok ? mixed.reason : '');
+
+  // РЕГРЕССИЯ: разные uniBase в блобе — не копии, продолжение работает как прежде.
+  const distinct = ask(m.PCK_UNI);
+  ck(distinct.ok === true, 'четыре разных uniBase в блобе — продолжение как было',
+     distinct.ok ? '' : distinct.reason);
+  ck(distinct.ok && distinct.areas.agnosticCm2 === 800, 'общая часть = четыре кармана',
+     distinct.ok ? String(distinct.areas.agnosticCm2) : '');
+}
+
 console.log(bad === 0 ? '\nВСЁ ЗЕЛЁНОЕ' : `\nПРОВАЛОВ: ${bad}`);
 process.exit(bad ? 1 : 0);
