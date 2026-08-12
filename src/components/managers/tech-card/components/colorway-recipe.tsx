@@ -12,6 +12,7 @@ import {
   UpdateColorwayRequest,
   common_TechCardMarkerSummary,
 } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import {
   composeArticleFromMaterial,
   materialCompositionCode,
@@ -28,6 +29,7 @@ import { techCardKeys } from 'components/managers/tech-cards/components/useTechC
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { techCardLabDipStatusOptions } from 'constants/filter';
 import { composition as compositionDict } from 'constants/garment-composition';
+import { SECTION } from 'constants/routes';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -50,6 +52,7 @@ import Text from 'ui/components/text';
 import { Tile, Tiles } from 'ui/components/tiles';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
+import { ColorwayDeleteControl } from './colorway-delete';
 import { normSourceLabel } from './costing-vocab';
 import { DxfApplyHint } from './dxf-apply';
 import { MarkerApplyHint } from './marker-apply';
@@ -4090,7 +4093,22 @@ export function ColorwayRecipes({
   canEdit: boolean;
 }) {
   const { dictionary } = useDictionary();
-  const colorways = techCard?.colorways ?? [];
+  const { canWrite } = usePermissions();
+  // УДАЛЕНИЕ КОЛОРВЕЯ ГЕЙТИТСЯ ПРАВОМ НА ПРОДУКТЫ, А НЕ `canEdit`. Это то же право, которым
+  // LifecycleControls открывает архивирование, и это не совпадение: удаление и архивирование —
+  // два исхода одного решения о судьбе ПРОДУКТА, и разъехавшиеся права дали бы аккаунт, который
+  // может стереть продукт, но не может его спрятать. `canEdit` тут не годится ещё и потому, что в
+  // нём сидит `!frozen`: см. комментарий о RELEASED в colorway-delete.tsx.
+  const canDeleteProduct = canWrite(SECTION.products);
+  // УДАЛЁННЫЕ ПРЯЧЕМ СРАЗУ, не дожидаясь рефетча карточки. Инвалидация уже запущена, но между ней и
+  // приехавшим ответом список ещё содержит стёртый колорвей — а он к этому моменту не существует:
+  // его плитка, его редактор и его выбор указывали бы на продукт, которого нет. Фильтр монотонный
+  // (id, однажды удалённый, не вернётся), поэтому после рефетча он превращается в no-op.
+  const [deletedIds, setDeletedIds] = useState<ReadonlySet<number>>(() => new Set());
+  const colorways = useMemo(
+    () => (techCard?.colorways ?? []).filter((c) => !deletedIds.has(c.colorwayId ?? 0)),
+    [techCard?.colorways, deletedIds],
+  );
   // The card's cut pieces, LIVE from form state — the same source every other piece picker reads —
   // so a piece added seconds ago in the table above appears in each recipe immediately, without a
   // save round-trip. addPiece mints the stable lineKey up front, and under the card's one save the
@@ -4249,6 +4267,18 @@ export function ColorwayRecipes({
     });
   }, []);
 
+  // ПОСЛЕ УДАЛЕНИЯ ВЫБОР ОБЯЗАН ПЕРЕЕХАТЬ. `selected` может быть и null — тогда активен
+  // colorways[0], и если стёрли именно его, вкладка осталась бы смотреть на несуществующий продукт
+  // молча. Поэтому сравниваем с ВЫЧИСЛЕННЫМ activeId, а не с `selected`, и адресуем соседа
+  // ЯВНО, из текущего списка: `setSelected(null)` снова упёрлось бы в colorways[0], то есть в тот
+  // же удалённый элемент, пока не приедет рефетч.
+  const handleDeleted = (deletedId: number) => {
+    setDeletedIds((prev) => new Set(prev).add(deletedId));
+    if (activeId !== deletedId) return;
+    const survivor = colorways.find((c) => c.colorwayId !== deletedId);
+    setSelected(survivor?.colorwayId ?? null);
+  };
+
   return (
     <div className='flex flex-col gap-2.5'>
       {/* This half shares the tab with the cut-piece table above it, so it has to announce itself —
@@ -4263,14 +4293,32 @@ export function ColorwayRecipes({
 
       <Tiles min={120}>
         {colorways.map((cw) => (
-          <ColorwayTile
-            key={cw.colorwayId}
-            colorway={cw}
-            hex={hexByCode.get(cw.colorCode ?? '')}
-            status={statuses[cw.colorwayId ?? 0]}
-            selected={activeId === cw.colorwayId}
-            onSelect={() => setSelected(cw.colorwayId ?? null)}
-          />
+          // Плитка и удаление — СОСЕДИ, а не вложение: Tile с onClick рендерится как <button>, и
+          // контрол внутри него был бы кнопкой в кнопке (невалидная разметка, и клик по удалению
+          // всплывал бы в выбор плитки).
+          <div key={cw.colorwayId} className='flex min-w-0 flex-col gap-1'>
+            <ColorwayTile
+              colorway={cw}
+              hex={hexByCode.get(cw.colorCode ?? '')}
+              status={statuses[cw.colorwayId ?? 0]}
+              selected={activeId === cw.colorwayId}
+              onSelect={() => setSelected(cw.colorwayId ?? null)}
+            />
+            {/* ТОЛЬКО ПОД ВЫБРАННОЙ ПЛИТКОЙ. Удаление — жест по одному продукту, тому самому, чей
+                рецепт открыт ниже; сетка из N необратимых контролов и приглашает промахнуться, и
+                перестаёт читаться как сетка цветов. Так же это делает жест двухшаговым: сначала
+                выбрать продукт, потом стереть его. */}
+            {canDeleteProduct && activeId === cw.colorwayId && (
+              <ColorwayDeleteControl
+                colorwayId={cw.colorwayId ?? 0}
+                code={colorwayTitle(cw)}
+                techCardId={techCardId}
+                lockVersion={cw.lockVersion ?? lockVersion}
+                isLastColorway={colorways.length === 1}
+                onDeleted={() => handleDeleted(cw.colorwayId ?? 0)}
+              />
+            )}
+          </div>
         ))}
         {canEdit && (
           <Tile
