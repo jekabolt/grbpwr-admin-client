@@ -177,9 +177,17 @@ export function LayEditor({
 
   // Кандидаты на копирование — карточные раскладки ЭТОГО слота. Норма выносится вперёд: она
   // и есть тот самый «скопировать норму в прогон».
+  //
+  // ЧЕРНОВИКИ УХОДЯТ В КОНЕЦ, но остаются в списке: копировать их нельзя (кнопка гасится в пикере
+  // с причиной), а прятать — значит отвечать молчанием тому, кто ищет раскладку, которую только
+  // что видел на карточке. Норма при этом остаётся первой: черновик нормой не бывает.
   const copySources = cardMarkers
     .filter((m) => (m.bomLineKey ?? '') === bomLineKey && bomLineKey !== '')
-    .sort((a, b) => Number(b.isNorm ?? false) - Number(a.isNorm ?? false));
+    .sort(
+      (a, b) =>
+        Number(a.isDraft ?? false) - Number(b.isDraft ?? false) ||
+        Number(b.isNorm ?? false) - Number(a.isNorm ?? false),
+    );
 
   // ── живые итоги, §7.1 ──────────────────────────────────────────────────────
   // cloth = Σ (used_length × plies);  end_loss_total = 2 × end_loss × Σ plies;  planned = сумма.

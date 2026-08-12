@@ -47,6 +47,8 @@ import {
   exportFileName,
   legacyPairOf,
   markerToView,
+  isDraftMarker,
+  refusalWord,
   scalarNormRefusal,
   type MarkerBomLine,
   type MarkerCompositionEntry,
@@ -798,6 +800,26 @@ export function NestingModal({
   // and efficiency_pct is a 0..100 column. Clamp once, use everywhere.
   const effPct = effective ? Math.min(100, effective.efficiency * 100) : 0;
 
+  // ═══ ЧАСТИЧНАЯ ГЕОМЕТРИЯ НЕ ВЫПУСКАЕТСЯ В ЦЕХ ══════════════════════════════════════════════
+  //
+  // Раскладка, у которой легла ЧАСТЬ деталей, — это ЧЕРНОВИК (0299): она законно хранится, её
+  // законно видно и её законно пересчитывают. Чего с ней делать НЕЛЬЗЯ — так это отдавать в
+  // производство: SVG на печать и DXF на плоттер описывают изделие, у которого не хватает деталей,
+  // и по этим файлам режут ткань. Ошибка при этом не выглядит ошибкой — файл открывается, контуры
+  // на месте, слои те же; недостающих деталей в нём просто НЕТ.
+  //
+  // Предикат один на два случая, и это намеренно: сохранённый черновик (счётчики приезжают со
+  // сводки) и НЕДОСЧИТАННЫЙ ЖИВОЙ ПРОГОН в этом же окне (счётчики от движка) — одна и та же
+  // частичная геометрия, и запрет обязан быть одинаков. Модалка и раньше не давала СОХРАНИТЬ
+  // такую раскладку, но экспорт оставался открытым — то есть закрытой была дверь в базу, а не в
+  // цех.
+  const partialGeometry =
+    !!effective && effective.totalCount > 0 && effective.placedCount !== effective.totalCount;
+  const viewIsDraft = isDraftMarker(view?.summary);
+  const partialExportRefusal = partialGeometry
+    ? `уложено ${effective?.placedCount ?? 0} из ${effective?.totalCount ?? 0} деталей: экспорт частичной раскладки запрещён — по такому файлу выкроят изделие без недостающих деталей. Поднимите бюджет поиска и пересчитайте${viewIsDraft ? ' (это ЧЕРНОВИК)' : ''}`
+    : '';
+
   // «НЕ ВЛЕЗЛО» — a different fact from «нарушения», and the panel has to keep them apart.
   //
   // A violation is a marker the engine BUILT whose clearances a human may still accept: the
@@ -951,11 +973,14 @@ export function NestingModal({
     // недоступен: чертежа в нём просто не окажется, и сказать об этом внутри файла нечем. Значит
     // его честность — только этот гейт. Без него починка DXF просто переносит ложь в соседнюю
     // кнопку (спека §7.4, дефект D).
-    if (s && !viewDegraded && !running && !drawingBlocked) download(s, 'image/svg+xml', 'svg');
+    if (s && !viewDegraded && !running && !drawingBlocked && !partialGeometry)
+      download(s, 'image/svg+xml', 'svg');
   };
   // Plotter export: R12 DXF of the finished layout, true contours, cm — the EFFECTIVE
   // placements, so a hand-adjusted marker cuts exactly what the operator sees.
-  const dxfReady = (viewData != null && !viewDegraded && !drawingBlocked) || run.phase === 'done';
+  const dxfReady =
+    !partialGeometry &&
+    ((viewData != null && !viewDegraded && !drawingBlocked) || run.phase === 'done');
   const downloadDxf = () => {
     if (!dxfReady || !effective) return;
     download(renderLayoutDxf(effective, displayPieces, displayWidth), 'application/dxf', 'dxf');
@@ -2804,6 +2829,17 @@ export function NestingModal({
               посчитана без них; сохранить норму нельзя, пока каждая деталь не легла.
             </CalloutBox>
           )}
+          {/* ЧЕРНОВИК НАЗЫВАЕТСЯ ЧЕРНОВИКОМ В ЕДИНСТВЕННОМ ОКНЕ, ГДЕ ЕГО ГЕОМЕТРИЮ ВИДНО.
+              Открытая раскладка выглядит нормальной: контуры на месте, длина и КПД напечатаны — а
+              то, что это 30 деталей из 45, читалось только по счётчику «размещено», который рядом
+              с «эффективность» выглядит бухгалтерской подробностью. Здесь же сказано, что экспорта
+              не будет: печать и плоттер — это дорога в цех. */}
+          {partialGeometry && (
+            <CalloutBox tone='error'>
+              {viewIsDraft ? 'ЧЕРНОВИК: ' : 'частичная раскладка: '}
+              {partialExportRefusal}
+            </CalloutBox>
+          )}
           {violations.length > 0 && !running && (
             <CalloutBox tone='warning'>
               нарушения: {violations.length}
@@ -2843,17 +2879,16 @@ export function NestingModal({
                   }
                   sub={
                     viewRefusal
-                      ? // Причина ИЗ СОСТАВА, а не одна на всё: нечитаемый состав (испорченная
-                        // строка, частичный рестор) — другой отказ, и звать его «смешанным»
-                        // значит отправить оператора чинить не то.
+                      ? // Причина ИЗ ОДНОГО СЛОВАРЯ (refusalWord): черновик, смешанный состав либо
+                        // нечитаемый состав — это три РАЗНЫХ отказа, и назвать один другим значит
+                        // отправить оператора чинить не то. До правки черновик здесь представлялся
+                        // «смешанным составом» или «состав не читается» — то есть единственное
+                        // место, где короткая длина видна рядом с КПД, про черновик молчало.
                         //
                         // Читается ТЕМ ЖЕ источником, что и сам отказ, — сводкой строки. viewData
                         // берёт состав из БЛОБА в первую очередь, и у маркера, чья проекция
-                        // размеров потеряна, а блоб цел, диагноз разошёлся бы с отказом: сервер
-                        // говорит «не читается», подпись — «смешанный».
-                        compositionOf(view.summary).length > 1
-                        ? 'смешанный состав — нормы нет'
-                        : 'состав не читается — нормы нет'
+                        // размеров потеряна, а блоб цел, диагноз разошёлся бы с отказом.
+                        `${refusalWord(view.summary)} — нормы нет`
                       : `изделий: ${viewData.totalUnits || 1}`
                   }
                 />
@@ -3148,15 +3183,16 @@ export function NestingModal({
             <Button
               type='button'
               variant='secondary'
-              disabled={!effective || running || viewDegraded || drawingBlocked}
+              disabled={!effective || running || viewDegraded || drawingBlocked || partialGeometry}
               title={
-                viewDegraded
+                partialExportRefusal ||
+                (viewDegraded
                   ? 'геометрия маркера нечитаема — доступна только сводка'
                   : drawing.phase === 'running'
                     ? 'восстанавливаем чертёж детали по выкройкам…'
                     : drawing.phase === 'error'
                       ? `чертёж не восстановлен: ${rebuildText}`
-                      : undefined
+                      : undefined)
               }
               onClick={downloadSvg}
             >
@@ -3167,13 +3203,14 @@ export function NestingModal({
               variant='secondary'
               disabled={!dxfReady}
               title={
-                viewDegraded
+                partialExportRefusal ||
+                (viewDegraded
                   ? 'геометрия маркера нечитаема — доступна только сводка'
                   : drawing.phase === 'running'
                     ? 'восстанавливаем чертёж детали по выкройкам…'
                     : drawing.phase === 'error'
                       ? `чертёж не восстановлен: ${rebuildText}`
-                      : 'DXF R12 для реза — контуры на слое CUT, чертёж INNER/SEAM, кромка STRIP, подписи LABELS'
+                      : 'DXF R12 для реза — контуры на слое CUT, чертёж INNER/SEAM, кромка STRIP, подписи LABELS')
               }
               onClick={downloadDxf}
             >
@@ -3187,8 +3224,13 @@ export function NestingModal({
               <Button
                 type='button'
                 variant='secondary'
-                disabled={!effective || running}
-                title={`то же, что система выдавала до починки: контуры и кромка, БЕЗ линии шва и надсечек. Причина: ${rebuildText}`}
+                // Плоттерный выход — тот же запрет: контурный файл частичной раскладки режет ткань
+                // ровно так же, как полный, только изделие в нём неполное.
+                disabled={!effective || running || partialGeometry}
+                title={
+                  partialExportRefusal ||
+                  `то же, что система выдавала до починки: контуры и кромка, БЕЗ линии шва и надсечек. Причина: ${rebuildText}`
+                }
                 onClick={downloadContoursOnly}
               >
                 DXF: только контуры
