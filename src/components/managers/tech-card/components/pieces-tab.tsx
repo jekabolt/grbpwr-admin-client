@@ -6,6 +6,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Canvas, Pin } from 'ui/components/canvas';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
@@ -287,32 +288,42 @@ export function PiecesTab({
     return m;
   }, [index, blocksByPiece]);
 
-  // ДЕТАЛИ, КОТОРЫЕ ДЕРЖИТ РЕЦЕПТ КОЛОРВЕЯ, — по ключу детали, со списком колорвеев.
+  // ЧТО УЕДЕТ ВМЕСТЕ С ДЕТАЛЬЮ — по ключу детали: колорвеи, чей рецепт её держит, сколько строк и
+  // сколько из них несут ЧИСЛО (норму), а не только назначение ткани.
   //
-  // Строка рецепта, привязанная к детали, ссылается на неё внешним ключом ON DELETE RESTRICT
-  // (fk_usage_piece), а рецепт живёт в ДРУГОМ RPC — сохранение карточки его не редактирует и
-  // отредактировать не может. Значит удаление такой детали не «рискованное», а невозможное: сервер
-  // роняет ВЕСЬ сейв карточки, по одной детали за попытку.
+  // Строка рецепта ссылается на деталь внешним ключом ON DELETE RESTRICT (fk_usage_piece), поэтому
+  // сервер удаляет такие строки ВМЕСТЕ с деталью, в той же транзакции. Иначе карточка запиралась
+  // насмерть: рецепт правится другим RPC, сохранение карточки его не трогает, а строка эта заводится
+  // самым обычным действием — «назначить детали ткань», — так что на разобранной карточке держатся
+  // ВСЕ детали разом. Заменил чертёж на файл с другими именами блоков — и каждое сохранение
+  // отказывает по одной детали за раз.
   //
-  // ПОЧЕМУ ЭТО НАДО ЛОВИТЬ ЗДЕСЬ. Строка детали в рецепте появляется от обычного действия —
-  // «назначить детали ткань», — так что на разобранной карточке держатся ВСЕ детали разом. Замена
-  // чертежа на файл с другими блоками (а «↔ детали кроя» заводит под них новые детали) оставляет
-  // старые сиротами, и оператор их удаляет — по одной, получая по отказу на каждое сохранение, и
-  // каждый отказ называет ULID, которого нет ни на одном экране.
+  // ЗДЕСЬ ЖЕ — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЭТО МОЖНО ПОКАЗАТЬ ДО ТОГО, КАК ОНО СЛУЧИТСЯ. Назначение
+  // ткани без детали — утверждение без подлежащего, и терять его не жалко; вписанная норма — это
+  // число, которое кто-то считал, и о нём предупреждают отдельной строкой.
   //
-  // ЭТА ПРОВЕРКА НЕ ПОЛНАЯ, И СЕРВЕРНАЯ ОСТАЁТСЯ ГЛАВНОЙ. Чтение карточки скрывает АРХИВНЫЕ
-  // колорвеи, а их строки рецепта держат деталь ровно так же. Такую деталь здесь удалить дадут, и
-  // откажет сервер — теперь по имени детали и с указанием, что держатель может быть архивным.
+  // ПРОЕКЦИЯ НЕПОЛНАЯ: чтение карточки скрывает АРХИВНЫЕ колорвеи, а их строки держат деталь так же
+  // и так же уедут. Поэтому подтверждение говорит «и в архивных, если они есть», а не молчит.
   const recipeHoldersByPiece = useMemo(() => {
-    const m = new Map<string, string[]>();
+    const m = new Map<string, { colorways: string[]; rows: number; withNorm: number }>();
+    const hasNorm = (u: {
+      consumption?: { value?: string } | null;
+      quantity?: { value?: string } | null;
+      sizeConsumptions?: unknown[];
+    }) =>
+      !!u.consumption?.value?.trim() ||
+      !!u.quantity?.value?.trim() ||
+      (u.sizeConsumptions?.length ?? 0) > 0;
     for (const c of techCard?.colorways ?? []) {
       const label = c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? ''}`;
       for (const u of c.usages ?? []) {
         const key = (u.pieceLineKey ?? '').trim().toLowerCase();
         if (!key) continue;
-        const list = m.get(key) ?? [];
-        if (!list.includes(label)) list.push(label);
-        m.set(key, list);
+        const cur = m.get(key) ?? { colorways: [], rows: 0, withNorm: 0 };
+        if (!cur.colorways.includes(label)) cur.colorways.push(label);
+        cur.rows += 1;
+        if (hasNorm(u)) cur.withNorm += 1;
+        m.set(key, cur);
       }
     }
     return m;
@@ -682,14 +693,27 @@ export function PiecesTab({
   // не первой детали списка: при чистке хвоста в 40 строк панель, прыгающая каждый раз в начало,
   // заставляла бы заново прокручивать плитки после каждого удаления. Сосед берётся из снимка
   // `fields` ДО remove — id выживших строк useFieldArray сохраняет.
-  // Колорвеи, чей рецепт держит ВЫБРАННУЮ деталь. Пусто — удалять можно.
-  const selRecipeHolders = selKey ? recipeHoldersByPiece.get(selKey.toLowerCase()) ?? [] : [];
+  // Что уедет вместе с ВЫБРАННОЙ деталью. undefined — рецепт её не держит, удаление ничего не уносит.
+  const selRecipeHold = selKey ? recipeHoldersByPiece.get(selKey.toLowerCase()) : undefined;
 
-  const removeSelected = () => {
-    if (selIndex < 0 || selRecipeHolders.length > 0) return;
+  const dropSelected = () => {
+    if (selIndex < 0) return;
     const neighbour = fields[selIndex - 1]?.id ?? fields[selIndex + 1]?.id ?? null;
     removePiece(selIndex);
     setSelectedId(neighbour);
+  };
+
+  // ПОДТВЕРЖДЕНИЕ — ТОЛЬКО КОГДА ЕСТЬ ЧТО УНОСИТЬ. Деталь без строк рецепта удаляется одним кликом,
+  // как раньше: лишний диалог на пустом месте учит жать «да» не глядя, и тогда он не работает там,
+  // где нужен.
+  const [confirmDrop, setConfirmDrop] = useState(false);
+  const removeSelected = () => {
+    if (selIndex < 0) return;
+    if (selRecipeHold) {
+      setConfirmDrop(true);
+      return;
+    }
+    dropSelected();
   };
 
   return (
@@ -945,13 +969,9 @@ export function PiecesTab({
               variant='secondary'
               size='xs'
               aria-label='remove piece'
-              // ОТКАЗ СТОИТ НА КНОПКЕ, А НЕ НА СОХРАНЕНИИ. Строку рецепта сохранение карточки не
-              // удаляет и удалить не может (рецепт — отдельный RPC), поэтому «удалить» здесь не
-              // рискованное действие, а невыполнимое: оно уронило бы весь сейв на FK.
-              disabled={selRecipeHolders.length > 0}
               title={
-                selRecipeHolders.length > 0
-                  ? `удалить нельзя: деталь держат строки рецепта колорвеев ${selRecipeHolders.join(', ')}. Уберите строку этой детали на вкладке colorways — сохранение карточки рецепт не трогает`
+                selRecipeHold
+                  ? `вместе с деталью уедут её строки рецепта (${selRecipeHold.colorways.join(', ')})`
                   : undefined
               }
               onClick={removeSelected}
@@ -1090,19 +1110,17 @@ export function PiecesTab({
                   ))}
                   <Text size='nano' variant='label' component='p'>
                     редактируется на вкладке colorways — строками этой детали в рецепте колорвея.
-                    Пока такая строка есть, деталь НЕЛЬЗЯ удалить: сохранение карточки рецепт не
-                    трогает, и сервер отвергает весь сейв
+                    Удаление детали уносит эти строки вместе с ней
                   </Text>
                 </div>
               )}
 
               {/* Рецепт держит деталь, а слой назвать нечем: строка рецепта ссылается на строку BOM,
-                  которой в карточке уже нет. Для блока выше это «нечего показать», и он молчит — а
-                  кнопка «удалить» при этом заблокирована. Молчаливо заблокированная кнопка читается
-                  как поломка, поэтому причина называется здесь отдельно. */}
-              {selRecipeHolders.length > 0 && selLayerRows.length === 0 && (
+                  которой в карточке уже нет. Для блока выше это «нечего показать», и он молчит —
+                  тогда об уезжающих строках сказать больше некому. */}
+              {selRecipeHold && selLayerRows.length === 0 && (
                 <Text size='nano' variant='label' component='p'>
-                  {`деталь держат строки рецепта колорвеев ${selRecipeHolders.join(', ')} (слой назвать нечем — строка рецепта ссылается на строку BOM, которой в карточке уже нет). Удалить деталь нельзя, пока эти строки не убраны на вкладке colorways`}
+                  {`деталь держат строки рецепта колорвеев ${selRecipeHold.colorways.join(', ')} (слой назвать нечем — строка ссылается на строку BOM, которой в карточке уже нет). Удаление детали уносит их вместе с ней`}
                 </Text>
               )}
 
@@ -1327,6 +1345,42 @@ export function PiecesTab({
             </div>
           </div>
         </Section>
+      )}
+
+      {/* УДАЛЕНИЕ ДЕТАЛИ, КОТОРУЮ ДЕРЖИТ РЕЦЕПТ, — ОДНО ДЕЙСТВИЕ, А НЕ ЗАПРЕТ. Раньше здесь стоял
+          отказ, и он запирал карточку: снять строку рецепта можно только на другой вкладке, по
+          одной, в каждом колорвее. Теперь строки уезжают вместе с деталью (сервер удаляет их в той
+          же транзакции), а диалог называет, что именно уедет, — потому что назначение ткани без
+          детали не жалко, а вписанную норму жалко, и разницу должен видеть человек. */}
+      {confirmDrop && sel && selRecipeHold && (
+        <ConfirmationModal
+          open
+          onOpenChange={(o: boolean) => {
+            if (!o) setConfirmDrop(false);
+          }}
+          onConfirm={() => {
+            setConfirmDrop(false);
+            dropSelected();
+          }}
+          onCancel={() => setConfirmDrop(false)}
+          title={`удалить деталь «${sel.name?.trim() || '—'}»?`}
+          confirmLabel='удалить деталь и её строки рецепта'
+        >
+          <div className='space-y-2'>
+            <CalloutBox tone='warning'>
+              {`Вместе с деталью будут удалены её строки в рецепте: ${selRecipeHold.rows} шт. в колорвеях ${selRecipeHold.colorways.join(', ')} (и в архивных, если они есть, — карточка их не показывает). Это назначения ткани на эту деталь: без самой детали они ни во что не входят.`}
+            </CalloutBox>
+            {selRecipeHold.withNorm > 0 && (
+              <CalloutBox tone='warning'>
+                {`Из них ${selRecipeHold.withNorm} несут вписанную НОРМУ расхода — это числа, которые кто-то считал, и восстановить их будет неоткуда. Если деталь удаляется по ошибке, отмените и проверьте рецепт на вкладке colorways.`}
+              </CalloutBox>
+            )}
+            <Text size='nano' variant='label' component='p'>
+              удаление применяется при СОХРАНЕНИИ карточки — до него ничего не потеряно, и отменить
+              его можно, перечитав карточку
+            </Text>
+          </div>
+        </ConfirmationModal>
       )}
     </>
   );
