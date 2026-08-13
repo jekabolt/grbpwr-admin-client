@@ -48,6 +48,7 @@ import Media from 'ui/components/media';
 import { Pill } from 'ui/components/pill';
 import { Placeholder } from 'ui/components/placeholder';
 import Select from 'ui/components/select';
+import { Stat, StatGrid } from 'ui/components/stat-grid';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import CheckboxField from 'ui/form/fields/checkbox-field';
@@ -86,7 +87,7 @@ import {
   roleSuggestions,
 } from './bom-roles';
 import { materialFabricWeight, materialFabricWidth } from './nesting/fabric-weight';
-import { markersForLine } from './nesting/marker-io';
+import { bomUnitKind, markersForLine } from './nesting/marker-io';
 import { TechCardFormData, wireInt } from './schema';
 import { unitOptions } from './tech-card-options';
 
@@ -296,32 +297,240 @@ function SlotIdentityFields({ index }: { index: number }) {
   );
 }
 
-// This style's use of the article — the ONLY three controls a linked line owns. Everything else on
-// a linked line is a catalog fact, rendered as a plate (below) rather than as disabled inputs.
+// Мерная нерулонная секция, у которой процент остаётся ручным (резинка, тесьма, стропа, велкро).
+const TRIM_SECTION = 'TECH_CARD_BOM_SECTION_TRIM';
+
+/** Строка рецепта, несущая НОРМУ этого слота (не привязку материала к детали), с её провенансом. */
+type SlotNormRow = { sku: string; marker: boolean; measured: boolean };
+
+// КТО СЕГОДНЯ КРОИТ ЭТОТ СЛОТ И КАК ПОЛУЧЕНА ЕГО НОРМА. Читается из ЧТЕНИЯ карточки
+// (techCard.colorways[].usages), а не из формы: рецепт колорвея живёт своим RPC и в состоянии этой
+// формы не лежит вовсе. Сохранение рецепта инвалидирует чтение карточки (useUpdateColorwayRecipe),
+// поэтому только что снятая раскладка комплекта здесь уже видна.
+//
+// ЗАЧЕМ ЭТО ЛЕСТНИЦЕ. «У слота есть раскладка» и «норма слота измерена» — РАЗНЫЕ утверждения, и
+// путать их дорого: процент не начисляется не тогда, когда раскладка снята, а тогда, когда строка
+// рецепта несёт consumption_source='marker' (серверный wastageApplies). Раскладка, с которой норму
+// ещё не сняли, ничего не отменяет — процент всё ещё умножает закупку.
+//
+// СОПОСТАВЛЕНИЕ ПО bom_item_id: чтение не эмитит bom_line_key на строке рецепта вовсе
+// (ConvertRecipeUsagesToPb), ключ оставлен запасным на случай, когда однажды начнёт. Строка,
+// привязанная к ДЕТАЛИ, отбрасывается — это назначение материала, а не норма (T8): расхода у неё
+// нет, и гросс-апу нечего умножать.
+function slotNormRows(
+  colorways: common_AdminColorwayRef[] | undefined,
+  bomItemId: number,
+  lineKey: string,
+): SlotNormRow[] {
+  const rows: SlotNormRow[] = [];
+  for (const c of colorways ?? []) {
+    for (const u of c.usages ?? []) {
+      const mine =
+        (bomItemId > 0 && wireInt(u.bomItemId) === bomItemId) ||
+        (!!lineKey && !!u.bomLineKey && u.bomLineKey === lineKey);
+      if (!mine) continue;
+      if ((u.pieceLineKey ?? '').trim() || wireInt(u.pieceId) > 0) continue;
+      rows.push({
+        sku: c.baseSku?.trim() || c.colorCode?.trim() || `#${c.colorwayId ?? 0}`,
+        marker: (u.consumptionSource ?? '').trim() === 'marker',
+        // МЕРНАЯ строка рецепта — та, у которой есть расход (а не количество штук). Именно по
+        // этому признаку сервер решает, начислять ли гросс-ап вообще: счётную строку отсекает
+        // ранний возврат LineTotal («4 пуговицы остаются 4 пуговицами»).
+        measured: !!u.consumption?.value?.trim() || (u.sizeConsumptions?.length ?? 0) > 0,
+      });
+    }
+  }
+  return rows;
+}
+
+/** Список SKU колорвеев коротко: три и «ещё N» — строка рецепта не должна распирать колонку. */
+const skuList = (rows: SlotNormRow[]): string => {
+  const names = rows.map((r) => r.sku);
+  return names.length <= 3
+    ? names.join(', ')
+    : `${names.slice(0, 3).join(', ')} и ещё ${names.length - 3}`;
+};
+
+// Процент как читаемая величина: «+22%» вместо «22.00». Хвостовые нули — артефакт колонки
+// DECIMAL, а не точность оценки; само сохранённое значение не трогается.
+const pctLabel = (raw: string): string => {
+  const n = parseDecimalNumber(raw);
+  return Number.isFinite(n) ? `+${Number(n)}%` : '';
+};
+
+// This style's use of the article — the ONLY controls a linked line owns. Everything else on a
+// linked line is a catalog fact, rendered as a plate (below) rather than as disabled inputs.
 // No top padding: the GroupLabel's own top margin is the box's inner top space.
 //
-// ПРОЦЕНТ РАСКРОЯ (T7, волны 1+2). У поля «est. cutting wastage %» здесь стоит разбор: что это
-// за число, откуда его брать и с чем его НЕЛЬЗЯ путать. Прежняя подпись («depends on marker
-// efficiency») не говорила ни того, ни другого — и главное, ничем не защищала от переноса сюда
-// коэффициента раскроя артикула: у того ДРУГАЯ база (измеренная длина раскладки, выпады уже
-// внутри), и его ~4% на месте нужных ~20% занижают закупку на все межлекальные выпады — линейно
-// и незаметно. Волна 2 привезла расчёт: медиану «факт ÷ netto» по настилам артикула считает
-// сервер (GetBomWastageSuggestion), панель ниже показывает её с составом выборки и кладёт в поле
-// по нажатию — вместе со счётчиком настилов, по которому сервер и признаёт применение.
+// ПОЛЯ «est. cutting wastage %» ЗДЕСЬ БОЛЬШЕ НЕТ (W2), и это не запрет расчёта. Величина, которую
+// оно изображало, есть функция тройки: набор деталей слота × раскройная ширина артикула, который
+// пинует колорвей × размерный состав настила. Ни одна из трёх не является свойством строки BOM и
+// ни одна не известна в момент, когда форма спрашивает число, — оператор вводил не оценку, а
+// привычку. Поэтому процент стал ПОКАЗАТЕЛЕМ: величина, её происхождение и то, чем её заменить.
+// Арифметика не тронута — сервер применяет сохранённое значение ровно как применял
+// (entity.grossNorm: процент × коэффициент артикула), — убран ВВОД, а не расчёт.
+//
+// ЛЕСТНИЦА, СВЕРХУ ВНИЗ, РОВНО ОДНА АКТИВНАЯ СТУПЕНЬ (см. CuttingAllowance):
+//   1. норма снята с раскладки → процент не начисляется ВОВСЕ, и сказать это важнее, чем показать
+//      число: умножать ему нечего;
+//   2. раскладки нет, но по фактам настилов есть медиана → подставить её кнопкой (панель);
+//   3. ни того ни другого: число есть, но введено руками и никем не подтверждено → путь наверх
+//      называется вслух («раскладка комплекта…» в рецепте колорвея);
+//   4. числа нет вовсе → netto-норма уйдёт в закупку БЕЗ надбавки, то есть заниженной.
+//
+// НЕРУЛОННЫЕ СТРОКИ. Направление ткани на молнии бессмысленно, раскройной лестницы у фурнитуры нет
+// вовсе — обе не монтируются. Но гросс-ап сервер решает НЕ по секции: счётную строку отсекает
+// ранний возврат, а МЕРНАЯ (резинка, тесьма, стропа, нитка в метрах) гроссится ровно как ткань.
+// Поэтому мерная нерулонная строка процент СОХРАНЯЕТ, и он остаётся ручным: ни выкроек, ни
+// раскладок, ни фактов настилов у неё нет, и притворяться, что мы это считаем, нечестно. Зовётся
+// он там своим именем — обрезки и стыки, а не раскрой.
 function ThisStyleFields({
   index,
   material,
   markers,
+  colorways,
+  onOpenColorways,
 }: {
   index: number;
-  /** Привязанный артикул строки — ради его коэффициента раскроя (предупреждение о путанице). */
+  /** Привязанный артикул строки — ради его коэффициента раскроя (второй множитель нормы). */
   material?: common_Material;
-  /** Карточные раскладки (techCard.markers) — лестница «откуда взять процент» смотрит, есть ли
-   *  раскладка ЭТОГО слота: она сильнее любого процента, потому что её длина измерена. */
+  /** Карточные раскладки (techCard.markers) — есть ли раскладка ЭТОГО слота. */
   markers?: common_TechCardMarkerSummary[];
+  /** Колорвеи как READ — их рецепты говорят, измерена ли норма слота (см. slotNormRows). */
+  colorways?: common_AdminColorwayRef[];
+  /** Закрыть редактор и уйти на вкладку колорвеев — туда, где живёт «раскладка комплекта…». */
+  onOpenColorways?: () => void;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
+  const lineKey = (useWatch({ control, name: `bomItems.${index}.lineKey` }) as string) ?? '';
+  const bomItemId = wireInt(useWatch({ control, name: `bomItems.${index}.id` }));
+  const unit = (useWatch({ control, name: `bomItems.${index}.unit` }) as string) ?? '';
+  const rollGoods = isRollGoodsSection(rowSection);
+  const normRows = useMemo(
+    () => slotNormRows(colorways, bomItemId, lineKey),
+    [colorways, bomItemId, lineKey],
+  );
+  // МЕРНАЯ ЛИ ЭТА НЕРУЛОННАЯ СТРОКА — три независимых свидетеля, любого достаточно. Единица
+  // строки (метры/см/кг — тот же словарь, которым норма пишется в рецепт), секция trim (бейка,
+  // резинка, стропа — мерные по определению) и живой рецепт, где у слота стоит РАСХОД, а не
+  // количество. Ошибиться в сторону «показать» дешевле: спрятанный процент на строке, которую
+  // сервер гроссит, — это молчаливо заниженная закупка, а лишнее поле на счётной резинке — шум.
+  const measuredLine =
+    bomUnitKind(unit) != null || rowSection === TRIM_SECTION || normRows.some((r) => r.measured);
+
+  return (
+    <div className='border border-borderColor px-2 pb-2'>
+      <GroupLabel>how this style uses it</GroupLabel>
+      {rollGoods ? (
+        <CuttingAllowance
+          index={index}
+          material={material}
+          markers={markers}
+          normRows={normRows}
+          onOpenColorways={onOpenColorways}
+        />
+      ) : measuredLine ? (
+        <TrimAllowance index={index} />
+      ) : (
+        <CountedNote index={index} />
+      )}
+      <div className='mt-2'>
+        <TextareaField
+          name={`bomItems.${index}.comment`}
+          label='comment'
+          rows={2}
+          maxLength={1000}
+        />
+      </div>
+    </div>
+  );
+}
+
+// СЧЁТНАЯ СТРОКА. Ни направления ткани, ни процента: первое бессмысленно на молнии, второго ни
+// один расчёт не берёт — в костинге счётная строка выходит раньше любого гросс-апа.
+//
+// НО ЕСЛИ ПРОЦЕНТ НА НЕЙ УЖЕ ЛЕЖИТ — сказать это и дать его убрать. Спрятать инпут над непустым
+// значением и не оставить выхода значит завести данные, которых в админке больше не видно: число
+// продолжает ездить туда-обратно при каждом сохранении и печатается на бумаге тех-пака в строке
+// «fabric». Инертное в расчёте, оно всё ещё врёт глазу на фабрике.
+function CountedNote({ index }: { index: number }) {
+  const { control, setValue } = useFormContext<TechCardFormData>();
+  const stale = (
+    (useWatch({ control, name: `bomItems.${index}.wastagePercent` }) as string) ?? ''
+  ).trim();
+  return (
+    <div className='mt-1 space-y-1'>
+      <Text variant='label' size='micro'>
+        Счётная строка: расход задаётся штуками в рецепте колорвея, надбавок на раскрой у неё нет —
+        четыре пуговицы остаются четырьмя пуговицами.
+      </Text>
+      {stale !== '' && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Pill tone='mut'>{pctLabel(stale) || `${stale}%`}</Pill>
+          <Text size='nano' variant='label' component='span'>
+            процент остался на строке с прежних времён — ни один расчёт его не берёт, но он
+            печатается в тех-паке
+          </Text>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            onClick={() => {
+              setValue(`bomItems.${index}.wastagePercent`, '', { shouldDirty: true });
+              // Провенанс уходит вместе с числом: «медиана по N раскроям» без числа — подпись под
+              // прочерком, а сервер про пару (источник, счётчик) судит по значению.
+              setValue(`bomItems.${index}.wastageSource`, 'manual', { shouldDirty: true });
+              setValue(`bomItems.${index}.wastageLayCount`, 0, { shouldDirty: true });
+            }}
+          >
+            убрать
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// МЕРНАЯ НЕРУЛОННАЯ СТРОКА: процент остаётся, но это НЕ раскрой. У резинки и тесьмы нет ни
+// выкроек, ни раскладок, ни настилов — измерить эту величину нечем и подтвердить нечем, поэтому
+// лестницы у неё не бывает и поле честно остаётся ручным. Меняется только имя: то, что здесь
+// оплачивается, — обрезки при отрезании и стыки в рулоне.
+function TrimAllowance({ index }: { index: number }) {
+  return (
+    <div className='mt-1 space-y-1'>
+      <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+        <DecimalField
+          name={`bomItems.${index}.wastagePercent`}
+          label='запас на обрезки и стыки, %'
+        />
+      </div>
+      <Text variant='label' size='micro'>
+        Множитель на мерную норму строки: в закупку и в себестоимость идёт норма × (1 + %/100).
+        Раскладок и выкроек у мерной фурнитуры нет, поэтому число здесь ставится руками — и означает
+        оно обрезки при отрезании и стыки в рулоне, а не раскрой полотна.
+      </Text>
+    </div>
+  );
+}
+
+// РУЛОННАЯ СТРОКА: направление полотна и ЛЕСТНИЦА надбавки. Все хуки процента живут здесь — на
+// нерулонной строке этот компонент не монтируется вовсе, так что ни эффекта провенанса, ни запроса
+// предложения там не бывает.
+function CuttingAllowance({
+  index,
+  material,
+  markers,
+  normRows,
+  onOpenColorways,
+}: {
+  index: number;
+  material?: common_Material;
+  markers?: common_TechCardMarkerSummary[];
+  normRows: SlotNormRow[];
+  onOpenColorways?: () => void;
 }) {
   const { control, setValue } = useFormContext<TechCardFormData>();
-  const rowSection = useWatch({ control, name: `bomItems.${index}.section` }) as string | undefined;
   const lineKey = (useWatch({ control, name: `bomItems.${index}.lineKey` }) as string) ?? '';
   // Артикул слота — ИЗ ФОРМЫ, а не из пропа material: тот резолвится по загруженному списку
   // каталога и на холодном старте ещё пуст, а панель предложения не должна секунду утверждать
@@ -340,7 +549,9 @@ function ThisStyleFields({
   const wastageAppliedAt = useWatch({ control, name: `bomItems.${index}.wastageAppliedAt` }) as
     | string
     | undefined;
-  const rollGoods = isRollGoodsSection(rowSection);
+  // Выпущенная карта заморожена целиком: кнопка внутри <fieldset disabled> мертва, и вместо неё
+  // честнее написать словами, куда идти.
+  const frozen = useWatch({ control, name: 'approvalState' }) === RELEASED_STATE;
 
   // РУЧНАЯ ПРАВКА ЗНАЧЕНИЯ ГАСИТ ПРОВЕНАНС «lays» СРАЗУ, НЕ ДОЖИДАЯСЬ СЕРВЕРА — та же дисциплина,
   // что у ручной правки нормы в рецепте (colorway-recipe: правка числа пишет source=''). Сервер
@@ -387,102 +598,182 @@ function ThisStyleFields({
     setValue(`bomItems.${index}.wastageLayCount`, layCount, { shouldDirty: true });
     setValue(`bomItems.${index}.wastageAppliedAt`, '', { shouldDirty: false });
   };
+
   // Прогонные однодневки отсеивает markersForLine (cardMarkers внутри) — совет «снимите норму с
   // раскладки» на основании раскладки чужого заказа был бы советом взять число, которого нормой
   // быть не может.
   const slotMarkers = markersForLine(markers, lineKey);
   // «Задан» — по правилу сервера: всё меньше единицы EffectiveCuttingCoefficient читает как «не
-  // задано», и предупреждать о числе, которое ни один расчёт не берёт, значило бы пугать пустотой.
+  // задано», и говорить о числе, которое ни один расчёт не берёт, значило бы пугать пустотой.
   const coefRaw = decimalToInput(material?.cuttingCoefficient);
   const coefSet = Number.isFinite(Number(coefRaw)) && Number(coefRaw) >= 1;
+
+  const measuredRows = normRows.filter((r) => r.marker);
+  // Строки рецепта, которые процент ВСЁ ЕЩЁ гроссит: мерные и не марочные. Счётные сюда не
+  // попадают — их сервер отсекает раньше любого гросс-апа.
+  const grossedRows = normRows.filter((r) => !r.marker && r.measured);
+  const pct = pctLabel(wastageValue);
+
+  // РОВНО ОДНА АКТИВНАЯ СТУПЕНЬ. Порядок — сила утверждения: измеренная норма сильнее любой
+  // калибровки, снятая раскладка сильнее оценки, оценка сильнее пустоты.
+  const rung: 'measured' | 'markerIdle' | 'lays' | 'manual' | 'none' =
+    measuredRows.length > 0
+      ? 'measured'
+      : slotMarkers.length > 0
+        ? 'markerIdle'
+        : wastageValue === ''
+          ? 'none'
+          : wastageSource === 'lays'
+            ? 'lays'
+            : 'manual';
+
+  // Величина и её происхождение — ОДНОЙ плиткой, потому что порознь они не значат ничего: «22%»
+  // без провенанса неотличимо от привычки, а «введено руками» без числа не говорит о закупке.
+  const appliesNowhere = rung === 'measured' && grossedRows.length === 0;
+  const statValue = appliesNowhere ? 'не начисляется' : pct || '—';
+  const statSub = appliesNowhere
+    ? 'норма измерена раскладкой'
+    : rung === 'lays'
+      ? `${laysProvenancePhrase(wastageLayCount, stampWhen(wastageAppliedAt))}${
+          stampWhen(wastageAppliedAt) ? '' : ' — применится при сохранении'
+        }`
+      : wastageValue !== ''
+        ? 'введено руками — ничем не подтверждено'
+        : 'значения нет';
+
+  // Путь наверх называется вслух и одинаково на всех нижних ступенях: измеренная длина — это то,
+  // что закрывает вопрос совсем, а не ещё одна оценка получше.
+  const kitMarkerRoute = frozen ? (
+    <Text size='nano' variant='label'>
+      Выше по лестнице — измеренная длина: «раскладка комплекта…» в рецепте колорвея. На выпущенной
+      карточке её не снять — сначала верните карточку в draft.
+    </Text>
+  ) : (
+    <div className='flex flex-wrap items-center gap-1.5'>
+      {onOpenColorways && (
+        <Button type='button' variant='secondary' size='xs' onClick={onOpenColorways}>
+          → к рецепту колорвея
+        </Button>
+      )}
+      <Text size='nano' variant='label' component='span'>
+        выше по лестнице — измеренная длина: «раскладка комплекта…» разложит детали ЭТОГО слота на
+        ширине пина колорвея, и процент перестанет применяться вовсе
+      </Text>
+    </div>
+  );
+
   return (
-    <div className='border border-borderColor px-2 pb-2'>
-      <GroupLabel>how this style uses it</GroupLabel>
+    <div className='mt-1 space-y-1.5'>
       <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
         <SelectField
           name={`bomItems.${index}.fabricDirection`}
           label='fabric direction'
           items={techCardFabricDirectionOptions}
         />
-        <div className='flex flex-col gap-0.5'>
-          <DecimalField name={`bomItems.${index}.wastagePercent`} label='est. cutting wastage %' />
-          {/* ПРОВЕНАНС — тем же приёмом, что у источника нормы (волна 2 достроила ветвление,
-              под которое волна 1 оставляла место): 'lays' — «медиана по N раскроям» со штампом
-              применения, всё прочее — «введено руками». Свежеприменённое (ещё не сохранённое)
-              значение штампа не имеет — дату ставит сервер при сохранении, и честная подпись
-              говорит это, а не выдумывает дату. Фраза — общая с ячейкой костинга
-              (laysProvenancePhrase), чтобы две подписи одного факта не разъехались словами. */}
-          {wastageValue !== '' && (
-            <Text size='nano' variant='label'>
-              {wastageSource === 'lays'
-                ? `${laysProvenancePhrase(wastageLayCount, stampWhen(wastageAppliedAt))}${
-                    stampWhen(wastageAppliedAt) ? '' : ' — применится при сохранении'
-                  }`
-                : 'введено руками'}
-            </Text>
-          )}
-        </div>
       </div>
-      {rollGoods ? (
-        <div className='mt-1 space-y-1'>
-          <Text variant='label' size='micro'>
-            Множитель на NETTO-норму: к закупке и в себестоимость идёт норма × (1 + %/100). Он
-            оплачивает то, чего в netto нет: межлекальные выпады, концы настила, стыки и обход
-            пороков. Кромка сюда НЕ входит — она уже оплачена делением площади на раскройную ширину.
-            Норму «из раскладки» процент не гроссит вовсе: измеренная длина уже содержит выпады. На
-            прогоне процент можно переопределить фактическим.
+
+      <StatGrid min={170}>
+        <Stat label='надбавка на раскрой' value={statValue} sub={statSub} />
+      </StatGrid>
+
+      {/* ЧТО ЭТО ЗА ЧИСЛО — ОДИН РАЗ НА ЭКРАН, и оба множителя названы вместе: порознь они и
+          разъезжаются. Процент = геометрия настила, коэффициент = реальность рулона. */}
+      <Text variant='label' size='micro'>
+        Процент платит ровно за ГЕОМЕТРИЮ настила: межлекальные выпады и концы. Кромка в него не
+        входит — она оплачена делением площади на раскройную ширину. Усадку, обход пороков и
+        сращивание платит другой множитель — коэффициент раскроя артикула
+        {coefSet ? ` (${coefRaw})` : ' (у этого артикула не задан)'}: он начисляется ВСЕГДА, включая
+        измеренную норму, потому что ни одна раскладка этого увидеть не может.
+      </Text>
+
+      {rung === 'measured' ? (
+        // СТУПЕНЬ 1. Не «раскладка есть», а «норма измерена»: процент не начисляется по правилу
+        // сервера (wastageApplies), и умножать ему нечего.
+        <CalloutBox tone='note'>
+          <Text size='micro'>
+            Норма снята с раскладки в рецептах: {skuList(measuredRows)}. Там надбавка не начисляется
+            — измеренная длина уже содержит межлекальные выпады и концы настила.
+            {grossedRows.length > 0
+              ? ` В остальных (${skuList(grossedRows)}) норма не измерена — там всё ещё начисляется ${pct || 'ноль: значения нет'}.`
+              : ''}
           </Text>
-          {slotMarkers.length > 0 ? (
-            // Раскладка слота есть — процент этой строке скоро не понадобится вовсе, и это
-            // сильнее любой калибровки (состояние 1 лестницы): звать оператора к измеренному
-            // числу, а не к оценке. Панель предложения при живой раскладке НЕ монтируется — и
-            // RPC не уходит: предлагать процент полю, которому осталось жить до применения
-            // раскладки, значит звать человека настраивать то, что пора выключить.
-            <CalloutBox tone='note'>
-              У карточки есть раскладка этого слота — снимите норму с неё в рецепте колорвея
-              (вкладка colorways): длина раскладки ИЗМЕРЕНА и уже содержит межлекальные выпады,
-              процент перестанет применяться. Усадку и пороки артикула доначислит его коэффициент
-              раскроя.
-            </CalloutBox>
-          ) : (
-            // Волна 2: место статичного «посчитать пока не из чего» заняла живая панель — она
-            // сама говорит и «фактов {n} из 3, вот что сделать», и «вне диапазона», и «готово,
-            // по N раскроям из M». Ленивость — по построению: этот компонент живёт только в
-            // открытом редакторе одной строки, так что открытие вкладки BOM запросов не стреляет.
-            <BomWastageSuggestion
-              materialId={rowMaterialId}
-              currentPercent={wastageValue}
-              currentSource={wastageSource}
-              onApply={applySuggestion}
-            />
-          )}
-          {coefSet && (
-            // Главная ошибка, от которой волна 1 защищает: рядом с полем живёт ДРУГОЙ множитель
-            // отходов. Предупреждение стоит только когда коэффициент у артикула правда есть —
-            // то есть ровно когда есть число, которое можно перепутать.
+        </CalloutBox>
+      ) : rung === 'markerIdle' ? (
+        // СТУПЕНЬ 1, НЕ ДОЙДЕННАЯ: раскладка снята, но норму с неё не взяли — процент ЖИВ. Панель
+        // предложения при живой раскладке не монтируется и RPC не уходит: калибровать оценку,
+        // которой осталось жить до одного нажатия, значит звать человека настраивать то, что пора
+        // выключить.
+        <>
+          <CalloutBox tone='warning'>
+            <Text size='micro'>
+              У карточки есть раскладка этого слота, но норма с неё не снята — пока начисляется{' '}
+              {pct || 'ноль: значения нет'}. Снимите расход с раскладки в рецепте колорвея, и
+              надбавка перестанет применяться вовсе.
+            </Text>
+          </CalloutBox>
+          {kitMarkerRoute}
+        </>
+      ) : (
+        <>
+          {/* СТУПЕНЬ 2. Живая панель: она сама говорит и «фактов n из 3, вот что сделать», и «вне
+              диапазона», и «готово, по N раскроям из M», и кладёт медиану в форму по нажатию —
+              вместе со счётчиком настилов, по которому сервер признаёт применение. Ленивость по
+              построению: компонент живёт только в открытом редакторе ОДНОЙ строки. */}
+          <BomWastageSuggestion
+            materialId={rowMaterialId}
+            currentPercent={wastageValue}
+            currentSource={wastageSource}
+            onApply={applySuggestion}
+          />
+          {/* СТУПЕНЬ 4. Не пустота, а названный риск: без надбавки netto уходит в закупку как
+              есть. Гейт готовности прогона останавливает прогон ровно на паре «норма по выкройкам
+              + процент не задан» — то есть это состояние однажды остановит цех, а не просто
+              «немного занизит». */}
+          {rung === 'none' && (
             <CalloutBox tone='warning'>
-              Не путать с коэффициентом раскроя артикула ({coefRaw}): тот — множитель к ИЗМЕРЕННОЙ
-              длине раскладки, межлекальных выпадов в нём нет. Вписать его сюда — занизить закупку
-              на все выпады.
+              <Text size='micro'>
+                Надбавки нет. Netto-норма уйдёт в закупку и в себестоимость КАК ЕСТЬ — без
+                межлекальных выпадов и концов настила, то есть заниженной. Гейт готовности прогона
+                на паре «норма по выкройкам + процент не задан» прогон не выпустит.
+              </Text>
+            </CalloutBox>
+          )}
+          {kitMarkerRoute}
+        </>
+      )}
+
+      {/* ЕДИНСТВЕННЫЙ ЯВНЫЙ ВЫХОД. Ручной ввод не запрещён — без него первый же странный DXF
+          останавливает закупку, — но он перестал быть умолчанием: это действие, а не поле, которое
+          стоит открытым и приглашает. <details>, а не кнопка: на выпущенной карточке вкладка лежит
+          внутри <fieldset disabled>, и раскрывашка на <button> там умерла бы молча. */}
+      <details className='border border-hairline px-2 py-1'>
+        <summary className='cursor-pointer text-micro uppercase tracking-label text-labelColor'>
+          вписать своё
+        </summary>
+        <div className='flex flex-col gap-1 pt-1.5'>
+          <div className='grid grid-cols-1 gap-2 sm:grid-cols-2'>
+            <DecimalField name={`bomItems.${index}.wastagePercent`} label='процент раскроя, %' />
+          </div>
+          <Text size='nano' variant='label'>
+            Число станет «введено руками»: подтвердить его нечем, пока у слота нет ни раскладки, ни
+            трёх замеренных настилов. На прогоне его можно переопределить фактическим процентом цеха
+            — тот тоже остаётся геометрией настила.
+          </Text>
+          {coefSet && (
+            // Ошибка, ради которой предупреждение и живёт ИМЕННО ЗДЕСЬ: единственное место, где
+            // коэффициент артикула ещё можно вписать не туда. У него ДРУГАЯ база — измеренная
+            // длина, выпады уже внутри, — и его 2–6% на месте нужных 15–30% занижают закупку на
+            // все межлекальные выпады, линейно и незаметно.
+            <CalloutBox tone='warning'>
+              <Text size='nano'>
+                Не вписывайте сюда коэффициент раскроя артикула ({coefRaw}): у него ДРУГАЯ база —
+                измеренная длина, выпады уже внутри, — и он начисляется отдельно и поверх. Здесь
+                ждут выпады настила: обычно 15–30%, а не 2–6%.
+              </Text>
             </CalloutBox>
           )}
         </div>
-      ) : (
-        // Не рулонная строка: у фурнитуры и ниток нет ни раскладок, ни netto-геометрии — вся
-        // раскройная лестница выше была бы рассказом про чужое. Остаётся сама арифметика поля.
-        <Text variant='label' size='micro' className='mt-1'>
-          Множитель на норму строки: к закупке и в себестоимость идёт норма × (1 + %/100) — запас на
-          отходы и обрезки. На прогоне может быть переопределён фактическим.
-        </Text>
-      )}
-      <div className='mt-2'>
-        <TextareaField
-          name={`bomItems.${index}.comment`}
-          label='comment'
-          rows={2}
-          maxLength={1000}
-        />
-      </div>
+      </details>
     </div>
   );
 }
@@ -500,10 +791,15 @@ function BomItemRow({
   index,
   highlight,
   markers,
+  colorways,
+  onOpenColorways,
 }: {
   index: number;
   highlight?: boolean;
   markers?: common_TechCardMarkerSummary[];
+  /** Рецепты колорвеев как READ — лестница надбавки читает по ним, измерена ли норма слота. */
+  colorways?: common_AdminColorwayRef[];
+  onOpenColorways?: () => void;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const warnNoPrice = useNoPriceWarning();
@@ -746,7 +1042,13 @@ function BomItemRow({
             )}
           </div>
 
-          <ThisStyleFields index={index} material={linkedMaterial} markers={markers} />
+          <ThisStyleFields
+            index={index}
+            material={linkedMaterial}
+            markers={markers}
+            colorways={colorways}
+            onOpenColorways={onOpenColorways}
+          />
         </div>
         {colorwayHint}
         {createModal}
@@ -830,9 +1132,14 @@ function BomItemRow({
         </div>
       </div>
 
-      {/* Непривязанная строка: артикула нет, поэтому нет и предупреждения о его коэффициенте —
-          но лестница «откуда взять процент» работает и здесь, раскладка привязана к слоту. */}
-      <ThisStyleFields index={index} markers={markers} />
+      {/* Непривязанная строка: артикула нет, поэтому коэффициент назвать нечем — но лестница
+          надбавки работает и здесь, раскладка привязана к слоту, а не к артикулу. */}
+      <ThisStyleFields
+        index={index}
+        markers={markers}
+        colorways={colorways}
+        onOpenColorways={onOpenColorways}
+      />
       {colorwayHint}
       {createModal}
     </div>
@@ -1285,6 +1592,19 @@ export function BomField({
     ? bomWatch.findIndex((b) => (b.materialId ?? 0) > 0 && b.materialId === wireInt(addMaterial.id))
     : -1;
 
+  // ВЕРХНЯЯ СТУПЕНЬ ЛЕСТНИЦЫ НАДБАВКИ ЖИВЁТ НА ДРУГОЙ ВКЛАДКЕ. «Раскладка комплекта…» стоит на
+  // строке рецепта колорвея (kit-marker), потому что мерить длину можно только на КОНКРЕТНОЙ
+  // ширине — то есть на артикуле, который пинует колорвей. Со строки BOM туда нужен переход, и
+  // редактор обязан закрыться первым: иначе модалка осталась бы висеть над вкладкой, которую
+  // человек только что открыл. Форма при этом не теряется — вкладки живут внутри одной формы,
+  // переключение меняет только параметр в URL.
+  const openColorways = () => {
+    setEditing(null);
+    const next = new URLSearchParams(params);
+    next.set('tab', 'colorways');
+    setParams(next, { replace: true });
+  };
+
   // Land on the offending recipe itself, not merely on the colorways tab: ?colorway= selects the
   // swatch, so the usage to remove is on screen instead of two clicks away.
   const goToColorway = (colorwayId: number) => {
@@ -1439,7 +1759,13 @@ export function BomField({
             sectionShort(bomWatch[editing]?.section),
           )}
         >
-          <BomItemRow index={editing} highlight={highlightActive} markers={markers} />
+          <BomItemRow
+            index={editing}
+            highlight={highlightActive}
+            markers={markers}
+            colorways={colorways}
+            onOpenColorways={openColorways}
+          />
         </ConfirmationModal>
       )}
 

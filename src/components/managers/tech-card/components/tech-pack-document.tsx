@@ -56,6 +56,7 @@ import {
 } from './bom-purpose';
 import { formatBomMoney, resolveBomPrice } from './bom-price';
 import { uniOf } from './nesting/block-code';
+import { bomUnitKind } from './nesting/marker-io';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 
 import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
@@ -1552,7 +1553,14 @@ export function TechPackDocument({
                   b.fabricDirection && b.fabricDirection !== 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN'
                     ? fabricDirL[b.fabricDirection]
                     : '',
-                  dec(b.wastagePercent) && `+${dec(b.wastagePercent)}%`,
+                  // ПРОЦЕНТ ПЕЧАТАЕТСЯ ТОЛЬКО НА МЕРНОЙ СТРОКЕ. На счётной его не берёт ни один
+                  // расчёт — костинг выходит из строки с `quantity` РАНЬШЕ любого гросс-апа, — и
+                  // «+15%» рядом с пуговицами уезжало на фабрику числом, которое ничего не значит
+                  // и которое там некому опровергнуть. Единица и есть свидетель мерности: тот же
+                  // словарь (m/cm/kg), которым норма пишется в рецепт.
+                  bomUnitKind(b.unit) != null && dec(b.wastagePercent)
+                    ? `+${dec(b.wastagePercent)}%`
+                    : '',
                 ]
                   .filter(Boolean)
                   .join(' · ');
