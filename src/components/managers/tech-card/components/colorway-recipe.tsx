@@ -1774,9 +1774,7 @@ function SlotNormBlock({
           ней же. */}
       {draft.materialId > 0 && (
         <span>
-          <Pill tone='mut'>
-            пин: {material?.name?.trim() || `артикул #${draft.materialId}`}
-          </Pill>
+          <Pill tone='mut'>пин: {material?.name?.trim() || `артикул #${draft.materialId}`}</Pill>
         </span>
       )}
       {isMeasured && !legacyCountedMeasured ? (
@@ -2318,6 +2316,15 @@ function FabricRecipeCard({
   onTogglePiece: (piece: PieceRef) => void;
 }) {
   const [pinOpen, setPinOpen] = useState(false);
+  // КОНТУР ПО КЛЮЧУ ДЕТАЛИ — функцией, а не картой: правило свёртки ключа (`pieceRefKey`) остаётся
+  // ЗДЕСЬ, у того, кто карту получил, и пикеру не приходится знать про него вовсе. Вторая копия
+  // этого правила у читателя разошлась бы с первой молча — часть деталей просто перестала бы
+  // находиться. `undefined` при холодном разборе — это и есть «показывать нечего»: пикер тогда
+  // остаётся текстовым списком, а не сеткой пустых рамок.
+  const shapeOf = useMemo(
+    () => (shapes ? (lineKey: string) => shapes.get(pieceRefKey(lineKey)) ?? null : undefined),
+    [shapes],
+  );
   const garment = garmentRows[0];
   // ЧЕРНОВИК СИНТЕТИЧЕСКИЙ, ПОКА СТРОКИ НЕТ. Он нужен только чтобы прочитать с него пин (его нет)
   // и отдать вниз пустую норму; первое же изменение уйдёт в onPatchSlot(-1, …) и заведёт настоящую
@@ -2367,12 +2374,9 @@ function FabricRecipeCard({
     .join(' · ');
 
   const assignedKeys = pieceRows.map(({ row }) => row.draft.pieceLineKey);
-  const pieceNames = pieceRows.map(
-    ({ row, piece }) => piece?.name?.trim() || row.draft.pieceLineKey,
-  );
-  // Восемь имён и многоточие: свёрнутый список обязан отвечать «какие детали», не разворачиваясь,
-  // но полный список из сорока имён в одну строку не читается и ломает верстку.
-  const preview = pieceNames.slice(0, 8).join(', ') + (pieceNames.length > 8 ? '…' : '');
+  // ИМЁН В СВЁРНУТОЙ СТРОКЕ БОЛЬШЕ НЕТ — их заменила полоска контуров (см. `<summary>` ниже).
+  // Перечисление лекальных кодов отвечало на вопрос «какие детали» только тому, кто их и так
+  // помнит наизусть, а на сорока деталях ещё и ломало вёрстку многоточием посреди слова.
 
   // Нарушения целостности слоёв — только по СВОИМ деталям и склеенные по видам: девять деталей без
   // основной ткани — это одна проблема и один текст, а не девять одинаковых абзацев.
@@ -2421,7 +2425,10 @@ function FabricRecipeCard({
   const piecePicker = (label: string) => (
     <GenericPopover
       title='детали из этой ткани'
-      className='w-64'
+      // Шире прежних 256px, потому что выбор стал ВИЗУАЛЬНЫМ: четыре силуэта в ряд — это тот
+      // размер, на котором форма детали ещё узнаётся, а список из тридцати не превращается в
+      // рулон. Ниже 340px сетка схлопывается в три колонки и начинает резать имена.
+      className='w-[340px]'
       triggerProps={{
         'aria-label': 'назначить детали',
         className: buttonVariants({ variant: 'secondary', size: 'xs' }),
@@ -2432,15 +2439,29 @@ function FabricRecipeCard({
           «деталей ещё нет». Создавать детали отсюда нельзя — рецепт пишется UpdateColorwayRecipe,
           который деталь завести не может, и «+ создать» намолотил бы ключей, которые сейв молча
           выбрасывает. */}
-      <PieceList
-        pieces={pieces}
-        selected={assignedKeys}
-        multiple
-        onToggle={(lineKey) => {
-          const piece = pieces.find((p) => p.lineKey === lineKey);
-          if (piece) onTogglePiece(piece);
-        }}
-      />
+      <div className='flex flex-col gap-1.5'>
+        <PieceList
+          pieces={pieces}
+          selected={assignedKeys}
+          multiple
+          // СИЛУЭТ ИЗ ЧЕРТЕЖА ПРЯМО В ВЫБОРЕ. Детали кроя названы кодами лекальщика («BP», «FP_1»,
+          // «PCK_L»), и по имени они не различаются вообще: выбор из тридцати таких строк — это
+          // угадывание, за которым едет неверная площадь изделия. Контур снимает вопрос молча.
+          // Карта приходит с карточки (одна на редактор), правило свёртки ключа — общее.
+          shapeOf={shapeOf}
+          onToggle={(lineKey) => {
+            const piece = pieces.find((p) => p.lineKey === lineKey);
+            if (piece) onTogglePiece(piece);
+          }}
+        />
+        {/* СКОЛЬКО ВЫБРАНО — В САМОМ ПИКЕРЕ. Отмечают тут по девять деталей подряд, попап при этом
+            перекрывает карточку, и посчитать галочки глазами по сетке из тридцати плиток нельзя. */}
+        <Text size='nano' variant='label' component='p' className='border-t border-hairline pt-1'>
+          {assignedKeys.length === 0
+            ? `выбрано 0 из ${pieces.length} — из этой ткани пока ничего не кроится`
+            : `выбрано ${assignedKeys.length} из ${pieces.length} ${plural(pieces.length, 'детали', 'деталей', 'деталей')} карточки`}
+        </Text>
+      </div>
     </GenericPopover>
   );
 
@@ -2626,8 +2647,8 @@ function FabricRecipeCard({
                   ...(selfIsUnsorted ? [selfName] : []),
                   ...rivalNames(unsortedRows.flatMap((x) => x.issue.unsortedNames)),
                 ].join(', ')}{' '}
-                не задано назначение — не доказать, что это не вторая основная, и наряд
-                остановится. Задай назначение на вкладке BOM
+                не задано назначение — не доказать, что это не вторая основная, и наряд остановится.
+                Задай назначение на вкладке BOM
               </Text>
             </div>
           )}
@@ -2648,9 +2669,9 @@ function FabricRecipeCard({
               <Pill tone='attention'>своё число расхода на деталях</Pill>
               <Text size='nano' variant='label' component='p'>
                 {legacyPieceNames.join(', ')} несут собственный расход, оставшийся от прежней
-                модели. Сервер СУММИРУЕТ строки одного слота — эти числа прибавляются к расходу
-                этой ткани сверху, и в себестоимость, и в потребность прогона. Разверните список
-                деталей и уберите их
+                модели. Сервер СУММИРУЕТ строки одного слота — эти числа прибавляются к расходу этой
+                ткани сверху, и в себестоимость, и в потребность прогона. Разверните список деталей
+                и уберите их
               </Text>
             </div>
           )}
@@ -2673,10 +2694,53 @@ function FabricRecipeCard({
                 </Text>
               ) : (
                 <details>
+                  {/* СВЁРНУТЫЙ СОСТАВ КРОЯ — КАРТИНКОЙ, А НЕ ПЕРЕЧИСЛЕНИЕМ КОДОВ. «9 деталей: BP,
+                      BP_1, FP, PCK_L…» отвечает на вопрос только тому, кто уже помнит, что за чем
+                      стоит; лекальные коды на то и коды, что не читаются. Полоска контуров
+                      отвечает на «что кроится из этой ткани» не разворачиваясь — ровно за этим
+                      свёрнутая строка и существует.
+                      Деталь БЕЗ контура остаётся в полоске пустой клеткой с обрезком имени, а не
+                      исчезает: пропав, она сделала бы полоску короче состава — и то, что расчёт по
+                      выкройкам на ней и отказывает, было бы не увидеть. */}
                   <summary className='cursor-pointer'>
-                    <Text size='nano' variant='label' component='span' className='uppercase'>
-                      {`${pieceRows.length} ${plural(pieceRows.length, 'деталь', 'детали', 'деталей')}: ${preview}`}
-                    </Text>
+                    <span className='inline-flex min-w-0 flex-wrap items-center gap-1 align-middle'>
+                      {pieceRows.slice(0, 14).map(({ row, piece }) => {
+                        const name = piece?.name?.trim() || row.draft.pieceLineKey;
+                        const found = shapes?.get(pieceRefKey(row.draft.pieceLineKey)) ?? null;
+                        // РАМКИ ВОКРУГ КОНТУРА НЕТ, и это проверено глазом: в клетке 24×32 с рамкой
+                        // силуэт читается как серый квадратик, а не как форма. Глиф стоит сам по
+                        // себе — ровно как у имени детали в списке ниже, тем же размером. Рамка
+                        // остаётся ЕДИНСТВЕННО у пустой клетки, где она и значит «здесь пусто».
+                        return found ? (
+                          <PieceSilhouette
+                            key={`${usageKey(row.draft)}:${row.index}`}
+                            found={found}
+                            boxClassName='mr-0'
+                          />
+                        ) : (
+                          <span
+                            key={`${usageKey(row.draft)}:${row.index}`}
+                            title={name}
+                            className='inline-flex h-7 w-10 shrink-0 items-center justify-center overflow-hidden border border-dashed border-borderColor px-0.5 text-nano text-labelColor'
+                          >
+                            <span className='truncate uppercase'>{name.slice(0, 3)}</span>
+                          </span>
+                        );
+                      })}
+                      {pieceRows.length > 14 && (
+                        <Text size='nano' variant='label' component='span'>
+                          {`+${pieceRows.length - 14}`}
+                        </Text>
+                      )}
+                      <Text
+                        size='nano'
+                        variant='label'
+                        component='span'
+                        className='pl-0.5 uppercase'
+                      >
+                        {`${pieceRows.length} ${plural(pieceRows.length, 'деталь', 'детали', 'деталей')}`}
+                      </Text>
+                    </span>
                   </summary>
                   <div className='divide-y divide-hairline pt-1'>
                     {pieceRows.map(({ row, piece }) => (
@@ -3564,9 +3628,7 @@ function ColorwayRecipeEditor({
     setDirty(true);
     setUsages((prev) => {
       const at =
-        index >= 0
-          ? index
-          : prev.findIndex((u) => !u.pieceLineKey && u.bomLineKey === bomLineKey);
+        index >= 0 ? index : prev.findIndex((u) => !u.pieceLineKey && u.bomLineKey === bomLineKey);
       if (at >= 0) return prev.map((u, i) => (i === at ? { ...u, ...patch } : u));
       // placement у строки «на изделие» пустой — ровно как его заводила прежняя кнопка «+ добавить
       // материал на изделие»: имя детали туда подставлять нечего, изделие одно.
@@ -3590,10 +3652,7 @@ function ColorwayRecipeEditor({
       const match = (u: UsageDraft) =>
         u.pieceLineKey === piece.lineKey && u.bomLineKey === bomLineKey;
       if (prev.some(match)) return prev.filter((u) => !match(u));
-      return [
-        ...prev,
-        { ...blankDraft(piece.lineKey, piece.name?.trim() || ''), bomLineKey },
-      ];
+      return [...prev, { ...blankDraft(piece.lineKey, piece.name?.trim() || ''), bomLineKey }];
     });
   };
   const removeUsage = (i: number) => {

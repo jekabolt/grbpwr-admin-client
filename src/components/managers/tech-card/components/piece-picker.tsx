@@ -5,12 +5,17 @@ import { Chip, ChipRow } from 'ui/components/chip';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
+import { PieceShape, type FoundPiece } from './nesting/dxf-geometry';
 import { TechCardFormData } from './schema';
 
 // A cut piece a norm or an operation can point at. `lineKey` is the stable client-minted ULID the
 // server resolves to the real tech_card_piece FK, so a reference survives reordering and renaming —
 // unlike the free-text part name it replaced.
-export type PieceRef = { lineKey: string; name: string };
+//
+// `perGarment` — кратность на изделие с карточки детали. Показом её пользуется только визуальный
+// выбор ниже, и там она не украшение: «×2» отличает пару рукавов от одной, а на именах вида
+// «SLV_L» / «SLV_R» это единственное, чем они отличаются на глаз.
+export type PieceRef = { lineKey: string; name: string; perGarment?: number };
 
 export const normalizePieceName = (name: string) => name.trim().toLowerCase();
 
@@ -19,12 +24,23 @@ export const normalizePieceName = (name: string) => name.trim().toLowerCase();
 // round-trip. Only pieces carrying a lineKey are offered: a reference to a piece with no stable
 // identity cannot be resolved server-side, so offering one would silently drop the link on save.
 export function useFormPieces(): PieceRef[] {
-  const raw = (useWatch({ name: 'pieces' }) ?? []) as { name?: string; lineKey?: string }[];
+  const raw = (useWatch({ name: 'pieces' }) ?? []) as {
+    name?: string;
+    lineKey?: string;
+    piecesPerGarment?: number;
+  }[];
   return useMemo(
     () =>
       raw
         .filter((p) => !!p.lineKey?.trim())
-        .map((p) => ({ lineKey: p.lineKey as string, name: p.name?.trim() || 'без названия' })),
+        .map((p) => ({
+          lineKey: p.lineKey as string,
+          name: p.name?.trim() || 'без названия',
+          // Ниже единицы не бывает — деталь либо есть, либо её не заявляли; то же правило, что в
+          // расчёте площади (useFabricDxfPieces), чтобы «×2» на плитке и множитель в норме были
+          // одним числом, а не двумя похожими.
+          perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
+        })),
     [raw],
   );
 }
@@ -89,6 +105,7 @@ export function PieceList({
   allowCreate,
   onCreate,
   multiple,
+  shapeOf,
 }: {
   pieces: PieceRef[];
   selected: string[];
@@ -97,12 +114,33 @@ export function PieceList({
   allowCreate?: boolean;
   onCreate?: (name: string) => void;
   multiple: boolean;
+  /**
+   * КОНТУР ДЕТАЛИ ИЗ ЧЕРТЕЖА — включает ВИЗУАЛЬНЫЙ режим выбора (плитки вместо строк).
+   *
+   * Функцией, а не картой: правило свёртки ключа (`pieceRefKey`) живёт у того, кто карту собрал, и
+   * вторая копия этого правила здесь однажды разошлась бы с первой — деталь просто перестала бы
+   * находиться, молча и только у части имён.
+   *
+   * Опущено — прежний текстовый список, слово в слово. Он остаётся не «запасным вариантом», а
+   * правильным ответом там, где чертежа нет вовсе (операции сборки, холодная карточка): сетка из
+   * пустых рамок читалась бы как «деталей нет», а не как «контуров не загружено».
+   */
+  shapeOf?: (lineKey: string) => FoundPiece | null;
 }) {
   const [query, setQuery] = useState('');
   const q = normalizePieceName(query);
   const matches = q ? pieces.filter((p) => normalizePieceName(p.name).includes(q)) : pieces;
   const exact = pieces.some((p) => normalizePieceName(p.name) === q);
   const canCreate = !!allowCreate && !!q && !exact;
+  // ПЛИТКИ ТОЛЬКО ТАМ, ГДЕ ЕСТЬ ЧТО ПОКАЗАТЬ. Разбор DXF может быть холодным (рецепт его никогда не
+  // запускает сам) или на карточке может не быть ни одной связи блок→деталь — тогда `shapeOf`
+  // отдаёт null на всё, и сетка выродилась бы в двадцать одинаковых пустых квадратов: хуже списка
+  // по всем статьям. Считается по ВСЕМ деталям, а не по отфильтрованным: режим выбора не должен
+  // переключаться на середине набора символов в поиске.
+  const visual = useMemo(
+    () => !!shapeOf && pieces.some((p) => !!shapeOf(p.lineKey)),
+    [shapeOf, pieces],
+  );
 
   const create = () => {
     if (!canCreate) return;
@@ -128,29 +166,90 @@ export function PieceList({
         }}
       />
       {/* The list owns the scroll, not the shell, so the search field stays pinned above it. */}
-      <div className='flex max-h-56 flex-col overflow-y-auto'>
+      <div
+        className={cn(
+          'overflow-y-auto',
+          visual
+            ? 'grid max-h-72 grid-cols-[repeat(auto-fill,minmax(78px,1fr))] gap-1'
+            : 'flex max-h-56 flex-col',
+        )}
+      >
         {matches.length === 0 && !canCreate && (
-          <Text size='micro' variant='label'>
+          <Text size='micro' variant='label' className={visual ? 'col-span-full' : undefined}>
             {pieces.length === 0 ? 'деталей ещё нет — введите название выше' : 'ничего не найдено'}
           </Text>
         )}
         {matches.map((p) => {
           const on = selected.includes(p.lineKey);
+          if (!visual) {
+            return (
+              <button
+                key={p.lineKey}
+                type='button'
+                aria-pressed={on}
+                onClick={() => onToggle(p.lineKey)}
+                className={cn(
+                  'flex items-center gap-2 border-b border-hairline py-1 text-left text-textBaseSize last:border-b-0 hover:bg-bgZebra',
+                  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                  on ? 'text-textColor' : 'text-labelColor',
+                )}
+              >
+                <span aria-hidden className='w-3 shrink-0'>
+                  {on ? (multiple ? '☑' : '●') : multiple ? '☐' : '○'}
+                </span>
+                <span className='truncate uppercase'>{p.name}</span>
+              </button>
+            );
+          }
+          const found = shapeOf?.(p.lineKey) ?? null;
           return (
+            // ПЛИТКА: контур сверху, имя внизу полосой. Выбранная — ИНК-рамка и полоса имени,
+            // залитая ink'ом с белым текстом: ровно тот же контракт «выбранного», что у Chip, и
+            // читается он без цвета, одним весом. Галочки здесь нет намеренно — она дублировала бы
+            // заливку и отъедала бы место у имени, которое и так короткое.
             <button
               key={p.lineKey}
               type='button'
               aria-pressed={on}
+              title={`${p.name}${(p.perGarment ?? 1) > 1 ? ` · ×${p.perGarment} на изделие` : ''}${
+                found ? '' : ' · нет в выкройках'
+              }`}
               onClick={() => onToggle(p.lineKey)}
               className={cn(
-                'flex items-center gap-2 border-b border-hairline py-1 text-left text-textBaseSize last:border-b-0 hover:bg-bgZebra',
-                on ? 'text-textColor' : 'text-labelColor',
+                'flex min-w-0 flex-col border text-left transition-colors',
+                'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+                on ? 'border-textColor' : 'border-borderColor hover:border-textColor',
               )}
             >
-              <span aria-hidden className='w-3 shrink-0'>
-                {on ? (multiple ? '☑' : '●') : multiple ? '☐' : '○'}
+              <span className='relative flex h-12 w-full items-center justify-center bg-bgColor p-1'>
+                {found ? (
+                  <PieceShape piece={found.piece} grainLayer='' outlineOnly />
+                ) : (
+                  // ДЕТАЛЬ БЕЗ КОНТУРА НАЗЫВАЕТСЯ ТАК ВСЛУХ, и это не косметика: пока она
+                  // назначена этой ткани, расчёт «по выкройкам» ОТКАЗЫВАЕТ целиком (площадь
+                  // изделия вышла бы неполной). Узнать это в момент выбора дешевле, чем из отказа
+                  // диалога через два экрана.
+                  <Text size='nano' variant='label' component='span' className='text-center'>
+                    нет
+                    <br />в выкройках
+                  </Text>
+                )}
+                {(p.perGarment ?? 1) > 1 && (
+                  <span className='absolute top-0 right-0 border-b border-l border-borderColor bg-bgColor px-1 text-nano text-labelColor'>
+                    ×{p.perGarment}
+                  </span>
+                )}
               </span>
-              <span className='truncate uppercase'>{p.name}</span>
+              <span
+                className={cn(
+                  'block truncate border-t px-1 py-0.5 text-nano tracking-label uppercase',
+                  on
+                    ? 'border-textColor bg-textColor text-bgColor'
+                    : 'border-hairline text-labelColor',
+                )}
+              >
+                {p.name}
+              </span>
             </button>
           );
         })}

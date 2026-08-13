@@ -33,13 +33,15 @@
 // (изделие × размер) и берёт норму размера, а при её отсутствии — скаляр НА ЛЮБОЙ размер: одна
 // цифра, снятая с площади M, поехала бы в потребность XL. Скаляр здесь был бы ровно той
 // нечестностью, за которую сервер отказывает смешанной раскладке в средней норме.
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useWatch, type Control } from 'react-hook-form';
 import { useQueryClient } from '@tanstack/react-query';
+import { formatSizeName } from 'components/managers/product/utility/sizes';
 import { techCardKeys } from 'components/managers/tech-cards/components/useTechCardQuery';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { DataTable } from 'ui/components/data-table';
+import { DataTable, EmptyCell } from 'ui/components/data-table';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { parseDecimalNumber } from 'utils/decimal';
@@ -54,6 +56,13 @@ import {
   useDxfMeasureConditions,
 } from './nesting/dxf-measure-conditions';
 import { dxfNormAreas, dxfNormValueRows, type DxfNormPiece } from './nesting/dxf-consumption';
+import {
+  BreakdownSizeChips,
+  DxfPieceBreakdown,
+  fmtInt,
+  middleSize,
+  NettoFormula,
+} from './nesting/dxf-piece-breakdown';
 import {
   weightBasisNote,
   weightRefusalText,
@@ -162,6 +171,17 @@ export default function DxfApplyDialog({
   // раскроя слота и право писать в карточку.
   const applicable = complete && !wastageMissing && canEdit && !conditions.blocked;
 
+  // РАЗМЕР, НА КОТОРОМ ПОКАЗАН РАЗБОР. Применяется ВЕСЬ ряд и только он (частичный заставил бы план
+  // прогона подставлять скаляр, которого здесь не будет), но ОБЪЯСНИТЬ норму можно только на одном
+  // размере: у градуируемой детали площадь в S и в XL разная, и среднее по ряду не соответствует ни
+  // одному настилу. По умолчанию срединный — тот же, которым по всей карточке рисуются силуэты
+  // деталей, чтобы картинка и число описывали одну и ту же геометрию.
+  const areaRows = outcome?.ok ? outcome.areas.rows : [];
+  const shownSizeIds = useMemo(() => areaRows.map((r) => r.sizeId), [areaRows]);
+  const [pickedSize, setPickedSize] = useState<number | null>(null);
+  const shownSize =
+    pickedSize != null && shownSizeIds.includes(pickedSize) ? pickedSize : middleSize(shownSizeIds);
+
   const { showMessage } = useSnackBarStore();
   const queryClient = useQueryClient();
   const patternRows = (useWatch({ control, name: 'patterns' }) ?? []) as {
@@ -254,8 +274,7 @@ export default function DxfApplyDialog({
         areas: outcome.areas.pieceRows,
         contourLayer: chosenLayer,
         seamAllowanceMm: Number(seamValue) || 0,
-        nameOfPiece: (key) =>
-          pieces.find((p) => (p.lineKey ?? '').trim() === key)?.name ?? key,
+        nameOfPiece: (key) => pieces.find((p) => (p.lineKey ?? '').trim() === key)?.name ?? key,
       }).then((res) => {
         if (!res.ok) {
           showMessage(`норма применена, но площади не сохранены: ${res.reason}`, 'error');
@@ -301,19 +320,14 @@ export default function DxfApplyDialog({
       confirmLabel='применить по размерам'
       confirmDisabled={!applicable}
       closeOnConfirm={false}
+      // ШИРЕ, ЧЕМ ФОРМА: с волной разбора у диалога появилась таблица «расход по деталям» —
+      // силуэт, кратность, площадь, доля и netto в одной строке. В 420px она либо режется, либо
+      // скроллится вбок, а таблица, которую надо листать горизонтально, читается хуже списка.
+      width='lg'
     >
-      <div className='space-y-2'>
-        <CalloutBox tone='note'>
-          Считается Σ(площадь деталей × количество на изделие) ÷ раскройная ширина. Это NETTO:
-          межлекальных выпадов и концов настила в нём нет — их доначисляет процент раскроя слота
-          {Number.isFinite(wastage) ? ` (${wastagePercent}%)` : ''}. Кромка уже учтена самим
-          делением на раскройную ширину (рулон − 2×кромка) — в процент её не закладывайте,
-          посчитается дважды. Раскладка, когда она появится, даст измеренное число и заменит это.
-          {unitKind === 'kg'
-            ? ' Слот в килограммах: netto-длина затем переводится в вес по ПОЛНОЙ ширине рулона (кромку покупают, и она весит — тот же один раз, не второй) и плотности артикула — обе ширины в одном расчёте, так и должно быть.'
-            : ''}
-        </CalloutBox>
-
+      <div className='space-y-2.5'>
+        {/* ── ЧТО МЕШАЕТ ПРИМЕНИТЬ — ПЕРВЫМ, И БЕЗ ИСКЛЮЧЕНИЙ ────────────────────────────────
+            Отказ, лежащий под таблицей, читается после того, как оператор уже поверил числу. */}
         {wastageMissing && (
           // ОТКУДА ВЗЯТЬ ПРОЦЕНТ — говорится прямо в отказе (T7): отказ без ответа на этот
           // вопрос отправлял оператора искать число самостоятельно, а ближайшее похожее число в
@@ -333,10 +347,6 @@ export default function DxfApplyDialog({
           </CalloutBox>
         )}
 
-        {/* Условия замера — общий блок с отдельным действием на вкладке выкроек: состояние
-            разбора, слой контура, припуск и все отказы условий, одними словами на оба входа. */}
-        <DxfMeasureConditionsFields state={conditions} />
-
         {!(widthCm > 0) && (
           <CalloutBox tone='warning'>
             У артикула не заполнена ширина полотна — делить площадь не на что. Подставить номинал
@@ -346,85 +356,214 @@ export default function DxfApplyDialog({
 
         {outcome && !outcome.ok && <CalloutBox tone='warning'>{outcome.reason}</CalloutBox>}
 
+        {/* Отказ по единице и ноль после округления — тоже блокеры, и стоят они здесь, а не под
+            таблицей: при них применить нельзя, и число ниже показано ровно затем, чтобы было видно,
+            ЧТО именно не переводится. */}
+        {outcome?.ok && rows.some((r) => r.conv == null) && (
+          // Кг-слот называет, ЧЕГО не хватает — ширины или плотности: «единица не принимает длину»
+          // отправила бы оператора менять единицу вместо того, чтобы заполнить артикул. Пустая
+          // единица — своя починка: единица нормы = единица слота (фолбэка в единицу артикула нет),
+          // и лечится это на вкладке BOM, а не здесь.
+          <CalloutBox tone='warning'>
+            {unitKind === 'kg' && !weightBasis.ok
+              ? weightRefusalText(weightBasis.missing, weightBasis.pinned)
+              : unit
+                ? `Единица слота «${unit}» не принимает ни длину, ни вес: применить можно в метрах, сантиметрах или килограммах.`
+                : 'У слота не заполнена единица — норма пишется в единице слота, и применить её не в чем. Заполните единицу на вкладке BOM.'}
+          </CalloutBox>
+        )}
+        {/* НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — НЕ НОРМА. Метры округляются до трёх знаков (столько держит
+            колонка), и крошечная площадь честно становится 0.000: строка сохранилась бы «с нормой»,
+            которая ничего не требует, а дефицит на прогоне вышел бы нулевым.
+            СОВЕТ РАЗВЕДЁН ПО РАЗМЕРНОСТИ: на весовой строке «выберите см» превратил бы её в
+            длиновую — единица строки согласована с закупочной ценой, и смена размерности
+            разъехалась бы с ценой за килограмм. */}
+        {outcome?.ok && rows.some((r) => r.conv != null && !(r.conv.value > 0)) && (
+          <CalloutBox tone='warning'>
+            {unitKind === 'kg'
+              ? `После перевода в «${unit}» норма округляется в ноль — вес на изделие меньше половины грамма. Ноль означал бы «ткань не нужна». Слот весовой: единицу на сантиметры не менять (это сменит размерность строки и разойдётся с закупочной ценой за килограмм) — проверьте плотность и ширину артикула и тот ли слой контура выбран.`
+              : `После перевода в «${unit || '—'}» норма округляется в ноль — площадь слишком мала для этой единицы. Ноль означал бы «ткань не нужна»; выберите единицу мельче (см) или проверьте, тот ли слой контура выбран.`}
+          </CalloutBox>
+        )}
+        {outcome?.ok && outcome.areas.sizesIncomplete.length > 0 && (
+          <CalloutBox tone='warning'>
+            Не нашлись все детали для размеров:{' '}
+            {outcome.areas.sizesIncomplete.map(sizeName).join(', ')}. Норма пишется на ВЕСЬ ряд или
+            не пишется вовсе: непокрытый размер в плане прогона взял бы скаляр, которого здесь нет.
+          </CalloutBox>
+        )}
+
+        {/* ── ЧИСЛО И ЕГО ФОРМУЛА ────────────────────────────────────────────────────────────
+            Раньше диалог открывался пятистрочным абзацем, а результат лежал под ним таблицей в
+            один вес со всем остальным. Порядок теперь говорит то же, что и порядок в строке
+            рецепта: сначала ЧИСЛО и из чего оно, потом условия, потом объяснение. */}
+        {outcome?.ok && areaRows.length > 0 && (
+          <div>
+            <GroupLabel
+              flush
+              action={
+                <BreakdownSizeChips
+                  sizeIds={shownSizeIds}
+                  sizeId={shownSize}
+                  sizeNameById={sizeNameById}
+                  onChange={setPickedSize}
+                  label=''
+                />
+              }
+            >
+              {`норма · размер ${formatSizeName(sizeName(shownSize))}`}
+            </GroupLabel>
+            <div className='flex flex-col gap-1.5 pt-1'>
+              <NettoFormula
+                areaCm2={areaRows.find((r) => r.sizeId === shownSize)?.areaCm2 ?? 0}
+                sizeLabel={formatSizeName(sizeName(shownSize))}
+                cuttingWidthCm={widthCm}
+                netto={rows.find((r) => r.sizeId === shownSize)?.conv?.value ?? null}
+                unit={unit}
+              />
+              {/* ГЛАВНОЕ УТВЕРЖДЕНИЕ О ЧИСЛЕ ОСТАЁТСЯ ИНЛАЙНОМ, а не уезжает в раскрывашку вместе
+                  с остальным разбором: «это netto, а выпады доначисляет процент» — единственное,
+                  чего нельзя не прочитать, потому что от него зависит, верна ли закупка. */}
+              <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
+                {Number.isFinite(wastage)
+                  ? `NETTO: межлекальных выпадов и концов настила в числе НЕТ — их доначисляет процент раскроя слота (${wastagePercent}%). Кромка уже внутри: она оплачена делением на раскройную ширину`
+                  : 'NETTO: межлекальных выпадов и концов настила в числе нет. Кромка уже внутри — она оплачена делением на раскройную ширину'}
+              </Text>
+            </div>
+          </div>
+        )}
+
         {outcome?.ok && rows.length > 0 && (
-          <>
-            <DataTable variant='grid' className='[&_td]:text-micro'>
-              <thead>
-                <tr>
-                  <th>размер</th>
-                  <th>площадь, см²</th>
-                  <th>netto{unit ? `, ${unit}` : ''}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.sizeId}>
-                    <td>{sizeName(r.sizeId)}</td>
-                    <td>{Math.round(r.areaCm2)}</td>
-                    <td>{r.conv ? `${r.conv.value} ${r.conv.unit}` : '—'}</td>
+          <div>
+            <GroupLabel flush>норма по всему ряду — это и уедет в строку</GroupLabel>
+            <div className='pt-1'>
+              <DataTable>
+                <thead>
+                  <tr>
+                    <th>размер</th>
+                    <th>площадь, см²</th>
+                    <th>netto{unit ? `, ${unit}` : ''}</th>
                   </tr>
-                ))}
-              </tbody>
-            </DataTable>
-            <Text size='nano' variant='label'>
+                </thead>
+                <tbody>
+                  {rows.map((r) => (
+                    // Показанный размер подсвечен зеброй — и это не украшение: формула и разбивка
+                    // выше относятся именно к нему, а без метки ряд из семи чисел не сообщает, о
+                    // каком из них там речь.
+                    <tr
+                      key={r.sizeId}
+                      className={r.sizeId === shownSize ? 'bg-bgZebra' : undefined}
+                    >
+                      <td>{formatSizeName(sizeName(r.sizeId))}</td>
+                      <td>{fmtInt(r.areaCm2)}</td>
+                      <td>{r.conv ? r.conv.value : <EmptyCell />}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </DataTable>
+            </div>
+            <Text size='nano' variant='label' component='p' className='pt-1'>
+              {`${rows.length} из ${sizeIds.length} ${sizeIds.length === 1 ? 'размера' : 'размеров'} ряда`}
+              {' · '}
               деталей градуируется: {outcome.areas.gradedPieces} из {pieces.length}
               {outcome.areas.sizelessCm2 > 0
                 ? ` · безразмерные детали: ${Math.round(outcome.areas.sizelessCm2)} см² в каждом размере`
                 : ''}
-              {widthCm > 0 ? ` · раскройная ширина ${articleWidth} см` : ''}
+              {' · себестоимость стиля — среднее по ряду, базовый размер для этого не нужен'}
             </Text>
             {/* Кг-число без основы не проверить ничем: формула целиком, с числами, до нажатия. */}
             {unitKind === 'kg' && fabric && (
-              <Text size='nano' variant='label'>
+              <Text size='nano' variant='label' component='p'>
                 {weightBasisNote(fabric)}
               </Text>
             )}
-            {outcome.areas.sizesIncomplete.length > 0 && (
-              <CalloutBox tone='warning'>
-                Не нашлись все детали для размеров:{' '}
-                {outcome.areas.sizesIncomplete.map(sizeName).join(', ')}. Норма пишется на ВЕСЬ ряд
-                или не пишется вовсе: непокрытый размер в плане прогона взял бы скаляр, которого
-                здесь нет.
-              </CalloutBox>
-            )}
-            {outcome.areas.hulled.length > 0 && (
-              <CalloutBox tone='note'>
-                контур заменён выпуклой оболочкой (площадь с запасом):{' '}
-                {outcome.areas.hulled.join(', ')}
-              </CalloutBox>
-            )}
-            <CalloutBox tone='note'>
-              Себестоимость стиля — среднее по размерному ряду: норма пишется на весь ряд, этого
-              достаточно, базовый размер не нужен.
-            </CalloutBox>
-            {/* Отказ по единице. Кг-слот называет, ЧЕГО не хватает — ширины или плотности:
-                «единица не принимает длину» отправила бы оператора менять единицу вместо того,
-                чтобы заполнить артикул. Пустая единица — своя починка: единица нормы = единица
-                слота (фолбэка в единицу артикула нет), и лечится это на вкладке BOM, а не здесь. */}
-            {rows.some((r) => r.conv == null) && (
-              <CalloutBox tone='warning'>
-                {unitKind === 'kg' && !weightBasis.ok
-                  ? weightRefusalText(weightBasis.missing, weightBasis.pinned)
-                  : unit
-                    ? `Единица слота «${unit}» не принимает ни длину, ни вес: применить можно в метрах, сантиметрах или килограммах.`
-                    : 'У слота не заполнена единица — норма пишется в единице слота, и применить её не в чем. Заполните единицу на вкладке BOM.'}
-              </CalloutBox>
-            )}
-            {/* НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — НЕ НОРМА. Метры округляются до трёх знаков (столько держит
-                колонка), и крошечная площадь честно становится 0.000: строка сохранилась бы «с
-                нормой», которая ничего не требует, а дефицит на прогоне вышел бы нулевым.
-                СОВЕТ РАЗВЕДЁН ПО РАЗМЕРНОСТИ: на весовой строке «выберите см» превратил бы её в
-                длиновую — единица строки согласована с закупочной ценой, и смена размерности
-                разъехалась бы с ценой за килограмм. */}
-            {rows.some((r) => r.conv != null && !(r.conv.value > 0)) && (
-              <CalloutBox tone='warning'>
-                {unitKind === 'kg'
-                  ? `После перевода в «${unit}» норма округляется в ноль — вес на изделие меньше половины грамма. Ноль означал бы «ткань не нужна». Слот весовой: единицу на сантиметры не менять (это сменит размерность строки и разойдётся с закупочной ценой за килограмм) — проверьте плотность и ширину артикула и тот ли слой контура выбран.`
-                  : `После перевода в «${unit || '—'}» норма округляется в ноль — площадь слишком мала для этой единицы. Ноль означал бы «ткань не нужна»; выберите единицу мельче (см) или проверьте, тот ли слой контура выбран.`}
-              </CalloutBox>
-            )}
-          </>
+          </div>
         )}
+
+        {/* ── ИЗ ЧЕГО СЛОЖИЛАСЬ ПЛОЩАДЬ — СТРОКА НА ДЕТАЛЬ ───────────────────────────────────
+            До этого разбора у оператора не было НИ ОДНОГО способа проверить норму: одно число на
+            размер, и ошибка в кратности, в привязке блока или в забытом кармане выглядела ровно
+            так же, как верный расчёт. Здесь видно, на что уходит ткань и какая деталь главная. */}
+        {outcome?.ok && (
+          <div>
+            <GroupLabel
+              flush
+            >{`расход по деталям · размер ${formatSizeName(sizeName(shownSize))}`}</GroupLabel>
+            <div className='pt-1'>
+              <DxfPieceBreakdown
+                index={index}
+                pieces={pieces}
+                areas={outcome.areas}
+                sizeId={shownSize}
+                sizeNameById={sizeNameById}
+                cuttingWidthCm={widthCm}
+                unit={unit}
+                fabric={fabric}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* ── ЧЕМ МЕРИЛИ ─────────────────────────────────────────────────────────────────────
+            Общий блок с отдельным действием на вкладке выкроек: состояние разбора, слой контура,
+            припуск и все отказы условий — одними словами на оба входа. Стоит ПОД числом, потому
+            что предзаполнен замером самого файла и в большинстве случаев верен; но менять его
+            приходится тому, кого число не устроило, — то есть ровно после того, как он его увидел. */}
+        <div>
+          <GroupLabel flush>условия замера</GroupLabel>
+          {/* ПОЛЯ НЕ ТЯНУТСЯ НА ВСЮ ШИРИНУ ОКНА. Общий блок условий рисует их `w-full`, и это
+              правильно в узком диалоге, из которого он приехал; здесь окно `lg`, и растянутый на
+              тысячу пикселей селект слоя читается как ошибка вёрстки, а не как поле. Ограничение
+              стоит СНАРУЖИ, на обёртке: правка общего компонента сузила бы поля и на вкладке
+              выкроек, где они законно во всю ширину своей колонки. */}
+          <div className='flex max-w-md flex-col gap-1.5 pt-1'>
+            <DxfMeasureConditionsFields state={conditions} />
+          </div>
+        </div>
+
+        {/* ── ПОЧЕМУ ЭТО ИМЕННО NETTO ────────────────────────────────────────────────────────
+            Тот же текст, что был первым абзацем диалога, — слово в слово, кроме порядка. Он не
+            выброшен и не сокращён: двойной учёт кромки, ради предупреждения о котором он написан,
+            стоит денег на каждом закупе. Но читать его нужно ОДИН раз на человека, а видеть перед
+            числом — каждый раз, и второе делало диалог нечитаемым.
+
+            `<details>`, а не кнопка: на выпущенной карточке вкладка лежит внутри
+            `<fieldset disabled>`, и раскрывашка на `<button>` там умерла бы молча. */}
+        <details className='border border-hairline px-2 py-1'>
+          <summary className='cursor-pointer text-micro uppercase'>
+            почему это netto и что доначисляет процент раскроя
+          </summary>
+          <div className='flex max-w-[90ch] flex-col gap-1 pt-1.5'>
+            <Text size='nano' variant='label' component='p'>
+              Считается Σ(площадь деталей × количество на изделие) ÷ раскройная ширина. Межлекальных
+              выпадов и концов настила в этом числе нет и быть не может — их знает только раскладка;
+              за них платит процент раскроя слота
+              {Number.isFinite(wastage) ? ` (${wastagePercent}%)` : ''}, и сервер доначисляет его
+              именно потому, что источник не «из раскладки».
+            </Text>
+            <Text size='nano' variant='label' component='p'>
+              Кромка в процент НЕ входит: netto-длина получена делением на РАСКРОЙНУЮ ширину (рулон
+              − 2×кромка), то есть купленный метр рулона несёт кромку с собой и она уже оплачена
+              этим делением — ровно один раз. Заложив её в процент, вы посчитаете её дважды.
+            </Text>
+            {unitKind === 'kg' && (
+              <Text size='nano' variant='label' component='p'>
+                Слот в килограммах: netto-длина переводится в вес по ПОЛНОЙ ширине рулона (кромку
+                покупают, и она весит — тот же один раз, не второй) и плотности артикула. Обе ширины
+                в одном расчёте, так и должно быть.
+              </Text>
+            )}
+            <Text size='nano' variant='label' component='p'>
+              Раскладка, когда она появится, даст ИЗМЕРЕННОЕ число и заменит это: в её длине отходы
+              уже лежат внутри, и процент раскроя слота к ней не начисляется.
+            </Text>
+            {outcome?.ok && outcome.areas.hulled.length > 0 && (
+              <Text size='nano' variant='label' component='p'>
+                {`контур заменён выпуклой оболочкой (площадь с запасом): ${outcome.areas.hulled.join(', ')}`}
+              </Text>
+            )}
+          </div>
+        </details>
 
         <Pill tone='mut'>источник будет записан как «по выкройкам»</Pill>
       </div>
