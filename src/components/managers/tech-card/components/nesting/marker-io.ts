@@ -479,6 +479,41 @@ export function markerWasteDecomposition(
   };
 }
 
+/**
+ * ПРОВЕНАНС, КОТОРЫЙ ЕДЕТ В РЕЦЕПТ ВМЕСТЕ С ЧИСЛОМ — один экземпляр на все поверхности применения.
+ *
+ * `consumption_source='marker'` говорит костингу, что в этом числе УЖЕ сидят отходы раскроя, и
+ * процент раскроя слота на него начислять нельзя. Разложение (кромка/выпады) — только показ. Оба
+ * поля обязаны ехать ОДНИМ патчем с числом, иначе «число» и «откуда оно» разъедутся; ровно поэтому
+ * список полей один, а не по копии на кнопку.
+ *
+ * ШТАМП (`normMarkerId`) ставит ЧИСЛО ИСТОЧНИКОВ, а не поверхность: он утверждает «эти числа сняты
+ * с раскладки #N», и при нескольких источниках это правдоподобная ложь, после которой индикатор
+ * расхождения следил бы за ОДНОЙ раскладкой и молча пропускал изменения в остальных. 0 обязан быть
+ * ЯВНЫМ, а не пропуском поля: отсутствие сервер читает как «сохрани что было».
+ */
+export function markerNormProvenance(
+  used: readonly common_TechCardMarkerSummary[],
+  normMarkerId: number,
+): {
+  consumptionSource: string;
+  wasteSelvedgePct: string;
+  wasteCutPct: string;
+  normMarkerId: number;
+} {
+  const parts = used.map(markerWasteDecomposition).filter((d) => d != null);
+  if (parts.length === 0)
+    return { consumptionSource: 'marker', wasteSelvedgePct: '', wasteCutPct: '', normMarkerId };
+  const mean = (pick: (d: { selvedgePct: number; cutPct: number }) => number) =>
+    String(Math.round((parts.reduce((s, d) => s + pick(d!), 0) / parts.length) * 100) / 100);
+  return {
+    consumptionSource: 'marker',
+    wasteSelvedgePct: mean((d) => d.selvedgePct),
+    wasteCutPct: mean((d) => d.cutPct),
+    normMarkerId,
+  };
+}
+
 // ── ЧЬИ ЭТО МАРКЕРЫ (Ф4.2) ──────────────────────────────────────────────────────────────
 //
 // С Ф4.2 у раскладки есть ВЛАДЕЛЕЦ. `production_run_id = 0` — КАРТОЧНАЯ: норма и всё, что снято до
@@ -617,6 +652,49 @@ export function isLegacyNorm(s?: common_TechCardMarkerSummary): boolean {
 /** Набор деталей карточки изменился с момента съёмки. НЕИЗВЕСТНОСТЬ — НЕ ИЗМЕНЕНИЕ. */
 export function pieceSetChanged(s?: common_TechCardMarkerSummary): boolean {
   return s?.pieceSetStatus === 'TECH_CARD_MARKER_PIECE_SET_STATUS_CHANGED';
+}
+
+/**
+ * НОРМА ПРОТУХЛА — дешёвая половина вердикта, та, что помещается на строку рецепта.
+ *
+ * Отпечаток входа раскладки — это (набор деталей × кратности) и ШИРИНА. Обе половины уже записаны:
+ * набор сверяет СЕРВЕР (`piece_set_status`, отпечаток снят в момент съёмки), ширину несёт сама
+ * раскладка (`fabric_width_cm`) и сверять её можно с артикулом строки прямо здесь, без единого
+ * байта геометрии. Точная сверка «столько же ли экземпляров кроит сегодняшний комплект» требует
+ * разбора DXF и живёт в диалоге раскладки комплекта (`kitInputDrift`) — на строке она стоила бы
+ * мегабайтов с CDN у КАЖДОГО слота КАЖДОГО колорвея.
+ *
+ * НИ ОДИН ПУНКТ НЕ ОТМЕНЯЕТ НОРМУ И НЕ ПЕРЕСЧИТЫВАЕТ ЕЁ. Число в строке — копия, она остаётся
+ * верной для тех условий, при которых снята; вердикт лишь говорит, что условия с тех пор другие.
+ * Молчаливый пересчёт подменил бы решение человека числом, которого он не выбирал, а молчаливое
+ * удаление — стёр бы норму, которой считают закупку.
+ *
+ * НЕИЗВЕСТНОСТЬ НЕ ЯВЛЯЕТСЯ ПРОТУХАНИЕМ ни в одном из двух пунктов: `pieceSetChanged` намеренно
+ * ложен на UNKNOWN (иначе протухшими стали бы разом все раскладки, снятые до Ф3), а ширина без
+ * числа с любой стороны просто не сверяется.
+ */
+export type NormStaleness = { stale: boolean; reasons: string[] };
+
+export function markerNormStaleness(
+  s: common_TechCardMarkerSummary | undefined,
+  /** РАСКРОЙНАЯ ширина эффективного артикула строки, см. '' = неизвестна — тогда не сверяем. */
+  articleWidthCm: string,
+): NormStaleness {
+  const reasons: string[] = [];
+  if (!s) return { stale: false, reasons };
+  if (pieceSetChanged(s)) {
+    reasons.push(
+      'набор деталей кроя КАРТОЧКИ изменился после того, как сняли эту раскладку: длина измерена по прежнему набору. Отпечаток серверный и охватывает всю карточку — деталь могли добавить и в другой ткани, поэтому это повод перепроверить, а не приговор числу',
+    );
+  }
+  const was = decNum(s.fabricWidthCm);
+  const now = Number((articleWidthCm ?? '').trim().replace(',', '.'));
+  if (was > 0 && Number.isFinite(now) && now > 0 && Math.abs(was - now) > 0.5) {
+    reasons.push(
+      `раскладку мерили на полотне ${was} см, а раскройная ширина артикула строки сейчас ${now} см — расход не переносится между ширинами без пересчёта`,
+    );
+  }
+  return { stale: reasons.length > 0, reasons };
 }
 
 // Лучший маркер на каждый размер для одной строки BOM — источник для применения по размерам.

@@ -28,7 +28,6 @@
 // прежний. Отсюда весь порядок работы очереди — задания идут сгруппированными по ткани, и разбор
 // делается по одному на ткань. Скачанные файлы кешируются в памяти вкладки, поэтому повторный
 // разбор той же ткани не платит за CDN.
-import { adminService } from 'api/api';
 import type {
   common_Material,
   common_ProductionRun,
@@ -56,7 +55,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { fetchMediaBlob } from 'lib/features/media-blob';
 import { useSnackBarStore } from 'lib/stores/store';
 import type { NestResult, PieceDTO } from 'lib/nesting/types';
-import { NEST_DEFAULTS, allowsFlip } from 'lib/nesting/types';
+import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -75,9 +74,7 @@ import {
   fabricScopes,
   isRollGoodsSection,
   markerScopeDirection,
-  type RollGoodsLine,
 } from './bom-purpose';
-import { bomPurposeLabel } from './bom-purpose-labels';
 import { BatchLayProposal } from './nesting/batch-lay-proposal';
 import {
   planBatchMarkers,
@@ -93,17 +90,16 @@ import { dxfSheetsByScope, type ScopedSheet } from './nesting/dxf-by-scope';
 import { weightBasisOf } from './nesting/fabric-weight';
 import {
   bomUnitKind,
-  buildMarkerLayout,
   cardMarkers,
   consumptionForSize,
-  dec,
   decNum,
   latestPerSize,
-  legacyPairOf,
   markersForLine,
   markersOfColorway,
   toBomUnit,
 } from './nesting/marker-io';
+import { saveMarkerJob } from './nesting/marker-save';
+import { roleWord, scopeLabel } from './nesting/scope-label';
 import { useDictionarySizeTokens } from './nesting/use-block-sizes';
 import type { TechCardFormData } from './schema';
 
@@ -723,110 +719,24 @@ export function BatchMarkerQueue({
   // конце» значило бы выбросить весь уже оплаченный счёт при первом же «остановить», закрытой
   // вкладке или упавшем воркере.
   const saveJob = async (job: MarkerJob, result: NestResult): Promise<number> => {
-    const composition = job.composition;
-    // КОЛИЧЕСТВО ДЕТАЛИ НА ОДНО ИЗДЕЛИЕ — здесь всегда 1, и это не упрощение. Блоб хранит именно
-    // «сколько раз эта деталь кроится на изделие», а тираж состава сервер накладывает сам
-    // (деталь с size_id — q своего размера, деталь без него — total_units). Очередь дублей на
-    // изделие не заводит: их источник — ручная правка в модалке, которой здесь нет.
-    const perSetQty = new Map<number, number>(job.config.pieces.map((p) => [p.pieceId, 1]));
     const urlBySource = new Map(
       (sheetsByScope.get(job.scopeKey) ?? []).map((s) => [s.name, s.url]),
     );
-    const layout = buildMarkerLayout({
-      pieces: job.pieces,
-      perSetQty,
+    // ВЕСЬ ПЭЙЛОАД — В `marker-save.ts`, один писатель на всех, кто считает задание без модалки
+    // (см. шапку того модуля). Здесь остаётся ровно то, чего планировщик знать не может: чем
+    // именно снята эта геометрия.
+    //
+    // Оговорка про запас едет ТОЛЬКО с размерной нормой: у настила партии её не бывает, он и есть
+    // плотная укладка.
+    return saveMarkerJob(techCardId, {
+      job,
+      result,
       urlBySource,
-      result: {
-        ...result,
-        warnings: [
-          ...result.warnings,
-          job.seamAllowanceMm > 0
-            ? `припуск на шов: ${job.seamAllowanceMm.toFixed(1)} мм (${job.seamAllowanceWhy}) — сохранён контур КРОЯ`
-            : 'припуск на шов: 0 — раскладывалась ЛИНИЯ ШВА, расход занижен относительно кроя',
-          // ЧЕМ ИМЕННО ЭТО ИЗМЕРЕНО — в сам блоб, а не только на экран: раскладку открывают через
-          // месяцы, и «настил на одно изделие» против «настил партии» — это разница между нормой с
-          // запасом и реальным раскроем. Оговорка про запас едет ТОЛЬКО с размерной нормой: у
-          // настила партии её не бывает, он и есть плотная укладка.
-          job.mode === 'batch'
-            ? `снято очередью раскроя партии #${run.id ?? 0}: НАСТИЛ ПАРТИИ, состав ${job.sizeLabel} (соотношение размеров партии, ужатое на НОД) — измеренный КПД и есть реальный процент раскроя этой партии.`
-            : `снято очередью раскроя партии #${run.id ?? 0}: настил на ОДНО изделие размера ${job.sizeLabel}. Многокомплектный настил кладётся плотнее, поэтому измеренный здесь расход идёт с запасом.`,
-        ],
-      },
-      unit: job.detectedUnit,
-      config: {
-        targetLengthCm: undefined,
-        // Ступень упрощения, которую движок ВЗЯЛ, а не которую просили: он грубит её сам, когда
-        // задание не тянет запрошенную точность, и записать запрос значило бы соврать тому, кто
-        // попробует воспроизвести этот маркер.
-        rdpEpsCm: result.telemetry?.rdpEpsCm ?? NEST_DEFAULTS.rdpEpsCm,
-        timeBudgetMs: job.config.timeBudgetMs,
-      },
-      tol: NEST_DEFAULTS.tol,
-      tolChain: NEST_DEFAULTS.tolChain,
-      parseWarnings: job.parseWarnings,
-      composition,
-      // ДЕТАЛЬ КРОЯ ЗА КАЖДЫМ КОНТУРОМ — тем же правилом, что у модалки (piece-selection.ts).
-      // Без него сохранённая раскладка держится на ИМЕНИ БЛОКА и перестаёт сходиться после
-      // переименования детали, а раскладки этой очереди становятся НОРМАМИ уже сегодня.
-      pieceLineKeyById: job.pieceLineKeyById as Map<number, string>,
-      // Размер градации каждой детали. Нужен смешанному настилу (сервер отвергает деталь, чей
-      // размер не назван в составе), и buildMarkerLayout сам решает, писать ли его: у однородного
-      // состава блоб обязан остаться байт в байт прежним.
-      sizeIdByPieceId: job.sizeIdByPieceId,
+      provenanceNote:
+        job.mode === 'batch'
+          ? `снято очередью раскроя партии #${run.id ?? 0}: НАСТИЛ ПАРТИИ, состав ${job.sizeLabel} (соотношение размеров партии, ужатое на НОД) — измеренный КПД и есть реальный процент раскроя этой партии.`
+          : `снято очередью раскроя партии #${run.id ?? 0}: настил на ОДНО изделие размера ${job.sizeLabel}. Многокомплектный настил кладётся плотнее, поэтому измеренный здесь расход идёт с запасом.`,
     });
-    const pair = legacyPairOf(composition);
-    const res = await adminService.SaveTechCardMarker({
-      // Пересъёмка ЗАМЕЩАЕТ прежнюю раскладку по id — иначе на карточке копились бы близнецы, и
-      // «какая из них норма» решал бы календарь.
-      id: job.replaces?.id ?? 0,
-      techCardId,
-      marker: {
-        // СОГЛАСИЕ СОХРАНИТЬ НЕПОЛНУЮ УКЛАДКУ (0299) — очередь даёт его ВСЕГДА, и это осознанно.
-        //
-        // Поле НЕ ОПИСЫВАЕТ раскладку: колонку сервер выводит сам из пары placed_count/total_count
-        // и с запроса её не копирует. То есть `true` на полной укладке хранит обычную раскладку, а
-        // пересчёт, уложивший всё, снимает признак сам собой — ничего «разчерновичивать» не нужно
-        // и нечем. Отсюда и форма согласия: это ПОЛИТИКА ОЧЕРЕДИ («неполная укладка сохраняется
-        // черновиком, а не выбрасывается»), а не суждение о конкретном результате, и второй
-        // локальный предикат placed !== total здесь мог бы разойтись с серверным.
-        isDraft: true,
-        // ВЛАДЕЛЕЦ РАСКЛАДКИ — решение планировщика, а не этого места. Размерная норма карточная
-        // (0): прогонная нормой быть не может (chk_tcm_run_not_norm) и умирает вместе с прогоном.
-        // Настил партии — наоборот, прогонный: его соотношение принадлежит ОДНОМУ заказу, и
-        // запрет схемы здесь именно то, что нужно.
-        productionRunId: job.productionRunId,
-        sizeId: pair.sizeId,
-        // Имя выдал ПЛАНИРОВЩИК: только он видит разом все задания и все сегодняшние раскладки
-        // карточки, а уникальность у сервера — (карточка, прогон, размер, имя), и её нарушение
-        // приходит отказом ПОСЛЕ полностью оплаченного прогона.
-        name: job.markerName,
-        source: 'auto',
-        bomLineKey: job.bomLineKey,
-        colorwayId: job.colorwayId,
-        fabricWidthCm: dec(job.widthCm),
-        gapCm: dec(job.config.gapCm),
-        edgeMarginCm: dec(job.config.edgeMarginCm),
-        selvedgeCm: dec(job.selvedgeCm),
-        allowCrossGrain: job.config.allowCrossGrain,
-        seamAllowanceMm: dec(job.seamAllowanceMm),
-        // `undefined` = «не мерялось», и это НЕ ноль: на выдуманном нуле костинг посчитал бы расход
-        // по контуру, который на самом деле уже раздут.
-        contourAllowanceMm:
-          job.contourAllowanceMm != null ? dec(job.contourAllowanceMm) : undefined,
-        contourLayer: job.contourLayer,
-        grainLayer: job.grainLayer,
-        // Политика переворота, ПОД КОТОРОЙ ШЁЛ ПОИСК. Выводить её из геометрии нельзя: «ни одна
-        // деталь не перевёрнута» не значит «переворот был запрещён».
-        allowFlip: allowsFlip(job.direction),
-        sets: pair.sets,
-        usedLengthCm: dec(result.usedLengthCm),
-        efficiencyPct: dec(Math.min(100, result.efficiency * 100)),
-        placedCount: result.placedCount,
-        totalCount: result.totalCount,
-        layout,
-      },
-    });
-    return Number((res as { id?: number })?.id ?? 0);
   };
 
   // ── сама очередь ──────────────────────────────────────────────────────────────────────────
@@ -1528,29 +1438,6 @@ export function BatchMarkerQueue({
 }
 
 // ── подписи ───────────────────────────────────────────────────────────────────────────────
-
-function roleWord(section: string): string {
-  if (section === 'TECH_CARD_BOM_SECTION_LINING') return 'подкладка';
-  if (section === 'TECH_CARD_BOM_SECTION_INTERLINING') return 'бортовка';
-  if (section === 'TECH_CARD_BOM_SECTION_INSULATION') return 'утеплитель';
-  return 'основная ткань';
-}
-
-/** Подпись ткани: назначение с его артикулами, либо роль с названием неразобранной строки. */
-function scopeLabel(
-  key: string,
-  byPurpose: boolean,
-  lines: Array<RollGoodsLine & { name?: string; section?: string }>,
-): string {
-  const names = lines
-    .map((l) => (l.name ?? '').trim())
-    .filter(Boolean)
-    .join(', ');
-  if (!byPurpose) {
-    return [roleWord(lines[0]?.section ?? ''), names].filter(Boolean).join(' · ') || 'без названия';
-  }
-  return [bomPurposeLabel(key), names].filter(Boolean).join(' · ');
-}
 
 function forecastText(j: MarkerJob): string {
   const e = j.estimate;

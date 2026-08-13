@@ -55,6 +55,7 @@ import { decimalToInput, inputToDecimal, parseDecimalNumber, sanitizeDecimal } f
 import { ColorwayDeleteControl } from './colorway-delete';
 import { normSourceLabel } from './costing-vocab';
 import { DxfApplyHint } from './dxf-apply';
+import { KitMarkerHint } from './kit-marker';
 import { MarkerApplyHint } from './marker-apply';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import {
@@ -64,10 +65,12 @@ import {
   weightRefusalText,
   type WeightBasisResolution,
 } from './nesting/fabric-weight';
+import { markerColorways, type MarkerColorway } from './nesting/colorway-widths';
 import {
   bomUnitKind,
   bomUnitStep,
   cardMarkers,
+  markerNormStaleness,
   markersForLine,
   markersOfColorway,
 } from './nesting/marker-io';
@@ -1615,10 +1618,12 @@ function SlotNormBlock({
   cardMarkersAllColorways,
   recipeLinks,
   colorwayId,
+  colorwayPins,
   techCardId,
   sizeIds,
   sizeNameById,
   canEdit,
+  frozen,
   active,
   onChange,
   onRemove,
@@ -1661,9 +1666,22 @@ function SlotNormBlock({
   recipeLinks?: readonly RecipePieceLink[];
   // Чей рецепт редактируется — для ранжирования маркеров (свой важнее свежего общего).
   colorwayId?: number;
+  /**
+   * Колорвеи карточки с шириной их ПИНОВ по слотам — ровно тот вход, которым считает раскладку
+   * очередь раскроя партии (`markerColorways`). Берётся из СОХРАНЁННОГО рецепта, а не из
+   * черновика строки: сравнение с шириной черновика и есть то, чем «раскладка комплекта» ловит
+   * несохранённую смену артикула.
+   */
+  colorwayPins?: readonly MarkerColorway[];
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
+  /**
+   * Карточка ВЫПУЩЕНА. Отдельно от `canEdit` (в нём это уже сидит), потому что причин две, а
+   * починки у них разные: раскладку комплекта на выпущенной карточке сервер не примет, и сказать
+   * об этом надо словами, а не пустотой на месте кнопки.
+   */
+  frozen?: boolean;
   /** Редактор этого колорвея сейчас виден — см. ColorwayRecipeEditor.active. */
   active: boolean;
   onChange: (patch: Partial<UsageDraft>) => void;
@@ -1732,6 +1750,9 @@ function SlotNormBlock({
   const stampedName = stampedMarker
     ? `«${stampedMarker.name?.trim() || `#${stampedId}`}»`
     : `#${stampedId}`;
+  // ПРОТУХАНИЕ НОРМЫ — дешёвая половина (см. markerNormStaleness): серверный отпечаток набора
+  // деталей и ширина артикула этой строки. Ни то ни другое не стоит запроса.
+  const normStale = markerNormStaleness(stampedMarker, articleWidth);
   const normStampText = [
     appliedDay !== '—'
       ? `норма применена ${appliedDay} из раскладки ${stampedName}`
@@ -1849,6 +1870,36 @@ function SlotNormBlock({
               explainWhenIdle={!hasNorm}
               recipeLinks={recipeLinks}
               techCardId={techCardId}
+              onApply={(patch) => onChange(patch)}
+            />
+          )}
+          {/* W1: ПОСЧИТАТЬ РАСКЛАДКУ КОМПЛЕКТА ПРЯМО ЗДЕСЬ.
+              «По выкройкам» выше даёт netto — площадь ÷ ширину, без межлекальных выпадов, и потому
+              требует процента раскроя сверху. Эта кнопка даёт ИЗМЕРЕННУЮ длину настила: выпады уже
+              внутри, и костинг процент на неё не начисляет. Разные слоты одной и той же ткани
+              (основная и карманка) кроят РАЗНЫЕ детали и дают разные числа сами — ровно поэтому
+              один процент на них и не был логичен.
+
+              Монтируется в тех же условиях, что «по выкройкам» (активный колорвей, рулонный слот),
+              плюс на ВЫПУЩЕННОЙ карточке — там она рисует не кнопку, а причину: сервер карточных
+              раскладок на релизнутую карточку не принимает, и пустота на месте кнопки читалась бы
+              как поломка. `active && rollGoods` — тот же гейт стоимости: подсказка держит две
+              подписки на массивы формы, а редакторы ВСЕХ колорвеев смонтированы одновременно. */}
+          {active && rollGoods && (
+            <KitMarkerHint
+              control={control}
+              techCardId={techCardId}
+              lineKey={draft.bomLineKey}
+              colorwayId={colorwayId ?? 0}
+              colorwayPins={colorwayPins}
+              unit={unit}
+              articleWidth={articleWidth}
+              weightBasis={weightBasis}
+              sizeNameById={sizeNameById}
+              cardMarkersAllColorways={cardMarkersAllColorways}
+              stampedMarker={stampedMarker}
+              canEdit={normEditable}
+              frozen={!!frozen}
               onApply={(patch) => onChange(patch)}
             />
           )}
@@ -2005,9 +2056,28 @@ function SlotNormBlock({
               раскладка удалена
             </Pill>
           )}
+          {/* ОТПЕЧАТОК ВХОДА РАЗОШЁЛСЯ — дешёвая половина вердикта (набор деталей карточки по
+              серверному отпечатку и ширина артикула). Точная сверка «столько же ли экземпляров
+              кроит сегодняшний комплект» требует разбора DXF и живёт в диалоге раскладки
+              комплекта: на строке она стоила бы мегабайтов с CDN у каждого слота каждого
+              колорвея. Норма при этом НЕ отменяется и не пересчитывается — число остаётся верным
+              для тех условий, при которых снято, и решает человек. */}
+          {normStale.stale && (
+            <Pill
+              tone='attention'
+              title={`${normStale.reasons.join('; ')}. Пересчитать: «раскладка комплекта…» на этой карточке — она заменит ту же раскладку и применит свежее число`}
+            >
+              норма протухла: вход изменился
+            </Pill>
+          )}
           <Text size='nano' variant='label' component='span'>
             {normStampText}
           </Text>
+          {normStale.stale && (
+            <Text size='nano' variant='label' component='span'>
+              {normStale.reasons.join('; ')}
+            </Text>
+          )}
         </div>
       )}
 
@@ -2279,10 +2349,12 @@ function FabricRecipeCard({
   cardMarkersAllColorways,
   recipeLinks,
   colorwayId,
+  colorwayPins,
   techCardId,
   sizeIds,
   sizeNameById,
   canEdit,
+  frozen,
   active,
   onPatchSlot,
   onRemoveRow,
@@ -2305,10 +2377,14 @@ function FabricRecipeCard({
   cardMarkersAllColorways?: common_TechCardMarkerSummary[];
   recipeLinks?: readonly RecipePieceLink[];
   colorwayId?: number;
+  /** Пины колорвеев с их ширинами — вход раскладки комплекта (см. SlotNormBlock). */
+  colorwayPins?: readonly MarkerColorway[];
   techCardId: number;
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
+  /** Карточка выпущена — раскладку комплекта сервер не примет, и это говорится словами. */
+  frozen?: boolean;
   active: boolean;
   /** index < 0 значит «строки этого слота ещё нет» — патч её и рождает (patchGarmentSlot). */
   onPatchSlot: (index: number, patch: Partial<UsageDraft>) => void;
@@ -2598,10 +2674,12 @@ function FabricRecipeCard({
                   cardMarkersAllColorways={cardMarkersAllColorways}
                   recipeLinks={recipeLinks}
                   colorwayId={colorwayId}
+                  colorwayPins={colorwayPins}
                   techCardId={techCardId}
                   sizeIds={sizeIds}
                   sizeNameById={sizeNameById}
                   canEdit={canEdit}
+                  frozen={frozen}
                   active={active}
                   onChange={(patch) => onPatchSlot(row?.index ?? -1, patch)}
                   onRemove={() => {
@@ -3378,6 +3456,8 @@ function ColorwayRecipeEditor({
   lockVersion,
   techCardId,
   canEdit,
+  frozen,
+  colorwayPins,
   onStatus,
 }: {
   colorway: common_AdminColorwayRef;
@@ -3416,6 +3496,14 @@ function ColorwayRecipeEditor({
   lockVersion: number;
   techCardId: number;
   canEdit: boolean;
+  /**
+   * Карточка ВЫПУЩЕНА. В `canEdit` это уже сидит, но там оно неотличимо от «нет прав», а починки
+   * у двух причин разные — и раскладка комплекта обязана назвать именно свою (сервер не принимает
+   * карточные раскладки на выпущенную карточку).
+   */
+  frozen: boolean;
+  /** Пины колорвеев карточки с их ширинами (markerColorways) — вход раскладки комплекта. */
+  colorwayPins: readonly MarkerColorway[];
   onStatus: (colorwayId: number, status: RecipeStatus) => void;
 }) {
   const save = useUpdateColorwayRecipe(techCardId);
@@ -3824,10 +3912,12 @@ function ColorwayRecipeEditor({
                         cardMarkersAllColorways={allCardMarkers}
                         recipeLinks={recipeLinks}
                         colorwayId={colorwayId}
+                        colorwayPins={colorwayPins}
                         techCardId={techCardId}
                         sizeIds={sizeIds}
                         sizeNameById={sizeNameById}
                         canEdit={canEdit}
+                        frozen={frozen}
                         active={active}
                         onPatchSlot={(index, patch) =>
                           patchGarmentSlot(slot.lineKey ?? '', index, patch)
@@ -4124,6 +4214,11 @@ export function ColorwayRecipes({
   // может стереть продукт, но не может его спрятать. `canEdit` тут не годится ещё и потому, что в
   // нём сидит `!frozen`: см. комментарий о RELEASED в colorway-delete.tsx.
   const canDeleteProduct = canWrite(SECTION.products);
+  // ВЫПУЩЕНА ЛИ КАРТОЧКА — читается ЗДЕСЬ, а не выводится из `canEdit`. В `canEdit` released уже
+  // сидит вместе с правом записи, и различить их снаружи нечем; между тем починки у них разные, а
+  // отказ сервера в карточной раскладке относится РОВНО к релизу. Тот же предикат, что в шапке
+  // вкладки (index.tsx): approvalState === RELEASED.
+  const frozen = techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED';
   // УДАЛЁННЫЕ ПРЯЧЕМ СРАЗУ, не дожидаясь рефетча карточки. Инвалидация уже запущена, но между ней и
   // приехавшим ответом список ещё содержит стёртый колорвей — а он к этому моменту не существует:
   // его плитка, его редактор и его выбор указывали бы на продукт, которого нет. Фильтр монотонный
@@ -4163,6 +4258,23 @@ export function ColorwayRecipes({
     for (const mat of materials) if (wireInt(mat.id)) m.set(wireInt(mat.id), mat);
     return m;
   }, [materials]);
+  // ПИНЫ КОЛОРВЕЕВ С ИХ ШИРИНАМИ — ТЕМ ЖЕ ВЫРАЖЕНИЕМ, ЧТО У ОЧЕРЕДИ РАСКРОЯ И У МОДАЛКИ.
+  //
+  // Раскладка комплекта меряет длину на КОНКРЕТНОМ полотне, и «какое это полотно» обязано
+  // считаться одной функцией на всю подсистему: `markerColorways` читает СОХРАНЁННЫЙ рецепт
+  // (colorway.usages[].material_id) и берёт у артикула его собственные ширину и кромку. Собрать
+  // тот же ответ из черновика строки — значит завести второе правило: пин, явно поставленный на
+  // тот же артикул, что у слота, черновик считает «не пином» и меряет по ширине СТРОКИ BOM (у неё
+  // бывает свой override), а сохранённый рецепт — по ширине АРТИКУЛА. Расхождение выглядит
+  // нормальным числом и стоит ровно разницы ширин.
+  //
+  // И РОВНО ПОЭТОМУ ЭТО СОХРАНЁННОЕ ЧТЕНИЕ, А НЕ ЧЕРНОВИК: сравнение «ширина, которой будем
+  // мерить» против «ширина, которую показывает строка» — единственное, чем ловится несохранённая
+  // смена артикула, а из одного источника оно совпадало бы всегда (kitWidthDisagreement).
+  const colorwayPins = useMemo(
+    () => markerColorways(techCard, materialById),
+    [techCard, materialById],
+  );
   // The card's BOM slots, LIVE from form state — for the same reason the pieces above are: a slot
   // added on the BOM tab a moment ago has to be assignable here immediately, instead of only after
   // a save and a refetch. It is safe for a usage to point at a slot the server has never seen,
@@ -4376,6 +4488,8 @@ export function ColorwayRecipes({
             lockVersion={lockVersion}
             techCardId={techCardId}
             canEdit={canEdit}
+            frozen={frozen}
+            colorwayPins={colorwayPins}
             onStatus={reportStatus}
           />
         </div>

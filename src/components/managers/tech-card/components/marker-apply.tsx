@@ -72,6 +72,7 @@ import {
   isLegacyNorm,
   latestPerSize,
   markersForLine,
+  markerNormProvenance,
   markerWasteDecomposition,
   pieceSetChanged,
   refusalWord,
@@ -354,19 +355,10 @@ export function MarkerApplyHint({
   // §6.4 этим не отменяется — штамп не FK и ничего не пересчитывает; он лишь позволяет строке
   // рецепта ответить на вопрос, которого она сегодня не помнит: «раскладку с тех пор перемеряли,
   // число ещё актуально?». Дату применения ставит СЕРВЕР — клиент её не шлёт никогда.
-  const provenance = (used: common_TechCardMarkerSummary[], normMarkerId: number) => {
-    const parts = used.map(markerWasteDecomposition).filter((d) => d != null);
-    if (parts.length === 0)
-      return { consumptionSource: 'marker', wasteSelvedgePct: '', wasteCutPct: '', normMarkerId };
-    const mean = (pick: (d: { selvedgePct: number; cutPct: number }) => number) =>
-      String(Math.round((parts.reduce((s, d) => s + pick(d!), 0) / parts.length) * 100) / 100);
-    return {
-      consumptionSource: 'marker',
-      wasteSelvedgePct: mean((d) => d.selvedgePct),
-      wasteCutPct: mean((d) => d.cutPct),
-      normMarkerId,
-    };
-  };
+  // Сам список полей и правило штампа живут в marker-io (`markerNormProvenance`): применений
+  // теперь два — этот диалог и «раскладка комплекта» на карточке ткани, — и две копии этого списка
+  // разъехались бы в тот день, когда провенанс получит третье поле.
+  const provenance = markerNormProvenance;
 
   const apply = () => {
     if (mode === 'scalar') {
