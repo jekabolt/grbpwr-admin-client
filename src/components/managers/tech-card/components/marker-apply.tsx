@@ -753,8 +753,10 @@ export function MarkerApplyHint({
                 />
                 {/* Кг-слот: формула веса целиком, с числами, ДО нажатия — применённое число иначе
                     невозможно проверить: ошибка ширины или плотности входит в него линейно.
-                    Стоит ВПЛОТНУЮ к арифметике, потому что это её продолжение. */}
-                {unitKind === 'kg' && fabric && (
+                    Стоит ВПЛОТНУЮ к арифметике, потому что это её продолжение.
+                    ГЕЙТ `applyPossible` СОХРАНЁН С ПРЕЖНЕГО МЕСТА: под отказом эта формула
+                    описывала бы перевод числа, которого не будет. */}
+                {applyPossible && unitKind === 'kg' && fabric && (
                   <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
                     {weightBasisNote(fabric)}
                   </Text>
@@ -809,7 +811,8 @@ export function MarkerApplyHint({
                   fabric={fabric}
                   toUnit={(cm) => toBomUnit(cm, unit, fabric)}
                 />
-                {unitKind === 'kg' && fabric && (
+                {/* Та же формула веса и тот же гейт, что в скалярном режиме выше. */}
+                {applyPossible && unitKind === 'kg' && fabric && (
                   <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
                     {weightBasisNote(fabric)}
                   </Text>

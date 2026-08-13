@@ -25,7 +25,7 @@ import Text from 'ui/components/text';
 import type { common_TechCardMarkerSummary } from 'api/proto-http/admin';
 // Разряды в см² — тем же правилом, что у dxf-разбора: два формата одного числа на двух
 // поверхностях одного расчёта разъехались бы первой же правкой.
-import { fmtInt } from './dxf-piece-breakdown';
+import { fmtInt, fmtNum } from './dxf-piece-breakdown';
 import {
   compositionOf,
   decNum,
@@ -68,8 +68,8 @@ export function MarkerLengthFormula({
     <StatGrid min={150}>
       <Stat
         label='длина настила'
-        value={lengthCm > 0 ? fmtInt(lengthCm) : '—'}
-        sub={widthCm > 0 ? `см · раскройная ширина ${fmtInt(widthCm)} см` : 'см'}
+        value={lengthCm > 0 ? fmtNum(lengthCm) : '—'}
+        sub={widthCm > 0 ? `см · раскройная ширина ${fmtNum(widthCm)} см` : 'см'}
       />
       <Stat
         label='÷ изделий в настиле'
@@ -196,9 +196,10 @@ export function MarkerAreaSplit({
       </DataTable>
       <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
         разложение выведено из КПД раскладки, её ширины и длины — оно объясняет число, но никуда не
-        уезжает и ни на что не умножается: измеренная длина уже оплатила все три слагаемых. В рецепт
-        те же отходы пишутся процентами ОТ ПЛОЩАДИ ДЕТАЛЕЙ (шкала костинга), поэтому там числа
-        другие — это одна и та же величина в двух шкалах
+        уезжает и ни на что не умножается: измеренная длина уже оплатила все три слагаемых.
+        Слагаемые округлены до целых см², итог считается по неокруглённым — сумма столбца может
+        разойтись с ним на единицы. В рецепт те же отходы пишутся процентами ОТ ПЛОЩАДИ ДЕТАЛЕЙ
+        (шкала костинга), поэтому там числа другие — это одна и та же величина в двух шкалах
       </Text>
     </div>
   );
