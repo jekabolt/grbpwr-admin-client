@@ -9,6 +9,34 @@ import { cn } from 'lib/utility';
 import { fmtCm, PieceShape, type FoundPiece } from './nesting/dxf-geometry';
 
 /**
+ * ЧИТАЕМОСТЬ КОНТУРА В МАЛОМ РАЗМЕРЕ — правкой ПОКАЗА, а не размера бокса.
+ *
+ * `PieceShape` считает штрих в координатах ЧЕРТЕЖА (`box.w / 120`), потому что рисовался для
+ * крупного окна на вкладке деталей кроя. В плитке 56px и в глифе строки тот же штрих ужимается
+ * вместе с viewBox до трети пикселя, а заливка #f2f2f2 почти совпадает с фоном плитки — деталь
+ * выглядит выцветшей независимо от того, насколько крупный ей дали бокс. Увеличивать бокс дальше
+ * бессмысленно: в 64px та же деталь так же бледна.
+ *
+ * Поэтому здесь: `vector-effect: non-scaling-stroke` — штрих меряется в ЭКРАННЫХ пикселях и не
+ * зависит от габарита детали (пояс шириной 70см и карман шириной 26см получают одинаковую линию,
+ * а не разную), плюс серая заливка, на которой силуэт читается формой, а не только кантом.
+ * CSS бьёт presentation-атрибуты SVG, так что сам `PieceShape` не тронут — у крупного окна на
+ * вкладке деталей кроя всё остаётся как было.
+ */
+export const SILHOUETTE_INK =
+  '[&_polygon]:fill-[#dedede] [&_polygon]:[vector-effect:non-scaling-stroke] [&_polygon]:[stroke-width:1px]';
+
+/** Подпись контура: блок, размер, по которому нарисовано, и габарит — одна на все поверхности. */
+export function pieceShapeTitle(found: FoundPiece): string {
+  const size = found.size
+    ? `размер ${found.size}${found.sizes.length > 1 ? ` из ${found.sizes.length}` : ''}`
+    : '';
+  return [found.block, size, `${fmtCm(found.piece.bboxW)}×${fmtCm(found.piece.bboxH)} см`]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+/**
  * Силуэт детали при её имени: форма из ЧЕРТЕЖА, не пиктограмма — рисуется тем же контуром
  * (findPiece: срединный размер ряда, слой линии кроя с фолбэком), что и плитка этой детали на
  * вкладке деталей кроя. Подпись обязательна, иначе это декорация: title называет блок, размер, по
@@ -28,18 +56,69 @@ export function PieceSilhouette({
   boxClassName?: string;
 }) {
   if (!found) return null;
-  const size = found.size
-    ? `размер ${found.size}${found.sizes.length > 1 ? ` из ${found.sizes.length}` : ''}`
-    : '';
-  const title = [found.block, size, `${fmtCm(found.piece.bboxW)}×${fmtCm(found.piece.bboxH)} см`]
-    .filter(Boolean)
-    .join(' · ');
+  const title = pieceShapeTitle(found);
   // Без рамки (глиф при имени, не контрол); grainLayer='' гасит красную долевую — на 28px она
   // читалась бы как цвет состояния, а красный в системе — только ошибка; outlineOnly гасит
   // внутреннюю геометрию, нечитаемую в этом размере. SVG letterbox-ится в бокс сам (meet).
   return (
     <span title={title} className={cn('mr-1.5 inline-flex h-7 w-10 shrink-0', boxClassName)}>
       <PieceShape piece={found.piece} grainLayer='' outlineOnly />
+    </span>
+  );
+}
+
+/**
+ * ПЛИТКА ДЕТАЛИ — квадрат с формой и именем ПОВЕРХ неё.
+ *
+ * Другая вещь, чем силуэт при имени, а не его размер побольше. Силуэт — ведущая метка строки, он
+ * живёт РЯДОМ с текстом и потому обязан быть с этот текст ростом; на 16 пикселях лекальная деталь
+ * различима как «что-то узкое» и не более. Плитка — сама единица выбора: имя уезжает НА неё, и
+ * освободившееся место целиком отдано форме, поэтому квадрат в 56px несёт больше, чем прежние
+ * чип с глифом при нём, занимая столько же строк.
+ *
+ * Квадрат, а не по габариту детали: рядом стоят полочка (высокая) и пояс (длинный), и плитки по их
+ * собственным пропорциям превратили бы полосу выбора в лесенку. Внутри квадрата контур
+ * letterbox-ится сам (preserveAspectRatio=meet), так что пропорции САМОЙ детали не врут — врал бы
+ * только общий размер, а его тут никто не читает.
+ *
+ * Имя стоит полосой по низу на полупрозрачной подложке: контур — светлая заливка с тёмным кантом,
+ * и буквы поверх него без подложки пересекались бы линией кроя ровно там, где деталь узкая.
+ * Тень для отделения запрещена (DESIGN.md), подложка — нет.
+ *
+ * БЕЗ КОНТУРА ПЛИТКА ВСЁ РАВНО РИСУЕТСЯ, пустым квадратом с именем. Это не «пустая рамка вместо
+ * данных»: в полосе, где у соседей форма есть, пустой квадрат — сам по себе ответ («эта деталь с
+ * блоком чертежа не связана»), и он держит сетку. Решение «показывать плитками или чипами» принимает
+ * вызывающий — по тому, есть ли у карточки вообще хоть один контур.
+ */
+export function PieceTile({
+  found,
+  name,
+  className,
+}: {
+  found: FoundPiece | null;
+  name: string;
+  className?: string;
+}) {
+  const title = found ? `${name} · ${pieceShapeTitle(found)}` : name;
+  return (
+    <span
+      title={title}
+      className={cn(
+        'relative flex size-14 shrink-0 items-center justify-center overflow-hidden bg-bgZebra',
+        SILHOUETTE_INK,
+        className,
+      )}
+    >
+      {/* Поле снизу — под саму подпись: контур ужимается ДО неё, а не прячет под ней свой низ.
+          Паддинг живёт на обёртке, а не на <svg>: у svg он режет область просмотра, а не поле. */}
+      {found ? (
+        <span className='flex size-full items-center justify-center p-1 pb-3.5'>
+          <PieceShape piece={found.piece} grainLayer='' outlineOnly />
+        </span>
+      ) : null}
+      <span className='absolute inset-x-0 bottom-0 truncate bg-bgColor/80 px-0.5 text-center text-nano leading-[1.35] tracking-pill uppercase'>
+        {name}
+      </span>
     </span>
   );
 }
