@@ -47,6 +47,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
 import Selector from 'ui/components/selector';
 import Text from 'ui/components/text';
@@ -71,13 +72,21 @@ import {
   isDraftMarker,
   isLegacyNorm,
   latestPerSize,
+  markerAreaSplitCm2,
   markersForLine,
   markerWasteDecomposition,
   pieceSetChanged,
   refusalWord,
   scalarNormRefusal,
   toBomUnit,
+  totalUnitsOf,
 } from './nesting/marker-io';
+import {
+  compositionSummary,
+  MarkerAreaSplit,
+  MarkerLengthFormula,
+  MarkerPerSizeTable,
+} from './nesting/marker-length-breakdown';
 import {
   canContinue,
   originLabel,
@@ -304,6 +313,21 @@ export function MarkerApplyHint({
   const perSizeWidthMismatch =
     Number.isFinite(artW) && artW > 0 && perSizeWidths.some((w) => Math.abs(artW - w) > 0.5);
 
+  // ЧЬЮ ДЛИНУ РАЗБИРАЕТ ТАБЛИЦА «ИЗ ЧЕГО СЛОЖИЛАСЬ». Разложение описывает ОДИН настил — его КПД, его
+  // ширину, его длину. В «по размерам» числа законно приходят от нескольких раскладок, и показать
+  // разложение одной из них значило бы объяснить длину, которой в рецепт не уедет. Поэтому источник
+  // обязан быть ровно один; иначе остаётся усреднённая процентная подпись — та же, что была всегда.
+  //
+  // Раскладка без записанной длины (или без КПД, или без ширины) разложения не даёт вовсе — и это
+  // проверяется ЗДЕСЬ, а не внутри таблицы: от ответа зависит, какой из двух текстов показать.
+  const splitSource: common_TechCardMarkerSummary | undefined =
+    mode === 'scalar'
+      ? chosen
+      : appliedPerSize.length === 1
+        ? appliedPerSize[0] ?? undefined
+        : undefined;
+  const splitMarker = splitSource && markerAreaSplitCm2(splitSource) ? splitSource : undefined;
+
   // Scalar-mode spread: a flat norm silently taken from one size understates/overstates the
   // run when sizes diverge — or when the chosen size is not the base sample size.
   //
@@ -427,12 +451,15 @@ export function MarkerApplyHint({
     setAreaBusy(true);
     setAreaError('');
     try {
-      const [{ sizeAreasForMarker }, { patternSourcesForMarker }, { fabricScopes, isRollGoodsSection }] =
-        await Promise.all([
-          import('./nesting/size-areas-from-dxf'),
-          import('./nesting/marker-rebuild'),
-          import('./bom-purpose'),
-        ]);
+      const [
+        { sizeAreasForMarker },
+        { patternSourcesForMarker },
+        { fabricScopes, isRollGoodsSection },
+      ] = await Promise.all([
+        import('./nesting/size-areas-from-dxf'),
+        import('./nesting/marker-rebuild'),
+        import('./bom-purpose'),
+      ]);
       // Какие листы обслуживают ткань ЭТОЙ раскладки. С 0267 лист привязан к НАЗНАЧЕНИЮ, и оно
       // резолвится перед bomLineKey — фильтр по одному ключу теряет листы «основного материала»
       // и отвечает «выкроек нет» там, где они загружены.
@@ -463,7 +490,8 @@ export function MarkerApplyHint({
       // Токены размера — ПО ВСЕМУ СЛОВАРЮ, а не по ряду карточки: иначе размер, лежащий в файле,
       // но не заведённый в ряд, перестаёт быть размерным хвостом, и деталь двоится на идентичности.
       const dictTokens = new Set<string>();
-      for (const name of sizeNameById.values()) for (const t of sizeTokensOf(name)) dictTokens.add(t);
+      for (const name of sizeNameById.values())
+        for (const t of sizeTokensOf(name)) dictTokens.add(t);
       const wanted = new Set<number>(sizeIds);
       for (const c of compositionOf(chosen)) wanted.add(c.sizeId);
       const out = await sizeAreasForMarker({
@@ -578,49 +606,61 @@ export function MarkerApplyHint({
         }
         closeOnConfirm={false}
       >
-        <div className='space-y-2'>
+        <div className='space-y-2.5'>
+          {/* ── ЧТО ПРИМЕНЯЕМ ────────────────────────────────────────────────────────────────
+              Выбор раскладки и режим — вход всего остального, и стоят они первыми. Всё, что
+              ниже, описывает ПОСЛЕДСТВИЯ этого выбора и меняется вместе с ним. */}
           {/* Селектор теперь и в «по размерам»: выбранная раскладка там не только показывается,
               она ЕСТЬ БАЗИС ПРОДОЛЖЕНИЯ — её константа L/Σ(q·a) достраивает размеры, которых нет
               в её составе. Прятать выбор в режиме, где он решает больше всего, было бы странно. */}
+          {/* ПОЛЯ НЕ ТЯНУТСЯ НА ВСЮ ШИРИНУ ОКНА. `Selector` рисует себя `w-full`, и это правильно в
+              узкой панели, из которой он приехал; здесь окно `lg`, и растянутый на тысячу пикселей
+              выпадающий список читается как ошибка вёрстки. Ограничение стоит СНАРУЖИ, на обёртке:
+              правка самого примитива сузила бы его на всех остальных экранах. */}
           {lineMarkers.length > 1 && (
-            <Selector
-              label='маркер'
-              value={chosen.id ?? 0}
-              // Список идёт ПО РАНГУ (норма → свой колорвей → свежесть), а не в порядке,
-              // в котором строки приехали с сервера: первый пункт списка обязан совпадать с тем,
-              // что экран предложил сам.
-              options={ranked.map((m) => {
-                const c = consumptionCm(m);
-                return {
-                  value: m.id ?? 0,
-                  // Неприменимая раскладка остаётся В СПИСКЕ и подписана словом. Спрятать её
-                  // значило бы ответить на «а где раскладка, которую я только что снял»
-                  // молчанием; подписать «— смешанный состав» — назвать причину там, где её ищут.
-                  // «набор изменился» стоит здесь же: это факт о ГОДНОСТИ числа, и узнать его надо
-                  // до выбора, а не после. «Старая норма» намеренно осталась ниже, на выбранном
-                  // маркере: до Ф3 её несёт КАЖДАЯ строка, и в списке это был бы шум, а не сигнал.
-                  label: `${m.isNorm === true ? 'норма · ' : ''}«${m.name}» · ${compLabel(m)} · ${
-                    c != null ? `${c} см/ед` : `нормы нет — ${refusalWord(m)}`
-                  }${
-                    isDraftMarker(m) &&
-                    Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
-                      ? ` (уложено ${m.placedCount ?? 0} из ${m.totalCount ?? 0})`
-                      : ''
-                  }${pieceSetChanged(m) ? ' · набор изменился' : ''}`,
-                };
-              })}
-              onChange={(v: string | number) => {
-                setMarkerId(Number(v));
-                // Площади посчитаны ПРОТИВ конкретной раскладки: её блоба, её условий съёмки, её
-                // записанных a_s. Для другой они не проверены ничем, и оставить их значило бы
-                // продолжить чужую константу по чужой сверке.
-                setAreas(null);
-                setAreaError('');
-              }}
-            />
+            <div className='max-w-xl'>
+              <Selector
+                label='маркер'
+                value={chosen.id ?? 0}
+                // Список идёт ПО РАНГУ (норма → свой колорвей → свежесть), а не в порядке,
+                // в котором строки приехали с сервера: первый пункт списка обязан совпадать с тем,
+                // что экран предложил сам.
+                options={ranked.map((m) => {
+                  const c = consumptionCm(m);
+                  return {
+                    value: m.id ?? 0,
+                    // Неприменимая раскладка остаётся В СПИСКЕ и подписана словом. Спрятать её
+                    // значило бы ответить на «а где раскладка, которую я только что снял»
+                    // молчанием; подписать «— смешанный состав» — назвать причину там, где её ищут.
+                    // «набор изменился» стоит здесь же: это факт о ГОДНОСТИ числа, и узнать его надо
+                    // до выбора, а не после. «Старая норма» намеренно осталась ниже, на выбранном
+                    // маркере: до Ф3 её несёт КАЖДАЯ строка, и в списке это был бы шум, а не сигнал.
+                    label: `${m.isNorm === true ? 'норма · ' : ''}«${m.name}» · ${compLabel(m)} · ${
+                      c != null ? `${c} см/ед` : `нормы нет — ${refusalWord(m)}`
+                    }${
+                      isDraftMarker(m) && Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
+                        ? ` (уложено ${m.placedCount ?? 0} из ${m.totalCount ?? 0})`
+                        : ''
+                    }${pieceSetChanged(m) ? ' · набор изменился' : ''}`,
+                  };
+                })}
+                onChange={(v: string | number) => {
+                  setMarkerId(Number(v));
+                  // Площади посчитаны ПРОТИВ конкретной раскладки: её блоба, её условий съёмки, её
+                  // записанных a_s. Для другой они не проверены ничем, и оставить их значило бы
+                  // продолжить чужую константу по чужой сверке.
+                  setAreas(null);
+                  setAreaError('');
+                }}
+              />
+            </div>
           )}
           <ChipRow>
-            <Chip selected={mode === 'scalar'} pressed={mode === 'scalar'} onClick={() => setMode('scalar')}>
+            <Chip
+              selected={mode === 'scalar'}
+              pressed={mode === 'scalar'}
+              onClick={() => setMode('scalar')}
+            >
               единой нормой
             </Chip>
             {/* «По размерам» ТЕПЕРЬ ДОСТУПНО И ОТ ОДНОЙ СМЕШАННОЙ РАСКЛАДКИ. Раньше режим требовал
@@ -643,6 +683,8 @@ export function MarkerApplyHint({
             </Chip>
           </ChipRow>
 
+          {/* ── ЧТО МЕШАЕТ ПРИМЕНИТЬ — СРАЗУ ПОСЛЕ ВЫБОРА И ДО ВСЯКИХ ЧИСЕЛ ───────────────────
+              Отказ, лежащий под таблицей, читается после того, как оператор уже поверил числу. */}
           {/* Отказ сервера, слово в слово. Он длинный намеренно: называет и правило, и что
               делать — применить однородную раскладку либо дождаться Ф2.4. Показывается ВМЕСТО
               отказа по единице: когда числа нет вовсе, единица уже не при чём. */}
@@ -675,86 +717,9 @@ export function MarkerApplyHint({
               из длины настила, и по черновику оно занизило бы сразу все размеры
             </CalloutBox>
           )}
-          {/* Применяется НЕ НОРМА — и это надо сказать до нажатия, а не объяснять потом. Два
-              разных случая, и путать их нельзя: экран сам обошёл норму, потому что она не выдаёт
-              расхода на изделие (тогда это предупреждение), либо оператор выбрал другую раскладку
-              руками (тогда это констатация). Молчаливая подмена назначенной нормы «просто
-              применимой» — ровно то, ради чего норма и заводилась. */}
-          {mode === 'scalar' && notTheNorm && normMarker && (
-            <CalloutBox tone={normRefusal ? 'warning' : 'note'}>
-              {normRefusal
-                ? `назначенная норма «${normMarker.name}» расхода на изделие не даёт (${refusalWord(
-                    normMarker,
-                  )}) — применится «${chosen.name}», а не она`
-                : `применится «${chosen.name}», а НЕ назначенная норма «${normMarker.name}»${
-                    normConv ? ` (${normConv.value} ${normConv.unit})` : ''
-                  }`}
-            </CalloutBox>
-          )}
-          {/* ЧИСЛО И ЕГО ПРОИСХОЖДЕНИЕ — В ОДНОЙ СТРОКЕ. Три источника выглядят одинаково
-              убедительно, а стоят разного: «из раскладки» измерено, «по площади выкроек»
-              продолжено той же формулой, «СРЕДНЕЕ» — тот самый перекос, который вся подсистема
-              отказывается отдавать скаляром. Строка без пометки была бы обещанием, которого экран
-              не может дать. */}
-          {mode === 'perSize' && (
-            <div className='space-y-0.5'>
-              {plan.rows.map((r) => {
-                const c = r.consumptionCm != null ? toBomUnit(r.consumptionCm, unit, fabric) : null;
-                return (
-                  <div key={r.sizeId} className='flex flex-wrap items-baseline gap-1.5'>
-                    <Text size='nano' variant='label' component='span'>
-                      {sizeName(r.sizeId)}:{' '}
-                      {/* Ноль после округления числом не показывается (см. zeroRefusal) —
-                          вместо него измеренные сантиметры, по которым видно, что округлилось. */}
-                      {c && c.value > 0
-                        ? `${c.value} ${c.unit}`
-                        : r.consumptionCm != null
-                          ? `${r.consumptionCm} см`
-                          : '—'}
-                    </Text>
-                    <Pill
-                      tone={r.origin === 'mean' ? 'warn' : r.origin === 'area' ? 'attention' : 'mut'}
-                      title={
-                        r.origin === 'area'
-                          ? `размера нет в составе «${chosen.name}» — расход продолжен по площади его выкроек (${(r.areaCm2 ?? 0).toFixed(0)} см² на изделие) той же формулой распределения`
-                          : r.origin === 'mean'
-                            ? `выкроек этого размера на карточке нет — подставлено СРЕДНЕЕ по настилу «${chosen.name}». Мелкие размеры оно завышает, крупные занижает`
-                            : r.marker
-                              ? `измерено раскладкой «${r.marker.name}»`
-                              : undefined
-                      }
-                    >
-                      {originLabel(r.origin)}
-                    </Pill>
-                  </div>
-                );
-              })}
-            </div>
-          )}
           {/* ПОЧЕМУ ПО РАЗМЕРАМ НЕ ПОЛУЧАЕТСЯ — словами, а не погасшей кнопкой. */}
           {mode === 'perSize' && !plan.complete && perSizeWhyNot && (
             <CalloutBox tone='warning'>{perSizeWhyNot}</CalloutBox>
-          )}
-          {/* ПРОДОЛЖЕНИЕ ФОРМУЛЫ НА ОСТАЛЬНОЙ РЯД. Раскладка публикует площадь каждого размера
-              своего состава, а вместе с длиной настила — и константу L/Σ(q·a); размеру, которого
-              в составе не было, недостаёт ровно одного числа — его собственной площади, и она
-              берётся из выкроек. Кнопка, а не автозапуск: это мегабайты с CDN и разбор DXF. */}
-          {mode === 'perSize' && continuationOffered && (
-            <div className='flex flex-wrap items-center gap-1.5'>
-              <Button
-                type='button'
-                variant='secondary'
-                size='xs'
-                disabled={areaBusy}
-                onClick={continueByAreas}
-              >
-                {areaBusy ? 'считаю площади…' : 'продолжить по выкройкам'}
-              </Button>
-              <Text size='nano' variant='label' component='span'>
-                посчитать площади размеров {plan.unansweredSizes.map(sizeName).join(', ')} по
-                сегодняшним выкройкам и продолжить распределение «{chosen.name}»
-              </Text>
-            </div>
           )}
           {mode === 'perSize' && areaError && <CalloutBox tone='error'>{areaError}</CalloutBox>}
           {/* СВЕРКА НЕ СОШЛАСЬ — ПРОДОЛЖАТЬ НЕЛЬЗЯ, и это отдельный, более сильный факт, чем
@@ -768,14 +733,186 @@ export function MarkerApplyHint({
               сегодняшним выкройкам — тогда и длина, и площади будут от одной геометрии
             </CalloutBox>
           )}
-          {mode === 'perSize' && plan.continuation === 'ok' && plan.continuedSizes.length > 0 && (
-            <CalloutBox tone='note'>
-              размеры {plan.continuedSizes.map(sizeName).join(', ')} в составе «{chosen.name}» не
-              резались: их расход ПРОДОЛЖЕН по площади выкроек тем же распределением, каким
-              раскладка поделила свою длину между своими размерами. Площади сверены с записанными в
-              раскладке — сегодняшние выкройки те же
-            </CalloutBox>
+
+          {/* ── ЧИСЛО И ЕГО АРИФМЕТИКА ───────────────────────────────────────────────────────
+              Расход раскладки — это ДЕЛЕНИЕ, и ошибаются в нём в делителе: настил на шесть
+              изделий, посчитанный как на три, даёт вдвое завышенную норму, и на экране это
+              по-прежнему правдоподобное число. До этой правки диалог печатал одно частное и
+              двадцать абзацев вокруг — проверить его было нечем. */}
+          {mode === 'scalar' && !chosenRefusal && (
+            <div>
+              <GroupLabel flush>{`норма из «${chosen.name}»`}</GroupLabel>
+              <div className='flex flex-col gap-1.5 pt-1'>
+                <MarkerLengthFormula
+                  lengthCm={decNum(chosen.usedLengthCm)}
+                  units={totalUnitsOf(chosen)}
+                  unitsLabel={compositionSummary(chosen, sizeName)}
+                  perGarment={conv && !convZero ? conv.value : null}
+                  unit={unit}
+                  widthCm={chosenW}
+                />
+                {/* Кг-слот: формула веса целиком, с числами, ДО нажатия — применённое число иначе
+                    невозможно проверить: ошибка ширины или плотности входит в него линейно.
+                    Стоит ВПЛОТНУЮ к арифметике, потому что это её продолжение. */}
+                {unitKind === 'kg' && fabric && (
+                  <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
+                    {weightBasisNote(fabric)}
+                  </Text>
+                )}
+                {/* Применяется НЕ НОРМА — и это надо сказать до нажатия, а не объяснять потом. Два
+                    разных случая, и путать их нельзя: экран сам обошёл норму, потому что она не
+                    выдаёт расхода на изделие (тогда это предупреждение), либо оператор выбрал
+                    другую раскладку руками (тогда это констатация). Молчаливая подмена назначенной
+                    нормы «просто применимой» — ровно то, ради чего норма и заводилась. */}
+                {notTheNorm && normMarker && (
+                  <CalloutBox tone={normRefusal ? 'warning' : 'note'}>
+                    {normRefusal
+                      ? `назначенная норма «${normMarker.name}» расхода на изделие не даёт (${refusalWord(
+                          normMarker,
+                        )}) — применится «${chosen.name}», а не она`
+                      : `применится «${chosen.name}», а НЕ назначенная норма «${normMarker.name}»${
+                          normConv ? ` (${normConv.value} ${normConv.unit})` : ''
+                        }`}
+                  </CalloutBox>
+                )}
+              </div>
+            </div>
           )}
+
+          {mode === 'perSize' && (
+            <div>
+              <GroupLabel flush>норма по размерному ряду — это и уедет в строку</GroupLabel>
+              <div className='flex flex-col gap-1.5 pt-1'>
+                {/* ЧИСЛО И ЕГО ПРОИСХОЖДЕНИЕ — В ОДНОЙ СТРОКЕ ТАБЛИЦЫ. Три источника выглядят
+                    одинаково убедительно, а стоят разного: «из раскладки» измерено, «по площади
+                    выкроек» продолжено той же формулой, «СРЕДНЕЕ» — тот самый перекос, который вся
+                    подсистема отказывается отдавать скаляром. Строка без пометки была бы обещанием,
+                    которого экран не может дать. */}
+                <MarkerPerSizeTable
+                  rows={plan.rows.map((r) => ({
+                    sizeId: r.sizeId,
+                    consumptionCm: r.consumptionCm,
+                    areaCm2: r.areaCm2,
+                    origin: r.origin ?? '',
+                    originLabel: originLabel(r.origin),
+                    originTitle:
+                      r.origin === 'area'
+                        ? `размера нет в составе «${chosen.name}» — расход продолжен по площади его выкроек (${(r.areaCm2 ?? 0).toFixed(0)} см² на изделие) той же формулой распределения`
+                        : r.origin === 'mean'
+                          ? `выкроек этого размера на карточке нет — подставлено СРЕДНЕЕ по настилу «${chosen.name}». Мелкие размеры оно завышает, крупные занижает`
+                          : r.marker
+                            ? `измерено раскладкой «${r.marker.name}»`
+                            : undefined,
+                  }))}
+                  sizeNameById={sizeNameById}
+                  unit={unit}
+                  fabric={fabric}
+                  toUnit={(cm) => toBomUnit(cm, unit, fabric)}
+                />
+                {unitKind === 'kg' && fabric && (
+                  <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
+                    {weightBasisNote(fabric)}
+                  </Text>
+                )}
+                {/* ПРОДОЛЖЕНИЕ ФОРМУЛЫ НА ОСТАЛЬНОЙ РЯД. Раскладка публикует площадь каждого размера
+                    своего состава, а вместе с длиной настила — и константу L/Σ(q·a); размеру, которого
+                    в составе не было, недостаёт ровно одного числа — его собственной площади, и она
+                    берётся из выкроек. Кнопка, а не автозапуск: это мегабайты с CDN и разбор DXF. */}
+                {continuationOffered && (
+                  <div className='flex flex-wrap items-center gap-1.5'>
+                    <Button
+                      type='button'
+                      variant='secondary'
+                      size='xs'
+                      disabled={areaBusy}
+                      onClick={continueByAreas}
+                    >
+                      {areaBusy ? 'считаю площади…' : 'продолжить по выкройкам'}
+                    </Button>
+                    <Text size='nano' variant='label' component='span'>
+                      посчитать площади размеров {plan.unansweredSizes.map(sizeName).join(', ')} по
+                      сегодняшним выкройкам и продолжить распределение «{chosen.name}»
+                    </Text>
+                  </div>
+                )}
+                {plan.continuation === 'ok' && plan.continuedSizes.length > 0 && (
+                  <CalloutBox tone='note'>
+                    размеры {plan.continuedSizes.map(sizeName).join(', ')} в составе «{chosen.name}»
+                    не резались: их расход ПРОДОЛЖЕН по площади выкроек тем же распределением, каким
+                    раскладка поделила свою длину между своими размерами. Площади сверены с
+                    записанными в раскладке — сегодняшние выкройки те же
+                  </CalloutBox>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ── НА ЧТО УШЛО ПОЛОТНО ──────────────────────────────────────────────────────────
+              Единственное место во всём приложении, где netto и brutto одной длины стоят рядом
+              числами. Оператор, только что видевший «0.867 м по выкройкам» на этой же ткани,
+              читал «1.737 м из раскладки» как второе мнение — теперь видно, что это то же самое
+              плюс названные отходы.
+
+              ТОЛЬКО ПРИ ОДНОМ ИСТОЧНИКЕ. В «по размерам» числа могут прийти от нескольких
+              раскладок, и разложение ОДНОЙ из них описывало бы не ту длину; там остаётся
+              усреднённая процентная подпись ниже, как и было. */}
+          {applyPossible && splitMarker && (
+            <div>
+              <GroupLabel flush>из чего сложилась измеренная длина</GroupLabel>
+              <div className='pt-1'>
+                <MarkerAreaSplit
+                  marker={splitMarker}
+                  unit={unit}
+                  fabric={fabric}
+                  units={totalUnitsOf(splitMarker)}
+                />
+              </div>
+            </div>
+          )}
+          {/* РАЗЛОЖЕНИЕ БЕЗ ДЛИНЫ НАСТИЛА — прежней подписью в процентах. Таблица выше требует
+              длину (она делит абсолютные см²), а проценты живут и без неё: раскладка, у которой
+              записаны КПД и ширина, но не записана длина, обязана по-прежнему отвечать. Тот же
+              текст стоит и там, где источников несколько. */}
+          {applyPossible &&
+            !splitMarker &&
+            (() => {
+              // Exactly the markers apply() would use — the preview and the value written must be
+              // the same number.
+              const used = mode === 'scalar' ? [chosen] : appliedPerSize;
+              const parts = used.map((m) => markerWasteDecomposition(m!)).filter((d) => d != null);
+              if (parts.length === 0) {
+                return (
+                  <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
+                    раскладка без записанной эффективности — отходы не разложить на кромку и выпады
+                  </Text>
+                );
+              }
+              const avg = (pick: (d: { selvedgePct: number; cutPct: number }) => number) =>
+                parts.reduce((s, d) => s + pick(d!), 0) / parts.length;
+              const sv = avg((d) => d.selvedgePct);
+              const cut = avg((d) => d.cutPct);
+              return (
+                <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
+                  в норме уже сидят отходы: кромка {sv.toFixed(1)}% + межлекальные выпады{' '}
+                  {cut.toFixed(1)}% (от площади деталей)
+                  {sv === 0 ? ' — кромка артикула не задана' : ''}
+                </Text>
+              );
+            })()}
+          {/* Процент раскроя слота на марочной норме НЕ начисляется, и сказать это надо там же, где
+              показаны отходы: иначе оператор, увидевший «12%» на вкладке BOM и отходы здесь,
+              решит, что они складываются. Одной строкой, а не колаутом: это правило системы, а не
+              состояние ЭТОГО числа. */}
+          {applyPossible && Number.isFinite(wastage) && wastage > 0 && (
+            <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
+              {`у линии стоит ${wastage}% отходов — на применённой из раскладки норме костинг их НЕ начисляет: измеренная длина уже содержит и межлекальные выпады, и кромку. Процент снова начнёт работать, если норму перебить вручную`}
+            </Text>
+          )}
+
+          {/* ── ЧТО СТОИТ ЗНАТЬ ПРО ЭТО ЧИСЛО ────────────────────────────────────────────────
+              Всё, что ниже, применить НЕ мешает, но говорит, насколько числу можно верить. Это
+              знание есть у экрана и нет у оператора — молчать о нём значит выдать число уверенней,
+              чем оно есть. Поэтому здесь, видимым, а не в раскрывашке. */}
           {/* СРЕДНЕЕ НАЗЫВАЕТСЯ ВСЛУХ. 03-composition.md оставляет его только размерам без файлов
               и требует сказать об этом на экране — потому что это ровно то число, ради устранения
               которого затевался состав, и молча оно неотличимо от измеренного. */}
@@ -795,8 +932,8 @@ export function MarkerApplyHint({
           {mode === 'perSize' && mixedWidths && (
             <CalloutBox tone='warning'>
               маркеры разных размеров посчитаны на разной ширине полотна (
-              {Math.min(...perSizeWidths)}–{Math.max(...perSizeWidths)} см) — нормы смешивают
-              разные ткани
+              {Math.min(...perSizeWidths)}–{Math.max(...perSizeWidths)} см) — нормы смешивают разные
+              ткани
             </CalloutBox>
           )}
           {mode === 'perSize' && perSizeWidthMismatch && (
@@ -847,52 +984,38 @@ export function MarkerApplyHint({
               переворот) не записаны
             </CalloutBox>
           )}
-          {/* Кг-слот: формула веса целиком, с числами, ДО нажатия — применённое число иначе
-              невозможно проверить: ошибка ширины или плотности входит в него линейно. */}
-          {applyPossible && unitKind === 'kg' && fabric && (
-            <CalloutBox tone='note'>{weightBasisNote(fabric)}</CalloutBox>
-          )}
-          {/* Заметки об отходах — только когда применить ВОЗМОЖНО. Под отказом строка «в норме
-              уже сидят отходы …» описывала бы норму, которой нет, прямо под колаутом об этом. */}
-          {applyPossible && Number.isFinite(wastage) && wastage > 0 && (
-            <CalloutBox tone='note'>
-              у линии стоит {wastage}% отходов, но на применённой из раскладки норме костинг их
-              НЕ начисляет: измеренная длина уже содержит и межлекальные выпады, и кромку. Процент
-              снова начнёт работать, если норму перебить вручную
-            </CalloutBox>
-          )}
-          {applyPossible && (() => {
-            // Exactly the markers apply() would use — the preview and the value written must be
-            // the same number.
-            const used = mode === 'scalar' ? [chosen] : appliedPerSize;
-            const parts = used.map((m) => markerWasteDecomposition(m!)).filter((d) => d != null);
-            if (parts.length === 0) {
-              return (
-                <Text size='nano' variant='label' component='p'>
-                  раскладка без записанной эффективности — отходы не разложить на кромку и выпады
-                </Text>
-              );
-            }
-            const avg = (pick: (d: { selvedgePct: number; cutPct: number }) => number) =>
-              parts.reduce((s, d) => s + pick(d!), 0) / parts.length;
-            const sv = avg((d) => d.selvedgePct);
-            const cut = avg((d) => d.cutPct);
-            return (
+
+          {/* ── КАК ЭТО РАБОТАЕТ ─────────────────────────────────────────────────────────────
+              Правила системы, а не состояние этого числа: читать их надо ОДИН раз на человека, а
+              видеть перед каждым применением — каждый раз. `<details>`, а не кнопка: на выпущенной
+              карточке вкладка лежит внутри `<fieldset disabled>`, который глушит любую кнопку. */}
+          <details className='border border-hairline px-2 py-1'>
+            <summary className='cursor-pointer text-micro uppercase'>
+              что именно запишется в рецепт
+            </summary>
+            <div className='flex max-w-[90ch] flex-col gap-1 pt-1.5'>
+              {/* §6.4 сказанное там, где оно случается. Кнопка КОПИРУЕТ число: ссылки на раскладку в
+                  рецепте не остаётся, и никакое последующее событие — ни пересъёмка, ни назначение
+                  другой нормы — этот рецепт не тронет. */}
               <Text size='nano' variant='label' component='p'>
-                в норме уже сидят отходы: кромка {sv.toFixed(1)}% + межлекальные выпады{' '}
-                {cut.toFixed(1)}% (от площади деталей)
-                {sv === 0 ? ' — кромка артикула не задана' : ''}
+                запись уйдёт при сохранении карточки (рецепт колорвея staged-сейвом). Число
+                КОПИРУЕТСЯ: связи рецепта с раскладкой нет — переназначат норму или переснимут
+                раскладку, рецепт сам не пересчитается, применять придётся заново.
               </Text>
-            );
-          })()}
-          {/* §6.4 сказанное там, где оно случается. Кнопка КОПИРУЕТ число: ссылки на раскладку в
-              рецепте не остаётся, и никакое последующее событие — ни пересъёмка, ни назначение
-              другой нормы — этот рецепт не тронет. */}
-          <Text size='nano' variant='label' component='p'>
-            запись уйдёт при сохранении карточки (рецепт колорвея staged-сейвом). Число
-            КОПИРУЕТСЯ: связи рецепта с раскладкой нет — переназначат норму или переснимут
-            раскладку, рецепт сам не пересчитается, применять придётся заново
-          </Text>
+              <Text size='nano' variant='label' component='p'>
+                Вместе с числом уходит ИСТОЧНИК — «из раскладки». По нему костинг понимает, что
+                отходы кроя уже внутри длины, и НЕ начисляет сверху процент раскроя слота. Перебьёте
+                число руками — источник снимется, и процент снова начнёт работать.
+              </Text>
+              <Text size='nano' variant='label' component='p'>
+                Расчёт «по выкройкам» на этой же ткани даёт NETTO — площадь деталей ÷ раскройную
+                ширину, без межлекальных выпадов; за них там платит процент раскроя слота. Раскладка
+                измеряет ту же длину целиком, поэтому её число больше, а процент к нему не
+                применяется. Два инструмента, одна физика — разница между их числами и есть отходы
+                раскроя.
+              </Text>
+            </div>
+          </details>
         </div>
       </ConfirmationModal>
     </div>
@@ -1216,8 +1339,8 @@ export function MarkerConsumptionBand({ techCard }: { techCard?: common_TechCard
           {stale && (
             <CalloutBox tone='warning'>
               рецепты не пересчитаны: применённое из раскладки {stale.applied.join(' / ')}{' '}
-              {stale.unit} против нормы «{stale.name}» — {stale.value} {stale.unit}. Связи рецепта
-              с раскладкой нет: переназначение нормы ничего не пересчитывает, и прежнее число будет
+              {stale.unit} против нормы «{stale.name}» — {stale.value} {stale.unit}. Связи рецепта с
+              раскладкой нет: переназначение нормы ничего не пересчитывает, и прежнее число будет
               стоять, пока норму не применят заново
               {/* НА КГ-СЛОТЕ У РАСХОЖДЕНИЯ ЕСТЬ ВТОРАЯ ПРИЧИНА, и приписывать его одной раскладке
                   нельзя: обе стороны переведены в вес, но применённое — основой ТОГО дня, а
