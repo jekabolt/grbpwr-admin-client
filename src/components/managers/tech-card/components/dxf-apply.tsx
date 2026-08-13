@@ -32,6 +32,8 @@ export function DxfApplyHint({
   sizeIds,
   sizeNameById,
   canEdit,
+  compact = false,
+  explainOnly = false,
   explainWhenIdle = false,
   recipeLinks,
   techCardId,
@@ -49,6 +51,20 @@ export function DxfApplyHint({
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
+  /**
+   * Кнопка БЕЗ подписи — для тулбара в шапке карточки (макет «лист»). Подпись «площадь деталей ÷
+   * раскройная ширина» объясняет ИНСТРУМЕНТ, а не число, и в ряду из пяти кнопок она разрывала бы
+   * строку; то же самое сказано первой строкой самого диалога. Отказы (`explainWhenIdle`) компакт
+   * НЕ глушит: они говорят, чего не хватает, и молчание вместо них — та самая пустая кнопка.
+   */
+  compact?: boolean;
+  /**
+   * ТОЛЬКО ОБЪЯСНЕНИЕ, НИКОГДА КНОПКА. Кнопка в макете «лист» стоит в тулбаре шапки, а адресный
+   * отказ («ряд не заявлен», «ни одна деталь не отнесена к этой ткани») — длинная фраза, которой
+   * в ряду кнопок не место, и она обязана стоять у ЧИСЛА. Экземпляр с этим флагом монтируется под
+   * таблицей и молчит всегда, кроме случая, когда предлагать нечего.
+   */
+  explainOnly?: boolean;
   /**
    * Строка рецепта пока БЕЗ нормы — тогда молчаливый возврат null запрещён: у такой строки не
    * остаётся ничего, кроме свёрнутого «ввести руками…», и экран предлагает угадать, ни слова не
@@ -91,7 +107,7 @@ export function DxfApplyHint({
   // свёрнутая «ввести руками…» — экран предлагал угадать и ни словом не упоминал, что число
   // считается. Условия РАЗНЫЕ, и лечатся они в разных местах карточки, поэтому называются порознь.
   if (pieces.length + unaliasedPieces.length === 0 || sizeIds.length === 0) {
-    if (!explainWhenIdle) return null;
+    if (!explainWhenIdle && !explainOnly) return null;
     return (
       <Text size='nano' variant='label' component='p'>
         {sizeIds.length === 0
@@ -101,14 +117,19 @@ export function DxfApplyHint({
     );
   }
 
+  // Предлагать есть что — а этот экземпляр отвечает только за отказ: молчит.
+  if (explainOnly) return null;
+
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
       <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
         по выкройкам…
       </Button>
-      <Text size='nano' variant='label' component='span'>
-        площадь деталей ÷ раскройная ширина — netto, без межлекальных выпадов
-      </Text>
+      {!compact && (
+        <Text size='nano' variant='label' component='span'>
+          площадь деталей ÷ раскройная ширина — netto, без межлекальных выпадов
+        </Text>
+      )}
       {open && (
         <Suspense fallback={null}>
           <DxfApplyDialog

@@ -834,16 +834,28 @@ function deriveComposition(
 function UsagePerSizeLocal({
   draft,
   sizeIds,
-  article,
   unit,
   canEdit,
+  editing,
+  sourceCell,
+  estimateValue,
   rowAlive,
   sizeNameById,
   onChange,
 }: {
   draft: UsageDraft;
   sizeIds: number[];
-  article?: BomLine;
+  /**
+   * ТАБЛИЦА ЧИТАЕТСЯ, А НЕ ЗАПОЛНЯЕТСЯ (решение владельца 2026-08-13). Расход считают инструменты;
+   * ячейки становятся полями только после «редактировать». До этого таблица была набором пустых
+   * инпутов — экран этим предлагал ВВЕСТИ число там, где его надо ПОСЧИТАТЬ, и ручной ввод
+   * оказывался путём наименьшего сопротивления.
+   */
+  editing: boolean;
+  /** Ячейка «источник» — последняя колонка той же таблицы (бейдж + «?»). */
+  sourceCell?: React.ReactNode;
+  /** Что печатать в пустой ячейке вместо прочерка — серверная оценка по площади (серым). */
+  estimateValue?: React.ReactNode;
   // ЕДИНИЦА НОРМЫ, резолвленная блоком расхода (SlotNormBlock: единица слота, и только она) — здесь
   // подписываются поля ввода САМОЙ нормы, и брать единицу с эффективного артикула значило бы
   // подписать «кг» число, которое сервер хранит и считает в единице строки.
@@ -906,14 +918,30 @@ function UsagePerSizeLocal({
     onChange(manual({ sizeConsumptions: next }));
   };
 
-  const currency = article?.currency ?? '';
-  const hasAnyConsumption = sizeIds.some((id) => consumptionBySize.get(id)?.trim());
+  // ОДНА ТАБЛИЦА НА ОБА СОСТОЯНИЯ И НА ОБА РЕЖИМА. Раньше расход по размерам показывался ДВАЖДЫ —
+  // строкой «M 1.093 · L 1.115 · …» в сводке и сеткой инпутов ниже; два вида одного числа читались
+  // как два разных факта. Теперь вид один: колонки размеров, значение в ячейке, справа — источник.
+  // Скалярная норма — та же таблица в одну колонку: у неё тот же вопрос и тот же ответ.
+  //
+  // КОЛОНКИ — РЯД КАРТОЧКИ ПЛЮС СОХРАНЁННЫЕ РАЗМЕРЫ ВНЕ РЯДА, и второе слагаемое обязательно.
+  // Число, сохранённое на размер, который потом убрали из ряда, НЕ исчезает из данных: сервер по
+  // непустым size_consumptions игнорирует скаляр целиком. Показать только сегодняшний ряд значило
+  // бы спрятать число, которое продолжает решать за костинг, — прежняя сводка такие размеры
+  // печатала в конце, и это надо было сохранить. Лишние идут ПОСЛЕ ряда, в порядке записи.
+  const extraSizes = draft.sizeConsumptions
+    .map((x) => x.sizeId ?? 0)
+    .filter((id) => id > 0 && !sizeIds.includes(id));
+  const colSizes = perSize ? [...sizeIds, ...[...new Set(extraSizes)]] : [];
+  // РЕЖИМ РЕШАЕТ НАЛИЧИЕ ПЕР-РАЗМЕРНЫХ ЧИСЕЛ, А НЕ ПУСТОТА КОЛОНОК. Карточка без заявленного ряда
+  // (sizeIds пуст) с сохранёнными пер-размерными числами иначе провалилась бы в скалярный вид:
+  // экран правил бы скаляр, которого сервер не читает, а настоящий массив оставался бы невидимым.
+  const scalarMode = !perSize;
 
   return (
     <div className='flex flex-col gap-1.5'>
-      <div className='flex flex-wrap items-center justify-between gap-2'>
-        <FieldLabel>consumption{unit ? ` (${unit})` : ''}</FieldLabel>
-        {sizeIds.length > 0 && canEdit && (
+      {editing && sizeIds.length > 0 && canEdit && (
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <FieldLabel>расход на изделие{unit ? ` (${unit})` : ''}</FieldLabel>
           <ChipRow>
             <Chip selected={!perSize} pressed={!perSize} onClick={disablePerSize}>
               один на изделие
@@ -922,54 +950,81 @@ function UsagePerSizeLocal({
               по размерам
             </Chip>
           </ChipRow>
-        )}
-      </div>
-
-      {!perSize ? (
-        <input
-          className={cell}
-          inputMode='decimal'
-          disabled={!canEdit}
-          placeholder='per garment'
-          aria-label={`consumption per garment${unit ? ` (${unit})` : ''}`}
-          value={draft.consumption}
-          onChange={(e) => onChange(manual({ consumption: sanitizeDecimal(e.target.value) }))}
-        />
-      ) : (
-        <div className='flex flex-col gap-1.5'>
-          <DataTable variant='grid' className='[&_td]:text-micro'>
-            <thead>
-              <tr>
-                <th>size</th>
-                {sizeIds.map((id) => (
-                  <th key={id}>{formatSizeName(sizeNameById.get(id) ?? `#${id}`)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{unit ? `${unit} / garment` : 'per garment'}</td>
-                {sizeIds.map((id) => (
-                  <td key={id}>
+        </div>
+      )}
+      <DataTable>
+        <thead>
+          <tr>
+            <th>расход на изделие{unit ? `, ${unit}` : ''}</th>
+            {scalarMode ? (
+              <th>на изделие</th>
+            ) : (
+              colSizes.map((id) => (
+                <th key={id} className={sizeIds.includes(id) ? undefined : 'text-warning'}>
+                  {formatSizeName(sizeNameById.get(id) ?? `#${id}`)}
+                  {sizeIds.includes(id) ? '' : ' *'}
+                </th>
+              ))
+            )}
+            {sourceCell != null && <th>источник</th>}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>{unit ? `${unit} / изделие` : 'на изделие'}</td>
+            {scalarMode ? (
+              <td className={editing ? 'p-0' : undefined}>
+                {editing ? (
+                  <input
+                    className={cn(gridInput, 'bg-bgZebra text-textBaseSize')}
+                    inputMode='decimal'
+                    disabled={!canEdit}
+                    placeholder='0.000'
+                    aria-label={`расход на изделие${unit ? ` (${unit})` : ''}`}
+                    value={draft.consumption}
+                    onChange={(e) =>
+                      onChange(manual({ consumption: sanitizeDecimal(e.target.value) }))
+                    }
+                  />
+                ) : (
+                  draft.consumption.trim() || estimateValue || <EmptyCell />
+                )}
+              </td>
+            ) : (
+              colSizes.map((id) => (
+                <td key={id} className={editing ? 'p-0' : undefined}>
+                  {editing ? (
                     <input
-                      className={cn(gridInput, 'text-micro')}
+                      className={cn(gridInput, 'bg-bgZebra text-textBaseSize')}
                       inputMode='decimal'
                       disabled={!canEdit}
-                      placeholder='0.00'
-                      aria-label={`consumption ${formatSizeName(sizeNameById.get(id) ?? `#${id}`)}`}
+                      placeholder='0.000'
+                      aria-label={`расход ${formatSizeName(sizeNameById.get(id) ?? `#${id}`)}`}
                       value={consumptionBySize.get(id) ?? ''}
                       onChange={(e) => setSizeCell(id, e.target.value)}
                     />
-                  </td>
-                ))}
-              </tr>
-              {/* Строки «order qty» и «расход на партию» отсюда сняты вместе с типовым тиражом
-                  карточки: у стиля своей партии нет, а норма по размерам — это спецификация, и
-                  умножать её здесь было не на что, кроме выдуманного микса. Сколько уйдёт ткани на
-                  конкретную партию, считает материальный план прогона по его собственным линиям. */}
-            </tbody>
-          </DataTable>
-        </div>
+                  ) : (
+                    (consumptionBySize.get(id) ?? '').trim() || <EmptyCell />
+                  )}
+                </td>
+              ))
+            )}
+            {sourceCell != null && (
+              <td className='max-w-[28rem] whitespace-normal'>{sourceCell}</td>
+            )}
+          </tr>
+          {/* Строки «order qty» и «расход на партию» отсюда сняты вместе с типовым тиражом
+              карточки: у стиля своей партии нет, а норма по размерам — это спецификация, и
+              умножать её здесь было не на что, кроме выдуманного микса. Сколько уйдёт ткани на
+              конкретную партию, считает материальный план прогона по его собственным линиям. */}
+        </tbody>
+      </DataTable>
+      {extraSizes.length > 0 && (
+        <Text size='nano' variant='label' component='p'>
+          * этих размеров в ряду карточки нет, а числа на них сохранены и продолжают работать:
+          сервер по непустым пер-размерным числам скаляр игнорирует. Уберите их или верните размер в
+          ряд
+        </Text>
       )}
     </div>
   );
@@ -1003,19 +1058,9 @@ function NormEstimate({ estimate }: { estimate?: common_TechCardSlotAreaEstimate
   const stale = estimate?.stale === true;
   const pieceCount = estimate?.pieceCount ?? 0;
 
-  // Оценки нет вовсе (слот не рулонный, колорвей её не получил, старый ответ сервера) — прежний
-  // честный прочерк. «Нет ответа» и «ответ: не считается» — разные состояния, и второе всегда
-  // приходит с текстом.
-  if (!estimate || (!value && !refusalText)) {
-    return (
-      <div className='flex flex-wrap items-baseline gap-1.5'>
-        <FieldLabel>расход</FieldLabel>
-        <Text size='small' variant='label' component='span'>
-          —
-        </Text>
-      </div>
-    );
-  }
+  // Оценки нет вовсе (слот не рулонный, колорвей её не получил, старый ответ сервера) — тогда у
+  // источника сказать нечего, а прочерк уже стоит в самой таблице.
+  if (!estimate || (!value && !refusalText)) return null;
 
   // Условия замера — то, без чего площадь не число, а мнение: слой контура, припуск, дата разбора.
   // Сервер прислал их echo'м вместе с оценкой, чтобы строка описывала себя целиком.
@@ -1032,47 +1077,52 @@ function NormEstimate({ estimate }: { estimate?: common_TechCardSlotAreaEstimate
     .filter(Boolean)
     .join(' · ');
 
+  // ЧИСЛО ОЦЕНКИ ПЕЧАТАЕТ ТАБЛИЦА (серым, см. UsagePerSizeLocal), здесь — только чем это число
+  // является и на чём посчитано. Разбор — под тем же «?», что и у настоящей нормы: у оценки и у
+  // нормы один вопрос «откуда», и два разных жеста для него были бы двумя привычками.
   return (
-    <div className='flex flex-col gap-1'>
-      <div className='flex flex-wrap items-baseline gap-1.5'>
-        <FieldLabel>расход</FieldLabel>
-        {/* СЕРЫМ — и это не оформление, а утверждение: чёрное на этой карточке носит норма, серое
-            носит вывод. Цветом состояния оценку красить нечем — она не ошибка и не мид-флайт. */}
-        <Text size='small' variant='label' component='span' className='font-mono tabular-nums'>
-          {value ? `${value}${unit ? ` ${unit}` : ''}` : '—'}
-        </Text>
-        {stale ? (
-          <Pill tone='attention' title={refusalText || undefined}>
-            замер устарел
-          </Pill>
-        ) : value ? (
-          <Pill tone='mut'>оценка по площади</Pill>
-        ) : (
-          <Pill tone='mut'>оценка не посчитана</Pill>
-        )}
-      </div>
-      {value && basis && (
-        <Text size='nano' variant='label' component='p'>
-          {basis}
-        </Text>
+    <div className='flex flex-wrap items-center gap-1.5'>
+      {stale ? (
+        <Pill tone='attention' title={refusalText || undefined}>
+          замер устарел
+        </Pill>
+      ) : value ? (
+        <Pill tone='mut'>оценка по площади</Pill>
+      ) : (
+        <Pill tone='mut'>оценка не посчитана</Pill>
       )}
-      {value && (
-        <Text size='nano' variant='label' component='p'>
-          это NETTO и нижняя граница: межлекальных выпадов и концов настила в ней нет — их знает
-          только раскладка. Число считает сервер по сегодняшним площадям, оно не хранится и не
-          правится: уточните раскладкой либо впишите своё — вписанная норма всегда сильнее
-          выведенной
-        </Text>
-      )}
-      {/* ОТКАЗ ПЕЧАТАЕТСЯ ДОСЛОВНО И БЕЗ ДОБАВОК. Сервер уже назвал причину и уже назвал действие,
-          одной фразой на систему; переписать её здесь значило бы завести второй перевод, который
-          разойдётся с формулировками костинга. Машинный код причины (`refusal`) уходит в title —
-          он нужен поддержке, а на экране оператора это шум. */}
-      {refusalText && (
-        <Text size='nano' variant='label' component='p' title={refusal || undefined}>
-          {refusalText}
-        </Text>
-      )}
+      <details className='inline-block text-nano'>
+        <summary
+          className='inline-flex h-[18px] w-[18px] cursor-pointer list-none items-center justify-center border border-borderColor text-labelColor [&::-webkit-details-marker]:hidden'
+          title='на чём посчитана оценка'
+          aria-label='на чём посчитана оценка'
+        >
+          ?
+        </summary>
+        <div className='flex flex-col gap-1 pt-1'>
+          {value && basis && (
+            <Text size='nano' variant='label' component='p'>
+              {basis}
+            </Text>
+          )}
+          {value && (
+            <Text size='nano' variant='label' component='p'>
+              это NETTO и нижняя граница: межлекальных выпадов и концов настила в ней нет — их знает
+              только раскладка. Число считает сервер по сегодняшним площадям, оно не хранится и не
+              правится: уточните раскладкой либо впишите своё — вписанная норма всегда сильнее
+              выведенной
+            </Text>
+          )}
+          {/* ОТКАЗ ПЕЧАТАЕТСЯ ДОСЛОВНО И БЕЗ ДОБАВОК. Сервер уже назвал причину и уже назвал
+              действие, одной фразой на систему; переписать её здесь значило бы завести второй
+              перевод, который разойдётся с формулировками костинга. */}
+          {refusalText && (
+            <Text size='nano' variant='label' component='p' title={refusal || undefined}>
+              {refusalText}
+            </Text>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -1161,23 +1211,9 @@ function NormSummary({
   // применение раскладки его не чистит), и показать его крупно с бейджем «из раскладки» значило бы
   // назвать нормой число, которого ни один расчёт не берёт. Он остаётся подписью — он всё ещё
   // работает, но только на размеры вне ряда.
-  // Числа — колонкой: моноширинно и одной разрядностью (0.88 → 0.880 рядом с 0.917) — дробная
-  // часть добивается нулями до самой длинной, ноль хвоста числу не врёт, а ряд выравнивается.
-  // Размер — ПРОПИСНЫМИ, единица — строчной фразой ПОСЛЕ ряда, не в заголовке: «(М)» в
-  // верхнерегистровом заголовке читалось разом как «метры» и как размер M, и различить было нечем.
-  const fracLen = (v: string) => /^\d+\.(\d+)$/.exec(v.trim())?.[1]?.length ?? 0;
-  const maxFrac = perSize.reduce((m, s) => Math.max(m, fracLen(s.consumption ?? '')), 0);
-  const padDecimal = (v: string) => {
-    const m = /^(\d+)(?:\.(\d+))?$/.exec(v.trim());
-    if (!m || maxFrac === 0) return v.trim();
-    return `${m[1]}.${(m[2] ?? '').padEnd(maxFrac, '0')}`;
-  };
-  const perSizeText = perSize
-    .map(
-      (s) =>
-        `${formatSizeName(sizeNameById.get(s.sizeId ?? 0) ?? `#${s.sizeId}`).toUpperCase()} ${padDecimal(s.consumption ?? '')}`,
-    )
-    .join(' · ');
+  // ВЫРАВНИВАНИЕ ЧИСЕЛ И ИХ ПЕЧАТЬ УЕХАЛИ В ТАБЛИЦУ (UsagePerSizeLocal): колонка размера сама
+  // держит разрядность, и второй набор правил форматирования здесь стал бы вторым видом тех же
+  // чисел — ровно тем, что эта волна и убрала.
   const scalarFallback = perSize.length > 0 && scalar ? `${scalar}${unit ? ` ${unit}` : ''}` : '';
 
   // Разбор говорит РОВНО то, что известно этой строке, и ни слова сверх. Марочная норма знает свои
@@ -1284,33 +1320,79 @@ function NormSummary({
           ? 'пересчёт по текущим выкройкам не делается: раскройная ширина артикула неизвестна — либо не заполнена ширина рулона, либо кромка съедает её целиком'
           : '';
 
+  // ЧИСЛА ЗДЕСЬ БОЛЬШЕ НЕ ПЕЧАТАЮТСЯ. Они живут в таблице расхода — одном-единственном виде на
+  // карточке (решение владельца 2026-08-13: строка «M 1.093 · L 1.115 · …» над той же таблицей была
+  // вторым изображением того же факта). Этому блоку осталось то, чего в таблице нет: ОТКУДА число,
+  // что с ним не так и разбор — и весь разбор убран под «?»: на восьми тканях восемь раскрывашек
+  // «из чего сложилось» повторяли одно и то же и забивали карточку.
   return (
     <div className='flex flex-col gap-1'>
-      <div className='flex flex-wrap items-baseline gap-1.5'>
-        <FieldLabel>расход{perSize.length > 0 ? ' по размерам' : ''}</FieldLabel>
-        {perSize.length > 0 ? (
-          <>
-            <Text size='small' component='span' className='font-mono tabular-nums'>
-              {perSizeText}
-            </Text>
-            {unit && (
-              <Text size='nano' variant='label' component='span'>
-                {`в ${unit} на изделие`}
-              </Text>
-            )}
-          </>
-        ) : (
-          <Text size='small' component='span'>
-            {scalar ? `${scalar}${unit ? ` ${unit}` : ''}` : '—'}
-          </Text>
-        )}
+      <div className='flex flex-wrap items-center gap-1.5'>
         <Pill tone={isMarker || isDxf ? 'mut' : 'attention'}>{label}</Pill>
-        {scalarFallback && (
-          <Text size='nano' variant='label' component='span'>
-            {`единая норма ${scalarFallback} осталась в строке и работает только на размеры вне ряда`}
-          </Text>
-        )}
+        {/* `<details>`, а не кнопка: на выпущенной карточке вкладка лежит в `<fieldset disabled>`,
+            который глушит любую кнопку, — а разбор нужен именно там, где менять уже нельзя. */}
+        <details className='inline-block text-nano' onToggle={(e) => setOpen(e.currentTarget.open)}>
+          <summary
+            className='inline-flex h-[18px] w-[18px] cursor-pointer list-none items-center justify-center border border-borderColor text-labelColor [&::-webkit-details-marker]:hidden'
+            title='из чего сложилось это число'
+            aria-label='из чего сложилось'
+          >
+            ?
+          </summary>
+          <div className='pt-1'>
+            <ul className='list-disc pl-4'>
+              {explain.map((line, i) => (
+                <li key={i}>
+                  <Text size='nano' variant='label' component='span'>
+                    {line}
+                  </Text>
+                </li>
+              ))}
+            </ul>
+            {/* Ф2: пересчёт по текущим данным — только для dxf-нормы и только ОТКРЫТЫМ «?».
+                Единица решается здесь, до ленивой части: качать мегабайты DXF ради строки «кг не
+                сравниваем» незачем. */}
+            {isDxf && (
+              <div className='flex flex-col gap-0.5 pt-1'>
+                {recheckBlocked ? (
+                  <Text size='nano' variant='label' component='span'>
+                    {recheckBlocked}
+                  </Text>
+                ) : (
+                  open && (
+                    <Suspense
+                      fallback={
+                        <Text size='nano' variant='label' component='span'>
+                          пересчитываем по текущим данным карточки…
+                        </Text>
+                      }
+                    >
+                      <DxfNormRecheck
+                        lineKey={draft.bomLineKey}
+                        unit={unit}
+                        articleWidth={articleWidth}
+                        weightBasis={weightBasis}
+                        sizeIds={sizeIds}
+                        sizeNameById={sizeNameById}
+                        recipeLinks={recipeLinks}
+                        saved={perSize}
+                      />
+                    </Suspense>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+        </details>
       </div>
+      {/* СКАЛЯР ПОД ПЕР-РАЗМЕРНОЙ НОРМОЙ И НЕПОКРЫТЫЕ РАЗМЕРЫ — ВИДИМЫ ВСЕГДА, не под «?»: это не
+          объяснение, а инварианты строки. Размер без числа означает, что план прогона расхода на
+          него не увидит вовсе. */}
+      {scalarFallback && (
+        <Text size='nano' variant='label' component='p'>
+          {`единая норма ${scalarFallback} осталась в строке и работает только на размеры вне ряда`}
+        </Text>
+      )}
       {uncoveredSizes.length > 0 && (
         <div className='flex flex-wrap items-center gap-1.5'>
           <Pill tone='attention'>
@@ -1324,51 +1406,6 @@ function NormSummary({
           </Text>
         </div>
       )}
-      <details className='text-nano' onToggle={(e) => setOpen(e.currentTarget.open)}>
-        <summary className='cursor-pointer uppercase'>из чего сложилось</summary>
-        <ul className='list-disc pl-4 pt-1'>
-          {explain.map((line, i) => (
-            <li key={i}>
-              <Text size='nano' variant='label' component='span'>
-                {line}
-              </Text>
-            </li>
-          ))}
-        </ul>
-        {/* Ф2: пересчёт по текущим данным — только для dxf-нормы и только ОТКРЫТОЙ раскрывашкой.
-            Единица решается здесь, до ленивой части: качать мегабайты DXF ради строки «кг не
-            сравниваем» незачем. */}
-        {isDxf && (
-          <div className='flex flex-col gap-0.5 pt-1'>
-            {recheckBlocked ? (
-              <Text size='nano' variant='label' component='span'>
-                {recheckBlocked}
-              </Text>
-            ) : (
-              open && (
-                <Suspense
-                  fallback={
-                    <Text size='nano' variant='label' component='span'>
-                      пересчитываем по текущим данным карточки…
-                    </Text>
-                  }
-                >
-                  <DxfNormRecheck
-                    lineKey={draft.bomLineKey}
-                    unit={unit}
-                    articleWidth={articleWidth}
-                    weightBasis={weightBasis}
-                    sizeIds={sizeIds}
-                    sizeNameById={sizeNameById}
-                    recipeLinks={recipeLinks}
-                    saved={perSize}
-                  />
-                </Suspense>
-              )
-            )}
-          </div>
-        )}
-      </details>
     </div>
   );
 }
@@ -1620,6 +1657,8 @@ function SlotNormBlock({
   sizeNameById,
   canEdit,
   active,
+  toolsInHeader = false,
+  editing = false,
   onChange,
   onRemove,
 }: {
@@ -1666,6 +1705,14 @@ function SlotNormBlock({
   canEdit: boolean;
   /** Редактор этого колорвея сейчас виден — см. ColorwayRecipeEditor.active. */
   active: boolean;
+  /**
+   * Инструменты (раскладка, выкройки) и «редактировать» рисует ШАПКА карточки — макет «лист»
+   * собирает все действия в один тулбар справа сверху. Верно для ПЕРВОЙ строки слота; у второй
+   * (легаси-дубль) своя шапка не положена, и она рисует их у себя.
+   */
+  toolsInHeader?: boolean;
+  /** Правка руками включена шапкой — таблица показывает поля вместо значений. */
+  editing?: boolean;
   onChange: (patch: Partial<UsageDraft>) => void;
   onRemove: () => void;
 }) {
@@ -1744,27 +1791,33 @@ function SlotNormBlock({
   // Форма карточки нужна диалогу «по выкройкам»: выкройки, детали кроя и их связи с блоками живут
   // в ней, а не в рецепте (рецепт — серверный, правится своим RPC).
   const { control } = useFormContext<TechCardFormData>();
-  // Норма ЕСТЬ и её дал ИНСТРУМЕНТ (раскладка или выкройки) — тогда ручной ввод уходит за
-  // раскрывашку. Нормы нет вовсе — туда же: на пустой строке первым надо предлагать посчитать, а не
-  // угадать. Инлайном остаётся уже набранное руками число (см. комментарий у раскрывашки) — и весь
-  // НЕРУЛОННЫЙ слот целиком: у нитки, тесьмы и фурнитуры ручной ввод не аварийный выход, а
-  // единственный способ (раскладок на нитку не снимают, выкроек у неё нет), и прятать его там за
-  // раскрывашку значило бы спрятать сам смысл строки.
+  // Норма ЕСТЬ и её дал ИНСТРУМЕНТ — этим отличаются подписи ниже (провенанс, «введено руками»).
+  // Прежнее разделение «инлайн против раскрывашки» для ручного ввода отсюда ушло: поля живут в той
+  // же таблице и открываются кнопкой «редактировать» — одинаково на любом слоте.
   const derivedNorm = draft.consumptionSource === 'marker' || draft.consumptionSource === 'dxf';
   const hasNorm =
     !!draft.consumption.trim() ||
     draft.sizeConsumptions.some((s) => (s.consumption ?? '').trim() !== '');
-  const manualInline = (!derivedNorm && hasNorm) || !rollGoods;
-  // Оценка ПОКАЗАНА ЧИСЛОМ — тогда ручной ввод перестаёт быть аварийным выходом и становится вторым
-  // из двух названных действий («вписать своё»). Отказ оценки числом не является: он объясняет,
-  // чего не хватает, и ручной ввод при нём — по-прежнему просто ручной ввод.
-  const estimateShown = !hasNorm && !!decimalToInput(estimate?.perGarment).trim();
+  // СЕРВЕРНАЯ ОЦЕНКА ПЕЧАТАЕТСЯ В ТОЙ ЖЕ ЯЧЕЙКЕ, ЧТО И НОРМА, СЕРЫМ. Своего места ей не заводится
+  // намеренно: «сколько уходит ткани» — один вопрос, и два ответа в разных углах карточки это
+  // ровно та двусмысленность, которую карточка ткани убрала. Серое против чёрного здесь — не
+  // оформление, а утверждение: чёрное носит норма, серое носит вывод.
+  const estimateNumber = !hasNorm ? decimalToInput(estimate?.perGarment).trim() : '';
+  const estimateCell = estimateNumber ? (
+    <span className='text-labelColor'>{estimateNumber}</span>
+  ) : undefined;
   // Раскладки ИМЕННО ЭТОГО слота — считаются здесь, чтобы решить, монтировать ли подсказку вовсе.
   // MarkerApplyHint на пустом списке и так возвращает null, но платит за это шестью useState и
   // двумя подписками на массивы формы; карточка теперь есть у КАЖДОГО слота BOM, а не только у
   // тех, где норму уже завели, так что «смонтировать и вернуть null» подорожало ровно во столько
   // раз, во сколько слотов больше строк.
   const lineMarkers = markersForLine(markers, draft.bomLineKey).length;
+  // ПРАВКА ДУБЛЯ — ЕГО СОБСТВЕННОЕ СОСТОЯНИЕ. У первой строки кнопку держит шапка карточки; у
+  // второй и далее шапки нет, а править их надо (сервер строки одного слота СУММИРУЕТ — эта
+  // строка тоже считает деньги). Без своей кнопки дубль остался бы с числом, которое видно, но
+  // нечем исправить.
+  const [selfEditing, setSelfEditing] = useState(false);
+  const rowEditing = toolsInHeader ? editing : selfEditing;
 
   return (
     <div className='flex min-w-0 flex-col gap-2'>
@@ -1785,20 +1838,42 @@ function SlotNormBlock({
               оказывался путём наименьшего сопротивления — при том, что и раскладка, и выкройки
               дают проверяемое число, а набранное руками ещё и умножается на процент раскроя «на
               глаз». Порядок здесь — это и есть утверждение о том, чему верить. */}
-          <NormSummary
+          {/* ОДНА ТАБЛИЦА — И ЧИСЛО, И ОТКУДА ОНО. Источник стоит последней колонкой той же
+              строки, а не подписью над ней: так «сколько» и «чему верить» читаются одним
+              движением глаз, и на карточке не остаётся второго изображения тех же чисел. */}
+          <UsagePerSizeLocal
             draft={draft}
-            unit={unit}
             sizeIds={sizeIds}
+            unit={unit}
+            canEdit={normEditable}
+            editing={rowEditing && normEditable}
+            estimateValue={estimateCell}
+            // КОЛОНКА ИСТОЧНИКА НЕ РЕНДЕРИТСЯ ПУСТОЙ. `<NormSummary/>` как JSX-элемент никогда не
+            // null, даже когда сам компонент внутри возвращает null (нет ни нормы, ни оценки) —
+            // условие обязано стоять СНАРУЖИ, иначе у пустой строки в таблице появляется колонка,
+            // которой нечего сказать.
+            sourceCell={
+              hasNorm || !!estimateNumber || !!estimate?.refusalText?.trim() ? (
+                <NormSummary
+                  draft={draft}
+                  unit={unit}
+                  sizeIds={sizeIds}
+                  sizeNameById={sizeNameById}
+                  slotWastagePercent={slot.wastagePercent ?? ''}
+                  articleWidth={articleWidth}
+                  recipeLinks={recipeLinks}
+                  weightBasis={weightBasis}
+                  estimate={estimate}
+                />
+              ) : undefined
+            }
+            rowAlive={hasRow}
             sizeNameById={sizeNameById}
-            slotWastagePercent={slot.wastagePercent ?? ''}
-            articleWidth={articleWidth}
-            recipeLinks={recipeLinks}
-            weightBasis={weightBasis}
-            estimate={estimate}
+            onChange={onChange}
           />
           {/* Ф4: измеренный маркером расход этого слота, применяемый в ЭТОТ драфт — через
               тот же onChange, которым staged-рецепт и живёт. */}
-          {lineMarkers > 0 && (
+          {!toolsInHeader && lineMarkers > 0 && (
             <MarkerApplyHint
               markers={markers}
               colorwayId={colorwayId}
@@ -1833,7 +1908,7 @@ function SlotNormBlock({
               отдаются только активному редактору). Ранний выход внутри компонента цену не убирает —
               хуки уже подписаны к моменту возврата; потерять при переключении плитки тут нечего —
               подсказка ничего не хранит, черновик живёт выше. */}
-          {normEditable && active && rollGoods && (
+          {!toolsInHeader && normEditable && active && rollGoods && (
             <DxfApplyHint
               control={control}
               lineKey={draft.bomLineKey}
@@ -1850,6 +1925,29 @@ function SlotNormBlock({
               recipeLinks={recipeLinks}
               techCardId={techCardId}
               onApply={(patch) => onChange(patch)}
+            />
+          )}
+          {/* АДРЕСНЫЙ ОТКАЗ «ПО ВЫКРОЙКАМ» — ПОД ЧИСЛОМ, А НЕ В ТУЛБАРЕ. Кнопка уехала в шапку, но
+              когда предлагать нечего, её место занимает не пустота, а фраза о том, ЧЕГО не хватает
+              (ряда размеров либо деталей, отнесённых к этой ткани). В ряду кнопок такой фразе не
+              место, поэтому здесь стоит второй экземпляр подсказки — он молчит всегда, кроме этого
+              случая (`explainOnly`), и монтируется только на пустой рулонной строке. */}
+          {toolsInHeader && normEditable && active && rollGoods && !hasNorm && (
+            <DxfApplyHint
+              control={control}
+              lineKey={draft.bomLineKey}
+              unit={unit}
+              wastagePercent={slot.wastagePercent ?? ''}
+              articleWidth={articleWidth}
+              weightBasis={weightBasis}
+              sizeIds={sizeIds}
+              sizeNameById={sizeNameById}
+              canEdit={normEditable}
+              explainOnly
+              explainWhenIdle
+              recipeLinks={recipeLinks}
+              techCardId={techCardId}
+              onApply={onChange}
             />
           )}
           {/* ПУСТАЯ НОРМА ОБЯЗАНА СКАЗАТЬ, ЧЕГО ЖДЁТ, А НЕ ПРЕДЛАГАТЬ ОДИН ЛИШЬ РУЧНОЙ ВВОД.
@@ -1898,38 +1996,29 @@ function SlotNormBlock({
 
               УЖЕ НАБРАННОЕ РУКАМИ ЧИСЛО ПОКАЗЫВАЕТСЯ ИНЛАЙНОМ. Спрятать его под раскрывашку
               значило бы наказать за легаси того, кто пришёл поправить свою же строку. */}
-          {manualInline ? (
-            <UsagePerSizeLocal
-              draft={draft}
-              sizeIds={sizeIds}
-              article={article}
-              unit={unit}
-              canEdit={normEditable}
-              rowAlive={hasRow}
-              sizeNameById={sizeNameById}
-              onChange={onChange}
-            />
-          ) : (
-            <details className='border border-hairline px-2 py-1'>
-              {/* «ВПИСАТЬ СВОЁ» — там, где сервер уже показал оценку: это второе из двух действий,
-                  которыми оценку превращают в норму (первое — уточнить раскладкой, кнопка выше).
-                  Без оценки формулировка прежняя: ручной ввод — аварийный выход, а не предложение. */}
-              <summary className='cursor-pointer text-micro uppercase'>
-                {estimateShown ? 'вписать своё…' : 'ввести руками…'}
-              </summary>
-              <div className='pt-1.5'>
-                <UsagePerSizeLocal
-                  draft={draft}
-                  sizeIds={sizeIds}
-                  article={article}
-                  unit={unit}
-                  canEdit={normEditable}
-                  rowAlive={hasRow}
-                  sizeNameById={sizeNameById}
-                  onChange={onChange}
-                />
-              </div>
-            </details>
+          {/* ВТОРОЙ ТАБЛИЦЫ ДЛЯ РУЧНОГО ВВОДА БОЛЬШЕ НЕТ. Раньше их было две: сводка сверху и
+              сетка инпутов под раскрывашкой «ввести руками…» — два вида одного числа, и второй
+              приглашал ВПИСАТЬ там, где надо ПОСЧИТАТЬ. Теперь таблица одна: она читается, а поля
+              появляются в ней же по «редактировать» в шапке. Ручной ввод никуда не делся — без
+              него первый же странный DXF останавливал бы производство, — он просто перестал быть
+              путём наименьшего сопротивления. */}
+          {!toolsInHeader && normEditable && (
+            <span>
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                onClick={() => setSelfEditing((v) => !v)}
+              >
+                {selfEditing ? 'готово' : 'редактировать'}
+              </Button>
+            </span>
+          )}
+          {rowEditing && normEditable && (
+            <Text size='nano' variant='label' component='p'>
+              правится вручную — источник сменится на «введено руками», и костинг снова начнёт
+              начислять сверху процент раскроя слота
+            </Text>
           )}
         </div>
       ) : (
@@ -2040,7 +2129,9 @@ function SlotNormBlock({
       {/* «УБРАТЬ РАСХОД» — бывший unlink строки «на изделие», и он всё ещё нужен: без него норму
           можно обнулить, но нельзя вернуть слот в состояние «строки рецепта нет вовсе» (а это
           разные вещи для полной замены строк). Виден только когда строка ЕСТЬ. */}
-      {canEdit && hasRow && (
+      {/* В МАКЕТЕ «ЛИСТ» ЭТА КНОПКА ЖИВЁТ В ТУЛБАРЕ ШАПКИ — здесь она остаётся только там, где
+          шапки нет: у второй строки слота (легаси-дубль) и у счётного слота. */}
+      {canEdit && hasRow && !toolsInHeader && (
         <div className='flex justify-end'>
           <Button type='button' variant='secondary' size='xs' onClick={onRemove}>
             убрать расход
@@ -2315,7 +2406,12 @@ function FabricRecipeCard({
   onRemoveRow: (index: number) => void;
   onTogglePiece: (piece: PieceRef) => void;
 }) {
+  const { control } = useFormContext<TechCardFormData>();
   const [pinOpen, setPinOpen] = useState(false);
+  // ПРАВКА РУКАМИ — СОСТОЯНИЕ КАРТОЧКИ, а не строки: кнопка стоит в тулбаре шапки (макет «лист»),
+  // а поля появляются в таблице ниже. Держать флаг в строке значило бы поднимать его наверх
+  // колбэком ради одной кнопки.
+  const [editing, setEditing] = useState(false);
   // КОНТУР ПО КЛЮЧУ ДЕТАЛИ — функцией, а не картой: правило свёртки ключа (`pieceRefKey`) остаётся
   // ЗДЕСЬ, у того, кто карту получил, и пикеру не приходится знать про него вовсе. Вторая копия
   // этого правила у читателя разошлась бы с первой молча — часть деталей просто перестала бы
@@ -2333,11 +2429,8 @@ function FabricRecipeCard({
   const draft = garment?.draft ?? { ...blankDraft('', ''), bomLineKey: slot.lineKey ?? '' };
   // Артикул ПЕРВОЙ строки — им карточка называет ткань и им же правит пин. У второй строки того же
   // слота законно бывает свой пин, и её собственный артикул резолвит она сама (SlotNormBlock).
-  const { material, materialId, pinnedDifferent, article } = resolveSlotArticle(
-    draft,
-    slot,
-    materials,
-  );
+  const { material, materialId, pinnedDifferent, article, articleWidth, weightBasis } =
+    resolveSlotArticle(draft, slot, materials);
   const unit = slot.unit?.trim() || '';
   const rollGoods = PIECE_SECTIONS.has(slot.section ?? '');
   const layerRole = derivePieceLayerRole(slot.section, slot.purpose);
@@ -2411,6 +2504,20 @@ function FabricRecipeCard({
   // молча прибавляет к норме ткани (строки одного слота суммируются — colorwayCost и
   // production_material_plan). Само число и кнопка «убрать» живут на своей строке внутри списка;
   // здесь — только факт, что они есть, и у каких деталей.
+  // СТРОКОЙ ПОКАЗЫВАЕТСЯ ТО, ЧТО ТРЕБУЕТ ДЕЙСТВИЯ, — плитка отвечает «что кроится», строка нужна
+  // там, где с деталью надо что-то СДЕЛАТЬ:
+  //   • у детали своё число расхода — сервер суммирует строки слота, оно молча прибавляется;
+  //   • у детали свой пин артикула — факт о ткани этой детали, которого плитка не несёт;
+  //   • секция перестала быть рулонной — тогда ВСЕ связи, потому что пикер там закрыт и убрать
+  //     их больше нечем (а текст ниже как раз просит их убрать).
+  const attentionRows = pieceRows.filter(
+    ({ row }) =>
+      !rollGoods ||
+      !!row.draft.consumption.trim() ||
+      !!row.draft.quantity.trim() ||
+      row.draft.sizeConsumptions.some((x) => (x.consumption ?? '').trim() !== '') ||
+      (row.draft.materialId > 0 && row.draft.materialId !== slot.materialId),
+  );
   const legacyPieceNames = uniq(
     pieceRows
       .filter(
@@ -2421,6 +2528,95 @@ function FabricRecipeCard({
       )
       .map(({ row, piece }) => piece?.name?.trim() || row.draft.pieceLineKey),
   );
+
+  // ── ТУЛБАР НОРМЫ: инструменты, правка руками, снятие ────────────────────────────────────
+  //
+  // Живёт в КАРТОЧКЕ, а не в строке расхода, потому что макет «лист» собирает действия в шапку.
+  // Работает всегда над ПЕРВОЙ строкой слота: она же подписывает карточку, её же правит пин. У
+  // второй строки (легаси-дубль) свои кнопки остаются внутри её блока — см. `toolsInHeader`.
+  //
+  // Инструменты приходят в КОМПАКТНОМ виде (только кнопка и пилюли): их объясняющие подписи
+  // разрывали бы ряд из пяти кнопок, а то же самое говорит первая строка каждого диалога.
+  const primaryIndex = garment?.index ?? -1;
+  const patchPrimary = (patch: Partial<UsageDraft>) => onPatchSlot(primaryIndex, patch);
+  const normEditable = canEdit && !offRecipeSection;
+  const primaryMarkers = markersForLine(markers, draft.bomLineKey).length;
+  // СЧЁТНАЯ ЛЕГАСИ-СТРОКА ТУЛБАРА НЕ ПОЛУЧАЕТ. У неё заполнено `quantity` и пусты consumption/
+  // sizeConsumptions — то есть строка живёт штуками, и своё поле ввода у неё открыто всегда.
+  // Дать здесь «применить из раскладки» значило бы записать consumption, НЕ тронув quantity:
+  // сервер читает Quantity первым в себестоимости и SizeConsumptions→Consumption в плане прогона —
+  // строка расколола бы деньги и потребность. «Редактировать» здесь тоже мёртвая: ветка quantity
+  // про `editing` не знает.
+  const primaryCountedLegacy =
+    measured(slot.section) &&
+    !!draft.quantity.trim() &&
+    !draft.consumption.trim() &&
+    draft.sizeConsumptions.length === 0;
+  const toolbarNorm =
+    !measured(slot.section) || primaryCountedLegacy ? null : (
+      <>
+        {/* МОНТИРУЕТСЯ И БЕЗ ПРАВА ПРАВКИ. Кнопку внутри погасит сам `canEdit`, а пилюли —
+          «норма», «набор изменился», «старая норма», отказ, основа веса — это факты о числе, и
+          на выпущенной карточке они нужнее всего: менять уже нельзя, а понять, чему верить, надо. */}
+        {primaryMarkers > 0 && (
+          <MarkerApplyHint
+            markers={markers}
+            colorwayId={colorwayId}
+            lineKey={draft.bomLineKey}
+            unit={unit}
+            wastagePercent={slot.wastagePercent ?? ''}
+            articleWidth={articleWidth}
+            weightBasis={weightBasis}
+            sizeIds={sizeIds}
+            sizeNameById={sizeNameById}
+            canEdit={normEditable}
+            compact
+            onApply={patchPrimary}
+          />
+        )}
+        {normEditable && active && rollGoods && (
+          <DxfApplyHint
+            control={control}
+            lineKey={draft.bomLineKey}
+            unit={unit}
+            wastagePercent={slot.wastagePercent ?? ''}
+            articleWidth={articleWidth}
+            weightBasis={weightBasis}
+            sizeIds={sizeIds}
+            sizeNameById={sizeNameById}
+            canEdit={normEditable}
+            compact
+            // Объяснение пустой строки живёт ПОД таблицей, а не в тулбаре: там ему есть где
+            // развернуться, и оно относится к числу, а не к кнопке.
+            explainWhenIdle={false}
+            recipeLinks={recipeLinks}
+            techCardId={techCardId}
+            onApply={patchPrimary}
+          />
+        )}
+        {normEditable && (
+          <Button type='button' variant='secondary' size='xs' onClick={() => setEditing((v) => !v)}>
+            {editing ? 'готово' : 'редактировать'}
+          </Button>
+        )}
+        {/* «УБРАТЬ РАСХОД» — бывший unlink строки «на изделие», и он всё ещё нужен: без него норму
+          можно обнулить, но нельзя вернуть слот в состояние «строки рецепта нет вовсе» (а это
+          разные вещи для полной замены строк). Виден только когда строка ЕСТЬ. */}
+        {canEdit && garment && (
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            onClick={() => {
+              setEditing(false);
+              onRemoveRow(garment.index);
+            }}
+          >
+            убрать расход
+          </Button>
+        )}
+      </>
+    );
 
   const piecePicker = (label: string) => (
     <GenericPopover
@@ -2469,64 +2665,73 @@ function FabricRecipeCard({
     <div>
       <GroupLabel
         action={
-          pinAllowed ? (
-            <div className='flex items-center gap-1.5'>
-              {/* ПИН АРТИКУЛА — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — стоит в шапке,
+          <div className='flex flex-wrap items-center justify-end gap-1.5'>
+            {/* ── ТУЛБАР КАРТОЧКИ (макет «лист») ────────────────────────────────────────────
+                Все действия над этой тканью собраны в одном месте справа сверху: артикул,
+                оба инструмента расчёта, правка руками и снятие нормы. Прежде они стояли в
+                четырёх разных местах — пин в шапке, инструменты под числом, ручной ввод под
+                раскрывашкой, «убрать расход» в самом низу, — и порядок чтения карточки
+                прерывался кнопкой на каждом шагу. */}
+            {toolbarNorm}
+            {pinAllowed ? (
+              <div className='flex items-center gap-1.5'>
+                {/* ПИН АРТИКУЛА — «этот колорвей берёт ДРУГОЙ артикул в этом слоте» — стоит в шапке,
                   рядом с именем ткани, которое он и переопределяет. Прежде он висел на плашке
                   артикула внутри строки; плашка уехала в шапку целиком, и пин уехал с ней. */}
-              <GenericPopover
-                open={pinOpen}
-                onOpenChange={setPinOpen}
-                noTail
-                title='артикул колорвея'
-                className='w-[280px]'
-                triggerProps={{
-                  'aria-label': 'артикул колорвея',
-                  className: buttonVariants({ variant: 'secondary', size: 'xs' }),
-                }}
-                openElement={draft.materialId > 0 ? 'пин ✎' : 'другой артикул…'}
-              >
-                <div className='flex flex-col gap-1.5'>
-                  <ArticlePinSelect
-                    draft={draft}
-                    slot={slot}
-                    materials={materials}
-                    canEdit={canEdit}
-                    // СМЕНА ПИНА НА КГ-СЛОТЕ СНИМАЕТ ЧИСЛО НОРМЫ (и провенанс вместе с ним).
-                    // Кг-норма ЗАКОДИРОВАЛА в себе основу веса КОНКРЕТНОГО артикула (полная
-                    // ширина × плотность, toBomUnit): маркер 2 м на артикуле 150 см × 200 г/м²
-                    // записан как 0.6 кг, и после пина на 180 см × 250 г/м² строка продолжала бы
-                    // обещать 0.6 при правильных 0.9 — прогон объявил бы честный факт
-                    // перерасходом +50%. На слотах в метрах/сантиметрах число НЕ трогается: длина
-                    // от артикула не зависит (за шириной раскладки следит отдельная проверка
-                    // ширины). Сравниваются ЭФФЕКТИВНЫЕ артикулы: «default» ↔ явный пин на
-                    // артикул самого слота — та же ткань, и чистить нечего.
-                    //
-                    // НИ В КОЕМ СЛУЧАЕ не «сбросить провенанс, оставив число»: марочное число
-                    // содержит отходы ВНУТРИ, и, став manual, оно получило бы сверху процент
-                    // раскроя слота — двойной учёт. Либо число уходит вместе с источником, либо
-                    // не трогается ничего.
-                    onChange={(nextMaterialId) => {
-                      const patch: Partial<UsageDraft> = { materialId: nextMaterialId };
-                      const effectiveBefore = draft.materialId || slot.materialId || 0;
-                      const effectiveAfter = nextMaterialId || slot.materialId || 0;
-                      if (bomUnitKind(unit) === 'kg' && effectiveBefore !== effectiveAfter) {
-                        patch.consumption = '';
-                        patch.sizeConsumptions = [];
-                        Object.assign(patch, MANUAL_PROVENANCE);
-                      }
-                      onPatchSlot(garment?.index ?? -1, patch);
-                      setPinOpen(false);
-                    }}
-                  />
-                  <Text size='micro' variant='label'>
-                    Переопределяет артикул слота только в этом колорвее. «default» возвращает
-                    артикул из BOM.
-                  </Text>
-                </div>
-              </GenericPopover>
-            </div>
-          ) : undefined
+                <GenericPopover
+                  open={pinOpen}
+                  onOpenChange={setPinOpen}
+                  noTail
+                  title='артикул колорвея'
+                  className='w-[280px]'
+                  triggerProps={{
+                    'aria-label': 'артикул колорвея',
+                    className: buttonVariants({ variant: 'secondary', size: 'xs' }),
+                  }}
+                  openElement={draft.materialId > 0 ? 'пин ✎' : 'другой артикул…'}
+                >
+                  <div className='flex flex-col gap-1.5'>
+                    <ArticlePinSelect
+                      draft={draft}
+                      slot={slot}
+                      materials={materials}
+                      canEdit={canEdit}
+                      // СМЕНА ПИНА НА КГ-СЛОТЕ СНИМАЕТ ЧИСЛО НОРМЫ (и провенанс вместе с ним).
+                      // Кг-норма ЗАКОДИРОВАЛА в себе основу веса КОНКРЕТНОГО артикула (полная
+                      // ширина × плотность, toBomUnit): маркер 2 м на артикуле 150 см × 200 г/м²
+                      // записан как 0.6 кг, и после пина на 180 см × 250 г/м² строка продолжала бы
+                      // обещать 0.6 при правильных 0.9 — прогон объявил бы честный факт
+                      // перерасходом +50%. На слотах в метрах/сантиметрах число НЕ трогается: длина
+                      // от артикула не зависит (за шириной раскладки следит отдельная проверка
+                      // ширины). Сравниваются ЭФФЕКТИВНЫЕ артикулы: «default» ↔ явный пин на
+                      // артикул самого слота — та же ткань, и чистить нечего.
+                      //
+                      // НИ В КОЕМ СЛУЧАЕ не «сбросить провенанс, оставив число»: марочное число
+                      // содержит отходы ВНУТРИ, и, став manual, оно получило бы сверху процент
+                      // раскроя слота — двойной учёт. Либо число уходит вместе с источником, либо
+                      // не трогается ничего.
+                      onChange={(nextMaterialId) => {
+                        const patch: Partial<UsageDraft> = { materialId: nextMaterialId };
+                        const effectiveBefore = draft.materialId || slot.materialId || 0;
+                        const effectiveAfter = nextMaterialId || slot.materialId || 0;
+                        if (bomUnitKind(unit) === 'kg' && effectiveBefore !== effectiveAfter) {
+                          patch.consumption = '';
+                          patch.sizeConsumptions = [];
+                          Object.assign(patch, MANUAL_PROVENANCE);
+                        }
+                        onPatchSlot(garment?.index ?? -1, patch);
+                        setPinOpen(false);
+                      }}
+                    />
+                    <Text size='micro' variant='label'>
+                      Переопределяет артикул слота только в этом колорвее. «default» возвращает
+                      артикул из BOM.
+                    </Text>
+                  </div>
+                </GenericPopover>
+              </div>
+            ) : null}
+          </div>
         }
       >
         {heading}
@@ -2603,6 +2808,10 @@ function FabricRecipeCard({
                   sizeNameById={sizeNameById}
                   canEdit={canEdit}
                   active={active}
+                  // Инструменты и «редактировать» ПЕРВОЙ строки живут в тулбаре шапки; у дубля
+                  // (i > 0) своей шапки нет, и он рисует их у себя, как раньше.
+                  toolsInHeader={i === 0}
+                  editing={i === 0 && editing}
                   onChange={(patch) => onPatchSlot(row?.index ?? -1, patch)}
                   onRemove={() => {
                     if (row) onRemoveRow(row.index);
@@ -2686,88 +2895,94 @@ function FabricRecipeCard({
               FABRIC, продолжают жить после переезда в THREAD или PACKAGING. Они уезжают в каждое
               сохранение и участвуют в костинге; закрыв их гейтом, экран показывал бы предупреждение
               «уберите легаси-число» рядом с наглухо запертой дверью. */}
+          {/* ── ПОДВАЛ КАРТОЧКИ: ЧТО КРОИТСЯ ИЗ ЭТОЙ ТКАНИ ────────────────────────────────────
+              ПЛИТКАМИ, А НЕ РАСКРЫВАШКОЙ (решение владельца 2026-08-13). Свёрнутый список отвечал
+              на «что кроится» только тому, кто уже готов кликнуть, а лекальные коды в строке всё
+              равно не читаются. Полоса контуров отвечает на этот вопрос молча и сразу.
+
+              ЗЕБРА, А НЕ ВТОРАЯ РАМКА: подвал — это ДРУГОЙ вопрос, и отделить его надо, но блок в
+              блоке система не держит. Заливка отделяет, рамка бы вложила.
+
+              Гейт по рулонности решает, можно ли СОЗДАТЬ связь (пикер), но не то, видно ли уже
+              существующие: секцию строки BOM меняют на вкладке BOM, и связи, заведённые при
+              FABRIC, продолжают жить после переезда в THREAD. Они уезжают в каждое сохранение и
+              участвуют в костинге. */}
           {(rollGoods || pieceRows.length > 0) && (
-            <div className='flex flex-col items-start gap-1'>
+            <div className='-mx-4 -mb-4 mt-1 flex flex-col items-start gap-1.5 border-t border-hairline bg-bgZebra px-4 py-2.5'>
               {pieceRows.length === 0 ? (
                 <Text size='nano' variant='label' component='p'>
                   детали не назначены — из этой ткани пока ничего не кроится
                 </Text>
               ) : (
-                <details>
-                  {/* СВЁРНУТЫЙ СОСТАВ КРОЯ — КАРТИНКОЙ, А НЕ ПЕРЕЧИСЛЕНИЕМ КОДОВ. «9 деталей: BP,
-                      BP_1, FP, PCK_L…» отвечает на вопрос только тому, кто уже помнит, что за чем
-                      стоит; лекальные коды на то и коды, что не читаются. Полоска контуров
-                      отвечает на «что кроится из этой ткани» не разворачиваясь — ровно за этим
-                      свёрнутая строка и существует.
-                      Деталь БЕЗ контура остаётся в полоске пустой клеткой с обрезком имени, а не
-                      исчезает: пропав, она сделала бы полоску короче состава — и то, что расчёт по
-                      выкройкам на ней и отказывает, было бы не увидеть. */}
-                  <summary className='cursor-pointer'>
-                    <span className='inline-flex min-w-0 flex-wrap items-center gap-1 align-middle'>
-                      {pieceRows.slice(0, 14).map(({ row, piece }) => {
-                        const name = piece?.name?.trim() || row.draft.pieceLineKey;
-                        const found = shapes?.get(pieceRefKey(row.draft.pieceLineKey)) ?? null;
-                        // РАМКИ ВОКРУГ КОНТУРА НЕТ, и это проверено глазом: в клетке 24×32 с рамкой
-                        // силуэт читается как серый квадратик, а не как форма. Глиф стоит сам по
-                        // себе — ровно как у имени детали в списке ниже, тем же размером. Рамка
-                        // остаётся ЕДИНСТВЕННО у пустой клетки, где она и значит «здесь пусто».
-                        return found ? (
-                          <PieceSilhouette
-                            key={`${usageKey(row.draft)}:${row.index}`}
-                            found={found}
-                            boxClassName='mr-0'
-                          />
-                        ) : (
-                          <span
-                            key={`${usageKey(row.draft)}:${row.index}`}
-                            title={name}
-                            className='inline-flex h-7 w-10 shrink-0 items-center justify-center overflow-hidden border border-dashed border-borderColor px-0.5 text-nano text-labelColor'
-                          >
-                            <span className='truncate uppercase'>{name.slice(0, 3)}</span>
-                          </span>
-                        );
-                      })}
-                      {pieceRows.length > 14 && (
-                        <Text size='nano' variant='label' component='span'>
-                          {`+${pieceRows.length - 14}`}
-                        </Text>
-                      )}
-                      <Text
-                        size='nano'
-                        variant='label'
-                        component='span'
-                        className='pl-0.5 uppercase'
-                      >
-                        {`${pieceRows.length} ${plural(pieceRows.length, 'деталь', 'детали', 'деталей')}`}
-                      </Text>
-                    </span>
-                  </summary>
-                  <div className='divide-y divide-hairline pt-1'>
-                    {pieceRows.map(({ row, piece }) => (
-                      <PieceLinkRow
-                        key={`${usageKey(row.draft)}:${row.index}`}
-                        draft={row.draft}
-                        piece={piece}
-                        shape={shapes?.get(pieceRefKey(row.draft.pieceLineKey)) ?? null}
-                        slot={slot}
-                        materials={materials}
-                        sizeIds={sizeIds}
-                        sizeNameById={sizeNameById}
-                        canEdit={canEdit}
-                        onChange={(patch) => onPatchSlot(row.index, patch)}
-                        onRemove={() => onRemoveRow(row.index)}
-                      />
-                    ))}
+                <div className='flex w-full min-w-0 flex-col gap-1.5'>
+                  <div className='flex flex-wrap items-baseline gap-2'>
+                    <Text size='micro' variant='label' component='span' className='uppercase'>
+                      {`кроится из этой ткани · ${pieceRows.length}`}
+                    </Text>
                   </div>
-                  <Text size='nano' variant='label' component='p' className='pt-1'>
-                    строка детали отвечает на один вопрос — из какой ткани деталь кроится, и своей
-                    нормы не несёт: расход один на ткань, сколько бы деталей из неё ни кроили
-                  </Text>
-                </details>
+                  {/* Деталь БЕЗ контура остаётся в полосе пустой клеткой с обрезком имени, а не
+                      исчезает: пропав, она сделала бы полосу короче состава — и то, что расчёт по
+                      выкройкам на ней и отказывает, было бы не увидеть. */}
+                  <div className='flex min-w-0 flex-wrap items-start gap-1.5'>
+                    {pieceRows.map(({ row, piece }) => {
+                      const name = piece?.name?.trim() || row.draft.pieceLineKey;
+                      const found = shapes?.get(pieceRefKey(row.draft.pieceLineKey)) ?? null;
+                      return (
+                        <span
+                          key={`${usageKey(row.draft)}:${row.index}`}
+                          title={name}
+                          className='flex w-[76px] shrink-0 flex-col border border-borderColor bg-bgColor'
+                        >
+                          <span className='flex h-12 items-center justify-center p-1'>
+                            {found ? (
+                              <PieceSilhouette found={found} boxClassName='mr-0 h-full w-full' />
+                            ) : (
+                              <Text
+                                size='nano'
+                                variant='label'
+                                component='span'
+                                className='text-center'
+                              >
+                                нет
+                                <br />в выкройках
+                              </Text>
+                            )}
+                          </span>
+                          <span className='block truncate border-t border-hairline px-1 py-0.5 text-nano tracking-label text-labelColor uppercase'>
+                            {name}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                  {/* ЧИНИТЬ — СПИСКОМ, И ТОЛЬКО ТО, ЧТО ТРЕБУЕТ ПОЧИНКИ. Плитка отвечает «что
+                      кроится», а строка нужна там, где у детали есть СВОЁ число расхода: сервер
+                      суммирует строки одного слота, и это число молча прибавляется к норме ткани.
+                      Раньше ради него разворачивали весь список из сорока деталей. */}
+                  {attentionRows.length > 0 && (
+                    <div className='divide-y divide-hairline border-t border-hairline pt-1'>
+                      {attentionRows.map(({ row, piece }) => (
+                        <PieceLinkRow
+                          key={`${usageKey(row.draft)}:${row.index}`}
+                          draft={row.draft}
+                          piece={piece}
+                          shape={shapes?.get(pieceRefKey(row.draft.pieceLineKey)) ?? null}
+                          slot={slot}
+                          materials={materials}
+                          sizeIds={sizeIds}
+                          sizeNameById={sizeNameById}
+                          canEdit={canEdit}
+                          onChange={(patch) => onPatchSlot(row.index, patch)}
+                          onRemove={() => onRemoveRow(row.index)}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
               {/* ПИКЕР СТОИТ ЗДЕСЬ И ТОЛЬКО ЗДЕСЬ — вторым ребёнком этого блока в ОБЕИХ ветках
                   выше, и это не вкусовщина, а условие его работоспособности: назначение первой
-                  детали переключает ветку (текст → раскрывашка), и пикер, живущий внутри ветки,
+                  детали переключает ветку (текст → плитки), и пикер, живущий внутри ветки,
                   размонтировался бы на первом же клике — попап закрывался бы после каждой галочки,
                   а отмечать деталей надо девять. React согласует детей по позиции: первый ребёнок
                   меняет тип, второй остаётся тем же экземпляром, и попап переживает выбор. */}
@@ -2787,8 +3002,8 @@ function FabricRecipeCard({
                   нельзя (деталь кроят из полотна, а не из нитки), а эти — убрать можно и нужно. */}
               {!rollGoods && pieceRows.length > 0 && (
                 <Text size='nano' variant='label' component='p'>
-                  секция этой строки BOM больше не рулонная — новые детали ей не назначают. Связи
-                  выше остались от прежней секции: разверните список и уберите их
+                  секция этой строки BOM больше не рулонная — новые детали ей не назначают. Связи,
+                  оставшиеся от прежней секции, перечислены строками выше: уберите их
                 </Text>
               )}
             </div>

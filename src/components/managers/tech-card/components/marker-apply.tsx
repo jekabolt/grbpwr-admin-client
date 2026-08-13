@@ -109,6 +109,7 @@ export function MarkerApplyHint({
   sizeIds,
   sizeNameById,
   canEdit,
+  compact = false,
   onApply,
 }: {
   markers: common_TechCardMarkerSummary[] | undefined;
@@ -129,6 +130,14 @@ export function MarkerApplyHint({
   sizeIds: number[];
   sizeNameById: Map<number, string>;
   canEdit: boolean;
+  /**
+   * Кнопка и ПИЛЮЛИ, но без строки «из раскладки: N · «имя» (состав)» — для тулбара в шапке
+   * карточки (макет «лист»). Пилюли остаются: «норма», «набор изменился», «старая норма», отказ и
+   * основа веса — это факты о ГОДНОСТИ числа, и узнать их надо до открытия диалога. Уходит только
+   * предпросмотр числа: то же самое диалог показывает первой строкой, а в ряду из пяти кнопок эта
+   * строка разрывала бы тулбар.
+   */
+  compact?: boolean;
   onApply: (patch: {
     consumption?: string;
     sizeConsumptions?: { sizeId: number; consumption: string }[];
@@ -530,9 +539,11 @@ export function MarkerApplyHint({
 
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
-      <Text size='nano' variant='label' component='span'>
-        из раскладки: {chosenRefusal ? '—' : preview} · «{chosen.name}» ({compLabel(chosen)})
-      </Text>
+      {!compact && (
+        <Text size='nano' variant='label' component='span'>
+          из раскладки: {chosenRefusal ? '—' : preview} · «{chosen.name}» ({compLabel(chosen)})
+        </Text>
+      )}
       {/* «Норма» — ПОДПИСЬ, а не порядок. Раньше назначенную раскладку можно было опознать только
           по тому, что её предложили первой, — то есть не отличить от «просто самой свежей». */}
       {chosen.isNorm === true && (
