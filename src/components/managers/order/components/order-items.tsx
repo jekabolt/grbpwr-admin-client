@@ -160,7 +160,9 @@ export function OrderItems({
           <Tile
             key={line.item.id ?? idx}
             selected={selected}
-            className={line.refunded ? 'flex gap-2 opacity-60' : 'flex gap-2'}
+            // `flex-row` явно: плитка по умолчанию складывает содержимое колонкой (миниатюра →
+            // имя → подпись), а строка заказа — карточка ВБОК: фото слева, текст справа.
+            className={line.refunded ? 'flex flex-row gap-2 opacity-60' : 'flex flex-row gap-2'}
           >
             <span className='w-[52px] shrink-0'>
               {line.item.thumbnail ? (

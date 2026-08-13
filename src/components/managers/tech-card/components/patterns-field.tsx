@@ -1158,6 +1158,10 @@ export function PatternsField({
           selected={selectedKey === key}
           tone={(!has && main) || missing.length > 0 ? 'error' : 'default'}
           onClick={() => setSelectedKey(key)}
+          // Имя материала в плитке обрезается по ширине дорожки, а различает материалы как раз
+          // хвост («основной материал · Твил 1» и «· Твил 2»), поэтому полное имя обязано
+          // дочитываться наведением — не открывая плитку.
+          title={label}
           media={
             has && dxfIndex && blocks > 0 ? (
               <div className='flex h-[84px] w-full items-center justify-center border border-borderColor bg-bgZebra p-1'>
@@ -1565,7 +1569,11 @@ export function PatternsField({
           выше советовал «откройте их материал», которого не существует. */}
       {shelfKeys.length > 0 && (
         <>
-          <Tiles min={158}>
+          {/* 200, а не 158: в этой плитке живут миниатюра, имя материала, счёт листов, ПОЛОСА
+              РАЗМЕРОВ (до восьми чипов) и строка замера площадей. На 158 полоса переносилась на
+              три ряда, а имя обрезалось до роли — то есть плитка переставала отвечать на то, ради
+              чего её и открывают: каким размером этот материал кроить нечем. */}
+          <Tiles min={200}>
             {scopeGroups.map(renderTile)}
             {looseDxf.length > 0 &&
               renderExtraTile(
