@@ -56,15 +56,7 @@ import { ColorwayDeleteControl } from './colorway-delete';
 import { normSourceLabel } from './costing-vocab';
 import { DxfApplyHint } from './dxf-apply';
 import { MarkerApplyHint } from './marker-apply';
-import { useCardDxfPack } from './nesting/card-dxf-pack';
-import {
-  findPiece,
-  fmtCm,
-  PieceShape,
-  useDxfGeometry,
-  useDxfIndex,
-  type FoundPiece,
-} from './nesting/dxf-geometry';
+import { type FoundPiece } from './nesting/dxf-geometry';
 import {
   fullRollWidthOf,
   weightBasisLabel,
@@ -80,12 +72,7 @@ import {
   markersOfColorway,
 } from './nesting/marker-io';
 import { sectionShort } from './bom-line-picker';
-import {
-  pieceBlockRefs,
-  pieceRefKey,
-  rollGoodsScopes,
-  type PieceAliasRow,
-} from './piece-block-refs';
+import { pieceRefKey } from './piece-block-refs';
 import {
   derivePieceLayerRole,
   isMainLayerRole,
@@ -93,8 +80,10 @@ import {
   pieceLayerRoleLabel,
 } from './piece-layer-role';
 import { PieceList, PieceRef, useFormPieces } from './piece-picker';
+import { PieceSilhouette } from './piece-silhouette';
 import { TechCardFormData, wireInt } from './schema';
 import type { RecipePieceLink } from './use-fabric-dxf-pieces';
+import { usePieceShapes } from './use-piece-shapes';
 import {
   createColorwayErrorMessage,
   recipeSaveErrorMessage,
@@ -2189,30 +2178,6 @@ function PieceLinkRow({
   );
 }
 
-// Силуэт детали при её имени: форма из ЧЕРТЕЖА, не пиктограмма — рисуется тем же контуром
-// (findPiece: срединный размер ряда, слой линии кроя с фолбэком), что и плитка этой детали на
-// вкладке деталей кроя. Подпись обязательна, иначе это декорация: title называет блок, размер,
-// по которому нарисовано (силуэт один на всю градацию), и габарит. Нет контура — нет и спана,
-// даже пустого: прочерк перед каждой несопоставленной деталью — шум, который T3 только что
-// вычистил, а диагностика («нет в файлах», «ткань потеряна») живёт на вкладке деталей кроя.
-function PieceSilhouette({ found }: { found: FoundPiece | null }) {
-  if (!found) return null;
-  const size = found.size
-    ? `размер ${found.size}${found.sizes.length > 1 ? ` из ${found.sizes.length}` : ''}`
-    : '';
-  const title = [found.block, size, `${fmtCm(found.piece.bboxW)}×${fmtCm(found.piece.bboxH)} см`]
-    .filter(Boolean)
-    .join(' · ');
-  // Без рамки (глиф при имени, не контрол); grainLayer='' гасит красную долевую — на 28px она
-  // читалась бы как цвет состояния, а красный в системе — только ошибка; outlineOnly гасит
-  // внутреннюю геометрию, нечитаемую в этом размере. SVG letterbox-ится в бокс сам (meet).
-  return (
-    <span title={title} className='mr-1.5 inline-flex h-7 w-10 shrink-0'>
-      <PieceShape piece={found.piece} grainLayer='' outlineOnly />
-    </span>
-  );
-}
-
 // Русское числительное при существительном — без библиотеки: карточка теперь называет числа вслух
 // («9 деталей»), и «9 деталь» читается как опечатка ровно там, где нужно доверие к числам.
 function plural(n: number, one: string, few: string, many: string): string {
@@ -4197,25 +4162,12 @@ export function ColorwayRecipes({
   // раскрывашкой пересчёта, отдаётся — это документированное свойство useDxfGeometry. Холодная
   // карточка честно молчит: ни иконок, ни спиннеров, ни одного сетевого запроса; тёплую видно
   // сразу, а разбор, идущий прямо сейчас, доедет сюда реактивно.
-  const pieceAliases = (useWatch<TechCardFormData>({ name: 'pieceDxfAliases' }) ??
-    []) as PieceAliasRow[];
-  const dxfPack = useCardDxfPack();
-  const dxfGeometry = useDxfGeometry(dxfPack, false);
-  const dxfIndex = useDxfIndex(dxfGeometry.data);
-  // Контур выбирают ТЕ ЖЕ общие правила, что на вкладке деталей кроя: refs из piece-block-refs +
-  // findPiece (первая живая привязка, срединный размер ряда, слой линии кроя с фолбэком). Своя
-  // эвристика тут разошлась бы с плитками молча — одна деталь рисовалась бы двумя фигурами.
-  const fabScopes = useMemo(() => rollGoodsScopes(formBom ?? []), [formBom]);
-  const refsByPiece = useMemo(
-    () => pieceBlockRefs(pieceAliases, fabScopes),
-    [pieceAliases, fabScopes],
-  );
-  const shapeByKey = useMemo(() => {
-    if (!dxfIndex) return null;
-    const m = new Map<string, FoundPiece | null>();
-    for (const [key, refs] of refsByPiece) m.set(key, findPiece(dxfIndex, refs));
-    return m;
-  }, [dxfIndex, refsByPiece]);
+  //
+  // Сама цепочка (пачка → индекс → связи → findPiece) живёт в usePieceShapes: её читает и вкладка
+  // сборки, где имена деталей печатают тарелка, чипы шага и рельс. Второй экземпляр той же
+  // арифметики разошёлся бы с плитками деталей кроя молча — одна деталь рисовалась бы двумя
+  // фигурами, и сравнить их было бы негде.
+  const { shapeByKey } = usePieceShapes(false);
   const sizeIds = (techCard?.techCard?.sizeIds ?? []) as number[];
   const sizeNameById = useMemo(() => {
     const m = new Map<number, string>();

@@ -46,8 +46,12 @@ import {
   zoneOptions,
 } from './operation-options';
 import { OPERATION_TYPE_PREFERRED_KINDS, kindLabel } from './bom-kind';
+import { type FoundPiece } from './nesting/dxf-geometry';
+import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
+import { PieceSilhouette } from './piece-silhouette';
 import { TechCardFormData } from './schema';
+import type { PieceShapeMap } from './use-piece-shapes';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
@@ -65,6 +69,20 @@ const PIECE_DND_PREFIX = 'grbpwr-piece:';
 // Keep a Radix select from ballooning when its selected option is long: clip the value span (the
 // trigger's first child) with an ellipsis instead of letting the text wrap the control taller/wider.
 const selectNoGrow = '[&>span:first-child]:min-w-0 [&>span:first-child]:truncate';
+
+// ГЛИФ ДЕТАЛИ — ВЕДУЩАЯ МЕТКА ПРИ ИМЕНИ, а не замена имени, поэтому мерится не «читаемостью
+// картинки», а строкой, рядом с которой стоит: 16px по высоте — ровно столько, сколько уже занимает
+// сама строка текста, так что ни чип тарелки, ни 26-пиксельная строка рельса не подрастают. Ради
+// картинки перестраивать полосу, которую оператор читает как ровный список, нельзя.
+//
+// `mr-0`: у чипа собственный `gap-1`, и дефолтный отступ силуэта сложился бы с ним в провал.
+const CHIP_GLYPH = 'mr-0 h-4 w-6';
+// В рельсе глиф ещё и уже: колонка 320px, а ведущие силуэты отъедают ширину у самого заголовка
+// шага, который и называет детали словами.
+const RAIL_GLYPH = 'mr-0.5 h-4 w-5';
+// Шаг может соединять и шесть деталей — тогда от заголовка не осталось бы ничего. Три силуэта
+// отвечают на «про какой это узел», остальное досказывает заголовок: он перечисляет их все.
+const RAIL_GLYPH_LIMIT = 3;
 
 // 1..4 rows of topstitching; 0 = unset. Past four it is decoration nobody sews and, more to the
 // point, a typo that reaches the printed sheet as an instruction.
@@ -278,11 +296,7 @@ function RailTotal() {
         </Text>
       }
       value={
-        <Text
-          size='micro'
-          component='span'
-          title='sum of SMV across the assembly order'
-        >
+        <Text size='micro' component='span' title='sum of SMV across the assembly order'>
           {`${total.toFixed(1)} min`}
         </Text>
       }
@@ -296,10 +310,13 @@ function RailTotal() {
 // path, which is not optional — click it and it lands on the step currently open in the editor.
 function TrayChip({
   piece,
+  shape,
   onAdd,
   highlighted = false,
 }: {
   piece: PieceRef;
+  /** Контур детали из общего разбора; null — привязки нет, кэш холодный или разбор не заказан. */
+  shape: FoundPiece | null;
   onAdd: () => void;
   highlighted?: boolean;
 }) {
@@ -322,6 +339,7 @@ function TrayChip({
         highlighted && 'motion-safe:animate-pulse border-textColor bg-bgZebra text-textColor',
       )}
     >
+      <PieceSilhouette found={shape} boxClassName={CHIP_GLYPH} />
       {piece.name}
     </Chip>
   );
@@ -338,6 +356,7 @@ function RailStep({
   hasError,
   activePin,
   activeBom,
+  pieceShapes,
   onHoverPin,
   onDropPiece,
 }: {
@@ -348,6 +367,8 @@ function RailStep({
   hasError: boolean;
   activePin?: number | null;
   activeBom?: string | null;
+  /** Контуры деталей карточки, одной стабильной картой на весь рельс (см. use-piece-shapes). */
+  pieceShapes: PieceShapeMap;
   onHoverPin: (n: number | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
 }) {
@@ -366,9 +387,18 @@ function RailStep({
   const pieceKeys = (useWatch({ control, name: `operations.${index}.pieceLineKeys` }) ??
     []) as string[];
   const allPieces = useFormPieces();
-  const pieceNames = pieceKeys
-    .map((k) => allPieces.find((pc) => pc.lineKey === k)?.name)
-    .filter(Boolean) as string[];
+  const linkedPieces = pieceKeys
+    .map((k) => allPieces.find((pc) => pc.lineKey === k))
+    .filter((p): p is PieceRef => !!p);
+  const pieceNames = linkedPieces.map((p) => p.name);
+  // ВЕДУЩИЕ ГЛИФЫ СТРОКИ. Заголовок шага — готовая СТРОКА из operationHeading (она же едет в
+  // title и в редактор), и класть картинки внутрь неё нечем; поэтому силуэты стоят рядом с ней
+  // отдельными узлами, слева. Только у живых деталей и только там, где контур нашёлся: нет
+  // контура — нет и спана, то же правило, что в рецепте, иначе строка обрастает пустыми боксами.
+  const glyphs = linkedPieces
+    .map((p) => ({ key: p.lineKey, shape: pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null }))
+    .filter((g): g is { key: string; shape: FoundPiece } => !!g.shape)
+    .slice(0, RAIL_GLYPH_LIMIT);
 
   const [over, setOver] = useState(false);
   const opNumber = (index + 1) * 10;
@@ -443,10 +473,20 @@ function RailStep({
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
               {opNumber}
             </Text>
+            {glyphs.length > 0 && (
+              <span className='flex shrink-0 items-center'>
+                {glyphs.map((g) => (
+                  <PieceSilhouette key={g.key} found={g.shape} boxClassName={RAIL_GLYPH} />
+                ))}
+              </span>
+            )}
             <Text
               size='control'
               component='span'
-              className={cn('min-w-0 flex-1 truncate', opType === NONE_OP_TYPE && 'text-labelColor')}
+              className={cn(
+                'min-w-0 flex-1 truncate',
+                opType === NONE_OP_TYPE && 'text-labelColor',
+              )}
             >
               {label}
             </Text>
@@ -496,6 +536,7 @@ function OperationEditor({
   index,
   bomLines,
   pieces,
+  pieceShapes,
   pinOptions,
   colorwayArticles,
   onInsertAfter,
@@ -507,6 +548,8 @@ function OperationEditor({
   index: number;
   bomLines: BomLine[];
   pieces: PieceRef[];
+  /** Контуры деталей карточки — та же карта, что у рельса и у тарелки. */
+  pieceShapes: PieceShapeMap;
   pinOptions: PickerOption[];
   colorwayArticles?: ColorwayArticles;
   onInsertAfter: () => void;
@@ -760,7 +803,6 @@ function OperationEditor({
   //
   // What replaces them is a PLACEHOLDER: the inherited value is shown, never stored.
 
-
   return (
     <div
       onDragEnter={(e: React.DragEvent) => {
@@ -818,7 +860,12 @@ function OperationEditor({
           items={zoneOptions}
           className={selectNoGrow}
         />
-        <DecimalField name={`operations.${index}.smv`} label='time, min' placeholder='1.8' min={0} />
+        <DecimalField
+          name={`operations.${index}.smv`}
+          label='time, min'
+          placeholder='1.8'
+          min={0}
+        />
         <SelectField
           name={`operations.${index}.calloutNumber`}
           label='sketch pin'
@@ -840,9 +887,15 @@ function OperationEditor({
       <ChipRow>
         {chosenPieces.map((k) => (
           <Chip key={k} title={byKey.get(k)?.name} onRemove={() => removePieceKey(k)}>
+            <PieceSilhouette
+              found={pieceShapes?.get(pieceRefKey(k)) ?? null}
+              boxClassName={CHIP_GLYPH}
+            />
             {byKey.get(k)?.name}
           </Chip>
         ))}
+        {/* Сирота (деталь удалили на PATTERNS) остаётся ТОЛЬКО красным чипом: рисовать ей силуэт
+            значило бы показать живую форму у ссылки, которая на сохранении оборвётся. */}
         {danglingPieces.map((k) => (
           <Chip
             key={k}
@@ -866,8 +919,8 @@ function OperationEditor({
       <GroupLabel>materials this step consumes</GroupLabel>
       {linkableBoms.length === 0 ? (
         <Text size='micro' variant='label'>
-          the BOM has no materials a step could consume — add hardware, thread,
-          fusing, tape, trim or labels on the BOM tab
+          the BOM has no materials a step could consume — add hardware, thread, fusing, tape, trim
+          or labels on the BOM tab
         </Text>
       ) : (
         <>
@@ -1041,12 +1094,7 @@ function OperationEditor({
       {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
           saying which was which, so two cards filled them the opposite way round. */}
       <div className='mt-2'>
-        <TextareaField
-          name={`operations.${index}.note`}
-          label='note'
-          rows={2}
-          maxLength={1000}
-        />
+        <TextareaField name={`operations.${index}.note`} label='note' rows={2} maxLength={1000} />
       </div>
     </div>
   );
@@ -1283,6 +1331,7 @@ export function OperationsField({
   activeBom = null,
   onActiveBomChange,
   colorwayArticles,
+  pieceShapes = null,
   addRequest = null,
   onAdded,
 }: {
@@ -1291,6 +1340,11 @@ export function OperationsField({
   activeBom?: string | null;
   onActiveBomChange?: (k: string | null) => void;
   colorwayArticles?: ColorwayArticles;
+  // Контуры деталей, посчитанные ОДИН раз на вкладке и стабильные по ссылке. Приходят пропом, а не
+  // своим хуком: здесь их читают тарелка, каждый чип открытого шага и каждая строка рельса, а этот
+  // компонент перерисовывается на каждый символ — считать карту заново на каждый рендер значило бы
+  // обнулять memo у PieceShape во всех двадцати строках сразу.
+  pieceShapes?: PieceShapeMap;
   // request from the construction panel to append an operation for a part (nonce dedupes)
   addRequest?: { placement: string; nonce: number } | null;
   onAdded?: () => void;
@@ -1546,7 +1600,6 @@ export function OperationsField({
 
   return (
     <div className='space-y-2.5'>
-
       <Text size='micro' variant='label'>
         Шаги сборки по порядку — слева вся последовательность, справа открытый шаг целиком. Номера
         (10/20/30) проставляются по позиции: перетащите <b>⠿</b>, чтобы поменять порядок. Выберите
@@ -1570,6 +1623,7 @@ export function OperationsField({
               <TrayChip
                 key={p.lineKey}
                 piece={p}
+                shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
                 highlighted={highlightPieces}
                 onAdd={() => addPieceToOperation(selectedIndex, p.lineKey)}
               />
@@ -1637,6 +1691,7 @@ export function OperationsField({
                         hasError={errorIndices.has(index)}
                         activePin={activePin}
                         activeBom={activeBom}
+                        pieceShapes={pieceShapes}
                         onHoverPin={(n) => onActivePinChange?.(n)}
                         onDropPiece={addPieceToOperation}
                       />
@@ -1668,6 +1723,7 @@ export function OperationsField({
               index={selectedIndex}
               bomLines={bomItems}
               pieces={pieces}
+              pieceShapes={pieceShapes}
               pinOptions={pinOptions}
               colorwayArticles={colorwayArticles}
               onInsertAfter={() => insertAfter(selectedIndex)}

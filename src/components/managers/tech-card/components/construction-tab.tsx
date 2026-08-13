@@ -20,6 +20,7 @@ import { ColorwayArticles, OPERATION_EXPECTED_SECTIONS, OperationsField } from '
 import { PieceLegend } from './piece-legend';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
+import { usePieceShapes, type PieceShapes } from './use-piece-shapes';
 
 const mediaKindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -82,7 +83,9 @@ export function operationMinutes(o: SummaryOp): number {
 // when in fact a standard IS in force — just not this card's.
 function RequiredSeamAllowanceField() {
   const { control } = useFormContext<TechCardFormData>();
-  const cardValue = ((useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string).trim();
+  const cardValue = (
+    (useWatch({ control, name: 'requiredSeamAllowanceMm' }) ?? '') as string
+  ).trim();
   // The workshop singleton, on the shared query key — the раскладка modal reads the same row for its
   // allowance prefill, so this is a cache hit rather than a second fetch on the usual path.
   const { data } = useWorkshopSettings();
@@ -123,10 +126,7 @@ function RequiredSeamAllowanceField() {
 // что показать иначе нельзя, — разница между пустым полем и нулём.
 function CardStandards() {
   return (
-    <Section
-      title='standards'
-      question='— what every step inherits unless it says otherwise'
-    >
+    <Section title='standards' question='— what every step inherits unless it says otherwise'>
       <div className='flex flex-col gap-2.5 sm:max-w-sm'>
         <RequiredSeamAllowanceField />
         <ConstructionField />
@@ -134,7 +134,6 @@ function CardStandards() {
     </Section>
   );
 }
-
 
 // Summary lead (config pick: Summary B) — the at-a-glance overview the tab lacked: how many
 // operations, total SAM (feeds costing), how many assembly zones are tagged, and how many steps
@@ -336,6 +335,61 @@ function ConstructionSketch({
   );
 }
 
+// ПРИГЛАШЕНИЕ РАЗОБРАТЬ ВЫКРОЙКИ — единственная реакция вкладки на наличие DXF, одна микро-строка
+// в шапке блока операций.
+//
+// Возвращает `undefined`, а не пустой узел, там, где сказать нечего, и это обязательно: карточка
+// БЕЗ выкроек не должна узнать, что силуэты вообще бывают (ни ссылки, ни плейсхолдера, ни пустого
+// бокса — выглядит ровно как вчера), а карточка, у которой контуры уже нарисованы, не нуждается в
+// приглашении нажать то, что и так видно. Молчание — только в этих двух случаях: разобранная
+// пачка, не давшая ни одного контура, и упавший разбор говорят о себе сами.
+//
+// Ошибка говорится ОДИН раз и не превращается в повтор: useDxfGeometry заведён с `retry: false`,
+// потому что недоступный CDN — это ответ, а не повод скачать всё второй раз.
+function shapesAffordance(
+  shapes: PieceShapes,
+  armed: boolean,
+  onArm: () => void,
+): React.ReactNode | undefined {
+  if (!shapes.hasDxf) return undefined;
+  // РАЗБОР ЕСТЬ, А КОНТУРОВ НЕТ — это ответ, и он обязан прозвучать. Иначе нажатие на «показать
+  // силуэты» выглядит как поломка: ссылка пропала, десятки мегабайт скачались, детали остались
+  // теми же именами. Причина всегда одна и чинится не здесь — деталь кроя не связана с блоком
+  // чертежа, — поэтому строка называет вкладку, на которой это делают.
+  if (shapes.shapeByKey) {
+    return shapes.foundCount === 0 ? (
+      <Text size='micro' variant='label' component='span'>
+        детали не сопоставлены с блоками выкроек — вкладка PATTERNS
+      </Text>
+    ) : undefined;
+  }
+  if (shapes.error) {
+    return (
+      <Text size='micro' variant='error' component='span' title={shapes.error.message}>
+        выкройки не разобрались
+      </Text>
+    );
+  }
+  // `isLoading` — не только про свой заказ: разбор мог уже идти по кнопке на вкладке PATTERNS, и
+  // предлагать нажать то, что уже выполняется, значит обещать второе скачивание тех же мегабайт.
+  if (armed || shapes.isLoading) {
+    return (
+      <Text size='micro' variant='label' component='span'>
+        разбираю выкройки…
+      </Text>
+    );
+  }
+  return (
+    <Chip
+      dashed
+      onClick={onArm}
+      title='скачать и разобрать DXF карточки, чтобы у деталей появились силуэты'
+    >
+      показать силуэты
+    </Chip>
+  );
+}
+
 // Construction workspace: the sketch (assembly map) on the left, the general finishing defaults
 // and the ordered operations on the right — so a step and its place on the drawing are visible
 // together, without switching tabs. Colourway / material selection lives on the colorways tab;
@@ -349,6 +403,23 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   // shared hook the pieces tab reuses for its mini-diagram.
   const pin = useCrossHighlight<number>();
   const bom = useCrossHighlight<string>();
+
+  // СИЛУЭТЫ ДЕТАЛЕЙ — ПАССИВНО ПО УМОЛЧАНИЮ, разбор только по явному клику.
+  //
+  // Вкладка не качает НИЧЕГО сама: `enabled` стартует false, поэтому тёплый кэш (вкладка PATTERNS,
+  // модалка раскладки, пересчёт нормы) рисует силуэты мгновенно и бесплатно, а холодная карточка
+  // не платит ни одного запроса за картинки, которых никто не просил — сборку открывают, чтобы
+  // править операции, а не разглядывать выкройки, и десятки мегабайт с CDN за вход на вкладку были
+  // бы платой в чужой карман. Кому силуэты нужны здесь и сейчас — нажимает ссылку в шапке блока.
+  //
+  // ЛАТЧ, а не зеркало «вкладка открыта»: уход на соседнюю вкладку не имеет права отменить уже
+  // идущее скачивание (React Query бросил бы запрос на полпути, и следующий заход начал бы его
+  // заново), поэтому обратной дороги у флага нет — он живёт до перемонтирования карточки.
+  //
+  // Хук держится ЗДЕСЬ, а не внутри редактора операций: карта контуров одна на карточку и
+  // стабильна по ссылке, а редактор перерисовывается на каждый введённый символ.
+  const [shapesArmed, setShapesArmed] = useState(false);
+  const pieceShapes = usePieceShapes(shapesArmed);
 
   // Which concrete article each colourway takes for the slots an operation consumes. Assembled here
   // because the two halves come from different places: the recipe (usages + their pins) rides the
@@ -435,6 +506,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
             <SectionHeader
               title='operations — assembly order'
               question='— what each step does, where, on which pieces, and how long it takes'
+              action={shapesAffordance(pieceShapes, shapesArmed, () => setShapesArmed(true))}
             />
             <OperationsField
               activePin={pin.active}
@@ -442,6 +514,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
               activeBom={bom.active}
               onActiveBomChange={bom.setActive}
               colorwayArticles={colorwayArticles}
+              pieceShapes={pieceShapes.shapeByKey}
             />
           </section>
         </div>
