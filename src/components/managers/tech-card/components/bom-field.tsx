@@ -418,11 +418,21 @@ function ThisStyleFields({
   // сервер гроссит, — это молчаливо заниженная закупка, а лишнее поле на счётной резинке — шум.
   const measuredLine =
     bomUnitKind(unit) != null || rowSection === TRIM_SECTION || normRows.some((r) => r.measured);
+  // СЛОТ, КОТОРЫЙ ЖИВЁТ ШТУКАМИ, РАСКРОЙНОЙ ЛЕСТНИЦЫ НЕ ПОЛУЧАЕТ — даже на рулонной секции.
+  // Секция говорит, ЧТО это за материал, а гросс-ап решает РЕЦЕПТ: строку с `quantity` костинг
+  // отсекает раньше любого множителя, и ткань, записанная штуками (легаси-строки такие есть),
+  // получала бы полную лестницу и приглашение вписать процент, которого ни один расчёт не возьмёт.
+  //
+  // Условие намеренно требует ЖИВЫХ строк: у слота без рецепта мерность ещё неизвестна, и молчание
+  // там читалось бы как «этой ткани надбавка не положена». Пока рецепта нет — показываем.
+  const countedOnlySlot = normRows.length > 0 && !normRows.some((r) => r.measured);
 
   return (
     <div className='border border-borderColor px-2 pb-2'>
       <GroupLabel>how this style uses it</GroupLabel>
-      {rollGoods ? (
+      {countedOnlySlot ? (
+        <CountedNote index={index} />
+      ) : rollGoods ? (
         <CuttingAllowance
           index={index}
           material={material}
@@ -469,8 +479,8 @@ function CountedNote({ index }: { index: number }) {
         <div className='flex flex-wrap items-center gap-1.5'>
           <Pill tone='mut'>{pctLabel(stale) || `${stale}%`}</Pill>
           <Text size='nano' variant='label' component='span'>
-            процент остался на строке с прежних времён — ни один расчёт его не берёт, но он
-            печатается в тех-паке
+            процент остался на строке с прежних времён — ни один расчёт его не берёт, и тех-пак его
+            больше не печатает. Убрать стоит, чтобы он не выглядел действующим
           </Text>
           <Button
             type='button'
@@ -608,7 +618,11 @@ function CuttingAllowance({
   const coefRaw = decimalToInput(material?.cuttingCoefficient);
   const coefSet = Number.isFinite(Number(coefRaw)) && Number(coefRaw) >= 1;
 
-  const measuredRows = normRows.filter((r) => r.marker);
+  // «Норма измерена» требует ОБОИХ свидетельств: провенанс marker И живой расход. Одного провенанса
+  // мало — он `optional` на проводе, поэтому стойкий клиент, стерев расход и не прислав источник,
+  // оставляет на строке `marker` без числа. Верхняя ступень тогда объявила бы норму снятой с
+  // раскладки при пустой норме, то есть соврала бы в самом сильном утверждении лестницы.
+  const measuredRows = normRows.filter((r) => r.marker && r.measured);
   // Строки рецепта, которые процент ВСЁ ЕЩЁ гроссит: мерные и не марочные. Счётные сюда не
   // попадают — их сервер отсекает раньше любого гросс-апа.
   const grossedRows = normRows.filter((r) => !r.marker && r.measured);

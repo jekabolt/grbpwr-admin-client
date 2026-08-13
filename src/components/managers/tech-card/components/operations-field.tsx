@@ -49,7 +49,7 @@ import { OPERATION_TYPE_PREFERRED_KINDS, kindLabel } from './bom-kind';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
-import { PieceSilhouette } from './piece-silhouette';
+import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
@@ -70,16 +70,16 @@ const PIECE_DND_PREFIX = 'grbpwr-piece:';
 // trigger's first child) with an ellipsis instead of letting the text wrap the control taller/wider.
 const selectNoGrow = '[&>span:first-child]:min-w-0 [&>span:first-child]:truncate';
 
-// ГЛИФ ДЕТАЛИ — ВЕДУЩАЯ МЕТКА ПРИ ИМЕНИ, а не замена имени, поэтому мерится не «читаемостью
-// картинки», а строкой, рядом с которой стоит: 16px по высоте — ровно столько, сколько уже занимает
-// сама строка текста, так что ни чип тарелки, ни 26-пиксельная строка рельса не подрастают. Ради
-// картинки перестраивать полосу, которую оператор читает как ровный список, нельзя.
+// ДВЕ РАЗНЫЕ ВЕЩИ, А НЕ ОДНА В ДВУХ РАЗМЕРАХ.
 //
-// `mr-0`: у чипа собственный `gap-1`, и дефолтный отступ силуэта сложился бы с ним в провал.
-const CHIP_GLYPH = 'mr-0 h-4 w-6';
-// В рельсе глиф ещё и уже: колонка 320px, а ведущие силуэты отъедают ширину у самого заголовка
-// шага, который и называет детали словами.
-const RAIL_GLYPH = 'mr-0.5 h-4 w-5';
+// Там, где деталь ВЫБИРАЮТ (тарелка, состав шага), она — ПЛИТКА: квадрат 56px с формой и именем
+// поверх (PieceTile). Имя уехало на картинку, поэтому место, которое раньше занимала подпись
+// рядом, целиком отдано форме — при той же занятой полосе.
+//
+// В рельсе деталь не выбирают, там читают ПОРЯДОК: строка 26px, двадцать строк подряд, и заголовок
+// шага уже называет детали словами. Плитке там места нет, поэтому остаётся глиф — но квадратный,
+// чтобы полочка и пояс стояли в одной сетке, а не лесенкой.
+const RAIL_GLYPH = `mr-0.5 size-4 ${SILHOUETTE_INK}`;
 // Шаг может соединять и шесть деталей — тогда от заголовка не осталось бы ничего. Три силуэта
 // отвечают на «про какой это узел», остальное досказывает заголовок: он перечисляет их все.
 const RAIL_GLYPH_LIMIT = 3;
@@ -311,26 +311,56 @@ function RailTotal() {
 function TrayChip({
   piece,
   shape,
+  tiled,
   onAdd,
   highlighted = false,
 }: {
   piece: PieceRef;
   /** Контур детали из общего разбора; null — привязки нет, кэш холодный или разбор не заказан. */
   shape: FoundPiece | null;
+  /** Карточка показывает детали плитками (у неё есть хоть один контур), а не чипами. */
+  tiled: boolean;
   onAdd: () => void;
   highlighted?: boolean;
 }) {
+  const dragProps = {
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData(PIECE_DND_TYPE, piece.lineKey);
+      e.dataTransfer.setData('text/plain', `${PIECE_DND_PREFIX}${piece.lineKey}`);
+      e.dataTransfer.effectAllowed = 'copy';
+    },
+  };
+  const hint = `${piece.name} — кликните, чтобы добавить к открытому шагу, или перетащите на любой`;
+
+  // ПЛИТКА — это КНОПКА с плиткой внутри, а не чип с картинкой. Чип меряется строкой текста, и
+  // 56-пиксельный квадрат внутри него растянул бы чип по вертикали, оставив канту чипа роль рамки
+  // вокруг рамки — то самое box-in-box, которое DESIGN.md запрещает первым пунктом.
+  if (tiled) {
+    return (
+      <button
+        type='button'
+        onClick={onAdd}
+        title={hint}
+        aria-label={`add piece ${piece.name} to the open step`}
+        {...dragProps}
+        className={cn(
+          'cursor-grab border border-borderColor bg-bgColor transition-colors active:cursor-grabbing',
+          'hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
+          highlighted && 'motion-safe:animate-pulse border-textColor',
+        )}
+      >
+        <PieceTile found={shape} name={piece.name} />
+      </button>
+    );
+  }
+
   return (
     <Chip
       onClick={onAdd}
-      draggable
-      title={`${piece.name} — кликните, чтобы добавить к открытому шагу, или перетащите на любой`}
+      title={hint}
       aria-label={`add piece ${piece.name} to the open step`}
-      onDragStart={(e: React.DragEvent) => {
-        e.dataTransfer.setData(PIECE_DND_TYPE, piece.lineKey);
-        e.dataTransfer.setData('text/plain', `${PIECE_DND_PREFIX}${piece.lineKey}`);
-        e.dataTransfer.effectAllowed = 'copy';
-      }}
+      {...dragProps}
       className={cn(
         'cursor-grab active:cursor-grabbing',
         // flashed by the editor's «＋ piece» — pull the eye to the chips now clickable. The border
@@ -339,7 +369,6 @@ function TrayChip({
         highlighted && 'motion-safe:animate-pulse border-textColor bg-bgZebra text-textColor',
       )}
     >
-      <PieceSilhouette found={shape} boxClassName={CHIP_GLYPH} />
       {piece.name}
     </Chip>
   );
@@ -537,6 +566,7 @@ function OperationEditor({
   bomLines,
   pieces,
   pieceShapes,
+  tiled,
   pinOptions,
   colorwayArticles,
   onInsertAfter,
@@ -550,6 +580,8 @@ function OperationEditor({
   pieces: PieceRef[];
   /** Контуры деталей карточки — та же карта, что у рельса и у тарелки. */
   pieceShapes: PieceShapeMap;
+  /** Детали показываются плитками — решает вкладка, одинаково для тарелки и состава шага. */
+  tiled: boolean;
   pinOptions: PickerOption[];
   colorwayArticles?: ColorwayArticles;
   onInsertAfter: () => void;
@@ -885,15 +917,32 @@ function OperationEditor({
         pieces this step joins
       </GroupLabel>
       <ChipRow>
-        {chosenPieces.map((k) => (
-          <Chip key={k} title={byKey.get(k)?.name} onRemove={() => removePieceKey(k)}>
-            <PieceSilhouette
-              found={pieceShapes?.get(pieceRefKey(k)) ?? null}
-              boxClassName={CHIP_GLYPH}
-            />
-            {byKey.get(k)?.name}
-          </Chip>
-        ))}
+        {chosenPieces.map((k) =>
+          tiled ? (
+            // Убрать — крестиком В УГЛУ плитки, а не кликом по ней самой: плитка достаточно
+            // крупная, чтобы по ней хотелось нажать, и «нажал посмотреть — отвязал деталь» здесь
+            // стоило бы молча потерянной связи шага с деталью.
+            <span key={k} className='relative inline-flex border border-borderColor bg-bgColor'>
+              <PieceTile
+                found={pieceShapes?.get(pieceRefKey(k)) ?? null}
+                name={byKey.get(k)?.name ?? ''}
+              />
+              <button
+                type='button'
+                aria-label={`убрать деталь ${byKey.get(k)?.name ?? ''}`}
+                title='убрать деталь со шага'
+                onClick={() => removePieceKey(k)}
+                className='absolute top-0 right-0 flex size-4 items-center justify-center bg-bgColor/80 text-nano leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+              >
+                ✕
+              </button>
+            </span>
+          ) : (
+            <Chip key={k} title={byKey.get(k)?.name} onRemove={() => removePieceKey(k)}>
+              {byKey.get(k)?.name}
+            </Chip>
+          ),
+        )}
         {/* Сирота (деталь удалили на PATTERNS) остаётся ТОЛЬКО красным чипом: рисовать ей силуэт
             значило бы показать живую форму у ссылки, которая на сохранении оборвётся. */}
         {danglingPieces.map((k) => (
@@ -1495,6 +1544,17 @@ export function OperationsField({
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
 
+  // ПЛИТКАМИ ИЛИ ЧИПАМИ — решается ОДИН раз на весь блок, по наличию хоть одного контура.
+  //
+  // Не «у этой детали контур есть» построчно: смешанная полоса из квадратов и коротких чипов
+  // читается как сломанная вёрстка, а не как разница в данных. И не «карточка вообще с
+  // выкройками»: пока разбор не заказан или ещё идёт, форм нет ни у кого, и сетка пустых квадратов
+  // с именами была бы хуже сегодняшних чипов — тот же список, только втрое выше.
+  const tiled = useMemo(
+    () => !!pieceShapes && [...pieceShapes.values()].some(Boolean),
+    [pieceShapes],
+  );
+
   const pinOptions = useMemo<PickerOption[]>(
     () => [
       { value: 0, label: '— пин —' },
@@ -1624,6 +1684,7 @@ export function OperationsField({
                 key={p.lineKey}
                 piece={p}
                 shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
+                tiled={tiled}
                 highlighted={highlightPieces}
                 onAdd={() => addPieceToOperation(selectedIndex, p.lineKey)}
               />
@@ -1724,6 +1785,7 @@ export function OperationsField({
               bomLines={bomItems}
               pieces={pieces}
               pieceShapes={pieceShapes}
+              tiled={tiled}
               pinOptions={pinOptions}
               colorwayArticles={colorwayArticles}
               onInsertAfter={() => insertAfter(selectedIndex)}

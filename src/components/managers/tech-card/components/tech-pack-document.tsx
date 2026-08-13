@@ -56,7 +56,6 @@ import {
 } from './bom-purpose';
 import { formatBomMoney, resolveBomPrice } from './bom-price';
 import { uniOf } from './nesting/block-code';
-import { bomUnitKind } from './nesting/marker-io';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
 
 import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
@@ -133,6 +132,41 @@ import {
 } from './operation-options';
 
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
+
+// БЕРЁТ ЛИ ХОТЬ КТО-ТО ПРОЦЕНТ РАСКРОЯ ЭТОЙ СТРОКИ — правило сервера, повторённое здесь для БУМАГИ.
+//
+// Процент умножает МЕРНУЮ и НЕ марочную норму: счётную строку костинг отсекает раньше любого
+// гросс-апа (4 пуговицы остаются четырьмя), а marker-норма отходы уже содержит внутри измеренной
+// длины. Печатать «+15%» там, где ни один расчёт его не берёт, — значит отдать в цех число, которое
+// там некому опровергнуть.
+//
+// СМОТРИМ РЕЦЕПТ, А НЕ ЕДИНИЦУ СТРОКИ: словарь единиц формы шире того, что умеют разбирать
+// инструменты («пог.м», «м²», «г»), и гейт по единице СПРЯТАЛ БЫ живую надбавку на строке, которую
+// сервер гроссит. Ошибаться надо в сторону «показать»: лишнее число — шум, спрятанное — молча
+// заниженная закупка.
+//
+// ЛЮБАЯ строка рецепта слота, а не только garment-level: легаси-расход, записанный на строке
+// детали, сервер по-прежнему суммирует в расход слота, и он тоже гроссится.
+// Тип СТРУКТУРНЫЙ, а не именованный: карточка приезжает сюда и как common_TechCard, и как её
+// вложенный insert, и связывать печать с одним из двух ради сигнатуры незачем — предикату нужны
+// ровно строки рецепта.
+function bomTakesWastage(
+  colorways: ReadonlyArray<{ usages?: common_TechCardColorwayUsage[] }> | undefined,
+  b: { id?: number; lineKey?: string },
+): boolean {
+  const id = b.id ?? 0;
+  const key = (b.lineKey ?? '').trim();
+  for (const c of colorways ?? []) {
+    for (const u of c.usages ?? []) {
+      const sameLine =
+        (id > 0 && u.bomItemId === id) || (key !== '' && (u.bomLineKey ?? '').trim() === key);
+      if (!sameLine) continue;
+      if ((u.consumptionSource ?? '').trim() === 'marker') continue;
+      if (dec(u.consumption) || has(u.sizeConsumptions)) return true;
+    }
+  }
+  return false;
+}
 
 // The printed sheet renders dictionary TOKENS, so it needs the same labels the editor shows. They
 // come from the one options module rather than a second table here — the tech pack and the screen
@@ -1553,12 +1587,19 @@ export function TechPackDocument({
                   b.fabricDirection && b.fabricDirection !== 'TECH_CARD_FABRIC_DIRECTION_UNKNOWN'
                     ? fabricDirL[b.fabricDirection]
                     : '',
-                  // ПРОЦЕНТ ПЕЧАТАЕТСЯ ТОЛЬКО НА МЕРНОЙ СТРОКЕ. На счётной его не берёт ни один
-                  // расчёт — костинг выходит из строки с `quantity` РАНЬШЕ любого гросс-апа, — и
-                  // «+15%» рядом с пуговицами уезжало на фабрику числом, которое ничего не значит
-                  // и которое там некому опровергнуть. Единица и есть свидетель мерности: тот же
-                  // словарь (m/cm/kg), которым норма пишется в рецепт.
-                  bomUnitKind(b.unit) != null && dec(b.wastagePercent)
+                  // ПРОЦЕНТ ПЕЧАТАЕТСЯ ТОЛЬКО ТАМ, ГДЕ ЕГО КТО-ТО БЕРЁТ. На счётной строке его не
+                  // берёт ни один расчёт (костинг выходит из строки с `quantity` РАНЬШЕ любого
+                  // гросс-апа), на marker-строке — тоже (измеренная длина отходы уже содержит), и
+                  // «+15%» рядом с пуговицами уезжало на фабрику числом, которое там некому
+                  // опровергнуть.
+                  //
+                  // СВИДЕТЕЛЬ — РЕЦЕПТ, А НЕ ЕДИНИЦА. Первая версия этого гейта смотрела на
+                  // `bomUnitKind(b.unit)` и была ХУЖЕ отсутствия гейта: форма предлагает «пог.м»,
+                  // «м²» и «г», которых тот словарь не знает, — и строка, которую сервер гроссит,
+                  // молча теряла бы надбавку на бумаге. Спрятанный живой множитель занижает
+                  // закупку; лишний мёртвый — всего лишь шум. Поэтому правило то же, что у сервера:
+                  // печатаем, если ХОТЬ ОДНА строка рецепта этого слота мерная и не марочная.
+                  bomTakesWastage(colorways, b) && dec(b.wastagePercent)
                     ? `+${dec(b.wastagePercent)}%`
                     : '',
                 ]

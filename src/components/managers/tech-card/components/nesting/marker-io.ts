@@ -77,7 +77,12 @@ export function exportFileName(
   const clean = parts
     .map((p) => (p ?? '').trim().replace(/\.(dxf|pdf|svg)$/i, ''))
     .filter(Boolean)
-    .map((p) => p.replace(/[\\/:*?"<>|#%\s]+/g, ' ').trim().replace(/\s+/g, '_'));
+    .map((p) =>
+      p
+        .replace(/[\\/:*?"<>|#%\s]+/g, ' ')
+        .trim()
+        .replace(/\s+/g, '_'),
+    );
   const prefix = productionRunId > 0 ? `PR${productionRunId}_` : '';
   return `${prefix}${clean.join('-') || 'раскладка'}.${ext}`;
 }
@@ -152,7 +157,8 @@ export function legacyPairOf(composition: readonly MarkerCompositionEntry[]): {
   sizeId: number;
   sets: number;
 } {
-  if (composition.length === 1) return { sizeId: composition[0].sizeId, sets: composition[0].quantity };
+  if (composition.length === 1)
+    return { sizeId: composition[0].sizeId, sets: composition[0].quantity };
   return { sizeId: 0, sets: 0 };
 }
 
@@ -344,10 +350,7 @@ export function perSizeComplete(s: common_TechCardMarkerSummary): boolean {
 // Однородная отвечает СВОИМ ЖЕ СКАЛЯРОМ, а не проводной строкой состава, хотя сервер шлёт там то
 // же число: скалярный режим диалога и пер-размерный обязаны печатать про одну раскладку ОДНУ
 // цифру, и разойтись они смогут только если возьмут её из двух мест.
-export function consumptionForSize(
-  s: common_TechCardMarkerSummary,
-  sizeId: number,
-): number | null {
+export function consumptionForSize(s: common_TechCardMarkerSummary, sizeId: number): number | null {
   const rows = sizeNormsOf(s);
   const row = rows.find((r) => r.sizeId === sizeId);
   if (!row) return null;
@@ -511,6 +514,55 @@ export function markerNormProvenance(
     wasteSelvedgePct: mean((d) => d.selvedgePct),
     wasteCutPct: mean((d) => d.cutPct),
     normMarkerId,
+  };
+}
+
+/**
+ * ТО ЖЕ РАЗЛОЖЕНИЕ, НО В АБСОЛЮТНЫХ СМ² — «на что ушло полотно настила».
+ *
+ * Проценты выше отвечают на вопрос костинга («сколько отходов сидит внутри нормы»), и в этом виде
+ * они уезжают на провод. Здесь тот же факт нужен ЧЕЛОВЕКУ и в другом виде: измеренная длина — это
+ * площадь деталей ПЛЮС межлекальные выпады ПЛЮС кромка, и пока эти три слагаемых не названы
+ * числами, «1.74 м» и «0.87 м по выкройкам» выглядят двумя мнениями об одном и том же, а не
+ * netto и brutto одной длины.
+ *
+ *     площадь деталей = КПД × W × L        (W — РАСКРОЙНАЯ ширина, L — длина настила)
+ *     межлекальные    = W×L − площадь деталей
+ *     кромка          = 2×кромка_см × L
+ *     полотно настила = (W + 2×кромка_см) × L      — то есть полная ширина рулона × длина
+ *
+ * ДВЕ ФУНКЦИИ, А НЕ ОДНА, И ЭТО НЕ ДУБЛЬ. Процентная форма НЕ ТРЕБУЕТ длины настила (она
+ * сокращается), и на раскладке, у которой записаны КПД и ширина, но не записана длина, она
+ * по-прежнему обязана отвечать — от неё зависит провенанс отходов в рецепте. Выразить её через эту
+ * значило бы молча потерять разложение на таких строках. Тождество между ними одно, и менять их
+ * можно только вместе.
+ *
+ * null — ровно там же, где null у процентов, плюс неизвестная длина: выдумывать слагаемые нельзя.
+ */
+export function markerAreaSplitCm2(m: common_TechCardMarkerSummary): {
+  pieceCm2: number;
+  interPieceCm2: number;
+  selvedgeCm2: number;
+  totalCm2: number;
+} | null {
+  const eff = decNum(m.efficiencyPct) / 100;
+  const w = decNum(m.fabricWidthCm);
+  const l = decNum(m.usedLengthCm);
+  // КПД ВЫШЕ 100% — ОТКАЗ, А НЕ ЗАЖИМ, и это разбор целиком, а не одно слагаемое. Детали не лежат
+  // плотнее собственной площади: КПД > 1 означает, что записанные КПД, ширина и длина описывают
+  // РАЗНЫЕ вещи (пересняли на другой ширине, площадь посчитана по другому набору). Зажать одни
+  // выпады в ноль мало — площадь деталей осталась бы больше самого полотна, строки дали бы 110%
+  // при итоге «100%», и таблица, вся ценность которой в сходимости, соврала бы дважды. Молчание
+  // здесь честнее: вызывающий покажет прежнюю процентную подпись, где та же беда уже зажата.
+  if (!(eff > 0) || eff > 1 || !(w > 0) || !(l > 0)) return null;
+  const selvedge = decNum(m.selvedgeCm);
+  const piece = eff * w * l;
+  return {
+    pieceCm2: piece,
+    // Неотрицательно ПО ПОСТРОЕНИЮ (eff ≤ 1 проверен выше) — отдельного зажима не нужно.
+    interPieceCm2: w * l - piece,
+    selvedgeCm2: 2 * selvedge * l,
+    totalCm2: w * l + 2 * selvedge * l,
   };
 }
 
