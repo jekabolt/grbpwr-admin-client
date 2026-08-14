@@ -274,6 +274,10 @@ export async function publishPieceAreas(args: {
         pieceLineKey: a.pieceLineKey,
         sizeId: a.sizeId,
         areaCm2: { value: a.areaCm2.toFixed(2) },
+        // Периметр (0305) — вторая мера того же контура, тем же масштабом, что и площадь: сервер
+        // округляет до сотых при сравнении «тот же ли это замер», и присланное с большей точностью
+        // вечно читалось бы как изменение, переписывая провенанс на каждом повторе.
+        perimeterCm: { value: a.perimeterCm.toFixed(2) },
         hulled: a.hulled,
         ambiguousPick: a.ambiguousPick,
       })),

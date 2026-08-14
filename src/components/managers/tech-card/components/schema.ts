@@ -24,6 +24,7 @@ import {
   common_TechCardOperationType,
   common_TechCardPackaging,
   common_TechCardPieceCutSymmetry,
+  common_TechCardPieceFusingMode,
   common_TechCardSignoffSection,
   common_TechCardSignoffState,
   common_TechCardStage,
@@ -39,6 +40,9 @@ import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import {
   CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
   UNSET_CUT_SYMMETRY,
+  UNSET_FUSING_MODE,
+  fusingNeedsWidth,
+  isFusingMarked,
   cutSymmetryCountInvalid,
   isCutSymmetryMarked,
 } from './piece-codes';
@@ -207,6 +211,8 @@ export function isBlankPiece(p: {
   note?: string;
   calloutNumber?: number;
   fused?: boolean;
+  fusingMode?: string;
+  fusingWidthMm?: string;
   piecesPerGarment?: number;
   cutSymmetry?: string;
   ungraded?: boolean;
@@ -223,6 +229,11 @@ export function isBlankPiece(p: {
   // только ответом содержимым является. Без этой проверки галку, поставленную до имени (а её
   // ставит и предзаполнение по токену UNI), сохранение выбросило бы вместе со всей строкой.
   if (p.ungraded) return false;
+  // Тот же прецедент в третий раз: режим дублирования — ОТВЕТ оператора, и строка, в которой
+  // успели ответить только на него, содержимым является. Ширина проверяется отдельно от режима:
+  // оператор набирает число раньше, чем доходит до селекта, и потерять его молча — та же потеря
+  // данных без сообщения.
+  if (isFusingMarked(p.fusingMode) || p.fusingWidthMm?.trim()) return false;
   return !(p.materials ?? []).some(
     (m) => m.bomLineKey?.trim() || m.fusingBomLineKey?.trim() || m.note?.trim(),
   );
@@ -259,6 +270,14 @@ const pieceSchema = z
     ungraded: z.boolean().optional().default(false),
     grainline: z.string().optional().default(''),
     fused: z.boolean().optional().default(false),
+    // КАК ИМЕННО ДУБЛИРУЕТСЯ (0304). Полный литерал перечисления, как у cutSymmetry выше и по той
+    // же причине: круглый рейс без словаря переводов — это то, что делает сохранение неспособным
+    // подменить ответ оператора.
+    fusingMode: z.string().optional().default(UNSET_FUSING_MODE),
+    // Ширина полосы — СТРОКА, а не число, как и всякий decimal на проводе: google.type.Decimal
+    // едет строкой, и промежуточное состояние ввода («2», «2.», «2.5») обязано доживать до конца
+    // набора. z.number() схлопнул бы «2.» в 2 под курсором.
+    fusingWidthMm: z.string().optional().default(''),
     calloutNumber: z.number().optional().default(0),
     note: z.string().optional().default(''),
     materials: z.array(pieceMaterialSchema).default([]),
@@ -1152,6 +1171,10 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       ungraded: p.ungraded ?? false,
       grainline: p.grainline || '',
       fused: p.fused ?? false,
+      // Круглый рейс, как у cutSymmetry и ungraded рядом: сервер отдаёт режим на чтении ВСЕГДА,
+      // карточка, сохранённая до 0304, приезжает без него — оба случая сходятся в «не размечено».
+      fusingMode: p.fusingMode || UNSET_FUSING_MODE,
+      fusingWidthMm: p.fusingWidthMm?.value ?? '',
       calloutNumber: p.calloutNumber ?? 0,
       note: p.note || '',
       materials: (p.materials ?? []).map((m) => ({
@@ -1546,6 +1569,18 @@ export function mapFormToTechCardInsert(
         ungraded: p.ungraded ?? false,
         grainline: p.grainline?.trim() || '',
         fused: p.fused ?? false,
+        // ПАРА ЕДЕТ ЦЕЛИКОМ И ВСЕГДА. Присутствие режима на проводе управляет и шириной под ним
+        // (сервер: один флаг :fusing_omitted на две колонки), поэтому промолчать про одну половину
+        // значило бы сохранить полосу с шириной от прошлой правки. Новый клиент шлёт обе, круглым
+        // рейсом того, что прочитал.
+        fusingMode: (p.fusingMode || UNSET_FUSING_MODE) as common_TechCardPieceFusingMode,
+        // Ширина отправляется ТОЛЬКО у «полосой»: у остальных режимов своей ширины нет, и сервер
+        // такую пару отвергает по имени поля (chk_tcp_fusing_width). Пустая строка — это «числа
+        // нет», поэтому она уходит как отсутствие поля, а не как «0».
+        fusingWidthMm:
+          fusingNeedsWidth(p.fusingMode) && p.fusingWidthMm?.trim()
+            ? { value: p.fusingWidthMm.trim() }
+            : undefined,
         // НЕ 0, а «поля нет». Ноль сервер принимает как настоящий номер (dto: `!= nil`), не находит
         // выноску №0 и помечает деталь `detached` — то есть «выноску, на которую ты ссылалась,
         // удалили» у детали, которую никогда ни к чему не прикрепляли. На бете так помечены 16

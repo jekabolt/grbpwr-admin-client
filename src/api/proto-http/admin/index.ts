@@ -620,9 +620,13 @@ export type common_TechCardColorwayUsage = {
   // PRESERVE the existing pin (absent ≠ explicit clear; an explicit 0 clears).
   materialId?: number;
   // consumption_source is the provenance of the norm. "manual" (or "") — typed by the operator;
-  // the article's wastage_percent grosses cost up, exactly as before. "marker" — applied from a
+  // the slot's wastage_percent grosses cost up, exactly as before. "marker" — applied from a
   // saved раскладка whose measured length already CONTAINS the cutting waste (selvedge rides the
-  // per-running-metre price), so costing must NOT gross such rows up again. `optional` is
+  // per-running-metre price), so costing must NOT gross such rows up by the PERCENT again.
+  // THIS FIELD GOVERNS THE PERCENT ONLY. The second multiplier of a norm's money — the article's
+  // material.cutting_coefficient — applies to EVERY measured norm whatever the provenance, "marker"
+  // included: it pays for усадка, обход пороков, сращивание и оттеночные полосы, which a marker
+  // cannot contain because it is measured on a clean lay of nominal width. `optional` is
   // load-bearing like material_id: a stale client omits the field on the full-replace recipe
   // write and the store PRESERVES the stored provenance triple; a present value is written as
   // sent ("" normalises to manual and clears the pcts).
@@ -5550,6 +5554,16 @@ export type StyleCutListPiece = {
   totalPerGarment: number | undefined;
   grainline: string | undefined;
   fused: boolean | undefined;
+  // КАК ИМЕННО дублируется (0304). Печатается рядом с fused и обязано печататься: раскройщик,
+  // прочитавший голое «fused: yes» у детали, которая дублируется полосой 25 мм, выкроит клеевую по
+  // всему лекалу — и потратит на неё в разы больше материала, чем заложено. UNKNOWN = не размечено;
+  // читатель волен развернуть его в FULL (так вёл себя весь код до 0304), но печатать обязан именно
+  // «не размечено», иначе вопрос перестаёт быть заметен.
+  fusingMode: common_TechCardPieceFusingMode | undefined;
+  // Ширина полосы, мм — значима только при STRIP. При SEAM_ALLOWANCE ширину даёт эталон припуска
+  // карточки, и он уже лежит на самой карточке; дублировать его сюда значило бы завести второй
+  // экземпляр числа, которое меняют в одном месте.
+  fusingWidthMm: googletype_Decimal | undefined;
   fabrics: StyleCutListFabric[] | undefined;
   // Классификация кроя (0275). total_per_garment по-прежнему РАВЕН pieces_per_garment: это поле
   // ничего не умножает, оно объясняет уже посчитанное число. UNKNOWN = не размечено.
@@ -5558,6 +5572,28 @@ export type StyleCutListPiece = {
   cutSymmetry: common_TechCardPieceCutSymmetry | undefined;
 };
 
+// TechCardPieceFusingMode — КАК ИМЕННО дублируется деталь (миграция 0304). Осмысленно только у
+// детали с поднятой галкой `fused`: галка отвечает «дублируется ли», это поле — «где именно лежит
+// клеевая».
+// ЗАЧЕМ РАЗЛИЧАТЬ. До 0304 ответ был один на всех, и весь код читал его единственным возможным
+// способом — «клеевая выкроена по той же лекале»: кат-лист ставит деталь в пару к interlining-слоту
+// целиком, тех-пак печатает «fused: yes», оценка расхода приписала бы клеевому слоту ПОЛНУЮ площадь
+// контура. В цеху чаще дублируется только край. Разница денежная и в разы: у полочки площадью
+// 4200 см² периметр ~260 см, полоса 25 мм — это 650 см², в 6.5 раза меньше.
+// UNKNOWN — «НЕ РАЗМЕЧЕНО», а не «целиком», ровно как у TechCardPieceCutSymmetry рядом. Читатель,
+// которому нужно число сейчас, разворачивает его в FULL сам (entity.PieceFusingModeOrFull) — это
+// сохраняет поведение всего, что было до 0304, — но на ЭКРАНЕ неразмеченная деталь обязана
+// оставаться видимо неразмеченной. Иначе вопрос «а как здесь на самом деле» перестанет быть
+// заметен ровно в тот момент, когда на него впервые ответили за технолога.
+// SEAM_ALLOWANCE И STRIP обе кладут полосу вдоль среза и различаются ТОЛЬКО источником её ширины:
+// первая берёт эталон припуска карточки (иначе цеха, 0277), вторая — fusing_width_mm. Свести их в
+// одно значение с обязательным числом значило бы вписывать припуск руками на каждой детали и ловить
+// расхождение с эталоном, ради которого 0277 и заводилась.
+export type common_TechCardPieceFusingMode =
+  | "TECH_CARD_PIECE_FUSING_MODE_UNKNOWN"
+  | "TECH_CARD_PIECE_FUSING_MODE_FULL"
+  | "TECH_CARD_PIECE_FUSING_MODE_SEAM_ALLOWANCE"
+  | "TECH_CARD_PIECE_FUSING_MODE_STRIP";
 // TechCardPieceCutSymmetry — КАК деталь кроится (миграция 0275). Не количество: количество целиком
 // живёт в pieces_per_garment (0266 свернула туда зеркальное удвоение), и ни одно значение отсюда
 // ничего не умножает. Вернуть множитель нельзя: тех-пак печатает pieces_per_garment и НИКОГДА total,
@@ -5602,12 +5638,23 @@ export type StyleCostMaterialLine = {
   hasBase: boolean | undefined;
   // OUTPUT-ONLY waste provenance (Ф9.4). "bom_estimate" — wastage_pct is the BOM line's static
   // estimate and it WAS grossed into line_total_base, as always. "marker" — the norm came from a
-  // saved раскладка: nothing was grossed (the length already contains the waste), wastage_pct
+  // saved раскладка: THE PERCENT was not grossed (the length already contains the waste) — the
+  // article's cutting_coefficient below still was, and on a marker line it is the ONLY multiplier
+  // in line_total_base. wastage_pct
   // carries the EFFECTIVE total (selvedge+cut) so old clients keep seeing a truthful figure, and
   // the two fields below decompose it for display.
   wastageSource: string | undefined;
   wastageSelvedgePct: googletype_Decimal | undefined;
   wastageCutPct: googletype_Decimal | undefined;
+  // ВТОРОЙ МНОЖИТЕЛЬ СТРОКИ (W3): коэффициент раскроя ЭФФЕКТИВНОГО артикула строки
+  // (material.cutting_coefficient — пин колорвея, иначе умолчание слота), уже вошедший в
+  // line_total_base. Пусто = множителя нет (артикул без коэффициента, нерулонная секция, счётная
+  // строка) — и тогда line_total_base объясняется одними полями выше, как и до W3.
+  // БЕЗ ЭТОГО ПОЛЯ СТРОКА БЫЛА НЕВОССТАНОВИМА, и это была не мелочь, а разрыв контракта сметы:
+  // 2 м × €10 при коэффициенте 1.05 даёт line_total_base 21, тогда как consumption × unit_price ×
+  // (1 + wastage_pct) объясняют 20. Читатель, сверяющий смету руками, видел расхождение и не имел
+  // ни одного поля, которым его закрыть.
+  cuttingCoefficient: googletype_Decimal | undefined;
 };
 
 // StyleCostArticleLine is one typed manual cost article (cmt/hardware/packaging/logistics/overhead).
@@ -6331,6 +6378,15 @@ export type common_TechCardBomItem = {
   // Since Ф1 that erasure also un-saves every раскладка on the card, so absence now means «do not
   // touch» and only an explicitly-sent UNKNOWN clears the column.
   fabricDirection?: common_TechCardFabricDirection;
+  // wastage_percent — ПРОЦЕНТ РАСКРОЯ СЛОТА, and since W3 it means ONE thing: THE GEOMETRY OF THE
+  // LAY — inter-piece waste + lay ends, over a netto base (typically 15–30%). Кромка is NOT in it:
+  // it is already subtracted by dividing the piece area by the CUTTING width. Усадка, обход пороков,
+  // сращивание и оттеночные полосы are NOT in it either — those are the roll's reality and are paid
+  // for exactly once, by material.cutting_coefficient, which multiplies the same money independently
+  // of this percent and of the norm's provenance. Before W3 this field was documented as covering
+  // усадка/пороки too; that overlap billed them twice wherever both dials were set.
+  // Folded into the usage line totals (line_total / size_run_total) and every costing rollup —
+  // EXCEPT on a marker-sourced norm, whose measured length already contains this geometry.
   wastagePercent: googletype_Decimal | undefined;
   // material_id optionally links this line to a catalog Material (task 10). The line keeps its
   // own snapshot fields regardless; 0 means unlinked (free-text / legacy).
@@ -6417,6 +6473,23 @@ export type common_TechCardBomItem = {
   // игнорирует; ставится когда тройка (source='lays', lay_count, wastage_percent) МЕНЯЕТСЯ, и
   // гасится вместе со сбросом в 'manual' — дисциплина norm_applied_at (:20 юзеджа).
   wastageAppliedAt: wellKnownTimestamp | undefined;
+  // ЗАМОРОЖЕННЫЙ КОЭФФИЦИЕНТ РАСКРОЯ ЭТОЙ СТРОКИ (W3) — OUTPUT-ONLY, на записи игнорируется.
+  // Коэффициент — свойство АРТИКУЛА (material.cutting_coefficient), а не строки BOM, и в обычном
+  // чтении карточки он и читается с артикула. Здесь он едет вместе со строкой ровно ради ОДНОГО
+  // читателя: РЕЛИЗНОГО СНАПШОТА. Блоб релиза замораживает спецификацию и нормы, но каталог
+  // материалов в него не входит — а с W3 коэффициент ВХОДИТ В ДЕНЬГИ нормы. Без этого поля
+  // пер-размерный пересчёт из блоба считал бы БЕЗ коэффициента, получал бы полное на вид число
+  // ниже замороженного скаляра и молча предпочитался ему.
+  // ТРИ СОСТОЯНИЯ, А НЕ ДВА, И РАЗНИЦА НЕСУЩАЯ:
+  // * поле ОТСУТСТВУЕТ (null) — снапшот снят ДО этой заморозки: коэффициент НЕИЗВЕСТЕН. Читатель
+  // обязан ОТКАЗАТЬСЯ считать такую рулонную строку и увести расчёт в фолбэк на замороженный
+  // скаляр — ровно так же, как он уже поступает с непроставленной ценой пина. Молчаливое
+  // занижение недопустимо, честный отказ допустим;
+  // * поле ЗАДАНО и равно 1 — известно, что надбавки НЕТ. Это УТВЕРЖДЕНИЕ, а не пустота;
+  // * поле ЗАДАНО и больше 1 — величина, которой строка грossилась в момент релиза.
+  // «Нет коэффициента» и «не знаем коэффициента» поэтому НИКОГДА не одно и то же значение: на этой
+  // разнице и стоит отказ выше, и свести их к одному null значило бы вернуть тихое занижение.
+  cuttingCoefficient: googletype_Decimal | undefined;
 };
 
 // TechCardBomSection groups a BOM line by material family (Sheet «Спецификация»).
@@ -7113,6 +7186,27 @@ export type common_TechCardPiece = {
   // ⇒ снять пометку, это осознанное действие. Новый клиент шлёт поле ВСЕГДА, круглым рейсом того,
   // что прочитал.
   ungraded?: boolean;
+  // КАК ИМЕННО ДУБЛИРУЕТСЯ (0304) — см. TechCardPieceFusingMode. Осмысленно только при fused=true;
+  // сервер гасит разметку вместе со снятой галкой, потому что уцелевший режим при снятом fused
+  // читался бы как «не дублируется», а норму давал бы полосой.
+  // ЯВНОЕ ПРИСУТСТВИЕ по той же причине, что у двух соседей выше, и цена ошибки та же: вкладка со
+  // старым бандлом поля не шлёт вовсе, голый proto3-энум приехал бы как UNKNOWN и СТЁР бы разметку
+  // на всех деталях карточки. ОТСУТСТВИЕ ⇒ сервер несёт хранимое дальше (store:
+  // IF(:fusing_omitted, …), и та же перенос-склейка ПЕРЕД дайджестом, иначе подпись CONSTRUCTION из
+  // такой вкладки рождается устаревшей). ЯВНЫЙ UNKNOWN ⇒ очистить в «не размечено», это осознанное
+  // действие. Новый клиент шлёт поле ВСЕГДА, круглым рейсом того, что прочитал.
+  // ПАРА АТОМАРНА: присутствие ЭТОГО поля управляет и шириной под ним. Клиент, приславший режим,
+  // обязан прислать и ширину — иначе полоса без числа досталась бы шириной от прошлой правки, то
+  // есть чужой, и молча.
+  fusingMode?: common_TechCardPieceFusingMode;
+  // Ширина клеевой полосы в МИЛЛИМЕТРАХ. Обязательна и осмысленна ТОЛЬКО при STRIP: при остальных
+  // режимах сервер её гасит, потому что число рядом с SEAM_ALLOWANCE спорит с эталоном припуска, и
+  // спор молчаливый — на экране видно одно, в расчёте другое. Потолок 100 мм (0304): шире бывает
+  // только ошибка единиц.
+  // Миллиметры, а не сантиметры соседнего эталона припуска: единицу выбирает тот, кто ВВОДИТ, а
+  // полосу технолог называет на каждой детали именно в миллиметрах. Переводит одно место — расчёт
+  // нормы, у которого на руках оба сомножителя.
+  fusingWidthMm: googletype_Decimal | undefined;
 };
 
 // TechCardPieceColorwayMaterial maps ONE cut-piece to its fabric (and optional fusing) for ONE
@@ -7895,6 +7989,15 @@ export type common_TechCardPieceArea = {
   // неградуируемых деталей раскладки в MarkerSizeAreasPerGarment).
   sizeId: number | undefined;
   areaCm2: googletype_Decimal | undefined;
+  // ПЕРИМЕТР того же контура, см (0305) — вторая мера того же обмера, по тем же условиям. Ею
+  // считается КРАЕВОЕ дублирование: клеевая полоса вдоль среза стоит `периметр × ширину полосы`,
+  // тогда как площадь отвечает только за дублирование целиком (см. TechCardPieceFusingMode).
+  // НЕ ЗАПОЛНЕН — законное и постоянное состояние, а не переходное: все замеры до 0305 периметра не
+  // несут, клиент его тогда не считал. Такая строка честно означает «площадь есть, периметра нет», и
+  // краевая оценка по ней ОТКАЗЫВАЕТ (AreaEstimateNoPerimeter) вместо того, чтобы вывести полосу из
+  // площади правдоподобной формулой. Правдоподобной формулы не существует: у компактной детали и у
+  // длинной узкой одной площади периметры отличаются вдвое, и ошибка ушла бы прямо в закупку.
+  perimeterCm: googletype_Decimal | undefined;
   // Контур заменён выпуклой оболочкой при раздутии припуском: площадь завышена, но воспроизводима.
   hulled: boolean | undefined;
   // На слое было несколько совпадающих по площади кандидатов, взят первый: число зависит от порядка
@@ -8205,13 +8308,33 @@ export type common_Material = {
   // operator set — silently, with no digest and no audit trail.
   // * field PRESENT, value ""    → CLEAR it (store NULL). This is how the UI unsets the dial.
   // * field PRESENT with a value → set it.
-  // SCOPE — this is a DEMAND-side dial only. It grosses up the material PLAN's requirement
-  // (GetProductionRunMaterialPlan) and nothing else: the run's planned unit cost and the style cost
-  // estimate gross up by the BOM wastage % alone and do NOT include this coefficient. Planned COGS is
-  // therefore understated by exactly the coefficient wherever one is set. That is deliberate for now —
-  // moving it into the costing chain changes how product.cost_price is derived and every style's
-  // margin with it, which is a separate, deliberately reviewed decision. Do not present a planned cost
-  // as coefficient-inclusive.
+  // SCOPE (W3) — THIS DIAL IS IN THE COSTING CHAIN. It grosses up the money of a recipe norm
+  // (TechCardColorwayUsage.line_total / size_run_total, the colourway unit cost, the run's planned
+  // unit cost, the style cost estimate) as well as the material PLAN's requirement. Planned COGS
+  // and product.cost_price therefore CONTAIN the coefficient wherever one is set. It used to be a
+  // demand-side dial only, and the understatement that followed was the reason for the change.
+  // TWO MULTIPLIERS, TWO BASES, AND THEY ARE NOT INTERCHANGEABLE:
+  // расход = ГЕОМЕТРИЯ(набор деталей, ширина, настил) × РЕАЛЬНОСТЬ_РУЛОНА(артикул)
+  // * ГЕОМЕТРИЯ = tech_card_bom_item.wastage_percent. Pays for the LAY and nothing else:
+  // inter-piece waste + lay ends. Its base is netto, where none of that exists yet, so the
+  // number is large (15–30%). A marker-sourced norm never takes it — the measured length
+  // already contains it.
+  // * РЕАЛЬНОСТЬ РУЛОНА = this coefficient. Pays for what NO marker can contain, because a
+  // marker is measured on a clean lay of nominal width: усадка, обход пороков, сращивание,
+  // оттеночные полосы. Its base is the marker length, where the waste already is, so the
+  // number is small (2–6%). It applies to EVERY measured norm regardless of provenance —
+  // marker, manual and dxf alike.
+  // Substituting one for the other is a silent defect, not a typo: the coefficient in the percent's
+  // place understates by every inter-piece drop, linearly; the percent in the coefficient's place
+  // pays for those drops twice.
+  // WHERE IT DELIBERATELY DOES NOT APPLY: countable trims (4 buttons stay 4 buttons) and
+  // non-roll-goods sections (a coefficient on thread is meaningless).
+  // A LAY-BASED REQUIREMENT DOES TAKE IT — after the geometry, never inside it. A настил is a PLAN
+  // of what will be spread; shrinkage, flaw avoidance and splicing happen to the CLOTH whatever the
+  // requirement was computed from. What must stay untouched is the lay GEOMETRY itself
+  // (dto.LayPlannedGeometryOf) and both calibrations: факт ÷ план-геометрия is an honest measurement
+  // of this coefficient exactly because the coefficient is not in that denominator — put it there
+  // and the calibration starts confirming itself.
   cuttingCoefficient: googletype_Decimal | undefined;
   // READ-ONLY (Ф5а.3): the vocabulary normalisation of `unit`. Ignored on write — set `unit`.
   // UNKNOWN = the free text does not map to any known unit, and must not be read as "no unit".
@@ -8475,6 +8598,16 @@ export type GetBomWastageSuggestionResponse = {
   // названного окна непроверяема.
   consideredLayCount: number | undefined;
   totalMeasuredLayCount: number | undefined;
+  // ЛИНЕЙКА, ПО КОТОРОЙ ПОСЧИТАНА МЕДИАНА (W3). Знаменатель дрейфа — netto × ЭТОТ коэффициент, а не
+  // чистое netto: с W3 усадку/пороки оплачивает material.cutting_coefficient, и оставить их в
+  // медиане значило бы предложить процент, который оплатит их ВТОРОЙ раз.
+  // ПУСТО = знаменатель чистое netto (у артикула коэффициента нет) — и тогда цифра означает ровно
+  // то же, что означала до W3.
+  // ПОЛЕ ОБЯЗАНО ЧИТАТЬСЯ ВМЕСТЕ С ЧИСЛОМ. Значения, применённые до W3, считались по чистому netto,
+  // поэтому у артикула с коэффициентом сегодняшнее предложение НИЖЕ прежнего примерно на величину
+  // коэффициента. Это не «факт изменился» — это сменилась линейка, и оператор, сравнивающий с
+  // сохранённым процентом, обязан видеть, чем именно мерили.
+  denominatorCuttingCoefficient: googletype_Decimal | undefined;
 };
 
 // ПРЕДЛОЖЕНИЕ ПРОЦЕНТА РАСКРОЯ (T7 волна 2) — СОСЕД калибровки коэффициента выше, И ЭТО ДРУГОЕ
@@ -8482,12 +8615,22 @@ export type GetBomWastageSuggestionResponse = {
 // калибровка КОЭФФИЦИЕНТА: дрейф = факт ÷ ПЛАН-ГЕОМЕТРИЯ настила (длина раскладки × слои +
 // концевые). Длина раскладки уже содержит межлекальные выпады, поэтому медиана меряет ТОЛЬКО
 // усадку/пороки/сращивание (2–6%) и ложится в material.cutting_coefficient.
-// предложение ПРОЦЕНТА: дрейф = факт ÷ NETTO настила (состав раскладки × netto-норма «по
-// выкройкам», БЕЗ выпадов). Медиана меряет ВСЁ, чего нет в netto: межлекальные выпады + концы
-// настила + усадку/пороки (15–30%) и ложится в bom_item.wastage_percent.
+// предложение ПРОЦЕНТА: дрейф = факт ÷ (NETTO настила × КОЭФФИЦИЕНТ артикула). Netto — состав
+// раскладки × netto-норма «по выкройкам», БЕЗ выпадов; коэффициент вынимает усадку и пороки,
+// которые он оплачивает сам. Остаток — ровно геометрия настила: выпады + концы (15–30%), и
+// ложится в bom_item.wastage_percent.
 // Вписать медиану коэффициента в поле процента — занизить закупку на все межлекальные выпады,
 // линейно и молча. Поэтому у этого предложения свой статус, своя строка дрейфа и НИ ОДНОГО общего
 // сообщения с калибровкой коэффициента.
+// ЗНАМЕНАТЕЛЬ ДВИНУЛСЯ ВМЕСТЕ СО СМЫСЛОМ ПОЛЯ (W3). До W3 процент оплачивал и усадку, поэтому
+// честным знаменателем было чистое netto. W3 сузил процент до геометрии настила и отдал
+// усадку/пороки/сращивание коэффициенту, который с тех пор входит в те же деньги нормы; оставь
+// знаменатель прежним — и на артикуле с коэффициентом усадка оплачивалась бы ДВАЖДЫ. Круга нет:
+// коэффициент калибруется от план-геометрии настила, а не от netto, так что ссылка однонаправленна.
+// ЛИНЕЙКА СМЕНИЛАСЬ, А НЕ ФАКТ: значения процента, применённые ДО W3, посчитаны по чистому netto и
+// на артикуле с коэффициентом с тех пор завышены примерно на него. Ответ называет свой знаменатель
+// (denominator_cutting_coefficient), чтобы разницу читали как смену линейки, а не как дрейф цеха.
+// Ничто не переписывает применённые значения — система никогда не применяет предложение сама.
 export type common_BomWastageSuggestionStatus =
   // Сервер всегда присылает одно из трёх ниже; ноль остаётся за «поле не заполнено» и читается
   // клиентом как ОТСУТСТВИЕ предложения — никогда как READY.
@@ -9232,19 +9375,29 @@ export type MaterialPlanRow = {
   // "before" number of the before → after pair, and it is honest for every row: a manual row, a
   // marker row, a counted trim, a row with no coefficient at all.
   // The ONE invariant that always holds is required >= required_before_grossup. The factor between
-  // them is whatever gross-up each contributing line took, and lines take exactly one:
-  // * MARKER-sourced norm → the article's cutting_coefficient;
-  // * manual / legacy measured norm → the BOM line's wastage % (or the run's actual wastage);
-  // * counted trim (4 buttons stay 4 buttons) → nothing.
-  // So required = required_before_grossup × cutting_coefficient holds ONLY for a row fed entirely by
-  // marker norms of an article that has a coefficient. On a manual row the ratio is the wastage
-  // factor while cutting_coefficient may still be set (and a caveat says it did not bite); on a
-  // counted row the ratio is 1. Do NOT derive the coefficient from the two numbers — read it from
-  // cutting_coefficient.
+  // them is whatever gross-up each contributing line took — and since W3 a MEASURED line can take
+  // TWO multipliers, not one, because they have different bases:
+  // расход = ГЕОМЕТРИЯ(набор деталей, ширина, настил) × РЕАЛЬНОСТЬ_РУЛОНА(артикул)
+  // * ГЕОМЕТРИЯ — the BOM line's wastage % (or the run's actual wastage %, which REPLACES it):
+  // inter-piece waste + lay ends, over a netto base. A MARKER-sourced norm never takes it — the
+  // measured length already contains it. A requirement computed from LAYS never takes it either,
+  // for the same reason: a lay is that measurement.
+  // * РЕАЛЬНОСТЬ РУЛОНА — the article's cutting_coefficient: усадка, обход пороков, сращивание,
+  // оттеночные полосы. Applied to EVERY measured roll-goods contribution regardless of how the
+  // requirement was computed — marker, manual, dxf and LAYS alike — because none of them can
+  // contain it. On the lay path it multiplies the requirement AFTER the geometry, never inside
+  // it: the lay geometry is the denominator that calibrates this very coefficient.
+  // * counted trim (4 buttons stay 4 buttons) → nothing at all.
+  // * a non-roll-goods slot → the percent only; a roll's shrinkage means nothing on thread.
+  // So required = required_before_grossup × cutting_coefficient holds only where the percent did not
+  // also bite (a marker norm, or a lay). Do NOT derive the coefficient from the two numbers — read
+  // it from cutting_coefficient.
   // cutting_coefficient is the ARTICLE's coefficient, reported whenever the article has one even if
-  // this run's norms did not let it bite. NOTE it is a DEMAND-side dial only: the run's planned unit
-  // cost and the style cost estimate do NOT include it (they gross up by wastage % alone), so a
-  // planned COGS must never be read as coefficient-inclusive.
+  // this run's contributions did not let it bite (counted quantities, non-roll-goods slots — a
+  // caveat then says which). IT IS NO LONGER DEMAND-ONLY: since W3 the same coefficient multiplies
+  // the MONEY of the norm too — the run's planned unit cost, the style cost estimate and
+  // product.cost_price all contain it. Purchasing and costing therefore stand on the same
+  // multipliers, which is the whole point of the change.
   requiredBeforeGrossup: googletype_Decimal | undefined;
   cuttingCoefficient: googletype_Decimal | undefined;
   // Vocabulary normalisation of `unit` (Ф5а.3). UNKNOWN = the row's unit is free text this
@@ -9252,8 +9405,11 @@ export type MaterialPlanRow = {
   unitCode: common_MaterialUnit | undefined;
   // Откуда взято `required` ЭТОЙ строки (Ф4.6). MIXED = артикул собрал слоты с настилами и без них,
   // и тогда ни cutting_coefficient, ни отход не описывают строку целиком — читать надо вклады.
-  // NOTE: на пути LAYS коэффициент раскроя НЕ применяется (решение Р4): настил это измерение
-  // (длина × слои + концевые потери), а коэффициент откалиброван против нормативных ОЦЕНОК.
+  // NOTE: на пути LAYS не применяется ПРОЦЕНТ раскроя — настил это измерение (длина × слои +
+  // концевые потери), и выпады уже внутри него. КОЭФФИЦИЕНТ применяется и там (W3): усадка, пороки и
+  // сращивание случаются с полотном независимо от того, чем посчитали требование. Он умножает
+  // требование ПОСЛЕ геометрии — сама геометрия обязана остаться чистой, потому что она знаменатель
+  // калибровки этого же коэффициента.
   source: ProductionRunCoverageSource | undefined;
 };
 
@@ -9273,10 +9429,11 @@ export type MaterialPlanContribution = {
   unit: string | undefined;
   required: googletype_Decimal | undefined;
   hasSizeNorms: boolean | undefined;
-  // Same decomposition as on the rollup row (Ф5а.2), per slot × colourway: Σ(norm × planned_qty)
-  // with NO gross-up applied (neither wastage % nor coefficient), and the article's cutting
-  // coefficient when it has one (unset = it has none). required >= required_before_grossup always;
-  // the two are related BY the coefficient only on a marker-sourced line — see MaterialPlanRow.
+  // Same decomposition as on the rollup row, per slot × colourway: Σ(norm × planned_qty) with NO
+  // gross-up applied (neither wastage % nor coefficient), and the article's cutting coefficient when
+  // it has one (unset = it has none). required >= required_before_grossup always; the two are
+  // related BY the coefficient alone only where the percent did not also bite (a marker norm, or a
+  // lay) — the two-multiplier model is stated in full on MaterialPlanRow.
   requiredBeforeGrossup: googletype_Decimal | undefined;
   cuttingCoefficient: googletype_Decimal | undefined;
   // Ф4.6. ВСЕГДА ЧИСТЫЙ (NORM или LAYS, никогда MIXED): вклад — это ОДИН слот одного колорвея, и
@@ -9374,6 +9531,12 @@ export type CutPlanRow = {
   pinned: boolean | undefined;
   fusingBomItemId: number | undefined;
   fusingMaterialName: string | undefined;
+  // КАК ИМЕННО дублировать — по тому же доводу, по которому в строке дублируется вся остальная
+  // спецификация детали: наряд ПЕЧАТАЮТ и РЕЖУТ по строкам. Голое «fused» у детали, которая
+  // дублируется полосой 25 мм, — это указание выкроить клеевую по всему лекалу, то есть в разы
+  // больше материала, чем заложено в норму. UNKNOWN = «не размечено», и это НЕ «целиком».
+  fusingMode: common_TechCardPieceFusingMode | undefined;
+  fusingWidthMm: googletype_Decimal | undefined;
   bySize: CutPlanSizeQty[] | undefined;
   garmentsTotal: number | undefined;
   piecesToCutTotal: number | undefined;
@@ -12075,6 +12238,13 @@ export interface AdminService {
   // bom-wastage-suggestion:         факт ÷ NETTO (состав раскладки × норма «по выкройкам») —
   // выпадов в знаменателе НЕТ, медиана меряет выпады + концы + усадку (15–30%) →
   // tech_card_bom_item.wastage_percent.
+  // ПОСЛЕ W3 у второго предложения знаменатель netto × КОЭФФИЦИЕНТ артикула, а не чистое netto:
+  // wastage_percent теперь означает только геометрию настила (выпады + концы), усадку/пороки
+  // оплачивает коэффициент — и оплачивает в тех же деньгах себестоимости, так что медиана над
+  // чистым netto предложила бы процент, оплачивающий их второй раз. Ответ называет свою линейку
+  // (denominator_cutting_coefficient), потому что на артикуле с коэффициентом сегодняшнее число
+  // НИЖЕ применённого до W3 — сменилась линейка, а не факт цеха. См. BomWastageSuggestionStatus
+  // в common/production.proto.
   // ПРЕДЛОЖЕНИЕ, А НЕ ПРИМЕНЕНИЕ: обработчик только читает; число вписывает в поле рука. Скоуп
   // медианы — все модели артикула, и ответ несёт состав (счётчики + список дрейфов с именами
   // карточек): число без опоры непроверяемо.

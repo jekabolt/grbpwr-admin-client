@@ -65,6 +65,11 @@ export type RpCutRow = {
   pinned?: boolean;
   fusing_bom_item_id?: number;
   fusing_material_name?: string;
+  // Серверное написание режима дублирования («full» / «seam_allowance» / «strip»); ПУСТО = не
+  // размечено — по той же причине, что и у cut_symmetry выше: молчание не является разновидностью
+  // ответа, и разворачивать его в «целиком» на экране, по которому режут, нельзя.
+  fusing_mode?: string;
+  fusing_width_mm?: string;
 
   by_size?: RpCutQty[];
   garments_total?: number;
@@ -206,4 +211,23 @@ export async function fetchRunPack(token: string): Promise<RunPackState> {
   } catch {
     return { phase: 'broken' };
   }
+}
+
+/**
+ * Подпись режима дублирования для вьюера. Манифест несёт УЖЕ переведённое сервером слово
+ * («full» / «seam_allowance» / «strip»), поэтому здесь только оформление — второй словарь развёл бы
+ * телефон раскройщика с бумагой из тех-пака.
+ *
+ * Пустой режим печатается как «способ не указан», а НЕ опускается: строка «клеевая: G210» без
+ * продолжения читается как «дублировать целиком», то есть как ответ, которого никто не давал.
+ */
+export function fusingViewerCaption(mode?: string, widthMm?: string): string {
+  const v = (mode ?? '').trim();
+  if (v === 'strip') {
+    const w = (widthMm ?? '').trim();
+    return w ? `полосой ${w} мм` : 'полосой (ширина не указана)';
+  }
+  if (v === 'seam_allowance') return 'по припуску';
+  if (v === 'full') return 'вся деталь';
+  return 'способ не указан';
 }

@@ -34,10 +34,14 @@ import {
   cutSymmetryOptions,
   cutSymmetryOptionsFor,
   cutSymmetryUnanswered,
+  fusingHint,
+  fusingModeOptionsFor,
+  fusingNeedsWidth,
   grainlineArrow,
   grainlineOptionsFor,
   isCutSymmetryMarked,
   pieceCodeOptions,
+  UNSET_FUSING_MODE,
 } from './piece-codes';
 import { derivePieceLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { normalizePieceName } from './piece-picker';
@@ -1183,14 +1187,84 @@ export function PiecesTab({
                       type='checkbox'
                       aria-label='fused'
                       checked={!!sel.fused}
-                      onChange={(e) =>
-                        setValue(`pieces.${selIndex}.fused`, e.target.checked, {
-                          shouldDirty: true,
-                        })
-                      }
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setValue(`pieces.${selIndex}.fused`, on, { shouldDirty: true });
+                        // СНЯТАЯ ГАЛКА ГАСИТ РАЗМЕТКУ ТУТ ЖЕ. Сервер всё равно её обнулит (0304:
+                        // режим законен только у fused-детали), но если оставить её на экране, форма
+                        // покажет «полосой 25 мм» под снятой галкой и отправит это на сохранение —
+                        // а вернётся карточка уже без разметки. Расхождение экрана с тем, что
+                        // сохранилось, дороже одной строки.
+                        if (!on) {
+                          setValue(`pieces.${selIndex}.fusingMode`, UNSET_FUSING_MODE, {
+                            shouldDirty: true,
+                          });
+                          setValue(`pieces.${selIndex}.fusingWidthMm`, '', { shouldDirty: true });
+                        }
+                      }}
                     />
                   </div>
                 </div>
+                {/* КАК ИМЕННО ДУБЛИРУЕТСЯ (0304) — только у дублируемой детали: у остальных вопроса
+                    не существует, и пустой селект рядом со снятой галкой читался бы как незаполненное
+                    поле. Занимает всю ширину ряда, потому что несёт ещё и число. */}
+                {!!sel.fused && (
+                  <div className='col-span-2 lg:col-span-3'>
+                    <Text size='micro' variant='label' component='label' className='uppercase'>
+                      как дублируется
+                    </Text>
+                    <div className='flex items-start gap-2.5'>
+                      <select
+                        className={`${selectCls} flex-1`}
+                        aria-label='как дублируется'
+                        data-field={`pieces.${selIndex}.fusingMode`}
+                        value={sel.fusingMode ?? UNSET_FUSING_MODE}
+                        onChange={(e) => {
+                          const mode = e.target.value;
+                          setValue(`pieces.${selIndex}.fusingMode`, mode, { shouldDirty: true });
+                          // Ширина живёт только у «полосой». Уходя с него, число убираем: рядом с
+                          // «по припуску» оно спорило бы с эталоном молча — на экране одно, в
+                          // расчёте другое, — и сервер отверг бы такую пару по имени поля.
+                          if (!fusingNeedsWidth(mode)) {
+                            setValue(`pieces.${selIndex}.fusingWidthMm`, '', { shouldDirty: true });
+                          }
+                        }}
+                      >
+                        {fusingModeOptionsFor(sel.fusingMode).map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {fusingNeedsWidth(sel.fusingMode) && (
+                        <div className='w-28'>
+                          <Input
+                            type='number'
+                            min='0.5'
+                            max='100'
+                            step='0.5'
+                            placeholder='мм'
+                            aria-label='ширина клеевой полосы, мм'
+                            data-field={`pieces.${selIndex}.fusingWidthMm`}
+                            aria-invalid={!sel.fusingWidthMm?.trim()}
+                            value={sel.fusingWidthMm ?? ''}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setValue(`pieces.${selIndex}.fusingWidthMm`, e.target.value, {
+                                shouldDirty: true,
+                              })
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
+                    {/* Подпись говорит, ОТКУДА берётся ширина у режима без своего числа — иначе
+                        «по припуску» выглядит как ответ без величины, и первый же вопрос оператора
+                        будет «а сколько это». */}
+                    <Text size='nano' variant='label' component='p'>
+                      {fusingHint(sel.fusingMode)}
+                    </Text>
+                  </div>
+                )}
                 <div>
                   <Text size='micro' variant='label' component='label' className='uppercase'>
                     не градуируется

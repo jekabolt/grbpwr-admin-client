@@ -99,7 +99,7 @@ import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
 // его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
-import { cutSymmetryUnanswered } from './piece-codes';
+import { cutSymmetryUnanswered, fusingPrintCaption } from './piece-codes';
 import { derivePieceLayerRole, isMainLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { useTechCardReleases } from './useSamples';
 
@@ -1742,7 +1742,24 @@ export function TechPackDocument({
                       })()}
                     </td>
                     <td className={TD}>{p.grainline || '—'}</td>
-                    <td className={`${TD} text-center`}>{p.fused ? 'yes' : 'no'}</td>
+                    <td className={`${TD} text-center`}>
+                      {p.fused ? (
+                        <>
+                          yes
+                          {/* КАК ИМЕННО (0304) — под словом «yes», а не вместо него. Голое «yes» у
+                              детали, которая дублируется полосой 25 мм, читается раскройщиком как
+                              «клеевая по всему лекалу»: он выкроит дубль всей детали и потратит в
+                              разы больше материала, чем заложено в норму. Печатается и у «вся
+                              деталь» тоже — подтвердить то, что и так сделают, дешевле, чем
+                              промолчать там, где молчание означает другое действие. */}
+                          <div className='mt-0.5 text-nano uppercase text-labelColor'>
+                            {fusingPrintCaption(p.fusingMode, p.fusingWidthMm?.value)}
+                          </div>
+                        </>
+                      ) : (
+                        'no'
+                      )}
+                    </td>
                     <td className={TD}>
                       {layers.length === 0 ? (
                         '—'
