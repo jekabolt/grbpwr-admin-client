@@ -14,6 +14,7 @@ import {
   cutSymmetryBadge,
   cutSymmetryPrintCaption,
   cutSymmetryUnanswered,
+  fusingPrintCaption,
   grainlineArrow,
 } from './piece-codes';
 import { derivePieceLayerRole, isMainLayerRole } from './piece-layer-role';
@@ -69,6 +70,10 @@ type FormPiece = {
   cutSymmetry?: string;
   grainline?: string;
   fused?: boolean;
+  // Форма держит ширину СТРОКОЙ (google.type.Decimal едет строкой, и промежуточный ввод «2.»
+  // обязан доживать до конца набора) — в отличие от провода, где это объект с полем value.
+  fusingMode?: string;
+  fusingWidthMm?: string;
   calloutNumber?: number;
   note?: string;
   lineKey?: string;
@@ -98,6 +103,8 @@ export type CutPiece = {
   cutSymmetry: string;
   grainline: string;
   fused: boolean;
+  /** Как именно дублируется (0304), уже подписью для человека; пусто у недублируемой детали. */
+  fusingCaption: string;
   calloutNumber: number;
   note: string;
   /** Index into `fabrics`; -1 when this piece has no fabric for the sample's colourway. */
@@ -238,6 +245,9 @@ export function useSampleCutView(techCard: common_TechCard | undefined, colorway
         cutSymmetry: p.cutSymmetry?.trim() || '',
         grainline: p.grainline?.trim() || '',
         fused: !!p.fused,
+        // Подпись считается ЗДЕСЬ, при сборке ряда, а не в двух местах отрисовки ниже: талон
+        // семпла показывает деталь и списком, и плиткой, и разойтись им нельзя.
+        fusingCaption: p.fused ? fusingPrintCaption(p.fusingMode, p.fusingWidthMm) : '',
         calloutNumber: p.calloutNumber ?? 0,
         note: p.note?.trim() || '',
         fabricIndex: -1,
@@ -371,6 +381,7 @@ export function SampleCutPieces({
                 {p.fused && (
                   <Text size='nano' variant='label' component='span' className='uppercase'>
                     · fused{p.fusingName ? ` (${p.fusingName})` : ''}
+                    {p.fusingCaption ? `, ${p.fusingCaption}` : ''}
                   </Text>
                 )}
                 {p.calloutNumber > 0 && (
@@ -474,7 +485,7 @@ export function SampleCutTicket({
                           {' '}
                           {[
                             p.grainline ? `${grainlineArrow(p.grainline)} ${p.grainline}` : '',
-                            p.fused ? 'fused' : '',
+                            p.fused ? `fused${p.fusingCaption ? `, ${p.fusingCaption}` : ''}` : '',
                           ]
                             .filter(Boolean)
                             .join(' · ')}
