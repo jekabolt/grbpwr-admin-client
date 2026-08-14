@@ -1802,6 +1802,12 @@ export function PatternsField({
             fabricName={matching.fabricName}
             scopeLabelByKey={scopeLabelByKey}
             sizeLabel=''
+            // Состав потерь для деталей, которых в перезалитом чертеже больше нет. Обе величины
+            // живут ТОЛЬКО в ответе сервера: рецепт колорвеев правится своим RPC, площади пишет
+            // SaveTechCardPieceAreas — в форме карточки их нет ни в каком виде. Тот же `cardRead`,
+            // из которого панель выкроек читает состояние замера.
+            colorways={cardRead?.colorways}
+            pieceAreaScopes={cardRead?.pieceAreaScopes}
             onClose={() => setMatching(null)}
           />
         </Suspense>

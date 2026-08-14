@@ -36,15 +36,19 @@
 // piece created here resolves for the alias that references it).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable } from 'ui/components/data-table';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes } from 'utils/pattern';
+import { recipeHoldersByPiece } from '../piece-recipe-hold';
 import type { TechCardFormData } from '../schema';
 import {
   type FabricScope,
@@ -126,6 +130,16 @@ type BlockRow = {
   choice: string; // piece lineKey, '' = unmapped, NEW = create a piece named after the block
 };
 
+// Деталь кроя, которой в перезалитом чертеже больше нет. Собирается ниже (deleteCandidates),
+// рисуется секцией «в чертеже больше нет» — имя, исчезнувшие блоки и выбор «удалить/оставить».
+type DeleteCandidate = {
+  lineKey: string;
+  name: string;
+  // Написание блоков так, как их несёт алиас: это единственный ответ на вопрос «чего именно не
+  // стало», сам чертёж про них уже ничего не скажет.
+  blocks: string[];
+};
+
 // ИМЯ НОВОЙ ДЕТАЛИ ПО УМОЛЧАНИЮ — имя блока, а у помеченного токеном UNI его uniBase.
 //
 // Склейка по-размерных выгрузок CLO приносит ОДНУ неградуируемую деталь под двумя именами
@@ -156,6 +170,8 @@ export function PieceMatchModal({
   fabricName,
   scopeLabelByKey,
   sizeLabel,
+  colorways,
+  pieceAreaScopes,
   onClose,
 }: {
   files: NestingFile[] | null; // null = closed
@@ -168,6 +184,12 @@ export function PieceMatchModal({
   // Ключи строк тоже есть в карте: подсказка может прийти с алиаса, лежащего ещё на строке.
   scopeLabelByKey?: Map<string, string>;
   sizeLabel?: string;
+  // ЧТО ДЕРЖИТСЯ НА ДЕТАЛЯХ — читается с СЕРВЕРА, а не из формы, и это не оплошность: ни строк
+  // рецепта колорвея, ни замеренных площадей в форме карточки нет вовсе. Рецепт правится своим RPC,
+  // площади пишет SaveTechCardPieceAreas — а удаление детали уносит и то, и другое (сервер чистит
+  // обе таблицы в транзакции сохранения карточки). Показать состав потерь можно только отсюда.
+  colorways?: readonly common_AdminColorwayRef[];
+  pieceAreaScopes?: readonly common_TechCardPieceAreaScope[];
   onClose: () => void;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
@@ -527,6 +549,135 @@ export function PieceMatchModal({
   }, [mineByBlock, mineSpelling, pieceOptions]);
   const toUnmap = unmapped.length;
 
+  // ── исчезнувшие детали ────────────────────────────────────────────────────────────────
+  // Идентичности ВСЕХ блоков разбора: по всем файлам скоупа и по ВСЕМ слоям, а не по контурному.
+  // Слой выбирается эвристикой и переключается руками (layerOpts выше), и он отвечает на вопрос
+  // «каким контуром нарисована деталь», а не «есть ли она в файле». Спроси мы про существование
+  // блока у contourPieces — один неверно выбранный слой объявил бы исчезнувшими ВСЕ детали ткани
+  // и предложил вырезать карточку.
+  const parsedIdentities = useMemo(() => {
+    const s = new Set<string>();
+    for (const p of allPieces) {
+      const ident = normBlock(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
+      if (ident) s.add(ident.toLowerCase());
+    }
+    return s;
+  }, [allPieces, split]);
+
+  // Перезалитый в скоуп чертёж БЕЗ блока — это заявление «такой детали в крое больше нет», и до
+  // сих пор единственным ответом на него было ручное удаление на вкладке деталей, которого никто
+  // не делал: деталь оставалась в карточке, в операциях и в кат-листе как призрак.
+  //
+  // Три условия, каждое отсекает свой способ снести чужое:
+  //   (а) деталь привязана В ЭТОМ скоупе — иначе разговор вообще не про этот чертёж;
+  //   (б) у неё нет алиасов ни в одном ДРУГОМ скоупе: одна деталь кроя законно кроится из двух
+  //       полотен (верх + дублерин), и файл верха про второе ничего не знает;
+  //   (в) НИ ОДИН её блок не найден в разборе — деталь, привязанная к нескольким блокам (две
+  //       uni-копии из склеенных по-размерных выгрузок), уходит, только когда исчезли ВСЕ.
+  // Сравнение идёт по идентичности и теми же хелперами, что на записи алиасов (identityOf →
+  // normBlock → ci): на сырых именах первый же старый алиас «BP_1_XS» разошёлся бы с файлом,
+  // где лежит «BP_1», и деталь с живой связью попала бы под нож.
+  //
+  // Читается СЫРОЙ набор алиасов, а не mineByBlock: тот сворачивает спор двух алиасов на одного
+  // победителя, и проигравшая деталь — тоже исчезнувшая — молча осталась бы в карточке.
+  //
+  // Цена ошибки ограничена: лист, который не скачался, даёт предупреждение разбора и УМЕНЬШАЕТ
+  // набор блоков, так что его детали окажутся здесь. Поэтому это предложение, применяемое
+  // человеком по кнопке, а не следствие открытия диалога.
+  const deleteCandidates = useMemo<DeleteCandidate[]>(() => {
+    // Пока разбор не закончился, блоков нет НИ ОДНОГО — и «исчезли все» было бы правдой про
+    // каждую привязанную деталь ткани.
+    if (parse.phase !== 'ready') return [];
+    const mine = new Map<string, string[]>(); // деталь (ci) → её блоки в этом скоупе
+    const elsewhere = new Set<string>(); // деталь (ci), привязанная ещё и к другой ткани
+    for (const a of aliases ?? []) {
+      const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
+      if (!pk) continue;
+      if (!aliasInScope(a, scope)) {
+        elsewhere.add(pk);
+        continue;
+      }
+      const ident = identityOf(a.blockName ?? '');
+      if (!ident) continue;
+      const list = mine.get(pk) ?? [];
+      if (!list.some((b) => b.toLowerCase() === ident.toLowerCase())) list.push(ident);
+      mine.set(pk, list);
+    }
+    // Деталь, на которую оператор ПРЯМО СЕЙЧАС вешает блок, исчезнувшей не является, даже если
+    // её прежний блок из файла пропал: это переименование блока в CAD. Удали её здесь — и apply
+    // запишет алиас на деталь, которой в `pieces` уже нет, а сервер ответит not_found и откажет
+    // в сохранении ВСЕЙ карты.
+    const staged = new Set(
+      rows.filter((r) => r.choice && r.choice !== CREATE).map((r) => r.choice.toLowerCase()),
+    );
+    const out: DeleteCandidate[] = [];
+    for (const p of pieceOptions) {
+      const pk = p.lineKey.toLowerCase();
+      const blocks = mine.get(pk);
+      if (!blocks || blocks.length === 0) continue;
+      if (elsewhere.has(pk) || staged.has(pk)) continue;
+      if (blocks.some((b) => parsedIdentities.has(b.toLowerCase()))) continue;
+      out.push({ lineKey: p.lineKey, name: p.name, blocks });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    return out;
+  }, [parse.phase, aliases, scope, split, pieceOptions, parsedIdentities, rows]);
+
+  // Ответ по каждому кандидату. Дефолт — «удалить», и он НЕ материализуется в карту: пустая
+  // карта уже значит «удалить всех», поэтому новый кандидат (оператор переключил список файлов)
+  // не требует ни эффекта-засева, ни синхронизации, которая молча теряла бы выбор. Переключатель
+  // секции пишет сюда `setDeleteChoice((prev) => new Map(prev).set(lineKey, v))`.
+  const [deleteChoice, setDeleteChoice] = useState<Map<string, 'delete' | 'keep'>>(new Map());
+  const deleteDecision = (lineKey: string): 'delete' | 'keep' =>
+    deleteChoice.get(lineKey) ?? 'delete';
+  // То, что реально применит apply(), — и то, по чему считается сводка исходов.
+  const toDelete = useMemo(
+    () => deleteCandidates.filter((c) => deleteDecision(c.lineKey) === 'delete'),
+    [deleteCandidates, deleteChoice],
+  );
+
+  // ── состав потерь ─────────────────────────────────────────────────────────────────────
+  // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
+  // модалка) и живёт в piece-recipe-hold.ts — вместе с оговоркой о НЕПОЛНОТЕ проекции: архивные
+  // колорвеи чтение карточки не отдаёт, а их строки уедут с деталью так же. Поэтому счёт ниже
+  // подписан «в колорвеях карточки», а не выдаётся за полный.
+  const recipeHold = useMemo(() => recipeHoldersByPiece(colorways), [colorways]);
+  // Замеренные площади детали — по строке на размер. Считаются по ВСЕМ скоупам, а не по текущей
+  // ткани: сервер удаляет их одним `piece_line_key IN (…)` без оглядки на скоуп, в той же
+  // транзакции, что и саму деталь (techcard/materials.go). Считать по одному скоупу значило бы
+  // назвать оператору меньшее число, чем он потеряет.
+  const areaRowsByPiece = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of pieceAreaScopes ?? []) {
+      for (const a of s.areas ?? []) {
+        const k = (a.pieceLineKey ?? '').trim().toLowerCase();
+        if (!k) continue;
+        m.set(k, (m.get(k) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [pieceAreaScopes]);
+
+  // Сколько деталей вообще привязано к этой ткани — знаменатель предупреждения о массовом
+  // исчезновении. Считается по тем же СЫРЫМ алиасам, что и кандидаты, и только по живым деталям:
+  // висячий алиас (деталь уже удалена) нигде не показывается и в знаменателе занижал бы долю.
+  const scopeBoundPieces = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of aliases ?? []) {
+      if (!aliasInScope(a, scope)) continue;
+      const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
+      if (pk && livePieceKeys.has(pk)) s.add(pk);
+    }
+    return s.size;
+  }, [aliases, scope, livePieceKeys]);
+  // Исчезла половина ткани и больше. Правка лекала так не выглядит — так выглядит файл, залитый не
+  // в тот слот, и так же выглядит НЕ ДОКАЧАВШИЙСЯ лист: разбор отдаёт `ready` с неполным набором
+  // блоков, и его детали попадают в кандидаты, ничем не отличаясь от настоящих (см. хазард у
+  // deleteCandidates). Это единственное, чем прикрыт тот случай, — но именно ПРЕДУПРЕЖДЕНИЕ, а не
+  // запрет: массовая замена лекал законна, и запретить её значило бы отнять единственный способ её
+  // применить, оставив карточку с призраками навсегда.
+  const massVanish = deleteCandidates.length > 0 && deleteCandidates.length * 2 >= scopeBoundPieces;
+
   // ── the sheet ─────────────────────────────────────────────────────────────────────────
   // One entry per parsed FILE, in parse order. Keyed by fileIndex rather than by `source`:
   // two rows of one fabric+size legitimately carry the same display name (two revisions
@@ -704,10 +855,32 @@ export function PieceMatchModal({
       const created: NonNullable<TechCardFormData['pieces']> = [];
       // Read at commit time, not from the render-time snapshot: the operator can have added or
       // renamed a piece in the table behind this dialog while it was open.
-      const live = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
+      const all = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
+      // Детали, которых в чертеже больше нет и которые оператор не оставил вручную. Всё
+      // дальнейшее считается уже БЕЗ них: имена (иначе новый блок с тем же именем привязался бы
+      // к уходящей детали), набор живых ключей (по нему отсеиваются её алиасы) и сама запись
+      // массива. Каскад на сервере (строки рецепта, замеренные площади) сработает при
+      // СОХРАНЕНИИ карточки, не здесь.
+      const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+      const live = all.filter((p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()));
+      // Ссылки на деталь снимаются ДО того, как она исчезнет, — тот же контракт, что у
+      // pieces-tab.removePiece: операция, всё ещё называющая удалённую деталь, роняет сохранение
+      // на сервере (operations[N].piece_line_key: no cut-piece "…") и откатывает всю транзакцию —
+      // по ключу, которого оператор не видит, в строке, которую он не трогал. Выноски при этом
+      // НЕ трогаются: выноска — номер на эскизе, она переживает деталь.
+      if (dropped.size > 0) {
+        const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
+        (operations ?? []).forEach((o, oi) => {
+          const keys = (o.pieceLineKeys ?? []).filter(Boolean);
+          const kept = keys.filter((k) => !dropped.has(k.trim().toLowerCase()));
+          if (kept.length === keys.length) return;
+          setValue(`operations.${oi}.pieceLineKeys`, kept, { shouldDirty: true });
+        });
+      }
       // Two pieces sharing a name make every reference to «полочка» ambiguous on the factory
-      // sheet, and the server rejects the save for it (useCreatePiece keeps the same rule). So a
-      // typed name that already exists REUSES that piece instead of minting a second one.
+      // sheet, and the server rejects the save for it — and since this dialog became the only
+      // place a cut piece is created, that rule now has exactly one keeper. So a typed name that
+      // already exists REUSES that piece instead of minting a second one.
       const keyByName = new Map<string, string>();
       for (const p of live) {
         const n = p.name?.trim().toLowerCase();
@@ -732,6 +905,8 @@ export function PieceMatchModal({
       // when the назначение owns exactly one. That is also what MIGRATES a card sorted a moment ago:
       // its line-scoped aliases are re-filed here, in one save, without anyone re-doing the work.
       const bind = bindingForScope(scope);
+      // Считается от списка ПОСЛЕ удаления — этим же набором ниже отсеиваются алиасы уходящих
+      // деталей, и переносящему проходу не нужно знать про удаление ничего отдельно.
       const liveKeys = new Set(
         live.map((p) => p.lineKey?.trim().toLowerCase()).filter(Boolean) as string[],
       );
@@ -762,6 +937,10 @@ export function PieceMatchModal({
       // collapsed any conflicting pair onto the winner the operator picked, so this loop writes
       // exactly one row per block — which is what the UNIQUE index is asking for.
       for (const [ci, pieceLineKey] of mineByBlock) {
+        // Деталь могла уйти этим же применением: её блоков в чертеже больше нет. Проход выше
+        // сюда не дотягивается (он про ЧУЖИЕ скоупы), а алиас на несуществующую деталь сервер
+        // не разрешит — piece_line_key: not_found, и падает сохранение всей карты.
+        if (!liveKeys.has(pieceLineKey.trim().toLowerCase())) continue;
         byKey.set(aliasKey(scope.key, mineSpelling.get(ci) ?? ci), {
           ...bind,
           blockName: mineSpelling.get(ci) ?? ci,
@@ -810,7 +989,10 @@ export function PieceMatchModal({
           pieceLineKey,
         });
       }
-      if (created.length > 0) {
+      // Массив пишется, когда состав деталей изменился хоть в одну сторону: заведение новых или
+      // уход исчезнувших. Без второго условия «применить» с одними удалениями не писало бы
+      // ничего, и диалог отчитался бы об удалении, которого не было.
+      if (created.length > 0 || live.length !== all.length) {
         setValue('pieces', [...live, ...created] as TechCardFormData['pieces'], {
           shouldDirty: true,
         });
@@ -1226,6 +1408,133 @@ export function PieceMatchModal({
                 связи и новые детали уйдут при сохранении карточки.
               </Text>
             </div>
+          </div>
+        )}
+
+        {/* В ЧЕРТЕЖЕ БОЛЬШЕ НЕТ — второй исход этого диалога, рядом с первым. Показывается ТОЛЬКО
+            составом потерь: «деталь удалится» само по себе звучит как уборка мусора, а уносит оно
+            строки рецепта колорвеев и замеренные площади — работу, которую делали руками и
+            восстановить которую будет неоткуда. Решение по каждой детали отдельное: чертёж
+            утверждает про крой, а деталь могла жить в карточке и по другой причине. */}
+        {parse.phase === 'ready' && deleteCandidates.length > 0 && (
+          <div className='space-y-1'>
+            {massVanish && (
+              <CalloutBox tone='error'>
+                <Text size='micro' component='p'>
+                  <b>
+                    исчезло деталей: {deleteCandidates.length} из {scopeBoundPieces} привязанных к
+                    этой ткани.
+                  </b>{' '}
+                  Похоже, файл заменён не тем или выбран не тот слой — проверьте список файлов и
+                  предупреждения разбора выше: лист, который не докачался, отсюда выглядит точно так
+                  же. Применить всё равно можно — замена лекал целиком бывает и законной.
+                </Text>
+              </CalloutBox>
+            )}
+            <GroupLabel flush>в чертеже больше нет ({deleteCandidates.length})</GroupLabel>
+            <Text size='nano' variant='label' component='p'>
+              блоков этих деталей нет ни на одном слое разобранных файлов этой ткани, и ни к какой
+              другой ткани они не привязаны. По умолчанию такая деталь удаляется — вместе с тем, что
+              на ней держится.
+            </Text>
+            {deleteCandidates.map((c) => {
+              const decision = deleteDecision(c.lineKey);
+              const key = c.lineKey.trim().toLowerCase();
+              const hold = recipeHold.get(key);
+              const areas = areaRowsByPiece.get(key) ?? 0;
+              return (
+                <div key={c.lineKey} className='space-y-0.5 pt-1'>
+                  <div className='flex flex-wrap items-center gap-1.5'>
+                    <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                      {c.name?.trim() || '—'}
+                    </Text>
+                    {/* Состояние читается СЛОВОМ. Красный здесь по делу — «сейчас будет
+                        разрушено», — но он второй, а не единственный носитель смысла. */}
+                    <Pill tone={decision === 'delete' ? 'warn' : 'mut'}>
+                      {decision === 'delete' ? 'будет удалена' : 'остаётся'}
+                    </Pill>
+                    <select
+                      className='h-7 border border-borderColor bg-bgColor px-1 text-micro'
+                      aria-label={`что сделать с деталью ${c.name?.trim() || c.lineKey}`}
+                      value={decision}
+                      onChange={(e) =>
+                        setDeleteChoice((prev) =>
+                          new Map(prev).set(
+                            c.lineKey,
+                            e.target.value === 'keep' ? 'keep' : 'delete',
+                          ),
+                        )
+                      }
+                    >
+                      <option value='delete'>удалить</option>
+                      <option value='keep'>оставить</option>
+                    </select>
+                  </div>
+                  <Text size='nano' variant='label' component='p' className='break-words'>
+                    исчезли блоки: {c.blocks.join(', ')}
+                  </Text>
+                  {decision === 'delete' ? (
+                    <>
+                      <Row
+                        label={
+                          <Text size='micro' component='span'>
+                            строки рецепта
+                            {hold ? ` (${hold.colorways.join(', ')})` : ' в колорвеях карточки'}
+                          </Text>
+                        }
+                        value={
+                          <Text size='micro' component='span'>
+                            {hold?.rows ?? 0}
+                          </Text>
+                        }
+                      />
+                      {/* Вписанная норма — единственное здесь, что считал человек. Назначение ткани
+                          без детали ни во что не входит, а число — входит в себестоимость. */}
+                      {(hold?.withNorm ?? 0) > 0 && (
+                        <Row
+                          tone='error'
+                          label={
+                            <Text size='micro' component='span'>
+                              из них с вписанной НОРМОЙ — восстановить будет неоткуда
+                            </Text>
+                          }
+                          value={
+                            <Text size='micro' component='span'>
+                              {hold?.withNorm ?? 0}
+                            </Text>
+                          }
+                        />
+                      )}
+                      <Row
+                        label={
+                          <Text size='micro' component='span'>
+                            замеренные площади, строк по размерам
+                          </Text>
+                        }
+                        value={
+                          <Text size='micro' component='span'>
+                            {areas > 0 ? areas : '—'}
+                          </Text>
+                        }
+                      />
+                    </>
+                  ) : (
+                    <Text size='nano' variant='label' component='p'>
+                      деталь остаётся в карточке вместе со связью на блок, которого в чертеже больше
+                      нет
+                    </Text>
+                  )}
+                </div>
+              );
+            })}
+            <Text size='nano' variant='label' component='p'>
+              строки рецепта посчитаны по колорвеям, которые показывает карточка: архивные она не
+              читает, а их строки держат деталь так же и уедут вместе с ней.
+            </Text>
+            <Text size='nano' variant='label' component='p'>
+              удаление применяется при СОХРАНЕНИИ карточки — до него ничего не потеряно, и отменить
+              его можно, перечитав карточку.
+            </Text>
           </div>
         )}
 

@@ -42,6 +42,9 @@ import {
 } from './piece-codes';
 import { derivePieceLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { normalizePieceName } from './piece-picker';
+// Счёт «что уедет вместе с деталью» — общий с модалкой «↔ детали кроя»; локальное имя оставлено
+// прежним, чтобы читателям панели детали ничего не пришлось переучивать.
+import { recipeHoldersByPiece as buildRecipeHolders } from './piece-recipe-hold';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 
@@ -296,45 +299,13 @@ export function PiecesTab({
   }, [index, blocksByPiece]);
 
   // ЧТО УЕДЕТ ВМЕСТЕ С ДЕТАЛЬЮ — по ключу детали: колорвеи, чей рецепт её держит, сколько строк и
-  // сколько из них несут ЧИСЛО (норму), а не только назначение ткани.
-  //
-  // Строка рецепта ссылается на деталь внешним ключом ON DELETE RESTRICT (fk_usage_piece), поэтому
-  // сервер удаляет такие строки ВМЕСТЕ с деталью, в той же транзакции. Иначе карточка запиралась
-  // насмерть: рецепт правится другим RPC, сохранение карточки его не трогает, а строка эта заводится
-  // самым обычным действием — «назначить детали ткань», — так что на разобранной карточке держатся
-  // ВСЕ детали разом. Заменил чертёж на файл с другими именами блоков — и каждое сохранение
-  // отказывает по одной детали за раз.
-  //
-  // ЗДЕСЬ ЖЕ — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЭТО МОЖНО ПОКАЗАТЬ ДО ТОГО, КАК ОНО СЛУЧИТСЯ. Назначение
-  // ткани без детали — утверждение без подлежащего, и терять его не жалко; вписанная норма — это
-  // число, которое кто-то считал, и о нём предупреждают отдельной строкой.
-  //
-  // ПРОЕКЦИЯ НЕПОЛНАЯ: чтение карточки скрывает АРХИВНЫЕ колорвеи, а их строки держат деталь так же
-  // и так же уедут. Поэтому подтверждение говорит «и в архивных, если они есть», а не молчит.
-  const recipeHoldersByPiece = useMemo(() => {
-    const m = new Map<string, { colorways: string[]; rows: number; withNorm: number }>();
-    const hasNorm = (u: {
-      consumption?: { value?: string } | null;
-      quantity?: { value?: string } | null;
-      sizeConsumptions?: unknown[];
-    }) =>
-      !!u.consumption?.value?.trim() ||
-      !!u.quantity?.value?.trim() ||
-      (u.sizeConsumptions?.length ?? 0) > 0;
-    for (const c of techCard?.colorways ?? []) {
-      const label = c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? ''}`;
-      for (const u of c.usages ?? []) {
-        const key = (u.pieceLineKey ?? '').trim().toLowerCase();
-        if (!key) continue;
-        const cur = m.get(key) ?? { colorways: [], rows: 0, withNorm: 0 };
-        if (!cur.colorways.includes(label)) cur.colorways.push(label);
-        cur.rows += 1;
-        if (hasNorm(u)) cur.withNorm += 1;
-        m.set(key, cur);
-      }
-    }
-    return m;
-  }, [techCard?.colorways]);
+  // сколько из них несут ЧИСЛО (норму). Само правило и объяснение, почему сервер сносит эти строки
+  // вместе с деталью, — в `piece-recipe-hold.ts`: тот же счёт потерь нужен модалке «↔ детали кроя»,
+  // а две копии правила разъехались бы молча.
+  const recipeHoldersByPiece = useMemo(
+    () => buildRecipeHolders(techCard?.colorways),
+    [techCard?.colorways],
+  );
 
   // Детали, КОТОРЫЕ УЖЕ ЛЕЖАТ НА СЕРВЕРЕ, по их ключу. Ими гейтится предзаполнение галки ниже:
   // у такой детали ответ про градацию ХРАНИМЫЙ, и переспрашивать его не у кого.
