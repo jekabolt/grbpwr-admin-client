@@ -139,6 +139,50 @@ export const PRESS_CLOTH_LABELS: Record<common_TechCardPressCloth, string> = {
   TECH_CARD_PRESS_CLOTH_OTHER: 'other (see note)',
 };
 
+// THE VERB OF A MACHINE STEP, and the reason this map exists at all: since 0306 the step type of
+// every sewing step is the single word MACHINE, so a heading built from the type alone would read
+// «machine · side seams» on the side seam, the buttonhole, the hem and the zip alike — twenty-five
+// different operations under one name. The verb has to come from the second axis.
+//
+// These are VERBS, not machine names: the heading reads «overlock · side seams», so the entry for a
+// machine whose name is already a verb is that word, and the automats say what they SET rather than
+// what they are. MACHINE_TYPE_LABELS stays the picker's vocabulary (it names the machine, with its
+// ISO number); this names the action, and the two are deliberately different strings.
+//
+// Total, like every other dictionary here: a machine added to the contract fails the build here
+// rather than turning into a blank heading on a printed sheet.
+export const MACHINE_TYPE_VERB: Record<common_TechCardMachineType, string> = {
+  // '' and not 'machine': a step whose machine is not picked yet has no verb of its own, and the
+  // heading falls back to the step type's own word (see operationHeading).
+  TECH_CARD_MACHINE_TYPE_UNKNOWN: '',
+  TECH_CARD_MACHINE_TYPE_LOCKSTITCH: 'join',
+  TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE: 'topstitch',
+  TECH_CARD_MACHINE_TYPE_OVERLOCK: 'overlock',
+  TECH_CARD_MACHINE_TYPE_COVERSTITCH: 'coverstitch',
+  TECH_CARD_MACHINE_TYPE_COVERLOCK: 'coverlock',
+  TECH_CARD_MACHINE_TYPE_CHAINSTITCH: 'chainstitch',
+  TECH_CARD_MACHINE_TYPE_BLINDSTITCH: 'blindhem',
+  TECH_CARD_MACHINE_TYPE_ZIGZAG: 'zigzag',
+  TECH_CARD_MACHINE_TYPE_BARTACK: 'bartack',
+  TECH_CARD_MACHINE_TYPE_BUTTONHOLE: 'buttonhole',
+  TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: 'button attach',
+  TECH_CARD_MACHINE_TYPE_EMBROIDERY: 'embroider',
+  TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION: 'AMF stitch',
+  TECH_CARD_MACHINE_TYPE_HARDWARE_ATTACH: 'attach hardware',
+  TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH: 'attach elastic',
+  TECH_CARD_MACHINE_TYPE_BINDING_TAPING: 'bind',
+  TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING: 'set zip',
+  TECH_CARD_MACHINE_TYPE_GATHERING: 'gather',
+  TECH_CARD_MACHINE_TYPE_PATCH_POCKET_AUTO: 'set patch pocket',
+  TECH_CARD_MACHINE_TYPE_WELT_POCKET_AUTO: 'set welt pocket',
+  TECH_CARD_MACHINE_TYPE_TEMPLATE_AUTO: 'template-sew',
+  TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO: 'set collar / cuff',
+  TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO: 'set sleeve',
+  TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO: 'set waistband',
+  // «other» has no verb to give: the step keeps the type's own word and its note says the rest.
+  TECH_CARD_MACHINE_TYPE_OTHER: '',
+};
+
 export const machineTypeOptions = optionsFrom(MACHINE_TYPE_LABELS);
 export const pressEquipmentOptions = optionsFrom(PRESS_EQUIPMENT_LABELS);
 export const needleTypeOptions = optionsFrom(NEEDLE_TYPE_LABELS);
@@ -163,20 +207,114 @@ export const pressProfileProcessOptions: Array<{
 // The label helpers return '' for the UNKNOWN member, exactly like zoneLabel: the dictionaries hold
 // a PICKER placeholder there («— machine —»), and printing that on a tech pack or in a step heading
 // would state a choice as if it were made.
-export const machineTypeLabel = (v?: common_TechCardMachineType): string =>
-  !v || v === 'TECH_CARD_MACHINE_TYPE_UNKNOWN' ? '' : MACHINE_TYPE_LABELS[v];
-export const pressEquipmentLabel = (v?: common_TechCardPressEquipment): string =>
-  !v || v === 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN' ? '' : PRESS_EQUIPMENT_LABELS[v];
-export const needleTypeLabel = (v?: common_TechCardNeedleType): string =>
-  !v || v === 'TECH_CARD_NEEDLE_TYPE_UNKNOWN' ? '' : NEEDLE_TYPE_LABELS[v];
-export const bedTypeLabel = (v?: common_TechCardBedType): string =>
-  !v || v === 'TECH_CARD_BED_TYPE_UNKNOWN' ? '' : BED_TYPE_LABELS[v];
-export const automationLevelLabel = (v?: common_TechCardAutomationLevel): string =>
-  !v || v === 'TECH_CARD_AUTOMATION_LEVEL_UNKNOWN' ? '' : AUTOMATION_LEVEL_LABELS[v];
-export const threadTensionLabel = (v?: common_TechCardThreadTension): string =>
-  !v || v === 'TECH_CARD_THREAD_TENSION_UNKNOWN' ? '' : THREAD_TENSION_LABELS[v];
-export const pressClothLabel = (v?: common_TechCardPressCloth): string =>
-  !v || v === 'TECH_CARD_PRESS_CLOTH_UNKNOWN' ? '' : PRESS_CLOTH_LABELS[v];
+//
+// THEY TAKE A PLAIN STRING, not the generated union, and that is deliberate rather than lazy: the
+// tech-card form holds every enum as `z.string()` (a nativeEnum would refuse the legacy tokens that
+// archived release snapshots still carry), so a union signature would only mean a cast at every one
+// of these call sites. The DRIFT CHECK is the exhaustive `Record` above — that is what fails the
+// build when the contract gains a member — and it is not weakened by this. An unrecognised token
+// returns '' for the same reason UNKNOWN does: rendering a raw wire token is worse than a blank.
+const lookup = <T extends string>(labels: Record<T, string>, v: string | undefined, unset: T) =>
+  !v || v === unset ? '' : (labels[v as T] ?? '');
+
+export const machineTypeLabel = (v?: string): string =>
+  lookup(MACHINE_TYPE_LABELS, v, 'TECH_CARD_MACHINE_TYPE_UNKNOWN');
+export const pressEquipmentLabel = (v?: string): string =>
+  lookup(PRESS_EQUIPMENT_LABELS, v, 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN');
+export const needleTypeLabel = (v?: string): string =>
+  lookup(NEEDLE_TYPE_LABELS, v, 'TECH_CARD_NEEDLE_TYPE_UNKNOWN');
+export const bedTypeLabel = (v?: string): string =>
+  lookup(BED_TYPE_LABELS, v, 'TECH_CARD_BED_TYPE_UNKNOWN');
+export const automationLevelLabel = (v?: string): string =>
+  lookup(AUTOMATION_LEVEL_LABELS, v, 'TECH_CARD_AUTOMATION_LEVEL_UNKNOWN');
+export const threadTensionLabel = (v?: string): string =>
+  lookup(THREAD_TENSION_LABELS, v, 'TECH_CARD_THREAD_TENSION_UNKNOWN');
+export const pressClothLabel = (v?: string): string =>
+  lookup(PRESS_CLOTH_LABELS, v, 'TECH_CARD_PRESS_CLOTH_UNKNOWN');
+export const machineTypeVerb = (v?: string): string =>
+  lookup(MACHINE_TYPE_VERB, v, 'TECH_CARD_MACHINE_TYPE_UNKNOWN');
+
+// --- the inheritance ladder (§3) -----------------------------------------------------------------
+//
+// WHICH PROFILE A STEP INHERITS FROM. The server never materialises an inherited value — a NULL
+// column means «ask the profile», and it stays NULL even when the technologist would have typed the
+// same number — so resolving the ladder is the CLIENT's job, in the editor's placeholders and again
+// on the printed sheet. Both must walk it the same way, which is why it lives here rather than
+// inside the step editor.
+//
+// The ladder is: the step's own value → the profile it NAMES by key → the profile of its type WHEN
+// THE CARD HOLDS EXACTLY ONE → card defaults, where those exist → «not set». The «exactly one» rung
+// is not a convenience: with two overlocks on the card, «the overlock» is not an answer, and
+// guessing the first one would print a thread count off a machine nobody chose.
+//
+// A key that resolves to nothing returns nothing (the step is detached — the server does the same
+// silently on save), and matching by type is skipped entirely once a key is set: a named profile is
+// a decision, and falling back from it would hide that the decision no longer points anywhere.
+//
+// Typed structurally, over the two fields the lookup actually reads, so the form's row shape (whose
+// decimals are strings) and the wire type (whose decimals are messages) both satisfy it.
+export function resolveMachineProfile<T extends { profileKey?: string; machineType?: string }>(
+  machines: T[] | undefined,
+  machineType: string | undefined,
+  profileKey: string | undefined,
+): T | undefined {
+  const list = machines ?? [];
+  const key = (profileKey ?? '').trim();
+  if (key) return list.find((m) => (m.profileKey ?? '') === key);
+  if (!machineType || machineType === 'TECH_CARD_MACHINE_TYPE_UNKNOWN') return undefined;
+  const sameType = list.filter((m) => m.machineType === machineType);
+  return sameType.length === 1 ? sameType[0] : undefined;
+}
+
+// A press profile also declares WHICH ВТО PROCESS it is for, and that narrows the by-type rung:
+// «the press of this card» is not an answer for a fusing step when the card's press profile was
+// written for разутюжка. A profile with no process stated is universal and answers for all three.
+//
+// THE PICKER AND THIS FUNCTION MUST USE THE SAME PREDICATE — if the list offered one profile while
+// the ladder counted two, the form would print «— pick one of 2 —» over a card that visibly holds
+// one, or quote as inherited a profile the picker refuses to show. Hence the shared helper.
+export const pressProfileFitsStep = (
+  profile: { operationType?: string },
+  stepType: string | undefined,
+): boolean =>
+  !profile.operationType ||
+  profile.operationType === 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ||
+  profile.operationType === stepType;
+
+export function resolvePressProfile<
+  T extends { profileKey?: string; pressEquipment?: string; operationType?: string },
+>(
+  presses: T[] | undefined,
+  pressEquipment: string | undefined,
+  profileKey: string | undefined,
+  // The step's own type (PRESS / PRESS_OPEN / FUSING). Omitted, every process matches — which is
+  // what a caller that only has a profile list (a printed sheet reading a frozen snapshot) needs.
+  stepType?: string,
+): T | undefined {
+  const list = presses ?? [];
+  const key = (profileKey ?? '').trim();
+  // A NAMED profile is a decision and is returned whatever its process says: the technologist
+  // pointed at it, and the server accepts it (only the equipment has to match). The process filter
+  // is about what gets OFFERED and what is inherited silently, not about overruling a choice.
+  if (key) return list.find((p) => (p.profileKey ?? '') === key);
+  if (!pressEquipment || pressEquipment === 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN') return undefined;
+  const usable = list.filter(
+    (p) => p.pressEquipment === pressEquipment && (!stepType || pressProfileFitsStep(p, stepType)),
+  );
+  return usable.length === 1 ? usable[0] : undefined;
+}
+
+// How a profile NAMES ITSELF wherever it is quoted as a source — «4 threads (оверлок у окна)». The
+// human label wins because that is the thing standing in the corner of the shop; the machine's own
+// name is the fallback for the profiles nobody has named, and neither is the key: the key is
+// identity, and printing an ULID at somebody would say nothing about which machine it is.
+export function machineProfileName(p: { label?: string; machineType?: string }): string {
+  return p.label?.trim() || machineTypeLabel(p.machineType) || 'machine profile';
+}
+
+export function pressProfileName(p: { label?: string; pressEquipment?: string }): string {
+  return p.label?.trim() || pressEquipmentLabel(p.pressEquipment) || 'press profile';
+}
 
 // --- the two construction fields the park RETIRED ------------------------------------------------
 //

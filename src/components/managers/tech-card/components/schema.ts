@@ -519,6 +519,100 @@ function refineStitchDensity(
   }
 }
 
+// THE SANITY BANDS of the equipment settings, mirrored from the server's entity constants (and from
+// the CHECKs behind them) so a number that will be refused is refused HERE, under the control that
+// holds it, instead of coming back as a violation on a save of the whole card.
+//
+// They are bands, not standards: 40 °C is not a sensible press, it is the lowest number that cannot
+// be a typo for 140. `0` is the unset value of every integer here (proto3 has no presence on a bare
+// int32 and every band starts above zero), so it is never checked — blank means inherit.
+const EQUIPMENT_INT_BANDS = {
+  threadCount: { min: 1, max: 20, what: 'threads on one machine' },
+  needleSizeNm: { min: 35, max: 300, what: 'needle size in Nm (Nm 90 = a 0.90 mm blade)' },
+  pressTemperatureC: { min: 40, max: 250, what: 'press temperature in °C' },
+  pressDwellSec: { min: 1, max: 300, what: 'dwell in seconds' },
+} as const;
+
+function refineRangedInt(
+  value: number | undefined,
+  band: { min: number; max: number; what: string },
+  ctx: z.RefinementCtx,
+  path: Array<string | number>,
+) {
+  const n = value ?? 0;
+  if (!n) return; // 0 = unset = inherit
+  if (!Number.isInteger(n) || n < band.min || n > band.max) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: `${band.what} runs ${band.min}–${band.max} in whole numbers — clear the field to inherit it`,
+    });
+  }
+}
+
+// The decimal twin. `maxDecimals` mirrors the column's scale, and that is not pedantry: MySQL does
+// not refuse an over-precise number, it rounds it silently and hands a different one back on the
+// next read — so the check has to happen before the value leaves.
+function refineRangedDecimal(
+  value: string | undefined,
+  band: { min: number; max: number; maxDecimals: number; what: string },
+  ctx: z.RefinementCtx,
+  path: Array<string | number>,
+) {
+  // Comma to dot BEFORE the fraction is counted: an RU keyboard types «4,55», parseDecimalNumber
+  // normalises it on the way to a number, and a check that split on '.' alone would read that as a
+  // whole number and wave the extra place through.
+  const raw = (value ?? '').trim().replace(/,/g, '.');
+  if (!raw) return; // blank = inherit
+  const n = parseDecimalNumber(raw);
+  if (!Number.isFinite(n) || n < band.min || n > band.max) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: `${band.what} runs ${band.min}–${band.max} — clear the field to inherit it`,
+    });
+    return;
+  }
+  const frac = raw.split('.')[1]?.length ?? 0;
+  if (frac > band.maxDecimals) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: `round to ${band.maxDecimals} decimal place — the column stores no more, so the rest would be dropped silently`,
+    });
+  }
+}
+
+const STITCH_WIDTH_BAND = {
+  min: 0,
+  max: 20,
+  maxDecimals: 1,
+  what: 'stitch width in mm (the zigzag amplitude / overlock bite, NOT the topstitch width)',
+} as const;
+const PRESS_PRESSURE_BAND = {
+  min: 1,
+  max: 100,
+  maxDecimals: 1,
+  what: 'pressure on the material in N/cm²',
+} as const;
+
+// A thread-tension note qualifies the scale («на 0.5 туже»); on its own it describes no setting the
+// next machine can be set to, and the server refuses the pair by name.
+function refineThreadTensionNote(
+  tension: string | undefined,
+  note: string | undefined,
+  ctx: z.RefinementCtx,
+  path: Array<string | number>,
+) {
+  if ((note ?? '').trim() && (!tension || tension === 'TECH_CARD_THREAD_TENSION_UNKNOWN')) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: 'pick the tension first — a note on its own describes no setting',
+    });
+  }
+}
+
 // THE CARD'S EQUIPMENT PARK (0306) — one row per machine / press this style is made on.
 //
 // IDENTITY IS `profileKey`, a client-minted ULID, exactly like a BOM line's `lineKey` and for
@@ -613,14 +707,25 @@ const constructionSchema = z
   })
   .superRefine((c, ctx) => {
     refineStitchDensity(c.defaultStitchesPerCm, ctx, ['defaultStitchesPerCm']);
-    (c.equipmentDefaults?.machines ?? []).forEach((m, i) =>
-      refineStitchDensity(m.stitchesPerCm, ctx, [
-        'equipmentDefaults',
-        'machines',
-        i,
-        'stitchesPerCm',
-      ]),
-    );
+    (c.equipmentDefaults?.machines ?? []).forEach((m, i) => {
+      const at = (field: string) => ['equipmentDefaults', 'machines', i, field];
+      refineStitchDensity(m.stitchesPerCm, ctx, at('stitchesPerCm'));
+      refineRangedInt(m.threadCount, EQUIPMENT_INT_BANDS.threadCount, ctx, at('threadCount'));
+      refineRangedInt(m.needleSizeNm, EQUIPMENT_INT_BANDS.needleSizeNm, ctx, at('needleSizeNm'));
+      refineRangedDecimal(m.stitchWidthMm, STITCH_WIDTH_BAND, ctx, at('stitchWidthMm'));
+      refineThreadTensionNote(m.threadTension, m.threadTensionNote, ctx, at('threadTensionNote'));
+    });
+    (c.equipmentDefaults?.presses ?? []).forEach((p, i) => {
+      const at = (field: string) => ['equipmentDefaults', 'presses', i, field];
+      refineRangedInt(
+        p.pressTemperatureC,
+        EQUIPMENT_INT_BANDS.pressTemperatureC,
+        ctx,
+        at('pressTemperatureC'),
+      );
+      refineRangedInt(p.pressDwellSec, EQUIPMENT_INT_BANDS.pressDwellSec, ctx, at('pressDwellSec'));
+      refineRangedDecimal(p.pressPressureNCm2, PRESS_PRESSURE_BAND, ctx, at('pressPressureNCm2'));
+    });
   });
 
 const operationSchema = z.object({
@@ -754,6 +859,53 @@ const operationSchema = z.object({
     // the same band. The step's own column predates the break and its CHECK is only `>= 0`, which
     // would have let a step hold a density the card is not allowed to default to.
     refineStitchDensity(o.stitchesPerCm, ctx, ['stitchesPerCm']);
+
+    // --- «на чём» is REQUIRED, on both axes (0306) ----------------------------------------------
+    //
+    // The server demands these two the moment a client declares itself machine-aware, which this one
+    // always does (machineFieldsAware is sent on every save) — so without the checks here the card
+    // would simply refuse to save with a violation from the server, on the whole card, for a select
+    // three tabs away. «MACHINE» on its own is not an instruction: it says a machine is involved and
+    // nothing about which of the twenty-five, and the printed sheet would carry that blank to the
+    // floor. Same for ВТО: an iron, a fusing press and a steamer are three different instructions.
+    if (
+      o.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE' &&
+      (!o.machineType || o.machineType === 'TECH_CARD_MACHINE_TYPE_UNKNOWN')
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['machineType'],
+        message:
+          'pick the machine — «machine» says what the step does, the machine says what it does it on',
+      });
+    }
+    const isPressStep =
+      o.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
+      o.operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
+      o.operationType === 'TECH_CARD_OPERATION_TYPE_FUSING';
+    if (
+      isPressStep &&
+      (!o.pressEquipment || o.pressEquipment === 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN')
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['pressEquipment'],
+        message:
+          'pick the equipment — an iron, a fusing press and a steamer are three different instructions',
+      });
+    }
+    // The bands. Checked whatever the step type is: the save mapper drops the block that does not
+    // belong to the type, but a value left over in form state has to be reported on ITS OWN control
+    // rather than dropped silently while the operator watches the number sit there.
+    refineRangedInt(o.threadCount, EQUIPMENT_INT_BANDS.threadCount, ctx, ['threadCount']);
+    refineRangedInt(o.needleSizeNm, EQUIPMENT_INT_BANDS.needleSizeNm, ctx, ['needleSizeNm']);
+    refineRangedDecimal(o.stitchWidthMm, STITCH_WIDTH_BAND, ctx, ['stitchWidthMm']);
+    refineThreadTensionNote(o.threadTension, o.threadTensionNote, ctx, ['threadTensionNote']);
+    refineRangedInt(o.pressTemperatureC, EQUIPMENT_INT_BANDS.pressTemperatureC, ctx, [
+      'pressTemperatureC',
+    ]);
+    refineRangedInt(o.pressDwellSec, EQUIPMENT_INT_BANDS.pressDwellSec, ctx, ['pressDwellSec']);
+    refineRangedDecimal(o.pressPressureNCm2, PRESS_PRESSURE_BAND, ctx, ['pressPressureNCm2']);
   });
 
 const labelSchema = z.object({

@@ -138,6 +138,10 @@ function SnapshotOperations({ ops }: { ops: common_TechCardOperation[] }) {
                   the card did, and there is no stored step title to fall back on any more. */}
               {operationHeading({
                 operationType: o.operationType,
+                // A snapshot written before 0306 carries a legacy type that names its own machine
+                // and no machine_type at all; one written after carries MACHINE plus the machine.
+                // operationHeading reads both, so a frozen release keeps the verb it was signed with.
+                machineType: o.machineType,
                 zone: o.zone,
                 pieceNames: [],
                 note: o.note,

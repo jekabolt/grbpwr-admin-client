@@ -14,7 +14,11 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { adminService } from 'api/api';
-import { common_TechCardOperation } from 'api/proto-http/admin';
+import {
+  common_TechCardMachineType,
+  common_TechCardOperation,
+  common_TechCardOperationType,
+} from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -29,23 +33,43 @@ import { Pill } from 'ui/components/pill';
 import { Row, RowTotal } from 'ui/components/row';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import Input from 'ui/components/input';
+import Select from 'ui/components/select';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { FormField, FormItem, FormLabel, FormMessage } from 'ui/form';
 import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
+import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary, revealField } from 'utils/field-errors';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import {
+  attachmentKindLabel,
   attachmentOptions,
   operationHeading,
-  operationTypeOptions,
+  operationTypeOptionsFor,
   seamClassOptions,
   topstitchModeOptions,
   zoneOptions,
 } from './operation-options';
-import { OPERATION_TYPE_PREFERRED_KINDS, kindLabel } from './bom-kind';
+import {
+  machineProfileName,
+  machineTypeOptions,
+  needleTypeLabel,
+  needleTypeOptions,
+  pressClothLabel,
+  pressClothOptions,
+  pressEquipmentOptions,
+  pressProfileFitsStep,
+  pressProfileName,
+  resolveMachineProfile,
+  resolvePressProfile,
+  threadTensionLabel,
+  threadTensionOptions,
+} from './equipment-options';
+import { kindLabel, preferredBomKinds } from './bom-kind';
 import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
@@ -60,6 +84,55 @@ const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
 const NONE_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
 const NONE_ATTACHMENT = 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN';
 const NONE_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
+// The unset member of each equipment vocabulary. In this feature UNSET NEVER MEANS ZERO — it means
+// «inherit», and the placeholder beside the control says what would be inherited and from where.
+const NONE_MACHINE = 'TECH_CARD_MACHINE_TYPE_UNKNOWN';
+const NONE_PRESS_EQUIPMENT = 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN';
+const NONE_NEEDLE = 'TECH_CARD_NEEDLE_TYPE_UNKNOWN';
+const NONE_TENSION = 'TECH_CARD_THREAD_TENSION_UNKNOWN';
+const NONE_PRESS_CLOTH = 'TECH_CARD_PRESS_CLOTH_UNKNOWN';
+
+// WHICH OF THE TWO EQUIPMENT BLOCKS A STEP OWNS. One step type answers «machine», three answer
+// «ВТО», the rest own neither — and the server refuses a field from the wrong block BY NAME, so
+// these two predicates decide what is rendered, what is cleared and what is counted as an override.
+const isMachineType = (t?: string) => t === 'TECH_CARD_OPERATION_TYPE_MACHINE';
+const isPressType = (t?: string) =>
+  t === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
+  t === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
+  t === 'TECH_CARD_OPERATION_TYPE_FUSING';
+
+// The fields of the core grid — the ones that are on screen whatever the fold is doing. Everything
+// else lives inside «differs from standard», which has to open itself when one of those fails.
+const CORE_STEP_FIELDS = new Set([
+  'operationType',
+  'machineType',
+  'pressEquipment',
+  'zone',
+  'smv',
+  'calloutNumber',
+  'note',
+  'pieceLineKeys',
+  'bomLineKeys',
+]);
+
+// What a step INHERITS, written the way it is shown: «4 (оверлок у окна)», «4 (card)», «not set».
+// The value alone is not enough — a technologist reading «4» in grey has to know whether clearing
+// the field would keep it (a card default that applies to every step) or change it (a profile that
+// applies to this machine), and the source is the whole difference.
+const NOT_SET = 'not set';
+const inheritedText = (value: string, source: string) => (value ? `${value} (${source})` : NOT_SET);
+
+// The label a picker shows on its «inherit» option, so an enum override states its inherited value
+// the same way a text field states it in the placeholder. Radix renders the option list from the
+// items array, so the option itself carries the sentence — there is no placeholder to put it in.
+function withInheritLabel<T extends { value: string; label: string }>(
+  options: T[],
+  unset: string,
+  inherited: string,
+): T[] {
+  if (!inherited || inherited === NOT_SET) return options;
+  return options.map((o) => (o.value === unset ? { ...o, label: `inherit: ${inherited}` } : o));
+}
 
 // Drag payload for the piece tray. A private MIME type so a stray text drop from elsewhere can
 // never be mistaken for a piece reference; the plain-text mirror (prefixed) is only a fallback for
@@ -124,17 +197,25 @@ export const OPERATION_EXPECTED_SECTIONS = new Set(
 );
 
 // A step whose verb names a material it does not link is almost always an omission. Kept to the two
-// unambiguous verbs: BUTTON_ATTACH consumes a fastener, FUSING consumes fusible. BUTTONHOLE is
-// deliberately absent — it consumes thread, which nearly every step does, so the check would fire
-// as noise and stop being read.
-const OPERATION_TYPE_EXPECTS: Record<string, { section: string; what: string }> = {
-  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: {
-    section: 'TECH_CARD_BOM_SECTION_HARDWARE',
-    what: 'фурнитуру',
-  },
+// unambiguous verbs: a button-attach machine consumes a fastener, a fusing step consumes fusible.
+// Buttonholing is deliberately absent — it consumes thread, which nearly every step does, so the
+// check would fire as noise and stop being read.
+//
+// TWO MAPS BECAUSE THERE ARE TWO AXES NOW (0306). «Fusing» is still a step TYPE; «button attach» is
+// a MACHINE, and its token left the type enum entirely — keyed on the type this whole check went
+// silently dead, which a `Record<string, …>` cannot notice. `Partial<Record<Enum, …>>` is the shape
+// that can: a key outside the contract stops the build, an absent key is a legitimate «no opinion».
+type ExpectedMaterial = { section: string; what: string };
+const OPERATION_TYPE_EXPECTS: Partial<Record<common_TechCardOperationType, ExpectedMaterial>> = {
   TECH_CARD_OPERATION_TYPE_FUSING: {
     section: 'TECH_CARD_BOM_SECTION_INTERLINING',
     what: 'клеевую',
+  },
+};
+const MACHINE_TYPE_EXPECTS: Partial<Record<common_TechCardMachineType, ExpectedMaterial>> = {
+  TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: {
+    section: 'TECH_CARD_BOM_SECTION_HARDWARE',
+    what: 'фурнитуру',
   },
 };
 
@@ -168,12 +249,38 @@ export const emptyOperation = {
   topstitchRows: 0,
   attachmentKind: NONE_ATTACHMENT,
   attachmentSizeMm: '',
+  // Both equipment blocks start unset — «inherit», not «zero» (0306). They are listed here rather
+  // than left to the zod defaults because this object is spread straight into the field array:
+  // a key missing here is a field RHF never registers, and the first render of the control would
+  // read `undefined` off a row the schema believes is complete.
+  machineType: NONE_MACHINE,
+  machineProfileKey: '',
+  threadCount: 0,
+  needleType: NONE_NEEDLE,
+  needleSizeNm: 0,
+  threadTension: NONE_TENSION,
+  threadTensionNote: '',
+  stitchWidthMm: '',
+  pressEquipment: NONE_PRESS_EQUIPMENT,
+  pressProfileKey: '',
+  pressTemperatureC: 0,
+  pressDwellSec: 0,
+  pressPressureNCm2: '',
+  // NOT `false`: three-valued (absent = inherit, false = «press it dry», true = «with steam»), and
+  // a default of false would state the instruction «dry» on every step nobody has answered.
+  pressSteam: undefined as boolean | undefined,
+  pressCloth: NONE_PRESS_CLOTH,
   note: '',
   pieceLineKeys: [] as string[],
   bomLineKeys: [] as string[],
 };
 
 type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
+// One row of the card's equipment park, as the form holds it (decimals as strings). The step editor
+// reads the park to resolve what a blank field would inherit; CARD DEFAULTS owns editing it.
+type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equipmentDefaults']>;
+type MachineProfileRow = NonNullable<EquipmentDefaultsForm['machines']>[number];
+type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
 
 // #66: AI generation is unavailable when the backend has no OPENROUTER_API_KEY configured — the
 // RPC reports this as FailedPrecondition (grpc-gateway → HTTP 412, same convention as
@@ -181,11 +288,6 @@ type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
 // setup gap, not something wrong with their description.
 const AI_NOT_CONFIGURED_MESSAGE =
   "AI generation isn't configured yet — ask an admin to set OPENROUTER_API_KEY";
-
-// The «— тип —» placeholder is an option label, not a name: read back as a heading it says nothing,
-// so an untyped operation reports empty and the caller supplies its own wording.
-const opTypeLabel = (v: string | undefined) =>
-  !v || v === NONE_OP_TYPE ? '' : operationTypeOptions.find((o) => o.value === v)?.label ?? '';
 
 // Maps one AI-drafted operation (GenerateTechCardOperations, #66) into this field array's row
 // shape — the same fields the manual «+ операция» row starts from (emptyOperation). Only stages
@@ -209,6 +311,26 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     topstitchRows: o.topstitch?.rows || 0,
     attachmentKind: o.attachmentKind || NONE_ATTACHMENT,
     attachmentSizeMm: decimalToInput(o.attachmentSizeMm),
+    // The equipment blocks ride the draft too. The model is asked for a machine on every machine
+    // step and for the ВТО mode on every press step (the prompt carries both vocabularies), so
+    // dropping them here would quietly hand the technologist a list of steps that all fail the
+    // «pick the machine» check — the one field the draft was best placed to answer.
+    machineType: o.machineType || NONE_MACHINE,
+    machineProfileKey: o.machineProfileKey ?? '',
+    threadCount: o.threadCount || 0,
+    needleType: o.needleType || NONE_NEEDLE,
+    needleSizeNm: o.needleSizeNm || 0,
+    threadTension: o.threadTension || NONE_TENSION,
+    threadTensionNote: o.threadTensionNote?.trim() || '',
+    stitchWidthMm: decimalToInput(o.stitchWidthMm),
+    pressEquipment: o.pressEquipment || NONE_PRESS_EQUIPMENT,
+    pressProfileKey: o.pressProfileKey ?? '',
+    pressTemperatureC: o.pressTemperatureC || 0,
+    pressDwellSec: o.pressDwellSec || 0,
+    pressPressureNCm2: decimalToInput(o.pressPressureNCm2),
+    // Verbatim, undefined included — see emptyOperation.
+    pressSteam: o.pressSteam,
+    pressCloth: o.pressCloth || NONE_PRESS_CLOTH,
     note: o.note?.trim() || '',
   };
 }
@@ -404,6 +526,10 @@ function RailStep({
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
+  // The verb of a machine step comes from its machine, not from the word MACHINE — without this the
+  // whole rail reads «machine · …» twenty times over.
+  const machineType = (useWatch({ control, name: `operations.${index}.machineType` }) ??
+    '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
   const note = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
@@ -439,6 +565,7 @@ function RailStep({
   const label =
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
+      machineType: machineType as common_TechCardMachineType,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames,
       note,
@@ -558,6 +685,149 @@ function RailStep({
   );
 }
 
+// ── two controls the field library has no shape for ──────────────────────────────────────────
+//
+// Both exist because a Radix select can only hold a NON-EMPTY STRING, and two of this feature's
+// values are legitimately neither: «no profile named» is the empty string, and «steam not stated»
+// is `undefined`. Encoding them at the control instead of in the form is deliberate — the moment
+// the sentinel reaches the form it also reaches the save mapper, and «__inherit__» would travel to
+// the server as a profile key.
+const PROFILE_INHERIT = '__inherit__';
+
+function EncodedSelectField<T>({
+  name,
+  label,
+  items,
+  encode,
+  decode,
+  className,
+}: {
+  name: `operations.${number}.${'machineProfileKey' | 'pressProfileKey' | 'pressSteam'}`;
+  label: string;
+  items: { value: string; label: string }[];
+  encode: (value: T) => string;
+  decode: (option: string) => T;
+  className?: string;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field, fieldState }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <Select
+            name={name}
+            items={items}
+            placeholder={label}
+            value={encode(field.value as T)}
+            onValueChange={(v?: string) => field.onChange(decode(v ?? ''))}
+            invalid={!!fieldState.error}
+            className={className}
+          />
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+// A NUMBER WHOSE ZERO MEANS «NOT STATED», and therefore a box that has to be EMPTY at zero.
+// InputField renders `field.value ?? ''`, so an unset thread count would sit in the control as a
+// literal `0` — which is both a wrong reading (there is no zero-thread machine) and the end of the
+// placeholder mechanism, because a box with a value in it never shows its placeholder and the
+// inherited value would stop being visible anywhere. The `value` prop lands after the spread inside
+// InputField, so passing it here overrides that default while onChange still goes to RHF.
+//
+// AND `step='any'` WITH NO `min` / `max`, which is the less obvious half. The card's <form> does not
+// carry noValidate, so the browser runs native constraint validation on submit — and a number input
+// has an IMPLICIT step of 1, so a mistyped «92.5» is a stepMismatch that aborts the submit with a
+// native bubble before RHF ever runs. These controls live inside an accordion that is CLOSED on any
+// step that inherits everything, so the save button would simply stop working, pointing at a field
+// nobody can see. `step='any'` switches the native check off; the bands are enforced in the schema
+// instead, where the message lands on the field and the editor walks to the failing step.
+function InheritableNumberField({
+  name,
+  label,
+  value,
+  placeholder,
+}: {
+  name: `operations.${number}.${'threadCount' | 'needleSizeNm' | 'pressTemperatureC' | 'pressDwellSec'}`;
+  label: string;
+  value: number;
+  placeholder: string;
+}) {
+  return (
+    <InputField
+      name={name}
+      type='number'
+      step='any'
+      valueAsNumber
+      label={label}
+      placeholder={placeholder}
+      value={value || ''}
+    />
+  );
+}
+
+// ONE VALUE IN TWO UNITS, and only one of them is stored. The card records stitches per cm; the
+// length in mm is `10 / density` and is written into no field at all — a second column would be a
+// second truth, and the two would disagree the first time somebody edited one of them.
+//
+// So this input is a MIRROR: it shows the length the stored density works out to, and typing a
+// length writes the density back. While it has focus it shows exactly what was typed (the local
+// draft) rather than the round-trip of it — without that, typing «3» would set density 3.33, which
+// renders back as «3.0» and moves the cursor out from under the next keystroke.
+function StitchLengthMirror({
+  index,
+  density,
+  placeholder,
+}: {
+  index: number;
+  density: string;
+  /** What the density would be inherited as, already in millimetres — «2.5 (card)». */
+  placeholder: string;
+}) {
+  const { setValue } = useFormContext<TechCardFormData>();
+  const [draft, setDraft] = useState<string | null>(null);
+  const n = parseDecimalNumber(density);
+  const derived = Number.isFinite(n) && n > 0 ? String(Math.round((10 / n) * 10) / 10) : '';
+  const onChange = (raw: string) => {
+    const text = sanitizeDecimal(raw, 1);
+    setDraft(text);
+    if (!text.trim()) {
+      // Clearing the length clears the density: they are the same fact, and leaving the density
+      // behind would put a value back in the box the moment focus left it.
+      setValue(`operations.${index}.stitchesPerCm`, '', { shouldDirty: true });
+      return;
+    }
+    const mm = parseDecimalNumber(text);
+    if (!Number.isFinite(mm) || mm <= 0) return;
+    setValue(`operations.${index}.stitchesPerCm`, String(Math.round((10 / mm) * 100) / 100), {
+      shouldDirty: true,
+    });
+  };
+  return (
+    <div className='space-y-px'>
+      <label htmlFor={`op-${index}-stitch-length`} className='block leading-none'>
+        <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
+          = stitch length, mm
+        </Text>
+      </label>
+      <Input
+        name={`op-${index}-stitch-length`}
+        inputMode='decimal'
+        placeholder={placeholder}
+        title='the same setting as stitches / cm — typing here writes the density'
+        value={draft ?? derived}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        onBlur={() => setDraft(null)}
+      />
+    </div>
+  );
+}
+
 // ── the step editor ──────────────────────────────────────────────────────────────────────────
 // The whole sewing spec for ONE step. Remounted (keyed on the field id) whenever the selection
 // moves, so the "skip the first run" guards below start clean and selecting a step never dirties
@@ -613,14 +883,89 @@ function OperationEditor({
     NONE_TOPSTITCH) as string;
   const attachmentKind = (useWatch({ control, name: `operations.${index}.attachmentKind` }) ??
     NONE_ATTACHMENT) as string;
-  const overrideCount = [
+
+  // --- the two equipment axes (0306) --------------------------------------------------------
+  // «На чём» the step is done. machineType / pressEquipment are REQUIRED by their step type and sit
+  // in the core grid beside the type; everything else below is an override whose blank means
+  // «inherit», and lives in the fold with the rest of the overrides.
+  const machineType = (useWatch({ control, name: `operations.${index}.machineType` }) ??
+    NONE_MACHINE) as string;
+  const machineProfileKey = (useWatch({ control, name: `operations.${index}.machineProfileKey` }) ??
+    '') as string;
+  const threadCount = (useWatch({ control, name: `operations.${index}.threadCount` }) ??
+    0) as number;
+  const needleType = (useWatch({ control, name: `operations.${index}.needleType` }) ??
+    NONE_NEEDLE) as string;
+  const needleSizeNm = (useWatch({ control, name: `operations.${index}.needleSizeNm` }) ??
+    0) as number;
+  const threadTension = (useWatch({ control, name: `operations.${index}.threadTension` }) ??
+    NONE_TENSION) as string;
+  const threadTensionNote = (useWatch({ control, name: `operations.${index}.threadTensionNote` }) ??
+    '') as string;
+  const stitchWidthMm = (useWatch({ control, name: `operations.${index}.stitchWidthMm` }) ??
+    '') as string;
+  const pressEquipment = (useWatch({ control, name: `operations.${index}.pressEquipment` }) ??
+    NONE_PRESS_EQUIPMENT) as string;
+  const pressProfileKey = (useWatch({ control, name: `operations.${index}.pressProfileKey` }) ??
+    '') as string;
+  const pressTemperatureC = (useWatch({ control, name: `operations.${index}.pressTemperatureC` }) ??
+    0) as number;
+  const pressDwellSec = (useWatch({ control, name: `operations.${index}.pressDwellSec` }) ??
+    0) as number;
+  const pressPressureNCm2 = (useWatch({
+    control,
+    name: `operations.${index}.pressPressureNCm2`,
+  }) ?? '') as string;
+  // `undefined` is a VALUE here, not a missing read — see the tri-state control below.
+  const pressSteam = useWatch({ control, name: `operations.${index}.pressSteam` }) as
+    | boolean
+    | undefined;
+  const pressCloth = (useWatch({ control, name: `operations.${index}.pressCloth` }) ??
+    NONE_PRESS_CLOTH) as string;
+
+  const isMachineStep = isMachineType(opType);
+  const isPressStep = isPressType(opType);
+
+  // The sewing overrides, counted apart from the equipment ones: a ВТО step has no seam class and
+  // no stitch density, so on those steps this half of the fold is hidden — but ONLY while it is
+  // empty. A value that exists is shown wherever it is, because a hidden number still prints on the
+  // tech pack and still moves the section digest, and the operator is the one who decides it goes.
+  const sewingOverrideCount = [
     seamClass !== NONE_SEAM_CLASS,
     seamAllowanceMm.trim() !== '',
     stitchesPerCm.trim() !== '',
     topstitchMode !== NONE_TOPSTITCH,
     attachmentKind !== NONE_ATTACHMENT,
   ].filter(Boolean).length;
+  const equipmentOverrideCount = [
+    isMachineStep && !!machineProfileKey.trim(),
+    isMachineStep && threadCount > 0,
+    isMachineStep && needleType !== NONE_NEEDLE,
+    isMachineStep && needleSizeNm > 0,
+    isMachineStep && threadTension !== NONE_TENSION,
+    isMachineStep && stitchWidthMm.trim() !== '',
+    isPressStep && !!pressProfileKey.trim(),
+    isPressStep && pressTemperatureC > 0,
+    isPressStep && pressDwellSec > 0,
+    isPressStep && pressPressureNCm2.trim() !== '',
+    isPressStep && pressSteam !== undefined,
+    isPressStep && pressCloth !== NONE_PRESS_CLOTH,
+  ].filter(Boolean).length;
+  const overrideCount = sewingOverrideCount + equipmentOverrideCount;
+  const showSewingOverrides = !isPressStep || sewingOverrideCount > 0;
   const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
+
+  // AND IT OPENS ITSELF ON AN ERROR. Nearly every field in the fold can now fail a check — a thread
+  // count out of band, a tension note without its scale, a density that would not fit the column —
+  // and a blocking error behind a closed disclosure is a save button that stops working with
+  // nothing on screen to fix: the error router focuses a control that is not rendered. The core
+  // grid's own fields are always visible, so they are excluded and the panel stays shut for them.
+  const { errors: formErrors } = useFormState({ control, name: `operations.${index}` });
+  const stepErrors = (
+    formErrors.operations as unknown as Array<Record<string, unknown> | undefined> | undefined
+  )?.[index];
+  const hasFoldedError =
+    !!stepErrors && Object.keys(stepErrors).some((field) => !CORE_STEP_FIELDS.has(field));
 
   // HIDING A CONTROL MUST ALSO CLEAR IT. Both fields below are rendered conditionally, and the save
   // rejects a value that its owner no longer admits — a width beside «edge», a size with no
@@ -638,14 +983,97 @@ function OperationEditor({
     }
   }, [topstitchMode, index, getValues, setValue]);
 
+  // «NONE» counts as no attachment here exactly as UNKNOWN does, and for a sharper reason: a binder
+  // size printed beside «runs bare» measures a tool the step has just said it does not use. The
+  // server refuses that pair by name too.
   useEffect(() => {
-    if (
-      attachmentKind === NONE_ATTACHMENT &&
-      (getValues(`operations.${index}.attachmentSizeMm`) ?? '') !== ''
-    ) {
+    const bare =
+      attachmentKind === NONE_ATTACHMENT || attachmentKind === 'TECH_CARD_ATTACHMENT_KIND_NONE';
+    if (bare && (getValues(`operations.${index}.attachmentSizeMm`) ?? '') !== '') {
       setValue(`operations.${index}.attachmentSizeMm`, '', { shouldDirty: true });
     }
   }, [attachmentKind, index, getValues, setValue]);
+
+  // THE SAME RULE, ON THE WHOLE EQUIPMENT BLOCK — and here it is not a nicety, it is the difference
+  // between a card that saves and one that does not. The server refuses a machine setting on a ВТО
+  // step and a ВТО setting on a machine step BY NAME, refusing the whole card with it: switch a step
+  // from machine to press with a thread count in it and the save comes back demanding the operator
+  // clear a control that is no longer on screen.
+  //
+  // Both directions, every field, and only when the value is actually set — an unconditional write
+  // would dirty the form merely by opening a step, and «unsaved changes» on a card nobody edited is
+  // how people learn to click through that warning.
+  useEffect(() => {
+    const p = `operations.${index}` as const;
+    if (!isMachineStep) {
+      if ((getValues(`${p}.machineType`) ?? NONE_MACHINE) !== NONE_MACHINE)
+        setValue(`${p}.machineType`, NONE_MACHINE, { shouldDirty: true });
+      if ((getValues(`${p}.machineProfileKey`) ?? '') !== '')
+        setValue(`${p}.machineProfileKey`, '', { shouldDirty: true });
+      if (getValues(`${p}.threadCount`)) setValue(`${p}.threadCount`, 0, { shouldDirty: true });
+      if ((getValues(`${p}.needleType`) ?? NONE_NEEDLE) !== NONE_NEEDLE)
+        setValue(`${p}.needleType`, NONE_NEEDLE, { shouldDirty: true });
+      if (getValues(`${p}.needleSizeNm`)) setValue(`${p}.needleSizeNm`, 0, { shouldDirty: true });
+      if ((getValues(`${p}.threadTension`) ?? NONE_TENSION) !== NONE_TENSION)
+        setValue(`${p}.threadTension`, NONE_TENSION, { shouldDirty: true });
+      if ((getValues(`${p}.threadTensionNote`) ?? '') !== '')
+        setValue(`${p}.threadTensionNote`, '', { shouldDirty: true });
+      if ((getValues(`${p}.stitchWidthMm`) ?? '') !== '')
+        setValue(`${p}.stitchWidthMm`, '', { shouldDirty: true });
+    }
+    if (!isPressStep) {
+      if ((getValues(`${p}.pressEquipment`) ?? NONE_PRESS_EQUIPMENT) !== NONE_PRESS_EQUIPMENT)
+        setValue(`${p}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: true });
+      if ((getValues(`${p}.pressProfileKey`) ?? '') !== '')
+        setValue(`${p}.pressProfileKey`, '', { shouldDirty: true });
+      if (getValues(`${p}.pressTemperatureC`))
+        setValue(`${p}.pressTemperatureC`, 0, { shouldDirty: true });
+      if (getValues(`${p}.pressDwellSec`)) setValue(`${p}.pressDwellSec`, 0, { shouldDirty: true });
+      if ((getValues(`${p}.pressPressureNCm2`) ?? '') !== '')
+        setValue(`${p}.pressPressureNCm2`, '', { shouldDirty: true });
+      if (getValues(`${p}.pressSteam`) !== undefined)
+        setValue(`${p}.pressSteam`, undefined, { shouldDirty: true });
+      if ((getValues(`${p}.pressCloth`) ?? NONE_PRESS_CLOTH) !== NONE_PRESS_CLOTH)
+        setValue(`${p}.pressCloth`, NONE_PRESS_CLOTH, { shouldDirty: true });
+    }
+  }, [isMachineStep, isPressStep, index, getValues, setValue]);
+
+  // --- the card's equipment park, and what this step inherits from it ---------------------------
+  const parkMachines = (useWatch({
+    control,
+    name: 'construction.equipmentDefaults.machines',
+  }) ?? []) as MachineProfileRow[];
+  const parkPresses = (useWatch({
+    control,
+    name: 'construction.equipmentDefaults.presses',
+  }) ?? []) as PressProfileRow[];
+
+  // A NAMED PROFILE OF THE WRONG TYPE IS REFUSED BY THE SERVER, so changing the machine has to drop
+  // a reference that no longer matches it — the pointer was to «this overlock», and the step is not
+  // an overlock step any more. This is the ONE thing a machine change touches: the overrides beside
+  // it are the technologist's own words about THIS step and are left exactly as they were, which is
+  // why they are not in this effect.
+  //
+  // A key that resolves to NOTHING is left alone: the server detaches it silently on save and the
+  // picker below shows it as «not found», so clearing it here would erase the only trace that the
+  // step used to point somewhere.
+  useEffect(() => {
+    const key = machineProfileKey.trim();
+    if (!key || !isMachineStep) return;
+    const profile = parkMachines.find((m) => (m.profileKey ?? '') === key);
+    if (profile && profile.machineType !== machineType) {
+      setValue(`operations.${index}.machineProfileKey`, '', { shouldDirty: true });
+    }
+  }, [machineType, machineProfileKey, parkMachines, isMachineStep, index, setValue]);
+
+  useEffect(() => {
+    const key = pressProfileKey.trim();
+    if (!key || !isPressStep) return;
+    const profile = parkPresses.find((p) => (p.profileKey ?? '') === key);
+    if (profile && profile.pressEquipment !== pressEquipment) {
+      setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: true });
+    }
+  }, [pressEquipment, pressProfileKey, parkPresses, isPressStep, index, setValue]);
 
   // WHAT THIS STEP WOULD INHERIT, and from where — shown as a placeholder, stored nowhere. The
   // card's own standard wins over the workshop's, exactly as the server resolves it.
@@ -654,13 +1082,72 @@ function OperationEditor({
     '') as string;
   const { data: workshop } = useWorkshopSettings();
   const shopAllowanceMm = decimalToInput(workshop?.settings?.defaultSeamAllowanceMm).trim();
+
+  // The profile this step resolves to, by the ladder in §3 (key → the single profile of its type →
+  // nothing). `machineProfile` is what every machine placeholder quotes, and the ONE thing that
+  // makes a blank field readable: «4 (оверлок у окна)» says the step will be sewn with four threads
+  // and where that four came from, where an empty box says only that nobody typed anything.
+  const machineProfile = isMachineStep
+    ? resolveMachineProfile(parkMachines, machineType, machineProfileKey)
+    : undefined;
+  const pressProfile = isPressStep
+    ? resolvePressProfile(parkPresses, pressEquipment, pressProfileKey, opType)
+    : undefined;
+  const machineSource = machineProfile ? machineProfileName(machineProfile) : '';
+  const pressSource = pressProfile ? pressProfileName(pressProfile) : '';
+  const fromMachine = (v: string | number | undefined) =>
+    machineProfile && v !== undefined && v !== '' && v !== 0
+      ? inheritedText(String(v), machineSource)
+      : '';
+  const fromPress = (v: string | number | undefined) =>
+    pressProfile && v !== undefined && v !== '' && v !== 0
+      ? inheritedText(String(v), pressSource)
+      : '';
+
+  // The density is the one setting with a rung on BOTH ladders: the machine's profile answers it
+  // first (it belongs to the machine this step runs on), the card default answers for everything
+  // with no machine of its own. Resolved once, as a number and a source, because it is shown twice —
+  // once as st/cm and once as the length in mm, and the two must agree about where they came from.
+  const inheritedDensity = machineProfile?.stitchesPerCm?.trim()
+    ? { value: machineProfile.stitchesPerCm.trim(), source: machineSource }
+    : cardStitchDensity.trim()
+      ? { value: cardStitchDensity.trim(), source: 'card' }
+      : { value: '', source: '' };
+  const inheritedDensityNum = parseDecimalNumber(inheritedDensity.value);
+
   const inherited = {
     seamAllowance: cardAllowanceMm.trim()
       ? `${cardAllowanceMm.trim()} (card)`
       : shopAllowanceMm
         ? `${shopAllowanceMm} (workshop)`
-        : 'not set',
-    stitchDensity: cardStitchDensity.trim() ? `${cardStitchDensity.trim()} (card)` : 'not set',
+        : NOT_SET,
+    stitchDensity: inheritedDensity.value
+      ? inheritedText(inheritedDensity.value, inheritedDensity.source)
+      : NOT_SET,
+    // The same inherited fact in the other unit. Computed, never stored — see StitchLengthMirror.
+    stitchLength:
+      Number.isFinite(inheritedDensityNum) && inheritedDensityNum > 0
+        ? inheritedText(
+            String(Math.round((10 / inheritedDensityNum) * 10) / 10),
+            inheritedDensity.source,
+          )
+        : NOT_SET,
+    threadCount: fromMachine(machineProfile?.threadCount) || NOT_SET,
+    needleType: fromMachine(needleTypeLabel(machineProfile?.needleType)) || NOT_SET,
+    needleSizeNm: fromMachine(machineProfile?.needleSizeNm) || NOT_SET,
+    threadTension: fromMachine(threadTensionLabel(machineProfile?.threadTension)) || NOT_SET,
+    stitchWidthMm: fromMachine(machineProfile?.stitchWidthMm?.trim()) || NOT_SET,
+    attachment: fromMachine(attachmentKindLabel(machineProfile?.attachmentKind)) || NOT_SET,
+    pressTemperatureC: fromPress(pressProfile?.pressTemperatureC) || NOT_SET,
+    pressDwellSec: fromPress(pressProfile?.pressDwellSec) || NOT_SET,
+    pressPressureNCm2: fromPress(pressProfile?.pressPressureNCm2?.trim()) || NOT_SET,
+    // A tri-state read as a sentence: `false` is «press it dry», an answer, and printing it as
+    // «not set» would hide the one instruction the profile was written to give.
+    pressSteam:
+      pressProfile && pressProfile.pressSteam !== undefined
+        ? inheritedText(pressProfile.pressSteam ? 'with steam' : 'dry', pressSource)
+        : NOT_SET,
+    pressCloth: fromPress(pressClothLabel(pressProfile?.pressCloth)) || NOT_SET,
   };
 
   // The off-part materials this operation consumes. Multi, because one operation genuinely joins
@@ -704,6 +1191,7 @@ function OperationEditor({
   const editorHeading =
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
+      machineType: machineType as common_TechCardMachineType,
       zone: zoneValue as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames: chosenPieces.map((k) => byKey.get(k)?.name ?? '').filter(Boolean),
       note: noteValue,
@@ -730,12 +1218,13 @@ function OperationEditor({
   // purpose — unlinkedBoms is a fresh array every render, so a useMemo over it would recompute
   // anyway while costing a dependency that lies about being stable.
   //
-  // Within that, ЧТО ЭТО ЗА ПОЗИЦИЯ (0278) does the actual suggesting: a BUTTON_ATTACH step offers
+  // Within that, ЧТО ЭТО ЗА ПОЗИЦИЯ (0278) does the actual suggesting: a button-attach step offers
   // buttons and snaps before the rest of the фурнитура, and the group holding them leads. This only
   // ever REORDERS — never filters — so a step that genuinely takes something unexpected is one
   // glance further down rather than unreachable, and a card whose lines carry no kind yet reads
-  // exactly as it did before.
-  const preferredKinds = new Set<string>(OPERATION_TYPE_PREFERRED_KINDS[opType] ?? []);
+  // exactly as it did before. Since 0306 the hunch comes off the MACHINE for every sewing step —
+  // the step type stopped naming one.
+  const preferredKinds = preferredBomKinds(opType, machineType);
   const isPreferred = (b: BomLine) => !!b.kind && preferredKinds.has(b.kind);
   const unlinkedBySection = (() => {
     const groups = new Map<string, BomLine[]>();
@@ -762,8 +1251,11 @@ function OperationEditor({
   // every render, so a useMemo keyed on it would recompute anyway while claiming a stability it
   // does not have.
   // «Пришить кнопки», у которых не привязана ни одна кнопка. Checked against the LINKED lines, so
-  // it clears the moment the operator picks one.
-  const expects = OPERATION_TYPE_EXPECTS[opType];
+  // it clears the moment the operator picks one. Both axes have an opinion: the step type answers
+  // for fusing, the machine for the button-attach automat.
+  const expects =
+    OPERATION_TYPE_EXPECTS[opType as common_TechCardOperationType] ??
+    (isMachineStep ? MACHINE_TYPE_EXPECTS[machineType as common_TechCardMachineType] : undefined);
   const expectsMaterial =
     expects && !linkedMaterials.some((b) => b.section === expects.section) ? expects : null;
 
@@ -827,14 +1319,71 @@ function OperationEditor({
     ];
   }, [pinOptions, calloutNumber]);
 
-  // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone.
-  //
-  // One wrote the operation type's machine and stitch density into the row whenever those were
-  // blank; the other copied the linked BOM line's name into `thread`. Between them they are why the
-  // printed tech pack had to SUBTRACT the thread from the material list to stop printing it twice,
-  // and why nobody could tell a density the technologist chose from one that simply appeared.
-  //
-  // What replaces them is a PLACEHOLDER: the inherited value is shown, never stored.
+  // WHICH PROFILE OF THE PARK THIS STEP POINTS AT. Narrowed to the machine the step runs on,
+  // because a profile of another type is a FieldViolation on save, not a preference — and the
+  // «inherit» option says what leaving it blank would actually do, which depends entirely on how
+  // many profiles of that machine the card holds: one is inherited by type, two are ambiguous and
+  // inherit nothing at all (§3). A dangling key keeps a visible option, like the sketch pin above:
+  // the save detaches it silently, so the picker is the only place that can still say so.
+  const machineProfileOptions = useMemo(() => {
+    const ofType = parkMachines.filter(
+      (m) => m.machineType === machineType && (m.profileKey ?? '').trim(),
+    );
+    const inheritLabel =
+      ofType.length === 1
+        ? `inherit: ${machineProfileName(ofType[0])}`
+        : ofType.length === 0
+          ? 'no profile for this machine'
+          : `— pick one of ${ofType.length} —`;
+    const opts = [
+      { value: PROFILE_INHERIT, label: inheritLabel },
+      ...ofType.map((m) => ({ value: m.profileKey ?? '', label: machineProfileName(m) })),
+    ];
+    const key = machineProfileKey.trim();
+    if (key && !opts.some((o) => o.value === key)) {
+      opts.push({ value: key, label: `#${key.slice(-6)} — profile not found (removed?)` });
+    }
+    return opts;
+  }, [parkMachines, machineType, machineProfileKey]);
+
+  // The ВТО twin, with one extra narrowing the machines have no equivalent of: a press profile
+  // declares WHICH PROCESS it is for, so a fusing profile is not offered on a разутюжка. That is a
+  // client-side courtesy (the server only checks the equipment), so it never hides what is already
+  // chosen — a profile whose process was changed on the defaults tab stays visible and removable.
+  const pressProfileOptions = useMemo(() => {
+    // Exactly the predicate resolvePressProfile uses for its by-type rung, plus whatever is already
+    // chosen — a profile whose process was changed on the defaults tab has to stay visible, or the
+    // step would hold a reference the picker cannot show and the operator cannot remove.
+    const usable = parkPresses.filter(
+      (p) =>
+        p.pressEquipment === pressEquipment &&
+        (p.profileKey ?? '').trim() &&
+        (pressProfileFitsStep(p, opType) || p.profileKey === pressProfileKey),
+    );
+    // Counted over what would ACTUALLY be inherited (the strict predicate), so the option cannot
+    // say «pick one of 2» because of a mismatched profile that is only listed to stay removable.
+    const inheritable = usable.filter((p) => pressProfileFitsStep(p, opType));
+    const inheritLabel =
+      inheritable.length === 1
+        ? `inherit: ${pressProfileName(inheritable[0])}`
+        : inheritable.length === 0
+          ? 'no profile for this equipment'
+          : `— pick one of ${inheritable.length} —`;
+    const opts = [
+      { value: PROFILE_INHERIT, label: inheritLabel },
+      ...usable.map((p) => ({ value: p.profileKey ?? '', label: pressProfileName(p) })),
+    ];
+    const key = pressProfileKey.trim();
+    if (key && !opts.some((o) => o.value === key)) {
+      opts.push({ value: key, label: `#${key.slice(-6)} — profile not found (removed?)` });
+    }
+    return opts;
+  }, [parkPresses, pressEquipment, pressProfileKey, opType]);
+
+  // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone: nothing is
+  // pre-filled from the step type any more. What replaces them is the PLACEHOLDER — the inherited
+  // value is shown with its source and stored nowhere, which is the whole difference between «the
+  // technologist chose 4 threads» and «it defaulted to 4».
 
   return (
     <div
@@ -877,16 +1426,40 @@ function OperationEditor({
         </div>
       </div>
 
-      {/* THE CORE, and it is all of it: what the step does, where, and how long it takes. Six
-          controls where there were eighteen. The pieces and materials below are the other half of
-          «with what»; everything else is an override that stays folded away until it differs. */}
+      {/* THE CORE, and it is all of it: what the step does, ON WHAT, where, and how long it takes.
+          The pieces and materials below are the other half of «with what»; everything else is an
+          override that stays folded away until it differs.
+
+          THE SECOND CONTROL IS THE SECOND AXIS (0306). «Machine» is not an instruction on its own —
+          it says a machine is involved and nothing about which of the twenty-five — so the machine
+          picker sits beside the type and is required by it, exactly like the zone. Press, press open
+          and fusing ask the same question about the equipment: an iron, a fusing press and a steamer
+          are three different instructions to the floor. Neither is an override, and neither belongs
+          in the fold: a required field behind a closed accordion is a save that fails at a control
+          nobody can see. */}
       <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
         <SelectField
           name={`operations.${index}.operationType`}
           label='operation *'
-          items={operationTypeOptions}
+          items={operationTypeOptionsFor(opType)}
           className={selectNoGrow}
         />
+        {isMachineStep && (
+          <SelectField
+            name={`operations.${index}.machineType`}
+            label='machine *'
+            items={machineTypeOptions}
+            className={selectNoGrow}
+          />
+        )}
+        {isPressStep && (
+          <SelectField
+            name={`operations.${index}.pressEquipment`}
+            label='equipment *'
+            items={pressEquipmentOptions}
+            className={selectNoGrow}
+          />
+        )}
         <SelectField
           name={`operations.${index}.zone`}
           label='zone *'
@@ -1054,7 +1627,7 @@ function OperationEditor({
           exists in the BOM, and blocking the save would make the check the operator's enemy. */}
       {expectsMaterial && (
         <Text size='micro' variant='label' className='mt-1'>
-          a step of this type usually consumes {expectsMaterial.what} — none is linked
+          такой шаг обычно потребляет {expectsMaterial.what} — ни одной строки не привязано
         </Text>
       )}
 
@@ -1064,8 +1637,9 @@ function OperationEditor({
           between «the technologist chose 4 st/cm» and «it defaulted to 4», and the old preset
           effect destroyed it on every row it touched. */}
       <Accordion
-        open={overridesOpen}
+        open={overridesOpen || hasFoldedError}
         onOpenChange={setOverridesOpen}
+        tone={hasFoldedError ? 'error' : 'default'}
         title={
           <Text size='control' variant='uppercase' tracking='label' component='span'>
             differs from standard
@@ -1081,64 +1655,251 @@ function OperationEditor({
           )
         }
       >
-        <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-          <SelectField
-            name={`operations.${index}.seamClass`}
-            label='seam class'
-            items={seamClassOptions}
-            className={selectNoGrow}
-          />
-          <DecimalField
-            name={`operations.${index}.seamAllowanceMm`}
-            label='seam allowance, mm'
-            maxDecimals={1}
-            placeholder={inherited.seamAllowance}
-          />
-          <DecimalField
-            name={`operations.${index}.stitchesPerCm`}
-            label='stitches / cm'
-            placeholder={inherited.stitchDensity}
-          />
-          <SelectField
-            name={`operations.${index}.topstitchMode`}
-            label='topstitch'
-            items={topstitchModeOptions}
-            className={selectNoGrow}
-          />
-          {/* The width belongs to «at width» and nowhere else — beside «edge» it is a shadow value
-              the server refuses anyway, so the control simply is not there. */}
-          {topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (
-            <>
-              <DecimalField
-                name={`operations.${index}.topstitchWidthMm`}
-                label='topstitch width, mm'
-                maxDecimals={1}
-                placeholder='6'
-              />
-              <SelectField
-                name={`operations.${index}.topstitchRows`}
-                label='rows'
-                items={TOPSTITCH_ROW_OPTIONS}
-                valueAsNumber
+        {/* THE MACHINE'S OWN SETTINGS — every one of them an override of the profile named above.
+            Blank inherits, and the placeholder (or the picker's first option) says what would be
+            inherited and from which profile. Bed and automation are deliberately absent: those are
+            machine IDENTITY, and a step that needs another bed is a step on another machine. */}
+        {isMachineStep && (
+          <>
+            <GroupLabel
+              flush
+              action={
+                <Text size='micro' variant='label' component='span'>
+                  {machineProfile ? `inherits ${machineSource}` : 'no profile — blanks stay unset'}
+                </Text>
+              }
+            >
+              machine settings
+            </GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <EncodedSelectField<string>
+                name={`operations.${index}.machineProfileKey`}
+                label='machine profile'
+                items={machineProfileOptions}
+                encode={(v) => (v?.trim() ? v : PROFILE_INHERIT)}
+                decode={(o) => (o === PROFILE_INHERIT ? '' : o)}
                 className={selectNoGrow}
               />
-            </>
-          )}
-          <SelectField
-            name={`operations.${index}.attachmentKind`}
-            label='attachment'
-            items={attachmentOptions}
-            className={selectNoGrow}
-          />
-          {attachmentKind !== NONE_ATTACHMENT && (
-            <DecimalField
-              name={`operations.${index}.attachmentSizeMm`}
-              label='attachment size, mm'
-              maxDecimals={1}
-              placeholder='8'
-            />
-          )}
-        </div>
+              <InheritableNumberField
+                name={`operations.${index}.threadCount`}
+                label='threads'
+                value={threadCount}
+                placeholder={inherited.threadCount}
+              />
+              <SelectField
+                name={`operations.${index}.needleType`}
+                label='needle point'
+                items={withInheritLabel(needleTypeOptions, NONE_NEEDLE, inherited.needleType)}
+                className={selectNoGrow}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.needleSizeNm`}
+                label='needle size, Nm'
+                value={needleSizeNm}
+                placeholder={inherited.needleSizeNm}
+              />
+              <SelectField
+                name={`operations.${index}.threadTension`}
+                label='thread tension'
+                items={withInheritLabel(
+                  threadTensionOptions,
+                  NONE_TENSION,
+                  inherited.threadTension,
+                )}
+                className={selectNoGrow}
+              />
+              {/* The note QUALIFIES the scale («на 0.5 туже») — on its own it describes no setting
+                  the next machine can be set to, which is why the server refuses the pair and why
+                  the box only appears once the scale is answered.
+                  ...UNLESS A NOTE IS ALREADY THERE. Hiding it the moment the tension goes back to
+                  «inherit» would strand the text behind its own validation error: the schema refuses
+                  the pair, the message lands on a control that is no longer rendered, and the save
+                  stops working with nothing on screen to fix. Same rule as the sewing block below —
+                  a value that EXISTS is shown wherever it is, and the operator clears it. */}
+              {(threadTension !== NONE_TENSION || threadTensionNote.trim() !== '') && (
+                <InputField
+                  name={`operations.${index}.threadTensionNote`}
+                  label='tension note'
+                  maxLength={64}
+                  placeholder='на 0.5 туже, dial 4'
+                />
+              )}
+              {/* «stitch width» is the zigzag amplitude / the overlock bite. NOT the topstitch
+                  width, which is a distance from an edge and lives three controls down — the two
+                  print side by side on the tech pack and must not read as one setting. */}
+              <DecimalField
+                name={`operations.${index}.stitchWidthMm`}
+                label='stitch width, mm'
+                maxDecimals={1}
+                placeholder={inherited.stitchWidthMm}
+              />
+            </div>
+          </>
+        )}
+
+        {/* THE ВТО MODE — the press twin of the block above. Same rule throughout: blank inherits
+            the profile, and the three-valued steam control keeps «not stated» apart from «press it
+            dry», which is an instruction somebody gave. */}
+        {isPressStep && (
+          <>
+            <GroupLabel
+              flush
+              action={
+                <Text size='micro' variant='label' component='span'>
+                  {pressProfile ? `inherits ${pressSource}` : 'no profile — blanks stay unset'}
+                </Text>
+              }
+            >
+              ВТО mode
+            </GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <EncodedSelectField<string>
+                name={`operations.${index}.pressProfileKey`}
+                label='press profile'
+                items={pressProfileOptions}
+                encode={(v) => (v?.trim() ? v : PROFILE_INHERIT)}
+                decode={(o) => (o === PROFILE_INHERIT ? '' : o)}
+                className={selectNoGrow}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.pressTemperatureC`}
+                label='temperature, °C'
+                value={pressTemperatureC}
+                placeholder={inherited.pressTemperatureC}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.pressDwellSec`}
+                label='dwell, sec'
+                value={pressDwellSec}
+                placeholder={inherited.pressDwellSec}
+              />
+              {/* The unit is IN THE NAME on both sides of the wire: pressure on a press is quoted in
+                  bar, in kg and in N/cm² depending on who is talking, and a bare «pressure» field
+                  would be filled in three different units by three people. */}
+              <DecimalField
+                name={`operations.${index}.pressPressureNCm2`}
+                label='pressure, N/cm²'
+                maxDecimals={1}
+                placeholder={inherited.pressPressureNCm2}
+              />
+              <EncodedSelectField<boolean | undefined>
+                name={`operations.${index}.pressSteam`}
+                label='steam'
+                items={[
+                  {
+                    value: 'inherit',
+                    label:
+                      inherited.pressSteam === NOT_SET
+                        ? '— inherit —'
+                        : `inherit: ${inherited.pressSteam}`,
+                  },
+                  { value: 'yes', label: 'with steam' },
+                  { value: 'no', label: 'no steam — press dry' },
+                ]}
+                encode={(v) => (v === undefined ? 'inherit' : v ? 'yes' : 'no')}
+                decode={(o) => (o === 'inherit' ? undefined : o === 'yes')}
+                className={selectNoGrow}
+              />
+              <SelectField
+                name={`operations.${index}.pressCloth`}
+                label='press cloth'
+                items={withInheritLabel(pressClothOptions, NONE_PRESS_CLOTH, inherited.pressCloth)}
+                className={selectNoGrow}
+              />
+            </div>
+          </>
+        )}
+
+        {/* THE SEAM AND THE STITCH. Hidden on a ВТО step — there is no seam class to press and no
+            density to iron — but only while the step actually holds none of them: a value that
+            EXISTS is shown wherever it is, because a hidden number still prints on the tech pack
+            and still moves the section digest, and clearing somebody's input on a type switch is
+            not this form's decision to make. */}
+        {showSewingOverrides && (
+          <>
+            {/* Not `flush`: this label follows a block, it does not open one. */}
+            {(isMachineStep || isPressStep) && (
+              <GroupLabel
+                action={
+                  isPressStep ? (
+                    <Text size='micro' variant='label' component='span'>
+                      set while this was a sewing step — clear what no longer applies
+                    </Text>
+                  ) : undefined
+                }
+              >
+                seam &amp; stitch
+              </GroupLabel>
+            )}
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <SelectField
+                name={`operations.${index}.seamClass`}
+                label='seam class'
+                items={seamClassOptions}
+                className={selectNoGrow}
+              />
+              <DecimalField
+                name={`operations.${index}.seamAllowanceMm`}
+                label='seam allowance, mm'
+                maxDecimals={1}
+                placeholder={inherited.seamAllowance}
+              />
+              <DecimalField
+                name={`operations.${index}.stitchesPerCm`}
+                label='stitches / cm'
+                placeholder={inherited.stitchDensity}
+              />
+              {/* The same setting in the other unit — see StitchLengthMirror. It is placed after the
+                  density, not instead of it, because the density is what is stored and what the
+                  card's own default is expressed in. */}
+              <StitchLengthMirror
+                index={index}
+                density={stitchesPerCm}
+                placeholder={inherited.stitchLength}
+              />
+              <SelectField
+                name={`operations.${index}.topstitchMode`}
+                label='topstitch'
+                items={topstitchModeOptions}
+                className={selectNoGrow}
+              />
+              {/* The width belongs to «at width» and nowhere else — beside «edge» it is a shadow
+                  value the server refuses anyway, so the control simply is not there. */}
+              {topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (
+                <>
+                  <DecimalField
+                    name={`operations.${index}.topstitchWidthMm`}
+                    label='topstitch width, mm'
+                    maxDecimals={1}
+                    placeholder='6'
+                  />
+                  <SelectField
+                    name={`operations.${index}.topstitchRows`}
+                    label='rows'
+                    items={TOPSTITCH_ROW_OPTIONS}
+                    valueAsNumber
+                    className={selectNoGrow}
+                  />
+                </>
+              )}
+              <SelectField
+                name={`operations.${index}.attachmentKind`}
+                label='attachment'
+                items={withInheritLabel(attachmentOptions, NONE_ATTACHMENT, inherited.attachment)}
+                className={selectNoGrow}
+              />
+              {attachmentKind !== NONE_ATTACHMENT &&
+                attachmentKind !== 'TECH_CARD_ATTACHMENT_KIND_NONE' && (
+                  <DecimalField
+                    name={`operations.${index}.attachmentSizeMm`}
+                    label='attachment size, mm'
+                    maxDecimals={1}
+                    placeholder='8'
+                  />
+                )}
+            </div>
+          </>
+        )}
       </Accordion>
 
       {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
@@ -1308,6 +2069,9 @@ function GenerateOperationsPanel({
                         <span className='text-labelColor tabular-nums'>{(i + 1) * 10}.</span>{' '}
                         {operationHeading({
                           operationType: o.operationType,
+                          // The draft's own machine, so the preview reads «overlock · side seams»
+                          // rather than fourteen lines of «machine».
+                          machineType: o.machineType,
                           zone: o.zone,
                           pieceNames: [],
                           note: o.note,
@@ -1681,8 +2445,9 @@ export function OperationsField({
     <div className='space-y-2.5'>
       <Text size='micro' variant='label'>
         Шаги сборки по порядку — слева вся последовательность, справа открытый шаг целиком. Номера
-        (10/20/30) проставляются по позиции: перетащите <b>⠿</b>, чтобы поменять порядок. Выберите
-        тип операции — машина и плотность подставятся автоматически.
+        (10/20/30) проставляются по позиции: перетащите <b>⠿</b>, чтобы поменять порядок. Тип шага
+        говорит, ЧТО делают, машинка или оборудование ВТО — НА ЧЁМ; пустое поле в настройках значит
+        «наследую», и подсказка в нём называет и значение, и источник.
       </Text>
 
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden

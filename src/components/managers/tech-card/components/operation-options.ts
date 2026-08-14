@@ -1,10 +1,12 @@
 import {
   common_TechCardAttachmentKind,
   common_TechCardGarmentZone,
+  common_TechCardMachineType,
   common_TechCardOperationType,
   common_TechCardSeamClass,
   common_TechCardTopstitchMode,
 } from 'api/proto-http/admin';
+import { machineTypeVerb } from './equipment-options';
 
 // The assembly-order vocabularies, in ENGLISH with the ISO numbers the trade already uses.
 //
@@ -54,17 +56,20 @@ export const OPERATION_TYPE_LABELS: Record<common_TechCardOperationType, string>
 // must cover every token that can arrive, while offering a deprecated token as a choice would let
 // somebody create new work in a retired vocabulary. Only the values are listed here; the labels come
 // from the one map, so the picker and the printed sheet cannot say different things about a token.
+//
+// SIX CHOICES, DOWN FROM THIRTEEN, and the nine that left are not a simplification: they were the
+// answer to a DIFFERENT question. «Overlock» never said what the step does, it said what it is done
+// on, so the list forced «стачать» and «обметать» into one field and had no room at all for the
+// machines the shop actually owns (coverlock, zigzag, the automats). Since 0306 the step says
+// MACHINE and the machine picker beside it says which one — see equipment-options.ts.
+//
+// Ordered by how often a step is one of them, not alphabetically: almost every step is machine work,
+// and press / press open are the межоперационные steps that used to be smuggled into a seam class.
 const OPERATION_TYPE_PICKER: common_TechCardOperationType[] = [
   'TECH_CARD_OPERATION_TYPE_UNKNOWN',
-  'TECH_CARD_OPERATION_TYPE_LOCKSTITCH',
-  'TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE',
-  'TECH_CARD_OPERATION_TYPE_OVERLOCK',
-  'TECH_CARD_OPERATION_TYPE_COVERSTITCH',
-  'TECH_CARD_OPERATION_TYPE_CHAINSTITCH',
-  'TECH_CARD_OPERATION_TYPE_BLINDHEM',
-  'TECH_CARD_OPERATION_TYPE_BARTACK',
-  'TECH_CARD_OPERATION_TYPE_BUTTONHOLE',
-  'TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH',
+  'TECH_CARD_OPERATION_TYPE_MACHINE',
+  'TECH_CARD_OPERATION_TYPE_PRESS',
+  'TECH_CARD_OPERATION_TYPE_PRESS_OPEN',
   'TECH_CARD_OPERATION_TYPE_FUSING',
   'TECH_CARD_OPERATION_TYPE_HANDWORK',
   'TECH_CARD_OPERATION_TYPE_OTHER',
@@ -72,6 +77,22 @@ const OPERATION_TYPE_PICKER: common_TechCardOperationType[] = [
 
 export const operationTypeOptions: Array<{ value: common_TechCardOperationType; label: string }> =
   OPERATION_TYPE_PICKER.map((value) => ({ value, label: OPERATION_TYPE_LABELS[value] }));
+
+// The picker for ONE row, which is the same list plus whatever that row already holds. A legacy
+// token cannot arrive off the wire any more (the server canonicalises on write and never emits one),
+// but it CAN come back from a localStorage draft written before this bundle — and a select whose
+// value is absent from its own items renders BLANK, so the row would report «no type» on a step
+// that has one and quietly re-save as unknown. Same defensive shape as the sketch-pin picker.
+export function operationTypeOptionsFor(
+  current?: string,
+): Array<{ value: common_TechCardOperationType; label: string }> {
+  const v = (current ?? '') as common_TechCardOperationType;
+  if (!v || OPERATION_TYPE_PICKER.includes(v)) return operationTypeOptions;
+  return [
+    ...operationTypeOptions,
+    { value: v, label: `${OPERATION_TYPE_LABELS[v] ?? v} — legacy, pick a current type` },
+  ];
+}
 
 // WHERE on the garment — and the reason the free-text `placement` could go. The three material
 // bands stay at the top because a step genuinely can be about the lining AS A LAYER; the garment
@@ -145,6 +166,15 @@ export const attachmentOptions: Array<{ value: common_TechCardAttachmentKind; la
   Object.keys(ATTACHMENT_KIND_LABELS) as common_TechCardAttachmentKind[]
 ).map((value) => ({ value, label: ATTACHMENT_KIND_LABELS[value] }));
 
+// '' for UNKNOWN («inherit»), the real label for NONE («runs bare») — the two are different facts
+// since the card grew machine profiles, and a helper that folded them together would put the word
+// «none» on a step that simply inherits the profile's foot. Takes a plain string for the reason
+// spelled out over the equipment helpers: the form holds these enums as strings.
+export const attachmentKindLabel = (v?: string): string =>
+  !v || v === 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN'
+    ? ''
+    : (ATTACHMENT_KIND_LABELS[v as common_TechCardAttachmentKind] ?? '');
+
 export const topstitchModeOptions: Array<{ value: common_TechCardTopstitchMode; label: string }> = [
   { value: 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN', label: '— none —' },
   { value: 'TECH_CARD_TOPSTITCH_MODE_EDGE', label: 'edge' },
@@ -155,10 +185,10 @@ export const topstitchModeOptions: Array<{ value: common_TechCardTopstitchMode; 
 // map went silently blank on every token the contract added, which is precisely what a bump is
 // supposed to surface. UNKNOWN maps to '' because a step with no type has no verb to speak.
 //
-// MACHINE's verb here is a PLACEHOLDER. A machine step's real verb comes from its machine_type —
-// otherwise every seam, hem and buttonhole on the card reads «machine» — and that lookup belongs
-// with the step editor (TC2), which is also where the three other heading builders
-// (sample-assembly-map, releases-field, issues-field) will be pointed at it.
+// MACHINE's verb here is the FALLBACK, used only while the machine is still unpicked: a machine
+// step's verb comes from its machine_type (MACHINE_TYPE_VERB), because otherwise every seam, hem,
+// buttonhole and zip on the card would read «machine». operationHeading does that lookup, and it is
+// the ONE place a step heading is composed — the four callers all go through it.
 const OPERATION_TYPE_VERB: Record<common_TechCardOperationType, string> = {
   TECH_CARD_OPERATION_TYPE_UNKNOWN: '',
   TECH_CARD_OPERATION_TYPE_LOCKSTITCH: 'join',
@@ -190,13 +220,22 @@ export function zoneLabel(zone?: common_TechCardGarmentZone): string {
 //
 // «join · side seams · Front + Back». Falls back to the first line of the note for the steps the
 // formula cannot describe (hand work, «other» in an «other» zone) — one escape hatch, no new field.
+//
+// THE VERB OF A MACHINE STEP COMES FROM THE MACHINE (0306). `machineType` is optional because a
+// heading is also built from archived release snapshots, where a step still carries a legacy type
+// that names its own machine — those keep the verb they always had.
 export function operationHeading(args: {
   operationType?: common_TechCardOperationType;
+  machineType?: common_TechCardMachineType;
   zone?: common_TechCardGarmentZone;
   pieceNames: string[];
   note?: string;
 }): string {
-  const verb = args.operationType ? (OPERATION_TYPE_VERB[args.operationType] ?? '') : '';
+  const typeVerb = args.operationType ? (OPERATION_TYPE_VERB[args.operationType] ?? '') : '';
+  const verb =
+    args.operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE'
+      ? machineTypeVerb(args.machineType) || typeVerb
+      : typeVerb;
   const zone = zoneLabel(args.zone);
   const parts = [verb, zone].filter(Boolean);
   if (args.pieceNames.length > 0) parts.push(args.pieceNames.join(' + '));
