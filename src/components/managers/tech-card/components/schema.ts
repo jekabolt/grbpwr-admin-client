@@ -9,8 +9,18 @@ import {
   common_TechCardBomSection,
   common_TechCardConstruction,
   common_TechCardAttachmentKind,
+  common_TechCardAutomationLevel,
+  common_TechCardBedType,
+  common_TechCardEquipmentDefaults,
   common_TechCardGarmentZone,
+  common_TechCardMachineProfile,
+  common_TechCardMachineType,
+  common_TechCardNeedleType,
+  common_TechCardPressCloth,
+  common_TechCardPressEquipment,
+  common_TechCardPressProfile,
   common_TechCardSeamClass,
+  common_TechCardThreadTension,
   common_TechCardTopstitchMode,
   common_TechCardCosting,
   common_TechCardFabricDirection,
@@ -492,7 +502,11 @@ const DEFAULT_LABEL_TYPE: common_TechCardLabelType = 'TECH_CARD_LABEL_TYPE_MAIN'
 const MIN_STITCHES_PER_CM = 1;
 const MAX_STITCHES_PER_CM = 20;
 
-function refineStitchDensity(value: string | undefined, ctx: z.RefinementCtx, path: string[]) {
+function refineStitchDensity(
+  value: string | undefined,
+  ctx: z.RefinementCtx,
+  path: Array<string | number>,
+) {
   const raw = (value ?? '').trim();
   if (!raw) return; // blank = inherit / not configured, always legal
   const n = parseDecimalNumber(raw);
@@ -505,18 +519,109 @@ function refineStitchDensity(value: string | undefined, ctx: z.RefinementCtx, pa
   }
 }
 
+// THE CARD'S EQUIPMENT PARK (0306) — one row per machine / press this style is made on.
+//
+// IDENTITY IS `profileKey`, a client-minted ULID, exactly like a BOM line's `lineKey` and for
+// exactly the same reason: the list is FULL-REPLACED on every save, so a position or a server id
+// would break every step that points at a row the moment another row is added above it. The key is
+// minted when the row is created in the form and round-tripped verbatim ever after. `label` is a
+// name for a human («оверлок у окна») and is NOT part of the identity — the scope_key lesson, where
+// two different keys ended up living under one name.
+//
+// THERE MAY BE SEVERAL PROFILES OF ONE TYPE. Two identical overlocks threaded differently is the
+// ordinary case on a floor, not a duplicate to collapse, which is why the type is not a key and the
+// type picker is not disabled once used.
+//
+// DECIMALS ARE STRINGS here, like every other decimal on this form (google.type.Decimal travels as
+// `{ value: "4.5" }` and an intermediate «2.» has to survive under the cursor). The wire-null the
+// gateway sends for an unset Decimal is absorbed by decimalToInput on the way IN, so no schema
+// field here ever sees a null — see the note on wastageAppliedAt for the one field where it does.
+const machineProfileSchema = z.object({
+  profileKey: z.string().optional().default(''),
+  label: z.string().optional().default(''),
+  // REQUIRED server-side: a park row that does not say what machine it is cannot be inherited from.
+  // A row left UNKNOWN is dropped on save rather than refused — see mapEquipmentDefaultsOut.
+  machineType: z.string().optional().default('TECH_CARD_MACHINE_TYPE_UNKNOWN'),
+  threadCount: z.number().optional().default(0), // 1..20; 0 = unset
+  needleType: z.string().optional().default('TECH_CARD_NEEDLE_TYPE_UNKNOWN'),
+  needleSizeNm: z.number().optional().default(0), // Nm 35..300; 0 = unset
+  // Bed and automation are machine IDENTITY and exist only here: a step that needs another bed is
+  // a step on another machine, so it changes machineType instead of overriding this.
+  bedType: z.string().optional().default('TECH_CARD_BED_TYPE_UNKNOWN'),
+  automation: z.string().optional().default('TECH_CARD_AUTOMATION_LEVEL_UNKNOWN'),
+  threadTension: z.string().optional().default('TECH_CARD_THREAD_TENSION_UNKNOWN'),
+  threadTensionNote: z.string().optional().default(''),
+  attachmentKind: z.string().optional().default('TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
+  stitchesPerCm: z.string().optional().default(''),
+  // The zigzag amplitude / overlock bite. NOT topstitch width (a distance from an edge) — the two
+  // are different facts and the labels must stay different wherever they print.
+  stitchWidthMm: z.string().optional().default(''),
+  note: z.string().optional().default(''),
+});
+
+const pressProfileSchema = z.object({
+  profileKey: z.string().optional().default(''),
+  label: z.string().optional().default(''),
+  // REQUIRED server-side, same rule as machineType above.
+  pressEquipment: z.string().optional().default('TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'),
+  // WHICH ВТО PROCESS this profile is for, so the step form can offer it by default. UNKNOWN =
+  // universal; the server accepts only PRESS / PRESS_OPEN / FUSING beyond that.
+  operationType: z.string().optional().default('TECH_CARD_OPERATION_TYPE_UNKNOWN'),
+  pressTemperatureC: z.number().optional().default(0), // 40..250; 0 = unset
+  pressDwellSec: z.number().optional().default(0), // 1..300; 0 = unset
+  pressPressureNCm2: z.string().optional().default(''), // N/cm², unit in the name
+  // THREE-VALUED, AND THE ONLY FIELD ON THIS FORM THAT HAS NO DEFAULT. `undefined` = «not stated,
+  // inherit», `false` = «press it DRY», `true` = «with steam» — three different instructions to the
+  // floor, and folding the first two together would make a signature over «без пара» read as one
+  // over «как получится». It is a proto3 `optional bool`: protojson NEVER prints an unset one, so
+  // absence arrives as a missing key (NOT as null — that is what unset google.type.Decimal messages
+  // arrive as, and they are absorbed by decimalToInput). A `.default(false)` here would invent the
+  // answer «dry» on every profile nobody has answered.
+  pressSteam: z.boolean().optional(),
+  pressCloth: z.string().optional().default('TECH_CARD_PRESS_CLOTH_UNKNOWN'),
+  note: z.string().optional().default(''),
+});
+
 const constructionSchema = z
   .object({
     defaultSeamClass: z.string().optional().default('TECH_CARD_SEAM_CLASS_UNKNOWN'),
     defaultStitchesPerCm: z.string().optional().default(''),
-    overlockThreadCount: z.number().optional().default(0),
     hemFinish: z.string().optional().default(''),
-    pressing: z.string().optional().default(''),
     notes: z.string().optional().default(''),
+    // NO `pressing`, NO `overlockThreadCount` — both left TechCardConstruction with 0306. One thread
+    // count per card could describe one overlock and a card is sewn on several; the prose field
+    // answered «how is it pressed» for a whole card when pressing is a STEP. Migration 0306 moved
+    // the prose into `notes` and turned the count into a real overlock profile below. Archived
+    // release snapshots still carry both — see legacyPressingText in equipment-options.ts.
+    //
+    // THE PARK KEEPS ITS WIRE NESTING, wrapper and all, rather than being flattened to two arrays on
+    // the construction. The wrapper is a wire fact — its PRESENCE is what tells the server «replace
+    // the park» from «this bundle knows nothing about parks» — but that is not why it is mirrored
+    // here. The server tags a bad profile row as
+    // `construction.equipment_defaults.machines[0].machine_type`, and applyServerFieldErrors pins a
+    // violation by camel-casing that path onto a form field: flattened, every such refusal would
+    // miss its control and degrade into an unattributable toast on a save of the whole card. (The
+    // backend documents the mirror image of this trade for `topstitch`, which the form holds flat
+    // and which is therefore reported flat.) The default keeps a draft restored from an older
+    // localStorage snapshot parseable.
+    equipmentDefaults: z
+      .object({
+        machines: z.array(machineProfileSchema).default([]),
+        presses: z.array(pressProfileSchema).default([]),
+      })
+      .default({ machines: [], presses: [] }),
   })
-  .superRefine((c, ctx) =>
-    refineStitchDensity(c.defaultStitchesPerCm, ctx, ['defaultStitchesPerCm']),
-  );
+  .superRefine((c, ctx) => {
+    refineStitchDensity(c.defaultStitchesPerCm, ctx, ['defaultStitchesPerCm']);
+    (c.equipmentDefaults?.machines ?? []).forEach((m, i) =>
+      refineStitchDensity(m.stitchesPerCm, ctx, [
+        'equipmentDefaults',
+        'machines',
+        i,
+        'stitchesPerCm',
+      ]),
+    );
+  });
 
 const operationSchema = z.object({
   // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
@@ -544,6 +649,45 @@ const operationSchema = z.object({
   topstitchRows: z.number().optional().default(0),
   attachmentKind: z.string().optional().default('TECH_CARD_ATTACHMENT_KIND_UNKNOWN'),
   attachmentSizeMm: z.string().optional().default(''),
+
+  // --- «НА ЧЁМ»: the machine block, for operationType = MACHINE (0306) ---------------------------
+  //
+  // The second axis. `operationType` says what the step does, this says what it does it on — the two
+  // used to collide in one enum, which is why the old type list read like a machine catalogue.
+  //
+  // EVERY FIELD BELOW IS AN OVERRIDE and unset means INHERIT (step → the profile it names → the
+  // single profile of its type → card defaults). The form must never fill one in from the inherited
+  // value: that is exactly what the removed operation-type preset did, and it made «the technologist
+  // chose 4 threads» indistinguishable from «it defaulted to 4». `0` and `_UNKNOWN` ARE the unset
+  // states here (the wire has no presence on a bare int32 and every range starts above zero).
+  //
+  // THE BLOCK BELONGS TO ITS STEP TYPE AND NOWHERE ELSE — the server refuses a thread count on a
+  // handwork step by name, refusing the WHOLE card with it. The editor clears hidden controls (TC2);
+  // the save mapper gates the block on the type as a belt, so a draft restored from localStorage
+  // cannot make a card unsavable with values nobody can see.
+  machineType: z.string().optional().default('TECH_CARD_MACHINE_TYPE_UNKNOWN'),
+  // Points at ONE profile of the card's park BY KEY, because «the overlock» is not an answer on a
+  // card with two. '' = resolve by type (used only when the card holds exactly one of that type).
+  machineProfileKey: z.string().optional().default(''),
+  threadCount: z.number().optional().default(0),
+  needleType: z.string().optional().default('TECH_CARD_NEEDLE_TYPE_UNKNOWN'),
+  needleSizeNm: z.number().optional().default(0),
+  threadTension: z.string().optional().default('TECH_CARD_THREAD_TENSION_UNKNOWN'),
+  threadTensionNote: z.string().optional().default(''),
+  stitchWidthMm: z.string().optional().default(''),
+  // NO bedType / automation: those are machine identity, not step settings (see machineProfileSchema).
+
+  // --- the ВТО block, for operationType = PRESS / PRESS_OPEN / FUSING ----------------------------
+  // Required server-side on those three types once the client declares itself machine-aware, which
+  // this one always does: an iron, a fusing press and a steamer are three different instructions.
+  pressEquipment: z.string().optional().default('TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'),
+  pressProfileKey: z.string().optional().default(''),
+  pressTemperatureC: z.number().optional().default(0),
+  pressDwellSec: z.number().optional().default(0),
+  pressPressureNCm2: z.string().optional().default(''),
+  // Three-valued and deliberately without a default — see pressProfileSchema for the whole argument.
+  pressSteam: z.boolean().optional(),
+  pressCloth: z.string().optional().default('TECH_CARD_PRESS_CLOTH_UNKNOWN'),
 
   // The only free text on a step. `description` merged into it: two boxes side by side with no rule
   // about which was which guaranteed two cards would fill them the opposite way round.
@@ -591,9 +735,14 @@ const operationSchema = z.object({
         message: 'a topstitch at a stated width needs the width',
       });
     }
+    // «NONE» counts as no attachment here for the same reason UNKNOWN does, and it is server parity
+    // (dto refuses the pair by name): a binder size printed next to «runs bare» measures a tool the
+    // step has just said it does not use.
     if (
       (o.attachmentSizeMm ?? '').trim() &&
-      (!o.attachmentKind || o.attachmentKind === 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN')
+      (!o.attachmentKind ||
+        o.attachmentKind === 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN' ||
+        o.attachmentKind === 'TECH_CARD_ATTACHMENT_KIND_NONE')
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -650,10 +799,9 @@ const costingSchema = z.object({
 export const emptyConstruction: z.input<typeof constructionSchema> = {
   defaultSeamClass: 'TECH_CARD_SEAM_CLASS_UNKNOWN',
   defaultStitchesPerCm: '',
-  overlockThreadCount: 0,
   hemFinish: '',
-  pressing: '',
   notes: '',
+  equipmentDefaults: { machines: [], presses: [] },
 };
 
 export const emptyPackaging: z.input<typeof packagingSchema> = {
@@ -1198,10 +1346,51 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           defaultSeamClass:
             insert.construction.defaultSeamClass || 'TECH_CARD_SEAM_CLASS_UNKNOWN',
           defaultStitchesPerCm: decimalToInput(insert.construction.defaultStitchesPerCm),
-          overlockThreadCount: insert.construction.overlockThreadCount || 0,
           hemFinish: insert.construction.hemFinish || '',
-          pressing: insert.construction.pressing || '',
           notes: insert.construction.notes || '',
+          // THE PARK, read verbatim. The server always emits the wrapper (even for a card with no
+          // profiles) so the lists below are the authoritative stored set; the `?? []` covers a
+          // draft restored from a localStorage snapshot taken by a bundle that predates it.
+          //
+          // Keys are kept EXACTLY as stored and never re-minted: the key is what every step's
+          // machineProfileKey / pressProfileKey points at, so re-minting one on read would detach
+          // every reference on the very next save. (Same rule, same reason, as a BOM lineKey.)
+          equipmentDefaults: {
+            machines: (insert.construction.equipmentDefaults?.machines ?? []).map((m) => ({
+              profileKey: m.profileKey ?? '',
+              label: m.label ?? '',
+              machineType: m.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN',
+              threadCount: m.threadCount || 0,
+              needleType: m.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN',
+              needleSizeNm: m.needleSizeNm || 0,
+              bedType: m.bedType || 'TECH_CARD_BED_TYPE_UNKNOWN',
+              automation: m.automation || 'TECH_CARD_AUTOMATION_LEVEL_UNKNOWN',
+              threadTension: m.threadTension || 'TECH_CARD_THREAD_TENSION_UNKNOWN',
+              threadTensionNote: m.threadTensionNote ?? '',
+              attachmentKind: m.attachmentKind || 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN',
+              // decimalToInput, not `|| ''`: an unset google.type.Decimal arrives as an explicit
+              // null (the gateway marshals with EmitUnpopulated) — `d?.value ?? ''` absorbs it.
+              stitchesPerCm: decimalToInput(m.stitchesPerCm),
+              stitchWidthMm: decimalToInput(m.stitchWidthMm),
+              note: m.note ?? '',
+            })),
+            presses: (insert.construction.equipmentDefaults?.presses ?? []).map((p) => ({
+              profileKey: p.profileKey ?? '',
+              label: p.label ?? '',
+              pressEquipment: p.pressEquipment || 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN',
+              operationType: p.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
+              pressTemperatureC: p.pressTemperatureC || 0,
+              pressDwellSec: p.pressDwellSec || 0,
+              pressPressureNCm2: decimalToInput(p.pressPressureNCm2),
+              // NO `?? false` AND NO `|| false`: this is a proto3 `optional bool`, so an unset one
+              // is simply ABSENT from the JSON and must stay `undefined` in the form. Folding it to
+              // false would turn «nobody said» into the instruction «press it dry» on every profile
+              // — and the next save would write that invention back as a fact.
+              pressSteam: p.pressSteam,
+              pressCloth: p.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN',
+              note: p.note ?? '',
+            })),
+          },
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
@@ -1222,6 +1411,25 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       topstitchRows: o.topstitch?.rows || 0,
       attachmentKind: o.attachmentKind || 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN',
       attachmentSizeMm: decimalToInput(o.attachmentSizeMm),
+      // The machine block (0306). Enum tokens arrive as the `_UNKNOWN` string and bare int32s as 0
+      // when they are unset — both are «inherit», not «zero degrees» and not «no machine», which is
+      // why the controls read them back as empty rather than as a value somebody chose.
+      machineType: o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN',
+      machineProfileKey: o.machineProfileKey ?? '',
+      threadCount: o.threadCount || 0,
+      needleType: o.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN',
+      needleSizeNm: o.needleSizeNm || 0,
+      threadTension: o.threadTension || 'TECH_CARD_THREAD_TENSION_UNKNOWN',
+      threadTensionNote: o.threadTensionNote ?? '',
+      stitchWidthMm: decimalToInput(o.stitchWidthMm),
+      // The ВТО block. pressSteam is read verbatim, undefined included — see the press profile above.
+      pressEquipment: o.pressEquipment || 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN',
+      pressProfileKey: o.pressProfileKey ?? '',
+      pressTemperatureC: o.pressTemperatureC || 0,
+      pressDwellSec: o.pressDwellSec || 0,
+      pressPressureNCm2: decimalToInput(o.pressPressureNCm2),
+      pressSteam: o.pressSteam,
+      pressCloth: o.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN',
       note: o.note || '',
     })),
     labels: (insert?.labels ?? []).map((l) => ({
@@ -1289,32 +1497,116 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
   };
 }
 
-// 1:1 sections — sent as undefined (unset) when the whole block is empty.
-function mapConstructionOut(
+// THE CARD'S EQUIPMENT PARK, on the way out (0306).
+//
+// A ROW WITH NO TYPE IS DROPPED, NOT SENT. The server refuses a machine profile whose machine_type
+// is UNKNOWN (and a press profile with no equipment) — rightly: a park row that does not say what it
+// is cannot be inherited from. But it refuses the WHOLE card with it, so a half-added row on a tab
+// the operator may never reopen would block a save carrying nine other tabs' work. Same treatment,
+// same reason, as a blank piece row (isBlankPiece).
+//
+// The key is minted HERE for a row that has none, exactly as a BOM line's is: the ULID is the row's
+// durable identity and a step's reference points at it. Never re-minted for a row that has one —
+// that would detach every step pointing at it on the very next save.
+function mapEquipmentDefaultsOut(
   c?: TechCardFormData['construction'],
+): common_TechCardEquipmentDefaults {
+  const machines: common_TechCardMachineProfile[] = (c?.equipmentDefaults?.machines ?? [])
+    .filter((m) => !!m.machineType && m.machineType !== 'TECH_CARD_MACHINE_TYPE_UNKNOWN')
+    .map((m) => ({
+      profileKey: m.profileKey?.trim() || ulid(),
+      label: m.label?.trim() || '',
+      machineType: m.machineType as common_TechCardMachineType,
+      threadCount: m.threadCount || 0,
+      needleType: (m.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN') as common_TechCardNeedleType,
+      needleSizeNm: m.needleSizeNm || 0,
+      bedType: (m.bedType || 'TECH_CARD_BED_TYPE_UNKNOWN') as common_TechCardBedType,
+      automation: (m.automation ||
+        'TECH_CARD_AUTOMATION_LEVEL_UNKNOWN') as common_TechCardAutomationLevel,
+      threadTension: (m.threadTension ||
+        'TECH_CARD_THREAD_TENSION_UNKNOWN') as common_TechCardThreadTension,
+      // Only ever alongside the scale it explains — the server refuses a note with no tension, and
+      // a note left behind by switching the scale back to «inherit» would ride out and be refused.
+      threadTensionNote:
+        m.threadTension && m.threadTension !== 'TECH_CARD_THREAD_TENSION_UNKNOWN'
+          ? m.threadTensionNote?.trim() || ''
+          : '',
+      attachmentKind: (m.attachmentKind ||
+        'TECH_CARD_ATTACHMENT_KIND_UNKNOWN') as common_TechCardAttachmentKind,
+      // Blank = unset: inputToDecimal('') is undefined, JSON.stringify drops the key and the column
+      // stays NULL. Sending `{ value: "0" }` would state a настройка nobody made.
+      stitchesPerCm: inputToDecimal(m.stitchesPerCm),
+      stitchWidthMm: inputToDecimal(m.stitchWidthMm),
+      note: m.note?.trim() || '',
+    }));
+  const presses: common_TechCardPressProfile[] = (c?.equipmentDefaults?.presses ?? [])
+    .filter((p) => !!p.pressEquipment && p.pressEquipment !== 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN')
+    .map((p) => ({
+      profileKey: p.profileKey?.trim() || ulid(),
+      label: p.label?.trim() || '',
+      pressEquipment: p.pressEquipment as common_TechCardPressEquipment,
+      operationType: (p.operationType ||
+        'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType,
+      pressTemperatureC: p.pressTemperatureC || 0,
+      pressDwellSec: p.pressDwellSec || 0,
+      pressPressureNCm2: inputToDecimal(p.pressPressureNCm2),
+      // Verbatim, undefined included: absent = «not stated», false = «press it DRY». JSON.stringify
+      // drops the key for undefined, which is exactly the wire shape an unset optional bool has.
+      pressSteam: p.pressSteam,
+      pressCloth: (p.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
+      note: p.note?.trim() || '',
+    }));
+  return { machines, presses };
+}
+
+// The 1:1 construction section.
+//
+// IT IS SENT WHEN IT CARRIES SOMETHING **OR WHEN THE CARD ALREADY HAD ONE**, and both halves are
+// load-bearing under a full-replace write where an ABSENT section means «preserve the stored row»:
+//
+//   - counting only content would make the section unclearable — empty the last field (or delete the
+//     last equipment profile) and the payload falls silent, the server preserves what is stored, and
+//     the deletion never happens. No error, no hint, the value simply reappears on reload.
+//   - sending it ALWAYS would be worse in the other direction: an empty construction is a REPLACE, so
+//     it would insert an all-NULL row on every card that has never had one, and the section digest
+//     of «no row» and of «a row of NULLs» are different fingerprints. Every approved CONSTRUCTION
+//     sign-off on such a card — nearly all of them — would read «edited since signing» at once.
+//
+// THE PROFILES COUNT AS CONTENT (that is what `park` adds to the check): without them a card whose
+// construction holds nothing but a machine profile would be dropped as «visually empty», and the
+// profile could then be neither created nor deleted.
+//
+// THE WRAPPER IS ALWAYS PRESENT once the section travels, empty lists included — the wrapper's
+// presence is the ONLY thing that tells the server «replace the park» from «this bundle knows
+// nothing about parks, leave it alone», and an empty park is a deliberate «delete them all».
+function mapConstructionOut(
+  c: TechCardFormData['construction'] | undefined,
+  storedHadConstruction: boolean,
 ): common_TechCardConstruction | undefined {
   const seamClass = (c?.defaultSeamClass ||
     'TECH_CARD_SEAM_CLASS_UNKNOWN') as common_TechCardSeamClass;
+  const park = mapEquipmentDefaultsOut(c);
   const out: common_TechCardConstruction = {
     defaultSeamClass: seamClass,
     defaultStitchesPerCm: inputToDecimal(c?.defaultStitchesPerCm),
-    overlockThreadCount: c?.overlockThreadCount || 0,
     hemFinish: c?.hemFinish?.trim() || '',
-    pressing: c?.pressing?.trim() || '',
     notes: c?.notes?.trim() || '',
+    equipmentDefaults: park,
   };
-  // An UNKNOWN seam class and a zero thread count are «not set», so neither counts as content —
-  // otherwise a card nobody configured would send a construction block full of defaults and the
-  // section would stop reading as empty.
-  const content = hasContent([
-    seamClass === 'TECH_CARD_SEAM_CLASS_UNKNOWN' ? '' : seamClass,
-    (c?.defaultStitchesPerCm ?? '').trim(),
-    out.overlockThreadCount ? String(out.overlockThreadCount) : '',
-    out.hemFinish,
-    out.pressing,
-    out.notes,
-  ]);
-  return content ? out : undefined;
+  // An UNKNOWN seam class is «not set», so it does not count as content — otherwise a card nobody
+  // configured would send a construction block full of defaults and the section would stop reading
+  // as empty. Profile rows are counted AFTER the drop above, so a blank half-added row does not
+  // conjure a section into existence.
+  const content =
+    hasContent([
+      seamClass === 'TECH_CARD_SEAM_CLASS_UNKNOWN' ? '' : seamClass,
+      (c?.defaultStitchesPerCm ?? '').trim(),
+      out.hemFinish,
+      out.notes,
+    ]) ||
+    (park.machines?.length ?? 0) > 0 ||
+    (park.presses?.length ?? 0) > 0;
+  return content || storedHadConstruction ? out : undefined;
 }
 
 function mapPackagingOut(p?: TechCardFormData['packaging']): common_TechCardPackaging | undefined {
@@ -1719,7 +2011,18 @@ export function mapFormToTechCardInsert(
         mediaIds: d.mediaIds ?? [],
       }))
       .filter((d) => d.key || d.text || d.mediaIds.length > 0),
-    construction: mapConstructionOut(data.construction),
+    // THE MACHINE-AWARENESS FLAG (§8), set on every save this client makes and by nothing else.
+    // Operations are full-replace with no per-field protection, so a save from a bundle that has
+    // never heard of machine_type would silently wipe every machine fact on the card. The flag is
+    // what lets the server tell «this client dropped the fields» from «this card has none»: a write
+    // WITHOUT it against a card that carries machine facts is refused with FailedPrecondition
+    // instead of erasing them. It is TRANSPORT, not content — it is not hashed into any section
+    // digest, so declaring it cannot stale a signature.
+    machineFieldsAware: true,
+    // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
+    // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
+    // make every such card start writing an all-NULL construction row — see mapConstructionOut.
+    construction: mapConstructionOut(data.construction, !!original?.construction),
     operations: (data.operations ?? []).map((o, i) => {
       const opBomKeys = (o.bomLineKeys ?? []).map((k) => k.trim()).filter(Boolean);
       // An override goes out ONLY when it is set. An empty control means «inherit the card
@@ -1732,6 +2035,22 @@ export function mapFormToTechCardInsert(
       };
       const topstitchMode = (o.topstitchMode ||
         'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') as common_TechCardTopstitchMode;
+      // WHICH OF THE TWO EQUIPMENT BLOCKS THIS STEP OWNS (0306). The server refuses a machine
+      // setting on a non-machine step and a ВТО setting on a non-ВТО step BY NAME, and it refuses
+      // the whole card with it. The editor clears the hidden block when the type changes; this gate
+      // is the belt behind that, because form state outlives a control — a draft restored from
+      // localStorage, or a step whose type was switched by another surface, would otherwise carry
+      // values nobody can see to a save nobody can fix.
+      const operationType = (o.operationType ||
+        'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType;
+      const isMachineStep = operationType === 'TECH_CARD_OPERATION_TYPE_MACHINE';
+      const isPressStep =
+        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
+        operationType === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
+        operationType === 'TECH_CARD_OPERATION_TYPE_FUSING';
+      // A legacy type (LOCKSTITCH…) is canonicalised into (MACHINE, machine_type) by the server, and
+      // it derives the machine from the token itself — so this client neither invents one for it nor
+      // sends the block: the step is not MACHINE on the wire yet.
       return {
         // Blanks dropped here as well as server-side: an empty key would be a field violation the
         // operator never caused.
@@ -1740,8 +2059,7 @@ export function mapFormToTechCardInsert(
         // operation number is positional (server is authoritative); send (i+1)*10 so a
         // freshly-created card reads back sensibly before the server recomputes.
         operationNumber: (i + 1) * 10,
-        operationType: (o.operationType ||
-          'TECH_CARD_OPERATION_TYPE_UNKNOWN') as common_TechCardOperationType,
+        operationType,
         zone: (o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN') as common_TechCardGarmentZone,
         smv: inputToDecimal(o.smv),
         calloutNumber: o.calloutNumber || 0,
@@ -1766,6 +2084,45 @@ export function mapFormToTechCardInsert(
         attachmentKind: (o.attachmentKind ||
           'TECH_CARD_ATTACHMENT_KIND_UNKNOWN') as common_TechCardAttachmentKind,
         attachmentSizeMm: optionalDecimal(o.attachmentSizeMm),
+        // --- the machine block: only on a MACHINE step, and unset stays unset -------------------
+        // `0` and `_UNKNOWN` ARE the unset wire values here (there is no presence on a bare int32
+        // and every range starts above zero), so they are sent as they are rather than omitted.
+        // The decimal is the exception: `''` must leave as an ABSENT key, because `{ value: "0" }`
+        // is a real setting — a zero stitch width is a legal straight stitch.
+        machineType: (isMachineStep
+          ? o.machineType || 'TECH_CARD_MACHINE_TYPE_UNKNOWN'
+          : 'TECH_CARD_MACHINE_TYPE_UNKNOWN') as common_TechCardMachineType,
+        machineProfileKey: isMachineStep ? o.machineProfileKey?.trim() || '' : '',
+        threadCount: isMachineStep ? o.threadCount || 0 : 0,
+        needleType: (isMachineStep
+          ? o.needleType || 'TECH_CARD_NEEDLE_TYPE_UNKNOWN'
+          : 'TECH_CARD_NEEDLE_TYPE_UNKNOWN') as common_TechCardNeedleType,
+        needleSizeNm: isMachineStep ? o.needleSizeNm || 0 : 0,
+        threadTension: (isMachineStep
+          ? o.threadTension || 'TECH_CARD_THREAD_TENSION_UNKNOWN'
+          : 'TECH_CARD_THREAD_TENSION_UNKNOWN') as common_TechCardThreadTension,
+        // Only with the scale it explains — server parity, same pair discipline as kind/kind_note.
+        threadTensionNote:
+          isMachineStep &&
+          o.threadTension &&
+          o.threadTension !== 'TECH_CARD_THREAD_TENSION_UNKNOWN'
+            ? o.threadTensionNote?.trim() || ''
+            : '',
+        stitchWidthMm: isMachineStep ? optionalDecimal(o.stitchWidthMm) : undefined,
+        // --- the ВТО block: only on PRESS / PRESS_OPEN / FUSING ---------------------------------
+        pressEquipment: (isPressStep
+          ? o.pressEquipment || 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN'
+          : 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN') as common_TechCardPressEquipment,
+        pressProfileKey: isPressStep ? o.pressProfileKey?.trim() || '' : '',
+        pressTemperatureC: isPressStep ? o.pressTemperatureC || 0 : 0,
+        pressDwellSec: isPressStep ? o.pressDwellSec || 0 : 0,
+        pressPressureNCm2: isPressStep ? optionalDecimal(o.pressPressureNCm2) : undefined,
+        // undefined drops the key, which IS the wire shape of an unset optional bool — and the
+        // server reads a present `false` as the stated instruction «without steam».
+        pressSteam: isPressStep ? o.pressSteam : undefined,
+        pressCloth: (isPressStep
+          ? o.pressCloth || 'TECH_CARD_PRESS_CLOTH_UNKNOWN'
+          : 'TECH_CARD_PRESS_CLOTH_UNKNOWN') as common_TechCardPressCloth,
         note: o.note?.trim() || '',
       };
     }),

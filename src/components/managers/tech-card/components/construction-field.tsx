@@ -8,15 +8,7 @@ import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
 import { seamClassOptions } from './operation-options';
 
-// 3/4/5 threads is the whole real range of an overlock; 0 = not set. A closed list rather than a
-// number field because there is no fourth answer, and a free number invites «4-нит.» back.
-const overlockThreadCountOptions = [
-  { value: 0, label: '— threads —' },
-  { value: 3, label: '3' },
-  { value: 4, label: '4' },
-  { value: 5, label: '5' },
-];
-import { hemFinishOptions, pressingOptions } from './tech-card-options';
+import { hemFinishOptions } from './tech-card-options';
 
 // General workmanship parameters (Sheet «Обработка», upper block). 1:1 — sent as
 // unset when every field is blank (see mapConstructionOut). Guided combos, not closed sets.
@@ -67,18 +59,15 @@ export function ConstructionField() {
           label='default stitch density (st/cm)'
           placeholder='4'
         />
-        <SelectField
-          name='construction.overlockThreadCount'
-          label='overlock threads'
-          items={overlockThreadCountOptions}
-          valueAsNumber
-        />
         <ComboField name='construction.hemFinish' label='hem finish' options={hemFinishOptions} />
-        <ComboField
-          name='construction.pressing'
-          label='pressing / finish'
-          options={pressingOptions}
-        />
+        {/* TWO CONTROLS LEFT HERE WITH 0306 and they are not coming back in this shape.
+            «overlock threads» was ONE number per card: it could describe one overlock, and a card is
+            sewn on several — the migration turned each card's count into a real overlock profile.
+            «pressing / finish» was prose answering «how is it pressed» for a whole garment, when
+            pressing is a STEP with its own equipment, temperature and dwell; the migration moved the
+            text into `notes`. Both are gone from the contract, so leaving the controls would have
+            bound them to form fields that no longer travel — visible, editable, silently discarded.
+            The equipment park («MACHINES & PRESSING») takes their place here — TC3. */}
       </div>
       <div className='mt-2'>
         <TextareaField name='construction.notes' label='notes' rows={2} maxLength={2000} />

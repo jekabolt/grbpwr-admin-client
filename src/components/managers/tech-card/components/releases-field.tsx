@@ -18,6 +18,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Row, RowTotal } from 'ui/components/row';
+import { legacyOverlockThreadsText, legacyPressingText } from './equipment-options';
 import { operationHeading } from './operation-options';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
@@ -100,9 +101,14 @@ function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
     [
       ['default seam class', c.defaultSeamClass],
       ['default stitch density', c.defaultStitchesPerCm?.value],
-      ['overlock threads', c.overlockThreadCount ? String(c.overlockThreadCount) : ''],
+      // A FROZEN RELEASE IS READ IN THE WORDS IT WAS SIGNED IN. `overlock_thread_count` and
+      // `pressing` left the contract with the equipment park (0306), but a release snapshot is
+      // immutable protojson that still holds them — reading it through the current generated type
+      // would silently drop two lines somebody approved. Live cards simply have neither and the
+      // rows below fall away on their own.
+      ['overlock threads', legacyOverlockThreadsText(c)],
       ['hem finish', c.hemFinish],
-      ['pressing', c.pressing],
+      ['pressing', legacyPressingText(c)],
       ['notes', c.notes],
     ] as Array<[string, string | undefined]>
   ).filter((r): r is [string, string] => !!r[1]?.trim());

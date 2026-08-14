@@ -124,9 +124,10 @@ const enumLabel = (v: string | undefined, prefix: string): string =>
 const lifecycleLabel = (v?: string) => enumLabel(v, 'COLORWAY_LIFECYCLE_STATUS_');
 const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 
+import { legacyOverlockThreadsText, legacyPressingText } from './equipment-options';
 import {
   attachmentOptions,
-  operationTypeOptions,
+  OPERATION_TYPE_LABELS,
   seamClassOptions,
   zoneOptions,
 } from './operation-options';
@@ -177,8 +178,11 @@ const optionLabel = <T extends string>(
   noneValue?: T,
 ): string => (!v || v === noneValue ? '' : opts.find((o) => o.value === v)?.label ?? '');
 
+// The TOTAL label map, not the picker list: the picker offers only the types a step may be GIVEN,
+// while paper has to render every type that can arrive — including the nine legacy tokens frozen
+// into archived releases, which through the picker list would each have printed as «—».
 const operationTypeText = (v?: common_TechCardOperationType): string =>
-  optionLabel(operationTypeOptions, v, 'TECH_CARD_OPERATION_TYPE_UNKNOWN') || '—';
+  (v && v !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ? OPERATION_TYPE_LABELS[v] : '') || '—';
 const zoneText = (v?: common_TechCardGarmentZone): string =>
   optionLabel(zoneOptions, v, 'TECH_CARD_GARMENT_ZONE_UNKNOWN');
 const seamClassText = (v?: common_TechCardSeamClass): string =>
@@ -1943,18 +1947,15 @@ export function TechPackDocument({
               <div>
                 <KV k='default seam class' v={seamClassText(tc.construction.defaultSeamClass)} />
                 <KV k='default density' v={densityText(tc.construction.defaultStitchesPerCm)} />
-                <KV
-                  k='overlock'
-                  v={
-                    tc.construction.overlockThreadCount
-                      ? `${tc.construction.overlockThreadCount}-thread`
-                      : ''
-                  }
-                />
+                {/* RETIRED WITH THE EQUIPMENT PARK (0306) AND STILL PRINTED FOR ARCHIVES: a frozen
+                    release is protojson written while these two fields existed, and this document
+                    prints frozen releases as well as live cards. A live card has neither, so both
+                    rows are simply blank there. The park's own table replaces them — TC5. */}
+                <KV k='overlock' v={legacyOverlockThreadsText(tc.construction)} />
               </div>
               <div>
                 <KV k='hem finish' v={tc.construction.hemFinish} />
-                <KV k='pressing' v={tc.construction.pressing} />
+                <KV k='pressing' v={legacyPressingText(tc.construction)} />
                 <KV k='notes' v={tc.construction.notes} />
               </div>
             </div>
