@@ -340,7 +340,7 @@ export function MaterialPlan({
                   {g.rows.map((c, i) => (
                     <tr key={`${wireInt(c.colorwayId)}-${wireInt(c.materialId)}-${i}`}>
                       <td className='w-1/3'>{c.colorwayName || `#${c.colorwayId}`}</td>
-                      <td className='text-left'>
+                      <td data-align='left'>
                         {c.materialName || <EmptyCell />}
                         {c.pinned ? (
                           ''

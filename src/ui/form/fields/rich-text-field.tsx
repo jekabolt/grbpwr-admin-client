@@ -111,8 +111,11 @@ function EmailRichTextEditor({
     content: value || '',
     editorProps: {
       attributes: {
+        // 16px, а не 12px админа: это НЕ поле формы, а холст, на котором пишут текст письма —
+        // абзацами, а читать его будет покупатель в почте, где он и наберётся примерно так.
+        // Двенадцать здесь сравняли бы тело письма с его же подписью-лейблом.
         class:
-          'min-h-[120px] w-full px-3 py-2 focus:outline-none leading-snug [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_a]:underline',
+          'min-h-[120px] w-full px-3 py-2 text-base focus:outline-none leading-snug [&_ul]:list-disc [&_ol]:list-decimal [&_ul]:pl-5 [&_ol]:pl-5 [&_a]:underline',
       },
       transformPastedHTML: stripToEmailSafeHtml,
     },

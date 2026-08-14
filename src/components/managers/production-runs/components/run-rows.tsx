@@ -136,8 +136,8 @@ export function RunTable({
         <tr>
           <th>партия</th>
           {showTechCard && <th>стиль</th>}
-          <th>статус</th>
-          <th>план → принято</th>
+          <th data-align='left'>статус</th>
+          <th data-align='left'>план → принято</th>
           <th>обещано</th>
           {canReadCosting && <th>unit план / факт</th>}
           <th>
@@ -175,7 +175,7 @@ export function RunTable({
                   {ins?.releaseId ? ` · rel ${ins.releaseId}` : ''}
                 </td>
               )}
-              <td>
+              <td data-align='left'>
                 <span className='flex flex-wrap items-center gap-1'>
                   <RunStatusBadge status={ins?.status} />
                   {late > 0 && (
@@ -185,7 +185,7 @@ export function RunTable({
                   )}
                 </span>
               </td>
-              <td>
+              <td data-align='left'>
                 <QtyBar {...q} />
               </td>
               <td className='tabular-nums'>{runDate(ins?.promisedAt) || '—'}</td>

@@ -71,7 +71,7 @@ export function LaySectionRows({
         <thead>
           <tr>
             <th>#</th>
-            <th>раскладка</th>
+            <th data-align='left'>раскладка</th>
             <th>слоёв</th>
             <th>длина секции</th>
             <th />
@@ -90,7 +90,7 @@ export function LaySectionRows({
             return (
               <tr key={s.sectionKey}>
                 <td>{i + 1}</td>
-                <td className='text-left'>
+                <td data-align='left'>
                   <MarkerPicker
                     value={s.markerId}
                     runMarkers={runMarkers}

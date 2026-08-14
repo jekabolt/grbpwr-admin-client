@@ -227,6 +227,13 @@ export function PatternViewerPage() {
 }
 
 // Одна колонка на всю ширину телефона; на десктопе — узкий столбец по центру серого ground.
+//
+// 16PX, А НЕ 12PX АДМИНА — по той же причине, что и во вьюере наряда: страницу читают с телефона
+// в цеху, а пальцами её не увеличить (`user-scalable=no` в index.html стоит ради iOS, чтобы тот не
+// зумил на фокусе поля). Почти весь текст здесь и так называет размер сам, через `Text`; наследуют
+// немногие — например строка отказа парсера DXF, и именно её в цеху и надо прочитать.
 function Shell({ children }: { children: React.ReactNode }) {
-  return <div className='mx-auto w-full max-w-3xl px-2.5 py-4 lg:px-4 lg:py-6'>{children}</div>;
+  return (
+    <div className='mx-auto w-full max-w-3xl px-2.5 py-4 text-base lg:px-4 lg:py-6'>{children}</div>
+  );
 }

@@ -206,6 +206,8 @@ A monochrome ramp doing structural work, plus four semantic colours that are nev
 
 The ceiling is enforced by `body { font-size: var(--text-textBaseSize) }` in `global.css`, and that declaration is load-bearing: Tailwind's preflight sets no font-size, so without it every element that does not name a size itself falls back to the browser's 16px. That is how the app ran until 2026-08-14 — table cells and `Row` values a third larger than the 12px section title above them, which is why tables read as big and heavy. If body text ever looks oversized again, check that line before touching a screen.
 
+The ceiling covers the admin, which is read sitting down at a desk. Three surfaces are named exceptions at 16px, and the reason is physical rather than aesthetic: the two public QR pages (`/r/:token`, `/p/:token`) are read at arm's length on a phone on the factory floor **and cannot be pinch-zoomed** — `index.html` asks for `user-scalable=no` so iOS stops zooming on input focus — and the email rich-text canvas holds prose a customer will read in a mail client. Each carries a comment saying so. Do not add a fourth without one.
+
 **The No-Hand-Tracking Rule.** Letter-spacing is baked into the four `tracking` tokens (`pill` 0.03em, `label` 0.04em, `group` 0.05em, `section` 0.06em) and applied through the `Text` primitive. No screen sets `letter-spacing`, `font-size` in px, or `tabular-nums` by hand. Outside `src/ui`, writing `text-[Npx]` is prohibited.
 
 **The Uppercase-Is-A-Label Rule.** Uppercase marks a label, a control or a section title — things of four words or fewer. Sentences and hints stay sentence case at `label` colour.

@@ -701,7 +701,7 @@ export function CutReceipts({
                   <th>выкроено / годных</th>
                   <th>на крой</th>
                   <th>на годное</th>
-                  <th className='w-full'>оговорки</th>
+                  <th data-align='left' className='w-full'>оговорки</th>
                 </tr>
               </thead>
               <tbody>
@@ -715,7 +715,7 @@ export function CutReceipts({
                     // пара, где часть настилов с фактом, дала бы число ни о чём.
                     return (
                       <tr key={p.key}>
-                        <td className='text-left'>{label}</td>
+                        <td data-align='left'>{label}</td>
                         <td>
                           <EmptyCell />
                         </td>
@@ -728,7 +728,7 @@ export function CutReceipts({
                         <td>
                           <EmptyCell />
                         </td>
-                        <td className='text-left'>
+                        <td data-align='left'>
                           {p.slotless ? (
                             <Text size='micro' component='span' className='block text-warning'>
                               у настила нет идентификатора слота BOM (легаси-запись) — строка
@@ -834,7 +834,7 @@ export function CutReceipts({
                   }
                   return (
                     <tr key={p.key}>
-                      <td className='text-left'>{label}</td>
+                      <td data-align='left'>{label}</td>
                       <td>
                         {fmtQty(perUnit.factTotal)} {u}
                       </td>
@@ -852,7 +852,7 @@ export function CutReceipts({
                           ? 'принято 0'
                           : `${fmtQty(perUnit.perAccepted)} ${u}`}
                       </td>
-                      <td className='text-left'>
+                      <td data-align='left'>
                         {notes.length === 0 ? (
                           <EmptyCell />
                         ) : (
@@ -931,7 +931,7 @@ export function CutReceipts({
                         <th title='сколько изделий этого размера кроит сам настил'>по настилу</th>
                         <th>выкроено</th>
                         <th>принято в пошив</th>
-                        <th className='w-full'>заметка</th>
+                        <th data-align='left' className='w-full'>заметка</th>
                         <th />
                       </tr>
                     </thead>
@@ -991,10 +991,9 @@ export function CutReceipts({
                                 d.accepted
                               )}
                             </td>
-                            <td>
+                            <td data-align='left'>
                               {editable ? (
                                 <Input
-                                  className='text-left'
                                   aria-label={`${label} заметка`}
                                   value={d.note}
                                   maxLength={512}
@@ -1120,7 +1119,7 @@ function LayClothTotalRow({
       <td>{planTotal > 0 ? planTotal : <EmptyCell />}</td>
       <td>{stored.length > 0 ? cut : <EmptyCell />}</td>
       <td>{stored.length > 0 ? accepted : <EmptyCell />}</td>
-      <td className='text-left' colSpan={2}>
+      <td data-align='left' colSpan={2}>
         <LayClothSummary report={report} />
       </td>
     </TotalRow>
@@ -1197,7 +1196,7 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
           <th>принято в пошив</th>
           <th>сдано готовым</th>
           <th>брак</th>
-          <th className='w-full'>расхождение</th>
+          <th data-align='left' className='w-full'>расхождение</th>
         </tr>
       </thead>
       <tbody>
@@ -1249,7 +1248,7 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
               <td className={acceptedTone}>{r.accepted == null ? <EmptyCell /> : r.accepted}</td>
               <td>{r.received == null ? <EmptyCell /> : r.received}</td>
               <td>{r.defect == null ? <EmptyCell /> : r.defect}</td>
-              <td className='text-left'>
+              <td data-align='left'>
                 {notes.length === 0 ? (
                   <EmptyCell>сходится</EmptyCell>
                 ) : (
@@ -1275,7 +1274,7 @@ function ChainTable({ rows, sizeLabel }: { rows: ChainRow[]; sizeLabel: (id: num
           <td>{sum((r) => r.accepted)}</td>
           <td>{sum((r) => r.received)}</td>
           <td>{sum((r) => r.defect)}</td>
-          <td className='text-left'>
+          <td data-align='left'>
             {anyIncomplete ? (
               <Text size='micro' component='span' className='text-labelColor'>
                 итог кроя неполный — не по всем настилам введено

@@ -102,8 +102,10 @@ export function DragDropArea({
           className='col-span-2 flex min-h-[300px] flex-col items-center justify-center gap-2 border-2 border-dashed border-textInactiveColor text-textInactiveColor transition-colors hover:border-textInactiveColor hover:text-textColor lg:col-span-4'
         >
           <span className='text-lg leading-none'>+</span>
-          <span className='uppercase'>drag &amp; drop media here</span>
-          <span className='text-small'>or click to browse</span>
+          {/* Две строки пустого состояния должны отличаться: приглашение — 12px жирным,
+              подсказка — 10px. Раньше их разводили случайные 16px наследования. */}
+          <span className='font-bold uppercase'>drag &amp; drop media here</span>
+          <span className='text-micro uppercase'>or click to browse</span>
         </button>
       )}
       {showAddButton && (

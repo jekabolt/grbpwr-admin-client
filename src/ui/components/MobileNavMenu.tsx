@@ -42,7 +42,10 @@ export function MobileNavMenu() {
             <div className='flex flex-col gap-5'>
               {groups.map((group) => (
                 <section key={group.label}>
-                  <Text variant='uppercase' className='text-labelColor'>
+                  {/* Заголовок группы — 10px серый (система: «group titles» = Label), а плитки
+                      под ним 12px ink. Пока тело наследовало браузерные 16px, разницу держал
+                      размер плиток; теперь её держит размер ЗАГОЛОВКА, как и задумано. */}
+                  <Text variant='uppercase' size='micro' className='text-labelColor'>
                     {group.label}
                   </Text>
                   <div className='mt-2 grid grid-cols-2 gap-2'>

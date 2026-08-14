@@ -243,6 +243,15 @@ export function RunPackViewerPage() {
 }
 
 // Одна колонка на всю ширину телефона; на десктопе — столбец по центру серого ground.
+//
+// 16PX, А НЕ 12PX АДМИНА, И ЭТО РЕШЕНИЕ, А НЕ НЕДОСМОТР. Двенадцать пикселей — размер плотного
+// экспертного инструмента, который читают с полуметра сидя. Эту страницу читают с вытянутой руки,
+// с телефона, в цеху, у настила — и увеличить её пальцами НЕЛЬЗЯ: index.html просит
+// `maximum-scale=1, user-scalable=no`, чтобы iOS не зумил на фокусе поля. То есть здесь размер
+// шрифта — единственная доступная цеху регулировка, и мы её не отбираем. Ячейки таблиц просят
+// размер отдельно: `DataTable` называет свой (12px) сам, и наследование до них не доходит.
 function Shell({ children }: { children: React.ReactNode }) {
-  return <div className='mx-auto w-full max-w-5xl px-2.5 py-4 lg:px-4 lg:py-6'>{children}</div>;
+  return (
+    <div className='mx-auto w-full max-w-5xl px-2.5 py-4 text-base lg:px-4 lg:py-6'>{children}</div>
+  );
 }
