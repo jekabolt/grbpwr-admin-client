@@ -17,7 +17,7 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { DataTable, EmptyCell, TotalRow } from 'ui/components/data-table';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { RpCutBlocker, RpCutRow, RpSize } from './manifest';
+import { fusingViewerCaption, RpCutBlocker, RpCutRow, RpSize } from './manifest';
 import { DESC_CELL, RUNPACK_GRID } from './table';
 
 const SYMMETRY_PREFIX = 'TECH_CARD_PIECE_CUT_SYMMETRY_';
@@ -137,6 +137,11 @@ export function CutList({
                   {r.fused ? (
                     <Text size='nano' component='p' className='uppercase'>
                       клеевая: {(r.fusing_material_name ?? '').trim() || 'артикул не назван'}
+                      {/* КАК ИМЕННО дублировать (0304) — по тому же доводу, что и долевая строкой
+                          выше: по этому экрану режут, и строка режется отдельно. Манифест несёт
+                          режим уже словом (fusingModeWord на сервере), поэтому здесь оно только
+                          печатается — второй словарь развёл бы бумагу с телефоном. */}
+                      {` · ${fusingViewerCaption(r.fusing_mode, r.fusing_width_mm)}`}
                     </Text>
                   ) : null}
                 </td>
