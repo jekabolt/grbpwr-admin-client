@@ -160,23 +160,42 @@ function expandInto(
 // Model space → groups. INSERTs become one group per instance (piece identity); loose
 // entities pool into a single fallback group split later by containment analysis.
 //
-// Возвращает ещё и `skippedBlocks` — см. SkipTally выше: «файл прочитан» и «в файле прочитано всё»
+// Возвращает ещё `skippedBlocks` — см. SkipTally выше: «файл прочитан» и «в файле прочитано всё»
 // это разные утверждения, и второе обязано доезжать до того, кто судит об ОТСУТСТВИИ блока.
+//
+// И `blockNames` — ИМЕНА ВСТРЕЧЕННЫХ ВСТАВОК, независимо от того, дожила ли их геометрия до контура
+// (находка 1 третьего адверсарного ревью). Между «блок встречен» и «блок стал деталью» лежит весь
+// геометрический путь — сшивка разомкнутых цепочек, порог площади, отбор внешнего контура,
+// `sanitizeLoop` (dxf/pieces.ts): любой его шаг может НЕ выдать ни одной детали по блоку, который в
+// файле есть. Для раскладки это правильный ответ («считать нечего»), а для вопроса «детали больше
+// нет в чертеже» — ложь, и цена лжи — предложенное по умолчанию удаление детали кроя вместе со
+// строками рецепта и замеренными площадями. Поэтому присутствие берётся ОТСЮДА, а геометрия —
+// оттуда, и это намеренно два разных ответа.
+//
+// Только ВЕРХНЕУРОВНЕВЫЕ вставки: имя детали — это имя блока, вставленного в модельное
+// пространство (`EntityGroup.blockName` берётся здесь же), а вложенные блоки — внутренности одной
+// детали. Записав и их, мы позволили бы служебному вложенному блоку с именем детали замаскировать
+// её настоящее исчезновение.
 export function expandGroups(
   modelEntities: IEntity[],
   blocks: Record<string, IBlock>,
   u: number,
   tolCm: number,
   warnings: string[],
-): { groups: EntityGroup[]; skippedBlocks: number } {
+): { groups: EntityGroup[]; skippedBlocks: number; blockNames: string[] } {
   const groups: EntityGroup[] = [];
   const loose: EntityGroup = { blockName: null, chains: [] };
   const budget: Budget = { left: MAX_INSTANCES, warned: false };
   const tally: SkipTally = { blocks: 0, warnedMissing: new Set<string>() };
+  const seenBlocks = new Set<string>();
 
   for (const e of modelEntities) {
     if (e.type === 'INSERT') {
       const ins = e as IInsertEntity;
+      // Записывается ДО всех проверок: вставка на отсутствующее определение — это тоже «имя в
+      // чертеже есть», а не «детали не стало». Ни одна ветка ниже не имеет права молча вычесть
+      // блок из набора присутствия.
+      if (ins.name) seenBlocks.add(String(ins.name));
       const block = blocks[ins.name];
       if (!block || !block.entities) {
         // Верхнеуровневый INSERT — это РОВНО одна деталь чертежа: пропустив его, разбор теряет
@@ -217,5 +236,5 @@ export function expandGroups(
   }
 
   if (loose.chains.length > 0) groups.push(loose);
-  return { groups, skippedBlocks: tally.blocks };
+  return { groups, skippedBlocks: tally.blocks, blockNames: [...seenBlocks] };
 }

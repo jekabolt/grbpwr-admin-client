@@ -37,6 +37,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
     warnings,
     failedFiles,
     skippedBlocks,
+    blockNames,
   } = await parseSheets(sheets, opts);
 
   // Every file failed → that's an error, not a note with an empty piece list.
@@ -53,6 +54,8 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
   // «в чертеже такого блока нет» и «мы про него ничего не знаем», и различить их может только
   // главный поток, у которого есть карточка. skippedBlocks — та же разница, но ВНУТРИ листа,
   // который прочитался: пропущенная вставка блока делает набор дырявым, ничем себя не выдавая.
+  // blockNames — третья: блок прочитан, но контура из него не вышло, и `pieces` про него молчит,
+  // хотя в чертеже он есть. Присутствие спрашивают у него, геометрию — у `pieces`.
   post({
     type: 'parsed',
     id,
@@ -61,6 +64,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
     warnings,
     failedFiles,
     skippedBlocks,
+    blockNames,
   });
 }
 

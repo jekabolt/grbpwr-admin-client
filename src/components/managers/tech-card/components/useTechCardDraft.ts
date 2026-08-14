@@ -207,26 +207,68 @@ export function useTechCardDraft(
     // одна посторонняя правка карточки обнуляет её у ВСЕХ деталей разом, без единого сообщения и без
     // контрола, которым это можно было бы вернуть.
     //
-    // Лечится ОТСУТСТВИЕ, а не значение: поле, которое в черновике есть, уезжает как есть — иначе
-    // восстановление отменяло бы правку, ради которой черновик и существует. Ключ — lineKey: имя
-    // редактируемо, порядок строк не обещан ничем.
+    // Лечится ОТСУТСТВИЕ КЛЮЧА, а не значение: поле, которое в черновике есть, уезжает как есть —
+    // включая пустое и `false`, — иначе восстановление отменяло бы правку, ради которой черновик и
+    // существует.
+    //
+    // ПЕРЕНОСИТСЯ ВСЁ, ЧЕГО В СТРОКЕ НЕТ, а не список полей (находка 3 третьего адверсарного
+    // ревью). Список из двух имён закрывал ровно те два поля, которые заметили, — а старый черновик
+    // так же не несёт `ungraded`, `fusingMode`, `fusingWidthMm` и любое поле, которое появится
+    // завтра. Все они уезжают на провод КРУГЛЫМ РЕЙСОМ (см. маппер `pieces` в schema.ts), то есть
+    // zod-дефолт на месте отсутствующего поля — это не молчание, а команда снять значение. Правило
+    // «нет ключа — возьми с карточки» закрывает и будущие поля; список пришлось бы дописывать при
+    // каждом, и один раз его забудут.
+    //
+    // КЛЮЧ СОПОСТАВЛЕНИЯ — ДВА, и второй не запасной (находка 2 третьего ревью). Черновик, снятый
+    // ДО появления `lineKey` у детали, не сходится по нему НИ С ОДНОЙ деталью карточки: ключа в
+    // строке нет вовсе. Дальше маппер сохранения минтит такой строке НОВЫЙ ULID (`p.lineKey?.trim()
+    // || ulid()`), и карточка уезжает с полностью новым набором деталей: старые сервер видит
+    // исчезнувшими и сносит вместе со строками рецепта колорвеев и замеренными площадями, а если
+    // алиасы на старые ключи живы — сохранение вообще падает с `piece_line_key: not_found`. Поэтому
+    // безключевая строка ищется ПО ИМЕНИ: сервер держит имя детали уникальным в пределах карточки
+    // (та же проверка стоит в `pieces` superRefine схемы), значит имя — однозначный ключ, а не
+    // догадка. Ровно тот же приём, что у `patterns` выше, где строки карточки регистрируются под
+    // двумя идентичностями сразу, потому что одну сторона черновика назвать не может.
     if (Array.isArray(data.pieces) && Array.isArray(loaded.pieces)) {
-      const loadedByKey = new Map<string, NonNullable<typeof loaded.pieces>[number]>();
+      type LoadedPiece = NonNullable<typeof loaded.pieces>[number];
+      const loadedByKey = new Map<string, LoadedPiece>();
+      const loadedByName = new Map<string, LoadedPiece>();
       for (const p of loaded.pieces) {
         const lk = p.lineKey?.trim().toLowerCase();
         if (lk) loadedByKey.set(lk, p);
+        const nm = p.name?.trim().toLowerCase();
+        // Первое вхождение и только оно: дубль имени карточка бы не сохранила, но если он всё же
+        // приехал, брать «последнее» значило бы решать спор жребием.
+        if (nm && !loadedByName.has(nm)) loadedByName.set(nm, p);
       }
-      const carriedPieceFields = ['cutSymmetry', 'piecesPerGarment'] as const;
+      // Одна деталь карточки достаётся не более чем ОДНОЙ строке черновика: иначе две безымянные
+      // копии получили бы один lineKey, и апсерт на сервере схлопнул бы их в одну.
+      const claimed = new Set<LoadedPiece>();
       data.pieces = data.pieces.map((p) => {
-        const from = loadedByKey.get((p.lineKey ?? '').trim().toLowerCase());
-        // Детали, заведённой этим же черновиком, на прочитанной карточке ещё нет — переносить
-        // нечего, и её поля модалка проставила явно при заведении.
-        if (!from) return p;
-        const missing = carriedPieceFields.filter((f) => !(f in (p as object)));
-        if (missing.length === 0) return p;
+        const lk = (p.lineKey ?? '').trim().toLowerCase();
+        const byKey = lk ? loadedByKey.get(lk) : undefined;
+        const from =
+          byKey ?? (lk ? undefined : loadedByName.get((p.name ?? '').trim().toLowerCase()));
+        // Ни ключа, ни имени на карточке — это законно новая деталь черновика (её только что завела
+        // модалка), и все её поля она проставила явно. Переносить нечего.
+        if (!from || claimed.has(from)) return p;
+        claimed.add(from);
         const merged = { ...p } as Record<string, unknown>;
-        for (const f of missing) merged[f] = from[f];
-        return merged as typeof p;
+        let changed = false;
+        for (const k of Object.keys(from)) {
+          if (k in (p as object)) continue;
+          merged[k] = (from as Record<string, unknown>)[k];
+          changed = true;
+        }
+        // Сопоставились по имени — значит ключа у строки нет (или он пуст), и его тоже надо взять с
+        // карточки: без него сохранение заведёт деталь заново, а старую снесёт каскадом. Это
+        // единственное место, где переносится ПРИСУТСТВУЮЩЕЕ поле, — потому что пустой lineKey это
+        // не ответ оператора, а отсутствие идентичности.
+        if (!byKey && from.lineKey?.trim()) {
+          merged.lineKey = from.lineKey;
+          changed = true;
+        }
+        return (changed ? merged : p) as typeof p;
       });
     }
     form.reset(data, { keepDefaultValues: true });

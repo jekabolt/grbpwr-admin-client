@@ -14,6 +14,10 @@ export type ParseOutcome = {
   // Блоки, пропущенные ВНУТРИ прочитавшихся листов (находка 1 второго адверсарного ревью). Неполнота
   // бывает двух видов, и вторая молчаливее первой: файл прочитан целиком, а блока в наборе нет.
   skippedBlocks: number;
+  // Имена встреченных блоков — набор ПРИСУТСТВИЯ, отдельный от `pieces` (находка 1 третьего ревью).
+  // «Блок есть в чертеже» и «из блока построился контур» — разные факты, и второй молчит там, где
+  // геометрия не сошлась.
+  blockNames: string[];
 };
 
 export type NestProgressMsg = {
@@ -76,6 +80,7 @@ export class NestingWorkerClient {
               warnings: msg.warnings,
               failedFiles: msg.failedFiles,
               skippedBlocks: msg.skippedBlocks,
+              blockNames: msg.blockNames,
             });
           } else reject(new Error('unexpected worker reply'));
         },
