@@ -114,6 +114,13 @@ export function grainlineArrow(grainline?: string): string {
 
 export const UNSET_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
   'TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN';
+// Экспортируется, потому что у ответа «режется как нарисовано» появился ВТОРОЙ автор: модалка
+// «детали кроя из DXF» проставляет его сама (чертёж несёт каждый контур), и литерал, рассыпанный по
+// двум файлам, разошёлся бы с этим словарём молча — селект показывал бы одно, чертёж писал другое.
+// MIRRORED наружу НЕ выносится: утверждать зеркальность за человека модалка не имеет права, ей
+// хватает `isCutSymmetryMarked` и `cutSymmetryCountInvalid`.
+export const IDENTICAL_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
+  'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
 const MIRRORED: common_TechCardPieceCutSymmetry = 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED';
 
 // Ноль перечисления — `_UNKNOWN`, не `_UNSPECIFIED`: `proto/common/buf.yaml` задаёт
@@ -127,7 +134,7 @@ export const cutSymmetryOptions: Array<{
   // «значение по умолчанию», то есть как ответ «обычная деталь», которого никто не давал — а весь
   // смысл поля в том, чтобы «не спрашивали» отличалось от «спросили, ответ: одинаковые».
   { value: UNSET_CUT_SYMMETRY, label: '— не размечено' },
-  { value: 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL', label: 'одинаковые копии' },
+  { value: IDENTICAL_CUT_SYMMETRY, label: 'одинаковые копии' },
   // Чётность названа в САМОЙ подписи, до всякой ошибки: CHECK в БД
   // (`chk_tcp_mirrored_needs_even_count`) отвергает зеркальную пару при нечётном количестве, и
   // узнать об этом дешевле до выбора, чем из красной строки после него.
@@ -189,7 +196,7 @@ export const CUT_SYMMETRY_EVEN_COUNT_MESSAGE =
   'зеркальная пара делится пополам — количество на изделие должно быть чётным и не меньше двух. Две строки по одной штуке (FP_L ×1 и FP_R ×1) — это «одинаковые копии» по штуке в каждой; «зеркальные пары» ставят на ОДНУ строку с чётным количеством.';
 
 const CUT_SYMMETRY_SHORT: Record<string, string> = {
-  TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL: 'одинаковые',
+  [IDENTICAL_CUT_SYMMETRY]: 'одинаковые',
   TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED: 'зеркальные пары',
   TECH_CARD_PIECE_CUT_SYMMETRY_FOLD: 'со сгибом',
 };
@@ -211,7 +218,7 @@ export function cutSymmetryBadge(
     const label = CUT_SYMMETRY_SHORT[v] ?? v;
     // Зеркальность и сгиб — указания цеху, которые меняют физическую деталь на выходе; «одинаковые»
     // подтверждает положение вещей по умолчанию. Отсюда чернила против серого.
-    return { label, tone: v === 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL' ? 'mut' : 'ink' };
+    return { label, tone: v === IDENTICAL_CUT_SYMMETRY ? 'mut' : 'ink' };
   }
   if (cutSymmetryUnanswered(v, piecesPerGarment)) {
     return { label: 'парность не указана', tone: 'attention' };
@@ -244,7 +251,7 @@ export function cutSymmetryPrintCaption(
       : 'зеркальные пары';
   }
   if (v === 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD') return 'со сгибом';
-  if (v === 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL') return '';
+  if (v === IDENTICAL_CUT_SYMMETRY) return '';
   return cutSymmetryUnanswered(v, piecesPerGarment) ? 'парность не указана' : '';
 }
 

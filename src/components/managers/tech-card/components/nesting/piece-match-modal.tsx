@@ -49,6 +49,12 @@ import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes } from 'utils/pattern';
 import { recipeHoldersByPiece } from '../piece-recipe-hold';
+import {
+  IDENTICAL_CUT_SYMMETRY,
+  UNSET_CUT_SYMMETRY,
+  cutSymmetryCountInvalid,
+  isCutSymmetryMarked,
+} from '../piece-codes';
 import type { TechCardFormData } from '../schema';
 import {
   type FabricScope,
@@ -163,6 +169,150 @@ const CREATE = '+create';
 // tech_card_piece.name is VARCHAR(255) and the server counts UTF-8 BYTES (Go len()), so a
 // 255-character Cyrillic name is twice over the limit and would fail the whole card save.
 const MAX_PIECE_NAME = 255;
+
+type PieceValue = NonNullable<TechCardFormData['pieces']>[number];
+// Что известно про идентичность из разбора: сколько раз она в чертеже (максимум по файлам и
+// размерам) и общий корень uni-копий, если он есть.
+type BlockCount = { instances: number; uniBase: string };
+
+// Что применение изменит у ОДНОЙ уже существующей детали. Незаполненное поле значит «не трогать»:
+// запись того, что и так стоит, — это лишний dirty на форме и лишний сдвиг дайджеста CONSTRUCTION,
+// то есть подпись, протухшая без единого изменения физического состава кроя.
+type PieceUpdate = { index: number; piecesPerGarment?: number; cutSymmetry?: string };
+
+// ЧТО ЭТОТ СКОУП БУДЕТ СВЯЗЫВАТЬ ПОСЛЕ ПРИМЕНЕНИЯ — блок (идентичность, ci) → деталь кроя.
+//
+// Считается ДО нажатия кнопки, потому что кнопка обязана называть свои исходы заранее. Порядок
+// повторяет apply() ровно: хранимая привязка → снятые связи → выбор оператора в строках. Разойдись
+// эти два прохода, и сводка обещала бы одно, а применение делало другое — а проверить это можно
+// было бы только по сохранённой карточке, то есть после.
+//
+// Детали, заводимые ЭТИМ применением, в карту не попадают: в массиве формы их ещё нет, их × и
+// разметку кладёт create-путь apply(). Здесь они только считаются — это N сводки.
+function plannedScopeBinding(
+  live: readonly PieceValue[],
+  storedByBlock: ReadonlyMap<string, string>,
+  unmapped: readonly string[],
+  rows: readonly BlockRow[],
+  draftNames: Record<string, string>,
+): { bound: Map<string, string>; created: number; reused: number } {
+  const liveKeys = new Set(
+    live.map((p) => (p.lineKey ?? '').trim().toLowerCase()).filter(Boolean) as string[],
+  );
+  const keyByName = new Map<string, string>();
+  for (const p of live) {
+    const n = p.name?.trim().toLowerCase();
+    if (n && p.lineKey?.trim()) keyByName.set(n, p.lineKey.trim());
+  }
+  const bound = new Map<string, string>();
+  for (const [ci, pieceLineKey] of storedByBlock) {
+    if (liveKeys.has(pieceLineKey.trim().toLowerCase())) bound.set(ci, pieceLineKey);
+  }
+  for (const b of unmapped) bound.delete(b);
+  const createdNames = new Set<string>();
+  let reused = 0;
+  for (const r of rows) {
+    if (!r.choice) continue;
+    const ci = r.block.toLowerCase();
+    if (r.choice !== CREATE) {
+      bound.set(ci, r.choice);
+      reused += 1;
+      continue;
+    }
+    // Напечатанное имя, уже существующее в карточке, ПРИВЯЗЫВАЕТ к той детали, а не заводит вторую
+    // с тем же именем (сервер такую пару отвергает целиком) — то же правило, что в apply().
+    const name = ((draftNames[ci] ?? '').trim() || defaultPieceName(r)).toLowerCase();
+    const existing = keyByName.get(name);
+    if (existing) {
+      bound.set(ci, existing);
+      reused += 1;
+      continue;
+    }
+    // Вторая uni-копия приходит с тем же именем по умолчанию и прицепляется к уже заводимой
+    // детали — новой деталью она не считается, иначе сводка обещала бы две там, где будет одна.
+    if (createdNames.has(name)) continue;
+    createdNames.add(name);
+  }
+  return { bound, created: createdNames.size, reused };
+}
+
+// ПЕРЕСЧЁТ «× НА ИЗДЕЛИЕ» И АВТОРАЗМЕТКА «КАК КРОИТСЯ» у деталей, привязанных к этому скоупу.
+// Модалка — единственный автор обоих полей: редакторы у детали убираются, и число, которое
+// когда-то правили руками, теперь целиком читается из чертежа.
+//
+// × = СУММА по РАЗЛИЧНЫМ деталям чертежа: «PLANKA_L» и «PLANKA_R», привязанные к одной детали
+// кроя, — это две панели в изделии. Но КОПИИ одной детали складывать нельзя: склейка по-размерных
+// выгрузок CLO приносит одну неградуируемую деталь под двумя именами (`PCK_L_UNI_M` и
+// `PCK_L_UNI_S`, общий uniBase), а настил кроит её ОДИН раз. Поэтому копии сворачиваются
+// максимумом — тем же правилом, каким create-путь apply() сводит их при заведении. Разойдись эти
+// два места, и повторное открытие модалки перебивало бы × у детали, которую она сама только что
+// завела, без единой правки в файлах.
+//
+// Идентичность, которой в разборе нет, не вносит НИЧЕГО, а деталь, у которой не нашлось ни одной,
+// пропускается целиком: ноль на изделие — это не «пересчитали», это стёрли. Этим же условием
+// закрыт кандидат на удаление, которого оператор оставил «оставить»: его блоков в чертеже нет, и
+// утверждать по такому чертежу «режется как нарисовано» было бы выдумыванием факта — ровно тем, от
+// которого бережёт правило про явную разметку ниже.
+function planPieceUpdates(
+  live: readonly PieceValue[],
+  bound: ReadonlyMap<string, string>,
+  blockCounts: ReadonlyMap<string, BlockCount>,
+): { updates: PieceUpdate[]; unchanged: number } {
+  const blocksByPiece = new Map<string, string[]>();
+  for (const [ci, pieceLineKey] of bound) {
+    const k = pieceLineKey.trim().toLowerCase();
+    if (!k) continue;
+    const list = blocksByPiece.get(k) ?? [];
+    list.push(ci);
+    blocksByPiece.set(k, list);
+  }
+  const updates: PieceUpdate[] = [];
+  let unchanged = 0;
+  live.forEach((p, index) => {
+    const cis = blocksByPiece.get((p.lineKey ?? '').trim().toLowerCase());
+    if (!cis || cis.length === 0) return; // деталь не этой ткани — модалка про неё не знает ничего
+    const byIdentity = new Map<string, number>();
+    for (const ci of cis) {
+      const found = blockCounts.get(ci);
+      if (!found) continue;
+      // Ключ — общий корень uni-копий, если он есть, иначе сама идентичность: этим одним ключом и
+      // отличается «две разные детали» от «две копии одной».
+      const identity = found.uniBase.trim().toLowerCase() || ci;
+      byIdentity.set(identity, Math.max(byIdentity.get(identity) ?? 0, found.instances));
+    }
+    let total = 0;
+    for (const n of byIdentity.values()) total += n;
+    if (total <= 0) {
+      unchanged += 1;
+      return;
+    }
+    const update: PieceUpdate = { index };
+    if ((p.piecesPerGarment ?? 0) !== total) update.piecesPerGarment = total;
+    const current = (p.cutSymmetry ?? '').trim();
+    if (!isCutSymmetryMarked(current)) {
+      // Не размечено — значит никто не отвечал, а чертёж отвечает: он несёт КАЖДЫЙ контур, и
+      // деталь режется как нарисована. Молчание здесь не нейтрально — оно гасит выводы бэка
+      // (клетка покрытия настила становится UNKNOWN, проверки зеркального разворота и перекроя
+      // перестают судить), поэтому ответ ставится, а не оставляется на потом.
+      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
+    } else if (cutSymmetryCountInvalid(current, total)) {
+      // Единственное исключение к «явную разметку не трогаем»: новое количество делает хранимую
+      // зеркальную пару невозможной (нечётное или < 2), и сохранение ВСЕЙ карточки упёрлось бы в
+      // серверную проверку и двухколоночный CHECK `chk_tcp_mirrored_needs_even_count`. Ставится
+      // явный UNKNOWN — «ответ больше не действителен», — а НЕ «одинаковые копии»: подменять
+      // человеческое утверждение своим значило бы выдумать факт поверх факта.
+      update.cutSymmetry = UNSET_CUT_SYMMETRY;
+    }
+    // Явные «зеркальные пары» и «со сгибом», которым новое количество не противоречит, остаются
+    // как есть: человек утверждал факт, и чертёж ему не возражает.
+    if (update.piecesPerGarment === undefined && update.cutSymmetry === undefined) {
+      unchanged += 1;
+      return;
+    }
+    updates.push(update);
+  });
+  return { updates, unchanged };
+}
 
 export function PieceMatchModal({
   files,
@@ -636,6 +786,36 @@ export function PieceMatchModal({
     [deleteCandidates, deleteChoice],
   );
 
+  // ── четыре исхода одного нажатия ──────────────────────────────────────────────────────
+  // Диалог давно перестал быть только сопоставлением: он заводит детали, удаляет исчезнувшие,
+  // пересчитывает число на изделие и размечает крой — и всё это уходит ОДНОЙ кнопкой. Значит
+  // кнопка обязана называть свои исходы до нажатия, а не после сохранения карточки.
+  //
+  // «Без изменений» — тоже исход, и он здесь не для симметрии: это единственное видимое
+  // доказательство, что повторное применение по тем же файлам ничего не переписывает. Молчание на
+  // его месте читалось бы как «диалог ничего не заметил».
+  const outcome = useMemo(() => {
+    const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+    const live = ((pieces ?? []) as NonNullable<TechCardFormData['pieces']>).filter(
+      (p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()),
+    );
+    const { bound, created, reused } = plannedScopeBinding(
+      live,
+      mineByBlock,
+      unmapped,
+      rows,
+      draftNames,
+    );
+    const { updates, unchanged } = planPieceUpdates(live, bound, blockCounts);
+    return {
+      created,
+      reused,
+      removed: toDelete.length,
+      updated: updates.length,
+      unchanged,
+    };
+  }, [pieces, toDelete, mineByBlock, unmapped, rows, draftNames, blockCounts]);
+
   // ── состав потерь ─────────────────────────────────────────────────────────────────────
   // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
   // модалка) и живёт в piece-recipe-hold.ts — вместе с оговоркой о НЕПОЛНОТЕ проекции: архивные
@@ -900,6 +1080,11 @@ export function PieceMatchModal({
         string,
         { bomLineKey: string; fabricPurpose: string; blockName: string; pieceLineKey: string }
       >();
+      // Итоговая привязка ЭТОГО скоупа — блок (ci) → деталь, — собираемая там же, где пишется
+      // alias-набор. По ней ниже пересчитывается «× на изделие» и ставится разметка кроя: считать
+      // их по параллельно собранной догадке значило бы завести второй ответ на вопрос «что связано
+      // с чем», а расходятся такие пары всегда молча.
+      const boundHere = new Map<string, string>();
       // Everything this dialog writes is filed under THIS scope's binding — назначение when the card
       // has been sorted, the line when it has not, with the compatibility line riding along only
       // when the назначение owns exactly one. That is also what MIGRATES a card sorted a moment ago:
@@ -941,6 +1126,7 @@ export function PieceMatchModal({
         // сюда не дотягивается (он про ЧУЖИЕ скоупы), а алиас на несуществующую деталь сервер
         // не разрешит — piece_line_key: not_found, и падает сохранение всей карты.
         if (!liveKeys.has(pieceLineKey.trim().toLowerCase())) continue;
+        boundHere.set(ci, pieceLineKey);
         byKey.set(aliasKey(scope.key, mineSpelling.get(ci) ?? ci), {
           ...bind,
           blockName: mineSpelling.get(ci) ?? ci,
@@ -949,7 +1135,10 @@ export function PieceMatchModal({
       }
       // Unmapping is a first-class action: a wrong mapping assigns the wrong cloth to a piece on
       // the cutting floor, and before this the only exit was deleting the target piece.
-      for (const b of unmapped) byKey.delete(aliasKey(scope.key, b));
+      for (const b of unmapped) {
+        byKey.delete(aliasKey(scope.key, b));
+        boundHere.delete(b);
+      }
       for (const r of rows) {
         if (!r.choice) continue;
         let pieceLineKey = r.choice;
@@ -975,6 +1164,13 @@ export function PieceMatchModal({
               // How many times the block appears in the file IS how many of that piece a garment
               // takes — the operator can still correct it on the pieces tab.
               piecesPerGarment: r.instances,
+              // РЕЖЕТСЯ КАК НАРИСОВАНА. Деталь заводится ИЗ чертежа, а чертёж несёт КАЖДЫЙ контур:
+              // ничего здесь не зеркалится неявно, и n панелей — это n одинаковых копий. Оставить
+              // поле неразмеченным значило бы отдать деталь бэку немым: клетка покрытия настила
+              // становится UNKNOWN, проверки зеркального разворота и перекроя перестают судить, а
+              // на бумаге голая «2» и так читается как «две одинаковые» — то есть молчание всё
+              // равно утверждает этот же ответ, просто не давая его проверить.
+              cutSymmetry: IDENTICAL_CUT_SYMMETRY,
               grainline: '',
               fused: false,
               calloutNumber: 0,
@@ -983,6 +1179,7 @@ export function PieceMatchModal({
             });
           }
         }
+        boundHere.set(r.block.toLowerCase(), pieceLineKey);
         byKey.set(aliasKey(scope.key, r.block), {
           ...bind,
           blockName: r.block,
@@ -996,6 +1193,29 @@ export function PieceMatchModal({
         setValue('pieces', [...live, ...created] as TechCardFormData['pieces'], {
           shouldDirty: true,
         });
+      }
+      // ПЕРЕСЧЁТ × И РАЗМЕТКА КРОЯ — точечными записями по вложенному пути, как renamePiece выше, а
+      // не через корень массива и не через useFieldArray.update: корень выше уже записан, второй
+      // полный write шёл бы от устаревшего снимка и стирал правку, сделанную в таблице за модалкой.
+      //
+      // Индексы — по `live`: он сохраняет порядок исходного массива, а в записанном выше
+      // `[...live, ...created]` живая деталь стоит ровно на своём месте. Заводимые детали сюда не
+      // попадают по построению (их ключей в `live` нет) — их × ставит create-путь выше.
+      //
+      // Сдвиг дайджеста CONSTRUCTION и протухшая подпись здесь ОЖИДАЕМЫ и правильны: физический
+      // состав кроя изменился. То же с подписью костинга и отпечатком набора раскладок — «набор
+      // изменился» и есть правда. Гасить этот сигнал значило бы утвердить крой, которого никто не
+      // видел.
+      const { updates } = planPieceUpdates(live, boundHere, blockCounts);
+      for (const u of updates) {
+        if (u.piecesPerGarment !== undefined) {
+          setValue(`pieces.${u.index}.piecesPerGarment`, u.piecesPerGarment, {
+            shouldDirty: true,
+          });
+        }
+        if (u.cutSymmetry !== undefined) {
+          setValue(`pieces.${u.index}.cutSymmetry`, u.cutSymmetry, { shouldDirty: true });
+        }
       }
       setValue('pieceDxfAliases', [...byKey.values()], { shouldDirty: true });
       onClose();
@@ -1030,6 +1250,21 @@ export function PieceMatchModal({
     </label>
   );
 
+  // Кнопка называет ВСЕ исходы, а не только сопоставления. «сопоставить (0)» на кнопке, которая
+  // сейчас удалит три детали и перепишет число на изделие у пяти, врало бы ровно в тот момент,
+  // когда цена ошибки самая высокая — и никакого другого места, где эти исходы названы вместе, у
+  // оператора нет.
+  const confirmParts = [
+    outcome.reused > 0 ? `${outcome.reused} ↔` : '',
+    outcome.created > 0 ? `${outcome.created} +` : '',
+    outcome.removed > 0 ? `${outcome.removed} −` : '',
+    outcome.updated > 0 ? `${outcome.updated} ×` : '',
+    toUnmap > 0 ? `${toUnmap} снять` : '',
+  ].filter(Boolean);
+  // Четыре нуля подряд не значат ничего: на карточке, где ещё ничего не связано и ничего не
+  // выбрано, сводка была бы строкой ради строки.
+  const hasOutcome = outcome.created + outcome.removed + outcome.updated + outcome.unchanged > 0;
+
   const basisLabel = (r: BlockRow) => {
     if (!r.suggested) return null;
     if (r.basis === 'similar') return <Pill tone='warn'>предложено по похожести</Pill>;
@@ -1050,15 +1285,24 @@ export function PieceMatchModal({
       onCancel={onClose}
       title={`детали кроя из DXF · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
       confirmLabel={
-        toUnmap > 0 ? `применить (${decided} ↔, ${toUnmap} снять)` : `сопоставить (${decided})`
+        confirmParts.length > 0 ? `применить (${confirmParts.join(', ')})` : 'применить'
       }
       // Пока хоть один спор не разрешён, применять НЕЧЕГО: набор, который ушёл бы на сервер, для
       // него невалиден, и он отклонит сохранение ВСЕЙ карты. Кнопка гаснет вместе с объяснением
       // выше — это и есть «предупредить до сохранения, а не после».
+      //
+      // Удаления и пересчёт × — самостоятельные исходы, а не довесок к сопоставлению: чертёж, из
+      // которого блок исчез или в котором сменилось число копий, не приносит НИ ОДНОГО нового
+      // сопоставления, и требование «сначала сопоставь хоть что-нибудь» запирало бы карточку с
+      // призраком детали и с неверным числом на изделие навсегда.
       confirmDisabled={
         saving ||
         unresolvedCollapses.length > 0 ||
-        (decided === 0 && toUnmap === 0 && collapses.size === 0)
+        (decided === 0 &&
+          toUnmap === 0 &&
+          collapses.size === 0 &&
+          outcome.removed === 0 &&
+          outcome.updated === 0)
       }
       width='lg'
       closeOnConfirm={false}
@@ -1658,6 +1902,32 @@ export function PieceMatchModal({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* ЧТО СДЕЛАЕТ ОДНО НАЖАТИЕ — все четыре исхода, названные рядом с кнопкой, которая их
+            исполнит. Раньше диалог только сопоставлял, и подпись на кнопке была полным ответом;
+            теперь он заводит, удаляет, пересчитывает и размечает, а увидеть это можно было бы
+            только по сохранённой карточке — то есть после. «Без изменений» стоит здесь наравне с
+            остальными: это и есть видимое доказательство, что повторный проход по тем же файлам
+            ничего не переписывает. */}
+        {parse.phase === 'ready' && hasOutcome && (
+          <div className='space-y-0.5 border border-borderColor p-2'>
+            <Text size='micro' component='p'>
+              применение: создать {outcome.created} · удалить {outcome.removed} · обновить ×{' '}
+              {outcome.updated} · без изменений {outcome.unchanged}
+            </Text>
+            <Text size='nano' variant='label' component='p'>
+              «обновить ×» — число на изделие пересчитывается по чертежу (сумма по разным деталям
+              чертежа; копии одной детали, разложенные по размерным выгрузкам, не складываются) и
+              заодно проставляется «как кроится: одинаковые копии» там, где ответа не было: чертёж
+              несёт каждый контур, значит деталь режется как нарисована.
+            </Text>
+            <Text size='nano' variant='label' component='p'>
+              явные «зеркальные пары» и «со сгибом» модалка не трогает — кроме случая, когда новое
+              число делает зеркальную пару невозможной (нечётное или меньше двух): тогда пометка
+              снимается, иначе карточка не сохранится вовсе.
+            </Text>
           </div>
         )}
       </div>
