@@ -123,38 +123,15 @@ export const IDENTICAL_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
   'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
 const MIRRORED: common_TechCardPieceCutSymmetry = 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED';
 
+// СЕЛЕКТА «как кроится» БОЛЬШЕ НЕТ, и словарь его опций удалён вместе с ним: деталь приходит из
+// чертежа, ответ ставит модалка сопоставления блоков, спрашивать человека не о чем. Оставленный
+// «на всякий случай» список опций — это приглашение вернуть вопрос в интерфейс мимо решения
+// владельца, поэтому его здесь нет. Осталось ровно то, что читает БУМАГА и проверяет отправка:
+// предикаты ниже и короткие подписи в `CUT_SYMMETRY_SHORT`.
+//
 // Ноль перечисления — `_UNKNOWN`, не `_UNSPECIFIED`: `proto/common/buf.yaml` задаёт
 // `enum_zero_value_suffix: _UNKNOWN`. Клиент, отправивший `_UNSPECIFIED`, получает ошибку разбора
 // protojson, а не «поле проигнорировано».
-export const cutSymmetryOptions: Array<{
-  value: common_TechCardPieceCutSymmetry;
-  label: string;
-}> = [
-  // Пункт НАЗВАН, а не оставлен пустой строкой. Пустая опция в закрытом селекте читается как
-  // «значение по умолчанию», то есть как ответ «обычная деталь», которого никто не давал — а весь
-  // смысл поля в том, чтобы «не спрашивали» отличалось от «спросили, ответ: одинаковые».
-  { value: UNSET_CUT_SYMMETRY, label: '— не размечено' },
-  { value: IDENTICAL_CUT_SYMMETRY, label: 'одинаковые копии' },
-  // Чётность названа в САМОЙ подписи, до всякой ошибки: CHECK в БД
-  // (`chk_tcp_mirrored_needs_even_count`) отвергает зеркальную пару при нечётном количестве, и
-  // узнать об этом дешевле до выбора, чем из красной строки после него.
-  { value: MIRRORED, label: 'зеркальные пары (× чётное)' },
-  { value: 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD', label: 'со сгибом' },
-];
-
-const cutSymmetryValues = new Set<string>(cutSymmetryOptions.map((o) => o.value));
-
-// Терпимое чтение, как у `grainlineOptionsFor`: значение, которого нет в наборе, всё равно
-// показывается — помеченным, — вместо того чтобы прочитаться пустым в контролируемом селекте и
-// быть молча переписанным следующим сохранением соседнего поля.
-export function cutSymmetryOptionsFor(current?: string): Array<{ value: string; label: string }> {
-  const value = (current ?? '').trim();
-  const items: Array<{ value: string; label: string }> = [...cutSymmetryOptions];
-  if (value && !cutSymmetryValues.has(value)) {
-    items.splice(1, 0, { value, label: `${value} — не из списка` });
-  }
-  return items;
-}
 
 /** Ответил ли на вопрос человек. Пустая строка и `_UNKNOWN` — одно и то же «нет». */
 export function isCutSymmetryMarked(value?: string): boolean {
@@ -189,11 +166,10 @@ export function cutSymmetryCountInvalid(
   return !Number.isInteger(n) || n < 2 || n % 2 !== 0;
 }
 
-// Самая вероятная ошибка оператора названа прямо в тексте: увидев в карточке два ряда FP_L ×1 и
-// FP_R ×1, человек помечает зеркальными ОБА. Сообщение обязано сказать, что делать, а не только
-// что запрещено.
-export const CUT_SYMMETRY_EVEN_COUNT_MESSAGE =
-  'зеркальная пара делится пополам — количество на изделие должно быть чётным и не меньше двух. Две строки по одной штуке (FP_L ×1 и FP_R ×1) — это «одинаковые копии» по штуке в каждой; «зеркальные пары» ставят на ОДНУ строку с чётным количеством.';
+// Текста ошибки про чётность здесь больше нет: он объяснял ОПЕРАТОРУ, что исправить в селекте,
+// которого не осталось. Невалидную пару теперь молча нормализует отправка (`schema.ts`), а не
+// отказ формы — зод-ошибка на путь несуществующего контрола была бы невидимой блокировкой
+// сохранения.
 
 const CUT_SYMMETRY_SHORT: Record<string, string> = {
   [IDENTICAL_CUT_SYMMETRY]: 'одинаковые',
