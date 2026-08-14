@@ -48,7 +48,10 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
     warnings.push('в файлах не нашлось замкнутых контуров деталей');
   // Commit only when no newer parse started while this one awaited.
   if (seq === parseSeq) currentParse = { id, pieces: out };
-  post({ type: 'parsed', id, pieces: out, detectedUnit: detected, warnings });
+  // failedFiles едет вместе с блоками: «часть листов не прочиталась» — это разница между
+  // «в чертеже такого блока нет» и «мы про него ничего не знаем», и различить их может только
+  // главный поток, у которого есть карточка.
+  post({ type: 'parsed', id, pieces: out, detectedUnit: detected, warnings, failedFiles });
 }
 
 async function handleNest(id: number, parseId: number, config: NestConfig): Promise<void> {

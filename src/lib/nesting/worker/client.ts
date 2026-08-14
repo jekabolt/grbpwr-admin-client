@@ -8,6 +8,9 @@ export type ParseOutcome = {
   pieces: PieceDTO[];
   detectedUnit: Exclude<Unit, 'auto'>;
   warnings: string[];
+  // Листы, которые разобрать не удалось. См. WorkerResponse['parsed'].failedFiles: потребитель,
+  // который делает выводы ИЗ ОТСУТСТВИЯ блока, обязан знать, что набор неполон.
+  failedFiles: number;
 };
 
 export type NestProgressMsg = {
@@ -63,7 +66,13 @@ export class NestingWorkerClient {
       this.handlers.set(id, {
         resolve: (msg) => {
           if (msg.type === 'parsed') {
-            resolve({ parseId: id, pieces: msg.pieces, detectedUnit: msg.detectedUnit, warnings: msg.warnings });
+            resolve({
+              parseId: id,
+              pieces: msg.pieces,
+              detectedUnit: msg.detectedUnit,
+              warnings: msg.warnings,
+              failedFiles: msg.failedFiles,
+            });
           } else reject(new Error('unexpected worker reply'));
         },
         reject,

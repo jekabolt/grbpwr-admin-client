@@ -17,6 +17,23 @@ export type ParseState =
       pieces: PieceDTO[];
       detectedUnit: Exclude<Unit, 'auto'>;
       warnings: string[];
+      // ПОЛНОТА РАЗБОРА, СТРУКТУРНО, А НЕ ПОДСТРОКОЙ В warnings.
+      //
+      // `ready` НЕ значит «разобраны все файлы»: не скачавшийся с CDN лист и лист, на котором
+      // упал разбор, стоят по одному предупреждению каждый, а набор блоков молча УМЕНЬШАЕТСЯ.
+      // Для всех, кто утверждает про то, что В файлах есть (сопоставление, пересчёт × на
+      // изделие), это безвредно. Но потребитель, делающий вывод ИЗ ОТСУТСТВИЯ блока, по такому
+      // разбору выносит приговор живой детали кроя: модалка «детали кроя из DXF» предлагает
+      // удалить её, а сохранение карточки уносит вместе с ней строки рецепта колорвеев и
+      // замеренные площади — восстанавливать неоткуда.
+      //
+      // Поэтому признак структурный: сколько файлов отдали и сколько реально доехало до блоков.
+      // Догадка по тексту предупреждения не годится — она ломается на первой же правке формулировки.
+      filesTotal: number;
+      filesParsed: number;
+      // filesParsed === filesTotal. Вынесено полем, чтобы «набор неполон» проверялся ОДНИМ
+      // выражением у всех потребителей, а не сравнением двух чисел в каждом.
+      complete: boolean;
     }
   | { phase: 'error'; message: string };
 
@@ -88,7 +105,19 @@ export function useNesting(files: NestingFile[] | null) {
           tolChain: NEST_DEFAULTS.tolChain,
         });
         if (dead) return;
-        setParse({ phase: 'ready', ...out, warnings: [...fetchWarnings, ...out.warnings] });
+        // Неполнота копится в ДВУХ местах и обязана считаться в одном: лист мог не скачаться с CDN
+        // (allSettled выше) и мог упасть на разборе уже скачанным (failedFiles из воркера).
+        const filesParsed = fetched.length - out.failedFiles;
+        setParse({
+          phase: 'ready',
+          parseId: out.parseId,
+          pieces: out.pieces,
+          detectedUnit: out.detectedUnit,
+          warnings: [...fetchWarnings, ...out.warnings],
+          filesTotal: files.length,
+          filesParsed,
+          complete: filesParsed === files.length,
+        });
       } catch (e) {
         if (!dead) setParse({ phase: 'error', message: e instanceof Error ? e.message : String(e) });
       }
