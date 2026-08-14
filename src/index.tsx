@@ -270,7 +270,11 @@ const ErrorFallback = ({ error, resetErrorBoundary }: FallbackProps) => {
   const stale = isStaleChunkError(error);
   return (
     <div style={{ padding: '2rem', textAlign: 'center' }}>
-      <h2>{stale ? 'This tab is running an old version' : 'Something went wrong'}</h2>
+      {/* Explicit size: this screen is inline-styled on purpose (it must render when everything
+          else is broken), and the body is 12px — an unsized heading would come out as body copy. */}
+      <h2 style={{ fontSize: '18px' }}>
+        {stale ? 'This tab is running an old version' : 'Something went wrong'}
+      </h2>
       <pre style={{ color: 'red', marginTop: '1rem' }}>
         {stale
           ? 'The app was updated while this tab was open. Reload to get the current version.'

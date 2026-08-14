@@ -204,6 +204,8 @@ A monochrome ramp doing structural work, plus four semantic colours that are nev
 
 **The Twelve-Pixel Ceiling Rule.** Body text is 12px and the chrome sizes go *down* from there (11 / 10 / 9), never up. The only sizes above 12 are the 18px page headline and the two stat sizes. A screen that needs a bigger font to establish hierarchy has a layout problem, not a type problem.
 
+The ceiling is enforced by `body { font-size: var(--text-textBaseSize) }` in `global.css`, and that declaration is load-bearing: Tailwind's preflight sets no font-size, so without it every element that does not name a size itself falls back to the browser's 16px. That is how the app ran until 2026-08-14 — table cells and `Row` values a third larger than the 12px section title above them, which is why tables read as big and heavy. If body text ever looks oversized again, check that line before touching a screen.
+
 **The No-Hand-Tracking Rule.** Letter-spacing is baked into the four `tracking` tokens (`pill` 0.03em, `label` 0.04em, `group` 0.05em, `section` 0.06em) and applied through the `Text` primitive. No screen sets `letter-spacing`, `font-size` in px, or `tabular-nums` by hand. Outside `src/ui`, writing `text-[Npx]` is prohibited.
 
 **The Uppercase-Is-A-Label Rule.** Uppercase marks a label, a control or a section title — things of four words or fewer. Sentences and hints stay sentence case at `label` colour.
@@ -300,6 +302,7 @@ The tech card's left rail is the reference pattern: a sticky 150px column of upp
 - **Do** fill a bordered block with white. Always.
 - **Do** write the `question` clause on section headers, so a block says what it is for and not only what it is called.
 - **Do** use `src/ui` primitives (`Text`, `Button`, `Pill`, `Chip`, `Row`, `StatGrid`, `CalloutBox`) instead of hand-rolling `div` + Tailwind. Type sizes, tracking and tabular numerals are baked in there on purpose.
+- **Do** mark a `DataTable` column that holds words rather than digits with `data-align="left"` on **both** its `th` and its `td`. Right alignment exists to line up decimal places; on a column of badges or prose it leaves the header at one edge of the cell and the content at the other, so the label sits over nothing. A `text-left` class on the cell does not work — the table's own `[&_th]:text-right` outranks it.
 - **Do** render `—` for missing data. An empty strip that reads as zero cost is worse than one that admits it has nothing.
 - **Do** pair every colour signal with a word or a glyph, so the UI survives monochrome and colour-blind reading.
 - **Do** give every interactive control a visible `focus-visible` outline and honour `prefers-reduced-motion`.

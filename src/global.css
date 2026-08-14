@@ -132,6 +132,13 @@
 body {
   font-family: var(--font-family-sans);
   font-weight: 400;
+  /* THE BODY SIZE IS DECLARED HERE OR IT DOES NOT EXIST. Tailwind's preflight sets no font-size,
+     so for a long time every element that did not name a size itself — table cells, `Row` labels,
+     plain divs and spans — rendered at the browser default 16px, a third larger than the 12px this
+     system is designed around. Next to a 10px uppercase table header that reads as heavy, which is
+     exactly what it looked like. Sizes are in px and spacing is in rem (i.e. off the ROOT size),
+     so this line changes type only: no layout moves. */
+  font-size: var(--text-textBaseSize);
   line-height: 1.5;
   /* The app canvas. Every panel is white-on-#f2f2f2 — that contrast is what gives
      the UI its "sheet of paper" read. Layout must not paint white over this. */
