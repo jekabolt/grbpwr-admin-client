@@ -299,10 +299,23 @@ function plannedScopeBinding(
 // закрыт кандидат на удаление, которого оператор оставил «оставить»: его блоков в чертеже нет, и
 // утверждать по такому чертежу «режется как нарисовано» было бы выдумыванием факта — ровно тем, от
 // которого бережёт правило про явную разметку ниже.
+//
+// НАХОДКА 2 второго адверсарного ревью — `complete`. По НЕПОЛНОМУ разбору × и разметка у УЖЕ
+// СУЩЕСТВУЮЩИХ деталей не трогаются вовсе. Раньше неполнота запрещала только удаление, а пересчёт
+// продолжал считать по тому, что прочиталось: блоки одной детали законно лежат в двух файлах
+// (верх + подкладка одного назначения, две по-размерных выгрузки), и потеря одного листа занижала
+// «× на изделие» — а вслед за числом менялась и проставляемая симметрия (нечётное количество
+// объявляет зеркальную пару невозможной и сбрасывает её в «одинаковые копии»). «Этой детали в
+// изделии столько-то» — утверждение про ПОЛНЫЙ набор, и на неполном оно не выносится. Редакторов
+// обоих полей в карточке не осталось, так что заниженное число оператору исправить нечем.
+//
+// Заведение новых деталей и сопоставление при этом продолжают работать: они утверждают про то, что
+// В файле ЕСТЬ, а не про то, сколько его всего.
 function planPieceUpdates(
   live: readonly PieceValue[],
   bound: ReadonlyMap<string, string>,
   blockCounts: ReadonlyMap<string, BlockCount>,
+  complete: boolean,
 ): { updates: PieceUpdate[]; unchanged: number } {
   const blocksByPiece = new Map<string, string[]>();
   for (const [ci, pieceLineKey] of bound) {
@@ -317,6 +330,13 @@ function planPieceUpdates(
   live.forEach((p, index) => {
     const cis = blocksByPiece.get((p.lineKey ?? '').trim().toLowerCase());
     if (!cis || cis.length === 0) return; // деталь не этой ткани — модалка про неё не знает ничего
+    // Набор блоков неполон — считать «сколько этой детали в изделии» не по чему (см. заголовок).
+    // Деталь идёт в «без изменений», а не пропускается молча: сводка обязана показать, что модалка
+    // её ВИДЕЛА и не тронула, иначе ноль в «обновить ×» читается как «диалог ничего не заметил».
+    if (!complete) {
+      unchanged += 1;
+      return;
+    }
     // Правило считает perGarmentFromBlocks — та же функция, которой считает путь СОЗДАНИЯ в
     // apply(). Здесь остаётся только достать из разбора то, что она складывает.
     const total = perGarmentFromBlocks(
@@ -415,6 +435,12 @@ export function PieceMatchModal({
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
   const { parse } = useNesting(files);
+  // РАЗБОР ПОЛОН — одно выражение на весь файл. Полнота (файлы скачаны и прочитаны ВСЕ, ни один блок
+  // внутри них не пропущен) решает судьбу ДВУХ исходов сразу: предложений об удалении (находка 1
+  // первого ревью) и пересчёта «× на изделие» с разметкой кроя (находка 2 второго). Собирать это
+  // условие заново в каждом месте нельзя — однажды соберут не полностью, и это будет молчаливая
+  // потеря данных оператора, которых он не сможет ни увидеть, ни исправить.
+  const parseComplete = parse.phase === 'ready' && parse.complete;
   // One DXF carries the whole grade, so the size lives in the block name and has to be split off
   // before anything else: the piece «BP_1» exists once for the style, not once per size.
   const dictTokens = useDictionarySizeTokens();
@@ -469,6 +495,22 @@ export function PieceMatchModal({
   // Размеры, которые есть в файле, но не заведены в карточке. Пока их там нет, хвост у таких
   // блоков не отрезается — и одна деталь двоится на строку в каждом непризнанном размере.
   const sizeById = useSizeNames();
+  // Сколько операций сборки ссылается на деталь. Применение снимает эти ссылки САМО — и раньше
+  // делало это молча, а операция, оставшаяся без детали, это потерянная работа технолога: он
+  // расставлял их по деталям вручную. Число обязано стоять в составе потерь рядом с рецептом.
+  const operations = (useWatch({ control, name: 'operations' }) ??
+    []) as TechCardFormData['operations'];
+  const opsByPiece = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const o of operations ?? []) {
+      for (const k of o?.pieceLineKeys ?? []) {
+        const key = (k ?? '').trim().toLowerCase();
+        if (!key) continue;
+        out.set(key, (out.get(key) ?? 0) + 1);
+      }
+    }
+    return out;
+  }, [operations]);
   const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const orderSizes = useSizeOrdering();
   const missingSizes = useMemo(
@@ -803,12 +845,13 @@ export function PieceMatchModal({
     // Пока разбор не закончился, блоков нет НИ ОДНОГО — и «исчезли все» было бы правдой про
     // каждую привязанную деталь ткани.
     if (parse.phase !== 'ready') return [];
-    // Разобрались не все файлы скоупа — утверждать «блока в чертеже больше нет» не по чему.
-    // Признак структурный (use-nesting: filesParsed/filesTotal), а не догадка по тексту
-    // предупреждения: формулировку однажды перепишут, и защита отвалится молча. Заведение
-    // деталей и пересчёт × при этом продолжают работать — они утверждают про то, что В файле
-    // ЕСТЬ, а не про то, чего в нём нет.
-    if (!parse.complete) return [];
+    // Разобрано не всё — утверждать «блока в чертеже больше нет» не по чему. Признак структурный
+    // (use-nesting: filesParsed/filesTotal + blocksSkipped), а не догадка по тексту предупреждения:
+    // формулировку однажды перепишут, и защита отвалится молча. Заведение деталей и сопоставление
+    // при этом продолжают работать — они утверждают про то, что В файле ЕСТЬ, а не про то, чего в
+    // нём нет; пересчёт × на неполном наборе тоже выключен, но по своей причине — см. находку 2 у
+    // planPieceUpdates.
+    if (!parseComplete) return [];
     const mine = new Map<string, string[]>(); // деталь (ci) → её блоки в этом скоупе
     const elsewhere = new Set<string>(); // деталь (ci), привязанная ещё и к другой ткани
     for (const a of aliases ?? []) {
@@ -852,7 +895,7 @@ export function PieceMatchModal({
     }
     out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
     return out;
-  }, [parse, aliases, scope, split, pieceOptions, parsedPresence, rows, dictTokens]);
+  }, [parse, parseComplete, aliases, scope, split, pieceOptions, parsedPresence, rows, dictTokens]);
 
   // Ответ по каждому кандидату. Дефолт — «удалить», и он НЕ материализуется в карту: пустая
   // карта уже значит «удалить всех», поэтому новый кандидат (оператор переключил список файлов)
@@ -887,7 +930,7 @@ export function PieceMatchModal({
       rows,
       draftNames,
     );
-    const { updates, unchanged } = planPieceUpdates(live, bound, blockCounts);
+    const { updates, unchanged } = planPieceUpdates(live, bound, blockCounts, parseComplete);
     return {
       created,
       reused,
@@ -895,7 +938,7 @@ export function PieceMatchModal({
       updated: updates.length,
       unchanged,
     };
-  }, [pieces, toDelete, mineByBlock, unmapped, rows, draftNames, blockCounts]);
+  }, [pieces, toDelete, mineByBlock, unmapped, rows, draftNames, blockCounts, parseComplete]);
 
   // ── состав потерь ─────────────────────────────────────────────────────────────────────
   // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
@@ -1306,7 +1349,9 @@ export function PieceMatchModal({
       // состав кроя изменился. То же с подписью костинга и отпечатком набора раскладок — «набор
       // изменился» и есть правда. Гасить этот сигнал значило бы утвердить крой, которого никто не
       // видел.
-      const { updates } = planPieceUpdates(live, boundHere, blockCounts);
+      // Тот же `parseComplete`, что и в сводке выше: сводка обязана называть ровно то, что сделает
+      // применение, и разойтись эти два вызова могут только молча.
+      const { updates } = planPieceUpdates(live, boundHere, blockCounts, parseComplete);
       for (const u of updates) {
         if (u.piecesPerGarment !== undefined) {
           setValue(`pieces.${u.index}.piecesPerGarment`, u.piecesPerGarment, {
@@ -1757,7 +1802,10 @@ export function PieceMatchModal({
 
         {/* НЕПОЛНЫЙ РАЗБОР — ОБЪЯСНЕНИЕ НА МЕСТЕ СЕКЦИИ УДАЛЕНИЯ (находка 1). Секция ниже просто
             не появится, а пустое место читается как «всё на месте» — то есть ровно как ответ,
-            которого разбор дать не может. Поэтому вместо предложений здесь стоит причина. */}
+            которого разбор дать не может. Поэтому вместо предложений здесь стоит причина.
+            Здесь же названы ОБА выключенных исхода (находка 2 второго ревью): ноль в «обновить ×»
+            обязан быть объяснён там же, где ноль в удалениях, иначе он читается как «в чертеже всё
+            совпало» — то есть ровно наоборот. */}
         {parse.phase === 'ready' && !parse.complete && (
           <div className='space-y-1'>
             <GroupLabel flush>в чертеже больше нет (—)</GroupLabel>
@@ -1766,15 +1814,28 @@ export function PieceMatchModal({
                 <Text size='micro' component='p'>
                   <b>
                     разобрано файлов: {parse.filesParsed} из {parse.filesTotal}
+                    {parse.blocksSkipped > 0
+                      ? `, пропущено блоков внутри файлов: ${parse.blocksSkipped}`
+                      : ''}
                   </b>{' '}
                   — предложений об удалении деталей не будет. По неполному разбору нельзя
                   утверждать, что деталь исчезла из чертежа: её блок мог лежать в листе, который не
-                  докачался или не прочитался. Проверьте предупреждения разбора выше и откройте
-                  диалог заново.
+                  докачался или не прочитался
+                  {parse.blocksSkipped > 0
+                    ? ', либо в самом файле остаться неразвёрнутым (ссылка на отсутствующее определение блока, слишком глубокая вложенность, исчерпанный лимит вставок)'
+                    : ''}
+                  . Проверьте предупреждения разбора выше и откройте диалог заново.
+                </Text>
+                <Text size='micro' component='p'>
+                  <b>«× на изделие» и «как кроится» тоже не пересчитываются</b> — у уже заведённых
+                  деталей они останутся как есть. «Этой детали в изделии столько-то» — утверждение
+                  про ПОЛНЫЙ набор блоков: не доехал один лист, и число молча занизится, а вслед за
+                  ним сменится разметка кроя. Поэтому «обновить ×» здесь показывает ноль, а все
+                  привязанные детали идут в «без изменений».
                 </Text>
                 <Text size='nano' variant='label' component='p'>
-                  сопоставление, заведение деталей и пересчёт «× на изделие» работают как обычно:
-                  они утверждают про то, что В файлах есть, а не про то, чего в них нет.
+                  сопоставление и заведение новых деталей работают как обычно: они утверждают про
+                  то, что В файлах есть, а не про то, чего в них нет и сколько его всего.
                 </Text>
               </div>
             </CalloutBox>
@@ -1796,9 +1857,9 @@ export function PieceMatchModal({
                     этой ткани.
                   </b>{' '}
                   Похоже, файл заменён не тем или выбран не тот слой — проверьте список файлов и
-                  выбранный контур выше. Разобрались при этом ВСЕ файлы: по неполному разбору
-                  предложений об удалении не бывает вовсе. Применить всё равно можно — замена лекал
-                  целиком бывает и законной.
+                  выбранный контур выше. Разбор при этом ПОЛОН — все файлы прочитаны и ни один блок
+                  внутри них не пропущен: по неполному разбору предложений об удалении не бывает
+                  вовсе. Применить всё равно можно — замена лекал целиком бывает и законной.
                 </Text>
               </CalloutBox>
             )}
@@ -1813,6 +1874,7 @@ export function PieceMatchModal({
               const key = c.lineKey.trim().toLowerCase();
               const hold = recipeHold.get(key);
               const areas = areaRowsByPiece.get(key) ?? 0;
+              const ops = opsByPiece.get(key) ?? 0;
               return (
                 <div key={c.lineKey} className='space-y-0.5 pt-1'>
                   <div className='flex flex-wrap items-center gap-1.5'>
@@ -1888,6 +1950,24 @@ export function PieceMatchModal({
                           </Text>
                         }
                       />
+                      <Row
+                        label={
+                          <Text size='micro' component='span'>
+                            операций сборки потеряют эту деталь
+                          </Text>
+                        }
+                        value={
+                          <Text size='micro' component='span'>
+                            {ops > 0 ? ops : '—'}
+                          </Text>
+                        }
+                      />
+                      {/* Выноска эскиза переживает деталь намеренно: номер на чертеже принадлежит
+                          рисунку, а не строке таблицы, и стирать его из-за смены лекал значило бы
+                          переписывать эскиз чужими руками. */}
+                      <Text size='nano' variant='label' component='p'>
+                        выноска на эскизе остаётся — её номер принадлежит рисунку, а не детали
+                      </Text>
                     </>
                   ) : (
                     <Text size='nano' variant='label' component='p'>
@@ -2044,6 +2124,16 @@ export function PieceMatchModal({
               применение: создать {outcome.created} · удалить {outcome.removed} · обновить ×{' '}
               {outcome.updated} · без изменений {outcome.unchanged}
             </Text>
+            {/* Ноль в «обновить ×» имеет ДВА разных смысла — «чертёж сошёлся» и «считать не по
+                чему», — и по одной цифре они неразличимы. Второй называется прямо здесь, у самой
+                цифры: причина подробно разобрана выше, в блоке про неполный разбор. */}
+            {!parseComplete && (
+              <Text size='nano' variant='label' component='p'>
+                разбор неполон, поэтому «обновить ×» здесь всегда ноль: «× на изделие» и «как
+                кроится» у уже заведённых деталей не трогаются вовсе — см. блок про неполный разбор
+                выше.
+              </Text>
+            )}
             <Text size='nano' variant='label' component='p'>
               «обновить ×» — число на изделие пересчитывается по чертежу (сумма по разным деталям
               чертежа; копии одной детали, разложенные по размерным выгрузкам, не складываются) и

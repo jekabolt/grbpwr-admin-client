@@ -31,8 +31,16 @@ export type ParseState =
       // Догадка по тексту предупреждения не годится — она ломается на первой же правке формулировки.
       filesTotal: number;
       filesParsed: number;
-      // filesParsed === filesTotal. Вынесено полем, чтобы «набор неполон» проверялся ОДНИМ
-      // выражением у всех потребителей, а не сравнением двух чисел в каждом.
+      // ВТОРОЙ СПОСОБ ПОТЕРЯТЬ БЛОК, тише первого (находка 1 второго адверсарного ревью). Файл
+      // прочитался ЦЕЛИКОМ, а отдельные вставки внутри него до геометрии не доехали: INSERT на
+      // отсутствующее определение, вложенность глубже предела, исчерпанный бюджет инстансов
+      // (lib/nesting/dxf/transform.ts). Снаружи такой разбор неотличим от полного, а деталь
+      // пропущенного блока — от исчезнувшей из чертежа. Считается ЧИСЛОМ на всю пачку, ровно как
+      // filesParsed: догадываться по тексту предупреждения нельзя ни там, ни здесь.
+      blocksSkipped: number;
+      // filesParsed === filesTotal И blocksSkipped === 0. Вынесено полем, чтобы «набор неполон»
+      // проверялся ОДНИМ выражением у всех потребителей, а не сборкой условия в каждом: собранное
+      // на месте условие однажды соберут не полностью, и это будет молчаливая потеря данных.
       complete: boolean;
     }
   | { phase: 'error'; message: string };
@@ -105,8 +113,10 @@ export function useNesting(files: NestingFile[] | null) {
           tolChain: NEST_DEFAULTS.tolChain,
         });
         if (dead) return;
-        // Неполнота копится в ДВУХ местах и обязана считаться в одном: лист мог не скачаться с CDN
-        // (allSettled выше) и мог упасть на разборе уже скачанным (failedFiles из воркера).
+        // Неполнота копится в ТРЁХ местах и обязана считаться в одном: лист мог не скачаться с CDN
+        // (allSettled выше), мог упасть на разборе уже скачанным (failedFiles из воркера) — и мог
+        // прочитаться целиком, недосчитавшись отдельных блоков внутри (skippedBlocks). Третий случай
+        // не виден ни по одному из первых двух: файлов «разобрано столько же, сколько отдали».
         const filesParsed = fetched.length - out.failedFiles;
         setParse({
           phase: 'ready',
@@ -116,7 +126,8 @@ export function useNesting(files: NestingFile[] | null) {
           warnings: [...fetchWarnings, ...out.warnings],
           filesTotal: files.length,
           filesParsed,
-          complete: filesParsed === files.length,
+          blocksSkipped: out.skippedBlocks,
+          complete: filesParsed === files.length && out.skippedBlocks === 0,
         });
       } catch (e) {
         if (!dead) setParse({ phase: 'error', message: e instanceof Error ? e.message : String(e) });

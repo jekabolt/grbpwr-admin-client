@@ -36,6 +36,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
     detectedUnit: detected,
     warnings,
     failedFiles,
+    skippedBlocks,
   } = await parseSheets(sheets, opts);
 
   // Every file failed → that's an error, not a note with an empty piece list.
@@ -50,8 +51,17 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
   if (seq === parseSeq) currentParse = { id, pieces: out };
   // failedFiles едет вместе с блоками: «часть листов не прочиталась» — это разница между
   // «в чертеже такого блока нет» и «мы про него ничего не знаем», и различить их может только
-  // главный поток, у которого есть карточка.
-  post({ type: 'parsed', id, pieces: out, detectedUnit: detected, warnings, failedFiles });
+  // главный поток, у которого есть карточка. skippedBlocks — та же разница, но ВНУТРИ листа,
+  // который прочитался: пропущенная вставка блока делает набор дырявым, ничем себя не выдавая.
+  post({
+    type: 'parsed',
+    id,
+    pieces: out,
+    detectedUnit: detected,
+    warnings,
+    failedFiles,
+    skippedBlocks,
+  });
 }
 
 async function handleNest(id: number, parseId: number, config: NestConfig): Promise<void> {

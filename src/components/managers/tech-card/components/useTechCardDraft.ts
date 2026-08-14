@@ -132,7 +132,11 @@ export function useTechCardDraft(
     // does not actually carry is taken from the loaded card instead of from a default.
     const loaded = form.getValues();
     const data = { ...pending.data } as typeof pending.data;
-    const carried = ['patterns', 'pieceDxfAliases'] as const;
+    // `pieces` в этом списке по той же причине, что и соседи: массив деталей уезжает на сервер
+    // ПОЛНОЙ ЗАМЕНОЙ, и черновик, снятый до появления вкладки деталей, подставил бы пустой набор —
+    // то есть удалил бы все детали кроя разом, вместе со строками рецепта колорвеев и замеренными
+    // площадями (сервер чистит обе таблицы в той же транзакции).
+    const carried = ['patterns', 'pieceDxfAliases', 'pieces'] as const;
     for (const key of carried) {
       if (!(key in (pending.data as object))) (data as Record<string, unknown>)[key] = loaded[key];
     }
@@ -191,6 +195,38 @@ export function useTechCardDraft(
         const block = (a.blockName ?? '').trim().toLowerCase();
         const carried = scopeByBlock.get(`${a.bomLineKey ?? ''}|${block}`);
         return { ...a, fabricPurpose: carried?.fabricPurpose ?? '' };
+      });
+    }
+    // ДЕТАЛИ КРОЯ — ПЕРЕНОС ПО ПОЛЯМ, а не по строке (находка 3 второго адверсарного ревью).
+    //
+    // У «× на изделие» и «как кроится» в карточке БОЛЬШЕ НЕТ РЕДАКТОРА: единственный их автор —
+    // модалка «детали кроя из DXF», которая читает ответ из чертежа. Оба поля при этом уезжают на
+    // провод ВСЕГДА (см. маппер `pieces` в schema.ts): явный `_UNKNOWN` сервер понимает как команду
+    // «очисти колонку», а не как молчание. Значит черновик, снятый до появления поля (или потерявший
+    // его по любой другой причине), после zod-дефолта превращается в приказ стереть разметку — и
+    // одна посторонняя правка карточки обнуляет её у ВСЕХ деталей разом, без единого сообщения и без
+    // контрола, которым это можно было бы вернуть.
+    //
+    // Лечится ОТСУТСТВИЕ, а не значение: поле, которое в черновике есть, уезжает как есть — иначе
+    // восстановление отменяло бы правку, ради которой черновик и существует. Ключ — lineKey: имя
+    // редактируемо, порядок строк не обещан ничем.
+    if (Array.isArray(data.pieces) && Array.isArray(loaded.pieces)) {
+      const loadedByKey = new Map<string, NonNullable<typeof loaded.pieces>[number]>();
+      for (const p of loaded.pieces) {
+        const lk = p.lineKey?.trim().toLowerCase();
+        if (lk) loadedByKey.set(lk, p);
+      }
+      const carriedPieceFields = ['cutSymmetry', 'piecesPerGarment'] as const;
+      data.pieces = data.pieces.map((p) => {
+        const from = loadedByKey.get((p.lineKey ?? '').trim().toLowerCase());
+        // Детали, заведённой этим же черновиком, на прочитанной карточке ещё нет — переносить
+        // нечего, и её поля модалка проставила явно при заведении.
+        if (!from) return p;
+        const missing = carriedPieceFields.filter((f) => !(f in (p as object)));
+        if (missing.length === 0) return p;
+        const merged = { ...p } as Record<string, unknown>;
+        for (const f of missing) merged[f] = from[f];
+        return merged as typeof p;
       });
     }
     form.reset(data, { keepDefaultValues: true });

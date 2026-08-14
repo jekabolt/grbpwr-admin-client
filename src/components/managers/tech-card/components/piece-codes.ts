@@ -273,7 +273,7 @@ export const fusingModeOptions: Array<{
 
 const fusingModeValues = new Set<string>(fusingModeOptions.map((o) => o.value));
 
-/** Терпимое чтение, как у cutSymmetryOptionsFor: чужое значение показывается помеченным, а не
+/** Терпимое чтение, как у `grainlineOptionsFor`: чужое значение показывается помеченным, а не
  * молча переписывается следующим сохранением соседнего поля. */
 export function fusingModeOptionsFor(current?: string): Array<{ value: string; label: string }> {
   const value = (current ?? '').trim();

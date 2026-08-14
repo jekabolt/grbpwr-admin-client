@@ -10,9 +10,17 @@ export function parseFiles(
   buf: ArrayBuffer,
   opts: ParseOpts,
   warnings: string[],
-): { raws: RawPiece[]; unit: Exclude<Unit, 'auto'>; unitGuessed: boolean } {
+): {
+  raws: RawPiece[];
+  unit: Exclude<Unit, 'auto'>;
+  unitGuessed: boolean;
+  // Вставки блоков, не доехавшие до геометрии в УСПЕШНО прочитанном файле (см. SkipTally в
+  // dxf/transform.ts). Едет отдельным числом рядом с `raws`, потому что «файл прочитан» и «в файле
+  // прочитано всё» — разные утверждения, а судящий об ОТСУТСТВИИ блока опирается на второе.
+  skippedBlocks: number;
+} {
   const parsed = parseDxf(buf, opts.unit);
-  const groups = expandGroups(
+  const { groups, skippedBlocks } = expandGroups(
     parsed.dxf.entities ?? [],
     parsed.dxf.blocks ?? {},
     parsed.cmPerUnit,
@@ -23,7 +31,7 @@ export function parseFiles(
   for (const g of groups) {
     raws.push(...groupToPieces(g, opts.tolChain, warnings));
   }
-  return { raws, unit: parsed.unit, unitGuessed: parsed.unitGuessed };
+  return { raws, unit: parsed.unit, unitGuessed: parsed.unitGuessed, skippedBlocks };
 }
 
 // One uploaded sheet, decoupled from the browser's File so the same pipeline runs off the
@@ -47,6 +55,11 @@ export type ParsedSheets = {
   // Files whose parse threw. The caller decides what «all of them» means: the worker
   // turns it into an error rather than an empty piece list with notes.
   failedFiles: number;
+  // ВТОРАЯ ПОЛОВИНА НЕПОЛНОТЫ, суммарно по пачке: блоки, пропущенные ВНУТРИ файлов, которые
+  // прочитались (отсутствующее определение, вложенность глубже предела, исчерпанный бюджет
+  // инстансов). Без неё «failedFiles === 0» читалось как «разобрано всё», а разобрано было не всё —
+  // и потребитель, выносящий приговор по ОТСУТСТВИЮ блока, выносил его по дырявому набору.
+  skippedBlocks: number;
 };
 
 // Parse a batch of sheets into placement-ready pieces. Ids are minted across the batch
@@ -61,11 +74,18 @@ export async function parseSheets(
   let detectedUnit: Exclude<Unit, 'auto'> = 'mm';
   let nextId = 1;
   let failedFiles = 0;
+  let skippedBlocks = 0;
   let fileIndex = 0;
 
   for (const sheet of sheets) {
     try {
-      const { raws, unit, unitGuessed } = parseFiles(await sheet.open(), opts, warnings);
+      const {
+        raws,
+        unit,
+        unitGuessed,
+        skippedBlocks: skipped,
+      } = parseFiles(await sheet.open(), opts, warnings);
+      skippedBlocks += skipped;
       detectedUnit = unit;
       if (unitGuessed) warnings.push(`${sheet.name}: единицы не заданы в файле — принято ${unit}`);
       for (const raw of raws) {
@@ -106,5 +126,5 @@ export async function parseSheets(
     fileIndex++;
   }
 
-  return { pieces, detectedUnit, warnings, failedFiles };
+  return { pieces, detectedUnit, warnings, failedFiles, skippedBlocks };
 }

@@ -11,6 +11,9 @@ export type ParseOutcome = {
   // Листы, которые разобрать не удалось. См. WorkerResponse['parsed'].failedFiles: потребитель,
   // который делает выводы ИЗ ОТСУТСТВИЯ блока, обязан знать, что набор неполон.
   failedFiles: number;
+  // Блоки, пропущенные ВНУТРИ прочитавшихся листов (находка 1 второго адверсарного ревью). Неполнота
+  // бывает двух видов, и вторая молчаливее первой: файл прочитан целиком, а блока в наборе нет.
+  skippedBlocks: number;
 };
 
 export type NestProgressMsg = {
@@ -72,6 +75,7 @@ export class NestingWorkerClient {
               detectedUnit: msg.detectedUnit,
               warnings: msg.warnings,
               failedFiles: msg.failedFiles,
+              skippedBlocks: msg.skippedBlocks,
             });
           } else reject(new Error('unexpected worker reply'));
         },
