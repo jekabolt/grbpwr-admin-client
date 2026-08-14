@@ -46,6 +46,7 @@ import {
   zoneOptions,
 } from './operation-options';
 import { OPERATION_TYPE_PREFERRED_KINDS, kindLabel } from './bom-kind';
+import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import { PieceRef, useFormPieces } from './piece-picker';
@@ -1544,6 +1545,13 @@ export function OperationsField({
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
 
+  // Чем именно заканчивается «+ new piece», решает наличие чертежа: пока его нет, деталь заводят
+  // руками на вкладке деталей; как только к карточке привязан первый DXF, единственным автором
+  // деталей становится модалка «↔ детали кроя», а ручная кнопка исчезает — вести к её якорю
+  // значило бы отправить оператора в пустоту.
+  const patterns = useWatch({ control, name: 'patterns' });
+  const hasDxf = cardHasDxf(patterns);
+
   // ПЛИТКАМИ ИЛИ ЧИПАМИ — решается ОДИН раз на весь блок, по наличию хоть одного контура.
   //
   // Не «у этой детали контур есть» построчно: смешанная полоса из квадратов и коротких чипов
@@ -1637,7 +1645,18 @@ export function OperationsField({
     next.set('tab', 'patterns');
     setParams(next, { replace: true });
     // that tab is a sibling `hidden` panel, so it is already mounted — one frame is enough
-    window.setTimeout(() => revealField('pieces.add'), 120);
+    // Обе цели живут на ОДНОЙ вкладке (детали кроя — секция PATTERNS), различается только якорь.
+    // На карточке с чертежом кнопка сопоставления рендерится ТОЛЬКО внутри выбранной плитки
+    // материала и только когда у той есть файлы: оператор, оставивший выбранным пустой материал,
+    // «без материала» или PDF, пришёл бы на вкладку, где подсвечивать нечего. Поэтому переход
+    // отступает на полку материалов — она стоит всегда и объясняет следующий шаг.
+    window.setTimeout(() => {
+      if (!hasDxf) {
+        revealField('pieces.add');
+        return;
+      }
+      if (!revealField('patterns.match')) revealField('patterns.shelf');
+    }, 120);
   };
 
   const sensors = useSensors(
@@ -1690,8 +1709,18 @@ export function OperationsField({
               />
             ))
           )}
-          <Chip dashed onClick={goToPiecesTab} title='создать деталь на вкладке PATTERNS'>
-            + new piece
+          {/* Чип называет ДЕЙСТВИЕ, которое оператор увидит по приезде, а не абстрактное
+              «добавить»: с чертежом это модалка сопоставления, без чертежа — ручная кнопка. */}
+          <Chip
+            dashed
+            onClick={goToPiecesTab}
+            title={
+              hasDxf
+                ? 'детали заводятся из DXF — «↔ детали кроя» на вкладке patterns'
+                : 'создать деталь на вкладке PATTERNS'
+            }
+          >
+            {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
           <ToolbarSpacer />
           <Text

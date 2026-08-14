@@ -17,6 +17,7 @@ import { ulid } from 'utils/ulid';
 import { bomPurposeLabel, type FabricScope, type RollGoodsLine } from './bom-purpose';
 import { uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
+import { cardHasDxf, type PatternSheetRow } from './nesting/card-has-dxf';
 import {
   findPiece,
   fmtCm,
@@ -234,6 +235,12 @@ export function PiecesTab({
     purpose?: string;
     name?: string;
   }>;
+  // Привязан ли к карточке хоть один DXF — это и есть ответ, можно ли ещё заводить детали руками:
+  // с чертежом единственный автор деталей — модалка «↔ детали кроя», и вторая, ручная дверь молча
+  // расхаживала бы карточку с чертежом. Смотрим ФОРМУ, а не сохранённую карточку (почему — в
+  // card-has-dxf.ts): лист, добавленный в этой сессии, закрывает ручное заведение сразу.
+  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as PatternSheetRow[];
+  const hasDxf = cardHasDxf(patterns);
   // Tile ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
   const pin = useCrossHighlight<number>();
   // Разбор включён. Латч по открытой вкладке — ровно как на панели выкроек: там же написано,
@@ -518,6 +525,9 @@ export function PiecesTab({
   // added here stayed unlinkable until the card had been saved and reloaded.
   const [pendingSelectLast, setPendingSelectLast] = useState(false);
   const addPiece = () => {
+    // Дверь одна: на карточке с чертежом деталь заводит только сопоставление блоков. Кнопки здесь
+    // уже нет, но путь закрыт и в коде — чтобы новый вызов не открыл её обратно незаметно.
+    if (hasDxf) return;
     append({
       name: '',
       lineKey: ulid(),
@@ -755,15 +765,20 @@ export function PiecesTab({
                 разбор dxf…
               </Text>
             )}
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              data-field='pieces.add'
-              onClick={addPiece}
-            >
-              + piece
-            </Button>
+            {/* Ручное заведение — последняя лазейка, и живёт она ровно до первого DXF: пока
+                конструктор рисует, на деталь уже вешают операции и строки рецепта. Дальше автор
+                деталей один — модалка «↔ детали кроя» над этим блоком. */}
+            {!hasDxf && (
+              <Button
+                type='button'
+                variant='main'
+                size='sm'
+                data-field='pieces.add'
+                onClick={addPiece}
+              >
+                + piece
+              </Button>
+            )}
           </div>
         }
       >
@@ -774,9 +789,12 @@ export function PiecesTab({
         </datalist>
 
         {fields.length === 0 ? (
+          // Пустой список читается по-разному в двух режимах, и звать к ручной кнопке, которой на
+          // карточке с чертежом больше нет, значит отправить оператора её искать.
           <Text size='micro' variant='label'>
-            деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо
-            добавьте вручную (полочка, спинка, воротник…)
+            {hasDxf
+              ? 'деталей ещё нет — на карточке с чертежом они приходят из него: нажмите «↔ детали кроя» над этим блоком, и блоки DXF станут деталями'
+              : 'деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо добавьте вручную (полочка, спинка, воротник…)'}
           </Text>
         ) : (
           <>
