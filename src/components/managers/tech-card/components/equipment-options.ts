@@ -204,6 +204,15 @@ export const pressProfileProcessOptions: Array<{
   { value: 'TECH_CARD_OPERATION_TYPE_FUSING', label: 'fusing (дублирование)' },
 ];
 
+// The same four processes in one word, for a tile that has room for a pill and not for a sentence.
+// DERIVED from the picker list rather than written out beside it: a second hand-written list of the
+// same four members is the drift this file exists to prevent, and the picker's own labels are
+// «short (parenthetical)» by construction, so the head of each is already the word.
+export const pressProcessShort = (v?: string): string => {
+  const label = pressProfileProcessOptions.find((o) => o.value === v)?.label ?? '';
+  return label.split(' (')[0] ?? '';
+};
+
 // The label helpers return '' for the UNKNOWN member, exactly like zoneLabel: the dictionaries hold
 // a PICKER placeholder there («— machine —»), and printing that on a tech pack or in a step heading
 // would state a choice as if it were made.
@@ -233,6 +242,17 @@ export const pressClothLabel = (v?: string): string =>
   lookup(PRESS_CLOTH_LABELS, v, 'TECH_CARD_PRESS_CLOTH_UNKNOWN');
 export const machineTypeVerb = (v?: string): string =>
   lookup(MACHINE_TYPE_VERB, v, 'TECH_CARD_MACHINE_TYPE_UNKNOWN');
+
+// WHICH OF THE TWO EQUIPMENT AXES A STEP TYPE OWNS. One type answers «machine», three answer «ВТО»,
+// the rest own neither — and the server refuses a field from the wrong block BY NAME, refusing the
+// whole card with it. Three screens have to agree about this (the step editor, the card's equipment
+// park and the printed sheet), so the predicate lives with the vocabulary rather than being retyped
+// in each of them: a fourth ВТО type added to the contract has one place to be added here.
+export const isMachineStepType = (t?: string) => t === 'TECH_CARD_OPERATION_TYPE_MACHINE';
+export const isPressStepType = (t?: string) =>
+  t === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
+  t === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
+  t === 'TECH_CARD_OPERATION_TYPE_FUSING';
 
 // --- the inheritance ladder (§3) -----------------------------------------------------------------
 //

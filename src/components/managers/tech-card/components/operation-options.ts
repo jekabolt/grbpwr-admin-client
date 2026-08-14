@@ -6,7 +6,14 @@ import {
   common_TechCardSeamClass,
   common_TechCardTopstitchMode,
 } from 'api/proto-http/admin';
-import { machineTypeVerb } from './equipment-options';
+import {
+  automationLevelLabel,
+  bedTypeLabel,
+  machineTypeVerb,
+  needleTypeLabel,
+  pressClothLabel,
+  threadTensionLabel,
+} from './equipment-options';
 
 // The assembly-order vocabularies, in ENGLISH with the ISO numbers the trade already uses.
 //
@@ -244,4 +251,85 @@ export function operationHeading(args: {
   if (composed && (meaningful || zone || args.pieceNames.length > 0)) return composed;
   const firstNoteLine = (args.note ?? '').trim().split('\n')[0]?.trim();
   return firstNoteLine || composed || 'step';
+}
+
+// WHAT A PARK PROFILE IS SET TO, in one line — the tile's second line on CARD DEFAULTS and the
+// settings column of the printed tech pack. One composer for both, for the reason operationHeading
+// is one composer: a profile summarised differently on screen and on paper is two answers to «what
+// is this machine threaded with», and the paper one is the one nobody can check against the form.
+//
+// IT LIVES HERE, NOT IN equipment-options, only because of the import direction: the foot comes from
+// ATTACHMENT_KIND_LABELS (this file) and everything else from the equipment vocabulary, and
+// operation-options is the half that is allowed to import the other. Reversing it would close a
+// cycle.
+//
+// DECIMALS ARE STRINGS on the way in. The form holds them that way; a caller reading the WIRE
+// (a printed sheet over a release snapshot) passes them through decimalToInput first. Typed
+// structurally over exactly the fields read, so both shapes satisfy it — the same trick the ladder
+// resolvers use.
+const joinSummary = (parts: Array<string | false | undefined>): string =>
+  parts.filter(Boolean).join(' · ');
+
+export function machineProfileSummary(p: {
+  threadCount?: number;
+  needleType?: string;
+  needleSizeNm?: number;
+  bedType?: string;
+  automation?: string;
+  threadTension?: string;
+  threadTensionNote?: string;
+  attachmentKind?: string;
+  stitchesPerCm?: string;
+  stitchWidthMm?: string;
+}): string {
+  // The point and the size are ONE fact about the needle («ballpoint Nm 90»), so they are joined by
+  // a space and enter the list as a single item — separated by the dot they would read as two
+  // independent settings, and a summary is scanned, not parsed.
+  const needle = [
+    needleTypeLabel(p.needleType),
+    (p.needleSizeNm ?? 0) > 0 ? `Nm ${p.needleSizeNm}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  // THE TENSION AND ITS NOTE ARE ONE FACT, and on the OTHER member of the scale the note is the
+  // whole of it: «other (see note)» printed alone tells the floor to look somewhere this summary is
+  // the only copy of. The note qualifies the scale and never appears without it, which is exactly
+  // the pair the server enforces.
+  // Never the note on its own: the scale is what the note qualifies, and the save mapper drops a
+  // note whose scale went back to «inherit» — printing it here would show a setting that is about
+  // to disappear.
+  const tensionLabel = threadTensionLabel(p.threadTension);
+  const tensionNote = (p.threadTensionNote ?? '').trim();
+  const tension = tensionLabel && tensionNote ? `${tensionLabel} — ${tensionNote}` : tensionLabel;
+  return joinSummary([
+    (p.threadCount ?? 0) > 0 && `${p.threadCount} threads`,
+    needle,
+    bedTypeLabel(p.bedType),
+    automationLevelLabel(p.automation),
+    tension,
+    (p.stitchesPerCm ?? '').trim() && `${(p.stitchesPerCm ?? '').trim()} st/cm`,
+    (p.stitchWidthMm ?? '').trim() && `width ${(p.stitchWidthMm ?? '').trim()} mm`,
+    // '' for UNKNOWN, the real words for NONE: «runs bare» is a настройка somebody chose, and the
+    // summary of a profile that states it must not read the same as one that says nothing.
+    attachmentKindLabel(p.attachmentKind),
+  ]);
+}
+
+export function pressProfileSummary(p: {
+  pressTemperatureC?: number;
+  pressDwellSec?: number;
+  pressPressureNCm2?: string;
+  pressSteam?: boolean;
+  pressCloth?: string;
+}): string {
+  return joinSummary([
+    (p.pressTemperatureC ?? 0) > 0 && `${p.pressTemperatureC} °C`,
+    (p.pressDwellSec ?? 0) > 0 && `${p.pressDwellSec} s`,
+    // THE UNIT IS IN THE TEXT, always: press pressure is quoted in bar, in kg and in N/cm² by three
+    // different people, and a bare number on a printed sheet gets read in whichever the reader uses.
+    (p.pressPressureNCm2 ?? '').trim() && `${(p.pressPressureNCm2 ?? '').trim()} N/cm²`,
+    // Tri-state: absent says nothing, `false` says «press it DRY» — an instruction, not a silence.
+    p.pressSteam === undefined ? '' : p.pressSteam ? 'steam' : 'dry',
+    pressClothLabel(p.pressCloth),
+  ]);
 }

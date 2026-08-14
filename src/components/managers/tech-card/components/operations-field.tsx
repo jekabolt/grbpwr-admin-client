@@ -54,7 +54,10 @@ import {
   topstitchModeOptions,
   zoneOptions,
 } from './operation-options';
+import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
 import {
+  isMachineStepType,
+  isPressStepType,
   machineProfileName,
   machineTypeOptions,
   needleTypeLabel,
@@ -95,11 +98,10 @@ const NONE_PRESS_CLOTH = 'TECH_CARD_PRESS_CLOTH_UNKNOWN';
 // WHICH OF THE TWO EQUIPMENT BLOCKS A STEP OWNS. One step type answers «machine», three answer
 // «ВТО», the rest own neither — and the server refuses a field from the wrong block BY NAME, so
 // these two predicates decide what is rendered, what is cleared and what is counted as an override.
-const isMachineType = (t?: string) => t === 'TECH_CARD_OPERATION_TYPE_MACHINE';
-const isPressType = (t?: string) =>
-  t === 'TECH_CARD_OPERATION_TYPE_PRESS' ||
-  t === 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN' ||
-  t === 'TECH_CARD_OPERATION_TYPE_FUSING';
+// They live in equipment-options because CARD DEFAULTS counts profile references through the same
+// question, and a second copy of «which types are ВТО» would go stale on the day a fourth is added.
+const isMachineType = isMachineStepType;
+const isPressType = isPressStepType;
 
 // The fields of the core grid — the ones that are on screen whatever the fold is doing. Everything
 // else lives inside «differs from standard», which has to open itself when one of those fails.
@@ -883,6 +885,11 @@ function OperationEditor({
     NONE_TOPSTITCH) as string;
   const attachmentKind = (useWatch({ control, name: `operations.${index}.attachmentKind` }) ??
     NONE_ATTACHMENT) as string;
+  // Watched, not merely written: «set as card profile» has to know whether a size is pinned to the
+  // foot before it may move the foot into the park (see machineTakes — clearing the kind out from
+  // under a size would trip the effect below and silently delete the number).
+  const attachmentSizeMm = (useWatch({ control, name: `operations.${index}.attachmentSizeMm` }) ??
+    '') as string;
 
   // --- the two equipment axes (0306) --------------------------------------------------------
   // «На чём» the step is done. machineType / pressEquipment are REQUIRED by their step type and sit
@@ -1664,9 +1671,31 @@ function OperationEditor({
             <GroupLabel
               flush
               action={
-                <Text size='micro' variant='label' component='span'>
-                  {machineProfile ? `inherits ${machineSource}` : 'no profile — blanks stay unset'}
-                </Text>
+                <div className='flex flex-wrap items-center justify-end gap-2'>
+                  <Text size='micro' variant='label' component='span'>
+                    {machineProfile ? `inherits ${machineSource}` : 'no profile — blanks stay unset'}
+                  </Text>
+                  {/* «These are not this step's exception, they are the card's normal.» The values
+                      MOVE into the park and leave the step blank — the button lives in
+                      equipment-park.tsx because it writes into the array CARD DEFAULTS owns, and a
+                      write that misses that owner's own methods leaves a mounted list stale. */}
+                  <AdoptMachineIntoProfile
+                    index={index}
+                    step={{
+                      machineType,
+                      machineProfileKey,
+                      threadCount,
+                      needleType,
+                      needleSizeNm,
+                      threadTension,
+                      threadTensionNote,
+                      stitchWidthMm,
+                      stitchesPerCm,
+                      attachmentKind,
+                      attachmentSizeMm,
+                    }}
+                  />
+                </div>
               }
             >
               machine settings
@@ -1745,9 +1774,24 @@ function OperationEditor({
             <GroupLabel
               flush
               action={
-                <Text size='micro' variant='label' component='span'>
-                  {pressProfile ? `inherits ${pressSource}` : 'no profile — blanks stay unset'}
-                </Text>
+                <div className='flex flex-wrap items-center justify-end gap-2'>
+                  <Text size='micro' variant='label' component='span'>
+                    {pressProfile ? `inherits ${pressSource}` : 'no profile — blanks stay unset'}
+                  </Text>
+                  <AdoptPressIntoProfile
+                    index={index}
+                    step={{
+                      operationType: opType,
+                      pressEquipment,
+                      pressProfileKey,
+                      pressTemperatureC,
+                      pressDwellSec,
+                      pressPressureNCm2,
+                      pressSteam,
+                      pressCloth,
+                    }}
+                  />
+                </div>
               }
             >
               ВТО mode

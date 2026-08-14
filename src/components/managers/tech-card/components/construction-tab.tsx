@@ -127,8 +127,15 @@ function RequiredSeamAllowanceField() {
 function CardStandards() {
   return (
     <Section title='standards' question='— what every step inherits unless it says otherwise'>
-      <div className='flex flex-col gap-2.5 sm:max-w-sm'>
-        <RequiredSeamAllowanceField />
+      {/* The narrow column belongs to the ONE number above, not to the block: a single decimal in a
+          640px-wide box reads as an unfinished layout. The defaults accordion below it now carries
+          the card's equipment park — two lists of tiles and a grid of settings — and capped at
+          `max-w-sm` every one of those grids collapsed to a single column with the tiles stacked
+          under each other, on a screen with room for four. */}
+      <div className='flex flex-col gap-2.5'>
+        <div className='sm:max-w-sm'>
+          <RequiredSeamAllowanceField />
+        </div>
         <ConstructionField />
       </div>
     </Section>
