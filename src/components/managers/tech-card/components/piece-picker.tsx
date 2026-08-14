@@ -10,10 +10,10 @@ import { PieceShape, type FoundPiece } from './nesting/dxf-geometry';
 // server resolves to the real tech_card_piece FK, so a reference survives reordering and renaming —
 // unlike the free-text part name it replaced.
 //
-// `perGarment` — кратность на изделие с карточки детали. Показом её пользуется только визуальный
-// выбор ниже, и там она не украшение: «×2» отличает пару рукавов от одной, а на именах вида
-// «SLV_L» / «SLV_R» это единственное, чем они отличаются на глаз.
-export type PieceRef = { lineKey: string; name: string; perGarment?: number };
+// Кратности «×N на изделие» здесь нет НАМЕРЕННО: число считается по чертежу (модалка сопоставления
+// DXF), спрашивать о нём человека не о чем — а показанное в списке ВЫБОРА оно только приглашает
+// спорить с чертежом. На бумаге (тех-пак, наряд, кат-лист) число остаётся: по нему кроят.
+export type PieceRef = { lineKey: string; name: string };
 
 export const normalizePieceName = (name: string) => name.trim().toLowerCase();
 
@@ -25,7 +25,6 @@ export function useFormPieces(): PieceRef[] {
   const raw = (useWatch({ name: 'pieces' }) ?? []) as {
     name?: string;
     lineKey?: string;
-    piecesPerGarment?: number;
   }[];
   return useMemo(
     () =>
@@ -34,10 +33,6 @@ export function useFormPieces(): PieceRef[] {
         .map((p) => ({
           lineKey: p.lineKey as string,
           name: p.name?.trim() || 'без названия',
-          // Ниже единицы не бывает — деталь либо есть, либо её не заявляли; то же правило, что в
-          // расчёте площади (useFabricDxfPieces), чтобы «×2» на плитке и множитель в норме были
-          // одним числом, а не двумя похожими.
-          perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
         })),
     [raw],
   );
@@ -159,9 +154,7 @@ export function PieceList({
               key={p.lineKey}
               type='button'
               aria-pressed={on}
-              title={`${p.name}${(p.perGarment ?? 1) > 1 ? ` · ×${p.perGarment} на изделие` : ''}${
-                found ? '' : ' · нет в выкройках'
-              }`}
+              title={`${p.name}${found ? '' : ' · нет в выкройках'}`}
               onClick={() => onToggle(p.lineKey)}
               className={cn(
                 'flex min-w-0 flex-col border text-left transition-colors',
@@ -169,7 +162,7 @@ export function PieceList({
                 on ? 'border-textColor' : 'border-borderColor hover:border-textColor',
               )}
             >
-              <span className='relative flex h-12 w-full items-center justify-center bg-bgColor p-1'>
+              <span className='flex h-12 w-full items-center justify-center bg-bgColor p-1'>
                 {found ? (
                   <PieceShape piece={found.piece} grainLayer='' outlineOnly />
                 ) : (
@@ -181,11 +174,6 @@ export function PieceList({
                     нет
                     <br />в выкройках
                   </Text>
-                )}
-                {(p.perGarment ?? 1) > 1 && (
-                  <span className='absolute top-0 right-0 border-b border-l border-borderColor bg-bgColor px-1 text-nano text-labelColor'>
-                    ×{p.perGarment}
-                  </span>
                 )}
               </span>
               <span

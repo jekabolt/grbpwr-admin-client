@@ -38,7 +38,6 @@ import { KIND_HOME_SECTION, UNSET_KIND, isKindEligibleSection } from './bom-kind
 import { UNSET_PURPOSE, fabricScopeKey, isOtherPurpose, isRollGoodsSection } from './bom-purpose';
 import { parseSeasonToSku, skuToSeasonLabel } from './season-util';
 import {
-  CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
   UNSET_CUT_SYMMETRY,
   UNSET_FUSING_MODE,
   fusingNeedsWidth,
@@ -298,19 +297,18 @@ const pieceSchema = z
         path: ['name'],
       });
     }
-    // Зеркальная пара при нечётном (или нулевом) количестве. Правило живёт в CHECK'е БД
-    // (`chk_tcp_mirrored_needs_even_count`), и CHECK этот ДВУХКОЛОНОЧНЫЙ: он срабатывает и когда
-    // правят одно только количество у уже размеченной детали. Без этой проверки оператор получил бы
-    // сырой MySQL 3819 про колонку, которой не касался, и сохранение всей карточки — с сезоном,
-    // подписями и всем остальным — упало бы без единого адресуемого поля. Ошибка вешается на
-    // `cutSymmetry`, то есть на контрол, который её и вызвал.
-    if (cutSymmetryCountInvalid(piece.cutSymmetry, piece.piecesPerGarment)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
-        path: ['cutSymmetry'],
-      });
-    }
+    // ПРОВЕРКИ «зеркальная пара при нечётном количестве» ЗДЕСЬ БОЛЬШЕ НЕТ — и это не забывчивость.
+    // Она вешала issue на `path: ['cutSymmetry']`, а контрола с таким путём в карточке не осталось:
+    // редактор «как кроится» убран вместе с «× на изделие», ответ теперь ставит модалка
+    // сопоставления DXF. Зод-ошибка на поле, которого нет на экране, — это молчащая кнопка
+    // «сохранить»: подсветить и проскроллить не к чему, исправить нечем, и карточка встаёт в
+    // «Press Save again» без выхода. Проект уже платил за ровно этот сценарий.
+    //
+    // Само правило БД никуда не делось (`chk_tcp_mirrored_needs_even_count` ДВУХКОЛОНОЧНЫЙ и
+    // стреляет сырым MySQL 3819), но закрывает его теперь не отказ, а нормализация на ОТПРАВКЕ —
+    // см. `cutSymmetry` в маппере `pieces` ниже: невалидная пара уезжает явным `_UNKNOWN`, то есть
+    // разметка снимается осознанно, а сохранение карточки проходит. Создать такую пару руками
+    // оператор больше не может — обе её половины ставит модалка, и она держит то же правило.
     // A fabric-map cell addresses its colourway by id (colorwayIndex holds colorway_id on the wire),
     // and the server rejects a cell whose id is <= 0 with a pathless error that blocks the whole
     // card — which is why the save mapper used to DROP such a cell. But this admin no longer edits
@@ -1559,7 +1557,22 @@ export function mapFormToTechCardInsert(
         // Молчать было бы «безопаснее» ровно до первого снятия разметки, которое стало бы
         // невозможным и необъяснимым: контрол показывает «не размечено», а карточка после перезагрузки
         // снова помечена.
-        cutSymmetry: (p.cutSymmetry || UNSET_CUT_SYMMETRY) as common_TechCardPieceCutSymmetry,
+        //
+        // ЕДИНСТВЕННОЕ ИСКЛЮЧЕНИЕ — НЕВАЛИДНАЯ ПАРА (защитная нормализация). Зеркальная пара при
+        // нечётном или нулевом количестве отвергается серверной `ValidatePieceCutSymmetry` и
+        // CHECK'ом `chk_tcp_mirrored_needs_even_count` (сырой MySQL 3819), и падает при этом ВСЯ
+        // карточка — с сезоном, подписями и всем остальным. Раньше такую пару ловил refine формы;
+        // теперь ловить её на форме нечем и НЕЧЕМ ЧИНИТЬ: ни «как кроится», ни «× на изделие» в
+        // карточке больше не редактируются, так что круглый рейс легаси-пары означал бы вечный
+        // отказ сохранения без единого адресуемого поля. Поэтому вместо хранимого значения уезжает
+        // явный `_UNKNOWN` — по тому же контракту абзацем выше сервер прочитает его как «очисти
+        // колонку»: разметка снимается осознанно, а карточка сохраняется. Пара проверяется в том
+        // виде, в каком уедет (количество уже подрезано до >= 1 строкой выше), — судить её будет
+        // именно такой. Валидные значения (identical / fold / mirrored при чётном >= 2) в эту ветку
+        // не попадают и уезжают неизменными.
+        cutSymmetry: (cutSymmetryCountInvalid(p.cutSymmetry, p.piecesPerGarment || 1)
+          ? UNSET_CUT_SYMMETRY
+          : p.cutSymmetry || UNSET_CUT_SYMMETRY) as common_TechCardPieceCutSymmetry,
         // `ungraded` шлётся ВСЕГДА, и по той же причине, что `cutSymmetry` выше: поле объявлено
         // `optional` ради ЧУЖОЙ устаревшей вкладки — ОТСУТСТВИЕ сервер читает как «оставь
         // хранимое», ЯВНЫЙ `false` как «сними пометку». Круглый рейс прочитанного выполняет оба
