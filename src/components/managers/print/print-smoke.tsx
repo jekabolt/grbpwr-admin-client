@@ -34,7 +34,8 @@ import { useSearchParams } from 'react-router-dom';
 // врала: зона операции UNKNOWN (шаги с ней исчезали с листа), нулевой припуск (легальное
 // «кроить по линии», которое нельзя схлопнуть в «стандарт»), висячая ссылка на BOM, деталь с
 // потерянной выноской, смешанная раскладка без скалярной нормы, подпись с разошедшимся digest,
-// issue со ссылкой на несуществующую операцию.
+// issue со ссылкой на несуществующую операцию, два профиля одного типа (ступень «по типу»
+// обязана НЕ разрешиться) и шаг, у которого почти всё унаследовано от профиля.
 
 const dec = (v: string) => ({ value: v });
 
@@ -51,7 +52,62 @@ const techCard = {
     measurementUnit: 'TECH_CARD_MEASUREMENT_UNIT_CM',
     concept: 'fixture concept',
     notes: 'fixture notes',
-    construction: { defaultSeamClass: 'TECH_CARD_SEAM_CLASS_SSA', hemFinish: 'blind hem' },
+    construction: {
+      defaultSeamClass: 'TECH_CARD_SEAM_CLASS_SS_PLAIN',
+      // Карточная плотность — НИЖНЯЯ ступень лестницы (§3.4): шаг, у которого своей нет и машинки
+      // нет, обязан печататься с этим числом, а не пустой клеткой.
+      defaultStitchesPerCm: dec('4'),
+      hemFinish: 'blind hem',
+      // ПАРК ОБОРУДОВАНИЯ (0306) — без него фикстура не накрывает ни таблицу дефолтов, ни колонку
+      // «machine / mode», ни наследование: печать считает эффективные значения САМА, потому что
+      // сервер унаследованное не материализует.
+      equipmentDefaults: {
+        machines: [
+          {
+            profileKey: 'M-LOCK',
+            label: 'lockstitch by the window',
+            machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+            threadCount: 2,
+            needleType: 'TECH_CARD_NEEDLE_TYPE_BALLPOINT',
+            needleSizeNm: 90,
+            bedType: 'TECH_CARD_BED_TYPE_FLATBED',
+            threadTension: 'TECH_CARD_THREAD_TENSION_NORMAL',
+            stitchesPerCm: dec('4.5'),
+            note: 'bobbin: same spool as the needle thread',
+          },
+          // ДВА ОВЕРЛОКА ОДНОГО ТИПА — обычный случай цеха и ловушка лестницы: шаг без ключа
+          // профиля не наследует НИЧЕГО (с двумя оверлоками «оверлок» не ответ), и бумага обязана
+          // это показать пустыми настройками, а не числами первого попавшегося.
+          {
+            profileKey: 'M-OVL-1',
+            label: 'overlock by the window',
+            machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK',
+            threadCount: 4,
+            stitchWidthMm: dec('5'),
+          },
+          {
+            // Без имени: имя профиля обязано откатиться на имя самой машинки.
+            profileKey: 'M-OVL-2',
+            machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK',
+            threadCount: 3,
+          },
+        ],
+        presses: [
+          {
+            profileKey: 'P-FUSE',
+            label: 'fusing press, line 2',
+            pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS',
+            operationType: 'TECH_CARD_OPERATION_TYPE_FUSING',
+            pressTemperatureC: 145,
+            pressDwellSec: 12,
+            pressPressureNCm2: dec('3.5'),
+            // false — это «утюжить СУХИМ», указание, а не молчание: печататься обязано словом.
+            pressSteam: false,
+            pressCloth: 'TECH_CARD_PRESS_CLOTH_TEFLON_SHEET',
+          },
+        ],
+      },
+    },
     callouts: [
       { number: 1, part: 'collar', description: 'top stitch 2 mm', mediaId: 0 },
       { number: 2, part: 'cuff', description: 'button placement' },
@@ -96,6 +152,42 @@ const techCard = {
         operationNumber: 30,
         operationType: 'TECH_CARD_OPERATION_TYPE_BARTACK',
         zone: 'TECH_CARD_GARMENT_ZONE_UNKNOWN',
+      },
+      {
+        // МАШИННЫЙ ШАГ, НАСЛЕДУЮЩИЙ ПОЧТИ ВСЁ. Своих значений два — натяжение и лапка с размером;
+        // нитки, игла, станина и плотность приходят с профиля, названного ключом, и обязаны
+        // печататься ЧИСЛАМИ без маркера. Строка, которая печаталась бы «не задано», — ровно тот
+        // дефект, ради которого печать считает лестницу сама.
+        operationNumber: 40,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_LOCKSTITCH',
+        machineProfileKey: 'M-LOCK',
+        zone: 'TECH_CARD_GARMENT_ZONE_SLEEVE',
+        pieceLineKeys: ['P1'],
+        threadTension: 'TECH_CARD_THREAD_TENSION_TIGHTER',
+        attachmentKind: 'TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE',
+        attachmentSizeMm: dec('6'),
+        // Ширина ОТСТРОЧКИ — расстояние от края, не амплитуда стежка: подписи обязаны их развести.
+        topstitch: { mode: 'TECH_CARD_TOPSTITCH_MODE_WIDTH', widthMm: dec('6'), rows: 2 },
+        smv: dec('2.1'),
+      },
+      {
+        // Тип есть, ключа нет, а оверлоков на карте два — наследовать нечего. Своя ширина стежка
+        // печатается с маркером, плотность падает до карточной (тоже число, но без маркера).
+        operationNumber: 50,
+        operationType: 'TECH_CARD_OPERATION_TYPE_MACHINE',
+        machineType: 'TECH_CARD_MACHINE_TYPE_OVERLOCK',
+        zone: 'TECH_CARD_GARMENT_ZONE_HEM',
+        stitchWidthMm: dec('4'),
+      },
+      {
+        // ВТО: профиль подобран по оборудованию И процессу (дублирование), своя — только
+        // температура. Плотность на ВТО-шаге не печатается вовсе: там нечего ею описывать.
+        operationNumber: 60,
+        operationType: 'TECH_CARD_OPERATION_TYPE_FUSING',
+        pressEquipment: 'TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS',
+        zone: 'TECH_CARD_GARMENT_ZONE_COLLAR',
+        pressTemperatureC: 150,
       },
     ],
     labels: [

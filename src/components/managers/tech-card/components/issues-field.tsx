@@ -249,15 +249,25 @@ export function IssuesField() {
   // OperationsField's own callout "pin" picker derives from `callouts`.
   const operations = (useWatch({ control, name: 'operations' }) ?? []) as Array<{
     operationType?: string;
+    machineType?: string;
     zone?: string;
     note?: string;
     pieceLineKeys?: string[];
   }>;
   const formPieces = useFormPieces();
   const headingOf = useCallback(
-    (o: { operationType?: string; zone?: string; note?: string; pieceLineKeys?: string[] }) =>
+    (o: {
+      operationType?: string;
+      machineType?: string;
+      zone?: string;
+      note?: string;
+      pieceLineKeys?: string[];
+    }) =>
       operationHeading({
         operationType: o.operationType as Parameters<typeof operationHeading>[0]['operationType'],
+        // The verb of a machine step comes from its machine — an issue that points at «machine ·
+        // hem» names no step on a card where nine steps are machine steps.
+        machineType: o.machineType as Parameters<typeof operationHeading>[0]['machineType'],
         zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
         pieceNames: (o.pieceLineKeys ?? [])
           .map((k) => formPieces.find((p) => p.lineKey === k)?.name)

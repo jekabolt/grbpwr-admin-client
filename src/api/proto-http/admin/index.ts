@@ -6284,6 +6284,17 @@ export type common_TechCardInsert = {
   // «edited since signing», on every card at once. (The free-text twin it used to be confused with,
   // construction.seam_allowances, no longer exists — the operations break removed it.)
   requiredSeamAllowanceMm: googletype_Decimal | undefined;
+  // Says «this bundle KNOWS about the machine / ВТО fields on operations and profiles». A new
+  // client sets it on every save; nothing else may.
+  // Operations are full-replace with no per-field protection, so a save from a bundle that has
+  // never heard of machine_type would silently wipe every machine fact on the card. With this flag
+  // the server can tell the two cases apart and refuse instead: a write WITHOUT it against a card
+  // that carries machine facts fails with FailedPrecondition naming the reason, and a write
+  // without it that nevertheless echoes the new fields fails the same way. A card with no machine
+  // facts saves from an old bundle exactly as before.
+  // TRANSPORT, NOT CONTENT: it is NOT part of any section digest — which client saved a card is
+  // not something a signature can depend on.
+  machineFieldsAware: boolean | undefined;
 };
 
 // StyleNumberSource records how a tech card's style_number was set (PLM-rework Q1): GENERATED = the
@@ -6665,24 +6676,27 @@ export type common_TechCardBomKind =
 // TechCardOperation.operation_type, and a card-wide default for it is not a thing a card can mean.
 export type common_TechCardConstruction = {
   hemFinish: string | undefined;
-  pressing: string | undefined;
   notes: string | undefined;
   // Inherited by TechCardOperation.seam_class when that one is UNKNOWN.
   defaultSeamClass: common_TechCardSeamClass | undefined;
   // Inherited by TechCardOperation.stitches_per_cm when that one is unset. In STITCHES PER
   // CENTIMETRE — stitch density is quoted per cm everywhere and is NOT part of the mm switch.
   defaultStitchesPerCm: googletype_Decimal | undefined;
-  // 3 | 4 | 5; 0 = unset. The name does NOT reuse the removed `overlock_threads` (a string):
-  // a reused name with a new type is the drift the removed-registry rule exists to prevent.
-  overlockThreadCount: number | undefined;
+  // The card's machine and ВТО park: which machines this style is sewn on and with what settings,
+  // which presses/irons it is pressed on. A step inherits from here (by profile key, or by type
+  // when the card has exactly one profile of that type) and stores only what it overrides.
+  // Absent = preserve the stored profiles; present = full replace (empty = delete all). See
+  // TechCardEquipmentDefaults for why presence lives in a wrapper and not in a flag.
+  equipmentDefaults: common_TechCardEquipmentDefaults | undefined;
 };
 
 // TechCardSeamClass is the ISO 4916 seam class, in its six families: SS superimposed, LS lapped,
 // EF edge finishing, BS bound, FS flat, OS ornamental. It replaces the free-text `seam_type`,
 // whose suggestion list mixed the class with the PRESSING DIRECTION — «стачной взаутюжку» and
 // «стачной вразутюжку» are one class (SS plain) pressed two ways, and holding them as two
-// entries made the field answer two questions with one value. Pressing stays prose on
-// TechCardConstruction.pressing.
+// entries made the field answer two questions with one value. The pressing direction is a STEP of
+// its own now — PRESS (заутюжить) and PRESS_OPEN (разутюжить), each with its own ВТО settings — and
+// it stopped being prose on the construction when that field was retired by the equipment park.
 // UNKNOWN = inherit TechCardConstruction.default_seam_class. Inheritance is a DISPLAY rule: the
 // server stores the unset value and never materialises the inherited one, so «the technologist
 // chose this» stays distinguishable from «it defaulted».
@@ -6699,6 +6713,208 @@ export type common_TechCardSeamClass =
   | "TECH_CARD_SEAM_CLASS_FS_FLAT"
   | "TECH_CARD_SEAM_CLASS_OS_TOPSTITCH"
   | "TECH_CARD_SEAM_CLASS_OTHER";
+// TechCardEquipmentDefaults wraps the two profile lists, and the WRAPPER IS THE PRESENCE SIGNAL —
+// which is the whole reason it exists rather than two bare repeated fields on the construction:
+// absent (nil)  — the payload did not speak about equipment (an older bundle), so the server
+// PRESERVES the stored profiles;
+// present       — full replace, and an EMPTY wrapper means «delete them all», an intent a bare
+// repeated field can never express.
+// A hand-made bool flag was rejected for this job: a flag inside the payload would be hashed into
+// the section digest and would make every signature depend on which client saved last.
+export type common_TechCardEquipmentDefaults = {
+  machines: common_TechCardMachineProfile[] | undefined;
+  presses: common_TechCardPressProfile[] | undefined;
+};
+
+// TechCardMachineProfile is one row of CARD DEFAULTS: «this card is sewn on such a machine, set up
+// like this». A step then names the machine TYPE (or points at this exact profile by key) and
+// overrides only what it genuinely deviates in — everything unset is inherited live and NEVER
+// materialised into the step's row.
+// IDENTITY IS profile_key, a durable client-minted ULID exactly like bom_line_key / piece_line_key:
+// the list is full-replaced on every save, so a positional index or an id would break every step
+// reference the moment a row moves. `label` is a NAME FOR A HUMAN («оверлок у окна») and is NOT
+// part of the identity — the scope_key lesson (two different keys living under one name) is what
+// keeps them separate. There may be MANY profiles of one type: two identical machines set up
+// differently is the normal case, not a mistake to deduplicate.
+export type common_TechCardMachineProfile = {
+  profileKey: string | undefined;
+  label: string | undefined;
+  machineType: common_TechCardMachineType | undefined;
+  threadCount: number | undefined;
+  needleType: common_TechCardNeedleType | undefined;
+  needleSizeNm: number | undefined;
+  bedType: common_TechCardBedType | undefined;
+  automation: common_TechCardAutomationLevel | undefined;
+  threadTension: common_TechCardThreadTension | undefined;
+  threadTensionNote: string | undefined;
+  attachmentKind: common_TechCardAttachmentKind | undefined;
+  stitchesPerCm: googletype_Decimal | undefined;
+  stitchWidthMm: googletype_Decimal | undefined;
+  note: string | undefined;
+};
+
+// TechCardMachineType is the SECOND AXIS of a sewing step: operation_type says WHAT is done
+// («machine», «press», «fusing»…), this says ON WHAT. Holding both on one field is what made the
+// old TechCardOperationType a mixture of a verb and a machine class — a step could not say
+// «прострочить на двухигольной» without the two answers colliding in one enum member.
+// 23 machines of the owner's park + LOCKSTITCH_DOUBLE_NEEDLE, which exists for one specific
+// reason: without it the migration of the legacy `double_needle` operation type would have
+// collapsed irreversibly into the plain lockstitch and lost the fact somebody recorded.
+export type common_TechCardMachineType =
+  | "TECH_CARD_MACHINE_TYPE_UNKNOWN"
+  | "TECH_CARD_MACHINE_TYPE_LOCKSTITCH"
+  | "TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE"
+  | "TECH_CARD_MACHINE_TYPE_OVERLOCK"
+  | "TECH_CARD_MACHINE_TYPE_COVERSTITCH"
+  | "TECH_CARD_MACHINE_TYPE_COVERLOCK"
+  | "TECH_CARD_MACHINE_TYPE_CHAINSTITCH"
+  | "TECH_CARD_MACHINE_TYPE_BLINDSTITCH"
+  | "TECH_CARD_MACHINE_TYPE_ZIGZAG"
+  | "TECH_CARD_MACHINE_TYPE_BARTACK"
+  | "TECH_CARD_MACHINE_TYPE_BUTTONHOLE"
+  | "TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH"
+  | "TECH_CARD_MACHINE_TYPE_EMBROIDERY"
+  | "TECH_CARD_MACHINE_TYPE_HANDSTITCH_IMITATION"
+  | "TECH_CARD_MACHINE_TYPE_HARDWARE_ATTACH"
+  | "TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH"
+  | "TECH_CARD_MACHINE_TYPE_BINDING_TAPING"
+  | "TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING"
+  | "TECH_CARD_MACHINE_TYPE_GATHERING"
+  | "TECH_CARD_MACHINE_TYPE_PATCH_POCKET_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_WELT_POCKET_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_TEMPLATE_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_COLLAR_CUFF_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_SLEEVE_SETTING_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_WAISTBAND_AUTO"
+  | "TECH_CARD_MACHINE_TYPE_OTHER";
+// TechCardNeedleType is the needle point, the fact that decides whether a knit is pierced or
+// pushed aside. UNKNOWN = inherit (profile → nothing), never «universal by default».
+export type common_TechCardNeedleType =
+  | "TECH_CARD_NEEDLE_TYPE_UNKNOWN"
+  | "TECH_CARD_NEEDLE_TYPE_UNIVERSAL"
+  | "TECH_CARD_NEEDLE_TYPE_BALLPOINT"
+  | "TECH_CARD_NEEDLE_TYPE_STRETCH"
+  | "TECH_CARD_NEEDLE_TYPE_JEANS"
+  | "TECH_CARD_NEEDLE_TYPE_LEATHER"
+  | "TECH_CARD_NEEDLE_TYPE_MICROTEX"
+  | "TECH_CARD_NEEDLE_TYPE_EMBROIDERY"
+  | "TECH_CARD_NEEDLE_TYPE_OTHER";
+// TechCardBedType is the machine's bed. It is the IDENTITY of a machine, not a setting of a step —
+// which is why it lives on the profile only and has deliberately no override on the operation:
+// a different bed is a different machine, so the step changes machine_type instead.
+export type common_TechCardBedType =
+  | "TECH_CARD_BED_TYPE_UNKNOWN"
+  | "TECH_CARD_BED_TYPE_FLATBED"
+  | "TECH_CARD_BED_TYPE_CYLINDER_BED"
+  | "TECH_CARD_BED_TYPE_POST_BED"
+  | "TECH_CARD_BED_TYPE_FEED_OFF_ARM"
+  | "TECH_CARD_BED_TYPE_OTHER";
+// TechCardAutomationLevel is an ORDERED SCALE, and therefore has NO `OTHER`: a scale with an
+// «other» member is no longer a scale. Like bed_type it is machine identity, profile-only.
+export type common_TechCardAutomationLevel =
+  | "TECH_CARD_AUTOMATION_LEVEL_UNKNOWN"
+  | "TECH_CARD_AUTOMATION_LEVEL_BASIC"
+  | "TECH_CARD_AUTOMATION_LEVEL_SEMI_AUTO"
+  | "TECH_CARD_AUTOMATION_LEVEL_AUTO";
+// TechCardThreadTension is a CLOSED SCALE relative to the machine's normal setting, plus a free
+// thread_tension_note for the numbers a particular machine wants. A raw dial number was rejected
+// deliberately: it means nothing across two machines of the same class.
+export type common_TechCardThreadTension =
+  | "TECH_CARD_THREAD_TENSION_UNKNOWN"
+  | "TECH_CARD_THREAD_TENSION_LOOSER"
+  | "TECH_CARD_THREAD_TENSION_NORMAL"
+  | "TECH_CARD_THREAD_TENSION_TIGHTER"
+  | "TECH_CARD_THREAD_TENSION_OTHER";
+// TechCardAttachmentKind is the folder / guide / presser foot the step runs with.
+// THERE IS A `NONE` NOW, AND IT IS NOT A SPELLING OF UNKNOWN. The old comment here said the
+// opposite — «none» and «not specified» are the same fact — and it was TRUE for as long as this
+// field was not inherited: with nothing above the step, both meant «nothing on the machine».
+// Since the card carries machine profiles, UNKNOWN means «take the profile's foot» and the step
+// lost any way to say «this one runs bare». NONE is that sentence. The two are different facts and
+// both are stored.
+// `walking_foot` is deliberately NOT in this list: in an industrial shop a walking foot is a
+// machine with a unison / top feed — a property of the TRANSPORT, not a snap-on foot an operator
+// fits per step. If it is ever needed it belongs next to bed_type on the machine, not here.
+export type common_TechCardAttachmentKind =
+  | "TECH_CARD_ATTACHMENT_KIND_UNKNOWN"
+  | "TECH_CARD_ATTACHMENT_KIND_BINDER"
+  | "TECH_CARD_ATTACHMENT_KIND_HEMMER_FOLDER"
+  | "TECH_CARD_ATTACHMENT_KIND_SCROLL_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ZIPPER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_INVISIBLE_ZIPPER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE"
+  | "TECH_CARD_ATTACHMENT_KIND_PIPING_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ELASTIC_ATTACHMENT"
+  | "TECH_CARD_ATTACHMENT_KIND_OTHER"
+  | "TECH_CARD_ATTACHMENT_KIND_TEFLON_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_ROLLER_FOOT"
+  | "TECH_CARD_ATTACHMENT_KIND_NONE";
+// TechCardPressProfile is the ВТО twin of TechCardMachineProfile: one press / iron / steamer of the
+// card, with the settings a step inherits. Same durable-key rules.
+export type common_TechCardPressProfile = {
+  profileKey: string | undefined;
+  label: string | undefined;
+  pressEquipment: common_TechCardPressEquipment | undefined;
+  // WHICH PROCESS this profile is for, so the form can offer it by default on the right step:
+  // UNKNOWN (universal), PRESS, PRESS_OPEN or FUSING are legal; any other operation type is
+  // rejected — a profile «for a lockstitch step» is not a thing a press can mean.
+  operationType: common_TechCardOperationType | undefined;
+  pressTemperatureC: number | undefined;
+  pressDwellSec: number | undefined;
+  pressPressureNCm2: googletype_Decimal | undefined;
+  pressSteam?: boolean;
+  pressCloth: common_TechCardPressCloth | undefined;
+  note: string | undefined;
+};
+
+// TechCardPressEquipment is the «on what» of a ВТО step (PRESS / PRESS_OPEN / FUSING), the press
+// side of the same second axis TechCardMachineType covers for sewing.
+export type common_TechCardPressEquipment =
+  | "TECH_CARD_PRESS_EQUIPMENT_UNKNOWN"
+  | "TECH_CARD_PRESS_EQUIPMENT_IRON"
+  | "TECH_CARD_PRESS_EQUIPMENT_PRESS"
+  | "TECH_CARD_PRESS_EQUIPMENT_FUSING_PRESS"
+  | "TECH_CARD_PRESS_EQUIPMENT_STEAM_DUMMY"
+  | "TECH_CARD_PRESS_EQUIPMENT_STEAMER"
+  | "TECH_CARD_PRESS_EQUIPMENT_OTHER";
+// TechCardOperationType says WHAT a step does. It used to mix that with the machine class, which
+// is why 1-9 read like a machine list: a step could not say «прострочить» without also committing
+// to a stitch class in the same value, and «на чём» had no field of its own. The second axis is
+// TechCardMachineType / TechCardPressEquipment now, and the verbs left here are six: MACHINE,
+// PRESS, PRESS_OPEN, FUSING, HANDWORK, OTHER.
+export type common_TechCardOperationType =
+  | "TECH_CARD_OPERATION_TYPE_UNKNOWN"
+  // 1-9 ARE LEGACY AND LIVE FOREVER. They are still ACCEPTED on write (canonicalised into
+  // (MACHINE, machine_type) before anything else sees them) but never EMITTED on read.
+  // The symbols themselves can never be deleted: a release snapshot is immutable protojson holding
+  // these very names, and removing a member would make such a snapshot parse «successfully» while
+  // silently losing what the step was. A cleanup phase for them was considered and cancelled.
+  | "TECH_CARD_OPERATION_TYPE_LOCKSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE"
+  | "TECH_CARD_OPERATION_TYPE_OVERLOCK"
+  | "TECH_CARD_OPERATION_TYPE_COVERSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_CHAINSTITCH"
+  | "TECH_CARD_OPERATION_TYPE_BLINDHEM"
+  | "TECH_CARD_OPERATION_TYPE_BARTACK"
+  | "TECH_CARD_OPERATION_TYPE_BUTTONHOLE"
+  | "TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH"
+  | "TECH_CARD_OPERATION_TYPE_FUSING"
+  | "TECH_CARD_OPERATION_TYPE_HANDWORK"
+  | "TECH_CARD_OPERATION_TYPE_OTHER"
+  | "TECH_CARD_OPERATION_TYPE_MACHINE"
+  | "TECH_CARD_OPERATION_TYPE_PRESS"
+  | "TECH_CARD_OPERATION_TYPE_PRESS_OPEN";
+// TechCardPressCloth is what sits between the iron and the cloth.
+// NONE IS NOT UNKNOWN HERE, and that is the point: with inheritance in play, «не указано» means
+// «take the card profile's answer», so without an explicit NONE a step could never CANCEL the
+// profile's press cloth. The same argument added NONE to TechCardAttachmentKind.
+export type common_TechCardPressCloth =
+  | "TECH_CARD_PRESS_CLOTH_UNKNOWN"
+  | "TECH_CARD_PRESS_CLOTH_NONE"
+  | "TECH_CARD_PRESS_CLOTH_PRESS_CLOTH"
+  | "TECH_CARD_PRESS_CLOTH_DAMP_PRESS_CLOTH"
+  | "TECH_CARD_PRESS_CLOTH_TEFLON_SHEET"
+  | "TECH_CARD_PRESS_CLOTH_OTHER";
 // TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
 // THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
 // path). Eleven fields left, and they left for three different reasons:
@@ -6748,6 +6964,37 @@ export type common_TechCardOperation = {
   topstitch: common_TechCardTopstitch | undefined;
   attachmentKind: common_TechCardAttachmentKind | undefined;
   attachmentSizeMm?: googletype_Decimal;
+  // --- «на чём»: the machine block, for operation_type = MACHINE ---------------------------------
+  // REQUIRED when the step is MACHINE (on an aware write); rejected on any other type. This is the
+  // second axis: the verb is above, the machine is here.
+  machineType: common_TechCardMachineType | undefined;
+  // Points at ONE profile of construction.equipment_defaults BY KEY — the card may hold several
+  // machines of the same type, and «the overlock» is then not an answer. Empty = resolve by type
+  // (used only when the card has exactly one profile of that type). A key naming no profile in the
+  // payload DETACHES to unset rather than failing the save (the callout precedent: tidying the
+  // defaults must not block saving the steps); a key naming a profile of a DIFFERENT machine type
+  // is a FieldViolation, because that is two answers to one question.
+  machineProfileKey: string | undefined;
+  // Overrides. Unset = INHERIT (step → profile → card defaults) and the inherited value is NEVER
+  // written into the row: the day it is, «the technologist chose 4» stops being distinguishable
+  // from «it defaulted to 4».
+  threadCount: number | undefined;
+  needleType: common_TechCardNeedleType | undefined;
+  needleSizeNm: number | undefined;
+  threadTension: common_TechCardThreadTension | undefined;
+  threadTensionNote: string | undefined;
+  // Stitch WIDTH — the zigzag amplitude, the bite of an overlock / coverstitch. NOT
+  // topstitch.width_mm, which is a distance from an edge; the two are different facts and the
+  // labels must stay different everywhere they are printed.
+  stitchWidthMm: googletype_Decimal | undefined;
+  // --- the ВТО block, for operation_type = PRESS / PRESS_OPEN / FUSING ---------------------------
+  pressEquipment: common_TechCardPressEquipment | undefined;
+  pressProfileKey: string | undefined;
+  pressTemperatureC: number | undefined;
+  pressDwellSec: number | undefined;
+  pressPressureNCm2: googletype_Decimal | undefined;
+  pressSteam?: boolean;
+  pressCloth: common_TechCardPressCloth | undefined;
   // --- the only free text left ------------------------------------------------------------------
   // One box, not two: `description` and `note` sat side by side with no rule saying which was
   // which, which guarantees two cards fill them the opposite way round.
@@ -6757,23 +7004,6 @@ export type common_TechCardOperation = {
   bomItemIds: number[] | undefined;
 };
 
-// TechCardOperationType classifies an operation by its machine / stitch class
-// (replaces the coarse seaming/overlock/decorative split with the real sewing
-// taxonomy the factory works in).
-export type common_TechCardOperationType =
-  | "TECH_CARD_OPERATION_TYPE_UNKNOWN"
-  | "TECH_CARD_OPERATION_TYPE_LOCKSTITCH"
-  | "TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE"
-  | "TECH_CARD_OPERATION_TYPE_OVERLOCK"
-  | "TECH_CARD_OPERATION_TYPE_COVERSTITCH"
-  | "TECH_CARD_OPERATION_TYPE_CHAINSTITCH"
-  | "TECH_CARD_OPERATION_TYPE_BLINDHEM"
-  | "TECH_CARD_OPERATION_TYPE_BARTACK"
-  | "TECH_CARD_OPERATION_TYPE_BUTTONHOLE"
-  | "TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH"
-  | "TECH_CARD_OPERATION_TYPE_FUSING"
-  | "TECH_CARD_OPERATION_TYPE_HANDWORK"
-  | "TECH_CARD_OPERATION_TYPE_OTHER";
 // TechCardGarmentZone says WHERE ON THE GARMENT a step works — and it is one of the two fields a
 // step cannot be saved without (the other is operation_type). Renamed from
 // TechCardConstructionZone, which had only the three material BANDS and therefore could not answer
@@ -6821,21 +7051,6 @@ export type common_TechCardTopstitchMode =
   | "TECH_CARD_TOPSTITCH_MODE_UNKNOWN"
   | "TECH_CARD_TOPSTITCH_MODE_EDGE"
   | "TECH_CARD_TOPSTITCH_MODE_WIDTH";
-// TechCardAttachmentKind is the folder / guide / presser foot the step runs with.
-// THERE IS NO `NONE`, AND THAT IS THE POINT: for a presser foot, «none» and «not specified» are
-// the same fact to everyone downstream, and offering both would make an operator pick between two
-// spellings of nothing. UNKNOWN covers it.
-export type common_TechCardAttachmentKind =
-  | "TECH_CARD_ATTACHMENT_KIND_UNKNOWN"
-  | "TECH_CARD_ATTACHMENT_KIND_BINDER"
-  | "TECH_CARD_ATTACHMENT_KIND_HEMMER_FOLDER"
-  | "TECH_CARD_ATTACHMENT_KIND_SCROLL_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_ZIPPER_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_INVISIBLE_ZIPPER_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_EDGE_GUIDE"
-  | "TECH_CARD_ATTACHMENT_KIND_PIPING_FOOT"
-  | "TECH_CARD_ATTACHMENT_KIND_ELASTIC_ATTACHMENT"
-  | "TECH_CARD_ATTACHMENT_KIND_OTHER";
 // TechCardLabel is one label / tag spec (Sheet «Этикетки и упаковка»).
 // TechCardLabel is the garment's label/tag SPEC — one of the three historically-unconnected "label"
 // concepts (S21): (a) THIS spec, (b) the shipment label (common/shipment.proto — a shipping document,
@@ -7203,9 +7418,9 @@ export type common_TechCardPiece = {
   // режимах сервер её гасит, потому что число рядом с SEAM_ALLOWANCE спорит с эталоном припуска, и
   // спор молчаливый — на экране видно одно, в расчёте другое. Потолок 100 мм (0304): шире бывает
   // только ошибка единиц.
-  // Миллиметры, а не сантиметры соседнего эталона припуска: единицу выбирает тот, кто ВВОДИТ, а
-  // полосу технолог называет на каждой детали именно в миллиметрах. Переводит одно место — расчёт
-  // нормы, у которого на руках оба сомножителя.
+  // Миллиметры — та же единица, что у эталона припуска (0290 перевёл его туда из сантиметров), и
+  // это не совпадение: режим SEAM_ALLOWANCE берёт ширину полосы прямо из эталона. В сантиметры
+  // геометрии переводит РОВНО ОДНО место — расчёт нормы, у которого на руках оба сомножителя.
   fusingWidthMm: googletype_Decimal | undefined;
 };
 

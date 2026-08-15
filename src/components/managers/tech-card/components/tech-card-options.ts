@@ -12,24 +12,23 @@ export const unitOptions = ['м', 'см', 'г', 'кг', 'pcs', 'компл', 'м
 // `overlock_thread_count`, and the whole reason that column got a new name instead of a new type was
 // so nobody could reconnect the old strings to it by reflex.
 //
-// The two below survive because hem finish and pressing are still free text on the card's defaults.
-// They are ENGLISH now: the operations they sit beside moved to English with ISO codes, they print on
-// the same tech pack, and half a tab in each language is worse than either language. Stored values
-// are NOT rewritten — these are suggestions, and somebody's typed instruction is theirs to keep.
+// `pressingOptions` JOINED THEM with 0306, and for the same kind of reason: `construction.pressing`
+// was prose answering «how is this garment pressed» for a whole card, while pressing is a STEP with
+// its own equipment, temperature, dwell and press cloth. The five suggestions it held are now three
+// step TYPES (press / press open / fusing) and a press profile — see equipment-options.ts. Leaving
+// the list would have invited somebody to reconnect free text to a typed vocabulary, which is the
+// same reflex `overlockThreadsOptions` was deleted to prevent.
+//
+// The one below survives because hem finish is still free text on the card's defaults. It is
+// ENGLISH: the operations it sits beside moved to English with ISO codes, they print on the same
+// tech pack, and half a tab in each language is worse than either language. Stored values are NOT
+// rewritten — these are suggestions, and somebody's typed instruction is theirs to keep.
 export const hemFinishOptions = [
   'turned twice, closed edge',
   'turned once, overlocked edge',
   'bound',
   'blindstitched',
   'coverstitched',
-];
-
-export const pressingOptions = [
-  'press open',
-  'press to one side',
-  'steam only',
-  'fuse (interlining)',
-  'final press, finished garment',
 ];
 
 // Packaging suggestion lists.

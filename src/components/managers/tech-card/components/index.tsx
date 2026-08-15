@@ -748,7 +748,16 @@ export function TechCardForm({
       return id === undefined ? b : { ...b, id };
     });
 
-    return { ...sent, signoffs, patterns, bomItems };
+    // CONSTRUCTION IS TAKEN WHOLE FROM THE SERVER, not merged field by field, and it is the one
+    // section where that is the honest answer. Its equipment park (0306) is a keyed list the write
+    // mapper EDITS on the way out: a profile row that never got a machine picked is dropped rather
+    // than refused (mapEquipmentDefaultsOut — a half-added row must not block a save carrying nine
+    // other tabs' work), and a row with no key gets one minted. Reset to what was SENT, such a row
+    // comes back as a pristine, clean row of a card that does not contain it: no unsaved-changes
+    // guard, no draft, and it disappears at the next navigation without anything having said so.
+    // The section carries nothing else the form owns and the server does not round-trip, so taking
+    // the server's copy costs nothing and makes «saved» mean saved.
+    return { ...sent, signoffs, patterns, bomItems, construction: server.construction };
   }
 
   // The actual write: card body first (it carries the lock version), then the staged sub-panels.
