@@ -465,6 +465,29 @@ export function AssemblySchematic({
   const blockOfStep = new Map<number, string>();
   for (const b of blocks) for (const i of b.steps) blockOfStep.set(i, b.key);
 
+  // ЧТО УЗЕЛ БЕРЁТ — его ПРЯМЫЕ входы, а не замыкание по деталям.
+  //
+  // Разница принципиальна. Замыкание (`block.leaves`) для готового изделия — это ВСЕ детали
+  // карточки, и сводка выродилась бы в список из пятнадцати имён ровно на том узле, ради
+  // которого схему открывают. Прямые входы отвечают на настоящий вопрос — «из чего собран
+  // именно этот узел»: у корпуса это полочка и спинка, у изделия — ▣ SHELL и ▣ HOOD.
+  //
+  // Собственный ключ отбрасывается: в поглощении `GARMENT + HEM → GARMENT` узел входит сам в
+  // себя, и «берёт: ▣ GARMENT» не сообщает ничего.
+  const directInputsOf = new Map<string, string[]>();
+  for (const b of blocks) {
+    const seen = new Set<string>();
+    const acc: string[] = [];
+    for (const i of b.steps) {
+      for (const input of steps[i]?.inputs ?? []) {
+        if (!input.key || input.key === b.key || seen.has(input.key)) continue;
+        seen.add(input.key);
+        acc.push(input.key);
+      }
+    }
+    directInputsOf.set(b.key, acc);
+  }
+
   const boxOf = (blockKey: string) => (blockKey === '' ? layout.tail : layout.byKey.get(blockKey));
 
   // Строка бокса → её y. Нужна проводам: они целятся в строку, а не в бокс.
@@ -641,26 +664,51 @@ export function AssemblySchematic({
                           })(),
                     )}
                     className={cn(
-                      'flex w-full items-baseline gap-1 border-b border-hairline px-1 text-left',
+                      // `overflow-hidden` на самой шапке — последняя преграда: высота бокса
+                      // посчитана раскладкой, и вторая строка текста, куда бы она ни взялась,
+                      // ляжет поверх первой строки шага.
+                      'flex w-full items-baseline gap-1 overflow-hidden border-b border-hairline px-1 text-left',
                       !frozen && onTable.has(box.key) && 'hover:bg-bgZebra',
                       picked.includes(box.key) && 'bg-bgZebra',
                     )}
                     style={{ height: HEAD_H }}
-                    title={
+                    // Полный текст шапки — в подсказке: ключ и имя узла обрезаются по ширине, и
+                    // прочесть их целиком иначе было бы негде.
+                    title={`▣ ${box.key}${b.name ? ` · ${b.name}` : ''}${
+                      terminal ? ' · готовое изделие' : b.absorbedInto ? ` · уходит в ▣ ${b.absorbedInto}` : ' · разрыв'
+                    }\n${
                       onTable.has(box.key)
                         ? 'узел на столе — кликните, чтобы взять его в следующую сборку'
                         : 'узел уже вошёл в другой; кликните, чтобы открыть шаг, который его съел'
-                    }
+                    }`}
                   >
-                    <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                    {/* КЛЮЧ НЕ ПЕРЕНОСИТСЯ. Он был единственным текстом шапки без ограничения
+                        ширины: имя узла усекалось, статус справа не сжимался, а ключ рос — и
+                        двухсловный «ДВА РУКАВА» уезжал второй строкой поверх первого шага.
+                        Многоточие честнее: шапка высотой в строку и обязана быть в одну строку. */}
+                    <Text
+                      size='micro'
+                      variant='uppercase'
+                      tracking='label'
+                      component='span'
+                      className='min-w-0 shrink truncate font-bold'
+                    >
                       {picked.includes(box.key) ? '✓ ' : ''}▣ {box.key}
                     </Text>
                     {b.name && (
-                      <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                      <Text size='nano' variant='label' component='span' className='min-w-0 shrink truncate'>
                         {b.name}
                       </Text>
                     )}
-                    <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                    {/* Статус тоже усекается: `→ключ съевшего узла` — текст произвольной длины, и
+                        несжимаемым он отбирал ширину у самого ключа. Порог в 45% оставляет ему
+                        достаточно, чтобы прочесть начало, но не даёт съесть шапку целиком. */}
+                    <Text
+                      size='nano'
+                      variant='label'
+                      component='span'
+                      className='ml-auto max-w-[45%] shrink-0 truncate'
+                    >
                       {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
                     </Text>
                   </div>
@@ -689,6 +737,20 @@ export function AssemblySchematic({
                       >
                         растворить
                       </Chip>
+                    </div>
+                  )}
+                  {/* СОСТАВ УЗЛА — по наведению и ОВЕРЛЕЕМ, а не строкой внутри бокса. Строкой
+                      он изменил бы высоту, которую считает чистая раскладка, то есть сдвинул бы
+                      всю схему ради подписи; а постоянной он превратил бы полотно в таблицу —
+                      ровно то, из-за чего действия узла уехали на наведение. */}
+                  {hovered === box.key && (directInputsOf.get(box.key) ?? []).length > 0 && (
+                    <div
+                      className='absolute -bottom-4 left-0 flex w-full items-center pt-1'
+                      title={`берёт: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ')}`}
+                    >
+                      <Text size='nano' variant='label' component='span' className='truncate'>
+                        ← {(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ')}
+                      </Text>
                     </div>
                   )}
                   {b.steps.map((i) => (
