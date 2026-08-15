@@ -95,6 +95,8 @@ for (const c of raw.cases) {
         // Ветка — то, ради чего detail вообще существует: координаты у «такого нет» и
         // «появится позже» одинаковые.
         fail(c.name, `нарушение ${i}: ветка ${g.detail}, ожидалась ${w.detail}`);
+      } else if (w.key !== undefined && g.key !== w.key) {
+        fail(c.name, `нарушение ${i}: ключ «${g.key}», ожидался «${w.key}»`);
       } else if (!g.message) {
         fail(c.name, `нарушение ${i} без сообщения`);
       }

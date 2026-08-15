@@ -1130,6 +1130,11 @@ const techCardObject = z.object({
   details: z.array(detailSchema).default([]), // construction-description aspects (text + images)
   construction: constructionSchema,
   operations: z.array(operationSchema).default([]),
+  // НАМЕРЕНИЕ снять разметку узлов целиком. Не свойство карточки, а свойство ОДНОГО сохранения:
+  // сервер без него отклоняет осведомлённую запись, которая не несёт ни одного узла против
+  // карточки, которая их несёт, — иначе параллельная вкладка или восстановленный черновик
+  // стирали бы самый дорогой ручной ввод молча. Ставит только кнопка «снять разметку узлов».
+  assemblyCleared: z.boolean().default(false),
   labels: z.array(labelSchema).default([]),
   packaging: packagingSchema,
   costing: costingSchema,
@@ -1266,6 +1271,7 @@ export const techCardDefaultData: TechCardFormData = {
   details: [],
   construction: { ...emptyConstruction },
   operations: [],
+  assemblyCleared: false,
   labels: [],
   packaging: { ...emptyPackaging },
   costing: { ...emptyCosting },
@@ -2209,6 +2215,8 @@ export function mapFormToTechCardInsert(
     // «этот бандл знает про узлы» от «этот бандл сейчас их сотрёт». Снятие разметки — отдельный
     // флаг assemblyCleared, и его ставит только соответствующая кнопка.
     assemblyAware: true,
+    // Намерение живёт ровно одно сохранение: форма сбрасывает флаг сразу после отправки.
+    assemblyCleared: !!data.assemblyCleared,
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.

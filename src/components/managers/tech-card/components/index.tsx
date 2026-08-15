@@ -757,7 +757,19 @@ export function TechCardForm({
     // guard, no draft, and it disappears at the next navigation without anything having said so.
     // The section carries nothing else the form owns and the server does not round-trip, so taking
     // the server's copy costs nothing and makes «saved» mean saved.
-    return { ...sent, signoffs, patterns, bomItems, construction: server.construction };
+    // assemblyCleared — НАМЕРЕНИЕ ОДНОГО СОХРАНЕНИЯ, а не свойство карточки, и после успешной
+    // записи оно обязано погаснуть. Оставь флаг взведённым — и следующее же сохранение сервер
+    // отвергнет: осведомлённая запись с cleared против карточки, у которой разметки уже нет, это
+    // теневое намерение, и гейт на него отвечает отказом. Кнопка «снять разметку» взводит флаг
+    // ровно один раз, здесь он снимается.
+    return {
+      ...sent,
+      signoffs,
+      patterns,
+      bomItems,
+      construction: server.construction,
+      assemblyCleared: false,
+    };
   }
 
   // The actual write: card body first (it carries the lock version), then the staged sub-panels.
