@@ -1000,6 +1000,38 @@ function ClearAssemblyButton({
   );
 }
 
+
+// StepNumberDrift — предупреждение о переезде номеров шагов.
+//
+// Номер операции сервер присваивает САМ как (position+1)*10, и делал это ещё до узлов сборки.
+// Значит номера двигает не разметка, а изменение ПОРЯДКА — и вот тут расходятся две вещи,
+// которые легко счесть одной:
+//
+//   - ссылки дефектов на номера шагов переезжают автоматически (remapIssues) — это машина;
+//   - НАПЕЧАТАННЫЕ номера в обращающихся тех-паках и в головах цеха не переезжают никак.
+//
+// Первичная разметка карточки в узлы обычно и означает перестановку шагов, поэтому баннер
+// появляется ровно там, где переезд реален, и называет его до сохранения, а не после.
+//
+// Баннер, а не модалка: модалка выстреливала бы на каждом сохранении после любой перестановки и
+// быстро стала бы кнопкой «ок, не читая».
+function StepNumberDrift() {
+  const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ operationNumber?: number }>;
+  const moves = ops
+    .map((o, i) => ({ from: o?.operationNumber ?? 0, to: (i + 1) * 10 }))
+    .filter((m) => m.from > 0 && m.from !== m.to);
+  if (moves.length === 0) return null;
+  return (
+    <CalloutBox tone='error'>
+      <Text size='micro'>
+        номера шагов переедут при сохранении:{' '}
+        <b>{moves.map((m) => `${m.from}→${m.to}`).join(', ')}</b>. Ссылки дефектов переедут вместе
+        с шагами автоматически, а напечатанные номера в уже выданных тех-паках — нет.
+      </Text>
+    </CalloutBox>
+  );
+}
+
 // ── the sequence rail ────────────────────────────────────────────────────────────────────────
 // One 26px line per assembly step, so twenty operations read as an ORDER instead of as twenty
 // screens of controls. Drag ⠿ to reorder; the row is a button that opens the step in the editor.
@@ -2496,7 +2528,7 @@ function OperationEditor({
   );
 }
 
-type ReplaceImpact = { operations: number; sam: number; pieceLinks: number };
+type ReplaceImpact = { operations: number; sam: number; pieceLinks: number; units: number };
 
 // #66: draft assembly operations from a plain-language description — «мы описываем все операции
 // словами (у нас есть знания о деталях/BOM), через OpenRouter генерируем структурированные
@@ -2709,6 +2741,15 @@ function GenerateOperationsPanel({
               . Ссылки дефектов на номера операций тоже будут сброшены.
             </Text>
           </CalloutBox>
+          {(impact?.units ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и <b>{impact?.units}</b> узлов сборки: черновик их не несёт, поэтому разметка
+                исчезнет целиком. Сервер такую запись отклонит — снимать разметку нужно кнопкой
+                «снять разметку», а не заменой списка.
+              </Text>
+            </CalloutBox>
+          )}
           <Text size='micro' variant='label'>
             вместо этого можно «добавить к списку» — черновик встанет после существующих операций.
           </Text>
@@ -2879,11 +2920,18 @@ export function OperationsField({
     const ops = (getValues('operations') ?? []) as {
       smv?: string;
       inputKeys?: string[];
+      outputUnitKey?: string;
     }[];
     return {
       operations: ops.length,
       sam: ops.filter((o) => (o.smv ?? '').trim()).length,
       pieceLinks: ops.filter((o) => (o.inputKeys ?? []).length > 0).length,
+      // РАЗМЕТКА УЗЛОВ — самый дорогой ручной ввод на карточке, и черновик сносит её целиком
+      // вместе со списком. Сервер откажет бекстопом («запись не несёт узлов против карточки,
+      // которая их несёт»), но узнать об этом на сохранении, уже потеряв работу в форме, —
+      // не то же самое, что прочитать цену до нажатия.
+      units: ops.filter((o) => ((o as { outputUnitKey?: string }).outputUnitKey ?? '').trim())
+        .length,
     };
   };
 
@@ -3074,6 +3122,8 @@ export function OperationsField({
         говорит, ЧТО делают, машинка или оборудование ВТО — НА ЧЁМ; пустое поле в настройках значит
         «наследую», и подсказка в нём называет и значение, и источник.
       </Text>
+
+      <StepNumberDrift />
 
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden
           while the sequence is empty: with nothing to attach a piece TO, every chip in it is a
