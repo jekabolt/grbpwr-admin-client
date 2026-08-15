@@ -529,6 +529,10 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
               storedHasUnits={(techCard?.techCard?.operations ?? []).some(
                 (o) => (o?.outputUnitKey ?? '').trim() !== '',
               )}
+              // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
+              // замораживает тело. Схема получает его ЯВНО, а не через внешний
+              // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+              frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
             />
           </section>
         </div>

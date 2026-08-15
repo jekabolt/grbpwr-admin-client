@@ -87,7 +87,10 @@ import {
 } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
+import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
+import { suggestUnitCode } from './assembly-suggest';
 import { AssemblySchematic } from './assembly-schematic';
+import { useSchematicPrefs } from './use-schematic-prefs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
@@ -773,12 +776,6 @@ function ProducesBlock({
   // поглощение, если тот же узел взят входом.
   const suggest = () => {
     const zone = (getValues(`operations.${index}.zone`) ?? '') as string;
-    // UNKNOWN и OTHER — не имена зон, а их отсутствие: узел «UNKNOWN» уехал бы на печать и в QR.
-    const token = zone.replace(/^TECH_CARD_GARMENT_ZONE_/, '');
-    const base =
-      token === 'UNKNOWN' || token === 'OTHER' || !token
-        ? 'UNIT'
-        : token.replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'UNIT';
     // Занято — это и узлы, И КЛЮЧИ ДЕТАЛЕЙ: пространство имён одно (правило 6), и предлагать
     // код, совпавший с деталью, значит предлагать заведомый отказ.
     const taken = new Set<string>([
@@ -787,15 +784,7 @@ function ProducesBlock({
         .filter(Boolean),
       ...pieces.map((p) => p.lineKey),
     ]);
-    // Колонка сервера — VARCHAR(64), и режет она БАЙТЫ. Код собран из ASCII-токена зоны, но
-    // подрезать всё равно надо здесь: отказ по длине на сохранении был бы отказом за то, чего
-    // автор не набирал.
-    const fit = (v: string) => (new TextEncoder().encode(v).length <= 64 ? v : v.slice(0, 48));
-    if (!taken.has(base)) return fit(base);
-    for (let n = 2; ; n++) {
-      const candidate = `${base}-${n}`;
-      if (!taken.has(candidate)) return fit(candidate);
-    }
+    return suggestUnitCode(zone, taken);
   };
 
   const declare = () => {
@@ -2895,9 +2884,15 @@ export function OperationsField({
   addRequest = null,
   onAdded,
   storedHasUnits = false,
+  frozen = false,
 }: {
   /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
   storedHasUnits?: boolean;
+  /**
+   * Карточка выпущена. Внешний `<fieldset disabled>` глушит кнопки, но НЕ pointer-обработчики на
+   * div — а схема Ф7 стала жестовой. Поэтому гейт обязан быть явным, и он приезжает пропом.
+   */
+  frozen?: boolean;
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
@@ -3128,7 +3123,29 @@ export function OperationsField({
   // сегодняшней карточке это дало бы пустое полотно на первом же открытии, то есть экран,
   // который читается как «сломалось». Схема становится дефолтом ровно там, где есть что
   // рисовать; пользовательский выбор живёт в сессии и уступает, когда узлов нет.
-  const [mode, setMode] = useState<'list' | 'schematic' | null>(null);
+  //
+  // Ф7: выбор пережил перезагрузку — он лёг в предпочтения карточки рядом с ручными позициями.
+  // Вывод остался фолбэком, когда предпочтения нет; замечание §10.3 («сохранённая схема на
+  // карточке без узлов = пустое полотно») сняла сама Ф7 — полотно без узлов теперь показывает
+  // детали.
+  const schematicNodeKeys = useCallback(() => {
+    const live = new Set<string>(['']); // '' — хвостовой бокс, он тоже нода
+    for (const p of pieces) live.add(p.lineKey);
+    for (const k of grouping.res.units.keys()) live.add(k);
+    return live;
+  }, [pieces, grouping.res]);
+  const prefs = useSchematicPrefs(techCardId, schematicNodeKeys);
+  const mode = prefs.mode;
+  const setMode = prefs.setMode;
+  // Незавершённый жест создания: что уже назначено входами и не предлагается ли поглощение.
+  // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
+  const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  // Карточку выпустили, пока диалог открыт — диалог обязан закрыться сам: он живёт порталом, и
+  // никакая заморозка разметки его не гасит.
+  useEffect(() => {
+    if (frozen) setPendingCreate(null);
+  }, [frozen]);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -3269,34 +3286,47 @@ export function OperationsField({
   // схеме начинают расходиться в мелочах. Поэтому общий обработчик, а не два похожих.
 
   /** Сшить выбранное в новый узел: добавляет шаг с этими входами и предложенным кодом. */
-  const joinIntoUnit = (inputKeys: string[]) => {
-    if (inputKeys.length < 2) {
-      showMessage('узел из одного входа — это обработка: выберите хотя бы два входа', 'error');
-      return;
-    }
-    const taken = new Set<string>([
-      ...((getValues('operations') ?? []) as Array<{ outputUnitKey?: string }>)
-        .map((o) => (o?.outputUnitKey ?? '').trim())
-        .filter(Boolean),
-      ...pieces.map((p) => p.lineKey),
-    ]);
-    let code = 'UNIT';
-    for (let n = 1; taken.has(code); n++) code = `UNIT-${n + 1}`;
+  /**
+   * ЕДИНСТВЕННОЕ МЕСТО, ГДЕ СХЕМА ПИШЕТ В ФОРМУ. Диалог только собирает аргументы; вся запись —
+   * здесь, в одном экземпляре, ровно как договаривались в T-23 про мутаторы.
+   *
+   * До Ф7 эту роль делили `joinIntoUnit` и `addStepIntoUnit`, и оба создавали шаг из
+   * `emptyOperation` — с типом и зоной в UNKNOWN, то есть заведомо невалидный. Технолог получал
+   * строку с «!» и долг вместо результата. Теперь минимум валидности собран ДО записи.
+   */
+  const appendStep = (r: CreateResult) => {
+    // ЗАМОРОЗКА ПРОВЕРЯЕТСЯ ЗДЕСЬ, а не только в разметке. Диалог рисуется порталом в body —
+    // внешний `<fieldset disabled>` карточки до него не достаёт вовсе. Гонка настоящая: нажали
+    // Release, пока запрос летит открыли создание, ответ перевёл карточку в RELEASED — и
+    // «создать» дописал бы шаг в выпущенную карточку, взведя isDirty.
+    if (frozen) return;
     const at = fields.length;
-    append({ ...emptyOperation, inputKeys, outputUnitKey: code });
+    append({
+      ...emptyOperation,
+      inputKeys: r.inputKeys,
+      outputUnitKey: r.outputUnitKey,
+      outputUnitName: r.outputUnitName,
+      operationType: r.operationType as typeof emptyOperation.operationType,
+      zone: r.zone as typeof emptyOperation.zone,
+      ...(r.machineType ? { machineType: r.machineType as typeof emptyOperation.machineType } : {}),
+      ...(r.pressEquipment
+        ? { pressEquipment: r.pressEquipment as typeof emptyOperation.pressEquipment }
+        : {}),
+    });
+    // Разметка появилась — намерение «снять разметку» отменено. Сегодняшний `joinIntoUnit` этого
+    // НЕ делал (в отличие от `declare()`), и сценарий «снял → передумал → сшил заново» уходил в
+    // отказ «снял и одновременно прислал узлы». Починка попутная и намеренная.
+    if (r.outputUnitKey) setValue('assemblyCleared', false, { shouldDirty: true });
     setSelected(at);
-    showMessage(`узел ${code} создан — назовите его в открывшемся шаге`, 'success');
-  };
-
-  /** Добавить обработку внутрь блока: шаг, берущий этот узел и ничего не собирающий. */
-  const addStepIntoUnit = (unitKey: string) => {
-    const at = fields.length;
-    append({ ...emptyOperation, inputKeys: [unitKey] });
-    setSelected(at);
+    setPendingCreate(null);
+    // Шаг создан — редактор обязан оказаться перед глазами, иначе жест кончается там же, где
+    // начался, и результат приходится искать.
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
   };
 
   /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
   const dissolveUnit = (stepIndex: number) => {
+    if (frozen) return; // тот же гейт: растворение — мутация, и разметке она не подотчётна
     setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
     setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
   };
@@ -3362,15 +3392,31 @@ export function OperationsField({
         </Toolbar>
       </div>
 
-      {fields.length === 0 ? (
+      {/* Заглушка пустой последовательности уступает схеме, как только схему попросили. Карточка с
+          деталями и нулём шагов — ПЕРВОЕ состояние любой тех-карты, и именно с него сборку и
+          начинают; закрывать его заглушкой значило бы не пустить на схему ровно там, где она
+          нужнее всего. */}
+      {fields.length === 0 && effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
             последовательность сборки пока пуста. Добавьте первый шаг — или опишите конструкцию
             словами и сгенерируйте черновик ниже.
           </Text>
-          <Button type='button' variant='main' size='sm' onClick={addOperation}>
-            + операция
-          </Button>
+          <div className='flex items-center gap-2'>
+            <Button type='button' variant='main' size='sm' onClick={addOperation}>
+              + операция
+            </Button>
+            {pieces.length > 0 && (
+              <Chip
+                nonForm
+                dashed
+                onClick={() => setMode('schematic')}
+                title='разложить детали и собрать узлы жестами'
+              >
+                собрать на схеме
+              </Chip>
+            )}
+          </div>
         </div>
       ) : (
         <div
@@ -3389,7 +3435,12 @@ export function OperationsField({
               flush
               action={
                 <div className='flex items-center gap-2'>
+                  {/* nonForm: переключатель ничего не меняет в данных, но обязан работать и на
+                      выпущенной карточке — иначе разрешённое Р9 ручное раскладывание недостижимо
+                      с карточки, сохранённой в режиме списка. Под `<fieldset disabled>` настоящая
+                      кнопка мертва, и своими пропами этого не исправить. */}
                   <Chip
+                    nonForm
                     dashed
                     onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
                     title='схема сборки или список шагов — оба редактируют одни данные'
@@ -3424,10 +3475,20 @@ export function OperationsField({
                   'шаг'
                 }
                 pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
-                onPickStep={setSelected}
-                onJoin={joinIntoUnit}
-                onAddStep={addStepIntoUnit}
+                onPickStep={(i) => {
+                  setSelected(i);
+                  // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
+                  // «открыть шаг» открывает его за пределами экрана.
+                  requestAnimationFrame(() =>
+                    editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                  );
+                }}
+                onCreate={setPendingCreate}
                 onDissolve={dissolveUnit}
+                positions={prefs.pos}
+                onMove={prefs.move}
+                onResetPositions={prefs.reset}
+                frozen={frozen}
               />
             ) : (
             <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
@@ -3484,6 +3545,7 @@ export function OperationsField({
           </div>
 
           {selectedIndex >= 0 && (
+            <div ref={editorRef}>
             <OperationEditor
               // Keyed on the row's identity AND its position: both of the editor's "skip the first
               // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
@@ -3504,9 +3566,20 @@ export function OperationsField({
               onActiveBomChange={onActiveBomChange}
               onDropPiece={addInputToOperation}
             />
+            </div>
           )}
         </div>
       )}
+
+      <AssemblyCreateDialog
+        prefill={pendingCreate}
+        onClose={() => setPendingCreate(null)}
+        onCreate={appendStep}
+        frontier={grouping.res.frontier}
+        unitKeys={new Set(grouping.res.units.keys())}
+        pieceKeys={new Set(pieces.map((p) => p.lineKey))}
+        labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+      />
 
       <GenerateOperationsPanel
         techCardId={techCardId}

@@ -1,11 +1,15 @@
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
+import type { CreatePrefill } from './assembly-create-dialog';
+import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -16,13 +20,55 @@ import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
 // Первая редакция плана оставляла схеме только выбор и навигацию, опасаясь, что два экрана
 // начнут спорить о том, где «настоящая» операция. Опасение верное, но лечится оно не запретом:
 // источник истины и так ОДИН — состояние формы. Расходятся не виды, а ЛОГИКА МУТАЦИЙ, если её
-// написать дважды. Поэтому схема не содержит ни одного собственного мутатора: joinIntoUnit,
-// addStepIntoUnit, dissolveUnit живут в OperationsField в одном экземпляре, и список зовёт ровно
-// их же.
+// написать дважды. Поэтому схема не содержит ни одного собственного мутатора: `appendStep` и
+// `dissolveUnit` живут в OperationsField в одном экземпляре, и список зовёт ровно их же. Схема
+// собирает ЖЕСТ и передаёт его наверх; всё, что пишет в форму, — там.
 //
 // ПРОВОД ИДЁТ К СТРОКЕ-ПОТРЕБИТЕЛЮ, А НЕ К БОКСУ. Разница существенная: узел SHELL входит в
 // GARMENT не «вообще», а на конкретном шаге, и провод, упирающийся в верх бокса, скрывает
 // именно то, ради чего схему смотрят — где эта подсборка пришивается.
+//
+// РУЧНЫЕ ПОЗИЦИИ — ПРЕЗЕНТАЦИЯ, А НЕ ДАННЫЕ. Они идут мимо формы (см. `use-schematic-prefs`), и
+// именно поэтому перетаскивание разрешено даже на выпущенной карточке: читатель раскладывает
+// чужую схему под себя, ничего в ней не меняя. Расплата за свободу — ось времени: авто-раскладка
+// ставила колонки по глубине, рука может поставить как угодно. Поэтому при живых оверрайдах
+// экран честно говорит «раскладка: ручная», а провода рисуются ИЗ ДАННЫХ и никогда из позиций.
+
+/** Порог, разводящий клик и перетаскивание. Ниже него жест остаётся кликом. */
+const DRAG_THRESHOLD = 4;
+/** Полоса у края контейнера, в которой драг подкручивает прокрутку. */
+const AUTOSCROLL_EDGE = 32;
+/** Постоянная скорость автоскролла: ускорение под неподвижным курсором дезориентирует. */
+const AUTOSCROLL_SPEED = 12;
+/**
+ * Ноды не отдают палец прокрутке.
+ *
+ * Объявляется ЗАРАНЕЕ и на самой ноде: браузер выбирает поведение жеста в момент касания, и
+ * запрет, выставленный после `pointerdown`, уже ничего не решает — палец уводит страницу в
+ * прокрутку, прилетает `pointercancel`, нода возвращается назад. Полотно при этом остаётся
+ * прокручиваемым: касание мимо нод ведёт себя как обычно.
+ */
+const NODE_TOUCH = 'none' as const;
+
+type DragState = {
+  key: string;
+  /** Указатель, начавший жест. Чужие события игнорируются: второй палец — не продолжение первого. */
+  pointerId: number;
+  /** Где внутри ноды её взяли — чтобы нода не прыгала под курсор углом. */
+  offX: number;
+  offY: number;
+  /** Текущая позиция ноды в координатах полотна. */
+  x: number;
+  y: number;
+  /** Точка начала жеста — для порога. */
+  fromX: number;
+  fromY: number;
+  /** Где сейчас указатель, в координатах полотна: по нему ищется цель под курсором. */
+  ptrX: number;
+  ptrY: number;
+  started: boolean;
+};
+
 export function AssemblySchematic({
   blocks,
   steps,
@@ -30,9 +76,11 @@ export function AssemblySchematic({
   labelOf,
   pieceNameOf,
   onPickStep,
-  onJoin,
-  onAddStep,
+  onCreate,
   onDissolve,
+  positions,
+  onMove,
+  onResetPositions,
   frozen = false,
 }: {
   blocks: AssemblyBlock[];
@@ -42,13 +90,18 @@ export function AssemblySchematic({
   labelOf: (index: number) => string;
   pieceNameOf: (lineKey: string) => string;
   onPickStep: (index: number) => void;
-  /** Сшить выбранное в новый узел. Мутатор общий со списком. */
-  onJoin: (inputKeys: string[]) => void;
-  /** Добавить обработку внутрь блока. */
-  onAddStep: (unitKey: string) => void;
+  /**
+   * Открыть создание операции по собранному жесту. Схема НЕ пишет в форму сама: она собирает
+   * намерение, пишет `appendStep` в OperationsField — единственный экземпляр логики записи.
+   */
+  onCreate: (prefill: CreatePrefill) => void;
   /** Растворить узел — по индексу его производящего шага. */
   onDissolve: (stepIndex: number) => void;
-  /** Карточка выпущена: схема остаётся читаемой, но не редактируемой. */
+  /** Ручные позиции нод. Живут выше схемы: схема размонтируется при смене режима. */
+  positions: PosOverrides;
+  onMove: (key: string, at: { x: number; y: number }) => void;
+  onResetPositions: () => void;
+  /** Карточка выпущена: схема остаётся читаемой и раскладываемой, но не редактируемой. */
   frozen?: boolean;
 }) {
   // Выбор — то, из чего собирается следующий узел. Живёт в схеме, потому что это состояние
@@ -57,40 +110,329 @@ export function AssemblySchematic({
   const toggle = (key: string) =>
     setPicked((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
   const onTable = new Set(res.frontier);
-  const layout = assemblyLayout(blocks, steps, res);
-  const { LINE_H, HEAD_H, TILE, TILE_GAP } = SCHEMATIC_METRICS;
+  const { LINE_H, HEAD_H } = SCHEMATIC_METRICS;
+  const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
-  if (layout.boxes.length === 0) {
-    // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, а не пустое полотно. Схема без узлов — не поломка, а «ещё не
-    // начали»: экран обязан сказать это словом и показать, чего он ждёт.
+  // ВЫБОР ЖИВЁТ ДО ТЕХ ПОР, ПОКА ЖИВЫ ЕГО КЛЮЧИ. Деталь, попавшая в узел соседним жестом, входом
+  // больше не годится, а чип «выбрано: A» продолжал бы предлагать её — и «обработка · 1» родила бы
+  // шаг со съеденным входом, то есть ровно ту невалидность, ради устранения которой затевался
+  // диалог.
+  useEffect(() => {
+    setPicked((cur) => {
+      const live = cur.filter((k) => res.frontier.includes(k));
+      return live.length === cur.length ? cur : live;
+    });
+  }, [res]);
+
+  const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  /** Человеческое имя ноды: имя детали или код узла. */
+  const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
+
+  const [drag, setDrag] = useState<DragState | null>(null);
+  // Зеркало состояния жеста для СИНХРОННОГО чтения. Слушатели window живут дольше одного рендера,
+  // а решение «куда именно бросили» обязано считаться по последнему движению, а не по тому, что
+  // успело отрендериться: последний рывок руки иначе теряется, и дроп попадает в прежнюю цель.
+  const dragRef = useRef<DragState | null>(null);
+  const commitDrag = useCallback((v: DragState | null) => {
+    dragRef.current = v;
+    setDrag(v);
+  }, []);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const lastClient = useRef<{ x: number; y: number } | null>(null);
+  // Клик приходит после перетаскивания — и не должен срабатывать как выбор. Порог разводит
+  // жесты по НАМЕРЕНИЮ, а этот флаг гасит уже случившееся эхо.
+  const justDragged = useRef(false);
+  const [resetOpen, setResetOpen] = useState(false);
+
+  const layout = useMemo(
+    () => applyOverrides(auto, drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions),
+    [auto, positions, drag],
+  );
+
+  /**
+   * Точка события в координатах ПОЛОТНА, а не окна. Без учёта прокрутки контейнера нода
+   * прыгала бы на величину скролла — а полотно шире окна уже на полутора десятках деталей.
+   */
+  const toLayoutPoint = useCallback((e: { clientX: number; clientY: number }) => {
+    const el = canvasRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: e.clientX - r.left + el.scrollLeft, y: e.clientY - r.top + el.scrollTop };
+  }, []);
+
+  /**
+   * ЖЕСТ СЛУШАЕТСЯ НА WINDOW, А НЕ НА НОДЕ, и захват указателя не берётся вовсе.
+   *
+   * Первая редакция вешала move/up на саму ноду и брала `setPointerCapture` по достижении
+   * порога. Два отказа отсюда следовали. Захват, если браузер его отклонил (а он вправе),
+   * оставлял жест без единого слушателя за пределами ноды: указатель уходил, отпускался
+   * снаружи, `pointerup` не приходил никогда — состояние жеста зависало вместе с работающим
+   * rAF. И захват меняет цель последующего `click`, из-за чего обычные клики по строкам шагов
+   * приходилось спасать отдельной механикой.
+   *
+   * Слушатели на window снимают оба: события приходят всегда, клик остаётся родным. Порог 4px
+   * по-прежнему разводит клик и драг по НАМЕРЕНИЮ.
+   */
+  const dragHandlers = (key: string, nodeX: number, nodeY: number) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      // Жест уже идёт — второе касание не трогает НИЧЕГО, и проверка стоит первой строкой.
+      // Стой она ниже, чужой палец успевал бы записать `lastClient`: автоскролл поехал бы по
+      // координатам второго пальца, утаскивая ноду первого, который при этом неподвижен.
+      if (dragRef.current) return;
+      if (e.button !== 0) return;
+      const p = toLayoutPoint(e);
+      if (!p) return;
+      lastClient.current = { x: e.clientX, y: e.clientY };
+      // Новый жест — старое эхо больше не актуально. Сбрасывать флаг в clickGuard было бы
+      // недостаточно: драг, закончившийся не на кликабельном, оставил бы флаг взведённым и
+      // проглотил следующий честный клик.
+      justDragged.current = false;
+      commitDrag({
+        key,
+        pointerId: e.pointerId,
+        offX: p.x - nodeX,
+        offY: p.y - nodeY,
+        x: nodeX,
+        y: nodeY,
+        fromX: p.x,
+        fromY: p.y,
+        ptrX: p.x,
+        ptrY: p.y,
+        started: false,
+      });
+    },
+  });
+
+  /**
+   * Кликабельный элемент полотна, НЕ являющийся формой.
+   *
+   * Схема живёт внутри общего `<fieldset disabled={frozen}>` карточки (index.tsx), а
+   * задизейбленность НАСЛЕДУЕТСЯ: любая `<button>` под таким предком не получает ни клика, ни
+   * pointer-событий, и `aria-disabled` этого не отменяет. То есть на выпущенной карточке умирало
+   * ровно то, что Р9 обещал оставить живым: раскладывать схему руками и ходить по её шагам.
+   * Проп `frozen` был проведён честно, но душили нас раньше, чем он что-то решал.
+   *
+   * Поэтому интерактив полотна собран на div с ролью кнопки: клавиатура сохранена (Enter и
+   * Space), а наследуемая задизейбленность до div'а не достаёт. Запреты Р9 продолжает решать
+   * `frozen`, а не fieldset — явно, как и требовалось.
+   */
+  const activate = (fn?: () => void) =>
+    fn
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          onClick: fn,
+          // Клавиатура зовёт действие НАПРЯМУЮ, минуя защиту от клик-эха: эхо бывает только у
+          // указателя, и общий сторож съедал бы первый Enter после отменённого жеста.
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            justDragged.current = false;
+            fn();
+          },
+        }
+      : // Без действия нет и роли: иначе скринридер объявляет кнопкой то, что ничего не делает и
+        // даже не фокусируется.
+        {};
+
+  const clickGuard = (fn: () => void) => () => {
+    if (justDragged.current) {
+      justDragged.current = false;
+      return;
+    }
+    fn();
+  };
+
+  // Жизнь жеста целиком: движение, отпускание, срыв. Подписка держится, пока жест жив.
+  const dragActive = drag !== null;
+  useEffect(() => {
+    if (!dragActive) return;
+    const onPointerMove = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d || e.pointerId !== d.pointerId) return;
+      // Кнопку отпустили там, где о нас не сообщили (потеря фокуса окна, дроп за его пределами) —
+      // о жесте узнаём по первому же движению без нажатых кнопок и сворачиваем его.
+      if (e.buttons === 0) {
+        justDragged.current = d.started;
+        commitDrag(null);
+        return;
+      }
+      const p = toLayoutPoint(e);
+      if (!p) return;
+      lastClient.current = { x: e.clientX, y: e.clientY };
+      const far = Math.abs(p.x - d.fromX) > DRAG_THRESHOLD || Math.abs(p.y - d.fromY) > DRAG_THRESHOLD;
+      if (!d.started && !far) return;
+      commitDrag({ ...d, started: true, x: p.x - d.offX, y: p.y - d.offY, ptrX: p.x, ptrY: p.y });
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (d && e.pointerId !== d.pointerId) return;
+      commitDrag(null);
+      if (!d?.started) return;
+      justDragged.current = true;
+      const at = { x: Math.max(0, d.x), y: Math.max(0, d.y) };
+      // Перемещение состоялось в любом случае: жест композитен, и «перенёс» не отменяется тем,
+      // что «соединить» потом отклонили. Позиция остаётся там, где ноду бросили.
+      onMove(d.key, at);
+      if (frozen) return;
+      // ПРИЦЕЛ СЧИТАЕТСЯ ЗДЕСЬ И СЕЙЧАС, из последнего состояния жеста и свежего `res`: цель,
+      // посчитанная в рендере, отстаёт на одно движение, а форму мог изменить кто-то ещё, пока
+      // жест длился.
+      const eff = applyOverrides(auto, { ...positions, [d.key]: at });
+      const hit = hitNode(eff, d.ptrX, d.ptrY, d.key);
+      const v = hit ? combineVerdict(d.key, hit.key, res, steps) : null;
+      if (v && !v.ok) {
+        // Отказ ДО диалога: открывать форму, которую нельзя отправить, — предлагать заведомый
+        // отказ. Причина словами движка.
+        showMessage(v.reason, 'error');
+      } else if (v?.ok && hit) {
+        onCreate({
+          inputKeys: [d.key, hit.key],
+          absorbInto: v.absorbInto,
+          intent: v.absorbInto ? undefined : 'unit',
+        });
+      }
+    };
+    const onPointerCancel = (e: PointerEvent) => {
+      if (dragRef.current && e.pointerId !== dragRef.current.pointerId) return;
+      // Система забрала указатель — намерение подтверждено не было. Но клик-эхо погасить надо:
+      // отпускание над нодой иначе сработает выбором, которого никто не просил.
+      justDragged.current = true;
+      commitDrag(null);
+    };
+    // Окно потеряло фокус или вкладку спрятали — поток событий указателя обрывается молча, и
+    // без этого жест висел бы с работающим rAF до Escape или следующего касания.
+    const onLost = () => {
+      const d = dragRef.current;
+      if (!d) return;
+      justDragged.current = d.started;
+      commitDrag(null);
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('blur', onLost);
+    document.addEventListener('visibilitychange', onLost);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('blur', onLost);
+      document.removeEventListener('visibilitychange', onLost);
+    };
+  }, [dragActive, auto, positions, res, steps, frozen, onMove, onCreate, showMessage, toLayoutPoint, commitDrag]);
+
+  // Escape во время драга — тот же откат: жест отменён, нода возвращается на прежнее место.
+  useEffect(() => {
+    if (!drag?.started) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      // Отменённый жест не должен догнать пользователя кликом: указатель ещё зажат, и отпускание
+      // родит click по ноде — то есть прыжок к шагу, которого никто не просил.
+      justDragged.current = true;
+      commitDrag(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drag?.started]);
+
+  // Автоскролл у края: без него ноду нельзя увести за пределы видимой части полотна — а полотно
+  // больше окна на любой настоящей карточке.
+  useEffect(() => {
+    if (!drag?.started) return;
+    let raf = 0;
+    const tick = () => {
+      const el = canvasRef.current;
+      const c = lastClient.current;
+      if (el && c) {
+        const r = el.getBoundingClientRect();
+        let dx = 0;
+        let dy = 0;
+        if (c.x < r.left + AUTOSCROLL_EDGE) dx = -AUTOSCROLL_SPEED;
+        else if (c.x > r.right - AUTOSCROLL_EDGE) dx = AUTOSCROLL_SPEED;
+        if (c.y < r.top + AUTOSCROLL_EDGE) dy = -AUTOSCROLL_SPEED;
+        else if (c.y > r.bottom - AUTOSCROLL_EDGE) dy = AUTOSCROLL_SPEED;
+        if (dx || dy) {
+          const wasL = el.scrollLeft;
+          const wasT = el.scrollTop;
+          el.scrollLeft += dx;
+          el.scrollTop += dy;
+          const movedX = el.scrollLeft - wasL;
+          const movedY = el.scrollTop - wasT;
+          // Курсор стоит на месте, полотно уехало — значит и нода, и ТОЧКА ПРИЦЕЛА сместились на
+          // ту же величину. Без второй половины автоскролл довозил ноду до цели, а hit-test
+          // продолжал бить в исходную точку: дроп на подъехавшую цель молча становился
+          // перемещением.
+          if (movedX || movedY) {
+            const d = dragRef.current;
+            if (d) {
+              commitDrag({
+                ...d,
+                x: d.x + movedX,
+                y: d.y + movedY,
+                ptrX: d.ptrX + movedX,
+                ptrY: d.ptrY + movedY,
+              });
+            }
+          }
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [drag?.started]);
+
+  // ЦЕЛЬ ЖЕСТА — СТРОГО ТО, ЧТО ПОД КУРСОРОМ, а не то, с чем пересеклась тащимая нода: пересечение
+  // фигур зависит от их размеров, точка — нет, и рука предсказуемо попадает туда, куда целится.
+  const target = drag?.started ? hitNode(layout, drag.ptrX, drag.ptrY, drag.key) : null;
+  // Вердикт считается от СЕГОДНЯШНЕГО res, а не от того, что был на pointerdown: форма могла
+  // измениться другой рукой, пока жест длился.
+  const verdict = target && !frozen ? combineVerdict(drag!.key, target.key, res, steps) : null;
+  const hint = (() => {
+    if (!verdict) return '';
+    if (!verdict.ok) return verdict.reason;
+    if (verdict.absorbInto) return `отпустите: дособрать ▣ ${verdict.absorbInto}`;
+    return `отпустите: сшить ${nameOfNode(drag!.key)} + ${nameOfNode(target!.key)}`;
+  })();
+
+  /** Рамка цели под курсором: чернильная у валидной, ошибочная у отказной. */
+  const targetRing = (key: string) =>
+    target?.key === key && verdict
+      ? verdict.ok
+        ? 'outline outline-2 outline-offset-2 outline-textColor'
+        : 'outline outline-2 outline-offset-2 outline-error'
+      : undefined;
+
+  const manual = Object.keys(positions).length;
+
+  if (layout.tiles.length === 0 && layout.boxes.length === 0 && !layout.tail) {
+    // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, а не пустое полотно — но теперь оно означает ровно одно:
+    // на карточке НЕТ ДЕТАЛЕЙ. До Ф7 сюда попадала и размеченная деталями карточка без единого
+    // узла, то есть экран говорил «нечего рисовать» ровно тогда, когда рисовать было что.
     return (
       <div className='flex flex-col items-center gap-1 border border-dashed border-borderColor px-3 py-8 text-center'>
         <Text size='micro' variant='label'>
-          узлов ещё нет — схеме нечего рисовать
+          деталей ещё нет — схеме нечего рисовать
         </Text>
         <Text size='micro' variant='label'>
-          выберите на столе две детали и нажмите «сшить» — первый узел появится здесь же
+          детали приходят из выкроек; появятся здесь плитками, и сборка начнётся с них
         </Text>
-        {!frozen && (
-          <FreePieces
-            keys={res.frontier}
-            pieceNameOf={pieceNameOf}
-            picked={picked}
-            onToggle={toggle}
-            onJoin={(keys) => {
-              onJoin(keys);
-              setPicked([]);
-            }}
-            onClear={() => setPicked([])}
-          />
-        )}
       </div>
     );
   }
 
+  // Шаг → блок, которому он принадлежит (включая хвостовой с пустым ключом).
+  const blockOfStep = new Map<number, string>();
+  for (const b of blocks) for (const i of b.steps) blockOfStep.set(i, b.key);
+
+  const boxOf = (blockKey: string) => (blockKey === '' ? layout.tail : layout.byKey.get(blockKey));
+
   // Строка бокса → её y. Нужна проводам: они целятся в строку, а не в бокс.
   const rowY = (blockKey: string, stepIndex: number): number => {
-    const box = layout.byKey.get(blockKey);
+    const box = boxOf(blockKey);
     if (!box) return 0;
     const b = blocks.find((x) => x.key === blockKey);
     const pos = b ? b.steps.indexOf(stepIndex) : -1;
@@ -98,8 +440,13 @@ export function AssemblySchematic({
     return box.y + HEAD_H + 2 + pos * LINE_H + LINE_H / 2;
   };
 
-  // Провод: от правого края бокса-источника к левому краю строки-потребителя, кубической кривой.
-  const wires: Array<{ d: string; key: string }> = [];
+  const wire = (x1: number, y1: number, x2: number, y2: number) => {
+    const mid = (x1 + x2) / 2;
+    return `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`;
+  };
+
+  const wires: Array<{ d: string; key: string; faint?: boolean }> = [];
+  // Узел → строка-потребитель.
   for (const b of blocks) {
     if (b.key === '') continue;
     for (const i of b.steps) {
@@ -108,200 +455,333 @@ export function AssemblySchematic({
         const from = layout.byKey.get(input.key);
         const to = layout.byKey.get(b.key);
         if (!from || !to) continue;
-        const x1 = from.x + from.w;
-        const y1 = from.y + from.h / 2;
-        const x2 = to.x;
-        const y2 = rowY(b.key, i);
-        const mid = (x1 + x2) / 2;
-        wires.push({ key: `${input.key}->${b.key}:${i}`, d: `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}` });
+        wires.push({
+          key: `${input.key}->${b.key}:${i}`,
+          d: wire(from.x + from.w, from.y + from.h / 2, to.x, rowY(b.key, i)),
+        });
       }
+    }
+  }
+  // Деталь → строка-потребитель, если та не рядом. До Ф7 деталь, взятая двумя блоками, рисовалась
+  // двумя стопками, и вторая связь читалась смежностью. Дубли схлопнуты — значит связь обязан
+  // сообщить провод, иначе она пропала бы молча. Смежная связь провода не требует и сегодня.
+  for (const t of layout.tiles) {
+    const home = t.state === 'eaten' ? t.into : null;
+    for (const i of t.consumers) {
+      const target = blockOfStep.get(i);
+      if (target === undefined) continue;
+      if (home !== null && target === home) continue;
+      const to = boxOf(target);
+      if (!to) continue;
+      wires.push({
+        key: `tile:${t.key}->${target}:${i}`,
+        d: wire(t.x + t.w, t.y + t.h / 2, to.x, rowY(target, i)),
+        faint: true,
+      });
     }
   }
 
   return (
     <>
       {!frozen && (
-        <FreePieces
-          keys={res.frontier.filter((k) => !res.units.has(k))}
-          pieceNameOf={pieceNameOf}
+        <ActionPanel
           picked={picked}
-          onToggle={toggle}
-          onJoin={(keys) => {
-            onJoin(keys);
+          labelOf={pieceNameOf}
+          onCreate={(intent) => {
+            onCreate({ inputKeys: picked, intent });
             setPicked([]);
           }}
           onClear={() => setPicked([])}
-          compact
         />
       )}
-    <div className='overflow-auto border border-borderColor bg-bgColor' style={{ maxHeight: 640 }}>
-      <div style={{ width: layout.width, height: layout.height, position: 'relative' }}>
-        <svg
-          width={layout.width}
-          height={layout.height}
-          className='absolute inset-0'
-          aria-hidden
-        >
-          {wires.map((w) => (
-            <path key={w.key} d={w.d} fill='none' stroke='currentColor' strokeWidth={1} opacity={0.45} />
-          ))}
-        </svg>
+      {/* Место под подсказку зарезервировано ПОСТОЯННО. Появляясь по факту наведения, строка
+          сдвигала бы контейнер вниз посреди жеста — а вместе с ним и систему координат: нода
+          прыгала бы на высоту строки, и у верхней кромки цели подсветка мигала бы через кадр. */}
+      <div className='mb-1.5 min-h-4'>
+        {drag?.started && hint && (
+          <Text size='micro' variant='label' className={cn(verdict && !verdict.ok && 'text-error')}>
+            {hint}
+          </Text>
+        )}
+      </div>
+      {manual > 0 && (
+        <ChipRow className='mb-1.5'>
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            раскладка: ручная · {manual}
+          </Text>
+          {/* nonForm по той же причине, что у переключателя режима: сброс раскладки не меняет
+              данных, но под внешним `<fieldset disabled>` настоящая кнопка мертва — и сбросить
+              чужую расстановку на выпущенной карточке было бы нечем. */}
+          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='вернуть автоматическую раскладку'>
+            авто
+          </Chip>
+        </ChipRow>
+      )}
+      <div
+        ref={canvasRef}
+        className='overflow-auto border border-borderColor bg-bgColor'
+        style={{ maxHeight: 640 }}
+      >
+        <div style={{ width: layout.width, height: layout.height, position: 'relative' }}>
+          <svg width={layout.width} height={layout.height} className='absolute inset-0' aria-hidden>
+            {wires.map((w) => (
+              <path
+                key={w.key}
+                d={w.d}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={1}
+                strokeDasharray={w.faint ? '3 3' : undefined}
+                opacity={w.faint ? 0.3 : 0.45}
+              />
+            ))}
+          </svg>
 
-        {/* Детали, не вошедшие ни в один узел — колонка у левого края. «Ещё не пришито» это
-            состояние, и оно обязано быть видно, а не выводиться из отсутствия на схеме. */}
-        {layout.unassigned.map((key, i) => (
-          <button
-            key={`free:${key}`}
-            type='button'
-            disabled={frozen}
-            onClick={() => toggle(key)}
-            className={cn(
-              'absolute flex items-center justify-center border border-dashed border-borderColor px-1 text-center',
-              picked.includes(key) && 'border-solid border-textColor bg-bgZebra',
-            )}
-            style={{ left: 8, top: 16 + i * (TILE + TILE_GAP), width: 64, height: TILE }}
-            title={`${pieceNameOf(key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`}
-          >
-            <Text size='nano' variant='label' component='span' className='line-clamp-2'>
-              {pieceNameOf(key)}
-            </Text>
-          </button>
-        ))}
-
-        {layout.boxes.map((box) => {
-          const b = blocks.find((x) => x.key === box.key);
-          if (!b) return null;
-          const terminal = res.frontier.includes(box.key) && res.units.has(box.key);
-          return (
-            <div key={box.key}>
-              {/* Плитки деталей-входов слева от бокса: точки входа чертежа. */}
-              {box.pieceInputs.map((key, i) => (
+          {layout.boxes.map((box) => {
+            const b = blocks.find((x) => x.key === box.key);
+            if (!b) return null;
+            const terminal = res.frontier.includes(box.key) && res.units.has(box.key);
+            return (
+              <div key={box.key}>
                 <div
-                  key={`${box.key}:${key}`}
-                  className='absolute flex items-center justify-center border border-borderColor bg-bgColor px-1 text-center'
-                  style={{ left: box.x - 60, top: box.stackTop + i * (TILE + TILE_GAP), width: 52, height: TILE }}
-                  title={pieceNameOf(key)}
+                  className={cn(
+                    'absolute border-2 border-textColor bg-bgColor',
+                    drag?.key === box.key && drag.started && 'opacity-70',
+                    targetRing(box.key),
+                  )}
+                  style={{ left: box.x, top: box.y, width: box.w, height: box.h, touchAction: NODE_TOUCH }}
+                  {...dragHandlers(box.key, box.x, box.y)}
                 >
-                  <Text size='nano' variant='label' component='span' className='line-clamp-2'>
-                    {pieceNameOf(key)}
+                  {/* ШАПКА — PICK-ЗОНА БОКСА. Строки внутри уже кнопки шагов, поэтому выбор узла
+                      переехал на заголовок: одна нода — одно место, куда по ней кликают. Кнопка, а
+                      не div, ради клавиатуры: Enter на сфокусированной шапке — тот же выбор, и
+                      путь «сшить» с клавиатуры не потерян. */}
+                  <div
+                    {...activate(
+                      !frozen && onTable.has(box.key)
+                        ? clickGuard(() => toggle(box.key))
+                        : // Съеденный узел входом не взять, зато вопрос «куда он делся» законен —
+                          // и шапка на него отвечает, как отвечает плитка съеденной детали.
+                          (() => {
+                            const eater = res.consumedBy.get(box.key);
+                            return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
+                          })(),
+                    )}
+                    className={cn(
+                      'flex w-full items-baseline gap-1 border-b border-hairline px-1 text-left',
+                      !frozen && onTable.has(box.key) && 'hover:bg-bgZebra',
+                      picked.includes(box.key) && 'bg-bgZebra',
+                    )}
+                    style={{ height: HEAD_H }}
+                    title={
+                      onTable.has(box.key)
+                        ? 'узел на столе — кликните, чтобы взять его в следующую сборку'
+                        : 'узел уже вошёл в другой; кликните, чтобы открыть шаг, который его съел'
+                    }
+                  >
+                    <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                      {picked.includes(box.key) ? '✓ ' : ''}▣ {box.key}
+                    </Text>
+                    {b.name && (
+                      <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                        {b.name}
+                      </Text>
+                    )}
+                    <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                      {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
+                    </Text>
+                  </div>
+                  {!frozen && (
+                    <div className='absolute -top-4 left-0 flex items-center gap-1'>
+                      <Chip
+                        dashed
+                        onClick={clickGuard(() => onCreate({ inputKeys: [box.key], intent: 'process' }))}
+                        title='добавить обработку по этому узлу'
+                      >
+                        + операция
+                      </Chip>
+                      <Chip
+                        dashed
+                        onClick={clickGuard(() => onDissolve(b.producedAt))}
+                        title='шаг перестанет собирать узел; входы вернутся на стол следующим шагам'
+                      >
+                        растворить
+                      </Chip>
+                    </div>
+                  )}
+                  {b.steps.map((i) => (
+                    <div
+                      key={i}
+                      {...activate(clickGuard(() => onPickStep(i)))}
+                      className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                      style={{ height: LINE_H }}
+                      title='открыть шаг в списке'
+                    >
+                      <Text size='nano' component='span' className='min-w-0 truncate'>
+                        {(i + 1) * 10} · {labelOf(i)}
+                      </Text>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* ХВОСТОВОЙ БОКС: шаги, не достигающие ни одного узла. До Ф7 их на полотне не было
+              вовсе — неразмеченная карточка показывала пустоту вместо существующего маршрута.
+              Пунктир и лексикон те же, что у врезки рельса, чтобы две вьюшки называли одно
+              одинаково. */}
+          {layout.tail && (
+            <div
+              className={cn(
+                'absolute border-2 border-dashed border-borderColor bg-bgColor',
+                drag?.key === '' && drag.started && 'opacity-70',
+                targetRing(''),
+              )}
+              style={{
+                left: layout.tail.x,
+                top: layout.tail.y,
+                width: layout.tail.w,
+                height: layout.tail.h,
+                touchAction: NODE_TOUCH,
+              }}
+              {...dragHandlers('', layout.tail.x, layout.tail.y)}
+            >
+              <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
+                <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                  ◌ вне узлов
+                </Text>
+                <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                  цель шага — не узел
+                </Text>
+              </div>
+              {looseSteps.map((i) => (
+                <div
+                  key={i}
+                  {...activate(clickGuard(() => onPickStep(i)))}
+                  className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                  style={{ height: LINE_H }}
+                  title='открыть шаг в списке'
+                >
+                  <Text size='nano' component='span' className='min-w-0 truncate'>
+                    {(i + 1) * 10} · {labelOf(i)}
                   </Text>
                 </div>
               ))}
-
-              <div
-                className='absolute border-2 border-textColor bg-bgColor'
-                style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
-              >
-                <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
-                  <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
-                    ▣ {box.key}
-                  </Text>
-                  {b.name && (
-                    <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-                      {b.name}
-                    </Text>
-                  )}
-                  <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
-                    {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
-                  </Text>
-                </div>
-                {!frozen && (
-                  <div className='absolute -top-4 left-0 flex items-center gap-1'>
-                    {/* Взять узел входом следующей сборки можно только пока он НА СТОЛЕ: съеденный
-                        узел лежит внутри другого, и предлагать его — предлагать заведомый отказ. */}
-                    {onTable.has(box.key) && (
-                      <Chip
-                        dashed={!picked.includes(box.key)}
-                        onClick={() => toggle(box.key)}
-                        title='взять этот узел в следующую сборку'
-                      >
-                        {picked.includes(box.key) ? '✓ выбран' : 'выбрать'}
-                      </Chip>
-                    )}
-                    <Chip dashed onClick={() => onAddStep(box.key)} title='добавить обработку по этому узлу'>
-                      + операция
-                    </Chip>
-                    <Chip
-                      dashed
-                      onClick={() => onDissolve(b.producedAt)}
-                      title='шаг перестанет собирать узел; входы вернутся на стол следующим шагам'
-                    >
-                      растворить
-                    </Chip>
-                  </div>
-                )}
-                {b.steps.map((i) => (
-                  <button
-                    key={i}
-                    type='button'
-                    onClick={() => onPickStep(i)}
-                    className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-                    style={{ height: LINE_H }}
-                    title='открыть шаг в списке'
-                  >
-                    <Text size='nano' component='span' className='min-w-0 truncate'>
-                      {(i + 1) * 10} · {labelOf(i)}
-                    </Text>
-                  </button>
-                ))}
-              </div>
             </div>
-          );
-        })}
+          )}
+
+          {/* ВСЕ ДЕТАЛИ КАРТОЧКИ — по одной плитке на деталь, место следует из состояния: съеденная
+              стоит у бокса своего узла, свободная — в колонке у левого края. Координаты приходят из
+              раскладки, а не считаются здесь: раскладка проверяема пробой, разметка — нет.
+
+              Плитки рисуются ПОСЛЕ боксов намеренно: hit-test отдаёт плитку при наложении (меньшая
+              цель побеждает), и порядок отрисовки обязан этому соответствовать — иначе рука
+              целилась бы в то, чего не видит. В авто-раскладке ноды не пересекаются, но ручные
+              позиции пересечение разрешают.
+
+              Плитка кликабельна в обоих состояниях: свободная берётся в сборку, съеденная уводит к
+              шагу, который её съел. Роль кнопки на div, а не сама <button>: см. `activate` —
+              внешний `<fieldset disabled>` карточки убил бы и клик, и перетаскивание. */}
+          {layout.tiles.map((t) => (
+            <div
+              key={`tile:${t.key}`}
+              {...activate(
+                t.state === 'free'
+                  ? !frozen
+                    ? clickGuard(() => toggle(t.key))
+                    : undefined
+                  : // Съеденную деталь входом не взять — правило 2. Зато главный вопрос читателя о
+                    // ней «куда она делась», и клик отвечает: уводит к шагу, который её съел.
+                    (() => {
+                      const eater = res.consumedBy.get(t.key);
+                      return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
+                    })(),
+              )}
+              className={cn(
+                'absolute flex items-center justify-center px-1 text-center',
+                t.state === 'free' ? 'border border-dashed border-borderColor' : 'border border-borderColor bg-bgColor',
+                picked.includes(t.key) && 'border-solid border-textColor bg-bgZebra',
+                drag?.key === t.key && drag.started && 'opacity-70',
+                targetRing(t.key),
+              )}
+              style={{ left: t.x, top: t.y, width: t.w, height: t.h, touchAction: NODE_TOUCH }}
+              title={
+                t.state === 'free'
+                  ? `${pieceNameOf(t.key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`
+                  : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}; кликните, чтобы открыть шаг, который её съел`
+              }
+              {...dragHandlers(t.key, t.x, t.y)}
+            >
+              <Text size='nano' variant='label' component='span' className='line-clamp-2'>
+                {pieceNameOf(t.key)}
+              </Text>
+            </div>
+          ))}
+        </div>
       </div>
-    </div>
+
+      <ConfirmationModal
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        onConfirm={() => {
+          onResetPositions();
+          setResetOpen(false);
+        }}
+        title='вернуть автоматическую раскладку'
+        confirmLabel='сбросить'
+        cancelLabel='оставить'
+        width='sm'
+      >
+        <Text size='micro' variant='label'>
+          все ручные позиции этой карточки будут забыты, и схема снова расставит узлы сама. Данные
+          карточки не изменятся: позиции — только способ смотреть.
+        </Text>
+      </ConfirmationModal>
     </>
   );
 }
 
-// FreePieces — панель выбора и единственное действие, рождающее узел.
+// Панель действий над полотном.
 //
-// Одна кнопка, а не мастер: «сшить» — это и есть весь жест. Код узла предлагается автоматически,
-// имя даётся потом в открывшемся шаге, потому что придумывать имя в момент жеста — это пауза
-// ровно там, где у технолога есть инерция.
-function FreePieces({
-  keys,
-  pieceNameOf,
+// ДО Ф7 ЗДЕСЬ ЛЕЖАЛИ ЧИПЫ СВОБОДНЫХ ДЕТАЛЕЙ — и это был единственный способ их выбрать. Теперь
+// детали лежат на самом полотне и кликаются там, а дублировать их строкой значило бы держать две
+// поверхности одного факта: разойдутся — врать будут тихо. Осталось то, чего на полотне нет:
+// сводка выбора и два действия над ним.
+//
+// Два действия, а не одно с угадыванием: два входа бывают и у обработки, и решать за автора по
+// их числу — переигрывать его выбор.
+function ActionPanel({
   picked,
-  onToggle,
-  onJoin,
+  labelOf,
+  onCreate,
   onClear,
-  compact = false,
 }: {
-  keys: string[];
-  pieceNameOf: (k: string) => string;
   picked: string[];
-  onToggle: (k: string) => void;
-  onJoin: (keys: string[]) => void;
+  labelOf: (k: string) => string;
+  onCreate: (intent: 'unit' | 'process') => void;
   onClear: () => void;
-  compact?: boolean;
 }) {
-  if (keys.length === 0 && picked.length === 0) return null;
+  if (picked.length === 0) return null;
   return (
-    <ChipRow className={compact ? 'mb-1.5' : 'mt-2'}>
+    <ChipRow className='mb-1.5'>
       <Text size='micro' variant='label' component='span' className='uppercase'>
-        на столе:
+        выбрано:
       </Text>
-      {keys.map((k) => (
-        <Chip
-          key={k}
-          dashed={!picked.includes(k)}
-          onClick={() => onToggle(k)}
-          title={`${pieceNameOf(k)} — кликните, чтобы взять в сборку`}
-        >
-          {picked.includes(k) ? `✓ ${pieceNameOf(k)}` : pieceNameOf(k)}
+      <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
+        {picked.map(labelOf).join(' + ')}
+      </Text>
+      {picked.length >= 2 && (
+        <Chip onClick={() => onCreate('unit')} title='собрать из выбранного новый узел'>
+          сшить · {picked.length}
         </Chip>
-      ))}
-      {picked.length > 0 && (
-        <>
-          <Chip onClick={() => onJoin(picked)} title='создать узел из выбранного'>
-            сшить · {picked.length}
-          </Chip>
-          <Chip dashed onClick={onClear} title='снять выбор'>
-            отменить
-          </Chip>
-        </>
       )}
+      <Chip dashed onClick={() => onCreate('process')} title='шаг по выбранному, ничего не собирающий'>
+        обработка · {picked.length}
+      </Chip>
+      <Chip dashed onClick={onClear} title='снять выбор'>
+        отменить
+      </Chip>
     </ChipRow>
   );
 }
