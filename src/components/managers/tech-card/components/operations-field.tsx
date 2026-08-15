@@ -498,6 +498,34 @@ function useAssemblyView(pieces: PieceRef[]): AssemblyView {
   }, [ops, pieces]);
 }
 
+// useAssemblyBrokenSteps — какие шаги ломают сборку, для маркера в рельсе.
+//
+// ПРО ЦЕНУ ПОДПИСКИ, честно. Дисциплина этого файла — держать кросс-операционные вычисления в
+// листьях, и лоток с SVG-силуэтами живёт в листе именно поэтому. Здесь подписка в корне, и это
+// осознанный размен: рельс — единственное место, где виден шаг, который автор сейчас НЕ открыл,
+// а без маркера нарушение на нём остаётся невидимым до сохранения. Дорогая часть (плитки
+// деталей) осталась в листе; корень перерисовывает строки рельса по 26px, и при тринадцати
+// шагах реальной карточки это ничто.
+function useAssemblyBrokenSteps(pieces: PieceRef[]): Set<number> {
+  const ops = useWatch({ name: 'operations' }) as
+    | Array<{ inputKeys?: string[]; outputUnitKey?: string }>
+    | undefined;
+  return useMemo(() => {
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = (ops ?? []).map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: '',
+    }));
+    const out = new Set<number>();
+    for (const v of assemblySweep(sweepPieces, steps).violations) {
+      if (v.step >= 0) out.add(v.step);
+    }
+    return out;
+  }, [ops, pieces]);
+}
+
 // AssemblyTray — лоток, который перестал врать.
 //
 // ЛИСТ, и это не стилистика: он подписан на весь массив operations (фронтир иначе не посчитать),
@@ -792,12 +820,17 @@ function ProducesBlock({
               имя необязательно, но на печати и в цехе читают его, а не код
             </Text>
           )}
-          {/* Только когда узел ДЕЙСТВИТЕЛЬНО состоялся: у невалидного джойна (арность < 2,
-              второй производитель, съеденный вход) подстановка его ключа превратила бы законные
-              ссылки в unknown-key — починка, которая ломает. */}
-          {assembly.res.units.has(outputKey) && (
-            <BootstrapEatenRefs index={index} outputKey={outputKey} pieces={pieces} />
-          )}
+          {/* Узел должен быть произведён ИМЕННО ЭТИМ шагом (или им поглощён). Предыдущий гейт
+              спрашивал только «узел с таким ключом существует» — а он мог состояться ДРУГИМ
+              шагом: у второго производителя джойн отвергнут, входы НЕ съедены, и кнопка
+              заменяла бы в поздних шагах ЖИВЫЕ ЗАКОННЫЕ ссылки, выбрасывая их состав. Починка,
+              которая ломает — ровно то, от чего предостерегал комментарий, пока предикат был не
+              тот. */}
+          <BootstrapEatenRefs
+            index={index}
+            outputKey={outputKey}
+            assembly={assembly}
+          />
         </>
       )}
     </>
@@ -814,33 +847,35 @@ function ProducesBlock({
 function BootstrapEatenRefs({
   index,
   outputKey,
-  pieces,
+  assembly,
 }: {
   index: number;
   outputKey: string;
-  pieces: PieceRef[];
+  assembly: AssemblyView;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const showMessage = useSnackBarStore((st) => st.showMessage);
   const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ inputKeys?: string[] }>;
 
-  // Съедается ВСЁ, что шаг взял входом, а не только детали: джойн [SHELL, SL] съедает и узел
-  // SHELL, и поздние шаги-обработки, ссылающиеся на SHELL, ломаются ровно так же. Считать здесь
-  // одни детали значило бы починить первый узел и не починить цепочку узлов — то есть основной
-  // сценарий фичи.
-  //
-  // Исключение — собственный выходной ключ: при поглощении узел не съедается, он сохраняет
-  // идентичность, и ссылки на него после шага законны.
-  const mine = new Set(
-    (ops[index]?.inputKeys ?? []).filter((k) => k && k !== outputKey),
-  );
+  // Узел должен быть произведён ЭТИМ шагом — или им поглощён. Иначе кнопки быть не должно вовсе.
+  const unit = assembly.res.units.get(outputKey);
+  const mineIsReal = !!unit && (unit.producedAt === index || unit.absorbedAt.includes(index));
+
+  // Съеденным считается только то, что съел ИМЕННО ЭТОТ шаг, по свидетельству движка, а не по
+  // списку входов. Список входов — это заявка; съедено ли по ней что-нибудь, знает проход:
+  // у отвергнутого джойна входы остаются на столе, и «замена» превратила бы законные ссылки в
+  // висячие.
+  const mine = new Set<string>();
+  assembly.res.consumedBy.forEach((eater, key) => {
+    if (eater === index && key !== outputKey) mine.add(key);
+  });
   // Кандидаты — только ПОЗЖЕ этого шага: шаг раньше него деталь ещё не потерял.
   const affected: number[] = [];
   ops.forEach((o, i) => {
     if (i <= index) return;
     if ((o?.inputKeys ?? []).some((k) => mine.has(k))) affected.push(i);
   });
-  if (affected.length === 0) return null;
+  if (!mineIsReal || affected.length === 0) return null;
 
   const apply = () => {
     const all = (getValues('operations') ?? []) as Array<{ inputKeys?: string[] }>;
@@ -1041,6 +1076,7 @@ function RailStep({
   selected,
   onSelect,
   hasError,
+  assemblyBroken = false,
   activePin,
   activeBom,
   pieceShapes,
@@ -1052,6 +1088,8 @@ function RailStep({
   selected: boolean;
   onSelect: () => void;
   hasError: boolean;
+  /** Шаг ломает сборочный граф: вход не на фронтире, дубль, невалидный джойн. */
+  assemblyBroken?: boolean;
   activePin?: number | null;
   activeBom?: string | null;
   /** Контуры деталей карточки, одной стабильной картой на весь рельс (см. use-piece-shapes). */
@@ -1139,7 +1177,7 @@ function RailStep({
           }}
           className={cn(
             'flex items-center gap-1 border bg-bgColor pr-1.5 transition-colors',
-            hasError || linked
+            hasError || assemblyBroken || linked
               ? 'border-error'
               : selected || over
                 ? 'border-textColor'
@@ -1182,13 +1220,19 @@ function RailStep({
             >
               {label}
             </Text>
-            {hasError && (
+            {(hasError || assemblyBroken) && (
               <Text
                 size='nano'
                 variant='error'
                 component='span'
                 className='shrink-0 font-bold'
-                title='в шаге есть незаполненное обязательное поле'
+                // Тултип обязан называть ПРИЧИНУ. Раньше он говорил про незаполненное поле и
+                // при нарушении сборки — то есть про другое, и уводил искать не туда.
+                title={
+                  assemblyBroken && !hasError
+                    ? 'шаг ломает сборку: вход не лежит на столе на этом шаге — откройте шаг'
+                    : 'в шаге есть незаполненное обязательное поле'
+                }
               >
                 !
               </Text>
@@ -1726,6 +1770,9 @@ function OperationEditor({
   // чтобы предложить замену съеденных ссылок при объявлении узла. Подписка здесь одна на всю
   // форму, а не по строке рельса: редактор смонтирован в единственном экземпляре.
   const assembly = useAssemblyView(pieces);
+  // Нарушения ИМЕННО ЭТОГО шага. Карточные (правило 4) сюда не попадают — они про сборку
+  // целиком и место им на релизном гейте, а не в строке шага.
+  const stepViolations = assembly.res.violations.filter((v) => v.step === index);
   const chosenUnits = selectedPieceKeys.filter((k) => !byKey.has(k) && assembly.res.units.has(k));
   // The same composed heading the rail shows, so the open step and its row in the list are named
   // identically — they used to differ, because the rail fell back to the type while the editor
@@ -2107,6 +2154,29 @@ function OperationEditor({
         <Text size='micro' variant='label' className='mt-1'>
           not linked to any piece — click one in the tray above, or drag it here
         </Text>
+      )}
+
+      {/* НАРУШЕНИЯ ЭТОГО ШАГА — ЗДЕСЬ, А НЕ ТОЛЬКО НА СОХРАНЕНИИ.
+          Клиент считает фронтир на каждое изменение, но до сих пор молчал о результате: гарды
+          стояли только на путях ДОБАВЛЕНИЯ (лоток, drop, объявление узла), а пути, ломающие уже
+          собранный граф, свободны — перестановка шагов, удаление шага-производителя, снятие
+          чипа входа, удаление детали на другой вкладке, замена деталей модалкой DXF.
+          Первичная разметка карточки обычно И ЕСТЬ перестановка, так что это не экзотика.
+          Сервер такую запись отвергает по пути operations[i].input_keys[j], а у этого пути нет
+          ни FormItem, ни FormMessage — текст не рендерился нигде, и автор видел «!» в рельсе с
+          тултипом про «незаполненное обязательное поле», то есть про другое.
+          «Пикер предлагает ровно то, что примет запись» было выполнено наполовину: предлагал
+          ровно, но молча позволял разрушить уже принятое. */}
+      {stepViolations.length > 0 && (
+        <CalloutBox tone='error'>
+          <div className='flex flex-col gap-0.5'>
+            {stepViolations.map((v, i) => (
+              <Text key={`${v.rule}:${v.detail}:${i}`} size='micro'>
+                {v.message}
+              </Text>
+            ))}
+          </div>
+        </CalloutBox>
       )}
 
       <ProducesBlock
@@ -2991,6 +3061,10 @@ export function OperationsField({
     return set;
   }, [opErrors]);
   const firstErrorIndex = errorIndices.size ? Math.min(...errorIndices) : -1;
+  // Шаги, ломающие сборку. Считается ЗДЕСЬ, потому что рельс живёт в корне и другого места нет;
+  // цена — один свип на изменение массива операций, а не на каждое нажатие клавиши: useWatch с
+  // exact-именем не срабатывает на правку note или SMV внутри шага.
+  const brokenSteps = useAssemblyBrokenSteps(pieces);
   const prevSubmit = useRef(submitCount);
   const prevErrorCount = useRef(errorIndices.size);
   useEffect(() => {
@@ -3218,6 +3292,7 @@ export function OperationsField({
                         selected={index === selectedIndex}
                         onSelect={() => setSelected(index)}
                         hasError={errorIndices.has(index)}
+                        assemblyBroken={brokenSteps.has(index)}
                         activePin={activePin}
                         activeBom={activeBom}
                         pieceShapes={pieceShapes}
