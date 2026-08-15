@@ -179,6 +179,36 @@ function ConstructionSummary() {
     return !key || !attachedKeys.has(key);
   });
 
+  // ПРИШИВ ЭТИКЕТОК — РАБОТА, КОТОРОЙ НЕТ В МАРШРУТЕ.
+  //
+  // Строки секции «этикетки» намеренно исключены из проверки выше: этикетка попадает на изделие
+  // через `tech_card_label` и сборочную ведомость, поэтому строка без операции — норма, а не
+  // пропуск. Верно для СТРОКИ, но не для КАРТОЧКИ: кто-то этикетку пришивает, это занимает время,
+  // и если такого шага нет ни одного, его минуты не попадают ни в маршрут для цеха, ни в SAM —
+  // себестоимость занижена ровно на этот труд.
+  //
+  // Проверка КАРТОЧНАЯ, а не построчная, именно поэтому: одна фраза о пропущенной работе читается,
+  // а список «эта этикетка не на шаге, и эта, и эта» — то самое обучение игнорировать проверки,
+  // от которого исключение и защищало.
+  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
+    content?: string;
+    placement?: string;
+    attachment?: string;
+    size?: string;
+    note?: string;
+  }>;
+  // Заполненная этикетка, а не пустая строка на дефолтном типе — тот же предикат, что у чек-листа.
+  const usedLabels = labels.filter((l) =>
+    [l.content, l.placement, l.attachment, l.size, l.note].some((v) => !!v?.trim()),
+  ).length;
+  const labelsOnSomeStep = bomItems.some(
+    (b) =>
+      (b.section ?? '') === 'TECH_CARD_BOM_SECTION_LABEL' &&
+      !!b.lineKey?.trim() &&
+      attachedKeys.has(b.lineKey.trim()),
+  );
+  const labelsOffRoute = opCount > 0 && usedLabels > 0 && !labelsOnSomeStep;
+
   // The SAM → money readout (implied ₽/min from cmt_cost) moved to the costing tab's labour band
   // (Phase 3, plan 11): money reads next to the CMT input it derives from, minutes stay here.
   return (
@@ -211,6 +241,15 @@ function ConstructionSummary() {
           <Text size='micro'>
             не привязаны ни к одной операции:{' '}
             {unattached.map((b) => b.name?.trim() || 'unnamed').join(' · ')}
+          </Text>
+        </CalloutBox>
+      )}
+      {labelsOffRoute && (
+        <CalloutBox tone='note' className='mt-2.5'>
+          <Text size='micro'>
+            этикеток задано {usedLabels}, но ни один шаг их не пришивает — этой работы нет ни в
+            маршруте для цеха, ни в SAM. Заведите шаг, который их ставит, и свяжите с ним строку
+            этикетки из BOM.
           </Text>
         </CalloutBox>
       )}
