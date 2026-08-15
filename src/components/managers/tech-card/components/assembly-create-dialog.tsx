@@ -82,10 +82,12 @@ export function AssemblyCreateDialog({
   labelOf: (key: string) => string;
 }) {
   const [inputs, setInputs] = useState<string[]>([]);
-  const [operationType, setOperationType] = useState('');
-  const [zone, setZone] = useState('');
-  const [machineType, setMachineType] = useState('');
-  const [pressEquipment, setPressEquipment] = useState('');
+  // Начальное значение — UNKNOWN-сентинел словаря, а не пустая строка: именно он и означает
+  // «не выбрано» во всём остальном редакторе, и именно он рисуется плейсхолдером.
+  const [operationType, setOperationType] = useState(UNKNOWN_TYPE);
+  const [zone, setZone] = useState(UNKNOWN_ZONE);
+  const [machineType, setMachineType] = useState(UNKNOWN_MACHINE);
+  const [pressEquipment, setPressEquipment] = useState(UNKNOWN_PRESS);
   const [produces, setProduces] = useState<'process' | 'unit' | 'absorb'>('process');
   const [unitKey, setUnitKey] = useState('');
   const [unitKeyTouched, setUnitKeyTouched] = useState(false);
@@ -98,10 +100,10 @@ export function AssemblyCreateDialog({
   useEffect(() => {
     if (!prefill) return;
     setInputs(prefill.inputKeys);
-    setOperationType('');
-    setZone('');
-    setMachineType('');
-    setPressEquipment('');
+    setOperationType(UNKNOWN_TYPE);
+    setZone(UNKNOWN_ZONE);
+    setMachineType(UNKNOWN_MACHINE);
+    setPressEquipment(UNKNOWN_PRESS);
     setProduces(
       prefill.absorbInto
         ? 'absorb'
@@ -292,14 +294,21 @@ export function AssemblyCreateDialog({
             name='assemblyOperationType'
             value={operationType}
             onValueChange={setOperationType}
-            items={[{ value: '', label: '— что делают —' }, ...operationTypeOptionsFor(operationType)]}
+            // Плейсхолдер — это UNKNOWN-значение словаря, а НЕ пустая строка: Radix запрещает
+            // `Select.Item` с пустым value (пустое значение зарезервировано за «выбор снят») и
+            // роняет весь экран. Зона, машинка и ВТО несут такой пункт в своих словарях с самого
+            // начала; у типа операции его нет, поэтому он добавляется здесь — тем же способом.
+            items={[
+              { value: UNKNOWN_TYPE, label: '— what the step does —' },
+              ...operationTypeOptionsFor(operationType),
+            ]}
             fullWidth
           />
           <Select
             name='assemblyZone'
             value={zone}
             onValueChange={setZone}
-            items={[{ value: '', label: '— где на изделии —' }, ...zoneOptions.filter((o) => o.value !== UNKNOWN_ZONE)]}
+            items={zoneOptions}
             fullWidth
           />
           {needsMachine && (
