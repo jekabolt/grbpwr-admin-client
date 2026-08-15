@@ -1,7 +1,7 @@
 import type {
   GetProductionRunCutPlanResponse,
-  common_TechCardAttachmentKind,
   common_TechCardGarmentZone,
+  common_TechCardMachineType,
   common_TechCardOperationType,
   common_TechCardSeamClass,
   common_TechCardTopstitch,
@@ -17,7 +17,10 @@ import {
   common_TechCard,
   common_TechCardBomItem,
   common_TechCardColorwayUsage,
+  common_TechCardMachineProfile,
+  common_TechCardOperation,
   common_TechCardPiece,
+  common_TechCardPressProfile,
   common_TechCardReleaseMeta,
   common_TechCardSizePattern,
   googletype_Decimal,
@@ -124,12 +127,30 @@ const enumLabel = (v: string | undefined, prefix: string): string =>
 const lifecycleLabel = (v?: string) => enumLabel(v, 'COLORWAY_LIFECYCLE_STATUS_');
 const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 
-import { legacyOverlockThreadsText, legacyPressingText } from './equipment-options';
 import {
-  attachmentOptions,
+  isMachineStepType,
+  isPressStepType,
+  legacyOverlockThreadsText,
+  legacyPressingText,
+  machineProfileName,
+  machineTypeLabel,
+  pressEquipmentLabel,
+  pressProcessShort,
+  pressProfileName,
+  resolveMachineProfile,
+  resolvePressProfile,
+} from './equipment-options';
+import {
+  densityText,
+  effectiveMachineSettings,
+  effectivePressSettings,
+  machineProfileSummary,
   OPERATION_TYPE_LABELS,
+  operationHeading,
+  pressProfileSummary,
   seamClassOptions,
   zoneOptions,
+  type EffectiveSetting,
 } from './operation-options';
 
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
@@ -181,8 +202,28 @@ const optionLabel = <T extends string>(
 // The TOTAL label map, not the picker list: the picker offers only the types a step may be GIVEN,
 // while paper has to render every type that can arrive — including the nine legacy tokens frozen
 // into archived releases, which through the picker list would each have printed as «—».
-const operationTypeText = (v?: common_TechCardOperationType): string =>
-  (v && v !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ? OPERATION_TYPE_LABELS[v] : '') || '—';
+//
+// EXCEPT FOR `MACHINE`, whose label in that map is the picker's prompt («machine — sewn on…») and
+// belongs on a select, not on paper. Since 0306 every sewing step carries that one type, so the
+// column would also read the same word forty times over: the VERB is what a step does, and it comes
+// from the machine (operationHeading is the one place that lookup lives). The machine itself is the
+// next column along.
+//
+// AND THE THREE ВТО TYPES GO ON IN ENGLISH: their labels carry a Russian gloss for the technologist
+// («press (заутюжить / отпарить)»), which is right in a picker whose reader is the person who wrote
+// the card and wrong on a sheet that is read in a Polish sewing room. pressProcessShort is that same
+// label with the parenthetical cut off — the derived short form, not a second vocabulary.
+const operationTypeText = (o: {
+  operationType?: common_TechCardOperationType;
+  machineType?: common_TechCardMachineType;
+}): string => {
+  const v = o.operationType;
+  if (isMachineStepType(v)) {
+    return operationHeading({ operationType: v, machineType: o.machineType, pieceNames: [] });
+  }
+  if (isPressStepType(v)) return pressProcessShort(v) || '—';
+  return (v && v !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ? OPERATION_TYPE_LABELS[v] : '') || '—';
+};
 const zoneText = (v?: common_TechCardGarmentZone): string =>
   optionLabel(zoneOptions, v, 'TECH_CARD_GARMENT_ZONE_UNKNOWN');
 const seamClassText = (v?: common_TechCardSeamClass): string =>
@@ -194,26 +235,25 @@ const allowanceText = (d?: googletype_Decimal): string => {
   const v = dec(d);
   return v ? `${v} mm` : '';
 };
-const densityText = (d?: googletype_Decimal): string => {
-  const v = dec(d);
-  return v ? `${v} st/cm` : '';
-};
+// «TOPSTITCH … FROM EDGE», never a bare «width»: the step carries a second width — stitch_width_mm,
+// the zigzag amplitude / overlock bite — and the two are different facts (§10). Confusing them is
+// paid for in a whole batch, so each says on paper which one it is.
 const topstitchText = (t?: common_TechCardTopstitch): string => {
   if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
   const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
   if (t.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return `topstitch ${rows}edge`;
   const w = dec(t.widthMm);
-  return `topstitch ${rows}${w ? `${w} mm` : ''}`.trim();
+  return `topstitch ${rows}${w ? `${w} mm from edge` : ''}`.trim();
 };
-const attachmentText = (
-  kind?: common_TechCardAttachmentKind,
-  size?: googletype_Decimal,
-): string => {
-  const label = optionLabel(attachmentOptions, kind, 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN');
-  if (!label) return '';
-  const s = dec(size);
-  return s ? `${label} ${s} mm` : label;
-};
+// A setting and the one bit that says where it came from: the marker means «the step's own value»,
+// and anything unmarked is inherited off the card's equipment park and printed all the same — see
+// stepEquipment.
+//
+// AN ASTERISK, NOT THE BULLET the plan drew: the settings of a step are joined with « · », and on
+// paper at 7pt a bullet standing after a space is the separator, letter for letter. Printed, «4
+// threads • · Nm 90» read as three settings, one of them blank. The marker hangs on the value with
+// no space in front of it for the same reason — it belongs to the number, not between numbers.
+const settingText = (s: EffectiveSetting<string>): string => (s.overridden ? `${s.text}*` : s.text);
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
 
 // Lowercase extension of a pattern sheet: filename first, url path as the legacy fallback —
@@ -725,6 +765,114 @@ export function TechPackDocument({
 
   // Стандарт припуска карты — печатается в каждой строке, у которой своего значения нет.
   const cardAllowance = dec(tc.requiredSeamAllowanceMm);
+
+  // ── THE EQUIPMENT PARK, AND WHAT EACH STEP ACTUALLY RUNS AT (0306) ───────────────────────────
+  //
+  // ЭФФЕКТИВНЫЕ ЗНАЧЕНИЯ СЧИТАЮТСЯ ЗДЕСЬ, НА КЛИЕНТЕ, и ждать их с провода бессмысленно: сервер
+  // принципиально НЕ материализует унаследованное (NULL в колонке = «спроси профиль», и он остаётся
+  // NULL, даже когда технолог набрал бы то же число — §3). Печать строки как она хранится показала
+  // бы корректно унаследованную настройку пустой на той самой бумаге, по которой машинку и
+  // настраивают. Лестница пройдена теми же резолверами, что и в редакторе
+  // (resolveMachineProfile / resolvePressProfile), поэтому экран и лист не могут разойтись в том,
+  // ОТКУДА взялось число.
+  const parkMachines = tc.construction?.equipmentDefaults?.machines ?? [];
+  const parkPresses = tc.construction?.equipmentDefaults?.presses ?? [];
+  const cardDensity = dec(tc.construction?.defaultStitchesPerCm);
+  // Профили приезжают с провода с Decimal-сообщениями, а один композитор настроек на экран и на
+  // бумагу принимает строки — decimalToInput и есть эта граница.
+  const machineSettingsOf = (m: common_TechCardMachineProfile) => ({
+    threadCount: m.threadCount,
+    needleType: m.needleType,
+    needleSizeNm: m.needleSizeNm,
+    bedType: m.bedType,
+    automation: m.automation,
+    threadTension: m.threadTension,
+    threadTensionNote: m.threadTensionNote,
+    attachmentKind: m.attachmentKind,
+    stitchesPerCm: dec(m.stitchesPerCm),
+    stitchWidthMm: dec(m.stitchWidthMm),
+  });
+  const pressSettingsOf = (p: common_TechCardPressProfile) => ({
+    pressTemperatureC: p.pressTemperatureC,
+    pressDwellSec: p.pressDwellSec,
+    pressPressureNCm2: dec(p.pressPressureNCm2),
+    pressSteam: p.pressSteam,
+    pressCloth: p.pressCloth,
+  });
+
+  // Одна строка операции: на чём она идёт, с какими настройками и что из них — её собственное.
+  // Плотность вынимается отдельно: она печатается в колонке шва (там же, где припуск и класс),
+  // потому что она есть у шага ЛЮБОГО типа, а не только у машинного.
+  const stepEquipment = (o: common_TechCardOperation) => {
+    const machineStep = isMachineStepType(o.operationType);
+    const pressStep = isPressStepType(o.operationType);
+    const machineProfile = machineStep
+      ? resolveMachineProfile(parkMachines, o.machineType, o.machineProfileKey)
+      : undefined;
+    const pressProfile = pressStep
+      ? resolvePressProfile(parkPresses, o.pressEquipment, o.pressProfileKey, o.operationType)
+      : undefined;
+    const stepMachine = {
+      threadCount: o.threadCount,
+      needleType: o.needleType,
+      needleSizeNm: o.needleSizeNm,
+      threadTension: o.threadTension,
+      threadTensionNote: o.threadTensionNote,
+      attachmentKind: o.attachmentKind,
+      attachmentSizeMm: dec(o.attachmentSizeMm),
+      stitchesPerCm: dec(o.stitchesPerCm),
+      stitchWidthMm: dec(o.stitchWidthMm),
+    };
+    // ВТО-шаг не шьют, поэтому карточная плотность на него НЕ распространяется: «4 ст/см» под
+    // строкой «разутюжить» — число, которому на этом шаге нечего описывать. Своё значение шага (или
+    // машинного профиля, если он почему-то есть) печатается как есть.
+    const machine = effectiveMachineSettings(
+      stepMachine,
+      machineProfile ? machineSettingsOf(machineProfile) : undefined,
+      pressStep ? undefined : cardDensity,
+    );
+    const density = machine.find((s) => s.field === 'density');
+    const settings = pressStep
+      ? [
+          ...effectivePressSettings(
+            {
+              pressTemperatureC: o.pressTemperatureC,
+              pressDwellSec: o.pressDwellSec,
+              pressPressureNCm2: dec(o.pressPressureNCm2),
+              pressSteam: o.pressSteam,
+              pressCloth: o.pressCloth,
+            },
+            pressProfile ? pressSettingsOf(pressProfile) : undefined,
+          ),
+          // Лапка/приспособление живёт на шаге любого типа (сервер её у ВТО не отбирает), а у
+          // press-профиля такого поля нет — поэтому она добирается со швейной стороны, чтобы не
+          // пропасть с бумаги молча.
+          ...machine.filter((s) => s.field === 'attachment'),
+        ]
+      : machine.filter((s) => s.field !== 'density');
+    // ИМЯ МАШИНКИ — человеческое, если профиль назван («оверлок у окна»), иначе имя самой машинки
+    // из словаря. Ключ не печатается никогда: ULID цеху ничего не говорит.
+    const head = machineStep
+      ? machineProfile
+        ? machineProfileName(machineProfile)
+        : machineTypeLabel(o.machineType)
+      : pressStep
+        ? pressProfile
+          ? pressProfileName(pressProfile)
+          : pressEquipmentLabel(o.pressEquipment)
+        : '';
+    return {
+      head,
+      settings,
+      density,
+      overridden: settings.some((s) => s.overridden) || !!density?.overridden,
+    };
+  };
+  // Не мемоизируется намеренно: массив пересобирается на каждый рендер и в самом документе, так что
+  // useMemo по нему пересчитывался бы всё равно, лишь обещая стабильность, которой нет.
+  const opEquipment = (tc.operations ?? []).map(stepEquipment);
+  // Маркер без легенды — шум: точка рядом с числом обязана где-то на листе объясниться.
+  const anyOverride = opEquipment.some((e) => e.overridden);
 
   // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
   // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
@@ -1946,11 +2094,13 @@ export function TechPackDocument({
             <div className='mb-3 grid grid-cols-2 gap-x-8'>
               <div>
                 <KV k='default seam class' v={seamClassText(tc.construction.defaultSeamClass)} />
-                <KV k='default density' v={densityText(tc.construction.defaultStitchesPerCm)} />
+                <KV k='default density' v={densityText(cardDensity)} />
                 {/* RETIRED WITH THE EQUIPMENT PARK (0306) AND STILL PRINTED FOR ARCHIVES: a frozen
                     release is protojson written while these two fields existed, and this document
-                    prints frozen releases as well as live cards. A live card has neither, so both
-                    rows are simply blank there. The park's own table replaces them — TC5. */}
+                    prints frozen releases as well as live cards (print-page hands it the snapshot).
+                    The park table below is what a LIVE card says instead — these two rows are blank
+                    there and must not be deleted, or an archived release would silently lose two
+                    lines somebody signed. */}
                 <KV k='overlock' v={legacyOverlockThreadsText(tc.construction)} />
               </div>
               <div>
@@ -1960,12 +2110,73 @@ export function TechPackDocument({
               </div>
             </div>
           )}
+          {/* THE CARD'S EQUIPMENT PARK — «this style is sewn on THESE machines, pressed in THESE
+              modes». It replaces the one line of `pressing` prose the park retired, and it is not a
+              decoration: every blank setting in the steps below is inherited from exactly one of
+              these rows, so without them the sheet quotes numbers with no stated source. */}
+          {(has(parkMachines) || has(parkPresses)) && (
+            <table className='mb-3 w-full border-collapse text-micro'>
+              <thead>
+                <tr>
+                  <th className={`${TH} w-24`}>kind</th>
+                  <th className={`${TH} w-1/3`}>profile</th>
+                  <th className={TH}>settings</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parkMachines.map((m, i) => (
+                  <tr key={`machine-${i}`} className='break-inside-avoid'>
+                    <td className={TD}>machine</td>
+                    <td className={TD}>
+                      <div className='font-medium'>{machineProfileName(m)}</div>
+                      {/* Только у НАЗВАННОГО профиля: без имени жирная строка выше и есть имя
+                          машинки, и вторая такая же прочиталась бы как другая машинка. */}
+                      {m.label?.trim() && (
+                        <div className='text-labelColor'>{machineTypeLabel(m.machineType) || '—'}</div>
+                      )}
+                    </td>
+                    <td className={TD}>
+                      <div>{machineProfileSummary(machineSettingsOf(m)) || '—'}</div>
+                      {m.note?.trim() && <div className='italic text-labelColor'>{m.note}</div>}
+                    </td>
+                  </tr>
+                ))}
+                {parkPresses.map((p, i) => (
+                  <tr key={`press-${i}`} className='break-inside-avoid'>
+                    <td className={TD}>press</td>
+                    <td className={TD}>
+                      <div className='font-medium'>{pressProfileName(p)}</div>
+                      {/* Для какого процесса режим написан: «press open» и «fusing» на одном утюге —
+                          разные режимы, и профиль без этой пометки читался бы как любой из них.
+                          УНИВЕРСАЛЬНЫЙ профиль процесс не печатает: его «любой ВТО-шаг» — это
+                          отсутствие ограничения, а не ещё одна настройка. */}
+                      <div className='text-labelColor'>
+                        {[
+                          p.label?.trim() ? pressEquipmentLabel(p.pressEquipment) : '',
+                          p.operationType && p.operationType !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN'
+                            ? pressProcessShort(p.operationType)
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    </td>
+                    <td className={TD}>
+                      <div>{pressProfileSummary(pressSettingsOf(p)) || '—'}</div>
+                      {p.note?.trim() && <div className='italic text-labelColor'>{p.note}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
           {has(tc.operations) && (
             <table className='w-full border-collapse text-micro'>
               <thead>
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
                   <th className={TH}>operation</th>
+                  <th className={TH}>machine / mode</th>
                   <th className={TH}>zone</th>
                   <th className={TH}>pieces</th>
                   <th className={TH}>seam</th>
@@ -1982,7 +2193,7 @@ export function TechPackDocument({
                         перечисляли узлы одинаково. */}
                     <tr className='break-inside-avoid'>
                       <td
-                        colSpan={7}
+                        colSpan={8}
                         className='border border-black bg-neutral-100 px-1.5 py-1 text-control font-bold uppercase tracking-wide'
                       >
                         {g.label}
@@ -1994,10 +2205,15 @@ export function TechPackDocument({
                       // the same string printed twice — once as the step's thread, once in its
                       // material list. There is one answer now, and it is the material list.
                       const materials = resolveOpMaterials(o);
+                      // ПЛОТНОСТЬ — ЭФФЕКТИВНАЯ И ПАРОЙ: «4 st/cm (2.5 mm)». Раньше печаталось
+                      // только собственное значение шага, то есть корректно унаследованная от
+                      // машинки или карточки плотность уходила в цех пустой клеткой — ровно тем же,
+                      // чем выглядит «не задано». Лапка переехала в колонку машинки: это настройка
+                      // машины, а не шва.
+                      const equip = opEquipment[i];
                       const detail = [
-                        dec(o.stitchesPerCm) && `${dec(o.stitchesPerCm)} st/cm`,
+                        equip?.density ? settingText(equip.density) : '',
                         topstitchText(o.topstitch),
-                        attachmentText(o.attachmentKind, o.attachmentSizeMm),
                       ]
                         .filter(Boolean)
                         .join(' · ');
@@ -2019,8 +2235,22 @@ export function TechPackDocument({
                             {o.operationNumber || (i + 1) * 10}
                           </td>
                           <td className={TD}>
-                            <div>{operationTypeText(o.operationType)}</div>
+                            <div>{operationTypeText(o)}</div>
                             {o.note && <div className='italic text-labelColor'>{o.note}</div>}
+                          </td>
+                          {/* НА ЧЁМ И В КАКОМ РЕЖИМЕ. Со стороны машинки — короткое имя машинки
+                              (человеческое, если профиль назван) и её эффективные настройки; со
+                              стороны ВТО — режим числами, которые оператор выставляет на прессе.
+                              До 0306 этой колонки не было вовсе: тип шага сам назывался машинкой,
+                              и настройки не печатались нигде. */}
+                          <td className={TD}>
+                            {equip?.head ? <div>{equip.head}</div> : null}
+                            {equip && equip.settings.length > 0 ? (
+                              <div className='text-labelColor'>
+                                {equip.settings.map(settingText).join(' · ')}
+                              </div>
+                            ) : null}
+                            {!equip?.head && !equip?.settings.length ? '—' : null}
                           </td>
                           <td className={TD}>{zoneText(o.zone) || '—'}</td>
                           <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
@@ -2056,6 +2286,14 @@ export function TechPackDocument({
                 ))}
               </tbody>
             </table>
+          )}
+          {/* ЛЕГЕНДА МАРКЕРА. Точка без объяснения — шум, который цех прочитает как опечатку.
+              Печатается только когда на листе есть хотя бы один переопределённый параметр. */}
+          {has(tc.operations) && anyOverride && (
+            <p className='mt-1 text-nano text-labelColor'>
+              * = set on the step itself; everything else is the card default or the machine /
+              pressing profile above.
+            </p>
           )}
         </Sheet>
       )}

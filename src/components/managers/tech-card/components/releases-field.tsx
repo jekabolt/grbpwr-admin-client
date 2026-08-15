@@ -3,7 +3,9 @@ import { adminService } from 'api/api';
 import {
   common_TechCardBomItem,
   common_TechCardConstruction,
+  common_TechCardMachineProfile,
   common_TechCardOperation,
+  common_TechCardPressProfile,
   common_TechCardReleaseMeta,
 } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
@@ -18,8 +20,25 @@ import { CalloutBox } from 'ui/components/callout-box';
 import { DataTable, EmptyCell } from 'ui/components/data-table';
 import { GroupLabel } from 'ui/components/group-label';
 import { Row, RowTotal } from 'ui/components/row';
-import { legacyOverlockThreadsText, legacyPressingText } from './equipment-options';
-import { operationHeading } from './operation-options';
+import {
+  isMachineStepType,
+  isPressStepType,
+  legacyOverlockThreadsText,
+  legacyPressingText,
+  machineProfileName,
+  machineTypeLabel,
+  pressEquipmentLabel,
+  pressProcessShort,
+  pressProfileName,
+} from './equipment-options';
+import {
+  densityText,
+  machineProfileSummary,
+  OPERATION_TYPE_LABELS,
+  operationHeading,
+  pressProfileSummary,
+  seamClassOptions,
+} from './operation-options';
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
@@ -95,12 +114,22 @@ function SnapshotBom({ items }: { items: common_TechCardBomItem[] }) {
   );
 }
 
+// A SNAPSHOT IS RENDERED THROUGH DICTIONARIES, NEVER RAW. The seam class used to print as
+// `TECH_CARD_SEAM_CLASS_SS_PLAIN` and the density as a bare number — the wire tokens, straight out
+// of the blob. The labels are the same ones the live editor and the printed sheet use, and an
+// unrecognised token (a class that left the contract) falls back to the token itself rather than to
+// a blank row: a frozen release must never lose a line somebody signed.
+const seamClassLabel = (v?: string) =>
+  !v || v === 'TECH_CARD_SEAM_CLASS_UNKNOWN'
+    ? ''
+    : (seamClassOptions.find((o) => o.value === v)?.label ?? v);
+
 function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
   if (!c) return null;
   const rows = (
     [
-      ['default seam class', c.defaultSeamClass],
-      ['default stitch density', c.defaultStitchesPerCm?.value],
+      ['default seam class', seamClassLabel(c.defaultSeamClass)],
+      ['default stitch density', densityText(decimalToInput(c.defaultStitchesPerCm))],
       // A FROZEN RELEASE IS READ IN THE WORDS IT WAS SIGNED IN. `overlock_thread_count` and
       // `pressing` left the contract with the equipment park (0306), but a release snapshot is
       // immutable protojson that still holds them — reading it through the current generated type
@@ -123,40 +152,146 @@ function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
   );
 }
 
+// Decimals arrive from the snapshot as messages, while the one summary composer (shared with the
+// card's own park tiles and with the printed sheet) speaks the form's strings — decimalToInput is
+// that boundary and the only difference between the two callers.
+const machineSummaryOf = (m: common_TechCardMachineProfile) =>
+  machineProfileSummary({
+    threadCount: m.threadCount,
+    needleType: m.needleType,
+    needleSizeNm: m.needleSizeNm,
+    bedType: m.bedType,
+    automation: m.automation,
+    threadTension: m.threadTension,
+    threadTensionNote: m.threadTensionNote,
+    attachmentKind: m.attachmentKind,
+    stitchesPerCm: decimalToInput(m.stitchesPerCm),
+    stitchWidthMm: decimalToInput(m.stitchWidthMm),
+  });
+
+const pressSummaryOf = (p: common_TechCardPressProfile) =>
+  pressProfileSummary({
+    pressTemperatureC: p.pressTemperatureC,
+    pressDwellSec: p.pressDwellSec,
+    pressPressureNCm2: decimalToInput(p.pressPressureNCm2),
+    pressSteam: p.pressSteam,
+    pressCloth: p.pressCloth,
+  });
+
+// THE PARK THE RELEASE WAS SIGNED WITH — and it is not decoration on this pane either: since 0306 a
+// step stores only what it OVERRIDES, so a frozen step reading «4 threads» nowhere is a step whose
+// four threads are in one of these rows. A release frozen before the park simply carries none and
+// the block does not render.
+function SnapshotEquipment({ c }: { c?: common_TechCardConstruction }) {
+  const machines = c?.equipmentDefaults?.machines ?? [];
+  const presses = c?.equipmentDefaults?.presses ?? [];
+  if (machines.length === 0 && presses.length === 0) return null;
+  return (
+    <>
+      <GroupLabel>equipment park (frozen) · {machines.length + presses.length}</GroupLabel>
+      {machines.map((m, i) => (
+        <Row
+          key={`machine-${i}`}
+          label={
+            <Text size='micro' component='span'>
+              {machineProfileName(m)}
+              <Text size='nano' variant='label' component='span'>
+                {' — '}
+                {machineSummaryOf(m) || 'no settings'}
+              </Text>
+            </Text>
+          }
+          value={
+            <Text size='micro' variant='label' component='span'>
+              {machineTypeLabel(m.machineType) || 'machine'}
+            </Text>
+          }
+        />
+      ))}
+      {presses.map((p, i) => (
+        <Row
+          key={`press-${i}`}
+          label={
+            <Text size='micro' component='span'>
+              {pressProfileName(p)}
+              <Text size='nano' variant='label' component='span'>
+                {' — '}
+                {pressSummaryOf(p) || 'no settings'}
+              </Text>
+            </Text>
+          }
+          value={
+            <Text size='micro' variant='label' component='span'>
+              {[pressEquipmentLabel(p.pressEquipment), pressProcessShort(p.operationType)]
+                .filter(Boolean)
+                .join(' · ') || 'press'}
+            </Text>
+          }
+        />
+      ))}
+    </>
+  );
+}
+
 function SnapshotOperations({ ops }: { ops: common_TechCardOperation[] }) {
   if (ops.length === 0) return null;
   return (
     <>
       <GroupLabel>operations (frozen) · {ops.length}</GroupLabel>
-      {ops.map((o, i) => (
-        <Row
-          key={i}
-          label={
-            <Text size='micro' component='span'>
-              {o.operationNumber != null ? `#${o.operationNumber} ` : ''}
-              {/* Composed, exactly as in the live editor — a frozen release must read the same way
-                  the card did, and there is no stored step title to fall back on any more. */}
-              {operationHeading({
-                operationType: o.operationType,
-                // A snapshot written before 0306 carries a legacy type that names its own machine
-                // and no machine_type at all; one written after carries MACHINE plus the machine.
-                // operationHeading reads both, so a frozen release keeps the verb it was signed with.
-                machineType: o.machineType,
-                zone: o.zone,
-                pieceNames: [],
-                note: o.note,
-              })}
-            </Text>
-          }
-          value={
-            o.smv?.value ? (
-              <Text size='micro' variant='label' component='span'>
-                {`${o.smv.value} min`}
+      {ops.map((o, i) => {
+        // WHAT THE STEP IS, IN THE VOCABULARY IT WAS WRITTEN IN. The heading beside it is a verb
+        // phrase; this line says what the step ran on. A step frozen SINCE 0306 says it with the
+        // second axis (the machine / the press and its process); one frozen BEFORE says it with the
+        // type itself, and that token renders through OPERATION_TYPE_LABELS — the total map, which
+        // keeps its nine deprecated members forever precisely because a snapshot is immutable
+        // protojson holding those very names. Through a picker-sized list every step of every
+        // pre-0306 release would have read as nothing at all.
+        const typeLabel =
+          o.operationType && o.operationType !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN'
+            ? OPERATION_TYPE_LABELS[o.operationType]
+            : '';
+        const spec = isMachineStepType(o.operationType)
+          ? machineTypeLabel(o.machineType)
+          : isPressStepType(o.operationType)
+            ? [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
+            : typeLabel;
+        return (
+          <Row
+            key={i}
+            label={
+              <Text size='micro' component='span'>
+                {o.operationNumber != null ? `#${o.operationNumber} ` : ''}
+                {/* Composed, exactly as in the live editor — a frozen release must read the same way
+                    the card did, and there is no stored step title to fall back on any more. */}
+                {operationHeading({
+                  operationType: o.operationType,
+                  // A snapshot written before 0306 carries a legacy type that names its own machine
+                  // and no machine_type at all; one written after carries MACHINE plus the machine.
+                  // operationHeading reads both, so a frozen release keeps the verb it was signed
+                  // with.
+                  machineType: o.machineType,
+                  zone: o.zone,
+                  pieceNames: [],
+                  note: o.note,
+                })}
+                {spec && (
+                  <Text size='nano' variant='label' component='span'>
+                    {' — '}
+                    {spec}
+                  </Text>
+                )}
               </Text>
-            ) : undefined
-          }
-        />
-      ))}
+            }
+            value={
+              o.smv?.value ? (
+                <Text size='micro' variant='label' component='span'>
+                  {`${o.smv.value} min`}
+                </Text>
+              ) : undefined
+            }
+          />
+        );
+      })}
     </>
   );
 }
@@ -234,6 +369,7 @@ function ReleaseSnapshot({
 
           <SnapshotBom items={snap.bomItems ?? []} />
           <SnapshotConstruction c={snap.construction} />
+          <SnapshotEquipment c={snap.construction} />
           <SnapshotOperations ops={snap.operations ?? []} />
 
           <Text size='micro' variant='label' className='mt-2'>

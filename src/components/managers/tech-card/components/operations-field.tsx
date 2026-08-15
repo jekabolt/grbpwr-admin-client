@@ -51,6 +51,7 @@ import {
   operationHeading,
   operationTypeOptionsFor,
   seamClassOptions,
+  stitchLengthMm,
   topstitchModeOptions,
   zoneOptions,
 } from './operation-options';
@@ -793,8 +794,9 @@ function StitchLengthMirror({
 }) {
   const { setValue } = useFormContext<TechCardFormData>();
   const [draft, setDraft] = useState<string | null>(null);
-  const n = parseDecimalNumber(density);
-  const derived = Number.isFinite(n) && n > 0 ? String(Math.round((10 / n) * 10) / 10) : '';
+  // The division lives in operation-options (stitchLengthMm) because the printed sheet shows the
+  // same pair — two copies of `10 / density` are two roundings of one number.
+  const derived = stitchLengthMm(density);
   const onChange = (raw: string) => {
     const text = sanitizeDecimal(raw, 1);
     setDraft(text);
@@ -1120,7 +1122,7 @@ function OperationEditor({
     : cardStitchDensity.trim()
       ? { value: cardStitchDensity.trim(), source: 'card' }
       : { value: '', source: '' };
-  const inheritedDensityNum = parseDecimalNumber(inheritedDensity.value);
+  const inheritedDensityLengthMm = stitchLengthMm(inheritedDensity.value);
 
   const inherited = {
     seamAllowance: cardAllowanceMm.trim()
@@ -1132,13 +1134,9 @@ function OperationEditor({
       ? inheritedText(inheritedDensity.value, inheritedDensity.source)
       : NOT_SET,
     // The same inherited fact in the other unit. Computed, never stored — see StitchLengthMirror.
-    stitchLength:
-      Number.isFinite(inheritedDensityNum) && inheritedDensityNum > 0
-        ? inheritedText(
-            String(Math.round((10 / inheritedDensityNum) * 10) / 10),
-            inheritedDensity.source,
-          )
-        : NOT_SET,
+    stitchLength: inheritedDensityLengthMm
+      ? inheritedText(inheritedDensityLengthMm, inheritedDensity.source)
+      : NOT_SET,
     threadCount: fromMachine(machineProfile?.threadCount) || NOT_SET,
     needleType: fromMachine(needleTypeLabel(machineProfile?.needleType)) || NOT_SET,
     needleSizeNm: fromMachine(machineProfile?.needleSizeNm) || NOT_SET,

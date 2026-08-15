@@ -6,6 +6,7 @@ import {
   common_TechCardSeamClass,
   common_TechCardTopstitchMode,
 } from 'api/proto-http/admin';
+import { parseDecimalNumber } from 'utils/decimal';
 import {
   automationLevelLabel,
   bedTypeLabel,
@@ -253,24 +254,63 @@ export function operationHeading(args: {
   return firstNoteLine || composed || 'step';
 }
 
-// WHAT A PARK PROFILE IS SET TO, in one line — the tile's second line on CARD DEFAULTS and the
-// settings column of the printed tech pack. One composer for both, for the reason operationHeading
-// is one composer: a profile summarised differently on screen and on paper is two answers to «what
-// is this machine threaded with», and the paper one is the one nobody can check against the form.
+// THE STITCH LENGTH IS NOT STORED (§10). The card records DENSITY in stitches per cm and the length
+// in mm is `10 / density`, computed wherever it is shown and written into no field at all — a second
+// column would be a second truth, and the two would disagree the first time somebody edited one.
+// One implementation of that division, because it is shown in three places (the editor's mirror
+// input, its inherited placeholder, and the printed sheet) and three copies of a formula is how the
+// paper ends up rounding differently from the screen.
+export function stitchLengthMm(density?: string): string {
+  const n = parseDecimalNumber(density);
+  return Number.isFinite(n) && n > 0 ? String(Math.round((10 / n) * 10) / 10) : '';
+}
+
+// DENSITY AND LENGTH AS ONE READING — «4 st/cm (2.5 mm)». They are the same setting in the two units
+// the floor uses, and quoting only the density means the operator with a stitch-length dial converts
+// it in their head at the machine. The pair is printed everywhere the density is.
+export function densityText(density?: string): string {
+  const d = (density ?? '').trim();
+  if (!d) return '';
+  const mm = stitchLengthMm(d);
+  return mm ? `${d} st/cm (${mm} mm)` : `${d} st/cm`;
+}
+
+// WHAT A PARK PROFILE IS SET TO — the tile's second line on CARD DEFAULTS and the settings column of
+// the printed tech pack. One composer for both, for the reason operationHeading is one composer: a
+// profile summarised differently on screen and on paper is two answers to «what is this machine
+// threaded with», and the paper one is the one nobody can check against the form.
 //
 // IT LIVES HERE, NOT IN equipment-options, only because of the import direction: the foot comes from
 // ATTACHMENT_KIND_LABELS (this file) and everything else from the equipment vocabulary, and
 // operation-options is the half that is allowed to import the other. Reversing it would close a
 // cycle.
 //
+// IT YIELDS PARTS, and the one-line summary is the join of them. The printed sheet has to mark WHICH
+// of a step's settings the technologist chose and which came off the profile (§3: the server stores
+// NULL for «inherit» and never materialises the value, so paper is the only place the two can be
+// told apart) — and a marker cannot be hung on a sentence that has already been joined. Hence
+// (field, text) pairs here and `joinSummary` for the callers that only want the sentence.
+//
 // DECIMALS ARE STRINGS on the way in. The form holds them that way; a caller reading the WIRE
 // (a printed sheet over a release snapshot) passes them through decimalToInput first. Typed
 // structurally over exactly the fields read, so both shapes satisfy it — the same trick the ladder
 // resolvers use.
-const joinSummary = (parts: Array<string | false | undefined>): string =>
-  parts.filter(Boolean).join(' · ');
+export type MachineSettingField =
+  | 'threads'
+  | 'needle'
+  | 'bed'
+  | 'automation'
+  | 'tension'
+  | 'density'
+  | 'stitchWidth'
+  | 'attachment';
 
-export function machineProfileSummary(p: {
+export type PressSettingField = 'temperature' | 'dwell' | 'pressure' | 'steam' | 'cloth';
+
+export type SettingPart<F extends string> = { field: F; text: string };
+
+/** The machine settings a PROFILE carries — and, field for field, the ones a step may override. */
+export type MachineSettings = {
   threadCount?: number;
   needleType?: string;
   needleSizeNm?: number;
@@ -279,9 +319,27 @@ export function machineProfileSummary(p: {
   threadTension?: string;
   threadTensionNote?: string;
   attachmentKind?: string;
+  /** ONLY a step carries this: a profile names the foot, not the width of the tape in it. */
+  attachmentSizeMm?: string;
   stitchesPerCm?: string;
   stitchWidthMm?: string;
-}): string {
+};
+
+export type PressSettings = {
+  pressTemperatureC?: number;
+  pressDwellSec?: number;
+  pressPressureNCm2?: string;
+  pressSteam?: boolean;
+  pressCloth?: string;
+};
+
+const joinSummary = (parts: Array<string | false | undefined>): string =>
+  parts.filter(Boolean).join(' · ');
+
+const nonEmpty = <F extends string>(parts: Array<SettingPart<F>>): Array<SettingPart<F>> =>
+  parts.filter((p) => p.text !== '');
+
+export function machineProfileParts(p: MachineSettings): Array<SettingPart<MachineSettingField>> {
   // The point and the size are ONE fact about the needle («ballpoint Nm 90»), so they are joined by
   // a space and enter the list as a single item — separated by the dot they would read as two
   // independent settings, and a summary is scanned, not parsed.
@@ -301,35 +359,140 @@ export function machineProfileSummary(p: {
   const tensionLabel = threadTensionLabel(p.threadTension);
   const tensionNote = (p.threadTensionNote ?? '').trim();
   const tension = tensionLabel && tensionNote ? `${tensionLabel} — ${tensionNote}` : tensionLabel;
-  return joinSummary([
-    (p.threadCount ?? 0) > 0 && `${p.threadCount} threads`,
-    needle,
-    bedTypeLabel(p.bedType),
-    automationLevelLabel(p.automation),
-    tension,
-    (p.stitchesPerCm ?? '').trim() && `${(p.stitchesPerCm ?? '').trim()} st/cm`,
-    (p.stitchWidthMm ?? '').trim() && `width ${(p.stitchWidthMm ?? '').trim()} mm`,
+  // The foot and the size it is set to are one fact as well («binder 8 mm»); a size with no foot
+  // above it is refused by the server and can only reach here from a legacy row.
+  const foot = attachmentKindLabel(p.attachmentKind);
+  const footSize = (p.attachmentSizeMm ?? '').trim();
+  return nonEmpty<MachineSettingField>([
+    { field: 'threads', text: (p.threadCount ?? 0) > 0 ? `${p.threadCount} threads` : '' },
+    { field: 'needle', text: needle },
+    { field: 'bed', text: bedTypeLabel(p.bedType) },
+    { field: 'automation', text: automationLevelLabel(p.automation) },
+    { field: 'tension', text: tension },
+    { field: 'density', text: densityText(p.stitchesPerCm) },
+    // «STITCH WIDTH», SPELLED OUT, and never just «width»: the other width on a step is
+    // topstitch.width_mm, which is a distance from an edge, and a zigzag amplitude read as a
+    // topstitch inset (or the reverse) is sewn wrong and noticed after the batch.
+    {
+      field: 'stitchWidth',
+      text: (p.stitchWidthMm ?? '').trim() ? `stitch width ${(p.stitchWidthMm ?? '').trim()} mm` : '',
+    },
     // '' for UNKNOWN, the real words for NONE: «runs bare» is a настройка somebody chose, and the
     // summary of a profile that states it must not read the same as one that says nothing.
-    attachmentKindLabel(p.attachmentKind),
+    { field: 'attachment', text: foot && footSize ? `${foot} ${footSize} mm` : foot },
   ]);
 }
 
-export function pressProfileSummary(p: {
-  pressTemperatureC?: number;
-  pressDwellSec?: number;
-  pressPressureNCm2?: string;
-  pressSteam?: boolean;
-  pressCloth?: string;
-}): string {
-  return joinSummary([
-    (p.pressTemperatureC ?? 0) > 0 && `${p.pressTemperatureC} °C`,
-    (p.pressDwellSec ?? 0) > 0 && `${p.pressDwellSec} s`,
+export const machineProfileSummary = (p: MachineSettings): string =>
+  joinSummary(machineProfileParts(p).map((s) => s.text));
+
+export function pressProfileParts(p: PressSettings): Array<SettingPart<PressSettingField>> {
+  return nonEmpty<PressSettingField>([
+    { field: 'temperature', text: (p.pressTemperatureC ?? 0) > 0 ? `${p.pressTemperatureC} °C` : '' },
+    { field: 'dwell', text: (p.pressDwellSec ?? 0) > 0 ? `${p.pressDwellSec} s` : '' },
     // THE UNIT IS IN THE TEXT, always: press pressure is quoted in bar, in kg and in N/cm² by three
     // different people, and a bare number on a printed sheet gets read in whichever the reader uses.
-    (p.pressPressureNCm2 ?? '').trim() && `${(p.pressPressureNCm2 ?? '').trim()} N/cm²`,
+    // A column heading is not enough — the number is what gets copied onto a machine.
+    {
+      field: 'pressure',
+      text: (p.pressPressureNCm2 ?? '').trim() ? `${(p.pressPressureNCm2 ?? '').trim()} N/cm²` : '',
+    },
     // Tri-state: absent says nothing, `false` says «press it DRY» — an instruction, not a silence.
-    p.pressSteam === undefined ? '' : p.pressSteam ? 'steam' : 'dry',
-    pressClothLabel(p.pressCloth),
+    { field: 'steam', text: p.pressSteam === undefined ? '' : p.pressSteam ? 'steam' : 'dry' },
+    { field: 'cloth', text: pressClothLabel(p.pressCloth) },
   ]);
+}
+
+export const pressProfileSummary = (p: PressSettings): string =>
+  joinSummary(pressProfileParts(p).map((s) => s.text));
+
+// --- the ladder, applied (§3) --------------------------------------------------------------------
+//
+// WHAT THE FLOOR ACTUALLY HAS TO DO — the step's own value where it has one, the profile's where it
+// does not. The server deliberately never materialises the inherited half (a NULL column means «ask
+// the profile», and it stays NULL even when the technologist would have typed the same number), so
+// a printed sheet that quoted only the stored row would leave a correctly inherited setting blank on
+// the paper the machine is set up from. Resolving it is the CLIENT's job — the editor does it for
+// its placeholders, this does it for the sheet, and both walk the same rungs.
+//
+// PER FIELD, because that is how it is stored: a step may override the needle size and inherit the
+// point, and the two rungs are decided independently. `overridden` is the one extra bit paper needs
+// — «this number is the step's own», printed as a marker beside it — and it is never a reason to
+// hide the inherited ones.
+export type EffectiveSetting<F extends string> = SettingPart<F> & { overridden: boolean };
+
+// «Is this enum answered?» — every dictionary of this feature names its zero member `*_UNKNOWN`, and
+// that token is the ONE spelling of «inherit». NONE (no foot, no press cloth) is an ANSWER and must
+// resolve as an override, which is exactly why the two tokens exist apart.
+const enumSet = (v?: string): boolean => {
+  const t = (v ?? '').trim();
+  return t !== '' && !t.endsWith('_UNKNOWN');
+};
+const textSet = (v?: string): boolean => (v ?? '').trim() !== '';
+
+export function effectiveMachineSettings(
+  step: MachineSettings,
+  profile?: MachineSettings,
+  /** The card's own default density — the rung below the profile, and the last one (§3.4). */
+  cardDensity?: string,
+): Array<EffectiveSetting<MachineSettingField>> {
+  const ownTension = enumSet(step.threadTension);
+  const merged: MachineSettings = {
+    threadCount: (step.threadCount ?? 0) > 0 ? step.threadCount : profile?.threadCount,
+    needleType: enumSet(step.needleType) ? step.needleType : profile?.needleType,
+    needleSizeNm: (step.needleSizeNm ?? 0) > 0 ? step.needleSizeNm : profile?.needleSizeNm,
+    // Bed and automation are machine IDENTITY: a step has no field for either (a different bed is a
+    // different machine), so they can only ever be the profile's and are never marked.
+    bedType: profile?.bedType,
+    automation: profile?.automation,
+    // The note travels with whichever scale won — a profile's note pasted under a step's own tension
+    // would qualify a setting it was not written about.
+    threadTension: ownTension ? step.threadTension : profile?.threadTension,
+    threadTensionNote: ownTension ? step.threadTensionNote : profile?.threadTensionNote,
+    stitchesPerCm: textSet(step.stitchesPerCm)
+      ? step.stitchesPerCm
+      : textSet(profile?.stitchesPerCm)
+        ? profile?.stitchesPerCm
+        : cardDensity,
+    stitchWidthMm: textSet(step.stitchWidthMm) ? step.stitchWidthMm : profile?.stitchWidthMm,
+    attachmentKind: enumSet(step.attachmentKind) ? step.attachmentKind : profile?.attachmentKind,
+    // The size measures the step's own tool and has no rung above it.
+    attachmentSizeMm: step.attachmentSizeMm,
+  };
+  const own = new Set<MachineSettingField>();
+  if ((step.threadCount ?? 0) > 0) own.add('threads');
+  // ONE MARKER FOR THE PAIR: point and size are printed as one item, so the step answering either
+  // half of it makes the item the step's own — silently dropping the marker because the other half
+  // was inherited would be the worse of the two roundings.
+  if (enumSet(step.needleType) || (step.needleSizeNm ?? 0) > 0) own.add('needle');
+  if (ownTension) own.add('tension');
+  if (textSet(step.stitchesPerCm)) own.add('density');
+  if (textSet(step.stitchWidthMm)) own.add('stitchWidth');
+  if (enumSet(step.attachmentKind)) own.add('attachment');
+  return machineProfileParts(merged).map((p) => ({ ...p, overridden: own.has(p.field) }));
+}
+
+export function effectivePressSettings(
+  step: PressSettings,
+  profile?: PressSettings,
+): Array<EffectiveSetting<PressSettingField>> {
+  const merged: PressSettings = {
+    pressTemperatureC:
+      (step.pressTemperatureC ?? 0) > 0 ? step.pressTemperatureC : profile?.pressTemperatureC,
+    pressDwellSec: (step.pressDwellSec ?? 0) > 0 ? step.pressDwellSec : profile?.pressDwellSec,
+    pressPressureNCm2: textSet(step.pressPressureNCm2)
+      ? step.pressPressureNCm2
+      : profile?.pressPressureNCm2,
+    // `false` IS AN ANSWER («press it dry»), so the rung is decided on presence, not on truthiness —
+    // `||` here would silently let a profile's «with steam» overrule a step that said dry.
+    pressSteam: step.pressSteam !== undefined ? step.pressSteam : profile?.pressSteam,
+    pressCloth: enumSet(step.pressCloth) ? step.pressCloth : profile?.pressCloth,
+  };
+  const own = new Set<PressSettingField>();
+  if ((step.pressTemperatureC ?? 0) > 0) own.add('temperature');
+  if ((step.pressDwellSec ?? 0) > 0) own.add('dwell');
+  if (textSet(step.pressPressureNCm2)) own.add('pressure');
+  if (step.pressSteam !== undefined) own.add('steam');
+  if (enumSet(step.pressCloth)) own.add('cloth');
+  return pressProfileParts(merged).map((p) => ({ ...p, overridden: own.has(p.field) }));
 }
