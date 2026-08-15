@@ -3407,7 +3407,12 @@ export function OperationsField({
               + операция
             </Button>
             {pieces.length > 0 && (
-              <Chip dashed onClick={() => setMode('schematic')} title='разложить детали и собрать узлы жестами'>
+              <Chip
+                nonForm
+                dashed
+                onClick={() => setMode('schematic')}
+                title='разложить детали и собрать узлы жестами'
+              >
                 собрать на схеме
               </Chip>
             )}
@@ -3430,7 +3435,12 @@ export function OperationsField({
               flush
               action={
                 <div className='flex items-center gap-2'>
+                  {/* nonForm: переключатель ничего не меняет в данных, но обязан работать и на
+                      выпущенной карточке — иначе разрешённое Р9 ручное раскладывание недостижимо
+                      с карточки, сохранённой в режиме списка. Под `<fieldset disabled>` настоящая
+                      кнопка мертва, и своими пропами этого не исправить. */}
                   <Chip
+                    nonForm
                     dashed
                     onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
                     title='схема сборки или список шагов — оба редактируют одни данные'

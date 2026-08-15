@@ -1,5 +1,7 @@
 import { cva, VariantProps } from 'class-variance-authority';
 
+import { cn } from 'lib/utility';
+
 /**
  * Interactive counterpart of `Pill` — filters, toggles, removable selections.
  * `selected` fills with ink. Use `ChipRow` as the wrapper so nobody hand-rolls
@@ -37,6 +39,16 @@ interface Props extends VariantProps<typeof chipVariants> {
   title?: string;
   /** Set for toggle chips so screen readers announce the pressed state. */
   pressed?: boolean;
+  /**
+   * Render as a `span` with a button role instead of a real `<button>`.
+   *
+   * For chips that must keep working inside a `<fieldset disabled>` — a read-only view control
+   * (switch the view, reset a layout) on a frozen record. `disabled` is INHERITED by every form
+   * control under a disabled fieldset and `aria-disabled` does not undo it, so a plain chip there
+   * is dead however its own props read. Only for controls that change no data: anything that
+   * writes must stay a real button so the fieldset can stop it.
+   */
+  nonForm?: boolean;
   /** Anything else (draggable, onDragStart, onKeyDown, data-*, role, tabIndex…). */
   [k: string]: unknown;
 }
@@ -51,16 +63,36 @@ export function Chip({
   onRemove,
   disabled,
   pressed,
+  nonForm,
   ...props
 }: Props) {
   const interactive = !!onClick || !!onRemove;
-  const Component = interactive ? 'button' : 'span';
+  const asSpan = !interactive || nonForm;
+  const Component = asSpan ? 'span' : 'button';
+  const spanRole =
+    nonForm && interactive
+      ? {
+          role: 'button' as const,
+          tabIndex: disabled ? undefined : 0,
+          onClick: disabled ? undefined : onClick,
+          'aria-disabled': disabled || undefined,
+          onKeyDown: disabled
+            ? undefined
+            : (e: React.KeyboardEvent) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                onClick?.();
+              },
+          className: 'cursor-pointer',
+        }
+      : {};
   return (
     <Component
       {...props}
-      {...(interactive ? { type: 'button' as const, disabled, onClick } : {})}
+      {...spanRole}
+      {...(interactive && !nonForm ? { type: 'button' as const, disabled, onClick } : {})}
       aria-pressed={pressed}
-      className={chipVariants({ selected, tone, dashed, className })}
+      className={chipVariants({ selected, tone, dashed, className: cn(spanRole.className, className) })}
     >
       {children}
       {onRemove && (

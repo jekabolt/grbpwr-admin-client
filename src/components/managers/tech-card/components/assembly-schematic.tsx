@@ -52,6 +52,8 @@ const NODE_TOUCH = 'none' as const;
 
 type DragState = {
   key: string;
+  /** Указатель, начавший жест. Чужие события игнорируются: второй палец — не продолжение первого. */
+  pointerId: number;
   /** Где внутри ноды её взяли — чтобы нода не прыгала под курсор углом. */
   offX: number;
   offY: number;
@@ -183,8 +185,12 @@ export function AssemblySchematic({
       // недостаточно: драг, закончившийся не на кликабельном, оставил бы флаг взведённым и
       // проглотил следующий честный клик.
       justDragged.current = false;
+      // Жест уже идёт — второе касание его не перехватывает: иначе нода B поехала бы по
+      // координатам пальца, тащившего A, и могла бы открыть чужой диалог соединения.
+      if (dragRef.current) return;
       commitDrag({
         key,
+        pointerId: e.pointerId,
         offX: p.x - nodeX,
         offY: p.y - nodeY,
         x: nodeX,
@@ -211,18 +217,24 @@ export function AssemblySchematic({
    * Space), а наследуемая задизейбленность до div'а не достаёт. Запреты Р9 продолжает решать
    * `frozen`, а не fieldset — явно, как и требовалось.
    */
-  const activate = (fn?: () => void) => ({
-    role: 'button' as const,
-    tabIndex: fn ? 0 : undefined,
-    onClick: fn,
-    onKeyDown: fn
-      ? (e: React.KeyboardEvent) => {
-          if (e.key !== 'Enter' && e.key !== ' ') return;
-          e.preventDefault();
-          fn();
+  const activate = (fn?: () => void) =>
+    fn
+      ? {
+          role: 'button' as const,
+          tabIndex: 0,
+          onClick: fn,
+          // Клавиатура зовёт действие НАПРЯМУЮ, минуя защиту от клик-эха: эхо бывает только у
+          // указателя, и общий сторож съедал бы первый Enter после отменённого жеста.
+          onKeyDown: (e: React.KeyboardEvent) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            justDragged.current = false;
+            fn();
+          },
         }
-      : undefined,
-  });
+      : // Без действия нет и роли: иначе скринридер объявляет кнопкой то, что ничего не делает и
+        // даже не фокусируется.
+        {};
 
   const clickGuard = (fn: () => void) => () => {
     if (justDragged.current) {
@@ -238,7 +250,14 @@ export function AssemblySchematic({
     if (!dragActive) return;
     const onPointerMove = (e: PointerEvent) => {
       const d = dragRef.current;
-      if (!d) return;
+      if (!d || e.pointerId !== d.pointerId) return;
+      // Кнопку отпустили там, где о нас не сообщили (потеря фокуса окна, дроп за его пределами) —
+      // о жесте узнаём по первому же движению без нажатых кнопок и сворачиваем его.
+      if (e.buttons === 0) {
+        justDragged.current = d.started;
+        commitDrag(null);
+        return;
+      }
       const p = toLayoutPoint(e);
       if (!p) return;
       lastClient.current = { x: e.clientX, y: e.clientY };
@@ -246,8 +265,9 @@ export function AssemblySchematic({
       if (!d.started && !far) return;
       commitDrag({ ...d, started: true, x: p.x - d.offX, y: p.y - d.offY, ptrX: p.x, ptrY: p.y });
     };
-    const onPointerUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
       const d = dragRef.current;
+      if (d && e.pointerId !== d.pointerId) return;
       commitDrag(null);
       if (!d?.started) return;
       justDragged.current = true;
@@ -274,19 +294,32 @@ export function AssemblySchematic({
         });
       }
     };
-    const onPointerCancel = () => {
+    const onPointerCancel = (e: PointerEvent) => {
+      if (dragRef.current && e.pointerId !== dragRef.current.pointerId) return;
       // Система забрала указатель — намерение подтверждено не было. Но клик-эхо погасить надо:
       // отпускание над нодой иначе сработает выбором, которого никто не просил.
       justDragged.current = true;
       commitDrag(null);
     };
+    // Окно потеряло фокус или вкладку спрятали — поток событий указателя обрывается молча, и
+    // без этого жест висел бы с работающим rAF до Escape или следующего касания.
+    const onLost = () => {
+      const d = dragRef.current;
+      if (!d) return;
+      justDragged.current = d.started;
+      commitDrag(null);
+    };
     window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('pointercancel', onPointerCancel);
+    window.addEventListener('blur', onLost);
+    document.addEventListener('visibilitychange', onLost);
     return () => {
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
       window.removeEventListener('pointercancel', onPointerCancel);
+      window.removeEventListener('blur', onLost);
+      document.removeEventListener('visibilitychange', onLost);
     };
   }, [dragActive, auto, positions, res, steps, frozen, onMove, onCreate, showMessage, toLayoutPoint, commitDrag]);
 
@@ -475,15 +508,12 @@ export function AssemblySchematic({
           <Text size='micro' variant='label' component='span' className='uppercase'>
             раскладка: ручная · {manual}
           </Text>
-          {/* Тот же случай, что у нод: Chip рисует <button>, а на выпущенной карточке она мертва
-              под внешним fieldset'ом — и сбросить чужую расстановку было бы нечем. */}
-          <span
-            {...activate(() => setResetOpen(true))}
-            className='inline-flex cursor-pointer items-center gap-1 whitespace-nowrap border border-dashed border-borderColor bg-bgColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor transition-colors hover:text-textColor'
-            title='вернуть автоматическую раскладку'
-          >
+          {/* nonForm по той же причине, что у переключателя режима: сброс раскладки не меняет
+              данных, но под внешним `<fieldset disabled>` настоящая кнопка мертва — и сбросить
+              чужую расстановку на выпущенной карточке было бы нечем. */}
+          <Chip nonForm dashed onClick={() => setResetOpen(true)} title='вернуть автоматическую раскладку'>
             авто
-          </span>
+          </Chip>
         </ChipRow>
       )}
       <div

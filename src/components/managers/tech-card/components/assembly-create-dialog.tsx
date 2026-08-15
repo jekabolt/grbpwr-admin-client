@@ -156,8 +156,15 @@ export function AssemblyCreateDialog({
     if (dead) return `«${dead}» больше не лежит на столе — входом его не взять`;
     // Поглощение теряет смысл, если поглощаемый узел сняли из входов: получился бы ВТОРОЙ
     // производитель живого узла, а не его дособирание.
-    if (produces === 'absorb' && !distinct.includes(absorbInto)) {
-      return `узел ${absorbInto} снят из входов — дособрать можно только то, что шаг берёт`;
+    if (produces === 'absorb') {
+      if (!distinct.includes(absorbInto)) {
+        return `узел ${absorbInto} снят из входов — дособрать можно только то, что шаг берёт`;
+      }
+      // Поглощение — тоже сборка узла, и правило 3 на него распространяется: `GARMENT → GARMENT`
+      // не дособирает ничего, движок отвечает too-few-inputs.
+      if (distinct.length < 2) {
+        return `дособрать ${absorbInto} нечем — возьмите на шаг ещё хотя бы один вход`;
+      }
     }
     if (!operationType || operationType === UNKNOWN_TYPE) return 'выберите, что шаг делает';
     if (!zone || zone === UNKNOWN_ZONE) return 'выберите зону — «other» это законный ответ';
