@@ -465,6 +465,29 @@ export function AssemblySchematic({
   const blockOfStep = new Map<number, string>();
   for (const b of blocks) for (const i of b.steps) blockOfStep.set(i, b.key);
 
+  // ЧТО УЗЕЛ БЕРЁТ — его ПРЯМЫЕ входы, а не замыкание по деталям.
+  //
+  // Разница принципиальна. Замыкание (`block.leaves`) для готового изделия — это ВСЕ детали
+  // карточки, и сводка выродилась бы в список из пятнадцати имён ровно на том узле, ради
+  // которого схему открывают. Прямые входы отвечают на настоящий вопрос — «из чего собран
+  // именно этот узел»: у корпуса это полочка и спинка, у изделия — ▣ SHELL и ▣ HOOD.
+  //
+  // Собственный ключ отбрасывается: в поглощении `GARMENT + HEM → GARMENT` узел входит сам в
+  // себя, и «берёт: ▣ GARMENT» не сообщает ничего.
+  const directInputsOf = new Map<string, string[]>();
+  for (const b of blocks) {
+    const seen = new Set<string>();
+    const acc: string[] = [];
+    for (const i of b.steps) {
+      for (const input of steps[i]?.inputs ?? []) {
+        if (!input.key || input.key === b.key || seen.has(input.key)) continue;
+        seen.add(input.key);
+        acc.push(input.key);
+      }
+    }
+    directInputsOf.set(b.key, acc);
+  }
+
   const boxOf = (blockKey: string) => (blockKey === '' ? layout.tail : layout.byKey.get(blockKey));
 
   // Строка бокса → её y. Нужна проводам: они целятся в строку, а не в бокс.
@@ -714,6 +737,20 @@ export function AssemblySchematic({
                       >
                         растворить
                       </Chip>
+                    </div>
+                  )}
+                  {/* СОСТАВ УЗЛА — по наведению и ОВЕРЛЕЕМ, а не строкой внутри бокса. Строкой
+                      он изменил бы высоту, которую считает чистая раскладка, то есть сдвинул бы
+                      всю схему ради подписи; а постоянной он превратил бы полотно в таблицу —
+                      ровно то, из-за чего действия узла уехали на наведение. */}
+                  {hovered === box.key && (directInputsOf.get(box.key) ?? []).length > 0 && (
+                    <div
+                      className='absolute -bottom-4 left-0 flex w-full items-center pt-1'
+                      title={`берёт: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ')}`}
+                    >
+                      <Text size='nano' variant='label' component='span' className='truncate'>
+                        ← {(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ')}
+                      </Text>
                     </div>
                   )}
                   {b.steps.map((i) => (
