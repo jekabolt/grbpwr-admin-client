@@ -3129,8 +3129,15 @@ export function OperationsField({
   // который читается как «сломалось». Схема становится дефолтом ровно там, где есть что
   // рисовать; пользовательский выбор живёт в сессии и уступает, когда узлов нет.
   const [mode, setMode] = useState<'list' | 'schematic' | null>(null);
-  const effectiveMode = grouping.marked ? (mode ?? 'schematic') : 'list';
+  // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
+  // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
+  // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
+  //
+  // Вывод остаётся дефолтом: неразмеченная карточка открывается списком (пустое полотно на первом
+  // открытии читается как «сломалось»), размеченная — схемой. Но переключиться можно всегда.
+  const effectiveMode = mode ?? (grouping.marked ? 'schematic' : 'list');
   const grouped = grouping.marked && effectiveMode === 'list';
+  // Заголовок рельса называет режим, чтобы «схемой» не читалось как «что-то ещё».
   const prevSubmit = useRef(submitCount);
   const prevErrorCount = useRef(errorIndices.size);
   useEffect(() => {
@@ -3382,15 +3389,13 @@ export function OperationsField({
               flush
               action={
                 <div className='flex items-center gap-2'>
-                  {grouping.marked && (
-                    <Chip
-                      dashed
-                      onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
-                      title='схема сборки или список шагов — оба редактируют одни данные'
-                    >
-                      {effectiveMode === 'schematic' ? 'списком' : 'схемой'}
-                    </Chip>
-                  )}
+                  <Chip
+                    dashed
+                    onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
+                    title='схема сборки или список шагов — оба редактируют одни данные'
+                  >
+                    {effectiveMode === 'schematic' ? 'списком' : 'схемой'}
+                  </Chip>
                   <Text size='micro' variant='label' component='span'>
                     ⠿ перетащить
                   </Text>

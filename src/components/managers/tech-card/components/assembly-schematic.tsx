@@ -77,7 +77,10 @@ export function AssemblySchematic({
             pieceNameOf={pieceNameOf}
             picked={picked}
             onToggle={toggle}
-            onJoin={onJoin}
+            onJoin={(keys) => {
+              onJoin(keys);
+              setPicked([]);
+            }}
             onClear={() => setPicked([])}
           />
         )}
