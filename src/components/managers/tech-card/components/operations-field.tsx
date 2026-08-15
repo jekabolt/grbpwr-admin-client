@@ -515,6 +515,8 @@ type RailGrouping = {
   headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
   /** Размечена ли карточка: без узлов досье вырождается в сегодняшний плоский рельс. */
   marked: boolean;
+  /** Σ SMV блока по его ключу ('' — хвостовой). Считается тем же `sumSmv`, что и в рельсе. */
+  smvOfBlock: Map<string, string>;
 };
 
 // useRailGrouping — досье: тот же рельс, но с врезанными заголовками подсборок.
@@ -559,18 +561,22 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
       return any ? String(Math.round(total * 100) / 100) : '';
     };
 
+    const smvOfBlock = new Map<string, string>();
     for (const b of [...grouped.blocks, grouped.loose]) {
       if (b.steps.length === 0) continue;
       const first = Math.min(...b.steps);
+      const smv = sumSmv(b.steps);
+      smvOfBlock.set(b.key, smv);
       headerBefore.set(first, {
         block: b,
-        smv: sumSmv(b.steps),
+        smv,
         terminal: liveUnits.length === 1 && liveUnits[0] === b.key,
       });
     }
     return {
       broken,
       headerBefore,
+      smvOfBlock,
       marked: grouped.blocks.length > 0,
       schematicBlocks: [...grouped.blocks, grouped.loose],
       schematicSteps: steps,
@@ -3485,6 +3491,7 @@ export function OperationsField({
                 }}
                 onCreate={setPendingCreate}
                 pieceShapes={pieceShapes}
+                smvOfBlock={grouping.smvOfBlock}
                 onDissolve={dissolveUnit}
                 positions={prefs.pos}
                 onMove={prefs.move}

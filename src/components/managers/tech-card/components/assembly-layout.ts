@@ -100,7 +100,12 @@ export type SchematicLayout = {
 // Размеры взяты из прототипа: 180×15px строки под шапкой 21px, зазоры 96×18, плитка 48.
 const W = 180;
 const LINE_H = 15;
-const HEAD_H = 21;
+// ШАПКА В ДВЕ СТРОКИ (вариант «паспорт»): ключ отдельной строкой, под ним имя узла и его состояние
+// СЛОВОМ. В одну строку эти три вещи не помещались: ключ теснил имя, имя теснило состояние, и всё
+// вместе — 180 пикселей ширины.
+const HEAD_H = 32;
+/** Подвал: состав узла и Σ SMV. Постоянный, а не по наведению — на планшете наведения нет. */
+const FOOT_H = 15;
 const GAP_X = 96;
 const GAP_Y = 18;
 const TILE = 48;
@@ -176,7 +181,9 @@ export function assemblyLayout(
       x,
       y: 16,
       w: W,
-      h: HEAD_H + 2 + loose.steps.length * LINE_H + 4,
+      // Хвост считается по той же формуле, что и узлы: одна геометрия на все боксы полотна
+      // дешевле двух, а подвал у него не пустой — Σ SMV шагов вне узлов такой же вопрос.
+      h: HEAD_H + 2 + loose.steps.length * LINE_H + 4 + FOOT_H,
       col,
       stackTop: 16,
       pieceInputs: [],
@@ -288,7 +295,7 @@ export function assemblyLayout(
     let cursor = 16;
     for (const b of cols[c]) {
       const isCollapsed = collapsed.has(b.key);
-      const boxH = isCollapsed ? HEAD_H : HEAD_H + 2 + b.steps.length * LINE_H + 4;
+      const boxH = isCollapsed ? HEAD_H : HEAD_H + 2 + b.steps.length * LINE_H + 4 + FOOT_H;
       const pieces = pieceInputsOf.get(b.key) ?? [];
       const stackH = pieces.length ? pieces.length * TILE + (pieces.length - 1) * TILE_GAP : 0;
       const effH = Math.max(boxH, stackH);
@@ -379,4 +386,4 @@ function bary(b: AssemblyBlock, rank: Map<string, number>, ins: Map<string, stri
   return keys.reduce((s, k) => s + (rank.get(k) ?? 0), 0) / keys.length;
 }
 
-export const SCHEMATIC_METRICS = { W, LINE_H, HEAD_H, TILE, TILE_GAP };
+export const SCHEMATIC_METRICS = { W, LINE_H, HEAD_H, FOOT_H, TILE, TILE_GAP };
