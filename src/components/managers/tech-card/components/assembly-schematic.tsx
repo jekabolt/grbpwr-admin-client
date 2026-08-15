@@ -18,9 +18,9 @@ import { applyOverrides, type PosOverrides } from './assembly-positions';
 // Первая редакция плана оставляла схеме только выбор и навигацию, опасаясь, что два экрана
 // начнут спорить о том, где «настоящая» операция. Опасение верное, но лечится оно не запретом:
 // источник истины и так ОДИН — состояние формы. Расходятся не виды, а ЛОГИКА МУТАЦИЙ, если её
-// написать дважды. Поэтому схема не содержит ни одного собственного мутатора: joinIntoUnit,
-// addStepIntoUnit, dissolveUnit живут в OperationsField в одном экземпляре, и список зовёт ровно
-// их же.
+// написать дважды. Поэтому схема не содержит ни одного собственного мутатора: `appendStep` и
+// `dissolveUnit` живут в OperationsField в одном экземпляре, и список зовёт ровно их же. Схема
+// собирает ЖЕСТ и передаёт его наверх; всё, что пишет в форму, — там.
 //
 // ПРОВОД ИДЁТ К СТРОКЕ-ПОТРЕБИТЕЛЮ, А НЕ К БОКСУ. Разница существенная: узел SHELL входит в
 // GARMENT не «вообще», а на конкретном шаге, и провод, упирающийся в верх бокса, скрывает
@@ -75,8 +75,11 @@ export function AssemblySchematic({
   labelOf: (index: number) => string;
   pieceNameOf: (lineKey: string) => string;
   onPickStep: (index: number) => void;
-  /** Сшить выбранное в новый узел. Мутатор общий со списком. */
-  onJoin: (inputKeys: string[]) => void;
+  /**
+   * Открыть создание операции с этими входами. Схема НЕ пишет в форму сама: она собирает жест,
+   * пишет `appendStep` в OperationsField — единственный экземпляр логики записи.
+   */
+  onJoin: (inputKeys: string[], intent: 'unit' | 'process') => void;
   /** Добавить обработку внутрь блока. */
   onAddStep: (unitKey: string) => void;
   /** Растворить узел — по индексу его производящего шага. */
@@ -311,17 +314,14 @@ export function AssemblySchematic({
   return (
     <>
       {!frozen && (
-        <FreePieces
-          keys={res.frontier.filter((k) => !res.units.has(k))}
-          pieceNameOf={pieceNameOf}
+        <ActionPanel
           picked={picked}
-          onToggle={toggle}
-          onJoin={(keys) => {
-            onJoin(keys);
+          labelOf={pieceNameOf}
+          onCreate={(intent) => {
+            onJoin(picked, intent);
             setPicked([]);
           }}
           onClear={() => setPicked([])}
-          compact
         />
       )}
       {manual > 0 && (
@@ -527,54 +527,46 @@ export function AssemblySchematic({
   );
 }
 
-// FreePieces — панель выбора и единственное действие, рождающее узел.
+// Панель действий над полотном.
 //
-// Одна кнопка, а не мастер: «сшить» — это и есть весь жест. Код узла предлагается автоматически,
-// имя даётся потом в открывшемся шаге, потому что придумывать имя в момент жеста — это пауза
-// ровно там, где у технолога есть инерция.
-function FreePieces({
-  keys,
-  pieceNameOf,
+// ДО Ф7 ЗДЕСЬ ЛЕЖАЛИ ЧИПЫ СВОБОДНЫХ ДЕТАЛЕЙ — и это был единственный способ их выбрать. Теперь
+// детали лежат на самом полотне и кликаются там, а дублировать их строкой значило бы держать две
+// поверхности одного факта: разойдутся — врать будут тихо. Осталось то, чего на полотне нет:
+// сводка выбора и два действия над ним.
+//
+// Два действия, а не одно с угадыванием: два входа бывают и у обработки, и решать за автора по
+// их числу — переигрывать его выбор.
+function ActionPanel({
   picked,
-  onToggle,
-  onJoin,
+  labelOf,
+  onCreate,
   onClear,
-  compact = false,
 }: {
-  keys: string[];
-  pieceNameOf: (k: string) => string;
   picked: string[];
-  onToggle: (k: string) => void;
-  onJoin: (keys: string[]) => void;
+  labelOf: (k: string) => string;
+  onCreate: (intent: 'unit' | 'process') => void;
   onClear: () => void;
-  compact?: boolean;
 }) {
-  if (keys.length === 0 && picked.length === 0) return null;
+  if (picked.length === 0) return null;
   return (
-    <ChipRow className={compact ? 'mb-1.5' : 'mt-2'}>
+    <ChipRow className='mb-1.5'>
       <Text size='micro' variant='label' component='span' className='uppercase'>
-        на столе:
+        выбрано:
       </Text>
-      {keys.map((k) => (
-        <Chip
-          key={k}
-          dashed={!picked.includes(k)}
-          onClick={() => onToggle(k)}
-          title={`${pieceNameOf(k)} — кликните, чтобы взять в сборку`}
-        >
-          {picked.includes(k) ? `✓ ${pieceNameOf(k)}` : pieceNameOf(k)}
+      <Text size='micro' variant='label' component='span' className='min-w-0 truncate'>
+        {picked.map(labelOf).join(' + ')}
+      </Text>
+      {picked.length >= 2 && (
+        <Chip onClick={() => onCreate('unit')} title='собрать из выбранного новый узел'>
+          сшить · {picked.length}
         </Chip>
-      ))}
-      {picked.length > 0 && (
-        <>
-          <Chip onClick={() => onJoin(picked)} title='создать узел из выбранного'>
-            сшить · {picked.length}
-          </Chip>
-          <Chip dashed onClick={onClear} title='снять выбор'>
-            отменить
-          </Chip>
-        </>
       )}
+      <Chip dashed onClick={() => onCreate('process')} title='шаг по выбранному, ничего не собирающий'>
+        обработка · {picked.length}
+      </Chip>
+      <Chip dashed onClick={onClear} title='снять выбор'>
+        отменить
+      </Chip>
     </ChipRow>
   );
 }

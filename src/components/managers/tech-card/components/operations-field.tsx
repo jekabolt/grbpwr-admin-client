@@ -87,6 +87,8 @@ import {
 } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
+import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
+import { suggestUnitCode } from './assembly-suggest';
 import { AssemblySchematic } from './assembly-schematic';
 import { useSchematicPrefs } from './use-schematic-prefs';
 import { PieceRef, useFormPieces } from './piece-picker';
@@ -774,12 +776,6 @@ function ProducesBlock({
   // поглощение, если тот же узел взят входом.
   const suggest = () => {
     const zone = (getValues(`operations.${index}.zone`) ?? '') as string;
-    // UNKNOWN и OTHER — не имена зон, а их отсутствие: узел «UNKNOWN» уехал бы на печать и в QR.
-    const token = zone.replace(/^TECH_CARD_GARMENT_ZONE_/, '');
-    const base =
-      token === 'UNKNOWN' || token === 'OTHER' || !token
-        ? 'UNIT'
-        : token.replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'UNIT';
     // Занято — это и узлы, И КЛЮЧИ ДЕТАЛЕЙ: пространство имён одно (правило 6), и предлагать
     // код, совпавший с деталью, значит предлагать заведомый отказ.
     const taken = new Set<string>([
@@ -788,15 +784,7 @@ function ProducesBlock({
         .filter(Boolean),
       ...pieces.map((p) => p.lineKey),
     ]);
-    // Колонка сервера — VARCHAR(64), и режет она БАЙТЫ. Код собран из ASCII-токена зоны, но
-    // подрезать всё равно надо здесь: отказ по длине на сохранении был бы отказом за то, чего
-    // автор не набирал.
-    const fit = (v: string) => (new TextEncoder().encode(v).length <= 64 ? v : v.slice(0, 48));
-    if (!taken.has(base)) return fit(base);
-    for (let n = 2; ; n++) {
-      const candidate = `${base}-${n}`;
-      if (!taken.has(candidate)) return fit(candidate);
-    }
+    return suggestUnitCode(zone, taken);
   };
 
   const declare = () => {
@@ -3149,6 +3137,10 @@ export function OperationsField({
   const prefs = useSchematicPrefs(techCardId, schematicNodeKeys);
   const mode = prefs.mode;
   const setMode = prefs.setMode;
+  // Незавершённый жест создания: что уже назначено входами и не предлагается ли поглощение.
+  // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
+  const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -3289,30 +3281,37 @@ export function OperationsField({
   // схеме начинают расходиться в мелочах. Поэтому общий обработчик, а не два похожих.
 
   /** Сшить выбранное в новый узел: добавляет шаг с этими входами и предложенным кодом. */
-  const joinIntoUnit = (inputKeys: string[]) => {
-    if (inputKeys.length < 2) {
-      showMessage('узел из одного входа — это обработка: выберите хотя бы два входа', 'error');
-      return;
-    }
-    const taken = new Set<string>([
-      ...((getValues('operations') ?? []) as Array<{ outputUnitKey?: string }>)
-        .map((o) => (o?.outputUnitKey ?? '').trim())
-        .filter(Boolean),
-      ...pieces.map((p) => p.lineKey),
-    ]);
-    let code = 'UNIT';
-    for (let n = 1; taken.has(code); n++) code = `UNIT-${n + 1}`;
+  /**
+   * ЕДИНСТВЕННОЕ МЕСТО, ГДЕ СХЕМА ПИШЕТ В ФОРМУ. Диалог только собирает аргументы; вся запись —
+   * здесь, в одном экземпляре, ровно как договаривались в T-23 про мутаторы.
+   *
+   * До Ф7 эту роль делили `joinIntoUnit` и `addStepIntoUnit`, и оба создавали шаг из
+   * `emptyOperation` — с типом и зоной в UNKNOWN, то есть заведомо невалидный. Технолог получал
+   * строку с «!» и долг вместо результата. Теперь минимум валидности собран ДО записи.
+   */
+  const appendStep = (r: CreateResult) => {
     const at = fields.length;
-    append({ ...emptyOperation, inputKeys, outputUnitKey: code });
+    append({
+      ...emptyOperation,
+      inputKeys: r.inputKeys,
+      outputUnitKey: r.outputUnitKey,
+      outputUnitName: r.outputUnitName,
+      operationType: r.operationType as typeof emptyOperation.operationType,
+      zone: r.zone as typeof emptyOperation.zone,
+      ...(r.machineType ? { machineType: r.machineType as typeof emptyOperation.machineType } : {}),
+      ...(r.pressEquipment
+        ? { pressEquipment: r.pressEquipment as typeof emptyOperation.pressEquipment }
+        : {}),
+    });
+    // Разметка появилась — намерение «снять разметку» отменено. Сегодняшний `joinIntoUnit` этого
+    // НЕ делал (в отличие от `declare()`), и сценарий «снял → передумал → сшил заново» уходил в
+    // отказ «снял и одновременно прислал узлы». Починка попутная и намеренная.
+    if (r.outputUnitKey) setValue('assemblyCleared', false, { shouldDirty: true });
     setSelected(at);
-    showMessage(`узел ${code} создан — назовите его в открывшемся шаге`, 'success');
-  };
-
-  /** Добавить обработку внутрь блока: шаг, берущий этот узел и ничего не собирающий. */
-  const addStepIntoUnit = (unitKey: string) => {
-    const at = fields.length;
-    append({ ...emptyOperation, inputKeys: [unitKey] });
-    setSelected(at);
+    setPendingCreate(null);
+    // Шаг создан — редактор обязан оказаться перед глазами, иначе жест кончается там же, где
+    // начался, и результат приходится искать.
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
   };
 
   /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
@@ -3445,8 +3444,8 @@ export function OperationsField({
                 }
                 pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
                 onPickStep={setSelected}
-                onJoin={joinIntoUnit}
-                onAddStep={addStepIntoUnit}
+                onJoin={(inputKeys, intent) => setPendingCreate({ inputKeys, intent })}
+                onAddStep={(unitKey) => setPendingCreate({ inputKeys: [unitKey], intent: 'process' })}
                 onDissolve={dissolveUnit}
                 positions={prefs.pos}
                 onMove={prefs.move}
@@ -3508,6 +3507,7 @@ export function OperationsField({
           </div>
 
           {selectedIndex >= 0 && (
+            <div ref={editorRef}>
             <OperationEditor
               // Keyed on the row's identity AND its position: both of the editor's "skip the first
               // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
@@ -3528,9 +3528,20 @@ export function OperationsField({
               onActiveBomChange={onActiveBomChange}
               onDropPiece={addInputToOperation}
             />
+            </div>
           )}
         </div>
       )}
+
+      <AssemblyCreateDialog
+        prefill={pendingCreate}
+        onClose={() => setPendingCreate(null)}
+        onCreate={appendStep}
+        frontier={grouping.res.frontier}
+        unitKeys={new Set(grouping.res.units.keys())}
+        pieceKeys={new Set(pieces.map((p) => p.lineKey))}
+        labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+      />
 
       <GenerateOperationsPanel
         techCardId={techCardId}
