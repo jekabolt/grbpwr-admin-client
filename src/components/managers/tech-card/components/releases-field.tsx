@@ -243,9 +243,20 @@ function SnapshotOperations({
   // и говорит о деталях старой проекцией. Ключ, не совпавший ни с одной деталью снапшота, есть
   // ссылка на узел — так его и печатаем.
   const partsOf = (o: common_TechCardOperation): string => {
-    const keys = o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? []);
+    // ИСТОЧНИК КЛЮЧЕЙ РЕШАЕТ, ЧТО ОЗНАЧАЕТ НЕНАЙДЕННЫЙ КЛЮЧ. В union'е (поле 46) ключ, не
+    // совпавший с деталью, есть ссылка на узел. В старой проекции `piece_line_keys` узлов НЕ
+    // БЫВАЕТ вовсе — их тогда не существовало, — и печатать там «▣ FRONT» значит утверждать про
+    // подписанный документ то, чего в нём быть не могло.
+    const legacy = !o.inputKeys?.length;
+    const keys = legacy ? (o.pieceLineKeys ?? []) : (o.inputKeys ?? []);
     return keys
-      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || (k ? `▣ ${k}` : ''))
+      .map((k) => {
+        if (!k) return '';
+        const piece = pieces.find((pc) => pc.lineKey === k);
+        // Деталь без имени — всё ещё деталь: показываем её ключ, а не выдаём за узел.
+        if (piece) return piece.name?.trim() || k;
+        return legacy ? k : `▣ ${k}`;
+      })
       .filter(Boolean)
       .join(' + ');
   };

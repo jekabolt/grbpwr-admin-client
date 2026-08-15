@@ -368,7 +368,10 @@ export function TechPackDocument({
       out.push({
         key: '',
         label: '◌ outside units',
-        sub: 'step output is not a unit',
+        // Нейтрально намеренно: сюда попадают и обработки (у них выхода нет), и производящие
+        // шаги, чей узел НЕ РОДИЛСЯ. У вторых в строке стоит «produces ▣ SHELL», и заголовок
+        // «выход шага — не узел» спорил бы с их же строкой.
+        sub: 'steps outside recognised units',
         operations: grouped.loose.steps.map((i) => indexed[i]).filter(Boolean),
       });
     }
@@ -943,9 +946,18 @@ export function TechPackDocument({
   // как были записаны, и поля 46 у них нет.
   const opParts = (o: { pieceLineKeys?: string[]; inputKeys?: string[] }): string[] => {
     const pieces = tc.pieces ?? [];
-    const keys = o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? []);
+    // Источник ключей решает, что означает ненайденный ключ: в union'е это ссылка на узел, а в
+    // старой проекции `piece_line_keys` узлов не бывает — там ненайденный ключ есть деталь,
+    // которую не нашли. Дефект был здесь и до Ф6; печать по нему выдавала деталь за узел.
+    const legacy = !o.inputKeys?.length;
+    const keys = legacy ? (o.pieceLineKeys ?? []) : (o.inputKeys ?? []);
     return keys
-      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || (k ? `▣ ${k}` : ''))
+      .map((k) => {
+        if (!k) return '';
+        const piece = pieces.find((pc) => pc.lineKey === k);
+        if (piece) return piece.name?.trim() || k;
+        return legacy ? k : `▣ ${k}`;
+      })
       .filter(Boolean);
   };
 
