@@ -69,6 +69,10 @@ export function Chip({
   const interactive = !!onClick || !!onRemove;
   const asSpan = !interactive || nonForm;
   const Component = asSpan ? 'span' : 'button';
+  // `nonForm` управляет ролью, фокусом и клавиатурой сам — эти четыре пропа он у вызывающего
+  // ПЕРЕХВАТЫВАЕТ, а не дополняет; чужой `onKeyDown` composed поверх встроенного, чтобы
+  // родительские горячие клавиши не потерялись.
+  const outerKeyDown = props.onKeyDown as ((e: React.KeyboardEvent) => void) | undefined;
   const spanRole =
     nonForm && interactive
       ? {
@@ -76,14 +80,17 @@ export function Chip({
           tabIndex: disabled ? undefined : 0,
           onClick: disabled ? undefined : onClick,
           'aria-disabled': disabled || undefined,
-          onKeyDown: disabled
-            ? undefined
-            : (e: React.KeyboardEvent) => {
-                if (e.key !== 'Enter' && e.key !== ' ') return;
-                e.preventDefault();
-                onClick?.();
-              },
-          className: 'cursor-pointer',
+          onKeyDown: (e: React.KeyboardEvent) => {
+            outerKeyDown?.(e);
+            if (disabled || e.defaultPrevented) return;
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            // Автоповтор удерживаемой клавиши не должен переключать по разу на каждое событие —
+            // нативная кнопка так себя не ведёт.
+            if (e.repeat) return;
+            e.preventDefault();
+            onClick?.();
+          },
+          className: disabled ? 'cursor-not-allowed' : 'cursor-pointer',
         }
       : {};
   return (
@@ -95,7 +102,10 @@ export function Chip({
       className={chipVariants({ selected, tone, dashed, className: cn(spanRole.className, className) })}
     >
       {children}
-      {onRemove && (
+      {/* Задизейбленный чип не удаляется. Настоящей `<button disabled>` это давал браузер; в
+          span-варианте гейт приходится ставить руками, иначе ✕ остаётся живым на выключенном
+          чипе. */}
+      {onRemove && !(nonForm && disabled) && (
         <span
           role='button'
           tabIndex={-1}

@@ -177,6 +177,10 @@ export function AssemblySchematic({
    */
   const dragHandlers = (key: string, nodeX: number, nodeY: number) => ({
     onPointerDown: (e: React.PointerEvent) => {
+      // Жест уже идёт — второе касание не трогает НИЧЕГО, и проверка стоит первой строкой.
+      // Стой она ниже, чужой палец успевал бы записать `lastClient`: автоскролл поехал бы по
+      // координатам второго пальца, утаскивая ноду первого, который при этом неподвижен.
+      if (dragRef.current) return;
       if (e.button !== 0) return;
       const p = toLayoutPoint(e);
       if (!p) return;
@@ -185,9 +189,6 @@ export function AssemblySchematic({
       // недостаточно: драг, закончившийся не на кликабельном, оставил бы флаг взведённым и
       // проглотил следующий честный клик.
       justDragged.current = false;
-      // Жест уже идёт — второе касание его не перехватывает: иначе нода B поехала бы по
-      // координатам пальца, тащившего A, и могла бы открыть чужой диалог соединения.
-      if (dragRef.current) return;
       commitDrag({
         key,
         pointerId: e.pointerId,
