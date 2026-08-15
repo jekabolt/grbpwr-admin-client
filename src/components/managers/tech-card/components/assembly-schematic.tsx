@@ -1,11 +1,13 @@
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
+import { applyOverrides, type PosOverrides } from './assembly-positions';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -23,6 +25,34 @@ import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
 // ПРОВОД ИДЁТ К СТРОКЕ-ПОТРЕБИТЕЛЮ, А НЕ К БОКСУ. Разница существенная: узел SHELL входит в
 // GARMENT не «вообще», а на конкретном шаге, и провод, упирающийся в верх бокса, скрывает
 // именно то, ради чего схему смотрят — где эта подсборка пришивается.
+//
+// РУЧНЫЕ ПОЗИЦИИ — ПРЕЗЕНТАЦИЯ, А НЕ ДАННЫЕ. Они идут мимо формы (см. `use-schematic-prefs`), и
+// именно поэтому перетаскивание разрешено даже на выпущенной карточке: читатель раскладывает
+// чужую схему под себя, ничего в ней не меняя. Расплата за свободу — ось времени: авто-раскладка
+// ставила колонки по глубине, рука может поставить как угодно. Поэтому при живых оверрайдах
+// экран честно говорит «раскладка: ручная», а провода рисуются ИЗ ДАННЫХ и никогда из позиций.
+
+/** Порог, разводящий клик и перетаскивание. Ниже него жест остаётся кликом. */
+const DRAG_THRESHOLD = 4;
+/** Полоса у края контейнера, в которой драг подкручивает прокрутку. */
+const AUTOSCROLL_EDGE = 32;
+/** Постоянная скорость автоскролла: ускорение под неподвижным курсором дезориентирует. */
+const AUTOSCROLL_SPEED = 12;
+
+type DragState = {
+  key: string;
+  /** Где внутри ноды её взяли — чтобы нода не прыгала под курсор углом. */
+  offX: number;
+  offY: number;
+  /** Текущая позиция ноды в координатах полотна. */
+  x: number;
+  y: number;
+  /** Точка начала жеста — для порога. */
+  fromX: number;
+  fromY: number;
+  started: boolean;
+};
+
 export function AssemblySchematic({
   blocks,
   steps,
@@ -33,6 +63,9 @@ export function AssemblySchematic({
   onJoin,
   onAddStep,
   onDissolve,
+  positions,
+  onMove,
+  onResetPositions,
   frozen = false,
 }: {
   blocks: AssemblyBlock[];
@@ -48,7 +81,11 @@ export function AssemblySchematic({
   onAddStep: (unitKey: string) => void;
   /** Растворить узел — по индексу его производящего шага. */
   onDissolve: (stepIndex: number) => void;
-  /** Карточка выпущена: схема остаётся читаемой, но не редактируемой. */
+  /** Ручные позиции нод. Живут выше схемы: схема размонтируется при смене режима. */
+  positions: PosOverrides;
+  onMove: (key: string, at: { x: number; y: number }) => void;
+  onResetPositions: () => void;
+  /** Карточка выпущена: схема остаётся читаемой и раскладываемой, но не редактируемой. */
   frozen?: boolean;
 }) {
   // Выбор — то, из чего собирается следующий узел. Живёт в схеме, потому что это состояние
@@ -57,9 +94,146 @@ export function AssemblySchematic({
   const toggle = (key: string) =>
     setPicked((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
   const onTable = new Set(res.frontier);
-  const layout = assemblyLayout(blocks, steps, res);
   const { LINE_H, HEAD_H } = SCHEMATIC_METRICS;
   const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
+
+  const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const lastClient = useRef<{ x: number; y: number } | null>(null);
+  // Клик приходит после перетаскивания — и не должен срабатывать как выбор. Порог разводит
+  // жесты по НАМЕРЕНИЮ, а этот флаг гасит уже случившееся эхо.
+  const justDragged = useRef(false);
+  const [resetOpen, setResetOpen] = useState(false);
+
+  const layout = useMemo(
+    () => applyOverrides(auto, drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions),
+    [auto, positions, drag],
+  );
+
+  /**
+   * Точка события в координатах ПОЛОТНА, а не окна. Без учёта прокрутки контейнера нода
+   * прыгала бы на величину скролла — а полотно шире окна уже на полутора десятках деталей.
+   */
+  const toLayoutPoint = useCallback((e: { clientX: number; clientY: number }) => {
+    const el = canvasRef.current;
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { x: e.clientX - r.left + el.scrollLeft, y: e.clientY - r.top + el.scrollTop };
+  }, []);
+
+  const dragHandlers = (key: string, nodeX: number, nodeY: number) => ({
+    onPointerDown: (e: React.PointerEvent) => {
+      if (e.button !== 0) return;
+      const p = toLayoutPoint(e);
+      if (!p) return;
+      lastClient.current = { x: e.clientX, y: e.clientY };
+      // Новый жест — старое эхо больше не актуально. Сбрасывать флаг в clickGuard было бы
+      // недостаточно: драг, закончившийся не на кликабельном, оставил бы флаг взведённым и
+      // проглотил следующий честный клик.
+      justDragged.current = false;
+      // Захват НЕ берётся здесь: он меняет цель последующего click, и обычный клик по строке
+      // шага перестал бы работать. Захват берётся ровно в тот момент, когда жест признан драгом.
+      setDrag({ key, offX: p.x - nodeX, offY: p.y - nodeY, x: nodeX, y: nodeY, fromX: p.x, fromY: p.y, started: false });
+    },
+    onPointerMove: (e: React.PointerEvent) => {
+      if (!drag || drag.key !== key) return;
+      const p = toLayoutPoint(e);
+      if (!p) return;
+      lastClient.current = { x: e.clientX, y: e.clientY };
+      const far = Math.abs(p.x - drag.fromX) > DRAG_THRESHOLD || Math.abs(p.y - drag.fromY) > DRAG_THRESHOLD;
+      if (!drag.started && !far) return;
+      if (!drag.started) {
+        try {
+          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        } catch {
+          // Указатель мог уже уйти — жест продолжится без захвата, это не повод его ронять.
+        }
+      }
+      setDrag({ ...drag, started: true, x: p.x - drag.offX, y: p.y - drag.offY });
+    },
+    onPointerUp: () => {
+      if (!drag || drag.key !== key) return;
+      if (drag.started) {
+        justDragged.current = true;
+        onMove(key, { x: Math.max(0, drag.x), y: Math.max(0, drag.y) });
+      }
+      setDrag(null);
+    },
+    // Срыв жеста — откат транзиента без записи: система забрала указатель, значит намерения
+    // подтверждено не было.
+    onPointerCancel: () => setDrag(null),
+    onLostPointerCapture: () => setDrag(null),
+  });
+
+  const clickGuard = (fn: () => void) => () => {
+    if (justDragged.current) {
+      justDragged.current = false;
+      return;
+    }
+    fn();
+  };
+
+  // ЖЕСТ, НЕ ДОШЕДШИЙ ДО ПОРОГА, обязан кончиться где угодно. До порога захвата ещё нет, и
+  // указатель, ушедший с ноды, больше не отдаёт ей событий — без этого сторожа «нажал и увёл»
+  // оставляло бы висеть незакрытое состояние жеста.
+  useEffect(() => {
+    if (!drag || drag.started) return;
+    const done = () => setDrag(null);
+    window.addEventListener('pointerup', done);
+    window.addEventListener('pointercancel', done);
+    return () => {
+      window.removeEventListener('pointerup', done);
+      window.removeEventListener('pointercancel', done);
+    };
+  }, [drag]);
+
+  // Escape во время драга — тот же откат: жест отменён, нода возвращается на прежнее место.
+  useEffect(() => {
+    if (!drag?.started) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDrag(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [drag?.started]);
+
+  // Автоскролл у края: без него ноду нельзя увести за пределы видимой части полотна — а полотно
+  // больше окна на любой настоящей карточке.
+  useEffect(() => {
+    if (!drag?.started) return;
+    let raf = 0;
+    const tick = () => {
+      const el = canvasRef.current;
+      const c = lastClient.current;
+      if (el && c) {
+        const r = el.getBoundingClientRect();
+        let dx = 0;
+        let dy = 0;
+        if (c.x < r.left + AUTOSCROLL_EDGE) dx = -AUTOSCROLL_SPEED;
+        else if (c.x > r.right - AUTOSCROLL_EDGE) dx = AUTOSCROLL_SPEED;
+        if (c.y < r.top + AUTOSCROLL_EDGE) dy = -AUTOSCROLL_SPEED;
+        else if (c.y > r.bottom - AUTOSCROLL_EDGE) dy = AUTOSCROLL_SPEED;
+        if (dx || dy) {
+          const wasL = el.scrollLeft;
+          const wasT = el.scrollTop;
+          el.scrollLeft += dx;
+          el.scrollTop += dy;
+          const movedX = el.scrollLeft - wasL;
+          const movedY = el.scrollTop - wasT;
+          // Курсор стоит на месте, полотно уехало — значит нода под курсором сместилась на ту же
+          // величину. Иначе она отставала бы от руки ровно на прокрутку.
+          if (movedX || movedY) setDrag((d) => (d ? { ...d, x: d.x + movedX, y: d.y + movedY } : d));
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [drag?.started]);
+
+  const manual = Object.keys(positions).length;
 
   if (layout.tiles.length === 0 && layout.boxes.length === 0) {
     // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, а не пустое полотно — но теперь оно означает ровно одно:
@@ -73,26 +247,19 @@ export function AssemblySchematic({
         <Text size='micro' variant='label'>
           детали приходят из выкроек; появятся здесь плитками, и сборка начнётся с них
         </Text>
-        {!frozen && (
-          <FreePieces
-            keys={res.frontier}
-            pieceNameOf={pieceNameOf}
-            picked={picked}
-            onToggle={toggle}
-            onJoin={(keys) => {
-              onJoin(keys);
-              setPicked([]);
-            }}
-            onClear={() => setPicked([])}
-          />
-        )}
       </div>
     );
   }
 
+  // Шаг → блок, которому он принадлежит (включая хвостовой с пустым ключом).
+  const blockOfStep = new Map<number, string>();
+  for (const b of blocks) for (const i of b.steps) blockOfStep.set(i, b.key);
+
+  const boxOf = (blockKey: string) => (blockKey === '' ? layout.tail : layout.byKey.get(blockKey));
+
   // Строка бокса → её y. Нужна проводам: они целятся в строку, а не в бокс.
   const rowY = (blockKey: string, stepIndex: number): number => {
-    const box = layout.byKey.get(blockKey);
+    const box = boxOf(blockKey);
     if (!box) return 0;
     const b = blocks.find((x) => x.key === blockKey);
     const pos = b ? b.steps.indexOf(stepIndex) : -1;
@@ -100,8 +267,13 @@ export function AssemblySchematic({
     return box.y + HEAD_H + 2 + pos * LINE_H + LINE_H / 2;
   };
 
-  // Провод: от правого края бокса-источника к левому краю строки-потребителя, кубической кривой.
-  const wires: Array<{ d: string; key: string }> = [];
+  const wire = (x1: number, y1: number, x2: number, y2: number) => {
+    const mid = (x1 + x2) / 2;
+    return `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`;
+  };
+
+  const wires: Array<{ d: string; key: string; faint?: boolean }> = [];
+  // Узел → строка-потребитель.
   for (const b of blocks) {
     if (b.key === '') continue;
     for (const i of b.steps) {
@@ -110,13 +282,29 @@ export function AssemblySchematic({
         const from = layout.byKey.get(input.key);
         const to = layout.byKey.get(b.key);
         if (!from || !to) continue;
-        const x1 = from.x + from.w;
-        const y1 = from.y + from.h / 2;
-        const x2 = to.x;
-        const y2 = rowY(b.key, i);
-        const mid = (x1 + x2) / 2;
-        wires.push({ key: `${input.key}->${b.key}:${i}`, d: `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}` });
+        wires.push({
+          key: `${input.key}->${b.key}:${i}`,
+          d: wire(from.x + from.w, from.y + from.h / 2, to.x, rowY(b.key, i)),
+        });
       }
+    }
+  }
+  // Деталь → строка-потребитель, если та не рядом. До Ф7 деталь, взятая двумя блоками, рисовалась
+  // двумя стопками, и вторая связь читалась смежностью. Дубли схлопнуты — значит связь обязан
+  // сообщить провод, иначе она пропала бы молча. Смежная связь провода не требует и сегодня.
+  for (const t of layout.tiles) {
+    const home = t.state === 'eaten' ? t.into : null;
+    for (const i of t.consumers) {
+      const target = blockOfStep.get(i);
+      if (target === undefined) continue;
+      if (home !== null && target === home) continue;
+      const to = boxOf(target);
+      if (!to) continue;
+      wires.push({
+        key: `tile:${t.key}->${target}:${i}`,
+        d: wire(t.x + t.w, t.y + t.h / 2, to.x, rowY(target, i)),
+        faint: true,
+      });
     }
   }
 
@@ -136,156 +324,205 @@ export function AssemblySchematic({
           compact
         />
       )}
-    <div className='overflow-auto border border-borderColor bg-bgColor' style={{ maxHeight: 640 }}>
-      <div style={{ width: layout.width, height: layout.height, position: 'relative' }}>
-        <svg
-          width={layout.width}
-          height={layout.height}
-          className='absolute inset-0'
-          aria-hidden
-        >
-          {wires.map((w) => (
-            <path key={w.key} d={w.d} fill='none' stroke='currentColor' strokeWidth={1} opacity={0.45} />
-          ))}
-        </svg>
-
-        {/* ВСЕ ДЕТАЛИ КАРТОЧКИ — по одной плитке на деталь, место следует из состояния: съеденная
-            стоит у бокса своего узла, свободная — в колонке у левого края. Координаты приходят из
-            раскладки, а не считаются здесь: раскладка проверяема пробой, разметка — нет.
-
-            Плитка остаётся <button> и на съеденной детали, хотя действия у той пока нет: клик по
-            съеденной уводит к съевшему шагу — это T-32, а фокусируемость нужна уже сейчас, иначе
-            клавиатура потеряет половину полотна ровно в тот момент, когда полотно стало полным. */}
-        {layout.tiles.map((t) => (
-          <button
-            key={`tile:${t.key}`}
-            type='button'
-            disabled={frozen}
-            onClick={t.state === 'free' ? () => toggle(t.key) : undefined}
-            className={cn(
-              'absolute flex items-center justify-center px-1 text-center',
-              t.state === 'free'
-                ? 'border border-dashed border-borderColor'
-                : 'border border-borderColor bg-bgColor',
-              picked.includes(t.key) && 'border-solid border-textColor bg-bgZebra',
-            )}
-            style={{ left: t.x, top: t.y, width: t.w, height: t.h }}
-            title={
-              t.state === 'free'
-                ? `${pieceNameOf(t.key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`
-                : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}`
-            }
-          >
-            <Text size='nano' variant='label' component='span' className='line-clamp-2'>
-              {pieceNameOf(t.key)}
-            </Text>
-          </button>
-        ))}
-
-        {/* ХВОСТОВОЙ БОКС: шаги, не достигающие ни одного узла. До Ф7 их на полотне не было
-            вовсе — неразмеченная карточка показывала пустоту вместо существующего маршрута, а
-            обработка, созданная из схемы, исчезала без следа. Пунктир и лексикон те же, что у
-            врезки рельса, чтобы две вьюшки называли одно одинаково. */}
-        {layout.tail && (
-          <div
-            className='absolute border-2 border-dashed border-borderColor bg-bgColor'
-            style={{ left: layout.tail.x, top: layout.tail.y, width: layout.tail.w, height: layout.tail.h }}
-          >
-            <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
-              <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
-                ◌ вне узлов
-              </Text>
-              <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
-                цель шага — не узел
-              </Text>
-            </div>
-            {looseSteps.map((i) => (
-              <button
-                key={i}
-                type='button'
-                onClick={() => onPickStep(i)}
-                className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-                style={{ height: LINE_H }}
-                title='открыть шаг в списке'
-              >
-                <Text size='nano' component='span' className='min-w-0 truncate'>
-                  {(i + 1) * 10} · {labelOf(i)}
-                </Text>
-              </button>
+      {manual > 0 && (
+        <ChipRow className='mb-1.5'>
+          <Text size='micro' variant='label' component='span' className='uppercase'>
+            раскладка: ручная · {manual}
+          </Text>
+          <Chip dashed onClick={() => setResetOpen(true)} title='вернуть автоматическую раскладку'>
+            авто
+          </Chip>
+        </ChipRow>
+      )}
+      <div
+        ref={canvasRef}
+        className='overflow-auto border border-borderColor bg-bgColor'
+        style={{ maxHeight: 640, touchAction: drag ? 'none' : undefined }}
+      >
+        <div style={{ width: layout.width, height: layout.height, position: 'relative' }}>
+          <svg width={layout.width} height={layout.height} className='absolute inset-0' aria-hidden>
+            {wires.map((w) => (
+              <path
+                key={w.key}
+                d={w.d}
+                fill='none'
+                stroke='currentColor'
+                strokeWidth={1}
+                strokeDasharray={w.faint ? '3 3' : undefined}
+                opacity={w.faint ? 0.3 : 0.45}
+              />
             ))}
-          </div>
-        )}
+          </svg>
 
-        {layout.boxes.map((box) => {
-          const b = blocks.find((x) => x.key === box.key);
-          if (!b) return null;
-          const terminal = res.frontier.includes(box.key) && res.units.has(box.key);
-          return (
-            <div key={box.key}>
-              {/* Плитки деталей-входов рисует общий проход по layout.tiles выше: до Ф7 они жили
-                  здесь, и деталь, взятая ещё и обработкой чужого блока, рисовалась дважды. */}
-              <div
-                className='absolute border-2 border-textColor bg-bgColor'
-                style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
-              >
-                <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
-                  <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
-                    ▣ {box.key}
-                  </Text>
-                  {b.name && (
-                    <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
-                      {b.name}
-                    </Text>
+          {layout.boxes.map((box) => {
+            const b = blocks.find((x) => x.key === box.key);
+            if (!b) return null;
+            const terminal = res.frontier.includes(box.key) && res.units.has(box.key);
+            return (
+              <div key={box.key}>
+                <div
+                  className={cn(
+                    'absolute border-2 border-textColor bg-bgColor',
+                    drag?.key === box.key && drag.started && 'opacity-70',
                   )}
-                  <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
-                    {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
-                  </Text>
-                </div>
-                {!frozen && (
-                  <div className='absolute -top-4 left-0 flex items-center gap-1'>
-                    {/* Взять узел входом следующей сборки можно только пока он НА СТОЛЕ: съеденный
-                        узел лежит внутри другого, и предлагать его — предлагать заведомый отказ. */}
-                    {onTable.has(box.key) && (
-                      <Chip
-                        dashed={!picked.includes(box.key)}
-                        onClick={() => toggle(box.key)}
-                        title='взять этот узел в следующую сборку'
-                      >
-                        {picked.includes(box.key) ? '✓ выбран' : 'выбрать'}
-                      </Chip>
-                    )}
-                    <Chip dashed onClick={() => onAddStep(box.key)} title='добавить обработку по этому узлу'>
-                      + операция
-                    </Chip>
-                    <Chip
-                      dashed
-                      onClick={() => onDissolve(b.producedAt)}
-                      title='шаг перестанет собирать узел; входы вернутся на стол следующим шагам'
-                    >
-                      растворить
-                    </Chip>
-                  </div>
-                )}
-                {b.steps.map((i) => (
-                  <button
-                    key={i}
-                    type='button'
-                    onClick={() => onPickStep(i)}
-                    className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-                    style={{ height: LINE_H }}
-                    title='открыть шаг в списке'
-                  >
-                    <Text size='nano' component='span' className='min-w-0 truncate'>
-                      {(i + 1) * 10} · {labelOf(i)}
+                  style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
+                  {...dragHandlers(box.key, box.x, box.y)}
+                >
+                  <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
+                    <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                      ▣ {box.key}
                     </Text>
-                  </button>
-                ))}
+                    {b.name && (
+                      <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                        {b.name}
+                      </Text>
+                    )}
+                    <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                      {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
+                    </Text>
+                  </div>
+                  {!frozen && (
+                    <div className='absolute -top-4 left-0 flex items-center gap-1'>
+                      {/* Взять узел входом следующей сборки можно только пока он НА СТОЛЕ: съеденный
+                          узел лежит внутри другого, и предлагать его — предлагать заведомый отказ. */}
+                      {onTable.has(box.key) && (
+                        <Chip
+                          dashed={!picked.includes(box.key)}
+                          onClick={clickGuard(() => toggle(box.key))}
+                          title='взять этот узел в следующую сборку'
+                        >
+                          {picked.includes(box.key) ? '✓ выбран' : 'выбрать'}
+                        </Chip>
+                      )}
+                      <Chip dashed onClick={clickGuard(() => onAddStep(box.key))} title='добавить обработку по этому узлу'>
+                        + операция
+                      </Chip>
+                      <Chip
+                        dashed
+                        onClick={clickGuard(() => onDissolve(b.producedAt))}
+                        title='шаг перестанет собирать узел; входы вернутся на стол следующим шагам'
+                      >
+                        растворить
+                      </Chip>
+                    </div>
+                  )}
+                  {b.steps.map((i) => (
+                    <button
+                      key={i}
+                      type='button'
+                      onClick={clickGuard(() => onPickStep(i))}
+                      className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                      style={{ height: LINE_H }}
+                      title='открыть шаг в списке'
+                    >
+                      <Text size='nano' component='span' className='min-w-0 truncate'>
+                        {(i + 1) * 10} · {labelOf(i)}
+                      </Text>
+                    </button>
+                  ))}
+                </div>
               </div>
+            );
+          })}
+
+          {/* ХВОСТОВОЙ БОКС: шаги, не достигающие ни одного узла. До Ф7 их на полотне не было
+              вовсе — неразмеченная карточка показывала пустоту вместо существующего маршрута.
+              Пунктир и лексикон те же, что у врезки рельса, чтобы две вьюшки называли одно
+              одинаково. */}
+          {layout.tail && (
+            <div
+              className={cn(
+                'absolute border-2 border-dashed border-borderColor bg-bgColor',
+                drag?.key === '' && drag.started && 'opacity-70',
+              )}
+              style={{ left: layout.tail.x, top: layout.tail.y, width: layout.tail.w, height: layout.tail.h }}
+              {...dragHandlers('', layout.tail.x, layout.tail.y)}
+            >
+              <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
+                <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                  ◌ вне узлов
+                </Text>
+                <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                  цель шага — не узел
+                </Text>
+              </div>
+              {looseSteps.map((i) => (
+                <button
+                  key={i}
+                  type='button'
+                  onClick={clickGuard(() => onPickStep(i))}
+                  className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                  style={{ height: LINE_H }}
+                  title='открыть шаг в списке'
+                >
+                  <Text size='nano' component='span' className='min-w-0 truncate'>
+                    {(i + 1) * 10} · {labelOf(i)}
+                  </Text>
+                </button>
+              ))}
             </div>
-          );
-        })}
+          )}
+
+          {/* ВСЕ ДЕТАЛИ КАРТОЧКИ — по одной плитке на деталь, место следует из состояния: съеденная
+              стоит у бокса своего узла, свободная — в колонке у левого края. Координаты приходят из
+              раскладки, а не считаются здесь: раскладка проверяема пробой, разметка — нет.
+
+              Плитки рисуются ПОСЛЕ боксов намеренно: hit-test отдаёт плитку при наложении (меньшая
+              цель побеждает), и порядок отрисовки обязан этому соответствовать — иначе рука
+              целилась бы в то, чего не видит. В авто-раскладке ноды не пересекаются, но ручные
+              позиции пересечение разрешают.
+
+              Плитка остаётся <button> и на съеденной детали, хотя действия у той пока нет: клик по
+              съеденной уводит к съевшему шагу — это T-32, а фокусируемость нужна уже сейчас, иначе
+              клавиатура потеряет половину полотна ровно в тот момент, когда полотно стало полным.
+
+              `aria-disabled` вместо `disabled`: на выпущенной карточке плитку нельзя выбрать, но
+              МОЖНО двигать (Р9), а `disabled`-кнопка не получает pointer-событий вовсе. */}
+          {layout.tiles.map((t) => (
+            <button
+              key={`tile:${t.key}`}
+              type='button'
+              aria-disabled={frozen || undefined}
+              onClick={t.state === 'free' && !frozen ? clickGuard(() => toggle(t.key)) : undefined}
+              className={cn(
+                'absolute flex items-center justify-center px-1 text-center',
+                t.state === 'free' ? 'border border-dashed border-borderColor' : 'border border-borderColor bg-bgColor',
+                picked.includes(t.key) && 'border-solid border-textColor bg-bgZebra',
+                drag?.key === t.key && drag.started && 'opacity-70',
+              )}
+              style={{ left: t.x, top: t.y, width: t.w, height: t.h }}
+              title={
+                t.state === 'free'
+                  ? `${pieceNameOf(t.key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`
+                  : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}`
+              }
+              {...dragHandlers(t.key, t.x, t.y)}
+            >
+              <Text size='nano' variant='label' component='span' className='line-clamp-2'>
+                {pieceNameOf(t.key)}
+              </Text>
+            </button>
+          ))}
+        </div>
       </div>
-    </div>
+
+      <ConfirmationModal
+        open={resetOpen}
+        onOpenChange={setResetOpen}
+        onConfirm={() => {
+          onResetPositions();
+          setResetOpen(false);
+        }}
+        title='вернуть автоматическую раскладку'
+        confirmLabel='сбросить'
+        cancelLabel='оставить'
+        width='sm'
+      >
+        <Text size='micro' variant='label'>
+          все ручные позиции этой карточки будут забыты, и схема снова расставит узлы сама. Данные
+          карточки не изменятся: позиции — только способ смотреть.
+        </Text>
+      </ConfirmationModal>
     </>
   );
 }

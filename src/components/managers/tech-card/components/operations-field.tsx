@@ -88,6 +88,7 @@ import {
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblySchematic } from './assembly-schematic';
+import { useSchematicPrefs } from './use-schematic-prefs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
@@ -2895,9 +2896,15 @@ export function OperationsField({
   addRequest = null,
   onAdded,
   storedHasUnits = false,
+  frozen = false,
 }: {
   /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
   storedHasUnits?: boolean;
+  /**
+   * Карточка выпущена. Внешний `<fieldset disabled>` глушит кнопки, но НЕ pointer-обработчики на
+   * div — а схема Ф7 стала жестовой. Поэтому гейт обязан быть явным, и он приезжает пропом.
+   */
+  frozen?: boolean;
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
@@ -3128,7 +3135,20 @@ export function OperationsField({
   // сегодняшней карточке это дало бы пустое полотно на первом же открытии, то есть экран,
   // который читается как «сломалось». Схема становится дефолтом ровно там, где есть что
   // рисовать; пользовательский выбор живёт в сессии и уступает, когда узлов нет.
-  const [mode, setMode] = useState<'list' | 'schematic' | null>(null);
+  //
+  // Ф7: выбор пережил перезагрузку — он лёг в предпочтения карточки рядом с ручными позициями.
+  // Вывод остался фолбэком, когда предпочтения нет; замечание §10.3 («сохранённая схема на
+  // карточке без узлов = пустое полотно») сняла сама Ф7 — полотно без узлов теперь показывает
+  // детали.
+  const schematicNodeKeys = useCallback(() => {
+    const live = new Set<string>(['']); // '' — хвостовой бокс, он тоже нода
+    for (const p of pieces) live.add(p.lineKey);
+    for (const k of grouping.res.units.keys()) live.add(k);
+    return live;
+  }, [pieces, grouping.res]);
+  const prefs = useSchematicPrefs(techCardId, schematicNodeKeys);
+  const mode = prefs.mode;
+  const setMode = prefs.setMode;
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -3428,6 +3448,10 @@ export function OperationsField({
                 onJoin={joinIntoUnit}
                 onAddStep={addStepIntoUnit}
                 onDissolve={dissolveUnit}
+                positions={prefs.pos}
+                onMove={prefs.move}
+                onResetPositions={prefs.reset}
+                frozen={frozen}
               />
             ) : (
             <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
