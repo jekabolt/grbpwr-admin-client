@@ -5,6 +5,7 @@ import {
   common_TechCardConstruction,
   common_TechCardMachineProfile,
   common_TechCardOperation,
+  common_TechCardPiece,
   common_TechCardPressProfile,
   common_TechCardReleaseMeta,
 } from 'api/proto-http/admin';
@@ -229,8 +230,44 @@ function SnapshotEquipment({ c }: { c?: common_TechCardConstruction }) {
   );
 }
 
-function SnapshotOperations({ ops }: { ops: common_TechCardOperation[] }) {
+function SnapshotOperations({
+  ops,
+  pieces,
+}: {
+  ops: common_TechCardOperation[];
+  /** Детали ИЗ ЭТОГО ЖЕ СНАПШОТА: имя должно быть тем, что было подписано, а не сегодняшним. */
+  pieces: common_TechCardPiece[];
+}) {
   if (ops.length === 0) return null;
+  // Вход шага — деталь ИЛИ узел, и читать надо union: релиз, подписанный до Ф1, поля 46 не несёт
+  // и говорит о деталях старой проекцией. Ключ, не совпавший ни с одной деталью снапшота, есть
+  // ссылка на узел — так его и печатаем.
+  const partsOf = (o: common_TechCardOperation): string => {
+    // ИСТОЧНИК КЛЮЧЕЙ РЕШАЕТ, ЧТО ОЗНАЧАЕТ НЕНАЙДЕННЫЙ КЛЮЧ. В union'е (поле 46) ключ, не
+    // совпавший с деталью, есть ссылка на узел. В старой проекции `piece_line_keys` узлов НЕ
+    // БЫВАЕТ вовсе — их тогда не существовало, — и печатать там «▣ FRONT» значит утверждать про
+    // подписанный документ то, чего в нём быть не могло.
+    const legacy = !o.inputKeys?.length;
+    const keys = legacy ? (o.pieceLineKeys ?? []) : (o.inputKeys ?? []);
+    return keys
+      .map((k) => {
+        if (!k) return '';
+        const piece = pieces.find((pc) => pc.lineKey === k);
+        // Деталь без имени — всё ещё деталь: показываем её ключ, а не выдаём за узел.
+        if (piece) return piece.name?.trim() || k;
+        return legacy ? k : `▣ ${k}`;
+      })
+      .filter(Boolean)
+      .join(' + ');
+  };
+  // Выход. Пусто на релизе, подписанном ДО Ф1, значит «карточка не была размечена» — и это
+  // правда, а не пробел: узлов тогда не существовало вовсе. Поэтому никакого фолбэка.
+  const outputOf = (o: common_TechCardOperation): string => {
+    const key = (o.outputUnitKey ?? '').trim();
+    if (!key) return '';
+    const name = (o.outputUnitName ?? '').trim();
+    return name ? `▣ ${key} · ${name}` : `▣ ${key}`;
+  };
   return (
     <>
       <GroupLabel>operations (frozen) · {ops.length}</GroupLabel>
@@ -276,6 +313,20 @@ function SnapshotOperations({ ops }: { ops: common_TechCardOperation[] }) {
                     {spec}
                   </Text>
                 )}
+                {/* ЧТО ШАГ БРАЛ И ЧТО СОБРАЛ. До Ф6 архив не показывал ни того, ни другого:
+                    подписанная сборка была в снапшоте, но на экране её не было — то есть
+                    единственное место, где релиз можно перечитать, о ней молчало. */}
+                {(() => {
+                  const parts = partsOf(o);
+                  const out = outputOf(o);
+                  if (!parts && !out) return null;
+                  return (
+                    <Text size='nano' variant='label' component='span' className='block'>
+                      {parts || '—'}
+                      {out ? ` → ${out}` : ''}
+                    </Text>
+                  );
+                })()}
               </Text>
             }
             value={
@@ -366,7 +417,7 @@ function ReleaseSnapshot({
           <SnapshotBom items={snap.bomItems ?? []} />
           <SnapshotConstruction c={snap.construction} />
           <SnapshotEquipment c={snap.construction} />
-          <SnapshotOperations ops={snap.operations ?? []} />
+          <SnapshotOperations ops={snap.operations ?? []} pieces={snap.pieces ?? []} />
 
           <Text size='micro' variant='label' className='mt-2'>
             Colourways aren’t part of the frozen snapshot (they’re live products) — the count
