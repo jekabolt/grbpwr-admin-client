@@ -1846,7 +1846,11 @@ export function TechCardForm({
                   of one field array, which is exactly the shape that made a piece created from the
                   DXF dialog land in the copy nobody was looking at. Cut pieces are on PATTERNS now,
                   a tab every card has, so the whole special case is gone. */}
-              <ConstructionTab techCard={techCard} />
+              {/* `active` — не украшение: вкладки этой формы СМОНТИРОВАНЫ ВСЕ СРАЗУ и лишь
+                  спрятаны, а разбор выкроек на вкладке заказывается автоматически. Без флага
+                  каждое открытие любой тех-карты качало бы её DXF — включая правку одного поля в
+                  шапке. */}
+              <ConstructionTab techCard={techCard} active={activeTab === 'construction'} />
             </SectionStack>
 
             {/* LABELS & PACKAGING */}
