@@ -201,7 +201,9 @@ export function assemblyLayout(
     const tail = tailBox(0, x0);
     const tilesH = tiles.length ? 16 + tiles.length * (TILE + TILE_GAP) : 0;
     const height = Math.max(tilesH, tail ? tail.y + tail.h : 0);
-    const width = tail ? x0 + W + 24 : tiles.length ? FREE_TILE_X + FREE_TILE_W + 12 : 0;
+    // Правый отступ тот же, что закладывает `applyOverrides`: разойдись они — «пустой набор
+    // оверрайдов даёт точное тождество» перестало бы быть правдой в этой ветке.
+    const width = tail ? x0 + W + 24 : tiles.length ? FREE_TILE_X + FREE_TILE_W + 24 : 0;
     return {
       boxes: [],
       byKey: new Map(),

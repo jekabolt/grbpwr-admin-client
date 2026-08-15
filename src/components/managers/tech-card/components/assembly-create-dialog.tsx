@@ -149,6 +149,16 @@ export function AssemblyCreateDialog({
 
   const problem = (() => {
     if (distinct.length === 0) return 'у шага должен быть хотя бы один вход';
+    // ВХОД ОБЯЗАН ЛЕЖАТЬ НА СТОЛЕ (правило 1). Прийти сюда мёртвый ключ может: выбор на полотне
+    // переживает соседний жест, который эту деталь съел, и «обработка · 1» по ней родила бы шаг,
+    // который движок и сервер отвергнут. Диалог, обещающий валидный шаг, обязан это ловить.
+    const dead = distinct.find((k) => !frontier.includes(k));
+    if (dead) return `«${dead}» больше не лежит на столе — входом его не взять`;
+    // Поглощение теряет смысл, если поглощаемый узел сняли из входов: получился бы ВТОРОЙ
+    // производитель живого узла, а не его дособирание.
+    if (produces === 'absorb' && !distinct.includes(absorbInto)) {
+      return `узел ${absorbInto} снят из входов — дособрать можно только то, что шаг берёт`;
+    }
     if (!operationType || operationType === UNKNOWN_TYPE) return 'выберите, что шаг делает';
     if (!zone || zone === UNKNOWN_ZONE) return 'выберите зону — «other» это законный ответ';
     if (needsMachine && (!machineType || machineType === UNKNOWN_MACHINE)) return 'выберите машинку';

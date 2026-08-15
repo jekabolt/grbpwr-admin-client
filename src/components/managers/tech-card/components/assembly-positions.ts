@@ -45,24 +45,36 @@ const clamp = (p: { x: number; y: number }) => ({ x: Math.max(0, p.x), y: Math.m
  * Вход не мутируется: раскладка мемоизируется выше по дереву.
  */
 export function applyOverrides(layout: SchematicLayout, pos: PosOverrides): SchematicLayout {
+  // Сдвиг каждого сдвинутого бокса — его стопка деталей обязана уехать вместе с ним.
+  const boxShift = new Map<string, { dx: number; dy: number }>();
+
   const moveBox = (b: BoxLayout): BoxLayout => {
     const o = pos[b.key];
     if (!o) return b;
     const p = clamp(o);
-    // stackTop едет вместе с боксом: стопка — его часть, а не самостоятельная нода. Плитки,
-    // у которых есть собственный оверрайд, отвяжутся от неё сами — ниже.
+    boxShift.set(b.key, { dx: p.x - b.x, dy: p.y - b.y });
+    // stackTop едет вместе с боксом: стопка — его часть, а не самостоятельная нода.
     return { ...b, x: p.x, y: p.y, stackTop: b.stackTop + (p.y - b.y) };
   };
+
   const moveTile = (t: TileLayout): TileLayout => {
     const o = pos[t.key];
-    if (!o) return t;
-    const p = clamp(o);
-    return { ...t, x: p.x, y: p.y };
+    if (o) {
+      // Своя рука сильнее чужой: деталь, поставленную отдельно, бокс за собой больше не таскает.
+      const p = clamp(o);
+      return { ...t, x: p.x, y: p.y };
+    }
+    // СЪЕДЕННАЯ ДЕТАЛЬ ЛЕЖИТ У СВОЕГО БОКСА — это не украшение, а единственное, чем стопка
+    // сообщает принадлежность. Утащи бокс и оставь плитки — и схема начнёт врать: плитки будут
+    // стоять у пустого места, а бокс приедет без входов.
+    const d = t.state === 'eaten' ? boxShift.get(t.into) : undefined;
+    return d ? { ...t, x: t.x + d.dx, y: t.y + d.dy } : t;
   };
 
+  // Порядок обязателен: сдвиги боксов должны быть известны раньше, чем поедут плитки.
   const boxes = layout.boxes.map(moveBox);
-  const tiles = layout.tiles.map(moveTile);
   const tail = layout.tail ? moveBox(layout.tail) : undefined;
+  const tiles = layout.tiles.map(moveTile);
 
   const byKey = new Map<string, BoxLayout>();
   for (const b of boxes) byKey.set(b.key, b);

@@ -3141,6 +3141,11 @@ export function OperationsField({
   // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
   const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
+  // Карточку выпустили, пока диалог открыт — диалог обязан закрыться сам: он живёт порталом, и
+  // никакая заморозка разметки его не гасит.
+  useEffect(() => {
+    if (frozen) setPendingCreate(null);
+  }, [frozen]);
   // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
   // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
   // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
@@ -3290,6 +3295,11 @@ export function OperationsField({
    * строку с «!» и долг вместо результата. Теперь минимум валидности собран ДО записи.
    */
   const appendStep = (r: CreateResult) => {
+    // ЗАМОРОЗКА ПРОВЕРЯЕТСЯ ЗДЕСЬ, а не только в разметке. Диалог рисуется порталом в body —
+    // внешний `<fieldset disabled>` карточки до него не достаёт вовсе. Гонка настоящая: нажали
+    // Release, пока запрос летит открыли создание, ответ перевёл карточку в RELEASED — и
+    // «создать» дописал бы шаг в выпущенную карточку, взведя isDirty.
+    if (frozen) return;
     const at = fields.length;
     append({
       ...emptyOperation,
@@ -3316,6 +3326,7 @@ export function OperationsField({
 
   /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
   const dissolveUnit = (stepIndex: number) => {
+    if (frozen) return; // тот же гейт: растворение — мутация, и разметке она не подотчётна
     setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
     setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
   };
@@ -3381,15 +3392,26 @@ export function OperationsField({
         </Toolbar>
       </div>
 
-      {fields.length === 0 ? (
+      {/* Заглушка пустой последовательности уступает схеме, как только схему попросили. Карточка с
+          деталями и нулём шагов — ПЕРВОЕ состояние любой тех-карты, и именно с него сборку и
+          начинают; закрывать его заглушкой значило бы не пустить на схему ровно там, где она
+          нужнее всего. */}
+      {fields.length === 0 && effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
             последовательность сборки пока пуста. Добавьте первый шаг — или опишите конструкцию
             словами и сгенерируйте черновик ниже.
           </Text>
-          <Button type='button' variant='main' size='sm' onClick={addOperation}>
-            + операция
-          </Button>
+          <div className='flex items-center gap-2'>
+            <Button type='button' variant='main' size='sm' onClick={addOperation}>
+              + операция
+            </Button>
+            {pieces.length > 0 && (
+              <Chip dashed onClick={() => setMode('schematic')} title='разложить детали и собрать узлы жестами'>
+                собрать на схеме
+              </Chip>
+            )}
+          </div>
         </div>
       ) : (
         <div

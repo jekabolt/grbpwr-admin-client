@@ -88,7 +88,19 @@ const B = fixture(
   const moved = out.byKey.get(box.key);
   is(name, [moved.x, moved.y], [500, 300]);
   is(name + ' (stackTop едет вместе)', moved.stackTop, box.stackTop + (300 - box.y));
-  is(name + ' (плитки не тронуты)', j(out.tiles), j(A.layout.tiles));
+  // Стопка съеденных деталей — часть бокса, а не соседи: она обязана уехать вместе с ним.
+  // Свободная деталь живёт в колонке у левого края и к боксу не привязана.
+  const dx = 500 - box.x;
+  const dy = 300 - box.y;
+  for (const t of A.layout.tiles) {
+    const m = out.tileByKey.get(t.key);
+    const attached = t.state === 'eaten' && t.into === box.key;
+    is(
+      `${name} (плитка ${t.key}, ${attached ? 'в стопке' : 'свободна'})`,
+      [m.x, m.y],
+      attached ? [t.x + dx, t.y + dy] : [t.x, t.y],
+    );
+  }
   is(name + ' (хвост не тронут)', j(out.tail), j(A.layout.tail));
   checks++;
   if (out.width < 500 + box.w + 24) fail(name, `полотно не выросло: width ${out.width}`);
@@ -104,6 +116,19 @@ const B = fixture(
   is(name + ' (боксы не тронуты)', j(out.boxes), j(A.layout.boxes));
   checks++;
   if (out.height < 400 + tile.h + 30) fail(name, `полотно не выросло: height ${out.height}`);
+}
+
+{
+  // Своя рука сильнее чужой: у детали, поставленной отдельно, есть собственный оверрайд, и
+  // переезд бокса её больше не касается — иначе «поставил сюда» отменялось бы чужим движением.
+  const name = 'плитка с собственной позицией за боксом не едет';
+  const box = A.layout.boxes[0];
+  const eaten = A.layout.tiles.find((t) => t.state === 'eaten' && t.into === box.key);
+  const out = applyOverrides(A.layout, {
+    [box.key]: { x: 500, y: 300 },
+    [eaten.key]: { x: 40, y: 400 },
+  });
+  is(name, [out.tileByKey.get(eaten.key).x, out.tileByKey.get(eaten.key).y], [40, 400]);
 }
 
 {

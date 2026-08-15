@@ -40,6 +40,15 @@ const DRAG_THRESHOLD = 4;
 const AUTOSCROLL_EDGE = 32;
 /** Постоянная скорость автоскролла: ускорение под неподвижным курсором дезориентирует. */
 const AUTOSCROLL_SPEED = 12;
+/**
+ * Ноды не отдают палец прокрутке.
+ *
+ * Объявляется ЗАРАНЕЕ и на самой ноде: браузер выбирает поведение жеста в момент касания, и
+ * запрет, выставленный после `pointerdown`, уже ничего не решает — палец уводит страницу в
+ * прокрутку, прилетает `pointercancel`, нода возвращается назад. Полотно при этом остаётся
+ * прокручиваемым: касание мимо нод ведёт себя как обычно.
+ */
+const NODE_TOUCH = 'none' as const;
 
 type DragState = {
   key: string;
@@ -102,6 +111,17 @@ export function AssemblySchematic({
   const { LINE_H, HEAD_H } = SCHEMATIC_METRICS;
   const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
+  // ВЫБОР ЖИВЁТ ДО ТЕХ ПОР, ПОКА ЖИВЫ ЕГО КЛЮЧИ. Деталь, попавшая в узел соседним жестом, входом
+  // больше не годится, а чип «выбрано: A» продолжал бы предлагать её — и «обработка · 1» родила бы
+  // шаг со съеденным входом, то есть ровно ту невалидность, ради устранения которой затевался
+  // диалог.
+  useEffect(() => {
+    setPicked((cur) => {
+      const live = cur.filter((k) => res.frontier.includes(k));
+      return live.length === cur.length ? cur : live;
+    });
+  }, [res]);
+
   const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
 
   const showMessage = useSnackBarStore((st) => st.showMessage);
@@ -109,6 +129,14 @@ export function AssemblySchematic({
   const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
 
   const [drag, setDrag] = useState<DragState | null>(null);
+  // Зеркало состояния жеста для СИНХРОННОГО чтения. Слушатели window живут дольше одного рендера,
+  // а решение «куда именно бросили» обязано считаться по последнему движению, а не по тому, что
+  // успело отрендериться: последний рывок руки иначе теряется, и дроп попадает в прежнюю цель.
+  const dragRef = useRef<DragState | null>(null);
+  const commitDrag = useCallback((v: DragState | null) => {
+    dragRef.current = v;
+    setDrag(v);
+  }, []);
   const canvasRef = useRef<HTMLDivElement>(null);
   const lastClient = useRef<{ x: number; y: number } | null>(null);
   // Клик приходит после перетаскивания — и не должен срабатывать как выбор. Порог разводит
@@ -132,6 +160,19 @@ export function AssemblySchematic({
     return { x: e.clientX - r.left + el.scrollLeft, y: e.clientY - r.top + el.scrollTop };
   }, []);
 
+  /**
+   * ЖЕСТ СЛУШАЕТСЯ НА WINDOW, А НЕ НА НОДЕ, и захват указателя не берётся вовсе.
+   *
+   * Первая редакция вешала move/up на саму ноду и брала `setPointerCapture` по достижении
+   * порога. Два отказа отсюда следовали. Захват, если браузер его отклонил (а он вправе),
+   * оставлял жест без единого слушателя за пределами ноды: указатель уходил, отпускался
+   * снаружи, `pointerup` не приходил никогда — состояние жеста зависало вместе с работающим
+   * rAF. И захват меняет цель последующего `click`, из-за чего обычные клики по строкам шагов
+   * приходилось спасать отдельной механикой.
+   *
+   * Слушатели на window снимают оба: события приходят всегда, клик остаётся родным. Порог 4px
+   * по-прежнему разводит клик и драг по НАМЕРЕНИЮ.
+   */
   const dragHandlers = (key: string, nodeX: number, nodeY: number) => ({
     onPointerDown: (e: React.PointerEvent) => {
       if (e.button !== 0) return;
@@ -142,9 +183,7 @@ export function AssemblySchematic({
       // недостаточно: драг, закончившийся не на кликабельном, оставил бы флаг взведённым и
       // проглотил следующий честный клик.
       justDragged.current = false;
-      // Захват НЕ берётся здесь: он меняет цель последующего click, и обычный клик по строке
-      // шага перестал бы работать. Захват берётся ровно в тот момент, когда жест признан драгом.
-      setDrag({
+      commitDrag({
         key,
         offX: p.x - nodeX,
         offY: p.y - nodeY,
@@ -157,47 +196,32 @@ export function AssemblySchematic({
         started: false,
       });
     },
-    onPointerMove: (e: React.PointerEvent) => {
-      if (!drag || drag.key !== key) return;
-      const p = toLayoutPoint(e);
-      if (!p) return;
-      lastClient.current = { x: e.clientX, y: e.clientY };
-      const far = Math.abs(p.x - drag.fromX) > DRAG_THRESHOLD || Math.abs(p.y - drag.fromY) > DRAG_THRESHOLD;
-      if (!drag.started && !far) return;
-      if (!drag.started) {
-        try {
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        } catch {
-          // Указатель мог уже уйти — жест продолжится без захвата, это не повод его ронять.
+  });
+
+  /**
+   * Кликабельный элемент полотна, НЕ являющийся формой.
+   *
+   * Схема живёт внутри общего `<fieldset disabled={frozen}>` карточки (index.tsx), а
+   * задизейбленность НАСЛЕДУЕТСЯ: любая `<button>` под таким предком не получает ни клика, ни
+   * pointer-событий, и `aria-disabled` этого не отменяет. То есть на выпущенной карточке умирало
+   * ровно то, что Р9 обещал оставить живым: раскладывать схему руками и ходить по её шагам.
+   * Проп `frozen` был проведён честно, но душили нас раньше, чем он что-то решал.
+   *
+   * Поэтому интерактив полотна собран на div с ролью кнопки: клавиатура сохранена (Enter и
+   * Space), а наследуемая задизейбленность до div'а не достаёт. Запреты Р9 продолжает решать
+   * `frozen`, а не fieldset — явно, как и требовалось.
+   */
+  const activate = (fn?: () => void) => ({
+    role: 'button' as const,
+    tabIndex: fn ? 0 : undefined,
+    onClick: fn,
+    onKeyDown: fn
+      ? (e: React.KeyboardEvent) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return;
+          e.preventDefault();
+          fn();
         }
-      }
-      setDrag({ ...drag, started: true, x: p.x - drag.offX, y: p.y - drag.offY, ptrX: p.x, ptrY: p.y });
-    },
-    onPointerUp: () => {
-      if (!drag || drag.key !== key) return;
-      if (drag.started) {
-        justDragged.current = true;
-        // Перемещение состоялось в любом случае: жест композитен, и «перенёс» не отменяется тем,
-        // что «соединить» потом отклонили. Позиция остаётся там, где ноду бросили.
-        onMove(key, { x: Math.max(0, drag.x), y: Math.max(0, drag.y) });
-        if (verdict && !verdict.ok) {
-          // Отказ ДО диалога: открывать форму, которую нельзя отправить, — предлагать заведомый
-          // отказ. Причина словами движка.
-          showMessage(verdict.reason, 'error');
-        } else if (verdict?.ok && target) {
-          onCreate({
-            inputKeys: [drag.key, target.key],
-            absorbInto: verdict.absorbInto,
-            intent: verdict.absorbInto ? undefined : 'unit',
-          });
-        }
-      }
-      setDrag(null);
-    },
-    // Срыв жеста — откат транзиента без записи: система забрала указатель, значит намерения
-    // подтверждено не было.
-    onPointerCancel: () => setDrag(null),
-    onLostPointerCapture: () => setDrag(null),
+      : undefined,
   });
 
   const clickGuard = (fn: () => void) => () => {
@@ -208,25 +232,73 @@ export function AssemblySchematic({
     fn();
   };
 
-  // ЖЕСТ, НЕ ДОШЕДШИЙ ДО ПОРОГА, обязан кончиться где угодно. До порога захвата ещё нет, и
-  // указатель, ушедший с ноды, больше не отдаёт ей событий — без этого сторожа «нажал и увёл»
-  // оставляло бы висеть незакрытое состояние жеста.
+  // Жизнь жеста целиком: движение, отпускание, срыв. Подписка держится, пока жест жив.
+  const dragActive = drag !== null;
   useEffect(() => {
-    if (!drag || drag.started) return;
-    const done = () => setDrag(null);
-    window.addEventListener('pointerup', done);
-    window.addEventListener('pointercancel', done);
-    return () => {
-      window.removeEventListener('pointerup', done);
-      window.removeEventListener('pointercancel', done);
+    if (!dragActive) return;
+    const onPointerMove = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const p = toLayoutPoint(e);
+      if (!p) return;
+      lastClient.current = { x: e.clientX, y: e.clientY };
+      const far = Math.abs(p.x - d.fromX) > DRAG_THRESHOLD || Math.abs(p.y - d.fromY) > DRAG_THRESHOLD;
+      if (!d.started && !far) return;
+      commitDrag({ ...d, started: true, x: p.x - d.offX, y: p.y - d.offY, ptrX: p.x, ptrY: p.y });
     };
-  }, [drag]);
+    const onPointerUp = () => {
+      const d = dragRef.current;
+      commitDrag(null);
+      if (!d?.started) return;
+      justDragged.current = true;
+      const at = { x: Math.max(0, d.x), y: Math.max(0, d.y) };
+      // Перемещение состоялось в любом случае: жест композитен, и «перенёс» не отменяется тем,
+      // что «соединить» потом отклонили. Позиция остаётся там, где ноду бросили.
+      onMove(d.key, at);
+      if (frozen) return;
+      // ПРИЦЕЛ СЧИТАЕТСЯ ЗДЕСЬ И СЕЙЧАС, из последнего состояния жеста и свежего `res`: цель,
+      // посчитанная в рендере, отстаёт на одно движение, а форму мог изменить кто-то ещё, пока
+      // жест длился.
+      const eff = applyOverrides(auto, { ...positions, [d.key]: at });
+      const hit = hitNode(eff, d.ptrX, d.ptrY, d.key);
+      const v = hit ? combineVerdict(d.key, hit.key, res, steps) : null;
+      if (v && !v.ok) {
+        // Отказ ДО диалога: открывать форму, которую нельзя отправить, — предлагать заведомый
+        // отказ. Причина словами движка.
+        showMessage(v.reason, 'error');
+      } else if (v?.ok && hit) {
+        onCreate({
+          inputKeys: [d.key, hit.key],
+          absorbInto: v.absorbInto,
+          intent: v.absorbInto ? undefined : 'unit',
+        });
+      }
+    };
+    const onPointerCancel = () => {
+      // Система забрала указатель — намерение подтверждено не было. Но клик-эхо погасить надо:
+      // отпускание над нодой иначе сработает выбором, которого никто не просил.
+      justDragged.current = true;
+      commitDrag(null);
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerCancel);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
+    };
+  }, [dragActive, auto, positions, res, steps, frozen, onMove, onCreate, showMessage, toLayoutPoint, commitDrag]);
 
   // Escape во время драга — тот же откат: жест отменён, нода возвращается на прежнее место.
   useEffect(() => {
     if (!drag?.started) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setDrag(null);
+      if (e.key !== 'Escape') return;
+      // Отменённый жест не должен догнать пользователя кликом: указатель ещё зажат, и отпускание
+      // родит click по ноде — то есть прыжок к шагу, которого никто не просил.
+      justDragged.current = true;
+      commitDrag(null);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -255,9 +327,22 @@ export function AssemblySchematic({
           el.scrollTop += dy;
           const movedX = el.scrollLeft - wasL;
           const movedY = el.scrollTop - wasT;
-          // Курсор стоит на месте, полотно уехало — значит нода под курсором сместилась на ту же
-          // величину. Иначе она отставала бы от руки ровно на прокрутку.
-          if (movedX || movedY) setDrag((d) => (d ? { ...d, x: d.x + movedX, y: d.y + movedY } : d));
+          // Курсор стоит на месте, полотно уехало — значит и нода, и ТОЧКА ПРИЦЕЛА сместились на
+          // ту же величину. Без второй половины автоскролл довозил ноду до цели, а hit-test
+          // продолжал бить в исходную точку: дроп на подъехавшую цель молча становился
+          // перемещением.
+          if (movedX || movedY) {
+            const d = dragRef.current;
+            if (d) {
+              commitDrag({
+                ...d,
+                x: d.x + movedX,
+                y: d.y + movedY,
+                ptrX: d.ptrX + movedX,
+                ptrY: d.ptrY + movedY,
+              });
+            }
+          }
         }
       }
       raf = requestAnimationFrame(tick);
@@ -289,7 +374,7 @@ export function AssemblySchematic({
 
   const manual = Object.keys(positions).length;
 
-  if (layout.tiles.length === 0 && layout.boxes.length === 0) {
+  if (layout.tiles.length === 0 && layout.boxes.length === 0 && !layout.tail) {
     // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, а не пустое полотно — но теперь оно означает ровно одно:
     // на карточке НЕТ ДЕТАЛЕЙ. До Ф7 сюда попадала и размеченная деталями карточка без единого
     // узла, то есть экран говорил «нечего рисовать» ровно тогда, когда рисовать было что.
@@ -375,25 +460,36 @@ export function AssemblySchematic({
           onClear={() => setPicked([])}
         />
       )}
-      {drag?.started && hint && (
-        <Text size='micro' variant='label' className={cn('mb-1.5', verdict && !verdict.ok && 'text-error')}>
-          {hint}
-        </Text>
-      )}
+      {/* Место под подсказку зарезервировано ПОСТОЯННО. Появляясь по факту наведения, строка
+          сдвигала бы контейнер вниз посреди жеста — а вместе с ним и систему координат: нода
+          прыгала бы на высоту строки, и у верхней кромки цели подсветка мигала бы через кадр. */}
+      <div className='mb-1.5 min-h-4'>
+        {drag?.started && hint && (
+          <Text size='micro' variant='label' className={cn(verdict && !verdict.ok && 'text-error')}>
+            {hint}
+          </Text>
+        )}
+      </div>
       {manual > 0 && (
         <ChipRow className='mb-1.5'>
           <Text size='micro' variant='label' component='span' className='uppercase'>
             раскладка: ручная · {manual}
           </Text>
-          <Chip dashed onClick={() => setResetOpen(true)} title='вернуть автоматическую раскладку'>
+          {/* Тот же случай, что у нод: Chip рисует <button>, а на выпущенной карточке она мертва
+              под внешним fieldset'ом — и сбросить чужую расстановку было бы нечем. */}
+          <span
+            {...activate(() => setResetOpen(true))}
+            className='inline-flex cursor-pointer items-center gap-1 whitespace-nowrap border border-dashed border-borderColor bg-bgColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor transition-colors hover:text-textColor'
+            title='вернуть автоматическую раскладку'
+          >
             авто
-          </Chip>
+          </span>
         </ChipRow>
       )}
       <div
         ref={canvasRef}
         className='overflow-auto border border-borderColor bg-bgColor'
-        style={{ maxHeight: 640, touchAction: drag ? 'none' : undefined }}
+        style={{ maxHeight: 640 }}
       >
         <div style={{ width: layout.width, height: layout.height, position: 'relative' }}>
           <svg width={layout.width} height={layout.height} className='absolute inset-0' aria-hidden>
@@ -422,18 +518,24 @@ export function AssemblySchematic({
                     drag?.key === box.key && drag.started && 'opacity-70',
                     targetRing(box.key),
                   )}
-                  style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
+                  style={{ left: box.x, top: box.y, width: box.w, height: box.h, touchAction: NODE_TOUCH }}
                   {...dragHandlers(box.key, box.x, box.y)}
                 >
                   {/* ШАПКА — PICK-ЗОНА БОКСА. Строки внутри уже кнопки шагов, поэтому выбор узла
                       переехал на заголовок: одна нода — одно место, куда по ней кликают. Кнопка, а
                       не div, ради клавиатуры: Enter на сфокусированной шапке — тот же выбор, и
                       путь «сшить» с клавиатуры не потерян. */}
-                  <button
-                    type='button'
-                    onClick={
-                      !frozen && onTable.has(box.key) ? clickGuard(() => toggle(box.key)) : undefined
-                    }
+                  <div
+                    {...activate(
+                      !frozen && onTable.has(box.key)
+                        ? clickGuard(() => toggle(box.key))
+                        : // Съеденный узел входом не взять, зато вопрос «куда он делся» законен —
+                          // и шапка на него отвечает, как отвечает плитка съеденной детали.
+                          (() => {
+                            const eater = res.consumedBy.get(box.key);
+                            return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
+                          })(),
+                    )}
                     className={cn(
                       'flex w-full items-baseline gap-1 border-b border-hairline px-1 text-left',
                       !frozen && onTable.has(box.key) && 'hover:bg-bgZebra',
@@ -443,7 +545,7 @@ export function AssemblySchematic({
                     title={
                       onTable.has(box.key)
                         ? 'узел на столе — кликните, чтобы взять его в следующую сборку'
-                        : 'узел уже вошёл в другой — входом его больше не взять'
+                        : 'узел уже вошёл в другой; кликните, чтобы открыть шаг, который его съел'
                     }
                   >
                     <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
@@ -457,7 +559,7 @@ export function AssemblySchematic({
                     <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
                       {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
                     </Text>
-                  </button>
+                  </div>
                   {!frozen && (
                     <div className='absolute -top-4 left-0 flex items-center gap-1'>
                       <Chip
@@ -477,10 +579,9 @@ export function AssemblySchematic({
                     </div>
                   )}
                   {b.steps.map((i) => (
-                    <button
+                    <div
                       key={i}
-                      type='button'
-                      onClick={clickGuard(() => onPickStep(i))}
+                      {...activate(clickGuard(() => onPickStep(i)))}
                       className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                       style={{ height: LINE_H }}
                       title='открыть шаг в списке'
@@ -488,7 +589,7 @@ export function AssemblySchematic({
                       <Text size='nano' component='span' className='min-w-0 truncate'>
                         {(i + 1) * 10} · {labelOf(i)}
                       </Text>
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -506,7 +607,13 @@ export function AssemblySchematic({
                 drag?.key === '' && drag.started && 'opacity-70',
                 targetRing(''),
               )}
-              style={{ left: layout.tail.x, top: layout.tail.y, width: layout.tail.w, height: layout.tail.h }}
+              style={{
+                left: layout.tail.x,
+                top: layout.tail.y,
+                width: layout.tail.w,
+                height: layout.tail.h,
+                touchAction: NODE_TOUCH,
+              }}
               {...dragHandlers('', layout.tail.x, layout.tail.y)}
             >
               <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
@@ -518,10 +625,9 @@ export function AssemblySchematic({
                 </Text>
               </div>
               {looseSteps.map((i) => (
-                <button
+                <div
                   key={i}
-                  type='button'
-                  onClick={clickGuard(() => onPickStep(i))}
+                  {...activate(clickGuard(() => onPickStep(i)))}
                   className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                   style={{ height: LINE_H }}
                   title='открыть шаг в списке'
@@ -529,7 +635,7 @@ export function AssemblySchematic({
                   <Text size='nano' component='span' className='min-w-0 truncate'>
                     {(i + 1) * 10} · {labelOf(i)}
                   </Text>
-                </button>
+                </div>
               ))}
             </div>
           )}
@@ -543,29 +649,24 @@ export function AssemblySchematic({
               целилась бы в то, чего не видит. В авто-раскладке ноды не пересекаются, но ручные
               позиции пересечение разрешают.
 
-              Плитка остаётся <button> и на съеденной детали, хотя действия у той пока нет: клик по
-              съеденной уводит к съевшему шагу — это T-32, а фокусируемость нужна уже сейчас, иначе
-              клавиатура потеряет половину полотна ровно в тот момент, когда полотно стало полным.
-
-              `aria-disabled` вместо `disabled`: на выпущенной карточке плитку нельзя выбрать, но
-              МОЖНО двигать (Р9), а `disabled`-кнопка не получает pointer-событий вовсе. */}
+              Плитка кликабельна в обоих состояниях: свободная берётся в сборку, съеденная уводит к
+              шагу, который её съел. Роль кнопки на div, а не сама <button>: см. `activate` —
+              внешний `<fieldset disabled>` карточки убил бы и клик, и перетаскивание. */}
           {layout.tiles.map((t) => (
-            <button
+            <div
               key={`tile:${t.key}`}
-              type='button'
-              aria-disabled={frozen || undefined}
-              onClick={
+              {...activate(
                 t.state === 'free'
                   ? !frozen
                     ? clickGuard(() => toggle(t.key))
                     : undefined
                   : // Съеденную деталь входом не взять — правило 2. Зато главный вопрос читателя о
                     // ней «куда она делась», и клик отвечает: уводит к шагу, который её съел.
-                    clickGuard(() => {
+                    (() => {
                       const eater = res.consumedBy.get(t.key);
-                      if (eater !== undefined) onPickStep(eater);
-                    })
-              }
+                      return eater === undefined ? undefined : clickGuard(() => onPickStep(eater));
+                    })(),
+              )}
               className={cn(
                 'absolute flex items-center justify-center px-1 text-center',
                 t.state === 'free' ? 'border border-dashed border-borderColor' : 'border border-borderColor bg-bgColor',
@@ -573,7 +674,7 @@ export function AssemblySchematic({
                 drag?.key === t.key && drag.started && 'opacity-70',
                 targetRing(t.key),
               )}
-              style={{ left: t.x, top: t.y, width: t.w, height: t.h }}
+              style={{ left: t.x, top: t.y, width: t.w, height: t.h, touchAction: NODE_TOUCH }}
               title={
                 t.state === 'free'
                   ? `${pieceNameOf(t.key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`
@@ -584,7 +685,7 @@ export function AssemblySchematic({
               <Text size='nano' variant='label' component='span' className='line-clamp-2'>
                 {pieceNameOf(t.key)}
               </Text>
-            </button>
+            </div>
           ))}
         </div>
       </div>
