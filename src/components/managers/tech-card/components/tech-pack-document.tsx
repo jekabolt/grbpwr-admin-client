@@ -875,11 +875,26 @@ export function TechPackDocument({
   // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
   // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
   // same join, computed in the editor and stored in the row.
-  const opParts = (o: { pieceLineKeys?: string[] }): string[] => {
+  //
+  // ЧИТАЕТСЯ ОБЪЕДИНЕНИЕ (input_keys), а не только легаси-проекция: с узлами сборки вход шага —
+  // деталь ИЛИ узел, и шаг, сшивающий два узла, по одной проекции напечатался бы вовсе без
+  // состава. Фолбэк на piece_line_keys оставлен для архивных снапшотов: они отданы ровно так,
+  // как были записаны, и поля 46 у них нет.
+  const opParts = (o: { pieceLineKeys?: string[]; inputKeys?: string[] }): string[] => {
     const pieces = tc.pieces ?? [];
-    return (o.pieceLineKeys ?? [])
-      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || '')
+    const keys = o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? []);
+    return keys
+      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || (k ? `▣ ${k}` : ''))
       .filter(Boolean);
+  };
+
+  // Колонка «выход»: что шаг ПРОИЗВОДИТ. Пусто = шаг ничего не собирает — это обработка, и пустая
+  // ячейка здесь утверждение, а не пробел.
+  const opOutput = (o: { outputUnitKey?: string; outputUnitName?: string }): string => {
+    const key = (o.outputUnitKey ?? '').trim();
+    if (!key) return '';
+    const name = (o.outputUnitName ?? '').trim();
+    return name ? `▣ ${key} · ${name}` : `▣ ${key}`;
   };
 
   // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
@@ -2175,6 +2190,7 @@ export function TechPackDocument({
                   <th className={TH}>machine / mode</th>
                   <th className={TH}>zone</th>
                   <th className={TH}>pieces</th>
+                  <th className={TH}>produces</th>
                   <th className={TH}>seam</th>
                   <th className={TH}>materials</th>
                   <th className={`${TH} text-right`}>SMV</th>
@@ -2189,7 +2205,7 @@ export function TechPackDocument({
                         перечисляли узлы одинаково. */}
                     <tr className='break-inside-avoid'>
                       <td
-                        colSpan={8}
+                        colSpan={9}
                         className='border border-black bg-neutral-100 px-1.5 py-1 text-control font-bold uppercase tracking-wide'
                       >
                         {g.label}
@@ -2250,6 +2266,10 @@ export function TechPackDocument({
                           </td>
                           <td className={TD}>{zoneText(o.zone) || '—'}</td>
                           <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
+                          {/* ЧТО ШАГ ПРОИЗВОДИТ. Пустая ячейка — утверждение, а не пробел: шаг
+                              ничего не собирает, это обработка, и его входы остаются на столе
+                              следующим шагам. Полная печать блоками — задача Ф6. */}
+                          <td className={TD}>{opOutput(o) || '—'}</td>
                           <td className={TD}>
                             <div>{seamClassText(o.seamClass) || '—'}</div>
                             <div className='font-medium'>{allowanceCell}</div>

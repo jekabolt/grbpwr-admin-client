@@ -19,6 +19,7 @@ import {
   common_TechCardOperation,
   common_TechCardOperationType,
 } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -78,6 +79,12 @@ import { kindLabel, preferredBomKinds } from './bom-kind';
 import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
+import {
+  assemblyReleaseCheck,
+  assemblySweep,
+  classifyAssemblyInputs,
+  type AssemblyResult,
+} from './assembly-frontier';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
@@ -115,8 +122,12 @@ const CORE_STEP_FIELDS = new Set([
   'smv',
   'calloutNumber',
   'note',
-  'pieceLineKeys',
+  'inputKeys',
   'bomLineKeys',
+  // Блок «produces» стоит в ядре редактора, а не в фолде переопределений: серверный отказ на
+  // этих полях не должен раскрывать фолд, в котором нужного контрола нет.
+  'outputUnitKey',
+  'outputUnitName',
 ]);
 
 // What a step INHERITS, written the way it is shown: «4 (оверлок у окна)», «4 (card)», «not set».
@@ -173,7 +184,7 @@ const TOPSTITCH_ROW_OPTIONS = [
 ];
 
 // The BOM sections an operation can CONSUME, in picker order. The rule is «чем соединяют», not
-// «что соединяют»: roll goods (fabric / lining / insulation) reach a step through pieceLineKeys —
+// «что соединяют»: roll goods (fabric / lining / insulation) reach a step through inputKeys —
 // they ARE the parts being joined — and packaging never reaches the sewing floor, it rides
 // packaging_recipe. Interlining is the deliberate exception on the roll-goods side: fusing is
 // consumed AT a fusing step.
@@ -275,7 +286,9 @@ export const emptyOperation = {
   pressSteam: undefined as boolean | undefined,
   pressCloth: NONE_PRESS_CLOTH,
   note: '',
-  pieceLineKeys: [] as string[],
+  inputKeys: [] as string[],
+  outputUnitKey: '',
+  outputUnitName: '',
   bomLineKeys: [] as string[],
 };
 
@@ -304,7 +317,12 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     operationType: o.operationType || NONE_OP_TYPE,
     zone: o.zone || NONE_ZONE,
     bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
-    pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
+    // TODO(T-26): генератор узлов пока не существует — aiOperationToPb на бэке не заполняет ни
+    // 21, ни 46, так что черновик приходит вовсе без привязок. Фолбэк написан заранее: без него
+    // научившийся узлам генератор молча выбрасывал бы узловые входы, и tsc это не поймал бы.
+    inputKeys: (o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])).filter(Boolean),
+    outputUnitKey: o.outputUnitKey ?? '',
+    outputUnitName: o.outputUnitName ?? '',
     calloutNumber: o.calloutNumber || 0,
     smv: decimalToInput(o.smv),
     seamClass: o.seamClass || NONE_SEAM_CLASS,
@@ -431,6 +449,137 @@ function RailTotal() {
   );
 }
 
+// ── фронтир ──────────────────────────────────────────────────────────────────────────────────
+// Что реально лежит на столе перед шагом k: детали, ещё не съеденные джойнами, плюс узлы,
+// произведённые раньше и ещё не съеденные.
+//
+// СЧИТАЕТСЯ В ЛИСТЕ. Подписка на весь массив `operations` из корня OperationsField
+// перерисовывала бы всё поле на каждое нажатие клавиши в любом шаге — дисциплина этого файла
+// прямо требует держать кросс-операционные вычисления в листьях или в getValues на событии.
+//
+// Правила — из общего с сервером порта (assembly-frontier), а не из собственных представлений:
+// пикер обязан предлагать РОВНО то, что примет запись.
+type AssemblyView = {
+  res: AssemblyResult;
+  /** что шаг index имеет право взять входом */
+  availableBefore: (index: number) => Set<string>;
+  /** живые узлы на фронтире шага (в порядке появления) */
+  liveUnitsBefore: (index: number) => string[];
+  /** ключ детали → узел, внутри которого она теперь лежит */
+  eatenInto: Map<string, string>;
+};
+
+function useAssemblyView(pieces: PieceRef[]): AssemblyView {
+  const ops = useWatch({ name: 'operations' }) as
+    | Array<{ inputKeys?: string[]; outputUnitKey?: string; outputUnitName?: string }>
+    | undefined;
+  return useMemo(() => {
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = (ops ?? []).map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(sweepPieces, steps);
+    const eatenInto = new Map<string, string>();
+    res.consumedBy.forEach((stepIdx, key) => {
+      const into = steps[stepIdx]?.outputUnitKey;
+      if (into) eatenInto.set(key, into);
+    });
+    const before = (index: number) => new Set(res.frontierBefore[index] ?? res.frontier);
+    return {
+      res,
+      availableBefore: before,
+      liveUnitsBefore: (index: number) =>
+        (res.frontierBefore[index] ?? res.frontier).filter((k) => res.units.has(k)),
+      eatenInto,
+    };
+  }, [ops, pieces]);
+}
+
+// AssemblyTray — лоток, который перестал врать.
+//
+// ЛИСТ, и это не стилистика: он подписан на весь массив operations (фронтир иначе не посчитать),
+// и будь эта подписка в корне OperationsField, всё поле перерисовывалось бы на каждое нажатие
+// клавиши в любом шаге.
+//
+// Съеденные детали НЕ рисуются стеной зачёркнутых: на позднем шаге съедено почти всё, и такая
+// стена сообщала бы только о том, что работа идёт. Вместо неё — свёрнутый счётчик, который
+// называет узел, куда деталь ушла. Решение прототипа, а не изобретение.
+function AssemblyTray({
+  pieces,
+  pieceShapes,
+  tiled,
+  highlighted,
+  stepIndex,
+  onAdd,
+}: {
+  pieces: PieceRef[];
+  pieceShapes: PieceShapeMap;
+  tiled: boolean;
+  highlighted: boolean;
+  stepIndex: number;
+  onAdd: (key: string) => void;
+}) {
+  const view = useAssemblyView(pieces);
+  const [consumedOpen, setConsumedOpen] = useState(false);
+
+  const available = view.availableBefore(stepIndex);
+  const units = view.liveUnitsBefore(stepIndex);
+  const onTable = pieces.filter((p) => available.has(p.lineKey));
+  const eaten = pieces.filter((p) => !available.has(p.lineKey));
+
+  return (
+    <>
+      {units.map((key) => {
+        const unit = view.res.units.get(key);
+        const title = unit?.name ? `${key} — ${unit.name}` : key;
+        return (
+          <Chip
+            key={`unit:${key}`}
+            onClick={() => onAdd(key)}
+            title={`${title}: узел из ${unit?.leaves.length ?? 0} деталей — кликните, чтобы добавить к открытому шагу`}
+          >
+            ▣ {key}
+          </Chip>
+        );
+      })}
+      {onTable.map((p) => (
+        <TrayChip
+          key={p.lineKey}
+          piece={p}
+          shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
+          tiled={tiled}
+          highlighted={highlighted}
+          onAdd={() => onAdd(p.lineKey)}
+        />
+      ))}
+      {eaten.length > 0 && (
+        <>
+          <Chip
+            dashed
+            onClick={() => setConsumedOpen((v) => !v)}
+            title='детали, уже вошедшие в узлы: их нельзя взять повторно — строка детали съедается ровно одним джойном'
+          >
+            уже в узлах · {eaten.length}
+          </Chip>
+          {consumedOpen &&
+            eaten.map((p) => {
+              const into = view.eatenInto.get(p.lineKey);
+              return (
+                <Text key={`eaten:${p.lineKey}`} size='micro' variant='label' component='span'>
+                  {p.name}
+                  {into ? ` ∈ ${into}` : ''}
+                </Text>
+              );
+            })}
+        </>
+      )}
+    </>
+  );
+}
+
 // ── piece tray ───────────────────────────────────────────────────────────────────────────────
 // Wiring 14 operations to their pieces used to mean opening 14 popovers. The tray puts every
 // DECLARED piece on one strip: drag a chip onto a step in the rail, or — the keyboard and touch
@@ -501,6 +650,356 @@ function TrayChip({
   );
 }
 
+
+// ── produces: что шаг собирает ───────────────────────────────────────────────────────────────
+// Узел — не поле «опишите шаг», а РЕЗУЛЬТАТ шага, на который ссылаются входы следующих шагов.
+// Именно поэтому он необязателен: пустой ключ значит «шаг ничего не собирает», это обработка, и
+// её входы остаются на столе. Ровно этим он отличается от свободнотекстового `node`, который
+// был обязательным и который действующий конструктор заполнить не смог (0289).
+//
+// ПОГЛОЩЕНИЯ КАК ОТДЕЛЬНОЙ МЕХАНИКИ ЗДЕСЬ НЕТ, и это не упущение: «GARMENT + HEM → GARMENT»
+// выражается тем, что автор берёт узел входом и пишет его же ключ выходом. Движок узнаёт
+// поглощение сам; отдельная кнопка «поглотить» была бы вторым способом сказать то же самое.
+function ProducesBlock({
+  index,
+  inputKeys,
+  pieces,
+  assembly,
+}: {
+  index: number;
+  inputKeys: string[];
+  pieces: PieceRef[];
+  assembly: AssemblyView;
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const outputKey = (useWatch({ name: `operations.${index}.outputUnitKey` }) ?? '') as string;
+  const outputName = (useWatch({ name: `operations.${index}.outputUnitName` }) ?? '') as string;
+
+  const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
+  const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
+
+  // СПРЯТАЛ КОНТРОЛ — ОЧИСТИ ЗНАЧЕНИЕ. Ключ можно стереть бэкспейсом, а не только «растворить»:
+  // ветка переключается на чип «сделать узлом», оба инпута размонтируются, и оставшееся имя
+  // становится теневым значением — сервер откажет всей записи гигиеной (shadow-name), а контрола,
+  // чтобы это исправить, на экране уже нет. То же правило, что у ширины отстрочки ниже.
+  useEffect(() => {
+    if (!outputKey && outputName) {
+      setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
+    }
+  }, [outputKey, outputName, index, setValue]);
+  const absorbs = !!outputKey && inputKeys.includes(outputKey) && assembly.res.units.has(outputKey);
+
+  // Код предлагается по зоне шага, а не по именам деталей: имена длинные и меняются, а код
+  // печатается на бумаге и в QR. Совпадение с существующим узлом — не беда: это и есть
+  // поглощение, если тот же узел взят входом.
+  const suggest = () => {
+    const zone = (getValues(`operations.${index}.zone`) ?? '') as string;
+    // UNKNOWN и OTHER — не имена зон, а их отсутствие: узел «UNKNOWN» уехал бы на печать и в QR.
+    const token = zone.replace(/^TECH_CARD_GARMENT_ZONE_/, '');
+    const base =
+      token === 'UNKNOWN' || token === 'OTHER' || !token
+        ? 'UNIT'
+        : token.replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'UNIT';
+    // Занято — это и узлы, И КЛЮЧИ ДЕТАЛЕЙ: пространство имён одно (правило 6), и предлагать
+    // код, совпавший с деталью, значит предлагать заведомый отказ.
+    const taken = new Set<string>([
+      ...((getValues('operations') ?? []) as Array<{ outputUnitKey?: string }>)
+        .map((o) => (o?.outputUnitKey ?? '').trim())
+        .filter(Boolean),
+      ...pieces.map((p) => p.lineKey),
+    ]);
+    // Колонка сервера — VARCHAR(64), и режет она БАЙТЫ. Код собран из ASCII-токена зоны, но
+    // подрезать всё равно надо здесь: отказ по длине на сохранении был бы отказом за то, чего
+    // автор не набирал.
+    const fit = (v: string) => (new TextEncoder().encode(v).length <= 64 ? v : v.slice(0, 48));
+    if (!taken.has(base)) return fit(base);
+    for (let n = 2; ; n++) {
+      const candidate = `${base}-${n}`;
+      if (!taken.has(candidate)) return fit(candidate);
+    }
+  };
+
+  const declare = () => {
+    if (usable.length < 2) {
+      showMessage(
+        'узел из одного входа — это обработка, а не узел: возьмите на шаг хотя бы два входа',
+        'error',
+      );
+      return;
+    }
+    const code = suggest();
+    if (byKey.has(code)) {
+      showMessage(`ключ «${code}» занят деталью — у деталей и узлов одно пространство имён`, 'error');
+      return;
+    }
+    setValue(`operations.${index}.outputUnitKey`, code, { shouldDirty: true });
+    // Разметка появилась снова — намерение «снять разметку» отменено. Без этого сценарий
+    // «снял → передумал → объявил заново» уходил бы в отказ «снял и одновременно прислал узлы»,
+    // а снять флаг руками нечем.
+    setValue('assemblyCleared', false, { shouldDirty: true });
+  };
+
+  return (
+    <>
+      <GroupLabel>produces</GroupLabel>
+      {!outputKey ? (
+        <ChipRow>
+          <Chip dashed onClick={declare} title='объявить, что этот шаг собирает узел'>
+            ▣ сделать узлом
+          </Chip>
+          <Text size='micro' variant='label' component='span'>
+            шаг ничего не собирает — его входы остаются доступными следующим шагам
+          </Text>
+        </ChipRow>
+      ) : (
+        <>
+          <div className='flex flex-wrap items-center gap-2'>
+            {/* InputField, а не голый Input: последний — это <input> без привязки к форме, и
+                набранный код узла молча не доезжал бы до сабмита. maxLength по колонкам сервера
+                (VARCHAR(64) / VARCHAR(255)) — отказ по длине здесь бесполезен, поле просто не
+                должно позволять её набрать. */}
+            <InputField
+              name={`operations.${index}.outputUnitKey`}
+              label='код узла'
+              placeholder='SHELL'
+              maxLength={64}
+            />
+            <InputField
+              name={`operations.${index}.outputUnitName`}
+              label='имя узла'
+              placeholder='корпус'
+              maxLength={255}
+            />
+            <Chip
+              dashed
+              onClick={() => {
+                setValue(`operations.${index}.outputUnitKey`, '', { shouldDirty: true });
+                setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
+              }}
+              title='шаг перестанет собирать узел; его входы вернутся на стол следующим шагам'
+            >
+              растворить
+            </Chip>
+          </div>
+          {absorbs && (
+            <Text size='micro' variant='label' className='mt-1'>
+              поглощение: узел {outputKey} сохраняет идентичность и получает содержимое этого шага
+            </Text>
+          )}
+          {!outputName && (
+            <Text size='micro' variant='label' className='mt-1'>
+              имя необязательно, но на печати и в цехе читают его, а не код
+            </Text>
+          )}
+          {/* Только когда узел ДЕЙСТВИТЕЛЬНО состоялся: у невалидного джойна (арность < 2,
+              второй производитель, съеденный вход) подстановка его ключа превратила бы законные
+              ссылки в unknown-key — починка, которая ломает. */}
+          {assembly.res.units.has(outputKey) && (
+            <BootstrapEatenRefs index={index} outputKey={outputKey} pieces={pieces} />
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+// BootstrapEatenRefs — «заменить съеденные ссылки узлом».
+//
+// БЕЗ ЭТОЙ КНОПКИ ФИЧУ НЕЛЬЗЯ ПРИМЕНИТЬ К ЖИВОЙ КАРТОЧКЕ. Сегодняшние карты законно ссылаются
+// на одну деталь из многих шагов: стачали, отстрочили, приутюжили — все три несут рукав. Стоит
+// объявить первый узел, и каждый поздний шаг, ссылающийся на съеденную деталь, начинает
+// нарушать правило 1 — а правило 1 отказывает ВСЕЙ записи. Руками это часы правок под жёсткими
+// отказами; здесь — одно действие.
+function BootstrapEatenRefs({
+  index,
+  outputKey,
+  pieces,
+}: {
+  index: number;
+  outputKey: string;
+  pieces: PieceRef[];
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ inputKeys?: string[] }>;
+
+  // Съедается ВСЁ, что шаг взял входом, а не только детали: джойн [SHELL, SL] съедает и узел
+  // SHELL, и поздние шаги-обработки, ссылающиеся на SHELL, ломаются ровно так же. Считать здесь
+  // одни детали значило бы починить первый узел и не починить цепочку узлов — то есть основной
+  // сценарий фичи.
+  //
+  // Исключение — собственный выходной ключ: при поглощении узел не съедается, он сохраняет
+  // идентичность, и ссылки на него после шага законны.
+  const mine = new Set(
+    (ops[index]?.inputKeys ?? []).filter((k) => k && k !== outputKey),
+  );
+  // Кандидаты — только ПОЗЖЕ этого шага: шаг раньше него деталь ещё не потерял.
+  const affected: number[] = [];
+  ops.forEach((o, i) => {
+    if (i <= index) return;
+    if ((o?.inputKeys ?? []).some((k) => mine.has(k))) affected.push(i);
+  });
+  if (affected.length === 0) return null;
+
+  const apply = () => {
+    const all = (getValues('operations') ?? []) as Array<{ inputKeys?: string[] }>;
+    affected.forEach((i) => {
+      const cur = (all[i]?.inputKeys ?? []).filter(Boolean);
+      // Узел встаёт НА МЕСТО первого заменённого входа, а не в начало списка: порядок входов —
+      // авторский, он несёт интерлив «деталь между узлами» и попадает в подпись секции. Сдвигать
+      // его молча значило бы протухать подпись за автора.
+      const next: string[] = [];
+      let placed = false;
+      for (const k of cur) {
+        if (mine.has(k)) {
+          if (!placed && !cur.includes(outputKey)) {
+            next.push(outputKey);
+            placed = true;
+          }
+          continue;
+        }
+        next.push(k);
+      }
+      if (!placed && !next.includes(outputKey)) next.unshift(outputKey);
+      setValue(`operations.${i}.inputKeys`, next, { shouldDirty: true });
+    });
+    setValue('assemblyCleared', false, { shouldDirty: true });
+    showMessage(`ссылки на съеденные детали заменены узлом ${outputKey} в ${affected.length} шагах`, 'success');
+  };
+
+  return (
+    <ChipRow className='mt-1'>
+      <Chip
+        dashed
+        onClick={apply}
+        title={`шаги ниже ссылаются на детали, которые этот узел съедает; замена обязательна — иначе сервер отвергнет всю карточку`}
+      >
+        заменить съеденные ссылки узлом · {affected.length}
+      </Chip>
+    </ChipRow>
+  );
+}
+
+
+// ClearAssemblyButton — «снять разметку узлов».
+//
+// ДВЕ ПОЛОВИНЫ, И ОНИ НЕДЕЛИМЫ. Распаковка без флага упрётся в контентный бекстоп сервера
+// («запись не несёт ни одного узла против карточки, которая их несёт»); флаг без распаковки — в
+// «противоречие: снял и одновременно прислал узлы». Поэтому кнопка делает обе вещи разом и
+// оставляет форму в состоянии, которое сервер принимает строкой «cleared=true» своей таблицы.
+//
+// РАСПАКОВКА ПО ЗАМЫКАНИЮ, а не отбрасыванием: шаг со входами [SHELL, SL] после наивного
+// удаления узла остался бы с одним рукавом, а полочка и спинка, жившие внутри SHELL, к нему не
+// вернулись бы — карточка врала бы о том, что этот шаг сшивает.
+function ClearAssemblyButton({
+  pieces,
+  storedHasUnits,
+}: {
+  pieces: PieceRef[];
+  /** Размечена ли СОХРАНЁННАЯ карточка. Не то же самое, что размечена форма. */
+  storedHasUnits: boolean;
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const view = useAssemblyView(pieces);
+  const [confirming, setConfirming] = useState(false);
+
+  // Кнопка видна и когда форма УЖЕ не размечена, а сохранённая карточка ещё размечена.
+  //
+  // Без этого путь отступления не работал: восстановленный черновик (или любой другой источник
+  // распакованных входов) даёт форму без узлов, кнопка исчезает, сохранение упирается в бекстоп
+  // с текстом «нажмите „снять разметку узлов“» — а нажимать нечего, и единственный выход
+  // перезагрузка с потерей правок. Отказ, из которого нет выхода, хуже отказа.
+  const inForm = view.res.units.size;
+  if (inForm === 0 && !storedHasUnits) return null;
+
+  const clear = () => {
+    const ops = (getValues('operations') ?? []) as Array<{
+      inputKeys?: string[];
+      outputUnitKey?: string;
+    }>;
+    const pieceKeys = new Set(pieces.map((p) => p.lineKey));
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const allSteps = ops.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: '',
+    }));
+    // Состав узла берётся НА МОМЕНТ ШАГА, а не финальный. Разница не косметическая: при
+    // «A+B→GARMENT, обработка [GARMENT], GARMENT+C→GARMENT» финальное замыкание вернуло бы
+    // обработке и деталь C, которой на её шаге ещё не существовало. Сервер такое примет —
+    // последовательность останется валидной, — и карточка соврёт о том, что этот шаг делает.
+    //
+    // Префиксный проход: n ≤ 60 шагов, стоимость незаметна, а альтернатива — хранить снимки
+    // замыканий в движке ради одной кнопки.
+    const unitsBefore = (i: number) => assemblySweep(sweepPieces, allSteps.slice(0, i)).units;
+    let droppedDangling = 0;
+    ops.forEach((o, i) => {
+      const seen = new Set<string>();
+      const expanded: string[] = [];
+      const asOfStep = unitsBefore(i);
+      for (const k of o?.inputKeys ?? []) {
+        const unit = asOfStep.get(k) ?? view.res.units.get(k);
+        // Оборванный ключ (не деталь И не узел — обычно удалённый шаг-производитель или легаси
+        // «piece deleted») при распаковке ОТБРАСЫВАЕТСЯ. Оставь его — и запись со снятой
+        // разметкой всё равно «несёт узлы» с точки зрения сервера, то есть кнопка ломала бы
+        // собственный контракт: обещает состояние, которое сервер примет, а отдаёт отказ.
+        if (!unit && !pieceKeys.has(k)) {
+          droppedDangling++;
+          continue;
+        }
+        for (const leaf of unit ? unit.leaves : [k]) {
+          if (!seen.has(leaf)) {
+            seen.add(leaf);
+            expanded.push(leaf);
+          }
+        }
+      }
+      setValue(`operations.${i}.inputKeys`, expanded, { shouldDirty: true });
+      setValue(`operations.${i}.outputUnitKey`, '', { shouldDirty: true });
+      setValue(`operations.${i}.outputUnitName`, '', { shouldDirty: true });
+    });
+    // Намерение объявляется ровно на это сохранение.
+    setValue('assemblyCleared', true, { shouldDirty: true });
+    setConfirming(false);
+    showMessage(
+      droppedDangling > 0
+        ? `разметка узлов снята; оборванных ссылок отброшено: ${droppedDangling} — сохраните карточку`
+        : 'разметка узлов снята — сохраните карточку, чтобы это применилось',
+      'success',
+    );
+  };
+
+  return (
+    <>
+      <Chip
+        dashed
+        onClick={() => setConfirming(true)}
+        title='снять разметку узлов со всей карточки: входы-узлы вернутся в детали по составу'
+      >
+        снять разметку{inForm > 0 ? ` · ${inForm}` : ''}
+      </Chip>
+      <ConfirmationModal
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={clear}
+        title='снять разметку узлов?'
+        confirmLabel='снять'
+      >
+        <Text size='micro'>
+          {inForm > 0
+            ? `Узлов на карточке: ${inForm}.`
+            : 'В форме узлов уже нет, но сохранённая карточка размечена — снятие подтвердит это серверу.'}{' '}
+          Входы-узлы вернутся в детали по составу,
+          выходные ключи будут очищены. Подпись секции CONSTRUCTION станет «изменено после
+          подписи» — это правда, а не дефект: содержание действительно поменялось.
+        </Text>
+      </ConfirmationModal>
+    </>
+  );
+}
+
 // ── the sequence rail ────────────────────────────────────────────────────────────────────────
 // One 26px line per assembly step, so twenty operations read as an ORDER instead of as twenty
 // screens of controls. Drag ⠿ to reorder; the row is a button that opens the step in the editor.
@@ -544,7 +1043,7 @@ function RailStep({
   // The joined pieces, by name, for the composed heading. Resolved through the card's piece list so
   // a rename on the PATTERNS tab reaches every step that references it — which is what the removed
   // PlacementSync was trying to achieve by writing the names into the row.
-  const pieceKeys = (useWatch({ control, name: `operations.${index}.pieceLineKeys` }) ??
+  const pieceKeys = (useWatch({ control, name: `operations.${index}.inputKeys` }) ??
     []) as string[];
   const allPieces = useFormPieces();
   const linkedPieces = pieceKeys
@@ -1187,10 +1686,15 @@ function OperationEditor({
 
   const selectedPieceKeys = (useWatch({
     control,
-    name: `operations.${index}.pieceLineKeys`,
+    name: `operations.${index}.inputKeys`,
   }) ?? []) as string[];
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
+  // Фронтир нужен редактору дважды: чтобы отличить вход-УЗЕЛ от оборванной ссылки на деталь и
+  // чтобы предложить замену съеденных ссылок при объявлении узла. Подписка здесь одна на всю
+  // форму, а не по строке рельса: редактор смонтирован в единственном экземпляре.
+  const assembly = useAssemblyView(pieces);
+  const chosenUnits = selectedPieceKeys.filter((k) => !byKey.has(k) && assembly.res.units.has(k));
   // The same composed heading the rail shows, so the open step and its row in the list are named
   // identically — they used to differ, because the rail fell back to the type while the editor
   // header printed only the type and the row printed `node`.
@@ -1199,16 +1703,21 @@ function OperationEditor({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
       machineType: machineType as common_TechCardMachineType,
       zone: zoneValue as Parameters<typeof operationHeading>[0]['zone'],
-      pieceNames: chosenPieces.map((k) => byKey.get(k)?.name ?? '').filter(Boolean),
+      pieceNames: selectedPieceKeys.map((k) => byKey.get(k)?.name ?? `▣ ${k}`),
       note: noteValue,
     }) || 'new step';
   // A key that no longer resolves (its piece was deleted on the PATTERNS tab, or an older card
   // invented one through the removed picker) is SURFACED, not silently dropped — the save would
   // unlink it and nobody would know which operation lost a part.
-  const danglingPieces = selectedPieceKeys.filter((k) => !byKey.has(k));
+  // Оборванная ссылка — это ключ, который НЕ деталь И НЕ узел. Без второй половины проверки
+  // каждый вход-узел отрисовался бы красным «piece deleted»: узла нет в списке деталей по
+  // определению, он не деталь.
+  const danglingPieces = selectedPieceKeys.filter(
+    (k) => !byKey.has(k) && !assembly.res.units.has(k),
+  );
   const removePieceKey = (lineKey: string) => {
     const next = selectedPieceKeys.filter((k) => k !== lineKey);
-    setValue(`operations.${index}.pieceLineKeys`, next, { shouldDirty: true });
+    setValue(`operations.${index}.inputKeys`, next, { shouldDirty: true });
   };
 
   // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
@@ -1547,15 +2056,33 @@ function OperationEditor({
             {`#${k.slice(-6)} — piece deleted`}
           </Chip>
         ))}
+        {/* Вход-УЗЕЛ. Отдельным видом чипа, а не в общей куче: узел — это уже сшитая подсборка, и
+            путать его с деталью значило бы скрыть от автора, что шаг берёт со стола. */}
+        {chosenUnits.map((k) => (
+          <Chip
+            key={`u:${k}`}
+            title={`узел ${k}: ${assembly.res.units.get(k)?.leaves.length ?? 0} деталей внутри`}
+            onRemove={() => removePieceKey(k)}
+          >
+            ▣ {k}
+          </Chip>
+        ))}
         <Chip dashed onClick={onFlashPieces} title='pick a piece from the tray above the list'>
           ＋ piece
         </Chip>
       </ChipRow>
-      {chosenPieces.length === 0 && danglingPieces.length === 0 && (
+      {chosenPieces.length === 0 && danglingPieces.length === 0 && chosenUnits.length === 0 && (
         <Text size='micro' variant='label' className='mt-1'>
           not linked to any piece — click one in the tray above, or drag it here
         </Text>
       )}
+
+      <ProducesBlock
+        index={index}
+        inputKeys={selectedPieceKeys}
+        pieces={pieces}
+        assembly={assembly}
+      />
 
       <GroupLabel>materials this step consumes</GroupLabel>
       {linkableBoms.length === 0 ? (
@@ -2206,7 +2733,10 @@ export function OperationsField({
   pieceShapes = null,
   addRequest = null,
   onAdded,
+  storedHasUnits = false,
 }: {
+  /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
+  storedHasUnits?: boolean;
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
@@ -2348,12 +2878,12 @@ export function OperationsField({
   const readReplaceImpact = (): ReplaceImpact => {
     const ops = (getValues('operations') ?? []) as {
       smv?: string;
-      pieceLineKeys?: string[];
+      inputKeys?: string[];
     }[];
     return {
       operations: ops.length,
       sam: ops.filter((o) => (o.smv ?? '').trim()).length,
-      pieceLinks: ops.filter((o) => (o.pieceLineKeys ?? []).length > 0).length,
+      pieceLinks: ops.filter((o) => (o.inputKeys ?? []).length > 0).length,
     };
   };
 
@@ -2366,6 +2896,7 @@ export function OperationsField({
   // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
 
   // Чем именно заканчивается «+ new piece», решает наличие чертежа: пока его нет, деталь заводят
   // руками на вкладке деталей; как только к карточке привязан первый DXF, единственным автором
@@ -2453,11 +2984,47 @@ export function OperationsField({
     [],
   );
 
-  const addPieceToOperation = (index: number, lineKey: string) => {
-    if (index < 0 || !pieces.some((p) => p.lineKey === lineKey)) return;
-    const cur = (getValues(`operations.${index}.pieceLineKeys`) ?? []) as string[];
-    if (cur.includes(lineKey)) return;
-    setValue(`operations.${index}.pieceLineKeys`, [...cur, lineKey], { shouldDirty: true });
+  // Вход шага — деталь ИЛИ узел, поэтому проверка «существует ли такая деталь» снята: ключ узла
+  // деталью не является по определению.
+  //
+  // ФРОНТИР СВЕРЯЕТСЯ ПО ЦЕЛЕВОМУ ШАГУ, а не по открытому. Лоток фильтрован фронтиром выбранного
+  // шага, но перетащить чип можно на ЛЮБОЙ шаг рельса — и деталь, свободная на шаге 8, на шаге 3
+  // может быть ещё не съедена, а на шаге 12 уже съедена. Без этой сверки drop молча создавал бы
+  // последовательность, которую сервер отвергнет целиком, и автор узнал бы об этом на сохранении.
+  //
+  // Считается через getValues НА СОБЫТИИ, а не подпиской: подписка на весь массив operations в
+  // корне поля перерисовывала бы всё на каждое нажатие клавиши.
+  const addInputToOperation = (index: number, key: string) => {
+    if (index < 0 || !key) return;
+    const cur = (getValues(`operations.${index}.inputKeys`) ?? []) as string[];
+    if (cur.includes(key)) return;
+
+    const formOps = (getValues('operations') ?? []) as Array<{
+      inputKeys?: string[];
+      outputUnitKey?: string;
+      outputUnitName?: string;
+    }>;
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = formOps.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(sweepPieces, steps);
+    const available = res.frontierBefore[index] ?? res.frontier;
+    if (!available.includes(key)) {
+      const eater = res.consumedBy.get(key);
+      const into = eater !== undefined ? steps[eater]?.outputUnitKey : '';
+      showMessage(
+        into
+          ? `«${key}» на этом шаге уже внутри узла ${into} — взять её повторно нельзя`
+          : `«${key}» на этом шаге ещё не лежит на столе`,
+        'error',
+      );
+      return;
+    }
+    setValue(`operations.${index}.inputKeys`, [...cur, key], { shouldDirty: true });
   };
 
   // Cut pieces are a section of the PATTERNS tab (they used to have their own, then sat on
@@ -2521,16 +3088,14 @@ export function OperationsField({
               деталей ещё нет
             </Text>
           ) : (
-            pieces.map((p) => (
-              <TrayChip
-                key={p.lineKey}
-                piece={p}
-                shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
-                tiled={tiled}
-                highlighted={highlightPieces}
-                onAdd={() => addPieceToOperation(selectedIndex, p.lineKey)}
-              />
-            ))
+            <AssemblyTray
+              pieces={pieces}
+              pieceShapes={pieceShapes}
+              tiled={tiled}
+              highlighted={highlightPieces}
+              stepIndex={selectedIndex}
+              onAdd={(key) => addInputToOperation(selectedIndex, key)}
+            />
           )}
           {/* Чип называет ДЕЙСТВИЕ, которое оператор увидит по приезде, а не абстрактное
               «добавить»: с чертежом это модалка сопоставления, без чертежа — ручная кнопка. */}
@@ -2545,6 +3110,7 @@ export function OperationsField({
           >
             {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
+          <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} />
           <ToolbarSpacer />
           <Text
             size='micro'
@@ -2606,7 +3172,7 @@ export function OperationsField({
                         activeBom={activeBom}
                         pieceShapes={pieceShapes}
                         onHoverPin={(n) => onActivePinChange?.(n)}
-                        onDropPiece={addPieceToOperation}
+                        onDropPiece={addInputToOperation}
                       />
                     ))}
                   </div>
@@ -2644,7 +3210,7 @@ export function OperationsField({
               onRemove={() => removeOperation(selectedIndex)}
               onFlashPieces={flashPieces}
               onActiveBomChange={onActiveBomChange}
-              onDropPiece={addPieceToOperation}
+              onDropPiece={addInputToOperation}
             />
           )}
         </div>

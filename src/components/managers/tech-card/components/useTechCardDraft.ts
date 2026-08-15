@@ -71,6 +71,21 @@ export function useTechCardDraft(
     }
   }, [storageKey, enabled]);
 
+  // draftPayload — единственное место, где черновик превращается в строку.
+  //
+  // assemblyCleared ВЫЧЁРКИВАЕТСЯ ЗДЕСЬ. Это намерение ОДНОГО сохранения, а черновик — «правки на
+  // потом»: восстановить намерение, которое, возможно, уже исполнено, значит открыть дыру мимо
+  // серверного бекстопа. Худший сценарий именно такой — снял разметку, сохранил, другая вкладка
+  // разметила заново, восстановил черновик: взведённый флаг попадает в РАЗРЕШЁННУЮ серверную
+  // клетку и молча стирает чужую свежую разметку.
+  //
+  // Хелпер общий для ОБОИХ писателей (правки формы и правки сабпанелей) намеренно: вычеркнуть
+  // флаг в одном из них — значит не вычеркнуть его вовсе.
+  const draftPayload = (values: TechCardFormData, st: typeof staging) => {
+    const { assemblyCleared: _spent, ...data } = values;
+    return JSON.stringify({ savedAt: Date.now(), data, staging: st?.serialize() ?? [] });
+  };
+
   // Persist on change (debounced), but only once the user has actually edited (isDirty) — merely
   // opening a card and clicking around must not write a redundant draft.
   useEffect(() => {
@@ -80,14 +95,17 @@ export function useTechCardDraft(
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => {
         try {
-          localStorage.setItem(
-            storageKey,
-            JSON.stringify({
-              savedAt: Date.now(),
-              data: form.getValues(),
-              staging: staging?.serialize() ?? [],
-            }),
-          );
+          // assemblyCleared В ЧЕРНОВИК НЕ ПОПАДАЕТ НИКОГДА (см. draftPayload). Это намерение ОДНОГО сохранения, а
+          // черновик — «незаписанные правки на потом»: восстановить намерение, которое, возможно,
+          // уже исполнено, значит открыть дыру мимо серверного бекстопа. Худший сценарий именно
+          // такой: снял разметку, сохранил, другая вкладка разметила заново — восстановленный
+          // черновик со взведённым флагом попадает в РАЗРЕШЁННУЮ серверную клетку и молча стирает
+          // чужую свежую разметку.
+          //
+          // Цена отказа мала и громкая: черновик, где кнопку нажали, но не сохранили, вернётся с
+          // распакованными входами и без флага — сервер откажет бекстопом с внятной подсказкой
+          // «нажмите снять разметку», и пользователь нажмёт её снова.
+          localStorage.setItem(storageKey, draftPayload(form.getValues(), staging));
         } catch {
           /* quota / serialization — best-effort, ignore */
         }
@@ -105,14 +123,11 @@ export function useTechCardDraft(
     if (!enabled || !hasStagedChanges) return;
     const t = setTimeout(() => {
       try {
-        localStorage.setItem(
-          storageKey,
-          JSON.stringify({
-            savedAt: Date.now(),
-            data: form.getValues(),
-            staging: staging?.serialize() ?? [],
-          }),
-        );
+        // ТОТ ЖЕ хелпер, что у соседнего писателя. Писателей черновика ДВА (правки формы и
+        // правки сабпанелей), и вычеркнуть потраченный флаг в одном из них значит не вычеркнуть
+        // его вовсе: достаточно снять разметку, тронуть сабпанель — и в localStorage ляжет
+        // снимок со взведённым намерением.
+        localStorage.setItem(storageKey, draftPayload(form.getValues(), staging));
       } catch {
         /* quota / serialization — best-effort, ignore */
       }
@@ -302,6 +317,31 @@ export function useTechCardDraft(
         return (changed ? merged : p) as typeof p;
       });
     }
+    // ОПЕРАЦИИ: pieceLineKeys → inputKeys (0307). Черновик, снятый до узлов сборки, несёт входы
+    // шага под старым именем, и восстановление БЕЗ этого переноса стало бы командой «сотри все
+    // привязки деталей к шагам»: restore заканчивается form.reset(data) МИМО mapTechCardToForm,
+    // поэтому фолбэк на уровне маппера сюда не достаёт, а маппер записи коэрсит отсутствующее
+    // поле в пустой массив и отправляет его как осознанное «удалить».
+    //
+    // Перенос ПОЛЯ ВНУТРИ ОДНОГО И ТОГО ЖЕ объекта операции, а не сопоставление строк по
+    // индексу: у операции нет стабильного ключа, и сопоставлять было бы не по чему — но здесь
+    // сопоставлять и не нужно, объект тот же самый. Поэтому у этого переноса нет цены, в отличие
+    // от keyless-гарда выше, который черновик отбрасывает.
+    if (Array.isArray(data.operations)) {
+      data.operations = data.operations.map((o) => {
+        const raw = o as Record<string, unknown>;
+        if (Array.isArray(raw.inputKeys) || !Array.isArray(raw.pieceLineKeys)) return o;
+        const { pieceLineKeys, ...rest } = raw;
+        return { ...rest, inputKeys: (pieceLineKeys as string[]).filter(Boolean) } as typeof o;
+      });
+    }
+
+    // СТРАХОВКА ВТОРОГО РУБЕЖА. Черновики, записанные сборками до вычёркивания, уже лежат в
+    // localStorage со взведённым флагом, и правило «отсутствующий ключ берём с карточки» их не
+    // спасает — ключ там ЕСТЬ. Намерение снять разметку не восстанавливается никогда: если оно
+    // ещё актуально, его объявляют кнопкой заново.
+    (data as Record<string, unknown>).assemblyCleared = false;
+
     form.reset(data, { keepDefaultValues: true });
     // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging
     // identity, which is what makes an ALREADY-MOUNTED panel re-run its claim effect and adopt its

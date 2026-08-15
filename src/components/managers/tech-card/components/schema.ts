@@ -817,9 +817,20 @@ const operationSchema = z.object({
   // about which was which guaranteed two cards would fill them the opposite way round.
   note: z.string().optional().default(''),
 
-  // The cut-pieces this operation works on, by stable TechCardPiece.line_key. REPEATED, unlike the
-  // recipe's single piece per norm: an assembly operation joins as many pieces as it joins.
-  pieceLineKeys: z.array(z.string()).default([]),
+  // ЕДИНЫЙ упорядоченный список входов шага: каждый ключ — либо TechCardPiece.line_key (деталь),
+  // либо output_unit_key более раннего шага (узел). Одно поле, а не два параллельных массива:
+  // два useFieldArray на одно имя не синхронизируются, и рассинхрон двух списков — ровно тот
+  // класс бага, который здесь уже ловили.
+  //
+  // Классификация «деталь или узел» НЕ хранится в форме: она выводится сравнением с line_key
+  // деталей карточки — той же функцией, что на сервере (assembly-frontier). Хранить её значило
+  // бы завести второй источник истины, который разъедется с первым при удалении детали.
+  inputKeys: z.array(z.string()).default([]),
+  // Код узла, который производит шаг («SHELL»). Пусто = шаг ничего не собирает: это обработка,
+  // её входы остаются доступными следующим шагам.
+  outputUnitKey: z.string().optional().default(''),
+  // Имя узла. Живёт на первом производящем шаге; поглощающие могут не повторять.
+  outputUnitName: z.string().optional().default(''),
   // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
   // went with the break — the chip row was always the real answer.
   bomLineKeys: z.array(z.string()).default([]),
@@ -1119,6 +1130,11 @@ const techCardObject = z.object({
   details: z.array(detailSchema).default([]), // construction-description aspects (text + images)
   construction: constructionSchema,
   operations: z.array(operationSchema).default([]),
+  // НАМЕРЕНИЕ снять разметку узлов целиком. Не свойство карточки, а свойство ОДНОГО сохранения:
+  // сервер без него отклоняет осведомлённую запись, которая не несёт ни одного узла против
+  // карточки, которая их несёт, — иначе параллельная вкладка или восстановленный черновик
+  // стирали бы самый дорогой ручной ввод молча. Ставит только кнопка «снять разметку узлов».
+  assemblyCleared: z.boolean().default(false),
   labels: z.array(labelSchema).default([]),
   packaging: packagingSchema,
   costing: costingSchema,
@@ -1255,6 +1271,7 @@ export const techCardDefaultData: TechCardFormData = {
   details: [],
   construction: { ...emptyConstruction },
   operations: [],
+  assemblyCleared: false,
   labels: [],
   packaging: { ...emptyPackaging },
   costing: { ...emptyCosting },
@@ -1565,7 +1582,11 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         }
       : { ...emptyConstruction },
     operations: (insert?.operations ?? []).map((o) => ({
-      pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
+      // Объединение (46) — источник; легаси-проекция (21) остаётся фолбэком для архивных
+      // снапшотов, отданных ровно так, как были записаны: у них поля 46 нет вовсе.
+      inputKeys: (o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])).filter(Boolean),
+      outputUnitKey: o.outputUnitKey ?? '',
+      outputUnitName: o.outputUnitName ?? '',
       bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
       operationNumber: o.operationNumber || 0,
       operationType: o.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
@@ -2190,6 +2211,22 @@ export function mapFormToTechCardInsert(
     // instead of erasing them. It is TRANSPORT, not content — it is not hashed into any section
     // digest, so declaring it cannot stale a signature.
     machineFieldsAware: true,
+    // Осведомлённость о полях сборки. Ставится на КАЖДОМ сохранении: сервер по нему отличает
+    // «этот бандл знает про узлы» от «этот бандл сейчас их сотрёт». Снятие разметки — отдельный
+    // флаг assemblyCleared, и его ставит только соответствующая кнопка.
+    assemblyAware: true,
+    // Намерение живёт ровно одно сохранение: форма сбрасывает флаг сразу после отправки.
+    //
+    // ФЛАГ РЕШАЕТСЯ ПО СОХРАНЁННОЙ КАРТОЧКЕ, А НЕ ПО ФОРМЕ. Намерение «снять разметку» имеет
+    // смысл только против карточки, которая разметку НЕСЁТ: сервер отвечает на всё остальное
+    // отказом «cleared против карточки без разметки», и это правильно.
+    //
+    // Форма же знает лишь своё текущее состояние. Объявить узел локально и тут же снять — жест
+    // законный (передумал), но серверу о нём знать незачем: на сохранённой карточке ничего не
+    // менялось. Маппер — единственное место, которое видит обе стороны, поэтому решение здесь.
+    assemblyCleared:
+      !!data.assemblyCleared &&
+      (original?.operations ?? []).some((o) => (o?.outputUnitKey ?? '').trim() !== ''),
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -2225,7 +2262,11 @@ export function mapFormToTechCardInsert(
       return {
         // Blanks dropped here as well as server-side: an empty key would be a field violation the
         // operator never caused.
-        pieceLineKeys: (o.pieceLineKeys ?? []).map((k) => k.trim()).filter(Boolean),
+        // Осведомлённая запись живёт по объединению; поле 21 сервер в ней игнорирует, поэтому
+        // отправлять его не нужно и вредно — оно стало бы вторым мнением о тех же входах.
+        inputKeys: (o.inputKeys ?? []).map((k) => k.trim()).filter(Boolean),
+        outputUnitKey: (o.outputUnitKey ?? '').trim(),
+        outputUnitName: (o.outputUnitName ?? '').trim(),
         bomLineKeys: opBomKeys,
         // operation number is positional (server is authoritative); send (i+1)*10 so a
         // freshly-created card reads back sensibly before the server recomputes.

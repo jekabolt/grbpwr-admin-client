@@ -397,10 +397,10 @@ export function PiecesTab({
     if (removedKey) {
       const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
       (operations ?? []).forEach((o, oi) => {
-        const keys = (o.pieceLineKeys ?? []).filter(Boolean);
+        const keys = (o.inputKeys ?? []).filter(Boolean);
         if (keys.includes(removedKey)) {
           setValue(
-            `operations.${oi}.pieceLineKeys`,
+            `operations.${oi}.inputKeys`,
             keys.filter((k) => k !== removedKey),
             { shouldDirty: true },
           );
