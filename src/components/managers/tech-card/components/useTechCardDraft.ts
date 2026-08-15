@@ -302,6 +302,25 @@ export function useTechCardDraft(
         return (changed ? merged : p) as typeof p;
       });
     }
+    // ОПЕРАЦИИ: pieceLineKeys → inputKeys (0307). Черновик, снятый до узлов сборки, несёт входы
+    // шага под старым именем, и восстановление БЕЗ этого переноса стало бы командой «сотри все
+    // привязки деталей к шагам»: restore заканчивается form.reset(data) МИМО mapTechCardToForm,
+    // поэтому фолбэк на уровне маппера сюда не достаёт, а маппер записи коэрсит отсутствующее
+    // поле в пустой массив и отправляет его как осознанное «удалить».
+    //
+    // Перенос ПОЛЯ ВНУТРИ ОДНОГО И ТОГО ЖЕ объекта операции, а не сопоставление строк по
+    // индексу: у операции нет стабильного ключа, и сопоставлять было бы не по чему — но здесь
+    // сопоставлять и не нужно, объект тот же самый. Поэтому у этого переноса нет цены, в отличие
+    // от keyless-гарда выше, который черновик отбрасывает.
+    if (Array.isArray(data.operations)) {
+      data.operations = data.operations.map((o) => {
+        const raw = o as Record<string, unknown>;
+        if (Array.isArray(raw.inputKeys) || !Array.isArray(raw.pieceLineKeys)) return o;
+        const { pieceLineKeys, ...rest } = raw;
+        return { ...rest, inputKeys: (pieceLineKeys as string[]).filter(Boolean) } as typeof o;
+      });
+    }
+
     form.reset(data, { keepDefaultValues: true });
     // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging
     // identity, which is what makes an ALREADY-MOUNTED panel re-run its claim effect and adopt its

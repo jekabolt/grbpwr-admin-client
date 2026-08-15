@@ -503,7 +503,7 @@ export function PieceMatchModal({
   const opsByPiece = useMemo(() => {
     const out = new Map<string, number>();
     for (const o of operations ?? []) {
-      for (const k of o?.pieceLineKeys ?? []) {
+      for (const k of o?.inputKeys ?? []) {
         const key = (k ?? '').trim().toLowerCase();
         if (!key) continue;
         out.set(key, (out.get(key) ?? 0) + 1);
@@ -1198,10 +1198,10 @@ export function PieceMatchModal({
       if (dropped.size > 0) {
         const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
         (operations ?? []).forEach((o, oi) => {
-          const keys = (o.pieceLineKeys ?? []).filter(Boolean);
+          const keys = (o.inputKeys ?? []).filter(Boolean);
           const kept = keys.filter((k) => !dropped.has(k.trim().toLowerCase()));
           if (kept.length === keys.length) return;
-          setValue(`operations.${oi}.pieceLineKeys`, kept, { shouldDirty: true });
+          setValue(`operations.${oi}.inputKeys`, kept, { shouldDirty: true });
         });
       }
       // Two pieces sharing a name make every reference to «полочка» ambiguous on the factory

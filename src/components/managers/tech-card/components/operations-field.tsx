@@ -115,8 +115,12 @@ const CORE_STEP_FIELDS = new Set([
   'smv',
   'calloutNumber',
   'note',
-  'pieceLineKeys',
+  'inputKeys',
   'bomLineKeys',
+  // TODO(T-17): добавить сюда outputUnitKey/outputUnitName вместе с блоком «produces». Их
+  // контролы встанут в ядро карточки шага, а не в фолд переопределений, и ошибка на них не
+  // должна раскрывать фолд, в котором нужного контрола нет. Сегодня недостижимо: полей в UI
+  // ещё не существует.
 ]);
 
 // What a step INHERITS, written the way it is shown: «4 (оверлок у окна)», «4 (card)», «not set».
@@ -173,7 +177,7 @@ const TOPSTITCH_ROW_OPTIONS = [
 ];
 
 // The BOM sections an operation can CONSUME, in picker order. The rule is «чем соединяют», not
-// «что соединяют»: roll goods (fabric / lining / insulation) reach a step through pieceLineKeys —
+// «что соединяют»: roll goods (fabric / lining / insulation) reach a step through inputKeys —
 // they ARE the parts being joined — and packaging never reaches the sewing floor, it rides
 // packaging_recipe. Interlining is the deliberate exception on the roll-goods side: fusing is
 // consumed AT a fusing step.
@@ -275,7 +279,9 @@ export const emptyOperation = {
   pressSteam: undefined as boolean | undefined,
   pressCloth: NONE_PRESS_CLOTH,
   note: '',
-  pieceLineKeys: [] as string[],
+  inputKeys: [] as string[],
+  outputUnitKey: '',
+  outputUnitName: '',
   bomLineKeys: [] as string[],
 };
 
@@ -304,7 +310,7 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     operationType: o.operationType || NONE_OP_TYPE,
     zone: o.zone || NONE_ZONE,
     bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
-    pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
+    inputKeys: (o.pieceLineKeys ?? []).filter(Boolean),
     calloutNumber: o.calloutNumber || 0,
     smv: decimalToInput(o.smv),
     seamClass: o.seamClass || NONE_SEAM_CLASS,
@@ -544,7 +550,7 @@ function RailStep({
   // The joined pieces, by name, for the composed heading. Resolved through the card's piece list so
   // a rename on the PATTERNS tab reaches every step that references it — which is what the removed
   // PlacementSync was trying to achieve by writing the names into the row.
-  const pieceKeys = (useWatch({ control, name: `operations.${index}.pieceLineKeys` }) ??
+  const pieceKeys = (useWatch({ control, name: `operations.${index}.inputKeys` }) ??
     []) as string[];
   const allPieces = useFormPieces();
   const linkedPieces = pieceKeys
@@ -1187,7 +1193,7 @@ function OperationEditor({
 
   const selectedPieceKeys = (useWatch({
     control,
-    name: `operations.${index}.pieceLineKeys`,
+    name: `operations.${index}.inputKeys`,
   }) ?? []) as string[];
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
@@ -1208,7 +1214,7 @@ function OperationEditor({
   const danglingPieces = selectedPieceKeys.filter((k) => !byKey.has(k));
   const removePieceKey = (lineKey: string) => {
     const next = selectedPieceKeys.filter((k) => k !== lineKey);
-    setValue(`operations.${index}.pieceLineKeys`, next, { shouldDirty: true });
+    setValue(`operations.${index}.inputKeys`, next, { shouldDirty: true });
   };
 
   // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
@@ -2348,12 +2354,12 @@ export function OperationsField({
   const readReplaceImpact = (): ReplaceImpact => {
     const ops = (getValues('operations') ?? []) as {
       smv?: string;
-      pieceLineKeys?: string[];
+      inputKeys?: string[];
     }[];
     return {
       operations: ops.length,
       sam: ops.filter((o) => (o.smv ?? '').trim()).length,
-      pieceLinks: ops.filter((o) => (o.pieceLineKeys ?? []).length > 0).length,
+      pieceLinks: ops.filter((o) => (o.inputKeys ?? []).length > 0).length,
     };
   };
 
@@ -2455,9 +2461,9 @@ export function OperationsField({
 
   const addPieceToOperation = (index: number, lineKey: string) => {
     if (index < 0 || !pieces.some((p) => p.lineKey === lineKey)) return;
-    const cur = (getValues(`operations.${index}.pieceLineKeys`) ?? []) as string[];
+    const cur = (getValues(`operations.${index}.inputKeys`) ?? []) as string[];
     if (cur.includes(lineKey)) return;
-    setValue(`operations.${index}.pieceLineKeys`, [...cur, lineKey], { shouldDirty: true });
+    setValue(`operations.${index}.inputKeys`, [...cur, lineKey], { shouldDirty: true });
   };
 
   // Cut pieces are a section of the PATTERNS tab (they used to have their own, then sat on
