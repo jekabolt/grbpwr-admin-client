@@ -165,6 +165,24 @@ const B = fixture(
   is(name, hitNode(out, box.x + 20, box.y + 20), { kind: 'tile', key: tile.key });
 }
 
+{
+  // Во время драга тащимая нода едет под курсором и перекрыла бы любую цель под собой —
+  // без исключения жест «бросить одну на другую» был бы невыразим вовсе.
+  const name = 'hit: исключённый ключ не может быть целью';
+  const tile = A.layout.tiles[0];
+  const cx = tile.x + tile.w / 2;
+  const cy = tile.y + tile.h / 2;
+  is(name + ' (без исключения — она)', hitNode(A.layout, cx, cy), { kind: 'tile', key: tile.key });
+  is(name, hitNode(A.layout, cx, cy, tile.key), null);
+  // Исключение снимает ТОЛЬКО её: то, что лежит под ней, целью остаётся.
+  const box = A.layout.boxes[0];
+  const over = applyOverrides(A.layout, { [tile.key]: { x: box.x + 10, y: box.y + 10 } });
+  is(name + ' (под ней остаётся бокс)', hitNode(over, box.x + 20, box.y + 20, tile.key), {
+    kind: 'box',
+    key: box.key,
+  });
+}
+
 // --- combineVerdict ---------------------------------------------------------------------------------
 
 {

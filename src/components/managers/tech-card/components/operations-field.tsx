@@ -3443,9 +3443,15 @@ export function OperationsField({
                   'шаг'
                 }
                 pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
-                onPickStep={setSelected}
-                onJoin={(inputKeys, intent) => setPendingCreate({ inputKeys, intent })}
-                onAddStep={(unitKey) => setPendingCreate({ inputKeys: [unitKey], intent: 'process' })}
+                onPickStep={(i) => {
+                  setSelected(i);
+                  // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
+                  // «открыть шаг» открывает его за пределами экрана.
+                  requestAnimationFrame(() =>
+                    editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                  );
+                }}
+                onCreate={setPendingCreate}
                 onDissolve={dissolveUnit}
                 positions={prefs.pos}
                 onMove={prefs.move}

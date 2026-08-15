@@ -1,4 +1,5 @@
 import { cn } from 'lib/utility';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -7,7 +8,8 @@ import Text from 'ui/components/text';
 import type { AssemblyBlock } from './assembly-blocks';
 import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
-import { applyOverrides, type PosOverrides } from './assembly-positions';
+import type { CreatePrefill } from './assembly-create-dialog';
+import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -50,6 +52,9 @@ type DragState = {
   /** Точка начала жеста — для порога. */
   fromX: number;
   fromY: number;
+  /** Где сейчас указатель, в координатах полотна: по нему ищется цель под курсором. */
+  ptrX: number;
+  ptrY: number;
   started: boolean;
 };
 
@@ -60,8 +65,7 @@ export function AssemblySchematic({
   labelOf,
   pieceNameOf,
   onPickStep,
-  onJoin,
-  onAddStep,
+  onCreate,
   onDissolve,
   positions,
   onMove,
@@ -76,12 +80,10 @@ export function AssemblySchematic({
   pieceNameOf: (lineKey: string) => string;
   onPickStep: (index: number) => void;
   /**
-   * Открыть создание операции с этими входами. Схема НЕ пишет в форму сама: она собирает жест,
-   * пишет `appendStep` в OperationsField — единственный экземпляр логики записи.
+   * Открыть создание операции по собранному жесту. Схема НЕ пишет в форму сама: она собирает
+   * намерение, пишет `appendStep` в OperationsField — единственный экземпляр логики записи.
    */
-  onJoin: (inputKeys: string[], intent: 'unit' | 'process') => void;
-  /** Добавить обработку внутрь блока. */
-  onAddStep: (unitKey: string) => void;
+  onCreate: (prefill: CreatePrefill) => void;
   /** Растворить узел — по индексу его производящего шага. */
   onDissolve: (stepIndex: number) => void;
   /** Ручные позиции нод. Живут выше схемы: схема размонтируется при смене режима. */
@@ -101,6 +103,10 @@ export function AssemblySchematic({
   const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
   const auto = useMemo(() => assemblyLayout(blocks, steps, res), [blocks, steps, res]);
+
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  /** Человеческое имя ноды: имя детали или код узла. */
+  const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
 
   const [drag, setDrag] = useState<DragState | null>(null);
   const canvasRef = useRef<HTMLDivElement>(null);
@@ -138,7 +144,18 @@ export function AssemblySchematic({
       justDragged.current = false;
       // Захват НЕ берётся здесь: он меняет цель последующего click, и обычный клик по строке
       // шага перестал бы работать. Захват берётся ровно в тот момент, когда жест признан драгом.
-      setDrag({ key, offX: p.x - nodeX, offY: p.y - nodeY, x: nodeX, y: nodeY, fromX: p.x, fromY: p.y, started: false });
+      setDrag({
+        key,
+        offX: p.x - nodeX,
+        offY: p.y - nodeY,
+        x: nodeX,
+        y: nodeY,
+        fromX: p.x,
+        fromY: p.y,
+        ptrX: p.x,
+        ptrY: p.y,
+        started: false,
+      });
     },
     onPointerMove: (e: React.PointerEvent) => {
       if (!drag || drag.key !== key) return;
@@ -154,13 +171,26 @@ export function AssemblySchematic({
           // Указатель мог уже уйти — жест продолжится без захвата, это не повод его ронять.
         }
       }
-      setDrag({ ...drag, started: true, x: p.x - drag.offX, y: p.y - drag.offY });
+      setDrag({ ...drag, started: true, x: p.x - drag.offX, y: p.y - drag.offY, ptrX: p.x, ptrY: p.y });
     },
     onPointerUp: () => {
       if (!drag || drag.key !== key) return;
       if (drag.started) {
         justDragged.current = true;
+        // Перемещение состоялось в любом случае: жест композитен, и «перенёс» не отменяется тем,
+        // что «соединить» потом отклонили. Позиция остаётся там, где ноду бросили.
         onMove(key, { x: Math.max(0, drag.x), y: Math.max(0, drag.y) });
+        if (verdict && !verdict.ok) {
+          // Отказ ДО диалога: открывать форму, которую нельзя отправить, — предлагать заведомый
+          // отказ. Причина словами движка.
+          showMessage(verdict.reason, 'error');
+        } else if (verdict?.ok && target) {
+          onCreate({
+            inputKeys: [drag.key, target.key],
+            absorbInto: verdict.absorbInto,
+            intent: verdict.absorbInto ? undefined : 'unit',
+          });
+        }
       }
       setDrag(null);
     },
@@ -235,6 +265,27 @@ export function AssemblySchematic({
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [drag?.started]);
+
+  // ЦЕЛЬ ЖЕСТА — СТРОГО ТО, ЧТО ПОД КУРСОРОМ, а не то, с чем пересеклась тащимая нода: пересечение
+  // фигур зависит от их размеров, точка — нет, и рука предсказуемо попадает туда, куда целится.
+  const target = drag?.started ? hitNode(layout, drag.ptrX, drag.ptrY, drag.key) : null;
+  // Вердикт считается от СЕГОДНЯШНЕГО res, а не от того, что был на pointerdown: форма могла
+  // измениться другой рукой, пока жест длился.
+  const verdict = target && !frozen ? combineVerdict(drag!.key, target.key, res, steps) : null;
+  const hint = (() => {
+    if (!verdict) return '';
+    if (!verdict.ok) return verdict.reason;
+    if (verdict.absorbInto) return `отпустите: дособрать ▣ ${verdict.absorbInto}`;
+    return `отпустите: сшить ${nameOfNode(drag!.key)} + ${nameOfNode(target!.key)}`;
+  })();
+
+  /** Рамка цели под курсором: чернильная у валидной, ошибочная у отказной. */
+  const targetRing = (key: string) =>
+    target?.key === key && verdict
+      ? verdict.ok
+        ? 'outline outline-2 outline-offset-2 outline-textColor'
+        : 'outline outline-2 outline-offset-2 outline-error'
+      : undefined;
 
   const manual = Object.keys(positions).length;
 
@@ -318,11 +369,16 @@ export function AssemblySchematic({
           picked={picked}
           labelOf={pieceNameOf}
           onCreate={(intent) => {
-            onJoin(picked, intent);
+            onCreate({ inputKeys: picked, intent });
             setPicked([]);
           }}
           onClear={() => setPicked([])}
         />
+      )}
+      {drag?.started && hint && (
+        <Text size='micro' variant='label' className={cn('mb-1.5', verdict && !verdict.ok && 'text-error')}>
+          {hint}
+        </Text>
       )}
       {manual > 0 && (
         <ChipRow className='mb-1.5'>
@@ -364,13 +420,34 @@ export function AssemblySchematic({
                   className={cn(
                     'absolute border-2 border-textColor bg-bgColor',
                     drag?.key === box.key && drag.started && 'opacity-70',
+                    targetRing(box.key),
                   )}
                   style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
                   {...dragHandlers(box.key, box.x, box.y)}
                 >
-                  <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
+                  {/* ШАПКА — PICK-ЗОНА БОКСА. Строки внутри уже кнопки шагов, поэтому выбор узла
+                      переехал на заголовок: одна нода — одно место, куда по ней кликают. Кнопка, а
+                      не div, ради клавиатуры: Enter на сфокусированной шапке — тот же выбор, и
+                      путь «сшить» с клавиатуры не потерян. */}
+                  <button
+                    type='button'
+                    onClick={
+                      !frozen && onTable.has(box.key) ? clickGuard(() => toggle(box.key)) : undefined
+                    }
+                    className={cn(
+                      'flex w-full items-baseline gap-1 border-b border-hairline px-1 text-left',
+                      !frozen && onTable.has(box.key) && 'hover:bg-bgZebra',
+                      picked.includes(box.key) && 'bg-bgZebra',
+                    )}
+                    style={{ height: HEAD_H }}
+                    title={
+                      onTable.has(box.key)
+                        ? 'узел на столе — кликните, чтобы взять его в следующую сборку'
+                        : 'узел уже вошёл в другой — входом его больше не взять'
+                    }
+                  >
                     <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
-                      ▣ {box.key}
+                      {picked.includes(box.key) ? '✓ ' : ''}▣ {box.key}
                     </Text>
                     {b.name && (
                       <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
@@ -380,21 +457,14 @@ export function AssemblySchematic({
                     <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
                       {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
                     </Text>
-                  </div>
+                  </button>
                   {!frozen && (
                     <div className='absolute -top-4 left-0 flex items-center gap-1'>
-                      {/* Взять узел входом следующей сборки можно только пока он НА СТОЛЕ: съеденный
-                          узел лежит внутри другого, и предлагать его — предлагать заведомый отказ. */}
-                      {onTable.has(box.key) && (
-                        <Chip
-                          dashed={!picked.includes(box.key)}
-                          onClick={clickGuard(() => toggle(box.key))}
-                          title='взять этот узел в следующую сборку'
-                        >
-                          {picked.includes(box.key) ? '✓ выбран' : 'выбрать'}
-                        </Chip>
-                      )}
-                      <Chip dashed onClick={clickGuard(() => onAddStep(box.key))} title='добавить обработку по этому узлу'>
+                      <Chip
+                        dashed
+                        onClick={clickGuard(() => onCreate({ inputKeys: [box.key], intent: 'process' }))}
+                        title='добавить обработку по этому узлу'
+                      >
                         + операция
                       </Chip>
                       <Chip
@@ -434,6 +504,7 @@ export function AssemblySchematic({
               className={cn(
                 'absolute border-2 border-dashed border-borderColor bg-bgColor',
                 drag?.key === '' && drag.started && 'opacity-70',
+                targetRing(''),
               )}
               style={{ left: layout.tail.x, top: layout.tail.y, width: layout.tail.w, height: layout.tail.h }}
               {...dragHandlers('', layout.tail.x, layout.tail.y)}
@@ -483,18 +554,30 @@ export function AssemblySchematic({
               key={`tile:${t.key}`}
               type='button'
               aria-disabled={frozen || undefined}
-              onClick={t.state === 'free' && !frozen ? clickGuard(() => toggle(t.key)) : undefined}
+              onClick={
+                t.state === 'free'
+                  ? !frozen
+                    ? clickGuard(() => toggle(t.key))
+                    : undefined
+                  : // Съеденную деталь входом не взять — правило 2. Зато главный вопрос читателя о
+                    // ней «куда она делась», и клик отвечает: уводит к шагу, который её съел.
+                    clickGuard(() => {
+                      const eater = res.consumedBy.get(t.key);
+                      if (eater !== undefined) onPickStep(eater);
+                    })
+              }
               className={cn(
                 'absolute flex items-center justify-center px-1 text-center',
                 t.state === 'free' ? 'border border-dashed border-borderColor' : 'border border-borderColor bg-bgColor',
                 picked.includes(t.key) && 'border-solid border-textColor bg-bgZebra',
                 drag?.key === t.key && drag.started && 'opacity-70',
+                targetRing(t.key),
               )}
               style={{ left: t.x, top: t.y, width: t.w, height: t.h }}
               title={
                 t.state === 'free'
                   ? `${pieceNameOf(t.key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`
-                  : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}`
+                  : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}; кликните, чтобы открыть шаг, который её съел`
               }
               {...dragHandlers(t.key, t.x, t.y)}
             >

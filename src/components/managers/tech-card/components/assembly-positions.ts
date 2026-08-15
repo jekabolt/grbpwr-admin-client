@@ -100,16 +100,27 @@ export type NodeHit = { kind: 'box' | 'tile'; key: string };
  * иначе рука целится в то, чего не видит. В авто-раскладке ноды не пересекаются вовсе, но
  * ручные позиции пересечение разрешают, и порядок отрисовки перестаёт быть безразличным.
  */
-export function hitNode(layout: SchematicLayout, x: number, y: number): NodeHit | null {
+export function hitNode(
+  layout: SchematicLayout,
+  x: number,
+  y: number,
+  /**
+   * Ключ, который целью быть не может. Во время драга это сама тащимая нода: она едет под
+   * курсором и иначе перекрывала бы всё, что под ней, — то есть жест «бросить на другую» стал бы
+   * невыразим.
+   */
+  exclude?: string,
+): NodeHit | null {
   const inside = (n: { x: number; y: number; w: number; h: number }) =>
     x >= n.x && x <= n.x + n.w && y >= n.y && y <= n.y + n.h;
 
   for (let i = layout.tiles.length - 1; i >= 0; i--) {
-    if (inside(layout.tiles[i])) return { kind: 'tile', key: layout.tiles[i].key };
+    const t = layout.tiles[i];
+    if (t.key !== exclude && inside(t)) return { kind: 'tile', key: t.key };
   }
   const boxes = [...layout.boxes, ...(layout.tail ? [layout.tail] : [])];
   for (let i = boxes.length - 1; i >= 0; i--) {
-    if (inside(boxes[i])) return { kind: 'box', key: boxes[i].key };
+    if (boxes[i].key !== exclude && inside(boxes[i])) return { kind: 'box', key: boxes[i].key };
   }
   return null;
 }
