@@ -134,6 +134,7 @@ import {
   isPressStepType,
   machineProfileName,
   machineTypeLabel,
+  machineTypeLabelWithStitch,
   pressEquipmentLabel,
   pressProcessShort,
   pressProfileName,
@@ -917,7 +918,10 @@ export function TechPackDocument({
     const head = machineStep
       ? machineProfile
         ? machineProfileName(machineProfile)
-        : machineTypeLabel(o.machineType)
+        : // НОМЕР СТЕЖКА — КОНКРЕТНЫЙ, А НЕ ПЕРЕЧИСЛЕНИЕ. «overlock 504 / 514 / 516» на листе для
+          // цеха предлагало оператору выбрать стежок самому; число ниток шага уже говорит, какой
+          // из трёх, — надо было только сказать это вслух.
+          machineTypeLabelWithStitch(o.machineType, o.threadCount)
       : pressStep
         ? pressProfile
           ? pressProfileName(pressProfile)

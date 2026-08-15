@@ -26,6 +26,7 @@ import {
   isPressStepType,
   machineProfileName,
   machineTypeLabel,
+  machineTypeLabelWithStitch,
   pressEquipmentLabel,
   pressProcessShort,
   pressProfileName,
@@ -284,7 +285,9 @@ function SnapshotOperations({
             ? OPERATION_TYPE_LABELS[o.operationType]
             : '';
         const spec = isMachineStepType(o.operationType)
-          ? machineTypeLabel(o.machineType)
+          ? // Снапшот несёт и машинку, и число ниток — значит и подписанный релиз может назвать
+            // стежок конкретно. Вывод здесь — презентация записанного, а не правка записанного.
+            machineTypeLabelWithStitch(o.machineType, o.threadCount)
           : isPressStepType(o.operationType)
             ? [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
             : typeLabel;

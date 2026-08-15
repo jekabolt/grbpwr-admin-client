@@ -24,6 +24,7 @@
     "assembly:blocks": "node scripts/assembly-blocks-probe.mjs",
     "assembly:layout": "node scripts/assembly-layout-probe.mjs",
     "assembly:positions": "node scripts/assembly-positions-probe.mjs",
+    "stitch:type": "node scripts/stitch-type-probe.mjs",
     "marker:area-field": "node scripts/area-field-probe.mjs",
     "lay:header": "node scripts/lay-header-probe.mjs",
     "fix": "yarn lint && yarn format",

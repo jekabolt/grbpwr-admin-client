@@ -227,6 +227,66 @@ const lookup = <T extends string>(labels: Record<T, string>, v: string | undefin
 
 export const machineTypeLabel = (v?: string): string =>
   lookup(MACHINE_TYPE_LABELS, v, 'TECH_CARD_MACHINE_TYPE_UNKNOWN');
+
+// ── ISO 4915: ТИП СТЕЖКА ────────────────────────────────────────────────────────────────────────
+//
+// Цифры в подписях машинок — это ISO 4915, а не часть названия. Для большинства классов машинка и
+// стежок — одно и то же: челночная делает 301 и ничего другого, и отдельное поле было бы вторым
+// именем той же вещи. Но у ОБМЁТОЧНОЙ это неправда, и слэш в подписи — признание: 504, 514 и 516
+// это три разных стежка на одном классе машин, с разной прочностью и разным расходом нитки. Лист,
+// уходящий в цех, печатал перечисление, то есть предлагал оператору выбрать самому.
+//
+// Различающий факт в шаге УЖЕ ЕСТЬ — `thread_count`. Три нитки это 504, четыре 514, пять 516.
+// Поэтому номер здесь ВЫВОДИТСЯ, а не заводится третьим полем: новая ось у шага («что × на чём ×
+// каким стежком») повторила бы то, от чего уходил разрыв 0306, ради факта, который уже записан.
+//
+// РАСПОШИВАЛЬНАЯ СОЗНАТЕЛЬНО НЕ ВЫВОДИТСЯ. У неё соответствие ниток и номеров не однозначно (602 —
+// двухигольный трёхниточный, 605 — трёхигольный пятиниточный, рядом живёт 604), и печатать догадку
+// на бумагу для фабрики нельзя. Пока живой человек не подтвердит таблицу, там остаётся честный
+// слэш.
+
+/** Классы, у которых стежок один и не зависит ни от чего. */
+const ISO4915_FIXED: Partial<Record<common_TechCardMachineType, string>> = {
+  TECH_CARD_MACHINE_TYPE_LOCKSTITCH: '301',
+  // Две иглы кладут два ряда ОДНОГО стежка: 301 остаётся 301.
+  TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE: '301',
+  TECH_CARD_MACHINE_TYPE_CHAINSTITCH: '401',
+  TECH_CARD_MACHINE_TYPE_BLINDSTITCH: '103',
+  TECH_CARD_MACHINE_TYPE_ZIGZAG: '304',
+};
+
+/** Классы, у которых стежок определяется числом ниток. */
+const ISO4915_BY_THREADS: Partial<Record<common_TechCardMachineType, Record<number, string>>> = {
+  TECH_CARD_MACHINE_TYPE_OVERLOCK: { 3: '504', 4: '514', 5: '516' },
+};
+
+/**
+ * Номер стежка по ISO 4915 для КОНКРЕТНОГО шага. Пусто — если класс машины его не определяет и
+ * число ниток не названо: пустая строка честнее догадки.
+ */
+export function stitchTypeNumber(machineType?: string, threadCount?: number): string {
+  const key = (machineType ?? '') as common_TechCardMachineType;
+  const fixed = ISO4915_FIXED[key];
+  if (fixed) return fixed;
+  const byThreads = ISO4915_BY_THREADS[key];
+  if (!byThreads) return '';
+  const n = Number(threadCount ?? 0);
+  return Number.isFinite(n) ? (byThreads[n] ?? '') : '';
+}
+
+/**
+ * Подпись машинки для конкретного шага: перечисление номеров заменяется тем одним, который шаг и
+ * означает. Словарь `MACHINE_TYPE_LABELS` при этом не трогается — он остаётся списком выбора, где
+ * перечисление уместно, потому что там ещё не выбран ни один шаг.
+ */
+export function machineTypeLabelWithStitch(machineType?: string, threadCount?: number): string {
+  const base = machineTypeLabel(machineType);
+  const n = stitchTypeNumber(machineType, threadCount);
+  if (!base || !n) return base;
+  // Хвост из номеров срезается целиком: «overlock 504 / 514 / 516» → «overlock» → «overlock 514».
+  const plain = base.replace(/\s+\d[\d\s/]*$/, '').trim();
+  return `${plain} ${n}`;
+}
 export const pressEquipmentLabel = (v?: string): string =>
   lookup(PRESS_EQUIPMENT_LABELS, v, 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN');
 export const needleTypeLabel = (v?: string): string =>
