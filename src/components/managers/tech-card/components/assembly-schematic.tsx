@@ -155,6 +155,10 @@ export function AssemblySchematic({
   // жесты по НАМЕРЕНИЮ, а этот флаг гасит уже случившееся эхо.
   const justDragged = useRef(false);
   const [resetOpen, setResetOpen] = useState(false);
+  // НАВЕДЕНИЕ — состояние ЧТЕНИЯ, а не редактирования: схема из двух десятков нод и втрое
+  // большего числа проводов читается только так — «покажи, что связано именно с этой». Живёт в
+  // компоненте и никуда не сохраняется.
+  const [hovered, setHovered] = useState<string | null>(null);
 
   const layout = useMemo(
     () => applyOverrides(auto, drag?.started ? { ...positions, [drag.key]: { x: drag.x, y: drag.y } } : positions),
@@ -246,6 +250,21 @@ export function AssemblySchematic({
       : // Без действия нет и роли: иначе скринридер объявляет кнопкой то, что ничего не делает и
         // даже не фокусируется.
         {};
+
+  /**
+   * Обработчики наведения для ноды.
+   *
+   * Во время начатого драга наведение НЕ ведётся: тащимая нода едет под курсором и подсвечивала
+   * бы саму себя постоянно, а цель жеста показывает своя рамка вердикта — две подсветки об одном
+   * месте спорили бы между собой.
+   */
+  const hoverHandlers = (key: string) => ({
+    onPointerEnter: () => {
+      if (drag?.started) return;
+      setHovered(key);
+    },
+    onPointerLeave: () => setHovered((h) => (h === key ? null : h)),
+  });
 
   const clickGuard = (fn: () => void) => () => {
     if (justDragged.current) {
@@ -408,13 +427,21 @@ export function AssemblySchematic({
     return `отпустите: сшить ${nameOfNode(drag!.key)} + ${nameOfNode(target!.key)}`;
   })();
 
-  /** Рамка цели под курсором: чернильная у валидной, ошибочная у отказной. */
-  const targetRing = (key: string) =>
-    target?.key === key && verdict
-      ? verdict.ok
+  /**
+   * Рамка ноды: цель жеста сильнее наведения.
+   *
+   * Обе рисуются outline'ом, и если бы они складывались, у цели под курсором получилась бы каша
+   * из двух рамок. Цель жеста — утверждение о том, что произойдёт по отпусканию, и оно важнее
+   * ответа на «что с этим связано».
+   */
+  const nodeRing = (key: string) => {
+    if (target?.key === key && verdict) {
+      return verdict.ok
         ? 'outline outline-2 outline-offset-2 outline-textColor'
-        : 'outline outline-2 outline-offset-2 outline-error'
-      : undefined;
+        : 'outline outline-2 outline-offset-2 outline-error';
+    }
+    return hovered === key ? 'outline outline-1 outline-offset-2 outline-textColor' : undefined;
+  };
 
   const manual = Object.keys(positions).length;
 
@@ -455,7 +482,9 @@ export function AssemblySchematic({
     return `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`;
   };
 
-  const wires: Array<{ d: string; key: string; faint?: boolean }> = [];
+  // Провод помнит СВОИ КОНЦЫ: без этого «подсветить всё, что входит и выходит из ноды»
+  // выродилось бы в разбор строки пути.
+  const wires: Array<{ d: string; key: string; from: string; to: string; faint?: boolean }> = [];
   /** Маркер-стрелка: провод обязан говорить НАПРАВЛЕНИЕ, а не только факт связи. */
   const ARROW = 'url(#assembly-arrow)';
   // Узел → строка-потребитель.
@@ -469,6 +498,8 @@ export function AssemblySchematic({
         if (!from || !to) continue;
         wires.push({
           key: `${input.key}->${b.key}:${i}`,
+          from: input.key,
+          to: b.key,
           d: wire(from.x + from.w, from.y + from.h / 2, to.x, rowY(b.key, i)),
         });
       }
@@ -489,6 +520,8 @@ export function AssemblySchematic({
       const eatenHere = t.state === 'eaten' && t.into === target;
       wires.push({
         key: `tile:${t.key}->${target}:${i}`,
+        from: t.key,
+        to: target,
         d: wire(t.x + t.w, t.y + t.h / 2, to.x, rowY(target, i)),
         // Вошла в узел — полный провод; просто обработана этим шагом — бледный пунктир: связь
         // есть, но деталь осталась на столе, и путать одно с другим нельзя.
@@ -553,18 +586,27 @@ export function AssemblySchematic({
                 <path d='M0,1 L7,4 L0,7 z' fill='currentColor' />
               </marker>
             </defs>
-            {wires.map((w) => (
-              <path
-                key={w.key}
-                d={w.d}
-                fill='none'
-                stroke='currentColor'
-                strokeWidth={1}
-                strokeDasharray={w.faint ? '3 3' : undefined}
-                markerEnd={ARROW}
-                opacity={w.faint ? 0.3 : 0.45}
-              />
-            ))}
+            {wires.map((w) => {
+              // Провод «этой ноды» — тот, у которого она на любом конце: вопрос читателя звучит
+              // как «что с ней связано», а не «что из неё выходит».
+              const lit = hovered !== null && (w.from === hovered || w.to === hovered);
+              // Пока что-то наведено, остальные провода УХОДЯТ НА ЗАДНИЙ ПЛАН, а не остаются как
+              // были: подсветить связи, не приглушив прочее, значит не ответить на вопрос — на
+              // плотной схеме жирная линия теряется среди двух десятков таких же.
+              const dimmed = hovered !== null && !lit;
+              return (
+                <path
+                  key={w.key}
+                  d={w.d}
+                  fill='none'
+                  stroke='currentColor'
+                  strokeWidth={lit ? 2 : 1}
+                  strokeDasharray={w.faint ? '3 3' : undefined}
+                  markerEnd={ARROW}
+                  opacity={lit ? 0.9 : dimmed ? 0.12 : w.faint ? 0.3 : 0.45}
+                />
+              );
+            })}
           </svg>
 
           {layout.boxes.map((box) => {
@@ -577,10 +619,11 @@ export function AssemblySchematic({
                   className={cn(
                     'absolute border-2 border-textColor bg-bgColor',
                     drag?.key === box.key && drag.started && 'opacity-70',
-                    targetRing(box.key),
+                    nodeRing(box.key),
                   )}
                   style={{ left: box.x, top: box.y, width: box.w, height: box.h, touchAction: NODE_TOUCH }}
                   {...dragHandlers(box.key, box.x, box.y)}
+                  {...hoverHandlers(box.key)}
                 >
                   {/* ШАПКА — PICK-ЗОНА БОКСА. Строки внутри уже кнопки шагов, поэтому выбор узла
                       переехал на заголовок: одна нода — одно место, куда по ней кликают. Кнопка, а
@@ -666,7 +709,7 @@ export function AssemblySchematic({
               className={cn(
                 'absolute border-2 border-dashed border-borderColor bg-bgColor',
                 drag?.key === '' && drag.started && 'opacity-70',
-                targetRing(''),
+                nodeRing(''),
               )}
               style={{
                 left: layout.tail.x,
@@ -676,6 +719,7 @@ export function AssemblySchematic({
                 touchAction: NODE_TOUCH,
               }}
               {...dragHandlers('', layout.tail.x, layout.tail.y)}
+              {...hoverHandlers('')}
             >
               <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
                 <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
@@ -733,7 +777,7 @@ export function AssemblySchematic({
                 t.state === 'free' ? 'border-dashed border-borderColor' : 'border-borderColor',
                 picked.includes(t.key) && 'border-solid border-textColor',
                 drag?.key === t.key && drag.started && 'opacity-70',
-                targetRing(t.key),
+                nodeRing(t.key),
               )}
               style={{ left: t.x, top: t.y, width: t.w, height: t.h, touchAction: NODE_TOUCH }}
               title={
@@ -742,6 +786,7 @@ export function AssemblySchematic({
                   : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}; кликните, чтобы открыть шаг, который её съел`
               }
               {...dragHandlers(t.key, t.x, t.y)}
+              {...hoverHandlers(t.key)}
             >
               <PieceTile
                 found={pieceShapes?.get(pieceRefKey(t.key)) ?? null}
