@@ -719,10 +719,20 @@ export function AssemblySchematic({
                       pointerenter/leave считают вложенность, а не нарисованные границы, поэтому
                       увести курсор на чип, не потеряв наведение, можно. */}
                   {!frozen && hovered === box.key && (
-                    // `pb-1` — не отступ, а МОСТИК: чипы стоят над боксом, и между их нижним краем
-                    // и его верхом остаётся пара пикселей пустоты. Провести через неё курсор,
-                    // не потеряв наведение, невозможно — чипы исчезли бы ровно на пути к ним.
-                    <div className='absolute -top-4 left-0 flex items-center gap-1 pb-1'>
+                    // ПОЗИЦИЯ СЧИТАЕТСЯ ОТ КРАЯ БОКСА, А НЕ ПОДБИРАЕТСЯ ЧИСЛОМ. `-top-4` было
+                    // магическими шестнадцатью пикселями: чуть выше строка чипа — и она залезала
+                    // на сам бокс, чуть ниже — отрывалась от него. `bottom-full` ставит нижний
+                    // край полосы ровно на верхний край бокса при любом кегле.
+                    //
+                    // `pb-1` внутри — МОСТИК: без него между чипами и боксом остаётся пустота, и
+                    // провести через неё курсор, не потеряв наведение, нельзя — чипы исчезали бы
+                    // ровно на пути к ним.
+                    //
+                    // Фон и `z-10` — потому что полоса живёт в зазоре между колонками и рядами, и
+                    // соседняя нода там же. Прозрачная полоса поверх чужого бокса читается как
+                    // наезд; непрозрачная и заведомо верхняя — как то, чем она и является:
+                    // временный слой над схемой.
+                    <div className='absolute bottom-full left-0 z-10 flex max-w-full items-center gap-1 bg-bgColor pb-1'>
                       <Chip
                         dashed
                         onClick={clickGuard(() => onCreate({ inputKeys: [box.key], intent: 'process' }))}
@@ -745,7 +755,7 @@ export function AssemblySchematic({
                       ровно то, из-за чего действия узла уехали на наведение. */}
                   {hovered === box.key && (directInputsOf.get(box.key) ?? []).length > 0 && (
                     <div
-                      className='absolute -bottom-4 left-0 flex w-full items-center pt-1'
+                      className='absolute top-full left-0 z-10 flex w-full items-center bg-bgColor pt-1'
                       title={`берёт: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ')}`}
                     >
                       <Text size='nano' variant='label' component='span' className='truncate'>
