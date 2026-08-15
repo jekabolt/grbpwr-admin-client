@@ -10,6 +10,9 @@ import type { AssemblyResult, AssemblyStep } from './assembly-frontier';
 import { assemblyLayout, SCHEMATIC_METRICS } from './assembly-layout';
 import type { CreatePrefill } from './assembly-create-dialog';
 import { applyOverrides, combineVerdict, hitNode, type PosOverrides } from './assembly-positions';
+import { pieceRefKey } from './piece-block-refs';
+import { PieceTile } from './piece-silhouette';
+import type { PieceShapeMap } from './use-piece-shapes';
 
 // Схема сборки: карта чёрных ящиков.
 //
@@ -78,6 +81,7 @@ export function AssemblySchematic({
   onPickStep,
   onCreate,
   onDissolve,
+  pieceShapes,
   positions,
   onMove,
   onResetPositions,
@@ -97,6 +101,12 @@ export function AssemblySchematic({
   onCreate: (prefill: CreatePrefill) => void;
   /** Растворить узел — по индексу его производящего шага. */
   onDissolve: (stepIndex: number) => void;
+  /**
+   * Контуры деталей из чертежа. Схема — экран, на котором сборку и размечают, поэтому деталь
+   * здесь обязана выглядеть деталью, а не строкой текста: полочку от подборта на глаз отличают
+   * по форме, а не по имени.
+   */
+  pieceShapes: PieceShapeMap;
   /** Ручные позиции нод. Живут выше схемы: схема размонтируется при смене режима. */
   positions: PosOverrides;
   onMove: (key: string, at: { x: number; y: number }) => void;
@@ -446,6 +456,8 @@ export function AssemblySchematic({
   };
 
   const wires: Array<{ d: string; key: string; faint?: boolean }> = [];
+  /** Маркер-стрелка: провод обязан говорить НАПРАВЛЕНИЕ, а не только факт связи. */
+  const ARROW = 'url(#assembly-arrow)';
   // Узел → строка-потребитель.
   for (const b of blocks) {
     if (b.key === '') continue;
@@ -462,21 +474,25 @@ export function AssemblySchematic({
       }
     }
   }
-  // Деталь → строка-потребитель, если та не рядом. До Ф7 деталь, взятая двумя блоками, рисовалась
-  // двумя стопками, и вторая связь читалась смежностью. Дубли схлопнуты — значит связь обязан
-  // сообщить провод, иначе она пропала бы молча. Смежная связь провода не требует и сегодня.
+  // ДЕТАЛЬ → СТРОКА-ПОТРЕБИТЕЛЬ, ВСЕГДА, включая её собственный узел.
+  //
+  // Раньше смежная связь провода не получала: плитка стоит вплотную к своему боксу, и считалось,
+  // что соседство само за себя говорит. Не говорит. Соседство показывает, ЧТО деталь относится к
+  // узлу, но не показывает, на КАКОМ ШАГЕ она в него вошла, — а это главный вопрос к схеме; и
+  // стоит ноду подвинуть рукой, как соседство исчезает, не оставив вместо себя ничего.
   for (const t of layout.tiles) {
-    const home = t.state === 'eaten' ? t.into : null;
     for (const i of t.consumers) {
       const target = blockOfStep.get(i);
       if (target === undefined) continue;
-      if (home !== null && target === home) continue;
       const to = boxOf(target);
       if (!to) continue;
+      const eatenHere = t.state === 'eaten' && t.into === target;
       wires.push({
         key: `tile:${t.key}->${target}:${i}`,
         d: wire(t.x + t.w, t.y + t.h / 2, to.x, rowY(target, i)),
-        faint: true,
+        // Вошла в узел — полный провод; просто обработана этим шагом — бледный пунктир: связь
+        // есть, но деталь осталась на столе, и путать одно с другим нельзя.
+        faint: !eatenHere,
       });
     }
   }
@@ -524,6 +540,19 @@ export function AssemblySchematic({
       >
         <div style={{ width: layout.width, height: layout.height, position: 'relative' }}>
           <svg width={layout.width} height={layout.height} className='absolute inset-0' aria-hidden>
+            <defs>
+              <marker
+                id='assembly-arrow'
+                viewBox='0 0 8 8'
+                refX={7}
+                refY={4}
+                markerWidth={5}
+                markerHeight={5}
+                orient='auto-start-reverse'
+              >
+                <path d='M0,1 L7,4 L0,7 z' fill='currentColor' />
+              </marker>
+            </defs>
             {wires.map((w) => (
               <path
                 key={w.key}
@@ -532,6 +561,7 @@ export function AssemblySchematic({
                 stroke='currentColor'
                 strokeWidth={1}
                 strokeDasharray={w.faint ? '3 3' : undefined}
+                markerEnd={ARROW}
                 opacity={w.faint ? 0.3 : 0.45}
               />
             ))}
@@ -699,9 +729,9 @@ export function AssemblySchematic({
                     })(),
               )}
               className={cn(
-                'absolute flex items-center justify-center px-1 text-center',
-                t.state === 'free' ? 'border border-dashed border-borderColor' : 'border border-borderColor bg-bgColor',
-                picked.includes(t.key) && 'border-solid border-textColor bg-bgZebra',
+                'absolute flex items-center justify-center overflow-hidden border',
+                t.state === 'free' ? 'border-dashed border-borderColor' : 'border-borderColor',
+                picked.includes(t.key) && 'border-solid border-textColor',
                 drag?.key === t.key && drag.started && 'opacity-70',
                 targetRing(t.key),
               )}
@@ -713,9 +743,11 @@ export function AssemblySchematic({
               }
               {...dragHandlers(t.key, t.x, t.y)}
             >
-              <Text size='nano' variant='label' component='span' className='line-clamp-2'>
-                {pieceNameOf(t.key)}
-              </Text>
+              <PieceTile
+                found={pieceShapes?.get(pieceRefKey(t.key)) ?? null}
+                name={pieceNameOf(t.key)}
+                className='size-full'
+              />
             </div>
           ))}
         </div>

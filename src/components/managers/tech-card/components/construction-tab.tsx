@@ -353,16 +353,12 @@ function ConstructionSketch({
 //
 // Ошибка говорится ОДИН раз и не превращается в повтор: useDxfGeometry заведён с `retry: false`,
 // потому что недоступный CDN — это ответ, а не повод скачать всё второй раз.
-function shapesAffordance(
-  shapes: PieceShapes,
-  armed: boolean,
-  onArm: () => void,
-): React.ReactNode | undefined {
+function shapesAffordance(shapes: PieceShapes): React.ReactNode | undefined {
   if (!shapes.hasDxf) return undefined;
-  // РАЗБОР ЕСТЬ, А КОНТУРОВ НЕТ — это ответ, и он обязан прозвучать. Иначе нажатие на «показать
-  // силуэты» выглядит как поломка: ссылка пропала, десятки мегабайт скачались, детали остались
-  // теми же именами. Причина всегда одна и чинится не здесь — деталь кроя не связана с блоком
-  // чертежа, — поэтому строка называет вкладку, на которой это делают.
+  // РАЗБОР ЕСТЬ, А КОНТУРОВ НЕТ — это ответ, и он обязан прозвучать. Иначе экран выглядит
+  // поломкой: мегабайты скачались, а детали остались теми же именами. Причина всегда одна и
+  // чинится не здесь — деталь кроя не связана с блоком чертежа, — поэтому строка называет
+  // вкладку, на которой это делают.
   if (shapes.shapeByKey) {
     return shapes.foundCount === 0 ? (
       <Text size='micro' variant='label' component='span'>
@@ -377,31 +373,34 @@ function shapesAffordance(
       </Text>
     );
   }
-  // `isLoading` — не только про свой заказ: разбор мог уже идти по кнопке на вкладке PATTERNS, и
-  // предлагать нажать то, что уже выполняется, значит обещать второе скачивание тех же мегабайт.
-  if (armed || shapes.isLoading) {
+  if (shapes.isLoading) {
     return (
       <Text size='micro' variant='label' component='span'>
         разбираю выкройки…
       </Text>
     );
   }
-  return (
-    <Chip
-      dashed
-      onClick={onArm}
-      title='скачать и разобрать DXF карточки, чтобы у деталей появились силуэты'
-    >
-      показать силуэты
-    </Chip>
-  );
+  // Кнопки «показать силуэты» здесь больше НЕТ. Силуэт — не украшение и не опция: сборку
+  // размечают по формам деталей, и экран, спрашивающий разрешения показать то, ради чего на него
+  // пришли, перекладывает на человека решение, которого у него нет данных принять. Цена честная и
+  // остаётся: пачка DXF скачивается и разбирается при открытии вкладки. Запрос один на карточку
+  // (React Query кэширует пачку между вкладками), `retry: false` не даёт недоступному CDN
+  // превратиться в повтор, а состояния разбора остаются здесь же строкой.
+  return undefined;
 }
 
 // Construction workspace: the sketch (assembly map) on the left, the general finishing defaults
 // and the ordered operations on the right — so a step and its place on the drawing are visible
 // together, without switching tabs. Colourway / material selection lives on the colorways tab;
 // this tab is about HOW the garment goes together, not which fabric or colour.
-export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
+export function ConstructionTab({
+  techCard,
+  active = false,
+}: {
+  techCard?: common_TechCard;
+  /** Вкладка открыта. Вкладки смонтированы все сразу — без этого разбор заказывался бы всегда. */
+  active?: boolean;
+}) {
   // Deliberately NOT watching `operations` here. The summary and the sketch each hold their own
   // subscription, so a keystroke in the assembly editor re-renders those two leaves instead of
   // this whole workspace (and with it every row of the sequence rail).
@@ -425,8 +424,10 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   //
   // Хук держится ЗДЕСЬ, а не внутри редактора операций: карта контуров одна на карточку и
   // стабильна по ссылке, а редактор перерисовывается на каждый введённый символ.
-  const [shapesArmed, setShapesArmed] = useState(false);
-  const pieceShapes = usePieceShapes(shapesArmed);
+  // Разбор заказывается САМ, как только вкладку открыли: силуэты здесь — рабочий материал, а не
+  // опция, и спрашивать разрешения показать то, ради чего на экран пришли, незачем. Но и качать
+  // мегабайты за того, кто вкладку не открывал, тоже: вкладки смонтированы все сразу.
+  const pieceShapes = usePieceShapes(active);
 
   // Which concrete article each colourway takes for the slots an operation consumes. Assembled here
   // because the two halves come from different places: the recipe (usages + their pins) rides the
@@ -513,7 +514,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
             <SectionHeader
               title='operations — assembly order'
               question='— what each step does, where, on which pieces, and how long it takes'
-              action={shapesAffordance(pieceShapes, shapesArmed, () => setShapesArmed(true))}
+              action={shapesAffordance(pieceShapes)}
             />
             <OperationsField
               activePin={pin.active}

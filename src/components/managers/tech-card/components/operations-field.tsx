@@ -3484,6 +3484,7 @@ export function OperationsField({
                   );
                 }}
                 onCreate={setPendingCreate}
+                pieceShapes={pieceShapes}
                 onDissolve={dissolveUnit}
                 positions={prefs.pos}
                 onMove={prefs.move}
