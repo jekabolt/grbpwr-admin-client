@@ -21,7 +21,7 @@ import {
 } from 'api/proto-http/admin';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Accordion } from 'ui/components/accordion';
@@ -85,7 +85,9 @@ import {
   classifyAssemblyInputs,
   type AssemblyResult,
 } from './assembly-frontier';
+import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
 import { PieceRef, useFormPieces } from './piece-picker';
+import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
@@ -498,17 +500,25 @@ function useAssemblyView(pieces: PieceRef[]): AssemblyView {
   }, [ops, pieces]);
 }
 
-// useAssemblyBrokenSteps — какие шаги ломают сборку, для маркера в рельсе.
+type RailGrouping = {
+  broken: Set<number>;
+  /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним. */
+  headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
+  /** Размечена ли карточка: без узлов досье вырождается в сегодняшний плоский рельс. */
+  marked: boolean;
+};
+
+// useRailGrouping — досье: тот же рельс, но с врезанными заголовками подсборок.
 //
-// ПРО ЦЕНУ ПОДПИСКИ, честно. Дисциплина этого файла — держать кросс-операционные вычисления в
-// листьях, и лоток с SVG-силуэтами живёт в листе именно поэтому. Здесь подписка в корне, и это
-// осознанный размен: рельс — единственное место, где виден шаг, который автор сейчас НЕ открыл,
-// а без маркера нарушение на нём остаётся невидимым до сохранения. Дорогая часть (плитки
-// деталей) осталась в листе; корень перерисовывает строки рельса по 26px, и при тринадцати
-// шагах реальной карточки это ничто.
-function useAssemblyBrokenSteps(pieces: PieceRef[]): Set<number> {
+// Считает ОДИН свип на обе задачи (маркеры сломанных шагов и группировку), потому что второй
+// свип на тех же данных был бы чистой платой за раздельность хуков.
+//
+// Заголовок врезается ПЕРЕД первым шагом блока — то есть блок это диапазон в последовательности,
+// а не контейнер. Порядок остаётся за технологом, перетаскивание глобальное; если он утащит шаг
+// в чужой блок, заголовки просто перестроятся, а не запретят жест.
+function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): RailGrouping {
   const ops = useWatch({ name: 'operations' }) as
-    | Array<{ inputKeys?: string[]; outputUnitKey?: string }>
+    | Array<{ inputKeys?: string[]; outputUnitKey?: string; outputUnitName?: string }>
     | undefined;
   return useMemo(() => {
     const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
@@ -516,14 +526,41 @@ function useAssemblyBrokenSteps(pieces: PieceRef[]): Set<number> {
     const steps = (ops ?? []).map((o) => ({
       inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
       outputUnitKey: (o?.outputUnitKey ?? '').trim(),
-      outputUnitName: '',
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
     }));
-    const out = new Set<number>();
-    for (const v of assemblySweep(sweepPieces, steps).violations) {
-      if (v.step >= 0) out.add(v.step);
+    const res = assemblySweep(sweepPieces, steps);
+
+    const broken = new Set<number>();
+    for (const v of res.violations) if (v.step >= 0) broken.add(v.step);
+
+    const grouped = assemblyBlocks(steps, res);
+    const liveUnits = res.frontier.filter((k) => res.units.has(k));
+    const headerBefore = new Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>();
+
+    const sumSmv = (idx: number[]) => {
+      let total = 0;
+      let any = false;
+      for (const i of idx) {
+        const n = Number((smvOf(i) ?? '').replace(',', '.'));
+        if (Number.isFinite(n) && n > 0) {
+          total += n;
+          any = true;
+        }
+      }
+      return any ? String(Math.round(total * 100) / 100) : '';
+    };
+
+    for (const b of [...grouped.blocks, grouped.loose]) {
+      if (b.steps.length === 0) continue;
+      const first = Math.min(...b.steps);
+      headerBefore.set(first, {
+        block: b,
+        smv: sumSmv(b.steps),
+        terminal: liveUnits.length === 1 && liveUnits[0] === b.key,
+      });
     }
-    return out;
-  }, [ops, pieces]);
+    return { broken, headerBefore, marked: grouped.blocks.length > 0 };
+  }, [ops, pieces, smvOf]);
 }
 
 // AssemblyTray — лоток, который перестал врать.
@@ -3064,7 +3101,18 @@ export function OperationsField({
   // Шаги, ломающие сборку. Считается ЗДЕСЬ, потому что рельс живёт в корне и другого места нет;
   // цена — один свип на изменение массива операций, а не на каждое нажатие клавиши: useWatch с
   // exact-именем не срабатывает на правку note или SMV внутри шага.
-  const brokenSteps = useAssemblyBrokenSteps(pieces);
+  // ДЕФОЛТ РЕЖИМА ВЫВОДИТСЯ, А НЕ КОНСТАНТА. На неразмеченной карточке — а сегодня это каждая —
+  // досье вырождается в один заголовок «вне узлов» над всем списком, то есть в шум. Поэтому
+  // группировка включается ровно тогда, когда есть что группировать, и переключатель появляется
+  // тогда же.
+  const smvOf = useCallback(
+    (i: number) => (getValues(`operations.${i}.smv`) ?? '') as string,
+    [getValues],
+  );
+  const grouping = useRailGrouping(pieces, smvOf);
+  const brokenSteps = grouping.broken;
+  const [dossier, setDossier] = useState(true);
+  const grouped = grouping.marked && dossier;
   const prevSubmit = useRef(submitCount);
   const prevErrorCount = useRef(errorIndices.size);
   useEffect(() => {
@@ -3265,9 +3313,16 @@ export function OperationsField({
             <GroupLabel
               flush
               action={
-                <Text size='micro' variant='label' component='span'>
-                  ⠿ перетащить
-                </Text>
+                <div className='flex items-center gap-2'>
+                  {grouping.marked && (
+                    <Chip dashed onClick={() => setDossier((v) => !v)} title='группировать шаги по подсборкам или показать плоским списком'>
+                      {dossier ? 'плоский список' : 'по подсборкам'}
+                    </Chip>
+                  )}
+                  <Text size='micro' variant='label' component='span'>
+                    ⠿ перетащить
+                  </Text>
+                </div>
               }
             >
               последовательность
@@ -3285,9 +3340,16 @@ export function OperationsField({
                 >
                   <div className='flex flex-col gap-0.5'>
                     {fields.map((f, index) => (
-                      <RailStep
-                        key={f.id}
-                        uid={f.id}
+                      <Fragment key={f.id}>
+                        {grouped && grouping.headerBefore.has(index) && (
+                          <UnitBlockHeader
+                            block={grouping.headerBefore.get(index)!.block}
+                            smv={grouping.headerBefore.get(index)!.smv}
+                            terminal={grouping.headerBefore.get(index)!.terminal}
+                          />
+                        )}
+                        <RailStep
+                          uid={f.id}
                         index={index}
                         selected={index === selectedIndex}
                         onSelect={() => setSelected(index)}
@@ -3298,7 +3360,8 @@ export function OperationsField({
                         pieceShapes={pieceShapes}
                         onHoverPin={(n) => onActivePinChange?.(n)}
                         onDropPiece={addInputToOperation}
-                      />
+                        />
+                      </Fragment>
                     ))}
                   </div>
                 </SortableContext>
