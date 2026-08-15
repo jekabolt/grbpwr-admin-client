@@ -19,6 +19,7 @@ import {
   common_TechCardOperation,
   common_TechCardOperationType,
 } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
@@ -78,6 +79,12 @@ import { kindLabel, preferredBomKinds } from './bom-kind';
 import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
+import {
+  assemblyReleaseCheck,
+  assemblySweep,
+  classifyAssemblyInputs,
+  type AssemblyResult,
+} from './assembly-frontier';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
@@ -434,6 +441,137 @@ function RailTotal() {
         </Text>
       }
     />
+  );
+}
+
+// ── фронтир ──────────────────────────────────────────────────────────────────────────────────
+// Что реально лежит на столе перед шагом k: детали, ещё не съеденные джойнами, плюс узлы,
+// произведённые раньше и ещё не съеденные.
+//
+// СЧИТАЕТСЯ В ЛИСТЕ. Подписка на весь массив `operations` из корня OperationsField
+// перерисовывала бы всё поле на каждое нажатие клавиши в любом шаге — дисциплина этого файла
+// прямо требует держать кросс-операционные вычисления в листьях или в getValues на событии.
+//
+// Правила — из общего с сервером порта (assembly-frontier), а не из собственных представлений:
+// пикер обязан предлагать РОВНО то, что примет запись.
+type AssemblyView = {
+  res: AssemblyResult;
+  /** что шаг index имеет право взять входом */
+  availableBefore: (index: number) => Set<string>;
+  /** живые узлы на фронтире шага (в порядке появления) */
+  liveUnitsBefore: (index: number) => string[];
+  /** ключ детали → узел, внутри которого она теперь лежит */
+  eatenInto: Map<string, string>;
+};
+
+function useAssemblyView(pieces: PieceRef[]): AssemblyView {
+  const ops = useWatch({ name: 'operations' }) as
+    | Array<{ inputKeys?: string[]; outputUnitKey?: string; outputUnitName?: string }>
+    | undefined;
+  return useMemo(() => {
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = (ops ?? []).map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(sweepPieces, steps);
+    const eatenInto = new Map<string, string>();
+    res.consumedBy.forEach((stepIdx, key) => {
+      const into = steps[stepIdx]?.outputUnitKey;
+      if (into) eatenInto.set(key, into);
+    });
+    const before = (index: number) => new Set(res.frontierBefore[index] ?? res.frontier);
+    return {
+      res,
+      availableBefore: before,
+      liveUnitsBefore: (index: number) =>
+        (res.frontierBefore[index] ?? res.frontier).filter((k) => res.units.has(k)),
+      eatenInto,
+    };
+  }, [ops, pieces]);
+}
+
+// AssemblyTray — лоток, который перестал врать.
+//
+// ЛИСТ, и это не стилистика: он подписан на весь массив operations (фронтир иначе не посчитать),
+// и будь эта подписка в корне OperationsField, всё поле перерисовывалось бы на каждое нажатие
+// клавиши в любом шаге.
+//
+// Съеденные детали НЕ рисуются стеной зачёркнутых: на позднем шаге съедено почти всё, и такая
+// стена сообщала бы только о том, что работа идёт. Вместо неё — свёрнутый счётчик, который
+// называет узел, куда деталь ушла. Решение прототипа, а не изобретение.
+function AssemblyTray({
+  pieces,
+  pieceShapes,
+  tiled,
+  highlighted,
+  stepIndex,
+  onAdd,
+}: {
+  pieces: PieceRef[];
+  pieceShapes: PieceShapeMap;
+  tiled: boolean;
+  highlighted: boolean;
+  stepIndex: number;
+  onAdd: (key: string) => void;
+}) {
+  const view = useAssemblyView(pieces);
+  const [consumedOpen, setConsumedOpen] = useState(false);
+
+  const available = view.availableBefore(stepIndex);
+  const units = view.liveUnitsBefore(stepIndex);
+  const onTable = pieces.filter((p) => available.has(p.lineKey));
+  const eaten = pieces.filter((p) => !available.has(p.lineKey));
+
+  return (
+    <>
+      {units.map((key) => {
+        const unit = view.res.units.get(key);
+        const title = unit?.name ? `${key} — ${unit.name}` : key;
+        return (
+          <Chip
+            key={`unit:${key}`}
+            onClick={() => onAdd(key)}
+            title={`${title}: узел из ${unit?.leaves.length ?? 0} деталей — кликните, чтобы добавить к открытому шагу`}
+          >
+            ▣ {key}
+          </Chip>
+        );
+      })}
+      {onTable.map((p) => (
+        <TrayChip
+          key={p.lineKey}
+          piece={p}
+          shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
+          tiled={tiled}
+          highlighted={highlighted}
+          onAdd={() => onAdd(p.lineKey)}
+        />
+      ))}
+      {eaten.length > 0 && (
+        <>
+          <Chip
+            dashed
+            onClick={() => setConsumedOpen((v) => !v)}
+            title='детали, уже вошедшие в узлы: их нельзя взять повторно — строка детали съедается ровно одним джойном'
+          >
+            уже в узлах · {eaten.length}
+          </Chip>
+          {consumedOpen &&
+            eaten.map((p) => {
+              const into = view.eatenInto.get(p.lineKey);
+              return (
+                <Text key={`eaten:${p.lineKey}`} size='micro' variant='label' component='span'>
+                  {p.name}
+                  {into ? ` ∈ ${into}` : ''}
+                </Text>
+              );
+            })}
+        </>
+      )}
+    </>
   );
 }
 
@@ -2372,6 +2510,7 @@ export function OperationsField({
   // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
+  const { showMessage } = useSnackBarStore();
 
   // Чем именно заканчивается «+ new piece», решает наличие чертежа: пока его нет, деталь заводят
   // руками на вкладке деталей; как только к карточке привязан первый DXF, единственным автором
@@ -2459,11 +2598,47 @@ export function OperationsField({
     [],
   );
 
-  const addPieceToOperation = (index: number, lineKey: string) => {
-    if (index < 0 || !pieces.some((p) => p.lineKey === lineKey)) return;
+  // Вход шага — деталь ИЛИ узел, поэтому проверка «существует ли такая деталь» снята: ключ узла
+  // деталью не является по определению.
+  //
+  // ФРОНТИР СВЕРЯЕТСЯ ПО ЦЕЛЕВОМУ ШАГУ, а не по открытому. Лоток фильтрован фронтиром выбранного
+  // шага, но перетащить чип можно на ЛЮБОЙ шаг рельса — и деталь, свободная на шаге 8, на шаге 3
+  // может быть ещё не съедена, а на шаге 12 уже съедена. Без этой сверки drop молча создавал бы
+  // последовательность, которую сервер отвергнет целиком, и автор узнал бы об этом на сохранении.
+  //
+  // Считается через getValues НА СОБЫТИИ, а не подпиской: подписка на весь массив operations в
+  // корне поля перерисовывала бы всё на каждое нажатие клавиши.
+  const addInputToOperation = (index: number, key: string) => {
+    if (index < 0 || !key) return;
     const cur = (getValues(`operations.${index}.inputKeys`) ?? []) as string[];
-    if (cur.includes(lineKey)) return;
-    setValue(`operations.${index}.inputKeys`, [...cur, lineKey], { shouldDirty: true });
+    if (cur.includes(key)) return;
+
+    const formOps = (getValues('operations') ?? []) as Array<{
+      inputKeys?: string[];
+      outputUnitKey?: string;
+      outputUnitName?: string;
+    }>;
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = formOps.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(sweepPieces, steps);
+    const available = res.frontierBefore[index] ?? res.frontier;
+    if (!available.includes(key)) {
+      const eater = res.consumedBy.get(key);
+      const into = eater !== undefined ? steps[eater]?.outputUnitKey : '';
+      showMessage(
+        into
+          ? `«${key}» на этом шаге уже внутри узла ${into} — взять её повторно нельзя`
+          : `«${key}» на этом шаге ещё не лежит на столе`,
+        'error',
+      );
+      return;
+    }
+    setValue(`operations.${index}.inputKeys`, [...cur, key], { shouldDirty: true });
   };
 
   // Cut pieces are a section of the PATTERNS tab (they used to have their own, then sat on
@@ -2527,16 +2702,14 @@ export function OperationsField({
               деталей ещё нет
             </Text>
           ) : (
-            pieces.map((p) => (
-              <TrayChip
-                key={p.lineKey}
-                piece={p}
-                shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
-                tiled={tiled}
-                highlighted={highlightPieces}
-                onAdd={() => addPieceToOperation(selectedIndex, p.lineKey)}
-              />
-            ))
+            <AssemblyTray
+              pieces={pieces}
+              pieceShapes={pieceShapes}
+              tiled={tiled}
+              highlighted={highlightPieces}
+              stepIndex={selectedIndex}
+              onAdd={(key) => addInputToOperation(selectedIndex, key)}
+            />
           )}
           {/* Чип называет ДЕЙСТВИЕ, которое оператор увидит по приезде, а не абстрактное
               «добавить»: с чертежом это модалка сопоставления, без чертежа — ручная кнопка. */}
@@ -2612,7 +2785,7 @@ export function OperationsField({
                         activeBom={activeBom}
                         pieceShapes={pieceShapes}
                         onHoverPin={(n) => onActivePinChange?.(n)}
-                        onDropPiece={addPieceToOperation}
+                        onDropPiece={addInputToOperation}
                       />
                     ))}
                   </div>
@@ -2650,7 +2823,7 @@ export function OperationsField({
               onRemove={() => removeOperation(selectedIndex)}
               onFlashPieces={flashPieces}
               onActiveBomChange={onActiveBomChange}
-              onDropPiece={addPieceToOperation}
+              onDropPiece={addInputToOperation}
             />
           )}
         </div>
