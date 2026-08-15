@@ -641,26 +641,51 @@ export function AssemblySchematic({
                           })(),
                     )}
                     className={cn(
-                      'flex w-full items-baseline gap-1 border-b border-hairline px-1 text-left',
+                      // `overflow-hidden` на самой шапке — последняя преграда: высота бокса
+                      // посчитана раскладкой, и вторая строка текста, куда бы она ни взялась,
+                      // ляжет поверх первой строки шага.
+                      'flex w-full items-baseline gap-1 overflow-hidden border-b border-hairline px-1 text-left',
                       !frozen && onTable.has(box.key) && 'hover:bg-bgZebra',
                       picked.includes(box.key) && 'bg-bgZebra',
                     )}
                     style={{ height: HEAD_H }}
-                    title={
+                    // Полный текст шапки — в подсказке: ключ и имя узла обрезаются по ширине, и
+                    // прочесть их целиком иначе было бы негде.
+                    title={`▣ ${box.key}${b.name ? ` · ${b.name}` : ''}${
+                      terminal ? ' · готовое изделие' : b.absorbedInto ? ` · уходит в ▣ ${b.absorbedInto}` : ' · разрыв'
+                    }\n${
                       onTable.has(box.key)
                         ? 'узел на столе — кликните, чтобы взять его в следующую сборку'
                         : 'узел уже вошёл в другой; кликните, чтобы открыть шаг, который его съел'
-                    }
+                    }`}
                   >
-                    <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                    {/* КЛЮЧ НЕ ПЕРЕНОСИТСЯ. Он был единственным текстом шапки без ограничения
+                        ширины: имя узла усекалось, статус справа не сжимался, а ключ рос — и
+                        двухсловный «ДВА РУКАВА» уезжал второй строкой поверх первого шага.
+                        Многоточие честнее: шапка высотой в строку и обязана быть в одну строку. */}
+                    <Text
+                      size='micro'
+                      variant='uppercase'
+                      tracking='label'
+                      component='span'
+                      className='min-w-0 shrink truncate font-bold'
+                    >
                       {picked.includes(box.key) ? '✓ ' : ''}▣ {box.key}
                     </Text>
                     {b.name && (
-                      <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                      <Text size='nano' variant='label' component='span' className='min-w-0 shrink truncate'>
                         {b.name}
                       </Text>
                     )}
-                    <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                    {/* Статус тоже усекается: `→ключ съевшего узла` — текст произвольной длины, и
+                        несжимаемым он отбирал ширину у самого ключа. Порог в 45% оставляет ему
+                        достаточно, чтобы прочесть начало, но не даёт съесть шапку целиком. */}
+                    <Text
+                      size='nano'
+                      variant='label'
+                      component='span'
+                      className='ml-auto max-w-[45%] shrink-0 truncate'
+                    >
                       {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
                     </Text>
                   </div>
