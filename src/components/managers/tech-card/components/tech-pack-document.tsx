@@ -321,7 +321,8 @@ export function TechPackDocument({
   // ВСЕ ХУКИ ОБЪЯВЛЕНЫ ДО раннего `if (!tc) return null` ниже. Иначе карта, приехавшая сначала
   // обёрткой без вложенного insert, а потом целиком (кэш → рефетч), меняла бы число вызовов
   // хуков между рендерами — а это не «иногда неверный вывод», это падение всего компонента.
-  // Порядок узлов — порядок словаря зон: бумага и экран обязаны перечислять узлы одинаково.
+  // ФОЛБЭК ДЛЯ НЕРАЗМЕЧЕННОЙ КАРТОЧКИ: группировка по зонам в порядке словаря. На размеченной
+  // карточке заголовки даёт `assemblyGroups` — настоящие узлы в порядке производящих шагов.
   // Шаги без зоны идут последней группой, а не растворяются в первой.
   // РАЗМЕЧЕННАЯ КАРТОЧКА ПЕЧАТАЕТСЯ БЛОКАМИ УЗЛОВ, неразмеченная — по зонам, как раньше.
   //
@@ -344,6 +345,11 @@ export function TechPackDocument({
     }));
     const res = assemblySweep(pieces, steps);
     const grouped = assemblyBlocks(steps, res);
+    // ГЕЙТ ТОТ ЖЕ, ЧТО У ДОСЬЕ: узлы должны РОДИТЬСЯ, а не быть объявленными. Объявленный ключ
+    // ещё не узел — джойн с одним входом его не рождает. По слабому гейту такая карточка
+    // печаталась бы целиком под одним заголовком «вне узлов», потеряв и узлы, и зоны: бумага
+    // оказалась бы хуже, чем до разметки, ровно на сломанной карточке, где она нужнее.
+    if (grouped.blocks.length === 0) return null;
     const nameOf = (k: string) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || k;
     const indexed = ops.map((op, index) => ({ op, index }));
     const out: Array<{ key: string; label: string; sub: string; operations: typeof indexed }> = [];
@@ -354,19 +360,21 @@ export function TechPackDocument({
         label: b.name ? `▣ ${b.key} · ${b.name}` : `▣ ${b.key}`,
         // СОСТАВ УЗЛА — то, ради чего блок и печатают: швея видит, из чего собирается эта
         // подсборка, не листая обратно к списку деталей.
-        sub: b.leaves.length ? `из: ${b.leaves.map(nameOf).join(' + ')}` : '',
+        sub: b.leaves.length ? `from: ${b.leaves.map(nameOf).join(' + ')}` : '',
         operations: b.steps.map((i) => indexed[i]).filter(Boolean),
       });
     }
     if (grouped.loose.steps.length > 0) {
       out.push({
         key: '',
-        label: '◌ вне узлов',
-        sub: 'цель шага — не узел',
+        label: '◌ outside units',
+        sub: 'step output is not a unit',
         operations: grouped.loose.steps.map((i) => indexed[i]).filter(Boolean),
       });
     }
-    return out.length > 0 ? out : null;
+    // Без страховки `out.length > 0`: после гейта выше блок гарантированно есть, и мнимый
+    // фолбэк, который никогда не срабатывает, читался бы как защита, которой нет.
+    return out;
   }, [tc?.operations, tc?.pieces]);
 
   const operationGroups = useMemo(() => {
@@ -2251,7 +2259,7 @@ export function TechPackDocument({
               </thead>
               <tbody>
                 {printGroups.map((g) => (
-                  <Fragment key={g.key || 'tail'}>
+                  <Fragment key={g.key ? `u:${g.key}` : 'tail'}>
                     {/* ЗАГОЛОВОК ГРУППЫ. Швея собирает изделие узлами, а не сплошным списком из
                         сорока строк. На размеченной карточке это НАСТОЯЩИЕ узлы сборки со своим
                         составом; на неразмеченной — зоны, как было до Ф1: подменять одно другим
