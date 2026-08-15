@@ -82,6 +82,7 @@ export function AssemblySchematic({
   onCreate,
   onDissolve,
   pieceShapes,
+  smvOfBlock,
   positions,
   onMove,
   onResetPositions,
@@ -107,6 +108,8 @@ export function AssemblySchematic({
    * по форме, а не по имени.
    */
   pieceShapes: PieceShapeMap;
+  /** Σ SMV блока по ключу ('' — хвостовой). Считает досье, схема только показывает. */
+  smvOfBlock: Map<string, string>;
   /** Ручные позиции нод. Живут выше схемы: схема размонтируется при смене режима. */
   positions: PosOverrides;
   onMove: (key: string, at: { x: number; y: number }) => void;
@@ -120,7 +123,7 @@ export function AssemblySchematic({
   const toggle = (key: string) =>
     setPicked((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
   const onTable = new Set(res.frontier);
-  const { LINE_H, HEAD_H } = SCHEMATIC_METRICS;
+  const { LINE_H, HEAD_H, FOOT_H } = SCHEMATIC_METRICS;
   const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
   // ВЫБОР ЖИВЁТ ДО ТЕХ ПОР, ПОКА ЖИВЫ ЕГО КЛЮЧИ. Деталь, попавшая в узел соседним жестом, входом
@@ -139,6 +142,39 @@ export function AssemblySchematic({
   const showMessage = useSnackBarStore((st) => st.showMessage);
   /** Человеческое имя ноды: имя детали или код узла. */
   const nameOfNode = (key: string) => (res.units.has(key) ? `▣ ${key}` : pieceNameOf(key));
+
+  /**
+   * ВИД ШАГА ОДНИМ ЗНАКОМ. В строке блока раньше стояли только номер и подпись, и три разных по
+   * смыслу шага выглядели одинаково: тот, что рождает узел, тот, что дособирает существующий, и
+   * тот, что просто обрабатывает и ничего не собирает. Глиф отвечает на это, не занимая строки.
+   */
+  const stepGlyph = (i: number): string => {
+    const st = steps[i];
+    if (!st?.outputUnitKey) return '·';
+    return st.inputs.some((inp) => inp.key === st.outputUnitKey) ? '+▣' : '▣';
+  };
+
+  /**
+   * Состояние узла СЛОВОМ, а не значком. «✓», «→GARMENT» и «✕» требовали держать в голове
+   * словарь из трёх символов; строчкой хватает места сказать это по-русски.
+   */
+  const stateWord = (b: AssemblyBlock, terminal: boolean): string =>
+    terminal ? '✓ изделие' : b.absorbedInto ? `→ ▣ ${b.absorbedInto}` : '✕ разрыв';
+
+  /**
+   * Состав узла КОМПАКТНО: узлы поимённо, детали числом.
+   *
+   * Имена деталей в подвал не влезают и не нужны — их видно плитками рядом и стрелками к ним.
+   * Число же отвечает на вопрос, которого плитки не закрывают: «сколько всего в этот узел
+   * вошло», особенно когда часть плиток утащена рукой на другой конец полотна.
+   */
+  const compositionOf = (key: string): string => {
+    const inputs = directInputsOf.get(key) ?? [];
+    const units = inputs.filter((k) => res.units.has(k)).map((k) => `▣ ${k}`);
+    const pieces = inputs.filter((k) => !res.units.has(k)).length;
+    const parts = [...units, ...(pieces ? [`${pieces} дет`] : [])];
+    return parts.length ? `← ${parts.join(' + ')}` : '';
+  };
 
   const [drag, setDrag] = useState<DragState | null>(null);
   // Зеркало состояния жеста для СИНХРОННОГО чтения. Слушатели window живут дольше одного рендера,
@@ -664,10 +700,10 @@ export function AssemblySchematic({
                           })(),
                     )}
                     className={cn(
-                      // `overflow-hidden` на самой шапке — последняя преграда: высота бокса
-                      // посчитана раскладкой, и вторая строка текста, куда бы она ни взялась,
-                      // ляжет поверх первой строки шага.
-                      'flex w-full items-baseline gap-1 overflow-hidden border-b border-hairline px-1 text-left',
+                      // `overflow-hidden` — последняя преграда: высота шапки посчитана
+                      // раскладкой, и третья строка текста, откуда бы она ни взялась, легла бы
+                      // поверх первой строки шага.
+                      'flex w-full flex-col justify-center overflow-hidden border-b border-hairline px-1 text-left',
                       !frozen && onTable.has(box.key) && 'hover:bg-bgZebra',
                       picked.includes(box.key) && 'bg-bgZebra',
                     )}
@@ -682,35 +718,40 @@ export function AssemblySchematic({
                         : 'узел уже вошёл в другой; кликните, чтобы открыть шаг, который его съел'
                     }`}
                   >
-                    {/* КЛЮЧ НЕ ПЕРЕНОСИТСЯ. Он был единственным текстом шапки без ограничения
-                        ширины: имя узла усекалось, статус справа не сжимался, а ключ рос — и
-                        двухсловный «ДВА РУКАВА» уезжал второй строкой поверх первого шага.
-                        Многоточие честнее: шапка высотой в строку и обязана быть в одну строку. */}
+                    {/* ПЕРВАЯ СТРОКА — ТОЛЬКО КЛЮЧ. Он идентифицирует узел во всех остальных
+                        шагах, и делить строку с чем-либо ему нельзя: раньше имя теснило ключ,
+                        ключ теснил состояние, и двухсловный «ДВА РУКАВА» уезжал поверх шага. */}
                     <Text
                       size='micro'
                       variant='uppercase'
                       tracking='label'
                       component='span'
-                      className='min-w-0 shrink truncate font-bold'
+                      className='block w-full truncate font-bold'
                     >
                       {picked.includes(box.key) ? '✓ ' : ''}▣ {box.key}
                     </Text>
-                    {b.name && (
-                      <Text size='nano' variant='label' component='span' className='min-w-0 shrink truncate'>
-                        {b.name}
+                    {/* ВТОРАЯ СТРОКА — ИМЯ И СОСТОЯНИЕ СЛОВОМ. «✓», «→GARMENT» и «✕» требовали
+                        держать в голове словарь из трёх значков; строкой хватает места сказать
+                        это по-русски. Красным — только разрыв: сборка не сошлась, и это ошибка,
+                        а не оттенок. */}
+                    <span className='flex w-full items-baseline gap-1 overflow-hidden'>
+                      {b.name && (
+                        <Text size='nano' variant='label' component='span' className='min-w-0 shrink truncate'>
+                          {b.name}
+                        </Text>
+                      )}
+                      <Text
+                        size='nano'
+                        variant='label'
+                        component='span'
+                        className={cn(
+                          'ml-auto max-w-[60%] shrink-0 truncate',
+                          !terminal && !b.absorbedInto && 'text-error',
+                        )}
+                      >
+                        {stateWord(b, terminal)}
                       </Text>
-                    )}
-                    {/* Статус тоже усекается: `→ключ съевшего узла` — текст произвольной длины, и
-                        несжимаемым он отбирал ширину у самого ключа. Порог в 45% оставляет ему
-                        достаточно, чтобы прочесть начало, но не даёт съесть шапку целиком. */}
-                    <Text
-                      size='nano'
-                      variant='label'
-                      component='span'
-                      className='ml-auto max-w-[45%] shrink-0 truncate'
-                    >
-                      {terminal ? '✓' : b.absorbedInto ? `→${b.absorbedInto}` : '✕'}
-                    </Text>
+                    </span>
                   </div>
                   {/* ДЕЙСТВИЯ УЗЛА ПОКАЗЫВАЮТСЯ ПО НАВЕДЕНИЮ. Постоянно висящие чипы над каждым
                       боксом — это два лишних объекта на узел, и на схеме из десяти узлов их
@@ -749,33 +790,45 @@ export function AssemblySchematic({
                       </Chip>
                     </div>
                   )}
-                  {/* СОСТАВ УЗЛА — по наведению и ОВЕРЛЕЕМ, а не строкой внутри бокса. Строкой
-                      он изменил бы высоту, которую считает чистая раскладка, то есть сдвинул бы
-                      всю схему ради подписи; а постоянной он превратил бы полотно в таблицу —
-                      ровно то, из-за чего действия узла уехали на наведение. */}
-                  {hovered === box.key && (directInputsOf.get(box.key) ?? []).length > 0 && (
-                    <div
-                      className='absolute top-full left-0 z-10 flex w-full items-center bg-bgColor pt-1'
-                      title={`берёт: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ')}`}
-                    >
-                      <Text size='nano' variant='label' component='span' className='truncate'>
-                        ← {(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ')}
-                      </Text>
-                    </div>
-                  )}
                   {b.steps.map((i) => (
                     <div
                       key={i}
                       {...activate(clickGuard(() => onPickStep(i)))}
-                      className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                      className='flex w-full items-center gap-1 px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                       style={{ height: LINE_H }}
                       title='открыть шаг в списке'
                     >
                       <Text size='nano' component='span' className='min-w-0 truncate'>
                         {(i + 1) * 10} · {labelOf(i)}
                       </Text>
+                      {/* Вид шага одним знаком: ▣ рождает узел, +▣ дособирает его, · только
+                          обрабатывает. Три разных по смыслу шага выглядели одинаково. */}
+                      <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                        {stepGlyph(i)}
+                      </Text>
                     </div>
                   ))}
+
+                  {/* ПОДВАЛ — ПОСТОЯННЫЙ, а не по наведению. Состав и трудоёмкость это два
+                      вопроса, которые задают узлу чаще всего, и прятать ответы за мышь нельзя:
+                      ноды размечены `touch-action: none`, то есть рассчитаны на палец, а
+                      наведения на планшете не существует вовсе. Состав компактный — узлы
+                      поимённо, детали числом: имена деталей сюда не влезут и не нужны, их видно
+                      плитками и стрелками к ним. */}
+                  <div
+                    className='absolute inset-x-0 bottom-0 flex items-baseline gap-1 overflow-hidden border-t border-hairline px-1'
+                    style={{ height: FOOT_H }}
+                    title={`берёт: ${(directInputsOf.get(box.key) ?? []).map(nameOfNode).join(' + ') || '—'}`}
+                  >
+                    <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                      {compositionOf(box.key)}
+                    </Text>
+                    {smvOfBlock.get(box.key) && (
+                      <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
+                        Σ {smvOfBlock.get(box.key)}
+                      </Text>
+                    )}
+                  </div>
                 </div>
               </div>
             );
@@ -802,11 +855,16 @@ export function AssemblySchematic({
               {...dragHandlers('', layout.tail.x, layout.tail.y)}
               {...hoverHandlers('')}
             >
-              <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
-                <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+              {/* Хвост носит ту же шапку в две строки, что и узлы: одна геометрия на все боксы
+                  полотна дешевле двух, а вопрос «что это за коробка» у него тот же. */}
+              <div
+                className='flex w-full flex-col justify-center overflow-hidden border-b border-hairline px-1'
+                style={{ height: HEAD_H }}
+              >
+                <Text size='micro' variant='uppercase' tracking='label' component='span' className='block truncate font-bold'>
                   ◌ вне узлов
                 </Text>
-                <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                <Text size='nano' variant='label' component='span' className='block truncate'>
                   цель шага — не узел
                 </Text>
               </div>
@@ -823,6 +881,19 @@ export function AssemblySchematic({
                   </Text>
                 </div>
               ))}
+              <div
+                className='absolute inset-x-0 bottom-0 flex items-baseline gap-1 overflow-hidden border-t border-hairline px-1'
+                style={{ height: FOOT_H }}
+              >
+                <Text size='nano' variant='label' component='span' className='min-w-0 truncate'>
+                  {looseSteps.length} шаг
+                </Text>
+                {smvOfBlock.get('') && (
+                  <Text size='nano' variant='label' component='span' className='ml-auto shrink-0 tabular-nums'>
+                    Σ {smvOfBlock.get('')}
+                  </Text>
+                )}
+              </div>
             </div>
           )}
 
