@@ -2216,7 +2216,17 @@ export function mapFormToTechCardInsert(
     // флаг assemblyCleared, и его ставит только соответствующая кнопка.
     assemblyAware: true,
     // Намерение живёт ровно одно сохранение: форма сбрасывает флаг сразу после отправки.
-    assemblyCleared: !!data.assemblyCleared,
+    //
+    // ФЛАГ РЕШАЕТСЯ ПО СОХРАНЁННОЙ КАРТОЧКЕ, А НЕ ПО ФОРМЕ. Намерение «снять разметку» имеет
+    // смысл только против карточки, которая разметку НЕСЁТ: сервер отвечает на всё остальное
+    // отказом «cleared против карточки без разметки», и это правильно.
+    //
+    // Форма же знает лишь своё текущее состояние. Объявить узел локально и тут же снять — жест
+    // законный (передумал), но серверу о нём знать незачем: на сохранённой карточке ничего не
+    // менялось. Маппер — единственное место, которое видит обе стороны, поэтому решение здесь.
+    assemblyCleared:
+      !!data.assemblyCleared &&
+      (original?.operations ?? []).some((o) => (o?.outputUnitKey ?? '').trim() !== ''),
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.

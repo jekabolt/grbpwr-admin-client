@@ -124,10 +124,10 @@ const CORE_STEP_FIELDS = new Set([
   'note',
   'inputKeys',
   'bomLineKeys',
-  // TODO(T-17): добавить сюда outputUnitKey/outputUnitName вместе с блоком «produces». Их
-  // контролы встанут в ядро карточки шага, а не в фолд переопределений, и ошибка на них не
-  // должна раскрывать фолд, в котором нужного контрола нет. Сегодня недостижимо: полей в UI
-  // ещё не существует.
+  // Блок «produces» стоит в ядре редактора, а не в фолде переопределений: серверный отказ на
+  // этих полях не должен раскрывать фолд, в котором нужного контрола нет.
+  'outputUnitKey',
+  'outputUnitName',
 ]);
 
 // What a step INHERITS, written the way it is shown: «4 (оверлок у окна)», «4 (card)», «not set».
@@ -672,7 +672,7 @@ function ProducesBlock({
   assembly: AssemblyView;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
   const outputKey = (useWatch({ name: `operations.${index}.outputUnitKey` }) ?? '') as string;
   const outputName = (useWatch({ name: `operations.${index}.outputUnitName` }) ?? '') as string;
 
@@ -685,19 +685,29 @@ function ProducesBlock({
   // поглощение, если тот же узел взят входом.
   const suggest = () => {
     const zone = (getValues(`operations.${index}.zone`) ?? '') as string;
+    // UNKNOWN и OTHER — не имена зон, а их отсутствие: узел «UNKNOWN» уехал бы на печать и в QR.
+    const token = zone.replace(/^TECH_CARD_GARMENT_ZONE_/, '');
     const base =
-      zone
-        .replace(/^TECH_CARD_GARMENT_ZONE_/, '')
-        .replace(/[^A-Z0-9]+/g, '-')
-        .replace(/^-|-$/g, '') || 'UNIT';
-    const taken = new Set(
-      ((getValues('operations') ?? []) as Array<{ outputUnitKey?: string }>)
+      token === 'UNKNOWN' || token === 'OTHER' || !token
+        ? 'UNIT'
+        : token.replace(/[^A-Z0-9]+/g, '-').replace(/^-|-$/g, '') || 'UNIT';
+    // Занято — это и узлы, И КЛЮЧИ ДЕТАЛЕЙ: пространство имён одно (правило 6), и предлагать
+    // код, совпавший с деталью, значит предлагать заведомый отказ.
+    const taken = new Set<string>([
+      ...((getValues('operations') ?? []) as Array<{ outputUnitKey?: string }>)
         .map((o) => (o?.outputUnitKey ?? '').trim())
         .filter(Boolean),
-    );
-    if (!taken.has(base)) return base;
-    for (let n = 2; n < 50; n++) if (!taken.has(`${base}-${n}`)) return `${base}-${n}`;
-    return base;
+      ...pieces.map((p) => p.lineKey),
+    ]);
+    // Колонка сервера — VARCHAR(64), и режет она БАЙТЫ. Код собран из ASCII-токена зоны, но
+    // подрезать всё равно надо здесь: отказ по длине на сохранении был бы отказом за то, чего
+    // автор не набирал.
+    const fit = (v: string) => (new TextEncoder().encode(v).length <= 64 ? v : v.slice(0, 48));
+    if (!taken.has(base)) return fit(base);
+    for (let n = 2; ; n++) {
+      const candidate = `${base}-${n}`;
+      if (!taken.has(candidate)) return fit(candidate);
+    }
   };
 
   const declare = () => {
@@ -714,6 +724,10 @@ function ProducesBlock({
       return;
     }
     setValue(`operations.${index}.outputUnitKey`, code, { shouldDirty: true });
+    // Разметка появилась снова — намерение «снять разметку» отменено. Без этого сценарий
+    // «снял → передумал → объявил заново» уходил бы в отказ «снял и одновременно прислал узлы»,
+    // а снять флаг руками нечем.
+    setValue('assemblyCleared', false, { shouldDirty: true });
   };
 
   return (
@@ -731,15 +745,21 @@ function ProducesBlock({
       ) : (
         <>
           <div className='flex flex-wrap items-center gap-2'>
-            <Input
+            {/* InputField, а не голый Input: последний — это <input> без привязки к форме, и
+                набранный код узла молча не доезжал бы до сабмита. maxLength по колонкам сервера
+                (VARCHAR(64) / VARCHAR(255)) — отказ по длине здесь бесполезен, поле просто не
+                должно позволять её набрать. */}
+            <InputField
               name={`operations.${index}.outputUnitKey`}
               label='код узла'
               placeholder='SHELL'
+              maxLength={64}
             />
-            <Input
+            <InputField
               name={`operations.${index}.outputUnitName`}
               label='имя узла'
               placeholder='корпус'
+              maxLength={255}
             />
             <Chip
               dashed
@@ -786,11 +806,19 @@ function BootstrapEatenRefs({
   pieces: PieceRef[];
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
   const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ inputKeys?: string[] }>;
 
-  const pieceKeys = useMemo(() => new Set(pieces.map((p) => p.lineKey)), [pieces]);
-  const mine = new Set((ops[index]?.inputKeys ?? []).filter((k) => pieceKeys.has(k)));
+  // Съедается ВСЁ, что шаг взял входом, а не только детали: джойн [SHELL, SL] съедает и узел
+  // SHELL, и поздние шаги-обработки, ссылающиеся на SHELL, ломаются ровно так же. Считать здесь
+  // одни детали значило бы починить первый узел и не починить цепочку узлов — то есть основной
+  // сценарий фичи.
+  //
+  // Исключение — собственный выходной ключ: при поглощении узел не съедается, он сохраняет
+  // идентичность, и ссылки на него после шага законны.
+  const mine = new Set(
+    (ops[index]?.inputKeys ?? []).filter((k) => k && k !== outputKey),
+  );
   // Кандидаты — только ПОЗЖЕ этого шага: шаг раньше него деталь ещё не потерял.
   const affected: number[] = [];
   ops.forEach((o, i) => {
@@ -803,10 +831,25 @@ function BootstrapEatenRefs({
     const all = (getValues('operations') ?? []) as Array<{ inputKeys?: string[] }>;
     affected.forEach((i) => {
       const cur = (all[i]?.inputKeys ?? []).filter(Boolean);
-      const kept = cur.filter((k) => !mine.has(k));
-      const next = kept.includes(outputKey) ? kept : [outputKey, ...kept];
+      // Узел встаёт НА МЕСТО первого заменённого входа, а не в начало списка: порядок входов —
+      // авторский, он несёт интерлив «деталь между узлами» и попадает в подпись секции. Сдвигать
+      // его молча значило бы протухать подпись за автора.
+      const next: string[] = [];
+      let placed = false;
+      for (const k of cur) {
+        if (mine.has(k)) {
+          if (!placed && !cur.includes(outputKey)) {
+            next.push(outputKey);
+            placed = true;
+          }
+          continue;
+        }
+        next.push(k);
+      }
+      if (!placed && !next.includes(outputKey)) next.unshift(outputKey);
       setValue(`operations.${i}.inputKeys`, next, { shouldDirty: true });
     });
+    setValue('assemblyCleared', false, { shouldDirty: true });
     showMessage(`ссылки на съеденные детали заменены узлом ${outputKey} в ${affected.length} шагах`, 'success');
   };
 
@@ -836,7 +879,7 @@ function BootstrapEatenRefs({
 // вернулись бы — карточка врала бы о том, что этот шаг сшивает.
 function ClearAssemblyButton({ pieces }: { pieces: PieceRef[] }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
-  const { showMessage } = useSnackBarStore();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
   const view = useAssemblyView(pieces);
   const [confirming, setConfirming] = useState(false);
 
@@ -848,11 +891,36 @@ function ClearAssemblyButton({ pieces }: { pieces: PieceRef[] }) {
       inputKeys?: string[];
       outputUnitKey?: string;
     }>;
+    const pieceKeys = new Set(pieces.map((p) => p.lineKey));
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const allSteps = ops.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: '',
+    }));
+    // Состав узла берётся НА МОМЕНТ ШАГА, а не финальный. Разница не косметическая: при
+    // «A+B→GARMENT, обработка [GARMENT], GARMENT+C→GARMENT» финальное замыкание вернуло бы
+    // обработке и деталь C, которой на её шаге ещё не существовало. Сервер такое примет —
+    // последовательность останется валидной, — и карточка соврёт о том, что этот шаг делает.
+    //
+    // Префиксный проход: n ≤ 60 шагов, стоимость незаметна, а альтернатива — хранить снимки
+    // замыканий в движке ради одной кнопки.
+    const unitsBefore = (i: number) => assemblySweep(sweepPieces, allSteps.slice(0, i)).units;
+    let droppedDangling = 0;
     ops.forEach((o, i) => {
       const seen = new Set<string>();
       const expanded: string[] = [];
+      const asOfStep = unitsBefore(i);
       for (const k of o?.inputKeys ?? []) {
-        const unit = view.res.units.get(k);
+        const unit = asOfStep.get(k) ?? view.res.units.get(k);
+        // Оборванный ключ (не деталь И не узел — обычно удалённый шаг-производитель или легаси
+        // «piece deleted») при распаковке ОТБРАСЫВАЕТСЯ. Оставь его — и запись со снятой
+        // разметкой всё равно «несёт узлы» с точки зрения сервера, то есть кнопка ломала бы
+        // собственный контракт: обещает состояние, которое сервер примет, а отдаёт отказ.
+        if (!unit && !pieceKeys.has(k)) {
+          droppedDangling++;
+          continue;
+        }
         for (const leaf of unit ? unit.leaves : [k]) {
           if (!seen.has(leaf)) {
             seen.add(leaf);
@@ -867,7 +935,12 @@ function ClearAssemblyButton({ pieces }: { pieces: PieceRef[] }) {
     // Намерение объявляется ровно на это сохранение.
     setValue('assemblyCleared', true, { shouldDirty: true });
     setConfirming(false);
-    showMessage('разметка узлов снята — сохраните карточку, чтобы это применилось', 'success');
+    showMessage(
+      droppedDangling > 0
+        ? `разметка узлов снята; оборванных ссылок отброшено: ${droppedDangling} — сохраните карточку`
+        : 'разметка узлов снята — сохраните карточку, чтобы это применилось',
+      'success',
+    );
   };
 
   return (
@@ -2789,7 +2862,7 @@ export function OperationsField({
   // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
-  const { showMessage } = useSnackBarStore();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
 
   // Чем именно заканчивается «+ new piece», решает наличие чертежа: пока его нет, деталь заводят
   // руками на вкладке деталей; как только к карточке привязан первый DXF, единственным автором

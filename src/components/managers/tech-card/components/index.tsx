@@ -697,7 +697,12 @@ export function TechCardForm({
   // queue is about to write. Only the three server-assigned lists are taken. Cut pieces have nothing
   // to re-seed: their identity is the client-minted lineKey, not a server id.
   async function withServerAssignedValues(sent: TechCardFormData): Promise<TechCardFormData> {
-    if (!numId) return sent;
+    // Намерение «снял разметку» гасится НА ВСЕХ ветках возврата, включая ранние. PUT к этому
+    // моменту уже прошёл — намерение исполнено, и оставить флаг взведённым из-за транзиентного
+    // сбоя рефетча значило бы отправить следующее сохранение в отказ «cleared против карточки без
+    // разметки», из которого пользователю не выбраться иначе как перезагрузкой с потерей правок.
+    const done = (v: TechCardFormData): TechCardFormData => ({ ...v, assemblyCleared: false });
+    if (!numId) return done(sent);
     let fresh: common_TechCard | undefined;
     try {
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
@@ -705,9 +710,9 @@ export function TechCardForm({
     } catch {
       // Not fatal — the save itself landed. Fall back to what was sent; useUpdateTechCard's own
       // invalidation still refetches the card, and a reload re-seeds the form from the server.
-      return sent;
+      return done(sent);
     }
-    if (!fresh) return sent;
+    if (!fresh) return done(sent);
     // Prime the cache with the read we already paid for, so the detail this reset is built from is
     // the same one the NEXT save reads its expectedLockVersion from.
     queryClient.setQueryData(techCardKeys.detail(numId), fresh);
@@ -762,14 +767,7 @@ export function TechCardForm({
     // отвергнет: осведомлённая запись с cleared против карточки, у которой разметки уже нет, это
     // теневое намерение, и гейт на него отвечает отказом. Кнопка «снять разметку» взводит флаг
     // ровно один раз, здесь он снимается.
-    return {
-      ...sent,
-      signoffs,
-      patterns,
-      bomItems,
-      construction: server.construction,
-      assemblyCleared: false,
-    };
+    return done({ ...sent, signoffs, patterns, bomItems, construction: server.construction });
   }
 
   // The actual write: card body first (it carries the lock version), then the staged sub-panels.
