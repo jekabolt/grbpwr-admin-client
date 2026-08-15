@@ -57,6 +57,8 @@ import {
   bomPurposeLabel,
   type RollGoodsLine,
 } from './bom-purpose';
+import { assemblyBlocks } from './assembly-blocks';
+import { assemblySweep, classifyAssemblyInputs } from './assembly-frontier';
 import { formatBomMoney, resolveBomPrice } from './bom-price';
 import { uniOf } from './nesting/block-code';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
@@ -321,6 +323,52 @@ export function TechPackDocument({
   // хуков между рендерами — а это не «иногда неверный вывод», это падение всего компонента.
   // Порядок узлов — порядок словаря зон: бумага и экран обязаны перечислять узлы одинаково.
   // Шаги без зоны идут последней группой, а не растворяются в первой.
+  // РАЗМЕЧЕННАЯ КАРТОЧКА ПЕЧАТАЕТСЯ БЛОКАМИ УЗЛОВ, неразмеченная — по зонам, как раньше.
+  //
+  // Зона отвечает на вопрос «где на изделии», узел — «что собирают». Когда автор сказал второе,
+  // печатать первое значило бы выбросить сказанное: швея собирает КОРПУС, а не «шаги зоны
+  // outer shell». Но подменять группировку там, где узлов нет, нельзя — вышли бы пустые
+  // заголовки над каждым шагом, и лист стал бы хуже прежнего.
+  const assemblyGroups = useMemo(() => {
+    const ops = tc?.operations ?? [];
+    if (!ops.some((o) => (o.outputUnitKey ?? '').trim())) return null; // карточка не размечена
+    const pieces = (tc?.pieces ?? []).map((pc) => ({
+      lineKey: pc.lineKey ?? '',
+      name: pc.name ?? '',
+    }));
+    const pieceKeys = new Set(pieces.map((pc) => pc.lineKey));
+    const steps = ops.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])),
+      outputUnitKey: (o.outputUnitKey ?? '').trim(),
+      outputUnitName: (o.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(pieces, steps);
+    const grouped = assemblyBlocks(steps, res);
+    const nameOf = (k: string) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || k;
+    const indexed = ops.map((op, index) => ({ op, index }));
+    const out: Array<{ key: string; label: string; sub: string; operations: typeof indexed }> = [];
+    for (const b of grouped.blocks) {
+      if (b.steps.length === 0) continue;
+      out.push({
+        key: b.key,
+        label: b.name ? `▣ ${b.key} · ${b.name}` : `▣ ${b.key}`,
+        // СОСТАВ УЗЛА — то, ради чего блок и печатают: швея видит, из чего собирается эта
+        // подсборка, не листая обратно к списку деталей.
+        sub: b.leaves.length ? `из: ${b.leaves.map(nameOf).join(' + ')}` : '',
+        operations: b.steps.map((i) => indexed[i]).filter(Boolean),
+      });
+    }
+    if (grouped.loose.steps.length > 0) {
+      out.push({
+        key: '',
+        label: '◌ вне узлов',
+        sub: 'цель шага — не узел',
+        operations: grouped.loose.steps.map((i) => indexed[i]).filter(Boolean),
+      });
+    }
+    return out.length > 0 ? out : null;
+  }, [tc?.operations, tc?.pieces]);
+
   const operationGroups = useMemo(() => {
     const indexed = (tc?.operations ?? []).map((op, index) => ({ op, index }));
     // Раскладываем ПО ОСТАТКУ, а не по совпадению со словарём. Прошлая версия перебирала словарь,
@@ -342,6 +390,11 @@ export function TechPackDocument({
     if (orphans.length > 0) groups.push({ zone: '', label: 'zone not set', operations: orphans });
     return groups;
   }, [tc?.operations]);
+
+  /** Что печатать заголовками: узлы, если карточка размечена, иначе зоны. */
+  const printGroups =
+    assemblyGroups ??
+    operationGroups.map((g) => ({ key: g.zone, label: g.label, sub: '', operations: g.operations }));
 
   // Раскладки скоупа: раскладка привязана к колорвею, а colorwayId = 0 означает общую для всех
   // цветов. Общая печатается всегда — она и есть норма этого стиля.
@@ -2197,18 +2250,25 @@ export function TechPackDocument({
                 </tr>
               </thead>
               <tbody>
-                {operationGroups.map((g) => (
-                  <Fragment key={g.zone}>
-                    {/* УЗЕЛ. Швея собирает изделие узлами, а не сплошным списком из сорока строк;
-                        до этого зона была колонкой, то есть признаком строки, а не структурой
-                        листа. Порядок групп — порядок словаря зон, чтобы бумага и экран
-                        перечисляли узлы одинаково. */}
+                {printGroups.map((g) => (
+                  <Fragment key={g.key || 'tail'}>
+                    {/* ЗАГОЛОВОК ГРУППЫ. Швея собирает изделие узлами, а не сплошным списком из
+                        сорока строк. На размеченной карточке это НАСТОЯЩИЕ узлы сборки со своим
+                        составом; на неразмеченной — зоны, как было до Ф1: подменять одно другим
+                        там, где узлов нет, значило бы напечатать пустые заголовки над каждым
+                        шагом. Порядок узлов — порядок их производящих шагов, порядок зон —
+                        порядок словаря; бумага и экран обязаны перечислять одинаково. */}
                     <tr className='break-inside-avoid'>
                       <td
                         colSpan={9}
                         className='border border-black bg-neutral-100 px-1.5 py-1 text-control font-bold uppercase tracking-wide'
                       >
                         {g.label}
+                        {g.sub && (
+                          <span className='ml-2 font-normal normal-case tracking-normal text-labelColor'>
+                            {g.sub}
+                          </span>
+                        )}
                       </td>
                     </tr>
                     {g.operations.map(({ op: o, index: i }) => {
@@ -2268,7 +2328,7 @@ export function TechPackDocument({
                           <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
                           {/* ЧТО ШАГ ПРОИЗВОДИТ. Пустая ячейка — утверждение, а не пробел: шаг
                               ничего не собирает, это обработка, и его входы остаются на столе
-                              следующим шагам. Полная печать блоками — задача Ф6. */}
+                              следующим шагам. */}
                           <td className={TD}>{opOutput(o) || '—'}</td>
                           <td className={TD}>
                             <div>{seamClassText(o.seamClass) || '—'}</div>
