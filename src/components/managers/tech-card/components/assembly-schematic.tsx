@@ -58,18 +58,20 @@ export function AssemblySchematic({
     setPicked((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
   const onTable = new Set(res.frontier);
   const layout = assemblyLayout(blocks, steps, res);
-  const { LINE_H, HEAD_H, TILE, TILE_GAP } = SCHEMATIC_METRICS;
+  const { LINE_H, HEAD_H } = SCHEMATIC_METRICS;
+  const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
-  if (layout.boxes.length === 0) {
-    // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, а не пустое полотно. Схема без узлов — не поломка, а «ещё не
-    // начали»: экран обязан сказать это словом и показать, чего он ждёт.
+  if (layout.tiles.length === 0 && layout.boxes.length === 0) {
+    // ЧЕСТНОЕ ПУСТОЕ СОСТОЯНИЕ, а не пустое полотно — но теперь оно означает ровно одно:
+    // на карточке НЕТ ДЕТАЛЕЙ. До Ф7 сюда попадала и размеченная деталями карточка без единого
+    // узла, то есть экран говорил «нечего рисовать» ровно тогда, когда рисовать было что.
     return (
       <div className='flex flex-col items-center gap-1 border border-dashed border-borderColor px-3 py-8 text-center'>
         <Text size='micro' variant='label'>
-          узлов ещё нет — схеме нечего рисовать
+          деталей ещё нет — схеме нечего рисовать
         </Text>
         <Text size='micro' variant='label'>
-          выберите на столе две детали и нажмите «сшить» — первый узел появится здесь же
+          детали приходят из выкроек; появятся здесь плитками, и сборка начнётся с них
         </Text>
         {!frozen && (
           <FreePieces
@@ -147,26 +149,72 @@ export function AssemblySchematic({
           ))}
         </svg>
 
-        {/* Детали, не вошедшие ни в один узел — колонка у левого края. «Ещё не пришито» это
-            состояние, и оно обязано быть видно, а не выводиться из отсутствия на схеме. */}
-        {layout.unassigned.map((key, i) => (
+        {/* ВСЕ ДЕТАЛИ КАРТОЧКИ — по одной плитке на деталь, место следует из состояния: съеденная
+            стоит у бокса своего узла, свободная — в колонке у левого края. Координаты приходят из
+            раскладки, а не считаются здесь: раскладка проверяема пробой, разметка — нет.
+
+            Плитка остаётся <button> и на съеденной детали, хотя действия у той пока нет: клик по
+            съеденной уводит к съевшему шагу — это T-32, а фокусируемость нужна уже сейчас, иначе
+            клавиатура потеряет половину полотна ровно в тот момент, когда полотно стало полным. */}
+        {layout.tiles.map((t) => (
           <button
-            key={`free:${key}`}
+            key={`tile:${t.key}`}
             type='button'
             disabled={frozen}
-            onClick={() => toggle(key)}
+            onClick={t.state === 'free' ? () => toggle(t.key) : undefined}
             className={cn(
-              'absolute flex items-center justify-center border border-dashed border-borderColor px-1 text-center',
-              picked.includes(key) && 'border-solid border-textColor bg-bgZebra',
+              'absolute flex items-center justify-center px-1 text-center',
+              t.state === 'free'
+                ? 'border border-dashed border-borderColor'
+                : 'border border-borderColor bg-bgColor',
+              picked.includes(t.key) && 'border-solid border-textColor bg-bgZebra',
             )}
-            style={{ left: 8, top: 16 + i * (TILE + TILE_GAP), width: 64, height: TILE }}
-            title={`${pieceNameOf(key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`}
+            style={{ left: t.x, top: t.y, width: t.w, height: t.h }}
+            title={
+              t.state === 'free'
+                ? `${pieceNameOf(t.key)} — ещё не вошла ни в один узел; кликните, чтобы взять в сборку`
+                : `${pieceNameOf(t.key)} — уже в узле ▣ ${t.into}`
+            }
           >
             <Text size='nano' variant='label' component='span' className='line-clamp-2'>
-              {pieceNameOf(key)}
+              {pieceNameOf(t.key)}
             </Text>
           </button>
         ))}
+
+        {/* ХВОСТОВОЙ БОКС: шаги, не достигающие ни одного узла. До Ф7 их на полотне не было
+            вовсе — неразмеченная карточка показывала пустоту вместо существующего маршрута, а
+            обработка, созданная из схемы, исчезала без следа. Пунктир и лексикон те же, что у
+            врезки рельса, чтобы две вьюшки называли одно одинаково. */}
+        {layout.tail && (
+          <div
+            className='absolute border-2 border-dashed border-borderColor bg-bgColor'
+            style={{ left: layout.tail.x, top: layout.tail.y, width: layout.tail.w, height: layout.tail.h }}
+          >
+            <div className='flex items-baseline gap-1 border-b border-hairline px-1' style={{ height: HEAD_H }}>
+              <Text size='micro' variant='uppercase' tracking='label' component='span' className='font-bold'>
+                ◌ вне узлов
+              </Text>
+              <Text size='nano' variant='label' component='span' className='ml-auto shrink-0'>
+                цель шага — не узел
+              </Text>
+            </div>
+            {looseSteps.map((i) => (
+              <button
+                key={i}
+                type='button'
+                onClick={() => onPickStep(i)}
+                className='flex w-full items-center px-1 text-left hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                style={{ height: LINE_H }}
+                title='открыть шаг в списке'
+              >
+                <Text size='nano' component='span' className='min-w-0 truncate'>
+                  {(i + 1) * 10} · {labelOf(i)}
+                </Text>
+              </button>
+            ))}
+          </div>
+        )}
 
         {layout.boxes.map((box) => {
           const b = blocks.find((x) => x.key === box.key);
@@ -174,20 +222,8 @@ export function AssemblySchematic({
           const terminal = res.frontier.includes(box.key) && res.units.has(box.key);
           return (
             <div key={box.key}>
-              {/* Плитки деталей-входов слева от бокса: точки входа чертежа. */}
-              {box.pieceInputs.map((key, i) => (
-                <div
-                  key={`${box.key}:${key}`}
-                  className='absolute flex items-center justify-center border border-borderColor bg-bgColor px-1 text-center'
-                  style={{ left: box.x - 60, top: box.stackTop + i * (TILE + TILE_GAP), width: 52, height: TILE }}
-                  title={pieceNameOf(key)}
-                >
-                  <Text size='nano' variant='label' component='span' className='line-clamp-2'>
-                    {pieceNameOf(key)}
-                  </Text>
-                </div>
-              ))}
-
+              {/* Плитки деталей-входов рисует общий проход по layout.tiles выше: до Ф7 они жили
+                  здесь, и деталь, взятая ещё и обработкой чужого блока, рисовалась дважды. */}
               <div
                 className='absolute border-2 border-textColor bg-bgColor'
                 style={{ left: box.x, top: box.y, width: box.w, height: box.h }}
