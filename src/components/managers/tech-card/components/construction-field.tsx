@@ -78,6 +78,9 @@ export function ConstructionField() {
         <DecimalField
           name='construction.defaultStitchesPerCm'
           label='default stitch density (st/cm)'
+          // Two, not DecimalField's default three: the column stores hundredths and rounds the rest
+          // silently. The schema refuses the third place as well — this only keeps it untypeable.
+          maxDecimals={2}
           placeholder='4'
         />
         <ComboField name='construction.hemFinish' label='hem finish' options={hemFinishOptions} />

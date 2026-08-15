@@ -164,61 +164,181 @@ function countProfileUses(
   return { machines: m, presses: p };
 }
 
-// ── WHAT REMOVING A ROW WOULD DO ─────────────────────────────────────────────────────────────────
+// ── WHAT AN EDIT TO THIS LIST WOULD DO ───────────────────────────────────────────────────────────
 //
-// Asked of the ladder TWICE — once over the list as it stands, once over the list without the row —
+// Asked of the ladder TWICE — once over the list as it stands, once over the list as it would be —
 // and never inferred from the reference count above, because those are two different questions and
 // on this card the difference bites. With TWO overlocks and a step that names neither, the by-type
 // rung is ambiguous and resolves to NOTHING: both profiles read «used by no step», and deleting
 // EITHER one leaves the survivor alone in its class, so that step suddenly starts inheriting
-// settings it never had. A delete that begins by silently handing a step new instructions must not
-// be the one delete that skips the warning.
+// settings it never had. An edit that begins by silently handing a step new instructions must not
+// be the one edit that skips the warning.
 //
 // Two buckets, both reachable: a step that STOPS resolving to what it resolved to, and a step that
 // STARTS resolving to something. (A by-key reference always lands in the first: the ladder
 // short-circuits on a named key, so it detaches rather than falling back to the type rung.)
+//
+// THE SAME QUESTION IS ASKED OF A DELETE AND OF A RETYPE, which is why the diff is a parameter
+// rather than three near-copies. Changing what a profile IS is not a smaller event than deleting
+// it: every step that named it as something else loses the reference (see the detach rules below),
+// every step that inherited it by type stops, and steps of the NEW type may start — and «type reset
+// to not set» is a delete in all but name, because the mapper drops such a row from the payload
+// entirely. `keyAfter` is what makes the two cases one function: a delete leaves the step's key
+// alone (it dangles and the ladder resolves nothing), a retype clears the keys it invalidates.
 type RemovalImpact = { losing: number; gaining: number };
 const impactTotal = (i: RemovalImpact) => i.losing + i.gaining;
 
-function machineRemovalImpact(
+function machineImpact(
   operations: StepRow[],
-  rows: MachineProfileRow[],
-  index: number,
+  before: MachineProfileRow[],
+  after: MachineProfileRow[],
+  keyAfter: (op: StepRow, i: number) => string,
 ): RemovalImpact {
-  const after = rows.filter((_, i) => i !== index);
   const impact: RemovalImpact = { losing: 0, gaining: 0 };
-  for (const op of operations) {
-    if (!isMachineStepType(op.operationType ?? '')) continue;
-    const before =
-      resolveMachineProfile(rows, op.machineType, op.machineProfileKey)?.profileKey ?? '';
-    const now = resolveMachineProfile(after, op.machineType, op.machineProfileKey)?.profileKey ?? '';
-    if (before === now) continue;
-    if (before) impact.losing += 1;
+  operations.forEach((op, i) => {
+    if (!isMachineStepType(op.operationType ?? '')) return;
+    const was =
+      resolveMachineProfile(before, op.machineType, op.machineProfileKey)?.profileKey ?? '';
+    const now = resolveMachineProfile(after, op.machineType, keyAfter(op, i))?.profileKey ?? '';
+    if (was === now) return;
+    if (was) impact.losing += 1;
     else impact.gaining += 1;
-  }
+  });
   return impact;
 }
 
-function pressRemovalImpact(
+function pressImpact(
+  operations: StepRow[],
+  before: PressProfileRow[],
+  after: PressProfileRow[],
+  keyAfter: (op: StepRow, i: number) => string,
+): RemovalImpact {
+  const impact: RemovalImpact = { losing: 0, gaining: 0 };
+  operations.forEach((op, i) => {
+    const type = op.operationType ?? '';
+    if (!isPressStepType(type)) return;
+    const was =
+      resolvePressProfile(before, op.pressEquipment, op.pressProfileKey, type)?.profileKey ?? '';
+    const now =
+      resolvePressProfile(after, op.pressEquipment, keyAfter(op, i), type)?.profileKey ?? '';
+    if (was === now) return;
+    if (was) impact.losing += 1;
+    else impact.gaining += 1;
+  });
+  return impact;
+}
+
+// A REMOVAL keeps every step's key exactly as it is: the pointer survives the delete as a dangling
+// reference the operator can see and repair, which is the whole distinction the dialog draws
+// between a named and an inherited use.
+const keptKey =
+  (field: 'machineProfileKey' | 'pressProfileKey') =>
+  (op: StepRow): string =>
+    op[field] ?? '';
+
+const machineRemovalImpact = (operations: StepRow[], rows: MachineProfileRow[], index: number) =>
+  machineImpact(
+    operations,
+    rows,
+    rows.filter((_, i) => i !== index),
+    keptKey('machineProfileKey'),
+  );
+
+const pressRemovalImpact = (operations: StepRow[], rows: PressProfileRow[], index: number) =>
+  pressImpact(
+    operations,
+    rows,
+    rows.filter((_, i) => i !== index),
+    keptKey('pressProfileKey'),
+  );
+
+// WHICH STEPS A RETYPE WOULD DETACH — the indices, not a count, so the sentence the operator reads
+// and the write the confirm performs are the SAME list. Counting them a second time by a rule of
+// its own is how a warning ends up describing an edit that did something else.
+//
+// A reference is dropped when it names THIS profile and the step is not of the profile's new type:
+// the server refuses that pair by name (resolveProfileKey → profile_type_mismatch for a machine)
+// and would refuse the whole card over a step that is not even on screen.
+const machineStepsToDetach = (operations: StepRow[], key: string, nextType: string): number[] =>
+  !key.trim()
+    ? []
+    : operations.reduce<number[]>((acc, op, i) => {
+        if (!isMachineStepType(op.operationType ?? '')) return acc;
+        if ((op.machineProfileKey ?? '').trim() !== key.trim()) return acc;
+        if ((op.machineType ?? '') === nextType) return acc;
+        acc.push(i);
+        return acc;
+      }, []);
+
+const pressStepsToDetach = (operations: StepRow[], key: string, nextEquipment: string): number[] =>
+  !key.trim()
+    ? []
+    : operations.reduce<number[]>((acc, op, i) => {
+        if (!isPressStepType(op.operationType ?? '')) return acc;
+        if ((op.pressProfileKey ?? '').trim() !== key.trim()) return acc;
+        if ((op.pressEquipment ?? '') === nextEquipment) return acc;
+        acc.push(i);
+        return acc;
+      }, []);
+
+// A RETYPE also detaches, and the diff has to be computed WITH that detach in it — otherwise the
+// dialog would count a step as keeping a reference the confirm is about to clear. Both sides are
+// built explicitly from `from` / `to` rather than read off the form, because this runs after the
+// select has already written the new value and «which snapshot am I holding» is not a question a
+// warning should depend on.
+function machineRetypeImpact(
+  operations: StepRow[],
+  rows: MachineProfileRow[],
+  index: number,
+  from: string,
+  to: string,
+): RemovalImpact {
+  const key = (rows[index]?.profileKey ?? '').trim();
+  const dropped = new Set(machineStepsToDetach(operations, key, to));
+  const at = (t: string) => rows.map((r, i) => (i === index ? { ...r, machineType: t } : r));
+  return machineImpact(operations, at(from), at(to), (op, i) =>
+    dropped.has(i) ? '' : (op.machineProfileKey ?? ''),
+  );
+}
+
+function pressReequipImpact(
   operations: StepRow[],
   rows: PressProfileRow[],
   index: number,
+  from: string,
+  to: string,
 ): RemovalImpact {
-  const after = rows.filter((_, i) => i !== index);
-  const impact: RemovalImpact = { losing: 0, gaining: 0 };
-  for (const op of operations) {
-    const type = op.operationType ?? '';
-    if (!isPressStepType(type)) continue;
-    const before =
-      resolvePressProfile(rows, op.pressEquipment, op.pressProfileKey, type)?.profileKey ?? '';
-    const now =
-      resolvePressProfile(after, op.pressEquipment, op.pressProfileKey, type)?.profileKey ?? '';
-    if (before === now) continue;
-    if (before) impact.losing += 1;
-    else impact.gaining += 1;
-  }
-  return impact;
+  const key = (rows[index]?.profileKey ?? '').trim();
+  const dropped = new Set(pressStepsToDetach(operations, key, to));
+  const at = (e: string) => rows.map((r, i) => (i === index ? { ...r, pressEquipment: e } : r));
+  return pressImpact(operations, at(from), at(to), (op, i) =>
+    dropped.has(i) ? '' : (op.pressProfileKey ?? ''),
+  );
 }
+
+// WHAT THE DIALOG IS ABOUT. One shape for both lists and both events: `retype` carries the value to
+// put back if the operator declines, which is the only difference in what confirm and cancel do.
+type PendingChange = {
+  kind: 'remove' | 'retype';
+  index: number;
+  name: string;
+  impact: RemovalImpact;
+  /**
+   * retype: how many steps lose their explicit reference. COUNTED APART FROM `impact`, because the
+   * two do not always coincide and the one that goes uncounted is the one that bites: a press step
+   * naming a profile written for another process already inherits NOTHING from it (the ladder
+   * refuses the mismatch), so re-equipping that profile changes no inherited value at all — while
+   * still erasing, irreversibly, the pick the operator can see in that step's picker. A change with
+   * `impact` zero and `detaching` two must still ask.
+   */
+  detaching?: number;
+  /** retype: the value the control held before, restored on cancel. */
+  from?: string;
+  /** retype: the value just picked. */
+  to?: string;
+  /** The new value is «not set», so the row will not be sent at all — see mapEquipmentDefaultsOut. */
+  drops?: boolean;
+};
 
 // The tile's selection handle. The profile key IS the identity, so it is what selection is keyed on
 // — never react-hook-form's row `id`, which is REGENERATED for every row whenever the array is
@@ -521,11 +641,7 @@ function MachineProfiles({
   const { fields, append, remove } = useFieldArray({ control, name: MACHINES });
   const rows = (useWatch({ control, name: MACHINES }) ?? []) as MachineProfileRow[];
   const [selected, setSelected] = useState<string | null>(null);
-  const [pending, setPending] = useState<{
-    index: number;
-    name: string;
-    impact: RemovalImpact;
-  } | null>(null);
+  const [pending, setPending] = useState<PendingChange | null>(null);
 
   // A field violation lands at `construction.equipmentDefaults.machines[i].<field>` — the schema
   // files its band checks there, and the server tags its refusals with the same path. Only the
@@ -547,20 +663,47 @@ function MachineProfiles({
   // server — two answers to one question — and it would refuse the whole card, naming a step that is
   // not even mounted (only the open one is). The step editor already applies exactly this rule to
   // the step it has on screen; doing it for the rest is the same rule, comprehensively, at the one
-  // moment the divergence is created. Silent, like its twin: the picker in each affected step then
-  // says what it inherits instead.
+  // moment the divergence is created.
+  //
+  // IT IS NOT SILENT ANY MORE, and that was the defect: the detach is irreversible (putting the old
+  // machine back does not put the keys back — they are gone from the form), it happens to steps on
+  // another tab, and it took one click with no sentence anywhere. The delete beside it has always
+  // asked, and asked the right question — not «how many point at this» but «what changes about what
+  // the steps inherit» — so this goes through the same dialog rather than growing a second one.
   //
   // Read through getValues rather than the watched copy: this runs from an event, and the value it
   // must not miss is the one that was just written.
   const detachStepsOfOtherType = (profileKey: string, nextType: string) => {
-    const key = (profileKey ?? '').trim();
-    if (!key) return;
     const ops = (getValues('operations') ?? []) as StepRow[];
-    ops.forEach((op, i) => {
-      if (!isMachineStepType(op.operationType ?? '')) return;
-      if ((op.machineProfileKey ?? '').trim() !== key) return;
-      if ((op.machineType ?? '') === nextType) return;
+    for (const i of machineStepsToDetach(ops, profileKey ?? '', nextType)) {
       setValue(`operations.${i}.machineProfileKey`, '', DIRTY);
+    }
+  };
+
+  // `from` is the value the CONTROL WAS SHOWING when it was clicked, closed over by the render that
+  // drew it — not re-read here, because by now the select has already written the new one and the
+  // watched copy is a race with React's next render.
+  const onMachineTypePicked = (rowIndex: number, from: string, to: string) => {
+    if (from === to) return;
+    const live = (getValues(MACHINES) ?? []) as MachineProfileRow[];
+    const ops = (getValues('operations') ?? []) as StepRow[];
+    const profileKey = live[rowIndex]?.profileKey ?? '';
+    const impact = machineRetypeImpact(ops, live, rowIndex, from, to);
+    const detaching = machineStepsToDetach(ops, profileKey, to).length;
+    // Nothing inherits differently and nothing loses a pointer: there is no price to name, and a
+    // dialog over every pick is how people learn to confirm without reading.
+    if (impactTotal(impact) + detaching === 0) return;
+    setPending({
+      kind: 'retype',
+      index: rowIndex,
+      // Named by what it WAS: an unlabelled profile borrows its name from its machine, and naming
+      // it after the machine it is being changed INTO would describe the wrong row.
+      name: machineProfileName({ ...(live[rowIndex] ?? {}), machineType: from }),
+      impact,
+      detaching,
+      from,
+      to,
+      drops: !to || to === NONE_MACHINE,
     });
   };
 
@@ -637,7 +780,13 @@ function MachineProfiles({
                   // a dialog over every one of them is how people learn to confirm without reading.
                   const impact = machineRemovalImpact(operations, rows, i);
                   if (impactTotal(impact) === 0) remove(i);
-                  else setPending({ index: i, name: machineProfileName(row), impact });
+                  else
+                    setPending({
+                      kind: 'remove',
+                      index: i,
+                      name: machineProfileName(row),
+                      impact,
+                    });
                 }}
                 removeLabel={`remove ${machineProfileName(row)}`}
               />
@@ -674,7 +823,9 @@ function MachineProfiles({
               name={machineField(selIndex, 'machineType')}
               label='machine'
               items={machineTypeOptions}
-              onAfterChange={(v) => detachStepsOfOtherType(sel.profileKey ?? '', String(v ?? ''))}
+              onAfterChange={(v) =>
+                onMachineTypePicked(selIndex, sel.machineType ?? '', String(v ?? ''))
+              }
               className={selectNoGrow}
             />
             <ProfileNumberField
@@ -736,6 +887,9 @@ function MachineProfiles({
             <DecimalField
               name={machineField(selIndex, 'stitchesPerCm')}
               label='stitch density (st/cm)'
+              // Hundredths, like the column and like the two decimals beside it — the default three
+              // would be rounded away on the server without a word.
+              maxDecimals={2}
               placeholder='4'
             />
             {/* «stitch width» is the zigzag amplitude / the overlock bite — NOT the topstitch width,
@@ -757,11 +911,25 @@ function MachineProfiles({
         </div>
       )}
 
-      <RemoveProfileDialog
+      <ProfileChangeDialog
         pending={pending}
-        onCancel={() => setPending(null)}
+        what='машинку'
+        onCancel={() => {
+          // Declining a RETYPE has to put the value back — the control already wrote the new one,
+          // and leaving it there would apply the change the operator just refused, minus the
+          // detach that makes it savable.
+          if (pending?.kind === 'retype') {
+            setValue(machineField(pending.index, 'machineType'), pending.from ?? '', DIRTY);
+          }
+          setPending(null);
+        }}
         onConfirm={() => {
-          if (pending) remove(pending.index);
+          if (pending?.kind === 'remove') remove(pending.index);
+          if (pending?.kind === 'retype') {
+            const key = ((getValues(MACHINES) ?? []) as MachineProfileRow[])[pending.index]
+              ?.profileKey;
+            detachStepsOfOtherType(key ?? '', pending.to ?? '');
+          }
           setPending(null);
         }}
       />
@@ -782,11 +950,7 @@ function PressProfiles({
   const { fields, append, remove } = useFieldArray({ control, name: PRESSES });
   const rows = (useWatch({ control, name: PRESSES }) ?? []) as PressProfileRow[];
   const [selected, setSelected] = useState<string | null>(null);
-  const [pending, setPending] = useState<{
-    index: number;
-    name: string;
-    impact: RemovalImpact;
-  } | null>(null);
+  const [pending, setPending] = useState<PendingChange | null>(null);
 
   const { errors, submitCount } = useFormState({ control, name: PRESSES });
   const rowErrors = ((
@@ -798,19 +962,42 @@ function PressProfiles({
   const selIndex = rows.findIndex((r, i) => rowKey(r.profileKey, i) === selected);
   const sel = selIndex >= 0 ? rows[selIndex] : undefined;
 
-  // The ВТО twin of the machine rule above, and narrower on purpose: only the EQUIPMENT has to
-  // match, so changing which PROCESS a mode is written for detaches nothing. A named profile is a
-  // decision, and the server honours it whatever its process says — the process only narrows what
-  // gets OFFERED and what is inherited silently.
+  // The ВТО twin of the machine rule above, and narrower in exactly one way: the server refuses a
+  // press key only on the EQUIPMENT (resolveProfileKey), so only an equipment change has to clear
+  // the references. Changing which PROCESS a mode is written for keeps them — the key is legal and
+  // stays visible — but it is NOT nothing: since the ladder applies the process at both rungs
+  // (resolvePressProfile, matching the server's sign-off gate), such a step stops inheriting the
+  // mode's temperature and dwell, and the picker marks its choice as «— fusing only». The dialog
+  // below covers the equipment change; the process change is visible in the step's own picker.
   const detachStepsOfOtherEquipment = (profileKey: string, nextEquipment: string) => {
-    const key = (profileKey ?? '').trim();
-    if (!key) return;
     const ops = (getValues('operations') ?? []) as StepRow[];
-    ops.forEach((op, i) => {
-      if (!isPressStepType(op.operationType ?? '')) return;
-      if ((op.pressProfileKey ?? '').trim() !== key) return;
-      if ((op.pressEquipment ?? '') === nextEquipment) return;
+    for (const i of pressStepsToDetach(ops, profileKey ?? '', nextEquipment)) {
       setValue(`operations.${i}.pressProfileKey`, '', DIRTY);
+    }
+  };
+
+  // Same shape as the machine twin: `from` is the value the control was showing, closed over by the
+  // render that drew it.
+  const onPressEquipmentPicked = (rowIndex: number, from: string, to: string) => {
+    if (from === to) return;
+    const live = (getValues(PRESSES) ?? []) as PressProfileRow[];
+    const ops = (getValues('operations') ?? []) as StepRow[];
+    const profileKey = live[rowIndex]?.profileKey ?? '';
+    const impact = pressReequipImpact(ops, live, rowIndex, from, to);
+    // Counted apart from the impact ON PURPOSE — this is the axis where the two come apart: a step
+    // naming a mode written for another process inherits nothing from it already, so re-equipping
+    // that mode changes no value while still erasing the pick that step visibly holds.
+    const detaching = pressStepsToDetach(ops, profileKey, to).length;
+    if (impactTotal(impact) + detaching === 0) return;
+    setPending({
+      kind: 'retype',
+      index: rowIndex,
+      name: pressProfileName({ ...(live[rowIndex] ?? {}), pressEquipment: from }),
+      impact,
+      detaching,
+      from,
+      to,
+      drops: !to || to === NONE_PRESS_EQUIPMENT,
     });
   };
 
@@ -887,7 +1074,8 @@ function PressProfiles({
                 onRemove={() => {
                   const impact = pressRemovalImpact(operations, rows, i);
                   if (impactTotal(impact) === 0) remove(i);
-                  else setPending({ index: i, name: pressProfileName(row), impact });
+                  else
+                    setPending({ kind: 'remove', index: i, name: pressProfileName(row), impact });
                 }}
                 removeLabel={`remove ${pressProfileName(row)}`}
               />
@@ -920,7 +1108,7 @@ function PressProfiles({
               label='equipment'
               items={pressEquipmentOptions}
               onAfterChange={(v) =>
-                detachStepsOfOtherEquipment(sel.profileKey ?? '', String(v ?? ''))
+                onPressEquipmentPicked(selIndex, sel.pressEquipment ?? '', String(v ?? ''))
               }
               className={selectNoGrow}
             />
@@ -971,11 +1159,21 @@ function PressProfiles({
         </div>
       )}
 
-      <RemoveProfileDialog
+      <ProfileChangeDialog
         pending={pending}
-        onCancel={() => setPending(null)}
+        what='оборудование'
+        onCancel={() => {
+          if (pending?.kind === 'retype') {
+            setValue(pressField(pending.index, 'pressEquipment'), pending.from ?? '', DIRTY);
+          }
+          setPending(null);
+        }}
         onConfirm={() => {
-          if (pending) remove(pending.index);
+          if (pending?.kind === 'remove') remove(pending.index);
+          if (pending?.kind === 'retype') {
+            const key = ((getValues(PRESSES) ?? []) as PressProfileRow[])[pending.index]?.profileKey;
+            detachStepsOfOtherEquipment(key ?? '', pending.to ?? '');
+          }
           setPending(null);
         }}
       />
@@ -1015,34 +1213,76 @@ export function EquipmentParkField() {
   );
 }
 
-// Removal is CONFIRMED, never blocked. A profile the floor no longer has is a fact about the floor,
-// and a card that could not record it would be lying to keep a reference tidy. The dialog is
-// rendered by each list rather than above them, so the delete can go through that list's OWN
+// The change is CONFIRMED, never blocked — in both of its shapes. A profile the floor no longer
+// has, or a machine that turned out to be a different machine, is a fact about the floor, and a card
+// that could not record it would be lying to keep a reference tidy. The dialog names the price and
+// nothing else: there is no path here that refuses an edit.
+//
+// It is rendered by each list rather than above them, so a delete can go through that list's OWN
 // `remove(i)` — which shifts the row-indexed error array along with the values. A root setValue
 // would leave the errors where they were, and the tile marks would point one row off until the next
 // failed save.
-function RemoveProfileDialog({
+function ProfileChangeDialog({
   pending,
+  what,
   onCancel,
   onConfirm,
 }: {
-  pending: { name: string; impact: RemovalImpact } | null;
+  pending: PendingChange | null;
+  /** what a retype changes, in the accusative: «машинку» / «оборудование». */
+  what: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   const impact = pending?.impact ?? { losing: 0, gaining: 0 };
+  const retype = pending?.kind === 'retype';
+  const detaching = pending?.detaching ?? 0;
   return (
     <ConfirmationModal
       open={!!pending}
       onOpenChange={(o) => !o && onCancel()}
       onConfirm={onConfirm}
       onCancel={onCancel}
-      title='удалить профиль оборудования?'
-      confirmLabel='удалить'
+      title={retype ? `сменить ${what} у профиля?` : 'удалить профиль оборудования?'}
+      confirmLabel={retype ? 'сменить' : 'удалить'}
       width='sm'
+      // `false`, AND IT IS LOAD-BEARING HERE rather than a preference. The shell's auto-close calls
+      // `onOpenChange(false)` right after `onConfirm()`, and this dialog routes that through
+      // onCancel — which for a retype PUTS THE OLD VALUE BACK. Left at the default, pressing
+      // «сменить» would detach the references and then silently restore the machine, i.e. do the
+      // one half of the change that cannot be undone and none of the half that was asked for. The
+      // dialog closes anyway: `open` is derived from `pending`, and both handlers clear it. (Radix
+      // fires onOpenChange only for ESC / overlay / ✕ — every one of which IS a decline.)
+      closeOnConfirm={false}
     >
       <div className='flex flex-col gap-2'>
-        <Text size='micro'>«{pending?.name}» — это изменит то, что наследуют шаги:</Text>
+        {/* The lead does not promise «inheritance» on a retype: a change may cost only the explicit
+            references (see `detaching`), and a heading naming the wrong loss is worse than a plain
+            one. */}
+        <Text size='micro'>
+          {retype
+            ? `«${pending?.name}» — вот что это изменит:`
+            : `«${pending?.name}» — это изменит то, что наследуют шаги:`}
+        </Text>
+        {/* THE HALF THAT MAKES A RETYPE WORSE THAN A DELETE: a deleted profile leaves its key in the
+            step, visible as «profile not found» and re-assignable. A retype CLEARS those keys, and
+            putting the old value back does not put them back — the form no longer holds them.
+            Counted separately from the two below because it does not always come with them. */}
+        {retype && detaching > 0 && (
+          <Text size='micro'>
+            {detaching} шаг(ов) ссылались на него явно и ссылку ПОТЕРЯЮТ: профиль другого типа
+            сервер не принимает. Вернуть прежнее значение потом — не вернуть ссылки, их придётся
+            проставить заново.
+          </Text>
+        )}
+        {/* «Not set» is a delete in all but name: the mapper drops a row with no type from the
+            payload, so the profile disappears on save without ever passing the delete dialog. */}
+        {retype && pending?.drops && (
+          <Text size='micro'>
+            «Не задано» — это ещё и удаление: профиль без типа на сервер не уезжает, так что при
+            сохранении он из карточки исчезнет.
+          </Text>
+        )}
         {/* «станет not set» would be the overstatement: the density has a rung BELOW the profile
             (construction.defaultStitchesPerCm), so some fields fall back rather than empty out. */}
         {impact.losing > 0 && (
@@ -1060,10 +1300,12 @@ function RemoveProfileDialog({
             оборудования — сейчас выбор неоднозначен, и они не наследуют ничего.
           </Text>
         )}
-        {/* The reference paragraph is conditional: on a delete that only GIVES steps something
+        {/* The reference paragraph is conditional TWICE. On a change that only GIVES steps something
             (the two-overlocks case above) nothing was ever pointed at this row, and explaining how
-            broken references look would describe a thing that is not happening. */}
-        {impact.losing > 0 && (
+            broken references look would describe a thing that is not happening. And it is a DELETE's
+            sentence only: a delete leaves the key in the step to be seen and re-assigned, a retype
+            clears it — that is the paragraph above, and printing both would say two things. */}
+        {!retype && impact.losing > 0 && (
           <Text size='micro' variant='label'>
             Явная ссылка останется в шаге видимой («profile not found») — её видно и можно
             переназначить; наследование по типу оборудования оборвётся молча.

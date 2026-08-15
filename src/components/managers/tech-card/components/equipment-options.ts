@@ -1,7 +1,6 @@
 import {
   common_TechCardAutomationLevel,
   common_TechCardBedType,
-  common_TechCardConstruction,
   common_TechCardMachineType,
   common_TechCardNeedleType,
   common_TechCardOperationType,
@@ -286,13 +285,17 @@ export function resolveMachineProfile<T extends { profileKey?: string; machineTy
   return sameType.length === 1 ? sameType[0] : undefined;
 }
 
-// A press profile also declares WHICH ВТО PROCESS it is for, and that narrows the by-type rung:
-// «the press of this card» is not an answer for a fusing step when the card's press profile was
-// written for разутюжка. A profile with no process stated is universal and answers for all three.
+// A press profile also declares WHICH ВТО PROCESS it is for, and that narrows BOTH rungs of the
+// press ladder: «the press of this card» is not an answer for a fusing step when the card's press
+// profile was written for разутюжка, and neither is a profile that step happens to NAME. A profile
+// with no process stated is universal and answers for all three.
 //
 // THE PICKER AND THIS FUNCTION MUST USE THE SAME PREDICATE — if the list offered one profile while
 // the ladder counted two, the form would print «— pick one of 2 —» over a card that visibly holds
-// one, or quote as inherited a profile the picker refuses to show. Hence the shared helper.
+// one, or quote as inherited a profile the picker refuses to show. Hence the shared helper. It is
+// the same one function, for the same reason, that the server keeps as pressProfileFitsStep: the
+// process was dropped from one of two copies of this question there, and the answer silently
+// widened.
 export const pressProfileFitsStep = (
   profile: { operationType?: string },
   stepType: string | undefined,
@@ -313,10 +316,27 @@ export function resolvePressProfile<
 ): T | undefined {
   const list = presses ?? [];
   const key = (profileKey ?? '').trim();
-  // A NAMED profile is a decision and is returned whatever its process says: the technologist
-  // pointed at it, and the server accepts it (only the equipment has to match). The process filter
-  // is about what gets OFFERED and what is inherited silently, not about overruling a choice.
-  if (key) return list.find((p) => (p.profileKey ?? '') === key);
+  // THE KEY IS NOT A BYPASS AROUND THE PROCESS, and this rung used to say the opposite: a named
+  // profile came back whatever its process declared, on the argument that the technologist pointed
+  // at it and the server accepts the reference (only the EQUIPMENT is checked on save — see
+  // resolveProfileKey). It does accept the reference. It no longer accepts what the reference was
+  // being read to MEAN: the sign-off gate walks this same ladder through pressProfileFitsStep at
+  // both rungs, so a fusing step naming an ironing profile resolves to «not set» there and the
+  // fresh CONSTRUCTION signature is refused for a fusing step with no temperature or dwell.
+  //
+  // With the old rule the editor showed 145 °C as inherited and the tech pack printed it onto paper
+  // that went to the floor, while the save came back refusing a signature over numbers that are
+  // visibly on screen — nothing to fix, because the fix is invisible. Same machine, different
+  // program; a delamination after the first wash is what the two being confused costs.
+  //
+  // AND IT DOES NOT FALL THROUGH to the by-type rung, exactly as the server does not: the step
+  // names THIS profile, and quietly resolving it against a different one is a second wrong answer.
+  // The key stays on the step (it is the operator's only visible trace of the decision) — the
+  // picker marks it as not fitting this process instead of hiding it.
+  if (key) {
+    const named = list.find((p) => (p.profileKey ?? '') === key);
+    return named && (!stepType || pressProfileFitsStep(named, stepType)) ? named : undefined;
+  }
   if (!pressEquipment || pressEquipment === 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN') return undefined;
   const usable = list.filter(
     (p) => p.pressEquipment === pressEquipment && (!stepType || pressProfileFitsStep(p, stepType)),
@@ -343,20 +363,16 @@ export function pressProfileName(p: { label?: string; pressEquipment?: string })
 // on several. Migration 0306 moved the prose into construction.notes and turned the thread count
 // into a real overlock profile.
 //
-// THE READER STAYS FOREVER, and not out of nostalgia: a RELEASE SNAPSHOT is immutable protojson
-// written when those fields existed, and `tech_card_release` holds the whole enriched card as JSON.
-// Rendering a frozen release through the CURRENT generated type would silently drop two lines that
-// were part of what somebody signed. The cast is narrow and one-way — nothing writes these back.
-type RetiredConstructionFields = {
-  pressing?: string;
-  overlockThreadCount?: number;
-};
-
-export function legacyPressingText(c?: common_TechCardConstruction): string {
-  return (c as RetiredConstructionFields | undefined)?.pressing?.trim() ?? '';
-}
-
-export function legacyOverlockThreadsText(c?: common_TechCardConstruction): string {
-  const n = (c as RetiredConstructionFields | undefined)?.overlockThreadCount ?? 0;
-  return n > 0 ? `${n}-thread` : '';
-}
+// THERE IS NO READER FOR THEM HERE, and the two that were (legacyPressingText,
+// legacyOverlockThreadsText) are gone rather than kept for archives. The argument for keeping them
+// was that a RELEASE SNAPSHOT is immutable protojson written while those fields existed, so the
+// frozen card still carries them. It does — IN THE DATABASE. It never reaches this client: the
+// snapshot is parsed server-side into the CURRENT pb_common.TechCard with
+// `protojson.UnmarshalOptions{DiscardUnknown: true}` (GetTechCardRelease), so a field that left the
+// contract is dropped before the response is built, and there is no raw-JSON path beside it. The
+// helpers therefore returned '' on every input that can exist, and the two rows they fed — in the
+// release list and on the printed sheet — were permanently blank while promising otherwise.
+//
+// Reading those lines again is a SERVER change (a raw snapshot field, or a legacy-aware parse), and
+// it would arrive with its own reader. A dead one standing here only says the archive is covered
+// when it is not.

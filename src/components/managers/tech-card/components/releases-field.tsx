@@ -23,8 +23,6 @@ import { Row, RowTotal } from 'ui/components/row';
 import {
   isMachineStepType,
   isPressStepType,
-  legacyOverlockThreadsText,
-  legacyPressingText,
   machineProfileName,
   machineTypeLabel,
   pressEquipmentLabel,
@@ -130,14 +128,12 @@ function SnapshotConstruction({ c }: { c?: common_TechCardConstruction }) {
     [
       ['default seam class', seamClassLabel(c.defaultSeamClass)],
       ['default stitch density', densityText(decimalToInput(c.defaultStitchesPerCm))],
-      // A FROZEN RELEASE IS READ IN THE WORDS IT WAS SIGNED IN. `overlock_thread_count` and
-      // `pressing` left the contract with the equipment park (0306), but a release snapshot is
-      // immutable protojson that still holds them — reading it through the current generated type
-      // would silently drop two lines somebody approved. Live cards simply have neither and the
-      // rows below fall away on their own.
-      ['overlock threads', legacyOverlockThreadsText(c)],
+      // NO `overlock threads` / `pressing` ROWS. They left the contract with the equipment park
+      // (0306) and a release snapshot written before that still holds them in the database — but
+      // not here: the server parses the blob into the current TechCard with DiscardUnknown, so the
+      // two fields are gone before the response is built. The rows were permanently blank and read
+      // as «this release said nothing about pressing», which is the opposite of what they meant.
       ['hem finish', c.hemFinish],
-      ['pressing', legacyPressingText(c)],
       ['notes', c.notes],
     ] as Array<[string, string | undefined]>
   ).filter((r): r is [string, string] => !!r[1]?.trim());

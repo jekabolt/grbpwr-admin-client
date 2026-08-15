@@ -153,13 +153,38 @@ export function useTechCardDraft(
     // does not actually carry is taken from the loaded card instead of from a default.
     const loaded = form.getValues();
     const data = { ...pending.data } as typeof pending.data;
-    // `pieces` в этом списке по той же причине, что и соседи: массив деталей уезжает на сервер
-    // ПОЛНОЙ ЗАМЕНОЙ, и черновик, снятый до появления вкладки деталей, подставил бы пустой набор —
-    // то есть удалил бы все детали кроя разом, вместе со строками рецепта колорвеев и замеренными
-    // площадями (сервер чистит обе таблицы в той же транзакции).
-    const carried = ['patterns', 'pieceDxfAliases', 'pieces'] as const;
-    for (const key of carried) {
+    // ПРАВИЛО, А НЕ СПИСОК ПОЛЕЙ. Здесь стояли три имени — `patterns`, `pieceDxfAliases`, `pieces` —
+    // ровно те, по которым успели обжечься. Их роднит не смысл, а МЕХАНИКА: всё на этой форме
+    // уезжает полной заменой, поэтому ЛЮБОЕ поле, которого в черновике нет, после zod-дефолта
+    // превращается не в молчание, а в приказ «сотри». Список закрывал вчерашние поля и не закрывал
+    // завтрашние — а завтрашнее поле и есть тот случай, когда черновик написан ДО него: парк
+    // оборудования (0306) добавили, старый черновик пришёл без ключа, и «восстановить» отправляло
+    // пустые списки профилей как осознанное «удалить все».
+    //
+    // Ключ, которого в черновике НЕТ, — это не выбор оператора, это возраст черновика: RHF отдаёт
+    // getValues() по defaultValues, а те собраны zod-маппером, так что у черновика СЕГОДНЯШНЕЙ
+    // сборки есть все ключи (форма не ставит shouldUnregister, размонтированная вкладка значение не
+    // теряет). Значит «ключа нет» ⇒ «черновик старше поля» ⇒ брать с карточки. Пустое значение при
+    // ПРИСУТСТВУЮЩЕМ ключе — наоборот, правка, ради которой черновик и существует, и не трогается.
+    for (const key of Object.keys(loaded) as Array<keyof typeof loaded>) {
       if (!(key in (pending.data as object))) (data as Record<string, unknown>)[key] = loaded[key];
+    }
+    // И ТО ЖЕ ПРАВИЛО НА ЯРУС ГЛУБЖЕ, для одной секции — construction. Она единственная на этой
+    // форме, кто держит под собой самостоятельную сущность: `equipmentDefaults` — это парк карточки,
+    // и его ПРИСУТСТВИЕ в пакете означает «заменить парк целиком» (пустой — «удалить все профили»).
+    // Черновик, снятый до 0306, несёт секцию конструкции без этого ключа, и верхнего правила ему
+    // мало: ключ `construction` в черновике ЕСТЬ. Итог был бы худшим из возможных — молча снесённые
+    // профили (включая заведённые миграцией), отцепленные ссылки шагов и протухшая подпись секции,
+    // и всё это на карточке, которую оператор открыл ради заметки полугодовой давности.
+    if (data.construction && loaded.construction) {
+      const merged = { ...data.construction } as Record<string, unknown>;
+      let changed = false;
+      for (const k of Object.keys(loaded.construction) as Array<keyof typeof loaded.construction>) {
+        if (k in (data.construction as object)) continue;
+        merged[k] = loaded.construction[k];
+        changed = true;
+      }
+      if (changed) data.construction = merged as typeof data.construction;
     }
     // `patterns` may exist but predate the binding column; carry it per row, by identity.
     if (Array.isArray(data.patterns) && Array.isArray(loaded.patterns)) {

@@ -130,8 +130,6 @@ const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 import {
   isMachineStepType,
   isPressStepType,
-  legacyOverlockThreadsText,
-  legacyPressingText,
   machineProfileName,
   machineTypeLabel,
   pressEquipmentLabel,
@@ -2095,17 +2093,15 @@ export function TechPackDocument({
               <div>
                 <KV k='default seam class' v={seamClassText(tc.construction.defaultSeamClass)} />
                 <KV k='default density' v={densityText(cardDensity)} />
-                {/* RETIRED WITH THE EQUIPMENT PARK (0306) AND STILL PRINTED FOR ARCHIVES: a frozen
-                    release is protojson written while these two fields existed, and this document
-                    prints frozen releases as well as live cards (print-page hands it the snapshot).
-                    The park table below is what a LIVE card says instead — these two rows are blank
-                    there and must not be deleted, or an archived release would silently lose two
-                    lines somebody signed. */}
-                <KV k='overlock' v={legacyOverlockThreadsText(tc.construction)} />
+                {/* NO `overlock` / `pressing` ROWS. Both left the contract with the equipment park
+                    (0306), and printing them «for the archives» never worked: this document renders
+                    a frozen release from the SERVER'S parse of the snapshot, and that parse is
+                    protojson with DiscardUnknown — the retired fields are dropped before the
+                    response is built, so the two rows printed blank on every sheet ever produced.
+                    The park table below is what both a live card and a release say instead. */}
               </div>
               <div>
                 <KV k='hem finish' v={tc.construction.hemFinish} />
-                <KV k='pressing' v={legacyPressingText(tc.construction)} />
                 <KV k='notes' v={tc.construction.notes} />
               </div>
             </div>

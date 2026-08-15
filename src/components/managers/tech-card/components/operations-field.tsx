@@ -66,6 +66,7 @@ import {
   pressClothLabel,
   pressClothOptions,
   pressEquipmentOptions,
+  pressProcessShort,
   pressProfileFitsStep,
   pressProfileName,
   resolveMachineProfile,
@@ -1352,13 +1353,15 @@ function OperationEditor({
   }, [parkMachines, machineType, machineProfileKey]);
 
   // The ВТО twin, with one extra narrowing the machines have no equivalent of: a press profile
-  // declares WHICH PROCESS it is for, so a fusing profile is not offered on a разутюжка. That is a
-  // client-side courtesy (the server only checks the equipment), so it never hides what is already
-  // chosen — a profile whose process was changed on the defaults tab stays visible and removable.
+  // declares WHICH PROCESS it is for, so a fusing profile is not offered on a разутюжка. It is not
+  // a courtesy — the process is half of what a press profile MEANS, and the ladder now refuses a
+  // mismatch at both rungs, the named one included (resolvePressProfile). What the picker still
+  // does not do is HIDE a mismatch that is already chosen: the reference survives the save (the
+  // server checks only the equipment on the key), so a profile whose process was changed on the
+  // defaults tab has to stay listed, or the step would hold a pointer the operator cannot see or
+  // remove — and the settings would simply be gone from the step's placeholders with nothing on
+  // screen saying why.
   const pressProfileOptions = useMemo(() => {
-    // Exactly the predicate resolvePressProfile uses for its by-type rung, plus whatever is already
-    // chosen — a profile whose process was changed on the defaults tab has to stay visible, or the
-    // step would hold a reference the picker cannot show and the operator cannot remove.
     const usable = parkPresses.filter(
       (p) =>
         p.pressEquipment === pressEquipment &&
@@ -1376,7 +1379,17 @@ function OperationEditor({
           : `— pick one of ${inheritable.length} —`;
     const opts = [
       { value: PROFILE_INHERIT, label: inheritLabel },
-      ...usable.map((p) => ({ value: p.profileKey ?? '', label: pressProfileName(p) })),
+      // THE MISMATCH IS LISTED AND SAID OUT LOUD. Listing it silently would be the worse half of
+      // both worlds: the step reads as pointing at a mode whose temperature is nowhere on screen,
+      // and the sheet prints «not set» beside a profile the picker shows as chosen. The label
+      // names the process it IS for, because that is what has to change for it to answer here —
+      // either the profile's process on the defaults tab, or this step's own pick.
+      ...usable.map((p) => ({
+        value: p.profileKey ?? '',
+        label: pressProfileFitsStep(p, opType)
+          ? pressProfileName(p)
+          : `${pressProfileName(p)} — ${pressProcessShort(p.operationType) || 'another process'} only, nothing inherited`,
+      })),
     ];
     const key = pressProfileKey.trim();
     if (key && !opts.some((o) => o.value === key)) {
@@ -1889,6 +1902,9 @@ function OperationEditor({
               <DecimalField
                 name={`operations.${index}.stitchesPerCm`}
                 label='stitches / cm'
+                // Hundredths — the column's scale. The mirror below already rounds to two when it
+                // converts a length back into a density.
+                maxDecimals={2}
                 placeholder={inherited.stitchDensity}
               />
               {/* The same setting in the other unit — see StitchLengthMirror. It is placed after the

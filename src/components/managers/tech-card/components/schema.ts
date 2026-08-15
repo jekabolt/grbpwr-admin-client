@@ -501,13 +501,22 @@ const DEFAULT_LABEL_TYPE: common_TechCardLabelType = 'TECH_CARD_LABEL_TYPE_MAIN'
 // seam with no stitches» to everything downstream — so blank is the way to leave it inherited.
 const MIN_STITCHES_PER_CM = 1;
 const MAX_STITCHES_PER_CM = 20;
+// The column is DECIMAL(_,2) and entity.ValidateStitchesPerCm refuses a third place by name. It is
+// checked here for the reason every other decimal on this form is (refineRangedDecimal says it at
+// length): MySQL does not refuse an over-precise number, it ROUNDS it and hands a different one
+// back on the next read — so «4.567» typed into a step would come home as «4.57» with no event
+// between. The three density controls all default to DecimalField's three places, which is exactly
+// one more than the wire takes.
+const MAX_STITCH_DENSITY_DECIMALS = 2;
 
 function refineStitchDensity(
   value: string | undefined,
   ctx: z.RefinementCtx,
   path: Array<string | number>,
 ) {
-  const raw = (value ?? '').trim();
+  // Comma to dot BEFORE the fraction is counted — an RU keyboard types «4,25», and a check that
+  // split on '.' alone would read that as a whole number and wave the extra place through.
+  const raw = (value ?? '').trim().replace(/,/g, '.');
   if (!raw) return; // blank = inherit / not configured, always legal
   const n = parseDecimalNumber(raw);
   if (!Number.isFinite(n) || n < MIN_STITCHES_PER_CM || n > MAX_STITCHES_PER_CM) {
@@ -515,6 +524,14 @@ function refineStitchDensity(
       code: z.ZodIssueCode.custom,
       path,
       message: `stitches per cm runs ${MIN_STITCHES_PER_CM}–${MAX_STITCHES_PER_CM} (3–5 is ordinary sewing) — leave it blank to inherit rather than entering 0`,
+    });
+    return;
+  }
+  if ((raw.split('.')[1]?.length ?? 0) > MAX_STITCH_DENSITY_DECIMALS) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path,
+      message: `round to ${MAX_STITCH_DENSITY_DECIMALS} decimal places — the column stores hundredths, so the rest would be dropped silently`,
     });
   }
 }
@@ -686,7 +703,9 @@ const constructionSchema = z
     // count per card could describe one overlock and a card is sewn on several; the prose field
     // answered «how is it pressed» for a whole card when pressing is a STEP. Migration 0306 moved
     // the prose into `notes` and turned the count into a real overlock profile below. Archived
-    // release snapshots still carry both — see legacyPressingText in equipment-options.ts.
+    // release snapshots still hold both in the DATABASE, but never on this side of the wire: the
+    // server parses a snapshot into the current contract with DiscardUnknown, so nothing here can
+    // read them (see the note where their two readers used to live, in equipment-options.ts).
     //
     // THE PARK KEEPS ITS WIRE NESTING, wrapper and all, rather than being flattened to two arrays on
     // the construction. The wrapper is a wire fact — its PRESENCE is what tells the server «replace
