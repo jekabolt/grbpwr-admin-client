@@ -678,6 +678,16 @@ function ProducesBlock({
 
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
+
+  // СПРЯТАЛ КОНТРОЛ — ОЧИСТИ ЗНАЧЕНИЕ. Ключ можно стереть бэкспейсом, а не только «растворить»:
+  // ветка переключается на чип «сделать узлом», оба инпута размонтируются, и оставшееся имя
+  // становится теневым значением — сервер откажет всей записи гигиеной (shadow-name), а контрола,
+  // чтобы это исправить, на экране уже нет. То же правило, что у ширины отстрочки ниже.
+  useEffect(() => {
+    if (!outputKey && outputName) {
+      setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
+    }
+  }, [outputKey, outputName, index, setValue]);
   const absorbs = !!outputKey && inputKeys.includes(outputKey) && assembly.res.units.has(outputKey);
 
   // Код предлагается по зоне шага, а не по именам деталей: имена длинные и меняются, а код
@@ -782,7 +792,12 @@ function ProducesBlock({
               имя необязательно, но на печати и в цехе читают его, а не код
             </Text>
           )}
-          <BootstrapEatenRefs index={index} outputKey={outputKey} pieces={pieces} />
+          {/* Только когда узел ДЕЙСТВИТЕЛЬНО состоялся: у невалидного джойна (арность < 2,
+              второй производитель, съеденный вход) подстановка его ключа превратила бы законные
+              ссылки в unknown-key — починка, которая ломает. */}
+          {assembly.res.units.has(outputKey) && (
+            <BootstrapEatenRefs index={index} outputKey={outputKey} pieces={pieces} />
+          )}
         </>
       )}
     </>
@@ -877,14 +892,27 @@ function BootstrapEatenRefs({
 // РАСПАКОВКА ПО ЗАМЫКАНИЮ, а не отбрасыванием: шаг со входами [SHELL, SL] после наивного
 // удаления узла остался бы с одним рукавом, а полочка и спинка, жившие внутри SHELL, к нему не
 // вернулись бы — карточка врала бы о том, что этот шаг сшивает.
-function ClearAssemblyButton({ pieces }: { pieces: PieceRef[] }) {
+function ClearAssemblyButton({
+  pieces,
+  storedHasUnits,
+}: {
+  pieces: PieceRef[];
+  /** Размечена ли СОХРАНЁННАЯ карточка. Не то же самое, что размечена форма. */
+  storedHasUnits: boolean;
+}) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const showMessage = useSnackBarStore((st) => st.showMessage);
   const view = useAssemblyView(pieces);
   const [confirming, setConfirming] = useState(false);
 
-  const marked = view.res.units.size > 0;
-  if (!marked) return null;
+  // Кнопка видна и когда форма УЖЕ не размечена, а сохранённая карточка ещё размечена.
+  //
+  // Без этого путь отступления не работал: восстановленный черновик (или любой другой источник
+  // распакованных входов) даёт форму без узлов, кнопка исчезает, сохранение упирается в бекстоп
+  // с текстом «нажмите „снять разметку узлов“» — а нажимать нечего, и единственный выход
+  // перезагрузка с потерей правок. Отказ, из которого нет выхода, хуже отказа.
+  const inForm = view.res.units.size;
+  if (inForm === 0 && !storedHasUnits) return null;
 
   const clear = () => {
     const ops = (getValues('operations') ?? []) as Array<{
@@ -950,7 +978,7 @@ function ClearAssemblyButton({ pieces }: { pieces: PieceRef[] }) {
         onClick={() => setConfirming(true)}
         title='снять разметку узлов со всей карточки: входы-узлы вернутся в детали по составу'
       >
-        снять разметку · {view.res.units.size}
+        снять разметку{inForm > 0 ? ` · ${inForm}` : ''}
       </Chip>
       <ConfirmationModal
         open={confirming}
@@ -960,7 +988,10 @@ function ClearAssemblyButton({ pieces }: { pieces: PieceRef[] }) {
         confirmLabel='снять'
       >
         <Text size='micro'>
-          Узлов на карточке: {view.res.units.size}. Входы-узлы вернутся в детали по составу,
+          {inForm > 0
+            ? `Узлов на карточке: ${inForm}.`
+            : 'В форме узлов уже нет, но сохранённая карточка размечена — снятие подтвердит это серверу.'}{' '}
+          Входы-узлы вернутся в детали по составу,
           выходные ключи будут очищены. Подпись секции CONSTRUCTION станет «изменено после
           подписи» — это правда, а не дефект: содержание действительно поменялось.
         </Text>
@@ -2702,7 +2733,10 @@ export function OperationsField({
   pieceShapes = null,
   addRequest = null,
   onAdded,
+  storedHasUnits = false,
 }: {
+  /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
+  storedHasUnits?: boolean;
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
@@ -3076,7 +3110,7 @@ export function OperationsField({
           >
             {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
-          <ClearAssemblyButton pieces={pieces} />
+          <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} />
           <ToolbarSpacer />
           <Text
             size='micro'

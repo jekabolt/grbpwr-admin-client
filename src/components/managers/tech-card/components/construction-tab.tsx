@@ -522,6 +522,13 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
               onActiveBomChange={bom.setActive}
               colorwayArticles={colorwayArticles}
               pieceShapes={pieceShapes.shapeByKey}
+              // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
+              // принимает намерение «снять разметку» только против карточки, которая её несёт,
+              // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
+              // распакована (восстановленный черновик).
+              storedHasUnits={(techCard?.techCard?.operations ?? []).some(
+                (o) => (o?.outputUnitKey ?? '').trim() !== '',
+              )}
             />
           </section>
         </div>
