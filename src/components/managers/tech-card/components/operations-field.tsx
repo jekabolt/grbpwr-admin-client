@@ -86,6 +86,8 @@ import {
   type AssemblyResult,
 } from './assembly-frontier';
 import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
+import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
+import { AssemblySchematic } from './assembly-schematic';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
@@ -502,6 +504,10 @@ function useAssemblyView(pieces: PieceRef[]): AssemblyView {
 
 type RailGrouping = {
   broken: Set<number>;
+  /** Блоки и шаги для схемы — тот же свип, второй раз считать незачем. */
+  schematicBlocks: AssemblyBlock[];
+  schematicSteps: AssemblyStepShape[];
+  res: ReturnType<typeof assemblySweep>;
   /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним. */
   headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
   /** Размечена ли карточка: без узлов досье вырождается в сегодняшний плоский рельс. */
@@ -559,7 +565,14 @@ function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): Rail
         terminal: liveUnits.length === 1 && liveUnits[0] === b.key,
       });
     }
-    return { broken, headerBefore, marked: grouped.blocks.length > 0 };
+    return {
+      broken,
+      headerBefore,
+      marked: grouped.blocks.length > 0,
+      schematicBlocks: [...grouped.blocks, grouped.loose],
+      schematicSteps: steps,
+      res,
+    };
   }, [ops, pieces, smvOf]);
 }
 
@@ -3111,8 +3124,13 @@ export function OperationsField({
   );
   const grouping = useRailGrouping(pieces, smvOf);
   const brokenSteps = grouping.broken;
-  const [dossier, setDossier] = useState(true);
-  const grouped = grouping.marked && dossier;
+  // ДЕФОЛТ ВЫВОДИТСЯ, А НЕ КОНСТАНТА. План объявлял схему режимом по умолчанию — и на любой
+  // сегодняшней карточке это дало бы пустое полотно на первом же открытии, то есть экран,
+  // который читается как «сломалось». Схема становится дефолтом ровно там, где есть что
+  // рисовать; пользовательский выбор живёт в сессии и уступает, когда узлов нет.
+  const [mode, setMode] = useState<'list' | 'schematic' | null>(null);
+  const effectiveMode = grouping.marked ? (mode ?? 'schematic') : 'list';
+  const grouped = grouping.marked && effectiveMode === 'list';
   const prevSubmit = useRef(submitCount);
   const prevErrorCount = useRef(errorIndices.size);
   useEffect(() => {
@@ -3236,6 +3254,46 @@ export function OperationsField({
     append({ ...emptyOperation });
   };
 
+  // --- авторинг, общий для СПИСКА и СХЕМЫ -------------------------------------------------------
+  //
+  // Мутаторы живут ЗДЕСЬ и в одном экземпляре, а схема их только вызывает. Два вида, редактирующих
+  // одни данные, опасны не тем, что их два, — источник истины и так один, это форма, — а тем, что
+  // каждый легко обзаводится СВОЕЙ логикой мутаций, и через полгода «сшить» в списке и «сшить» на
+  // схеме начинают расходиться в мелочах. Поэтому общий обработчик, а не два похожих.
+
+  /** Сшить выбранное в новый узел: добавляет шаг с этими входами и предложенным кодом. */
+  const joinIntoUnit = (inputKeys: string[]) => {
+    if (inputKeys.length < 2) {
+      showMessage('узел из одного входа — это обработка: выберите хотя бы два входа', 'error');
+      return;
+    }
+    const taken = new Set<string>([
+      ...((getValues('operations') ?? []) as Array<{ outputUnitKey?: string }>)
+        .map((o) => (o?.outputUnitKey ?? '').trim())
+        .filter(Boolean),
+      ...pieces.map((p) => p.lineKey),
+    ]);
+    let code = 'UNIT';
+    for (let n = 1; taken.has(code); n++) code = `UNIT-${n + 1}`;
+    const at = fields.length;
+    append({ ...emptyOperation, inputKeys, outputUnitKey: code });
+    setSelected(at);
+    showMessage(`узел ${code} создан — назовите его в открывшемся шаге`, 'success');
+  };
+
+  /** Добавить обработку внутрь блока: шаг, берущий этот узел и ничего не собирающий. */
+  const addStepIntoUnit = (unitKey: string) => {
+    const at = fields.length;
+    append({ ...emptyOperation, inputKeys: [unitKey] });
+    setSelected(at);
+  };
+
+  /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
+  const dissolveUnit = (stepIndex: number) => {
+    setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
+    setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
+  };
+
   return (
     <div className='space-y-2.5'>
       <Text size='micro' variant='label'>
@@ -3308,15 +3366,29 @@ export function OperationsField({
           </Button>
         </div>
       ) : (
-        <div className='flex flex-col gap-3 lg:flex-row lg:items-start'>
-          <div className='w-full lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
+        <div
+          className={cn(
+            'flex flex-col gap-3',
+            effectiveMode === 'list' && 'lg:flex-row lg:items-start',
+          )}
+        >
+          <div
+            className={cn(
+              'w-full',
+              effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0',
+            )}
+          >
             <GroupLabel
               flush
               action={
                 <div className='flex items-center gap-2'>
                   {grouping.marked && (
-                    <Chip dashed onClick={() => setDossier((v) => !v)} title='группировать шаги по подсборкам или показать плоским списком'>
-                      {dossier ? 'плоский список' : 'по подсборкам'}
+                    <Chip
+                      dashed
+                      onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
+                      title='схема сборки или список шагов — оба редактируют одни данные'
+                    >
+                      {effectiveMode === 'schematic' ? 'списком' : 'схемой'}
                     </Chip>
                   )}
                   <Text size='micro' variant='label' component='span'>
@@ -3327,6 +3399,32 @@ export function OperationsField({
             >
               последовательность
             </GroupLabel>
+            {effectiveMode === 'schematic' ? (
+              <AssemblySchematic
+                blocks={grouping.schematicBlocks}
+                steps={grouping.schematicSteps}
+                res={grouping.res}
+                labelOf={(i) =>
+                  ((getValues(`operations.${i}.note`) as string) || '').trim() ||
+                  operationHeading({
+                    operationType: getValues(`operations.${i}.operationType`) as Parameters<
+                      typeof operationHeading
+                    >[0]['operationType'],
+                    machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
+                    zone: getValues(`operations.${i}.zone`) as Parameters<
+                      typeof operationHeading
+                    >[0]['zone'],
+                    pieceNames: [],
+                  }) ||
+                  'шаг'
+                }
+                pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+                onPickStep={setSelected}
+                onJoin={joinIntoUnit}
+                onAddStep={addStepIntoUnit}
+                onDissolve={dissolveUnit}
+              />
+            ) : (
             <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
               <DndContext
                 sensors={sensors}
@@ -3367,6 +3465,7 @@ export function OperationsField({
                 </SortableContext>
               </DndContext>
             </div>
+            )}
             <button
               type='button'
               onClick={addOperation}
