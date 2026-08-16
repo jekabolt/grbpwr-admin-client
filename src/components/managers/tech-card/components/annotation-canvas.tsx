@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { AnnotationEditor } from 'ui/components/annotation/editor';
+import { useEditHistory } from 'ui/components/annotation/history';
 import { ALL_KIND_KEYS, kindDef } from 'ui/components/annotation/kinds';
 import {
   AnnotationSurface,
@@ -95,6 +96,8 @@ export function AnnotationCanvas({
 }) {
   const [ownKind, setOwnKind] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
+  // ⌘Z откатывает ЖЕСТ над фигурой. Правка текста сюда не входит: там откат принадлежит браузеру.
+  const history = useEditHistory(annotations, (prev) => onChange?.(prev));
   const tool = externalKind !== undefined ? externalKind : ownKind;
   const editable = !frozen && !!onChange;
 
@@ -109,7 +112,10 @@ export function AnnotationCanvas({
         kind: a.kind ?? 'pin',
         points: (a.points ?? []).map((p) => ({ x: num(p.x), y: num(p.y) })),
         label: { x: num(a.labelX), y: num(a.labelY) },
-        number: pinNumber(annotations, i),
+        // НОМЕР ТОЛЬКО У ПИНА. У выноски снимка шага номер — порядок в легенде, а не адрес: на
+        // неё никто не ссылается снаружи. Дать его фигуре значило бы напечатать на плашке число,
+        // которое ничего не адресует.
+        number: (a.kind ?? 'pin') === 'pin' ? pinNumber(annotations, i) : undefined,
         text: a.text ?? '',
         color: a.color ?? '',
         dashed: !!a.dashed,
@@ -132,7 +138,6 @@ export function AnnotationCanvas({
     src,
     alt,
     callouts,
-    labelMode: 'plate' as const,
     frozen,
     pieceLabel,
     maxCallouts: MAX_ANNOTATIONS,
@@ -184,6 +189,9 @@ export function AnnotationCanvas({
       ? (key: string, at: ShapePoint) => patch(key, { labelX: str(at.x), labelY: str(at.y) })
       : undefined,
     onRemove: editable ? removeAt : undefined,
+    onBeforeMutate: editable ? history.record : undefined,
+    onUndo: editable ? history.undo : undefined,
+    canUndo: history.canUndo,
     renderEditor: editable
       ? (key: string, { close }: { close: () => void }) => {
           const a = annotations[Number(key)];

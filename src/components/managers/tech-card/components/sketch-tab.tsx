@@ -2,15 +2,14 @@ import { common_MediaFull, common_TechCard, common_TechCardMediaKind } from 'api
 import { techCardMeasurementUnitOptions, techCardMediaKindOptions } from 'constants/filter';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Accordion } from 'ui/components/accordion';
-import { kindDef } from 'ui/components/annotation/kinds';
-import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
+import { AnnotationEditor } from 'ui/components/annotation/editor';
+import { type EditHistory } from 'ui/components/annotation/history';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
 import { Button } from 'ui/components/button';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
 import { SectionHeader } from 'ui/components/section-header';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import InputField from 'ui/form/fields/input-field';
@@ -19,7 +18,6 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { cn } from 'lib/utility';
 import GenericPopover from 'ui/components/popover';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { CALLOUT_COLOR_HEX } from 'ui/components/annotation/shapes';
 import { PieceAddChip, normalizePieceName, useFormPieces, type PieceRef } from './piece-picker';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
@@ -61,6 +59,7 @@ type FormCallout = {
   kind?: AnnotationKind;
   points?: { x: string; y: string }[];
   color?: AnnotationColor;
+  dimensions?: string;
   dashed?: boolean;
   filled?: boolean;
   /** Детали указания. `part` — эхо первого элемента: на нём стоит связь «деталь ↔ выноска». */
@@ -89,35 +88,6 @@ const numOf = (v?: string) => {
 const mediaUrl = (full?: common_MediaFull): string =>
   full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
 
-// The editable body of a callout's note: just its text. The structured fields (part, number, which
-// image it's pinned to) live in the "callouts" accordion below, so the note that pops on a pin
-// stays small and legible — a place to write, not a form.
-function CalloutNoteBody({ index, frozen }: { index: number; frozen: boolean }) {
-  const { control } = useFormContext<TechCardFormData>();
-  const { field } = useController({ control, name: `callouts.${index}.description` });
-  return (
-    <Textarea
-      {...field}
-      value={field.value ?? ''}
-      rows={2}
-      maxLength={2000}
-      // ЗАМОРОЗКА ЯВНАЯ, потому что записка живёт в `Popover.Portal` — то есть в `document.body`,
-      // ВНЕ `<fieldset disabled>` карточки вместе со всем содержимым. Без этого текст подписанной
-      // выноски правился на выпущенной карточке, и правился молча: автосохранение при заморозке
-      // выключено, чип «есть правки» тоже.
-      readOnly={frozen}
-      placeholder={frozen ? '' : 'describe this callout…'}
-      onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          e.currentTarget.blur();
-        }
-      }}
-      className='min-h-[38px] resize-none'
-    />
-  );
-}
-
 // The tech-card adapter over the shared FocusedAnnotator, driven in GRID layout: every view is on
 // screen at once carrying its own pins, so front and back can be read together without clicking
 // between them. It owns the tech-card-specific data — the `{ mediaId, kind }` media rows, the
@@ -128,23 +98,27 @@ function TechCardGallery({
   listName,
   mediaById,
   onPickedMedia,
-  notesMode,
-  pinSize,
   emptyLabel,
   addLabel,
   purpose,
   frozen,
+  cardPieces,
+  shapeOf,
+  history,
 }: {
   listName: MediaListName;
   mediaById: Map<number, common_MediaFull>;
   onPickedMedia: (items: common_MediaFull[]) => void;
-  notesMode: 'hover' | 'auto';
-  pinSize: 'sm' | 'md';
   emptyLabel: string;
   addLabel: string;
   purpose: string;
   /** Выпущенная карточка: гасит ⌘V, который `<fieldset disabled>` не глушит. */
   frozen: boolean;
+  /** Детали кроя карточки — для пикера деталей в редакторе указания. */
+  cardPieces: PieceRef[];
+  shapeOf: (lineKey: string) => FoundPiece | null;
+  /** Общая на форму история отката: массив `callouts` один на оба листа. */
+  history: EditHistory<FormCallout>;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const mediaFA = useFieldArray({ control, name: listName });
@@ -159,7 +133,7 @@ function TechCardGallery({
 
   const myMediaIds = useMemo(() => new Set(mediaFA.fields.map((f) => f.mediaId)), [mediaFA.fields]);
 
-  // Which sheet a callout counts against — the same rule `CalloutsList` filters by, so the two can
+  // Which sheet a callout counts against — the same rule the surface filters by, so the two can
   // never disagree about who owns a number. An unpinned callout falls to the technical sheet.
   const isMine = (c: FormCallout) => (c.mediaId ? myMediaIds.has(c.mediaId) : !isMoodboard);
 
@@ -237,16 +211,47 @@ function TechCardGallery({
     });
   }
 
+  // Единица привязки размера — та же, что у карточки: технолог не должен гадать, сантиметры это
+  // или миллиметры.
+  const measurementUnit = (useWatch({ control, name: 'measurementUnit' }) ?? '') as string;
+  const unitLabel =
+    techCardMeasurementUnitOptions.find((o) => o.value === measurementUnit)?.label ?? '';
+
+  // ВТОРАЯ ПОЛОВИНА СВЯЗИ «ДЕТАЛЬ ↔ ВЫНОСКА». Выноска называет детали, а деталь ссылается на
+  // выноску НОМЕРОМ — и рисуют пины, считают «открепление» и печатают тех-пак именно по номеру.
+  // Клиент писал только первую половину, и номер не ставился НИГДЕ.
+  //
+  // ТОЛЬКО ЭСКИЗ. Номера пер-листовые: эскиз и мудборд нумеруются независимо, а `calloutNumber`
+  // детали адресует выноску ЭСКИЗА. Сопоставление по одному лишь номеру означало, что выбор детали
+  // на выноске мудборда №3 молча снимал деталь с выноски эскиза №3.
+  const pinPieceToCallout = (calloutIndex: number, parts: string[]) => {
+    if (isMoodboard) return;
+    const number = calloutValues[calloutIndex]?.number ?? 0;
+    if (!number) return;
+    // НА ОДИН НОМЕР ЗАКОННО ССЫЛАЮТСЯ НЕСКОЛЬКО ДЕТАЛЕЙ: узел собирает их вместе. Обратная сторона
+    // связи однозначна и была такой всегда — деталь называет ОДИН номер.
+    const wanted = new Set(parts.map((n) => normalizePieceName(n)).filter(Boolean));
+    const live = (getValues('pieces') ?? []) as Array<{ name?: string; calloutNumber?: number }>;
+    live.forEach((pp, pi) => {
+      const isTarget = wanted.has(normalizePieceName(pp.name ?? ''));
+      const holds = (pp.calloutNumber ?? 0) === number;
+      if (isTarget === holds) return;
+      setValue(`pieces.${pi}.calloutNumber`, isTarget ? number : 0, { shouldDirty: true });
+    });
+  };
+
   // ЗАПИСЬ ИДЁТ В КОРЕНЬ МАССИВА, а не через append/remove этого useFieldArray.
   //
-  // На «callouts» висят ДВА useFieldArray: этот и свой у CalloutsList — и оба смонтированы
-  // одновременно, они соседи в одной секции. В react-hook-form 7.62 append/remove НЕ эмитят
+  // На «callouts» висел ВТОРОЙ useFieldArray — у списка выносок под галереей, и оба были
+  // смонтированы одновременно, соседями в одной секции. Список снят, но запись остаётся корневой:
+  // правило «массив пишется целиком» не должно зависеть от того, смотрит ли на него кто-то ещё. В react-hook-form 7.62 append/remove НЕ эмитят
   // _subjects.array (измерено), поэтому соседний массив о правке не узнаёт: пин на картинке
   // появляется (он читается из useWatch), а строки в структурированном списке нет. Хуже того,
   // remove по устаревшему fields адресует НЕ ТУ выноску. setValue по корню массива событие
   // эмитит, и оба useFieldArray пересинхронизируются — это ровно та же починка, что была нужна
   // деталям кроя.
   const writeCallouts = (next: FormCallout[]) => setValue('callouts', next, { shouldDirty: true });
+
 
   // ПОСТАНОВКА — ОДИН ПУТЬ НА ВСЕ ВИДЫ. Их было два (пин отдельно, фигура отдельно), и каждый
   // создавал выноску сам: два списка умолчаний на одну сущность разошлись бы первой же добавленной
@@ -310,7 +315,12 @@ function TechCardGallery({
           points: (x.c?.points ?? []).map((pt) => ({ x: numOf(pt.x), y: numOf(pt.y) })),
           // legacy pinned-but-unplaced callouts fall back to centre so they stay reachable.
           label: { x: Number.isNaN(px) ? 0.5 : px, y: Number.isNaN(py) ? 0.5 : py },
+          // ТЕКСТ ЕДЕТ В ВЬЮ-МОДЕЛЬ, а не только в редактор: им подписана плашка фигуры на самом
+          // эскизе и им же наполняется легенда под кадром. Без него на листе стояли бы фигуры с
+          // прочерком вместо указания, а легенда была бы пуста — при заполненных описаниях.
+          text: x.c?.description ?? '',
           hasText: !!x.c?.description?.trim(),
+          pieceLineKeys: calloutParts(x.c),
           color: x.c?.color ?? '',
           dashed: !!x.c?.dashed,
           filled: !!x.c?.filled,
@@ -327,12 +337,72 @@ function TechCardGallery({
     return kindLabels[f?.kind ?? ''] ?? (isMoodboard ? 'reference' : 'sketch');
   };
 
-  return (
+  // ОТКРЕПИВШИЕСЯ УКАЗАНИЯ. Список выносок под галереей снят — правка живёт в редакторе под тем
+  // кадром, на котором указание стоит. Но выноска с `mediaId = 0` не стоит ни на одном: такие
+  // остались от старых карточек и рождаются, когда снимают картинку. Без этого ряда они
+  // становились бы НЕВИДИМЫМИ и неудаляемыми — данные, которых нет на экране, но которые уезжают
+  // на сервер при каждом сохранении.
+  // «БЕЗ КАРТИНКИ» — ЭТО НЕ ТОЛЬКО НОЛЬ. Выноска с ненулевым mediaId, которого нет ни в одном из
+  // двух списков, так же невидима: строку медиа сняли, а ссылку не обнулили (или карточка пришла
+  // с дрейфом данных). Проверять только ноль значило бы оставить половину случаев за экраном —
+  // ровно тех, что рождаются откатом ⌘Z после снятия картинки.
+  const liveMediaIds = new Set<number>([
+    ...mediaFA.fields.map((f) => f.mediaId),
+    ...((getValues(siblingName) ?? []) as Array<{ mediaId?: number }>).map((m) => m.mediaId ?? 0),
+  ]);
+  const strays = calloutValues
+    .map((c, i) => ({ c, i }))
+    .filter(({ c }) => isMine(c) && !liveMediaIds.has(c.mediaId ?? 0));
+
+  // ВЫНОСКИ, КОТОРЫЕ НАЗЫВАЮТ СУЩЕСТВУЮЩУЮ ДЕТАЛЬ, НО НЕ СВЯЗАНЫ С НЕЙ.
+  //
+  // Связь двусторонняя: выноска называет детали, а деталь ссылается на выноску НОМЕРОМ — и пины в
+  // «деталях кроя», подсчёт «открепления» и печать тех-пака идут по номеру. Клиент годами писал
+  // только первую половину, поэтому ровно в этом состоянии лежит каждая живая карточка.
+  //
+  // Молча дописать на загрузке нельзя — это правка карточки, которой никто не делал. Поэтому
+  // связывание остаётся действием человека, но ОДНИМ нажатием на все сразу: переоткрывать по
+  // очереди пятнадцать выносок никто не станет, и карточка так и осталась бы без связей.
+  const unlinked = (() => {
+    if (isMoodboard) return [];
+    const held = new Map<string, number>();
+    for (const pc of cardPieces) {
+      const key = normalizePieceName(pc.name);
+      if (key && !held.has(key)) held.set(key, 0);
+    }
+    const live = (getValues('pieces') ?? []) as Array<{ name?: string; calloutNumber?: number }>;
+    for (const pc of live) {
+      const key = normalizePieceName(pc.name ?? '');
+      if (key) held.set(key, pc.calloutNumber ?? 0);
+    }
+    return calloutValues
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => isMine(c) && (c.number ?? 0) > 0)
+      .filter(({ c }) =>
+        calloutParts(c).some((name) => {
+          const n = held.get(normalizePieceName(name));
+          return n != null && n !== c.number;
+        }),
+      );
+  })();
+
+  const gallery = (
     <FocusedAnnotator
       layout='grid'
       views={views}
       calloutsFor={calloutsFor}
       onAddCallout={addCalloutTo}
+      // Детали указания хранятся ИМЕНАМИ, поэтому «резолвер» здесь — проверка существования:
+      // имя, которого среди деталей карточки нет, честно показывается как «деталь удалена», а не
+      // исчезает молча вместе со связью.
+      pieceLabel={(name) =>
+        cardPieces.some((pp) => normalizePieceName(pp.name) === normalizePieceName(name))
+          ? name
+          : undefined
+      }
+      onBeforeMutate={frozen ? undefined : history.record}
+      onUndo={frozen ? undefined : history.undo}
+      canUndo={history.canUndo}
       onEditPoints={(key, points) => {
         const i = keyToIndex.get(key);
         if (i == null) return;
@@ -365,13 +435,109 @@ function TechCardGallery({
             ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== i),
           );
       }}
-      renderNote={(key) => {
+      // ТОТ ЖЕ РЕДАКТОР, ЧТО У СНИМКА ШАГА СБОРКИ, — не «похожий», а буквально он. Выноска на
+      // эскизе и указание на фото узла это одно ремесло, и две формы для него означали две
+      // грамматики: где-то деталь чипом, где-то селектом, где-то Enter переносит строку, где-то
+      // закрывает. Различие у карточного указания ровно одно — привязка размера, и она приходит
+      // сюда слотом, а не второй формой.
+      renderEditor={(key, { close }) => {
         const i = keyToIndex.get(key);
-        return i != null ? <CalloutNoteBody index={i} frozen={frozen} /> : null;
-      }}
-      noteTitle={(key) => {
-        const i = keyToIndex.get(key);
-        return i != null ? calloutValues[i]?.part || undefined : undefined;
+        const c = i != null ? calloutValues[i] : undefined;
+        if (i == null || !c) return null;
+        return (
+          <AnnotationEditor
+            kind={c.kind ?? 'pin'}
+            number={c.number}
+            text={c.description ?? ''}
+            color={c.color ?? ''}
+            dashed={!!c.dashed}
+            filled={!!c.filled}
+            // ДЕТАЛИ ЗДЕСЬ ИМЕНАМИ, а не ключами: на именах стоит связь «деталь ↔ выноска»
+            // (`piece.calloutNumber` сверяется по имени) и ими печатается тех-пак.
+            pieceKeys={calloutParts(c)}
+            pieceLabel={(name) =>
+              cardPieces.some((pp) => normalizePieceName(pp.name) === normalizePieceName(name))
+                ? name
+                : undefined
+            }
+            onText={(v) => setValue(`callouts.${i}.description`, v, { shouldDirty: true })}
+            onColor={(v) => {
+              rememberPen({ color: v });
+              setValue(`callouts.${i}.color`, v as AnnotationColor, { shouldDirty: true });
+            }}
+            onDashed={(v) => {
+              rememberPen({ dashed: v });
+              setValue(`callouts.${i}.dashed`, v, { shouldDirty: true });
+            }}
+            onFilled={(v) => {
+              rememberPen({ filled: v });
+              setValue(`callouts.${i}.filled`, v, { shouldDirty: true });
+            }}
+            onPieces={(names) => {
+              setValue(`callouts.${i}.parts`, names, { shouldDirty: true });
+              setValue(`callouts.${i}.part`, names[0] ?? '', { shouldDirty: true });
+              pinPieceToCallout(i, names);
+            }}
+            onRemove={() => {
+              // ЧЕРЕЗ ИСТОРИЮ, как и удаление клавишей. Одна и та же операция, сделанная мышью,
+              // не имеет права быть безвозвратной там, где сделанная с клавиатуры откатывается.
+              history.record();
+              writeCallouts(
+                ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== i),
+              );
+              close();
+            }}
+            onClose={close}
+            // РАЗЖАЛОВАТЬ ФИГУРУ В ТОЧКУ. Единственный способ избавиться от неудачной геометрии,
+            // СОХРАНИВ выноску: ручки ниже минимума точек не опускаются, а удалить и поставить
+            // заново — значит получить новый номер, а на номер ссылаются деталь, операция и дефект.
+            onDemote={
+              (c.kind ?? 'pin') === 'pin'
+                ? undefined
+                : () => {
+                    history.record();
+                    setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
+                    setValue(`callouts.${i}.points`, [], { shouldDirty: true });
+                    // Пунктир и штриховка у точки не значат ничего: сервер обнулил бы их сам, а
+                    // расхождение формы с хранимым делает карточку «изменённой» после сохранения.
+                    setValue(`callouts.${i}.dashed`, false, { shouldDirty: true });
+                    setValue(`callouts.${i}.filled`, false, { shouldDirty: true });
+                  }
+            }
+            // Имена, а не ключи: сравнение — по правилу карточки, иначе легаси-имя в другом
+            // регистре даёт два чипа на одну деталь.
+            sameKey={(a, b) => normalizePieceName(a) === normalizePieceName(b)}
+            renderPiecePicker={({ selected, onPick }) => (
+              <PieceAddChip
+                pieces={cardPieces}
+                selected={cardPieces
+                  .filter((pp) => selected.some((n) => normalizePieceName(n) === normalizePieceName(pp.name)))
+                  .map((pp) => pp.lineKey)}
+                shapeOf={shapeOf}
+                onPick={(lineKey) => {
+                  const picked = cardPieces.find((pp) => pp.lineKey === lineKey);
+                  if (picked) onPick(picked.name);
+                }}
+              />
+            )}
+            extra={
+              <div className='flex items-center gap-1.5'>
+                <Text size='micro' variant='label' component='span' className='shrink-0 uppercase'>
+                  размер{unitLabel ? ` (${unitLabel})` : ''}:
+                </Text>
+                <input
+                  value={c.dimensions ?? ''}
+                  onChange={(e) =>
+                    setValue(`callouts.${i}.dimensions`, e.target.value, { shouldDirty: true })
+                  }
+                  placeholder='например 14 × 16'
+                  maxLength={255}
+                  className='min-w-0 flex-1 border border-borderColor bg-bgColor px-1 py-px text-micro focus:border-textColor focus:outline-none'
+                />
+              </div>
+            }
+          />
+        );
       }}
       onPickMedia={handleAddMedia}
       onRemoveMedia={removeMedia}
@@ -381,8 +547,6 @@ function TechCardGallery({
       // перекрывает чертёж на втором.
       halo={isMoodboard}
       pickerAspectRatio={['Custom']}
-      notesMode={notesMode}
-      pinSize={pinSize}
       emptyLabel={emptyLabel}
       fallbackAspect='3/4'
       // Both surfaces are a fixed-height filmstrip — every image the same height, natural width
@@ -423,419 +587,90 @@ function TechCardGallery({
       }}
     />
   );
-}
 
-// The full, structured callout editor — number, part code, which image it is pinned to, and the
-// note. With every view on screen carrying its own pins, this list's job narrows to
-// reaching UNPINNED callouts (a callout survives its image being removed), so it announces how many
-// there are and opens itself when any exist.
-function CalloutsList({
-  view,
-  pieces: cardPieces,
-  shapeOf,
-}: {
-  view: 'technical' | 'moodboard';
-  /** Детали кроя карточки — те же, что предлагает состав шага. */
-  pieces: PieceRef[];
-  shapeOf: (lineKey: string) => FoundPiece | null;
-}) {
-  const { control, formState, getValues, setValue } = useFormContext<TechCardFormData>();
-  // `fields` даёт стабильные ключи для React; удаление идёт КОРНЕВЫМ setValue — по той же
-  // причине, что и в галерее: на «callouts» висят два useFieldArray, и remove одного не
-  // доходит до другого. Плюс remove по устаревшему fields адресует не ту выноску.
-  const { fields } = useFieldArray({ control, name: 'callouts' });
-  const removeCallout = (index: number) =>
-    setValue(
-      'callouts',
-      ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== index),
-      { shouldDirty: true },
-    );
-  const callouts = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
-  const technicalMedia = (useWatch({ control, name: 'technicalMedia' }) ?? []) as Array<{
-    mediaId: number;
-    kind?: string;
-  }>;
-  const moodboardMedia = (useWatch({ control, name: 'moodboardMedia' }) ?? []) as Array<{
-    mediaId: number;
-    kind?: string;
-  }>;
-  const media = view === 'moodboard' ? moodboardMedia : technicalMedia;
-  // null = the user hasn't touched the disclosure, so it follows the unpinned count.
-  const [open, setOpen] = useState<boolean | null>(null);
-
-  const viewMediaIds = useMemo(() => new Set(media.map((m) => m.mediaId)), [media]);
-  // A callout belongs to this list when pinned to one of the view's images; an un-pinned callout
-  // defaults to the technical list so it is never hidden from both.
-  const inView = (index: number) => {
-    const mid = callouts[index]?.mediaId;
-    return mid ? viewMediaIds.has(mid) : view === 'technical';
-  };
-  const visibleFields = fields
-    .map((f, index) => ({ f, index }))
-    .filter(({ index }) => inView(index));
-  const unpinned = visibleFields.filter(({ index }) => !callouts[index]?.mediaId).length;
-  // An error inside a callout FORCES the disclosure open, overriding the user's own collapse: the
-  // error router switches to this tab and calls revealField, which finds nothing when the row is
-  // not in the DOM — leaving a toast that names a field nobody can see (19.8).
-  const hasCalloutError = !!formState.errors.callouts;
-  const isOpen = hasCalloutError || (open ?? unpinned > 0);
-
-  // A callout names a PIECE, and a piece is a row on the pieces tab — so the vocabulary here is
-  // that table, not the standard nomenclature it was typed from. Free text let a callout point at
-  // «FP_R» while the card's only front piece was named «FP_R_1», and nothing ever flagged it.
-  const pieces = (useWatch({ control, name: 'pieces' }) ?? []) as Array<{
-    name?: string;
-    calloutNumber?: number;
-  }>;
-  // ВТОРАЯ ПОЛОВИНА СВЯЗИ. Выноска называет деталь (`callout.part`), а деталь ссылается на выноску
-  // НОМЕРОМ (`piece.calloutNumber`) — и рисуют пины, считают «открепление» и печатают тех-пак
-  // именно по номеру. Клиент писал только первую половину: с тех пор как из таблицы деталей убрали
-  // редактируемую колонку callout (95cdb1af, 30.07) с формулировкой «номер ставится на вкладке
-  // SKETCH», номер не ставился НИГДЕ — `piece.calloutNumber` оставался нулём у всех деталей, и
-  // диаграмма выносок в «деталях кроя» вечно показывала «нет выносок». Здесь эта половина и
-  // дописывается: выбрал деталь в выноске — деталь на неё сослалась.
-  //
-  // Проход по ВСЕМ деталям, а не только по выбранной: смена детали в выноске обязана снять номер с
-  // прежней, иначе на один номер сослались бы две детали, и «открепить» стало бы нечем.
-  const pinPieceToCallout = (calloutIndex: number, parts: string[]) => {
-    // ТОЛЬКО ЭСКИЗ. Номера выносок ПЕР-ЛИСТОВЫЕ: эскиз и мудборд нумеруются независимо (см.
-    // `nextNumber` выше — это два разных документа), а `piece.calloutNumber` адресует выноску
-    // ЭСКИЗА, как и ссылки операций и дефектов. Сопоставление по одному лишь номеру означало, что
-    // выбор детали на выноске мудборда №3 молча снимал деталь с выноски эскиза №3 — связь рвалась
-    // на другом листе, и заметить это было нечем.
-    if (view !== 'technical') return;
-    const number = callouts[calloutIndex]?.number ?? 0;
-    if (!number) return;
-    // НА ОДИН НОМЕР ЗАКОННО ССЫЛАЮТСЯ НЕСКОЛЬКО ДЕТАЛЕЙ: узел собирает их вместе, и «втачать
-    // рукав в пройму» это и рукав, и полочка, и спинка. Обратная сторона связи однозначна и была
-    // такой всегда — деталь называет ОДИН номер.
-    const wanted = new Set(parts.map((n) => normalizePieceName(n)).filter(Boolean));
-    const live = (getValues('pieces') ?? []) as Array<{ name?: string; calloutNumber?: number }>;
-    live.forEach((p, pi) => {
-      const isTarget = wanted.has(normalizePieceName(p.name ?? ''));
-      const holds = (p.calloutNumber ?? 0) === number;
-      if (isTarget === holds) return;
-      setValue(`pieces.${pi}.calloutNumber`, isTarget ? number : 0, { shouldDirty: true });
-    });
-  };
-
-  // The card's geometry unit exists exactly to say what a callout's dimensions are measured in
-  // (techCardMeasurementUnitOptions), so the field names it rather than leaving the operator to
-  // guess whether "12" is cm or mm.
-  const measurementUnit = (useWatch({ control, name: 'measurementUnit' }) ?? '') as string;
-  const unitLabel =
-    techCardMeasurementUnitOptions.find((o) => o.value === measurementUnit)?.label ?? '';
-
-  // Выноски этого списка, чей `part` называет РЕАЛЬНУЮ деталь, которая на эту выноску не ссылается.
-  // Считается по живой форме, поэтому кнопка исчезает сама, как только связи проставлены.
-  const unlinkedParts = useMemo(() => {
-    const byName = new Map<string, number>();
-    for (const p of pieces) {
-      const key = normalizePieceName(p.name ?? '');
-      if (key && !byName.has(key)) byName.set(key, p.calloutNumber ?? 0);
-    }
-    return visibleFields
-      .map(({ index }) => ({
-        index,
-        number: callouts[index]?.number ?? 0,
-        parts: calloutParts(callouts[index]),
-      }))
-      .filter((u) => {
-        if (!u.number || u.parts.length === 0) return false;
-        // Достаточно ОДНОЙ названной детали, которая на выноску не ссылается: связать надо всё
-        // указание разом, а не по одной детали за нажатие.
-        return u.parts.some((name) => {
-          const held = byName.get(normalizePieceName(name));
-          return held != null && held !== u.number;
-        });
-      });
-  }, [pieces, callouts, visibleFields]);
-
-  const pinOptions = [
-    { value: 0, label: '(unpinned)' },
-    ...media.map((m, i) => ({
-      value: m.mediaId,
-      label: `${view === 'moodboard' ? 'M' : 'T'}#${i + 1} ${
-        kindLabels[m.kind ?? ''] ?? (view === 'moodboard' ? 'reference' : 'sketch')
-      }`,
-    })),
-  ];
-
+  if (strays.length === 0 && unlinked.length === 0) return gallery;
   return (
-    <Accordion
-      open={isOpen}
-      onOpenChange={setOpen}
-      title={
-        <Text
-          size='micro'
-          variant='uppercase'
-          tracking='group'
-          component='span'
-          className='font-bold'
-        >
-          callouts ({visibleFields.length})
-        </Text>
-      }
-      meta={unpinned > 0 ? <Pill tone='attention'>{unpinned} unpinned</Pill> : undefined}
-    >
-      <div className='space-y-2'>
-        {/* Выноски, которые НАЗЫВАЮТ существующую деталь, но не связаны с ней.
-            Ровно то состояние, в котором сегодня лежит каждая карточка: имя детали проставлено, а
-            номер выноски у детали — нет, потому что писать его было нечему. Молча дописать это на
-            загрузке нельзя (правка карточки, которую никто не делал), поэтому связывание — действие
-            человека, но одним нажатием на все сразу: пятнадцать раз переоткрыть один и тот же
-            селект никто не станет, и карточка так и осталась бы без выносок. */}
-        {unlinkedParts.length > 0 && (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              title={`деталь названа, но не ссылается на выноску: ${unlinkedParts
-                .map((u) => `#${u.number} → ${u.parts.join(', ')}`)
-                .join('; ')}`}
-              onClick={() => unlinkedParts.forEach((u) => pinPieceToCallout(u.index, u.parts))}
-            >
-              связать детали с выносками ({unlinkedParts.length})
-            </Button>
-            <Text size='nano' variant='label' component='span'>
-              без связи деталь не знает своей выноски: пин не рисуется в «деталях кроя» и не
-              печатается в тех-паке
-            </Text>
-          </div>
-        )}
-        {visibleFields.length === 0 ? (
-          <Text size='micro' variant='label'>
-            no callouts yet. turn on “add callout”, then click any image above
+    <div className='flex flex-col gap-2'>
+      {gallery}
+      {unlinked.length > 0 && !frozen && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            title={`деталь названа, но не ссылается на выноску: ${unlinked
+              .map(({ c }) => `#${c.number} → ${calloutParts(c).join(', ')}`)
+              .join('; ')}`}
+            onClick={() => unlinked.forEach(({ c, i }) => pinPieceToCallout(i, calloutParts(c)))}
+          >
+            связать детали с выносками ({unlinked.length})
+          </Button>
+          <Text size='nano' variant='label' component='span'>
+            без связи деталь не знает своей выноски: пин не рисуется в «деталях кроя» и не
+            печатается в тех-паке
           </Text>
-        ) : (
-          visibleFields.map(({ f, index }) => (
-            <div key={f.id} className='space-y-2 border border-borderColor p-2'>
-              <div className='flex items-center gap-1.5'>
-                {/* Auto-assigned (nextNumber = max+1) and referenced BY number by
-                    pieces/operations/issues — read-only so hand-edits can't collide with the
-                    sequence. Kept in the field array so it still round-trips. */}
-                <span className='flex size-4 shrink-0 items-center justify-center bg-textColor text-nano leading-none tabular-nums text-bgColor'>
-                  {callouts[index]?.number ?? index + 1}
-                </span>
-                <Text
-                  size='micro'
-                  variant='uppercase'
-                  tracking='group'
-                  component='span'
-                  className='font-bold'
-                >
-                  callout
-                </Text>
-                {!callouts[index]?.mediaId && <Pill tone='attention'>unpinned</Pill>}
-                <div className='ml-auto shrink-0'>
-                  <Button
-                    type='button'
-                    variant='secondary'
-                    size='xs'
-                    aria-label='remove callout'
-                    onClick={() => removeCallout(index)}
-                    className='cursor-pointer'
+        </div>
+      )}
+      {strays.length > 0 && (
+      <div className='flex flex-col gap-1 border border-dashed border-borderColor p-2'>
+        <Text size='micro' variant='label' component='span' className='uppercase'>
+          указания без картинки · {strays.length}
+        </Text>
+        <Text size='nano' variant='label'>
+          они не стоят ни на одной картинке — снимок сняли или выноска пришла со старой карточки.
+          Вернуть её на лист можно, СОХРАНИВ НОМЕР: на номер ссылаются деталь, операция и дефект, и
+          «удалить и поставить заново» порвало бы эти ссылки. Маркер встанет в середину — оттуда его
+          перетаскивают куда надо.
+        </Text>
+        {strays.map(({ c, i }) => (
+          <div key={i} className='flex items-baseline gap-1.5'>
+            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
+              {c.number || i + 1}
+            </Text>
+            <Text size='nano' component='span' className='min-w-0 flex-1'>
+              {(c.description ?? '').trim() || calloutParts(c).join(', ') || '—'}
+            </Text>
+            {!frozen && (
+              <ChipRow>
+                {/* ЧИПОМ НА КАЖДУЮ КАРТИНКУ, а не селектом: картинок на листе единицы, и список из
+                    двух пунктов, спрятанный за раскрытием, дороже двух чипов рядом. */}
+                {mediaFA.fields.map((f, mi) => (
+                  <Chip
+                    key={f.id}
+                    dashed
+                    onClick={() => {
+                      history.record();
+                      setValue(`callouts.${i}.mediaId`, f.mediaId, { shouldDirty: true });
+                      setValue(`callouts.${i}.posX`, '0.5', { shouldDirty: true });
+                      setValue(`callouts.${i}.posY`, '0.5', { shouldDirty: true });
+                      // ЯКОРЯ НЕ ПЕРЕЕЗЖАЮТ: доли кадра осмысленны только на своём снимке, и
+                      // фигура легла бы на новую картинку по координатам старой — с виду
+                      // нормальная линия, указывающая не туда.
+                      setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
+                      setValue(`callouts.${i}.points`, [], { shouldDirty: true });
+                    }}
+                    title={`поставить на ${isMoodboard ? 'M' : 'T'}#${mi + 1}, сохранив номер`}
                   >
-                    ✕
-                  </Button>
-                </div>
-              </div>
-              <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
-                {/* ДЕТАЛЬ — ПЛИТКАМИ С КОНТУРОМ, а не строкой в списке. Выноска называет деталь
-                    кроя, и узнать «полочку» среди двадцати имён вида FP_R_1 глазами нельзя, а по
-                    форме — можно с одного взгляда. Пикер и контуры те же, что у состава шага. */}
-                <CalloutPartsPicker
-                  pieces={cardPieces}
-                  shapeOf={shapeOf}
-                  value={calloutParts(callouts[index])}
-                  onChange={(names) => {
-                    // `part` — ПЕРВЫЙ ЭЛЕМЕНТ СПИСКА, а не отдельное значение: сервер хранит
-                    // именно так, и разойтись им нельзя, иначе бумага покажет одну деталь, а
-                    // экран другую.
-                    setValue(`callouts.${index}.parts`, names, { shouldDirty: true });
-                    setValue(`callouts.${index}.part`, names[0] ?? '', { shouldDirty: true });
-                    pinPieceToCallout(index, names);
+                    на {isMoodboard ? 'M' : 'T'}#{mi + 1}
+                  </Chip>
+                ))}
+                <Chip
+                  dashed
+                  onClick={() => {
+                    history.record();
+                    writeCallouts(
+                      ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== i),
+                    );
                   }}
-                />
-                <SelectField
-                  name={`callouts.${index}.mediaId`}
-                  label='pinned to'
-                  items={pinOptions}
-                  valueAsNumber
-                  // ЯКОРЯ НЕ ПЕРЕЕЗЖАЮТ ВМЕСТЕ С УКАЗАНИЕМ. Доли кадра осмысленны только на своём
-                  // снимке: перепривязанная мерка легла бы на новый эскиз по координатам старого —
-                  // с виду нормальная линия, указывающая не туда, и заметить это нечем. Переставить
-                  // якоря отсюда нельзя (их ставят кликами по картинке), поэтому фигура честно
-                  // разжалуется в точку, а нарисовать её заново — три клика.
-                  onAfterChange={() => {
-                    if ((callouts[index]?.points?.length ?? 0) === 0) return;
-                    setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
-                    setValue(`callouts.${index}.points`, [], { shouldDirty: true });
-                  }}
-                />
-                {/* The measurement the callout carries (ширина кармана, длина планки…). It
-                    round-trips and prints on the tech pack, but nothing in this editor could
-                    write it — a callout could only ever be described in prose. */}
-                <InputField
-                  name={`callouts.${index}.dimensions`}
-                  label={`dimensions${unitLabel ? ` (${unitLabel})` : ''}`}
-                  placeholder='e.g. 14 × 16'
-                />
-              </div>
-              <TextareaField
-                name={`callouts.${index}.description`}
-                label='description'
-                rows={2}
-                maxLength={2000}
-              />
-              {/* ГЕОМЕТРИЯ. Переставить якоря отсюда нельзя намеренно: их ставят НА КАРТИНКЕ, а
-                  четыре поля с числами вместо трёх кликов — не правка, а расшифровка. Здесь
-                  остаётся то, что от картинки не зависит: цвет и «вернуть точкой». */}
-              <CalloutGeometryRow
-                kind={callouts[index]?.kind ?? 'pin'}
-                color={callouts[index]?.color ?? ''}
-                dashed={!!callouts[index]?.dashed}
-                filled={!!callouts[index]?.filled}
-                // Правка оформления ЗАПОМИНАЕТСЯ ПЕРОМ — так же, как в редакторе снимка шага:
-                // следующая фигура наследует то, чем нарисовали эту.
-                onColor={(c) => {
-                  rememberPen({ color: c });
-                  setValue(`callouts.${index}.color`, c as AnnotationColor, { shouldDirty: true });
-                }}
-                onDashed={(v) => {
-                  rememberPen({ dashed: v });
-                  setValue(`callouts.${index}.dashed`, v, { shouldDirty: true });
-                }}
-                onFilled={(v) => {
-                  rememberPen({ filled: v });
-                  setValue(`callouts.${index}.filled`, v, { shouldDirty: true });
-                }}
-                onDemote={() => {
-                  setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
-                  setValue(`callouts.${index}.points`, [], { shouldDirty: true });
-                  // Пунктир и штриховка у точки не значат ничего: сервер обнулил бы их сам, а
-                  // расхождение формы с хранимым делает карточку «изменённой» после сохранения.
-                  setValue(`callouts.${index}.dashed`, false, { shouldDirty: true });
-                  setValue(`callouts.${index}.filled`, false, { shouldDirty: true });
-                }}
-              />
-            </div>
-          ))
-        )}
+                  title='удалить указание, которое ни на чём не стоит'
+                >
+                  удалить
+                </Chip>
+              </ChipRow>
+            )}
+          </div>
+        ))}
       </div>
-    </Accordion>
-  );
-}
-
-// ПИКЕР ДЕТАЛЕЙ ДЛЯ УКАЗАНИЯ. Пишет ИМЕНА, а не ключи: на именах стоит связь «деталь ↔ выноска»
-// (`pinPieceToCallout` сверяет имена), ими печатается тех-пак и хранит архив релиза. Менять
-// хранимое на ключ здесь значило бы переделывать обе половины связи заодно с пикером.
-//
-// СПИСОК, А НЕ ОДНА ДЕТАЛЬ: узел законно собирает несколько сразу, и выбирать из них главную у шва
-// не у кого. Выбранные показаны чипами, добавляет — тот же пикер с силуэтами, что и у состава шага:
-// деталь на одном экране обязана выбираться одинаково, иначе одна и та же называется в двух местах
-// по-разному.
-function CalloutPartsPicker({
-  pieces,
-  shapeOf,
-  value,
-  onChange,
-}: {
-  pieces: PieceRef[];
-  shapeOf: (lineKey: string) => FoundPiece | null;
-  value: string[];
-  onChange: (names: string[]) => void;
-}) {
-  const byName = new Map(pieces.map((p) => [normalizePieceName(p.name), p]));
-  const selectedKeys = value
-    .map((n) => byName.get(normalizePieceName(n))?.lineKey)
-    .filter(Boolean) as string[];
-
-  return (
-    <div className='flex flex-col gap-0.5'>
-      <Text size='micro' variant='label' component='span' className='uppercase'>
-        детали (код)
-      </Text>
-      <ChipRow>
-        {value.map((name) => {
-          // Имя, которого среди деталей нет (напечатано до пикера или деталь переименовали),
-          // показывается ФЛАГОМ, а не молча пустотой: иначе следующее сохранение унесло бы его
-          // без следа, и человек не узнал бы, что связь порвалась.
-          const known = byName.has(normalizePieceName(name));
-          return (
-            <Chip
-              key={name}
-              tone={known ? 'default' : 'error'}
-              title={known ? 'убрать деталь из указания' : `${name} — нет среди деталей карточки`}
-              onRemove={() => onChange(value.filter((n) => n !== name))}
-            >
-              {name}
-            </Chip>
-          );
-        })}
-        <PieceAddChip
-          pieces={pieces}
-          selected={selectedKeys}
-          shapeOf={shapeOf}
-          onPick={(lineKey) => {
-            const picked = pieces.find((p) => p.lineKey === lineKey);
-            if (!picked) return;
-            const has = value.some((n) => normalizePieceName(n) === normalizePieceName(picked.name));
-            onChange(has ? value.filter((n) => normalizePieceName(n) !== normalizePieceName(picked.name)) : [...value, picked.name]);
-          }}
-        />
-      </ChipRow>
-    </div>
-  );
-}
-
-// Вид, цвет и начертание указания. ВИД ТОЛЬКО ЧИТАЕТСЯ: фигуру рисуют кликами по картинке, и
-// «сменить вид» в списке означало бы либо потерять якоря, либо принять их от другого вида — две
-// точки мерки не годятся началом дуги.
-//
-// ЧИПЫ ЗДЕСЬ ОБЫЧНЫЕ, а не `nonForm`. `nonForm` заведён ради того, что обязано РАБОТАТЬ на
-// выпущенной карточке (изоляция по наведению, зум): такой чип — span, и `<fieldset disabled>` его
-// не глушит. Здесь всё наоборот — это правка, и на выпущенной карточке она обязана быть глухой.
-function CalloutGeometryRow({
-  kind,
-  color,
-  dashed,
-  filled,
-  onColor,
-  onDashed,
-  onFilled,
-  onDemote,
-}: {
-  kind: AnnotationKind;
-  color: AnnotationColor;
-  dashed: boolean;
-  filled: boolean;
-  onColor: (c: string) => void;
-  onDashed: (v: boolean) => void;
-  onFilled: (v: boolean) => void;
-  onDemote: () => void;
-}) {
-  return (
-    <div className='flex flex-wrap items-center gap-1.5'>
-      <Text size='micro' variant='label' component='span' className='uppercase'>
-        {kindDef(kind).label}
-      </Text>
-      <AnnotationStyleRow
-        kind={kind}
-        color={color}
-        dashed={dashed}
-        filled={filled}
-        onColor={onColor}
-        onDashed={onDashed}
-        onFilled={onFilled}
-      />
-      {kind !== 'pin' && (
-        <ChipRow>
-          <Chip dashed onClick={onDemote} title='убрать фигуру, оставить нумерованную точку'>
-            сделать точкой
-          </Chip>
-        </ChipRow>
       )}
     </div>
   );
@@ -879,8 +714,17 @@ export function SketchTab({
   view = 'sketch',
   active = false,
   frozen = false,
+  calloutHistory,
 }: {
   techCard?: common_TechCard;
+  /**
+   * История отката указаний — ОДНА НА ФОРМУ, приходит сверху.
+   *
+   * Эскиз и мудборд смонтированы одновременно и пишут ОДИН массив `callouts`. Своя история у
+   * каждого означала бы, что откат на одном листе возвращает снимок, снятый до правок другого, и
+   * они исчезают молча — на скрытой вкладке этого не видно.
+   */
+  calloutHistory: EditHistory<FormCallout>;
   view?: 'sketch' | 'moodboard';
   /** Карточка выпущена и заморожена. Нужен ЯВНО: `<fieldset disabled>` не глушит ⌘V. */
   frozen?: boolean;
@@ -921,13 +765,13 @@ export function SketchTab({
           mediaById={mediaById}
           onPickedMedia={onPicked}
           frozen={frozen}
-          notesMode='hover'
-          pinSize='sm'
           emptyLabel='no moodboard images yet. add references to pin notes on them'
           addLabel='add moodboard image'
           purpose='moodboard reference'
+          cardPieces={pieces}
+          shapeOf={shapeOf}
+          history={calloutHistory}
         />
-        <CalloutsList view='moodboard' pieces={pieces} shapeOf={shapeOf} />
         <MoodboardComments />
       </section>
     );
@@ -944,13 +788,13 @@ export function SketchTab({
         mediaById={mediaById}
         onPickedMedia={onPicked}
         frozen={frozen}
-        notesMode='auto'
-        pinSize='md'
         emptyLabel='no sketches yet. add a technical drawing to place callouts on it'
         addLabel='add sketch'
         purpose='tech sketch'
+        cardPieces={pieces}
+        shapeOf={shapeOf}
+        history={calloutHistory}
       />
-      <CalloutsList view='technical' pieces={pieces} shapeOf={shapeOf} />
     </section>
   );
 }
