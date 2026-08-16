@@ -97,10 +97,14 @@ for (const key of ALL_KIND_KEYS) {
   );
 }
 
-check('в панели ровно семь видов', PALETTE_KINDS.length === 7, String(PALETTE_KINDS.length));
+check('в панели ровно восемь видов', PALETTE_KINDS.length === 8, String(PALETTE_KINDS.length));
+// МУЛЬТИЛИДЕР В ПАНЕЛИ, и это не украшение: добавить якорь ПОСТАВЛЕННОЙ подписи нечем (ручки-
+// призраки рождаются рёбрами, а у подписи их нет), поэтому без своего чипа «одна подпись к трём
+// местам» невыразима вовсе.
+check('мультилидер в панели', PALETTE_KINDS.some((d) => d.key === 'multi'));
 check(
-  'мультилидер живёт в реестре, но не в панели',
-  ALL_KIND_KEYS.includes('multi') && !PALETTE_KINDS.some((d) => d.key === 'multi'),
+  'у мультилидера плавающее число якорей — иначе «готово» нечего заканчивать',
+  kindDef('multi').points[0] !== kindDef('multi').points[1],
 );
 check('пин в панели первым — он неприкасаем', PALETTE_KINDS[0].key === 'pin');
 check(

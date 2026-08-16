@@ -68,7 +68,7 @@ export function OperationMediaStrip({
   urlById: Map<number, string>;
   frozen?: boolean;
   /** Пикер детали кроя для редактора указания (силуэты из чертежа). Отдаёт выбранный ключ. */
-  renderPiecePicker?: (opts: { onPick: (lineKey: string) => void }) => ReactNode;
+  renderPiecePicker?: (opts: { selected: string[]; onPick: (lineKey: string) => void }) => ReactNode;
   pieceLabel?: (lineKey: string) => string | undefined;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
@@ -85,8 +85,11 @@ export function OperationMediaStrip({
   // Сколько якорей набрано на ТОМ кадре, где идёт жест. Подсказку рисует общая панель — она одна,
   // а кадров десять, и повторить её под каждым значило бы превратить полосу в столбик одинаковых
   // строк. Кадры, где жеста нет, шлют ноль, поэтому максимум и есть «сколько набрано».
-  const [placedByFrame, setPlacedByFrame] = useState<Record<number, number>>({});
-  const placed = Math.max(0, ...Object.values(placedByFrame), 0);
+  //
+  // КЛЮЧ — САМА ФОТОГРАФИЯ, а не позиция в полосе. По позиции запись переживала бы и удаление
+  // кадра (оставаясь навсегда), и перестановку стрелками — и тогда подсказка показывала бы
+  // «поставлено 2» от жеста, которого на этом снимке никто не начинал.
+  const [placedByMedia, setPlacedByMedia] = useState<Record<number, number>>({});
   // Кадр, чья правка сейчас открыта. Нужен только затем, чтобы ⌘V не улетал в соседнюю полосу:
   // включается вставка у той, внутри которой стоит указатель.
   const [hot, setHot] = useState(false);
@@ -139,6 +142,8 @@ export function OperationMediaStrip({
 
   const list = (watched ?? []) as OperationMediaForm[];
   const full = fields.length >= MAX_MEDIA_PER_STEP;
+  // Считается ТОЛЬКО по живым кадрам: запись снятого снимка иначе жила бы в словаре вечно.
+  const placed = list.reduce((m, f) => Math.max(m, placedByMedia[wireInt(f.mediaId)] ?? 0), 0);
 
   const setAnnotations = (index: number, next: AnnotationForm[]) =>
     setValue(`${name}.${index}.annotations`, next, { shouldDirty: true });
@@ -234,7 +239,11 @@ export function OperationMediaStrip({
                       placingKind={placingKind}
                       onPlaced={() => setPlacingKind(null)}
                       onPlacedCountChange={(n) =>
-                        setPlacedByFrame((prev) => (prev[i] === n ? prev : { ...prev, [i]: n }))
+                        setPlacedByMedia((prev) =>
+                          prev[wireInt(current.mediaId)] === n
+                            ? prev
+                            : { ...prev, [wireInt(current.mediaId)]: n },
+                        )
                       }
                       zoomable
                       annotations={(current.annotations ?? []) as AnnotationForm[]}

@@ -1,6 +1,8 @@
 'use client';
 
 import { cn } from 'lib/utility';
+import { Chip, ChipRow } from 'ui/components/chip';
+import Text from 'ui/components/text';
 import {
   useCallback,
   useEffect,
@@ -15,7 +17,7 @@ import {
 import { ImageCallout, pinSizes, type PinSize } from './marker-note';
 import { simplifyPath, simplifyToLimit, type ShapePoint } from './geometry';
 import { kindDef, labelKindForPoints } from './kinds';
-import { AnnotationDefs, CalloutShape, PlacingShape } from './shapes';
+import { AnnotationDefs, CalloutShape, CALLOUT_COLOR_HEX, PlacingShape } from './shapes';
 
 // ПОВЕРХНОСТЬ УКАЗАНИЙ — картинка и всё, что на ней нарисовано и правится.
 //
@@ -111,6 +113,14 @@ export type AnnotationSurfaceProps = {
   renderEditor?: (key: string, opts: { close: () => void }) => ReactNode;
   /** plate: имя детали по ключу — для плашки и легенды. */
   pieceLabel?: (lineKey: string) => string | undefined;
+  /**
+   * plate: печатная легенда пинов под кадром.
+   *
+   * ЖИВЁТ ЗДЕСЬ, А НЕ У ВЛАДЕЛЬЦА, потому что наведение на строку легенды обязано подсвечивать
+   * свой пин на снимке, а состояние наведения принадлежит поверхности. У владельца легенда могла
+   * бы только показывать текст — и ровно это с ней и случилось, когда она жила снаружи.
+   */
+  legend?: boolean;
 
   /** marker: тело записки. */
   renderNote?: (key: string, opts: { close: () => void }) => ReactNode;
@@ -216,6 +226,7 @@ export function AnnotationSurface({
   onBackgroundView,
   maxCallouts,
   onPlacedCountChange,
+  legend = false,
 }: AnnotationSurfaceProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -233,6 +244,8 @@ export function AnnotationSurface({
   const [points, setPoints] = useState<ShapePoint[]>([]);
   const [cursor, setCursor] = useState<ShapePoint | null>(null);
   const [drag, setDrag] = useState<Drag | null>(null);
+  /** Последний отказ постановки — печатается под кадром, пока не начнут новый жест. */
+  const [refused, setRefused] = useState<string | null>(null);
   const dragRef = useRef<Drag | null>(null);
   const setDragBoth = useCallback((d: Drag | null) => {
     dragRef.current = d;
@@ -355,8 +368,21 @@ export function AnnotationSurface({
   }, [count]);
 
   const px = useCallback((p: ShapePoint) => ({ x: p.x * size.w, y: p.y * size.h }), [size]);
-  /** Экранный пиксель в долях кадра — пороги захвата обязаны быть экранными, а не кадровыми. */
-  const unitPerPx = size.w > 0 ? 1 / (size.w * (zoom ? scale : 1)) : 0;
+  /**
+   * Обратный ход: пиксели кадра в доли. Нужен там, где считать НАДО в пикселях, а хранить в долях.
+   *
+   * Доли по X и по Y — РАЗНЫЕ единицы: на кадре 400×300 одна доля высоты это 300 пикселей, а одна
+   * доля ширины — 400. Поэтому любое РАССТОЯНИЕ (порог прореживания следа, отсев совпавших
+   * отсчётов) считается в пикселях и только потом переводится обратно: посчитанное в долях, оно
+   * зажимало бы вертикальные извивы сильнее горизонтальных, и один и тот же росчерк прореживался
+   * бы по-разному на альбомном и портретном снимке.
+   */
+  const unpx = useCallback(
+    (p: ShapePoint) => ({ x: size.w ? p.x / size.w : 0, y: size.h ? p.y / size.h : 0 }),
+    [size],
+  );
+  /** Масштаб показа: экранный пиксель против пикселя кадра. */
+  const shown = zoom ? scale || 1 : 1;
 
   /** Экранная точка → доля кадра, БЕЗ клампа: клик мимо картинки обязан быть отличим. */
   const rawAt = useCallback((clientX: number, clientY: number): ShapePoint | null => {
@@ -387,11 +413,24 @@ export function AnnotationSurface({
       if (pts.length < d.points[0]) return;
       setPoints([]);
       setCursor(null);
+      if (full) {
+        // ОТКАЗ ОБЯЗАН БЫТЬ ВИДЕН. Молча погасить инструмент — то же самое, что сделать вид, будто
+        // фигура поставлена: человек ставит вторую, третью и узнаёт правду, только пересчитав
+        // указания глазами.
+        setRefused('на этом кадре уже 30 указаний — дальше их не прочесть');
+      }
       if (!full) {
         // Вид ХРАНЕНИЯ у подписи считается по числу якорей: панель знает один вид, провод
         // различает одну стрелку и несколько. Различие — счётчик, поэтому его считают.
         const stored = d.key === 'label' || d.key === 'multi' ? labelKindForPoints(pts.length) : d.key;
-        onAdd?.(stored, pts, { ...pen, filled: d.fillable ? pen.filled : false });
+        // Оба флага сужаются ПО ВИДУ. Пунктир у точки и штриховка у линии сервер приводит к
+        // false, и форма, оставившая их поднятыми, разошлась бы с хранимым: карточка становится
+        // «изменённой после подписи» за нажатие, которое ничего не изменило.
+        onAdd?.(stored, pts, {
+          color: pen.color,
+          dashed: d.dashable ? pen.dashed : false,
+          filled: d.fillable ? pen.filled : false,
+        });
         // ТРЕТИЙ ТАКТ ЖЕСТА «клик-клик-ввод»: поставленная фигура выбирается сама и открывает
         // редактор. Кроме липкого инструмента: там штрихуют сериями, и открытый редактор после
         // каждого штриха превращает набросок в процедуру.
@@ -417,10 +456,13 @@ export function AnnotationSurface({
     if (def.grammar !== 'polygon' || points.length < def.points[0] || !cursor) return false;
     const a = px(cursor);
     const b = px(points[0]);
-    return Math.hypot(a.x - b.x, a.y - b.y) * (zoom ? scale : 1) < SNAP_RADIUS;
+    return Math.hypot(a.x - b.x, a.y - b.y) * shown < SNAP_RADIUS;
   })();
 
   const addPlacementPoint = (p: ShapePoint) => {
+    // Отказ живёт до следующего жеста: он объясняет, почему предыдущий ничего не дал, и убирать
+    // его по таймеру значило бы прятать объяснение от того, кто читает медленно.
+    setRefused(null);
     // Первая точка ЗДЕСЬ отменяет наполовину набранное у соседей: жест принадлежит одному снимку.
     if (points.length === 0) claimEditing(claimRef.current);
     if (def.grammar === 'arc') {
@@ -498,6 +540,19 @@ export function AnnotationSurface({
     return () => el.removeEventListener('wheel', onWheel);
   }, [zoom, zoomAt]);
 
+  // Потеря фокуса окна обрывает и штрих: событий указателя оттуда больше не придёт вовсе, а
+  // незакрытый штрих продолжился бы с того места, где рука его бросила.
+  useEffect(() => {
+    const lost = () => {
+      if (!inking.current) return;
+      inking.current = null;
+      pointers.current.clear();
+      setPoints([]);
+    };
+    window.addEventListener('blur', lost);
+    return () => window.removeEventListener('blur', lost);
+  }, []);
+
   const resetZoom = useCallback(() => {
     setScale(1);
     setPos({ x: 0, y: 0 });
@@ -553,8 +608,10 @@ export function AnnotationSurface({
       const p = at(e.clientX, e.clientY);
       const last = ink.pts[ink.pts.length - 1];
       // Отсев совпавших отсчётов до RDP: браузер шлёт движение и без смещения, и такие точки
-      // разбавляют след, не неся о нём ничего.
-      if (Math.hypot(p.x - last.x, p.y - last.y) > unitPerPx * 0.5) {
+      // разбавляют след, не неся о нём ничего. Считается В ПИКСЕЛЯХ — см. `unpx`.
+      const a = px(p);
+      const b = px(last);
+      if (Math.hypot(a.x - b.x, a.y - b.y) * shown > 0.5) {
         ink.pts.push(p);
         setPoints([...ink.pts]);
       }
@@ -588,6 +645,13 @@ export function AnnotationSurface({
   }
 
   function releasePointer(e: ReactPointerEvent) {
+    // ШТРИХ ОБРЫВАЕТСЯ ВМЕСТЕ С УКАЗАТЕЛЕМ. Без этого `pointercancel` (палец ушёл в прокрутку,
+    // система перехватила жест) оставлял полуштрих на экране и незакрытую карту указателей:
+    // следующее движение БЕЗ нажатия дописывало след дальше.
+    if (inking.current?.id === e.pointerId) {
+      inking.current = null;
+      setPoints([]);
+    }
     pointers.current.delete(e.pointerId);
     if (pointers.current.size < 2) pinch.current = null;
     if (pan.current?.id === e.pointerId) {
@@ -602,13 +666,15 @@ export function AnnotationSurface({
       inking.current = null;
       releasePointer(e);
       // ПРОРЕЖИВАНИЕ ПЕРЕД ЗАПИСЬЮ, а не при отрисовке: сырой след уезжает в JSON-колонку, в
-      // отпечаток секции и в каждое чтение карточки. Порог — экранный, тот, который видел рисующий.
-      const eps = INK_EPSILON * unitPerPx;
-      // Порог не бывает нулевым: в зуме ×6 он мельчает, но ноль означал бы «не прореживать».
+      // отпечаток секции и в каждое чтение карточки. Считается В ПИКСЕЛЯХ КАДРА и порогом,
+      // который видел рисующий: в зуме ×6 он мельчает вместе с тем, что видно.
+      const inPx = ink.pts.map(px);
+      const eps = Math.max(INK_EPSILON / shown, 1e-3);
       const thinned = simplifyToLimit(
-        ink.pts.length > 2 ? simplifyPath(ink.pts, Math.max(eps, 1e-5)) : ink.pts,
+        inPx.length > 2 ? simplifyPath(inPx, eps) : inPx,
         kindDef('ink').points[1],
-      );
+        eps,
+      ).map(unpx);
       setPoints([]);
       if (thinned.length >= 2) finishPlacing('ink', thinned);
       return;
@@ -749,11 +815,21 @@ export function AnnotationSurface({
       if (!visible) return;
 
       if (e.key === 'Escape') {
-        // ЛЕСТНИЦА: вооружённая ручка → выбор → инструмент. Один Esc — один шаг: иначе выход из
-        // режима правки точки гасил бы заодно и инструмент, который выбирали отдельно.
+        // ЛЕСТНИЦА: вооружённая ручка → выбор → незавершённый жест → инструмент. Один Esc — один
+        // шаг: иначе выход из режима правки точки гасил бы заодно и инструмент, который выбирали
+        // отдельно.
+        //
+        // СОБЫТИЕ ГАСИТСЯ, КОГДА ШАГ СДЕЛАН. Слушатель висит в фазе ПЕРЕХВАТА (см. ниже), поэтому
+        // успевает раньше Radix-диалога, который слушает на document: без этого один Esc в
+        // увеличенном виде отменял наполовину набранную зону И закрывал диалог, а в полосе из
+        // десяти кадров снимал выбор на одном и инструмент на другом одновременно.
+        let stepped = true;
         if (armed) setArmed(null);
         else if (selected !== null) select(null);
+        else if (points.length > 0) setPoints([]);
         else if (tool) cancelPlacing();
+        else stepped = false;
+        if (stepped) e.stopPropagation();
         return;
       }
       if (e.key === 'Enter' && !typing && placing && points.length >= def.points[0]) {
@@ -781,8 +857,10 @@ export function AnnotationSurface({
       live.current.onRemove?.(selected);
       select(null);
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // ФАЗА ПЕРЕХВАТА: событие идёт window → document → цель, и Radix слушает Escape на document.
+    // В фазе всплытия окно получило бы его последним, то есть уже после того, как диалог закрылся.
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [editable, armed, selected, tool, placing, points, def, byKey, select, cancelPlacing, finishPlacing]);
 
   // ── ОТРИСОВКА ─────────────────────────────────────────────────────────────────────────────────
@@ -983,8 +1061,12 @@ export function AnnotationSurface({
                       onPointerEnter={() => setHovered(c.key)}
                       onPointerLeave={() => setHovered((h) => (h === c.key ? null : h))}
                       onPointerDown={(e) => {
+                        // ВЫБРАННУЮ фигуру нажатие тащит. НЕВЫБРАННУЮ — пропускает вниз, на кадр,
+                        // и это важнее, чем кажется: заштрихованная зона ловит клики по всей своей
+                        // площади, и глушение нажатия отняло бы у неё панораму в зуме — снимок
+                        // стало бы нельзя двигать иначе как мимо зоны. Выбор при этом не страдает:
+                        // он делается кликом, а клик приходит после отпускания и порога сдвига.
                         if (selected === c.key) startShapeDrag(c, e);
-                        else e.stopPropagation();
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1029,6 +1111,7 @@ export function AnnotationSurface({
                     at={px(p)}
                     inv={inv}
                     number={c.number ?? 0}
+                    color={c.color || undefined}
                     title={[text, ...names].filter(Boolean).join(' · ') || `выноска ${c.number ?? ''}`}
                     dimmed={dim(c.key)}
                     selected={selected === c.key}
@@ -1106,6 +1189,11 @@ export function AnnotationSurface({
               px={px}
               inv={inv}
               armed={armed}
+              justDragged={() => {
+                const v = justDragged.current;
+                justDragged.current = false;
+                return v;
+              }}
               onArm={(index) => setArmed({ key: selectedCallout.key, index })}
               onDrag={(index, from, e) => startHandleDrag(selectedCallout.key, index, from, e)}
               onInsert={(index, p) => {
@@ -1128,6 +1216,50 @@ export function AnnotationSurface({
         )}
         {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
       </div>
+
+      {/* ЛЕГЕНДА ПИНОВ — ТОЛЬКО ДЛЯ ПИНОВ. Остальные виды несут текст на себе, и повторять его
+          списком значило бы печатать одно и то же дважды — до первого расхождения.
+          Живёт ЗДЕСЬ, а не у владельца: наведение на строку обязано подсвечивать свой пин на
+          снимке, а состояние наведения принадлежит поверхности. Снаружи легенда могла только
+          показывать текст — и ровно это с ней и случилось. */}
+      {legend && labelMode === 'plate' && (
+        <PinLegend
+          callouts={callouts}
+          pieceLabel={pieceLabel}
+          onHover={setHovered}
+        />
+      )}
+
+      {/* СТРОКА ЗАВЕРШЕНИЯ ЖЕСТА — ПОД ТЕМ КАДРОМ, ГДЕ ЖЕСТ ИДЁТ, а не в общей панели.
+          Панель одна на десять снимков, и «готово · 3» в ней не сказало бы, у какого из них три
+          точки. Здесь же она появляется ровно у того кадра, на котором набирают.
+          Закрывает три дыры разом: мультилидер (от 2 до 8 якорей) заканчивать было нечем, кроме
+          достижения восьми; зону нельзя было замкнуть без клавиатуры (снап считается по движению
+          курсора, а после тапа на планшете курсор не двигается); упёршийся предел молчал. */}
+      {editable && (refused || (placing && points.length > 0)) && (
+        <ChipRow>
+          {refused ? (
+            <Text size='micro' variant='label' component='span'>
+              {refused}
+            </Text>
+          ) : (
+            <>
+              {points.length >= def.points[0] && def.points[0] !== def.points[1] && (
+                <Chip
+                  nonForm
+                  onClick={() => finishPlacing(def.key, points)}
+                  title='закончить постановку на этом числе точек'
+                >
+                  готово · {points.length}
+                </Chip>
+              )}
+              <Chip nonForm dashed onClick={cancelPlacing} title='отменить постановку'>
+                отменить
+              </Chip>
+            </>
+          )}
+        </ChipRow>
+      )}
 
       {renderEditor && selected !== null && byKey.has(selected) && (
         <EditorSlot focusRequested={takeFocusRequest}>
@@ -1241,6 +1373,7 @@ function PinMarker({
   at,
   inv,
   number,
+  color,
   title,
   dimmed,
   selected,
@@ -1251,6 +1384,13 @@ function PinMarker({
   at: ShapePoint;
   inv: number;
   number: number;
+  /**
+   * Цвет КОЛЬЦА, а не цифры. Правило системы — «цвет красит геометрию, никогда текст и номер», но
+   * у пина никакой другой геометрии нет: точка радиусом 2 под восемнадцатипиксельным кружком не
+   * видна вовсе, и цвет у пина стал бы невыразимым — виден только в редакторе, то есть нигде.
+   * Кольцо это его геометрия; цифра остаётся чернильной и читаемой.
+   */
+  color?: string;
   title: string;
   dimmed: boolean;
   selected: boolean;
@@ -1258,6 +1398,7 @@ function PinMarker({
   onHover: (on: boolean) => void;
   onPress: () => void;
 }) {
+  const ink = color ? CALLOUT_COLOR_HEX[color] : undefined;
   return (
     <span
       role='button'
@@ -1289,6 +1430,11 @@ function PinMarker({
         width: R_PIN * 2,
         height: R_PIN * 2,
         transform: `translate(-50%, -50%) scale(${inv})`,
+        // Белый пин на белом фоне снимка исчез бы целиком: кольцо красится, но толщина у него
+        // остаётся, а тень даёт ту же двухслойность, что чернильная подложка у белой линии.
+        borderColor: ink,
+        borderWidth: ink ? 2 : undefined,
+        boxShadow: color === 'white' ? '0 0 0 1px var(--color-textColor)' : undefined,
       }}
     >
       {number || ''}
@@ -1366,6 +1512,56 @@ function Plate({
   );
 }
 
+/**
+ * Легенда пинов — печатная таблица под снимком.
+ *
+ * ДЕТАЛИ ПЕРЕЧИСЛЯЮТСЯ ПОЛНОСТЬЮ, в отличие от плашки, где после двух имён стоит счётчик: у бумаги
+ * нет наведения, и спрятать на ней список за подсказкой значит потерять его.
+ */
+function PinLegend({
+  callouts,
+  pieceLabel,
+  onHover,
+}: {
+  callouts: SurfaceCallout[];
+  pieceLabel?: (lineKey: string) => string | undefined;
+  onHover: (key: string | null) => void;
+}) {
+  const pins = callouts.filter(
+    (c) =>
+      kindDef(c.kind).key === 'pin' &&
+      ((c.text ?? '').trim() || ((c.pieceLineKeys ?? []).length > 0 && !!pieceLabel)),
+  );
+  if (pins.length === 0) return null;
+  return (
+    <div className='flex flex-col gap-0.5'>
+      {pins.map((c) => {
+        const names = (c.pieceLineKeys ?? []).map((k) => pieceLabel?.(k) ?? 'деталь удалена');
+        return (
+          <div
+            key={c.key}
+            className='flex items-baseline gap-1.5'
+            onPointerEnter={() => onHover(c.key)}
+            onPointerLeave={() => onHover(null)}
+          >
+            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
+              {c.number ?? ''}
+            </Text>
+            <Text size='nano' component='span' className='min-w-0'>
+              {c.text}
+            </Text>
+            {names.length > 0 && (
+              <Text size='nano' variant='label' component='span' className='shrink-0 uppercase'>
+                {names.join(', ')}
+              </Text>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Размер ручки в экранных пикселях: видимый квадрат и обёртка, в которую попадают пальцем. */
 const HANDLE = 10;
 const HANDLE_HIT = 20;
@@ -1376,6 +1572,7 @@ function Handles({
   px,
   inv,
   armed,
+  justDragged,
   onArm,
   onDrag,
   onInsert,
@@ -1385,6 +1582,8 @@ function Handles({
   px: (p: ShapePoint) => ShapePoint;
   inv: number;
   armed: { key: string; index: number } | null;
+  /** Съедает эхо только что законченного перетаскивания. Одноразово: спрашивают ровно раз. */
+  justDragged: () => boolean;
   onArm: (index: number) => void;
   onDrag: (index: number, from: ShapePoint, e: ReactPointerEvent) => void;
   onInsert: (index: number, p: ShapePoint) => void;
@@ -1450,6 +1649,11 @@ function Handles({
             onPointerDown={(e) => onDrag(i, p, e)}
             onClick={(e) => {
               e.stopPropagation();
+              // КЛИК ПОСЛЕ ПЕРЕТАСКИВАНИЯ — ЭХО, и вооружать им точку нельзя: жест «подвинул
+              // вершину» заканчивался бы взведённой под Delete точкой, о чём человек не просил, и
+              // следующее нажатие Delete (фокус после жеста мышью обычно вне полей) уносило бы
+              // вершину вместо ожидаемого. Тот же порог, что у плашки и у фигуры.
+              if (justDragged()) return;
               onArm(i);
             }}
             className='absolute cursor-move'

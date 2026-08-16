@@ -85,6 +85,7 @@ export function FittingMedia({
   }, [mediaIds]);
 
   // Единственный вид здесь — пин, и его точка И ЕСТЬ маркер: якорей у него нет.
+  // Перо здесь не при чём: единственный вид — пин, а у пина ни линии, ни площади.
   function addCalloutTo(mediaId: number, _kind: string, points: { x: number; y: number }[]) {
     const p = points[0];
     if (!p) return;

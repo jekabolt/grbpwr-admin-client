@@ -5,7 +5,7 @@ import { useController, useFieldArray, useFormContext, useWatch } from 'react-ho
 import { Accordion } from 'ui/components/accordion';
 import { kindDef } from 'ui/components/annotation/kinds';
 import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
-import { type SurfaceCallout } from 'ui/components/annotation/surface';
+import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
 import { Button } from 'ui/components/button';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import { GroupLabel } from 'ui/components/group-label';
@@ -252,7 +252,12 @@ function TechCardGallery({
   // создавал выноску сам: два списка умолчаний на одну сущность разошлись бы первой же добавленной
   // колонкой. У ПИНА ЯКОРЕЙ НЕТ — его единственная точка и есть нумерованный маркер; у фигуры
   // маркер ставится САМ, над серединой якорей и чуть выше, чтобы номер не сел на саму линию.
-  function addCalloutTo(mediaId: number, kind: string, pts: { x: number; y: number }[]) {
+  function addCalloutTo(
+    mediaId: number,
+    kind: string,
+    pts: { x: number; y: number }[],
+    pen: PenStyle,
+  ) {
     if (pts.length === 0) return;
     const pin = kind === 'pin';
     const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
@@ -275,9 +280,12 @@ function TechCardGallery({
         posY: marker.y.toFixed(3),
         kind: kind as AnnotationKind,
         points: pin ? [] : pts.map((p) => ({ x: p.x.toFixed(4), y: p.y.toFixed(4) })),
-        color: '',
-        dashed: false,
-        filled: false,
+        // ОФОРМЛЕНИЕ ИЗ ПАМЯТИ ПЕРА, а не с нуля: у человека одна рука, и выбрав красный пунктир,
+        // он рисует им дальше. Иначе серия штрихов маркером на мудборде выходит чернильной, и
+        // каждый штрих приходится перекрашивать поштучно.
+        color: pen.color as AnnotationColor,
+        dashed: pen.dashed,
+        filled: pen.filled,
       },
     ]);
   }
@@ -689,11 +697,20 @@ function CalloutsList({
                 color={callouts[index]?.color ?? ''}
                 dashed={!!callouts[index]?.dashed}
                 filled={!!callouts[index]?.filled}
-                onColor={(c) =>
-                  setValue(`callouts.${index}.color`, c as AnnotationColor, { shouldDirty: true })
-                }
-                onDashed={(v) => setValue(`callouts.${index}.dashed`, v, { shouldDirty: true })}
-                onFilled={(v) => setValue(`callouts.${index}.filled`, v, { shouldDirty: true })}
+                // Правка оформления ЗАПОМИНАЕТСЯ ПЕРОМ — так же, как в редакторе снимка шага:
+                // следующая фигура наследует то, чем нарисовали эту.
+                onColor={(c) => {
+                  rememberPen({ color: c });
+                  setValue(`callouts.${index}.color`, c as AnnotationColor, { shouldDirty: true });
+                }}
+                onDashed={(v) => {
+                  rememberPen({ dashed: v });
+                  setValue(`callouts.${index}.dashed`, v, { shouldDirty: true });
+                }}
+                onFilled={(v) => {
+                  rememberPen({ filled: v });
+                  setValue(`callouts.${index}.filled`, v, { shouldDirty: true });
+                }}
                 onDemote={() => {
                   setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
                   setValue(`callouts.${index}.points`, [], { shouldDirty: true });

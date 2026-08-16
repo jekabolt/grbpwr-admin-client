@@ -2340,10 +2340,10 @@ function OperationEditor({
         // ДЕТАЛЬ НА УКАЗАНИИ — тем же пикером и теми же силуэтами, что и состав шага рядом.
         // Второй способ выбрать деталь на одном экране означал бы, что одна и та же деталь
         // называется в двух местах по-разному.
-        renderPiecePicker={({ onPick }) => (
+        renderPiecePicker={({ selected, onPick }) => (
           <PieceAddChip
             pieces={pieces}
-            selected={[]}
+            selected={selected}
             onPick={onPick}
             shapeOf={(k) => pieceShapes?.get(pieceRefKey(k)) ?? null}
           />

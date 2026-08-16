@@ -5,7 +5,12 @@ import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AnnotationSurface, type ShapePoint, type SurfaceCallout } from './annotation/surface';
+import {
+  AnnotationSurface,
+  type PenStyle,
+  type ShapePoint,
+  type SurfaceCallout,
+} from './annotation/surface';
 import { AnnotationToolbar, placingHint } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
@@ -147,7 +152,7 @@ export type FocusedAnnotatorProps = {
    * якорях значило бы завести два места для одной координаты. Владелец кладёт `points[0]` в
    * posX/posY и оставляет якоря пустыми.
    */
-  onAddCallout: (mediaId: number, kind: string, points: ShapePoint[]) => void;
+  onAddCallout: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
   onMoveCallout: (key: string, xNorm: number, yNorm: number) => void;
   onRemoveCallout: (key: string) => void;
   renderNote: (key: string, opts: { close: () => void }) => ReactNode;
@@ -476,7 +481,10 @@ export function FocusedAnnotator({
                     pinSize={pinSize}
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
                     noteClassName='w-60'
-                    onAdd={(kind, points) => onAddCallout(v.mediaId, kind, points)}
+                    // ПЕРО ДОЕЗЖАЕТ ДО ВЛАДЕЛЬЦА. Без него серия штрихов маркером рисуется чернильной, и
+                    // каждый приходится перекрашивать поштучно в списке выносок — то есть панель
+                    // без цвета оправдана памятью пера, которой бы не было.
+                    onAdd={(kind, points, pen) => onAddCallout(v.mediaId, kind, points, pen)}
                     onEditPoints={onEditPoints}
                     onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                     onRemove={onRemoveCallout}
@@ -573,7 +581,7 @@ export function FocusedAnnotator({
                 onPlacedCountChange={setPlaced}
                 showAllNotes={showAllNotes}
                 pinSize={pinSize}
-                onAdd={(kind, points) => onAddCallout(focused.mediaId, kind, points)}
+                onAdd={(kind, points, pen) => onAddCallout(focused.mediaId, kind, points, pen)}
                 onEditPoints={onEditPoints}
                 onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                 onRemove={onRemoveCallout}
@@ -673,7 +681,7 @@ export function FocusedAnnotator({
           showAllNotes={showAllNotes}
           pinSize={pinSize}
           halo={halo}
-          onAdd={(kind, points) => onAddCallout(views[zoomIndex].mediaId, kind, points)}
+          onAdd={(kind, points, pen) => onAddCallout(views[zoomIndex].mediaId, kind, points, pen)}
           onEditPoints={onEditPoints}
           onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
           onRemove={onRemoveCallout}

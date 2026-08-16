@@ -87,8 +87,8 @@ export function AnnotationCanvas({
   onPlaced?: () => void;
   cornerSlot?: ReactNode;
   zoomable?: boolean;
-  /** Пикер детали кроя: отдаёт выбранный ключ. Отсутствует = строки деталей нет вовсе. */
-  renderPiecePicker?: (opts: { onPick: (lineKey: string) => void }) => ReactNode;
+  /** Пикер детали кроя. Получает уже выбранные, чтобы помечать их в списке, и отдаёт ключ. */
+  renderPiecePicker?: (opts: { selected: string[]; onPick: (lineKey: string) => void }) => ReactNode;
   pieceLabel?: (lineKey: string) => string | undefined;
   /** Сколько якорей набрано — общая панель полосы рисует подсказку сама. */
   onPlacedCountChange?: (n: number) => void;
@@ -139,6 +139,9 @@ export function AnnotationCanvas({
     // Снимок узла — ФОТОГРАФИЯ: чернильная линия на пёстрой ткани тонет, и без белой подложки
     // указание перестаёт быть видно ровно там, где его поставили.
     halo: true,
+    // Легенда пинов рисуется САМОЙ поверхностью: наведение на строку подсвечивает свой пин, а
+    // состояние наведения принадлежит ей. Снаружи легенда умела бы только показывать текст.
+    legend: true,
     onAdd: editable
       ? (kind: string, points: ShapePoint[], pen: PenStyle) => {
           if (annotations.length >= MAX_ANNOTATIONS) return;
@@ -262,10 +265,6 @@ export function AnnotationCanvas({
         }
       />
 
-      {/* ЛЕГЕНДА ТОЛЬКО ДЛЯ ПИНОВ. Остальные виды несут текст на себе, и повторять его списком
-          значило бы печатать одно и то же дважды — до первого расхождения. */}
-      <PinLegend annotations={annotations} pieceLabel={pieceLabel} />
-
       {zoomable && (
         <AnnotationZoomDialog
           {...surface}
@@ -312,50 +311,5 @@ function FrameButton({
     >
       {label}
     </span>
-  );
-}
-
-/**
- * Легенда пинов — печатная таблица под снимком.
- *
- * ДЕТАЛИ ЗДЕСЬ ПЕРЕЧИСЛЯЮТСЯ ПОЛНОСТЬЮ, в отличие от плашки, где после двух имён стоит счётчик:
- * у бумаги нет наведения, и спрятать на ней список за подсказкой значит потерять его.
- */
-function PinLegend({
-  annotations,
-  pieceLabel,
-}: {
-  annotations: AnnotationForm[];
-  pieceLabel?: (lineKey: string) => string | undefined;
-}) {
-  const pins = annotations
-    .map((a, i) => ({ a, i }))
-    .filter(
-      ({ a }) =>
-        (a.kind ?? 'pin') === 'pin' &&
-        ((a.text ?? '').trim() || ((a.pieceLineKeys ?? []).length > 0 && !!pieceLabel)),
-    );
-  if (pins.length === 0) return null;
-  return (
-    <div className='mt-1 flex flex-col gap-0.5'>
-      {pins.map(({ a, i }) => {
-        const names = (a.pieceLineKeys ?? []).map((k) => pieceLabel?.(k) ?? 'деталь удалена');
-        return (
-          <div key={i} className='flex items-baseline gap-1.5'>
-            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
-              {pinNumber(annotations, i)}
-            </Text>
-            <Text size='nano' component='span' className='min-w-0'>
-              {a.text}
-            </Text>
-            {names.length > 0 && (
-              <Text size='nano' variant='label' component='span' className='shrink-0 uppercase'>
-                {names.join(', ')}
-              </Text>
-            )}
-          </div>
-        );
-      })}
-    </div>
   );
 }

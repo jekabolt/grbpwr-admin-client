@@ -51,7 +51,7 @@ export function AnnotationEditor({
   onRemove: () => void;
   onClose: () => void;
   /** Пикер детали с силуэтами. Отсутствует — строки деталей нет вовсе (печать, архив). */
-  renderPiecePicker?: (opts: { onPick: (lineKey: string) => void }) => ReactNode;
+  renderPiecePicker?: (opts: { selected: string[]; onPick: (lineKey: string) => void }) => ReactNode;
 }) {
   const d = kindDef(kind);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -116,6 +116,10 @@ export function AnnotationEditor({
               );
             })}
             {renderPiecePicker({
+              // ПИКЕР ЗНАЕТ ПРО УЖЕ ВЫБРАННЫЕ. Без этого список не помечает добавленные детали, а
+              // клик по такой их СНИМАЕТ — то есть выбор ведёт себя противоположно тому, что
+              // показано, и понять это можно только попробовав.
+              selected: pieceKeys,
               onPick: (lineKey) => {
                 if (!lineKey) return;
                 onPieces(
