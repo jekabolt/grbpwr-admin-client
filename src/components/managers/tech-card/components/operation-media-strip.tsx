@@ -1,6 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
-import { usePasteImage } from 'components/managers/media/utils/usePasteImage';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { cn } from 'lib/utility';
 import { useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
@@ -68,7 +68,10 @@ export function OperationMediaStrip({
   urlById: Map<number, string>;
   frozen?: boolean;
   /** Пикер детали кроя для редактора указания (силуэты из чертежа). Отдаёт выбранный ключ. */
-  renderPiecePicker?: (opts: { selected: string[]; onPick: (lineKey: string) => void }) => ReactNode;
+  renderPiecePicker?: (opts: {
+    selected: string[];
+    onPick: (lineKey: string) => void;
+  }) => ReactNode;
   pieceLabel?: (lineKey: string) => string | undefined;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
@@ -90,9 +93,6 @@ export function OperationMediaStrip({
   // кадра (оставаясь навсегда), и перестановку стрелками — и тогда подсказка показывала бы
   // «поставлено 2» от жеста, которого на этом снимке никто не начинал.
   const [placedByMedia, setPlacedByMedia] = useState<Record<number, number>>({});
-  // Кадр, чья правка сейчас открыта. Нужен только затем, чтобы ⌘V не улетал в соседнюю полосу:
-  // включается вставка у той, внутри которой стоит указатель.
-  const [hot, setHot] = useState(false);
 
   // `wireInt` ВНУТРИ, а не на совести вызывающего. Оба словаря ключуются нормализованным id, а
   // тип поля обещает `number` — сырое значение с провода (int64 приезжает СТРОКОЙ) тайпчекается и
@@ -127,18 +127,19 @@ export function OperationMediaStrip({
     setValue('mediaCleared', false, { shouldDirty: true });
   };
 
-  // ⌘V прямо в полосу: скриншот узла из мессенджера прикрепляется без похода в библиотеку.
-  // Включён, только пока указатель внутри ЭТОЙ полосы, — иначе одна вставка ушла бы во все
-  // тринадцать шагов сразу.
-  const { pasting } = usePasteImage(
-    {
-      claims: hot && !frozen && fields.length < MAX_MEDIA_PER_STEP,
-      // Больше, чем осталось мест, не берём: `add` лишние всё равно отбросит, а загруженные файлы
-      // остались бы в библиотеке молча.
-      limit: MAX_MEDIA_PER_STEP - fields.length,
-    },
-    add,
-  );
+  // ⌘V и бросок файла прямо в полосу: скриншот узла из мессенджера прикрепляется без похода в
+  // библиотеку. Оба жеста проходят приёмную модалку — превью, кроп, подтверждение, — и приходят
+  // сюда готовым медиа, тем же путём, что и выбор мышью.
+  //
+  // Очередь вставки держится, только пока указатель или фокус внутри ЭТОЙ полосы, — иначе одна
+  // вставка ушла бы во все тринадцать шагов сразу.
+  const intake = useMediaIntake({
+    enabled: !frozen && fields.length < MAX_MEDIA_PER_STEP,
+    // Больше, чем осталось мест, не берём: `add` лишние всё равно отбросит, а проведённые через
+    // кроп файлы остались бы в библиотеке молча.
+    limit: MAX_MEDIA_PER_STEP - fields.length,
+    onMedia: add,
+  });
 
   const list = (watched ?? []) as OperationMediaForm[];
   const full = fields.length >= MAX_MEDIA_PER_STEP;
@@ -149,11 +150,7 @@ export function OperationMediaStrip({
     setValue(`${name}.${index}.annotations`, next, { shouldDirty: true });
 
   return (
-    <div
-      className='flex flex-col gap-1.5'
-      onPointerEnter={() => setHot(true)}
-      onPointerLeave={() => setHot(false)}
-    >
+    <div className='flex flex-col gap-1.5' {...intake.regionHandlers}>
       <div className='flex flex-wrap items-center gap-2'>
         <Text size='micro' variant='label' component='span' className='uppercase'>
           фото узла{fields.length > 0 ? ` · ${fields.length}` : ''}
@@ -172,9 +169,9 @@ export function OperationMediaStrip({
             }
           />
         )}
-        {pasting && (
+        {(intake.busy || intake.dragging) && (
           <Text size='micro' variant='label' component='span'>
-            вставляю картинку из буфера…
+            {intake.busy ? 'принимаю картинку из буфера…' : 'бросьте файл — откроется кроп'}
           </Text>
         )}
       </div>
@@ -184,34 +181,18 @@ export function OperationMediaStrip({
         // читалась как ещё один контрол в ряду полей шага и терялась среди них; полосатый
         // плейсхолдер во всю ширину — это и есть слот, и он выглядит слотом.
         frozen ? (
-          <Placeholder
-            label='фотографий у этого шага нет'
-            className='h-20 w-full border-dashed'
-          />
+          <Placeholder label='фотографий у этого шага нет' className='h-20 w-full border-dashed' />
         ) : (
-          <MediaSelector
-            label='добавить фото'
+          <MediaSlot
             aspectRatio={['Custom']}
+            heightPx={80}
+            sizeClassName='w-full'
+            label='+ фото узла'
+            hint='на снимке ставят указания: мерки, подписи, участки'
             allowMultiple
+            limit={MAX_MEDIA_PER_STEP}
             showVideos={false}
-            saveSelectedMedia={add}
-            trigger={
-              <button
-                type='button'
-                aria-label='добавить фото узла'
-                className='block w-full cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-              >
-                <Placeholder
-                  dashed
-                  className='h-20 w-full flex-col gap-0.5 px-2 text-center hover:border-textColor hover:text-textColor'
-                >
-                  <span>+ фото узла</span>
-                  <span className='text-nano normal-case tracking-normal'>
-                    на снимке ставят указания: мерки, подписи, участки · ⌘V вставит из буфера
-                  </span>
-                </Placeholder>
-              </button>
-            }
+            onSelect={add}
           />
         )
       ) : (
@@ -323,26 +304,17 @@ export function OperationMediaStrip({
             {/* Слот «ещё кадр» стоит в самой полосе: пустое место и есть кнопка, которая его
                 заполняет — тот же приём, что у мудборда. */}
             {!frozen && !full && (
-              <MediaSelector
-                label='добавить фото'
+              <MediaSlot
                 aspectRatio={['Custom']}
+                heightPx={STRIP_HEIGHT}
+                sizeClassName='w-28'
+                compact
+                label='+ ещё'
                 allowMultiple
+                limit={MAX_MEDIA_PER_STEP - fields.length}
                 showVideos={false}
-                saveSelectedMedia={add}
-                trigger={
-                  <button
-                    type='button'
-                    aria-label='добавить ещё фото узла'
-                    className='block shrink-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
-                  >
-                    <Placeholder
-                      dashed
-                      label='+ ещё'
-                      className='w-28 hover:border-textColor hover:text-textColor'
-                      style={{ height: STRIP_HEIGHT }}
-                    />
-                  </button>
-                }
+                onSelect={add}
+                className='shrink-0'
               />
             )}
           </div>
@@ -354,6 +326,9 @@ export function OperationMediaStrip({
           )}
         </>
       )}
+
+      {/* Приёмка вставленного и брошенного: одна на полосу, а не на каждый кадр. */}
+      {intake.dialog}
     </div>
   );
 }

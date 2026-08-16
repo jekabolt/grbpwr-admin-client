@@ -18,6 +18,51 @@ export const mediaAspectRatio = (
   return calculateAspectRatio(width, height);
 };
 
+/**
+ * Что слот говорит о пропорциях. Список `aspectRatio` (`['4:5']`, `['4:5','Custom']`, `['Custom']`)
+ * читают и пикер, и приёмная модалка, и рамка плейсхолдера — разбирать его в каждом из трёх мест
+ * значило бы, что «слот с фиксированным соотношением» где-то определится иначе, и кроп по ⌘V
+ * предложит не ту сетку, которую потом требует сама рамка.
+ */
+export type SlotAspect = {
+  /** Конкретные соотношения списка, числами. */
+  ratios: number[];
+  /** Есть ли свободный кроп. */
+  hasCustom: boolean;
+  /** Соотношение ОБЯЗАТЕЛЬНО: перечислены конкретные и свободного среди них нет. */
+  constrained: boolean;
+  /** Первое конкретное — то, по которому рисуется рамка и открывается кроп. */
+  primary?: number;
+};
+
+export function parseAspect(ratio?: string): number | undefined {
+  if (!ratio || ratio.toLowerCase() === 'custom') return undefined;
+  const [w, h] = ratio.split(':').map(Number);
+  return w && h ? w / h : undefined;
+}
+
+export function readSlotAspect(aspectRatio?: string[]): SlotAspect {
+  const list = aspectRatio ?? [];
+  const ratios = list
+    .filter((r) => r.toLowerCase() !== 'custom')
+    .map(parseAspect)
+    .filter((r): r is number => r !== undefined);
+  const hasCustom = list.some((r) => r.toLowerCase() === 'custom');
+  return {
+    ratios,
+    hasCustom,
+    constrained: ratios.length > 0 && !hasCustom,
+    primary: ratios[0],
+  };
+}
+
+/** Совпадает ли соотношение медиа с одним из требуемых (3% — допуск на округление сторон). */
+export function matchesSlotRatio(width?: number, height?: number, ratios: number[] = []): boolean {
+  if (!width || !height || ratios.length === 0) return false;
+  const r = width / height;
+  return ratios.some((vr) => Math.abs(r - vr) / vr < 0.03);
+}
+
 const ASPECT_RATIO_CLASSES: Record<string, string> = {
   '16:9': 'bg-red-600',
   '4:3': 'bg-orange-500',

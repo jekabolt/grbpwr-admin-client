@@ -15,6 +15,8 @@ interface MediaListProps {
   selectionMode?: boolean;
   pendingFilesHook: ReturnType<typeof usePendingFiles>;
   showAddButton?: boolean;
+  /** Слот «добавить» первой клеткой сетки (страница библиотеки, есть право писать). */
+  showAddTile?: boolean;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
   onView?: (media: common_MediaFull) => void | Promise<void>;
 }
@@ -27,6 +29,7 @@ export function MediaList({
   selectionMode = false,
   pendingFilesHook,
   showAddButton = false,
+  showAddTile = false,
   onVideoLoad,
   onView,
 }: MediaListProps) {
@@ -36,6 +39,7 @@ export function MediaList({
       className='grid grid-cols-2 lg:grid-cols-4 gap-4'
       pendingFilesHook={pendingFilesHook}
       showAddButton={showAddButton}
+      showAddTile={showAddTile}
     >
       {media.map((m) => (
         <MediaItem

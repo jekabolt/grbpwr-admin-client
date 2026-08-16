@@ -31,6 +31,19 @@ interface CropperInterface {
   onUseOriginal?: () => void;
   /** Disables actions (e.g. while uploading). */
   busy?: boolean;
+  /**
+   * MIME type of the cropped output. Defaults to guessing from the source url's extension, which
+   * only works for library media — a pasted or dropped file arrives as a `blob:` url with no
+   * extension at all, and guessing JPEG there flattens a screenshot's transparency without asking.
+   * Callers that know the source type (the intake dialog does — it holds the File) pass it.
+   */
+  outputFormat?: string;
+  /** Label of the confirm action. Defaults to "crop & use". */
+  saveLabel?: string;
+  /** Label of the "use without crop" action. Defaults to "use without crop". */
+  originalLabel?: string;
+  /** Drop the cropper's own "crop image" bar when the host dialog already titles the screen. */
+  hideHeader?: boolean;
 }
 
 export const MediaCropper: FC<CropperInterface> = ({
@@ -41,6 +54,10 @@ export const MediaCropper: FC<CropperInterface> = ({
   lockAspect = false,
   onUseOriginal,
   busy = false,
+  outputFormat,
+  saveLabel = 'crop & use',
+  originalLabel = 'use without crop',
+  hideHeader = false,
 }) => {
   const { showMessage } = useSnackBarStore();
   const defaultAspect = initialAspect ?? 4 / 5;
@@ -81,7 +98,7 @@ export const MediaCropper: FC<CropperInterface> = ({
     if (!selectedFile) return;
 
     try {
-      const format = selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
+      const format = outputFormat ?? (selectedFile.endsWith('.webp') ? 'image/webp' : 'image/jpeg');
 
       if (aspect === undefined && customCropData) {
         const area = convertPixelCropToArea(customCropData.imgRef, customCropData.crop);
@@ -128,14 +145,16 @@ export const MediaCropper: FC<CropperInterface> = ({
 
   return (
     <div className='flex w-full flex-col gap-4'>
-      <div className='flex items-center justify-between border-b border-textInactiveColor pb-2'>
-        <Text variant='uppercase' size='large'>
-          crop image
-        </Text>
-        <Button className='cursor-pointer py-1' onClick={onCancel}>
-          [x]
-        </Button>
-      </div>
+      {!hideHeader && (
+        <div className='flex items-center justify-between border-b border-textInactiveColor pb-2'>
+          <Text variant='uppercase' size='large'>
+            crop image
+          </Text>
+          <Button className='cursor-pointer py-1' onClick={onCancel}>
+            [x]
+          </Button>
+        </div>
+      )}
 
       <div className='flex flex-col gap-4 lg:flex-row lg:items-start'>
         <div className='h-[340px] w-full lg:h-[440px] lg:flex-1'>
@@ -198,7 +217,7 @@ export const MediaCropper: FC<CropperInterface> = ({
             onClick={onUseOriginal}
             disabled={busy}
           >
-            use without crop
+            {originalLabel}
           </Button>
         ) : (
           <span />
@@ -223,7 +242,7 @@ export const MediaCropper: FC<CropperInterface> = ({
             disabled={saveDisabled || busy}
             loading={busy}
           >
-            crop &amp; use
+            {saveLabel}
           </Button>
         </div>
       </div>

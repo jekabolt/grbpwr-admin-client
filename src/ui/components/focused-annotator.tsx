@@ -1,7 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
-import { usePasteImage } from 'components/managers/media/utils/usePasteImage';
-import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
+import { useMediaIntake } from 'components/managers/media/utils/useMediaIntake';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -15,7 +14,6 @@ import { AnnotationToolbar, placingHint } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
-import { Placeholder } from './placeholder';
 import Text from './text';
 import { Toolbar, ToolbarSpacer } from './toolbar';
 
@@ -61,8 +59,6 @@ function mediaAspect(full: common_MediaFull | undefined, fallback: string): stri
   return w && h ? `${w}/${h}` : fallback;
 }
 
-const isMediaFile = (f: File) => f.type.startsWith('image/') || f.type.startsWith('video/');
-
 /** Width of one rail cell, and the gap between two — the arrow step has to match the snap step. */
 const RAIL_CARD = 300;
 const RAIL_GAP = 8;
@@ -103,38 +99,6 @@ function useRailScroll(itemCount: number) {
   };
 
   return { ref, overflowing, step };
-}
-
-// Drag-and-drop plumbing for a single drop target. Kept local (rather than reusing the media
-// manager's DragDropArea) because that one is bound to the manager's pending-files queue, while
-// here a dropped file must go straight up through `onPickMedia`.
-function useFileDrop(onFiles: (files: File[]) => void) {
-  const [dragging, setDragging] = useState(false);
-  const handlers = {
-    onDragEnter: (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragging(true);
-    },
-    onDragOver: (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-    },
-    onDragLeave: (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const related = e.relatedTarget as Node | null;
-      if (related && e.currentTarget.contains(related)) return;
-      setDragging(false);
-    },
-    onDrop: (e: React.DragEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      setDragging(false);
-      onFiles(Array.from(e.dataTransfer.files));
-    },
-  };
-  return { dragging, handlers };
 }
 
 export type FocusedAnnotatorProps = {
@@ -289,8 +253,6 @@ export function FocusedAnnotator({
   /** Индекс кадра, открытого во весь экран. */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
   const [focusedId, setFocusedId] = useState<number | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const uploadMedia = useUploadMedia();
   // +1 for the trailing "+ add view" slot, which is part of what can overflow.
   const rail = useRailScroll(views.length + 1);
 
@@ -312,37 +274,25 @@ export function FocusedAnnotator({
     if (added.length && added[0] != null) setFocusedId(added[0]);
   }
 
-  // ⌘V ПРЯМО В ГАЛЕРЕЮ. Референс почти всегда рождается в буфере — скрин с чужого показа, кроп из
-  // лукбука, — и путь «сохранить файлом → открыть библиотеку → загрузить» стоит трёх шагов ради
-  // картинки, которая уже в руках. Включено, только пока указатель ВНУТРИ этой галереи: на
-  // странице их две (мудборд и эскиз) плюс полоса снимков у каждого шага, и без этого одна
-  // вставка ушла бы во все сразу.
-  const [hot, setHot] = useState(false);
-  const { pasting } = usePasteImage(hot && !readOnly, handlePick);
+  // ⌘V И БРОСОК ПРЯМО В ГАЛЕРЕЮ. Референс почти всегда рождается в буфере — скрин с чужого показа,
+  // кроп из лукбука, — и путь «сохранить файлом → открыть библиотеку → загрузить» стоит трёх шагов
+  // ради картинки, которая уже в руках. Оба жеста идут через приёмную модалку (превью → кроп →
+  // подтверждение) и приходят сюда готовым медиа — тем же путём, что и выбор из библиотеки.
+  //
+  // Очередь вставки принадлежит галерее, пока в ней указатель или фокус: на странице их две
+  // (мудборд и эскиз) плюс полоса снимков у каждого шага, и без этого одна вставка ушла бы во все
+  // сразу. Этим же занимается хук — здесь остаётся только повесить его обработчики на корень.
+  const intake = useMediaIntake({
+    enabled: !readOnly,
+    accept: 'media',
+    purpose,
+    onMedia: handlePick,
+  });
 
   // Removing the focused image falls focus back to the new first image.
   function handleRemoveMedia(view: FocusedView) {
     if (view.mediaId === focusedId) setFocusedId(null);
     onRemoveMedia(view);
-  }
-
-  // Drop / browse straight into the gallery: upload each file, then commit the resolved media the
-  // same way a library pick would. Failures are already surfaced by the upload hook's snackbar, so
-  // one bad file in a batch doesn't lose the rest.
-  async function handleFiles(files: File[]) {
-    const accepted = files.filter(isMediaFile);
-    if (!accepted.length) return;
-    setUploading(true);
-    const added: common_MediaFull[] = [];
-    for (const file of accepted) {
-      try {
-        added.push(await uploadMedia.mutateAsync(file));
-      } catch {
-        /* surfaced by useUploadMedia */
-      }
-    }
-    setUploading(false);
-    if (added.length) handlePick(added);
   }
 
   const modeToggles = (
@@ -355,7 +305,13 @@ export function FocusedAnnotator({
           tool={tool}
           onTool={setTool}
           kinds={calloutKinds}
-          hint={tool ? (placed > 0 ? placingHint(tool, placed) : 'кликайте по нужной картинке') : undefined}
+          hint={
+            tool
+              ? placed > 0
+                ? placingHint(tool, placed)
+                : 'кликайте по нужной картинке'
+              : undefined
+          }
         />
       )}
     </ChipRow>
@@ -368,40 +324,38 @@ export function FocusedAnnotator({
       </EditorPanel>
     ) : null;
 
-  const hint = pasting
-    ? 'загружаю картинку из буфера…'
-    : tool
-      ? placingHint(tool, placed)
-      : 'клик по пину или по линии — правка · текст читается в легенде под кадром · ⌘V вставит картинку';
+  const hint = intake.busy
+    ? 'принимаю картинку из буфера…'
+    : intake.dragging
+      ? 'бросьте файл — откроется кроп'
+      : tool
+        ? placingHint(tool, placed)
+        : 'клик по пину или по линии — правка · текст читается в легенде под кадром · ⌘V вставит картинку';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
   // no other media-add path: gating it on `hasMedia` made the empty state a dead end, where a new
   // fitting could never get its first photo and removing the last one made re-adding impossible.
   // Staying mounted across empty → populated also keeps an open picker dialog alive through the
-  // pick that fills the gallery. (The grid layout has its own always-present AddTile slot instead.)
+  // pick that fills the gallery. (The grid layout has its own always-present add slot instead.)
+  //
+  // СЛОТ, А НЕ КНОПКА: «add photo» в ряду контролов ничего не говорила о том, что появится на её
+  // месте, а появляется КАДР. Пустая рамка тех же пропорций — это и есть кадр, которого пока нет.
   const addControl = readOnly ? null : (
-    <MediaSelector
+    <MediaSlot
+      aspectRatio={pickerAspectRatio ?? ['Custom']}
+      frameAspect={fallbackAspect}
+      sizeClassName='w-full sm:w-[260px]'
       label={addLabel}
       purpose={purpose}
-      aspectRatio={pickerAspectRatio}
       allowMultiple
       showVideos
-      saveSelectedMedia={handlePick}
-      trigger={
-        <Button type='button' variant='main' size='sm'>
-          {addLabel}
-        </Button>
-      }
+      onSelect={handlePick}
     />
   );
 
   return (
-    <div
-      className='space-y-2.5'
-      onPointerEnter={() => setHot(true)}
-      onPointerLeave={() => setHot(false)}
-    >
+    <div className='space-y-2.5' {...intake.regionHandlers}>
       {hasMedia &&
         (isGrid ? (
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
@@ -542,29 +496,22 @@ export function FocusedAnnotator({
             {/* "+ add view" — a dashed slot in the grid itself, so the empty spot IS the control
                 that fills it. Clicking opens the media library: a sketch view is nearly always an
                 image that already exists, and sending the click straight to the OS file dialog
-                made the library the harder path to reach. Dropping files on the tile still
-                uploads — that gesture already carries the file. */}
+                made the library the harder path to reach. Dropping a file on the tile — or ⌘V —
+                goes through the intake dialog: that gesture already carries the picture, and what
+                it needs is a look and a crop, not a silent upload. */}
             {!readOnly && (
-            <MediaSelector
-              label={addLabel}
-              purpose={purpose}
-              aspectRatio={pickerAspectRatio}
-              allowMultiple
-              showVideos
-              saveSelectedMedia={handlePick}
-              trigger={
-                <AddTile
-                  aspect={fallbackAspect}
-                  heightPx={rowMode ? gridRowHeight : undefined}
-                  busy={uploading}
-                  onFiles={handleFiles}
-                  className={cn(
-                    'shrink-0 snap-start',
-                    rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
-                  )}
-                />
-              }
-            />
+              <MediaSlot
+                aspectRatio={pickerAspectRatio ?? ['Custom']}
+                frameAspect={fallbackAspect}
+                heightPx={rowMode ? gridRowHeight : undefined}
+                label={addLabel}
+                purpose={purpose}
+                allowMultiple
+                showVideos
+                onSelect={handlePick}
+                sizeClassName={rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]'}
+                className='shrink-0 snap-start'
+              />
             )}
           </div>
 
@@ -608,7 +555,7 @@ export function FocusedAnnotator({
                 pieceLabel={pieceLabel}
                 onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                 onRemove={onRemoveCallout}
-                    legend
+                legend
                 halo={halo}
                 cornerSlot={
                   <FrameButton
@@ -664,14 +611,14 @@ export function FocusedAnnotator({
                     </span>
                   )}
                   {!readOnly && (
-                  <button
-                    type='button'
-                    aria-label={`remove image ${i + 1}`}
-                    onClick={() => handleRemoveMedia(v)}
-                    className='absolute right-0 top-0 cursor-pointer border border-borderColor bg-bgColor px-1 py-px text-nano leading-none hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
-                  >
-                    ✕
-                  </button>
+                    <button
+                      type='button'
+                      aria-label={`remove image ${i + 1}`}
+                      onClick={() => handleRemoveMedia(v)}
+                      className='absolute right-0 top-0 cursor-pointer border border-borderColor bg-bgColor px-1 py-px text-nano leading-none hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+                    >
+                      ✕
+                    </button>
                   )}
                 </div>
               );
@@ -693,7 +640,7 @@ export function FocusedAnnotator({
         <AnnotationZoomDialog
           open
           onOpenChange={(v) => !v && setZoomIndex(null)}
-          title={mediaLabel ? mediaLabel(views[zoomIndex], zoomIndex) : (carouselLabel ?? 'картинка')}
+          title={mediaLabel ? mediaLabel(views[zoomIndex], zoomIndex) : carouselLabel ?? 'картинка'}
           src={mediaUrl(views[zoomIndex].full)}
           media={isVideo(mediaUrl(views[zoomIndex].full)) ? 'video' : 'image'}
           callouts={calloutsFor(views[zoomIndex].mediaId)}
@@ -713,9 +660,14 @@ export function FocusedAnnotator({
           pieceLabel={pieceLabel}
           onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
           onRemove={onRemoveCallout}
-                    legend
+          legend
         />
       )}
+
+      {/* Приёмка вставленного и брошенного — одна на галерею. Слот «добавить» держит свою, и это
+          не двойная загрузка: ⌘V обрабатывает ВЕРХНИЙ в стопке приёмник — ровно один из двух, — а
+          кладут результат оба через один и тот же `handlePick`. */}
+      {intake.dialog}
     </div>
   );
 }
@@ -779,53 +731,3 @@ function FrameButton({
     </span>
   );
 }
-
-// ---------------------------------------------------------------------------
-// The "+ add view" grid cell — a dashed slot that opens the media library on click and accepts a
-// file drop, so the empty spot in the grid is itself the control that fills it.
-//
-// It spreads the props it is given rather than taking an `onClick`, because it is handed to
-// `MediaSelector` through Radix `asChild`: the dialog's own trigger props (onClick, aria-haspopup,
-// data-state) arrive as props and have to land on the real button or the tile does nothing.
-// ---------------------------------------------------------------------------
-
-function AddTile({
-  aspect,
-  heightPx,
-  busy,
-  onFiles,
-  className,
-  ...triggerProps
-}: {
-  aspect: string;
-  /** Filmstrip mode: fix the slot's height (natural width from the ratio) so it matches the tiles. */
-  heightPx?: number;
-  busy: boolean;
-  onFiles: (files: File[]) => void;
-} & React.ComponentPropsWithRef<'button'>) {
-  const { dragging, handlers } = useFileDrop(onFiles);
-  return (
-    <button
-      type='button'
-      {...triggerProps}
-      // After the trigger props, so a drop is always handled here and never by the dialog.
-      {...handlers}
-      aria-label='add view'
-      className={cn(
-        'block cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
-        className,
-      )}
-    >
-      <Placeholder
-        dashed
-        label={busy ? 'uploading…' : dragging ? 'drop to upload' : '+ add view'}
-        // The ratio lives on the placeholder itself, so it never depends on a percentage
-        // height resolving against the button. In filmstrip mode a fixed height (natural width)
-        // makes the add slot the same height as the image tiles.
-        style={heightPx != null ? { aspectRatio: aspect, height: heightPx } : { aspectRatio: aspect }}
-        className={cn(heightPx != null ? 'w-auto' : 'w-full', dragging && 'border-textColor text-textColor')}
-      />
-    </button>
-  );
-}
-
