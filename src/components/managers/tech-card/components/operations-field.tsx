@@ -3445,11 +3445,12 @@ export function OperationsField({
           отказ щита и настигает: у сохранённой карточки снимки есть, в форме шагов не осталось,
           сервер требует объявить намерение — и кнопка, которой это делают, оказалась бы за
           `hidden`. Отказ, из которого нет выхода, хуже отказа. */}
-      {(storedHasMedia || fields.length === 0) && (
-        <ChipRow>
-          <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={frozen} />
-        </ChipRow>
-      )}
+      {/* Без внешнего условия: компонент сам решает, показываться ли, и знает про ОБА источника —
+          снимки в форме и снимки сохранённой карточки. Внешнее условие про второй источник
+          прятало кнопку там, где снимки добавили, но ещё не сохранили. */}
+      <ChipRow>
+        <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={frozen} />
+      </ChipRow>
 
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden
           while the sequence is empty: with nothing to attach a piece TO, every chip in it is a

@@ -403,15 +403,21 @@ function ReleaseSnapshot({
   meta,
   techCardId,
   canReadCosting,
+  active,
 }: {
   id: number;
   meta?: common_TechCardReleaseMeta;
   techCardId: number;
   canReadCosting: boolean;
+  /** Вкладка открыта: скрытая не должна тянуть снимки. */
+  active: boolean;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['techCardRelease', id],
     queryFn: () => adminService.GetTechCardRelease({ id }),
+    // Вкладка спрятана, но смонтирована: без гейта ответ приходил бы на невидимый экран и
+    // создавал <img> для каждого снимка каждого шага — десятки полноразмерных загрузок.
+    enabled: active,
   });
   // Colourways aren't part of the frozen snapshot (they're live products, not versioned by
   // release) — show the style's CURRENT colourway count instead of a historical one.
@@ -635,6 +641,7 @@ export function ReleasesField({
               meta={selected}
               techCardId={techCardId}
               canReadCosting={canReadCosting}
+              active={active}
             />
           ) : (
             <Text size='micro' variant='label'>

@@ -62,8 +62,10 @@ export function OperationMediaStrip({
     const rows: OperationMediaForm[] = [];
     for (const m of picked) {
       // Предел тот же, что проверяет сервер: превысив его в форме, пользователь узнал бы об
-      // отказе только при сохранении ВСЕЙ карточки, и не про этот шаг.
-      if (existing.size + rows.length >= MAX_MEDIA_PER_STEP) break;
+      // отказе только при сохранении ВСЕЙ карточки, и не про этот шаг. Считается по ОДНОМУ
+      // счётчику: `existing` пополняется каждым принятым снимком, и складывать его с длиной
+      // `rows` значило бы учитывать одно и то же дважды — из десяти выбранных прошло бы пять.
+      if (existing.size >= MAX_MEDIA_PER_STEP) break;
       const id = wireInt(m.id);
       const url = m.media?.fullSize?.mediaUrl ?? m.media?.thumbnail?.mediaUrl ?? '';
       if (!id || existing.has(id)) continue;

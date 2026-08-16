@@ -133,6 +133,11 @@ export function AnnotationCanvas({
   const justDragged = useRef(false);
 
   const editable = !frozen && !!onChange;
+  // Замыкание слушателей window живёт дольше рендера, поэтому «можно ли писать» и КУДА писать
+  // читаются из ref'ов, а не из замыкания: карточку могли выпустить, пока палец на плашке, и
+  // старый обработчик записал бы координаты в уже замороженную форму.
+  const liveRef = useRef({ editable, onChange });
+  liveRef.current = { editable, onChange };
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -176,6 +181,10 @@ export function AnnotationCanvas({
   // `pointercancel`, подписанное анонимной функцией, не отписывалось бы вовсе.
   const dragActive = dragPlate !== null;
   useEffect(() => {
+    // Карточку выпустили посреди жеста — жест обрывается сразу, не дожидаясь отпускания.
+    if (dragActive && !editable) commitDrag(null);
+  }, [dragActive, editable, commitDrag]);
+  useEffect(() => {
     if (!dragActive) return;
     const at = (e: PointerEvent) => {
       const el = boxRef.current;
@@ -208,21 +217,31 @@ export function AnnotationCanvas({
       commitDrag(null);
       if (!d?.started) return;
       justDragged.current = true;
+      // Право на запись проверяется В МОМЕНТ ЗАПИСИ, а не в момент начала жеста.
+      if (!liveRef.current.editable) return;
       patch(d.index, { labelX: str(d.x), labelY: str(d.y) });
     };
-    const cancel = () => {
-      justDragged.current = !!dragRef.current?.started;
+    const cancel = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (d && e.pointerId !== d.pointerId) return;
+      justDragged.current = !!d?.started;
       commitDrag(null);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    // Потеря фокуса окна обрывает жест без разбора указателей: событий указателя оттуда больше
+    // не придёт вовсе.
+    const lost = () => {
+      justDragged.current = !!dragRef.current?.started;
+      commitDrag(null);
+    };
     window.addEventListener('pointercancel', cancel);
-    window.addEventListener('blur', cancel);
+    window.addEventListener('blur', lost);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
       window.removeEventListener('pointercancel', cancel);
-      window.removeEventListener('blur', cancel);
+      window.removeEventListener('blur', lost);
     };
   }, [dragActive, commitDrag, annotations]);
 
@@ -370,7 +389,7 @@ export function AnnotationCanvas({
             a.kind === 'pin' ? null : (
               <span
                 key={`plate:${i}`}
-                role='button'
+                role={editable ? 'button' : undefined}
                 tabIndex={editable ? 0 : undefined}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
@@ -397,6 +416,9 @@ export function AnnotationCanvas({
                 )}
                 onPointerDown={(e) => {
                   if (!editable) return;
+                  // Живой жест не перехватывается вторым касанием: иначе плашка B поехала бы по
+                  // координатам пальца, тащившего A.
+                  if (dragRef.current) return;
                   e.stopPropagation();
                   justDragged.current = false;
                   const el = boxRef.current;
@@ -417,6 +439,10 @@ export function AnnotationCanvas({
                   });
                 }}
                 style={{
+                  // `touch-action` объявляется ЗАРАНЕЕ: браузер выбирает поведение жеста в момент
+                  // касания, и запрет, выставленный позже, уже ничего не решает — палец уводит
+                  // страницу в прокрутку, прилетает pointercancel, плашка возвращается назад.
+                  touchAction: editable ? 'none' : undefined,
                   left: `${(dragPlate?.index === i ? dragPlate.x : num(a.labelX)) * 100}%`,
                   top: `${(dragPlate?.index === i ? dragPlate.y : num(a.labelY)) * 100}%`,
                   color: a.color ? COLOR_HEX[a.color as Exclude<AnnotationColor, ''>] : undefined,
@@ -436,7 +462,7 @@ export function AnnotationCanvas({
             return (
               <span
                 key={`pin:${i}`}
-                role='button'
+                role={editable ? 'button' : undefined}
                 tabIndex={editable ? 0 : undefined}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
