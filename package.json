@@ -36,7 +36,8 @@
     "lint:print": "eslint --config tdz.config.mjs src/components/managers/print src/components/managers/tech-card/components/tech-pack-document.tsx src/components/managers/tech-card/print-page.tsx src/components/managers/production-runs/components/run-pack-document.tsx src/components/managers/production-runs/print-page.tsx",
     "annotation:geometry": "node scripts/annotation-geometry-probe.mjs",
     "annotation:kinds": "node scripts/annotation-kinds-probe.mjs",
-    "annotation:hit": "node scripts/annotation-hit-probe.mjs"
+    "annotation:hit": "node scripts/annotation-hit-probe.mjs",
+    "annotation:frame": "node scripts/annotation-frame-probe.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",
