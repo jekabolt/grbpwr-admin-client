@@ -701,7 +701,15 @@ export function TechCardForm({
     // моменту уже прошёл — намерение исполнено, и оставить флаг взведённым из-за транзиентного
     // сбоя рефетча значило бы отправить следующее сохранение в отказ «cleared против карточки без
     // разметки», из которого пользователю не выбраться иначе как перезагрузкой с потерей правок.
-    const done = (v: TechCardFormData): TechCardFormData => ({ ...v, assemblyCleared: false });
+    // ОБА намерения гасятся здесь. Забыть второе — значит отправить следующее сохранение в
+    // тупик: маппер увидит взведённый mediaCleared против карточки, у которой снимки уже есть,
+    // и пришлёт «снял» вместе с фотографиями — серверный гейт отвергнет это как противоречие, а
+    // жеста, снимающего флаг, в интерфейсе нет.
+    const done = (v: TechCardFormData): TechCardFormData => ({
+      ...v,
+      assemblyCleared: false,
+      mediaCleared: false,
+    });
     if (!numId) return done(sent);
     let fresh: common_TechCard | undefined;
     try {
@@ -1930,6 +1938,11 @@ export function TechCardForm({
                   // blockers modal with the page header instead of a second `title` tooltip.
                   <ReleasesField
                     techCardId={numId}
+                    // `active` — не украшение: вкладки этой формы СМОНТИРОВАНЫ ВСЕ СРАЗУ и лишь
+                    // спрятаны, а архив релиза теперь рисует снимки шагов. Без флага открытие
+                    // любой карточки грузило бы десятки полноразмерных фотографий из вкладки,
+                    // которую никто не открывал.
+                    active={activeTab === 'history'}
                     gate={
                       canWrite(SECTION.techCards) && !frozen
                         ? {

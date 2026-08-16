@@ -19,6 +19,7 @@ import {
   common_TechCardColorwayUsage,
   common_TechCardMachineProfile,
   common_TechCardOperation,
+  common_TechCardOperationMedia,
   common_TechCardPiece,
   common_TechCardPressProfile,
   common_TechCardReleaseMeta,
@@ -66,7 +67,13 @@ import { runStatusLabel } from 'components/managers/production-runs/components/o
 import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
 import { formatCompositionEntries } from './composition-entries';
 import { wireFabricPurpose } from './pattern-size-index';
-import { wireInt } from './schema';
+import {
+  annotationColorFromWire,
+  annotationKindFromWire,
+  wireInt,
+  type AnnotationForm,
+} from './schema';
+import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
@@ -473,6 +480,18 @@ export function TechPackDocument({
       if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     return m;
   }, [techCard.resolvedTechnicalMedia, techCard.resolvedMoodboardMedia]);
+  // Адреса операционных снимков карточка НЕ хранит — форма шага несёт только media_id, а адрес
+  // отдаёт read-модель отдельным списком (0308 и далее). Словарь id → адрес собирается один раз,
+  // а не на каждый шаг таблицы операций.
+  const opMediaUrlById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of techCard.resolvedOperationMedia ?? []) {
+      const id = wireInt(r.media?.id);
+      const url = r.media?.media?.fullSize?.mediaUrl || r.media?.media?.thumbnail?.mediaUrl;
+      if (id && url) m.set(id, url);
+    }
+    return m;
+  }, [techCard.resolvedOperationMedia]);
   // detail reference images (and swatches) are library media ids not carried in the resolved
   // sketch maps — resolve them from the library so they print.
   const libraryMap = useMediaMap();
@@ -1049,6 +1068,22 @@ export function TechPackDocument({
     const legacy = resolveUsageArt(o);
     return legacy ? [described(legacy)] : out;
   };
+
+  // Выноски картинки шага — с провода на форму примитива. Зеркалит конвертацию mapTechCardToForm
+  // (schema.ts): координаты остаются decimal-строкой без округлений, тот же круговой рейс. Не
+  // импортируется оттуда — примитив печати читает read-модель (o.media), а не форму карточки.
+  const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
+    (m.annotations ?? []).map((a) => ({
+      kind: annotationKindFromWire(a.kind),
+      points: (a.points ?? []).map((pt) => ({
+        x: decimalToInput(pt.x) || '0',
+        y: decimalToInput(pt.y) || '0',
+      })),
+      text: a.text ?? '',
+      labelX: decimalToInput(a.labelX) || '0',
+      labelY: decimalToInput(a.labelY) || '0',
+      color: annotationColorFromWire(a.color),
+    }));
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
     common_TechCardReleaseMeta | undefined
@@ -2325,61 +2360,101 @@ export function TechPackDocument({
                           : cardAllowance
                             ? `${cardAllowance} mm (card standard)`
                             : 'card standard not set';
+                      // ФОТОГРАФИИ ШАГА. Адрес резолвится через словарь разрешённых картинок
+                      // карточки (opMediaUrlById) — картинка без разрешённого адреса НЕ печатается
+                      // вовсе: пустая рамка на бумаге хуже, чем отсутствующий снимок.
+                      const stepMedia = (o.media ?? [])
+                        .map((m) => ({ m, url: opMediaUrlById.get(wireInt(m.mediaId)) }))
+                        .filter(
+                          (x): x is { m: common_TechCardOperationMedia; url: string } => !!x.url,
+                        );
                       return (
-                        <tr key={i} className='break-inside-avoid'>
-                          <td className={`${TD} text-center`}>
-                            {o.operationNumber || (i + 1) * 10}
-                          </td>
-                          <td className={TD}>
-                            <div>{operationTypeText(o)}</div>
-                            {o.note && <div className='italic text-labelColor'>{o.note}</div>}
-                          </td>
-                          {/* НА ЧЁМ И В КАКОМ РЕЖИМЕ. Со стороны машинки — короткое имя машинки
-                              (человеческое, если профиль назван) и её эффективные настройки; со
-                              стороны ВТО — режим числами, которые оператор выставляет на прессе.
-                              До 0306 этой колонки не было вовсе: тип шага сам назывался машинкой,
-                              и настройки не печатались нигде. */}
-                          <td className={TD}>
-                            {equip?.head ? <div>{equip.head}</div> : null}
-                            {equip && equip.settings.length > 0 ? (
-                              <div className='text-labelColor'>
-                                {equip.settings.map(settingText).join(' · ')}
-                              </div>
-                            ) : null}
-                            {!equip?.head && !equip?.settings.length ? '—' : null}
-                          </td>
-                          <td className={TD}>{zoneText(o.zone) || '—'}</td>
-                          <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
-                          {/* ЧТО ШАГ ПРОИЗВОДИТ. Пустая ячейка — утверждение, а не пробел: шаг
-                              ничего не собирает, это обработка, и его входы остаются на столе
-                              следующим шагам. */}
-                          <td className={TD}>{opOutput(o) || '—'}</td>
-                          <td className={TD}>
-                            <div>{seamClassText(o.seamClass) || '—'}</div>
-                            <div className='font-medium'>{allowanceCell}</div>
-                            {detail && <div className='text-labelColor'>{detail}</div>}
-                          </td>
-                          <td className={TD}>
-                            {materials.length === 0 ? (
-                              '—'
-                            ) : (
-                              <div className='flex flex-col gap-0.5'>
-                                {materials.map((m, j) => (
-                                  <div key={j} className={m.missing ? 'font-bold uppercase' : ''}>
-                                    {m.missing ? `⚠ ${m.name}` : m.name}
-                                    {m.kind ? (
-                                      <span className='text-labelColor'> · {m.kind}</span>
-                                    ) : null}
-                                    {m.colour ? (
-                                      <span className='text-labelColor'> · {m.colour}</span>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </td>
-                          <td className={`${TD} text-right`}>{dec(o.smv) || '—'}</td>
-                        </tr>
+                        <Fragment key={i}>
+                          <tr className='break-inside-avoid'>
+                            <td className={`${TD} text-center`}>
+                              {o.operationNumber || (i + 1) * 10}
+                            </td>
+                            <td className={TD}>
+                              <div>{operationTypeText(o)}</div>
+                              {o.note && <div className='italic text-labelColor'>{o.note}</div>}
+                            </td>
+                            {/* НА ЧЁМ И В КАКОМ РЕЖИМЕ. Со стороны машинки — короткое имя машинки
+                                (человеческое, если профиль назван) и её эффективные настройки; со
+                                стороны ВТО — режим числами, которые оператор выставляет на прессе.
+                                До 0306 этой колонки не было вовсе: тип шага сам назывался машинкой,
+                                и настройки не печатались нигде. */}
+                            <td className={TD}>
+                              {equip?.head ? <div>{equip.head}</div> : null}
+                              {equip && equip.settings.length > 0 ? (
+                                <div className='text-labelColor'>
+                                  {equip.settings.map(settingText).join(' · ')}
+                                </div>
+                              ) : null}
+                              {!equip?.head && !equip?.settings.length ? '—' : null}
+                            </td>
+                            <td className={TD}>{zoneText(o.zone) || '—'}</td>
+                            <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
+                            {/* ЧТО ШАГ ПРОИЗВОДИТ. Пустая ячейка — утверждение, а не пробел: шаг
+                                ничего не собирает, это обработка, и его входы остаются на столе
+                                следующим шагам. */}
+                            <td className={TD}>{opOutput(o) || '—'}</td>
+                            <td className={TD}>
+                              <div>{seamClassText(o.seamClass) || '—'}</div>
+                              <div className='font-medium'>{allowanceCell}</div>
+                              {detail && <div className='text-labelColor'>{detail}</div>}
+                            </td>
+                            <td className={TD}>
+                              {materials.length === 0 ? (
+                                '—'
+                              ) : (
+                                <div className='flex flex-col gap-0.5'>
+                                  {materials.map((m, j) => (
+                                    <div
+                                      key={j}
+                                      className={m.missing ? 'font-bold uppercase' : ''}
+                                    >
+                                      {m.missing ? `⚠ ${m.name}` : m.name}
+                                      {m.kind ? (
+                                        <span className='text-labelColor'> · {m.kind}</span>
+                                      ) : null}
+                                      {m.colour ? (
+                                        <span className='text-labelColor'> · {m.colour}</span>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td className={`${TD} text-right`}>{dec(o.smv) || '—'}</td>
+                          </tr>
+                          {/* СНИМКИ ШАГА — ВО ВСЮ ШИРИНУ ЛИСТА, отдельной строкой на каждую
+                              картинку: лист швеи так и читают, по эскизу узла, а не по колонке
+                              таблицы. Только для чтения (AnnotationCanvas без onChange) — печать
+                              не редактирует. */}
+                          {stepMedia.map(({ m, url }, mi) => (
+                            <tr key={`media:${i}:${mi}`} className='break-inside-avoid'>
+                              <td colSpan={9} className={TD}>
+                                {/* Потолок высоты: портретный снимок во всю ширину листа выше
+                                    страницы, а `break-inside-avoid` не переносит — он бы просто
+                                    обрезался. Ширина при этом ужимается вместе с высотой, и
+                                    выноски остаются на своих местах: они в долях кадра. */}
+                                <div className='mx-auto w-fit'>
+                                  <AnnotationCanvas
+                                    src={url}
+                                    alt={m.caption || undefined}
+                                    annotations={mediaAnnotations(m)}
+                                    maxHeightClass='max-h-[120mm]'
+                                  />
+                                </div>
+                                {m.caption?.trim() && (
+                                  <p className='mt-1 text-nano text-labelColor'>
+                                    {m.caption.trim()}
+                                  </p>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </Fragment>
                       );
                     })}
                   </Fragment>

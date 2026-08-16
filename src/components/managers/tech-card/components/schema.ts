@@ -39,6 +39,8 @@ import {
   common_TechCardSignoffState,
   common_TechCardStage,
   common_StyleNumberSource,
+  common_TechCardAnnotationColor,
+  common_TechCardAnnotationKind,
 } from 'api/proto-http/admin';
 import { ZERO_TIMESTAMP } from 'components/managers/tech-cards/components/utils';
 import { decimalToInput, inputToDecimal, parseDecimalNumber } from 'utils/decimal';
@@ -747,6 +749,93 @@ const constructionSchema = z
     });
   });
 
+// ── ВЫНОСКИ НА ФОТО ─────────────────────────────────────────────────────────────────────────────
+//
+// Вид выноски — ЗАКРЫТЫЙ СЛОВАРЬ, и он определяет всё остальное: сколько точек, что рисуется и
+// чем является текст. Набор проектировался осями (якорь × геометрия × лидер × подпись), но
+// независимые поля пришлось бы валидировать комбинаторикой бессмыслицы — скобка с одной точкой,
+// номер на мерке. Сервер проверяет ровно эти же правила, теми же словами.
+export const ANNOTATION_KINDS = ['pin', 'label', 'dim', 'bracket', 'multi'] as const;
+export type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
+
+/** Сколько точек у вида: [минимум, максимум]. Зеркало `PointsAllowed()` сервера. */
+export const ANNOTATION_POINTS: Record<AnnotationKind, [number, number]> = {
+  pin: [1, 1],
+  label: [1, 1],
+  dim: [2, 2],
+  bracket: [2, 2],
+  multi: [2, 8],
+};
+
+// Цвет — закрытый список, а не свободный hex: лист швеи печатают и на чёрно-белом принтере, где
+// произвольный цвет станет неразличимым серым. Пусто = чернильный, тот же, каким нарисовано всё
+// остальное. Цвет РАЗЛИЧАЕТ пересекающиеся выноски, а не кодирует смысл.
+export const ANNOTATION_COLORS = ['', 'red', 'blue', 'green', 'orange'] as const;
+export type AnnotationColor = (typeof ANNOTATION_COLORS)[number];
+
+/**
+ * Вид выноски: провод ↔ форма. Неизвестное значение с провода становится пином, а не пустотой:
+ * снимок с выноской неизвестного вида должен показать хоть что-то в том месте, где технолог её
+ * поставил, — потерянная точка хуже неточной фигуры.
+ */
+const ANNOTATION_KIND_WIRE: Record<AnnotationKind, string> = {
+  pin: 'TECH_CARD_ANNOTATION_KIND_PIN',
+  label: 'TECH_CARD_ANNOTATION_KIND_LABEL',
+  dim: 'TECH_CARD_ANNOTATION_KIND_DIM',
+  bracket: 'TECH_CARD_ANNOTATION_KIND_BRACKET',
+  multi: 'TECH_CARD_ANNOTATION_KIND_MULTI',
+};
+const ANNOTATION_KIND_FORM = Object.fromEntries(
+  Object.entries(ANNOTATION_KIND_WIRE).map(([k, v]) => [v, k as AnnotationKind]),
+) as Record<string, AnnotationKind>;
+
+export const annotationKindFromWire = (v?: string): AnnotationKind =>
+  ANNOTATION_KIND_FORM[v ?? ''] ?? 'pin';
+export const annotationKindToWire = (v?: AnnotationKind): common_TechCardAnnotationKind =>
+  (ANNOTATION_KIND_WIRE[v ?? 'pin'] ?? ANNOTATION_KIND_WIRE.pin) as common_TechCardAnnotationKind;
+
+const ANNOTATION_COLOR_WIRE: Record<string, string> = {
+  red: 'TECH_CARD_ANNOTATION_COLOR_RED',
+  blue: 'TECH_CARD_ANNOTATION_COLOR_BLUE',
+  green: 'TECH_CARD_ANNOTATION_COLOR_GREEN',
+  orange: 'TECH_CARD_ANNOTATION_COLOR_ORANGE',
+};
+const ANNOTATION_COLOR_FORM = Object.fromEntries(
+  Object.entries(ANNOTATION_COLOR_WIRE).map(([k, v]) => [v, k as AnnotationColor]),
+) as Record<string, AnnotationColor>;
+
+export const annotationColorFromWire = (v?: string): AnnotationColor =>
+  ANNOTATION_COLOR_FORM[v ?? ''] ?? '';
+export const annotationColorToWire = (v?: AnnotationColor): common_TechCardAnnotationColor =>
+  (v ? ANNOTATION_COLOR_WIRE[v] : 'TECH_CARD_ANNOTATION_COLOR_UNKNOWN') as common_TechCardAnnotationColor;
+
+const annotationPointSchema = z.object({
+  // Доли кадра, 0..1 — та же система, что у карточных выносок. Строкой, а не числом: тот же
+  // decimal, что на проводе, и круговой рейс без округлений.
+  x: z.string().default('0'),
+  y: z.string().default('0'),
+});
+
+const annotationSchema = z.object({
+  kind: z.enum(ANNOTATION_KINDS).default('pin'),
+  points: z.array(annotationPointSchema).default([]),
+  text: z.string().default(''),
+  labelX: z.string().default('0'),
+  labelY: z.string().default('0'),
+  color: z.enum(ANNOTATION_COLORS).default(''),
+});
+
+const operationMediaSchema = z.object({
+  mediaId: z.number().default(0),
+  caption: z.string().default(''),
+  // Пределы — ЗЕРКАЛА серверных (dto). Без них превышение всплывало бы отказом сохранения ВСЕЙ
+  // карточки, и сообщение указывало бы не на тот шаг.
+  annotations: z.array(annotationSchema).max(30).default([]),
+});
+
+export type OperationMediaForm = z.infer<typeof operationMediaSchema>;
+export type AnnotationForm = z.infer<typeof annotationSchema>;
+
 const operationSchema = z.object({
   // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
   // («Node is required») is why: a mandatory field with free input has no right answer, so the
@@ -834,6 +923,10 @@ const operationSchema = z.object({
   // The off-part materials this operation consumes (thread, fusing). The legacy single bomLineKey
   // went with the break — the chip row was always the real answer.
   bomLineKeys: z.array(z.string()).default([]),
+  // Фотографии ЭТОГО шага с выносками поверх них. Операционные, а не карточные: указание
+  // «здесь припосадить 6 мм» относится к шагу, и адресовать его номером карточной выноски
+  // значило бы завести ссылку, которая рвётся при пересортировке шагов.
+  media: z.array(operationMediaSchema).max(10).default([]),
 })
   // The two required fields are checked HERE as well as on the server, and the wording is the same
   // on both sides. Without this the operator learns that a step needs a zone only after a failed
@@ -1135,6 +1228,11 @@ const techCardObject = z.object({
   // карточки, которая их несёт, — иначе параллельная вкладка или восстановленный черновик
   // стирали бы самый дорогой ручной ввод молча. Ставит только кнопка «снять разметку узлов».
   assemblyCleared: z.boolean().default(false),
+  // НАМЕРЕНИЕ снять ВСЕ фотографии шагов. Той же породы, что assemblyCleared, и по той же
+  // причине: операции пишутся полной заменой, и без объявленного намерения сервер отклоняет
+  // осведомлённую пустоту против карточки, у которой снимки есть, — иначе отставшая вкладка
+  // стирала бы десятки выносок молча. Ставит только кнопка «снять фотографии шагов».
+  mediaCleared: z.boolean().default(false),
   labels: z.array(labelSchema).default([]),
   packaging: packagingSchema,
   costing: costingSchema,
@@ -1272,6 +1370,7 @@ export const techCardDefaultData: TechCardFormData = {
   construction: { ...emptyConstruction },
   operations: [],
   assemblyCleared: false,
+  mediaCleared: false,
   labels: [],
   packaging: { ...emptyPackaging },
   costing: { ...emptyCosting },
@@ -1588,6 +1687,23 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       outputUnitKey: o.outputUnitKey ?? '',
       outputUnitName: o.outputUnitName ?? '',
       bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
+      // Фотографии шага с выносками. Координаты приходят Decimal'ом и остаются строкой: тот же
+      // тип на проводе, в форме и в БД — круговой рейс без округлений.
+      media: (o.media ?? []).map((m) => ({
+        mediaId: wireInt(m.mediaId),
+        caption: m.caption ?? '',
+        annotations: (m.annotations ?? []).map((a) => ({
+          kind: annotationKindFromWire(a.kind),
+          points: (a.points ?? []).map((pt) => ({
+            x: decimalToInput(pt.x) || '0',
+            y: decimalToInput(pt.y) || '0',
+          })),
+          text: a.text ?? '',
+          labelX: decimalToInput(a.labelX) || '0',
+          labelY: decimalToInput(a.labelY) || '0',
+          color: annotationColorFromWire(a.color),
+        })),
+      })),
       operationNumber: o.operationNumber || 0,
       operationType: o.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
       zone: o.zone || 'TECH_CARD_GARMENT_ZONE_UNKNOWN',
@@ -2227,6 +2343,14 @@ export function mapFormToTechCardInsert(
     assemblyCleared:
       !!data.assemblyCleared &&
       (original?.operations ?? []).some((o) => (o?.outputUnitKey ?? '').trim() !== ''),
+    // Осведомлённость о фотографиях шагов — на КАЖДОМ сохранении, как и две выше: сервер по ней
+    // отличает «этот бандл знает про снимки» от «этот бандл сейчас их сотрёт».
+    mediaAware: true,
+    // Решается по СОХРАНЁННОЙ карточке, а не по форме — тот же довод, что у assemblyCleared:
+    // приложить снимок локально и тут же убрать это законный жест, но на сохранённой карточке
+    // при этом ничего не менялось, и объявлять снятие незачем.
+    mediaCleared:
+      !!data.mediaCleared && (original?.operations ?? []).some((o) => (o?.media ?? []).length > 0),
     // `!!` and not `!== undefined`: a card with no construction row comes back with an explicit
     // `null` (the gateway marshals an unset message that way), and treating that as «had one» would
     // make every such card start writing an all-NULL construction row — see mapConstructionOut.
@@ -2268,6 +2392,26 @@ export function mapFormToTechCardInsert(
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
         bomLineKeys: opBomKeys,
+        // Фотографии шага. Пустой список шлётся как есть — сервер трактует его так же, как
+        // отсутствие поля, а щит совместимости смотрит на ФЛАГ `mediaAware`, а не на наличие
+        // ключа: именно поэтому отставший бандл узнаётся по флагу, а не по пустоте.
+        media: (o.media ?? [])
+          .filter((m) => wireInt(m.mediaId) > 0)
+          .map((m) => ({
+            mediaId: wireInt(m.mediaId),
+            caption: (m.caption ?? '').trim(),
+            annotations: (m.annotations ?? []).map((a) => ({
+              kind: annotationKindToWire(a.kind),
+              points: (a.points ?? []).map((pt) => ({
+                x: inputToDecimal(pt.x),
+                y: inputToDecimal(pt.y),
+              })),
+              text: (a.text ?? '').trim(),
+              labelX: inputToDecimal(a.labelX),
+              labelY: inputToDecimal(a.labelY),
+              color: annotationColorToWire(a.color),
+            })),
+          })),
         // operation number is positional (server is authoritative); send (i+1)*10 so a
         // freshly-created card reads back sensibly before the server recomputes.
         operationNumber: (i + 1) * 10,
@@ -2379,5 +2523,18 @@ export function mapFormToTechCardInsert(
     // Cast: TechCardInsert keys are required-but-nullable; we set every section above and
     // echo any still-unhandled proto field from `original`. Untouched keys are omitted on
     // create (absent == empty on the wire), which the structural type can't express.
-  } as common_TechCardInsert;
+    // ПРИВЕДЕНИЕ ЧЕРЕЗ `unknown`, И ЭТО НЕ ОСЛАБЛЕНИЕ ПРОВЕРКИ, А ЕЁ ЧЕСТНОЕ ИМЯ.
+    //
+    // Здесь собирается ПРОЕКЦИЯ ЗАПИСИ, а сгенерированный тип описывает форму ЧТЕНИЯ: у строки
+    // BOM он объявляет цену-снапшот и эффективную ширину, у операции — piece_ids и прочие
+    // выводимые сервером проекции, у выкройки — uploadedAt и ссылки, у детали — поля, которые
+    // сервер выводит сам. Форма их не несёт и нести не должна: прислать их значило бы отдать
+    // клиенту право на серверные факты.
+    //
+    // Раньше это расхождение пряталось за обычным `as`, который TypeScript терпел, пока сообщение
+    // было меньше: правило «достаточного перекрытия» — эвристика по числу совпавших полей, а не
+    // утверждение о совместимости. С ростом сообщения оно перестало срабатывать, и выбор был
+    // между приведением каждого подсписка по отдельности (пять приведений, которые разъедутся
+    // поодиночке) и одним честным здесь. Одно здесь и названо причиной.
+  } as unknown as common_TechCardInsert;
 }

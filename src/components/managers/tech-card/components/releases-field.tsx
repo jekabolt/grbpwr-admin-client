@@ -5,6 +5,7 @@ import {
   common_TechCardConstruction,
   common_TechCardMachineProfile,
   common_TechCardOperation,
+  common_TechCardOperationMedia,
   common_TechCardPiece,
   common_TechCardPressProfile,
   common_TechCardReleaseMeta,
@@ -14,7 +15,7 @@ import { useTechCard } from 'components/managers/tech-cards/components/useTechCa
 import { formatTechCardDate } from 'components/managers/tech-cards/components/utils';
 import { techCardBomSectionOptions, techCardStageOptions } from 'constants/filter';
 import { cn } from 'lib/utility';
-import { useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
@@ -42,7 +43,14 @@ import {
 import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
+import { AnnotationCanvas } from './annotation-canvas';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
+import {
+  annotationColorFromWire,
+  annotationKindFromWire,
+  wireInt,
+  type AnnotationForm,
+} from './schema';
 
 const bomSectionLabel = (v?: string) =>
   techCardBomSectionOptions.find((o) => o.value === v)?.label ?? v ?? '—';
@@ -231,13 +239,32 @@ function SnapshotEquipment({ c }: { c?: common_TechCardConstruction }) {
   );
 }
 
+// Выноски картинки шага — с провода на форму примитива. Зеркалит конвертацию mapTechCardToForm
+// (schema.ts): координаты остаются decimal-строкой без округлений. Не импортируется оттуда — этот
+// файл читает вербатимный снапшот, а не форму карточки.
+const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
+  (m.annotations ?? []).map((a) => ({
+    kind: annotationKindFromWire(a.kind),
+    points: (a.points ?? []).map((pt) => ({
+      x: decimalToInput(pt.x) || '0',
+      y: decimalToInput(pt.y) || '0',
+    })),
+    text: a.text ?? '',
+    labelX: decimalToInput(a.labelX) || '0',
+    labelY: decimalToInput(a.labelY) || '0',
+    color: annotationColorFromWire(a.color),
+  }));
+
 function SnapshotOperations({
   ops,
   pieces,
+  mediaUrlById,
 }: {
   ops: common_TechCardOperation[];
   /** Детали ИЗ ЭТОГО ЖЕ СНАПШОТА: имя должно быть тем, что было подписано, а не сегодняшним. */
   pieces: common_TechCardPiece[];
+  /** Адреса операционных снимков — из resolvedOperationMedia ЭТОГО ЖЕ СНАПШОТА, не живой карточки. */
+  mediaUrlById: Map<number, string>;
 }) {
   if (ops.length === 0) return null;
   // Вход шага — деталь ИЛИ узел, и читать надо union: релиз, подписанный до Ф1, поля 46 не несёт
@@ -291,55 +318,78 @@ function SnapshotOperations({
           : isPressStepType(o.operationType)
             ? [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
             : typeLabel;
+        // Фотографии шага — те же правила, что у печати: адрес есть только для картинки в
+        // словаре снапшота, у остальных ничего не показываем (не заглушка).
+        const stepMedia = (o.media ?? [])
+          .map((m) => ({ m, url: mediaUrlById.get(wireInt(m.mediaId)) }))
+          .filter((x): x is { m: common_TechCardOperationMedia; url: string } => !!x.url);
         return (
-          <Row
-            key={i}
-            label={
-              <Text size='micro' component='span'>
-                {o.operationNumber != null ? `#${o.operationNumber} ` : ''}
-                {/* Composed, exactly as in the live editor — a frozen release must read the same way
-                    the card did, and there is no stored step title to fall back on any more. */}
-                {operationHeading({
-                  operationType: o.operationType,
-                  // A snapshot written before 0306 carries a legacy type that names its own machine
-                  // and no machine_type at all; one written after carries MACHINE plus the machine.
-                  // operationHeading reads both, so a frozen release keeps the verb it was signed
-                  // with.
-                  machineType: o.machineType,
-                  zone: o.zone,
-                  pieceNames: [],
-                  note: o.note,
-                })}
-                {spec && (
-                  <Text size='nano' variant='label' component='span'>
-                    {' — '}
-                    {spec}
+          <Fragment key={i}>
+            <Row
+              label={
+                <Text size='micro' component='span'>
+                  {o.operationNumber != null ? `#${o.operationNumber} ` : ''}
+                  {/* Composed, exactly as in the live editor — a frozen release must read the same
+                      way the card did, and there is no stored step title to fall back on any
+                      more. */}
+                  {operationHeading({
+                    operationType: o.operationType,
+                    // A snapshot written before 0306 carries a legacy type that names its own
+                    // machine and no machine_type at all; one written after carries MACHINE plus
+                    // the machine. operationHeading reads both, so a frozen release keeps the verb
+                    // it was signed with.
+                    machineType: o.machineType,
+                    zone: o.zone,
+                    pieceNames: [],
+                    note: o.note,
+                  })}
+                  {spec && (
+                    <Text size='nano' variant='label' component='span'>
+                      {' — '}
+                      {spec}
+                    </Text>
+                  )}
+                  {/* ЧТО ШАГ БРАЛ И ЧТО СОБРАЛ. До Ф6 архив не показывал ни того, ни другого:
+                      подписанная сборка была в снапшоте, но на экране её не было — то есть
+                      единственное место, где релиз можно перечитать, о ней молчало. */}
+                  {(() => {
+                    const parts = partsOf(o);
+                    const out = outputOf(o);
+                    if (!parts && !out) return null;
+                    return (
+                      <Text size='nano' variant='label' component='span' className='block'>
+                        {parts || '—'}
+                        {out ? ` → ${out}` : ''}
+                      </Text>
+                    );
+                  })()}
+                </Text>
+              }
+              value={
+                o.smv?.value ? (
+                  <Text size='micro' variant='label' component='span'>
+                    {`${o.smv.value} min`}
+                  </Text>
+                ) : undefined
+              }
+            />
+            {/* СНИМКИ ШАГА, ТЕМ ЖЕ ХОЛСТОМ, ЧТО И ПРИ РЕДАКТИРОВАНИИ, но только для чтения:
+                архив — не место для правки замороженной карточки. */}
+            {stepMedia.map(({ m, url }, mi) => (
+              <div key={mi} className='py-1'>
+                <AnnotationCanvas
+                  src={url}
+                  alt={m.caption || undefined}
+                  annotations={mediaAnnotations(m)}
+                />
+                {m.caption?.trim() && (
+                  <Text size='nano' variant='label' className='mt-1'>
+                    {m.caption.trim()}
                   </Text>
                 )}
-                {/* ЧТО ШАГ БРАЛ И ЧТО СОБРАЛ. До Ф6 архив не показывал ни того, ни другого:
-                    подписанная сборка была в снапшоте, но на экране её не было — то есть
-                    единственное место, где релиз можно перечитать, о ней молчало. */}
-                {(() => {
-                  const parts = partsOf(o);
-                  const out = outputOf(o);
-                  if (!parts && !out) return null;
-                  return (
-                    <Text size='nano' variant='label' component='span' className='block'>
-                      {parts || '—'}
-                      {out ? ` → ${out}` : ''}
-                    </Text>
-                  );
-                })()}
-              </Text>
-            }
-            value={
-              o.smv?.value ? (
-                <Text size='micro' variant='label' component='span'>
-                  {`${o.smv.value} min`}
-                </Text>
-              ) : undefined
-            }
-          />
+              </div>
+            ))}
+          </Fragment>
         );
       })}
     </>
@@ -353,15 +403,21 @@ function ReleaseSnapshot({
   meta,
   techCardId,
   canReadCosting,
+  active,
 }: {
   id: number;
   meta?: common_TechCardReleaseMeta;
   techCardId: number;
   canReadCosting: boolean;
+  /** Вкладка открыта: скрытая не должна тянуть снимки. */
+  active: boolean;
 }) {
   const { data, isLoading } = useQuery({
     queryKey: ['techCardRelease', id],
     queryFn: () => adminService.GetTechCardRelease({ id }),
+    // Вкладка спрятана, но смонтирована: без гейта ответ приходил бы на невидимый экран и
+    // создавал <img> для каждого снимка каждого шага — десятки полноразмерных загрузок.
+    enabled: active,
   });
   // Colourways aren't part of the frozen snapshot (they're live products, not versioned by
   // release) — show the style's CURRENT colourway count instead of a historical one.
@@ -375,6 +431,20 @@ function ReleaseSnapshot({
   const head = data?.release ?? meta;
   const snap = data?.snapshot?.techCard;
   const err = data?.snapshotError;
+
+  // Адреса операционных снимков — ИЗ СНАПШОТА, а не с живой карточки: снапшот вербатимный, и
+  // resolvedOperationMedia — часть read-модели, замороженная вместе со всем остальным (лежит на
+  // data.snapshot, соседом snap = data.snapshot.techCard). Релиз, подписанный до этой фичи, поля
+  // не несёт вовсе — словарь тогда просто пуст, и это не дефект, а честная граница снапшота.
+  const mediaUrlById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of data?.snapshot?.resolvedOperationMedia ?? []) {
+      const id = wireInt(r.media?.id);
+      const url = r.media?.media?.fullSize?.mediaUrl || r.media?.media?.thumbnail?.mediaUrl;
+      if (id && url) m.set(id, url);
+    }
+    return m;
+  }, [data?.snapshot?.resolvedOperationMedia]);
 
   return (
     <div className='border border-borderColor p-2'>
@@ -420,7 +490,11 @@ function ReleaseSnapshot({
           <SnapshotBom items={snap.bomItems ?? []} />
           <SnapshotConstruction c={snap.construction} />
           <SnapshotEquipment c={snap.construction} />
-          <SnapshotOperations ops={snap.operations ?? []} pieces={snap.pieces ?? []} />
+          <SnapshotOperations
+            ops={snap.operations ?? []}
+            pieces={snap.pieces ?? []}
+            mediaUrlById={mediaUrlById}
+          />
 
           <Text size='micro' variant='label' className='mt-2'>
             Colourways aren’t part of the frozen snapshot (they’re live products) — the count
@@ -443,7 +517,16 @@ function ReleaseSnapshot({
 // Two panes rather than a list that swaps itself for a detail screen: you keep your place in the
 // list while you read, so comparing Rev.2 against Rev.1 is two clicks and no back button. The
 // selection lives in the URL (?rev=N) so a specific snapshot is linkable.
-export function ReleasesField({ techCardId, gate }: { techCardId: number; gate?: ReleaseGate }) {
+export function ReleasesField({
+  techCardId,
+  gate,
+  active = true,
+}: {
+  techCardId: number;
+  gate?: ReleaseGate;
+  /** Вкладка открыта. Вкладки смонтированы все сразу — без флага архив грузил бы снимки всегда. */
+  active?: boolean;
+}) {
   const { canReadCosting } = usePermissions();
   const [params, setParams] = useSearchParams();
   const [blockersOpen, setBlockersOpen] = useState(false);
@@ -451,6 +534,7 @@ export function ReleasesField({ techCardId, gate }: { techCardId: number; gate?:
   const { data, isLoading } = useQuery({
     queryKey: ['techCardReleases', techCardId],
     queryFn: () => adminService.ListTechCardReleases({ techCardId }),
+    enabled: active,
   });
 
   const releases = data?.releases ?? [];
@@ -557,6 +641,7 @@ export function ReleasesField({ techCardId, gate }: { techCardId: number; gate?:
               meta={selected}
               techCardId={techCardId}
               canReadCosting={canReadCosting}
+              active={active}
             />
           ) : (
             <Text size='micro' variant='label'>

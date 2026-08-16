@@ -463,6 +463,18 @@ export function ConstructionTab({
   //
   // Хук держится ЗДЕСЬ, а не внутри редактора операций: карта контуров одна на карточку и
   // стабильна по ссылке, а редактор перерисовывается на каждый введённый символ.
+  // Словарь «media_id → адрес» для операционных снимков. Приходит с чтения карточки: во форме
+  // лежит только id, потому что именно он уходит на сервер.
+  const operationMediaUrls = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of techCard?.resolvedOperationMedia ?? []) {
+      const id = wireInt(r.media?.id);
+      const url = r.media?.media?.fullSize?.mediaUrl ?? r.media?.media?.thumbnail?.mediaUrl ?? '';
+      if (id > 0 && url) m.set(id, url);
+    }
+    return m;
+  }, [techCard?.resolvedOperationMedia]);
+
   // Разбор заказывается САМ, как только вкладку открыли: силуэты здесь — рабочий материал, а не
   // опция, и спрашивать разрешения показать то, ради чего на экран пришли, незачем. Но и качать
   // мегабайты за того, кто вкладку не открывал, тоже: вкладки смонтированы все сразу.
@@ -573,6 +585,13 @@ export function ConstructionTab({
               // замораживает тело. Схема получает его ЯВНО, а не через внешний
               // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
               frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+              // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
+              operationMediaUrls={operationMediaUrls}
+              // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
+              // от него зависит, показывать ли путь отступления «снять фотографии шагов».
+              storedHasMedia={(techCard?.techCard?.operations ?? []).some(
+                (o) => (o?.media ?? []).length > 0,
+              )}
             />
           </section>
         </div>
