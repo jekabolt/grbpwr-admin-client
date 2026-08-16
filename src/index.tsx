@@ -355,7 +355,10 @@ root.render(
                 <Route path={ROUTES.login} element={<LoginBlock />} />
                 <Route path='/' element={<ProtectedLayout />}>
                   <Route path={ROUTES.main} element={<AnalyticsHome />} />
-                  <Route path={ROUTES.media} element={<MediaManager disabled={true} />} />
+                  {/* Без `disabled`: страница библиотеки — единственное место, где снимки можно
+                      выбрать пачкой и удалить одним действием. Флаг глушил `toggleMedia`, то есть
+                      выбор на ней был мёртв физически, и чистка после съёмки шла по одному кадру. */}
+                  <Route path={ROUTES.media} element={<MediaManager />} />
                   <Route path={ROUTES.singleProduct} element={<Product />} />
                   <Route path={ROUTES.product} element={<ProductsCatalog />} />
                   <Route path={ROUTES.waitlist} element={<Waitlist />} />

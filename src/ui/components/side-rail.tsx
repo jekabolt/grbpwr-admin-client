@@ -54,8 +54,21 @@ export function SideRailLayout({
   );
 }
 
-export function SideRailGroup({ children, flush }: { children: React.ReactNode; flush?: boolean }) {
-  return <GroupLabel flush={flush}>{children}</GroupLabel>;
+export function SideRailGroup({
+  children,
+  action,
+  flush,
+}: {
+  children: React.ReactNode;
+  /** Правая приписка группы — обычным текстом, а не вторым словом в капсовой метке. */
+  action?: React.ReactNode;
+  flush?: boolean;
+}) {
+  return (
+    <GroupLabel flush={flush} action={action}>
+      {children}
+    </GroupLabel>
+  );
 }
 
 export function SideRailItem({

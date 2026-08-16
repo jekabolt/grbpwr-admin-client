@@ -1,0 +1,46 @@
+/* react-image-crop, перекрашенный в грамматику админки.
+ *
+ * Библиотека из коробки рисует «марширующих муравьёв» (бегущий пунктир), полупрозрачные ручки
+ * и синюю рамку фокуса #0088ff. Синий в этой системе значит «в процессе, нужен человек», а
+ * бегущая анимация — украшение, поэтому и то и другое здесь снимается: рамка становится
+ * неподвижной белой линией с чёрной обводкой, ручки — белыми квадратами в чёрной рамке.
+ *
+ * Специфичность нарочно завышена (.crop-stage .crop-rc.ReactCrop …): правило муравьёв в самой
+ * библиотеке написано через :not(…) и весит три класса, поэтому пара классов его не перебивает.
+ */
+.crop-stage .crop-rc.ReactCrop {
+  --rc-drag-handle-size: 9px;
+  --rc-drag-handle-bg-colour: #fff;
+  --rc-border-color: #000;
+  --rc-focus-color: #000;
+  max-width: none;
+}
+
+.crop-stage .crop-rc.ReactCrop .ReactCrop__crop-selection {
+  animation: none;
+  background-image: none;
+  border: 1px solid var(--color-bgColor);
+  outline: 1px solid var(--color-textColor);
+}
+
+.crop-stage .crop-rc.ReactCrop .ReactCrop__drag-handle {
+  background: var(--color-bgColor);
+  border: 1px solid var(--color-textColor);
+}
+
+/* Затемнение вокруг рамки — не отдельный слой, а вырезанная маска самой рамки, поэтому
+   разъехаться с ней не может. */
+.crop-stage .crop-rc.ReactCrop .ReactCrop__crop-mask rect[mask] {
+  fill-opacity: 0.55;
+}
+
+/* Ползунок размера кадра: системный, но в чернилах, а не в акцентном синем браузера. */
+.crop-range {
+  accent-color: var(--color-textColor);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crop-stage .crop-rc.ReactCrop .ReactCrop__crop-selection {
+    animation: none;
+  }
+}

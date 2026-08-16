@@ -1,19 +1,31 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { SECTION } from 'constants/routes';
-import { useEffect, useRef, useState } from 'react';
+import { isVideo } from 'lib/features/filterContentType';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
 import { Button } from 'ui/components/button';
+import {
+  MediaViewer,
+  ViewerAction,
+  mediaFullListToViewerItems,
+  useMediaViewer,
+} from 'ui/components/media-viewer';
+import { SideRailLayout } from 'ui/components/side-rail';
 import Text from 'ui/components/text';
 import { Filter } from './components/filter';
+import { MediaFilterBar } from './components/media-filter-bar';
+import { SlotFit } from './components/media-item';
 import { MediaList } from './components/media-list';
+import { MediaRail } from './components/media-rail';
+import { MediaRecropDialog } from './components/media-recrop-dialog';
+import { MediaSelectionBar } from './components/media-selection-bar';
 import { PendingMediaPlate } from './components/pending-media-plate';
-import { PreviewMedia } from './components/preview-media';
+import { cropLoss, matchesSlotRatio } from './utils/calculate-aspect';
 import { useFilter } from './utils/useFilter';
 import { usePasteFiles } from './utils/usePasteFiles';
 import { useInfiniteMedia } from './utils/useMediaQuery';
 import { usePendingFiles } from './utils/usePendingFiles';
-import { usePreviewMedia } from './utils/usePreviewMedia';
 import { useSelection } from './utils/useSelectMedia';
 
 export type VideoSize = { width: number; height: number };
@@ -25,6 +37,22 @@ interface MediaLayoutProps {
   showVideos?: boolean;
   selectionMode?: boolean;
   showFilters?: boolean;
+  /**
+   * Пропорции, которые ждёт слот, числами. Сетка делится на «встанут как есть» и «нужен кроп»,
+   * на каждом кадре второй полосы рисуется рамка будущего кадрирования, а сама полоса
+   * сортируется по тому, сколько площади уйдёт под нож.
+   */
+  targetRatios?: number[];
+  /**
+   * Куда девать файл, выбранный с диска. Задаёт диалог выбора: там файл идёт в приёмку слота,
+   * а не в общую очередь библиотеки. Не задан — очередь пачки, как на странице медиатеки.
+   */
+  onFilesPicked?: (files: File[]) => void;
+  /**
+   * Набранное, когда им владеет вызывающий. Задан — сетка отмечает выбранным ровно это, и снять
+   * кадр можно снаружи (лоток в подвале диалога). Не задан — набор ведёт сам менеджер.
+   */
+  selected?: common_MediaFull[];
   onSelectionChange?: (selectedMedia: common_MediaFull[]) => void;
 }
 
@@ -35,13 +63,22 @@ export function MediaManager({
   showVideos,
   selectionMode = false,
   showFilters = true,
+  targetRatios,
+  onFilesPicked,
+  selected,
   onSelectionChange,
 }: MediaLayoutProps) {
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteMedia();
   const { ref, inView } = useInView();
   const prevInViewRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const media = data?.pages.flatMap((page) => page.media as common_MediaFull[]) || [];
+  // Список СОБИРАЕТСЯ ОДИН РАЗ НА ОТВЕТ, а не на каждый рендер: пересобранный массив — новая
+  // ссылка, и мемоизация отбора внутри `useFilter` не срабатывала бы ни разу, пересчитывая
+  // фасетные счётчики и сортировку на каждое нажатие клавиши в поиске.
+  const media = useMemo(
+    () => data?.pages.flatMap((page) => page.media as common_MediaFull[]) || [],
+    [data],
+  );
   const [videoSizes, setVideoSizes] = useState<Record<number, VideoSize>>({});
 
   const pendingFilesHook = usePendingFiles();
@@ -61,36 +98,45 @@ export function MediaManager({
 
   const handleUploadClick = () => fileInputRef.current?.click();
 
+  /**
+   * Файл с диска. На странице библиотеки он встаёт в очередь пачки; в диалоге выбора — уходит в
+   * приёмку слота (`onFilesPicked`), той же дорогой, что и ⌘V.
+   *
+   * Разводить их обязательно. Очередь пачки — полоса на самом верхнем слое (менеджер передач
+   * идёт фоном и не должен прятаться за диалогами), и в диалоге она легла бы прямо на его
+   * подвал с кнопкой «поставить». А главное, в диалоге человек заполняет СЛОТ, а не пополняет
+   * библиотеку: файл должен пройти кроп по пропорции слота и встать на место, а не осесть в
+   * общей очереди, из которой его потом ещё искать.
+   */
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(
-      (file) => file.type.startsWith('image/') || file.type.startsWith('video/'),
-    );
-    if (files.length) pendingFilesHook.addFiles(files);
+    const files = Array.from(e.target.files || []);
+    if (files.length) {
+      if (onFilesPicked) onFilesPicked(files);
+      else pendingFilesHook.addFiles(files);
+    }
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const {
-    viewingMedia,
-    viewingMediaData,
-    isPreviewOpen,
-    isUploading,
-    isLoadingBlob,
-    setIsPreviewOpen,
-    handleViewMedia,
-    handlePreviewCancel,
-    handlePreviewUpload,
-  } = usePreviewMedia();
-
-  const { filteredMedia, type, order, search, setType, setOrder, setSearch } = useFilter(
-    media,
-    aspectRatio,
-    videoSizes,
-    showVideos === false ? 'image' : undefined,
-  );
+    filteredMedia,
+    type,
+    order,
+    search,
+    ratio,
+    typeCounts,
+    ratioCounts,
+    isFiltered,
+    setType,
+    setOrder,
+    setSearch,
+    setRatio,
+    reset,
+  } = useFilter(media, aspectRatio, videoSizes, showVideos === false ? 'image' : undefined);
 
   const selection = useSelection({
     allowMultiple,
     disabled,
+    value: selected,
     onSelectionChange,
   });
 
@@ -124,6 +170,127 @@ export function MediaManager({
     />
   );
 
+  const shown = filteredMedia?.length ?? 0;
+
+  // ОДИН ПРОСМОТРЩИК НА ВСЁ. До этого клик по плитке открывал `PreviewMedia` — диалог 800px с
+  // кадром, зажатым в 500×400, тремя колонками адресов и заблокированной кнопкой «upload». А
+  // полноэкранный `MediaViewer` с зумом, диафильмом и рисованием, который в приложении был,
+  // из библиотеки не открывался вовсе.
+  const viewerItems = mediaFullListToViewerItems(filteredMedia || []);
+  const viewer = useMediaViewer();
+  const viewingMedia = filteredMedia?.[viewer.index];
+  const [recropping, setRecropping] = useState<common_MediaFull | undefined>(undefined);
+
+  const handleView = (m: common_MediaFull) => {
+    const at = (filteredMedia || []).findIndex((x) => x.id === m.id);
+    if (at >= 0) viewer.openAt(at);
+  };
+
+  // ПУСТО ПО ОТБОРУ И ПУСТАЯ БИБЛИОТЕКА — РАЗНЫЕ ЭКРАНЫ. Раньше отбор, не давший ничего, рисовал
+  // то же приглашение бросить файл, что и чистая библиотека: человек читал это как «снимки
+  // пропали» и шёл искать их, вместо того чтобы снять фильтр.
+  const noMatch =
+    media.length > 0 && shown === 0 ? (
+      <div className='flex min-h-[240px] flex-col items-center justify-center gap-2 border border-borderColor bg-bgColor px-4 text-center'>
+        <Text variant='uppercase' className='font-bold'>
+          nothing matched the filter
+        </Text>
+        <Text variant='label'>
+          {media.length} loaded, nothing to show. This is the filter, not an empty library.
+        </Text>
+        <Button className='mt-1' onClick={reset}>
+          clear filter
+        </Button>
+      </div>
+    ) : undefined;
+
+  // РАЗБОР ПО ПРИГОДНОСТИ. Слот знает своё требование с самого начала; раньше он молчал о нём
+  // до клика и предлагал кроп постфактум. Здесь непригодность становится числом: сколько
+  // процентов кадра срежет рамка, и кадры выстраиваются от самых дешёвых.
+  const measureFit = useCallback(
+    (m: common_MediaFull): SlotFit | undefined => {
+      if (!targetRatios?.length) return undefined;
+      const dim = m.media?.fullSize ?? m.media?.thumbnail;
+      // Видео не кадрируется: перекодирования в браузере нет, оно уходит как есть.
+      const video = isVideo(m.media?.thumbnail?.mediaUrl);
+      if (video) return { ok: true };
+      const ok = matchesSlotRatio(dim?.width, dim?.height, targetRatios);
+      if (ok) return { ok: true, target: targetRatios[0] };
+      const loss = Math.min(...targetRatios.map((t) => cropLoss(dim?.width, dim?.height, t) ?? 1));
+      return { ok: false, loss, target: targetRatios[0] };
+    },
+    [targetRatios],
+  );
+
+  // ЗАМЕР ОДИН РАЗ НА КАДР. Раньше `fitOf` считался заново внутри компаратора сортировки, то есть
+  // O(n log n) раз на каждый рендер — и там же, где сравнение обязано быть дешёвым и стабильным.
+  const fits = useMemo(() => {
+    if (!targetRatios?.length) return undefined;
+    const map = new Map<number, SlotFit>();
+    for (const m of filteredMedia || []) {
+      const f = measureFit(m);
+      if (f) map.set(m.id ?? 0, f);
+    }
+    return map;
+  }, [filteredMedia, targetRatios, measureFit]);
+
+  const fitOf = useMemo(
+    () => (fits ? (m: common_MediaFull) => fits.get(m.id ?? 0) : undefined),
+    [fits],
+  );
+
+  const bands = useMemo(() => {
+    if (!fits) return undefined;
+    const all = filteredMedia || [];
+    const good = all.filter((m) => fits.get(m.id ?? 0)?.ok);
+    const rest = all
+      .filter((m) => !fits.get(m.id ?? 0)?.ok)
+      .sort((a, b) => (fits.get(a.id ?? 0)?.loss ?? 1) - (fits.get(b.id ?? 0)?.loss ?? 1));
+    return [
+      {
+        key: 'fit',
+        title: 'fit as they are',
+        hint: 'the ratio matched, or it is a video',
+        items: good,
+      },
+      {
+        key: 'crop',
+        title: 'need cropping',
+        hint: 'least loss first · the frame drawn on the image shows what stays',
+        items: rest,
+      },
+    ];
+  }, [fits, filteredMedia]);
+
+  const list = (
+    <>
+      <MediaList
+        media={filteredMedia || []}
+        bands={bands}
+        fitOf={fitOf}
+        selection={selection}
+        disabled={disabled}
+        videoSizes={videoSizes}
+        onVideoLoad={handleVideoLoad}
+        onView={selectionMode ? undefined : handleView}
+        selectionMode={selectionMode}
+        pendingFilesHook={pendingFilesHook}
+        // Файл, БРОШЕННЫЙ в сетку, идёт той же дорогой, что кнопка выбора и ⌘V: в диалоге — в
+        // приёмку слота, на странице библиотеки — в очередь пачки.
+        onFilesPicked={onFilesPicked}
+        showAddButton={false}
+        showAddTile={isStandalone && canUpload}
+        noMatch={noMatch}
+      />
+      {isStandalone && !disabled && (
+        <MediaSelectionBar
+          selected={selection.selectedMedia}
+          onClear={selection.clearSelection}
+        />
+      )}
+    </>
+  );
+
   return (
     <div className='flex flex-col gap-6 pb-16'>
       {isStandalone ? (
@@ -133,23 +300,14 @@ export function MediaManager({
               Media
             </Text>
             {media.length > 0 && (
-              <Text variant='inactive'>
-                {(filteredMedia?.length ?? 0) === media.length
-                  ? media.length
-                  : `${filteredMedia?.length ?? 0} / ${media.length}`}
+              <Text variant='label'>
+                {shown === media.length ? media.length : `${shown} / ${media.length}`}
               </Text>
             )}
           </div>
           <div className='flex flex-wrap items-center gap-2'>
             {showFilters && (
-              <Filter
-                type={type}
-                order={order}
-                search={search}
-                setType={setType}
-                setOrder={setOrder}
-                setSearch={setSearch}
-              />
+              <Filter order={order} search={search} setOrder={setOrder} setSearch={setSearch} />
             )}
             {pendingPlate}
             <input
@@ -168,51 +326,103 @@ export function MediaManager({
           </div>
         </div>
       ) : (
-        (pendingFilesHook.previews.length > 0 || showFilters) && (
-          <div className='flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-end'>
-            {pendingPlate}
+        (showFilters || pendingFilesHook.previews.length > 0) && (
+          <div className='flex flex-col gap-2'>
+            {/* ФАЙЛ С ДИСКА ПРЯМО ИЗ ДИАЛОГА. Раньше загрузить сюда что-то новое можно было
+                только ⌘V или броском: кнопка выбора файла жила в шапке отдельной страницы, а
+                плитка «добавить» показывалась лишь там же. Человек, у которого нужный кадр лежит
+                в папке, был вынужден закрыть диалог, уйти в библиотеку, загрузить и вернуться. */}
+            {canUpload && (
+              <>
+                <input
+                  ref={fileInputRef}
+                  type='file'
+                  accept='image/*,video/*'
+                  multiple
+                  className='hidden'
+                  onChange={handleFileChange}
+                />
+                <div className='flex justify-end'>
+                  <Button size='sm' onClick={handleUploadClick}>
+                    choose a file…
+                  </Button>
+                </div>
+              </>
+            )}
             {showFilters && (
-              <Filter
+              <MediaFilterBar
                 type={type}
-                order={order}
+                ratio={ratio}
                 search={search}
-                setType={setType}
-                setOrder={setOrder}
-                setSearch={setSearch}
+                typeCounts={typeCounts}
+                ratioCounts={ratioCounts}
+                isFiltered={isFiltered}
+                showVideos={showVideos !== false}
+                onType={setType}
+                onRatio={setRatio}
+                onSearch={setSearch}
+                onReset={reset}
               />
             )}
+            {/* Полосы очереди здесь НЕТ. Внутри диалога выбора файл идёт в приёмку слота, а не в
+                общую очередь; а сама полоса живёт на верхнем слое и легла бы на подвал диалога. */}
           </div>
         )
       )}
 
-      <MediaList
-        media={filteredMedia || []}
-        selection={selection}
-        disabled={disabled}
-        videoSizes={videoSizes}
-        onVideoLoad={handleVideoLoad}
-        onView={selectionMode ? undefined : handleViewMedia}
-        selectionMode={selectionMode}
-        pendingFilesHook={pendingFilesHook}
-        showAddButton={false}
-        showAddTile={isStandalone && canUpload}
-      />
-      <PreviewMedia
-        open={isPreviewOpen}
-        preview={viewingMedia}
-        onOpenChange={setIsPreviewOpen}
-        onUpload={handlePreviewUpload}
-        onCancel={handlePreviewCancel}
-        isExistingMedia={true}
-        mediaData={viewingMediaData}
-        isUploading={isUploading}
-        isLoadingBlob={isLoadingBlob}
+      {isStandalone ? (
+        <SideRailLayout
+          rail={
+            <MediaRail
+              type={type}
+              ratio={ratio}
+              typeCounts={typeCounts}
+              ratioCounts={ratioCounts}
+              isFiltered={isFiltered}
+              loaded={media.length}
+              onType={setType}
+              onRatio={setRatio}
+              onReset={reset}
+            />
+          }
+        >
+          {list}
+        </SideRailLayout>
+      ) : (
+        list
+      )}
+      {isStandalone && (
+        <MediaViewer
+          items={viewerItems}
+          index={viewer.index}
+          open={viewer.open}
+          onOpenChange={viewer.onOpenChange}
+          onIndexChange={viewer.onIndexChange}
+          actions={() =>
+            canUpload && viewingMedia ? (
+              <ViewerAction
+                onClick={() => {
+                  setRecropping(viewingMedia);
+                  viewer.onOpenChange(false);
+                }}
+              >
+                crop
+              </ViewerAction>
+            ) : null
+          }
+        />
+      )}
+
+      <MediaRecropDialog
+        media={recropping}
+        open={!!recropping}
+        onOpenChange={(next) => !next && setRecropping(undefined)}
       />
 
       {hasNextPage && (
         <div ref={ref} className='flex justify-center p-4'>
           {isFetchingNextPage && (
-            <Text variant='inactive' className='animate-pulse'>
+            <Text variant='label' className='animate-pulse'>
               loading more media…
             </Text>
           )}

@@ -100,16 +100,27 @@ export const heroTypes: { value: common_HeroType; label: string }[] = [
   { value: 'HERO_TYPE_PRODUCT_SPOTLIGHT', label: 'product spotlight' },
 ];
 
-export const ASPECT_RATIOS = [
-  { label: '16:9', value: 1.7778, color: '#cc0000' },
-  { label: '4:3', value: 1.3333, color: '#e69138' },
-  { label: '2:1', value: 2, color: '#c0c0c0' },
-  { label: '1:1', value: 1.0, color: '#f1c232' },
-  { label: '4:5', value: 0.8, color: '#6aa84f' },
-  { label: '3:4', value: 0.75, color: '#45818e' },
-  { label: '5:4', value: 1.25, color: '#3d85c6' },
-  { label: '9:16', value: 0.5625, color: '#674ea7' },
-  { label: 'Custom', value: undefined, color: '#000000' },
+/**
+ * Пропорции кадрирования, от панорамы к портрету.
+ *
+ * У каждой строки лежало поле `color` с радугой (#cc0000 → #674ea7), которое не читал ни один
+ * рендер: цвет-категория запрещён грамматикой (красный, синий и зелёный значат «сломано»,
+ * «в работе» и «готово», и ничего больше), а форму кадра показывает <RatioGlyph/> — пустой
+ * прямоугольник тех же пропорций. Поле снесено вместе с фиктивным `color: '#000000'`,
+ * который кроппер подставлял в синтетическую строку.
+ *
+ * «Custom» тоже убран: отсутствие пропорции — не пропорция. Оно живёт в кроппере отдельной
+ * группой рельса, а не в одном ряду с числами.
+ */
+export const ASPECT_RATIOS: { label: string; value: number }[] = [
+  { label: '2:1', value: 2 },
+  { label: '16:9', value: 1.7778 },
+  { label: '4:3', value: 1.3333 },
+  { label: '5:4', value: 1.25 },
+  { label: '1:1', value: 1.0 },
+  { label: '4:5', value: 0.8 },
+  { label: '3:4', value: 0.75 },
+  { label: '9:16', value: 0.5625 },
 ];
 
 export const SORT_MAP: Partial<Record<common_SortFactor, SortFactorConfig>> = {

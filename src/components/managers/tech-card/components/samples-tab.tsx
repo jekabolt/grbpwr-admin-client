@@ -906,11 +906,18 @@ function SampleEditor({
             aspectRatio={['3:4']}
             frameAspect='3/4'
             purpose='sample photos'
-            ratioCaption='any ratio'
+            // Требование ЖЁСТКОЕ (`aspectRatio={['3:4']}` — кроп другого выбора не даст), и
+            // подпись обязана называть его, а не обещать «любое соотношение».
+            ratioCaption='3:4 frame'
             fit='cover'
             firstIsThumbnail
             onSelect={onPick}
             onDelete={(id) => set({ mediaIds: d.mediaIds.filter((x) => x !== id) })}
+            // `mediaById` — кэш разрешённых медиа, и он НЕ чистится на удалении, поэтому вернуть
+            // убранный кадр на его место можно, ничего не перезапрашивая.
+            onReorder={(next) =>
+              set({ mediaIds: next.map((m) => m.id).filter((id): id is number => id != null) })
+            }
           />
 
           <GroupLabel>facts</GroupLabel>

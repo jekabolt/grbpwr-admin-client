@@ -1,7 +1,9 @@
 import { cn } from 'lib/utility';
 import { useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { CalloutBox } from 'ui/components/callout-box';
 import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
+import Text from 'ui/components/text';
 import { usePendingFiles } from '../utils/usePendingFiles';
 
 export function DragDropArea({
@@ -9,13 +11,21 @@ export function DragDropArea({
   mediaLength,
   className,
   pendingFilesHook,
+  onFilesPicked,
   showAddButton = false,
   showAddTile = false,
+  noMatch,
 }: {
   children: React.ReactNode;
   mediaLength: number;
   className?: string;
   pendingFilesHook: ReturnType<typeof usePendingFiles>;
+  /**
+   * Куда девать принесённые файлы. Задан — забирает их себе (диалог выбора: файл идёт в приёмку
+   * слота, через кроп по его пропорции, и в слот). Не задан — очередь пачки, как на странице
+   * библиотеки.
+   */
+  onFilesPicked?: (files: File[]) => void;
   showAddButton?: boolean;
   /**
    * Слот «добавить» ПЕРВОЙ КЛЕТКОЙ сетки. Кнопка в шапке — единственный вход на страницу, где всё
@@ -23,9 +33,15 @@ export function DragDropArea({
    * куда смотрят.
    */
   showAddTile?: boolean;
+  /**
+   * Заглушка «под отбор ничего не попало». Приходит только тогда, когда в библиотеке что-то есть,
+   * а показать нечего из-за отбора: приглашение бросить файл в этом случае врёт про пустую
+   * библиотеку, и человек идёт искать пропавшие снимки вместо того, чтобы снять фильтр.
+   */
+  noMatch?: React.ReactNode;
 }) {
   const [isDragging, setIsDragging] = useState(false);
-  const { previews, addFiles } = pendingFilesHook;
+  const { previews, addFiles, skipped, dismissSkipped } = pendingFilesHook;
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragEnter = (e: React.DragEvent) => {
@@ -51,28 +67,29 @@ export function DragDropArea({
     setIsDragging(false);
   };
 
+  // ОТБОР НЕ ЗДЕСЬ. Оба входа отдают дальше ВСЁ, что принесли: не-медиа отсеет приёмник и
+  // назовёт отброшенное по именам. Раньше фильтр стоял в каждом обработчике, и брошенный в пачке
+  // PDF исчезал молча — человек узнавал о недостаче, пересчитывая плитки.
+  //
+  // ОДИН ПРИЁМНИК НА ВСЕ ДОРОГИ ЭТОЙ ЗОНЫ. Внутри диалога выбора полосы очереди нет — она живёт
+  // на верхнем слое и легла бы на подвал диалога, — поэтому файл, отданный в очередь, там просто
+  // исчезал: превью никто не рисовал, blob висел до размонтирования, а работа пропадала.
+  const intake = (files: File[]) => {
+    if (!files.length) return;
+    if (onFilesPicked) onFilesPicked(files);
+    else addFiles(files);
+  };
+
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragging(false);
 
-    const files = Array.from(e.dataTransfer.files).filter(
-      (file) => file.type.startsWith('image/') || file.type.startsWith('video/'),
-    );
-
-    if (!files.length) return;
-
-    addFiles(files);
+    intake(Array.from(e.dataTransfer.files));
   };
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter(
-      (file) => file.type.startsWith('image/') || file.type.startsWith('video/'),
-    );
-
-    if (!files.length) return;
-
-    addFiles(files);
+    intake(Array.from(e.target.files || []));
     // Reset input so the same file can be selected again
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
@@ -101,6 +118,20 @@ export function DragDropArea({
         onChange={handleFileInputChange}
       />
 
+      {/* ОТБРОШЕННОЕ НАЗЫВАЕТСЯ ПО ИМЕНИ. Бросили десять файлов, два из них PDF — до этого про них
+          не говорилось нигде: ни счётчика, ни имени, ни причины. */}
+      {skipped.length > 0 && (
+        <CalloutBox tone='note' className='col-span-full flex flex-wrap items-center gap-2'>
+          <Text size='micro' variant='label' component='p'>
+            skipped {skipped.length} {skipped.length === 1 ? 'file' : 'files'}:{' '}
+            {skipped.map((file) => `${file.name} (${file.why})`).join(' · ')}
+          </Text>
+          <Button size='xs' variant='secondary' className='ml-auto' onClick={dismissSkipped}>
+            got it
+          </Button>
+        </CalloutBox>
+      )}
+
       {showAddTile && mediaLength > 0 && (
         <button
           type='button'
@@ -120,14 +151,18 @@ export function DragDropArea({
 
       {children}
 
-      {mediaLength === 0 && !previews.length && (
+      {mediaLength === 0 && !previews.length && noMatch && (
+        <div className='col-span-full'>{noMatch}</div>
+      )}
+
+      {mediaLength === 0 && !previews.length && !noMatch && (
         <button
           type='button'
           onClick={handleAddButtonClick}
           style={PLACEHOLDER_SURFACE}
           className={cn(
             placeholderClass({ dashed: true }),
-            'col-span-2 min-h-[300px] cursor-pointer flex-col gap-2 text-labelColor transition-colors hover:border-textColor hover:text-textColor lg:col-span-4',
+            'col-span-full min-h-[300px] cursor-pointer flex-col gap-2 text-labelColor transition-colors hover:border-textColor hover:text-textColor',
           )}
         >
           <span className='text-lg leading-none'>+</span>
@@ -138,17 +173,20 @@ export function DragDropArea({
         </button>
       )}
       {showAddButton && (
+        // Плавающая кнопка — липкая мебель страницы, а не модалка: сырой `z-50` объявлял её
+        // слоем диалогов и клал бы поверх любого открытого. Слой берётся из семантической шкалы.
         <Button
           onClick={handleAddButtonClick}
           variant='main'
           size='lg'
-          className='fixed bottom-2 right-2 z-50'
+          className='fixed bottom-2 right-2 z-[var(--z-sticky)]'
         >
           add
         </Button>
       )}
 
       {isDragging && (
+        // z-10 — локальный стек самой зоны (плёнка поверх её плиток), не слой страницы.
         <div className='pointer-events-none absolute inset-0 z-10 flex items-center justify-center border-2 border-dashed border-textInactiveColor bg-bgColor/90'>
           <span className='uppercase text-textColor'>drop files to upload</span>
         </div>

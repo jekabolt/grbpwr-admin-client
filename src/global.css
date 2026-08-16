@@ -83,8 +83,12 @@
   --color-overlay: rgba(0, 0, 0, 0.4);
 
   /* Z-INDEX SCALE (semantic — reference via z-[var(--z-*)])
-     sticky page chrome < nav < modal < popover-in-modal < toast */
+     sticky page chrome < bottom dock < nav < modal < popover-in-modal < toast */
   --z-sticky: 20;
+  /* Fixed bottom bar of the page (the media upload queue). Furniture, NOT a toast: it runs in the
+     background and asks nothing, so it must sit BELOW --z-modal — on the toast layer it covered the
+     footer, and therefore both buttons, of every dialog opened over it. */
+  --z-dock: 40;
   --z-nav: 45; /* top nav bar + its dropdowns: above page chrome, below modals */
   --z-modal: 50;
   --z-popover: 60; /* selects / date / entity pickers opened inside a modal */
@@ -144,6 +148,16 @@ body {
      the UI its "sheet of paper" read. Layout must not paint white over this. */
   background: var(--color-pageBg);
   color: var(--color-textColor);
+}
+
+/* A FIXED BOTTOM DOCK OWNS THE BOTTOM OF THE VIEWPORT, SO EVERYTHING PINNED THERE MOVES UP.
+   The dock (media upload queue) declares its height in --dock-bottom-h and sets data-dock-bottom on
+   <body> while it stands. Its body padding-bottom only lifts what is in FLOW; a `sticky bottom-0`
+   bar is pinned to the SCROLLPORT and knows nothing about that padding — the media bulk-selection
+   bar went under the dock, and its buttons were reachable only at the very bottom of the scroll.
+   Footers inside a dialog are excluded: the dock lies below --z-modal and never covers them. */
+body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
+  bottom: var(--dock-bottom-h, 0px);
 }
 
 /* Print: the canvas must not come out grey, and hairlines must survive at print

@@ -17,6 +17,19 @@ export interface MediaViewerItem {
   type?: 'image' | 'video';
   /** Accessible label / caption. */
   alt?: string;
+  /**
+   * Всё, что бакет знает о файле. Панель сведений в просмотрщике появилась потому, что до неё
+   * эти цифры жили в отдельном диалоге `PreviewMedia`, который открывался ВМЕСТО просмотрщика и
+   * показывал миниатюру 480px, растянутую в коробку 500×400. Открывать одно, чтобы посмотреть
+   * снимок, и другое, чтобы узнать его размер, — две двери в одну комнату.
+   */
+  meta?: {
+    id?: number;
+    createdAt?: string;
+    blurhash?: string;
+    /** Размеры, которые бакет держит на один объект: оригинал, сжатое, миниатюра. */
+    renditions?: { label: string; url?: string; width?: number; height?: number }[];
+  };
 }
 
 /** Map a proto `common_MediaFull` to a viewer item (full-size preferred, thumb for the strip). */
@@ -25,7 +38,29 @@ export function mediaFullToViewerItem(m: common_MediaFull): MediaViewerItem {
   const src =
     media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
   const thumbnail = media?.thumbnail?.mediaUrl || media?.compressed?.mediaUrl || src;
-  return { src, thumbnail, type: isVideo(src) ? 'video' : 'image', alt: media?.blurhash || '' };
+  return {
+    src,
+    thumbnail,
+    type: isVideo(src) ? 'video' : 'image',
+    alt: media?.blurhash || '',
+    meta: {
+      id: m.id,
+      createdAt: m.createdAt,
+      blurhash: media?.blurhash,
+      renditions: [
+        { label: 'original', info: media?.fullSize },
+        { label: 'compressed', info: media?.compressed },
+        { label: 'thumbnail', info: media?.thumbnail },
+      ]
+        .filter((r) => r.info?.mediaUrl)
+        .map((r) => ({
+          label: r.label,
+          url: r.info?.mediaUrl,
+          width: r.info?.width,
+          height: r.info?.height,
+        })),
+    },
+  };
 }
 
 export function mediaFullListToViewerItems(list: common_MediaFull[]): MediaViewerItem[] {
@@ -40,6 +75,46 @@ export function resolveViewerType(item: MediaViewerItem): 'image' | 'video' {
 function annotatedFileName(src: string): string {
   const base = src.split('?')[0]?.split('/').pop() || 'image';
   return `${base.replace(/\.[^.]+$/, '') || 'image'}-annotated.png`;
+}
+
+/**
+ * Кнопка тёмного хрома просмотрщика — и для собственных кнопок, и для тех, что владелец снимка
+ * передаёт через `actions`.
+ *
+ * Светлый `Button` здесь не годится: у всех его вариантов ink-текст, и на чёрной сцене подпись
+ * пропадает. Каждое место, где нужна кнопка поверх снимка, рисовало её своими классами —
+ * четырьмя копиями одной строки.
+ *
+ * ДВЕ СТУПЕНИ ЛИНИЙ, как в светлой системе: `/40` — внешний контур контрола (роль `#ccc`),
+ * `/20` — внутренняя линейка между строками панели (роль `#e6e6e6`).
+ */
+export function ViewerAction({
+  children,
+  selected,
+  className,
+  ...props
+}: {
+  children: ReactNode;
+  /** Нажатое состояние: заливка выворачивается, как у выбранного чипа. */
+  selected?: boolean;
+  className?: string;
+} & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type='button'
+      {...props}
+      className={cn(
+        'border px-2 py-1 text-micro uppercase leading-4 tracking-label transition-colors',
+        'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor',
+        selected
+          ? 'border-bgColor bg-bgColor text-textColor'
+          : 'border-bgColor/40 hover:bg-bgColor hover:text-textColor',
+        className,
+      )}
+    >
+      {children}
+    </button>
+  );
 }
 
 /** Small controller so a gallery can open the viewer at a given index with one call. */
@@ -59,6 +134,12 @@ interface MediaViewerProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onIndexChange: (index: number) => void;
+  /**
+   * Действия владельца над текущим кадром (кадрировать, удалить). Просмотрщик их не знает и не
+   * умеет: он показывает, а мутации живут у того, кто им владеет. Библиотека передаёт свои,
+   * галерея тех-карты не передаёт ничего.
+   */
+  actions?: (item: MediaViewerItem, index: number) => ReactNode;
   // РАНЬШЕ ЗДЕСЬ БЫЛ `renderOverlay` — крючок, которым галерея эскиза рисовала поверх снимка СВОЮ
   // копию указаний: он умел показывать, но не править, и расходился с плиткой на каждой правке.
   // Теперь увеличенный вид указаний это `annotation/zoom-dialog` — та же поверхность, что и на
@@ -71,7 +152,9 @@ export function MediaViewer({
   open,
   onOpenChange,
   onIndexChange,
+  actions,
 }: MediaViewerProps) {
+  const [showMeta, setShowMeta] = useState(false);
   const count = items.length;
   const hasMany = count > 1;
   // Clamp defensively — the list can shrink (a delete) while the viewer is open.
@@ -150,19 +233,38 @@ export function MediaViewer({
             {hasMany ? `Viewing item ${label}. Use the arrow keys to navigate.` : 'Viewing media.'}
           </Dialog.Description>
 
-          {/* Top chrome */}
-          <div className='relative z-10 flex shrink-0 items-center justify-between gap-4 px-4 py-3'>
+          {/* Top chrome. z-10 — ЛОКАЛЬНЫЙ СТЕК внутри просмотрщика (хром над сценой); слой самого
+              просмотрщика задан выше через var(--z-modal). */}
+          <div className='relative z-10 flex shrink-0 flex-wrap items-center gap-2 px-4 py-3'>
             <span className='text-textBaseSize uppercase tabular-nums'>
               {hasMany ? label : ' '}
             </span>
-            <Dialog.Close
-              aria-label='Close viewer'
-              className='flex size-8 items-center justify-center border border-bgColor/40 transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
-            >
-              <Cross2Icon className='size-4' />
-            </Dialog.Close>
+            {current.meta?.id != null && (
+              <span className='text-micro uppercase tracking-label tabular-nums text-bgColor/70'>
+                id {current.meta.id}
+              </span>
+            )}
+            <span className='ml-auto flex flex-wrap items-center gap-2'>
+              {actions?.(current, safeIndex)}
+              {current.meta && (
+                <ViewerAction
+                  aria-pressed={showMeta}
+                  selected={showMeta}
+                  onClick={() => setShowMeta((v) => !v)}
+                >
+                  details
+                </ViewerAction>
+              )}
+              <Dialog.Close
+                aria-label='Close viewer'
+                className='flex size-8 items-center justify-center border border-bgColor/40 transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
+              >
+                <Cross2Icon className='size-4' />
+              </Dialog.Close>
+            </span>
           </div>
 
+          <div className='flex min-h-0 flex-1'>
           {/* Stage — click on the empty ground (not the media) closes. Images get
               real pan/zoom (wheel, drag, pinch) and an optional draw overlay;
               video is untouched. */}
@@ -262,6 +364,9 @@ export function MediaViewer({
             )}
           </div>
 
+            {showMeta && current.meta && <MetaPanel meta={current.meta} />}
+          </div>
+
           {/* Filmstrip */}
           {hasMany && (
             <div className='flex shrink-0 items-center gap-1.5 overflow-x-auto px-4 py-3'>
@@ -317,6 +422,81 @@ export function MediaViewer({
   );
 }
 
+/**
+ * Сведения о файле рядом со снимком, а не в отдельном диалоге.
+ *
+ * Ровно эти строки раньше жили в `MediaInfo` внутри `PreviewMedia`: три колонки адресов и
+ * ничего больше — ни id, ни даты, ни blurhash, при том что открывался тот диалог по клику на
+ * плитку и был единственным способом что-то о снимке узнать. Панель тёмная, потому что стоит
+ * на тёмной сцене: белая колонка сбоку от снимка светила бы в глаза ровно там, куда смотрят.
+ */
+function MetaPanel({ meta }: { meta: NonNullable<MediaViewerItem['meta']> }) {
+  const [copied, setCopied] = useState<string | undefined>(undefined);
+  const copy = (url?: string) => {
+    if (!url) return;
+    navigator.clipboard?.writeText(url);
+    setCopied(url);
+    setTimeout(() => setCopied(undefined), 1200);
+  };
+  const created = meta.createdAt ? new Date(meta.createdAt) : undefined;
+
+  return (
+    <aside className='w-64 shrink-0 overflow-y-auto border-l border-bgColor/20 px-3 py-2'>
+      {/* ДВЕ СТУПЕНИ СЕРОГО НА ВСЮ ПАНЕЛЬ: значение — белое, подпись — `/70`, линейка — `/20`.
+          Раньше их было четыре (/60 /40 /20 /10), и читаемый текст стоял на самой слабой. */}
+      <div className='mb-1 border-b border-bgColor/20 pb-0.5 text-micro uppercase tracking-group text-bgColor/70'>
+        details
+      </div>
+      <dl className='mb-3'>
+        <MetaRow label='id' value={meta.id ?? '—'} />
+        <MetaRow
+          label='uploaded'
+          value={created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString() : '—'}
+        />
+        <MetaRow label='blurhash' value={meta.blurhash ? `${meta.blurhash.slice(0, 10)}…` : '—'} />
+      </dl>
+
+      {!!meta.renditions?.length && (
+        <>
+          <div className='mb-1 border-b border-bgColor/20 pb-0.5 text-micro uppercase tracking-group text-bgColor/70'>
+            sizes in the bucket
+          </div>
+          {meta.renditions.map((r) => (
+            <div
+              key={r.label}
+              className='flex items-center gap-2 border-b border-bgColor/20 py-1 text-micro'
+            >
+              <span className='w-20 shrink-0 uppercase tracking-label text-bgColor/70'>
+                {r.label}
+              </span>
+              <span className='tabular-nums'>
+                {r.width && r.height ? `${r.width}×${r.height}` : '—'}
+              </span>
+              <ViewerAction
+                onClick={() => copy(r.url)}
+                title='copy url'
+                aria-label={`copy url: ${r.label}`}
+                className='ml-auto px-1.5 py-0'
+              >
+                {copied === r.url ? 'ok' : 'url'}
+              </ViewerAction>
+            </div>
+          ))}
+        </>
+      )}
+    </aside>
+  );
+}
+
+function MetaRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className='flex justify-between gap-2 border-b border-bgColor/20 py-1 text-micro'>
+      <dt className='uppercase tracking-label text-bgColor/70'>{label}</dt>
+      <dd className='tabular-nums'>{value}</dd>
+    </div>
+  );
+}
+
 function ArrowButton({
   side,
   onClick,
@@ -331,6 +511,7 @@ function ArrowButton({
       aria-label={side === 'left' ? 'Previous' : 'Next'}
       onClick={onClick}
       className={cn(
+        // z-10 — локальный стек сцены (стрелка над снимком), не слой страницы.
         'absolute top-1/2 z-10 flex size-9 -translate-y-1/2 items-center justify-center',
         'border border-bgColor/40 bg-black/40 text-bgColor backdrop-blur-sm transition-colors',
         'hover:bg-bgColor hover:text-textColor',

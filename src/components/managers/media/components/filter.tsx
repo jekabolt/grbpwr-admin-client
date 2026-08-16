@@ -1,44 +1,42 @@
 import Input from 'ui/components/input';
 import Selector from 'ui/components/selector';
-import { FILTER_TYPES, FilterType, SORT_ORDERS, SortOrder } from '../utils/useFilter';
+import { SortOrder, SORT_ORDERS } from '../utils/useFilter';
 
-interface FilterProps {
-  type: FilterType;
+/**
+ * Поиск и порядок в шапке библиотеки. Тип медиа и соотношение живут в рельсе слева: там у них
+ * есть счётчики, а выпадающий список без счётчика не отвечает на вопрос «а есть ли вообще».
+ */
+export function Filter({
+  order,
+  search,
+  setOrder,
+  setSearch,
+}: {
   order: SortOrder;
   search: string;
-  setType: (type: FilterType) => void;
   setOrder: (order: SortOrder) => void;
   setSearch: (search: string) => void;
-}
-
-export function Filter({ type, order, search, setType, setOrder, setSearch }: FilterProps) {
+}) {
   return (
     <div className='flex flex-row flex-wrap gap-2'>
-      <div className='w-40'>
-        {/* No filename metadata exists on media (uploads never carry one, see useUploadMedia) —
-            this matches against each item's own id/url, the only text it has. */}
+      <div className='w-48'>
+        {/* Имени у медиа нет: загрузка отдаёт бакету сырые байты и не сохраняет его (см.
+            useUploadMedia). Искать можно только по тому тексту, который у объекта реально
+            есть, — по его id и адресу. */}
         <Input
           name='mediaSearch'
           type='text'
           value={search}
-          placeholder='search by id or url'
-          aria-label='search media'
+          placeholder='id or url'
+          aria-label='search the media library'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
-        />
-      </div>
-      <div className='w-32'>
-        <Selector
-          label='Media Type'
-          value={type}
-          options={FILTER_TYPES.map((type) => ({ label: type, value: type }))}
-          onChange={(value) => setType(value)}
         />
       </div>
       <div className='w-28'>
         <Selector
           label='Order'
           value={order}
-          options={SORT_ORDERS.map((order) => ({ label: order, value: order }))}
+          options={SORT_ORDERS.map((o) => ({ label: o, value: o }))}
           onChange={(value) => setOrder(value)}
         />
       </div>
