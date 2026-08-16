@@ -504,6 +504,10 @@ export function AnnotationSurface({
   }, []);
 
   function onFramePointerDown(e: ReactPointerEvent) {
+    // Эхо прошлого перетаскивания снимается ЗДЕСЬ, а не только там, где его читают: жест,
+    // кончившийся мимо плашки, оставлял флаг поднятым, и следующий клик по совсем другой выноске
+    // молча проглатывался.
+    justDragged.current = false;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
     // ЩИПОК ОТМЕНЯЕТ НЕЗАКОНЧЕННЫЙ ШТРИХ. Полштриха, закоммиченного вторым пальцем, человек не
@@ -680,8 +684,10 @@ export function AnnotationSurface({
       const dx = p.x - d.from.x;
       const dy = p.y - d.from.y;
       if (!d.moved && Math.hypot(dx * size.w, dy * size.h) <= CLICK_MOVE_THRESHOLD) return;
-      setDragBoth({ ...d, moved: true, from: d.from, base: d.base });
+      // Смещение — ПЕРЕД состоянием: его читает отрисовка во время рендера, и обратный порядок
+      // держался бы только на том, что React рендерит после обработчика.
       lastShapeDelta.current = { x: dx, y: dy };
+      setDragBoth({ ...d, moved: true, from: d.from, base: d.base });
     };
     const up = () => {
       const d = dragRef.current;
@@ -864,7 +870,11 @@ export function AnnotationSurface({
         className={cn(
           'relative select-none border border-borderColor bg-bgZebra',
           heightPx != null && 'w-fit',
-          zoom && 'touch-none overflow-hidden',
+          // `touch-action` объявляется ЗАРАНЕЕ: браузер выбирает поведение жеста в момент касания,
+          // и запрет, выставленный позже, уже ничего не решает — палец уводит страницу в
+          // прокрутку, прилетает pointercancel, и полштриха теряется.
+          (zoom || placing) && 'touch-none',
+          zoom && 'overflow-hidden',
           frameClassName,
           cursorClass,
         )}
@@ -959,14 +969,17 @@ export function AnnotationSurface({
                   const pts = pointsOf(c).map(px);
                   const d = hitPath(c.kind, pts, px(labelOf(c)));
                   if (!d) return null;
+                  // Заштрихованная зона ловится ПО ПЛОЩАДИ: когда область закрашена, целятся в неё,
+                  // а не в двухпиксельный контур по краю.
+                  const byArea = kindDef(c.kind).key === 'polygon' && !!c.filled;
                   return (
                     <path
                       key={`hit:${c.key}`}
                       d={d}
-                      fill='none'
+                      fill={byArea ? 'transparent' : 'none'}
                       stroke='transparent'
                       strokeWidth={HIT_WIDTH}
-                      style={{ pointerEvents: 'stroke', cursor: 'pointer' }}
+                      style={{ pointerEvents: byArea ? 'all' : 'stroke', cursor: 'pointer' }}
                       onPointerEnter={() => setHovered(c.key)}
                       onPointerLeave={() => setHovered((h) => (h === c.key ? null : h))}
                       onPointerDown={(e) => {
@@ -1252,6 +1265,9 @@ function PinMarker({
       title={title}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
+      // Нажатие не доходит до кадра: иначе оно завело бы там жест панорамы, а его отпускание —
+      // снятие выбора, которое тут же отменяло бы выбор, сделанный кликом по этому же маркеру.
+      onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => {
         e.stopPropagation();
         onPress();
