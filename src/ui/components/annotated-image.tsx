@@ -301,7 +301,23 @@ export function ImageCallout({
         {/* pin, centred on the anchor */}
         <Popover.Root open={!showAll && open} onOpenChange={(o) => (o ? openNow() : close())}>
           <Popover.Anchor asChild>
-            <div className='pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2'>
+            {/* НАВЕДЕНИЕ ЖИВЁТ НА ОБЁРТКЕ, А НЕ НА КНОПКЕ. Эскиз выпущенной карточки лежит внутри
+                общего `<fieldset disabled>`, а задизейбленность НАСЛЕДУЕТСЯ: нативный `<button>`
+                под таким предком не получает ни клика, ни `pointerenter`. На кнопке висело сразу
+                два ЧИТАТЕЛЬСКИХ жеста — всплытие записки и изоляция пересекающихся фигур, — и оба
+                умирали ровно там, где карточку только и остаётся что читать. Правка (перетаскивание
+                пина, клик-закрепление) остаётся на кнопке: её глушить как раз правильно. */}
+            <div
+              className='pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2'
+              onPointerEnter={() => {
+                onHoverChange?.(true);
+                if (!showAll) openNow();
+              }}
+              onPointerLeave={() => {
+                onHoverChange?.(false);
+                if (!showAll) closeSoon();
+              }}
+            >
               <CalloutPin
                 ref={pinRef}
                 number={data.number}
@@ -312,14 +328,6 @@ export function ImageCallout({
                 aria-label={`callout ${data.number}${data.hasText ? '' : ' (no note yet)'}`}
                 aria-expanded={showAll ? undefined : open}
                 onPointerDown={editable ? onPinPointerDown : undefined}
-                onPointerEnter={() => {
-                  onHoverChange?.(true);
-                  if (!showAll) openNow();
-                }}
-                onPointerLeave={() => {
-                  onHoverChange?.(false);
-                  if (!showAll) closeSoon();
-                }}
                 onFocus={showAll ? undefined : openNow}
                 onBlur={showAll ? undefined : closeSoon}
                 onClick={(e) => {

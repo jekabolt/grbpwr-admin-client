@@ -347,6 +347,40 @@ export function useTechCardDraft(
         return (changed ? merged : p) as typeof p;
       });
     }
+    // ВЫНОСКИ ЭСКИЗА: та же болезнь, что у деталей выше, и то же лекарство. С 0309 указание несёт
+    // вид, якоря и цвет, и все три уезжают на провод КРУГЛЫМ РЕЙСОМ — значит zod-дефолт на месте
+    // отсутствующего ключа это не молчание, а команда «сделай обратно точкой». Черновик, снятый до
+    // геометрии (или любым бандлом, который её не знает), после восстановления стёр бы КАЖДУЮ
+    // мерку и скобку на эскизе — сохранением, которое эскиз даже не открывало.
+    //
+    // Ключ сопоставления — НОМЕР выноски: другой идентичности у неё нет, и именно номером на неё
+    // ссылаются деталь, операция и дефект. Тем же номером переносит хранимую геометрию сервер
+    // (CarryOmittedCalloutGeometry), так что обе стороны сопоставляют одинаково.
+    if (Array.isArray(data.callouts) && Array.isArray(loaded.callouts)) {
+      type LoadedCallout = NonNullable<typeof loaded.callouts>[number];
+      const loadedByNumber = new Map<number, LoadedCallout>();
+      for (const c of loaded.callouts) {
+        const n = c.number ?? 0;
+        // Первый выигрывает: номера уникальны по смыслу, а дубль — испорченные данные, на которых
+        // перенос обязан быть детерминированным.
+        if (n > 0 && !loadedByNumber.has(n)) loadedByNumber.set(n, c);
+      }
+      data.callouts = data.callouts.map((c) => {
+        const from = loadedByNumber.get(c.number ?? 0);
+        // Номера нет на карточке — выноска заведена в самом черновике, и все свои поля она
+        // проставила явно. Переносить нечего.
+        if (!from) return c;
+        const merged = { ...c } as Record<string, unknown>;
+        let changed = false;
+        for (const k of Object.keys(from)) {
+          if (k in (c as object)) continue;
+          merged[k] = (from as Record<string, unknown>)[k];
+          changed = true;
+        }
+        return (changed ? merged : c) as typeof c;
+      });
+    }
+
     // ОПЕРАЦИИ: pieceLineKeys → inputKeys (0307). Черновик, снятый до узлов сборки, несёт входы
     // шага под старым именем, и восстановление БЕЗ этого переноса стало бы командой «сотри все
     // привязки деталей к шагам»: restore заканчивается form.reset(data) МИМО mapTechCardToForm,

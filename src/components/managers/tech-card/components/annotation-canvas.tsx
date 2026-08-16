@@ -95,6 +95,33 @@ type PlateDrag = {
 /** Порог, разводящий клик по плашке и её перетаскивание, в долях кадра. */
 const PLATE_DRAG_THRESHOLD = 0.01;
 
+/**
+ * РЕЕСТР ЖИВЫХ ХОЛСТОВ — «правка ровно одна на экране».
+ *
+ * До полосы кадров холст был на экране один, и локальные `selected`/`points` были локальными по
+ * факту. Теперь их до десяти сразу (плюс одиннадцатый в зуме), и локальность превращается в три
+ * дефекта: выбор на кадре A не снимается выбором на кадре B, поэтому Delete срабатывает у ОБОИХ
+ * слушателей window и уносит две выноски с разных снимков; наполовину набранная мерка на A
+ * достраивается кликом по A уже после того, как человек начал новую на B; а `selected` — ИНДЕКС,
+ * и удаление в зуме сдвигает индекс наружного холста на чужую выноску, которую следующая же
+ * правка текста перезапишет.
+ *
+ * Лечится одним правилом: холст, начавший правку, гасит правку у всех остальных. Реестр модульный,
+ * потому что холсты не знают друг о друге и знать не должны — их родители разные (полоса шага,
+ * галерея эскиза, диалог зума).
+ */
+type CanvasClaim = { clearSelection: () => void; clearPoints: () => void };
+const liveCanvases = new Set<CanvasClaim>();
+
+/** Отдать правку себе: у всех прочих холстов гаснет и выбор, и незавершённый жест. */
+function claimEditing(me: CanvasClaim) {
+  for (const other of liveCanvases) {
+    if (other === me) continue;
+    other.clearSelection();
+    other.clearPoints();
+  }
+}
+
 const num = (v?: string) => {
   const n = Number((v ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
@@ -183,8 +210,26 @@ export function AnnotationCanvas({
   // Замыкание слушателей window живёт дольше рендера, поэтому «можно ли писать» и КУДА писать
   // читаются из ref'ов, а не из замыкания: карточку могли выпустить, пока палец на плашке, и
   // старый обработчик записал бы координаты в уже замороженную форму.
-  const liveRef = useRef({ editable, onChange });
-  liveRef.current = { editable, onChange };
+  const liveRef = useRef({ editable, onChange, annotations });
+  liveRef.current = { editable, onChange, annotations };
+
+  // ЗАЯВКА НА ПРАВКУ. Идентичность стабильна на всю жизнь холста, а функции внутри читают свежие
+  // сеттеры — реестр хранит ОДИН объект и не пересобирается на каждый рендер.
+  const claimRef = useRef<CanvasClaim>({ clearSelection: () => {}, clearPoints: () => {} });
+  claimRef.current.clearSelection = () => setSelected(null);
+  claimRef.current.clearPoints = () => setPoints([]);
+  useEffect(() => {
+    const me = claimRef.current;
+    liveCanvases.add(me);
+    return () => {
+      liveCanvases.delete(me);
+    };
+  }, []);
+  /** Выбрать выноску ЗДЕСЬ — и погасить правку на всех остальных холстах. */
+  const selectHere = useCallback((next: number | null) => {
+    if (next !== null) claimEditing(claimRef.current);
+    setSelected(next);
+  }, []);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -295,14 +340,19 @@ export function AnnotationCanvas({
     };
   }, [dragActive, commitDrag, annotations]);
 
-  const commit = (next: AnnotationForm[]) => onChange?.(next);
+  // ЗАПИСЬ ИДЁТ ЧЕРЕЗ liveRef, А НЕ ЧЕРЕЗ ЗАМЫКАНИЕ. Слушатель клавиатуры подписан на window и
+  // пересоздаётся только когда меняются его зависимости; проп `onChange` полосы несёт ИНДЕКС
+  // кадра, и после перестановки стрелками (`move`) сам кадр остаётся тем же (ключ — media_id), а
+  // индекс в нём уже чужой. Стрелка «раньше» и следом Delete записывали массив выносок этого
+  // снимка в тот, что занял его место, — потеря без единого сообщения.
+  const commit = (next: AnnotationForm[]) => liveRef.current.onChange?.(next);
 
   const patch = (i: number, fields: Partial<AnnotationForm>) => {
-    commit(annotations.map((a, k) => (k === i ? { ...a, ...fields } : a)));
+    commit(liveRef.current.annotations.map((a, k) => (k === i ? { ...a, ...fields } : a)));
   };
 
   const remove = (i: number) => {
-    commit(annotations.filter((_, k) => k !== i));
+    commit(liveRef.current.annotations.filter((_, k) => k !== i));
     setSelected(null);
   };
 
@@ -315,7 +365,7 @@ export function AnnotationCanvas({
   const finishPlacing = (kind: AnnotationKind, pts: Pt[]) => {
     const [min] = ANNOTATION_POINTS[kind];
     if (pts.length < min) return;
-    if (annotations.length >= MAX_ANNOTATIONS) {
+    if (liveRef.current.annotations.length >= MAX_ANNOTATIONS) {
       clearPlacing();
       return;
     }
@@ -332,10 +382,11 @@ export function AnnotationCanvas({
       color: '',
       pieceLineKey: '',
     };
-    commit([...annotations, next]);
+    const before = liveRef.current.annotations;
+    commit([...before, next]);
     clearPlacing();
     // Выбор сразу — третий такт жеста «клик-клик-ввод»: поле подписи открывается само.
-    setSelected(annotations.length);
+    selectHere(before.length);
   };
 
   const onCanvasClick = (e: React.MouseEvent) => {
@@ -345,6 +396,9 @@ export function AnnotationCanvas({
       x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
       y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
     };
+    // Первая точка ЗДЕСЬ отменяет наполовину набранное у соседей: жест принадлежит одному снимку,
+    // и мерка, начатая на кадре A, не должна ждать своего второго клика, пока человек рисует на B.
+    if (points.length === 0) claimEditing(claimRef.current);
     const next = [...points, p];
     const [, max] = ANNOTATION_POINTS[placingKind];
     if (next.length >= max) finishPlacing(placingKind, next);
@@ -473,12 +527,12 @@ export function AnnotationCanvas({
                     justDragged.current = false;
                     return;
                   }
-                  if (editable) setSelected(selected === i ? null : i);
+                  if (editable) selectHere(selected === i ? null : i);
                 }}
                 onKeyDown={(e) => {
                   if (!editable || (e.key !== 'Enter' && e.key !== ' ')) return;
                   e.preventDefault();
-                  setSelected(selected === i ? null : i);
+                  selectHere(selected === i ? null : i);
                 }}
                 className={cn(
                   'absolute max-w-[45%] -translate-x-1/2 -translate-y-1/2 cursor-pointer border bg-bgColor px-1 py-px text-left text-nano leading-tight',
@@ -542,12 +596,12 @@ export function AnnotationCanvas({
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (editable) setSelected(selected === i ? null : i);
+                  if (editable) selectHere(selected === i ? null : i);
                 }}
                 onKeyDown={(e) => {
                   if (!editable || (e.key !== 'Enter' && e.key !== ' ')) return;
                   e.preventDefault();
-                  setSelected(selected === i ? null : i);
+                  selectHere(selected === i ? null : i);
                 }}
                 title={titleOf(a, `выноска ${pinNumber(annotations, i)}`)}
                 className={cn(
@@ -576,12 +630,55 @@ export function AnnotationCanvas({
               <FrameButton
                 label='зум'
                 title='открыть снимок во весь экран — там же и ставить указания точнее'
-                onPress={() => setZoomOpen(true)}
+                onPress={() => {
+                  // ЗУМ ОБРЫВАЕТ НЕЗАВЕРШЁННУЮ ПОСТАНОВКУ. Полноэкранный холст — отдельная
+                  // поверхность со своей панелью видов и своими точками; продолжить в нём мерку,
+                  // начатую на миниатюре, нечем, а оставить режим включённым значило бы, что после
+                  // закрытия зума первый же клик по кадру уронит на него постороннюю фигуру.
+                  if (placingKind) clearPlacing();
+                  setZoomOpen(true);
+                }}
               />
             )}
           </div>
         )}
       </div>
+
+      {/* ПОЛОСА ПРЯЧЕТ СВОЙ ТУЛБАР — вместе с ним пряталось и «готово». У мультилидера якорей от
+          двух до восьми, и без этой кнопки закончить его раньше ВОСЬМИ было нечем: жест завершался
+          только по достижению максимума. Здесь же говорится и про упёршийся предел — иначе выбор
+          вида на полном снимке просто ничего не делал бы, молча. */}
+      {editable && !toolbar && (annotations.length >= MAX_ANNOTATIONS || placingKind) && (
+        <ChipRow>
+          {annotations.length >= MAX_ANNOTATIONS ? (
+            <Text size='micro' variant='label' component='span'>
+              на этом снимке уже {MAX_ANNOTATIONS} выносок — дальше их не прочесть
+            </Text>
+          ) : (
+            <>
+              <Text size='micro' variant='label' component='span'>
+                {placingHint(placingKind as AnnotationKind, points.length)}
+              </Text>
+              {points.length >= ANNOTATION_POINTS[placingKind as AnnotationKind][0] &&
+                ANNOTATION_POINTS[placingKind as AnnotationKind][0] !==
+                  ANNOTATION_POINTS[placingKind as AnnotationKind][1] && (
+                  <Chip
+                    nonForm
+                    onClick={() => finishPlacing(placingKind as AnnotationKind, points)}
+                    title='закончить постановку'
+                  >
+                    готово · {points.length}
+                  </Chip>
+                )}
+              {points.length > 0 && (
+                <Chip nonForm dashed onClick={clearPlacing} title='отменить постановку'>
+                  отменить
+                </Chip>
+              )}
+            </>
+          )}
+        </ChipRow>
+      )}
 
       {editable && selected !== null && annotations[selected] && (
         <AnnotationEditor

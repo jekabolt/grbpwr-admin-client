@@ -124,6 +124,7 @@ function TechCardGallery({
   emptyLabel,
   addLabel,
   purpose,
+  frozen,
 }: {
   listName: MediaListName;
   mediaById: Map<number, common_MediaFull>;
@@ -133,6 +134,8 @@ function TechCardGallery({
   emptyLabel: string;
   addLabel: string;
   purpose: string;
+  /** Выпущенная карточка: гасит ⌘V, который `<fieldset disabled>` не глушит. */
+  frozen: boolean;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const mediaFA = useFieldArray({ control, name: listName });
@@ -215,6 +218,12 @@ function TechCardGallery({
         setValue(`callouts.${ci}.mediaId`, 0, { shouldDirty: true });
         setValue(`callouts.${ci}.posX`, '', { shouldDirty: true });
         setValue(`callouts.${ci}.posY`, '', { shouldDirty: true });
+        // ЯКОРЯ УХОДЯТ ВМЕСТЕ С КАРТИНКОЙ. Доли кадра осмысленны только на СВОЁМ снимке: оставить
+        // их значило бы, что открепившаяся мерка, приколотая потом к другому эскизу, ляжет по
+        // координатам удалённого — с виду нормальная линия, указывающая не туда. Текст выноски
+        // при этом остаётся: его писал человек, и он переживает картинку.
+        setValue(`callouts.${ci}.kind`, 'pin', { shouldDirty: true });
+        setValue(`callouts.${ci}.points`, [], { shouldDirty: true });
       }
     });
   }
@@ -313,6 +322,7 @@ function TechCardGallery({
       onAddCallout={addCalloutTo}
       calloutKinds={CALLOUT_KINDS}
       onAddShape={addShapeTo}
+      readOnly={frozen}
       onMoveCallout={(key, x, y) => {
         const i = keyToIndex.get(key);
         if (i == null) return;
@@ -604,6 +614,16 @@ function CalloutsList({
                   label='pinned to'
                   items={pinOptions}
                   valueAsNumber
+                  // ЯКОРЯ НЕ ПЕРЕЕЗЖАЮТ ВМЕСТЕ С УКАЗАНИЕМ. Доли кадра осмысленны только на своём
+                  // снимке: перепривязанная мерка легла бы на новый эскиз по координатам старого —
+                  // с виду нормальная линия, указывающая не туда, и заметить это нечем. Переставить
+                  // якоря отсюда нельзя (их ставят кликами по картинке), поэтому фигура честно
+                  // разжалуется в точку, а нарисовать её заново — три клика.
+                  onAfterChange={() => {
+                    if ((callouts[index]?.points?.length ?? 0) === 0) return;
+                    setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
+                    setValue(`callouts.${index}.points`, [], { shouldDirty: true });
+                  }}
                 />
                 {/* The measurement the callout carries (ширина кармана, длина планки…). It
                     round-trips and prints on the tech pack, but nothing in this editor could
@@ -709,6 +729,11 @@ function CalloutPartPicker({
 // Вид и цвет указания. Вид только читается: фигуру рисуют кликами по картинке, и «сменить вид» в
 // списке означало бы либо потерять якоря, либо принять их от другого вида — две точки мерки не
 // годятся началом дуги.
+//
+// ЧИПЫ ЗДЕСЬ ОБЫЧНЫЕ, а не `nonForm`. `nonForm` заведён ради того, что обязано РАБОТАТЬ на
+// выпущенной карточке (изоляция по наведению, зум): такой чип — span, и `<fieldset disabled>` его
+// не глушит. Здесь всё наоборот — это правка, и на выпущенной карточке она обязана быть глухой.
+// Поставить `nonForm` значило бы дать перекрасить и разжаловать указание в подписанном эскизе.
 function CalloutGeometryRow({
   kind,
   color,
@@ -728,7 +753,6 @@ function CalloutGeometryRow({
       {ANNOTATION_COLORS.map((c) => (
         <Chip
           key={c || 'ink'}
-          nonForm
           dashed={color !== c}
           onClick={() => onColor(c)}
           title={c ? 'цвет различает пересекающиеся указания' : 'чернильный — как всё на листе'}
@@ -742,7 +766,7 @@ function CalloutGeometryRow({
         </Chip>
       ))}
       {kind !== 'pin' && (
-        <Chip nonForm dashed onClick={onDemote} title='убрать фигуру, оставить нумерованную точку'>
+        <Chip dashed onClick={onDemote} title='убрать фигуру, оставить нумерованную точку'>
           сделать точкой
         </Chip>
       )}
@@ -787,9 +811,12 @@ export function SketchTab({
   techCard,
   view = 'sketch',
   active = false,
+  frozen = false,
 }: {
   techCard?: common_TechCard;
   view?: 'sketch' | 'moodboard';
+  /** Карточка выпущена и заморожена. Нужен ЯВНО: `<fieldset disabled>` не глушит ⌘V. */
+  frozen?: boolean;
   /** Вкладка на экране. Только она заказывает разбор чертежей — вкладки смонтированы все сразу,
    *  и качать мегабайты за того, кто сюда не заходил, незачем (тот же довод, что в CONSTRUCTION). */
   active?: boolean;
@@ -826,6 +853,7 @@ export function SketchTab({
           listName='moodboardMedia'
           mediaById={mediaById}
           onPickedMedia={onPicked}
+          frozen={frozen}
           notesMode='hover'
           pinSize='sm'
           emptyLabel='no moodboard images yet. add references to pin notes on them'
@@ -848,6 +876,7 @@ export function SketchTab({
         listName='technicalMedia'
         mediaById={mediaById}
         onPickedMedia={onPicked}
+        frozen={frozen}
         notesMode='auto'
         pinSize='md'
         emptyLabel='no sketches yet. add a technical drawing to place callouts on it'

@@ -562,6 +562,16 @@ export function TechPackDocument({
     }
     return m;
   }, [techCard.resolvedOperationMedia]);
+  // Имя детали кроя по её ключу — для указаний на снимках шага. Указание может называть деталь
+  // (`piece_line_key`), и на бумаге читается именно ИМЯ: ключ в цеху не значит ничего.
+  const pieceNameByKey = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const p of tc?.pieces ?? []) {
+      const k = p.lineKey?.trim();
+      if (k) byKey.set(k, p.name?.trim() || '(без имени)');
+    }
+    return (lineKey: string) => byKey.get(lineKey);
+  }, [tc?.pieces]);
   // detail reference images (and swatches) are library media ids not carried in the resolved
   // sketch maps — resolve them from the library so they print.
   const libraryMap = useMediaMap();
@@ -2524,6 +2534,11 @@ export function TechPackDocument({
                                     alt={m.caption || undefined}
                                     annotations={mediaAnnotations(m)}
                                     maxHeightClass='max-h-[120mm]'
+                                    // ИМЯ ДЕТАЛИ НА БУМАГЕ. Без резолвера связь «указание про эту
+                                    // деталь» хранится, но не читается: у пина, где заполнена
+                                    // только деталь, легенда пуста, а у остальных видов имя не
+                                    // показывается вовсе. Ключ в цеху не значит ничего — имя значит.
+                                    pieceLabel={pieceNameByKey}
                                   />
                                 </div>
                                 {m.caption?.trim() && (

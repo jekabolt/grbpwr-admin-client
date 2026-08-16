@@ -1742,11 +1742,16 @@ export function TechCardForm({
 
             {/* SKETCH */}
             <div hidden={activeTab !== 'sketch'}>
-              <SketchTab techCard={techCard} view='sketch' active={activeTab === 'sketch'} />
+              <SketchTab techCard={techCard} view='sketch' active={activeTab === 'sketch'} frozen={frozen} />
             </div>
 
             <div hidden={activeTab !== 'moodboard'}>
-              <SketchTab techCard={techCard} view='moodboard' active={activeTab === 'moodboard'} />
+              <SketchTab
+                techCard={techCard}
+                view='moodboard'
+                active={activeTab === 'moodboard'}
+                frozen={frozen}
+              />
             </div>
 
             {/* PATTERNS (size range + DXF выкройки по материалам) */}

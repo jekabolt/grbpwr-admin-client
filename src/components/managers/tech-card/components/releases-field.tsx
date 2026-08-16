@@ -382,6 +382,10 @@ function SnapshotOperations({
                   src={url}
                   alt={m.caption || undefined}
                   annotations={mediaAnnotations(m)}
+                  // Имя детали — ИЗ ЭТОГО ЖЕ СНАПШОТА, а не из живой карточки: подписан был тот
+                  // набор деталей, и переименованная сегодня деталь не имеет права переписать то,
+                  // что стоит под подписью. Без резолвера связь хранилась бы, но не читалась.
+                  pieceLabel={(k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || undefined}
                 />
                 {m.caption?.trim() && (
                   <Text size='nano' variant='label' className='mt-1'>

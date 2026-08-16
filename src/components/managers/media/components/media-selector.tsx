@@ -159,16 +159,30 @@ export function MediaSelector({
   //
   // Включено, только пока диалог открыт и не в режиме кропа: там ⌘V означал бы вставку поверх
   // кадрируемого снимка, а этого никто не просил.
-  const { pasting } = usePasteImage(open && !cropMedia, (media) => {
-    const m = media[0];
-    if (!m) return;
-    const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
-    if (oneAtATime && !isVideo(url) && !matchesRatio(m)) {
-      enterCrop(m);
-      return;
-    }
-    commitMedia(media);
-  });
+  const { pasting } = usePasteImage(
+    {
+      // ОЧЕРЕДЬ ДЕРЖИТСЯ ВСЁ ВРЕМЯ, ПОКА ДИАЛОГ ОТКРЫТ, а принимается вставка только вне кропа.
+      // Отдать очередь на время кадрирования значило бы уронить ⌘V в галерею ПОД диалогом: она
+      // осталась «горячей» (появление модалки само по себе не шлёт `pointerleave`), и картинка
+      // прикрепилась бы туда мимо кропа, ради которого диалог и открыт.
+      claims: open,
+      accepts: open && !cropMedia,
+      // Слот с фиксированным соотношением сторон и одиночный выбор принимают РОВНО ОДНУ картинку.
+      // Без предела хук загрузил бы все из буфера, а прикрепилась бы первая: остальные осели бы в
+      // библиотеке файлами, которых никто не просил.
+      limit: oneAtATime || !allowMultiple ? 1 : undefined,
+    },
+    (media) => {
+      const m = media[0];
+      if (!m) return;
+      const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
+      if (oneAtATime && !isVideo(url) && !matchesRatio(m)) {
+        enterCrop(m);
+        return;
+      }
+      commitMedia(media);
+    },
+  );
 
   const handleCropSave = async (croppedDataUrl: string) => {
     setIsUploading(true);

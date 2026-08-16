@@ -118,7 +118,15 @@ export function OperationMediaStrip({
   // ⌘V прямо в полосу: скриншот узла из мессенджера прикрепляется без похода в библиотеку.
   // Включён, только пока указатель внутри ЭТОЙ полосы, — иначе одна вставка ушла бы во все
   // тринадцать шагов сразу.
-  const { pasting } = usePasteImage(hot && !frozen && fields.length < MAX_MEDIA_PER_STEP, add);
+  const { pasting } = usePasteImage(
+    {
+      claims: hot && !frozen && fields.length < MAX_MEDIA_PER_STEP,
+      // Больше, чем осталось мест, не берём: `add` лишние всё равно отбросит, а загруженные файлы
+      // остались бы в библиотеке молча.
+      limit: MAX_MEDIA_PER_STEP - fields.length,
+    },
+    add,
+  );
 
   const list = (watched ?? []) as OperationMediaForm[];
   const full = fields.length >= MAX_MEDIA_PER_STEP;

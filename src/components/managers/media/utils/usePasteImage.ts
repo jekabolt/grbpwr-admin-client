@@ -1,5 +1,4 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useUploadMedia } from './useUploadMedia';
 
@@ -50,24 +49,44 @@ function imagesFromClipboard(data: DataTransfer | null): File[] {
   return out;
 }
 
+export type PasteImageOptions = {
+  /**
+   * Забрать очередь себе. Верхний в стопке ГЛОТАЕТ вставку целиком — даже когда сам её не
+   * принимает: диалог в режиме кадрирования обязан не пустить ⌘V вниз, в галерею под собой, иначе
+   * картинка прикрепится мимо кропа, ради которого диалог и открыт.
+   */
+  claims: boolean;
+  /** Реально загружать. По умолчанию — как `claims`. */
+  accepts?: boolean;
+  /**
+   * Сколько картинок взять из буфера. В буфере их бывает несколько, а слот с одной картинкой или
+   * шаг, у которого осталось одно место, примет ОДНУ — загрузить остальные значило бы засорить
+   * библиотеку файлами, которые никто не просил и никто не увидит.
+   */
+  limit?: number;
+};
+
 /**
  * Загружает картинку из буфера по ⌘V и отдаёт готовое медиа.
  *
- * @param enabled этот экран сейчас принимает вставку. Ровно один на странице.
  * @param onUploaded что делать с загруженным — прикрепить к шагу, выбрать в диалоге, добавить в
  *                   мудборд. Хук не знает, куда именно.
  */
 export function usePasteImage(
-  enabled: boolean,
+  options: boolean | PasteImageOptions,
   onUploaded: (media: common_MediaFull[]) => void,
 ): { pasting: boolean } {
+  const opts: PasteImageOptions = typeof options === 'boolean' ? { claims: options } : options;
+  const claims = opts.claims;
+  const accepts = opts.accepts ?? claims;
+  const limit = opts.limit;
+
   const [pasting, setPasting] = useState(false);
   const uploadMedia = useUploadMedia();
-  const { showMessage } = useSnackBarStore();
   // Замыкание слушателя живёт дольше рендера; колбэк владельца пересоздаётся на каждый — читаем
   // его из ref'а, иначе подписка пересоздавалась бы на каждом кадре и теряла бы вставку между.
-  const liveRef = useRef({ onUploaded, uploadMedia, showMessage });
-  liveRef.current = { onUploaded, uploadMedia, showMessage };
+  const liveRef = useRef({ onUploaded, uploadMedia, accepts, limit });
+  liveRef.current = { onUploaded, uploadMedia, accepts, limit };
   // Вторая вставка, пришедшая пока грузится первая, игнорируется: ⌘V удерживают, и повтор клавиши
   // прислал бы тот же скриншот дважды.
   const busyRef = useRef(false);
@@ -86,7 +105,12 @@ export function usePasteImage(
     }
     busyRef.current = false;
     setPasting(false);
-    if (added.length) liveRef.current.onUploaded(added);
+    // ПРАВО ПРИКРЕПИТЬ ПРОВЕРЯЕТСЯ В МОМЕНТ ПРИКРЕПЛЕНИЯ, а не в момент нажатия. Загрузка длится
+    // секунды, и за это время диалог успевают закрыть, вкладку — переключить, а карточку —
+    // выпустить. Дописать медиа в форму после этого значило бы, что закрытое окно всё-таки
+    // изменило документ. Файл при этом не пропадает: он уже в библиотеке.
+    if (!added.length || !liveRef.current.accepts) return;
+    liveRef.current.onUploaded(added);
   }, []);
 
   // Личность приёмника. Одна на всю жизнь хука, поэтому включение и выключение снимают ИМЕННО
@@ -94,17 +118,20 @@ export function usePasteImage(
   const idRef = useRef<symbol>(Symbol('paste'));
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!claims) return;
     const id = idRef.current;
     pasteStack.push(id);
     const onPaste = (e: ClipboardEvent) => {
       // Не моя очередь — молчу, но и не мешаю: событие уйдёт верхнему приёмнику.
       if (pasteStack[pasteStack.length - 1] !== id) return;
       if (isEditableTarget(e.target)) return;
-      const files = imagesFromClipboard(e.clipboardData);
-      if (files.length === 0) return;
+      const all = imagesFromClipboard(e.clipboardData);
+      if (all.length === 0) return;
+      // Очередь МОЯ — значит вставка гасится здесь, даже если принимать её я сейчас не готов.
       e.preventDefault();
-      void handle(files);
+      if (!liveRef.current.accepts) return;
+      const take = liveRef.current.limit;
+      void handle(take != null ? all.slice(0, Math.max(0, take)) : all);
     };
     document.addEventListener('paste', onPaste);
     return () => {
@@ -112,7 +139,7 @@ export function usePasteImage(
       const at = pasteStack.lastIndexOf(id);
       if (at >= 0) pasteStack.splice(at, 1);
     };
-  }, [enabled, handle]);
+  }, [claims, handle]);
 
   return { pasting };
 }
