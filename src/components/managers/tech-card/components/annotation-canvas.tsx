@@ -8,12 +8,13 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { ALL_KIND_KEYS, kindDef } from 'ui/components/annotation/kinds';
 import {
   ArrowMarkerDef,
   CalloutShape,
   CALLOUT_COLOR_HEX,
   PlacingShape,
-} from 'ui/components/annotation-shapes';
+} from 'ui/components/annotation/shapes';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
@@ -54,23 +55,15 @@ const MAX_ANNOTATIONS = 30;
 /** Цвета живут в общем примитиве фигур: их читает и карточный эскиз. */
 const COLOR_HEX = CALLOUT_COLOR_HEX;
 
-export const KIND_LABEL: Record<AnnotationKind, string> = {
-  pin: 'пин',
-  label: 'подпись',
-  dim: 'мерка',
-  bracket: 'участок',
-  multi: 'мультилидер',
-  arc: 'дуга',
-};
+// Подписи и подсказки видов — ИЗ РЕЕСТРА (ui/annotation/kinds), а не своим словарём. Свой словарь
+// приходилось дополнять при каждом новом виде, и забытая строка роняла экран прямой индексацией.
+export const KIND_LABEL: Record<string, string> = Object.fromEntries(
+  ALL_KIND_KEYS.map((k) => [k, kindDef(k).label]),
+);
 
-export const KIND_HINT: Record<AnnotationKind, string> = {
-  pin: 'точка с номером — подпись читается в легенде под снимком',
-  label: 'точка и подпись со стрелкой — «что тут делать»',
-  dim: 'две точки, размерная линия с засечками — «по какому размеру»',
-  bracket: 'две точки, скобка над участком — «на этом отрезке»',
-  multi: 'одна подпись к нескольким местам — от 2 до 8 точек',
-  arc: 'три точки: начало, точка НА КРИВОЙ, конец — посадка оката, скругление борта, ход строчки',
-};
+export const KIND_HINT: Record<string, string> = Object.fromEntries(
+  ALL_KIND_KEYS.map((k) => [k, kindDef(k).hint]),
+);
 
 type Pt = { x: number; y: number };
 
@@ -389,7 +382,10 @@ export function AnnotationCanvas({
       labelX: str(Math.min(0.96, Math.max(0.04, cx))),
       labelY: str(Math.min(0.96, Math.max(0.06, cy - 0.1))),
       color: '',
+      dashed: false,
+      filled: false,
       pieceLineKey: '',
+      pieceLineKeys: [],
     };
     const before = liveRef.current.annotations;
     commit([...before, next]);

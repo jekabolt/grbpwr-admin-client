@@ -70,6 +70,7 @@ import { formatCompositionEntries } from './composition-entries';
 import { wireFabricPurpose } from './pattern-size-index';
 import {
   annotationColorFromWire,
+  annotationFromWire,
   annotationKindFromWire,
   wireInt,
   type AnnotationForm,
@@ -101,7 +102,7 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation-shapes';
+import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation/shapes';
 import { decimalToInput } from 'utils/decimal';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
@@ -1165,18 +1166,7 @@ export function TechPackDocument({
   // (schema.ts): координаты остаются decimal-строкой без округлений, тот же круговой рейс. Не
   // импортируется оттуда — примитив печати читает read-модель (o.media), а не форму карточки.
   const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
-    (m.annotations ?? []).map((a) => ({
-      kind: annotationKindFromWire(a.kind),
-      points: (a.points ?? []).map((pt) => ({
-        x: decimalToInput(pt.x) || '0',
-        y: decimalToInput(pt.y) || '0',
-      })),
-      text: a.text ?? '',
-      labelX: decimalToInput(a.labelX) || '0',
-      labelY: decimalToInput(a.labelY) || '0',
-      color: annotationColorFromWire(a.color),
-      pieceLineKey: a.pieceLineKey ?? '',
-    }));
+    (m.annotations ?? []).map(annotationFromWire);
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
     common_TechCardReleaseMeta | undefined

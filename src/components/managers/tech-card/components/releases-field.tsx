@@ -49,7 +49,7 @@ import { printCutSymmetryCaption } from 'components/managers/print/labels';
 import { fusingPrintCaption } from './piece-codes';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
 import {
-  annotationColorFromWire,
+  annotationFromWire,
   annotationKindFromWire,
   wireInt,
   type AnnotationForm,
@@ -246,18 +246,7 @@ function SnapshotEquipment({ c }: { c?: common_TechCardConstruction }) {
 // (schema.ts): координаты остаются decimal-строкой без округлений. Не импортируется оттуда — этот
 // файл читает вербатимный снапшот, а не форму карточки.
 const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
-  (m.annotations ?? []).map((a) => ({
-    kind: annotationKindFromWire(a.kind),
-    points: (a.points ?? []).map((pt) => ({
-      x: decimalToInput(pt.x) || '0',
-      y: decimalToInput(pt.y) || '0',
-    })),
-    text: a.text ?? '',
-    labelX: decimalToInput(a.labelX) || '0',
-    labelY: decimalToInput(a.labelY) || '0',
-    color: annotationColorFromWire(a.color),
-    pieceLineKey: a.pieceLineKey ?? '',
-  }));
+  (m.annotations ?? []).map(annotationFromWire);
 
 // ДЕТАЛИ КРОЯ ПОДПИСАННОГО РЕЛИЗА. Их не было в архиве вовсе: снапшот их несёт, экран и бумага их
 // показывают, а единственное место, где подписанный документ перечитывают, о них молчало —

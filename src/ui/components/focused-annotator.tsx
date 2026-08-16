@@ -6,7 +6,7 @@ import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnnotatedImage, ImageCallout, type AnnotatedCallout } from './annotated-image';
-import { ArrowMarkerDef, CalloutShape } from './annotation-shapes';
+import { ArrowMarkerDef, CalloutShape } from './annotation/shapes';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
 import { MediaViewer, mediaFullListToViewerItems, useMediaViewer } from './media-viewer';

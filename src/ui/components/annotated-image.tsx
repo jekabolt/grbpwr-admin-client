@@ -18,7 +18,7 @@ import {
   CalloutShape,
   PlacingShape,
   type ShapePoint,
-} from './annotation-shapes';
+} from './annotation/shapes';
 import Text from './text';
 
 // A reusable image-annotation surface: numbered callout PINS placed on an image at normalised

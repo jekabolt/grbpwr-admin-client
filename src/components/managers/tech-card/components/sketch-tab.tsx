@@ -17,7 +17,7 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { cn } from 'lib/utility';
 import GenericPopover from 'ui/components/popover';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { CALLOUT_COLOR_HEX } from 'ui/components/annotation-shapes';
+import { CALLOUT_COLOR_HEX } from 'ui/components/annotation/shapes';
 import { KIND_HINT, KIND_LABEL } from './annotation-canvas';
 import { PieceList, normalizePieceName, useFormPieces, type PieceRef } from './piece-picker';
 import type { FoundPiece } from './nesting/dxf-geometry';
