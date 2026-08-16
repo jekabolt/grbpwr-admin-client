@@ -85,8 +85,6 @@ const numOf = (v?: string) => {
 
 // Media resolves to a URL only a tick after it's picked; an unresolved id is skipped (not rendered
 // blank), so this gates which field-array rows become gallery images.
-const mediaUrl = (full?: common_MediaFull): string =>
-  full?.media?.fullSize?.mediaUrl || full?.media?.thumbnail?.mediaUrl || '';
 
 // The tech-card adapter over the shared FocusedAnnotator, driven in GRID layout: every view is on
 // screen at once carrying its own pins, so front and back can be read together without clicking
@@ -327,10 +325,17 @@ function TechCardGallery({
         };
       });
 
-  const views: FocusedView[] = mediaFA.fields
-    .map((f) => ({ f, full: mediaById.get(f.mediaId) }))
-    .filter((v) => !!mediaUrl(v.full))
-    .map((v) => ({ key: v.f.id, mediaId: v.f.mediaId, full: v.full as common_MediaFull }));
+  // БЕЗ ФИЛЬТРА ПО АДРЕСУ, и здесь цена молчания выше, чем на примерке. Строка медиа, которую не
+  // удалось разрешить, выпадала из ряда — а НА ПОЗИЦИЮ В РЯДУ ссылаются деталь кроя, операция и
+  // «pinned to»: выпав, картинка СДВИГАЛА номера всех следующих, и указания начинали называть
+  // соседний вид. Плюс её собственные выноски исчезали с экрана, продолжая сохраняться.
+  // Неразрешённый кадр остаётся на своём месте и говорит о себе сам (пустой `src` в
+  // AnnotationSurface), поэтому нумерация больше не зависит от того, что успело приехать.
+  const views: FocusedView[] = mediaFA.fields.map((f) => ({
+    key: f.id,
+    mediaId: f.mediaId,
+    full: mediaById.get(f.mediaId),
+  }));
 
   const mediaLabel = (view: FocusedView): string => {
     const f = mediaFA.fields.find((mf) => mf.mediaId === view.mediaId);

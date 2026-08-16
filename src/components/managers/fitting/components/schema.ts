@@ -181,10 +181,21 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       // int64 → string from grpc-gateway; coerce so z.number() doesn't block save
       sizeBytes: Number(p.sizeBytes) || 0,
     })),
-    mediaIds:
-      fitting.media?.map((m) => m.id).filter((id): id is number => id != null) ??
-      insert?.mediaIds ??
-      [],
+    // СОСТАВ СНИМКОВ — ОБЪЕДИНЕНИЕ ОБОИХ ИСТОЧНИКОВ, а не «первый непустой».
+    //
+    // Здесь стояло `fitting.media?.map(...) ?? insert?.mediaIds ?? []`, и `??` на МАССИВЕ падает
+    // только на null/undefined: пришедший с провода `"media": []` (grpc-gateway отдаёт пустые
+    // списки явно, EmitUnpopulated) — это уже массив, поэтому `insert.mediaIds` не читался
+    // никогда. Форма получала пустой состав, а следующее сохранение отправляло его на сервер,
+    // то есть ОТВЯЗЫВАЛО фотографии совсем. Разойтись эти два поля на чтении сегодня не могут
+    // (сервер строит их одним проходом), но цена ошибки здесь — потерянные снимки, а цена
+    // страховки — три строки.
+    mediaIds: [
+      ...new Set([
+        ...(insert?.mediaIds ?? []),
+        ...(fitting.media ?? []).map((m) => m.id).filter((id): id is number => id != null),
+      ]),
+    ],
     callouts: (insert?.callouts ?? []).map((c) => ({
       number: c.number || 0,
       note: c.note || '',
