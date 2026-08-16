@@ -3,6 +3,7 @@ import { adminService } from 'api/api';
 import {
   common_TechCardBomItem,
   common_TechCardConstruction,
+  common_TechCardEquipmentDefaults,
   common_TechCardMachineProfile,
   common_TechCardOperation,
   common_TechCardOperationMedia,
@@ -44,9 +45,11 @@ import { SectionHeader } from 'ui/components/section-header';
 import Text from 'ui/components/text';
 import { decimalToInput } from 'utils/decimal';
 import { AnnotationCanvas } from './annotation-canvas';
+import { printCutSymmetryCaption } from 'components/managers/print/labels';
+import { fusingPrintCaption } from './piece-codes';
 import { ReleaseBlocker, ReleaseBlockersModal } from './release-blockers-modal';
 import {
-  annotationColorFromWire,
+  annotationFromWire,
   annotationKindFromWire,
   wireInt,
   type AnnotationForm,
@@ -243,27 +246,68 @@ function SnapshotEquipment({ c }: { c?: common_TechCardConstruction }) {
 // (schema.ts): координаты остаются decimal-строкой без округлений. Не импортируется оттуда — этот
 // файл читает вербатимный снапшот, а не форму карточки.
 const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
-  (m.annotations ?? []).map((a) => ({
-    kind: annotationKindFromWire(a.kind),
-    points: (a.points ?? []).map((pt) => ({
-      x: decimalToInput(pt.x) || '0',
-      y: decimalToInput(pt.y) || '0',
-    })),
-    text: a.text ?? '',
-    labelX: decimalToInput(a.labelX) || '0',
-    labelY: decimalToInput(a.labelY) || '0',
-    color: annotationColorFromWire(a.color),
-    pieceLineKey: a.pieceLineKey ?? '',
-  }));
+  (m.annotations ?? []).map(annotationFromWire);
+
+// ДЕТАЛИ КРОЯ ПОДПИСАННОГО РЕЛИЗА. Их не было в архиве вовсе: снапшот их несёт, экран и бумага их
+// показывают, а единственное место, где подписанный документ перечитывают, о них молчало —
+// `snap.pieces` использовался только как словарь имён. Дублирование клеевой (0304), симметрия кроя
+// и безразмерность подписаны вместе со всем остальным, и прочесть их должно быть можно там же.
+//
+// Подписи берутся ТЕМИ ЖЕ функциями, что у печати (`piece-codes`), чтобы архив и бумага одного
+// релиза не разошлись в словах — ровно та болезнь, которой болел соседний блок операций.
+function SnapshotPieces({ pieces }: { pieces: common_TechCardPiece[] }) {
+  if (pieces.length === 0) return null;
+  return (
+    <>
+      <GroupLabel>детали кроя (frozen) · {pieces.length}</GroupLabel>
+      <DataTable>
+        <thead>
+          <tr>
+            <th>деталь</th>
+            <th>× на изделие</th>
+            <th>как кроится</th>
+            <th>долевая</th>
+            <th>дублирование</th>
+          </tr>
+        </thead>
+        <tbody>
+          {pieces.map((p, i) => (
+            <tr key={p.lineKey || i}>
+              <td>
+                {p.name || <EmptyCell />}
+                {p.ungraded ? ' · UNI' : ''}
+              </td>
+              <td>{p.piecesPerGarment ?? <EmptyCell />}</td>
+              <td>
+                {printCutSymmetryCaption(p.cutSymmetry, p.piecesPerGarment) || <EmptyCell />}
+              </td>
+              <td>{p.grainline || <EmptyCell />}</td>
+              <td>
+                {p.fused ? (
+                  fusingPrintCaption(p.fusingMode, decimalToInput(p.fusingWidthMm)) || 'да'
+                ) : (
+                  <EmptyCell />
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </DataTable>
+    </>
+  );
+}
 
 function SnapshotOperations({
   ops,
   pieces,
+  park,
   mediaUrlById,
 }: {
   ops: common_TechCardOperation[];
   /** Детали ИЗ ЭТОГО ЖЕ СНАПШОТА: имя должно быть тем, что было подписано, а не сегодняшним. */
   pieces: common_TechCardPiece[];
+  /** Парк оборудования ЭТОГО ЖЕ снапшота — шаг чаще всего не несёт машинку, а наследует её. */
+  park?: common_TechCardEquipmentDefaults;
   /** Адреса операционных снимков — из resolvedOperationMedia ЭТОГО ЖЕ СНАПШОТА, не живой карточки. */
   mediaUrlById: Map<number, string>;
 }) {
@@ -312,12 +356,27 @@ function SnapshotOperations({
           o.operationType && o.operationType !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN'
             ? OPERATION_TYPE_LABELS[o.operationType]
             : '';
+        // МАШИНКА РАЗРЕШАЕТСЯ ЧЕРЕЗ ПАРК, как это делает печать. С 0306 шаг хранит только то, что
+        // ПЕРЕОПРЕДЕЛЯЕТ, а остальное берёт у профиля карточки; читая сырой `threadCount` (у
+        // наследующего шага он нулевой), архив печатал перечисление «overlock 504 / 514 / 516»
+        // там, где бумага того же релиза говорит «overlock 514». Один подписанный документ не
+        // может давать два ответа.
+        const machineProfile = (park?.machines ?? []).find(
+          (m) => !!o.machineProfileKey && m.profileKey === o.machineProfileKey,
+        );
+        const pressProfile = (park?.presses ?? []).find(
+          (pp) => !!o.pressProfileKey && pp.profileKey === o.pressProfileKey,
+        );
         const spec = isMachineStepType(o.operationType)
-          ? // Снапшот несёт и машинку, и число ниток — значит и подписанный релиз может назвать
-            // стежок конкретно. Вывод здесь — презентация записанного, а не правка записанного.
-            machineTypeLabelWithStitch(o.machineType, o.threadCount)
+          ? machineProfile
+            ? machineProfileName(machineProfile)
+            : // Профиля нет — шаг назвал машинку сам. Число ниток шага уже говорит, какой из трёх
+              // стежков имеется в виду, и сказать это вслух честнее перечисления.
+              machineTypeLabelWithStitch(o.machineType, o.threadCount)
           : isPressStepType(o.operationType)
-            ? [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
+            ? pressProfile
+              ? pressProfileName(pressProfile)
+              : [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
             : typeLabel;
         // Фотографии шага — те же правила, что у печати: адрес есть только для картинки в
         // словаре снапшота, у остальных ничего не показываем (не заглушка).
@@ -495,9 +554,11 @@ function ReleaseSnapshot({
           <SnapshotBom items={snap.bomItems ?? []} />
           <SnapshotConstruction c={snap.construction} />
           <SnapshotEquipment c={snap.construction} />
+          <SnapshotPieces pieces={snap.pieces ?? []} />
           <SnapshotOperations
             ops={snap.operations ?? []}
             pieces={snap.pieces ?? []}
+            park={snap.construction?.equipmentDefaults}
             mediaUrlById={mediaUrlById}
           />
 
@@ -614,13 +675,27 @@ export function ReleasesField({
             {releases.map((r) => {
               const active = r.id != null && r.id === selected?.id;
               return (
-                <button
+                // НЕ `<button>`, А СПАН С РОЛЬЮ. Архив релизов живёт внутри общего
+                // `<fieldset disabled>` карточки, и у нативной кнопки под таким предком не
+                // стреляет `click`. Получалось наоборот от задуманного: этот список — ЕДИНСТВЕННЫЙ
+                // способ переключиться между ревизиями, и он умирал ровно на выпущенной карточке,
+                // то есть там, где ревизии только и существуют. Строки при этом подсвечивались на
+                // наведении, так что выглядели нажимаемыми. Переключение ревизии ничего не пишет —
+                // это чтение, и глушить его не за что.
+                <span
                   key={r.id}
-                  type='button'
+                  role='button'
+                  tabIndex={0}
                   aria-current={active ? 'true' : undefined}
                   onClick={() => select(r.releaseNumber)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter' && e.key !== ' ') return;
+                    e.preventDefault();
+                    select(r.releaseNumber);
+                  }}
                   className={cn(
-                    'flex w-full flex-col gap-0.5 border-b border-hairline px-2 py-1.5 text-left last:border-b-0',
+                    'flex w-full cursor-pointer flex-col gap-0.5 border-b border-hairline px-2 py-1.5 text-left last:border-b-0',
+                    'focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor',
                     active ? 'bg-textColor text-bgColor' : 'hover:bg-bgZebra',
                   )}
                 >
@@ -634,7 +709,7 @@ export function ReleasesField({
                   >
                     {formatTechCardDate(r.createdAt)}
                   </Text>
-                </button>
+                </span>
               );
             })}
           </div>

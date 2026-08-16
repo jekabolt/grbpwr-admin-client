@@ -259,6 +259,54 @@ export function PieceMultiPicker({
 
 // Single-select piece picker — the shape a consumption norm needs: a norm is about exactly one
 // piece (1:1, unlike an operation), so this replaces the selection instead of adding to it.
+/**
+ * ПИКЕР ДЕТАЛИ ЧИПОМ — для рядов, где выбранное уже показано чипами и не хватает только «добавить».
+ *
+ * Отличается от `PieceSinglePicker` ровно триггером: там поле во всю ширину, здесь пунктирный чип
+ * в одном ряду с выбранными. Список внутри тот же, с теми же силуэтами: деталь на одном экране
+ * обязана выбираться одинаково, иначе одна и та же деталь называется в двух местах по-разному.
+ */
+export function PieceAddChip({
+  pieces,
+  selected,
+  onPick,
+  shapeOf,
+  label = '＋ деталь',
+}: {
+  pieces: PieceRef[];
+  selected: string[];
+  onPick: (lineKey: string) => void;
+  shapeOf?: (lineKey: string) => FoundPiece | null;
+  label?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  if (pieces.length === 0) return null;
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      noTail
+      className='w-64'
+      triggerProps={{
+        className:
+          'inline-flex items-center gap-1 whitespace-nowrap border border-dashed border-borderColor bg-bgColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor transition-colors hover:text-textColor focus:border-textColor focus:outline-none',
+      }}
+      openElement={<span>{label}</span>}
+    >
+      <PieceList
+        pieces={pieces}
+        selected={selected}
+        onToggle={(lineKey) => {
+          onPick(lineKey);
+          setOpen(false);
+        }}
+        multiple
+        shapeOf={shapeOf}
+      />
+    </GenericPopover>
+  );
+}
+
 export function PieceSinglePicker({
   pieces,
   value,

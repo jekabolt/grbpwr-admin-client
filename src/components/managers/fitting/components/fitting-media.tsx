@@ -1,7 +1,7 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { useEffect, useMemo, useRef } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { type AnnotatedCallout } from 'ui/components/annotated-image';
+import { type SurfaceCallout } from 'ui/components/annotation/surface';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import { FittingFormData } from './schema';
 
@@ -84,7 +84,11 @@ export function FittingMedia({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaIds]);
 
-  function addCalloutTo(mediaId: number, x: number, y: number) {
+  // Единственный вид здесь — пин, и его точка И ЕСТЬ маркер: якорей у него нет.
+  // Перо здесь не при чём: единственный вид — пин, а у пина ни линии, ни площади.
+  function addCalloutTo(mediaId: number, _kind: string, points: { x: number; y: number }[]) {
+    const p = points[0];
+    if (!p) return;
     // max+1, not length+1: after a mid-list delete, length+1 collides with an existing number —
     // and the number is read-only, so a duplicate can't be fixed by hand. change requests
     // reference fit notes BY number, so it must stay unique.
@@ -94,8 +98,8 @@ export function FittingMedia({
       number: nextNumber,
       note: '',
       mediaId,
-      posX: x.toFixed(3),
-      posY: y.toFixed(3),
+      posX: p.x.toFixed(3),
+      posY: p.y.toFixed(3),
     });
   }
 
@@ -105,7 +109,7 @@ export function FittingMedia({
     [calloutFA.fields],
   );
 
-  const calloutsFor = (mediaId: number): AnnotatedCallout[] =>
+  const calloutsFor = (mediaId: number): SurfaceCallout[] =>
     calloutFA.fields
       .map((f, index) => ({ f, index, c: callouts[index] }))
       .filter((x) => x.c?.mediaId === mediaId)
@@ -115,9 +119,12 @@ export function FittingMedia({
         return {
           key: x.f.id,
           number: x.c?.number ?? x.index + 1,
+          // У заметки примерки геометрии нет и не появляется: это пин с запиской о посадке, а
+          // мерка на фото примерки означала бы измерение, которого никто не делал.
+          kind: 'pin',
+          points: [],
           // legacy pinned-but-unplaced notes fall back to centre so they stay reachable.
-          xNorm: Number.isNaN(px) ? 0.5 : px,
-          yNorm: Number.isNaN(py) ? 0.5 : py,
+          label: { x: Number.isNaN(px) ? 0.5 : px, y: Number.isNaN(py) ? 0.5 : py },
           hasText: !!x.c?.note?.trim(),
         };
       });
@@ -127,6 +134,8 @@ export function FittingMedia({
       views={views}
       calloutsFor={calloutsFor}
       onAddCallout={addCalloutTo}
+      // Панель примерки — только пин: заметка о посадке это «здесь морщит», а не чертёжная мерка.
+      calloutKinds={['pin']}
       onMoveCallout={(key, x, y) => {
         const i = keyToIndex.get(key);
         if (i == null) return;
@@ -146,6 +155,7 @@ export function FittingMedia({
       onRemoveMedia={removeMedia}
       addLabel='add fitting photo'
       purpose='fitting photos'
+      halo
       notesMode='auto'
       pinSize='md'
       emptyLabel='add a photo to start pinning fit notes'

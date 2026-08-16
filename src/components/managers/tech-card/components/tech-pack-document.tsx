@@ -70,10 +70,12 @@ import { formatCompositionEntries } from './composition-entries';
 import { wireFabricPurpose } from './pattern-size-index';
 import {
   annotationColorFromWire,
+  annotationFromWire,
   annotationKindFromWire,
   wireInt,
   type AnnotationForm,
 } from './schema';
+import { kindDef } from 'ui/components/annotation/kinds';
 import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
@@ -101,7 +103,7 @@ import { useMaterials } from 'components/managers/materials/components/useMateri
 import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
 import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation-shapes';
+import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation/shapes';
 import { decimalToInput } from 'utils/decimal';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
@@ -227,6 +229,11 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
               // единственное, что можно прочесть глазами.
               label={{ x: num(dec(c.posX)) * box.w, y: num(dec(c.posY)) * box.h }}
               color={annotationColorFromWire(c.color) || undefined}
+              // Пунктир и штриховка НА БУМАГЕ ОБЯЗАТЕЛЬНЫ: сплошная и пунктир на чертеже говорят
+              // разное, а контур и заливка — «эта граница» против «эта площадь». Потерять их при
+              // печати значит отдать в цех другое указание, чем видно на экране.
+              dashed={!!c.dashed}
+              filled={!!c.filled}
             />
           ))}
         </svg>
@@ -235,20 +242,17 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
   );
 }
 
-/** Вид указания словом в таблице выносок. Пин — не подпись: он и так «просто номер». */
+/**
+ * Вид указания словом в таблице выносок. Пин — не подпись: он и так «просто номер».
+ *
+ * Название берётся из ОБЩЕГО РЕЕСТРА, а не из своего словаря: свой был четвёртой копией того же
+ * списка и первым же новым видом отстал бы — на бумаге появилась бы пустая клетка вида там, где
+ * на экране стоит зона.
+ */
 function calloutKindLabel(kind?: string): string {
   const k = annotationKindFromWire(kind);
-  return k === 'pin' ? '' : ANNOTATION_KIND_PRINT[k];
+  return k === 'pin' ? '' : kindDef(k).label;
 }
-
-const ANNOTATION_KIND_PRINT: Record<string, string> = {
-  pin: '',
-  label: 'подпись',
-  dim: 'мерка',
-  bracket: 'участок',
-  multi: 'мультилидер',
-  arc: 'дуга',
-};
 
 function bomTakesWastage(
   colorways: ReadonlyArray<{ usages?: common_TechCardColorwayUsage[] }> | undefined,
@@ -564,6 +568,18 @@ export function TechPackDocument({
   }, [techCard.resolvedOperationMedia]);
   // Имя детали кроя по её ключу — для указаний на снимках шага. Указание может называть деталь
   // (`piece_line_key`), и на бумаге читается именно ИМЯ: ключ в цеху не значит ничего.
+  // Выноска печатается на листе ЭСКИЗА, если приколота к техническому изображению или не
+  // приколота вовсе. Мудбордовые (приколотые к картинке мудборда) на лист швеи не идут: мудборд —
+  // внутренний документ, и его нумерация своя.
+  const sketchMediaIds = useMemo(
+    () => new Set((tc?.technicalMedia ?? []).map((m) => wireInt(m.mediaId))),
+    [tc?.technicalMedia],
+  );
+  const printedOnSketch = (c: common_TechCardCallout) => {
+    const mid = wireInt(c.mediaId);
+    return mid === 0 || sketchMediaIds.has(mid);
+  };
+
   const pieceNameByKey = useMemo(() => {
     const byKey = new Map<string, string>();
     for (const p of tc?.pieces ?? []) {
@@ -1153,18 +1169,7 @@ export function TechPackDocument({
   // (schema.ts): координаты остаются decimal-строкой без округлений, тот же круговой рейс. Не
   // импортируется оттуда — примитив печати читает read-модель (o.media), а не форму карточки.
   const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
-    (m.annotations ?? []).map((a) => ({
-      kind: annotationKindFromWire(a.kind),
-      points: (a.points ?? []).map((pt) => ({
-        x: decimalToInput(pt.x) || '0',
-        y: decimalToInput(pt.y) || '0',
-      })),
-      text: a.text ?? '',
-      labelX: decimalToInput(a.labelX) || '0',
-      labelY: decimalToInput(a.labelY) || '0',
-      color: annotationColorFromWire(a.color),
-      pieceLineKey: a.pieceLineKey ?? '',
-    }));
+    (m.annotations ?? []).map(annotationFromWire);
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
     common_TechCardReleaseMeta | undefined
@@ -1639,7 +1644,12 @@ export function TechPackDocument({
                 </tr>
               </thead>
               <tbody>
-                {(tc.callouts ?? []).map((c, i) => {
+                {/* ТОЛЬКО ВЫНОСКИ ЭТОГО ЛИСТА. Номера пер-листовые — эскиз и мудборд нумеруются
+                    независимо, — а фигуры выше уже отфильтрованы по `mediaId`. Таблица же брала
+                    ВСЕ выноски карточки, и записки, приколотые к мудборду, приезжали на лист швеи
+                    с номерами, которых на этом листе нет, вперемешку и с дублями. Непривязанная
+                    выноска остаётся здесь: она про изделие, а не про картинку. */}
+                {(tc.callouts ?? []).filter(printedOnSketch).map((c, i) => {
                   // СВЯЗЬ ВЫНОСКИ С ДЕТАЛЬЮ — половина, которой на бумаге не было. Номер на
                   // эскизе и строка в «cut pieces» жили порознь, и соединить их можно было только
                   // в голове. Номер выноски берём тем же фолбэком (`c.number || i + 1`), что и
@@ -1654,7 +1664,10 @@ export function TechPackDocument({
                     <tr key={i} className='break-inside-avoid'>
                       <td className={`${TD} text-center font-semibold`}>{number}</td>
                       <td className={TD}>
-                        {c.part || '—'}
+                        {/* ВСЕ ДЕТАЛИ, А НЕ ПЕРВАЯ. У бумаги нет наведения и нет подсказки: список,
+                            сокращённый до «и ещё две», на листе швеи означает две потерянные
+                            детали. Указание законно называет несколько — узел собирает их вместе. */}
+                        {(c.parts?.length ? c.parts : c.part ? [c.part] : []).join(', ') || '—'}
                         {calloutKindLabel(c.kind) && (
                           <span className='ml-1 text-labelColor'>· {calloutKindLabel(c.kind)}</span>
                         )}

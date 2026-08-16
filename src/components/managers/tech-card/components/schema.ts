@@ -39,6 +39,7 @@ import {
   common_TechCardSignoffState,
   common_TechCardStage,
   common_StyleNumberSource,
+  common_TechCardAnnotation,
   common_TechCardAnnotationColor,
   common_TechCardAnnotationKind,
 } from 'api/proto-http/admin';
@@ -58,6 +59,12 @@ import {
   isCutSymmetryMarked,
 } from './piece-codes';
 import { z } from 'zod';
+import {
+  ANNOTATION_COLOR_KEYS,
+  ANNOTATION_KIND_KEYS,
+  type AnnotationColorKey,
+  type AnnotationKindKey,
+} from 'ui/components/annotation/kinds';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
 // the bare entity word. The generated client types both as `string`, so swapping them compiles
@@ -749,27 +756,22 @@ const constructionSchema = z
 // чем является текст. Набор проектировался осями (якорь × геометрия × лидер × подпись), но
 // независимые поля пришлось бы валидировать комбинаторикой бессмыслицы — скобка с одной точкой,
 // номер на мерке. Сервер проверяет ровно эти же правила, теми же словами.
-export const ANNOTATION_KINDS = ['pin', 'label', 'dim', 'bracket', 'multi', 'arc'] as const;
-export type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
-
-/** Сколько точек у вида: [минимум, максимум]. Зеркало `PointsAllowed()` сервера. */
-export const ANNOTATION_POINTS: Record<AnnotationKind, [number, number]> = {
-  pin: [1, 1],
-  label: [1, 1],
-  dim: [2, 2],
-  bracket: [2, 2],
-  multi: [2, 8],
-  // Начало, ТОЧКА НА КРИВОЙ, конец. Средняя лежит на самой дуге, а не управляет ей со стороны:
-  // управляющая точка Безье кривой не принадлежит, и ставящий её мышью каждый раз промахивается
-  // мимо линии, которую рисует.
-  arc: [3, 3],
-};
+// СЛОВАРЬ ВИДОВ ЖИВЁТ В РЕЕСТРЕ ОТРИСОВКИ (`ui/components/annotation/kinds`), а здесь только
+// зеркалится в zod и в провод. Раньше он был объявлен и тут, и там, и в двух местах холста —
+// четыре списка, каждый со своим набором ключей, и каждый новый вид требовал вспомнить про все
+// четыре. Один забытый роняет экран целиком: словарь без строки на пришедший ключ отдаёт undefined,
+// а код тут же его деструктурирует.
+//
+// Правило «у мерки две точки» — знание ЖЕСТА И ОТРИСОВКИ, поэтому живёт там же: им одинаково
+// пользуются снимок шага, эскиз, мудборд и примерка, а форма карточки о нём не знает вовсе.
+export const ANNOTATION_KINDS = ANNOTATION_KIND_KEYS;
+export type AnnotationKind = AnnotationKindKey;
 
 // Цвет — закрытый список, а не свободный hex: лист швеи печатают и на чёрно-белом принтере, где
 // произвольный цвет станет неразличимым серым. Пусто = чернильный, тот же, каким нарисовано всё
-// остальное. Цвет РАЗЛИЧАЕТ пересекающиеся выноски, а не кодирует смысл.
-export const ANNOTATION_COLORS = ['', 'red', 'blue', 'green', 'orange'] as const;
-export type AnnotationColor = (typeof ANNOTATION_COLORS)[number];
+// остальное. Цвет РАЗЛИЧАЕТ пересекающиеся указания, а не кодирует смысл.
+export const ANNOTATION_COLORS = ANNOTATION_COLOR_KEYS;
+export type AnnotationColor = AnnotationColorKey;
 
 /**
  * Вид выноски: провод ↔ форма. Неизвестное значение с провода становится пином, а не пустотой:
@@ -783,6 +785,8 @@ const ANNOTATION_KIND_WIRE: Record<AnnotationKind, string> = {
   bracket: 'TECH_CARD_ANNOTATION_KIND_BRACKET',
   multi: 'TECH_CARD_ANNOTATION_KIND_MULTI',
   arc: 'TECH_CARD_ANNOTATION_KIND_ARC',
+  polygon: 'TECH_CARD_ANNOTATION_KIND_POLYGON',
+  ink: 'TECH_CARD_ANNOTATION_KIND_INK',
 };
 const ANNOTATION_KIND_FORM = Object.fromEntries(
   Object.entries(ANNOTATION_KIND_WIRE).map(([k, v]) => [v, k as AnnotationKind]),
@@ -798,6 +802,7 @@ const ANNOTATION_COLOR_WIRE: Record<string, string> = {
   blue: 'TECH_CARD_ANNOTATION_COLOR_BLUE',
   green: 'TECH_CARD_ANNOTATION_COLOR_GREEN',
   orange: 'TECH_CARD_ANNOTATION_COLOR_ORANGE',
+  white: 'TECH_CARD_ANNOTATION_COLOR_WHITE',
 };
 const ANNOTATION_COLOR_FORM = Object.fromEntries(
   Object.entries(ANNOTATION_COLOR_WIRE).map(([k, v]) => [v, k as AnnotationColor]),
@@ -807,6 +812,62 @@ export const annotationColorFromWire = (v?: string): AnnotationColor =>
   ANNOTATION_COLOR_FORM[v ?? ''] ?? '';
 export const annotationColorToWire = (v?: AnnotationColor): common_TechCardAnnotationColor =>
   (v ? ANNOTATION_COLOR_WIRE[v] : 'TECH_CARD_ANNOTATION_COLOR_UNKNOWN') as common_TechCardAnnotationColor;
+
+/**
+ * СПИСОК ДЕТАЛЕЙ И ОДИНОЧНОЕ ПОЛЕ — ОДНО И ТО ЖЕ, записанное дважды. Правило свода общее для
+ * выноски снимка шага и карточного указания, и оно ЗЕРКАЛО серверного: непустой список вытесняет
+ * одиночное поле целиком, пустой читается как [поле]. Без общего свода клиент однажды прислал бы
+ * список из одной детали, а поле — из другой, и печать разошлась бы с экраном.
+ *
+ * Пустые и повторы снимаются: деталь, названная дважды, — одно указание, а не порча данных.
+ */
+function mergeSingleAndList(list: string[] | undefined, single: string | undefined): string[] {
+  const src = (list ?? []).map((v) => (v ?? '').trim()).filter(Boolean);
+  const from = src.length ? src : [(single ?? '').trim()].filter(Boolean);
+  const out: string[] = [];
+  for (const v of from) if (!out.includes(v)) out.push(v);
+  return out;
+}
+
+/**
+ * ВЫНОСКА СНИМКА ШАГА С ПРОВОДА — ОДНА КОНВЕРТАЦИЯ НА ВСЕХ ЧИТАТЕЛЕЙ.
+ *
+ * Её делают трое: маппер формы карточки, архив релиза (вербатимный снапшот) и печать тех-пака
+ * (read-модель). Тип у всех троих один — `AnnotationForm`, потому что рисует их один примитив, и
+ * три копии этого преобразования означали, что новое поле приезжает на экран, но не на бумагу, —
+ * ровно так `pieceLineKey` однажды и разошёлся. Координаты остаются decimal-строкой: тот же тип,
+ * что на проводе и в БД, круговой рейс без округлений.
+ */
+export function annotationFromWire(a: common_TechCardAnnotation): AnnotationForm {
+  const keys = (a.pieceLineKeys ?? []).filter(Boolean);
+  return {
+    kind: annotationKindFromWire(a.kind),
+    points: (a.points ?? []).map((pt) => ({
+      x: decimalToInput(pt.x) || '0',
+      y: decimalToInput(pt.y) || '0',
+    })),
+    text: a.text ?? '',
+    labelX: decimalToInput(a.labelX) || '0',
+    labelY: decimalToInput(a.labelY) || '0',
+    color: annotationColorFromWire(a.color),
+    dashed: !!a.dashed,
+    filled: !!a.filled,
+    pieceLineKey: a.pieceLineKey ?? '',
+    // Пустой список читается как [старое поле] — то же правило, что на сервере: карточка,
+    // записанная до 0310, несёт только одиночный ключ.
+    pieceLineKeys: keys.length ? keys : a.pieceLineKey ? [a.pieceLineKey] : [],
+  };
+}
+
+/** Детали выноски снимка шага для отправки. */
+export const annotationPieceKeysOut = (a: {
+  pieceLineKeys?: string[];
+  pieceLineKey?: string;
+}): string[] => mergeSingleAndList(a.pieceLineKeys, a.pieceLineKey);
+
+/** Детали карточного указания для отправки — те же правила, но имена, а не ключи. */
+export const calloutPartsOut = (c: { parts?: string[]; part?: string }): string[] =>
+  mergeSingleAndList(c.parts, c.part);
 
 const annotationPointSchema = z.object({
   // Доли кадра, 0..1 — та же система, что у карточных выносок. Строкой, а не числом: тот же
@@ -822,10 +883,22 @@ const annotationSchema = z.object({
   labelX: z.string().default('0'),
   labelY: z.string().default('0'),
   color: z.enum(ANNOTATION_COLORS).default(''),
+  // Пунктир вместо сплошной. На чертеже это РАЗНЫЕ указания, а не два оформления одного: сплошная
+  // — то, что делают, пунктир — построение, припуск, линия под слоем.
+  dashed: z.boolean().default(false),
+  // Штриховка области. Только у полигона: у линии заливать нечего, и сервер обнуляет флаг сам.
+  filled: z.boolean().default(false),
   // Деталь кроя, о которой указание. Тот же стабильный ключ, которым деталь адресуют вход операции
   // и назначение материала, — не имя: имя переживает переименование хуже, чем ссылка. Пусто =
   // указание не про конкретную деталь (а про узел, шов, посадку).
+  //
+  // ОДИНОЧНОЕ ПОЛЕ — ЭХО ПЕРВОГО ЭЛЕМЕНТА СПИСКА, и живёт только ради того, что уже записано:
+  // колонка выносок это JSON, и в ней лежит `piece`. Пишущий код трогает СПИСОК, читающий берёт
+  // список, а к одиночному полю падает только когда списка нет вовсе.
   pieceLineKey: z.string().default(''),
+  // Детали, о которых указание. Узел законно собирает несколько сразу («втачать рукав в пройму» —
+  // и рукав, и полочка, и спинка), и выбирать из них главную у шва не у кого.
+  pieceLineKeys: z.array(z.string()).default([]),
 });
 
 const operationMediaSchema = z.object({
@@ -858,6 +931,15 @@ const calloutSchema = z.object({
   kind: z.enum(ANNOTATION_KINDS).optional().default('pin'),
   points: z.array(annotationPointSchema).optional().default([]),
   color: z.enum(ANNOTATION_COLORS).optional().default(''),
+  // Пунктир и штриховка — те же правила, что у выноски снимка шага. Входят в АТОМАРНУЮ группу
+  // присутствия вместе с `kind`: бандл, промолчавший про вид, молчит про всю фигуру, и сервер
+  // несёт хранимую дальше целиком.
+  dashed: z.boolean().optional().default(false),
+  filled: z.boolean().optional().default(false),
+  // Детали указания — ИМЕНАМИ, а не ключами: на именах стоит связь «деталь ↔ выноска»
+  // (`piece.calloutNumber` сверяется по имени), и второй способ адресовать деталь развёл бы две
+  // половины одной связи. `part` — эхо первого элемента.
+  parts: z.array(z.string()).optional().default([]),
 });
 
 const operationSchema = z.object({
@@ -1621,6 +1703,15 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
         y: decimalToInput(pt.y) || '0',
       })),
       color: annotationColorFromWire(c.color),
+      dashed: !!c.dashed,
+      filled: !!c.filled,
+      // Список приходит с сервера всегда непустым, если деталь есть вовсе (он собирает его из
+      // `part` у карточек, записанных до 0310). Фолбэк здесь — на случай ответа старого сервера.
+      parts: (c.parts ?? []).filter(Boolean).length
+        ? (c.parts ?? []).filter(Boolean)
+        : c.part
+          ? [c.part]
+          : [],
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
       // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
@@ -1725,18 +1816,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       media: (o.media ?? []).map((m) => ({
         mediaId: wireInt(m.mediaId),
         caption: m.caption ?? '',
-        annotations: (m.annotations ?? []).map((a) => ({
-          kind: annotationKindFromWire(a.kind),
-          points: (a.points ?? []).map((pt) => ({
-            x: decimalToInput(pt.x) || '0',
-            y: decimalToInput(pt.y) || '0',
-          })),
-          text: a.text ?? '',
-          labelX: decimalToInput(a.labelX) || '0',
-          labelY: decimalToInput(a.labelY) || '0',
-          color: annotationColorFromWire(a.color),
-          pieceLineKey: a.pieceLineKey ?? '',
-        })),
+        annotations: (m.annotations ?? []).map(annotationFromWire),
       })),
       operationNumber: o.operationNumber || 0,
       operationType: o.operationType || 'TECH_CARD_OPERATION_TYPE_UNKNOWN',
@@ -2160,7 +2240,9 @@ export function mapFormToTechCardInsert(
     technicalMedia: (data.technicalMedia ?? []).map(mapMediaItemOut),
     callouts: (data.callouts ?? []).map((c) => ({
       number: c.number || 0,
-      part: c.part?.trim() || '',
+      // Первым элементом списка, а не сырым полем: сервер хранит `part` = parts[0], и разойтись
+      // им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатается тех-пак.
+      part: calloutPartsOut(c)[0] ?? '',
       description: c.description?.trim() || '',
       dimensions: c.dimensions?.trim() || '',
       mediaId: c.mediaId || 0,
@@ -2175,6 +2257,11 @@ export function mapFormToTechCardInsert(
         y: inputToDecimal(pt.y),
       })),
       color: annotationColorToWire(c.color),
+      dashed: !!c.dashed,
+      filled: !!c.filled,
+      // `part` шлётся ПЕРВЫМ ЭЛЕМЕНТОМ СПИСКА, а не тем, что лежит в поле: сервер хранит именно
+      // так, и разойтись им нельзя — на `part` стоит связь «деталь ↔ выноска» и им печатают.
+      parts: calloutPartsOut(c),
     })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
@@ -2453,7 +2540,10 @@ export function mapFormToTechCardInsert(
               labelX: inputToDecimal(a.labelX),
               labelY: inputToDecimal(a.labelY),
               color: annotationColorToWire(a.color),
-              pieceLineKey: (a.pieceLineKey ?? '').trim(),
+              dashed: !!a.dashed,
+              filled: !!a.filled,
+              pieceLineKey: annotationPieceKeysOut(a)[0] ?? '',
+              pieceLineKeys: annotationPieceKeysOut(a),
             })),
           })),
         // operation number is positional (server is authoritative); send (i+1)*10 so a

@@ -80,7 +80,6 @@ import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import {
-  assemblyReleaseCheck,
   assemblySweep,
   classifyAssemblyInputs,
   type AssemblyResult,
@@ -92,7 +91,7 @@ import { suggestUnitCode } from './assembly-suggest';
 import { AssemblySchematic } from './assembly-schematic';
 import { OperationMediaStrip } from './operation-media-strip';
 import { useSchematicPrefs } from './use-schematic-prefs';
-import { PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
+import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
@@ -301,6 +300,10 @@ export const emptyOperation = {
   outputUnitKey: '',
   outputUnitName: '',
   bomLineKeys: [] as string[],
+  // Снимки шага — по тому же доводу, что и блоки оборудования выше: ключ, отсутствующий здесь,
+  // RHF не регистрирует вовсе. Пустой список у НОВОГО шага ничего не теряет, зато делает форму
+  // однородной: всякий читатель `operations.N.media` получает массив, а не `undefined`.
+  media: [] as OperationFormValue['media'],
 };
 
 type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
@@ -1047,10 +1050,13 @@ function ClearOperationMediaButton({
 function ClearAssemblyButton({
   pieces,
   storedHasUnits,
+  frozen = false,
 }: {
   pieces: PieceRef[];
   /** Размечена ли СОХРАНЁННАЯ карточка. Не то же самое, что размечена форма. */
   storedHasUnits: boolean;
+  /** Выпущенная карточка: намерение снять разметку объявлять не из чего и незачем. */
+  frozen?: boolean;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const showMessage = useSnackBarStore((st) => st.showMessage);
@@ -1065,6 +1071,10 @@ function ClearAssemblyButton({
   // перезагрузка с потерей правок. Отказ, из которого нет выхода, хуже отказа.
   const inForm = view.res.units.size;
   if (inForm === 0 && !storedHasUnits) return null;
+  // Модалка подтверждения портальная, то есть рендерится ВНЕ `<fieldset disabled>` карточки и
+  // остаётся живой; без явного флага диалог, открытый до выпуска, взводил бы намерение уже на
+  // замороженной карточке (близнец гасится тем же способом).
+  if (frozen) return null;
 
   const clear = () => {
     const ops = (getValues('operations') ?? []) as Array<{
@@ -1310,12 +1320,23 @@ function RailStep({
           >
             ⠿
           </button>
-          <button
-            type='button'
+          {/* НЕ `<button>`: открыть шаг — ЧТЕНИЕ, а нативная кнопка внутри `<fieldset disabled>`
+              выпущенной карточки клика не получает. Получалось, что на подписанной карточке
+              открывался только первый шаг (он выбран по умолчанию), а остальные двенадцать
+              прочитать было нельзя вовсе — при том что строка подсвечивалась на наведении и
+              выглядела нажимаемой. Перетаскивание строки рядом остаётся кнопкой: это правка. */}
+          <span
+            role='button'
+            tabIndex={0}
             onClick={onSelect}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              onSelect();
+            }}
             aria-current={selected}
             title={label}
-            className='flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className='flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
               {opNumber}
@@ -1374,7 +1395,7 @@ function RailStep({
             >
               {smvMin > 0 ? smvMin.toFixed(1) : '—'}
             </Text>
-          </button>
+          </span>
         </div>
       )}
     </SortableEntity>
@@ -2319,12 +2340,11 @@ function OperationEditor({
         // ДЕТАЛЬ НА УКАЗАНИИ — тем же пикером и теми же силуэтами, что и состав шага рядом.
         // Второй способ выбрать деталь на одном экране означал бы, что одна и та же деталь
         // называется в двух местах по-разному.
-        renderPiecePicker={(value, onPick) => (
-          <PieceSinglePicker
+        renderPiecePicker={({ selected, onPick }) => (
+          <PieceAddChip
             pieces={pieces}
-            value={value}
-            onChange={(k) => onPick(k)}
-            placeholder='— деталь (необязательно) —'
+            selected={selected}
+            onPick={onPick}
             shapeOf={(k) => pieceShapes?.get(pieceRefKey(k)) ?? null}
           />
         )}
@@ -2743,7 +2763,14 @@ function OperationEditor({
   );
 }
 
-type ReplaceImpact = { operations: number; sam: number; pieceLinks: number; units: number };
+type ReplaceImpact = {
+  operations: number;
+  sam: number;
+  pieceLinks: number;
+  units: number;
+  photos: number;
+  equipment: number;
+};
 
 // #66: draft assembly operations from a plain-language description — «мы описываем все операции
 // словами (у нас есть знания о деталях/BOM), через OpenRouter генерируем структурированные
@@ -2965,6 +2992,24 @@ function GenerateOperationsPanel({
               </Text>
             </CalloutBox>
           )}
+          {(impact?.photos ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и <b>{impact?.photos}</b> снимков шагов вместе со всеми указаниями на них: мерками,
+                подписями, участками. Сервер откажет щитом, и единственный выход из отказа —
+                согласиться стереть снимки насовсем.
+              </Text>
+            </CalloutBox>
+          )}
+          {(impact?.equipment ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и машинки с режимами ВТО у <b>{impact?.equipment}</b> шагов. Здесь щита нет: запись
+                пройдёт молча, и узнать о пропаже будет неоткуда — в цеху просто станут шить другой
+                иглой на другой машине.
+              </Text>
+            </CalloutBox>
+          )}
           <Text size='micro' variant='label'>
             вместо этого можно «добавить к списку» — черновик встанет после существующих операций.
           </Text>
@@ -3144,15 +3189,27 @@ export function OperationsField({
   // What «заменить весь список» would destroy, read at press time off form state — watching the
   // whole operations array here would re-render every row on every keystroke.
   const readReplaceImpact = (): ReplaceImpact => {
-    const ops = (getValues('operations') ?? []) as {
-      smv?: string;
-      inputKeys?: string[];
-      outputUnitKey?: string;
-    }[];
+    const ops = (getValues('operations') ?? []) as OperationFormValue[];
     return {
       operations: ops.length,
       sam: ops.filter((o) => (o.smv ?? '').trim()).length,
       pieceLinks: ops.filter((o) => (o.inputKeys ?? []).length > 0).length,
+      // СНИМКИ ШАГА С УКАЗАНИЯМИ. Черновик генератора их не несёт (`mapGeneratedOperationToForm`
+      // строит шаг с нуля), поэтому «заменить весь список» уносит каждую фотографию и каждую
+      // выноску на ней. Сервер потом откажет щитом медиа, но к этому моменту работа в форме уже
+      // потеряна, а единственный выход из отказа — согласиться стереть снимки НАВСЕГДА. Цена
+      // обязана читаться ДО нажатия.
+      photos: ops.reduce((n, o) => n + (o.media ?? []).length, 0),
+      // Машинные факты и режимы ВТО. У них щита с бекстопом нет вовсе, так что их пропажу вообще
+      // никто не окликнет: ни отказа, ни сообщения — просто в следующий раз шаг шьётся на другой
+      // машине другой иглой.
+      equipment: ops.filter(
+        (o) =>
+          (o.machineType && o.machineType !== NONE_MACHINE) ||
+          (o.machineProfileKey ?? '').trim() ||
+          (o.pressEquipment && o.pressEquipment !== NONE_PRESS_EQUIPMENT) ||
+          (o.pressProfileKey ?? '').trim(),
+      ).length,
       // РАЗМЕТКА УЗЛОВ — самый дорогой ручной ввод на карточке, и черновик сносит её целиком
       // вместе со списком. Сервер откажет бекстопом («запись не несёт узлов против карточки,
       // которая их несёт»), но узнать об этом на сохранении, уже потеряв работу в форме, —
@@ -3463,6 +3520,12 @@ export function OperationsField({
           прятало кнопку там, где снимки добавили, но ещё не сохранили. */}
       <ChipRow>
         <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={frozen} />
+        {/* ТА ЖЕ ПРИЧИНА, ЧТО У СОСЕДА СЛЕВА, и её пришлось усвоить дважды: кнопка снятия
+            разметки узлов жила ВНУТРИ лотка деталей, а лоток прячется при нуле операций. Сценарий
+            отказа ровно такой: у сохранённой карточки узлы есть, технолог удалил все шаги, чтобы
+            пересобрать последовательность, сервер требует объявить намерение — и кнопка, которой
+            это делают, оказалась за `hidden`. Починку применили к одному щиту из двух. */}
+        <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} frozen={frozen} />
       </ChipRow>
 
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden
@@ -3500,7 +3563,6 @@ export function OperationsField({
           >
             {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
-          <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} />
           <ToolbarSpacer />
           <Text
             size='micro'
