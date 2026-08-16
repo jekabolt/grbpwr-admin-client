@@ -34,6 +34,8 @@ export function AnnotationEditor({
   onClose,
   renderPiecePicker,
   extra,
+  onDemote,
+  sameKey = (a, b) => a === b,
   style = true,
 }: {
   kind: string;
@@ -62,6 +64,22 @@ export function AnnotationEditor({
    * разводить их — разведённые, они разойдутся и во всём остальном, как уже разошлись однажды.
    */
   extra?: ReactNode;
+  /**
+   * Разжаловать фигуру обратно в нумерованную точку. Отсутствует — чипа нет.
+   *
+   * Нужен там, где номер выноски АДРЕСУЕТ её снаружи: удалить и поставить заново означало бы новый
+   * номер и повисшие ссылки. У выноски снимка шага номера-адреса нет, и разжаловать её незачем —
+   * проще стереть.
+   */
+  onDemote?: () => void;
+  /**
+   * Совпадают ли два ключа детали. По умолчанию — точное равенство: у выноски снимка шага это
+   * ULID, и «почти равно» там не бывает.
+   *
+   * Эскиз хранит ИМЕНА, и имя из эпохи свободного текста отличается от каталожного регистром —
+   * точное сравнение давало бы два чипа на одну деталь и «клик по выбранной добавляет вторую».
+   */
+  sameKey?: (a: string, b: string) => boolean;
   /**
    * Показывать ряд оформления. Выключается там, где владельцу негде хранить цвет: ряд свотчей,
    * который ничего не пишет, хуже отсутствующего — он обещает, что нажатие что-то изменит.
@@ -124,9 +142,11 @@ export function AnnotationEditor({
                   key={k}
                   tone={name ? 'default' : 'error'}
                   title={name ? 'убрать деталь из указания' : 'детали с таким ключом больше нет'}
-                  onRemove={() => onPieces(pieceKeys.filter((x) => x !== k))}
+                  onRemove={() => onPieces(pieceKeys.filter((x) => !sameKey(x, k)))}
                 >
-                  {name ?? 'деталь удалена'}
+                  {/* ИМЯ ВИДНО ДАЖЕ У НЕИЗВЕСТНОЙ ДЕТАЛИ: без него не понять, что именно было
+                      привязано, и восстановить связь можно только угадав. */}
+                  {name ?? `${k} — нет среди деталей`}
                 </Chip>
               );
             })}
@@ -138,8 +158,8 @@ export function AnnotationEditor({
               onPick: (lineKey) => {
                 if (!lineKey) return;
                 onPieces(
-                  pieceKeys.includes(lineKey)
-                    ? pieceKeys.filter((x) => x !== lineKey)
+                  pieceKeys.some((x) => sameKey(x, lineKey))
+                    ? pieceKeys.filter((x) => !sameKey(x, lineKey))
                     : [...pieceKeys, lineKey],
                 );
               },
@@ -166,6 +186,11 @@ export function AnnotationEditor({
         <Chip dashed onClick={onRemove} title='удалить указание целиком'>
           удалить
         </Chip>
+        {onDemote && (
+          <Chip dashed onClick={onDemote} title='убрать фигуру, оставить нумерованную точку'>
+            сделать точкой
+          </Chip>
+        )}
         <Chip dashed onClick={onClose} title='закрыть правку (Esc или ⌘Enter)'>
           готово
         </Chip>

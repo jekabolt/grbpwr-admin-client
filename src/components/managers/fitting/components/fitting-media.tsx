@@ -125,6 +125,9 @@ export function FittingMedia({
           points: [],
           // legacy pinned-but-unplaced notes fall back to centre so they stay reachable.
           label: { x: Number.isNaN(px) ? 0.5 : px, y: Number.isNaN(py) ? 0.5 : py },
+          // ТЕКСТ ЕДЕТ В ВЬЮ-МОДЕЛЬ. Им наполняется легенда под фотографией и подсказка пина —
+          // без него заметки о посадке читались бы только по одной, открывая каждый пин кликом.
+          text: x.c?.note ?? '',
           hasText: !!x.c?.note?.trim(),
         };
       });

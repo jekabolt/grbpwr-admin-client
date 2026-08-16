@@ -84,6 +84,7 @@ import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
 import { StyleNumberField } from './style-number-field';
 import { RolesField } from './roles-field';
+import { useEditHistory } from 'ui/components/annotation/history';
 import { SketchTab } from './sketch-tab';
 import {
   TechCardFormData,
@@ -395,6 +396,17 @@ export function TechCardForm({
   // drives the Release gate.
   const frozen = techCard?.techCard?.approvalState === RELEASED;
   const styleNumber = useWatch({ control: form.control, name: 'styleNumber' });
+
+  // ИСТОРИЯ ОТКАТА УКАЗАНИЙ — ОДНА НА ФОРМУ, а не на вкладку.
+  //
+  // Эскиз и мудборд смонтированы ОДНОВРЕМЕННО (переключение вкладок — это `hidden`) и пишут ОДИН
+  // массив `callouts`. Две истории над одним массивом означали, что откат на эскизе возвращает
+  // снимок, снятый ДО правок мудборда, — и три заметки, поставленные на другой вкладке, исчезают
+  // молча, потому что их не видно.
+  const calloutValues = (useWatch({ control: form.control, name: 'callouts' }) ?? []) as never[];
+  const calloutHistory = useEditHistory(calloutValues, (prev) =>
+    form.setValue('callouts', prev, { shouldDirty: true }),
+  );
   const name = useWatch({ control: form.control, name: 'name' });
   const issues = (useWatch({ control: form.control, name: 'issues' }) ?? []) as Array<{
     status?: string;
@@ -820,6 +832,10 @@ export function TechCardForm({
           // was just approved carries its stamped digest instead of the blank that MEANS "approve
           // now" (see withServerAssignedValues).
           form.reset(await withServerAssignedValues(data));
+          // ИСТОРИЯ ОТКАТА ЗАБЫВАЕТСЯ ВМЕСТЕ С СОХРАНЕНИЕМ. Она помнит массивы ДО отправки, а форма
+          // теперь несёт то, что вернул сервер: ⌘Z воскресил бы пред-сейвовое состояние поверх
+          // серверных значений — правку, которой никто не делал, поверх той, что уже уехала.
+          calloutHistory.reset();
         }
         // Then the staged sub-panels, in commit order. These are separate RPCs — there is NO
         // transaction, and the banner below deliberately does not pretend otherwise.
@@ -1750,7 +1766,13 @@ export function TechCardForm({
 
             {/* SKETCH */}
             <div hidden={activeTab !== 'sketch'}>
-              <SketchTab techCard={techCard} view='sketch' active={activeTab === 'sketch'} frozen={frozen} />
+              <SketchTab
+                techCard={techCard}
+                view='sketch'
+                active={activeTab === 'sketch'}
+                frozen={frozen}
+                calloutHistory={calloutHistory}
+              />
             </div>
 
             <div hidden={activeTab !== 'moodboard'}>
@@ -1759,6 +1781,7 @@ export function TechCardForm({
                 view='moodboard'
                 active={activeTab === 'moodboard'}
                 frozen={frozen}
+                calloutHistory={calloutHistory}
               />
             </div>
 

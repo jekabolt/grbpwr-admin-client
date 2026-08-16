@@ -66,17 +66,17 @@ export type SurfaceCallout = {
   kind: string;
   /** Якоря фигуры, доли кадра. У пина пуст либо содержит саму точку — решает владелец. */
   points: ShapePoint[];
-  /** Плашка (plate) или нумерованный маркер (marker), доли кадра. */
+  /** Где стоит подпись: плашка у фигуры, нумерованный кружок у пина без якорей. Доли кадра. */
   label: ShapePoint;
   number?: number;
-  /** plate: текст на плашке. marker: не используется (текст живёт в записке владельца). */
+  /** Текст указания: им подписана плашка и наполняется легенда. */
   text?: string;
-  /** marker: полый пин = записки ещё нет. */
+  /** Текст есть, но владелец хранит его не в `text` (примерка). Полый пин = текста ещё нет. */
   hasText?: boolean;
   color?: string;
   dashed?: boolean;
   filled?: boolean;
-  /** plate: детали кроя, о которых указание. */
+  /** Детали кроя, о которых указание. */
   pieceLineKeys?: string[];
 };
 
@@ -124,8 +124,14 @@ export type AnnotationSurfaceProps = {
 
   /** Редактор выбранного указания — рисуется ПОД КАДРОМ. Единственный путь правки текста. */
   renderEditor?: (key: string, opts: { close: () => void }) => ReactNode;
-  /** Подложка редактора: в увеличенном виде фон тёмный, и чернильный текст на нём не читается. */
-  editorClassName?: string;
+  /**
+   * Подложка ПОД ВСЁ, что живёт под кадром: редактор, легенду, строку завершения жеста.
+   *
+   * В увеличенном виде фон тёмный, а весь этот текст чернильный. Подкладывать только под редактор
+   * мало: легенда пинов и «готово · N» оставались бы чёрным по чёрному — то есть невидимыми ровно
+   * там, куда приходят читать.
+   */
+  chromeClassName?: string;
   /** Имя детали по ключу — для плашки и легенды. */
   pieceLabel?: (lineKey: string) => string | undefined;
   /**
@@ -196,6 +202,22 @@ function claimEditing(me: SurfaceClaim) {
   for (const other of liveSurfaces) if (other !== me) other.clear();
 }
 
+/**
+ * КТО ВЛАДЕЕТ ОТКАТОМ. Слушатель клавиш висит на window У КАЖДОЙ поверхности, и вкладки карточки
+ * смонтированы все разом: на экране их бывает до десяти (полоса кадров), плюс одиннадцатая в зуме.
+ *
+ * У Esc и Delete есть собственное владение — они требуют выбранной выноски или начатого жеста, а
+ * он всегда один на экране (см. реестр выше). У ⌘Z такого условия нет по природе: откатывать можно
+ * и не выбрав ничего. Без явного владельца ОДНО нажатие вызывало бы `undo` у каждой видимой
+ * поверхности — три эскиза на листе откатывали бы три жеста, а полоса снимков портила бы соседние
+ * кадры, где правили когда-то раньше. `stopPropagation` тут бессилен: слушатели висят на ОДНОМ
+ * узле, и остановить их могло бы только `stopImmediatePropagation`, порядок которого случаен.
+ *
+ * Владелец — та поверхность, которая последней что-то изменила. Это ровно то, что человек имеет в
+ * виду под «отменить»: последнее сделанное, а не «что-нибудь где-нибудь».
+ */
+let undoOwner: object | null = null;
+
 type Drag =
   | { what: 'label'; key: string; offX: number; offY: number; at: ShapePoint; moved: boolean }
   | { what: 'handle'; key: string; index: number; at: ShapePoint; moved: boolean }
@@ -233,7 +255,7 @@ export function AnnotationSurface({
   maxCallouts,
   onPlacedCountChange,
   legend = false,
-  editorClassName,
+  chromeClassName,
 }: AnnotationSurfaceProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -295,6 +317,7 @@ export function AnnotationSurface({
    * истории, и ⌘Z через раз «ничего не делает».
    */
   const mutate = useCallback((run: () => void) => {
+    undoOwner = claimRef.current;
     live.current.onBeforeMutate?.();
     run();
   }, []);
@@ -314,6 +337,9 @@ export function AnnotationSurface({
     liveSurfaces.add(me);
     return () => {
       liveSurfaces.delete(me);
+      // Поверхность ушла с экрана — вместе с ней уходит и право откатывать: иначе ⌘Z достался бы
+      // никому, и человек нажимал бы его в пустоту, не понимая почему.
+      if (undoOwner === me) undoOwner = null;
     };
   }, []);
 
@@ -860,6 +886,8 @@ export function AnnotationSurface({
       // вместо буквы — «умный» откат, который хуже никакого.
       if ((e.key === 'z' || e.key === 'Z' || e.key === 'я' || e.key === 'Я') && (e.metaKey || e.ctrlKey)) {
         if (typing || e.shiftKey || !onUndo || !canUndo?.()) return;
+        // Откатывает ТА поверхность, которая последней что-то меняла, — см. `undoOwner`.
+        if (undoOwner !== claimRef.current) return;
         e.preventDefault();
         e.stopPropagation();
         // Откат снимает выбор: он адресуется ключом, а вернувшийся список мог этого ключа уже не
@@ -1175,13 +1203,25 @@ export function AnnotationSurface({
                     }
                     inv={inv}
                     number={c.number ?? 0}
+                    // ПОЛЫЙ ПИН = ТЕКСТА ЕЩЁ НЕТ. Единственное состояние, которое видно, не открывая
+                    // выноску: на листе из пятнадцати пинов недописанный иначе неотличим.
+                    filled={!!(c.hasText ?? (c.text ?? '').trim())}
                     color={c.color || undefined}
                     title={[text, ...names].filter(Boolean).join(' · ') || `выноска ${c.number ?? ''}`}
                     dimmed={dim(c.key)}
                     selected={selected === c.key}
                     interactive={!placing}
                     onHover={(on) => setHovered(on ? c.key : null)}
-                    onPress={() => editable && select(selected === c.key ? null : c.key, { focus: true })}
+                    onPress={() => {
+                      // Клик после перетаскивания — ЭХО. Без этой проверки жест «подвинул маркер»
+                      // заканчивался открытым редактором и уехавшим в него фокусом (на планшете —
+                      // выехавшей клавиатурой), а если редактор был открыт — закрывал его.
+                      if (justDragged.current) {
+                        justDragged.current = false;
+                        return;
+                      }
+                      if (editable) select(selected === c.key ? null : c.key, { focus: true });
+                    }}
                   />
                 );
               }
@@ -1193,6 +1233,7 @@ export function AnnotationSurface({
                   key={`plate:${c.key}`}
                   at={px(labelOf(c))}
                   inv={inv}
+                  number={c.number}
                   text={text}
                   names={names}
                   dimmed={dim(c.key)}
@@ -1250,6 +1291,7 @@ export function AnnotationSurface({
         {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
       </div>
 
+      <div className={cn('flex flex-col gap-1', chromeClassName)}>
       {/* ЛЕГЕНДА ПИНОВ — ТОЛЬКО ДЛЯ ПИНОВ. Остальные виды несут текст на себе, и повторять его
           списком значило бы печатать одно и то же дважды — до первого расхождения.
           Живёт ЗДЕСЬ, а не у владельца: наведение на строку обязано подсвечивать свой пин на
@@ -1295,10 +1337,11 @@ export function AnnotationSurface({
       )}
 
       {renderEditor && selected !== null && byKey.has(selected) && (
-        <EditorSlot focusRequested={takeFocusRequest} className={editorClassName}>
+        <EditorSlot focusRequested={takeFocusRequest}>
           {renderEditor(selected, { close: () => select(null) })}
         </EditorSlot>
       )}
+      </div>
     </div>
   );
 }
@@ -1412,6 +1455,7 @@ function PinMarker({
   at,
   inv,
   number,
+  filled,
   color,
   title,
   dimmed,
@@ -1424,6 +1468,8 @@ function PinMarker({
   at: ShapePoint;
   inv: number;
   number: number;
+  /** Текст у выноски уже есть. Пустая — полая, и это видно, не открывая её. */
+  filled: boolean;
   /**
    * Цвет КОЛЬЦА, а не цифры. Правило системы — «цвет красит геометрию, никогда текст и номер», но
    * у пина никакой другой геометрии нет: точка радиусом 2 под восемнадцатипиксельным кружком не
@@ -1464,7 +1510,8 @@ function PinMarker({
         onPress();
       }}
       className={cn(
-        'absolute flex items-center justify-center rounded-full border bg-bgColor text-nano tabular-nums',
+        'absolute flex items-center justify-center rounded-full border text-nano tabular-nums',
+        filled ? 'bg-textColor text-bgColor' : 'bg-bgColor text-textColor',
         onDragStart ? 'cursor-move' : 'cursor-pointer',
         selected ? 'border-textColor' : 'border-borderColor',
         dimmed && 'invisible',
@@ -1495,6 +1542,7 @@ function PinMarker({
 function Plate({
   at,
   inv,
+  number,
   text,
   names,
   dimmed,
@@ -1507,6 +1555,8 @@ function Plate({
 }: {
   at: ShapePoint;
   inv: number;
+  /** Номер, которым выноску адресуют снаружи. Отсутствует — на плашке его нет. */
+  number?: number;
   text: string;
   names: string[];
   dimmed: boolean;
@@ -1553,6 +1603,16 @@ function Plate({
         transform: `translate(-50%, -50%) scale(${inv})`,
       }}
     >
+      {number != null && (
+        // НОМЕР НА ПЛАШКЕ, если владелец им адресует. На эскизе выноску называют номером деталь,
+        // операция и дефект, и тех-пак печатает нумерованный кружок у КАЖДОЙ — а на экране номер
+        // фигуры не было видно нигде: прочитав «callout 5» в операции, найти эту мерку глазами
+        // было нельзя. У снимка шага номера у фигур нет вовсе (там адресуют не им), и владелец
+        // его не передаёт.
+        <span className='mr-1 inline-block bg-textColor px-[3px] leading-tight text-bgColor tabular-nums'>
+          {number}
+        </span>
+      )}
       {text || (tail ? '' : '—')}
       {tail && (
         <span className='block uppercase tracking-label text-labelColor'>{tail}</span>

@@ -112,7 +112,10 @@ export function AnnotationCanvas({
         kind: a.kind ?? 'pin',
         points: (a.points ?? []).map((p) => ({ x: num(p.x), y: num(p.y) })),
         label: { x: num(a.labelX), y: num(a.labelY) },
-        number: pinNumber(annotations, i),
+        // НОМЕР ТОЛЬКО У ПИНА. У выноски снимка шага номер — порядок в легенде, а не адрес: на
+        // неё никто не ссылается снаружи. Дать его фигуре значило бы напечатать на плашке число,
+        // которое ничего не адресует.
+        number: (a.kind ?? 'pin') === 'pin' ? pinNumber(annotations, i) : undefined,
         text: a.text ?? '',
         color: a.color ?? '',
         dashed: !!a.dashed,
@@ -135,7 +138,6 @@ export function AnnotationCanvas({
     src,
     alt,
     callouts,
-    labelMode: 'plate' as const,
     frozen,
     pieceLabel,
     maxCallouts: MAX_ANNOTATIONS,

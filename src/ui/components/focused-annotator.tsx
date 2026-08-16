@@ -356,7 +356,7 @@ export function FocusedAnnotator({
     ? 'загружаю картинку из буфера…'
     : tool
       ? placingHint(tool, placed)
-      : 'наведите на пин — прочесть · клик по пину или по линии — правка · ⌘V вставит картинку';
+      : 'клик по пину или по линии — правка · текст читается в легенде под кадром · ⌘V вставит картинку';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have

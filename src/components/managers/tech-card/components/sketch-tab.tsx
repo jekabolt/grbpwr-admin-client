@@ -2,17 +2,14 @@ import { common_MediaFull, common_TechCard, common_TechCardMediaKind } from 'api
 import { techCardMeasurementUnitOptions, techCardMediaKindOptions } from 'constants/filter';
 import { useId, useMemo, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
-import { Accordion } from 'ui/components/accordion';
 import { AnnotationEditor } from 'ui/components/annotation/editor';
-import { useEditHistory } from 'ui/components/annotation/history';
-import { kindDef } from 'ui/components/annotation/kinds';
-import { AnnotationStyleRow } from 'ui/components/annotation/style-row';
+import { type EditHistory } from 'ui/components/annotation/history';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
 import { Button } from 'ui/components/button';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
 import { GroupLabel } from 'ui/components/group-label';
-import { Pill } from 'ui/components/pill';
 import { SectionHeader } from 'ui/components/section-header';
+import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import InputField from 'ui/form/fields/input-field';
@@ -21,7 +18,6 @@ import TextareaField from 'ui/form/fields/textarea-field';
 import { cn } from 'lib/utility';
 import GenericPopover from 'ui/components/popover';
 import { Chip, ChipRow } from 'ui/components/chip';
-import { CALLOUT_COLOR_HEX } from 'ui/components/annotation/shapes';
 import { PieceAddChip, normalizePieceName, useFormPieces, type PieceRef } from './piece-picker';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
@@ -108,6 +104,7 @@ function TechCardGallery({
   frozen,
   cardPieces,
   shapeOf,
+  history,
 }: {
   listName: MediaListName;
   mediaById: Map<number, common_MediaFull>;
@@ -120,6 +117,8 @@ function TechCardGallery({
   /** Детали кроя карточки — для пикера деталей в редакторе указания. */
   cardPieces: PieceRef[];
   shapeOf: (lineKey: string) => FoundPiece | null;
+  /** Общая на форму история отката: массив `callouts` один на оба листа. */
+  history: EditHistory<FormCallout>;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const mediaFA = useFieldArray({ control, name: listName });
@@ -253,11 +252,6 @@ function TechCardGallery({
   // деталям кроя.
   const writeCallouts = (next: FormCallout[]) => setValue('callouts', next, { shouldDirty: true });
 
-  // ⌘Z откатывает ЖЕСТ над фигурой: постановку, перенос точки, перетаскивание маркера, удаление.
-  // Список тут ОБЩИЙ на оба листа — и это правильно: откат возвращает состояние массива, а не
-  // «состояние мудборда», и разделять его по листам значило бы, что жест на одном листе виден
-  // истории другого только наполовину.
-  const history = useEditHistory(calloutValues, writeCallouts);
 
   // ПОСТАНОВКА — ОДИН ПУТЬ НА ВСЕ ВИДЫ. Их было два (пин отдельно, фигура отдельно), и каждый
   // создавал выноску сам: два списка умолчаний на одну сущность разошлись бы первой же добавленной
@@ -348,9 +342,49 @@ function TechCardGallery({
   // остались от старых карточек и рождаются, когда снимают картинку. Без этого ряда они
   // становились бы НЕВИДИМЫМИ и неудаляемыми — данные, которых нет на экране, но которые уезжают
   // на сервер при каждом сохранении.
+  // «БЕЗ КАРТИНКИ» — ЭТО НЕ ТОЛЬКО НОЛЬ. Выноска с ненулевым mediaId, которого нет ни в одном из
+  // двух списков, так же невидима: строку медиа сняли, а ссылку не обнулили (или карточка пришла
+  // с дрейфом данных). Проверять только ноль значило бы оставить половину случаев за экраном —
+  // ровно тех, что рождаются откатом ⌘Z после снятия картинки.
+  const liveMediaIds = new Set<number>([
+    ...mediaFA.fields.map((f) => f.mediaId),
+    ...((getValues(siblingName) ?? []) as Array<{ mediaId?: number }>).map((m) => m.mediaId ?? 0),
+  ]);
   const strays = calloutValues
     .map((c, i) => ({ c, i }))
-    .filter(({ c }) => isMine(c) && !c.mediaId);
+    .filter(({ c }) => isMine(c) && !liveMediaIds.has(c.mediaId ?? 0));
+
+  // ВЫНОСКИ, КОТОРЫЕ НАЗЫВАЮТ СУЩЕСТВУЮЩУЮ ДЕТАЛЬ, НО НЕ СВЯЗАНЫ С НЕЙ.
+  //
+  // Связь двусторонняя: выноска называет детали, а деталь ссылается на выноску НОМЕРОМ — и пины в
+  // «деталях кроя», подсчёт «открепления» и печать тех-пака идут по номеру. Клиент годами писал
+  // только первую половину, поэтому ровно в этом состоянии лежит каждая живая карточка.
+  //
+  // Молча дописать на загрузке нельзя — это правка карточки, которой никто не делал. Поэтому
+  // связывание остаётся действием человека, но ОДНИМ нажатием на все сразу: переоткрывать по
+  // очереди пятнадцать выносок никто не станет, и карточка так и осталась бы без связей.
+  const unlinked = (() => {
+    if (isMoodboard) return [];
+    const held = new Map<string, number>();
+    for (const pc of cardPieces) {
+      const key = normalizePieceName(pc.name);
+      if (key && !held.has(key)) held.set(key, 0);
+    }
+    const live = (getValues('pieces') ?? []) as Array<{ name?: string; calloutNumber?: number }>;
+    for (const pc of live) {
+      const key = normalizePieceName(pc.name ?? '');
+      if (key) held.set(key, pc.calloutNumber ?? 0);
+    }
+    return calloutValues
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => isMine(c) && (c.number ?? 0) > 0)
+      .filter(({ c }) =>
+        calloutParts(c).some((name) => {
+          const n = held.get(normalizePieceName(name));
+          return n != null && n !== c.number;
+        }),
+      );
+  })();
 
   const gallery = (
     <FocusedAnnotator
@@ -445,12 +479,34 @@ function TechCardGallery({
               pinPieceToCallout(i, names);
             }}
             onRemove={() => {
+              // ЧЕРЕЗ ИСТОРИЮ, как и удаление клавишей. Одна и та же операция, сделанная мышью,
+              // не имеет права быть безвозвратной там, где сделанная с клавиатуры откатывается.
+              history.record();
               writeCallouts(
                 ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== i),
               );
               close();
             }}
             onClose={close}
+            // РАЗЖАЛОВАТЬ ФИГУРУ В ТОЧКУ. Единственный способ избавиться от неудачной геометрии,
+            // СОХРАНИВ выноску: ручки ниже минимума точек не опускаются, а удалить и поставить
+            // заново — значит получить новый номер, а на номер ссылаются деталь, операция и дефект.
+            onDemote={
+              (c.kind ?? 'pin') === 'pin'
+                ? undefined
+                : () => {
+                    history.record();
+                    setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
+                    setValue(`callouts.${i}.points`, [], { shouldDirty: true });
+                    // Пунктир и штриховка у точки не значат ничего: сервер обнулил бы их сам, а
+                    // расхождение формы с хранимым делает карточку «изменённой» после сохранения.
+                    setValue(`callouts.${i}.dashed`, false, { shouldDirty: true });
+                    setValue(`callouts.${i}.filled`, false, { shouldDirty: true });
+                  }
+            }
+            // Имена, а не ключи: сравнение — по правилу карточки, иначе легаси-имя в другом
+            // регистре даёт два чипа на одну деталь.
+            sameKey={(a, b) => normalizePieceName(a) === normalizePieceName(b)}
             renderPiecePicker={({ selected, onPick }) => (
               <PieceAddChip
                 pieces={cardPieces}
@@ -532,18 +588,39 @@ function TechCardGallery({
     />
   );
 
-  if (strays.length === 0) return gallery;
+  if (strays.length === 0 && unlinked.length === 0) return gallery;
   return (
     <div className='flex flex-col gap-2'>
       {gallery}
+      {unlinked.length > 0 && !frozen && (
+        <div className='flex flex-wrap items-center gap-1.5'>
+          <Button
+            type='button'
+            variant='secondary'
+            size='xs'
+            title={`деталь названа, но не ссылается на выноску: ${unlinked
+              .map(({ c }) => `#${c.number} → ${calloutParts(c).join(', ')}`)
+              .join('; ')}`}
+            onClick={() => unlinked.forEach(({ c, i }) => pinPieceToCallout(i, calloutParts(c)))}
+          >
+            связать детали с выносками ({unlinked.length})
+          </Button>
+          <Text size='nano' variant='label' component='span'>
+            без связи деталь не знает своей выноски: пин не рисуется в «деталях кроя» и не
+            печатается в тех-паке
+          </Text>
+        </div>
+      )}
+      {strays.length > 0 && (
       <div className='flex flex-col gap-1 border border-dashed border-borderColor p-2'>
         <Text size='micro' variant='label' component='span' className='uppercase'>
           указания без картинки · {strays.length}
         </Text>
         <Text size='nano' variant='label'>
-          они не стоят ни на одном {isMoodboard ? 'референсе' : 'эскизе'} — картинку сняли или
-          выноска пришла со старой карточки. Поставить их заново нечем: доли кадра осмысленны только
-          на своём снимке. Текст сохранён, чтобы было что перенести.
+          они не стоят ни на одной картинке — снимок сняли или выноска пришла со старой карточки.
+          Вернуть её на лист можно, СОХРАНИВ НОМЕР: на номер ссылаются деталь, операция и дефект, и
+          «удалить и поставить заново» порвало бы эти ссылки. Маркер встанет в середину — оттуда его
+          перетаскивают куда надо.
         </Text>
         {strays.map(({ c, i }) => (
           <div key={i} className='flex items-baseline gap-1.5'>
@@ -555,13 +632,36 @@ function TechCardGallery({
             </Text>
             {!frozen && (
               <ChipRow>
+                {/* ЧИПОМ НА КАЖДУЮ КАРТИНКУ, а не селектом: картинок на листе единицы, и список из
+                    двух пунктов, спрятанный за раскрытием, дороже двух чипов рядом. */}
+                {mediaFA.fields.map((f, mi) => (
+                  <Chip
+                    key={f.id}
+                    dashed
+                    onClick={() => {
+                      history.record();
+                      setValue(`callouts.${i}.mediaId`, f.mediaId, { shouldDirty: true });
+                      setValue(`callouts.${i}.posX`, '0.5', { shouldDirty: true });
+                      setValue(`callouts.${i}.posY`, '0.5', { shouldDirty: true });
+                      // ЯКОРЯ НЕ ПЕРЕЕЗЖАЮТ: доли кадра осмысленны только на своём снимке, и
+                      // фигура легла бы на новую картинку по координатам старой — с виду
+                      // нормальная линия, указывающая не туда.
+                      setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
+                      setValue(`callouts.${i}.points`, [], { shouldDirty: true });
+                    }}
+                    title={`поставить на ${isMoodboard ? 'M' : 'T'}#${mi + 1}, сохранив номер`}
+                  >
+                    на {isMoodboard ? 'M' : 'T'}#{mi + 1}
+                  </Chip>
+                ))}
                 <Chip
                   dashed
-                  onClick={() =>
+                  onClick={() => {
+                    history.record();
                     writeCallouts(
                       ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== i),
-                    )
-                  }
+                    );
+                  }}
                   title='удалить указание, которое ни на чём не стоит'
                 >
                   удалить
@@ -571,6 +671,7 @@ function TechCardGallery({
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }
@@ -613,8 +714,17 @@ export function SketchTab({
   view = 'sketch',
   active = false,
   frozen = false,
+  calloutHistory,
 }: {
   techCard?: common_TechCard;
+  /**
+   * История отката указаний — ОДНА НА ФОРМУ, приходит сверху.
+   *
+   * Эскиз и мудборд смонтированы одновременно и пишут ОДИН массив `callouts`. Своя история у
+   * каждого означала бы, что откат на одном листе возвращает снимок, снятый до правок другого, и
+   * они исчезают молча — на скрытой вкладке этого не видно.
+   */
+  calloutHistory: EditHistory<FormCallout>;
   view?: 'sketch' | 'moodboard';
   /** Карточка выпущена и заморожена. Нужен ЯВНО: `<fieldset disabled>` не глушит ⌘V. */
   frozen?: boolean;
@@ -660,6 +770,7 @@ export function SketchTab({
           purpose='moodboard reference'
           cardPieces={pieces}
           shapeOf={shapeOf}
+          history={calloutHistory}
         />
         <MoodboardComments />
       </section>
@@ -682,6 +793,7 @@ export function SketchTab({
         purpose='tech sketch'
         cardPieces={pieces}
         shapeOf={shapeOf}
+        history={calloutHistory}
       />
     </section>
   );
