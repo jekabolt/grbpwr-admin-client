@@ -103,7 +103,19 @@ export type AnnotationSurfaceProps = {
   onEditPoints?: (key: string, points: ShapePoint[]) => void;
   onMoveLabel?: (key: string, at: ShapePoint) => void;
   onRemove?: (key: string) => void;
-  onSelect?: (key: string | null) => void;
+  /**
+   * Выбор изменился. `focus` — жест просит открыть правку и поставить в неё курсор.
+   *
+   * Нужен там, где редактор живёт НЕ под кадром: у листа эскиза он сгруппирован с панелью видов,
+   * потому что редактор шире панели, а плитки стоят в ряд — растущая колонка двигала бы соседние
+   * кадры на каждый клик по пину.
+   */
+  onSelect?: (key: string | null, opts?: { focus?: boolean }) => void;
+  /**
+   * Выбранное указание, когда выбором владеет ВЛАДЕЛЕЦ (лист эскиза: одна правка на весь лист, а
+   * поверхностей на нём столько же, сколько картинок). Не задан — поверхность держит выбор сама.
+   */
+  selectedKey?: string | null;
   /**
    * Зовётся ПЕРЕД каждой мутацией фигур — владелец запоминает состояние для отката (см. history.ts).
    *
@@ -146,6 +158,14 @@ export type AnnotationSurfaceProps = {
 
   /** Колесо/щипок/панорама. Живёт только в увеличенном виде: инлайн колесо скроллит страницу. */
   zoom?: boolean;
+  /**
+   * Кадр ВПИСЫВАЕТСЯ в доступное место, сохраняя пропорции картинки, и занимает его целиком.
+   *
+   * Пропорции берутся у САМОЙ картинки при загрузке, а не приходят пропом: увеличенный вид не
+   * знает, что ему покажут, а кадр обязан совпадать с картинкой — он и есть система координат
+   * указаний. Пока пропорции неизвестны, кадр ведёт себя как обычно.
+   */
+  fit?: boolean;
   /** Слой указаний целиком не рисуется — смотреть сам снимок. */
   hideCallouts?: boolean;
   /**
@@ -239,6 +259,7 @@ export function AnnotationSurface({
   onMoveLabel,
   onRemove,
   onSelect,
+  selectedKey,
   onBeforeMutate,
   onUndo,
   canUndo,
@@ -256,14 +277,29 @@ export function AnnotationSurface({
   onPlacedCountChange,
   legend = false,
   chromeClassName,
+  fit = false,
 }: AnnotationSurfaceProps) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
+  /** Собственные пропорции картинки — известны только после загрузки. */
+  const [naturalRatio, setNaturalRatio] = useState<number | null>(null);
+  // Смена картинки обнуляет пропорции: иначе новый снимок кадрируется по старым, и указания на нём
+  // ложатся мимо — ровно на время до его загрузки, то есть незаметно и каждый раз по-разному.
+  useEffect(() => setNaturalRatio(null), [src]);
+  const fitting = fit && naturalRatio != null;
 
   // Наведение и выбор — РАЗНЫЕ состояния: наведение изолирует (мышь), выбор открывает правку и
   // переживает уход курсора, иначе редактор закрывался бы от каждого движения.
   const [hovered, setHovered] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [ownSelected, setOwnSelected] = useState<string | null>(null);
+  const controlled = selectedKey !== undefined;
+  const selected = controlled ? selectedKey : ownSelected;
+  const setSelected = useCallback(
+    (next: string | null) => {
+      if (!controlled) setOwnSelected(next);
+    },
+    [controlled],
+  );
   /** Вооружённая ручка: Delete тогда уносит ТОЧКУ, а не всю фигуру. */
   const [armed, setArmed] = useState<{ key: string; index: number } | null>(null);
 
@@ -328,6 +364,9 @@ export function AnnotationSurface({
   // сеттеры — реестр хранит ОДИН объект и не пересобирается на каждый рендер.
   const claimRef = useRef<SurfaceClaim>({ clear: () => {} });
   claimRef.current.clear = () => {
+    // Гасит выбор и у владельца тоже: «правка ровно одна на экране» обязана работать и когда
+    // выбором владеет лист, иначе на нём остался бы открытый редактор чужой картинки.
+    if (selected !== null) onSelectRef.current?.(null);
     setSelected(null);
     setArmed(null);
     setPoints([]);
@@ -350,6 +389,8 @@ export function AnnotationSurface({
    * было не набрать. Одноразовый флаг: поставил жест — редактор его снял.
    */
   const focusOnce = useRef(false);
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   /**
    * Только что поставленная фигура ждёт выбора. Ключ новой выноски знает ВЛАДЕЛЕЦ (она приедет
    * следующим рендером), поэтому выбор делается по её появлению — но по одноразовому флагу из
@@ -368,9 +409,9 @@ export function AnnotationSurface({
       focusOnce.current = !!opts?.focus;
       setSelected(key);
       setArmed(null);
-      onSelect?.(key);
+      onSelect?.(key, opts);
     },
-    [onSelect],
+    [onSelect, setSelected],
   );
 
   useLayoutEffect(() => {
@@ -892,8 +933,7 @@ export function AnnotationSurface({
         e.stopPropagation();
         // Откат снимает выбор: он адресуется ключом, а вернувшийся список мог этого ключа уже не
         // содержать — редактор тогда открылся бы на пустоте.
-        setSelected(null);
-        setArmed(null);
+        select(null);
         onUndo();
         return;
       }
@@ -1039,6 +1079,9 @@ export function AnnotationSurface({
           // пины оказывались не на своих местах, и это выглядело как «поехали точки». Повторный
           // клик закрывал редактор и возвращал всё назад — отсюда «увеличивается и уменьшается».
           'self-start',
+          // Вписанный кадр занимает всё доступное место, упираясь в ту сторону, которая кончится
+          // раньше. Без `min-h-0` он не ужимается по высоте внутри flex-родителя.
+          fitting && 'h-auto max-h-full w-full min-h-0 self-center',
           heightPx != null && 'w-fit',
           // `touch-action` объявляется ЗАРАНЕЕ: браузер выбирает поведение жеста в момент касания,
           // и запрет, выставленный позже, уже ничего не решает — палец уводит страницу в
@@ -1048,7 +1091,12 @@ export function AnnotationSurface({
           frameClassName,
           cursorClass,
         )}
-        style={{ aspectRatio, ...frameStyle }}
+        style={{
+          // Вписанный кадр держит СОБСТВЕННЫЕ пропорции картинки: тогда `object-cover` ничего не
+          // обрезает, и кадр совпадает с картинкой пиксель в пиксель.
+          aspectRatio: fitting ? String(naturalRatio) : aspectRatio,
+          ...frameStyle,
+        }}
         onPointerDown={onFramePointerDown}
         onPointerMove={onFramePointerMove}
         onPointerUp={onFramePointerUp}
@@ -1087,8 +1135,14 @@ export function AnnotationSurface({
               // все эскизы в полный размер.
               loading='lazy'
               draggable={false}
+              onLoad={(e) => {
+                const el = e.currentTarget;
+                if (fit && el.naturalWidth > 0 && el.naturalHeight > 0) {
+                  setNaturalRatio(el.naturalWidth / el.naturalHeight);
+                }
+              }}
               className={cn(
-                aspectRatio
+                fitting || aspectRatio
                   ? 'absolute inset-0 h-full w-full object-cover'
                   : heightPx != null
                     ? 'block h-auto w-auto max-w-none'
@@ -1308,7 +1362,13 @@ export function AnnotationSurface({
         {cornerSlot && <div className='absolute right-1 top-1 z-[4] flex gap-1'>{cornerSlot}</div>}
       </div>
 
-      <div className={cn('flex flex-col gap-1', chromeClassName)}>
+      {/* ВСЁ ПОД КАДРОМ НЕ УЧАСТВУЕТ В ШИРИНЕ КОЛОНКИ.
+          Кадр уже не тянется (`self-start`), но сама колонка — `width: fit-content`, и она росла
+          под самого широкого соседа: открытый редактор шире панели видов, поэтому клик по пину
+          раздвигал плитку и сдвигал соседние кадры в полосе. Замерено в Chromium: `width: 0` не даёт
+          подписи участвовать в max-content родителя, `min-width: 100%` возвращает ей всю его
+          ширину — колонка держится за кадр, а редактор переносится внутри неё. */}
+      <div className={cn('flex w-0 min-w-full flex-col gap-1', chromeClassName)}>
       {/* ЛЕГЕНДА ПИНОВ — ТОЛЬКО ДЛЯ ПИНОВ. Остальные виды несут текст на себе, и повторять его
           списком значило бы печатать одно и то же дважды — до первого расхождения.
           Живёт ЗДЕСЬ, а не у владельца: наведение на строку обязано подсвечивать свой пин на

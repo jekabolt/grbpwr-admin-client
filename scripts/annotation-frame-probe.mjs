@@ -12,9 +12,12 @@
 // ширину → картинку СПЛЮЩИВАЛО (400×300 → 520×150). Повторный клик возвращал всё назад: «картинка
 // увеличивается и уменьшается, и точки уезжают».
 //
-// Проверяются оба правила, на которых всё держится:
+// Проверяются три правила, на которых всё держится:
 //   1. кадр не меняет размер, когда под ним появляется что-то широкое;
-//   2. кадр совпадает с картинкой, даже когда её ужимает `max-height`.
+//   2. кадр совпадает с картинкой, даже когда её ужимает `max-height`;
+//   3. КОЛОНКА тоже не меняет ширину. Кадр держится, но сама колонка — `width: fit-content`, и
+//      открытый редактор шире панели видов: без третьего правила клик по пину раздвигал плитку и
+//      двигал соседние кадры в ряду. Это второй заход того же дефекта, уже после первой починки.
 //
 // Playwright не в зависимостях проекта — проба ищет его в кэше npx и МОЛЧА ПРОПУСКАЕТСЯ, если не
 // нашла: гейт, который нельзя выполнить, не должен красить сборку в красный.
@@ -68,6 +71,7 @@ const src = readFileSync(resolve(here, '../src/ui/components/annotation/surface.
 const guards = [
   ["кадр объявлен нерастягивающимся ('self-start')", /'self-start',/],
   ["ширину картинки задаёт она сама ('w-auto max-w-full')", /'block h-auto w-auto max-w-full'/],
+  ['подпись под кадром не участвует в ширине колонки', /'flex w-0 min-w-full flex-col gap-1'/],
 ];
 
 const browser = await chromium.launch();
@@ -87,9 +91,13 @@ await page.setContent(`
  .free{width:auto;max-width:100%;max-height:150px}
  .stretchy{width:100%;max-height:150px}
  .editor{width:520px;height:30px}
+ .hide{display:none}
+ .pin{width:0;min-width:100%}
 </style>
 <div class="col"><div class="frame" id="bad"><img id="badImg" class="stretchy" src="${img}"></div><div class="editor"></div></div>
-<div class="col"><div class="frame fixed" id="good"><img id="goodImg" class="free" src="${img}"></div><div class="editor"></div></div>`);
+<div class="col"><div class="frame fixed" id="good"><img id="goodImg" class="free" src="${img}"></div><div class="editor"></div></div>
+<div class="col" id="colGrow"><div class="frame fixed"><img class="free" src="${img}"></div><div><div class="editor hide" id="growEd"></div></div></div>
+<div class="col" id="colPin"><div class="frame fixed"><img class="free" src="${img}"></div><div class="pin"><div class="editor hide" id="pinEd"></div></div></div>`);
 await page.waitForFunction(() => document.getElementById('goodImg')?.complete);
 
 const box = (id) =>
@@ -119,6 +127,19 @@ check(
   badFrame[0] === 520 && badImg[1] === 150 && badImg[0] / badImg[1] !== 4 / 3,
   `кадр ${badFrame}, картинка ${badImg}`,
 );
+
+// КОЛОНКА НЕ РАСТЁТ ПОД РЕДАКТОР — с негативным контролем рядом: без приёма она обязана вырасти,
+// иначе проба не отличала бы «починено» от «случай недостижим».
+{
+  const growBefore = (await box('colGrow'))[0];
+  const pinBefore = (await box('colPin'))[0];
+  await page.evaluate(() => {
+    document.getElementById('growEd').classList.remove('hide');
+    document.getElementById('pinEd').classList.remove('hide');
+  });
+  check('без приёма колонка растёт под редактор', (await box('colGrow'))[0] > growBefore, `${growBefore} → ${(await box('colGrow'))[0]}`);
+  check('с приёмом колонка держится за кадр', (await box('colPin'))[0] === pinBefore, `${pinBefore} → ${(await box('colPin'))[0]}`);
+}
 
 const frame = await box('good');
 const shown = await box('goodImg');
