@@ -88,7 +88,7 @@ const mediaUrl = (full?: common_MediaFull): string =>
 // The editable body of a callout's note: just its text. The structured fields (part, number, which
 // image it's pinned to) live in the "callouts" accordion below, so the note that pops on a pin
 // stays small and legible — a place to write, not a form.
-function CalloutNoteBody({ index }: { index: number }) {
+function CalloutNoteBody({ index, frozen }: { index: number; frozen: boolean }) {
   const { control } = useFormContext<TechCardFormData>();
   const { field } = useController({ control, name: `callouts.${index}.description` });
   return (
@@ -97,7 +97,12 @@ function CalloutNoteBody({ index }: { index: number }) {
       value={field.value ?? ''}
       rows={2}
       maxLength={2000}
-      placeholder='describe this callout…'
+      // ЗАМОРОЗКА ЯВНАЯ, потому что записка живёт в `Popover.Portal` — то есть в `document.body`,
+      // ВНЕ `<fieldset disabled>` карточки вместе со всем содержимым. Без этого текст подписанной
+      // выноски правился на выпущенной карточке, и правился молча: автосохранение при заморозке
+      // выключено, чип «есть правки» тоже.
+      readOnly={frozen}
+      placeholder={frozen ? '' : 'describe this callout…'}
       onKeyDown={(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key === 'Escape') {
           e.preventDefault();
@@ -338,7 +343,7 @@ function TechCardGallery({
       }}
       renderNote={(key) => {
         const i = keyToIndex.get(key);
-        return i != null ? <CalloutNoteBody index={i} /> : null;
+        return i != null ? <CalloutNoteBody index={i} frozen={frozen} /> : null;
       }}
       noteTitle={(key) => {
         const i = keyToIndex.get(key);

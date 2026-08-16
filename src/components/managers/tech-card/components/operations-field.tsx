@@ -1047,10 +1047,13 @@ function ClearOperationMediaButton({
 function ClearAssemblyButton({
   pieces,
   storedHasUnits,
+  frozen = false,
 }: {
   pieces: PieceRef[];
   /** Размечена ли СОХРАНЁННАЯ карточка. Не то же самое, что размечена форма. */
   storedHasUnits: boolean;
+  /** Выпущенная карточка: намерение снять разметку объявлять не из чего и незачем. */
+  frozen?: boolean;
 }) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const showMessage = useSnackBarStore((st) => st.showMessage);
@@ -1065,6 +1068,10 @@ function ClearAssemblyButton({
   // перезагрузка с потерей правок. Отказ, из которого нет выхода, хуже отказа.
   const inForm = view.res.units.size;
   if (inForm === 0 && !storedHasUnits) return null;
+  // Модалка подтверждения портальная, то есть рендерится ВНЕ `<fieldset disabled>` карточки и
+  // остаётся живой; без явного флага диалог, открытый до выпуска, взводил бы намерение уже на
+  // замороженной карточке (близнец гасится тем же способом).
+  if (frozen) return null;
 
   const clear = () => {
     const ops = (getValues('operations') ?? []) as Array<{
@@ -3463,6 +3470,12 @@ export function OperationsField({
           прятало кнопку там, где снимки добавили, но ещё не сохранили. */}
       <ChipRow>
         <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={frozen} />
+        {/* ТА ЖЕ ПРИЧИНА, ЧТО У СОСЕДА СЛЕВА, и её пришлось усвоить дважды: кнопка снятия
+            разметки узлов жила ВНУТРИ лотка деталей, а лоток прячется при нуле операций. Сценарий
+            отказа ровно такой: у сохранённой карточки узлы есть, технолог удалил все шаги, чтобы
+            пересобрать последовательность, сервер требует объявить намерение — и кнопка, которой
+            это делают, оказалась за `hidden`. Починку применили к одному щиту из двух. */}
+        <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} frozen={frozen} />
       </ChipRow>
 
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden
@@ -3500,7 +3513,6 @@ export function OperationsField({
           >
             {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
-          <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} />
           <ToolbarSpacer />
           <Text
             size='micro'

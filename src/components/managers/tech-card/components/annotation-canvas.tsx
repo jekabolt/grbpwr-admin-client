@@ -254,11 +254,20 @@ export function AnnotationCanvas({
         } else setSelected(null);
         return;
       }
-      // Delete удаляет выбранную — но НЕ когда курсор в поле ввода: там та же клавиша стирает
-      // букву, и перехватить её значило бы удалять выноску при правке её же подписи.
-      if (e.key !== 'Delete' || selected === null) return;
+      // Delete/Backspace удаляют выбранную. ОБЕ клавиши намеренно: на маковской клавиатуре
+      // «Delete» — это `Backspace`, и обещать жест, которого у половины команды физически нет,
+      // хуже, чем не обещать вовсе.
+      //
+      // НО НЕ когда курсор в поле ввода: там та же клавиша стирает букву, и перехватить её
+      // значило бы удалять выноску при правке её же подписи.
+      if ((e.key !== 'Delete' && e.key !== 'Backspace') || selected === null) return;
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      // И НЕ когда этот холст на СКРЫТОЙ вкладке. Вкладки карточки смонтированы все разом
+      // (переключение — это `hidden`), слушатель висит на window, а выбор переживает уход с
+      // вкладки. Без этой проверки «выбрал выноску на снимке шага → ушёл на эскиз → нажал Delete»
+      // удаляло выноску на вкладке, которой не видно, — молча и без единого следа на экране.
+      if (!boxRef.current?.isConnected || boxRef.current.offsetParent === null) return;
       e.preventDefault();
       remove(selected);
     };
