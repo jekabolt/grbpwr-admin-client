@@ -146,18 +146,18 @@ export function FittingMedia({
         const i = keyToIndex.get(key);
         if (i != null) calloutFA.remove(i);
       }}
-      renderNote={(key, { close }) => {
+      // ТОТ ЖЕ СЛОТ, что у тех-карты, но СВОЙ редактор: заметка о посадке это одно поле, и
+      // грузить её чипами деталей и палитрой значило бы обещать хранение, которого у примерки нет.
+      // Общая здесь не форма, а место: правка живёт под кадром, а не всплывает над пином.
+      renderEditor={(key, { close }) => {
         const i = keyToIndex.get(key);
         return i != null ? <FitNoteBody index={i} onDone={close} /> : null;
       }}
-      noteTitle={() => 'fit note'}
       onPickMedia={onPickMedia}
       onRemoveMedia={removeMedia}
       addLabel='add fitting photo'
       purpose='fitting photos'
       halo
-      notesMode='auto'
-      pinSize='md'
       emptyLabel='add a photo to start pinning fit notes'
       fallbackAspect='3/4'
       mediaLabel={(_view, i) => `fitting photo ${i + 1}`}
@@ -166,8 +166,8 @@ export function FittingMedia({
   );
 }
 
-// The editable body of one fit-note sticky note (the text behind a pin). Bound straight to the
-// shared `callouts` field array, so edits here and in the FittingCallouts list stay in sync.
+// Правка одной заметки о посадке. Привязана прямо к общему полю-массиву `callouts`, поэтому правка
+// здесь и в списке заметок остаются одним и тем же.
 function FitNoteBody({ index, onDone }: { index: number; onDone: () => void }) {
   const { control } = useFormContext<FittingFormData>();
   const { field } = useController({ control, name: `callouts.${index}.note` });

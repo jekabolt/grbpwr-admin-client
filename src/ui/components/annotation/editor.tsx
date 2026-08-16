@@ -33,6 +33,8 @@ export function AnnotationEditor({
   onRemove,
   onClose,
   renderPiecePicker,
+  extra,
+  style = true,
 }: {
   kind: string;
   /** Номер пина; у прочих видов не показывается — у них подпись стоит на самой картинке. */
@@ -52,6 +54,19 @@ export function AnnotationEditor({
   onClose: () => void;
   /** Пикер детали с силуэтами. Отсутствует — строки деталей нет вовсе (печать, архив). */
   renderPiecePicker?: (opts: { selected: string[]; onPick: (lineKey: string) => void }) => ReactNode;
+  /**
+   * Поля, которые есть только у ЭТОГО владельца. У карточного указания это привязка размера
+   * («14 × 16»), которую печатает тех-пак; у снимка шага её нет.
+   *
+   * СЛОТ, А НЕ ВТОРОЙ РЕДАКТОР: форма правки одна на все экраны, и различие в одном поле не повод
+   * разводить их — разведённые, они разойдутся и во всём остальном, как уже разошлись однажды.
+   */
+  extra?: ReactNode;
+  /**
+   * Показывать ряд оформления. Выключается там, где владельцу негде хранить цвет: ряд свотчей,
+   * который ничего не пишет, хуже отсутствующего — он обещает, что нажатие что-то изменит.
+   */
+  style?: boolean;
 }) {
   const d = kindDef(kind);
   const ref = useRef<HTMLTextAreaElement>(null);
@@ -133,15 +148,19 @@ export function AnnotationEditor({
         </div>
       )}
 
-      <AnnotationStyleRow
-        kind={kind}
-        color={color}
-        dashed={dashed}
-        filled={filled}
-        onColor={onColor}
-        onDashed={onDashed}
-        onFilled={onFilled}
-      />
+      {extra}
+
+      {style && (
+        <AnnotationStyleRow
+          kind={kind}
+          color={color}
+          dashed={dashed}
+          filled={filled}
+          onColor={onColor}
+          onDashed={onDashed}
+          onFilled={onFilled}
+        />
+      )}
 
       <ChipRow>
         <Chip dashed onClick={onRemove} title='удалить указание целиком'>

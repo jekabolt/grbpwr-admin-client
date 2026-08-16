@@ -141,7 +141,7 @@ export type FocusedAnnotatorProps = {
   /** Resolved, URL-bearing images in display order. Position 0 is the preview when `previewFirst`. */
   views: FocusedView[];
 
-  /** Callouts pinned to one image, already mapped to the annotated-image marker shape. */
+  /** Указания, приколотые к одной картинке, уже в вью-модели поверхности. */
   calloutsFor: (mediaId: number) => SurfaceCallout[];
   /**
    * Указание поставлено. ОДИН колбэк на все виды, включая пин: раньше их было два (`onAddCallout`
@@ -155,9 +155,16 @@ export type FocusedAnnotatorProps = {
   onAddCallout: (mediaId: number, kind: string, points: ShapePoint[], pen: PenStyle) => void;
   onMoveCallout: (key: string, xNorm: number, yNorm: number) => void;
   onRemoveCallout: (key: string) => void;
-  renderNote: (key: string, opts: { close: () => void }) => ReactNode;
+  /**
+   * РЕДАКТОР выбранного указания — рисуется ПОД КАДРОМ, а не всплывает над пином.
+   *
+   * Раньше здесь была `renderNote`: записка в портале поверх картинки. Портал рендерится в
+   * `document.body`, то есть ВНЕ `<fieldset disabled>` карточки со всем содержимым, — и текст
+   * подписанной выноски правился на выпущенной карточке молча. Плюс это был ВТОРОЙ способ
+   * записать текст указания: у снимка шага он всегда жил в редакторе под кадром.
+   */
+  renderEditor: (key: string, opts: { close: () => void }) => ReactNode;
   /** Optional header title inside a note (e.g. a part code, or a constant "fit note"). */
-  noteTitle?: (key: string) => string | undefined;
 
   /** Commit newly-picked media (caller dedupes + appends) and return the ids actually added, so the
    *  first fresh image can be focused immediately. */
@@ -172,8 +179,6 @@ export type FocusedAnnotatorProps = {
 
   /** `focused` = one big image + thumbs. `grid` = every view at once, each with its own pins. */
   layout?: 'focused' | 'grid';
-  notesMode: 'hover' | 'auto';
-  pinSize: 'sm' | 'md';
   emptyLabel: string;
   /** Aspect used only when a media has no known dimensions (e.g. '4/5', '3/4'). */
   fallbackAspect?: string;
@@ -222,6 +227,12 @@ export type FocusedAnnotatorProps = {
   readOnly?: boolean;
   /** Якоря поставленной фигуры изменились — точку подвинули, добавили или убрали. */
   onEditPoints?: (key: string, points: ShapePoint[]) => void;
+  /** Перед каждой мутацией фигур: владелец запоминает состояние для отката (⌘Z). */
+  onBeforeMutate?: () => void;
+  onUndo?: () => void;
+  canUndo?: () => boolean;
+  /** Имя детали по ключу — плашке на кадре и легенде под ним. */
+  pieceLabel?: (key: string) => string | undefined;
   /** Grid only: when set, the grid is a fixed-HEIGHT filmstrip — every image is this many px tall
    *  and keeps its own aspect (natural width, so a landscape is wider), and only the horizontal axis
    *  scrolls. The image is never cropped, so callout pins still map 1:1. Unset = the default
@@ -235,16 +246,13 @@ export function FocusedAnnotator({
   onAddCallout,
   onMoveCallout,
   onRemoveCallout,
-  renderNote,
-  noteTitle,
+  renderEditor,
   onPickMedia,
   onRemoveMedia,
   addLabel,
   purpose,
   pickerAspectRatio,
   layout = 'focused',
-  notesMode,
-  pinSize,
   emptyLabel,
   fallbackAspect = '4/5',
   previewFirst = false,
@@ -254,6 +262,10 @@ export function FocusedAnnotator({
   gridRowHeight,
   calloutKinds,
   onEditPoints,
+  onBeforeMutate,
+  onUndo,
+  canUndo,
+  pieceLabel,
   halo = false,
   readOnly = false,
 }: FocusedAnnotatorProps) {
@@ -267,7 +279,6 @@ export function FocusedAnnotator({
   const [placed, setPlaced] = useState(0);
   /** Индекс кадра, открытого во весь экран. */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
-  const [showAllNotes, setShowAllNotes] = useState(false);
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
   const uploadMedia = useUploadMedia();
@@ -327,22 +338,6 @@ export function FocusedAnnotator({
 
   const modeToggles = (
     <ChipRow>
-      {/* «показать все записки» — ЧИТАТЕЛЬСКИЙ режим, живёт и на выпущенной карточке. Всё
-          остальное в этой полосе пишет, и на замороженной карточке не рисуется вовсе: мёртвый
-          контрол на экране хуже отсутствующего — он обещает действие, которого не будет. */}
-      {notesMode === 'auto' && (
-        <Chip
-          // `nonForm` — потому что это ЧТЕНИЕ. Обычный Chip рендерится нативной кнопкой, а у неё
-          // под `<fieldset disabled>` не стреляет `click`: на выпущенной карточке единственный
-          // способ прочесть все записки разом оказался бы мёртвым ровно там, где карточку читают.
-          nonForm
-          selected={showAllNotes}
-          pressed={showAllNotes}
-          onClick={() => setShowAllNotes((v) => !v)}
-        >
-          показать все записки
-        </Chip>
-      )}
       {/* ПАНЕЛЬ ВИДОВ — общая, та же, что у снимков шага сборки. Отдельного тумблера «add
           callout» нет: выбранный вид сам и есть режим постановки, а два выключателя одного и
           того же расходились ровно так, как расходились здесь. */}
@@ -472,24 +467,23 @@ export function FocusedAnnotator({
                     frameClassName={rowMode ? 'w-auto' : 'w-full'}
                     frameStyle={rowMode ? { height: gridRowHeight } : undefined}
                     callouts={calloutsFor(v.mediaId)}
-                    labelMode='marker'
                     frozen={readOnly}
                     tool={tool}
                     onToolDone={() => setTool(null)}
                     onPlacedCountChange={setPlaced}
-                    showAllNotes={showAllNotes}
-                    pinSize={pinSize}
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
-                    noteClassName='w-60'
-                    // ПЕРО ДОЕЗЖАЕТ ДО ВЛАДЕЛЬЦА. Без него серия штрихов маркером рисуется чернильной, и
                     // каждый приходится перекрашивать поштучно в списке выносок — то есть панель
                     // без цвета оправдана памятью пера, которой бы не было.
                     onAdd={(kind, points, pen) => onAddCallout(v.mediaId, kind, points, pen)}
                     onEditPoints={onEditPoints}
+                    onBeforeMutate={onBeforeMutate}
+                    onUndo={onUndo}
+                    canUndo={canUndo}
+                    pieceLabel={pieceLabel}
                     onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                     onRemove={onRemoveCallout}
-                    noteTitle={noteTitle}
-                    renderNote={renderNote}
+                    renderEditor={renderEditor}
+                    legend
                     halo={halo}
                     cornerSlot={
                       <div className='flex items-center gap-1'>
@@ -574,19 +568,20 @@ export function FocusedAnnotator({
                 media={isVideo(focusedUrl) ? 'video' : 'image'}
                 aspectRatio={mediaAspect(focused.full, fallbackAspect)}
                 callouts={calloutsFor(focused.mediaId)}
-                labelMode='marker'
                 frozen={readOnly}
                 tool={tool}
                 onToolDone={() => setTool(null)}
                 onPlacedCountChange={setPlaced}
-                showAllNotes={showAllNotes}
-                pinSize={pinSize}
                 onAdd={(kind, points, pen) => onAddCallout(focused.mediaId, kind, points, pen)}
                 onEditPoints={onEditPoints}
+                onBeforeMutate={onBeforeMutate}
+                onUndo={onUndo}
+                canUndo={canUndo}
+                pieceLabel={pieceLabel}
                 onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                 onRemove={onRemoveCallout}
-                noteTitle={noteTitle}
-                renderNote={renderNote}
+                renderEditor={renderEditor}
+                    legend
                 halo={halo}
                 cornerSlot={
                   <FrameButton
@@ -675,18 +670,19 @@ export function FocusedAnnotator({
           src={mediaUrl(views[zoomIndex].full)}
           media={isVideo(mediaUrl(views[zoomIndex].full)) ? 'video' : 'image'}
           callouts={calloutsFor(views[zoomIndex].mediaId)}
-          labelMode='marker'
           frozen={readOnly}
           toolKinds={calloutKinds}
-          showAllNotes={showAllNotes}
-          pinSize={pinSize}
           halo={halo}
           onAdd={(kind, points, pen) => onAddCallout(views[zoomIndex].mediaId, kind, points, pen)}
           onEditPoints={onEditPoints}
+          onBeforeMutate={onBeforeMutate}
+          onUndo={onUndo}
+          canUndo={canUndo}
+          pieceLabel={pieceLabel}
           onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
           onRemove={onRemoveCallout}
-          noteTitle={noteTitle}
-          renderNote={renderNote}
+          renderEditor={renderEditor}
+                    legend
         />
       )}
     </div>
