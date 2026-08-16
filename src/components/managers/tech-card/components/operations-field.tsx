@@ -987,16 +987,30 @@ function BootstrapEatenRefs({
  * Кнопка видна и когда форма уже пуста, а сохранённая карточка ещё несёт снимки: ровно тот же
  * довод, что у кнопки снятия разметки узлов — отказ, из которого нет выхода, хуже отказа.
  */
-function ClearOperationMediaButton({ storedHasMedia }: { storedHasMedia: boolean }) {
+function ClearOperationMediaButton({
+  storedHasMedia,
+  frozen = false,
+}: {
+  storedHasMedia: boolean;
+  frozen?: boolean;
+}) {
   const { getValues, setValue } = useFormContext<TechCardFormData>();
   const showMessage = useSnackBarStore((st) => st.showMessage);
   const [confirming, setConfirming] = useState(false);
 
+  // Диалог рисуется ПОРТАЛОМ в body, куда внешний `<fieldset disabled>` не достаёт: карточку
+  // могли выпустить, пока он открыт. Гейт поэтому в самом мутаторе, а диалог закрывается сам.
+  useEffect(() => {
+    if (frozen) setConfirming(false);
+  }, [frozen]);
+
   const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ media?: unknown[] }>;
   const inForm = ops.reduce((n, o) => n + (o?.media?.length ?? 0), 0);
+  if (frozen) return null;
   if (inForm === 0 && !storedHasMedia) return null;
 
   const clear = () => {
+    if (frozen) return;
     const list = (getValues('operations') ?? []) as Array<Record<string, unknown>>;
     list.forEach((_, i) => setValue(`operations.${i}.media`, [], { shouldDirty: true }));
     // Намерение живёт ровно одно сохранение: маппер записи гасит его сам, а черновик не хранит.
@@ -3427,6 +3441,16 @@ export function OperationsField({
 
       <StepNumberDrift />
 
+      {/* ПУТЬ ОТСТУПЛЕНИЯ ЖИВЁТ СНАРУЖИ ЛОТКА. Лоток прячется при нуле операций, а именно там
+          отказ щита и настигает: у сохранённой карточки снимки есть, в форме шагов не осталось,
+          сервер требует объявить намерение — и кнопка, которой это делают, оказалась бы за
+          `hidden`. Отказ, из которого нет выхода, хуже отказа. */}
+      {(storedHasMedia || fields.length === 0) && (
+        <ChipRow>
+          <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={frozen} />
+        </ChipRow>
+      )}
+
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden
           while the sequence is empty: with nothing to attach a piece TO, every chip in it is a
           dead end and the strip only reports «нет операций». */}
@@ -3463,7 +3487,6 @@ export function OperationsField({
             {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
           <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} />
-          <ClearOperationMediaButton storedHasMedia={storedHasMedia} />
           <ToolbarSpacer />
           <Text
             size='micro'

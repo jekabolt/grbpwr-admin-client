@@ -2438,12 +2438,12 @@ export function TechPackDocument({
                                     страницы, а `break-inside-avoid` не переносит — он бы просто
                                     обрезался. Ширина при этом ужимается вместе с высотой, и
                                     выноски остаются на своих местах: они в долях кадра. */}
-                                <div className='mx-auto max-h-[120mm] w-fit'>
+                                <div className='mx-auto w-fit'>
                                   <AnnotationCanvas
                                     src={url}
                                     alt={m.caption || undefined}
                                     annotations={mediaAnnotations(m)}
-                                    className='max-h-[120mm]'
+                                    maxHeightClass='max-h-[120mm]'
                                   />
                                 </div>
                                 {m.caption?.trim() && (

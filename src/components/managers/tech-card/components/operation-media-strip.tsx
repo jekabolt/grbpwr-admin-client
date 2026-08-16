@@ -29,6 +29,9 @@ import { TechCardFormData, wireInt, type AnnotationForm, type OperationMediaForm
  */
 const sessionUrls = new Map<number, string>();
 
+/** Зеркала серверных пределов (dto): узнать о них при сохранении всей карточки — поздно. */
+const MAX_MEDIA_PER_STEP = 10;
+
 export function OperationMediaStrip({
   name,
   urlById,
@@ -58,6 +61,9 @@ export function OperationMediaStrip({
     );
     const rows: OperationMediaForm[] = [];
     for (const m of picked) {
+      // Предел тот же, что проверяет сервер: превысив его в форме, пользователь узнал бы об
+      // отказе только при сохранении ВСЕЙ карточки, и не про этот шаг.
+      if (existing.size + rows.length >= MAX_MEDIA_PER_STEP) break;
       const id = wireInt(m.id);
       const url = m.media?.fullSize?.mediaUrl ?? m.media?.thumbnail?.mediaUrl ?? '';
       if (!id || existing.has(id)) continue;
@@ -67,6 +73,10 @@ export function OperationMediaStrip({
     }
     if (rows.length === 0) return;
     append(rows, { shouldFocus: false });
+    // НАМЕРЕНИЕ СНЯТЬ ОТМЕНЯЕТСЯ ДОБАВЛЕНИЕМ. Иначе «снял всё → передумал → добавил снимок»
+    // уезжает на сервер как «снял и одновременно прислал», гейт отвергает противоречие, а
+    // снять невидимый флаг в интерфейсе нечем — тупик до перезагрузки.
+    setValue('mediaCleared', false, { shouldDirty: true });
     setOpenIndex(fields.length);
   };
 
@@ -151,6 +161,10 @@ export function OperationMediaStrip({
             <div className='flex flex-col gap-1'>
               {currentUrl ? (
                 <AnnotationCanvas
+                  // Ключ — сама фотография: незавершённая постановка, выбор и перетаскивание это
+                  // состояние ЭТОГО снимка. Без ключа первая точка мерки, начатой на снимке 1,
+                  // достраивалась бы вторым кликом уже на снимке 2.
+                  key={wireInt(current.mediaId)}
                   src={currentUrl}
                   alt={(current.caption ?? '').trim() || 'фото узла'}
                   annotations={(current.annotations ?? []) as AnnotationForm[]}

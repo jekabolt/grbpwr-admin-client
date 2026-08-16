@@ -35,6 +35,8 @@ import {
 const R_PIN = 9;
 const TICK = 7;
 const BRACKET_DROP = 10;
+/** Зеркало серверного предела: узнать о нём при сохранении всей карточки — поздно. */
+const MAX_ANNOTATIONS = 30;
 
 const COLOR_HEX: Record<Exclude<AnnotationColor, ''>, string> = {
   red: '#d02b2b',
@@ -61,6 +63,27 @@ const KIND_HINT: Record<AnnotationKind, string> = {
 
 type Pt = { x: number; y: number };
 
+/**
+ * Перетаскивание плашки. Хранится СМЕЩЕНИЕ курсора относительно её центра: без него плашка
+ * прыгала бы центром под курсор на первом же пикселе — жест начинался бы с рывка.
+ */
+type PlateDrag = {
+  index: number;
+  pointerId: number;
+  /** Смещение точки захвата от центра плашки, в долях кадра. */
+  offX: number;
+  offY: number;
+  x: number;
+  y: number;
+  /** Точка начала — для порога: ниже него жест остаётся кликом. */
+  fromX: number;
+  fromY: number;
+  started: boolean;
+};
+
+/** Порог, разводящий клик по плашке и её перетаскивание, в долях кадра. */
+const PLATE_DRAG_THRESHOLD = 0.01;
+
 const num = (v?: string) => {
   const n = Number((v ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
@@ -76,9 +99,12 @@ export function AnnotationCanvas({
   onChange,
   frozen = false,
   className,
+  maxHeightClass,
 }: {
   src: string;
   alt?: string;
+  /** Потолок высоты снимка (класс), когда место ограничено — печать. */
+  maxHeightClass?: string;
   annotations: AnnotationForm[];
   /** Отсутствует = холст только читается. Печать и архив зовут его именно так. */
   onChange?: (next: AnnotationForm[]) => void;
@@ -95,7 +121,16 @@ export function AnnotationCanvas({
   const [placing, setPlacing] = useState<{ kind: AnnotationKind; points: Pt[] } | null>(null);
   // Перетаскивание плашки. Без него перекрытие двух подписей НЕУСТРАНИМО: плашка ставится над
   // серединой якорей, и когда две выноски рядом, их подписи ложатся друг на друга навсегда.
-  const [dragPlate, setDragPlate] = useState<{ index: number; x: number; y: number } | null>(null);
+  const [dragPlate, setDragPlate] = useState<PlateDrag | null>(null);
+  // Зеркало жеста для синхронного чтения слушателями window: они переживают рендер, а решение
+  // «куда встала плашка» обязано считаться по последнему движению, а не по отрендеренному.
+  const dragRef = useRef<PlateDrag | null>(null);
+  const commitDrag = useCallback((v: PlateDrag | null) => {
+    dragRef.current = v;
+    setDragPlate(v);
+  }, []);
+  /** Клик после перетаскивания — эхо, и открывать редактор он не должен. */
+  const justDragged = useRef(false);
 
   const editable = !frozen && !!onChange;
 
@@ -135,32 +170,61 @@ export function AnnotationCanvas({
 
   // Слушатели на window, а не на плашке: она размером с текст, и указатель сходит с неё на первом
   // же движении — на самой плашке жест обрывался бы сразу.
+  //
+  // Подписка держится, ПОКА ЖЕСТ ЖИВ, а не пересоздаётся на каждое движение: зависимость от
+  // самого состояния перетаскивания плодила бы по слушателю на кадр, и снятие с
+  // `pointercancel`, подписанное анонимной функцией, не отписывалось бы вовсе.
+  const dragActive = dragPlate !== null;
   useEffect(() => {
-    if (!dragPlate) return;
-    const move = (e: PointerEvent) => {
+    if (!dragActive) return;
+    const at = (e: PointerEvent) => {
       const el = boxRef.current;
-      if (!el) return;
+      if (!el) return null;
       const r = el.getBoundingClientRect();
-      setDragPlate({
-        index: dragPlate.index,
+      return {
         x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
         y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      };
+    };
+    const move = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d || e.pointerId !== d.pointerId) return;
+      const p = at(e);
+      if (!p) return;
+      const far =
+        Math.abs(p.x - d.fromX) > PLATE_DRAG_THRESHOLD ||
+        Math.abs(p.y - d.fromY) > PLATE_DRAG_THRESHOLD;
+      if (!d.started && !far) return;
+      commitDrag({
+        ...d,
+        started: true,
+        x: Math.min(1, Math.max(0, p.x - d.offX)),
+        y: Math.min(1, Math.max(0, p.y - d.offY)),
       });
     };
-    const up = () => {
-      const d = dragPlate;
-      setDragPlate(null);
-      if (!d) return;
+    const up = (e: PointerEvent) => {
+      const d = dragRef.current;
+      if (d && e.pointerId !== d.pointerId) return;
+      commitDrag(null);
+      if (!d?.started) return;
+      justDragged.current = true;
       patch(d.index, { labelX: str(d.x), labelY: str(d.y) });
+    };
+    const cancel = () => {
+      justDragged.current = !!dragRef.current?.started;
+      commitDrag(null);
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
-    window.addEventListener('pointercancel', () => setDragPlate(null));
+    window.addEventListener('pointercancel', cancel);
+    window.addEventListener('blur', cancel);
     return () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      window.removeEventListener('pointercancel', cancel);
+      window.removeEventListener('blur', cancel);
     };
-  }, [dragPlate]);
+  }, [dragActive, commitDrag, annotations]);
 
   const commit = (next: AnnotationForm[]) => onChange?.(next);
 
@@ -176,6 +240,10 @@ export function AnnotationCanvas({
   const finishPlacing = (kind: AnnotationKind, points: Pt[]) => {
     const [min] = ANNOTATION_POINTS[kind];
     if (points.length < min) return;
+    if (annotations.length >= MAX_ANNOTATIONS) {
+      setPlacing(null);
+      return;
+    }
     // Плашка ставится над серединой якорей — оттуда её почти никогда не приходится двигать,
     // а лидер строится сам.
     const cx = points.reduce((s, p) => s + p.x, 0) / points.length;
@@ -214,7 +282,12 @@ export function AnnotationCanvas({
     <div className={cn('flex flex-col gap-1', className)}>
       {editable && (
         <ChipRow>
-          {(Object.keys(KIND_LABEL) as AnnotationKind[]).map((k) => (
+          {annotations.length >= MAX_ANNOTATIONS ? (
+            <Text size='micro' variant='label' component='span'>
+              на снимок не больше {MAX_ANNOTATIONS} выносок — дальше их не прочесть
+            </Text>
+          ) : (
+            (Object.keys(KIND_LABEL) as AnnotationKind[]).map((k) => (
             <Chip
               key={k}
               dashed={placing?.kind !== k}
@@ -223,7 +296,8 @@ export function AnnotationCanvas({
             >
               {KIND_LABEL[k]}
             </Chip>
-          ))}
+            ))
+          )}
           {placing && (
             <>
               <Text size='micro' variant='label' component='span'>
@@ -247,7 +321,16 @@ export function AnnotationCanvas({
         className={cn('relative select-none border border-borderColor bg-bgZebra', placing && 'cursor-crosshair')}
         onClick={onCanvasClick}
       >
-        <img src={src} alt={alt ?? ''} className='block w-full' draggable={false} />
+        {/* `max-h` кладётся на САМО изображение, а не на контейнер: коробка с ограниченной
+            высотой и картинкой `w-full` внутри просто переполняется — на печати это обрезанный
+            снимок. Ограничив изображение, коробка ужимается по нему, а выноски остаются на
+            местах: они в долях кадра, а не в пикселях. */}
+        <img
+          src={src}
+          alt={alt ?? ''}
+          className={cn('block h-auto w-full', maxHeightClass)}
+          draggable={false}
+        />
         {/* viewBox, А НЕ ПИКСЕЛЬНЫЕ width/height. Замер сделан для ЭКРАНА, а печать меняет ширину
             коробки, и ResizeObserver при этом не стреляет: фигуры остались бы в экранном масштабе,
             пока плашки (они в процентах) переехали бы — лидер указывал бы мимо. С viewBox холст
@@ -293,7 +376,16 @@ export function AnnotationCanvas({
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
                 onClick={(e) => {
                   e.stopPropagation();
+                  if (justDragged.current) {
+                    justDragged.current = false;
+                    return;
+                  }
                   if (editable) setSelected(selected === i ? null : i);
+                }}
+                onKeyDown={(e) => {
+                  if (!editable || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  e.preventDefault();
+                  setSelected(selected === i ? null : i);
                 }}
                 className={cn(
                   'absolute max-w-[45%] -translate-x-1/2 -translate-y-1/2 cursor-pointer border bg-bgColor px-1 py-px text-left text-nano leading-tight',
@@ -306,7 +398,23 @@ export function AnnotationCanvas({
                 onPointerDown={(e) => {
                   if (!editable) return;
                   e.stopPropagation();
-                  setDragPlate({ index: i, x: num(a.labelX), y: num(a.labelY) });
+                  justDragged.current = false;
+                  const el = boxRef.current;
+                  if (!el) return;
+                  const r = el.getBoundingClientRect();
+                  const px0 = (e.clientX - r.left) / r.width;
+                  const py0 = (e.clientY - r.top) / r.height;
+                  commitDrag({
+                    index: i,
+                    pointerId: e.pointerId,
+                    offX: px0 - num(a.labelX),
+                    offY: py0 - num(a.labelY),
+                    x: num(a.labelX),
+                    y: num(a.labelY),
+                    fromX: px0,
+                    fromY: py0,
+                    started: false,
+                  });
                 }}
                 style={{
                   left: `${(dragPlate?.index === i ? dragPlate.x : num(a.labelX)) * 100}%`,
@@ -335,6 +443,11 @@ export function AnnotationCanvas({
                 onClick={(e) => {
                   e.stopPropagation();
                   if (editable) setSelected(selected === i ? null : i);
+                }}
+                onKeyDown={(e) => {
+                  if (!editable || (e.key !== 'Enter' && e.key !== ' ')) return;
+                  e.preventDefault();
+                  setSelected(selected === i ? null : i);
                 }}
                 title={a.text?.trim() || `выноска ${pinNumber(annotations, i)}`}
                 className={cn(

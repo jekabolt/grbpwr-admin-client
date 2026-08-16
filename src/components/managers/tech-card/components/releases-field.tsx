@@ -511,7 +511,16 @@ function ReleaseSnapshot({
 // Two panes rather than a list that swaps itself for a detail screen: you keep your place in the
 // list while you read, so comparing Rev.2 against Rev.1 is two clicks and no back button. The
 // selection lives in the URL (?rev=N) so a specific snapshot is linkable.
-export function ReleasesField({ techCardId, gate }: { techCardId: number; gate?: ReleaseGate }) {
+export function ReleasesField({
+  techCardId,
+  gate,
+  active = true,
+}: {
+  techCardId: number;
+  gate?: ReleaseGate;
+  /** Вкладка открыта. Вкладки смонтированы все сразу — без флага архив грузил бы снимки всегда. */
+  active?: boolean;
+}) {
   const { canReadCosting } = usePermissions();
   const [params, setParams] = useSearchParams();
   const [blockersOpen, setBlockersOpen] = useState(false);
@@ -519,6 +528,7 @@ export function ReleasesField({ techCardId, gate }: { techCardId: number; gate?:
   const { data, isLoading } = useQuery({
     queryKey: ['techCardReleases', techCardId],
     queryFn: () => adminService.ListTechCardReleases({ techCardId }),
+    enabled: active,
   });
 
   const releases = data?.releases ?? [];

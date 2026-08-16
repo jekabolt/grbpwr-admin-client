@@ -828,7 +828,9 @@ const annotationSchema = z.object({
 const operationMediaSchema = z.object({
   mediaId: z.number().default(0),
   caption: z.string().default(''),
-  annotations: z.array(annotationSchema).default([]),
+  // Пределы — ЗЕРКАЛА серверных (dto). Без них превышение всплывало бы отказом сохранения ВСЕЙ
+  // карточки, и сообщение указывало бы не на тот шаг.
+  annotations: z.array(annotationSchema).max(30).default([]),
 });
 
 export type OperationMediaForm = z.infer<typeof operationMediaSchema>;
@@ -924,7 +926,7 @@ const operationSchema = z.object({
   // Фотографии ЭТОГО шага с выносками поверх них. Операционные, а не карточные: указание
   // «здесь припосадить 6 мм» относится к шагу, и адресовать его номером карточной выноски
   // значило бы завести ссылку, которая рвётся при пересортировке шагов.
-  media: z.array(operationMediaSchema).default([]),
+  media: z.array(operationMediaSchema).max(10).default([]),
 })
   // The two required fields are checked HERE as well as on the server, and the wording is the same
   // on both sides. Without this the operator learns that a step needs a zone only after a failed

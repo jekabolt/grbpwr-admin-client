@@ -1938,6 +1938,11 @@ export function TechCardForm({
                   // blockers modal with the page header instead of a second `title` tooltip.
                   <ReleasesField
                     techCardId={numId}
+                    // `active` — не украшение: вкладки этой формы СМОНТИРОВАНЫ ВСЕ СРАЗУ и лишь
+                    // спрятаны, а архив релиза теперь рисует снимки шагов. Без флага открытие
+                    // любой карточки грузило бы десятки полноразмерных фотографий из вкладки,
+                    // которую никто не открывал.
+                    active={activeTab === 'history'}
                     gate={
                       canWrite(SECTION.techCards) && !frozen
                         ? {
