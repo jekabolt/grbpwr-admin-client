@@ -276,6 +276,15 @@ export function FocusedAnnotator({
    * своём кадре: мерка, растянутая между передом и спинкой, — не мерка.
    */
   const [tool, setTool] = useState<string | null>(null);
+  /**
+   * ПРАВКА ОДНА НА ЛИСТ, и живёт она РЯДОМ С ПАНЕЛЬЮ ВИДОВ, а не под кадром.
+   *
+   * Редактор шире панели, а кадры стоят в ряд: под кадром он раздвигал бы колонку плитки на каждый
+   * клик по пину и двигал соседние снимки. Сгруппированный с панелью, он не трогает ряд вовсе — и
+   * заодно получает всю ширину листа вместо трёхсот пикселей плитки.
+   */
+  const [selected, setSelected] = useState<string | null>(null);
+  const [focusEditor, setFocusEditor] = useState(0);
   const [placed, setPlaced] = useState(0);
   /** Индекс кадра, открытого во весь экран. */
   const [zoomIndex, setZoomIndex] = useState<number | null>(null);
@@ -351,6 +360,13 @@ export function FocusedAnnotator({
       )}
     </ChipRow>
   );
+
+  const editorPanel =
+    selected != null ? (
+      <EditorPanel focusToken={focusEditor}>
+        {renderEditor(selected, { close: () => setSelected(null) })}
+      </EditorPanel>
+    ) : null;
 
   const hint = pasting
     ? 'загружаю картинку из буфера…'
@@ -431,6 +447,9 @@ export function FocusedAnnotator({
           </div>
         ))}
 
+      {/* ПРАВКА ВЫБРАННОГО УКАЗАНИЯ — ЗДЕСЬ, а не под кадром: см. довод у `selected`. */}
+      {editorPanel}
+
       {isGrid ? (
         <>
           <div
@@ -479,10 +498,14 @@ export function FocusedAnnotator({
                     onBeforeMutate={onBeforeMutate}
                     onUndo={onUndo}
                     canUndo={canUndo}
+                    selectedKey={selected}
+                    onSelect={(key, opts) => {
+                      setSelected(key);
+                      if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+                    }}
                     pieceLabel={pieceLabel}
                     onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                     onRemove={onRemoveCallout}
-                    renderEditor={renderEditor}
                     legend
                     halo={halo}
                     cornerSlot={
@@ -577,10 +600,14 @@ export function FocusedAnnotator({
                 onBeforeMutate={onBeforeMutate}
                 onUndo={onUndo}
                 canUndo={canUndo}
+                selectedKey={selected}
+                onSelect={(key, opts) => {
+                  setSelected(key);
+                  if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+                }}
                 pieceLabel={pieceLabel}
                 onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                 onRemove={onRemoveCallout}
-                renderEditor={renderEditor}
                     legend
                 halo={halo}
                 cornerSlot={
@@ -678,15 +705,36 @@ export function FocusedAnnotator({
           onBeforeMutate={onBeforeMutate}
           onUndo={onUndo}
           canUndo={canUndo}
+          selectedKey={selected}
+          onSelect={(key, opts) => {
+            setSelected(key);
+            if (key != null && opts?.focus) setFocusEditor((n) => n + 1);
+          }}
           pieceLabel={pieceLabel}
           onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
           onRemove={onRemoveCallout}
-          renderEditor={renderEditor}
                     legend
         />
       )}
     </div>
   );
+}
+
+/**
+ * Обёртка редактора листа. Ставит курсор в поле ТОЛЬКО по жесту выбора — счётчик меняется в
+ * `onSelect`, а не при каждой правке данных.
+ *
+ * Иначе фокус уезжал бы в редактор из любого другого поля на листе: данные выноски приходят из
+ * `useWatch`, то есть новой ссылкой на каждую запись под формой, — ровно так курсор и прыгал из
+ * подписи к кадру после первого набранного символа.
+ */
+function EditorPanel({ focusToken, children }: { focusToken: number; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (focusToken === 0) return;
+    ref.current?.querySelector<HTMLElement>('textarea, input')?.focus();
+  }, [focusToken]);
+  return <div ref={ref}>{children}</div>;
 }
 
 // ---------------------------------------------------------------------------
