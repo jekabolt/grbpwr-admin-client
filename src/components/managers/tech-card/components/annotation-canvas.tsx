@@ -25,6 +25,11 @@ import {
 //
 // ИЗОЛЯЦИЯ: наведение на выноску скрывает остальные. На снимке узла их бывает десяток, они
 // пересекаются, и прочесть один указатель, не убрав соседей, невозможно.
+//
+// ИНТЕРАКТИВ ЗДЕСЬ — НЕ ФОРМА. Холст живёт внутри общего `<fieldset disabled>` карточки, а
+// задизейбленность НАСЛЕДУЕТСЯ: `<button>` под таким предком не получает ни клика, ни
+// mouseenter. На выпущенной карточке это убило бы не правку (её и так нет), а ЧТЕНИЕ —
+// изоляция перестала бы работать ровно там, где выносок много и они пересекаются.
 
 /** Толщина линий и размеры фигур в пикселях кадра — не масштабируются вместе с картинкой. */
 const R_PIN = 9;
@@ -88,6 +93,9 @@ export function AnnotationCanvas({
   const [selected, setSelected] = useState<number | null>(null);
   // Незавершённая постановка: вид выбран, точки набираются кликами.
   const [placing, setPlacing] = useState<{ kind: AnnotationKind; points: Pt[] } | null>(null);
+  // Перетаскивание плашки. Без него перекрытие двух подписей НЕУСТРАНИМО: плашка ставится над
+  // серединой якорей, и когда две выноски рядом, их подписи ложатся друг на друга навсегда.
+  const [dragPlate, setDragPlate] = useState<{ index: number; x: number; y: number } | null>(null);
 
   const editable = !frozen && !!onChange;
 
@@ -106,15 +114,53 @@ export function AnnotationCanvas({
   useEffect(() => {
     if (!editable) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
-      if (placing) setPlacing(null);
-      else setSelected(null);
+      if (e.key === 'Escape') {
+        if (placing) setPlacing(null);
+        else setSelected(null);
+        return;
+      }
+      // Delete удаляет выбранную — но НЕ когда курсор в поле ввода: там та же клавиша стирает
+      // букву, и перехватить её значило бы удалять выноску при правке её же подписи.
+      if (e.key !== 'Delete' || selected === null) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      e.preventDefault();
+      remove(selected);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editable, placing]);
+  }, [editable, placing, selected, annotations]);
 
   const px = useCallback((p: Pt) => ({ x: p.x * size.w, y: p.y * size.h }), [size]);
+
+  // Слушатели на window, а не на плашке: она размером с текст, и указатель сходит с неё на первом
+  // же движении — на самой плашке жест обрывался бы сразу.
+  useEffect(() => {
+    if (!dragPlate) return;
+    const move = (e: PointerEvent) => {
+      const el = boxRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      setDragPlate({
+        index: dragPlate.index,
+        x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+        y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+      });
+    };
+    const up = () => {
+      const d = dragPlate;
+      setDragPlate(null);
+      if (!d) return;
+      patch(d.index, { labelX: str(d.x), labelY: str(d.y) });
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', () => setDragPlate(null));
+    return () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+  }, [dragPlate]);
 
   const commit = (next: AnnotationForm[]) => onChange?.(next);
 
@@ -202,11 +248,15 @@ export function AnnotationCanvas({
         onClick={onCanvasClick}
       >
         <img src={src} alt={alt ?? ''} className='block w-full' draggable={false} />
+        {/* viewBox, А НЕ ПИКСЕЛЬНЫЕ width/height. Замер сделан для ЭКРАНА, а печать меняет ширину
+            коробки, и ResizeObserver при этом не стреляет: фигуры остались бы в экранном масштабе,
+            пока плашки (они в процентах) переехали бы — лидер указывал бы мимо. С viewBox холст
+            масштабируется вместе с коробкой, пропорции которой равны пропорциям снимка. */}
         {size.w > 0 && (
           <svg
-            className='pointer-events-none absolute inset-0'
-            width={size.w}
-            height={size.h}
+            className='pointer-events-none absolute inset-0 h-full w-full'
+            viewBox={`0 0 ${size.w} ${size.h}`}
+            preserveAspectRatio='none'
             aria-hidden
           >
             <defs>
@@ -218,10 +268,12 @@ export function AnnotationCanvas({
               <AnnotationShape
                 key={i}
                 a={a}
-                index={i}
                 px={px}
                 hidden={dimmed(i)}
                 selected={selected === i}
+                // Лидер тянется за плашкой во время перетаскивания: иначе линия оставалась бы у
+                // старого места, и жест выглядел бы как «подпись оторвалась от указателя».
+                labelAt={dragPlate?.index === i ? { x: dragPlate.x, y: dragPlate.y } : undefined}
               />
             ))}
             {placing && <PlacingShape kind={placing.kind} points={placing.points} px={px} />}
@@ -233,9 +285,10 @@ export function AnnotationCanvas({
         {size.w > 0 &&
           annotations.map((a, i) =>
             a.kind === 'pin' ? null : (
-              <button
+              <span
                 key={`plate:${i}`}
-                type='button'
+                role='button'
+                tabIndex={editable ? 0 : undefined}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
                 onClick={(e) => {
@@ -243,18 +296,26 @@ export function AnnotationCanvas({
                   if (editable) setSelected(selected === i ? null : i);
                 }}
                 className={cn(
-                  'absolute max-w-[45%] -translate-x-1/2 -translate-y-1/2 border bg-bgColor px-1 py-px text-left text-nano leading-tight',
+                  'absolute max-w-[45%] -translate-x-1/2 -translate-y-1/2 cursor-pointer border bg-bgColor px-1 py-px text-left text-nano leading-tight',
                   selected === i ? 'border-textColor' : 'border-borderColor',
                   dimmed(i) && 'invisible',
+                  // Во время постановки слой подписей НЕ ловит клик: точка под чужой плашкой иначе
+                  // непоставима — вместо неё открывался бы редактор соседа.
+                  placing && 'pointer-events-none',
                 )}
+                onPointerDown={(e) => {
+                  if (!editable) return;
+                  e.stopPropagation();
+                  setDragPlate({ index: i, x: num(a.labelX), y: num(a.labelY) });
+                }}
                 style={{
-                  left: `${num(a.labelX) * 100}%`,
-                  top: `${num(a.labelY) * 100}%`,
+                  left: `${(dragPlate?.index === i ? dragPlate.x : num(a.labelX)) * 100}%`,
+                  top: `${(dragPlate?.index === i ? dragPlate.y : num(a.labelY)) * 100}%`,
                   color: a.color ? COLOR_HEX[a.color as Exclude<AnnotationColor, ''>] : undefined,
                 }}
               >
                 {a.text?.trim() || '—'}
-              </button>
+              </span>
             ),
           )}
 
@@ -265,9 +326,10 @@ export function AnnotationCanvas({
             const p = ptsOf(a)[0];
             if (!p) return null;
             return (
-              <button
+              <span
                 key={`pin:${i}`}
-                type='button'
+                role='button'
+                tabIndex={editable ? 0 : undefined}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
                 onClick={(e) => {
@@ -276,9 +338,10 @@ export function AnnotationCanvas({
                 }}
                 title={a.text?.trim() || `выноска ${pinNumber(annotations, i)}`}
                 className={cn(
-                  'absolute flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border bg-bgColor text-nano',
+                  'absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-bgColor text-nano',
                   selected === i ? 'border-textColor' : 'border-borderColor',
                   dimmed(i) && 'invisible',
+                  placing && 'pointer-events-none',
                 )}
                 style={{
                   left: `${p.x * 100}%`,
@@ -289,7 +352,7 @@ export function AnnotationCanvas({
                 }}
               >
                 {pinNumber(annotations, i)}
-              </button>
+              </span>
             );
           })}
       </div>
@@ -328,23 +391,24 @@ function pinNumber(list: AnnotationForm[], index: number): number {
 
 function AnnotationShape({
   a,
-  index,
   px,
   hidden,
   selected,
+  labelAt,
 }: {
   a: AnnotationForm;
-  index: number;
   px: (p: Pt) => Pt;
   hidden: boolean;
   selected: boolean;
+  /** Транзиентная позиция плашки во время перетаскивания. */
+  labelAt?: Pt;
 }) {
   if (hidden) return null;
   const pts = ptsOf(a).map(px);
   if (pts.length === 0) return null;
   const ink = inkOf(a);
   const w = selected ? 2 : 1.5;
-  const label = px({ x: num(a.labelX), y: num(a.labelY) });
+  const label = px(labelAt ?? { x: num(a.labelX), y: num(a.labelY) });
 
   switch (a.kind) {
     case 'pin':

@@ -22,6 +22,30 @@ type StoredDraft = { savedAt: number; data: TechCardFormData; staging?: Persiste
 // здесь нет, и городить его ради одного поля несоразмерно; поднятая версия просто не предлагает
 // старые черновики. Цена — потеря несохранённых правок одним релизом, и она честнее.
 const PREFIX = 'plm.techcard.draft.v2.';
+const LEGACY_PREFIX = 'plm.techcard.draft.';
+
+/**
+ * Одноразовая выметка черновиков прошлой версии.
+ *
+ * Поднятая версия ключа делает их невидимыми, но НЕ удаляет: они остаются в localStorage
+ * навсегда и продолжают занимать квоту, а запись черновика ошибки квоты глотает — то есть
+ * автосейв однажды заглох бы молча. Выметается один раз за загрузку модуля.
+ */
+let sweptLegacy = false;
+function sweepLegacyDrafts() {
+  if (sweptLegacy) return;
+  sweptLegacy = true;
+  try {
+    const stale: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(LEGACY_PREFIX) && !k.startsWith(PREFIX)) stale.push(k);
+    }
+    stale.forEach((k) => localStorage.removeItem(k));
+  } catch {
+    /* приватный режим или запрещённое хранилище — не повод мешать работе */
+  }
+}
 const DEBOUNCE_MS = 800;
 
 export function useTechCardDraft(
@@ -37,6 +61,7 @@ export function useTechCardDraft(
     hydrate: (persisted: PersistedStaging | null) => void;
   },
 ) {
+  sweepLegacyDrafts();
   const storageKey = PREFIX + key;
   const [pending, setPending] = useState<StoredDraft | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);

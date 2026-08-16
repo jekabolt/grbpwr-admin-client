@@ -2390,8 +2390,9 @@ export function mapFormToTechCardInsert(
         outputUnitKey: (o.outputUnitKey ?? '').trim(),
         outputUnitName: (o.outputUnitName ?? '').trim(),
         bomLineKeys: opBomKeys,
-        // Фотографии шага. Пустой список не шлём вовсе: `undefined` и `[]` сервер трактует
-        // одинаково, а лишний ключ в payload — лишний повод для расхождения.
+        // Фотографии шага. Пустой список шлётся как есть — сервер трактует его так же, как
+        // отсутствие поля, а щит совместимости смотрит на ФЛАГ `mediaAware`, а не на наличие
+        // ключа: именно поэтому отставший бандл узнаётся по флагу, а не по пустоте.
         media: (o.media ?? [])
           .filter((m) => wireInt(m.mediaId) > 0)
           .map((m) => ({

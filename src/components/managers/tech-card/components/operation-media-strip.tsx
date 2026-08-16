@@ -2,7 +2,7 @@ import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
-import { useFieldArray, useFormContext } from 'react-hook-form';
+import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
@@ -42,6 +42,12 @@ export function OperationMediaStrip({
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
   const { fields, append, remove, move } = useFieldArray({ control, name });
+  // ПОДПИСКА, А НЕ `getValues`. Холст пишет выноски в `…media.k.annotations` — это не имя
+  // fieldArray и не наблюдаемый лист, поэтому массив-событие RHF не стреляет, и снимок,
+  // прочитанный один раз, протухает мгновенно. С `getValues` первая поставленная выноска не
+  // появлялась на экране, а вторая ЗАТИРАЛА её: обе писались поверх одного и того же старого
+  // списка.
+  const watched = useWatch({ control, name }) as OperationMediaForm[] | undefined;
   const [openIndex, setOpenIndex] = useState(0);
 
   const urlOf = (mediaId: number) => urlById.get(mediaId) ?? sessionUrls.get(mediaId) ?? '';
@@ -64,7 +70,7 @@ export function OperationMediaStrip({
     setOpenIndex(fields.length);
   };
 
-  const list = (getValues(name) ?? []) as OperationMediaForm[];
+  const list = (watched ?? []) as OperationMediaForm[];
   const open = Math.min(openIndex, Math.max(0, list.length - 1));
   const current = list[open];
   const currentUrl = current ? urlOf(wireInt(current.mediaId)) : '';
@@ -100,6 +106,7 @@ export function OperationMediaStrip({
             {fields.map((f, i) => (
               <Chip
                 key={f.id}
+                nonForm
                 dashed={i !== open}
                 onClick={() => setOpenIndex(i)}
                 title={(list[i]?.caption ?? '').trim() || `снимок ${i + 1}`}
