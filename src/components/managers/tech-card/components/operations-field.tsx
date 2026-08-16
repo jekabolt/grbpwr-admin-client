@@ -14,9 +14,14 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { adminService } from 'api/api';
-import { common_TechCardOperation } from 'api/proto-http/admin';
+import {
+  common_TechCardMachineType,
+  common_TechCardOperation,
+  common_TechCardOperationType,
+} from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useFieldArray, useFormContext, useFormState, useWatch } from 'react-hook-form';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { Accordion } from 'ui/components/accordion';
@@ -29,36 +34,130 @@ import { Pill } from 'ui/components/pill';
 import { Row, RowTotal } from 'ui/components/row';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import Input from 'ui/components/input';
+import Select from 'ui/components/select';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
+import { FormField, FormItem, FormLabel, FormMessage } from 'ui/form';
 import ComboField from 'ui/form/fields/combo-field';
 import DecimalField from 'ui/form/fields/decimal-field';
+import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { decimalToInput, parseDecimalNumber } from 'utils/decimal';
+import { decimalToInput, parseDecimalNumber, sanitizeDecimal } from 'utils/decimal';
 import { fieldErrorSummary, revealField } from 'utils/field-errors';
 import { SortableEntity } from '../../hero/components/sortable-entity';
 import {
+  attachmentKindLabel,
   attachmentOptions,
   operationHeading,
-  operationTypeOptions,
+  operationTypeOptionsFor,
   seamClassOptions,
+  stitchLengthMm,
   topstitchModeOptions,
   zoneOptions,
 } from './operation-options';
-import { OPERATION_TYPE_PREFERRED_KINDS, kindLabel } from './bom-kind';
+import { AdoptMachineIntoProfile, AdoptPressIntoProfile } from './equipment-park';
+import {
+  isMachineStepType,
+  isPressStepType,
+  machineProfileName,
+  machineTypeOptions,
+  needleTypeLabel,
+  needleTypeOptions,
+  pressClothLabel,
+  pressClothOptions,
+  pressEquipmentOptions,
+  pressProcessShort,
+  pressProfileFitsStep,
+  pressProfileName,
+  resolveMachineProfile,
+  resolvePressProfile,
+  threadTensionLabel,
+  threadTensionOptions,
+} from './equipment-options';
+import { kindLabel, preferredBomKinds } from './bom-kind';
+import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
-import { PieceRef, useFormPieces } from './piece-picker';
+import {
+  assemblySweep,
+  classifyAssemblyInputs,
+  type AssemblyResult,
+} from './assembly-frontier';
+import { assemblyBlocks, type AssemblyBlock } from './assembly-blocks';
+import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
+import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
+import { suggestUnitCode } from './assembly-suggest';
+import { AssemblySchematic } from './assembly-schematic';
+import { OperationMediaStrip } from './operation-media-strip';
+import { useSchematicPrefs } from './use-schematic-prefs';
+import { PieceAddChip, PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
+import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
+
+/** Стабильная пустая карта: `new Map()` в пропе рождал бы новую ссылку на каждый рендер. */
+const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
 const NONE_SEAM_CLASS = 'TECH_CARD_SEAM_CLASS_UNKNOWN';
 const NONE_ATTACHMENT = 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN';
 const NONE_TOPSTITCH = 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN';
+// The unset member of each equipment vocabulary. In this feature UNSET NEVER MEANS ZERO — it means
+// «inherit», and the placeholder beside the control says what would be inherited and from where.
+const NONE_MACHINE = 'TECH_CARD_MACHINE_TYPE_UNKNOWN';
+const NONE_PRESS_EQUIPMENT = 'TECH_CARD_PRESS_EQUIPMENT_UNKNOWN';
+const NONE_NEEDLE = 'TECH_CARD_NEEDLE_TYPE_UNKNOWN';
+const NONE_TENSION = 'TECH_CARD_THREAD_TENSION_UNKNOWN';
+const NONE_PRESS_CLOTH = 'TECH_CARD_PRESS_CLOTH_UNKNOWN';
+
+// WHICH OF THE TWO EQUIPMENT BLOCKS A STEP OWNS. One step type answers «machine», three answer
+// «ВТО», the rest own neither — and the server refuses a field from the wrong block BY NAME, so
+// these two predicates decide what is rendered, what is cleared and what is counted as an override.
+// They live in equipment-options because CARD DEFAULTS counts profile references through the same
+// question, and a second copy of «which types are ВТО» would go stale on the day a fourth is added.
+const isMachineType = isMachineStepType;
+const isPressType = isPressStepType;
+
+// The fields of the core grid — the ones that are on screen whatever the fold is doing. Everything
+// else lives inside «differs from standard», which has to open itself when one of those fails.
+const CORE_STEP_FIELDS = new Set([
+  'operationType',
+  'machineType',
+  'pressEquipment',
+  'zone',
+  'smv',
+  'calloutNumber',
+  'note',
+  'inputKeys',
+  'bomLineKeys',
+  // Блок «produces» стоит в ядре редактора, а не в фолде переопределений: серверный отказ на
+  // этих полях не должен раскрывать фолд, в котором нужного контрола нет.
+  'outputUnitKey',
+  'outputUnitName',
+]);
+
+// What a step INHERITS, written the way it is shown: «4 (оверлок у окна)», «4 (card)», «not set».
+// The value alone is not enough — a technologist reading «4» in grey has to know whether clearing
+// the field would keep it (a card default that applies to every step) or change it (a profile that
+// applies to this machine), and the source is the whole difference.
+const NOT_SET = 'not set';
+const inheritedText = (value: string, source: string) => (value ? `${value} (${source})` : NOT_SET);
+
+// The label a picker shows on its «inherit» option, so an enum override states its inherited value
+// the same way a text field states it in the placeholder. Radix renders the option list from the
+// items array, so the option itself carries the sentence — there is no placeholder to put it in.
+function withInheritLabel<T extends { value: string; label: string }>(
+  options: T[],
+  unset: string,
+  inherited: string,
+): T[] {
+  if (!inherited || inherited === NOT_SET) return options;
+  return options.map((o) => (o.value === unset ? { ...o, label: `inherit: ${inherited}` } : o));
+}
 
 // Drag payload for the piece tray. A private MIME type so a stray text drop from elsewhere can
 // never be mistaken for a piece reference; the plain-text mirror (prefixed) is only a fallback for
@@ -95,7 +194,7 @@ const TOPSTITCH_ROW_OPTIONS = [
 ];
 
 // The BOM sections an operation can CONSUME, in picker order. The rule is «чем соединяют», not
-// «что соединяют»: roll goods (fabric / lining / insulation) reach a step through pieceLineKeys —
+// «что соединяют»: roll goods (fabric / lining / insulation) reach a step through inputKeys —
 // they ARE the parts being joined — and packaging never reaches the sewing floor, it rides
 // packaging_recipe. Interlining is the deliberate exception on the roll-goods side: fusing is
 // consumed AT a fusing step.
@@ -123,17 +222,25 @@ export const OPERATION_EXPECTED_SECTIONS = new Set(
 );
 
 // A step whose verb names a material it does not link is almost always an omission. Kept to the two
-// unambiguous verbs: BUTTON_ATTACH consumes a fastener, FUSING consumes fusible. BUTTONHOLE is
-// deliberately absent — it consumes thread, which nearly every step does, so the check would fire
-// as noise and stop being read.
-const OPERATION_TYPE_EXPECTS: Record<string, { section: string; what: string }> = {
-  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: {
-    section: 'TECH_CARD_BOM_SECTION_HARDWARE',
-    what: 'фурнитуру',
-  },
+// unambiguous verbs: a button-attach machine consumes a fastener, a fusing step consumes fusible.
+// Buttonholing is deliberately absent — it consumes thread, which nearly every step does, so the
+// check would fire as noise and stop being read.
+//
+// TWO MAPS BECAUSE THERE ARE TWO AXES NOW (0306). «Fusing» is still a step TYPE; «button attach» is
+// a MACHINE, and its token left the type enum entirely — keyed on the type this whole check went
+// silently dead, which a `Record<string, …>` cannot notice. `Partial<Record<Enum, …>>` is the shape
+// that can: a key outside the contract stops the build, an absent key is a legitimate «no opinion».
+type ExpectedMaterial = { section: string; what: string };
+const OPERATION_TYPE_EXPECTS: Partial<Record<common_TechCardOperationType, ExpectedMaterial>> = {
   TECH_CARD_OPERATION_TYPE_FUSING: {
     section: 'TECH_CARD_BOM_SECTION_INTERLINING',
     what: 'клеевую',
+  },
+};
+const MACHINE_TYPE_EXPECTS: Partial<Record<common_TechCardMachineType, ExpectedMaterial>> = {
+  TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: {
+    section: 'TECH_CARD_BOM_SECTION_HARDWARE',
+    what: 'фурнитуру',
   },
 };
 
@@ -167,12 +274,44 @@ export const emptyOperation = {
   topstitchRows: 0,
   attachmentKind: NONE_ATTACHMENT,
   attachmentSizeMm: '',
+  // Both equipment blocks start unset — «inherit», not «zero» (0306). They are listed here rather
+  // than left to the zod defaults because this object is spread straight into the field array:
+  // a key missing here is a field RHF never registers, and the first render of the control would
+  // read `undefined` off a row the schema believes is complete.
+  machineType: NONE_MACHINE,
+  machineProfileKey: '',
+  threadCount: 0,
+  needleType: NONE_NEEDLE,
+  needleSizeNm: 0,
+  threadTension: NONE_TENSION,
+  threadTensionNote: '',
+  stitchWidthMm: '',
+  pressEquipment: NONE_PRESS_EQUIPMENT,
+  pressProfileKey: '',
+  pressTemperatureC: 0,
+  pressDwellSec: 0,
+  pressPressureNCm2: '',
+  // NOT `false`: three-valued (absent = inherit, false = «press it dry», true = «with steam»), and
+  // a default of false would state the instruction «dry» on every step nobody has answered.
+  pressSteam: undefined as boolean | undefined,
+  pressCloth: NONE_PRESS_CLOTH,
   note: '',
-  pieceLineKeys: [] as string[],
+  inputKeys: [] as string[],
+  outputUnitKey: '',
+  outputUnitName: '',
   bomLineKeys: [] as string[],
+  // Снимки шага — по тому же доводу, что и блоки оборудования выше: ключ, отсутствующий здесь,
+  // RHF не регистрирует вовсе. Пустой список у НОВОГО шага ничего не теряет, зато делает форму
+  // однородной: всякий читатель `operations.N.media` получает массив, а не `undefined`.
+  media: [] as OperationFormValue['media'],
 };
 
 type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
+// One row of the card's equipment park, as the form holds it (decimals as strings). The step editor
+// reads the park to resolve what a blank field would inherit; CARD DEFAULTS owns editing it.
+type EquipmentDefaultsForm = NonNullable<TechCardFormData['construction']['equipmentDefaults']>;
+type MachineProfileRow = NonNullable<EquipmentDefaultsForm['machines']>[number];
+type PressProfileRow = NonNullable<EquipmentDefaultsForm['presses']>[number];
 
 // #66: AI generation is unavailable when the backend has no OPENROUTER_API_KEY configured — the
 // RPC reports this as FailedPrecondition (grpc-gateway → HTTP 412, same convention as
@@ -180,11 +319,6 @@ type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
 // setup gap, not something wrong with their description.
 const AI_NOT_CONFIGURED_MESSAGE =
   "AI generation isn't configured yet — ask an admin to set OPENROUTER_API_KEY";
-
-// The «— тип —» placeholder is an option label, not a name: read back as a heading it says nothing,
-// so an untyped operation reports empty and the caller supplies its own wording.
-const opTypeLabel = (v: string | undefined) =>
-  !v || v === NONE_OP_TYPE ? '' : operationTypeOptions.find((o) => o.value === v)?.label ?? '';
 
 // Maps one AI-drafted operation (GenerateTechCardOperations, #66) into this field array's row
 // shape — the same fields the manual «+ операция» row starts from (emptyOperation). Only stages
@@ -197,7 +331,12 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     operationType: o.operationType || NONE_OP_TYPE,
     zone: o.zone || NONE_ZONE,
     bomLineKeys: (o.bomLineKeys ?? []).filter(Boolean),
-    pieceLineKeys: (o.pieceLineKeys ?? []).filter(Boolean),
+    // TODO(T-26): генератор узлов пока не существует — aiOperationToPb на бэке не заполняет ни
+    // 21, ни 46, так что черновик приходит вовсе без привязок. Фолбэк написан заранее: без него
+    // научившийся узлам генератор молча выбрасывал бы узловые входы, и tsc это не поймал бы.
+    inputKeys: (o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])).filter(Boolean),
+    outputUnitKey: o.outputUnitKey ?? '',
+    outputUnitName: o.outputUnitName ?? '',
     calloutNumber: o.calloutNumber || 0,
     smv: decimalToInput(o.smv),
     seamClass: o.seamClass || NONE_SEAM_CLASS,
@@ -208,6 +347,26 @@ function mapGeneratedOperationToForm(o: common_TechCardOperation): OperationForm
     topstitchRows: o.topstitch?.rows || 0,
     attachmentKind: o.attachmentKind || NONE_ATTACHMENT,
     attachmentSizeMm: decimalToInput(o.attachmentSizeMm),
+    // The equipment blocks ride the draft too. The model is asked for a machine on every machine
+    // step and for the ВТО mode on every press step (the prompt carries both vocabularies), so
+    // dropping them here would quietly hand the technologist a list of steps that all fail the
+    // «pick the machine» check — the one field the draft was best placed to answer.
+    machineType: o.machineType || NONE_MACHINE,
+    machineProfileKey: o.machineProfileKey ?? '',
+    threadCount: o.threadCount || 0,
+    needleType: o.needleType || NONE_NEEDLE,
+    needleSizeNm: o.needleSizeNm || 0,
+    threadTension: o.threadTension || NONE_TENSION,
+    threadTensionNote: o.threadTensionNote?.trim() || '',
+    stitchWidthMm: decimalToInput(o.stitchWidthMm),
+    pressEquipment: o.pressEquipment || NONE_PRESS_EQUIPMENT,
+    pressProfileKey: o.pressProfileKey ?? '',
+    pressTemperatureC: o.pressTemperatureC || 0,
+    pressDwellSec: o.pressDwellSec || 0,
+    pressPressureNCm2: decimalToInput(o.pressPressureNCm2),
+    // Verbatim, undefined included — see emptyOperation.
+    pressSteam: o.pressSteam,
+    pressCloth: o.pressCloth || NONE_PRESS_CLOTH,
     note: o.note?.trim() || '',
   };
 }
@@ -304,6 +463,217 @@ function RailTotal() {
   );
 }
 
+// ── фронтир ──────────────────────────────────────────────────────────────────────────────────
+// Что реально лежит на столе перед шагом k: детали, ещё не съеденные джойнами, плюс узлы,
+// произведённые раньше и ещё не съеденные.
+//
+// СЧИТАЕТСЯ В ЛИСТЕ. Подписка на весь массив `operations` из корня OperationsField
+// перерисовывала бы всё поле на каждое нажатие клавиши в любом шаге — дисциплина этого файла
+// прямо требует держать кросс-операционные вычисления в листьях или в getValues на событии.
+//
+// Правила — из общего с сервером порта (assembly-frontier), а не из собственных представлений:
+// пикер обязан предлагать РОВНО то, что примет запись.
+type AssemblyView = {
+  res: AssemblyResult;
+  /** что шаг index имеет право взять входом */
+  availableBefore: (index: number) => Set<string>;
+  /** живые узлы на фронтире шага (в порядке появления) */
+  liveUnitsBefore: (index: number) => string[];
+  /** ключ детали → узел, внутри которого она теперь лежит */
+  eatenInto: Map<string, string>;
+};
+
+function useAssemblyView(pieces: PieceRef[]): AssemblyView {
+  const ops = useWatch({ name: 'operations' }) as
+    | Array<{ inputKeys?: string[]; outputUnitKey?: string; outputUnitName?: string }>
+    | undefined;
+  return useMemo(() => {
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = (ops ?? []).map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(sweepPieces, steps);
+    const eatenInto = new Map<string, string>();
+    res.consumedBy.forEach((stepIdx, key) => {
+      const into = steps[stepIdx]?.outputUnitKey;
+      if (into) eatenInto.set(key, into);
+    });
+    const before = (index: number) => new Set(res.frontierBefore[index] ?? res.frontier);
+    return {
+      res,
+      availableBefore: before,
+      liveUnitsBefore: (index: number) =>
+        (res.frontierBefore[index] ?? res.frontier).filter((k) => res.units.has(k)),
+      eatenInto,
+    };
+  }, [ops, pieces]);
+}
+
+type RailGrouping = {
+  broken: Set<number>;
+  /** Блоки и шаги для схемы — тот же свип, второй раз считать незачем. */
+  schematicBlocks: AssemblyBlock[];
+  schematicSteps: AssemblyStepShape[];
+  res: ReturnType<typeof assemblySweep>;
+  /** Индекс шага → шапка блока, которую надо врезать ПЕРЕД ним. */
+  headerBefore: Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>;
+  /** Размечена ли карточка: без узлов досье вырождается в сегодняшний плоский рельс. */
+  marked: boolean;
+  /** Σ SMV блока по его ключу ('' — хвостовой). Считается тем же `sumSmv`, что и в рельсе. */
+  smvOfBlock: Map<string, string>;
+};
+
+// useRailGrouping — досье: тот же рельс, но с врезанными заголовками подсборок.
+//
+// Считает ОДИН свип на обе задачи (маркеры сломанных шагов и группировку), потому что второй
+// свип на тех же данных был бы чистой платой за раздельность хуков.
+//
+// Заголовок врезается ПЕРЕД первым шагом блока — то есть блок это диапазон в последовательности,
+// а не контейнер. Порядок остаётся за технологом, перетаскивание глобальное; если он утащит шаг
+// в чужой блок, заголовки просто перестроятся, а не запретят жест.
+function useRailGrouping(pieces: PieceRef[], smvOf: (i: number) => string): RailGrouping {
+  const ops = useWatch({ name: 'operations' }) as
+    | Array<{ inputKeys?: string[]; outputUnitKey?: string; outputUnitName?: string }>
+    | undefined;
+  return useMemo(() => {
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = (ops ?? []).map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(sweepPieces, steps);
+
+    const broken = new Set<number>();
+    for (const v of res.violations) if (v.step >= 0) broken.add(v.step);
+
+    const grouped = assemblyBlocks(steps, res);
+    const liveUnits = res.frontier.filter((k) => res.units.has(k));
+    const headerBefore = new Map<number, { block: AssemblyBlock; smv: string; terminal: boolean }>();
+
+    const sumSmv = (idx: number[]) => {
+      let total = 0;
+      let any = false;
+      for (const i of idx) {
+        const n = Number((smvOf(i) ?? '').replace(',', '.'));
+        if (Number.isFinite(n) && n > 0) {
+          total += n;
+          any = true;
+        }
+      }
+      return any ? String(Math.round(total * 100) / 100) : '';
+    };
+
+    const smvOfBlock = new Map<string, string>();
+    for (const b of [...grouped.blocks, grouped.loose]) {
+      if (b.steps.length === 0) continue;
+      const first = Math.min(...b.steps);
+      const smv = sumSmv(b.steps);
+      smvOfBlock.set(b.key, smv);
+      headerBefore.set(first, {
+        block: b,
+        smv,
+        terminal: liveUnits.length === 1 && liveUnits[0] === b.key,
+      });
+    }
+    return {
+      broken,
+      headerBefore,
+      smvOfBlock,
+      marked: grouped.blocks.length > 0,
+      schematicBlocks: [...grouped.blocks, grouped.loose],
+      schematicSteps: steps,
+      res,
+    };
+  }, [ops, pieces, smvOf]);
+}
+
+// AssemblyTray — лоток, который перестал врать.
+//
+// ЛИСТ, и это не стилистика: он подписан на весь массив operations (фронтир иначе не посчитать),
+// и будь эта подписка в корне OperationsField, всё поле перерисовывалось бы на каждое нажатие
+// клавиши в любом шаге.
+//
+// Съеденные детали НЕ рисуются стеной зачёркнутых: на позднем шаге съедено почти всё, и такая
+// стена сообщала бы только о том, что работа идёт. Вместо неё — свёрнутый счётчик, который
+// называет узел, куда деталь ушла. Решение прототипа, а не изобретение.
+function AssemblyTray({
+  pieces,
+  pieceShapes,
+  tiled,
+  highlighted,
+  stepIndex,
+  onAdd,
+}: {
+  pieces: PieceRef[];
+  pieceShapes: PieceShapeMap;
+  tiled: boolean;
+  highlighted: boolean;
+  stepIndex: number;
+  onAdd: (key: string) => void;
+}) {
+  const view = useAssemblyView(pieces);
+  const [consumedOpen, setConsumedOpen] = useState(false);
+
+  const available = view.availableBefore(stepIndex);
+  const units = view.liveUnitsBefore(stepIndex);
+  const onTable = pieces.filter((p) => available.has(p.lineKey));
+  const eaten = pieces.filter((p) => !available.has(p.lineKey));
+
+  return (
+    <>
+      {units.map((key) => {
+        const unit = view.res.units.get(key);
+        const title = unit?.name ? `${key} — ${unit.name}` : key;
+        return (
+          <Chip
+            key={`unit:${key}`}
+            onClick={() => onAdd(key)}
+            title={`${title}: узел из ${unit?.leaves.length ?? 0} деталей — кликните, чтобы добавить к открытому шагу`}
+          >
+            ▣ {key}
+          </Chip>
+        );
+      })}
+      {onTable.map((p) => (
+        <TrayChip
+          key={p.lineKey}
+          piece={p}
+          shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
+          tiled={tiled}
+          highlighted={highlighted}
+          onAdd={() => onAdd(p.lineKey)}
+        />
+      ))}
+      {eaten.length > 0 && (
+        <>
+          <Chip
+            dashed
+            onClick={() => setConsumedOpen((v) => !v)}
+            title='детали, уже вошедшие в узлы: их нельзя взять повторно — строка детали съедается ровно одним джойном'
+          >
+            уже в узлах · {eaten.length}
+          </Chip>
+          {consumedOpen &&
+            eaten.map((p) => {
+              const into = view.eatenInto.get(p.lineKey);
+              return (
+                <Text key={`eaten:${p.lineKey}`} size='micro' variant='label' component='span'>
+                  {p.name}
+                  {into ? ` ∈ ${into}` : ''}
+                </Text>
+              );
+            })}
+        </>
+      )}
+    </>
+  );
+}
+
 // ── piece tray ───────────────────────────────────────────────────────────────────────────────
 // Wiring 14 operations to their pieces used to mean opening 14 popovers. The tray puts every
 // DECLARED piece on one strip: drag a chip onto a step in the rail, or — the keyboard and touch
@@ -374,6 +744,456 @@ function TrayChip({
   );
 }
 
+
+// ── produces: что шаг собирает ───────────────────────────────────────────────────────────────
+// Узел — не поле «опишите шаг», а РЕЗУЛЬТАТ шага, на который ссылаются входы следующих шагов.
+// Именно поэтому он необязателен: пустой ключ значит «шаг ничего не собирает», это обработка, и
+// её входы остаются на столе. Ровно этим он отличается от свободнотекстового `node`, который
+// был обязательным и который действующий конструктор заполнить не смог (0289).
+//
+// ПОГЛОЩЕНИЯ КАК ОТДЕЛЬНОЙ МЕХАНИКИ ЗДЕСЬ НЕТ, и это не упущение: «GARMENT + HEM → GARMENT»
+// выражается тем, что автор берёт узел входом и пишет его же ключ выходом. Движок узнаёт
+// поглощение сам; отдельная кнопка «поглотить» была бы вторым способом сказать то же самое.
+function ProducesBlock({
+  index,
+  inputKeys,
+  pieces,
+  assembly,
+}: {
+  index: number;
+  inputKeys: string[];
+  pieces: PieceRef[];
+  assembly: AssemblyView;
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const outputKey = (useWatch({ name: `operations.${index}.outputUnitKey` }) ?? '') as string;
+  const outputName = (useWatch({ name: `operations.${index}.outputUnitName` }) ?? '') as string;
+
+  const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
+  const usable = inputKeys.filter((k) => byKey.has(k) || assembly.res.units.has(k));
+
+  // СПРЯТАЛ КОНТРОЛ — ОЧИСТИ ЗНАЧЕНИЕ. Ключ можно стереть бэкспейсом, а не только «растворить»:
+  // ветка переключается на чип «сделать узлом», оба инпута размонтируются, и оставшееся имя
+  // становится теневым значением — сервер откажет всей записи гигиеной (shadow-name), а контрола,
+  // чтобы это исправить, на экране уже нет. То же правило, что у ширины отстрочки ниже.
+  useEffect(() => {
+    if (!outputKey && outputName) {
+      setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
+    }
+  }, [outputKey, outputName, index, setValue]);
+  const absorbs = !!outputKey && inputKeys.includes(outputKey) && assembly.res.units.has(outputKey);
+
+  // Код предлагается по зоне шага, а не по именам деталей: имена длинные и меняются, а код
+  // печатается на бумаге и в QR. Совпадение с существующим узлом — не беда: это и есть
+  // поглощение, если тот же узел взят входом.
+  const suggest = () => {
+    const zone = (getValues(`operations.${index}.zone`) ?? '') as string;
+    // Занято — это и узлы, И КЛЮЧИ ДЕТАЛЕЙ: пространство имён одно (правило 6), и предлагать
+    // код, совпавший с деталью, значит предлагать заведомый отказ.
+    const taken = new Set<string>([
+      ...((getValues('operations') ?? []) as Array<{ outputUnitKey?: string }>)
+        .map((o) => (o?.outputUnitKey ?? '').trim())
+        .filter(Boolean),
+      ...pieces.map((p) => p.lineKey),
+    ]);
+    return suggestUnitCode(zone, taken);
+  };
+
+  const declare = () => {
+    if (usable.length < 2) {
+      showMessage(
+        'узел из одного входа — это обработка, а не узел: возьмите на шаг хотя бы два входа',
+        'error',
+      );
+      return;
+    }
+    const code = suggest();
+    if (byKey.has(code)) {
+      showMessage(`ключ «${code}» занят деталью — у деталей и узлов одно пространство имён`, 'error');
+      return;
+    }
+    setValue(`operations.${index}.outputUnitKey`, code, { shouldDirty: true });
+    // Разметка появилась снова — намерение «снять разметку» отменено. Без этого сценарий
+    // «снял → передумал → объявил заново» уходил бы в отказ «снял и одновременно прислал узлы»,
+    // а снять флаг руками нечем.
+    setValue('assemblyCleared', false, { shouldDirty: true });
+  };
+
+  return (
+    <>
+      <GroupLabel>produces</GroupLabel>
+      {!outputKey ? (
+        <ChipRow>
+          <Chip dashed onClick={declare} title='объявить, что этот шаг собирает узел'>
+            ▣ сделать узлом
+          </Chip>
+          <Text size='micro' variant='label' component='span'>
+            шаг ничего не собирает — его входы остаются доступными следующим шагам
+          </Text>
+        </ChipRow>
+      ) : (
+        <>
+          <div className='flex flex-wrap items-center gap-2'>
+            {/* InputField, а не голый Input: последний — это <input> без привязки к форме, и
+                набранный код узла молча не доезжал бы до сабмита. maxLength по колонкам сервера
+                (VARCHAR(64) / VARCHAR(255)) — отказ по длине здесь бесполезен, поле просто не
+                должно позволять её набрать. */}
+            <InputField
+              name={`operations.${index}.outputUnitKey`}
+              label='код узла'
+              placeholder='SHELL'
+              maxLength={64}
+            />
+            <InputField
+              name={`operations.${index}.outputUnitName`}
+              label='имя узла'
+              placeholder='корпус'
+              maxLength={255}
+            />
+            <Chip
+              dashed
+              onClick={() => {
+                setValue(`operations.${index}.outputUnitKey`, '', { shouldDirty: true });
+                setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
+              }}
+              title='шаг перестанет собирать узел; его входы вернутся на стол следующим шагам'
+            >
+              растворить
+            </Chip>
+          </div>
+          {absorbs && (
+            <Text size='micro' variant='label' className='mt-1'>
+              поглощение: узел {outputKey} сохраняет идентичность и получает содержимое этого шага
+            </Text>
+          )}
+          {!outputName && (
+            <Text size='micro' variant='label' className='mt-1'>
+              имя необязательно, но на печати и в цехе читают его, а не код
+            </Text>
+          )}
+          {/* Узел должен быть произведён ИМЕННО ЭТИМ шагом (или им поглощён). Предыдущий гейт
+              спрашивал только «узел с таким ключом существует» — а он мог состояться ДРУГИМ
+              шагом: у второго производителя джойн отвергнут, входы НЕ съедены, и кнопка
+              заменяла бы в поздних шагах ЖИВЫЕ ЗАКОННЫЕ ссылки, выбрасывая их состав. Починка,
+              которая ломает — ровно то, от чего предостерегал комментарий, пока предикат был не
+              тот. */}
+          <BootstrapEatenRefs
+            index={index}
+            outputKey={outputKey}
+            assembly={assembly}
+          />
+        </>
+      )}
+    </>
+  );
+}
+
+// BootstrapEatenRefs — «заменить съеденные ссылки узлом».
+//
+// БЕЗ ЭТОЙ КНОПКИ ФИЧУ НЕЛЬЗЯ ПРИМЕНИТЬ К ЖИВОЙ КАРТОЧКЕ. Сегодняшние карты законно ссылаются
+// на одну деталь из многих шагов: стачали, отстрочили, приутюжили — все три несут рукав. Стоит
+// объявить первый узел, и каждый поздний шаг, ссылающийся на съеденную деталь, начинает
+// нарушать правило 1 — а правило 1 отказывает ВСЕЙ записи. Руками это часы правок под жёсткими
+// отказами; здесь — одно действие.
+function BootstrapEatenRefs({
+  index,
+  outputKey,
+  assembly,
+}: {
+  index: number;
+  outputKey: string;
+  assembly: AssemblyView;
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ inputKeys?: string[] }>;
+
+  // Узел должен быть произведён ЭТИМ шагом — или им поглощён. Иначе кнопки быть не должно вовсе.
+  const unit = assembly.res.units.get(outputKey);
+  const mineIsReal = !!unit && (unit.producedAt === index || unit.absorbedAt.includes(index));
+
+  // Съеденным считается только то, что съел ИМЕННО ЭТОТ шаг, по свидетельству движка, а не по
+  // списку входов. Список входов — это заявка; съедено ли по ней что-нибудь, знает проход:
+  // у отвергнутого джойна входы остаются на столе, и «замена» превратила бы законные ссылки в
+  // висячие.
+  const mine = new Set<string>();
+  assembly.res.consumedBy.forEach((eater, key) => {
+    if (eater === index && key !== outputKey) mine.add(key);
+  });
+  // Кандидаты — только ПОЗЖЕ этого шага: шаг раньше него деталь ещё не потерял.
+  const affected: number[] = [];
+  ops.forEach((o, i) => {
+    if (i <= index) return;
+    if ((o?.inputKeys ?? []).some((k) => mine.has(k))) affected.push(i);
+  });
+  if (!mineIsReal || affected.length === 0) return null;
+
+  const apply = () => {
+    const all = (getValues('operations') ?? []) as Array<{ inputKeys?: string[] }>;
+    affected.forEach((i) => {
+      const cur = (all[i]?.inputKeys ?? []).filter(Boolean);
+      // Узел встаёт НА МЕСТО первого заменённого входа, а не в начало списка: порядок входов —
+      // авторский, он несёт интерлив «деталь между узлами» и попадает в подпись секции. Сдвигать
+      // его молча значило бы протухать подпись за автора.
+      const next: string[] = [];
+      let placed = false;
+      for (const k of cur) {
+        if (mine.has(k)) {
+          if (!placed && !cur.includes(outputKey)) {
+            next.push(outputKey);
+            placed = true;
+          }
+          continue;
+        }
+        next.push(k);
+      }
+      if (!placed && !next.includes(outputKey)) next.unshift(outputKey);
+      setValue(`operations.${i}.inputKeys`, next, { shouldDirty: true });
+    });
+    setValue('assemblyCleared', false, { shouldDirty: true });
+    showMessage(`ссылки на съеденные детали заменены узлом ${outputKey} в ${affected.length} шагах`, 'success');
+  };
+
+  return (
+    <ChipRow className='mt-1'>
+      <Chip
+        dashed
+        onClick={apply}
+        title={`шаги ниже ссылаются на детали, которые этот узел съедает; замена обязательна — иначе сервер отвергнет всю карточку`}
+      >
+        заменить съеденные ссылки узлом · {affected.length}
+      </Chip>
+    </ChipRow>
+  );
+}
+
+
+// ClearAssemblyButton — «снять разметку узлов».
+//
+// ДВЕ ПОЛОВИНЫ, И ОНИ НЕДЕЛИМЫ. Распаковка без флага упрётся в контентный бекстоп сервера
+// («запись не несёт ни одного узла против карточки, которая их несёт»); флаг без распаковки — в
+// «противоречие: снял и одновременно прислал узлы». Поэтому кнопка делает обе вещи разом и
+// оставляет форму в состоянии, которое сервер принимает строкой «cleared=true» своей таблицы.
+//
+// РАСПАКОВКА ПО ЗАМЫКАНИЮ, а не отбрасыванием: шаг со входами [SHELL, SL] после наивного
+// удаления узла остался бы с одним рукавом, а полочка и спинка, жившие внутри SHELL, к нему не
+// вернулись бы — карточка врала бы о том, что этот шаг сшивает.
+/**
+ * «Снять фотографии шагов» — путь отступления для операционных снимков.
+ *
+ * Он обязателен, а не удобен. Операции пишутся полной заменой, поэтому сервер отклоняет
+ * осведомлённую запись без снимков против карточки, у которой они есть, — иначе отставшая вкладка
+ * стирала бы десятки выносок молча. Значит убрать ПОСЛЕДНИЙ снимок руками, без объявленного
+ * намерения, было бы невозможно: сохранение упиралось бы в бекстоп.
+ *
+ * Кнопка видна и когда форма уже пуста, а сохранённая карточка ещё несёт снимки: ровно тот же
+ * довод, что у кнопки снятия разметки узлов — отказ, из которого нет выхода, хуже отказа.
+ */
+function ClearOperationMediaButton({
+  storedHasMedia,
+  frozen = false,
+}: {
+  storedHasMedia: boolean;
+  frozen?: boolean;
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const [confirming, setConfirming] = useState(false);
+
+  // Диалог рисуется ПОРТАЛОМ в body, куда внешний `<fieldset disabled>` не достаёт: карточку
+  // могли выпустить, пока он открыт. Гейт поэтому в самом мутаторе, а диалог закрывается сам.
+  useEffect(() => {
+    if (frozen) setConfirming(false);
+  }, [frozen]);
+
+  const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ media?: unknown[] }>;
+  const inForm = ops.reduce((n, o) => n + (o?.media?.length ?? 0), 0);
+  if (frozen) return null;
+  if (inForm === 0 && !storedHasMedia) return null;
+
+  const clear = () => {
+    if (frozen) return;
+    const list = (getValues('operations') ?? []) as Array<Record<string, unknown>>;
+    list.forEach((_, i) => setValue(`operations.${i}.media`, [], { shouldDirty: true }));
+    // Намерение живёт ровно одно сохранение: маппер записи гасит его сам, а черновик не хранит.
+    setValue('mediaCleared', true, { shouldDirty: true });
+    setConfirming(false);
+    showMessage('фотографии шагов сняты — сохраните карточку', 'success');
+  };
+
+  return (
+    <>
+      <Chip dashed onClick={() => setConfirming(true)} title='убрать все фотографии со всех шагов'>
+        снять фотографии шагов
+      </Chip>
+      <ConfirmationModal
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={clear}
+        title='снять фотографии шагов'
+        confirmLabel='снять'
+        cancelLabel='оставить'
+        width='sm'
+      >
+        <Text size='micro'>
+          {inForm > 0
+            ? `со всех шагов будут убраны фотографии (${inForm}) вместе с выносками на них.`
+            : 'в форме фотографий уже нет; кнопка объявляет серверу намерение снять их с сохранённой карточки.'}{' '}
+          Сами файлы в библиотеке останутся.
+        </Text>
+      </ConfirmationModal>
+    </>
+  );
+}
+
+function ClearAssemblyButton({
+  pieces,
+  storedHasUnits,
+  frozen = false,
+}: {
+  pieces: PieceRef[];
+  /** Размечена ли СОХРАНЁННАЯ карточка. Не то же самое, что размечена форма. */
+  storedHasUnits: boolean;
+  /** Выпущенная карточка: намерение снять разметку объявлять не из чего и незачем. */
+  frozen?: boolean;
+}) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const view = useAssemblyView(pieces);
+  const [confirming, setConfirming] = useState(false);
+
+  // Кнопка видна и когда форма УЖЕ не размечена, а сохранённая карточка ещё размечена.
+  //
+  // Без этого путь отступления не работал: восстановленный черновик (или любой другой источник
+  // распакованных входов) даёт форму без узлов, кнопка исчезает, сохранение упирается в бекстоп
+  // с текстом «нажмите „снять разметку узлов“» — а нажимать нечего, и единственный выход
+  // перезагрузка с потерей правок. Отказ, из которого нет выхода, хуже отказа.
+  const inForm = view.res.units.size;
+  if (inForm === 0 && !storedHasUnits) return null;
+  // Модалка подтверждения портальная, то есть рендерится ВНЕ `<fieldset disabled>` карточки и
+  // остаётся живой; без явного флага диалог, открытый до выпуска, взводил бы намерение уже на
+  // замороженной карточке (близнец гасится тем же способом).
+  if (frozen) return null;
+
+  const clear = () => {
+    const ops = (getValues('operations') ?? []) as Array<{
+      inputKeys?: string[];
+      outputUnitKey?: string;
+    }>;
+    const pieceKeys = new Set(pieces.map((p) => p.lineKey));
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const allSteps = ops.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: '',
+    }));
+    // Состав узла берётся НА МОМЕНТ ШАГА, а не финальный. Разница не косметическая: при
+    // «A+B→GARMENT, обработка [GARMENT], GARMENT+C→GARMENT» финальное замыкание вернуло бы
+    // обработке и деталь C, которой на её шаге ещё не существовало. Сервер такое примет —
+    // последовательность останется валидной, — и карточка соврёт о том, что этот шаг делает.
+    //
+    // Префиксный проход: n ≤ 60 шагов, стоимость незаметна, а альтернатива — хранить снимки
+    // замыканий в движке ради одной кнопки.
+    const unitsBefore = (i: number) => assemblySweep(sweepPieces, allSteps.slice(0, i)).units;
+    let droppedDangling = 0;
+    ops.forEach((o, i) => {
+      const seen = new Set<string>();
+      const expanded: string[] = [];
+      const asOfStep = unitsBefore(i);
+      for (const k of o?.inputKeys ?? []) {
+        const unit = asOfStep.get(k) ?? view.res.units.get(k);
+        // Оборванный ключ (не деталь И не узел — обычно удалённый шаг-производитель или легаси
+        // «piece deleted») при распаковке ОТБРАСЫВАЕТСЯ. Оставь его — и запись со снятой
+        // разметкой всё равно «несёт узлы» с точки зрения сервера, то есть кнопка ломала бы
+        // собственный контракт: обещает состояние, которое сервер примет, а отдаёт отказ.
+        if (!unit && !pieceKeys.has(k)) {
+          droppedDangling++;
+          continue;
+        }
+        for (const leaf of unit ? unit.leaves : [k]) {
+          if (!seen.has(leaf)) {
+            seen.add(leaf);
+            expanded.push(leaf);
+          }
+        }
+      }
+      setValue(`operations.${i}.inputKeys`, expanded, { shouldDirty: true });
+      setValue(`operations.${i}.outputUnitKey`, '', { shouldDirty: true });
+      setValue(`operations.${i}.outputUnitName`, '', { shouldDirty: true });
+    });
+    // Намерение объявляется ровно на это сохранение.
+    setValue('assemblyCleared', true, { shouldDirty: true });
+    setConfirming(false);
+    showMessage(
+      droppedDangling > 0
+        ? `разметка узлов снята; оборванных ссылок отброшено: ${droppedDangling} — сохраните карточку`
+        : 'разметка узлов снята — сохраните карточку, чтобы это применилось',
+      'success',
+    );
+  };
+
+  return (
+    <>
+      <Chip
+        dashed
+        onClick={() => setConfirming(true)}
+        title='снять разметку узлов со всей карточки: входы-узлы вернутся в детали по составу'
+      >
+        снять разметку{inForm > 0 ? ` · ${inForm}` : ''}
+      </Chip>
+      <ConfirmationModal
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={clear}
+        title='снять разметку узлов?'
+        confirmLabel='снять'
+      >
+        <Text size='micro'>
+          {inForm > 0
+            ? `Узлов на карточке: ${inForm}.`
+            : 'В форме узлов уже нет, но сохранённая карточка размечена — снятие подтвердит это серверу.'}{' '}
+          Входы-узлы вернутся в детали по составу,
+          выходные ключи будут очищены. Подпись секции CONSTRUCTION станет «изменено после
+          подписи» — это правда, а не дефект: содержание действительно поменялось.
+        </Text>
+      </ConfirmationModal>
+    </>
+  );
+}
+
+
+// StepNumberDrift — предупреждение о переезде номеров шагов.
+//
+// Номер операции сервер присваивает САМ как (position+1)*10, и делал это ещё до узлов сборки.
+// Значит номера двигает не разметка, а изменение ПОРЯДКА — и вот тут расходятся две вещи,
+// которые легко счесть одной:
+//
+//   - ссылки дефектов на номера шагов переезжают автоматически (remapIssues) — это машина;
+//   - НАПЕЧАТАННЫЕ номера в обращающихся тех-паках и в головах цеха не переезжают никак.
+//
+// Первичная разметка карточки в узлы обычно и означает перестановку шагов, поэтому баннер
+// появляется ровно там, где переезд реален, и называет его до сохранения, а не после.
+//
+// Баннер, а не модалка: модалка выстреливала бы на каждом сохранении после любой перестановки и
+// быстро стала бы кнопкой «ок, не читая».
+function StepNumberDrift() {
+  const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ operationNumber?: number }>;
+  const moves = ops
+    .map((o, i) => ({ from: o?.operationNumber ?? 0, to: (i + 1) * 10 }))
+    .filter((m) => m.from > 0 && m.from !== m.to);
+  if (moves.length === 0) return null;
+  return (
+    <CalloutBox tone='error'>
+      <Text size='micro'>
+        номера шагов переедут при сохранении:{' '}
+        <b>{moves.map((m) => `${m.from}→${m.to}`).join(', ')}</b>. Ссылки дефектов переедут вместе
+        с шагами автоматически, а напечатанные номера в уже выданных тех-паках — нет.
+      </Text>
+    </CalloutBox>
+  );
+}
+
 // ── the sequence rail ────────────────────────────────────────────────────────────────────────
 // One 26px line per assembly step, so twenty operations read as an ORDER instead of as twenty
 // screens of controls. Drag ⠿ to reorder; the row is a button that opens the step in the editor.
@@ -383,6 +1203,7 @@ function RailStep({
   selected,
   onSelect,
   hasError,
+  assemblyBroken = false,
   activePin,
   activeBom,
   pieceShapes,
@@ -394,6 +1215,8 @@ function RailStep({
   selected: boolean;
   onSelect: () => void;
   hasError: boolean;
+  /** Шаг ломает сборочный граф: вход не на фронтире, дубль, невалидный джойн. */
+  assemblyBroken?: boolean;
   activePin?: number | null;
   activeBom?: string | null;
   /** Контуры деталей карточки, одной стабильной картой на весь рельс (см. use-piece-shapes). */
@@ -403,6 +1226,10 @@ function RailStep({
 }) {
   const { control } = useFormContext<TechCardFormData>();
   const opType = (useWatch({ control, name: `operations.${index}.operationType` }) ?? '') as string;
+  // The verb of a machine step comes from its machine, not from the word MACHINE — without this the
+  // whole rail reads «machine · …» twenty times over.
+  const machineType = (useWatch({ control, name: `operations.${index}.machineType` }) ??
+    '') as string;
   const zone = (useWatch({ control, name: `operations.${index}.zone` }) ?? '') as string;
   const note = (useWatch({ control, name: `operations.${index}.note` }) ?? '') as string;
   const calloutNumber = (useWatch({ control, name: `operations.${index}.calloutNumber` }) ??
@@ -413,7 +1240,7 @@ function RailStep({
   // The joined pieces, by name, for the composed heading. Resolved through the card's piece list so
   // a rename on the PATTERNS tab reaches every step that references it — which is what the removed
   // PlacementSync was trying to achieve by writing the names into the row.
-  const pieceKeys = (useWatch({ control, name: `operations.${index}.pieceLineKeys` }) ??
+  const pieceKeys = (useWatch({ control, name: `operations.${index}.inputKeys` }) ??
     []) as string[];
   const allPieces = useFormPieces();
   const linkedPieces = pieceKeys
@@ -438,6 +1265,7 @@ function RailStep({
   const label =
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
+      machineType: machineType as common_TechCardMachineType,
       zone: zone as Parameters<typeof operationHeading>[0]['zone'],
       pieceNames,
       note,
@@ -476,7 +1304,7 @@ function RailStep({
           }}
           className={cn(
             'flex items-center gap-1 border bg-bgColor pr-1.5 transition-colors',
-            hasError || linked
+            hasError || assemblyBroken || linked
               ? 'border-error'
               : selected || over
                 ? 'border-textColor'
@@ -492,12 +1320,23 @@ function RailStep({
           >
             ⠿
           </button>
-          <button
-            type='button'
+          {/* НЕ `<button>`: открыть шаг — ЧТЕНИЕ, а нативная кнопка внутри `<fieldset disabled>`
+              выпущенной карточки клика не получает. Получалось, что на подписанной карточке
+              открывался только первый шаг (он выбран по умолчанию), а остальные двенадцать
+              прочитать было нельзя вовсе — при том что строка подсвечивалась на наведении и
+              выглядела нажимаемой. Перетаскивание строки рядом остаётся кнопкой: это правка. */}
+          <span
+            role='button'
+            tabIndex={0}
             onClick={onSelect}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              onSelect();
+            }}
             aria-current={selected}
             title={label}
-            className='flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className='flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
               {opNumber}
@@ -519,13 +1358,19 @@ function RailStep({
             >
               {label}
             </Text>
-            {hasError && (
+            {(hasError || assemblyBroken) && (
               <Text
                 size='nano'
                 variant='error'
                 component='span'
                 className='shrink-0 font-bold'
-                title='в шаге есть незаполненное обязательное поле'
+                // Тултип обязан называть ПРИЧИНУ. Раньше он говорил про незаполненное поле и
+                // при нарушении сборки — то есть про другое, и уводил искать не туда.
+                title={
+                  assemblyBroken && !hasError
+                    ? 'шаг ломает сборку: вход не лежит на столе на этом шаге — откройте шаг'
+                    : 'в шаге есть незаполненное обязательное поле'
+                }
               >
                 !
               </Text>
@@ -550,10 +1395,154 @@ function RailStep({
             >
               {smvMin > 0 ? smvMin.toFixed(1) : '—'}
             </Text>
-          </button>
+          </span>
         </div>
       )}
     </SortableEntity>
+  );
+}
+
+// ── two controls the field library has no shape for ──────────────────────────────────────────
+//
+// Both exist because a Radix select can only hold a NON-EMPTY STRING, and two of this feature's
+// values are legitimately neither: «no profile named» is the empty string, and «steam not stated»
+// is `undefined`. Encoding them at the control instead of in the form is deliberate — the moment
+// the sentinel reaches the form it also reaches the save mapper, and «__inherit__» would travel to
+// the server as a profile key.
+const PROFILE_INHERIT = '__inherit__';
+
+function EncodedSelectField<T>({
+  name,
+  label,
+  items,
+  encode,
+  decode,
+  className,
+}: {
+  name: `operations.${number}.${'machineProfileKey' | 'pressProfileKey' | 'pressSteam'}`;
+  label: string;
+  items: { value: string; label: string }[];
+  encode: (value: T) => string;
+  decode: (option: string) => T;
+  className?: string;
+}) {
+  const { control } = useFormContext<TechCardFormData>();
+  return (
+    <FormField
+      control={control}
+      name={name}
+      render={({ field, fieldState }) => (
+        <FormItem>
+          <FormLabel>{label}</FormLabel>
+          <Select
+            name={name}
+            items={items}
+            placeholder={label}
+            value={encode(field.value as T)}
+            onValueChange={(v?: string) => field.onChange(decode(v ?? ''))}
+            invalid={!!fieldState.error}
+            className={className}
+          />
+          <FormMessage />
+        </FormItem>
+      )}
+    />
+  );
+}
+
+// A NUMBER WHOSE ZERO MEANS «NOT STATED», and therefore a box that has to be EMPTY at zero.
+// InputField renders `field.value ?? ''`, so an unset thread count would sit in the control as a
+// literal `0` — which is both a wrong reading (there is no zero-thread machine) and the end of the
+// placeholder mechanism, because a box with a value in it never shows its placeholder and the
+// inherited value would stop being visible anywhere. The `value` prop lands after the spread inside
+// InputField, so passing it here overrides that default while onChange still goes to RHF.
+//
+// AND `step='any'` WITH NO `min` / `max`, which is the less obvious half. The card's <form> does not
+// carry noValidate, so the browser runs native constraint validation on submit — and a number input
+// has an IMPLICIT step of 1, so a mistyped «92.5» is a stepMismatch that aborts the submit with a
+// native bubble before RHF ever runs. These controls live inside an accordion that is CLOSED on any
+// step that inherits everything, so the save button would simply stop working, pointing at a field
+// nobody can see. `step='any'` switches the native check off; the bands are enforced in the schema
+// instead, where the message lands on the field and the editor walks to the failing step.
+function InheritableNumberField({
+  name,
+  label,
+  value,
+  placeholder,
+}: {
+  name: `operations.${number}.${'threadCount' | 'needleSizeNm' | 'pressTemperatureC' | 'pressDwellSec'}`;
+  label: string;
+  value: number;
+  placeholder: string;
+}) {
+  return (
+    <InputField
+      name={name}
+      type='number'
+      step='any'
+      valueAsNumber
+      label={label}
+      placeholder={placeholder}
+      value={value || ''}
+    />
+  );
+}
+
+// ONE VALUE IN TWO UNITS, and only one of them is stored. The card records stitches per cm; the
+// length in mm is `10 / density` and is written into no field at all — a second column would be a
+// second truth, and the two would disagree the first time somebody edited one of them.
+//
+// So this input is a MIRROR: it shows the length the stored density works out to, and typing a
+// length writes the density back. While it has focus it shows exactly what was typed (the local
+// draft) rather than the round-trip of it — without that, typing «3» would set density 3.33, which
+// renders back as «3.0» and moves the cursor out from under the next keystroke.
+function StitchLengthMirror({
+  index,
+  density,
+  placeholder,
+}: {
+  index: number;
+  density: string;
+  /** What the density would be inherited as, already in millimetres — «2.5 (card)». */
+  placeholder: string;
+}) {
+  const { setValue } = useFormContext<TechCardFormData>();
+  const [draft, setDraft] = useState<string | null>(null);
+  // The division lives in operation-options (stitchLengthMm) because the printed sheet shows the
+  // same pair — two copies of `10 / density` are two roundings of one number.
+  const derived = stitchLengthMm(density);
+  const onChange = (raw: string) => {
+    const text = sanitizeDecimal(raw, 1);
+    setDraft(text);
+    if (!text.trim()) {
+      // Clearing the length clears the density: they are the same fact, and leaving the density
+      // behind would put a value back in the box the moment focus left it.
+      setValue(`operations.${index}.stitchesPerCm`, '', { shouldDirty: true });
+      return;
+    }
+    const mm = parseDecimalNumber(text);
+    if (!Number.isFinite(mm) || mm <= 0) return;
+    setValue(`operations.${index}.stitchesPerCm`, String(Math.round((10 / mm) * 100) / 100), {
+      shouldDirty: true,
+    });
+  };
+  return (
+    <div className='space-y-px'>
+      <label htmlFor={`op-${index}-stitch-length`} className='block leading-none'>
+        <Text size='micro' variant='label' tracking='label' className='leading-none uppercase'>
+          = stitch length, mm
+        </Text>
+      </label>
+      <Input
+        name={`op-${index}-stitch-length`}
+        inputMode='decimal'
+        placeholder={placeholder}
+        title='the same setting as stitches / cm — typing here writes the density'
+        value={draft ?? derived}
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => onChange(e.target.value)}
+        onBlur={() => setDraft(null)}
+      />
+    </div>
   );
 }
 
@@ -574,6 +1563,8 @@ function OperationEditor({
   onFlashPieces,
   onActiveBomChange,
   onDropPiece,
+  mediaUrls,
+  frozen = false,
 }: {
   index: number;
   bomLines: BomLine[];
@@ -589,6 +1580,10 @@ function OperationEditor({
   onFlashPieces: () => void;
   onActiveBomChange?: (k: string | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
+  /** Адреса операционных снимков; форма возит только media_id. */
+  mediaUrls?: Map<number, string>;
+  /** Карточка выпущена: снимки и выноски читаются, но не правятся. */
+  frozen?: boolean;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const opNumber = (index + 1) * 10;
@@ -612,14 +1607,94 @@ function OperationEditor({
     NONE_TOPSTITCH) as string;
   const attachmentKind = (useWatch({ control, name: `operations.${index}.attachmentKind` }) ??
     NONE_ATTACHMENT) as string;
-  const overrideCount = [
+  // Watched, not merely written: «set as card profile» has to know whether a size is pinned to the
+  // foot before it may move the foot into the park (see machineTakes — clearing the kind out from
+  // under a size would trip the effect below and silently delete the number).
+  const attachmentSizeMm = (useWatch({ control, name: `operations.${index}.attachmentSizeMm` }) ??
+    '') as string;
+
+  // --- the two equipment axes (0306) --------------------------------------------------------
+  // «На чём» the step is done. machineType / pressEquipment are REQUIRED by their step type and sit
+  // in the core grid beside the type; everything else below is an override whose blank means
+  // «inherit», and lives in the fold with the rest of the overrides.
+  const machineType = (useWatch({ control, name: `operations.${index}.machineType` }) ??
+    NONE_MACHINE) as string;
+  const machineProfileKey = (useWatch({ control, name: `operations.${index}.machineProfileKey` }) ??
+    '') as string;
+  const threadCount = (useWatch({ control, name: `operations.${index}.threadCount` }) ??
+    0) as number;
+  const needleType = (useWatch({ control, name: `operations.${index}.needleType` }) ??
+    NONE_NEEDLE) as string;
+  const needleSizeNm = (useWatch({ control, name: `operations.${index}.needleSizeNm` }) ??
+    0) as number;
+  const threadTension = (useWatch({ control, name: `operations.${index}.threadTension` }) ??
+    NONE_TENSION) as string;
+  const threadTensionNote = (useWatch({ control, name: `operations.${index}.threadTensionNote` }) ??
+    '') as string;
+  const stitchWidthMm = (useWatch({ control, name: `operations.${index}.stitchWidthMm` }) ??
+    '') as string;
+  const pressEquipment = (useWatch({ control, name: `operations.${index}.pressEquipment` }) ??
+    NONE_PRESS_EQUIPMENT) as string;
+  const pressProfileKey = (useWatch({ control, name: `operations.${index}.pressProfileKey` }) ??
+    '') as string;
+  const pressTemperatureC = (useWatch({ control, name: `operations.${index}.pressTemperatureC` }) ??
+    0) as number;
+  const pressDwellSec = (useWatch({ control, name: `operations.${index}.pressDwellSec` }) ??
+    0) as number;
+  const pressPressureNCm2 = (useWatch({
+    control,
+    name: `operations.${index}.pressPressureNCm2`,
+  }) ?? '') as string;
+  // `undefined` is a VALUE here, not a missing read — see the tri-state control below.
+  const pressSteam = useWatch({ control, name: `operations.${index}.pressSteam` }) as
+    | boolean
+    | undefined;
+  const pressCloth = (useWatch({ control, name: `operations.${index}.pressCloth` }) ??
+    NONE_PRESS_CLOTH) as string;
+
+  const isMachineStep = isMachineType(opType);
+  const isPressStep = isPressType(opType);
+
+  // The sewing overrides, counted apart from the equipment ones: a ВТО step has no seam class and
+  // no stitch density, so on those steps this half of the fold is hidden — but ONLY while it is
+  // empty. A value that exists is shown wherever it is, because a hidden number still prints on the
+  // tech pack and still moves the section digest, and the operator is the one who decides it goes.
+  const sewingOverrideCount = [
     seamClass !== NONE_SEAM_CLASS,
     seamAllowanceMm.trim() !== '',
     stitchesPerCm.trim() !== '',
     topstitchMode !== NONE_TOPSTITCH,
     attachmentKind !== NONE_ATTACHMENT,
   ].filter(Boolean).length;
+  const equipmentOverrideCount = [
+    isMachineStep && !!machineProfileKey.trim(),
+    isMachineStep && threadCount > 0,
+    isMachineStep && needleType !== NONE_NEEDLE,
+    isMachineStep && needleSizeNm > 0,
+    isMachineStep && threadTension !== NONE_TENSION,
+    isMachineStep && stitchWidthMm.trim() !== '',
+    isPressStep && !!pressProfileKey.trim(),
+    isPressStep && pressTemperatureC > 0,
+    isPressStep && pressDwellSec > 0,
+    isPressStep && pressPressureNCm2.trim() !== '',
+    isPressStep && pressSteam !== undefined,
+    isPressStep && pressCloth !== NONE_PRESS_CLOTH,
+  ].filter(Boolean).length;
+  const overrideCount = sewingOverrideCount + equipmentOverrideCount;
+  const showSewingOverrides = !isPressStep || sewingOverrideCount > 0;
   const [overridesOpen, setOverridesOpen] = useState(overrideCount > 0);
+
+  // AND IT OPENS ITSELF ON AN ERROR. Nearly every field in the fold can now fail a check — a thread
+  // count out of band, a tension note without its scale, a density that would not fit the column —
+  // and a blocking error behind a closed disclosure is a save button that stops working with
+  // nothing on screen to fix: the error router focuses a control that is not rendered. The core
+  // grid's own fields are always visible, so they are excluded and the panel stays shut for them.
+  const { errors: formErrors } = useFormState({ control, name: `operations.${index}` });
+  const stepErrors = (
+    formErrors.operations as unknown as Array<Record<string, unknown> | undefined> | undefined
+  )?.[index];
+  const hasFoldedError =
+    !!stepErrors && Object.keys(stepErrors).some((field) => !CORE_STEP_FIELDS.has(field));
 
   // HIDING A CONTROL MUST ALSO CLEAR IT. Both fields below are rendered conditionally, and the save
   // rejects a value that its owner no longer admits — a width beside «edge», a size with no
@@ -637,14 +1712,97 @@ function OperationEditor({
     }
   }, [topstitchMode, index, getValues, setValue]);
 
+  // «NONE» counts as no attachment here exactly as UNKNOWN does, and for a sharper reason: a binder
+  // size printed beside «runs bare» measures a tool the step has just said it does not use. The
+  // server refuses that pair by name too.
   useEffect(() => {
-    if (
-      attachmentKind === NONE_ATTACHMENT &&
-      (getValues(`operations.${index}.attachmentSizeMm`) ?? '') !== ''
-    ) {
+    const bare =
+      attachmentKind === NONE_ATTACHMENT || attachmentKind === 'TECH_CARD_ATTACHMENT_KIND_NONE';
+    if (bare && (getValues(`operations.${index}.attachmentSizeMm`) ?? '') !== '') {
       setValue(`operations.${index}.attachmentSizeMm`, '', { shouldDirty: true });
     }
   }, [attachmentKind, index, getValues, setValue]);
+
+  // THE SAME RULE, ON THE WHOLE EQUIPMENT BLOCK — and here it is not a nicety, it is the difference
+  // between a card that saves and one that does not. The server refuses a machine setting on a ВТО
+  // step and a ВТО setting on a machine step BY NAME, refusing the whole card with it: switch a step
+  // from machine to press with a thread count in it and the save comes back demanding the operator
+  // clear a control that is no longer on screen.
+  //
+  // Both directions, every field, and only when the value is actually set — an unconditional write
+  // would dirty the form merely by opening a step, and «unsaved changes» on a card nobody edited is
+  // how people learn to click through that warning.
+  useEffect(() => {
+    const p = `operations.${index}` as const;
+    if (!isMachineStep) {
+      if ((getValues(`${p}.machineType`) ?? NONE_MACHINE) !== NONE_MACHINE)
+        setValue(`${p}.machineType`, NONE_MACHINE, { shouldDirty: true });
+      if ((getValues(`${p}.machineProfileKey`) ?? '') !== '')
+        setValue(`${p}.machineProfileKey`, '', { shouldDirty: true });
+      if (getValues(`${p}.threadCount`)) setValue(`${p}.threadCount`, 0, { shouldDirty: true });
+      if ((getValues(`${p}.needleType`) ?? NONE_NEEDLE) !== NONE_NEEDLE)
+        setValue(`${p}.needleType`, NONE_NEEDLE, { shouldDirty: true });
+      if (getValues(`${p}.needleSizeNm`)) setValue(`${p}.needleSizeNm`, 0, { shouldDirty: true });
+      if ((getValues(`${p}.threadTension`) ?? NONE_TENSION) !== NONE_TENSION)
+        setValue(`${p}.threadTension`, NONE_TENSION, { shouldDirty: true });
+      if ((getValues(`${p}.threadTensionNote`) ?? '') !== '')
+        setValue(`${p}.threadTensionNote`, '', { shouldDirty: true });
+      if ((getValues(`${p}.stitchWidthMm`) ?? '') !== '')
+        setValue(`${p}.stitchWidthMm`, '', { shouldDirty: true });
+    }
+    if (!isPressStep) {
+      if ((getValues(`${p}.pressEquipment`) ?? NONE_PRESS_EQUIPMENT) !== NONE_PRESS_EQUIPMENT)
+        setValue(`${p}.pressEquipment`, NONE_PRESS_EQUIPMENT, { shouldDirty: true });
+      if ((getValues(`${p}.pressProfileKey`) ?? '') !== '')
+        setValue(`${p}.pressProfileKey`, '', { shouldDirty: true });
+      if (getValues(`${p}.pressTemperatureC`))
+        setValue(`${p}.pressTemperatureC`, 0, { shouldDirty: true });
+      if (getValues(`${p}.pressDwellSec`)) setValue(`${p}.pressDwellSec`, 0, { shouldDirty: true });
+      if ((getValues(`${p}.pressPressureNCm2`) ?? '') !== '')
+        setValue(`${p}.pressPressureNCm2`, '', { shouldDirty: true });
+      if (getValues(`${p}.pressSteam`) !== undefined)
+        setValue(`${p}.pressSteam`, undefined, { shouldDirty: true });
+      if ((getValues(`${p}.pressCloth`) ?? NONE_PRESS_CLOTH) !== NONE_PRESS_CLOTH)
+        setValue(`${p}.pressCloth`, NONE_PRESS_CLOTH, { shouldDirty: true });
+    }
+  }, [isMachineStep, isPressStep, index, getValues, setValue]);
+
+  // --- the card's equipment park, and what this step inherits from it ---------------------------
+  const parkMachines = (useWatch({
+    control,
+    name: 'construction.equipmentDefaults.machines',
+  }) ?? []) as MachineProfileRow[];
+  const parkPresses = (useWatch({
+    control,
+    name: 'construction.equipmentDefaults.presses',
+  }) ?? []) as PressProfileRow[];
+
+  // A NAMED PROFILE OF THE WRONG TYPE IS REFUSED BY THE SERVER, so changing the machine has to drop
+  // a reference that no longer matches it — the pointer was to «this overlock», and the step is not
+  // an overlock step any more. This is the ONE thing a machine change touches: the overrides beside
+  // it are the technologist's own words about THIS step and are left exactly as they were, which is
+  // why they are not in this effect.
+  //
+  // A key that resolves to NOTHING is left alone: the server detaches it silently on save and the
+  // picker below shows it as «not found», so clearing it here would erase the only trace that the
+  // step used to point somewhere.
+  useEffect(() => {
+    const key = machineProfileKey.trim();
+    if (!key || !isMachineStep) return;
+    const profile = parkMachines.find((m) => (m.profileKey ?? '') === key);
+    if (profile && profile.machineType !== machineType) {
+      setValue(`operations.${index}.machineProfileKey`, '', { shouldDirty: true });
+    }
+  }, [machineType, machineProfileKey, parkMachines, isMachineStep, index, setValue]);
+
+  useEffect(() => {
+    const key = pressProfileKey.trim();
+    if (!key || !isPressStep) return;
+    const profile = parkPresses.find((p) => (p.profileKey ?? '') === key);
+    if (profile && profile.pressEquipment !== pressEquipment) {
+      setValue(`operations.${index}.pressProfileKey`, '', { shouldDirty: true });
+    }
+  }, [pressEquipment, pressProfileKey, parkPresses, isPressStep, index, setValue]);
 
   // WHAT THIS STEP WOULD INHERIT, and from where — shown as a placeholder, stored nowhere. The
   // card's own standard wins over the workshop's, exactly as the server resolves it.
@@ -653,13 +1811,68 @@ function OperationEditor({
     '') as string;
   const { data: workshop } = useWorkshopSettings();
   const shopAllowanceMm = decimalToInput(workshop?.settings?.defaultSeamAllowanceMm).trim();
+
+  // The profile this step resolves to, by the ladder in §3 (key → the single profile of its type →
+  // nothing). `machineProfile` is what every machine placeholder quotes, and the ONE thing that
+  // makes a blank field readable: «4 (оверлок у окна)» says the step will be sewn with four threads
+  // and where that four came from, where an empty box says only that nobody typed anything.
+  const machineProfile = isMachineStep
+    ? resolveMachineProfile(parkMachines, machineType, machineProfileKey)
+    : undefined;
+  const pressProfile = isPressStep
+    ? resolvePressProfile(parkPresses, pressEquipment, pressProfileKey, opType)
+    : undefined;
+  const machineSource = machineProfile ? machineProfileName(machineProfile) : '';
+  const pressSource = pressProfile ? pressProfileName(pressProfile) : '';
+  const fromMachine = (v: string | number | undefined) =>
+    machineProfile && v !== undefined && v !== '' && v !== 0
+      ? inheritedText(String(v), machineSource)
+      : '';
+  const fromPress = (v: string | number | undefined) =>
+    pressProfile && v !== undefined && v !== '' && v !== 0
+      ? inheritedText(String(v), pressSource)
+      : '';
+
+  // The density is the one setting with a rung on BOTH ladders: the machine's profile answers it
+  // first (it belongs to the machine this step runs on), the card default answers for everything
+  // with no machine of its own. Resolved once, as a number and a source, because it is shown twice —
+  // once as st/cm and once as the length in mm, and the two must agree about where they came from.
+  const inheritedDensity = machineProfile?.stitchesPerCm?.trim()
+    ? { value: machineProfile.stitchesPerCm.trim(), source: machineSource }
+    : cardStitchDensity.trim()
+      ? { value: cardStitchDensity.trim(), source: 'card' }
+      : { value: '', source: '' };
+  const inheritedDensityLengthMm = stitchLengthMm(inheritedDensity.value);
+
   const inherited = {
     seamAllowance: cardAllowanceMm.trim()
       ? `${cardAllowanceMm.trim()} (card)`
       : shopAllowanceMm
         ? `${shopAllowanceMm} (workshop)`
-        : 'not set',
-    stitchDensity: cardStitchDensity.trim() ? `${cardStitchDensity.trim()} (card)` : 'not set',
+        : NOT_SET,
+    stitchDensity: inheritedDensity.value
+      ? inheritedText(inheritedDensity.value, inheritedDensity.source)
+      : NOT_SET,
+    // The same inherited fact in the other unit. Computed, never stored — see StitchLengthMirror.
+    stitchLength: inheritedDensityLengthMm
+      ? inheritedText(inheritedDensityLengthMm, inheritedDensity.source)
+      : NOT_SET,
+    threadCount: fromMachine(machineProfile?.threadCount) || NOT_SET,
+    needleType: fromMachine(needleTypeLabel(machineProfile?.needleType)) || NOT_SET,
+    needleSizeNm: fromMachine(machineProfile?.needleSizeNm) || NOT_SET,
+    threadTension: fromMachine(threadTensionLabel(machineProfile?.threadTension)) || NOT_SET,
+    stitchWidthMm: fromMachine(machineProfile?.stitchWidthMm?.trim()) || NOT_SET,
+    attachment: fromMachine(attachmentKindLabel(machineProfile?.attachmentKind)) || NOT_SET,
+    pressTemperatureC: fromPress(pressProfile?.pressTemperatureC) || NOT_SET,
+    pressDwellSec: fromPress(pressProfile?.pressDwellSec) || NOT_SET,
+    pressPressureNCm2: fromPress(pressProfile?.pressPressureNCm2?.trim()) || NOT_SET,
+    // A tri-state read as a sentence: `false` is «press it dry», an answer, and printing it as
+    // «not set» would hide the one instruction the profile was written to give.
+    pressSteam:
+      pressProfile && pressProfile.pressSteam !== undefined
+        ? inheritedText(pressProfile.pressSteam ? 'with steam' : 'dry', pressSource)
+        : NOT_SET,
+    pressCloth: fromPress(pressClothLabel(pressProfile?.pressCloth)) || NOT_SET,
   };
 
   // The off-part materials this operation consumes. Multi, because one operation genuinely joins
@@ -693,27 +1906,41 @@ function OperationEditor({
 
   const selectedPieceKeys = (useWatch({
     control,
-    name: `operations.${index}.pieceLineKeys`,
+    name: `operations.${index}.inputKeys`,
   }) ?? []) as string[];
   const byKey = useMemo(() => new Map(pieces.map((p) => [p.lineKey, p])), [pieces]);
   const chosenPieces = selectedPieceKeys.filter((k) => byKey.has(k));
+  // Фронтир нужен редактору дважды: чтобы отличить вход-УЗЕЛ от оборванной ссылки на деталь и
+  // чтобы предложить замену съеденных ссылок при объявлении узла. Подписка здесь одна на всю
+  // форму, а не по строке рельса: редактор смонтирован в единственном экземпляре.
+  const assembly = useAssemblyView(pieces);
+  // Нарушения ИМЕННО ЭТОГО шага. Карточные (правило 4) сюда не попадают — они про сборку
+  // целиком и место им на релизном гейте, а не в строке шага.
+  const stepViolations = assembly.res.violations.filter((v) => v.step === index);
+  const chosenUnits = selectedPieceKeys.filter((k) => !byKey.has(k) && assembly.res.units.has(k));
   // The same composed heading the rail shows, so the open step and its row in the list are named
   // identically — they used to differ, because the rail fell back to the type while the editor
   // header printed only the type and the row printed `node`.
   const editorHeading =
     operationHeading({
       operationType: opType as Parameters<typeof operationHeading>[0]['operationType'],
+      machineType: machineType as common_TechCardMachineType,
       zone: zoneValue as Parameters<typeof operationHeading>[0]['zone'],
-      pieceNames: chosenPieces.map((k) => byKey.get(k)?.name ?? '').filter(Boolean),
+      pieceNames: selectedPieceKeys.map((k) => byKey.get(k)?.name ?? `▣ ${k}`),
       note: noteValue,
     }) || 'new step';
   // A key that no longer resolves (its piece was deleted on the PATTERNS tab, or an older card
   // invented one through the removed picker) is SURFACED, not silently dropped — the save would
   // unlink it and nobody would know which operation lost a part.
-  const danglingPieces = selectedPieceKeys.filter((k) => !byKey.has(k));
+  // Оборванная ссылка — это ключ, который НЕ деталь И НЕ узел. Без второй половины проверки
+  // каждый вход-узел отрисовался бы красным «piece deleted»: узла нет в списке деталей по
+  // определению, он не деталь.
+  const danglingPieces = selectedPieceKeys.filter(
+    (k) => !byKey.has(k) && !assembly.res.units.has(k),
+  );
   const removePieceKey = (lineKey: string) => {
     const next = selectedPieceKeys.filter((k) => k !== lineKey);
-    setValue(`operations.${index}.pieceLineKeys`, next, { shouldDirty: true });
+    setValue(`operations.${index}.inputKeys`, next, { shouldDirty: true });
   };
 
   // The chip row IS the material link. The legacy single `bomLineKey` went with the break — it
@@ -729,12 +1956,13 @@ function OperationEditor({
   // purpose — unlinkedBoms is a fresh array every render, so a useMemo over it would recompute
   // anyway while costing a dependency that lies about being stable.
   //
-  // Within that, ЧТО ЭТО ЗА ПОЗИЦИЯ (0278) does the actual suggesting: a BUTTON_ATTACH step offers
+  // Within that, ЧТО ЭТО ЗА ПОЗИЦИЯ (0278) does the actual suggesting: a button-attach step offers
   // buttons and snaps before the rest of the фурнитура, and the group holding them leads. This only
   // ever REORDERS — never filters — so a step that genuinely takes something unexpected is one
   // glance further down rather than unreachable, and a card whose lines carry no kind yet reads
-  // exactly as it did before.
-  const preferredKinds = new Set<string>(OPERATION_TYPE_PREFERRED_KINDS[opType] ?? []);
+  // exactly as it did before. Since 0306 the hunch comes off the MACHINE for every sewing step —
+  // the step type stopped naming one.
+  const preferredKinds = preferredBomKinds(opType, machineType);
   const isPreferred = (b: BomLine) => !!b.kind && preferredKinds.has(b.kind);
   const unlinkedBySection = (() => {
     const groups = new Map<string, BomLine[]>();
@@ -761,8 +1989,11 @@ function OperationEditor({
   // every render, so a useMemo keyed on it would recompute anyway while claiming a stability it
   // does not have.
   // «Пришить кнопки», у которых не привязана ни одна кнопка. Checked against the LINKED lines, so
-  // it clears the moment the operator picks one.
-  const expects = OPERATION_TYPE_EXPECTS[opType];
+  // it clears the moment the operator picks one. Both axes have an opinion: the step type answers
+  // for fusing, the machine for the button-attach automat.
+  const expects =
+    OPERATION_TYPE_EXPECTS[opType as common_TechCardOperationType] ??
+    (isMachineStep ? MACHINE_TYPE_EXPECTS[machineType as common_TechCardMachineType] : undefined);
   const expectsMaterial =
     expects && !linkedMaterials.some((b) => b.section === expects.section) ? expects : null;
 
@@ -826,14 +2057,83 @@ function OperationEditor({
     ];
   }, [pinOptions, calloutNumber]);
 
-  // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone.
-  //
-  // One wrote the operation type's machine and stitch density into the row whenever those were
-  // blank; the other copied the linked BOM line's name into `thread`. Between them they are why the
-  // printed tech pack had to SUBTRACT the thread from the material list to stop printing it twice,
-  // and why nobody could tell a density the technologist chose from one that simply appeared.
-  //
-  // What replaces them is a PLACEHOLDER: the inherited value is shown, never stored.
+  // WHICH PROFILE OF THE PARK THIS STEP POINTS AT. Narrowed to the machine the step runs on,
+  // because a profile of another type is a FieldViolation on save, not a preference — and the
+  // «inherit» option says what leaving it blank would actually do, which depends entirely on how
+  // many profiles of that machine the card holds: one is inherited by type, two are ambiguous and
+  // inherit nothing at all (§3). A dangling key keeps a visible option, like the sketch pin above:
+  // the save detaches it silently, so the picker is the only place that can still say so.
+  const machineProfileOptions = useMemo(() => {
+    const ofType = parkMachines.filter(
+      (m) => m.machineType === machineType && (m.profileKey ?? '').trim(),
+    );
+    const inheritLabel =
+      ofType.length === 1
+        ? `inherit: ${machineProfileName(ofType[0])}`
+        : ofType.length === 0
+          ? 'no profile for this machine'
+          : `— pick one of ${ofType.length} —`;
+    const opts = [
+      { value: PROFILE_INHERIT, label: inheritLabel },
+      ...ofType.map((m) => ({ value: m.profileKey ?? '', label: machineProfileName(m) })),
+    ];
+    const key = machineProfileKey.trim();
+    if (key && !opts.some((o) => o.value === key)) {
+      opts.push({ value: key, label: `#${key.slice(-6)} — profile not found (removed?)` });
+    }
+    return opts;
+  }, [parkMachines, machineType, machineProfileKey]);
+
+  // The ВТО twin, with one extra narrowing the machines have no equivalent of: a press profile
+  // declares WHICH PROCESS it is for, so a fusing profile is not offered on a разутюжка. It is not
+  // a courtesy — the process is half of what a press profile MEANS, and the ladder now refuses a
+  // mismatch at both rungs, the named one included (resolvePressProfile). What the picker still
+  // does not do is HIDE a mismatch that is already chosen: the reference survives the save (the
+  // server checks only the equipment on the key), so a profile whose process was changed on the
+  // defaults tab has to stay listed, or the step would hold a pointer the operator cannot see or
+  // remove — and the settings would simply be gone from the step's placeholders with nothing on
+  // screen saying why.
+  const pressProfileOptions = useMemo(() => {
+    const usable = parkPresses.filter(
+      (p) =>
+        p.pressEquipment === pressEquipment &&
+        (p.profileKey ?? '').trim() &&
+        (pressProfileFitsStep(p, opType) || p.profileKey === pressProfileKey),
+    );
+    // Counted over what would ACTUALLY be inherited (the strict predicate), so the option cannot
+    // say «pick one of 2» because of a mismatched profile that is only listed to stay removable.
+    const inheritable = usable.filter((p) => pressProfileFitsStep(p, opType));
+    const inheritLabel =
+      inheritable.length === 1
+        ? `inherit: ${pressProfileName(inheritable[0])}`
+        : inheritable.length === 0
+          ? 'no profile for this equipment'
+          : `— pick one of ${inheritable.length} —`;
+    const opts = [
+      { value: PROFILE_INHERIT, label: inheritLabel },
+      // THE MISMATCH IS LISTED AND SAID OUT LOUD. Listing it silently would be the worse half of
+      // both worlds: the step reads as pointing at a mode whose temperature is nowhere on screen,
+      // and the sheet prints «not set» beside a profile the picker shows as chosen. The label
+      // names the process it IS for, because that is what has to change for it to answer here —
+      // either the profile's process on the defaults tab, or this step's own pick.
+      ...usable.map((p) => ({
+        value: p.profileKey ?? '',
+        label: pressProfileFitsStep(p, opType)
+          ? pressProfileName(p)
+          : `${pressProfileName(p)} — ${pressProcessShort(p.operationType) || 'another process'} only, nothing inherited`,
+      })),
+    ];
+    const key = pressProfileKey.trim();
+    if (key && !opts.some((o) => o.value === key)) {
+      opts.push({ value: key, label: `#${key.slice(-6)} — profile not found (removed?)` });
+    }
+    return opts;
+  }, [parkPresses, pressEquipment, pressProfileKey, opType]);
+
+  // THE PRESET EFFECT AND THE THREAD AUTO-FILL BOTH LIVED HERE, and both are gone: nothing is
+  // pre-filled from the step type any more. What replaces them is the PLACEHOLDER — the inherited
+  // value is shown with its source and stored nowhere, which is the whole difference between «the
+  // technologist chose 4 threads» and «it defaulted to 4».
 
   return (
     <div
@@ -876,16 +2176,40 @@ function OperationEditor({
         </div>
       </div>
 
-      {/* THE CORE, and it is all of it: what the step does, where, and how long it takes. Six
-          controls where there were eighteen. The pieces and materials below are the other half of
-          «with what»; everything else is an override that stays folded away until it differs. */}
+      {/* THE CORE, and it is all of it: what the step does, ON WHAT, where, and how long it takes.
+          The pieces and materials below are the other half of «with what»; everything else is an
+          override that stays folded away until it differs.
+
+          THE SECOND CONTROL IS THE SECOND AXIS (0306). «Machine» is not an instruction on its own —
+          it says a machine is involved and nothing about which of the twenty-five — so the machine
+          picker sits beside the type and is required by it, exactly like the zone. Press, press open
+          and fusing ask the same question about the equipment: an iron, a fusing press and a steamer
+          are three different instructions to the floor. Neither is an override, and neither belongs
+          in the fold: a required field behind a closed accordion is a save that fails at a control
+          nobody can see. */}
       <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
         <SelectField
           name={`operations.${index}.operationType`}
           label='operation *'
-          items={operationTypeOptions}
+          items={operationTypeOptionsFor(opType)}
           className={selectNoGrow}
         />
+        {isMachineStep && (
+          <SelectField
+            name={`operations.${index}.machineType`}
+            label='machine *'
+            items={machineTypeOptions}
+            className={selectNoGrow}
+          />
+        )}
+        {isPressStep && (
+          <SelectField
+            name={`operations.${index}.pressEquipment`}
+            label='equipment *'
+            items={pressEquipmentOptions}
+            className={selectNoGrow}
+          />
+        )}
         <SelectField
           name={`operations.${index}.zone`}
           label='zone *'
@@ -955,15 +2279,77 @@ function OperationEditor({
             {`#${k.slice(-6)} — piece deleted`}
           </Chip>
         ))}
+        {/* Вход-УЗЕЛ. Отдельным видом чипа, а не в общей куче: узел — это уже сшитая подсборка, и
+            путать его с деталью значило бы скрыть от автора, что шаг берёт со стола. */}
+        {chosenUnits.map((k) => (
+          <Chip
+            key={`u:${k}`}
+            title={`узел ${k}: ${assembly.res.units.get(k)?.leaves.length ?? 0} деталей внутри`}
+            onRemove={() => removePieceKey(k)}
+          >
+            ▣ {k}
+          </Chip>
+        ))}
         <Chip dashed onClick={onFlashPieces} title='pick a piece from the tray above the list'>
           ＋ piece
         </Chip>
       </ChipRow>
-      {chosenPieces.length === 0 && danglingPieces.length === 0 && (
+      {chosenPieces.length === 0 && danglingPieces.length === 0 && chosenUnits.length === 0 && (
         <Text size='micro' variant='label' className='mt-1'>
           not linked to any piece — click one in the tray above, or drag it here
         </Text>
       )}
+
+      {/* НАРУШЕНИЯ ЭТОГО ШАГА — ЗДЕСЬ, А НЕ ТОЛЬКО НА СОХРАНЕНИИ.
+          Клиент считает фронтир на каждое изменение, но до сих пор молчал о результате: гарды
+          стояли только на путях ДОБАВЛЕНИЯ (лоток, drop, объявление узла), а пути, ломающие уже
+          собранный граф, свободны — перестановка шагов, удаление шага-производителя, снятие
+          чипа входа, удаление детали на другой вкладке, замена деталей модалкой DXF.
+          Первичная разметка карточки обычно И ЕСТЬ перестановка, так что это не экзотика.
+          Сервер такую запись отвергает по пути operations[i].input_keys[j], а у этого пути нет
+          ни FormItem, ни FormMessage — текст не рендерился нигде, и автор видел «!» в рельсе с
+          тултипом про «незаполненное обязательное поле», то есть про другое.
+          «Пикер предлагает ровно то, что примет запись» было выполнено наполовину: предлагал
+          ровно, но молча позволял разрушить уже принятое. */}
+      {stepViolations.length > 0 && (
+        <CalloutBox tone='error'>
+          <div className='flex flex-col gap-0.5'>
+            {stepViolations.map((v, i) => (
+              <Text key={`${v.rule}:${v.detail}:${i}`} size='micro'>
+                {v.message}
+              </Text>
+            ))}
+          </div>
+        </CalloutBox>
+      )}
+
+      <ProducesBlock
+        index={index}
+        inputKeys={selectedPieceKeys}
+        pieces={pieces}
+        assembly={assembly}
+      />
+
+      {/* ФОТО УЗЛА С УКАЗАНИЯМИ. Стоит рядом с материалами, а не в аккордеоне отклонений:
+          «что тут делать» — вопрос того же порядка, что «из чего», и прятать ответ за разворот
+          значило бы прятать половину инструкции. */}
+      <OperationMediaStrip
+        name={`operations.${index}.media`}
+        urlById={mediaUrls ?? EMPTY_MEDIA_URLS}
+        frozen={frozen}
+        // ДЕТАЛЬ НА УКАЗАНИИ — тем же пикером и теми же силуэтами, что и состав шага рядом.
+        // Второй способ выбрать деталь на одном экране означал бы, что одна и та же деталь
+        // называется в двух местах по-разному.
+        renderPiecePicker={({ selected, onPick }) => (
+          <PieceAddChip
+            pieces={pieces}
+            selected={selected}
+            onPick={onPick}
+            shapeOf={(k) => pieceShapes?.get(pieceRefKey(k)) ?? null}
+          />
+        )}
+        pieceLabel={(k) => pieces.find((p) => p.lineKey === k)?.name}
+      />
 
       <GroupLabel>materials this step consumes</GroupLabel>
       {linkableBoms.length === 0 ? (
@@ -1053,7 +2439,7 @@ function OperationEditor({
           exists in the BOM, and blocking the save would make the check the operator's enemy. */}
       {expectsMaterial && (
         <Text size='micro' variant='label' className='mt-1'>
-          a step of this type usually consumes {expectsMaterial.what} — none is linked
+          такой шаг обычно потребляет {expectsMaterial.what} — ни одной строки не привязано
         </Text>
       )}
 
@@ -1063,8 +2449,9 @@ function OperationEditor({
           between «the technologist chose 4 st/cm» and «it defaulted to 4», and the old preset
           effect destroyed it on every row it touched. */}
       <Accordion
-        open={overridesOpen}
+        open={overridesOpen || hasFoldedError}
         onOpenChange={setOverridesOpen}
+        tone={hasFoldedError ? 'error' : 'default'}
         title={
           <Text size='control' variant='uppercase' tracking='label' component='span'>
             differs from standard
@@ -1080,64 +2467,291 @@ function OperationEditor({
           )
         }
       >
-        <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
-          <SelectField
-            name={`operations.${index}.seamClass`}
-            label='seam class'
-            items={seamClassOptions}
-            className={selectNoGrow}
-          />
-          <DecimalField
-            name={`operations.${index}.seamAllowanceMm`}
-            label='seam allowance, mm'
-            maxDecimals={1}
-            placeholder={inherited.seamAllowance}
-          />
-          <DecimalField
-            name={`operations.${index}.stitchesPerCm`}
-            label='stitches / cm'
-            placeholder={inherited.stitchDensity}
-          />
-          <SelectField
-            name={`operations.${index}.topstitchMode`}
-            label='topstitch'
-            items={topstitchModeOptions}
-            className={selectNoGrow}
-          />
-          {/* The width belongs to «at width» and nowhere else — beside «edge» it is a shadow value
-              the server refuses anyway, so the control simply is not there. */}
-          {topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (
-            <>
-              <DecimalField
-                name={`operations.${index}.topstitchWidthMm`}
-                label='topstitch width, mm'
-                maxDecimals={1}
-                placeholder='6'
-              />
-              <SelectField
-                name={`operations.${index}.topstitchRows`}
-                label='rows'
-                items={TOPSTITCH_ROW_OPTIONS}
-                valueAsNumber
+        {/* THE MACHINE'S OWN SETTINGS — every one of them an override of the profile named above.
+            Blank inherits, and the placeholder (or the picker's first option) says what would be
+            inherited and from which profile. Bed and automation are deliberately absent: those are
+            machine IDENTITY, and a step that needs another bed is a step on another machine. */}
+        {isMachineStep && (
+          <>
+            <GroupLabel
+              flush
+              action={
+                <div className='flex flex-wrap items-center justify-end gap-2'>
+                  <Text size='micro' variant='label' component='span'>
+                    {machineProfile ? `inherits ${machineSource}` : 'no profile — blanks stay unset'}
+                  </Text>
+                  {/* «These are not this step's exception, they are the card's normal.» The values
+                      MOVE into the park and leave the step blank — the button lives in
+                      equipment-park.tsx because it writes into the array CARD DEFAULTS owns, and a
+                      write that misses that owner's own methods leaves a mounted list stale. */}
+                  <AdoptMachineIntoProfile
+                    index={index}
+                    step={{
+                      machineType,
+                      machineProfileKey,
+                      threadCount,
+                      needleType,
+                      needleSizeNm,
+                      threadTension,
+                      threadTensionNote,
+                      stitchWidthMm,
+                      stitchesPerCm,
+                      attachmentKind,
+                      attachmentSizeMm,
+                    }}
+                  />
+                </div>
+              }
+            >
+              machine settings
+            </GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <EncodedSelectField<string>
+                name={`operations.${index}.machineProfileKey`}
+                label='machine profile'
+                items={machineProfileOptions}
+                encode={(v) => (v?.trim() ? v : PROFILE_INHERIT)}
+                decode={(o) => (o === PROFILE_INHERIT ? '' : o)}
                 className={selectNoGrow}
               />
-            </>
-          )}
-          <SelectField
-            name={`operations.${index}.attachmentKind`}
-            label='attachment'
-            items={attachmentOptions}
-            className={selectNoGrow}
-          />
-          {attachmentKind !== NONE_ATTACHMENT && (
-            <DecimalField
-              name={`operations.${index}.attachmentSizeMm`}
-              label='attachment size, mm'
-              maxDecimals={1}
-              placeholder='8'
-            />
-          )}
-        </div>
+              <InheritableNumberField
+                name={`operations.${index}.threadCount`}
+                label='threads'
+                value={threadCount}
+                placeholder={inherited.threadCount}
+              />
+              <SelectField
+                name={`operations.${index}.needleType`}
+                label='needle point'
+                items={withInheritLabel(needleTypeOptions, NONE_NEEDLE, inherited.needleType)}
+                className={selectNoGrow}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.needleSizeNm`}
+                label='needle size, Nm'
+                value={needleSizeNm}
+                placeholder={inherited.needleSizeNm}
+              />
+              <SelectField
+                name={`operations.${index}.threadTension`}
+                label='thread tension'
+                items={withInheritLabel(
+                  threadTensionOptions,
+                  NONE_TENSION,
+                  inherited.threadTension,
+                )}
+                className={selectNoGrow}
+              />
+              {/* The note QUALIFIES the scale («на 0.5 туже») — on its own it describes no setting
+                  the next machine can be set to, which is why the server refuses the pair and why
+                  the box only appears once the scale is answered.
+                  ...UNLESS A NOTE IS ALREADY THERE. Hiding it the moment the tension goes back to
+                  «inherit» would strand the text behind its own validation error: the schema refuses
+                  the pair, the message lands on a control that is no longer rendered, and the save
+                  stops working with nothing on screen to fix. Same rule as the sewing block below —
+                  a value that EXISTS is shown wherever it is, and the operator clears it. */}
+              {(threadTension !== NONE_TENSION || threadTensionNote.trim() !== '') && (
+                <InputField
+                  name={`operations.${index}.threadTensionNote`}
+                  label='tension note'
+                  maxLength={64}
+                  placeholder='на 0.5 туже, dial 4'
+                />
+              )}
+              {/* «stitch width» is the zigzag amplitude / the overlock bite. NOT the topstitch
+                  width, which is a distance from an edge and lives three controls down — the two
+                  print side by side on the tech pack and must not read as one setting. */}
+              <DecimalField
+                name={`operations.${index}.stitchWidthMm`}
+                label='stitch width, mm'
+                maxDecimals={1}
+                placeholder={inherited.stitchWidthMm}
+              />
+            </div>
+          </>
+        )}
+
+        {/* THE ВТО MODE — the press twin of the block above. Same rule throughout: blank inherits
+            the profile, and the three-valued steam control keeps «not stated» apart from «press it
+            dry», which is an instruction somebody gave. */}
+        {isPressStep && (
+          <>
+            <GroupLabel
+              flush
+              action={
+                <div className='flex flex-wrap items-center justify-end gap-2'>
+                  <Text size='micro' variant='label' component='span'>
+                    {pressProfile ? `inherits ${pressSource}` : 'no profile — blanks stay unset'}
+                  </Text>
+                  <AdoptPressIntoProfile
+                    index={index}
+                    step={{
+                      operationType: opType,
+                      pressEquipment,
+                      pressProfileKey,
+                      pressTemperatureC,
+                      pressDwellSec,
+                      pressPressureNCm2,
+                      pressSteam,
+                      pressCloth,
+                    }}
+                  />
+                </div>
+              }
+            >
+              ВТО mode
+            </GroupLabel>
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <EncodedSelectField<string>
+                name={`operations.${index}.pressProfileKey`}
+                label='press profile'
+                items={pressProfileOptions}
+                encode={(v) => (v?.trim() ? v : PROFILE_INHERIT)}
+                decode={(o) => (o === PROFILE_INHERIT ? '' : o)}
+                className={selectNoGrow}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.pressTemperatureC`}
+                label='temperature, °C'
+                value={pressTemperatureC}
+                placeholder={inherited.pressTemperatureC}
+              />
+              <InheritableNumberField
+                name={`operations.${index}.pressDwellSec`}
+                label='dwell, sec'
+                value={pressDwellSec}
+                placeholder={inherited.pressDwellSec}
+              />
+              {/* The unit is IN THE NAME on both sides of the wire: pressure on a press is quoted in
+                  bar, in kg and in N/cm² depending on who is talking, and a bare «pressure» field
+                  would be filled in three different units by three people. */}
+              <DecimalField
+                name={`operations.${index}.pressPressureNCm2`}
+                label='pressure, N/cm²'
+                maxDecimals={1}
+                placeholder={inherited.pressPressureNCm2}
+              />
+              <EncodedSelectField<boolean | undefined>
+                name={`operations.${index}.pressSteam`}
+                label='steam'
+                items={[
+                  {
+                    value: 'inherit',
+                    label:
+                      inherited.pressSteam === NOT_SET
+                        ? '— inherit —'
+                        : `inherit: ${inherited.pressSteam}`,
+                  },
+                  { value: 'yes', label: 'with steam' },
+                  { value: 'no', label: 'no steam — press dry' },
+                ]}
+                encode={(v) => (v === undefined ? 'inherit' : v ? 'yes' : 'no')}
+                decode={(o) => (o === 'inherit' ? undefined : o === 'yes')}
+                className={selectNoGrow}
+              />
+              <SelectField
+                name={`operations.${index}.pressCloth`}
+                label='press cloth'
+                items={withInheritLabel(pressClothOptions, NONE_PRESS_CLOTH, inherited.pressCloth)}
+                className={selectNoGrow}
+              />
+            </div>
+          </>
+        )}
+
+        {/* THE SEAM AND THE STITCH. Hidden on a ВТО step — there is no seam class to press and no
+            density to iron — but only while the step actually holds none of them: a value that
+            EXISTS is shown wherever it is, because a hidden number still prints on the tech pack
+            and still moves the section digest, and clearing somebody's input on a type switch is
+            not this form's decision to make. */}
+        {showSewingOverrides && (
+          <>
+            {/* Not `flush`: this label follows a block, it does not open one. */}
+            {(isMachineStep || isPressStep) && (
+              <GroupLabel
+                action={
+                  isPressStep ? (
+                    <Text size='micro' variant='label' component='span'>
+                      set while this was a sewing step — clear what no longer applies
+                    </Text>
+                  ) : undefined
+                }
+              >
+                seam &amp; stitch
+              </GroupLabel>
+            )}
+            <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
+              <SelectField
+                name={`operations.${index}.seamClass`}
+                label='seam class'
+                items={seamClassOptions}
+                className={selectNoGrow}
+              />
+              <DecimalField
+                name={`operations.${index}.seamAllowanceMm`}
+                label='seam allowance, mm'
+                maxDecimals={1}
+                placeholder={inherited.seamAllowance}
+              />
+              <DecimalField
+                name={`operations.${index}.stitchesPerCm`}
+                label='stitches / cm'
+                // Hundredths — the column's scale. The mirror below already rounds to two when it
+                // converts a length back into a density.
+                maxDecimals={2}
+                placeholder={inherited.stitchDensity}
+              />
+              {/* The same setting in the other unit — see StitchLengthMirror. It is placed after the
+                  density, not instead of it, because the density is what is stored and what the
+                  card's own default is expressed in. */}
+              <StitchLengthMirror
+                index={index}
+                density={stitchesPerCm}
+                placeholder={inherited.stitchLength}
+              />
+              <SelectField
+                name={`operations.${index}.topstitchMode`}
+                label='topstitch'
+                items={topstitchModeOptions}
+                className={selectNoGrow}
+              />
+              {/* The width belongs to «at width» and nowhere else — beside «edge» it is a shadow
+                  value the server refuses anyway, so the control simply is not there. */}
+              {topstitchMode === 'TECH_CARD_TOPSTITCH_MODE_WIDTH' && (
+                <>
+                  <DecimalField
+                    name={`operations.${index}.topstitchWidthMm`}
+                    label='topstitch width, mm'
+                    maxDecimals={1}
+                    placeholder='6'
+                  />
+                  <SelectField
+                    name={`operations.${index}.topstitchRows`}
+                    label='rows'
+                    items={TOPSTITCH_ROW_OPTIONS}
+                    valueAsNumber
+                    className={selectNoGrow}
+                  />
+                </>
+              )}
+              <SelectField
+                name={`operations.${index}.attachmentKind`}
+                label='attachment'
+                items={withInheritLabel(attachmentOptions, NONE_ATTACHMENT, inherited.attachment)}
+                className={selectNoGrow}
+              />
+              {attachmentKind !== NONE_ATTACHMENT &&
+                attachmentKind !== 'TECH_CARD_ATTACHMENT_KIND_NONE' && (
+                  <DecimalField
+                    name={`operations.${index}.attachmentSizeMm`}
+                    label='attachment size, mm'
+                    maxDecimals={1}
+                    placeholder='8'
+                  />
+                )}
+            </div>
+          </>
+        )}
       </Accordion>
 
       {/* ONE free-text box, not two. `description` and `note` used to sit side by side with no rule
@@ -1149,7 +2763,14 @@ function OperationEditor({
   );
 }
 
-type ReplaceImpact = { operations: number; sam: number; pieceLinks: number };
+type ReplaceImpact = {
+  operations: number;
+  sam: number;
+  pieceLinks: number;
+  units: number;
+  photos: number;
+  equipment: number;
+};
 
 // #66: draft assembly operations from a plain-language description — «мы описываем все операции
 // словами (у нас есть знания о деталях/BOM), через OpenRouter генерируем структурированные
@@ -1307,6 +2928,9 @@ function GenerateOperationsPanel({
                         <span className='text-labelColor tabular-nums'>{(i + 1) * 10}.</span>{' '}
                         {operationHeading({
                           operationType: o.operationType,
+                          // The draft's own machine, so the preview reads «overlock · side seams»
+                          // rather than fourteen lines of «machine».
+                          machineType: o.machineType,
                           zone: o.zone,
                           pieceNames: [],
                           note: o.note,
@@ -1359,6 +2983,33 @@ function GenerateOperationsPanel({
               . Ссылки дефектов на номера операций тоже будут сброшены.
             </Text>
           </CalloutBox>
+          {(impact?.units ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и <b>{impact?.units}</b> узлов сборки: черновик их не несёт, поэтому разметка
+                исчезнет целиком. Сервер такую запись отклонит — снимать разметку нужно кнопкой
+                «снять разметку», а не заменой списка.
+              </Text>
+            </CalloutBox>
+          )}
+          {(impact?.photos ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и <b>{impact?.photos}</b> снимков шагов вместе со всеми указаниями на них: мерками,
+                подписями, участками. Сервер откажет щитом, и единственный выход из отказа —
+                согласиться стереть снимки насовсем.
+              </Text>
+            </CalloutBox>
+          )}
+          {(impact?.equipment ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и машинки с режимами ВТО у <b>{impact?.equipment}</b> шагов. Здесь щита нет: запись
+                пройдёт молча, и узнать о пропаже будет неоткуда — в цеху просто станут шить другой
+                иглой на другой машине.
+              </Text>
+            </CalloutBox>
+          )}
           <Text size='micro' variant='label'>
             вместо этого можно «добавить к списку» — черновик встанет после существующих операций.
           </Text>
@@ -1383,7 +3034,22 @@ export function OperationsField({
   pieceShapes = null,
   addRequest = null,
   onAdded,
+  storedHasUnits = false,
+  storedHasMedia = false,
+  frozen = false,
+  operationMediaUrls,
 }: {
+  /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
+  storedHasUnits?: boolean;
+  /** Несёт ли СОХРАНЁННАЯ карточка фотографии шагов — предикат тот же, что у серверного щита. */
+  storedHasMedia?: boolean;
+  /**
+   * Карточка выпущена. Внешний `<fieldset disabled>` глушит кнопки, но НЕ pointer-обработчики на
+   * div — а схема Ф7 стала жестовой. Поэтому гейт обязан быть явным, и он приезжает пропом.
+   */
+  frozen?: boolean;
+  /** Адреса операционных снимков с чтения карточки: форма возит только media_id. */
+  operationMediaUrls?: Map<number, string>;
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
@@ -1523,14 +3189,33 @@ export function OperationsField({
   // What «заменить весь список» would destroy, read at press time off form state — watching the
   // whole operations array here would re-render every row on every keystroke.
   const readReplaceImpact = (): ReplaceImpact => {
-    const ops = (getValues('operations') ?? []) as {
-      smv?: string;
-      pieceLineKeys?: string[];
-    }[];
+    const ops = (getValues('operations') ?? []) as OperationFormValue[];
     return {
       operations: ops.length,
       sam: ops.filter((o) => (o.smv ?? '').trim()).length,
-      pieceLinks: ops.filter((o) => (o.pieceLineKeys ?? []).length > 0).length,
+      pieceLinks: ops.filter((o) => (o.inputKeys ?? []).length > 0).length,
+      // СНИМКИ ШАГА С УКАЗАНИЯМИ. Черновик генератора их не несёт (`mapGeneratedOperationToForm`
+      // строит шаг с нуля), поэтому «заменить весь список» уносит каждую фотографию и каждую
+      // выноску на ней. Сервер потом откажет щитом медиа, но к этому моменту работа в форме уже
+      // потеряна, а единственный выход из отказа — согласиться стереть снимки НАВСЕГДА. Цена
+      // обязана читаться ДО нажатия.
+      photos: ops.reduce((n, o) => n + (o.media ?? []).length, 0),
+      // Машинные факты и режимы ВТО. У них щита с бекстопом нет вовсе, так что их пропажу вообще
+      // никто не окликнет: ни отказа, ни сообщения — просто в следующий раз шаг шьётся на другой
+      // машине другой иглой.
+      equipment: ops.filter(
+        (o) =>
+          (o.machineType && o.machineType !== NONE_MACHINE) ||
+          (o.machineProfileKey ?? '').trim() ||
+          (o.pressEquipment && o.pressEquipment !== NONE_PRESS_EQUIPMENT) ||
+          (o.pressProfileKey ?? '').trim(),
+      ).length,
+      // РАЗМЕТКА УЗЛОВ — самый дорогой ручной ввод на карточке, и черновик сносит её целиком
+      // вместе со списком. Сервер откажет бекстопом («запись не несёт узлов против карточки,
+      // которая их несёт»), но узнать об этом на сохранении, уже потеряв работу в форме, —
+      // не то же самое, что прочитать цену до нажатия.
+      units: ops.filter((o) => ((o as { outputUnitKey?: string }).outputUnitKey ?? '').trim())
+        .length,
     };
   };
 
@@ -1543,6 +3228,14 @@ export function OperationsField({
   // produced dangling codes in the first place, so that path is gone: «+ new piece» walks to the
   // PATTERNS tab, where a piece also gets its cut data instead of just a name.
   const pieces = useFormPieces();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+
+  // Чем именно заканчивается «+ new piece», решает наличие чертежа: пока его нет, деталь заводят
+  // руками на вкладке деталей; как только к карточке привязан первый DXF, единственным автором
+  // деталей становится модалка «↔ детали кроя», а ручная кнопка исчезает — вести к её якорю
+  // значило бы отправить оператора в пустоту.
+  const patterns = useWatch({ control, name: 'patterns' });
+  const hasDxf = cardHasDxf(patterns);
 
   // ПЛИТКАМИ ИЛИ ЧИПАМИ — решается ОДИН раз на весь блок, по наличию хоть одного контура.
   //
@@ -1582,6 +3275,55 @@ export function OperationsField({
     return set;
   }, [opErrors]);
   const firstErrorIndex = errorIndices.size ? Math.min(...errorIndices) : -1;
+  // Шаги, ломающие сборку. Считается ЗДЕСЬ, потому что рельс живёт в корне и другого места нет;
+  // цена — один свип на изменение массива операций, а не на каждое нажатие клавиши: useWatch с
+  // exact-именем не срабатывает на правку note или SMV внутри шага.
+  // ДЕФОЛТ РЕЖИМА ВЫВОДИТСЯ, А НЕ КОНСТАНТА. На неразмеченной карточке — а сегодня это каждая —
+  // досье вырождается в один заголовок «вне узлов» над всем списком, то есть в шум. Поэтому
+  // группировка включается ровно тогда, когда есть что группировать, и переключатель появляется
+  // тогда же.
+  const smvOf = useCallback(
+    (i: number) => (getValues(`operations.${i}.smv`) ?? '') as string,
+    [getValues],
+  );
+  const grouping = useRailGrouping(pieces, smvOf);
+  const brokenSteps = grouping.broken;
+  // ДЕФОЛТ ВЫВОДИТСЯ, А НЕ КОНСТАНТА. План объявлял схему режимом по умолчанию — и на любой
+  // сегодняшней карточке это дало бы пустое полотно на первом же открытии, то есть экран,
+  // который читается как «сломалось». Схема становится дефолтом ровно там, где есть что
+  // рисовать; пользовательский выбор живёт в сессии и уступает, когда узлов нет.
+  //
+  // Ф7: выбор пережил перезагрузку — он лёг в предпочтения карточки рядом с ручными позициями.
+  // Вывод остался фолбэком, когда предпочтения нет; замечание §10.3 («сохранённая схема на
+  // карточке без узлов = пустое полотно») сняла сама Ф7 — полотно без узлов теперь показывает
+  // детали.
+  const schematicNodeKeys = useCallback(() => {
+    const live = new Set<string>(['']); // '' — хвостовой бокс, он тоже нода
+    for (const p of pieces) live.add(p.lineKey);
+    for (const k of grouping.res.units.keys()) live.add(k);
+    return live;
+  }, [pieces, grouping.res]);
+  const prefs = useSchematicPrefs(techCardId, schematicNodeKeys);
+  const mode = prefs.mode;
+  const setMode = prefs.setMode;
+  // Незавершённый жест создания: что уже назначено входами и не предлагается ли поглощение.
+  // Живёт здесь, а не в схеме, потому что пишет в форму тоже отсюда.
+  const [pendingCreate, setPendingCreate] = useState<CreatePrefill | null>(null);
+  const editorRef = useRef<HTMLDivElement>(null);
+  // Карточку выпустили, пока диалог открыт — диалог обязан закрыться сам: он живёт порталом, и
+  // никакая заморозка разметки его не гасит.
+  useEffect(() => {
+    if (frozen) setPendingCreate(null);
+  }, [frozen]);
+  // ЯВНЫЙ ВЫБОР ПОЛЬЗОВАТЕЛЯ СИЛЬНЕЕ ВЫВОДА — иначе получается замкнутый круг, в который я и
+  // попал: схема была доступна только на размеченной карточке, а разметить первый узел можно было
+  // только в списке. Схема, на которой сборку собирают с нуля, обязана быть достижима с нуля.
+  //
+  // Вывод остаётся дефолтом: неразмеченная карточка открывается списком (пустое полотно на первом
+  // открытии читается как «сломалось»), размеченная — схемой. Но переключиться можно всегда.
+  const effectiveMode = mode ?? (grouping.marked ? 'schematic' : 'list');
+  const grouped = grouping.marked && effectiveMode === 'list';
+  // Заголовок рельса называет режим, чтобы «схемой» не читалось как «что-то ещё».
   const prevSubmit = useRef(submitCount);
   const prevErrorCount = useRef(errorIndices.size);
   useEffect(() => {
@@ -1623,11 +3365,47 @@ export function OperationsField({
     [],
   );
 
-  const addPieceToOperation = (index: number, lineKey: string) => {
-    if (index < 0 || !pieces.some((p) => p.lineKey === lineKey)) return;
-    const cur = (getValues(`operations.${index}.pieceLineKeys`) ?? []) as string[];
-    if (cur.includes(lineKey)) return;
-    setValue(`operations.${index}.pieceLineKeys`, [...cur, lineKey], { shouldDirty: true });
+  // Вход шага — деталь ИЛИ узел, поэтому проверка «существует ли такая деталь» снята: ключ узла
+  // деталью не является по определению.
+  //
+  // ФРОНТИР СВЕРЯЕТСЯ ПО ЦЕЛЕВОМУ ШАГУ, а не по открытому. Лоток фильтрован фронтиром выбранного
+  // шага, но перетащить чип можно на ЛЮБОЙ шаг рельса — и деталь, свободная на шаге 8, на шаге 3
+  // может быть ещё не съедена, а на шаге 12 уже съедена. Без этой сверки drop молча создавал бы
+  // последовательность, которую сервер отвергнет целиком, и автор узнал бы об этом на сохранении.
+  //
+  // Считается через getValues НА СОБЫТИИ, а не подпиской: подписка на весь массив operations в
+  // корне поля перерисовывала бы всё на каждое нажатие клавиши.
+  const addInputToOperation = (index: number, key: string) => {
+    if (index < 0 || !key) return;
+    const cur = (getValues(`operations.${index}.inputKeys`) ?? []) as string[];
+    if (cur.includes(key)) return;
+
+    const formOps = (getValues('operations') ?? []) as Array<{
+      inputKeys?: string[];
+      outputUnitKey?: string;
+      outputUnitName?: string;
+    }>;
+    const sweepPieces = pieces.map((p) => ({ lineKey: p.lineKey, name: p.name }));
+    const pieceKeys = new Set(sweepPieces.map((p) => p.lineKey));
+    const steps = formOps.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, (o?.inputKeys ?? []).filter(Boolean)),
+      outputUnitKey: (o?.outputUnitKey ?? '').trim(),
+      outputUnitName: (o?.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(sweepPieces, steps);
+    const available = res.frontierBefore[index] ?? res.frontier;
+    if (!available.includes(key)) {
+      const eater = res.consumedBy.get(key);
+      const into = eater !== undefined ? steps[eater]?.outputUnitKey : '';
+      showMessage(
+        into
+          ? `«${key}» на этом шаге уже внутри узла ${into} — взять её повторно нельзя`
+          : `«${key}» на этом шаге ещё не лежит на столе`,
+        'error',
+      );
+      return;
+    }
+    setValue(`operations.${index}.inputKeys`, [...cur, key], { shouldDirty: true });
   };
 
   // Cut pieces are a section of the PATTERNS tab (they used to have their own, then sat on
@@ -1637,7 +3415,18 @@ export function OperationsField({
     next.set('tab', 'patterns');
     setParams(next, { replace: true });
     // that tab is a sibling `hidden` panel, so it is already mounted — one frame is enough
-    window.setTimeout(() => revealField('pieces.add'), 120);
+    // Обе цели живут на ОДНОЙ вкладке (детали кроя — секция PATTERNS), различается только якорь.
+    // На карточке с чертежом кнопка сопоставления рендерится ТОЛЬКО внутри выбранной плитки
+    // материала и только когда у той есть файлы: оператор, оставивший выбранным пустой материал,
+    // «без материала» или PDF, пришёл бы на вкладку, где подсвечивать нечего. Поэтому переход
+    // отступает на полку материалов — она стоит всегда и объясняет следующий шаг.
+    window.setTimeout(() => {
+      if (!hasDxf) {
+        revealField('pieces.add');
+        return;
+      }
+      if (!revealField('patterns.match')) revealField('patterns.shelf');
+    }, 120);
   };
 
   const sensors = useSensors(
@@ -1658,13 +3447,86 @@ export function OperationsField({
     append({ ...emptyOperation });
   };
 
+  // --- авторинг, общий для СПИСКА и СХЕМЫ -------------------------------------------------------
+  //
+  // Мутаторы живут ЗДЕСЬ и в одном экземпляре, а схема их только вызывает. Два вида, редактирующих
+  // одни данные, опасны не тем, что их два, — источник истины и так один, это форма, — а тем, что
+  // каждый легко обзаводится СВОЕЙ логикой мутаций, и через полгода «сшить» в списке и «сшить» на
+  // схеме начинают расходиться в мелочах. Поэтому общий обработчик, а не два похожих.
+
+  /** Сшить выбранное в новый узел: добавляет шаг с этими входами и предложенным кодом. */
+  /**
+   * ЕДИНСТВЕННОЕ МЕСТО, ГДЕ СХЕМА ПИШЕТ В ФОРМУ. Диалог только собирает аргументы; вся запись —
+   * здесь, в одном экземпляре, ровно как договаривались в T-23 про мутаторы.
+   *
+   * До Ф7 эту роль делили `joinIntoUnit` и `addStepIntoUnit`, и оба создавали шаг из
+   * `emptyOperation` — с типом и зоной в UNKNOWN, то есть заведомо невалидный. Технолог получал
+   * строку с «!» и долг вместо результата. Теперь минимум валидности собран ДО записи.
+   */
+  const appendStep = (r: CreateResult) => {
+    // ЗАМОРОЗКА ПРОВЕРЯЕТСЯ ЗДЕСЬ, а не только в разметке. Диалог рисуется порталом в body —
+    // внешний `<fieldset disabled>` карточки до него не достаёт вовсе. Гонка настоящая: нажали
+    // Release, пока запрос летит открыли создание, ответ перевёл карточку в RELEASED — и
+    // «создать» дописал бы шаг в выпущенную карточку, взведя isDirty.
+    if (frozen) return;
+    const at = fields.length;
+    append({
+      ...emptyOperation,
+      inputKeys: r.inputKeys,
+      outputUnitKey: r.outputUnitKey,
+      outputUnitName: r.outputUnitName,
+      operationType: r.operationType as typeof emptyOperation.operationType,
+      zone: r.zone as typeof emptyOperation.zone,
+      ...(r.machineType ? { machineType: r.machineType as typeof emptyOperation.machineType } : {}),
+      ...(r.pressEquipment
+        ? { pressEquipment: r.pressEquipment as typeof emptyOperation.pressEquipment }
+        : {}),
+    });
+    // Разметка появилась — намерение «снять разметку» отменено. Сегодняшний `joinIntoUnit` этого
+    // НЕ делал (в отличие от `declare()`), и сценарий «снял → передумал → сшил заново» уходил в
+    // отказ «снял и одновременно прислал узлы». Починка попутная и намеренная.
+    if (r.outputUnitKey) setValue('assemblyCleared', false, { shouldDirty: true });
+    setSelected(at);
+    setPendingCreate(null);
+    // Шаг создан — редактор обязан оказаться перед глазами, иначе жест кончается там же, где
+    // начался, и результат приходится искать.
+    requestAnimationFrame(() => editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }));
+  };
+
+  /** Растворить узел: шаг перестаёт собирать, его входы возвращаются на стол следующим. */
+  const dissolveUnit = (stepIndex: number) => {
+    if (frozen) return; // тот же гейт: растворение — мутация, и разметке она не подотчётна
+    setValue(`operations.${stepIndex}.outputUnitKey`, '', { shouldDirty: true });
+    setValue(`operations.${stepIndex}.outputUnitName`, '', { shouldDirty: true });
+  };
+
   return (
     <div className='space-y-2.5'>
       <Text size='micro' variant='label'>
         Шаги сборки по порядку — слева вся последовательность, справа открытый шаг целиком. Номера
-        (10/20/30) проставляются по позиции: перетащите <b>⠿</b>, чтобы поменять порядок. Выберите
-        тип операции — машина и плотность подставятся автоматически.
+        (10/20/30) проставляются по позиции: перетащите <b>⠿</b>, чтобы поменять порядок. Тип шага
+        говорит, ЧТО делают, машинка или оборудование ВТО — НА ЧЁМ; пустое поле в настройках значит
+        «наследую», и подсказка в нём называет и значение, и источник.
       </Text>
+
+      <StepNumberDrift />
+
+      {/* ПУТЬ ОТСТУПЛЕНИЯ ЖИВЁТ СНАРУЖИ ЛОТКА. Лоток прячется при нуле операций, а именно там
+          отказ щита и настигает: у сохранённой карточки снимки есть, в форме шагов не осталось,
+          сервер требует объявить намерение — и кнопка, которой это делают, оказалась бы за
+          `hidden`. Отказ, из которого нет выхода, хуже отказа. */}
+      {/* Без внешнего условия: компонент сам решает, показываться ли, и знает про ОБА источника —
+          снимки в форме и снимки сохранённой карточки. Внешнее условие про второй источник
+          прятало кнопку там, где снимки добавили, но ещё не сохранили. */}
+      <ChipRow>
+        <ClearOperationMediaButton storedHasMedia={storedHasMedia} frozen={frozen} />
+        {/* ТА ЖЕ ПРИЧИНА, ЧТО У СОСЕДА СЛЕВА, и её пришлось усвоить дважды: кнопка снятия
+            разметки узлов жила ВНУТРИ лотка деталей, а лоток прячется при нуле операций. Сценарий
+            отказа ровно такой: у сохранённой карточки узлы есть, технолог удалил все шаги, чтобы
+            пересобрать последовательность, сервер требует объявить намерение — и кнопка, которой
+            это делают, оказалась за `hidden`. Починку применили к одному щиту из двух. */}
+        <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} frozen={frozen} />
+      </ChipRow>
 
       {/* piece tray — click a chip to add it to the open step, or drag it onto any step. Hidden
           while the sequence is empty: with nothing to attach a piece TO, every chip in it is a
@@ -1679,19 +3541,27 @@ export function OperationsField({
               деталей ещё нет
             </Text>
           ) : (
-            pieces.map((p) => (
-              <TrayChip
-                key={p.lineKey}
-                piece={p}
-                shape={pieceShapes?.get(pieceRefKey(p.lineKey)) ?? null}
-                tiled={tiled}
-                highlighted={highlightPieces}
-                onAdd={() => addPieceToOperation(selectedIndex, p.lineKey)}
-              />
-            ))
+            <AssemblyTray
+              pieces={pieces}
+              pieceShapes={pieceShapes}
+              tiled={tiled}
+              highlighted={highlightPieces}
+              stepIndex={selectedIndex}
+              onAdd={(key) => addInputToOperation(selectedIndex, key)}
+            />
           )}
-          <Chip dashed onClick={goToPiecesTab} title='создать деталь на вкладке PATTERNS'>
-            + new piece
+          {/* Чип называет ДЕЙСТВИЕ, которое оператор увидит по приезде, а не абстрактное
+              «добавить»: с чертежом это модалка сопоставления, без чертежа — ручная кнопка. */}
+          <Chip
+            dashed
+            onClick={goToPiecesTab}
+            title={
+              hasDxf
+                ? 'детали заводятся из DXF — «↔ детали кроя» на вкладке patterns'
+                : 'создать деталь на вкладке PATTERNS'
+            }
+          >
+            {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
           <ToolbarSpacer />
           <Text
@@ -1707,29 +3577,107 @@ export function OperationsField({
         </Toolbar>
       </div>
 
-      {fields.length === 0 ? (
+      {/* Заглушка пустой последовательности уступает схеме, как только схему попросили. Карточка с
+          деталями и нулём шагов — ПЕРВОЕ состояние любой тех-карты, и именно с него сборку и
+          начинают; закрывать его заглушкой значило бы не пустить на схему ровно там, где она
+          нужнее всего. */}
+      {fields.length === 0 && effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
             последовательность сборки пока пуста. Добавьте первый шаг — или опишите конструкцию
             словами и сгенерируйте черновик ниже.
           </Text>
-          <Button type='button' variant='main' size='sm' onClick={addOperation}>
-            + операция
-          </Button>
+          <div className='flex items-center gap-2'>
+            <Button type='button' variant='main' size='sm' onClick={addOperation}>
+              + операция
+            </Button>
+            {pieces.length > 0 && (
+              <Chip
+                nonForm
+                dashed
+                onClick={() => setMode('schematic')}
+                title='разложить детали и собрать узлы жестами'
+              >
+                собрать на схеме
+              </Chip>
+            )}
+          </div>
         </div>
       ) : (
-        <div className='flex flex-col gap-3 lg:flex-row lg:items-start'>
-          <div className='w-full lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0'>
+        <div
+          className={cn(
+            'flex flex-col gap-3',
+            effectiveMode === 'list' && 'lg:flex-row lg:items-start',
+          )}
+        >
+          <div
+            className={cn(
+              'w-full',
+              effectiveMode === 'list' && 'lg:sticky lg:top-36 lg:w-[320px] lg:shrink-0',
+            )}
+          >
             <GroupLabel
               flush
               action={
-                <Text size='micro' variant='label' component='span'>
-                  ⠿ перетащить
-                </Text>
+                <div className='flex items-center gap-2'>
+                  {/* nonForm: переключатель ничего не меняет в данных, но обязан работать и на
+                      выпущенной карточке — иначе разрешённое Р9 ручное раскладывание недостижимо
+                      с карточки, сохранённой в режиме списка. Под `<fieldset disabled>` настоящая
+                      кнопка мертва, и своими пропами этого не исправить. */}
+                  <Chip
+                    nonForm
+                    dashed
+                    onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
+                    title='схема сборки или список шагов — оба редактируют одни данные'
+                  >
+                    {effectiveMode === 'schematic' ? 'списком' : 'схемой'}
+                  </Chip>
+                  <Text size='micro' variant='label' component='span'>
+                    ⠿ перетащить
+                  </Text>
+                </div>
               }
             >
               последовательность
             </GroupLabel>
+            {effectiveMode === 'schematic' ? (
+              <AssemblySchematic
+                blocks={grouping.schematicBlocks}
+                steps={grouping.schematicSteps}
+                res={grouping.res}
+                labelOf={(i) =>
+                  ((getValues(`operations.${i}.note`) as string) || '').trim() ||
+                  operationHeading({
+                    operationType: getValues(`operations.${i}.operationType`) as Parameters<
+                      typeof operationHeading
+                    >[0]['operationType'],
+                    machineType: getValues(`operations.${i}.machineType`) as common_TechCardMachineType,
+                    zone: getValues(`operations.${i}.zone`) as Parameters<
+                      typeof operationHeading
+                    >[0]['zone'],
+                    pieceNames: [],
+                  }) ||
+                  'шаг'
+                }
+                pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+                onPickStep={(i) => {
+                  setSelected(i);
+                  // Схема отправила к шагу — редактор обязан оказаться перед глазами, иначе
+                  // «открыть шаг» открывает его за пределами экрана.
+                  requestAnimationFrame(() =>
+                    editorRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }),
+                  );
+                }}
+                onCreate={setPendingCreate}
+                pieceShapes={pieceShapes}
+                smvOfBlock={grouping.smvOfBlock}
+                onDissolve={dissolveUnit}
+                positions={prefs.pos}
+                onMove={prefs.move}
+                onResetPositions={prefs.reset}
+                frozen={frozen}
+              />
+            ) : (
             <div className='lg:max-h-[calc(100vh-16rem)] lg:overflow-y-auto'>
               <DndContext
                 sensors={sensors}
@@ -1743,24 +3691,34 @@ export function OperationsField({
                 >
                   <div className='flex flex-col gap-0.5'>
                     {fields.map((f, index) => (
-                      <RailStep
-                        key={f.id}
-                        uid={f.id}
+                      <Fragment key={f.id}>
+                        {grouped && grouping.headerBefore.has(index) && (
+                          <UnitBlockHeader
+                            block={grouping.headerBefore.get(index)!.block}
+                            smv={grouping.headerBefore.get(index)!.smv}
+                            terminal={grouping.headerBefore.get(index)!.terminal}
+                          />
+                        )}
+                        <RailStep
+                          uid={f.id}
                         index={index}
                         selected={index === selectedIndex}
                         onSelect={() => setSelected(index)}
                         hasError={errorIndices.has(index)}
+                        assemblyBroken={brokenSteps.has(index)}
                         activePin={activePin}
                         activeBom={activeBom}
                         pieceShapes={pieceShapes}
                         onHoverPin={(n) => onActivePinChange?.(n)}
-                        onDropPiece={addPieceToOperation}
-                      />
+                        onDropPiece={addInputToOperation}
+                        />
+                      </Fragment>
                     ))}
                   </div>
                 </SortableContext>
               </DndContext>
             </div>
+            )}
             <button
               type='button'
               onClick={addOperation}
@@ -1774,6 +3732,7 @@ export function OperationsField({
           </div>
 
           {selectedIndex >= 0 && (
+            <div ref={editorRef}>
             <OperationEditor
               // Keyed on the row's identity AND its position: both of the editor's "skip the first
               // run" guards are keyed to a mount, and their effects depend on `index`. Reordering
@@ -1792,11 +3751,24 @@ export function OperationsField({
               onRemove={() => removeOperation(selectedIndex)}
               onFlashPieces={flashPieces}
               onActiveBomChange={onActiveBomChange}
-              onDropPiece={addPieceToOperation}
+              onDropPiece={addInputToOperation}
+              mediaUrls={operationMediaUrls}
+              frozen={frozen}
             />
+            </div>
           )}
         </div>
       )}
+
+      <AssemblyCreateDialog
+        prefill={pendingCreate}
+        onClose={() => setPendingCreate(null)}
+        onCreate={appendStep}
+        frontier={grouping.res.frontier}
+        unitKeys={new Set(grouping.res.units.keys())}
+        pieceKeys={new Set(pieces.map((p) => p.lineKey))}
+        labelOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
+      />
 
       <GenerateOperationsPanel
         techCardId={techCardId}

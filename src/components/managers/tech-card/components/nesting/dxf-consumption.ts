@@ -26,6 +26,7 @@
 // ткань кончилась. Поэтому размер, у которого нашлись не все детали, не получает числа вовсе.
 import type { PieceDTO } from 'lib/nesting/types';
 import { applySeamAllowance } from 'lib/nesting/geom/seam-allowance';
+import { perimeter } from 'lib/nesting/geom/polygon';
 import type { DxfIndex, PieceBlockRef } from './dxf-geometry';
 import {
   normBlock,
@@ -78,6 +79,15 @@ export type DxfPieceAreaRow = {
   sizeId: number;
   /** ДО умножения на количество на изделие: кратность живёт на детали и меняется отдельно. */
   areaCm2: number;
+  /**
+   * Периметр ТОГО ЖЕ контура, см (0305) — вторая мера того же замера.
+   *
+   * Ею считается КРАЕВОЕ дублирование: клеевая полоса вдоль среза стоит «периметр × ширину полосы»,
+   * тогда как площадь отвечает только за дублирование целиком. Выводить полосу из площади нельзя:
+   * у компактной детали и у длинной узкой одной площади периметры отличаются вдвое, и ошибка ушла
+   * бы прямо в закупку клеевой.
+   */
+  perimeterCm: number;
   /**
    * Контур этой строки заменён выпуклой оболочкой при раздутии припуском — площадь С ЗАПАСОМ.
    *
@@ -454,6 +464,13 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
   const seam = applySeamAllowance(unique, input.allowanceCm);
   const areaOf = new Map<PieceDTO, number>();
   unique.forEach((p, i) => areaOf.set(p, seam.pieces[i]?.areaCm2 ?? p.areaCm2));
+  // ПЕРИМЕТР СНИМАЕТСЯ С ТОГО ЖЕ КОНТУРА, ЧТО И ПЛОЩАДЬ, — из seam.pieces[i], а не из p, и это
+  // условие правильности, а не аккуратность. Им считается краевое дублирование (клеевая полоса
+  // вдоль среза), и контур обязан быть тем же, по которому режут: снять периметр с исходного
+  // контура, когда площадь снята с раздутого припуском, значит мерить полосу по линии шва, а
+  // кроить по линии кроя — расхождение ровно на припуск по всему периметру каждой детали.
+  const perimeterOf = new Map<PieceDTO, number>();
+  unique.forEach((p, i) => perimeterOf.set(p, perimeter(seam.pieces[i]?.poly ?? p.poly)));
 
   // ── площадь по размерам ──────────────────────────────────────────────────────────────────
   const rows: DxfNormSizeRow[] = [];
@@ -505,6 +522,7 @@ export function dxfNormAreas(input: DxfNormInput): DxfNormOutcome {
           pieceLineKey: lineKey,
           sizeId: outSize,
           areaCm2: areaOf.get(contour) ?? contour.areaCm2,
+          perimeterCm: perimeterOf.get(contour) ?? perimeter(contour.poly),
           hulled: hulledNames.has(contour.name),
           ambiguousPick: multiByKey.has(`${sizeId}|${i}`),
         });

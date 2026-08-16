@@ -17,6 +17,7 @@ import { ulid } from 'utils/ulid';
 import { bomPurposeLabel, type FabricScope, type RollGoodsLine } from './bom-purpose';
 import { uniOf } from './nesting/block-code';
 import { useCardDxfPack } from './nesting/card-dxf-pack';
+import { cardHasDxf, type PatternSheetRow } from './nesting/card-has-dxf';
 import {
   findPiece,
   fmtCm,
@@ -27,20 +28,20 @@ import {
 } from './nesting/dxf-geometry';
 import { pieceBlockRefs, rollGoodsScopes, type PieceAliasRow } from './piece-block-refs';
 import {
-  CUT_SYMMETRY_EVEN_COUNT_MESSAGE,
   UNSET_CUT_SYMMETRY,
-  cutSymmetryBadge,
-  cutSymmetryCountInvalid,
-  cutSymmetryOptions,
-  cutSymmetryOptionsFor,
-  cutSymmetryUnanswered,
+  fusingHint,
+  fusingModeOptionsFor,
+  fusingNeedsWidth,
   grainlineArrow,
   grainlineOptionsFor,
-  isCutSymmetryMarked,
   pieceCodeOptions,
+  UNSET_FUSING_MODE,
 } from './piece-codes';
 import { derivePieceLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { normalizePieceName } from './piece-picker';
+// Счёт «что уедет вместе с деталью» — общий с модалкой «↔ детали кроя»; локальное имя оставлено
+// прежним, чтобы читателям панели детали ничего не пришлось переучивать.
+import { recipeHoldersByPiece as buildRecipeHolders } from './piece-recipe-hold';
 import { TechCardFormData, wireInt } from './schema';
 import { useCrossHighlight } from './useCrossHighlight';
 
@@ -196,8 +197,8 @@ function PieceDiagram({
 // The 7-column table this used to be forced a horizontal scroll on every monitor (min 860px inside
 // a 1fr track beside a 200px rail) and let one row grow five lines tall, because three independent
 // warning channels lived in three different columns. A real card is 20–40 rows. The tiles carry
-// what an operator scans FOR (shape, name, count, size); everything editable lives in ONE
-// selected-piece panel below, a peer block — a block never contains a block (DESIGN.md).
+// what an operator scans FOR (shape, name, size); everything editable lives in ONE selected-piece
+// panel below, a peer block — a block never contains a block (DESIGN.md).
 //
 // The `pieces` field array is owned HERE and nowhere else. `PieceMatchModal` writes through a ROOT
 // `setValue('pieces', …)` on purpose: measured against react-hook-form 7.62, `append`/`remove` emit
@@ -234,6 +235,12 @@ export function PiecesTab({
     purpose?: string;
     name?: string;
   }>;
+  // Привязан ли к карточке хоть один DXF — это и есть ответ, можно ли ещё заводить детали руками:
+  // с чертежом единственный автор деталей — модалка «↔ детали кроя», и вторая, ручная дверь молча
+  // расхаживала бы карточку с чертежом. Смотрим ФОРМУ, а не сохранённую карточку (почему — в
+  // card-has-dxf.ts): лист, добавленный в этой сессии, закрывает ручное заведение сразу.
+  const patterns = (useWatch({ control, name: 'patterns' }) ?? []) as PatternSheetRow[];
+  const hasDxf = cardHasDxf(patterns);
   // Tile ↔ pin cross-highlight, the same hook the construction tab drives its sketch with.
   const pin = useCrossHighlight<number>();
   // Разбор включён. Латч по открытой вкладке — ровно как на панели выкроек: там же написано,
@@ -249,10 +256,8 @@ export function PiecesTab({
   // или потерянный (деталь удалена, массив переписан диалогом сопоставления) откатывается к
   // первой детали, чтобы панель с полями не исчезала, пока детали есть.
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  // Фильтры плиток: чип скоупа ткани («все» по умолчанию) и счётчик «парность не указана» в
-  // шапке, который по клику оставляет только неразмеченные.
+  // Фильтр плиток: чип скоупа ткани («все» по умолчанию).
   const [filter, setFilter] = useState<string>('all');
-  const [pairingOnly, setPairingOnly] = useState(false);
 
   const scopes = useMemo(() => rollGoodsScopes(bomItems), [bomItems]);
 
@@ -289,45 +294,13 @@ export function PiecesTab({
   }, [index, blocksByPiece]);
 
   // ЧТО УЕДЕТ ВМЕСТЕ С ДЕТАЛЬЮ — по ключу детали: колорвеи, чей рецепт её держит, сколько строк и
-  // сколько из них несут ЧИСЛО (норму), а не только назначение ткани.
-  //
-  // Строка рецепта ссылается на деталь внешним ключом ON DELETE RESTRICT (fk_usage_piece), поэтому
-  // сервер удаляет такие строки ВМЕСТЕ с деталью, в той же транзакции. Иначе карточка запиралась
-  // насмерть: рецепт правится другим RPC, сохранение карточки его не трогает, а строка эта заводится
-  // самым обычным действием — «назначить детали ткань», — так что на разобранной карточке держатся
-  // ВСЕ детали разом. Заменил чертёж на файл с другими именами блоков — и каждое сохранение
-  // отказывает по одной детали за раз.
-  //
-  // ЗДЕСЬ ЖЕ — ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЭТО МОЖНО ПОКАЗАТЬ ДО ТОГО, КАК ОНО СЛУЧИТСЯ. Назначение
-  // ткани без детали — утверждение без подлежащего, и терять его не жалко; вписанная норма — это
-  // число, которое кто-то считал, и о нём предупреждают отдельной строкой.
-  //
-  // ПРОЕКЦИЯ НЕПОЛНАЯ: чтение карточки скрывает АРХИВНЫЕ колорвеи, а их строки держат деталь так же
-  // и так же уедут. Поэтому подтверждение говорит «и в архивных, если они есть», а не молчит.
-  const recipeHoldersByPiece = useMemo(() => {
-    const m = new Map<string, { colorways: string[]; rows: number; withNorm: number }>();
-    const hasNorm = (u: {
-      consumption?: { value?: string } | null;
-      quantity?: { value?: string } | null;
-      sizeConsumptions?: unknown[];
-    }) =>
-      !!u.consumption?.value?.trim() ||
-      !!u.quantity?.value?.trim() ||
-      (u.sizeConsumptions?.length ?? 0) > 0;
-    for (const c of techCard?.colorways ?? []) {
-      const label = c.colorCode?.trim() || c.baseSku?.trim() || `#${c.colorwayId ?? ''}`;
-      for (const u of c.usages ?? []) {
-        const key = (u.pieceLineKey ?? '').trim().toLowerCase();
-        if (!key) continue;
-        const cur = m.get(key) ?? { colorways: [], rows: 0, withNorm: 0 };
-        if (!cur.colorways.includes(label)) cur.colorways.push(label);
-        cur.rows += 1;
-        if (hasNorm(u)) cur.withNorm += 1;
-        m.set(key, cur);
-      }
-    }
-    return m;
-  }, [techCard?.colorways]);
+  // сколько из них несут ЧИСЛО (норму). Само правило и объяснение, почему сервер сносит эти строки
+  // вместе с деталью, — в `piece-recipe-hold.ts`: тот же счёт потерь нужен модалке «↔ детали кроя»,
+  // а две копии правила разъехались бы молча.
+  const recipeHoldersByPiece = useMemo(
+    () => buildRecipeHolders(techCard?.colorways),
+    [techCard?.colorways],
+  );
 
   // Детали, КОТОРЫЕ УЖЕ ЛЕЖАТ НА СЕРВЕРЕ, по их ключу. Ими гейтится предзаполнение галки ниже:
   // у такой детали ответ про градацию ХРАНИМЫЙ, и переспрашивать его не у кого.
@@ -424,10 +397,10 @@ export function PiecesTab({
     if (removedKey) {
       const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
       (operations ?? []).forEach((o, oi) => {
-        const keys = (o.pieceLineKeys ?? []).filter(Boolean);
+        const keys = (o.inputKeys ?? []).filter(Boolean);
         if (keys.includes(removedKey)) {
           setValue(
-            `operations.${oi}.pieceLineKeys`,
+            `operations.${oi}.inputKeys`,
             keys.filter((k) => k !== removedKey),
             { shouldDirty: true },
           );
@@ -480,21 +453,6 @@ export function PiecesTab({
       .map((p) => p.name?.trim() || 'без названия')
       .join(' · ') || `#${n}`;
 
-  // Разметка кроя по всему блоку: сколько деталей уйдёт на фабрику с оговоркой «парность не
-  // указана» (то же условие, что печатает тех-пак — Р5), и сколько вообще без ответа. Первое число
-  // — счётчик риска и метр кампании Д2; второе живёт в подсказке, потому что деталь по одной на
-  // изделие тоже стоит разметить (сгиб печатается и у неё), но кричать про неё не о чем.
-  const unmarked = useMemo(() => {
-    let pairing = 0;
-    let any = 0;
-    for (const p of pieces) {
-      if (isCutSymmetryMarked(p.cutSymmetry)) continue;
-      any += 1;
-      if (cutSymmetryUnanswered(p.cutSymmetry, p.piecesPerGarment)) pairing += 1;
-    }
-    return { pairing, any, total: pieces.length };
-  }, [pieces]);
-
   // Переименование детали, ПРИКРЕПЛЁННОЙ к выноске, обязано дописаться в саму выноску.
   //
   // Имя такой детали хранится один раз — в `callout.part`, — и сервер при каждом сохранении
@@ -518,12 +476,24 @@ export function PiecesTab({
   // added here stayed unlinkable until the card had been saved and reloaded.
   const [pendingSelectLast, setPendingSelectLast] = useState(false);
   const addPiece = () => {
+    // Дверь одна: на карточке с чертежом деталь заводит только сопоставление блоков. Кнопки здесь
+    // уже нет, но путь закрыт и в коде — чтобы новый вызов не открыл её обратно незаметно.
+    if (hasDxf) return;
     append({
       name: '',
       lineKey: ulid(),
+      // ЦЕНА РЕШЕНИЯ «× убран из интерфейса»: число живёт в данных и на проводе (кат-лист,
+      // костинг, маркеры, печать, слот №2 дайджеста подписи), но спросить его здесь больше негде.
+      // Значит на карточке БЕЗ чертежа парная деталь уходит ×1, и кат-лист с костингом
+      // недоучитывают её до прихода DXF (модалка сопоставления пересчитает × по экземплярам
+      // блока); легаси-деталь с неверным хранимым числом через интерфейс уже не исправить.
+      // Принято владельцем осознанно: на карточке с чертежом число считает чертёж, а ручной ввод
+      // ровно там и врал чаще всего.
       piecesPerGarment: 1,
       // Явно, а не через дефолт схемы: новая строка стартует «не размечено», и это состояние —
-      // ответ «никто не спрашивал», а не отсутствие поля.
+      // ответ «никто не спрашивал», а не отсутствие поля. Ответ теперь ставит модалка
+      // сопоставления, а поле обязано быть в строке ФОРМЫ: сериализация шлёт `cutSymmetry`
+      // безусловно, и строка без него уехала бы явным UNKNOWN — командой сервера СТЕРЕТЬ разметку.
       cutSymmetry: UNSET_CUT_SYMMETRY,
       grainline: '',
       fused: false,
@@ -577,29 +547,15 @@ export function PiecesTab({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields, pieces, blocksByPiece, scopes]);
 
-  // Фильтр, чей чип исчез (скоуп опустел, последняя неразмеченная деталь размечена), обязан
-  // сброситься сам — иначе плитки остаются отфильтрованными контролом, которого больше нет.
+  // Фильтр, чей чип исчез (скоуп опустел), обязан сброситься сам — иначе плитки остаются
+  // отфильтрованными контролом, которого больше нет.
   useEffect(() => {
     if (filter !== 'all' && !groups.some((g) => g.key === filter)) setFilter('all');
   }, [filter, groups]);
-  useEffect(() => {
-    if (pairingOnly && unmarked.pairing === 0) setPairingOnly(false);
-  }, [pairingOnly, unmarked.pairing]);
 
   const visibleGroups = useMemo(
-    () =>
-      groups
-        .filter((g) => filter === 'all' || filter === g.key)
-        .map((g) => ({
-          ...g,
-          indices: pairingOnly
-            ? g.indices.filter((pi) =>
-                cutSymmetryUnanswered(pieces[pi]?.cutSymmetry, pieces[pi]?.piecesPerGarment),
-              )
-            : g.indices,
-        }))
-        .filter((g) => g.indices.length > 0),
-    [groups, filter, pairingOnly, pieces],
+    () => groups.filter((g) => filter === 'all' || filter === g.key),
+    [groups, filter],
   );
 
   // Выбранная деталь. Потерянный выбор (удаление, перезапись массива диалогом сопоставления)
@@ -613,10 +569,10 @@ export function PiecesTab({
   // Ошибка валидации (своя или серверная) на детали, которой нет в панели, обязана эту панель
   // переключить: якоря `data-field` полей живут только у ВЫБРАННОЙ детали, а revealField умеет
   // подождать несколько кадров (index.tsx) — ровно столько, сколько стоит это переключение. Тот же
-  // приём, каким sketch-tab силой раскрывает свёрнутый блок выносок под ошибкой (19.8). Фильтры
-  // сбрасываются вместе с выбором: деталь с ошибкой, скрытая чипом скоупа или счётчиком парности,
-  // оставила бы плитки БЕЗ выбранной детали — панель называет себя «выбранная на плитках выше» и
-  // обязана этому соответствовать.
+  // приём, каким sketch-tab силой раскрывает свёрнутый блок выносок под ошибкой (19.8). Фильтр
+  // сбрасывается вместе с выбором: деталь с ошибкой, скрытая чипом скоупа, оставила бы плитки БЕЗ
+  // выбранной детали — панель называет себя «выбранная на плитках выше» и обязана этому
+  // соответствовать.
   const pieceErrors = errors.pieces;
   useEffect(() => {
     if (!pieceErrors || typeof pieceErrors !== 'object') return;
@@ -629,7 +585,6 @@ export function PiecesTab({
     if (id) {
       setSelectedId(id);
       setFilter('all');
-      setPairingOnly(false);
     }
     // fields намеренно вне зависимостей: прыгать надо на НОВУЮ ошибку, а не на каждый рендер массива.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -641,8 +596,6 @@ export function PiecesTab({
   const selFound = sel && foundByKey ? foundByKey.get(selKey.toLowerCase()) ?? null : null;
   const selCallout = sel?.calloutNumber || 0;
   const selDup = selIndex >= 0 && duplicateRows.has(selIndex);
-  const selOddPair = sel ? cutSymmetryCountInvalid(sel.cutSymmetry, sel.piecesPerGarment) : false;
-  const selUnanswered = sel ? cutSymmetryUnanswered(sel.cutSymmetry, sel.piecesPerGarment) : false;
   const selArrow = grainlineArrow(sel?.grainline);
   // ВСЕ блоки детали помечены токеном UNI — источник, из которого галка предзаполнилась. Подпись
   // говорит именно «откуда взялось», а не «стоит»: при живом токене снятие галки законно, и
@@ -696,6 +649,15 @@ export function PiecesTab({
   // Что уедет вместе с ВЫБРАННОЙ деталью. undefined — рецепт её не держит, удаление ничего не уносит.
   const selRecipeHold = selKey ? recipeHoldersByPiece.get(selKey.toLowerCase()) : undefined;
 
+  // ЖИВЁТ ЛИ ДЕТАЛЬ В ЧЕРТЕЖЕ — от этого зависит, есть ли здесь ручное удаление. Деталь с привязкой
+  // заведена сопоставлением блоков, и удалять её надо там же: блок из файла никуда не денется, и
+  // следующее сопоставление заведёт деталь заново — а операции и строки рецепта, уехавшие с ней,
+  // уже не вернутся. Ответ берётся из ФОРМЫ (`pieceDxfAliases` → blocksByPiece), а не из
+  // сохранённой карточки: алиас, записанный модалкой в этой сессии, делает деталь деталью чертежа
+  // сразу, ещё до сохранения. Ключ свёрнут тем же trim + нижним регистром, каким его фолдят модалка
+  // и сервер, — легаси-ключи бывают не-ULID и приходят в другом регистре.
+  const selBoundToDxf = selRefs.length > 0;
+
   const dropSelected = () => {
     if (selIndex < 0) return;
     const neighbour = fields[selIndex - 1]?.id ?? fields[selIndex + 1]?.id ?? null;
@@ -709,6 +671,10 @@ export function PiecesTab({
   const [confirmDrop, setConfirmDrop] = useState(false);
   const removeSelected = () => {
     if (selIndex < 0) return;
+    // Дверь закрыта и в коде, а не только в разметке: у детали с привязкой к блоку DXF кнопки нет,
+    // но обработчик обязан отказать сам — иначе следующий вызов (горячая клавиша, рефактор,
+    // повторное использование) молча вернёт вторую, тихую дверь. Тот же приём, что у `addPiece`.
+    if (selBoundToDxf) return;
     if (selRecipeHold) {
       setConfirmDrop(true);
       return;
@@ -723,20 +689,6 @@ export function PiecesTab({
         question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из каких тканей (слоёв) кроится деталь в конкретном колорвее — правится строками детали в рецепте на вкладке colorways; здесь это видно в панели выбранной детали'
         action={
           <div className='flex flex-wrap items-center gap-2'>
-            {unmarked.pairing > 0 && (
-              // Кликается — значит Chip, не Pill (контракт дизайн-системы), но в цветах прежней
-              // синей пилюли: клик оставляет на плитках только неразмеченные детали. Выбранный —
-              // обычная залитая чернилами форма чипа, чтобы нажатость читалась.
-              <Chip
-                className={pairingOnly ? undefined : 'border-warning text-warning'}
-                selected={pairingOnly}
-                pressed={pairingOnly}
-                onClick={() => setPairingOnly((v) => !v)}
-                title={`Деталей, которые идут по две и больше на изделие, а как кроятся — не сказано: ${unmarked.pairing}. В тех-паке у каждой такой строки печатается «парность не указана»: молчать нельзя, потому что после миграции 0266 зеркальная пара выглядит как голая «2», и цех выкроит две одинаковые панели вместо левой и правой. Всего без разметки: ${unmarked.any} из ${unmarked.total}. Клик — показать только такие детали.`}
-              >
-                парность не указана: {unmarked.pairing}
-              </Chip>
-            )}
             {duplicateRows.size > 0 && (
               <Pill
                 tone='warn'
@@ -755,15 +707,20 @@ export function PiecesTab({
                 разбор dxf…
               </Text>
             )}
-            <Button
-              type='button'
-              variant='main'
-              size='sm'
-              data-field='pieces.add'
-              onClick={addPiece}
-            >
-              + piece
-            </Button>
+            {/* Ручное заведение — последняя лазейка, и живёт она ровно до первого DXF: пока
+                конструктор рисует, на деталь уже вешают операции и строки рецепта. Дальше автор
+                деталей один — модалка «↔ детали кроя» над этим блоком. */}
+            {!hasDxf && (
+              <Button
+                type='button'
+                variant='main'
+                size='sm'
+                data-field='pieces.add'
+                onClick={addPiece}
+              >
+                + piece
+              </Button>
+            )}
           </div>
         }
       >
@@ -774,9 +731,12 @@ export function PiecesTab({
         </datalist>
 
         {fields.length === 0 ? (
+          // Пустой список читается по-разному в двух режимах, и звать к ручной кнопке, которой на
+          // карточке с чертежом больше нет, значит отправить оператора её искать.
           <Text size='micro' variant='label'>
-            деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо
-            добавьте вручную (полочка, спинка, воротник…)
+            {hasDxf
+              ? 'деталей ещё нет — на карточке с чертежом они приходят из него: выберите материал на полке выше и нажмите «↔ детали кроя», и блоки DXF станут деталями'
+              : 'деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо добавьте вручную (полочка, спинка, воротник…)'}
           </Text>
         ) : (
           <>
@@ -821,9 +781,7 @@ export function PiecesTab({
                     flush
                     action={
                       <Text size='micro' variant='label'>
-                        {g.indices.length} {ruPieces(g.indices.length)} ·{' '}
-                        {g.indices.reduce((n, pi) => n + (pieces[pi]?.piecesPerGarment ?? 1), 0)} шт
-                        на изделие
+                        {g.indices.length} {ruPieces(g.indices.length)}
                       </Text>
                     }
                   >
@@ -843,27 +801,16 @@ export function PiecesTab({
                       // геометрия грузится, отсутствие контура — не диагноз.
                       const missing = !!index && refs.length > 0 && !found;
                       const dup = duplicateRows.has(pi);
-                      // Нечётная зеркальная пара — то, что реально роняет сохранение (CHECK в
-                      // БД), поэтому она видна с плитки, а не только из панели: без этого
-                      // размеченная «зеркальными» деталь с ×3 выглядела бы здоровой.
-                      const oddPair = cutSymmetryCountInvalid(p.cutSymmetry, p.piecesPerGarment);
-                      const unanswered = cutSymmetryUnanswered(p.cutSymmetry, p.piecesPerGarment);
                       const detached = detachedKeys.has(key);
-                      const badge = cutSymmetryBadge(p.cutSymmetry, p.piecesPerGarment);
-                      const short = badge && badge.tone !== 'attention' ? badge.label : '';
                       const callout = p.calloutNumber || 0;
                       const isSelected = pi === selIndex;
                       // Цвет канта ВСЕГДА в паре со словом на самой плитке (DESIGN.md: состояние
-                      // не сообщается одним цветом): красные слова — «дубль имени» / «× нечётное»
-                      // в подписи, «нет в файлах» / «ткань потеряна» в окне контура; синие —
-                      // «парность не указана» и «откреплена» (той же тревоги, что их пилюли в
-                      // панели, — кант при них остаётся по правилу парности, откреплённость канта
-                      // не красит).
+                      // не сообщается одним цветом): красные слова — «дубль имени» в подписи,
+                      // «нет в файлах» / «ткань потеряна» в окне контура; синее — «откреплена»
+                      // (той же тревоги, что её пилюля в панели, — откреплённость канта не
+                      // красит).
                       const flags: Array<{ k: string; cls: string; word: string }> = [];
                       if (dup) flags.push({ k: 'dup', cls: 'text-error', word: 'дубль имени' });
-                      if (oddPair) flags.push({ k: 'odd', cls: 'text-error', word: '× нечётное' });
-                      if (unanswered)
-                        flags.push({ k: 'sym', cls: 'text-warning', word: 'парность не указана' });
                       if (detached)
                         flags.push({ k: 'det', cls: 'text-warning', word: 'откреплена' });
                       return (
@@ -879,13 +826,11 @@ export function PiecesTab({
                               // плитка утолщает кант до 2px с компенсацией паддинга, чтобы
                               // контент не дёргался. Тень элементу в потоке DESIGN.md запрещает.
                               isSelected ? 'border-2 p-[5px]' : 'border p-1.5',
-                              dup || missing || oddPair
+                              dup || missing
                                 ? 'border-error'
-                                : unanswered
-                                  ? 'border-warning'
-                                  : isSelected
-                                    ? 'border-textColor'
-                                    : 'border-borderColor',
+                                : isSelected
+                                  ? 'border-textColor'
+                                  : 'border-borderColor',
                               pin.isActive(callout) && 'bg-bgZebra',
                             )}
                           >
@@ -925,10 +870,6 @@ export function PiecesTab({
                             <Text size='micro' className='mt-1 w-full truncate font-bold uppercase'>
                               {p.name?.trim() || 'без названия'}
                             </Text>
-                            <Text size='micro' variant='label' className='w-full truncate'>
-                              ×{p.piecesPerGarment ?? 1}
-                              {short ? ` ${short}` : ''}
-                            </Text>
                             {found && (
                               <Text size='micro' variant='label' className='w-full truncate'>
                                 {fmtCm(found.piece.bboxW)} × {fmtCm(found.piece.bboxH)} см
@@ -964,20 +905,35 @@ export function PiecesTab({
           title='деталь'
           question='— выбранная на плитках выше: форма из чертежа, поля строки и происхождение имени'
           action={
-            <Button
-              type='button'
-              variant='secondary'
-              size='xs'
-              aria-label='remove piece'
-              title={
-                selRecipeHold
-                  ? `вместе с деталью уедут её строки рецепта (${selRecipeHold.colorways.join(', ')})`
-                  : undefined
-              }
-              onClick={removeSelected}
-            >
-              ✕ удалить деталь
-            </Button>
+            // Ручное удаление осталось ровно там, где деталь заводили руками, — у детали без
+            // чертежа. У привязанной вместо кнопки адрес двери: удаление по факту чертежа живёт в
+            // сопоставлении блоков, и оно же показывает состав потерь. Кнопка здесь была второй,
+            // тихой дверью — ею деталь уходила из карточки при живом блоке в файле.
+            selBoundToDxf ? (
+              <Text
+                size='micro'
+                variant='label'
+                component='span'
+                title='деталь нарисована в чертеже (есть привязка к блоку DXF). Удалить её отсюда значило бы разойтись с файлом: блок никуда не делся, и следующее сопоставление заведёт деталь заново — уже без операций и строк рецепта, которые уедут вместе с ней. Модалка «↔ детали кроя» предлагает удаление тогда, когда блок ИСЧЕЗ из чертежа, и называет, что при этом теряется.'
+              >
+                удаляется через «↔ детали кроя» на панели выкроек над этим блоком
+              </Text>
+            ) : (
+              <Button
+                type='button'
+                variant='secondary'
+                size='xs'
+                aria-label='remove piece'
+                title={
+                  selRecipeHold
+                    ? `вместе с деталью уедут её строки рецепта (${selRecipeHold.colorways.join(', ')})`
+                    : undefined
+                }
+                onClick={removeSelected}
+              >
+                ✕ удалить деталь
+              </Button>
+            )
           }
         >
           <div className='grid gap-2.5 lg:grid-cols-[240px_minmax(0,1fr)]'>
@@ -1124,56 +1080,13 @@ export function PiecesTab({
                 </Text>
               )}
 
+              {/* «× на изделие» и «как кроится» в этой панели больше не спрашиваются: и то, и
+                  другое приходит из чертежа — количество считает модалка сопоставления по числу
+                  экземпляров блока, симметрию она же проставляет «одинаковыми копиями» там, где
+                  ответа не было. В ДАННЫХ и на проводе оба поля живут дальше (кат-лист, костинг,
+                  раскладка, печать; `piecesPerGarment` — слот дайджеста подписи), схема и
+                  сериализация не тронуты — убран только вопрос к человеку. */}
               <div className='grid grid-cols-2 gap-2.5 lg:grid-cols-3'>
-                <div>
-                  <Text size='micro' variant='label' component='label' className='uppercase'>
-                    × на изделие
-                  </Text>
-                  <Input
-                    className='w-full'
-                    type='number'
-                    min='1'
-                    // Помечено невалидным вместе с селектом: CHECK в БД двухколоночный, и
-                    // нарушить его можно с ЛЮБОЙ из двух сторон — как выбрав «зеркальные пары»
-                    // при нечётном количестве, так и исправив количество на нечётное у уже
-                    // размеченной детали. Подсветить только селект значило бы указать не на то
-                    // поле в половине случаев.
-                    aria-invalid={selOddPair}
-                    value={sel.piecesPerGarment ?? 1}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                      setValue(`pieces.${selIndex}.piecesPerGarment`, Number(e.target.value) || 1, {
-                        shouldDirty: true,
-                      })
-                    }
-                  />
-                </div>
-                <div>
-                  <Text size='micro' variant='label' component='label' className='uppercase'>
-                    как кроится
-                  </Text>
-                  <select
-                    className={selectCls}
-                    aria-label='как кроится'
-                    // Якорь для revealField: и схема, и сервер адресуют нарушение чётности
-                    // путём `pieces.N.cutSymmetry`, а прокрутить и подсветить он умеет только
-                    // элемент с этим самым атрибутом. Без него ошибка находит вкладку, но не
-                    // деталь.
-                    data-field={`pieces.${selIndex}.cutSymmetry`}
-                    aria-invalid={selOddPair}
-                    value={sel.cutSymmetry ?? UNSET_CUT_SYMMETRY}
-                    onChange={(e) =>
-                      setValue(`pieces.${selIndex}.cutSymmetry`, e.target.value, {
-                        shouldDirty: true,
-                      })
-                    }
-                  >
-                    {cutSymmetryOptionsFor(sel.cutSymmetry).map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
                 <div>
                   <Text size='micro' variant='label' component='label' className='uppercase'>
                     fused
@@ -1183,14 +1096,84 @@ export function PiecesTab({
                       type='checkbox'
                       aria-label='fused'
                       checked={!!sel.fused}
-                      onChange={(e) =>
-                        setValue(`pieces.${selIndex}.fused`, e.target.checked, {
-                          shouldDirty: true,
-                        })
-                      }
+                      onChange={(e) => {
+                        const on = e.target.checked;
+                        setValue(`pieces.${selIndex}.fused`, on, { shouldDirty: true });
+                        // СНЯТАЯ ГАЛКА ГАСИТ РАЗМЕТКУ ТУТ ЖЕ. Сервер всё равно её обнулит (0304:
+                        // режим законен только у fused-детали), но если оставить её на экране, форма
+                        // покажет «полосой 25 мм» под снятой галкой и отправит это на сохранение —
+                        // а вернётся карточка уже без разметки. Расхождение экрана с тем, что
+                        // сохранилось, дороже одной строки.
+                        if (!on) {
+                          setValue(`pieces.${selIndex}.fusingMode`, UNSET_FUSING_MODE, {
+                            shouldDirty: true,
+                          });
+                          setValue(`pieces.${selIndex}.fusingWidthMm`, '', { shouldDirty: true });
+                        }
+                      }}
                     />
                   </div>
                 </div>
+                {/* КАК ИМЕННО ДУБЛИРУЕТСЯ (0304) — только у дублируемой детали: у остальных вопроса
+                    не существует, и пустой селект рядом со снятой галкой читался бы как незаполненное
+                    поле. Занимает всю ширину ряда, потому что несёт ещё и число. */}
+                {!!sel.fused && (
+                  <div className='col-span-2 lg:col-span-3'>
+                    <Text size='micro' variant='label' component='label' className='uppercase'>
+                      как дублируется
+                    </Text>
+                    <div className='flex items-start gap-2.5'>
+                      <select
+                        className={`${selectCls} flex-1`}
+                        aria-label='как дублируется'
+                        data-field={`pieces.${selIndex}.fusingMode`}
+                        value={sel.fusingMode ?? UNSET_FUSING_MODE}
+                        onChange={(e) => {
+                          const mode = e.target.value;
+                          setValue(`pieces.${selIndex}.fusingMode`, mode, { shouldDirty: true });
+                          // Ширина живёт только у «полосой». Уходя с него, число убираем: рядом с
+                          // «по припуску» оно спорило бы с эталоном молча — на экране одно, в
+                          // расчёте другое, — и сервер отверг бы такую пару по имени поля.
+                          if (!fusingNeedsWidth(mode)) {
+                            setValue(`pieces.${selIndex}.fusingWidthMm`, '', { shouldDirty: true });
+                          }
+                        }}
+                      >
+                        {fusingModeOptionsFor(sel.fusingMode).map((o) => (
+                          <option key={o.value} value={o.value}>
+                            {o.label}
+                          </option>
+                        ))}
+                      </select>
+                      {fusingNeedsWidth(sel.fusingMode) && (
+                        <div className='w-28'>
+                          <Input
+                            type='number'
+                            min='0.5'
+                            max='100'
+                            step='0.5'
+                            placeholder='мм'
+                            aria-label='ширина клеевой полосы, мм'
+                            data-field={`pieces.${selIndex}.fusingWidthMm`}
+                            aria-invalid={!sel.fusingWidthMm?.trim()}
+                            value={sel.fusingWidthMm ?? ''}
+                            onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+                              setValue(`pieces.${selIndex}.fusingWidthMm`, e.target.value, {
+                                shouldDirty: true,
+                              })
+                            }
+                          />
+                        </div>
+                      )}
+                    </div>
+                    {/* Подпись говорит, ОТКУДА берётся ширина у режима без своего числа — иначе
+                        «по припуску» выглядит как ответ без величины, и первый же вопрос оператора
+                        будет «а сколько это». */}
+                    <Text size='nano' variant='label' component='p'>
+                      {fusingHint(sel.fusingMode)}
+                    </Text>
+                  </div>
+                )}
                 <div>
                   <Text size='micro' variant='label' component='label' className='uppercase'>
                     не градуируется
@@ -1221,41 +1204,6 @@ export function PiecesTab({
                   )}
                 </div>
               </div>
-              {selOddPair && (
-                <Text size='micro' variant='error'>
-                  {CUT_SYMMETRY_EVEN_COUNT_MESSAGE}
-                </Text>
-              )}
-
-              {/* Оговорка «парность не указана» объясняется ЗДЕСЬ и один раз — в шапке остался
-                  только счётчик-фильтр. Чипы ставят ответ в один клик. */}
-              {selUnanswered && (
-                <CalloutBox tone='warning'>
-                  <Text size='micro'>
-                    эта деталь идёт по две и больше на изделие, а как они кроятся — не сказано. Если
-                    это зеркальная пара, а лекало пришло полукомплектом, раскладка положит только
-                    одну хиральность и на крой уйдут одни левые. В тех-паке у строки печатается
-                    «парность не указана».
-                  </Text>
-                  <ChipRow className='mt-1'>
-                    {cutSymmetryOptions
-                      .filter((o) => o.value !== UNSET_CUT_SYMMETRY)
-                      .map((o) => (
-                        <Chip
-                          key={o.value}
-                          onClick={() =>
-                            setValue(`pieces.${selIndex}.cutSymmetry`, o.value, {
-                              shouldDirty: true,
-                            })
-                          }
-                        >
-                          {o.label}
-                        </Chip>
-                      ))}
-                  </ChipRow>
-                </CalloutBox>
-              )}
-
               <div className='grid grid-cols-2 gap-2.5'>
                 <div>
                   <Text size='micro' variant='label' component='label' className='uppercase'>
@@ -1305,17 +1253,6 @@ export function PiecesTab({
               </div>
 
               <div className='flex flex-col gap-1'>
-                {/* Почему у поля вообще есть состояние «не размечено» и почему оно не
-                    «одинаковые». Сказано один раз под полями, а не в подсказке каждой строки. */}
-                <Text size='micro' variant='label'>
-                  как кроится — количество этим НЕ меняется: «×2» и так означает две панели на
-                  изделие, поле лишь говорит, копии это или левая с правой. «Не размечено» — не то
-                  же самое, что «одинаковые»: это значит, что вопрос никто не задавал, и такой ответ
-                  сохраняется как есть, не подменяясь умолчанием. Зеркальная пара делится пополам,
-                  поэтому её количество обязано быть чётным; крой по сгибу парным не бывает по
-                  построению (контур симметричен сам себе), а «со сгибом и нужна дважды» — это
-                  манжеты: со сгибом × 2.
-                </Text>
                 {/* Что означает «не градуируется» и чем это отличается от «размера в имени не
                     нашлось». Сказано здесь же, одним абзацем: галка отвечает на вопрос про
                     ДЕТАЛЬ, а не про файл. */}

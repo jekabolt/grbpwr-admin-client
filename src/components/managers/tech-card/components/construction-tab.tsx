@@ -127,8 +127,15 @@ function RequiredSeamAllowanceField() {
 function CardStandards() {
   return (
     <Section title='standards' question='— what every step inherits unless it says otherwise'>
-      <div className='flex flex-col gap-2.5 sm:max-w-sm'>
-        <RequiredSeamAllowanceField />
+      {/* The narrow column belongs to the ONE number above, not to the block: a single decimal in a
+          640px-wide box reads as an unfinished layout. The defaults accordion below it now carries
+          the card's equipment park — two lists of tiles and a grid of settings — and capped at
+          `max-w-sm` every one of those grids collapsed to a single column with the tiles stacked
+          under each other, on a screen with room for four. */}
+      <div className='flex flex-col gap-2.5'>
+        <div className='sm:max-w-sm'>
+          <RequiredSeamAllowanceField />
+        </div>
         <ConstructionField />
       </div>
     </Section>
@@ -172,6 +179,36 @@ function ConstructionSummary() {
     return !key || !attachedKeys.has(key);
   });
 
+  // ПРИШИВ ЭТИКЕТОК — РАБОТА, КОТОРОЙ НЕТ В МАРШРУТЕ.
+  //
+  // Строки секции «этикетки» намеренно исключены из проверки выше: этикетка попадает на изделие
+  // через `tech_card_label` и сборочную ведомость, поэтому строка без операции — норма, а не
+  // пропуск. Верно для СТРОКИ, но не для КАРТОЧКИ: кто-то этикетку пришивает, это занимает время,
+  // и если такого шага нет ни одного, его минуты не попадают ни в маршрут для цеха, ни в SAM —
+  // себестоимость занижена ровно на этот труд.
+  //
+  // Проверка КАРТОЧНАЯ, а не построчная, именно поэтому: одна фраза о пропущенной работе читается,
+  // а список «эта этикетка не на шаге, и эта, и эта» — то самое обучение игнорировать проверки,
+  // от которого исключение и защищало.
+  const labels = (useWatch({ control, name: 'labels' }) ?? []) as Array<{
+    content?: string;
+    placement?: string;
+    attachment?: string;
+    size?: string;
+    note?: string;
+  }>;
+  // Заполненная этикетка, а не пустая строка на дефолтном типе — тот же предикат, что у чек-листа.
+  const usedLabels = labels.filter((l) =>
+    [l.content, l.placement, l.attachment, l.size, l.note].some((v) => !!v?.trim()),
+  ).length;
+  const labelsOnSomeStep = bomItems.some(
+    (b) =>
+      (b.section ?? '') === 'TECH_CARD_BOM_SECTION_LABEL' &&
+      !!b.lineKey?.trim() &&
+      attachedKeys.has(b.lineKey.trim()),
+  );
+  const labelsOffRoute = opCount > 0 && usedLabels > 0 && !labelsOnSomeStep;
+
   // The SAM → money readout (implied ₽/min from cmt_cost) moved to the costing tab's labour band
   // (Phase 3, plan 11): money reads next to the CMT input it derives from, minutes stay here.
   return (
@@ -204,6 +241,15 @@ function ConstructionSummary() {
           <Text size='micro'>
             не привязаны ни к одной операции:{' '}
             {unattached.map((b) => b.name?.trim() || 'unnamed').join(' · ')}
+          </Text>
+        </CalloutBox>
+      )}
+      {labelsOffRoute && (
+        <CalloutBox tone='note' className='mt-2.5'>
+          <Text size='micro'>
+            этикеток задано {usedLabels}, но ни один шаг их не пришивает — этой работы нет ни в
+            маршруте для цеха, ни в SAM. Заведите шаг, который их ставит, и свяжите с ним строку
+            этикетки из BOM.
           </Text>
         </CalloutBox>
       )}
@@ -292,6 +338,11 @@ function ConstructionSketch({
           {views.map((v) => (
             <Chip
               key={v.mediaId}
+              // `nonForm`: переключение проекции (перёд / спинка / деталь) — ЧТЕНИЕ, оно ничего не
+              // пишет. Обычный Chip рендерится нативной кнопкой, а та внутри `<fieldset disabled>`
+              // выпущенной карточки клика не получает: на подписанной карточке было видно только
+              // первое изображение, а спинку посмотреть было нельзя.
+              nonForm
               selected={v.mediaId === activeViewId}
               pressed={v.mediaId === activeViewId}
               onClick={() => setViewId(v.mediaId)}
@@ -346,16 +397,12 @@ function ConstructionSketch({
 //
 // Ошибка говорится ОДИН раз и не превращается в повтор: useDxfGeometry заведён с `retry: false`,
 // потому что недоступный CDN — это ответ, а не повод скачать всё второй раз.
-function shapesAffordance(
-  shapes: PieceShapes,
-  armed: boolean,
-  onArm: () => void,
-): React.ReactNode | undefined {
+function shapesAffordance(shapes: PieceShapes): React.ReactNode | undefined {
   if (!shapes.hasDxf) return undefined;
-  // РАЗБОР ЕСТЬ, А КОНТУРОВ НЕТ — это ответ, и он обязан прозвучать. Иначе нажатие на «показать
-  // силуэты» выглядит как поломка: ссылка пропала, десятки мегабайт скачались, детали остались
-  // теми же именами. Причина всегда одна и чинится не здесь — деталь кроя не связана с блоком
-  // чертежа, — поэтому строка называет вкладку, на которой это делают.
+  // РАЗБОР ЕСТЬ, А КОНТУРОВ НЕТ — это ответ, и он обязан прозвучать. Иначе экран выглядит
+  // поломкой: мегабайты скачались, а детали остались теми же именами. Причина всегда одна и
+  // чинится не здесь — деталь кроя не связана с блоком чертежа, — поэтому строка называет
+  // вкладку, на которой это делают.
   if (shapes.shapeByKey) {
     return shapes.foundCount === 0 ? (
       <Text size='micro' variant='label' component='span'>
@@ -370,31 +417,34 @@ function shapesAffordance(
       </Text>
     );
   }
-  // `isLoading` — не только про свой заказ: разбор мог уже идти по кнопке на вкладке PATTERNS, и
-  // предлагать нажать то, что уже выполняется, значит обещать второе скачивание тех же мегабайт.
-  if (armed || shapes.isLoading) {
+  if (shapes.isLoading) {
     return (
       <Text size='micro' variant='label' component='span'>
         разбираю выкройки…
       </Text>
     );
   }
-  return (
-    <Chip
-      dashed
-      onClick={onArm}
-      title='скачать и разобрать DXF карточки, чтобы у деталей появились силуэты'
-    >
-      показать силуэты
-    </Chip>
-  );
+  // Кнопки «показать силуэты» здесь больше НЕТ. Силуэт — не украшение и не опция: сборку
+  // размечают по формам деталей, и экран, спрашивающий разрешения показать то, ради чего на него
+  // пришли, перекладывает на человека решение, которого у него нет данных принять. Цена честная и
+  // остаётся: пачка DXF скачивается и разбирается при открытии вкладки. Запрос один на карточку
+  // (React Query кэширует пачку между вкладками), `retry: false` не даёт недоступному CDN
+  // превратиться в повтор, а состояния разбора остаются здесь же строкой.
+  return undefined;
 }
 
 // Construction workspace: the sketch (assembly map) on the left, the general finishing defaults
 // and the ordered operations on the right — so a step and its place on the drawing are visible
 // together, without switching tabs. Colourway / material selection lives on the colorways tab;
 // this tab is about HOW the garment goes together, not which fabric or colour.
-export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
+export function ConstructionTab({
+  techCard,
+  active = false,
+}: {
+  techCard?: common_TechCard;
+  /** Вкладка открыта. Вкладки смонтированы все сразу — без этого разбор заказывался бы всегда. */
+  active?: boolean;
+}) {
   // Deliberately NOT watching `operations` here. The summary and the sketch each hold their own
   // subscription, so a keystroke in the assembly editor re-renders those two leaves instead of
   // this whole workspace (and with it every row of the sequence rail).
@@ -418,8 +468,22 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
   //
   // Хук держится ЗДЕСЬ, а не внутри редактора операций: карта контуров одна на карточку и
   // стабильна по ссылке, а редактор перерисовывается на каждый введённый символ.
-  const [shapesArmed, setShapesArmed] = useState(false);
-  const pieceShapes = usePieceShapes(shapesArmed);
+  // Словарь «media_id → адрес» для операционных снимков. Приходит с чтения карточки: во форме
+  // лежит только id, потому что именно он уходит на сервер.
+  const operationMediaUrls = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of techCard?.resolvedOperationMedia ?? []) {
+      const id = wireInt(r.media?.id);
+      const url = r.media?.media?.fullSize?.mediaUrl ?? r.media?.media?.thumbnail?.mediaUrl ?? '';
+      if (id > 0 && url) m.set(id, url);
+    }
+    return m;
+  }, [techCard?.resolvedOperationMedia]);
+
+  // Разбор заказывается САМ, как только вкладку открыли: силуэты здесь — рабочий материал, а не
+  // опция, и спрашивать разрешения показать то, ради чего на экран пришли, незачем. Но и качать
+  // мегабайты за того, кто вкладку не открывал, тоже: вкладки смонтированы все сразу.
+  const pieceShapes = usePieceShapes(active);
 
   // Which concrete article each colourway takes for the slots an operation consumes. Assembled here
   // because the two halves come from different places: the recipe (usages + their pins) rides the
@@ -506,7 +570,7 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
             <SectionHeader
               title='operations — assembly order'
               question='— what each step does, where, on which pieces, and how long it takes'
-              action={shapesAffordance(pieceShapes, shapesArmed, () => setShapesArmed(true))}
+              action={shapesAffordance(pieceShapes)}
             />
             <OperationsField
               activePin={pin.active}
@@ -515,6 +579,24 @@ export function ConstructionTab({ techCard }: { techCard?: common_TechCard }) {
               onActiveBomChange={bom.setActive}
               colorwayArticles={colorwayArticles}
               pieceShapes={pieceShapes.shapeByKey}
+              // Размечена ли СОХРАНЁННАЯ карточка. Предикат тот же, что у маппера: сервер
+              // принимает намерение «снять разметку» только против карточки, которая её несёт,
+              // и кнопка обязана быть на экране ровно в этом случае — даже если форма уже
+              // распакована (восстановленный черновик).
+              storedHasUnits={(techCard?.techCard?.operations ?? []).some(
+                (o) => (o?.outputUnitKey ?? '').trim() !== '',
+              )}
+              // Выпущенная карточка. Предикат тот же, что в index.tsx: серверное состояние
+              // замораживает тело. Схема получает его ЯВНО, а не через внешний
+              // `<fieldset disabled>`: тот глушит кнопки, но не pointer-жесты на div.
+              frozen={techCard?.techCard?.approvalState === 'TECH_CARD_APPROVAL_STATE_RELEASED'}
+              // Адреса операционных снимков: форма возит только media_id, а URL — read-данные.
+              operationMediaUrls={operationMediaUrls}
+              // Несёт ли СОХРАНЁННАЯ карточка снимки: предикат тот же, что у серверного щита, и
+              // от него зависит, показывать ли путь отступления «снять фотографии шагов».
+              storedHasMedia={(techCard?.techCard?.operations ?? []).some(
+                (o) => (o?.media ?? []).length > 0,
+              )}
             />
           </section>
         </div>

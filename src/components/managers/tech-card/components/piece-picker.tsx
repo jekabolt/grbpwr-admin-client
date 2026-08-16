@@ -1,33 +1,30 @@
 import { cn } from 'lib/utility';
 import { useMemo, useState } from 'react';
-import { useFormContext, useWatch } from 'react-hook-form';
+import { useWatch } from 'react-hook-form';
 import { Chip, ChipRow } from 'ui/components/chip';
 import GenericPopover from 'ui/components/popover';
 import Text from 'ui/components/text';
-import { ulid } from 'utils/ulid';
 import { PieceShape, type FoundPiece } from './nesting/dxf-geometry';
-import { TechCardFormData } from './schema';
 
 // A cut piece a norm or an operation can point at. `lineKey` is the stable client-minted ULID the
 // server resolves to the real tech_card_piece FK, so a reference survives reordering and renaming —
 // unlike the free-text part name it replaced.
 //
-// `perGarment` — кратность на изделие с карточки детали. Показом её пользуется только визуальный
-// выбор ниже, и там она не украшение: «×2» отличает пару рукавов от одной, а на именах вида
-// «SLV_L» / «SLV_R» это единственное, чем они отличаются на глаз.
-export type PieceRef = { lineKey: string; name: string; perGarment?: number };
+// Кратности «×N на изделие» здесь нет НАМЕРЕННО: число считается по чертежу (модалка сопоставления
+// DXF), спрашивать о нём человека не о чем — а показанное в списке ВЫБОРА оно только приглашает
+// спорить с чертежом. На бумаге (тех-пак, наряд, кат-лист) число остаётся: по нему кроят.
+export type PieceRef = { lineKey: string; name: string };
 
 export const normalizePieceName = (name: string) => name.trim().toLowerCase();
 
 // The card's cut pieces, live from form state (not the server) so a piece added seconds ago on the
-// PATTERNS tab — or inline from a picker below — is immediately selectable everywhere, without a save
-// round-trip. Only pieces carrying a lineKey are offered: a reference to a piece with no stable
-// identity cannot be resolved server-side, so offering one would silently drop the link on save.
+// PATTERNS tab is immediately selectable everywhere, without a save round-trip. Only pieces carrying
+// a lineKey are offered: a reference to a piece with no stable identity cannot be resolved
+// server-side, so offering one would silently drop the link on save.
 export function useFormPieces(): PieceRef[] {
   const raw = (useWatch({ name: 'pieces' }) ?? []) as {
     name?: string;
     lineKey?: string;
-    piecesPerGarment?: number;
   }[];
   return useMemo(
     () =>
@@ -36,52 +33,9 @@ export function useFormPieces(): PieceRef[] {
         .map((p) => ({
           lineKey: p.lineKey as string,
           name: p.name?.trim() || 'без названия',
-          // Ниже единицы не бывает — деталь либо есть, либо её не заявляли; то же правило, что в
-          // расчёте площади (useFabricDxfPieces), чтобы «×2» на плитке и множитель в норме были
-          // одним числом, а не двумя похожими.
-          perGarment: Math.max(1, Math.round(Number(p.piecesPerGarment ?? 1) || 1)),
         })),
     [raw],
   );
-}
-
-// Creates a cut piece from a picker without leaving the tab it's on, and returns its lineKey.
-// Discovering a part you forgot to declare is exactly what happens while writing an operation or a
-// norm; making that a trip to the PATTERNS tab loses the thought.
-//
-// A name that already exists is NEVER created a second time — the existing piece's key comes back
-// instead. Two pieces sharing a name make every reference to "полочка" ambiguous to the human
-// reading the factory sheet, and the server rejects the save for the same reason.
-export function useCreatePiece(): (name: string) => string {
-  const { getValues, setValue } = useFormContext<TechCardFormData>();
-  return (name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return '';
-    const pieces = (getValues('pieces') ?? []) as { name?: string; lineKey?: string }[];
-    const existing = pieces.find(
-      (p) => normalizePieceName(p.name ?? '') === normalizePieceName(trimmed) && p.lineKey?.trim(),
-    );
-    if (existing?.lineKey) return existing.lineKey;
-    const lineKey = ulid();
-    setValue(
-      'pieces',
-      [
-        ...(pieces as unknown as Record<string, unknown>[]),
-        {
-          name: trimmed,
-          lineKey,
-          piecesPerGarment: 1,
-          grainline: '',
-          fused: false,
-          calloutNumber: 0,
-          note: '',
-          materials: [],
-        },
-      ] as unknown as TechCardFormData['pieces'],
-      { shouldDirty: true },
-    );
-    return lineKey;
-  };
 }
 
 // Phase-02 field metrics — the picker's search box and its trigger must be indistinguishable from
@@ -89,30 +43,27 @@ export function useCreatePiece(): (name: string) => string {
 const searchCls =
   'block min-h-[22px] w-full appearance-none border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize placeholder:text-textInactiveColor focus:border-textColor focus:outline-none';
 
-// The picker body: search + the card's pieces as a selectable list + a create row for a name that
-// isn't there yet. Shared by the single and multi variants so "выбрать или создать" behaves
-// identically everywhere a piece is chosen. Width and chrome belong to the popover shell — this
-// renders content only.
+// The picker body: search + the card's pieces as a selectable list. Shared by the single and multi
+// variants so выбор детали ведёт себя одинаково везде. Width and chrome belong to the popover
+// shell — this renders content only.
+//
+// ЗАВЕСТИ деталь отсюда нельзя ни в одном варианте: деталь кроя заводит только модалка
+// сопоставления DXF («↔ детали кроя» на вкладке patterns) — иначе в карточке появлялась бы деталь,
+// которой нет ни в одном чертеже.
 //
 // Экспортируется ради карточки ткани в рецепте колорвея («назначить детали»): там выбор — тот же
 // набор деталей той же карточки, и вторая реализация списка разошлась бы с этой первой же правкой
-// (поиск, отметка выбранного, «деталей ещё нет»). Создавать детали оттуда нельзя (allowCreate=false):
-// рецепт пишется UpdateColorwayRecipe, который деталь завести не может, — см. PieceSinglePicker.
+// (поиск, отметка выбранного, «деталей ещё нет»).
 export function PieceList({
   pieces,
   selected,
   onToggle,
-  allowCreate,
-  onCreate,
   multiple,
   shapeOf,
 }: {
   pieces: PieceRef[];
   selected: string[];
   onToggle: (lineKey: string) => void;
-  /** Опущено там, где деталь завести нельзя (рецепт колорвея) — список тогда только выбирает. */
-  allowCreate?: boolean;
-  onCreate?: (name: string) => void;
   multiple: boolean;
   /**
    * КОНТУР ДЕТАЛИ ИЗ ЧЕРТЕЖА — включает ВИЗУАЛЬНЫЙ режим выбора (плитки вместо строк).
@@ -130,8 +81,6 @@ export function PieceList({
   const [query, setQuery] = useState('');
   const q = normalizePieceName(query);
   const matches = q ? pieces.filter((p) => normalizePieceName(p.name).includes(q)) : pieces;
-  const exact = pieces.some((p) => normalizePieceName(p.name) === q);
-  const canCreate = !!allowCreate && !!q && !exact;
   // ПЛИТКИ ТОЛЬКО ТАМ, ГДЕ ЕСТЬ ЧТО ПОКАЗАТЬ. Разбор DXF может быть холодным (рецепт его никогда не
   // запускает сам) или на карточке может не быть ни одной связи блок→деталь — тогда `shapeOf`
   // отдаёт null на всё, и сетка выродилась бы в двадцать одинаковых пустых квадратов: хуже списка
@@ -142,27 +91,19 @@ export function PieceList({
     [shapeOf, pieces],
   );
 
-  const create = () => {
-    if (!canCreate) return;
-    onCreate?.(query.trim());
-    setQuery('');
-  };
-
   return (
     <div className='flex flex-col gap-1.5'>
       <input
         autoFocus
         className={searchCls}
-        placeholder={allowCreate ? 'найти или создать деталь' : 'найти деталь'}
+        placeholder='найти деталь'
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
-          // This picker lives inside the tech-card <form>: without preventDefault, Enter submits
-          // the whole card instead of creating the piece.
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            create();
-          }
+          // Этот пикер живёт внутри <form> тех-карты: без preventDefault Enter в поиске отправляет
+          // ВСЮ карточку. Делать Enter'у здесь больше нечего — деталь заводит только модалка
+          // сопоставления DXF, — но гасить сабмит по-прежнему обязательно.
+          if (e.key === 'Enter') e.preventDefault();
         }}
       />
       {/* The list owns the scroll, not the shell, so the search field stays pinned above it. */}
@@ -174,9 +115,11 @@ export function PieceList({
             : 'flex max-h-56 flex-col',
         )}
       >
-        {matches.length === 0 && !canCreate && (
+        {matches.length === 0 && (
           <Text size='micro' variant='label' className={visual ? 'col-span-full' : undefined}>
-            {pieces.length === 0 ? 'деталей ещё нет — введите название выше' : 'ничего не найдено'}
+            {/* Куда идти за деталью, этот попап не подсказывает намеренно: он всплывает и над
+                рецептом колорвея, где вкладки patterns под рукой нет. */}
+            {pieces.length === 0 ? 'деталей ещё нет' : 'ничего не найдено'}
           </Text>
         )}
         {matches.map((p) => {
@@ -211,9 +154,7 @@ export function PieceList({
               key={p.lineKey}
               type='button'
               aria-pressed={on}
-              title={`${p.name}${(p.perGarment ?? 1) > 1 ? ` · ×${p.perGarment} на изделие` : ''}${
-                found ? '' : ' · нет в выкройках'
-              }`}
+              title={`${p.name}${found ? '' : ' · нет в выкройках'}`}
               onClick={() => onToggle(p.lineKey)}
               className={cn(
                 'flex min-w-0 flex-col border text-left transition-colors',
@@ -221,7 +162,7 @@ export function PieceList({
                 on ? 'border-textColor' : 'border-borderColor hover:border-textColor',
               )}
             >
-              <span className='relative flex h-12 w-full items-center justify-center bg-bgColor p-1'>
+              <span className='flex h-12 w-full items-center justify-center bg-bgColor p-1'>
                 {found ? (
                   <PieceShape piece={found.piece} grainLayer='' outlineOnly />
                 ) : (
@@ -233,11 +174,6 @@ export function PieceList({
                     нет
                     <br />в выкройках
                   </Text>
-                )}
-                {(p.perGarment ?? 1) > 1 && (
-                  <span className='absolute top-0 right-0 border-b border-l border-borderColor bg-bgColor px-1 text-nano text-labelColor'>
-                    ×{p.perGarment}
-                  </span>
                 )}
               </span>
               <span
@@ -254,15 +190,6 @@ export function PieceList({
           );
         })}
       </div>
-      {canCreate && (
-        <button
-          type='button'
-          onClick={create}
-          className='border border-dashed border-borderColor px-[7px] py-[3px] text-left text-micro tracking-label text-labelColor uppercase hover:border-textColor hover:text-textColor'
-        >
-          + создать «{query.trim()}»
-        </button>
-      )}
     </div>
   );
 }
@@ -274,16 +201,12 @@ export function PieceMultiPicker({
   pieces,
   value,
   onChange,
-  onCreate,
   label,
   hint,
 }: {
   pieces: PieceRef[];
   value: string[];
   onChange: (next: string[]) => void;
-  // Omitted where pieces aren't editable from this screen (the colourway recipe edits through its
-  // own RPC and can't author a piece) — the picker then only selects.
-  onCreate?: (name: string) => string;
   label?: string;
   hint?: string;
 }) {
@@ -317,17 +240,7 @@ export function PieceMultiPicker({
           triggerProps={{ className: 'flex items-center' }}
           openElement={<Chip dashed>{chosen.length === 0 ? '+ выбрать детали' : '+ ещё'}</Chip>}
         >
-          <PieceList
-            pieces={pieces}
-            selected={value}
-            onToggle={toggle}
-            allowCreate={!!onCreate}
-            multiple
-            onCreate={(name) => {
-              const key = onCreate?.(name);
-              if (key && !value.includes(key)) onChange([...value, key]);
-            }}
-          />
+          <PieceList pieces={pieces} selected={value} onToggle={toggle} multiple />
         </GenericPopover>
       </ChipRow>
       {dangling.length > 0 && (
@@ -346,21 +259,70 @@ export function PieceMultiPicker({
 
 // Single-select piece picker — the shape a consumption norm needs: a norm is about exactly one
 // piece (1:1, unlike an operation), so this replaces the selection instead of adding to it.
-//
-// Deliberately has NO create affordance: the colourway recipe saves through UpdateColorwayRecipe,
-// which cannot author a piece — offering "+ создать" here would mint a key the save silently drops.
+/**
+ * ПИКЕР ДЕТАЛИ ЧИПОМ — для рядов, где выбранное уже показано чипами и не хватает только «добавить».
+ *
+ * Отличается от `PieceSinglePicker` ровно триггером: там поле во всю ширину, здесь пунктирный чип
+ * в одном ряду с выбранными. Список внутри тот же, с теми же силуэтами: деталь на одном экране
+ * обязана выбираться одинаково, иначе одна и та же деталь называется в двух местах по-разному.
+ */
+export function PieceAddChip({
+  pieces,
+  selected,
+  onPick,
+  shapeOf,
+  label = '＋ деталь',
+}: {
+  pieces: PieceRef[];
+  selected: string[];
+  onPick: (lineKey: string) => void;
+  shapeOf?: (lineKey: string) => FoundPiece | null;
+  label?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  if (pieces.length === 0) return null;
+  return (
+    <GenericPopover
+      open={open}
+      onOpenChange={setOpen}
+      noTail
+      className='w-64'
+      triggerProps={{
+        className:
+          'inline-flex items-center gap-1 whitespace-nowrap border border-dashed border-borderColor bg-bgColor px-[7px] py-px text-micro uppercase tracking-pill text-labelColor transition-colors hover:text-textColor focus:border-textColor focus:outline-none',
+      }}
+      openElement={<span>{label}</span>}
+    >
+      <PieceList
+        pieces={pieces}
+        selected={selected}
+        onToggle={(lineKey) => {
+          onPick(lineKey);
+          setOpen(false);
+        }}
+        multiple
+        shapeOf={shapeOf}
+      />
+    </GenericPopover>
+  );
+}
+
 export function PieceSinglePicker({
   pieces,
   value,
   onChange,
   placeholder = '— деталь —',
   disabled,
+  shapeOf,
 }: {
   pieces: PieceRef[];
   value: string;
   onChange: (lineKey: string, piece?: PieceRef) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Контур из чертежа — включает выбор ПЛИТКАМИ. См. шапку PieceList: без контуров сетка пустых
+   *  квадратов хуже списка, поэтому режим выбирается по наличию хотя бы одного силуэта. */
+  shapeOf?: (lineKey: string) => FoundPiece | null;
 }) {
   const [open, setOpen] = useState(false);
   const current = pieces.find((p) => p.lineKey === value);
@@ -406,9 +368,8 @@ export function PieceSinglePicker({
         pieces={pieces}
         selected={value ? [value] : []}
         onToggle={pick}
-        allowCreate={false}
         multiple={false}
-        onCreate={() => undefined}
+        shapeOf={shapeOf}
       />
     </GenericPopover>
   );

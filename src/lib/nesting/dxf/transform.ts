@@ -60,6 +60,41 @@ type Budget = { left: number; warned: boolean };
 
 const MAX_DEPTH = 8;
 
+// СТРУКТУРНЫЙ УЧЁТ ТИХО ПРОПУЩЕННЫХ ВСТАВОК (находка 1 второго адверсарного ревью).
+//
+// Файл может прочитаться ЦЕЛИКОМ и всё равно недосчитаться отдельных блоков: INSERT ссылается на
+// определение, которого в файле нет; вложенность глубже MAX_DEPTH; выбран бюджет инстансов. Каждый
+// такой пропуск отмечался ТОЛЬКО предупреждением (а вложенный отсутствующий блок — вообще ничем), и
+// снаружи разбор выглядел успешным. Для потребителя, который делает вывод ИЗ ОТСУТСТВИЯ блока
+// (модалка «детали кроя из DXF» → кандидаты на удаление → каскад сервера по строкам рецепта и
+// замеренным площадям), это неотличимо от «детали в чертеже больше нет», и восстанавливать потерю
+// нечем.
+//
+// Поэтому пропуск считается ЧИСЛОМ и едет наружу тем же путём, что failedFiles, — полем, а не
+// догадкой по тексту предупреждения: формулировку однажды перепишут, и защита отвалится молча.
+//
+// ЧТО СЮДА НЕ ВХОДИТ и не должно: блок, прочитанный полностью и не давший геометрии (пустое
+// определение, штамп, аннотация), и блок, чей контур не замкнулся. Это ВЫВОДЫ из прочитанного, а не
+// пропуски; записав их в неполноту, мы объявили бы неполным почти каждый реальный чертёж и запретили
+// бы удаление исчезнувших деталей навсегда.
+type SkipTally = {
+  // Сколько вставок блоков не доехало до геометрии.
+  blocks: number;
+  // Имена, о которых уже предупредили. Вложенный INSERT живёт внутри массива (columnCount ×
+  // rowCount), так что без дедупликации ОДНО отсутствующее определение даёт тысячи одинаковых строк
+  // в панели предупреждений модалки.
+  warnedMissing: Set<string>;
+};
+
+// Отсутствующее определение блока: считаем ВСЕГДА, предупреждаем ОДИН раз на имя.
+function noteMissingBlock(name: string, warnings: string[], tally: SkipTally): void {
+  tally.blocks++;
+  const key = String(name ?? '');
+  if (tally.warnedMissing.has(key)) return;
+  tally.warnedMissing.add(key);
+  warnings.push(`INSERT ссылается на отсутствующий блок «${key}»`);
+}
+
 function expandInto(
   entities: IEntity[],
   blocks: Record<string, IBlock>,
@@ -70,18 +105,26 @@ function expandInto(
   warnings: string[],
   depth: number,
   budget: Budget,
+  tally: SkipTally,
 ): void {
   for (const e of entities) {
     if (e.type === 'INSERT') {
       const ins = e as IInsertEntity;
       const block = blocks[ins.name];
-      if (!block || !block.entities) continue;
+      if (!block || !block.entities) {
+        // Раньше здесь не оставалось ВООБЩЕ НИЧЕГО — ни предупреждения, ни следа: геометрия внутри
+        // успешно прочитанного файла исчезала бесшумно.
+        noteMissingBlock(ins.name, warnings, tally);
+        continue;
+      }
       if (depth >= MAX_DEPTH) {
+        tally.blocks++;
         warnings.push(`блок «${ins.name}» вложен глубже ${MAX_DEPTH} уровней — пропущен`);
         continue;
       }
       const cols = Math.max(1, ins.columnCount || 1);
       const rows = Math.max(1, ins.rowCount || 1);
+      let placed = 0;
       for (let ci = 0; ci < cols; ci++) {
         for (let ri = 0; ri < rows; ri++) {
           if (budget.left <= 0) {
@@ -89,11 +132,15 @@ function expandInto(
               budget.warned = true;
               warnings.push(`слишком много вложенных вставок блоков (> ${MAX_INSTANCES}) — часть пропущена`);
             }
+            // Управление тем же `return`, что и раньше (бросаем и остаток сущностей этого уровня);
+            // добавлен только счёт неразвёрнутых инстансов ЭТОЙ вставки.
+            tally.blocks += cols * rows - placed;
             return;
           }
+          placed++;
           budget.left--;
           const t = insertXform(ins, block, u, ci, ri);
-          expandInto(block.entities, blocks, u, tolCm, [...transforms, t], group, warnings, depth + 1, budget);
+          expandInto(block.entities, blocks, u, tolCm, [...transforms, t], group, warnings, depth + 1, budget, tally);
         }
       }
       continue;
@@ -112,41 +159,74 @@ function expandInto(
 
 // Model space → groups. INSERTs become one group per instance (piece identity); loose
 // entities pool into a single fallback group split later by containment analysis.
+//
+// Возвращает ещё `skippedBlocks` — см. SkipTally выше: «файл прочитан» и «в файле прочитано всё»
+// это разные утверждения, и второе обязано доезжать до того, кто судит об ОТСУТСТВИИ блока.
+//
+// И `blockNames` — ИМЕНА ВСТРЕЧЕННЫХ ВСТАВОК, независимо от того, дожила ли их геометрия до контура
+// (находка 1 третьего адверсарного ревью). Между «блок встречен» и «блок стал деталью» лежит весь
+// геометрический путь — сшивка разомкнутых цепочек, порог площади, отбор внешнего контура,
+// `sanitizeLoop` (dxf/pieces.ts): любой его шаг может НЕ выдать ни одной детали по блоку, который в
+// файле есть. Для раскладки это правильный ответ («считать нечего»), а для вопроса «детали больше
+// нет в чертеже» — ложь, и цена лжи — предложенное по умолчанию удаление детали кроя вместе со
+// строками рецепта и замеренными площадями. Поэтому присутствие берётся ОТСЮДА, а геометрия —
+// оттуда, и это намеренно два разных ответа.
+//
+// Только ВЕРХНЕУРОВНЕВЫЕ вставки: имя детали — это имя блока, вставленного в модельное
+// пространство (`EntityGroup.blockName` берётся здесь же), а вложенные блоки — внутренности одной
+// детали. Записав и их, мы позволили бы служебному вложенному блоку с именем детали замаскировать
+// её настоящее исчезновение.
 export function expandGroups(
   modelEntities: IEntity[],
   blocks: Record<string, IBlock>,
   u: number,
   tolCm: number,
   warnings: string[],
-): EntityGroup[] {
+): { groups: EntityGroup[]; skippedBlocks: number; blockNames: string[] } {
   const groups: EntityGroup[] = [];
   const loose: EntityGroup = { blockName: null, chains: [] };
   const budget: Budget = { left: MAX_INSTANCES, warned: false };
+  const tally: SkipTally = { blocks: 0, warnedMissing: new Set<string>() };
+  const seenBlocks = new Set<string>();
 
   for (const e of modelEntities) {
     if (e.type === 'INSERT') {
       const ins = e as IInsertEntity;
+      // Записывается ДО всех проверок: вставка на отсутствующее определение — это тоже «имя в
+      // чертеже есть», а не «детали не стало». Ни одна ветка ниже не имеет права молча вычесть
+      // блок из набора присутствия.
+      if (ins.name) seenBlocks.add(String(ins.name));
       const block = blocks[ins.name];
       if (!block || !block.entities) {
-        warnings.push(`INSERT ссылается на отсутствующий блок «${ins.name}»`);
+        // Верхнеуровневый INSERT — это РОВНО одна деталь чертежа: пропустив его, разбор теряет
+        // деталь целиком, а модалка увидит ту же пустоту, что и от настоящего удаления блока.
+        noteMissingBlock(ins.name, warnings, tally);
         continue;
       }
       const cols = Math.max(1, ins.columnCount || 1);
       const rows = Math.max(1, ins.rowCount || 1);
-      for (let ci = 0; ci < cols; ci++) {
-        for (let ri = 0; ri < rows; ri++) {
-          if (budget.left <= 0) {
-            if (!budget.warned) {
-              budget.warned = true;
-              warnings.push(`слишком много вставок блоков (> ${MAX_INSTANCES}) — часть пропущена`);
-            }
-            break;
-          }
+      let placed = 0;
+      // Бюджет проверяется УСЛОВИЕМ цикла, а не `break` изнутри: прежний внутренний `break` выходил
+      // только из ri-цикла, внешний тут же входил снова и упирался в тот же ноль. Результат был тот
+      // же (групп не создаётся), но посчитать неразвёрнутые инстансы РОВНО один раз так нельзя —
+      // счётчик пришлось бы двоить на каждом обороте ci.
+      for (let ci = 0; ci < cols && budget.left > 0; ci++) {
+        for (let ri = 0; ri < rows && budget.left > 0; ri++) {
+          placed++;
           budget.left--;
           const group: EntityGroup = { blockName: ins.name, chains: [] };
-          expandInto(block.entities, blocks, u, tolCm, [insertXform(ins, block, u, ci, ri)], group, warnings, 1, budget);
+          expandInto(block.entities, blocks, u, tolCm, [insertXform(ins, block, u, ci, ri)], group, warnings, 1, budget, tally);
           if (group.chains.length > 0) groups.push(group);
         }
+      }
+      // Развёрнуто меньше, чем нарисовано, — остаток пропущен из-за бюджета. Предупреждение одно на
+      // файл (budget.warned), а счёт полный: `complete` смотрит на число, а не на текст.
+      if (placed < cols * rows) {
+        if (!budget.warned) {
+          budget.warned = true;
+          warnings.push(`слишком много вставок блоков (> ${MAX_INSTANCES}) — часть пропущена`);
+        }
+        tally.blocks += cols * rows - placed;
       }
       continue;
     }
@@ -156,5 +236,5 @@ export function expandGroups(
   }
 
   if (loose.chains.length > 0) groups.push(loose);
-  return groups;
+  return { groups, skippedBlocks: tally.blocks, blockNames: [...seenBlocks] };
 }

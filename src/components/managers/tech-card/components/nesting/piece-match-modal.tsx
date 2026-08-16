@@ -36,15 +36,24 @@
 // piece created here resolves for the alias that references it).
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
+import type { common_AdminColorwayRef, common_TechCardPieceAreaScope } from 'api/proto-http/admin';
 import type { PieceDTO } from 'lib/nesting/types';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DataTable } from 'ui/components/data-table';
+import { GroupLabel } from 'ui/components/group-label';
 import { Pill } from 'ui/components/pill';
+import { Row } from 'ui/components/row';
 import Text from 'ui/components/text';
 import { ulid } from 'utils/ulid';
 import { clampUtf8Bytes } from 'utils/pattern';
+import { recipeHoldersByPiece } from '../piece-recipe-hold';
+import {
+  IDENTICAL_CUT_SYMMETRY,
+  cutSymmetryCountInvalid,
+  isCutSymmetryMarked,
+} from '../piece-codes';
 import type { TechCardFormData } from '../schema';
 import {
   type FabricScope,
@@ -53,7 +62,7 @@ import {
   aliasScopeKey,
   bindingForScope,
 } from '../bom-purpose';
-import { normBlock } from './block-code';
+import { bareToken, normBlock } from './block-code';
 import { blocksMissingOnLayer, defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
 import { PieceSheet, type PieceMark } from './piece-sheet';
@@ -126,6 +135,16 @@ type BlockRow = {
   choice: string; // piece lineKey, '' = unmapped, NEW = create a piece named after the block
 };
 
+// Деталь кроя, которой в перезалитом чертеже больше нет. Собирается ниже (deleteCandidates),
+// рисуется секцией «в чертеже больше нет» — имя, исчезнувшие блоки и выбор «удалить/оставить».
+type DeleteCandidate = {
+  lineKey: string;
+  name: string;
+  // Написание блоков так, как их несёт алиас: это единственный ответ на вопрос «чего именно не
+  // стало», сам чертёж про них уже ничего не скажет.
+  blocks: string[];
+};
+
 // ИМЯ НОВОЙ ДЕТАЛИ ПО УМОЛЧАНИЮ — имя блока, а у помеченного токеном UNI его uniBase.
 //
 // Склейка по-размерных выгрузок CLO приносит ОДНУ неградуируемую деталь под двумя именами
@@ -150,12 +169,230 @@ const CREATE = '+create';
 // 255-character Cyrillic name is twice over the limit and would fail the whole card save.
 const MAX_PIECE_NAME = 255;
 
+type PieceValue = NonNullable<TechCardFormData['pieces']>[number];
+// Что известно про идентичность из разбора: сколько раз она в чертеже (максимум по файлам и
+// размерам) и общий корень uni-копий, если он есть.
+type BlockCount = { instances: number; uniBase: string };
+
+// СКОЛЬКО ЭТОЙ ДЕТАЛИ В ИЗДЕЛИИ — ОДНА ФУНКЦИЯ НА ОБА ПУТИ (заведение и пересчёт).
+//
+// Правило одно: СУММА по РАЗЛИЧНЫМ деталям чертежа, МАКСИМУМ по копиям ОДНОЙ. «PLANKA_L» и
+// «PLANKA_R» — две панели в изделии; `PCK_L_UNI_M` и `PCK_L_UNI_S` из склеенных по-размерных
+// выгрузок CLO — одна деталь, нарисованная дважды, и настил кроит её один раз.
+//
+// НАХОДКА 4 адверсарного ревью: у пересчёта (planPieceUpdates) это правило было, а путь СОЗДАНИЯ
+// сворачивал все блоки одной новой детали максимумом. Оператор, назвавший «PLANKA_L» и «PLANKA_R»
+// одним именем, получал деталь с ×1, а следующее открытие диалога молча переписывало её на ×2 —
+// то есть первое применение врало, а второе меняло данные без единой правки в чертеже. Две копии
+// одного правила разъезжаются молча, поэтому копия здесь ровно одна.
+function perGarmentFromBlocks(blocks: readonly { identity: string; instances: number }[]): number {
+  const byIdentity = new Map<string, number>();
+  for (const b of blocks) {
+    // Ключ — общий корень uni-копий, если он есть, иначе сама идентичность: этим одним ключом и
+    // отличается «две разные детали» от «двух копий одной».
+    const k = b.identity.trim().toLowerCase();
+    if (!k) continue;
+    byIdentity.set(k, Math.max(byIdentity.get(k) ?? 0, b.instances));
+  }
+  let total = 0;
+  for (const n of byIdentity.values()) total += n;
+  return total;
+}
+
+// ЕСТЬ ЛИ ЭТОТ БЛОК В ЧЕРТЕЖЕ — СЛАБАЯ форма имени, общая для обеих сторон сравнения.
+//
+// НАХОДКА 2 адверсарного ревью. Свёртка алиаса к идентичности (aliasIdentity) спрашивает ФАЙЛ, а
+// не форму имени, и это правильно: «FP_L» — левая полочка, и резать у неё «L» нельзя. Но вердикт
+// о размерном хвосте выносит `deriveBlockSizes`, а он требует у основы имени НЕ МЕНЕЕ ДВУХ
+// размерных хвостов — то есть в наборе с ОДНИМ размером не выносится вовсе. Тогда старый алиас
+// «BP_1_XS» остаётся сам собой, файл несёт «BP_1_M», идентичности не совпадают — и живая деталь
+// уходит в кандидаты на удаление вместе со строками рецепта и замерами.
+//
+// Отсюда вторая, заведомо более грубая форма: имя без последнего токена, если тот ВООБЩЕ бывает
+// размером по словарю. Она используется ТОЛЬКО чтобы признать деталь присутствующей, никогда —
+// чтобы объявить её исчезнувшей: «BP_1_XS» и «BP_1_M» сходятся на «bp_1», а «FP_L» и «FP_R» не
+// сходятся ни на чём (у «R» размера не бывает). Ложное совпадение здесь оставляет лишнюю деталь в
+// карточке — её видно и её удаляют руками; ложное расхождение уносит работу без следа.
+function sizelessStem(block: string, isSizeToken: (token: string) => boolean): string {
+  const parts = normBlock(block).split('_');
+  if (parts.length < 2) return '';
+  if (!isSizeToken(bareToken(parts[parts.length - 1]))) return '';
+  const stem = parts.slice(0, -1).join('_').trim();
+  return stem.toLowerCase();
+}
+
+// Что применение изменит у ОДНОЙ уже существующей детали. Незаполненное поле значит «не трогать»:
+// запись того, что и так стоит, — это лишний dirty на форме и лишний сдвиг дайджеста CONSTRUCTION,
+// то есть подпись, протухшая без единого изменения физического состава кроя.
+type PieceUpdate = { index: number; piecesPerGarment?: number; cutSymmetry?: string };
+
+// ЧТО ЭТОТ СКОУП БУДЕТ СВЯЗЫВАТЬ ПОСЛЕ ПРИМЕНЕНИЯ — блок (идентичность, ci) → деталь кроя.
+//
+// Считается ДО нажатия кнопки, потому что кнопка обязана называть свои исходы заранее. Порядок
+// повторяет apply() ровно: хранимая привязка → снятые связи → выбор оператора в строках. Разойдись
+// эти два прохода, и сводка обещала бы одно, а применение делало другое — а проверить это можно
+// было бы только по сохранённой карточке, то есть после.
+//
+// Детали, заводимые ЭТИМ применением, в карту не попадают: в массиве формы их ещё нет, их × и
+// разметку кладёт create-путь apply(). Здесь они только считаются — это N сводки.
+function plannedScopeBinding(
+  live: readonly PieceValue[],
+  storedByBlock: ReadonlyMap<string, string>,
+  unmapped: readonly string[],
+  rows: readonly BlockRow[],
+  draftNames: Record<string, string>,
+): { bound: Map<string, string>; created: number; reused: number } {
+  const liveKeys = new Set(
+    live.map((p) => (p.lineKey ?? '').trim().toLowerCase()).filter(Boolean) as string[],
+  );
+  const keyByName = new Map<string, string>();
+  for (const p of live) {
+    const n = p.name?.trim().toLowerCase();
+    if (n && p.lineKey?.trim()) keyByName.set(n, p.lineKey.trim());
+  }
+  const bound = new Map<string, string>();
+  for (const [ci, pieceLineKey] of storedByBlock) {
+    if (liveKeys.has(pieceLineKey.trim().toLowerCase())) bound.set(ci, pieceLineKey);
+  }
+  for (const b of unmapped) bound.delete(b);
+  const createdNames = new Set<string>();
+  let reused = 0;
+  for (const r of rows) {
+    if (!r.choice) continue;
+    const ci = r.block.toLowerCase();
+    if (r.choice !== CREATE) {
+      bound.set(ci, r.choice);
+      reused += 1;
+      continue;
+    }
+    // Напечатанное имя, уже существующее в карточке, ПРИВЯЗЫВАЕТ к той детали, а не заводит вторую
+    // с тем же именем (сервер такую пару отвергает целиком) — то же правило, что в apply().
+    const name = ((draftNames[ci] ?? '').trim() || defaultPieceName(r)).toLowerCase();
+    const existing = keyByName.get(name);
+    if (existing) {
+      bound.set(ci, existing);
+      reused += 1;
+      continue;
+    }
+    // Вторая uni-копия приходит с тем же именем по умолчанию и прицепляется к уже заводимой
+    // детали — новой деталью она не считается, иначе сводка обещала бы две там, где будет одна.
+    if (createdNames.has(name)) continue;
+    createdNames.add(name);
+  }
+  return { bound, created: createdNames.size, reused };
+}
+
+// ПЕРЕСЧЁТ «× НА ИЗДЕЛИЕ» И АВТОРАЗМЕТКА «КАК КРОИТСЯ» у деталей, привязанных к этому скоупу.
+// Модалка — единственный автор обоих полей: редакторы у детали убираются, и число, которое
+// когда-то правили руками, теперь целиком читается из чертежа.
+//
+// × = СУММА по РАЗЛИЧНЫМ деталям чертежа: «PLANKA_L» и «PLANKA_R», привязанные к одной детали
+// кроя, — это две панели в изделии. Но КОПИИ одной детали складывать нельзя: склейка по-размерных
+// выгрузок CLO приносит одну неградуируемую деталь под двумя именами (`PCK_L_UNI_M` и
+// `PCK_L_UNI_S`, общий uniBase), а настил кроит её ОДИН раз. Поэтому копии сворачиваются
+// максимумом — тем же правилом, каким create-путь apply() сводит их при заведении. Разойдись эти
+// два места, и повторное открытие модалки перебивало бы × у детали, которую она сама только что
+// завела, без единой правки в файлах.
+//
+// Идентичность, которой в разборе нет, не вносит НИЧЕГО, а деталь, у которой не нашлось ни одной,
+// пропускается целиком: ноль на изделие — это не «пересчитали», это стёрли. Этим же условием
+// закрыт кандидат на удаление, которого оператор оставил «оставить»: его блоков в чертеже нет, и
+// утверждать по такому чертежу «режется как нарисовано» было бы выдумыванием факта — ровно тем, от
+// которого бережёт правило про явную разметку ниже.
+//
+// НАХОДКА 2 второго адверсарного ревью — `complete`. По НЕПОЛНОМУ разбору × и разметка у УЖЕ
+// СУЩЕСТВУЮЩИХ деталей не трогаются вовсе. Раньше неполнота запрещала только удаление, а пересчёт
+// продолжал считать по тому, что прочиталось: блоки одной детали законно лежат в двух файлах
+// (верх + подкладка одного назначения, две по-размерных выгрузки), и потеря одного листа занижала
+// «× на изделие» — а вслед за числом менялась и проставляемая симметрия (нечётное количество
+// объявляет зеркальную пару невозможной и сбрасывает её в «одинаковые копии»). «Этой детали в
+// изделии столько-то» — утверждение про ПОЛНЫЙ набор, и на неполном оно не выносится. Редакторов
+// обоих полей в карточке не осталось, так что заниженное число оператору исправить нечем.
+//
+// Заведение новых деталей и сопоставление при этом продолжают работать: они утверждают про то, что
+// В файле ЕСТЬ, а не про то, сколько его всего.
+function planPieceUpdates(
+  live: readonly PieceValue[],
+  bound: ReadonlyMap<string, string>,
+  blockCounts: ReadonlyMap<string, BlockCount>,
+  complete: boolean,
+): { updates: PieceUpdate[]; unchanged: number } {
+  const blocksByPiece = new Map<string, string[]>();
+  for (const [ci, pieceLineKey] of bound) {
+    const k = pieceLineKey.trim().toLowerCase();
+    if (!k) continue;
+    const list = blocksByPiece.get(k) ?? [];
+    list.push(ci);
+    blocksByPiece.set(k, list);
+  }
+  const updates: PieceUpdate[] = [];
+  let unchanged = 0;
+  live.forEach((p, index) => {
+    const cis = blocksByPiece.get((p.lineKey ?? '').trim().toLowerCase());
+    if (!cis || cis.length === 0) return; // деталь не этой ткани — модалка про неё не знает ничего
+    // Набор блоков неполон — считать «сколько этой детали в изделии» не по чему (см. заголовок).
+    // Деталь идёт в «без изменений», а не пропускается молча: сводка обязана показать, что модалка
+    // её ВИДЕЛА и не тронула, иначе ноль в «обновить ×» читается как «диалог ничего не заметил».
+    if (!complete) {
+      unchanged += 1;
+      return;
+    }
+    // Правило считает perGarmentFromBlocks — та же функция, которой считает путь СОЗДАНИЯ в
+    // apply(). Здесь остаётся только достать из разбора то, что она складывает.
+    const total = perGarmentFromBlocks(
+      cis.flatMap((ci) => {
+        const found = blockCounts.get(ci);
+        // Пустой (или пробельный) uniBase — это «копий нет», а не ключ: подставляется сама
+        // идентичность, иначе блок выпал бы из счёта молча.
+        return found ? [{ identity: found.uniBase.trim() || ci, instances: found.instances }] : [];
+      }),
+    );
+    if (total <= 0) {
+      unchanged += 1;
+      return;
+    }
+    const update: PieceUpdate = { index };
+    if ((p.piecesPerGarment ?? 0) !== total) update.piecesPerGarment = total;
+    const current = (p.cutSymmetry ?? '').trim();
+    if (!isCutSymmetryMarked(current)) {
+      // Не размечено — значит никто не отвечал, а чертёж отвечает: он несёт КАЖДЫЙ контур, и
+      // деталь режется как нарисована. Молчание здесь не нейтрально — оно гасит выводы бэка
+      // (клетка покрытия настила становится UNKNOWN, проверки зеркального разворота и перекроя
+      // перестают судить), поэтому ответ ставится, а не оставляется на потом.
+      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
+    } else if (cutSymmetryCountInvalid(current, total)) {
+      // Единственное исключение к «явную разметку не трогаем»: новое количество делает хранимую
+      // зеркальную пару невозможной (нечётное или < 2), и сохранение ВСЕЙ карточки упёрлось бы в
+      // серверную проверку и двухколоночный CHECK `chk_tcp_mirrored_needs_even_count`.
+      //
+      // Ставится сразу IDENTICAL, а НЕ UNKNOWN. Чертёж авторитетнее пометки ровно тогда, когда
+      // ПРЯМО ей противоречит: зеркальная пара из нечётного числа контуров невозможна, а сам
+      // чертёж несёт каждый контур отдельно — значит деталь режется как нарисована. И это же
+      // делает результат УСТОЙЧИВЫМ (находка 3 адверсарного ревью): UNKNOWN здесь читался
+      // следующим проходом как «не размечено», ветка выше ставила ему IDENTICAL — и повторное
+      // применение БЕЗ единой правки в чертеже меняло данные и роняло подписи. Теперь второй
+      // проход не меняет ничего: cutSymmetryCountInvalid у IDENTICAL всегда false.
+      update.cutSymmetry = IDENTICAL_CUT_SYMMETRY;
+    }
+    // Явные «зеркальные пары» и «со сгибом», которым новое количество не противоречит, остаются
+    // как есть: человек утверждал факт, и чертёж ему не возражает.
+    if (update.piecesPerGarment === undefined && update.cutSymmetry === undefined) {
+      unchanged += 1;
+      return;
+    }
+    updates.push(update);
+  });
+  return { updates, unchanged };
+}
+
 export function PieceMatchModal({
   files,
   scope,
   fabricName,
   scopeLabelByKey,
   sizeLabel,
+  colorways,
+  pieceAreaScopes,
   onClose,
 }: {
   files: NestingFile[] | null; // null = closed
@@ -168,6 +405,12 @@ export function PieceMatchModal({
   // Ключи строк тоже есть в карте: подсказка может прийти с алиаса, лежащего ещё на строке.
   scopeLabelByKey?: Map<string, string>;
   sizeLabel?: string;
+  // ЧТО ДЕРЖИТСЯ НА ДЕТАЛЯХ — читается с СЕРВЕРА, а не из формы, и это не оплошность: ни строк
+  // рецепта колорвея, ни замеренных площадей в форме карточки нет вовсе. Рецепт правится своим RPC,
+  // площади пишет SaveTechCardPieceAreas — а удаление детали уносит и то, и другое (сервер чистит
+  // обе таблицы в транзакции сохранения карточки). Показать состав потерь можно только отсюда.
+  colorways?: readonly common_AdminColorwayRef[];
+  pieceAreaScopes?: readonly common_TechCardPieceAreaScope[];
   onClose: () => void;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
@@ -192,6 +435,12 @@ export function PieceMatchModal({
   const aliases = (useWatch({ control, name: 'pieceDxfAliases' }) ??
     []) as TechCardFormData['pieceDxfAliases'];
   const { parse } = useNesting(files);
+  // РАЗБОР ПОЛОН — одно выражение на весь файл. Полнота (файлы скачаны и прочитаны ВСЕ, ни один блок
+  // внутри них не пропущен) решает судьбу ДВУХ исходов сразу: предложений об удалении (находка 1
+  // первого ревью) и пересчёта «× на изделие» с разметкой кроя (находка 2 второго). Собирать это
+  // условие заново в каждом месте нельзя — однажды соберут не полностью, и это будет молчаливая
+  // потеря данных оператора, которых он не сможет ни увидеть, ни исправить.
+  const parseComplete = parse.phase === 'ready' && parse.complete;
   // One DXF carries the whole grade, so the size lives in the block name and has to be split off
   // before anything else: the piece «BP_1» exists once for the style, not once per size.
   const dictTokens = useDictionarySizeTokens();
@@ -246,6 +495,22 @@ export function PieceMatchModal({
   // Размеры, которые есть в файле, но не заведены в карточке. Пока их там нет, хвост у таких
   // блоков не отрезается — и одна деталь двоится на строку в каждом непризнанном размере.
   const sizeById = useSizeNames();
+  // Сколько операций сборки ссылается на деталь. Применение снимает эти ссылки САМО — и раньше
+  // делало это молча, а операция, оставшаяся без детали, это потерянная работа технолога: он
+  // расставлял их по деталям вручную. Число обязано стоять в составе потерь рядом с рецептом.
+  const operations = (useWatch({ control, name: 'operations' }) ??
+    []) as TechCardFormData['operations'];
+  const opsByPiece = useMemo(() => {
+    const out = new Map<string, number>();
+    for (const o of operations ?? []) {
+      for (const k of o?.inputKeys ?? []) {
+        const key = (k ?? '').trim().toLowerCase();
+        if (!key) continue;
+        out.set(key, (out.get(key) ?? 0) + 1);
+      }
+    }
+    return out;
+  }, [operations]);
   const cardSizeIds = (useWatch({ control, name: 'sizeIds' }) ?? []) as number[];
   const orderSizes = useSizeOrdering();
   const missingSizes = useMemo(
@@ -527,6 +792,219 @@ export function PieceMatchModal({
   }, [mineByBlock, mineSpelling, pieceOptions]);
   const toUnmap = unmapped.length;
 
+  // ── исчезнувшие детали ────────────────────────────────────────────────────────────────
+  // ЧТО РАЗБОР ЗНАЕТ ПРИСУТСТВУЮЩИМ: по всем файлам скоупа и по ВСЕМ слоям, а не по контурному.
+  // Слой выбирается эвристикой и переключается руками (layerOpts выше), и он отвечает на вопрос
+  // «каким контуром нарисована деталь», а не «есть ли она в файле». Спроси мы про существование
+  // блока у contourPieces — один неверно выбранный слой объявил бы исчезнувшими ВСЕ детали ткани
+  // и предложил вырезать карточку.
+  //
+  // Каждая идентичность кладётся ДВАЖДЫ: сама собой и своей слабой формой без размерного хвоста
+  // (sizelessStem) — см. находку 2 у этой функции. Обе стороны сравнения считаются одним и тем же
+  // правилом, иначе набор с одним размером («BP_1_M») расходится со старым алиасом («BP_1_XS») и
+  // объявляет живую деталь исчезнувшей. Отсюда и имя: это набор КЛЮЧЕЙ ПРИСУТСТВИЯ, а не набор
+  // идентичностей — спрашивать у него «как называется деталь» нельзя.
+  //
+  // НАХОДКА 1 третьего адверсарного ревью — ИСТОЧНИК. Набор строится по ВСТРЕЧЕННЫМ ВСТАВКАМ
+  // (parse.blockNames), а не только по построенным контурам. Между блоком и деталью лежит вся
+  // геометрия — сшивка разомкнутых цепочек, порог MIN_PIECE_AREA_CM2, отбор внешнего контура,
+  // `sanitizeLoop` (lib/nesting/dxf/pieces.ts:184-186), — и любой её шаг законно возвращает по блоку
+  // НОЛЬ контуров: тонкая деталь, кривая, которую не удалось замкнуть, самопересечение, которое
+  // клиппер не вычистил. Для раскладки это верный ответ («класть нечего»), а вопрос здесь другой:
+  // «есть ли такой блок в чертеже». Блок, который в файле есть, но чью геометрию мы не смогли
+  // использовать, — это «не смогли прочитать», а не «его не стало», и разница между этими двумя
+  // ответами равна удалению детали кроя со строками рецепта колорвеев и замеренными площадями.
+  //
+  // Контуры при этом остаются вторым источником, а не заменяются: их идентичности уже свёрнуты
+  // вердиктом по размерам (codeById), и терять эту свёртку нельзя.
+  const parsedBlocks = useMemo(() => (parse.phase === 'ready' ? parse.blockNames : []), [parse]);
+  const parsedPresence = useMemo(() => {
+    const s = new Set<string>();
+    const isSizeToken = (t: string) => dictTokens.has(t);
+    // Один ключ и его слабая форма — тем же правилом, что и на стороне алиаса (см. sizelessStem).
+    const add = (name: string) => {
+      const ident = normBlock(name);
+      if (!ident) return;
+      s.add(ident.toLowerCase());
+      const stem = sizelessStem(ident, isSizeToken);
+      if (stem) s.add(stem);
+    };
+    for (const p of allPieces) add(split.codeById.get(p.id)?.identity ?? p.blockName ?? '');
+    for (const b of parsedBlocks) {
+      // Сырое имя из файла И его свёртка к идентичности: блок, не давший контура, в вердикт по
+      // размерам не попал вовсе (тот считается по разобранным деталям), поэтому «BP_9_M» обязано
+      // лечь и как есть, и как «BP_9», иначе старый алиас в другом написании с ним не сойдётся.
+      add(b);
+      add(identityOf(b));
+    }
+    return s;
+  }, [allPieces, parsedBlocks, split, dictTokens]);
+
+  // Перезалитый в скоуп чертёж БЕЗ блока — это заявление «такой детали в крое больше нет», и до
+  // сих пор единственным ответом на него было ручное удаление на вкладке деталей, которого никто
+  // не делал: деталь оставалась в карточке, в операциях и в кат-листе как призрак.
+  //
+  // Три условия, каждое отсекает свой способ снести чужое:
+  //   (а) деталь привязана В ЭТОМ скоупе — иначе разговор вообще не про этот чертёж;
+  //   (б) у неё нет алиасов ни в одном ДРУГОМ скоупе: одна деталь кроя законно кроится из двух
+  //       полотен (верх + дублерин), и файл верха про второе ничего не знает;
+  //   (в) НИ ОДИН её блок не найден в разборе — деталь, привязанная к нескольким блокам (две
+  //       uni-копии из склеенных по-размерных выгрузок), уходит, только когда исчезли ВСЕ.
+  // Сравнение идёт по идентичности и теми же хелперами, что на записи алиасов (identityOf →
+  // normBlock → ci): на сырых именах первый же старый алиас «BP_1_XS» разошёлся бы с файлом,
+  // где лежит «BP_1», и деталь с живой связью попала бы под нож.
+  //
+  // Читается СЫРОЙ набор алиасов, а не mineByBlock: тот сворачивает спор двух алиасов на одного
+  // победителя, и проигравшая деталь — тоже исчезнувшая — молча осталась бы в карточке.
+  //
+  // НАХОДКА 1 адверсарного ревью: раньше здесь стояла оговорка «цена ошибки ограничена — лист,
+  // который не скачался, даёт предупреждение разбора», и этого было мало. Не докачавшийся лист
+  // отдаёт `ready` с УМЕНЬШЕННЫМ набором блоков, его детали попадают сюда неотличимо от настоящих
+  // с дефолтом «удалить», а красный advisory загорается только при потере половины ткани. Одно
+  // применение + сохранение карточки — и деталей, их строк рецепта и замеров площадей нет, и
+  // восстановить нечем. Поэтому по НЕПОЛНОМУ разбору предложений об удалении не бывает вовсе:
+  // отсутствие блока в неполном наборе не значит ничего.
+  const deleteCandidates = useMemo<DeleteCandidate[]>(() => {
+    // Пока разбор не закончился, блоков нет НИ ОДНОГО — и «исчезли все» было бы правдой про
+    // каждую привязанную деталь ткани.
+    if (parse.phase !== 'ready') return [];
+    // Разобрано не всё — утверждать «блока в чертеже больше нет» не по чему. Признак структурный
+    // (use-nesting: filesParsed/filesTotal + blocksSkipped), а не догадка по тексту предупреждения:
+    // формулировку однажды перепишут, и защита отвалится молча. Заведение деталей и сопоставление
+    // при этом продолжают работать — они утверждают про то, что В файле ЕСТЬ, а не про то, чего в
+    // нём нет; пересчёт × на неполном наборе тоже выключен, но по своей причине — см. находку 2 у
+    // planPieceUpdates.
+    if (!parseComplete) return [];
+    const mine = new Map<string, string[]>(); // деталь (ci) → её блоки в этом скоупе
+    const elsewhere = new Set<string>(); // деталь (ci), привязанная ещё и к другой ткани
+    for (const a of aliases ?? []) {
+      const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
+      if (!pk) continue;
+      if (!aliasInScope(a, scope)) {
+        elsewhere.add(pk);
+        continue;
+      }
+      const ident = identityOf(a.blockName ?? '');
+      if (!ident) continue;
+      const list = mine.get(pk) ?? [];
+      if (!list.some((b) => b.toLowerCase() === ident.toLowerCase())) list.push(ident);
+      mine.set(pk, list);
+    }
+    // Деталь, на которую оператор ПРЯМО СЕЙЧАС вешает блок, исчезнувшей не является, даже если
+    // её прежний блок из файла пропал: это переименование блока в CAD. Удали её здесь — и apply
+    // запишет алиас на деталь, которой в `pieces` уже нет, а сервер ответит not_found и откажет
+    // в сохранении ВСЕЙ карты.
+    const staged = new Set(
+      rows.filter((r) => r.choice && r.choice !== CREATE).map((r) => r.choice.toLowerCase()),
+    );
+    const out: DeleteCandidate[] = [];
+    for (const p of pieceOptions) {
+      const pk = p.lineKey.toLowerCase();
+      const blocks = mine.get(pk);
+      if (!blocks || blocks.length === 0) continue;
+      if (elsewhere.has(pk) || staged.has(pk)) continue;
+      // Присутствие проверяется в ОБЕ стороны одной нормализацией (находка 2): точное совпадение
+      // идентичности ИЛИ совпадение слабых форм без размерного хвоста. Не свернулось однозначно —
+      // значит НЕ кандидат: сомнение всегда в пользу сохранения детали.
+      if (blocks.some((b) => parsedPresence.has(b.toLowerCase()))) continue;
+      if (
+        blocks.some((b) => {
+          const stem = sizelessStem(b, (t) => dictTokens.has(t));
+          return !!stem && parsedPresence.has(stem);
+        })
+      )
+        continue;
+      out.push({ lineKey: p.lineKey, name: p.name, blocks });
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+    return out;
+  }, [parse, parseComplete, aliases, scope, split, pieceOptions, parsedPresence, rows, dictTokens]);
+
+  // Ответ по каждому кандидату. Дефолт — «удалить», и он НЕ материализуется в карту: пустая
+  // карта уже значит «удалить всех», поэтому новый кандидат (оператор переключил список файлов)
+  // не требует ни эффекта-засева, ни синхронизации, которая молча теряла бы выбор. Переключатель
+  // секции пишет сюда `setDeleteChoice((prev) => new Map(prev).set(lineKey, v))`.
+  const [deleteChoice, setDeleteChoice] = useState<Map<string, 'delete' | 'keep'>>(new Map());
+  const deleteDecision = (lineKey: string): 'delete' | 'keep' =>
+    deleteChoice.get(lineKey) ?? 'delete';
+  // То, что реально применит apply(), — и то, по чему считается сводка исходов.
+  const toDelete = useMemo(
+    () => deleteCandidates.filter((c) => deleteDecision(c.lineKey) === 'delete'),
+    [deleteCandidates, deleteChoice],
+  );
+
+  // ── четыре исхода одного нажатия ──────────────────────────────────────────────────────
+  // Диалог давно перестал быть только сопоставлением: он заводит детали, удаляет исчезнувшие,
+  // пересчитывает число на изделие и размечает крой — и всё это уходит ОДНОЙ кнопкой. Значит
+  // кнопка обязана называть свои исходы до нажатия, а не после сохранения карточки.
+  //
+  // «Без изменений» — тоже исход, и он здесь не для симметрии: это единственное видимое
+  // доказательство, что повторное применение по тем же файлам ничего не переписывает. Молчание на
+  // его месте читалось бы как «диалог ничего не заметил».
+  const outcome = useMemo(() => {
+    const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+    const live = ((pieces ?? []) as NonNullable<TechCardFormData['pieces']>).filter(
+      (p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()),
+    );
+    const { bound, created, reused } = plannedScopeBinding(
+      live,
+      mineByBlock,
+      unmapped,
+      rows,
+      draftNames,
+    );
+    const { updates, unchanged } = planPieceUpdates(live, bound, blockCounts, parseComplete);
+    return {
+      created,
+      reused,
+      removed: toDelete.length,
+      updated: updates.length,
+      unchanged,
+    };
+  }, [pieces, toDelete, mineByBlock, unmapped, rows, draftNames, blockCounts, parseComplete]);
+
+  // ── состав потерь ─────────────────────────────────────────────────────────────────────
+  // Строки рецепта, которые держатся на детали. Правило одно на два экрана (панель детали и эта
+  // модалка) и живёт в piece-recipe-hold.ts — вместе с оговоркой о НЕПОЛНОТЕ проекции: архивные
+  // колорвеи чтение карточки не отдаёт, а их строки уедут с деталью так же. Поэтому счёт ниже
+  // подписан «в колорвеях карточки», а не выдаётся за полный.
+  const recipeHold = useMemo(() => recipeHoldersByPiece(colorways), [colorways]);
+  // Замеренные площади детали — по строке на размер. Считаются по ВСЕМ скоупам, а не по текущей
+  // ткани: сервер удаляет их одним `piece_line_key IN (…)` без оглядки на скоуп, в той же
+  // транзакции, что и саму деталь (techcard/materials.go). Считать по одному скоупу значило бы
+  // назвать оператору меньшее число, чем он потеряет.
+  const areaRowsByPiece = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of pieceAreaScopes ?? []) {
+      for (const a of s.areas ?? []) {
+        const k = (a.pieceLineKey ?? '').trim().toLowerCase();
+        if (!k) continue;
+        m.set(k, (m.get(k) ?? 0) + 1);
+      }
+    }
+    return m;
+  }, [pieceAreaScopes]);
+
+  // Сколько деталей вообще привязано к этой ткани — знаменатель предупреждения о массовом
+  // исчезновении. Считается по тем же СЫРЫМ алиасам, что и кандидаты, и только по живым деталям:
+  // висячий алиас (деталь уже удалена) нигде не показывается и в знаменателе занижал бы долю.
+  const scopeBoundPieces = useMemo(() => {
+    const s = new Set<string>();
+    for (const a of aliases ?? []) {
+      if (!aliasInScope(a, scope)) continue;
+      const pk = (a.pieceLineKey ?? '').trim().toLowerCase();
+      if (pk && livePieceKeys.has(pk)) s.add(pk);
+    }
+    return s.size;
+  }, [aliases, scope, livePieceKeys]);
+  // Исчезла половина ткани и больше. Правка лекала так не выглядит — так выглядит файл, залитый не
+  // в тот слот. Случай НЕ ДОКАЧАВШЕГОСЯ листа этим порогом больше не прикрывается и прикрываться не
+  // должен: по неполному разбору кандидатов не бывает вовсе (находка 1), а половина — слишком
+  // грубое сито, чтобы ловить потерю одного листа из пяти. Здесь остаётся ПРЕДУПРЕЖДЕНИЕ, а не
+  // запрет: массовая замена лекал законна, и запретить её значило бы отнять единственный способ её
+  // применить, оставив карточку с призраками навсегда.
+  const massVanish = deleteCandidates.length > 0 && deleteCandidates.length * 2 >= scopeBoundPieces;
+
   // ── the sheet ─────────────────────────────────────────────────────────────────────────
   // One entry per parsed FILE, in parse order. Keyed by fileIndex rather than by `source`:
   // two rows of one fabric+size legitimately carry the same display name (two revisions
@@ -704,10 +1182,32 @@ export function PieceMatchModal({
       const created: NonNullable<TechCardFormData['pieces']> = [];
       // Read at commit time, not from the render-time snapshot: the operator can have added or
       // renamed a piece in the table behind this dialog while it was open.
-      const live = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
+      const all = (getValues('pieces') ?? []) as NonNullable<TechCardFormData['pieces']>;
+      // Детали, которых в чертеже больше нет и которые оператор не оставил вручную. Всё
+      // дальнейшее считается уже БЕЗ них: имена (иначе новый блок с тем же именем привязался бы
+      // к уходящей детали), набор живых ключей (по нему отсеиваются её алиасы) и сама запись
+      // массива. Каскад на сервере (строки рецепта, замеренные площади) сработает при
+      // СОХРАНЕНИИ карточки, не здесь.
+      const dropped = new Set(toDelete.map((c) => c.lineKey.trim().toLowerCase()));
+      const live = all.filter((p) => !dropped.has((p.lineKey ?? '').trim().toLowerCase()));
+      // Ссылки на деталь снимаются ДО того, как она исчезнет, — тот же контракт, что у
+      // pieces-tab.removePiece: операция, всё ещё называющая удалённую деталь, роняет сохранение
+      // на сервере (operations[N].piece_line_key: no cut-piece "…") и откатывает всю транзакцию —
+      // по ключу, которого оператор не видит, в строке, которую он не трогал. Выноски при этом
+      // НЕ трогаются: выноска — номер на эскизе, она переживает деталь.
+      if (dropped.size > 0) {
+        const operations = (getValues('operations') ?? []) as TechCardFormData['operations'];
+        (operations ?? []).forEach((o, oi) => {
+          const keys = (o.inputKeys ?? []).filter(Boolean);
+          const kept = keys.filter((k) => !dropped.has(k.trim().toLowerCase()));
+          if (kept.length === keys.length) return;
+          setValue(`operations.${oi}.inputKeys`, kept, { shouldDirty: true });
+        });
+      }
       // Two pieces sharing a name make every reference to «полочка» ambiguous on the factory
-      // sheet, and the server rejects the save for it (useCreatePiece keeps the same rule). So a
-      // typed name that already exists REUSES that piece instead of minting a second one.
+      // sheet, and the server rejects the save for it — and since this dialog became the only
+      // place a cut piece is created, that rule now has exactly one keeper. So a typed name that
+      // already exists REUSES that piece instead of minting a second one.
       const keyByName = new Map<string, string>();
       for (const p of live) {
         const n = p.name?.trim().toLowerCase();
@@ -727,11 +1227,18 @@ export function PieceMatchModal({
         string,
         { bomLineKey: string; fabricPurpose: string; blockName: string; pieceLineKey: string }
       >();
+      // Итоговая привязка ЭТОГО скоупа — блок (ci) → деталь, — собираемая там же, где пишется
+      // alias-набор. По ней ниже пересчитывается «× на изделие» и ставится разметка кроя: считать
+      // их по параллельно собранной догадке значило бы завести второй ответ на вопрос «что связано
+      // с чем», а расходятся такие пары всегда молча.
+      const boundHere = new Map<string, string>();
       // Everything this dialog writes is filed under THIS scope's binding — назначение when the card
       // has been sorted, the line when it has not, with the compatibility line riding along only
       // when the назначение owns exactly one. That is also what MIGRATES a card sorted a moment ago:
       // its line-scoped aliases are re-filed here, in one save, without anyone re-doing the work.
       const bind = bindingForScope(scope);
+      // Считается от списка ПОСЛЕ удаления — этим же набором ниже отсеиваются алиасы уходящих
+      // деталей, и переносящему проходу не нужно знать про удаление ничего отдельно.
       const liveKeys = new Set(
         live.map((p) => p.lineKey?.trim().toLowerCase()).filter(Boolean) as string[],
       );
@@ -762,6 +1269,11 @@ export function PieceMatchModal({
       // collapsed any conflicting pair onto the winner the operator picked, so this loop writes
       // exactly one row per block — which is what the UNIQUE index is asking for.
       for (const [ci, pieceLineKey] of mineByBlock) {
+        // Деталь могла уйти этим же применением: её блоков в чертеже больше нет. Проход выше
+        // сюда не дотягивается (он про ЧУЖИЕ скоупы), а алиас на несуществующую деталь сервер
+        // не разрешит — piece_line_key: not_found, и падает сохранение всей карты.
+        if (!liveKeys.has(pieceLineKey.trim().toLowerCase())) continue;
+        boundHere.set(ci, pieceLineKey);
         byKey.set(aliasKey(scope.key, mineSpelling.get(ci) ?? ci), {
           ...bind,
           blockName: mineSpelling.get(ci) ?? ci,
@@ -770,7 +1282,15 @@ export function PieceMatchModal({
       }
       // Unmapping is a first-class action: a wrong mapping assigns the wrong cloth to a piece on
       // the cutting floor, and before this the only exit was deleting the target piece.
-      for (const b of unmapped) byKey.delete(aliasKey(scope.key, b));
+      for (const b of unmapped) {
+        byKey.delete(aliasKey(scope.key, b));
+        boundHere.delete(b);
+      }
+      // Блоки, стоящие за КАЖДОЙ заводимой деталью: её ключ → идентичности с числом экземпляров.
+      // Копится, а не считается на месте, потому что второй блок под тем же именем приходит позже
+      // по циклу, а правило (сумма по РАЗЛИЧНЫМ, максимум по копиям ОДНОЙ) отвечает только на
+      // ПОЛНОМ наборе — см. perGarmentFromBlocks и находку 4.
+      const createdBlocks = new Map<string, { identity: string; instances: number }[]>();
       for (const r of rows) {
         if (!r.choice) continue;
         let pieceLineKey = r.choice;
@@ -779,14 +1299,10 @@ export function PieceMatchModal({
           const name = typed || defaultPieceName(r);
           const existing = keyByName.get(name.toLowerCase());
           if (existing) {
-            // The operator typed the name of a piece that already exists — bind to it.
+            // The operator typed the name of a piece that already exists — bind to it. Число на
+            // изделие досчитается ниже: у ЖИВОЙ детали его ставит planPieceUpdates по boundHere,
+            // у заводимой этим же применением — фикс-ап по createdBlocks.
             pieceLineKey = existing;
-            // Вторая копия uni-детали приходит сюда же (общий uniBase дал общее имя). Количество
-            // на изделие берётся МАКСИМУМОМ по её блокам — тем же правилом, каким выше берётся
-            // максимум по файлам: копии одной детали обязаны быть одинаковыми, а если экспорт
-            // соврал, занизить крой хуже, чем завысить. Правится это на вкладке деталей.
-            const mine = created.find((c) => c.lineKey === existing);
-            if (mine) mine.piecesPerGarment = Math.max(mine.piecesPerGarment ?? 1, r.instances);
           } else {
             pieceLineKey = ulid();
             keyByName.set(name.toLowerCase(), pieceLineKey);
@@ -794,8 +1310,17 @@ export function PieceMatchModal({
               lineKey: pieceLineKey,
               name,
               // How many times the block appears in the file IS how many of that piece a garment
-              // takes — the operator can still correct it on the pieces tab.
+              // takes — the operator can still correct it on the pieces tab. Значение
+              // ПРЕДВАРИТЕЛЬНОЕ: под этим же именем может прийти ещё блок, и итог считает фикс-ап
+              // по createdBlocks сразу после цикла.
               piecesPerGarment: r.instances,
+              // РЕЖЕТСЯ КАК НАРИСОВАНА. Деталь заводится ИЗ чертежа, а чертёж несёт КАЖДЫЙ контур:
+              // ничего здесь не зеркалится неявно, и n панелей — это n одинаковых копий. Оставить
+              // поле неразмеченным значило бы отдать деталь бэку немым: клетка покрытия настила
+              // становится UNKNOWN, проверки зеркального разворота и перекроя перестают судить, а
+              // на бумаге голая «2» и так читается как «две одинаковые» — то есть молчание всё
+              // равно утверждает этот же ответ, просто не давая его проверить.
+              cutSymmetry: IDENTICAL_CUT_SYMMETRY,
               grainline: '',
               fused: false,
               calloutNumber: 0,
@@ -803,17 +1328,62 @@ export function PieceMatchModal({
               materials: [],
             });
           }
+          // Идентичность блока — тем же ключом, что и в пересчёте: общий корень uni-копий, если он
+          // есть, иначе сама идентичность.
+          const list = createdBlocks.get(pieceLineKey) ?? [];
+          list.push({ identity: r.uniBase.trim() || r.block, instances: r.instances });
+          createdBlocks.set(pieceLineKey, list);
         }
+        boundHere.set(r.block.toLowerCase(), pieceLineKey);
         byKey.set(aliasKey(scope.key, r.block), {
           ...bind,
           blockName: r.block,
           pieceLineKey,
         });
       }
-      if (created.length > 0) {
+      // ЧИСЛО НА ИЗДЕЛИЕ У ЗАВОДИМЫХ ДЕТАЛЕЙ — на полном наборе их блоков и ТЕМ ЖЕ правилом, что
+      // и пересчёт ниже (находка 4). Две РАЗЛИЧНЫЕ детали чертежа под одним именем («PLANKA_L» и
+      // «PLANKA_R») дают ×2, две копии ОДНОЙ (`PCK_L_UNI_M` и `PCK_L_UNI_S` из склеенных
+      // по-размерных выгрузок) — ×1. Иначе первое применение заводило деталь с ×1, а следующее
+      // открытие диалога молча переписывало её на ×2, без единой правки в чертеже.
+      for (const c of created) {
+        const blocks = createdBlocks.get(c.lineKey ?? '');
+        if (!blocks) continue;
+        const total = perGarmentFromBlocks(blocks);
+        if (total > 0) c.piecesPerGarment = total;
+      }
+      // Массив пишется, когда состав деталей изменился хоть в одну сторону: заведение новых или
+      // уход исчезнувших. Без второго условия «применить» с одними удалениями не писало бы
+      // ничего, и диалог отчитался бы об удалении, которого не было.
+      if (created.length > 0 || live.length !== all.length) {
         setValue('pieces', [...live, ...created] as TechCardFormData['pieces'], {
           shouldDirty: true,
         });
+      }
+      // ПЕРЕСЧЁТ × И РАЗМЕТКА КРОЯ — точечными записями по вложенному пути, как renamePiece выше, а
+      // не через корень массива и не через useFieldArray.update: корень выше уже записан, второй
+      // полный write шёл бы от устаревшего снимка и стирал правку, сделанную в таблице за модалкой.
+      //
+      // Индексы — по `live`: он сохраняет порядок исходного массива, а в записанном выше
+      // `[...live, ...created]` живая деталь стоит ровно на своём месте. Заводимые детали сюда не
+      // попадают по построению (их ключей в `live` нет) — их × ставит create-путь выше.
+      //
+      // Сдвиг дайджеста CONSTRUCTION и протухшая подпись здесь ОЖИДАЕМЫ и правильны: физический
+      // состав кроя изменился. То же с подписью костинга и отпечатком набора раскладок — «набор
+      // изменился» и есть правда. Гасить этот сигнал значило бы утвердить крой, которого никто не
+      // видел.
+      // Тот же `parseComplete`, что и в сводке выше: сводка обязана называть ровно то, что сделает
+      // применение, и разойтись эти два вызова могут только молча.
+      const { updates } = planPieceUpdates(live, boundHere, blockCounts, parseComplete);
+      for (const u of updates) {
+        if (u.piecesPerGarment !== undefined) {
+          setValue(`pieces.${u.index}.piecesPerGarment`, u.piecesPerGarment, {
+            shouldDirty: true,
+          });
+        }
+        if (u.cutSymmetry !== undefined) {
+          setValue(`pieces.${u.index}.cutSymmetry`, u.cutSymmetry, { shouldDirty: true });
+        }
       }
       setValue('pieceDxfAliases', [...byKey.values()], { shouldDirty: true });
       onClose();
@@ -848,6 +1418,21 @@ export function PieceMatchModal({
     </label>
   );
 
+  // Кнопка называет ВСЕ исходы, а не только сопоставления. «сопоставить (0)» на кнопке, которая
+  // сейчас удалит три детали и перепишет число на изделие у пяти, врало бы ровно в тот момент,
+  // когда цена ошибки самая высокая — и никакого другого места, где эти исходы названы вместе, у
+  // оператора нет.
+  const confirmParts = [
+    outcome.reused > 0 ? `${outcome.reused} ↔` : '',
+    outcome.created > 0 ? `${outcome.created} +` : '',
+    outcome.removed > 0 ? `${outcome.removed} −` : '',
+    outcome.updated > 0 ? `${outcome.updated} ×` : '',
+    toUnmap > 0 ? `${toUnmap} снять` : '',
+  ].filter(Boolean);
+  // Четыре нуля подряд не значат ничего: на карточке, где ещё ничего не связано и ничего не
+  // выбрано, сводка была бы строкой ради строки.
+  const hasOutcome = outcome.created + outcome.removed + outcome.updated + outcome.unchanged > 0;
+
   const basisLabel = (r: BlockRow) => {
     if (!r.suggested) return null;
     if (r.basis === 'similar') return <Pill tone='warn'>предложено по похожести</Pill>;
@@ -868,15 +1453,24 @@ export function PieceMatchModal({
       onCancel={onClose}
       title={`детали кроя из DXF · ${fabricName}${sizeLabel ? ` · ${sizeLabel}` : ''}`}
       confirmLabel={
-        toUnmap > 0 ? `применить (${decided} ↔, ${toUnmap} снять)` : `сопоставить (${decided})`
+        confirmParts.length > 0 ? `применить (${confirmParts.join(', ')})` : 'применить'
       }
       // Пока хоть один спор не разрешён, применять НЕЧЕГО: набор, который ушёл бы на сервер, для
       // него невалиден, и он отклонит сохранение ВСЕЙ карты. Кнопка гаснет вместе с объяснением
       // выше — это и есть «предупредить до сохранения, а не после».
+      //
+      // Удаления и пересчёт × — самостоятельные исходы, а не довесок к сопоставлению: чертёж, из
+      // которого блок исчез или в котором сменилось число копий, не приносит НИ ОДНОГО нового
+      // сопоставления, и требование «сначала сопоставь хоть что-нибудь» запирало бы карточку с
+      // призраком детали и с неверным числом на изделие навсегда.
       confirmDisabled={
         saving ||
         unresolvedCollapses.length > 0 ||
-        (decided === 0 && toUnmap === 0 && collapses.size === 0)
+        (decided === 0 &&
+          toUnmap === 0 &&
+          collapses.size === 0 &&
+          outcome.removed === 0 &&
+          outcome.updated === 0)
       }
       width='lg'
       closeOnConfirm={false}
@@ -1229,6 +1823,198 @@ export function PieceMatchModal({
           </div>
         )}
 
+        {/* НЕПОЛНЫЙ РАЗБОР — ОБЪЯСНЕНИЕ НА МЕСТЕ СЕКЦИИ УДАЛЕНИЯ (находка 1). Секция ниже просто
+            не появится, а пустое место читается как «всё на месте» — то есть ровно как ответ,
+            которого разбор дать не может. Поэтому вместо предложений здесь стоит причина.
+            Здесь же названы ОБА выключенных исхода (находка 2 второго ревью): ноль в «обновить ×»
+            обязан быть объяснён там же, где ноль в удалениях, иначе он читается как «в чертеже всё
+            совпало» — то есть ровно наоборот. */}
+        {parse.phase === 'ready' && !parse.complete && (
+          <div className='space-y-1'>
+            <GroupLabel flush>в чертеже больше нет (—)</GroupLabel>
+            <CalloutBox tone='warning'>
+              <div className='space-y-0.5'>
+                <Text size='micro' component='p'>
+                  <b>
+                    разобрано файлов: {parse.filesParsed} из {parse.filesTotal}
+                    {parse.blocksSkipped > 0
+                      ? `, пропущено блоков внутри файлов: ${parse.blocksSkipped}`
+                      : ''}
+                  </b>{' '}
+                  — предложений об удалении деталей не будет. По неполному разбору нельзя
+                  утверждать, что деталь исчезла из чертежа: её блок мог лежать в листе, который не
+                  докачался или не прочитался
+                  {parse.blocksSkipped > 0
+                    ? ', либо в самом файле остаться неразвёрнутым (ссылка на отсутствующее определение блока, слишком глубокая вложенность, исчерпанный лимит вставок)'
+                    : ''}
+                  . Проверьте предупреждения разбора выше и откройте диалог заново.
+                </Text>
+                <Text size='micro' component='p'>
+                  <b>«× на изделие» и «как кроится» тоже не пересчитываются</b> — у уже заведённых
+                  деталей они останутся как есть. «Этой детали в изделии столько-то» — утверждение
+                  про ПОЛНЫЙ набор блоков: не доехал один лист, и число молча занизится, а вслед за
+                  ним сменится разметка кроя. Поэтому «обновить ×» здесь показывает ноль, а все
+                  привязанные детали идут в «без изменений».
+                </Text>
+                <Text size='nano' variant='label' component='p'>
+                  сопоставление и заведение новых деталей работают как обычно: они утверждают про
+                  то, что В файлах есть, а не про то, чего в них нет и сколько его всего.
+                </Text>
+              </div>
+            </CalloutBox>
+          </div>
+        )}
+
+        {/* В ЧЕРТЕЖЕ БОЛЬШЕ НЕТ — второй исход этого диалога, рядом с первым. Показывается ТОЛЬКО
+            составом потерь: «деталь удалится» само по себе звучит как уборка мусора, а уносит оно
+            строки рецепта колорвеев и замеренные площади — работу, которую делали руками и
+            восстановить которую будет неоткуда. Решение по каждой детали отдельное: чертёж
+            утверждает про крой, а деталь могла жить в карточке и по другой причине. */}
+        {parse.phase === 'ready' && deleteCandidates.length > 0 && (
+          <div className='space-y-1'>
+            {massVanish && (
+              <CalloutBox tone='error'>
+                <Text size='micro' component='p'>
+                  <b>
+                    исчезло деталей: {deleteCandidates.length} из {scopeBoundPieces} привязанных к
+                    этой ткани.
+                  </b>{' '}
+                  Похоже, файл заменён не тем или выбран не тот слой — проверьте список файлов и
+                  выбранный контур выше. Разбор при этом ПОЛОН — все файлы прочитаны и ни один блок
+                  внутри них не пропущен: по неполному разбору предложений об удалении не бывает
+                  вовсе. Применить всё равно можно — замена лекал целиком бывает и законной.
+                </Text>
+              </CalloutBox>
+            )}
+            <GroupLabel flush>в чертеже больше нет ({deleteCandidates.length})</GroupLabel>
+            {/* Формулировка называет ИМЕННО тот критерий, по которому деталь сюда попала: блок не
+                встретился разбору ни разу. «Не нашлось контура» — это другое утверждение, и по нему
+                деталь не удаляют (находка 1 третьего ревью). */}
+            <Text size='nano' variant='label' component='p'>
+              блоки этих деталей не встретились в разобранных файлах этой ткани ни разу — ни на
+              одном слое, ни в одном размере, — и ни к какой другой ткани они не привязаны. По
+              умолчанию такая деталь удаляется — вместе с тем, что на ней держится.
+            </Text>
+            {deleteCandidates.map((c) => {
+              const decision = deleteDecision(c.lineKey);
+              const key = c.lineKey.trim().toLowerCase();
+              const hold = recipeHold.get(key);
+              const areas = areaRowsByPiece.get(key) ?? 0;
+              const ops = opsByPiece.get(key) ?? 0;
+              return (
+                <div key={c.lineKey} className='space-y-0.5 pt-1'>
+                  <div className='flex flex-wrap items-center gap-1.5'>
+                    <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
+                      {c.name?.trim() || '—'}
+                    </Text>
+                    {/* Состояние читается СЛОВОМ. Красный здесь по делу — «сейчас будет
+                        разрушено», — но он второй, а не единственный носитель смысла. */}
+                    <Pill tone={decision === 'delete' ? 'warn' : 'mut'}>
+                      {decision === 'delete' ? 'будет удалена' : 'остаётся'}
+                    </Pill>
+                    <select
+                      className='h-7 border border-borderColor bg-bgColor px-1 text-micro'
+                      aria-label={`что сделать с деталью ${c.name?.trim() || c.lineKey}`}
+                      value={decision}
+                      onChange={(e) =>
+                        setDeleteChoice((prev) =>
+                          new Map(prev).set(
+                            c.lineKey,
+                            e.target.value === 'keep' ? 'keep' : 'delete',
+                          ),
+                        )
+                      }
+                    >
+                      <option value='delete'>удалить</option>
+                      <option value='keep'>оставить</option>
+                    </select>
+                  </div>
+                  <Text size='nano' variant='label' component='p' className='break-words'>
+                    исчезли блоки: {c.blocks.join(', ')}
+                  </Text>
+                  {decision === 'delete' ? (
+                    <>
+                      <Row
+                        label={
+                          <Text size='micro' component='span'>
+                            строки рецепта
+                            {hold ? ` (${hold.colorways.join(', ')})` : ' в колорвеях карточки'}
+                          </Text>
+                        }
+                        value={
+                          <Text size='micro' component='span'>
+                            {hold?.rows ?? 0}
+                          </Text>
+                        }
+                      />
+                      {/* Вписанная норма — единственное здесь, что считал человек. Назначение ткани
+                          без детали ни во что не входит, а число — входит в себестоимость. */}
+                      {(hold?.withNorm ?? 0) > 0 && (
+                        <Row
+                          tone='error'
+                          label={
+                            <Text size='micro' component='span'>
+                              из них с вписанной НОРМОЙ — восстановить будет неоткуда
+                            </Text>
+                          }
+                          value={
+                            <Text size='micro' component='span'>
+                              {hold?.withNorm ?? 0}
+                            </Text>
+                          }
+                        />
+                      )}
+                      <Row
+                        label={
+                          <Text size='micro' component='span'>
+                            замеренные площади, строк по размерам
+                          </Text>
+                        }
+                        value={
+                          <Text size='micro' component='span'>
+                            {areas > 0 ? areas : '—'}
+                          </Text>
+                        }
+                      />
+                      <Row
+                        label={
+                          <Text size='micro' component='span'>
+                            операций сборки потеряют эту деталь
+                          </Text>
+                        }
+                        value={
+                          <Text size='micro' component='span'>
+                            {ops > 0 ? ops : '—'}
+                          </Text>
+                        }
+                      />
+                      {/* Выноска эскиза переживает деталь намеренно: номер на чертеже принадлежит
+                          рисунку, а не строке таблицы, и стирать его из-за смены лекал значило бы
+                          переписывать эскиз чужими руками. */}
+                      <Text size='nano' variant='label' component='p'>
+                        выноска на эскизе остаётся — её номер принадлежит рисунку, а не детали
+                      </Text>
+                    </>
+                  ) : (
+                    <Text size='nano' variant='label' component='p'>
+                      деталь остаётся в карточке вместе со связью на блок, которого в чертеже больше
+                      нет
+                    </Text>
+                  )}
+                </div>
+              );
+            })}
+            <Text size='nano' variant='label' component='p'>
+              строки рецепта посчитаны по колорвеям, которые показывает карточка: архивные она не
+              читает, а их строки держат деталь так же и уедут вместе с ней.
+            </Text>
+            <Text size='nano' variant='label' component='p'>
+              удаление применяется при СОХРАНЕНИИ карточки — до него ничего не потеряно, и отменить
+              его можно, перечитав карточку.
+            </Text>
+          </div>
+        )}
+
         {/* Заведение пачкой. Имена уже нормализованы — BP_1_S и BP_1_XL это один BP_1 — так что
             «завести всё» создаёт ровно по одной детали кроя на деталь чертежа, а не по одной на
             размер. Девять выпадающих списков подряд никто не выберет правильно. */}
@@ -1349,6 +2135,44 @@ export function PieceMatchModal({
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {/* ЧТО СДЕЛАЕТ ОДНО НАЖАТИЕ — все четыре исхода, названные рядом с кнопкой, которая их
+            исполнит. Раньше диалог только сопоставлял, и подпись на кнопке была полным ответом;
+            теперь он заводит, удаляет, пересчитывает и размечает, а увидеть это можно было бы
+            только по сохранённой карточке — то есть после. «Без изменений» стоит здесь наравне с
+            остальными: это и есть видимое доказательство, что повторный проход по тем же файлам
+            ничего не переписывает. */}
+        {parse.phase === 'ready' && hasOutcome && (
+          <div className='space-y-0.5 border border-borderColor p-2'>
+            <Text size='micro' component='p'>
+              применение: создать {outcome.created} · удалить {outcome.removed} · обновить ×{' '}
+              {outcome.updated} · без изменений {outcome.unchanged}
+            </Text>
+            {/* Ноль в «обновить ×» имеет ДВА разных смысла — «чертёж сошёлся» и «считать не по
+                чему», — и по одной цифре они неразличимы. Второй называется прямо здесь, у самой
+                цифры: причина подробно разобрана выше, в блоке про неполный разбор. */}
+            {!parseComplete && (
+              <Text size='nano' variant='label' component='p'>
+                разбор неполон, поэтому «обновить ×» здесь всегда ноль: «× на изделие» и «как
+                кроится» у уже заведённых деталей не трогаются вовсе — см. блок про неполный разбор
+                выше.
+              </Text>
+            )}
+            <Text size='nano' variant='label' component='p'>
+              «обновить ×» — число на изделие пересчитывается по чертежу (сумма по разным деталям
+              чертежа; копии одной детали, разложенные по размерным выгрузкам, не складываются) и
+              заодно проставляется «как кроится: одинаковые копии» там, где ответа не было: чертёж
+              несёт каждый контур, значит деталь режется как нарисована.
+            </Text>
+            <Text size='nano' variant='label' component='p'>
+              явные «зеркальные пары» и «со сгибом» модалка не трогает — кроме случая, когда новое
+              число делает зеркальную пару невозможной (нечётное или меньше двух): тогда ставится
+              «одинаковые копии», иначе карточка не сохранится вовсе. Чертёж здесь прямо
+              противоречит пометке и несёт каждый контур отдельно — значит деталь режется как
+              нарисована.
+            </Text>
           </div>
         )}
       </div>

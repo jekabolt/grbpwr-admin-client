@@ -33,6 +33,9 @@ import {
 // leave it reading eleven fields that no longer exist.
 type FormOperation = {
   operationType?: string;
+  // «На чём» (0306) — the step type says MACHINE, this says which of the twenty-five, and the
+  // heading's verb comes from it.
+  machineType?: string;
   zone?: string;
   seamClass?: string;
   stitchesPerCm?: string;
@@ -44,7 +47,7 @@ type FormOperation = {
   note?: string;
   calloutNumber?: number;
   operationNumber?: number;
-  pieceLineKeys?: string[];
+  inputKeys?: string[];
 };
 
 type FormCallout = {
@@ -213,9 +216,9 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
         <GroupLabel>operations — in the card’s order</GroupLabel>
         <div className='flex flex-col'>
           {operations.map((o, i) => {
-            const names = (o.pieceLineKeys ?? [])
-              .map((k) => pieceNameByKey.get(k))
-              .filter((n): n is string => !!n);
+            // Неизвестный ключ — узел: показываем его меткой, а не выбрасываем. Иначе шаг,
+            // собирающий два узла, отрисовался бы вовсе без состава.
+            const names = (o.inputKeys ?? []).map((k) => pieceNameByKey.get(k) ?? `▣ ${k}`);
             const spec = specLine(o, names);
             const t = Number(o.smv ?? '');
             return (
@@ -232,6 +235,11 @@ export function SampleAssemblyMap({ techCard }: { techCard?: common_TechCard }) 
                       operationType: o.operationType as Parameters<
                         typeof operationHeading
                       >[0]['operationType'],
+                      // The verb of a machine step is its machine's (0306) — without this every
+                      // sewing step on the map reads «machine».
+                      machineType: o.machineType as Parameters<
+                        typeof operationHeading
+                      >[0]['machineType'],
                       zone: o.zone as Parameters<typeof operationHeading>[0]['zone'],
                       pieceNames: names,
                       note: o.note,

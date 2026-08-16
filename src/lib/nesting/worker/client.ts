@@ -8,6 +8,16 @@ export type ParseOutcome = {
   pieces: PieceDTO[];
   detectedUnit: Exclude<Unit, 'auto'>;
   warnings: string[];
+  // Листы, которые разобрать не удалось. См. WorkerResponse['parsed'].failedFiles: потребитель,
+  // который делает выводы ИЗ ОТСУТСТВИЯ блока, обязан знать, что набор неполон.
+  failedFiles: number;
+  // Блоки, пропущенные ВНУТРИ прочитавшихся листов (находка 1 второго адверсарного ревью). Неполнота
+  // бывает двух видов, и вторая молчаливее первой: файл прочитан целиком, а блока в наборе нет.
+  skippedBlocks: number;
+  // Имена встреченных блоков — набор ПРИСУТСТВИЯ, отдельный от `pieces` (находка 1 третьего ревью).
+  // «Блок есть в чертеже» и «из блока построился контур» — разные факты, и второй молчит там, где
+  // геометрия не сошлась.
+  blockNames: string[];
 };
 
 export type NestProgressMsg = {
@@ -63,7 +73,15 @@ export class NestingWorkerClient {
       this.handlers.set(id, {
         resolve: (msg) => {
           if (msg.type === 'parsed') {
-            resolve({ parseId: id, pieces: msg.pieces, detectedUnit: msg.detectedUnit, warnings: msg.warnings });
+            resolve({
+              parseId: id,
+              pieces: msg.pieces,
+              detectedUnit: msg.detectedUnit,
+              warnings: msg.warnings,
+              failedFiles: msg.failedFiles,
+              skippedBlocks: msg.skippedBlocks,
+              blockNames: msg.blockNames,
+            });
           } else reject(new Error('unexpected worker reply'));
         },
         reject,

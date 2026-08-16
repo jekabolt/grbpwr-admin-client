@@ -19,7 +19,10 @@ import {
 import { KV, Nothing, Sheet, TD, TH } from 'components/managers/print/sheet';
 import { cutPlanAuthoritative } from 'components/managers/print/labels';
 import { PackagingSheet } from 'components/managers/print/sheets/packaging';
-import { grainlineArrow } from 'components/managers/tech-card/components/piece-codes';
+import {
+  fusingPrintCaption,
+  grainlineArrow,
+} from 'components/managers/tech-card/components/piece-codes';
 import { wireInt } from 'components/managers/tech-card/components/schema';
 import { useTechCardReleases } from 'components/managers/tech-card/components/useSamples';
 import { useTechCard } from 'components/managers/tech-cards/components/useTechCardQuery';
@@ -676,6 +679,11 @@ export function RunPackDocument({
                         {r.fused ? (
                           <div className='text-nano uppercase'>
                             fusing: {r.fusingMaterialName || 'article not named'}
+                            {/* КАК ИМЕННО дублировать (0304), по тому же доводу, что и долевая
+                                строкой выше: наряд режут ПО СТРОКАМ. Строка, назвавшая артикул
+                                клеевой и промолчавшая о том, что дублируется только край, — это
+                                указание выкроить дубль всей детали. */}
+                            {` · ${fusingPrintCaption(r.fusingMode, r.fusingWidthMm?.value)}`}
                           </div>
                         ) : null}
                       </td>

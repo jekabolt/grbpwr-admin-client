@@ -1,4 +1,7 @@
-import { common_TechCardPieceCutSymmetry } from 'api/proto-http/admin';
+import {
+  common_TechCardPieceCutSymmetry,
+  common_TechCardPieceFusingMode,
+} from 'api/proto-http/admin';
 
 // Standardised pattern-piece nomenclature, used as free text where pieces are named
 // (sketch callout «part», operation description). Base codes name the piece; the universal
@@ -111,40 +114,24 @@ export function grainlineArrow(grainline?: string): string {
 
 export const UNSET_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
   'TECH_CARD_PIECE_CUT_SYMMETRY_UNKNOWN';
+// Экспортируется, потому что у ответа «режется как нарисовано» появился ВТОРОЙ автор: модалка
+// «детали кроя из DXF» проставляет его сама (чертёж несёт каждый контур), и литерал, рассыпанный по
+// двум файлам, разошёлся бы с этим словарём молча — селект показывал бы одно, чертёж писал другое.
+// MIRRORED наружу НЕ выносится: утверждать зеркальность за человека модалка не имеет права, ей
+// хватает `isCutSymmetryMarked` и `cutSymmetryCountInvalid`.
+export const IDENTICAL_CUT_SYMMETRY: common_TechCardPieceCutSymmetry =
+  'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL';
 const MIRRORED: common_TechCardPieceCutSymmetry = 'TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED';
 
+// СЕЛЕКТА «как кроится» БОЛЬШЕ НЕТ, и словарь его опций удалён вместе с ним: деталь приходит из
+// чертежа, ответ ставит модалка сопоставления блоков, спрашивать человека не о чем. Оставленный
+// «на всякий случай» список опций — это приглашение вернуть вопрос в интерфейс мимо решения
+// владельца, поэтому его здесь нет. Осталось ровно то, что читает БУМАГА и проверяет отправка:
+// предикаты ниже и короткие подписи в `CUT_SYMMETRY_SHORT`.
+//
 // Ноль перечисления — `_UNKNOWN`, не `_UNSPECIFIED`: `proto/common/buf.yaml` задаёт
 // `enum_zero_value_suffix: _UNKNOWN`. Клиент, отправивший `_UNSPECIFIED`, получает ошибку разбора
 // protojson, а не «поле проигнорировано».
-export const cutSymmetryOptions: Array<{
-  value: common_TechCardPieceCutSymmetry;
-  label: string;
-}> = [
-  // Пункт НАЗВАН, а не оставлен пустой строкой. Пустая опция в закрытом селекте читается как
-  // «значение по умолчанию», то есть как ответ «обычная деталь», которого никто не давал — а весь
-  // смысл поля в том, чтобы «не спрашивали» отличалось от «спросили, ответ: одинаковые».
-  { value: UNSET_CUT_SYMMETRY, label: '— не размечено' },
-  { value: 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL', label: 'одинаковые копии' },
-  // Чётность названа в САМОЙ подписи, до всякой ошибки: CHECK в БД
-  // (`chk_tcp_mirrored_needs_even_count`) отвергает зеркальную пару при нечётном количестве, и
-  // узнать об этом дешевле до выбора, чем из красной строки после него.
-  { value: MIRRORED, label: 'зеркальные пары (× чётное)' },
-  { value: 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD', label: 'со сгибом' },
-];
-
-const cutSymmetryValues = new Set<string>(cutSymmetryOptions.map((o) => o.value));
-
-// Терпимое чтение, как у `grainlineOptionsFor`: значение, которого нет в наборе, всё равно
-// показывается — помеченным, — вместо того чтобы прочитаться пустым в контролируемом селекте и
-// быть молча переписанным следующим сохранением соседнего поля.
-export function cutSymmetryOptionsFor(current?: string): Array<{ value: string; label: string }> {
-  const value = (current ?? '').trim();
-  const items: Array<{ value: string; label: string }> = [...cutSymmetryOptions];
-  if (value && !cutSymmetryValues.has(value)) {
-    items.splice(1, 0, { value, label: `${value} — не из списка` });
-  }
-  return items;
-}
 
 /** Ответил ли на вопрос человек. Пустая строка и `_UNKNOWN` — одно и то же «нет». */
 export function isCutSymmetryMarked(value?: string): boolean {
@@ -179,14 +166,13 @@ export function cutSymmetryCountInvalid(
   return !Number.isInteger(n) || n < 2 || n % 2 !== 0;
 }
 
-// Самая вероятная ошибка оператора названа прямо в тексте: увидев в карточке два ряда FP_L ×1 и
-// FP_R ×1, человек помечает зеркальными ОБА. Сообщение обязано сказать, что делать, а не только
-// что запрещено.
-export const CUT_SYMMETRY_EVEN_COUNT_MESSAGE =
-  'зеркальная пара делится пополам — количество на изделие должно быть чётным и не меньше двух. Две строки по одной штуке (FP_L ×1 и FP_R ×1) — это «одинаковые копии» по штуке в каждой; «зеркальные пары» ставят на ОДНУ строку с чётным количеством.';
+// Текста ошибки про чётность здесь больше нет: он объяснял ОПЕРАТОРУ, что исправить в селекте,
+// которого не осталось. Невалидную пару теперь молча нормализует отправка (`schema.ts`), а не
+// отказ формы — зод-ошибка на путь несуществующего контрола была бы невидимой блокировкой
+// сохранения.
 
 const CUT_SYMMETRY_SHORT: Record<string, string> = {
-  TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL: 'одинаковые',
+  [IDENTICAL_CUT_SYMMETRY]: 'одинаковые',
   TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED: 'зеркальные пары',
   TECH_CARD_PIECE_CUT_SYMMETRY_FOLD: 'со сгибом',
 };
@@ -208,7 +194,7 @@ export function cutSymmetryBadge(
     const label = CUT_SYMMETRY_SHORT[v] ?? v;
     // Зеркальность и сгиб — указания цеху, которые меняют физическую деталь на выходе; «одинаковые»
     // подтверждает положение вещей по умолчанию. Отсюда чернила против серого.
-    return { label, tone: v === 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL' ? 'mut' : 'ink' };
+    return { label, tone: v === IDENTICAL_CUT_SYMMETRY ? 'mut' : 'ink' };
   }
   if (cutSymmetryUnanswered(v, piecesPerGarment)) {
     return { label: 'парность не указана', tone: 'attention' };
@@ -241,10 +227,106 @@ export function cutSymmetryPrintCaption(
       : 'зеркальные пары';
   }
   if (v === 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD') return 'со сгибом';
-  if (v === 'TECH_CARD_PIECE_CUT_SYMMETRY_IDENTICAL') return '';
+  if (v === IDENTICAL_CUT_SYMMETRY) return '';
   return cutSymmetryUnanswered(v, piecesPerGarment) ? 'парность не указана' : '';
 }
 
 /** Легенда словаря — печатается один раз под таблицей деталей, а не в каждой строке. */
 export const CUT_SYMMETRY_PRINT_LEGEND =
   'зеркальные пары — половина панелей кроится в зеркале (левая / правая), а не копиями; со сгибом — деталь кроится по сгибу ткани; «парность не указана» — в карточке на этот вопрос ещё никто не ответил, уточните до раскроя.';
+
+// --- КАК ИМЕННО ДУБЛИРУЕТСЯ ДЕТАЛЬ (0304) ------------------------------------------------------
+//
+// Галка `fused` отвечает «дублируется ли», этот словарь — «где именно лежит клеевая». До 0304
+// ответа не было вовсе, и каждый читатель понимал галку единственным доступным способом — «клеевая
+// выкроена по тому же лекалу». В цеху чаще дублируется только край, и разница не косметическая:
+// у полочки площадью 4200 см² периметр ~260 см, поэтому полоса 25 мм — это 650 см², в 6.5 раза
+// меньше материала.
+//
+// Словарь живёт здесь по той же причине, что и словарь кроя выше: одну деталь показывают четыре
+// поверхности (вкладка деталей, тех-пак, кат-лист стиля, наряд на партию), и «не размечено» на
+// экране обязано означать то же, что молчание на бумаге.
+//
+// «ПО ПРИПУСКУ» И «ПОЛОСОЙ» — РАЗНЫЕ ПУНКТЫ, хотя обе кладут полосу вдоль среза: первая берёт
+// ширину из эталона припуска карточки (иначе цеха), вторая — из введённого числа. Один пункт с
+// обязательным числом заставлял бы вписывать припуск руками на каждой детали и расходиться с
+// эталоном, ради которого эталон и заводили.
+
+export const UNSET_FUSING_MODE: common_TechCardPieceFusingMode =
+  'TECH_CARD_PIECE_FUSING_MODE_UNKNOWN';
+export const FUSING_MODE_STRIP: common_TechCardPieceFusingMode =
+  'TECH_CARD_PIECE_FUSING_MODE_STRIP';
+const FUSING_MODE_SEAM: common_TechCardPieceFusingMode =
+  'TECH_CARD_PIECE_FUSING_MODE_SEAM_ALLOWANCE';
+
+export const fusingModeOptions: Array<{
+  value: common_TechCardPieceFusingMode;
+  label: string;
+}> = [
+  // Пункт НАЗВАН, а не оставлен пустым, ровно как «— не размечено» у кроя: пустая опция читается
+  // как «значение по умолчанию», то есть как ответ «целиком», которого никто не давал.
+  { value: UNSET_FUSING_MODE, label: '— не размечено' },
+  { value: 'TECH_CARD_PIECE_FUSING_MODE_FULL', label: 'вся деталь' },
+  { value: FUSING_MODE_SEAM, label: 'по припуску' },
+  { value: FUSING_MODE_STRIP, label: 'полосой, мм' },
+];
+
+const fusingModeValues = new Set<string>(fusingModeOptions.map((o) => o.value));
+
+/** Терпимое чтение, как у `grainlineOptionsFor`: чужое значение показывается помеченным, а не
+ * молча переписывается следующим сохранением соседнего поля. */
+export function fusingModeOptionsFor(current?: string): Array<{ value: string; label: string }> {
+  const value = (current ?? '').trim();
+  const items: Array<{ value: string; label: string }> = [...fusingModeOptions];
+  if (value && !fusingModeValues.has(value)) {
+    items.splice(1, 0, { value, label: `${value} — не из списка` });
+  }
+  return items;
+}
+
+/** Ответил ли человек. Пустая строка и `_UNKNOWN` — одно и то же «нет». */
+export function isFusingMarked(value?: string): boolean {
+  const v = (value ?? '').trim();
+  return !!v && v !== UNSET_FUSING_MODE;
+}
+
+/** Нужна ли этому режиму своя ширина. Только «полосой»: у «по припуску» ширина приходит из
+ * эталона, и второе число рядом с ним спорило бы с ним молча. */
+export function fusingNeedsWidth(value?: string): boolean {
+  return (value ?? '').trim() === FUSING_MODE_STRIP;
+}
+
+/**
+ * Подпись для БУМАГИ и для плиток: что именно делать с клеевой.
+ *
+ * Печатается у КАЖДОЙ дублируемой детали, включая «вся деталь», — в отличие от `identical` у кроя,
+ * который на бумаге опускается. Причина в асимметрии последствий: голое «fused» раскройщик уже
+ * читает как «целиком», поэтому молчание у полосы — это указание выкроить лишнее, а слово у
+ * «целиком» — подтверждение того, что и так делают.
+ */
+export function fusingPrintCaption(value: string | undefined, widthMm?: string): string {
+  const v = (value ?? '').trim();
+  if (v === FUSING_MODE_STRIP) {
+    const w = (widthMm ?? '').trim();
+    return w ? `полосой ${w} мм` : 'полосой (ширина не указана)';
+  }
+  if (v === FUSING_MODE_SEAM) return 'по припуску';
+  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'вся деталь';
+  return 'способ не указан';
+}
+
+/**
+ * Подсказка под селектом режима: откуда берётся ширина у режима, у которого своего числа нет.
+ *
+ * Без неё «по припуску» выглядит как ответ без величины. Текст называет ИСТОЧНИК, а не значение:
+ * эталон живёт на карточке (иначе в настройках цеха) и меняется там, а второй экземпляр числа на
+ * этом экране разошёлся бы с ним при первой же правке.
+ */
+export function fusingHint(mode?: string): string {
+  const v = (mode ?? '').trim();
+  if (v === FUSING_MODE_STRIP) return 'ширина полосы вдоль среза, в миллиметрах (до 100)';
+  if (v === FUSING_MODE_SEAM)
+    return 'ширина полосы = припуск на шов по карточке (иначе по настройкам цеха)';
+  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'клеевая кроится по тому же лекалу целиком';
+  return 'не размечено: цех увидит «дублируется» без указания, где именно лежит клеевая';
+}

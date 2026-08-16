@@ -84,6 +84,7 @@ import { SignoffsField } from './signoffs-field';
 import { SeasonField } from './season-field';
 import { StyleNumberField } from './style-number-field';
 import { RolesField } from './roles-field';
+import { useEditHistory } from 'ui/components/annotation/history';
 import { SketchTab } from './sketch-tab';
 import {
   TechCardFormData,
@@ -395,6 +396,17 @@ export function TechCardForm({
   // drives the Release gate.
   const frozen = techCard?.techCard?.approvalState === RELEASED;
   const styleNumber = useWatch({ control: form.control, name: 'styleNumber' });
+
+  // ИСТОРИЯ ОТКАТА УКАЗАНИЙ — ОДНА НА ФОРМУ, а не на вкладку.
+  //
+  // Эскиз и мудборд смонтированы ОДНОВРЕМЕННО (переключение вкладок — это `hidden`) и пишут ОДИН
+  // массив `callouts`. Две истории над одним массивом означали, что откат на эскизе возвращает
+  // снимок, снятый ДО правок мудборда, — и три заметки, поставленные на другой вкладке, исчезают
+  // молча, потому что их не видно.
+  const calloutValues = (useWatch({ control: form.control, name: 'callouts' }) ?? []) as never[];
+  const calloutHistory = useEditHistory(calloutValues, (prev) =>
+    form.setValue('callouts', prev, { shouldDirty: true }),
+  );
   const name = useWatch({ control: form.control, name: 'name' });
   const issues = (useWatch({ control: form.control, name: 'issues' }) ?? []) as Array<{
     status?: string;
@@ -697,7 +709,20 @@ export function TechCardForm({
   // queue is about to write. Only the three server-assigned lists are taken. Cut pieces have nothing
   // to re-seed: their identity is the client-minted lineKey, not a server id.
   async function withServerAssignedValues(sent: TechCardFormData): Promise<TechCardFormData> {
-    if (!numId) return sent;
+    // Намерение «снял разметку» гасится НА ВСЕХ ветках возврата, включая ранние. PUT к этому
+    // моменту уже прошёл — намерение исполнено, и оставить флаг взведённым из-за транзиентного
+    // сбоя рефетча значило бы отправить следующее сохранение в отказ «cleared против карточки без
+    // разметки», из которого пользователю не выбраться иначе как перезагрузкой с потерей правок.
+    // ОБА намерения гасятся здесь. Забыть второе — значит отправить следующее сохранение в
+    // тупик: маппер увидит взведённый mediaCleared против карточки, у которой снимки уже есть,
+    // и пришлёт «снял» вместе с фотографиями — серверный гейт отвергнет это как противоречие, а
+    // жеста, снимающего флаг, в интерфейсе нет.
+    const done = (v: TechCardFormData): TechCardFormData => ({
+      ...v,
+      assemblyCleared: false,
+      mediaCleared: false,
+    });
+    if (!numId) return done(sent);
     let fresh: common_TechCard | undefined;
     try {
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
@@ -705,9 +730,9 @@ export function TechCardForm({
     } catch {
       // Not fatal — the save itself landed. Fall back to what was sent; useUpdateTechCard's own
       // invalidation still refetches the card, and a reload re-seeds the form from the server.
-      return sent;
+      return done(sent);
     }
-    if (!fresh) return sent;
+    if (!fresh) return done(sent);
     // Prime the cache with the read we already paid for, so the detail this reset is built from is
     // the same one the NEXT save reads its expectedLockVersion from.
     queryClient.setQueryData(techCardKeys.detail(numId), fresh);
@@ -748,7 +773,21 @@ export function TechCardForm({
       return id === undefined ? b : { ...b, id };
     });
 
-    return { ...sent, signoffs, patterns, bomItems };
+    // CONSTRUCTION IS TAKEN WHOLE FROM THE SERVER, not merged field by field, and it is the one
+    // section where that is the honest answer. Its equipment park (0306) is a keyed list the write
+    // mapper EDITS on the way out: a profile row that never got a machine picked is dropped rather
+    // than refused (mapEquipmentDefaultsOut — a half-added row must not block a save carrying nine
+    // other tabs' work), and a row with no key gets one minted. Reset to what was SENT, such a row
+    // comes back as a pristine, clean row of a card that does not contain it: no unsaved-changes
+    // guard, no draft, and it disappears at the next navigation without anything having said so.
+    // The section carries nothing else the form owns and the server does not round-trip, so taking
+    // the server's copy costs nothing and makes «saved» mean saved.
+    // assemblyCleared — НАМЕРЕНИЕ ОДНОГО СОХРАНЕНИЯ, а не свойство карточки, и после успешной
+    // записи оно обязано погаснуть. Оставь флаг взведённым — и следующее же сохранение сервер
+    // отвергнет: осведомлённая запись с cleared против карточки, у которой разметки уже нет, это
+    // теневое намерение, и гейт на него отвечает отказом. Кнопка «снять разметку» взводит флаг
+    // ровно один раз, здесь он снимается.
+    return done({ ...sent, signoffs, patterns, bomItems, construction: server.construction });
   }
 
   // The actual write: card body first (it carries the lock version), then the staged sub-panels.
@@ -793,6 +832,10 @@ export function TechCardForm({
           // was just approved carries its stamped digest instead of the blank that MEANS "approve
           // now" (see withServerAssignedValues).
           form.reset(await withServerAssignedValues(data));
+          // ИСТОРИЯ ОТКАТА ЗАБЫВАЕТСЯ ВМЕСТЕ С СОХРАНЕНИЕМ. Она помнит массивы ДО отправки, а форма
+          // теперь несёт то, что вернул сервер: ⌘Z воскресил бы пред-сейвовое состояние поверх
+          // серверных значений — правку, которой никто не делал, поверх той, что уже уехала.
+          calloutHistory.reset();
         }
         // Then the staged sub-panels, in commit order. These are separate RPCs — there is NO
         // transaction, and the banner below deliberately does not pretend otherwise.
@@ -1055,6 +1098,14 @@ export function TechCardForm({
     try {
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
       lockOverride.current = res.techCard?.lockVersion ?? 0;
+      // И САМУ КАРТОЧКУ, А НЕ ТОЛЬКО НОМЕР ВЕРСИИ. Прочитанное здесь — это то, ЧТО лежит на
+      // сервере сейчас, и от него зависит не только замок: маппер записи спреадит `original`
+      // (поля, которых форма не ведёт), а щиты совместимости решают по нему, объявлять ли
+      // намерение снять узлы и снимки. Взяв одну версию и оставив в кэше вчерашнюю карточку, мы
+      // получали ровно тот отказ, от которого эта кнопка спасает: соседняя вкладка добавила узлы,
+      // наша карточка о них не знает, `assemblyCleared` зажат в false «потому что узлов нет» —
+      // и сервер отвергает запись, а кнопка «не потеряй работу» упирается в «перезагрузи и потеряй».
+      queryClient.setQueryData(techCardKeys.detail(numId), res);
     } catch (error) {
       showMessage(
         techCardErrorMessage(error, 'could not read the server’s version — try saving again'),
@@ -1715,11 +1766,23 @@ export function TechCardForm({
 
             {/* SKETCH */}
             <div hidden={activeTab !== 'sketch'}>
-              <SketchTab techCard={techCard} view='sketch' />
+              <SketchTab
+                techCard={techCard}
+                view='sketch'
+                active={activeTab === 'sketch'}
+                frozen={frozen}
+                calloutHistory={calloutHistory}
+              />
             </div>
 
             <div hidden={activeTab !== 'moodboard'}>
-              <SketchTab techCard={techCard} view='moodboard' />
+              <SketchTab
+                techCard={techCard}
+                view='moodboard'
+                active={activeTab === 'moodboard'}
+                frozen={frozen}
+                calloutHistory={calloutHistory}
+              />
             </div>
 
             {/* PATTERNS (size range + DXF выкройки по материалам) */}
@@ -1827,7 +1890,11 @@ export function TechCardForm({
                   of one field array, which is exactly the shape that made a piece created from the
                   DXF dialog land in the copy nobody was looking at. Cut pieces are on PATTERNS now,
                   a tab every card has, so the whole special case is gone. */}
-              <ConstructionTab techCard={techCard} />
+              {/* `active` — не украшение: вкладки этой формы СМОНТИРОВАНЫ ВСЕ СРАЗУ и лишь
+                  спрятаны, а разбор выкроек на вкладке заказывается автоматически. Без флага
+                  каждое открытие любой тех-карты качало бы её DXF — включая правку одного поля в
+                  шапке. */}
+              <ConstructionTab techCard={techCard} active={activeTab === 'construction'} />
             </SectionStack>
 
             {/* LABELS & PACKAGING */}
@@ -1907,6 +1974,11 @@ export function TechCardForm({
                   // blockers modal with the page header instead of a second `title` tooltip.
                   <ReleasesField
                     techCardId={numId}
+                    // `active` — не украшение: вкладки этой формы СМОНТИРОВАНЫ ВСЕ СРАЗУ и лишь
+                    // спрятаны, а архив релиза теперь рисует снимки шагов. Без флага открытие
+                    // любой карточки грузило бы десятки полноразмерных фотографий из вкладки,
+                    // которую никто не открывал.
+                    active={activeTab === 'history'}
                     gate={
                       canWrite(SECTION.techCards) && !frozen
                         ? {

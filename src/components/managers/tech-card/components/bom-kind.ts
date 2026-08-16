@@ -1,4 +1,8 @@
-import { common_TechCardBomKind } from 'api/proto-http/admin';
+import {
+  common_TechCardBomKind,
+  common_TechCardMachineType,
+  common_TechCardOperationType,
+} from 'api/proto-http/admin';
 
 // ЧТО ЭТО ЗА ПОЗИЦИЯ (kind, 0278) — the client half of the closed vocabulary that classifies a
 // NON-roll-goods BOM line. The server owns the truth (entity.bomKindHomeSection + chk_bom_item_kind);
@@ -168,20 +172,65 @@ export const kindOptionsForSection = (
   kindsForSection(section).map((k) => ({ value: k, label: KIND_LABEL[k] ?? k }));
 
 /**
- * Which kinds a step of a given type most likely consumes, offered FIRST in the operation picker.
- * A presentation heuristic and nothing more — it reorders, never filters, so a step that genuinely
+ * Which kinds a step most likely consumes, offered FIRST in the operation's material picker. A
+ * presentation heuristic and nothing more — it reorders, never filters, so a step that genuinely
  * takes something unexpected is one scroll away rather than unreachable. It lives on the client
  * deliberately: the vocabulary is stored data, this ordering is a hunch we will retune.
+ *
+ * IT IS KEYED ON THE MACHINE NOW, not on the step type (0306). Every entry this map ever had —
+ * button attach, buttonhole, overlock, bartack, twin needle — named a MACHINE, and those tokens left
+ * the type enum; keyed on the type the whole map went silently dead, because `Record<string, …>`
+ * accepts any key and the lookup for a retired token simply misses. The maps below are
+ * `Partial<Record<Enum, …>>` for exactly that reason: a key outside the contract is now a build
+ * error, while a machine nobody has a hunch about is legitimately absent.
  */
-export const OPERATION_TYPE_PREFERRED_KINDS: Record<string, string[]> = {
-  TECH_CARD_OPERATION_TYPE_BUTTON_ATTACH: [
+export const MACHINE_TYPE_PREFERRED_KINDS: Partial<
+  Record<common_TechCardMachineType, common_TechCardBomKind[]>
+> = {
+  TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: [
     'TECH_CARD_BOM_KIND_BUTTON',
     'TECH_CARD_BOM_KIND_SNAP',
     'TECH_CARD_BOM_KIND_RIVET',
   ],
-  TECH_CARD_OPERATION_TYPE_BUTTONHOLE: ['TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD'],
-  TECH_CARD_OPERATION_TYPE_OVERLOCK: ['TECH_CARD_BOM_KIND_OVERLOCK_THREAD'],
-  TECH_CARD_OPERATION_TYPE_FUSING: [],
-  TECH_CARD_OPERATION_TYPE_BARTACK: ['TECH_CARD_BOM_KIND_SEWING_THREAD'],
-  TECH_CARD_OPERATION_TYPE_DOUBLE_NEEDLE: ['TECH_CARD_BOM_KIND_TOPSTITCH_THREAD'],
+  TECH_CARD_MACHINE_TYPE_BUTTONHOLE: ['TECH_CARD_BOM_KIND_BUTTONHOLE_THREAD'],
+  TECH_CARD_MACHINE_TYPE_OVERLOCK: ['TECH_CARD_BOM_KIND_OVERLOCK_THREAD'],
+  TECH_CARD_MACHINE_TYPE_COVERLOCK: ['TECH_CARD_BOM_KIND_OVERLOCK_THREAD'],
+  TECH_CARD_MACHINE_TYPE_BARTACK: ['TECH_CARD_BOM_KIND_SEWING_THREAD'],
+  TECH_CARD_MACHINE_TYPE_LOCKSTITCH_DOUBLE_NEEDLE: ['TECH_CARD_BOM_KIND_TOPSTITCH_THREAD'],
+  TECH_CARD_MACHINE_TYPE_EMBROIDERY: ['TECH_CARD_BOM_KIND_EMBROIDERY_THREAD'],
+  TECH_CARD_MACHINE_TYPE_ZIPPER_SETTING: [
+    'TECH_CARD_BOM_KIND_ZIPPER',
+    'TECH_CARD_BOM_KIND_ZIPPER_SLIDER',
+  ],
+  TECH_CARD_MACHINE_TYPE_ELASTIC_ATTACH: [
+    'TECH_CARD_BOM_KIND_ELASTIC',
+    'TECH_CARD_BOM_KIND_ELASTIC_THREAD',
+  ],
+  TECH_CARD_MACHINE_TYPE_BINDING_TAPING: [
+    'TECH_CARD_BOM_KIND_BINDING',
+    'TECH_CARD_BOM_KIND_TAPE',
+    'TECH_CARD_BOM_KIND_PIPING',
+  ],
+  TECH_CARD_MACHINE_TYPE_HARDWARE_ATTACH: [
+    'TECH_CARD_BOM_KIND_EYELET',
+    'TECH_CARD_BOM_KIND_RIVET',
+    'TECH_CARD_BOM_KIND_HOOK_AND_BAR',
+  ],
 };
+
+/**
+ * The handful of hunches that still belong to the step TYPE rather than to a machine. Interlining is
+ * roll goods and carries no kind at all, so fusing has nothing to prefer — the advisory that a
+ * fusing step should link some fusible lives in the step editor, on the SECTION.
+ */
+export const OPERATION_TYPE_PREFERRED_KINDS: Partial<
+  Record<common_TechCardOperationType, common_TechCardBomKind[]>
+> = {};
+
+/** The kinds to float to the top for a step, from whichever axis has an opinion about it. */
+export function preferredBomKinds(operationType?: string, machineType?: string): Set<string> {
+  const byType =
+    OPERATION_TYPE_PREFERRED_KINDS[operationType as common_TechCardOperationType] ?? [];
+  const byMachine = MACHINE_TYPE_PREFERRED_KINDS[machineType as common_TechCardMachineType] ?? [];
+  return new Set<string>([...byType, ...byMachine]);
+}

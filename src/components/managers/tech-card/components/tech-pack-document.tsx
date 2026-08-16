@@ -1,7 +1,7 @@
 import type {
   GetProductionRunCutPlanResponse,
-  common_TechCardAttachmentKind,
   common_TechCardGarmentZone,
+  common_TechCardMachineType,
   common_TechCardOperationType,
   common_TechCardSeamClass,
   common_TechCardTopstitch,
@@ -16,8 +16,13 @@ import {
   common_MediaFull,
   common_TechCard,
   common_TechCardBomItem,
+  common_TechCardCallout,
   common_TechCardColorwayUsage,
+  common_TechCardMachineProfile,
+  common_TechCardOperation,
+  common_TechCardOperationMedia,
   common_TechCardPiece,
+  common_TechCardPressProfile,
   common_TechCardReleaseMeta,
   common_TechCardSizePattern,
   googletype_Decimal,
@@ -54,6 +59,8 @@ import {
   bomPurposeLabel,
   type RollGoodsLine,
 } from './bom-purpose';
+import { assemblyBlocks } from './assembly-blocks';
+import { assemblySweep, classifyAssemblyInputs } from './assembly-frontier';
 import { formatBomMoney, resolveBomPrice } from './bom-price';
 import { uniOf } from './nesting/block-code';
 import { runStatusLabel } from 'components/managers/production-runs/components/options';
@@ -61,7 +68,15 @@ import { runStatusLabel } from 'components/managers/production-runs/components/o
 import { LabelPlacementPictogram, resolvePlacementRegion } from './label-placement-pictogram';
 import { formatCompositionEntries } from './composition-entries';
 import { wireFabricPurpose } from './pattern-size-index';
-import { wireInt } from './schema';
+import {
+  annotationColorFromWire,
+  annotationFromWire,
+  annotationKindFromWire,
+  wireInt,
+  type AnnotationForm,
+} from './schema';
+import { kindDef } from 'ui/components/annotation/kinds';
+import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { formatSizeName } from 'components/managers/product/utility/sizes';
@@ -87,7 +102,8 @@ import { useCareVocabulary } from 'components/managers/product/components/care/u
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { Fragment, ReactNode, useEffect, useMemo } from 'react';
+import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation/shapes';
 import { decimalToInput } from 'utils/decimal';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
@@ -99,7 +115,7 @@ import { GrbpwrMark } from 'ui/icons/grbpwr-mark';
 import { detailKeyLabel } from './tech-card-options';
 // cutSymmetryUnanswered — предикат, а не текст: он одинаков для экрана и бумаги, и дублировать
 // его в печатном слое значило бы завести второе определение «вопрос цеху не отвечен».
-import { cutSymmetryUnanswered } from './piece-codes';
+import { cutSymmetryUnanswered, fusingPrintCaption } from './piece-codes';
 import { derivePieceLayerRole, isMainLayerRole, pieceLayerRoleLabel } from './piece-layer-role';
 import { useTechCardReleases } from './useSamples';
 
@@ -125,10 +141,28 @@ const lifecycleLabel = (v?: string) => enumLabel(v, 'COLORWAY_LIFECYCLE_STATUS_'
 const auxSubtypeLabel = (v?: string) => enumLabel(v, 'TECH_CARD_AUX_SUBTYPE_');
 
 import {
-  attachmentOptions,
-  operationTypeOptions,
+  isMachineStepType,
+  isPressStepType,
+  machineProfileName,
+  machineTypeLabel,
+  machineTypeLabelWithStitch,
+  pressEquipmentLabel,
+  pressProcessShort,
+  pressProfileName,
+  resolveMachineProfile,
+  resolvePressProfile,
+} from './equipment-options';
+import {
+  densityText,
+  effectiveMachineSettings,
+  effectivePressSettings,
+  machineProfileSummary,
+  OPERATION_TYPE_LABELS,
+  operationHeading,
+  pressProfileSummary,
   seamClassOptions,
   zoneOptions,
+  type EffectiveSetting,
 } from './operation-options';
 
 const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
@@ -150,6 +184,76 @@ const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
 // Тип СТРУКТУРНЫЙ, а не именованный: карточка приезжает сюда и как common_TechCard, и как её
 // вложенный insert, и связывать печать с одним из двух ради сигнатуры незачем — предикату нужны
 // ровно строки рецепта.
+// ГЕОМЕТРИЯ УКАЗАНИЙ НА ПЕЧАТИ (0309). Мерка между двумя точками, скобка над участком и дуга по
+// окату — инструкция швее, и лист без них несёт половину сказанного: номер есть, а «по какому
+// размеру» — нет.
+//
+// Размер коробки МЕРЯЕТСЯ, а фигуры кладутся в viewBox тех же пикселей: в процентах засечки мерки
+// на альбомном эскизе стали бы косыми, а окружность — эллипсом. Печать меняет ширину коробки
+// ПОСЛЕ замера, и ResizeObserver на это не стреляет, — с viewBox холст масштабируется вместе с
+// коробкой, пропорции которой равны пропорциям картинки, и указание остаётся на своём узле.
+function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current?.parentElement;
+    if (!el) return;
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const drawn = callouts.filter((c) => (c.points?.length ?? 0) > 0);
+  return (
+    <div ref={ref} className='pointer-events-none absolute inset-0'>
+      {box.w > 0 && drawn.length > 0 && (
+        <svg
+          className='h-full w-full'
+          viewBox={`0 0 ${box.w} ${box.h}`}
+          preserveAspectRatio='none'
+          aria-hidden
+        >
+          <defs>
+            <ArrowMarkerDef />
+          </defs>
+          {drawn.map((c, i) => (
+            <CalloutShape
+              key={i}
+              kind={annotationKindFromWire(c.kind)}
+              pts={(c.points ?? []).map((p) => ({
+                x: num(dec(p.x)) * box.w,
+                y: num(dec(p.y)) * box.h,
+              }))}
+              // Подпись фигуры — сам нумерованный маркер: лидер тянется к нему, и на бумаге он
+              // единственное, что можно прочесть глазами.
+              label={{ x: num(dec(c.posX)) * box.w, y: num(dec(c.posY)) * box.h }}
+              color={annotationColorFromWire(c.color) || undefined}
+              // Пунктир и штриховка НА БУМАГЕ ОБЯЗАТЕЛЬНЫ: сплошная и пунктир на чертеже говорят
+              // разное, а контур и заливка — «эта граница» против «эта площадь». Потерять их при
+              // печати значит отдать в цех другое указание, чем видно на экране.
+              dashed={!!c.dashed}
+              filled={!!c.filled}
+            />
+          ))}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Вид указания словом в таблице выносок. Пин — не подпись: он и так «просто номер».
+ *
+ * Название берётся из ОБЩЕГО РЕЕСТРА, а не из своего словаря: свой был четвёртой копией того же
+ * списка и первым же новым видом отстал бы — на бумаге появилась бы пустая клетка вида там, где
+ * на экране стоит зона.
+ */
+function calloutKindLabel(kind?: string): string {
+  const k = annotationKindFromWire(kind);
+  return k === 'pin' ? '' : kindDef(k).label;
+}
+
 function bomTakesWastage(
   colorways: ReadonlyArray<{ usages?: common_TechCardColorwayUsage[] }> | undefined,
   b: { id?: number; lineKey?: string },
@@ -177,8 +281,31 @@ const optionLabel = <T extends string>(
   noneValue?: T,
 ): string => (!v || v === noneValue ? '' : opts.find((o) => o.value === v)?.label ?? '');
 
-const operationTypeText = (v?: common_TechCardOperationType): string =>
-  optionLabel(operationTypeOptions, v, 'TECH_CARD_OPERATION_TYPE_UNKNOWN') || '—';
+// The TOTAL label map, not the picker list: the picker offers only the types a step may be GIVEN,
+// while paper has to render every type that can arrive — including the nine legacy tokens frozen
+// into archived releases, which through the picker list would each have printed as «—».
+//
+// EXCEPT FOR `MACHINE`, whose label in that map is the picker's prompt («machine — sewn on…») and
+// belongs on a select, not on paper. Since 0306 every sewing step carries that one type, so the
+// column would also read the same word forty times over: the VERB is what a step does, and it comes
+// from the machine (operationHeading is the one place that lookup lives). The machine itself is the
+// next column along.
+//
+// AND THE THREE ВТО TYPES GO ON IN ENGLISH: their labels carry a Russian gloss for the technologist
+// («press (заутюжить / отпарить)»), which is right in a picker whose reader is the person who wrote
+// the card and wrong on a sheet that is read in a Polish sewing room. pressProcessShort is that same
+// label with the parenthetical cut off — the derived short form, not a second vocabulary.
+const operationTypeText = (o: {
+  operationType?: common_TechCardOperationType;
+  machineType?: common_TechCardMachineType;
+}): string => {
+  const v = o.operationType;
+  if (isMachineStepType(v)) {
+    return operationHeading({ operationType: v, machineType: o.machineType, pieceNames: [] });
+  }
+  if (isPressStepType(v)) return pressProcessShort(v) || '—';
+  return (v && v !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN' ? OPERATION_TYPE_LABELS[v] : '') || '—';
+};
 const zoneText = (v?: common_TechCardGarmentZone): string =>
   optionLabel(zoneOptions, v, 'TECH_CARD_GARMENT_ZONE_UNKNOWN');
 const seamClassText = (v?: common_TechCardSeamClass): string =>
@@ -190,26 +317,25 @@ const allowanceText = (d?: googletype_Decimal): string => {
   const v = dec(d);
   return v ? `${v} mm` : '';
 };
-const densityText = (d?: googletype_Decimal): string => {
-  const v = dec(d);
-  return v ? `${v} st/cm` : '';
-};
+// «TOPSTITCH … FROM EDGE», never a bare «width»: the step carries a second width — stitch_width_mm,
+// the zigzag amplitude / overlock bite — and the two are different facts (§10). Confusing them is
+// paid for in a whole batch, so each says on paper which one it is.
 const topstitchText = (t?: common_TechCardTopstitch): string => {
   if (!t || t.mode === 'TECH_CARD_TOPSTITCH_MODE_UNKNOWN') return '';
   const rows = t.rows && t.rows > 1 ? `${t.rows} × ` : '';
   if (t.mode === 'TECH_CARD_TOPSTITCH_MODE_EDGE') return `topstitch ${rows}edge`;
   const w = dec(t.widthMm);
-  return `topstitch ${rows}${w ? `${w} mm` : ''}`.trim();
+  return `topstitch ${rows}${w ? `${w} mm from edge` : ''}`.trim();
 };
-const attachmentText = (
-  kind?: common_TechCardAttachmentKind,
-  size?: googletype_Decimal,
-): string => {
-  const label = optionLabel(attachmentOptions, kind, 'TECH_CARD_ATTACHMENT_KIND_UNKNOWN');
-  if (!label) return '';
-  const s = dec(size);
-  return s ? `${label} ${s} mm` : label;
-};
+// A setting and the one bit that says where it came from: the marker means «the step's own value»,
+// and anything unmarked is inherited off the card's equipment park and printed all the same — see
+// stepEquipment.
+//
+// AN ASTERISK, NOT THE BULLET the plan drew: the settings of a step are joined with « · », and on
+// paper at 7pt a bullet standing after a space is the separator, letter for letter. Printed, «4
+// threads • · Nm 90» read as three settings, one of them blank. The marker hangs on the value with
+// no space in front of it for the same reason — it belongs to the number, not between numbers.
+const settingText = (s: EffectiveSetting<string>): string => (s.overridden ? `${s.text}*` : s.text);
 const has = (a?: unknown[]): boolean => Array.isArray(a) && a.length > 0;
 
 // Lowercase extension of a pattern sheet: filename first, url path as the legacy fallback —
@@ -277,8 +403,65 @@ export function TechPackDocument({
   // ВСЕ ХУКИ ОБЪЯВЛЕНЫ ДО раннего `if (!tc) return null` ниже. Иначе карта, приехавшая сначала
   // обёрткой без вложенного insert, а потом целиком (кэш → рефетч), меняла бы число вызовов
   // хуков между рендерами — а это не «иногда неверный вывод», это падение всего компонента.
-  // Порядок узлов — порядок словаря зон: бумага и экран обязаны перечислять узлы одинаково.
+  // ФОЛБЭК ДЛЯ НЕРАЗМЕЧЕННОЙ КАРТОЧКИ: группировка по зонам в порядке словаря. На размеченной
+  // карточке заголовки даёт `assemblyGroups` — настоящие узлы в порядке производящих шагов.
   // Шаги без зоны идут последней группой, а не растворяются в первой.
+  // РАЗМЕЧЕННАЯ КАРТОЧКА ПЕЧАТАЕТСЯ БЛОКАМИ УЗЛОВ, неразмеченная — по зонам, как раньше.
+  //
+  // Зона отвечает на вопрос «где на изделии», узел — «что собирают». Когда автор сказал второе,
+  // печатать первое значило бы выбросить сказанное: швея собирает КОРПУС, а не «шаги зоны
+  // outer shell». Но подменять группировку там, где узлов нет, нельзя — вышли бы пустые
+  // заголовки над каждым шагом, и лист стал бы хуже прежнего.
+  const assemblyGroups = useMemo(() => {
+    const ops = tc?.operations ?? [];
+    if (!ops.some((o) => (o.outputUnitKey ?? '').trim())) return null; // карточка не размечена
+    const pieces = (tc?.pieces ?? []).map((pc) => ({
+      lineKey: pc.lineKey ?? '',
+      name: pc.name ?? '',
+    }));
+    const pieceKeys = new Set(pieces.map((pc) => pc.lineKey));
+    const steps = ops.map((o) => ({
+      inputs: classifyAssemblyInputs(pieceKeys, o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])),
+      outputUnitKey: (o.outputUnitKey ?? '').trim(),
+      outputUnitName: (o.outputUnitName ?? '').trim(),
+    }));
+    const res = assemblySweep(pieces, steps);
+    const grouped = assemblyBlocks(steps, res);
+    // ГЕЙТ ТОТ ЖЕ, ЧТО У ДОСЬЕ: узлы должны РОДИТЬСЯ, а не быть объявленными. Объявленный ключ
+    // ещё не узел — джойн с одним входом его не рождает. По слабому гейту такая карточка
+    // печаталась бы целиком под одним заголовком «вне узлов», потеряв и узлы, и зоны: бумага
+    // оказалась бы хуже, чем до разметки, ровно на сломанной карточке, где она нужнее.
+    if (grouped.blocks.length === 0) return null;
+    const nameOf = (k: string) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || k;
+    const indexed = ops.map((op, index) => ({ op, index }));
+    const out: Array<{ key: string; label: string; sub: string; operations: typeof indexed }> = [];
+    for (const b of grouped.blocks) {
+      if (b.steps.length === 0) continue;
+      out.push({
+        key: b.key,
+        label: b.name ? `▣ ${b.key} · ${b.name}` : `▣ ${b.key}`,
+        // СОСТАВ УЗЛА — то, ради чего блок и печатают: швея видит, из чего собирается эта
+        // подсборка, не листая обратно к списку деталей.
+        sub: b.leaves.length ? `from: ${b.leaves.map(nameOf).join(' + ')}` : '',
+        operations: b.steps.map((i) => indexed[i]).filter(Boolean),
+      });
+    }
+    if (grouped.loose.steps.length > 0) {
+      out.push({
+        key: '',
+        label: '◌ outside units',
+        // Нейтрально намеренно: сюда попадают и обработки (у них выхода нет), и производящие
+        // шаги, чей узел НЕ РОДИЛСЯ. У вторых в строке стоит «produces ▣ SHELL», и заголовок
+        // «выход шага — не узел» спорил бы с их же строкой.
+        sub: 'steps outside recognised units',
+        operations: grouped.loose.steps.map((i) => indexed[i]).filter(Boolean),
+      });
+    }
+    // Без страховки `out.length > 0`: после гейта выше блок гарантированно есть, и мнимый
+    // фолбэк, который никогда не срабатывает, читался бы как защита, которой нет.
+    return out;
+  }, [tc?.operations, tc?.pieces]);
+
   const operationGroups = useMemo(() => {
     const indexed = (tc?.operations ?? []).map((op, index) => ({ op, index }));
     // Раскладываем ПО ОСТАТКУ, а не по совпадению со словарём. Прошлая версия перебирала словарь,
@@ -300,6 +483,11 @@ export function TechPackDocument({
     if (orphans.length > 0) groups.push({ zone: '', label: 'zone not set', operations: orphans });
     return groups;
   }, [tc?.operations]);
+
+  /** Что печатать заголовками: узлы, если карточка размечена, иначе зоны. */
+  const printGroups =
+    assemblyGroups ??
+    operationGroups.map((g) => ({ key: g.zone, label: g.label, sub: '', operations: g.operations }));
 
   // Раскладки скоупа: раскладка привязана к колорвею, а colorwayId = 0 означает общую для всех
   // цветов. Общая печатается всегда — она и есть норма этого стиля.
@@ -366,6 +554,40 @@ export function TechPackDocument({
       if (rm.media?.id != null) m.set(rm.media.id, rm.media);
     return m;
   }, [techCard.resolvedTechnicalMedia, techCard.resolvedMoodboardMedia]);
+  // Адреса операционных снимков карточка НЕ хранит — форма шага несёт только media_id, а адрес
+  // отдаёт read-модель отдельным списком (0308 и далее). Словарь id → адрес собирается один раз,
+  // а не на каждый шаг таблицы операций.
+  const opMediaUrlById = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of techCard.resolvedOperationMedia ?? []) {
+      const id = wireInt(r.media?.id);
+      const url = r.media?.media?.fullSize?.mediaUrl || r.media?.media?.thumbnail?.mediaUrl;
+      if (id && url) m.set(id, url);
+    }
+    return m;
+  }, [techCard.resolvedOperationMedia]);
+  // Имя детали кроя по её ключу — для указаний на снимках шага. Указание может называть деталь
+  // (`piece_line_key`), и на бумаге читается именно ИМЯ: ключ в цеху не значит ничего.
+  // Выноска печатается на листе ЭСКИЗА, если приколота к техническому изображению или не
+  // приколота вовсе. Мудбордовые (приколотые к картинке мудборда) на лист швеи не идут: мудборд —
+  // внутренний документ, и его нумерация своя.
+  const sketchMediaIds = useMemo(
+    () => new Set((tc?.technicalMedia ?? []).map((m) => wireInt(m.mediaId))),
+    [tc?.technicalMedia],
+  );
+  const printedOnSketch = (c: common_TechCardCallout) => {
+    const mid = wireInt(c.mediaId);
+    return mid === 0 || sketchMediaIds.has(mid);
+  };
+
+  const pieceNameByKey = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const p of tc?.pieces ?? []) {
+      const k = p.lineKey?.trim();
+      if (k) byKey.set(k, p.name?.trim() || '(без имени)');
+    }
+    return (lineKey: string) => byKey.get(lineKey);
+  }, [tc?.pieces]);
   // detail reference images (and swatches) are library media ids not carried in the resolved
   // sketch maps — resolve them from the library so they print.
   const libraryMap = useMediaMap();
@@ -722,14 +944,149 @@ export function TechPackDocument({
   // Стандарт припуска карты — печатается в каждой строке, у которой своего значения нет.
   const cardAllowance = dec(tc.requiredSeamAllowanceMm);
 
+  // ── THE EQUIPMENT PARK, AND WHAT EACH STEP ACTUALLY RUNS AT (0306) ───────────────────────────
+  //
+  // ЭФФЕКТИВНЫЕ ЗНАЧЕНИЯ СЧИТАЮТСЯ ЗДЕСЬ, НА КЛИЕНТЕ, и ждать их с провода бессмысленно: сервер
+  // принципиально НЕ материализует унаследованное (NULL в колонке = «спроси профиль», и он остаётся
+  // NULL, даже когда технолог набрал бы то же число — §3). Печать строки как она хранится показала
+  // бы корректно унаследованную настройку пустой на той самой бумаге, по которой машинку и
+  // настраивают. Лестница пройдена теми же резолверами, что и в редакторе
+  // (resolveMachineProfile / resolvePressProfile), поэтому экран и лист не могут разойтись в том,
+  // ОТКУДА взялось число.
+  const parkMachines = tc.construction?.equipmentDefaults?.machines ?? [];
+  const parkPresses = tc.construction?.equipmentDefaults?.presses ?? [];
+  const cardDensity = dec(tc.construction?.defaultStitchesPerCm);
+  // Профили приезжают с провода с Decimal-сообщениями, а один композитор настроек на экран и на
+  // бумагу принимает строки — decimalToInput и есть эта граница.
+  const machineSettingsOf = (m: common_TechCardMachineProfile) => ({
+    threadCount: m.threadCount,
+    needleType: m.needleType,
+    needleSizeNm: m.needleSizeNm,
+    bedType: m.bedType,
+    automation: m.automation,
+    threadTension: m.threadTension,
+    threadTensionNote: m.threadTensionNote,
+    attachmentKind: m.attachmentKind,
+    stitchesPerCm: dec(m.stitchesPerCm),
+    stitchWidthMm: dec(m.stitchWidthMm),
+  });
+  const pressSettingsOf = (p: common_TechCardPressProfile) => ({
+    pressTemperatureC: p.pressTemperatureC,
+    pressDwellSec: p.pressDwellSec,
+    pressPressureNCm2: dec(p.pressPressureNCm2),
+    pressSteam: p.pressSteam,
+    pressCloth: p.pressCloth,
+  });
+
+  // Одна строка операции: на чём она идёт, с какими настройками и что из них — её собственное.
+  // Плотность вынимается отдельно: она печатается в колонке шва (там же, где припуск и класс),
+  // потому что она есть у шага ЛЮБОГО типа, а не только у машинного.
+  const stepEquipment = (o: common_TechCardOperation) => {
+    const machineStep = isMachineStepType(o.operationType);
+    const pressStep = isPressStepType(o.operationType);
+    const machineProfile = machineStep
+      ? resolveMachineProfile(parkMachines, o.machineType, o.machineProfileKey)
+      : undefined;
+    const pressProfile = pressStep
+      ? resolvePressProfile(parkPresses, o.pressEquipment, o.pressProfileKey, o.operationType)
+      : undefined;
+    const stepMachine = {
+      threadCount: o.threadCount,
+      needleType: o.needleType,
+      needleSizeNm: o.needleSizeNm,
+      threadTension: o.threadTension,
+      threadTensionNote: o.threadTensionNote,
+      attachmentKind: o.attachmentKind,
+      attachmentSizeMm: dec(o.attachmentSizeMm),
+      stitchesPerCm: dec(o.stitchesPerCm),
+      stitchWidthMm: dec(o.stitchWidthMm),
+    };
+    // ВТО-шаг не шьют, поэтому карточная плотность на него НЕ распространяется: «4 ст/см» под
+    // строкой «разутюжить» — число, которому на этом шаге нечего описывать. Своё значение шага (или
+    // машинного профиля, если он почему-то есть) печатается как есть.
+    const machine = effectiveMachineSettings(
+      stepMachine,
+      machineProfile ? machineSettingsOf(machineProfile) : undefined,
+      pressStep ? undefined : cardDensity,
+    );
+    const density = machine.find((s) => s.field === 'density');
+    const settings = pressStep
+      ? [
+          ...effectivePressSettings(
+            {
+              pressTemperatureC: o.pressTemperatureC,
+              pressDwellSec: o.pressDwellSec,
+              pressPressureNCm2: dec(o.pressPressureNCm2),
+              pressSteam: o.pressSteam,
+              pressCloth: o.pressCloth,
+            },
+            pressProfile ? pressSettingsOf(pressProfile) : undefined,
+          ),
+          // Лапка/приспособление живёт на шаге любого типа (сервер её у ВТО не отбирает), а у
+          // press-профиля такого поля нет — поэтому она добирается со швейной стороны, чтобы не
+          // пропасть с бумаги молча.
+          ...machine.filter((s) => s.field === 'attachment'),
+        ]
+      : machine.filter((s) => s.field !== 'density');
+    // ИМЯ МАШИНКИ — человеческое, если профиль назван («оверлок у окна»), иначе имя самой машинки
+    // из словаря. Ключ не печатается никогда: ULID цеху ничего не говорит.
+    const head = machineStep
+      ? machineProfile
+        ? machineProfileName(machineProfile)
+        : // НОМЕР СТЕЖКА — КОНКРЕТНЫЙ, А НЕ ПЕРЕЧИСЛЕНИЕ. «overlock 504 / 514 / 516» на листе для
+          // цеха предлагало оператору выбрать стежок самому; число ниток шага уже говорит, какой
+          // из трёх, — надо было только сказать это вслух.
+          machineTypeLabelWithStitch(o.machineType, o.threadCount)
+      : pressStep
+        ? pressProfile
+          ? pressProfileName(pressProfile)
+          : pressEquipmentLabel(o.pressEquipment)
+        : '';
+    return {
+      head,
+      settings,
+      density,
+      overridden: settings.some((s) => s.overridden) || !!density?.overridden,
+    };
+  };
+  // Не мемоизируется намеренно: массив пересобирается на каждый рендер и в самом документе, так что
+  // useMemo по нему пересчитывался бы всё равно, лишь обещая стабильность, которой нет.
+  const opEquipment = (tc.operations ?? []).map(stepEquipment);
+  // Маркер без легенды — шум: точка рядом с числом обязана где-то на листе объясниться.
+  const anyOverride = opEquipment.some((e) => e.overridden);
+
   // The step's pieces, by name — the "pieces" column of the operations table. Resolved through the
   // card's own piece list, which is why the removed free-text `placement` is not missed: it was this
   // same join, computed in the editor and stored in the row.
-  const opParts = (o: { pieceLineKeys?: string[] }): string[] => {
+  //
+  // ЧИТАЕТСЯ ОБЪЕДИНЕНИЕ (input_keys), а не только легаси-проекция: с узлами сборки вход шага —
+  // деталь ИЛИ узел, и шаг, сшивающий два узла, по одной проекции напечатался бы вовсе без
+  // состава. Фолбэк на piece_line_keys оставлен для архивных снапшотов: они отданы ровно так,
+  // как были записаны, и поля 46 у них нет.
+  const opParts = (o: { pieceLineKeys?: string[]; inputKeys?: string[] }): string[] => {
     const pieces = tc.pieces ?? [];
-    return (o.pieceLineKeys ?? [])
-      .map((k) => pieces.find((pc) => pc.lineKey === k)?.name?.trim() || '')
+    // Источник ключей решает, что означает ненайденный ключ: в union'е это ссылка на узел, а в
+    // старой проекции `piece_line_keys` узлов не бывает — там ненайденный ключ есть деталь,
+    // которую не нашли. Дефект был здесь и до Ф6; печать по нему выдавала деталь за узел.
+    const legacy = !o.inputKeys?.length;
+    const keys = legacy ? (o.pieceLineKeys ?? []) : (o.inputKeys ?? []);
+    return keys
+      .map((k) => {
+        if (!k) return '';
+        const piece = pieces.find((pc) => pc.lineKey === k);
+        if (piece) return piece.name?.trim() || k;
+        return legacy ? k : `▣ ${k}`;
+      })
       .filter(Boolean);
+  };
+
+  // Колонка «выход»: что шаг ПРОИЗВОДИТ. Пусто = шаг ничего не собирает — это обработка, и пустая
+  // ячейка здесь утверждение, а не пробел.
+  const opOutput = (o: { outputUnitKey?: string; outputUnitName?: string }): string => {
+    const key = (o.outputUnitKey ?? '').trim();
+    if (!key) return '';
+    const name = (o.outputUnitName ?? '').trim();
+    return name ? `▣ ${key} · ${name}` : `▣ ${key}`;
   };
 
   // The "part" column: the piece link is the durable ref (line_key, then the legacy piece_id);
@@ -807,6 +1164,12 @@ export function TechPackDocument({
     const legacy = resolveUsageArt(o);
     return legacy ? [described(legacy)] : out;
   };
+
+  // Выноски картинки шага — с провода на форму примитива. Зеркалит конвертацию mapTechCardToForm
+  // (schema.ts): координаты остаются decimal-строкой без округлений, тот же круговой рейс. Не
+  // импортируется оттуда — примитив печати читает read-модель (o.media), а не форму карточки.
+  const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
+    (m.annotations ?? []).map(annotationFromWire);
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
     common_TechCardReleaseMeta | undefined
@@ -1238,6 +1601,10 @@ export function TechPackDocument({
                       увёл бы номера с их узлов. */}
                   <div className='relative block w-full border border-black'>
                     <img src={url} alt='' className='block h-auto w-full' />
+                    {/* ГЕОМЕТРИЯ УКАЗАНИЙ — на бумаге тоже. Мерка «6 мм» между двумя точками и
+                        скобка над участком это инструкция швее; напечатать только номер, оставив
+                        фигуру на экране, значило бы выдать в цех половину указания. */}
+                    <SketchGeometryLayer callouts={pins} />
                     {pins.map((c, j) => {
                       const x = num(dec(c.posX));
                       const y = num(dec(c.posY));
@@ -1277,7 +1644,12 @@ export function TechPackDocument({
                 </tr>
               </thead>
               <tbody>
-                {(tc.callouts ?? []).map((c, i) => {
+                {/* ТОЛЬКО ВЫНОСКИ ЭТОГО ЛИСТА. Номера пер-листовые — эскиз и мудборд нумеруются
+                    независимо, — а фигуры выше уже отфильтрованы по `mediaId`. Таблица же брала
+                    ВСЕ выноски карточки, и записки, приколотые к мудборду, приезжали на лист швеи
+                    с номерами, которых на этом листе нет, вперемешку и с дублями. Непривязанная
+                    выноска остаётся здесь: она про изделие, а не про картинку. */}
+                {(tc.callouts ?? []).filter(printedOnSketch).map((c, i) => {
                   // СВЯЗЬ ВЫНОСКИ С ДЕТАЛЬЮ — половина, которой на бумаге не было. Номер на
                   // эскизе и строка в «cut pieces» жили порознь, и соединить их можно было только
                   // в голове. Номер выноски берём тем же фолбэком (`c.number || i + 1`), что и
@@ -1291,7 +1663,15 @@ export function TechPackDocument({
                   return (
                     <tr key={i} className='break-inside-avoid'>
                       <td className={`${TD} text-center font-semibold`}>{number}</td>
-                      <td className={TD}>{c.part || '—'}</td>
+                      <td className={TD}>
+                        {/* ВСЕ ДЕТАЛИ, А НЕ ПЕРВАЯ. У бумаги нет наведения и нет подсказки: список,
+                            сокращённый до «и ещё две», на листе швеи означает две потерянные
+                            детали. Указание законно называет несколько — узел собирает их вместе. */}
+                        {(c.parts?.length ? c.parts : c.part ? [c.part] : []).join(', ') || '—'}
+                        {calloutKindLabel(c.kind) && (
+                          <span className='ml-1 text-labelColor'>· {calloutKindLabel(c.kind)}</span>
+                        )}
+                      </td>
                       <td className={TD}>
                         {pieces.length === 0
                           ? '—'
@@ -1742,7 +2122,24 @@ export function TechPackDocument({
                       })()}
                     </td>
                     <td className={TD}>{p.grainline || '—'}</td>
-                    <td className={`${TD} text-center`}>{p.fused ? 'yes' : 'no'}</td>
+                    <td className={`${TD} text-center`}>
+                      {p.fused ? (
+                        <>
+                          yes
+                          {/* КАК ИМЕННО (0304) — под словом «yes», а не вместо него. Голое «yes» у
+                              детали, которая дублируется полосой 25 мм, читается раскройщиком как
+                              «клеевая по всему лекалу»: он выкроит дубль всей детали и потратит в
+                              разы больше материала, чем заложено в норму. Печатается и у «вся
+                              деталь» тоже — подтвердить то, что и так сделают, дешевле, чем
+                              промолчать там, где молчание означает другое действие. */}
+                          <div className='mt-0.5 text-nano uppercase text-labelColor'>
+                            {fusingPrintCaption(p.fusingMode, p.fusingWidthMm?.value)}
+                          </div>
+                        </>
+                      ) : (
+                        'no'
+                      )}
+                    </td>
                     <td className={TD}>
                       {layers.length === 0 ? (
                         '—'
@@ -1925,22 +2322,79 @@ export function TechPackDocument({
             <div className='mb-3 grid grid-cols-2 gap-x-8'>
               <div>
                 <KV k='default seam class' v={seamClassText(tc.construction.defaultSeamClass)} />
-                <KV k='default density' v={densityText(tc.construction.defaultStitchesPerCm)} />
-                <KV
-                  k='overlock'
-                  v={
-                    tc.construction.overlockThreadCount
-                      ? `${tc.construction.overlockThreadCount}-thread`
-                      : ''
-                  }
-                />
+                <KV k='default density' v={densityText(cardDensity)} />
+                {/* NO `overlock` / `pressing` ROWS. Both left the contract with the equipment park
+                    (0306), and printing them «for the archives» never worked: this document renders
+                    a frozen release from the SERVER'S parse of the snapshot, and that parse is
+                    protojson with DiscardUnknown — the retired fields are dropped before the
+                    response is built, so the two rows printed blank on every sheet ever produced.
+                    The park table below is what both a live card and a release say instead. */}
               </div>
               <div>
                 <KV k='hem finish' v={tc.construction.hemFinish} />
-                <KV k='pressing' v={tc.construction.pressing} />
                 <KV k='notes' v={tc.construction.notes} />
               </div>
             </div>
+          )}
+          {/* THE CARD'S EQUIPMENT PARK — «this style is sewn on THESE machines, pressed in THESE
+              modes». It replaces the one line of `pressing` prose the park retired, and it is not a
+              decoration: every blank setting in the steps below is inherited from exactly one of
+              these rows, so without them the sheet quotes numbers with no stated source. */}
+          {(has(parkMachines) || has(parkPresses)) && (
+            <table className='mb-3 w-full border-collapse text-micro'>
+              <thead>
+                <tr>
+                  <th className={`${TH} w-24`}>kind</th>
+                  <th className={`${TH} w-1/3`}>profile</th>
+                  <th className={TH}>settings</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parkMachines.map((m, i) => (
+                  <tr key={`machine-${i}`} className='break-inside-avoid'>
+                    <td className={TD}>machine</td>
+                    <td className={TD}>
+                      <div className='font-medium'>{machineProfileName(m)}</div>
+                      {/* Только у НАЗВАННОГО профиля: без имени жирная строка выше и есть имя
+                          машинки, и вторая такая же прочиталась бы как другая машинка. */}
+                      {m.label?.trim() && (
+                        <div className='text-labelColor'>{machineTypeLabel(m.machineType) || '—'}</div>
+                      )}
+                    </td>
+                    <td className={TD}>
+                      <div>{machineProfileSummary(machineSettingsOf(m)) || '—'}</div>
+                      {m.note?.trim() && <div className='italic text-labelColor'>{m.note}</div>}
+                    </td>
+                  </tr>
+                ))}
+                {parkPresses.map((p, i) => (
+                  <tr key={`press-${i}`} className='break-inside-avoid'>
+                    <td className={TD}>press</td>
+                    <td className={TD}>
+                      <div className='font-medium'>{pressProfileName(p)}</div>
+                      {/* Для какого процесса режим написан: «press open» и «fusing» на одном утюге —
+                          разные режимы, и профиль без этой пометки читался бы как любой из них.
+                          УНИВЕРСАЛЬНЫЙ профиль процесс не печатает: его «любой ВТО-шаг» — это
+                          отсутствие ограничения, а не ещё одна настройка. */}
+                      <div className='text-labelColor'>
+                        {[
+                          p.label?.trim() ? pressEquipmentLabel(p.pressEquipment) : '',
+                          p.operationType && p.operationType !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN'
+                            ? pressProcessShort(p.operationType)
+                            : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    </td>
+                    <td className={TD}>
+                      <div>{pressProfileSummary(pressSettingsOf(p)) || '—'}</div>
+                      {p.note?.trim() && <div className='italic text-labelColor'>{p.note}</div>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
           {has(tc.operations) && (
             <table className='w-full border-collapse text-micro'>
@@ -1948,26 +2402,35 @@ export function TechPackDocument({
                 <tr>
                   <th className={`${TH} w-8`}>#</th>
                   <th className={TH}>operation</th>
+                  <th className={TH}>machine / mode</th>
                   <th className={TH}>zone</th>
                   <th className={TH}>pieces</th>
+                  <th className={TH}>produces</th>
                   <th className={TH}>seam</th>
                   <th className={TH}>materials</th>
                   <th className={`${TH} text-right`}>SMV</th>
                 </tr>
               </thead>
               <tbody>
-                {operationGroups.map((g) => (
-                  <Fragment key={g.zone}>
-                    {/* УЗЕЛ. Швея собирает изделие узлами, а не сплошным списком из сорока строк;
-                        до этого зона была колонкой, то есть признаком строки, а не структурой
-                        листа. Порядок групп — порядок словаря зон, чтобы бумага и экран
-                        перечисляли узлы одинаково. */}
+                {printGroups.map((g) => (
+                  <Fragment key={g.key ? `u:${g.key}` : 'tail'}>
+                    {/* ЗАГОЛОВОК ГРУППЫ. Швея собирает изделие узлами, а не сплошным списком из
+                        сорока строк. На размеченной карточке это НАСТОЯЩИЕ узлы сборки со своим
+                        составом; на неразмеченной — зоны, как было до Ф1: подменять одно другим
+                        там, где узлов нет, значило бы напечатать пустые заголовки над каждым
+                        шагом. Порядок узлов — порядок их производящих шагов, порядок зон —
+                        порядок словаря; бумага и экран обязаны перечислять одинаково. */}
                     <tr className='break-inside-avoid'>
                       <td
-                        colSpan={7}
+                        colSpan={9}
                         className='border border-black bg-neutral-100 px-1.5 py-1 text-control font-bold uppercase tracking-wide'
                       >
                         {g.label}
+                        {g.sub && (
+                          <span className='ml-2 font-normal normal-case tracking-normal text-labelColor'>
+                            {g.sub}
+                          </span>
+                        )}
                       </td>
                     </tr>
                     {g.operations.map(({ op: o, index: i }) => {
@@ -1976,10 +2439,15 @@ export function TechPackDocument({
                       // the same string printed twice — once as the step's thread, once in its
                       // material list. There is one answer now, and it is the material list.
                       const materials = resolveOpMaterials(o);
+                      // ПЛОТНОСТЬ — ЭФФЕКТИВНАЯ И ПАРОЙ: «4 st/cm (2.5 mm)». Раньше печаталось
+                      // только собственное значение шага, то есть корректно унаследованная от
+                      // машинки или карточки плотность уходила в цех пустой клеткой — ровно тем же,
+                      // чем выглядит «не задано». Лапка переехала в колонку машинки: это настройка
+                      // машины, а не шва.
+                      const equip = opEquipment[i];
                       const detail = [
-                        dec(o.stitchesPerCm) && `${dec(o.stitchesPerCm)} st/cm`,
+                        equip?.density ? settingText(equip.density) : '',
                         topstitchText(o.topstitch),
-                        attachmentText(o.attachmentKind, o.attachmentSizeMm),
                       ]
                         .filter(Boolean)
                         .join(' · ');
@@ -1995,49 +2463,120 @@ export function TechPackDocument({
                           : cardAllowance
                             ? `${cardAllowance} mm (card standard)`
                             : 'card standard not set';
+                      // ФОТОГРАФИИ ШАГА. Адрес резолвится через словарь разрешённых картинок
+                      // карточки (opMediaUrlById) — картинка без разрешённого адреса НЕ печатается
+                      // вовсе: пустая рамка на бумаге хуже, чем отсутствующий снимок.
+                      const stepMedia = (o.media ?? [])
+                        .map((m) => ({ m, url: opMediaUrlById.get(wireInt(m.mediaId)) }))
+                        .filter(
+                          (x): x is { m: common_TechCardOperationMedia; url: string } => !!x.url,
+                        );
                       return (
-                        <tr key={i} className='break-inside-avoid'>
-                          <td className={`${TD} text-center`}>
-                            {o.operationNumber || (i + 1) * 10}
-                          </td>
-                          <td className={TD}>
-                            <div>{operationTypeText(o.operationType)}</div>
-                            {o.note && <div className='italic text-labelColor'>{o.note}</div>}
-                          </td>
-                          <td className={TD}>{zoneText(o.zone) || '—'}</td>
-                          <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
-                          <td className={TD}>
-                            <div>{seamClassText(o.seamClass) || '—'}</div>
-                            <div className='font-medium'>{allowanceCell}</div>
-                            {detail && <div className='text-labelColor'>{detail}</div>}
-                          </td>
-                          <td className={TD}>
-                            {materials.length === 0 ? (
-                              '—'
-                            ) : (
-                              <div className='flex flex-col gap-0.5'>
-                                {materials.map((m, j) => (
-                                  <div key={j} className={m.missing ? 'font-bold uppercase' : ''}>
-                                    {m.missing ? `⚠ ${m.name}` : m.name}
-                                    {m.kind ? (
-                                      <span className='text-labelColor'> · {m.kind}</span>
-                                    ) : null}
-                                    {m.colour ? (
-                                      <span className='text-labelColor'> · {m.colour}</span>
-                                    ) : null}
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </td>
-                          <td className={`${TD} text-right`}>{dec(o.smv) || '—'}</td>
-                        </tr>
+                        <Fragment key={i}>
+                          <tr className='break-inside-avoid'>
+                            <td className={`${TD} text-center`}>
+                              {o.operationNumber || (i + 1) * 10}
+                            </td>
+                            <td className={TD}>
+                              <div>{operationTypeText(o)}</div>
+                              {o.note && <div className='italic text-labelColor'>{o.note}</div>}
+                            </td>
+                            {/* НА ЧЁМ И В КАКОМ РЕЖИМЕ. Со стороны машинки — короткое имя машинки
+                                (человеческое, если профиль назван) и её эффективные настройки; со
+                                стороны ВТО — режим числами, которые оператор выставляет на прессе.
+                                До 0306 этой колонки не было вовсе: тип шага сам назывался машинкой,
+                                и настройки не печатались нигде. */}
+                            <td className={TD}>
+                              {equip?.head ? <div>{equip.head}</div> : null}
+                              {equip && equip.settings.length > 0 ? (
+                                <div className='text-labelColor'>
+                                  {equip.settings.map(settingText).join(' · ')}
+                                </div>
+                              ) : null}
+                              {!equip?.head && !equip?.settings.length ? '—' : null}
+                            </td>
+                            <td className={TD}>{zoneText(o.zone) || '—'}</td>
+                            <td className={TD}>{opParts(o).join(' + ') || '—'}</td>
+                            {/* ЧТО ШАГ ПРОИЗВОДИТ. Пустая ячейка — утверждение, а не пробел: шаг
+                                ничего не собирает, это обработка, и его входы остаются на столе
+                                следующим шагам. */}
+                            <td className={TD}>{opOutput(o) || '—'}</td>
+                            <td className={TD}>
+                              <div>{seamClassText(o.seamClass) || '—'}</div>
+                              <div className='font-medium'>{allowanceCell}</div>
+                              {detail && <div className='text-labelColor'>{detail}</div>}
+                            </td>
+                            <td className={TD}>
+                              {materials.length === 0 ? (
+                                '—'
+                              ) : (
+                                <div className='flex flex-col gap-0.5'>
+                                  {materials.map((m, j) => (
+                                    <div
+                                      key={j}
+                                      className={m.missing ? 'font-bold uppercase' : ''}
+                                    >
+                                      {m.missing ? `⚠ ${m.name}` : m.name}
+                                      {m.kind ? (
+                                        <span className='text-labelColor'> · {m.kind}</span>
+                                      ) : null}
+                                      {m.colour ? (
+                                        <span className='text-labelColor'> · {m.colour}</span>
+                                      ) : null}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td className={`${TD} text-right`}>{dec(o.smv) || '—'}</td>
+                          </tr>
+                          {/* СНИМКИ ШАГА — ВО ВСЮ ШИРИНУ ЛИСТА, отдельной строкой на каждую
+                              картинку: лист швеи так и читают, по эскизу узла, а не по колонке
+                              таблицы. Только для чтения (AnnotationCanvas без onChange) — печать
+                              не редактирует. */}
+                          {stepMedia.map(({ m, url }, mi) => (
+                            <tr key={`media:${i}:${mi}`} className='break-inside-avoid'>
+                              <td colSpan={9} className={TD}>
+                                {/* Потолок высоты: портретный снимок во всю ширину листа выше
+                                    страницы, а `break-inside-avoid` не переносит — он бы просто
+                                    обрезался. Ширина при этом ужимается вместе с высотой, и
+                                    выноски остаются на своих местах: они в долях кадра. */}
+                                <div className='mx-auto w-fit'>
+                                  <AnnotationCanvas
+                                    src={url}
+                                    alt={m.caption || undefined}
+                                    annotations={mediaAnnotations(m)}
+                                    maxHeightClass='max-h-[120mm]'
+                                    // ИМЯ ДЕТАЛИ НА БУМАГЕ. Без резолвера связь «указание про эту
+                                    // деталь» хранится, но не читается: у пина, где заполнена
+                                    // только деталь, легенда пуста, а у остальных видов имя не
+                                    // показывается вовсе. Ключ в цеху не значит ничего — имя значит.
+                                    pieceLabel={pieceNameByKey}
+                                  />
+                                </div>
+                                {m.caption?.trim() && (
+                                  <p className='mt-1 text-nano text-labelColor'>
+                                    {m.caption.trim()}
+                                  </p>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </Fragment>
                       );
                     })}
                   </Fragment>
                 ))}
               </tbody>
             </table>
+          )}
+          {/* ЛЕГЕНДА МАРКЕРА. Точка без объяснения — шум, который цех прочитает как опечатку.
+              Печатается только когда на листе есть хотя бы один переопределённый параметр. */}
+          {has(tc.operations) && anyOverride && (
+            <p className='mt-1 text-nano text-labelColor'>
+              * = set on the step itself; everything else is the card default or the machine /
+              pressing profile above.
+            </p>
           )}
         </Sheet>
       )}
