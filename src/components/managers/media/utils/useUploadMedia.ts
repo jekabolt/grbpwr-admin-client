@@ -39,8 +39,14 @@ function getContentTypeFromDataUrl(dataUrl: string): string {
 // Client-side pre-upload size gates, mirroring the backend's real limits (see the error mapper
 // below): images up to 40 megapixels (≈28 MB), video up to 50 MB. Keeping these as one constant
 // each avoids the two pre-check call sites (File / data-URL) silently drifting apart.
-const MAX_IMAGE_BYTES = 28 * 1024 * 1024;
-const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+//
+// ЭКСПОРТИРУЮТСЯ, потому что проверять их в момент отправки — поздно. Очередь загрузки
+// (`usePendingFiles`) меряет файл при постановке в очередь и говорит про предел ДО того, как
+// человек нажал «отправить»; гейты ниже остаются последней линией для остальных путей.
+export const MAX_IMAGE_BYTES = 28 * 1024 * 1024;
+export const MAX_VIDEO_BYTES = 50 * 1024 * 1024;
+/** Второй предел бакета на картинку, который до сих пор не проверялся нигде на клиенте. */
+export const MAX_IMAGE_MEGAPIXELS = 40;
 
 // Maps an upload failure to a clear, media-specific message. The grpc-gateway surfaces the
 // gRPC code as an HTTP status on the thrown error: INVALID_ARGUMENT → 400 (bad file — the
@@ -63,9 +69,24 @@ function mediaUploadErrorMessage(error: unknown, isVideo: boolean): string {
 
 export type UploadMediaInput = File | string;
 
-export function useUploadMedia() {
+/** Отказ с сохранённым кодом ответа: вызывающий может перевести его сам, не разбирая текст. */
+function uploadError(error: unknown, isVideo: boolean): Error {
+  return Object.assign(new Error(mediaUploadErrorMessage(error, isVideo)), {
+    status: (error as { status?: number })?.status,
+  });
+}
+
+export function useUploadMedia(options?: {
+  /**
+   * Не показывать тост на отказе. Для очереди загрузки: там причина стоит В СТРОКЕ файла и не
+   * гаснет, а тост на каждый файл пачки — десять всплывающих сообщений подряд поверх той самой
+   * строки, где всё уже написано.
+   */
+  silent?: boolean;
+}) {
   const queryClient = useQueryClient();
   const { showMessage } = useSnackBarStore();
+  const silent = options?.silent ?? false;
 
   return useMutation<common_MediaFull, Error, UploadMediaInput>({
     mutationFn: async (input: UploadMediaInput) => {
@@ -109,7 +130,7 @@ export function useUploadMedia() {
             rawB64Image: base64,
           });
         } catch (e) {
-          throw new Error(mediaUploadErrorMessage(e, false));
+          throw uploadError(e, false);
         }
 
         if (!response.media) {
@@ -127,7 +148,7 @@ export function useUploadMedia() {
           contentType,
         });
       } catch (e) {
-        throw new Error(mediaUploadErrorMessage(e, true));
+        throw uploadError(e, true);
       }
 
       if (!response.media) {
@@ -140,6 +161,7 @@ export function useUploadMedia() {
       queryClient.invalidateQueries({ queryKey: mediaKeys.all });
     },
     onError: (error) => {
+      if (silent) return;
       const msg = error instanceof Error ? error.message : 'Failed to upload media';
       showMessage(msg, 'error');
     },

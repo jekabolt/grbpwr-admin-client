@@ -29,8 +29,18 @@ export function ModelMedia({ model }: { model?: common_Model }) {
   }
 
   function handleDelete(id: number) {
-    setMedia((prev) => prev.filter((m) => m.id !== id));
+    // Локальный список — КЭШ РАЗРЕШЁННЫХ МЕДИА, а не выбор (выбор в `field.value`). Пруня его на
+    // удалении, форма теряла адрес кадра и не могла вернуть убранное.
     field.onChange((field.value ?? []).filter((v) => v !== id));
+  }
+
+  function handleReorder(next: common_MediaFull[]) {
+    setMedia((prev) => {
+      const known = new Set(prev.map((m) => m.id));
+      const fresh = next.filter((m) => m.id != null && !known.has(m.id));
+      return fresh.length ? [...prev, ...fresh] : prev;
+    });
+    field.onChange(next.map((m) => m.id).filter((id): id is number => id != null));
   }
 
   return (
@@ -40,11 +50,12 @@ export function ModelMedia({ model }: { model?: common_Model }) {
       aspectRatio={['3:4']}
       frameAspect='3/4'
       purpose='model photos'
-      ratioCaption='first photo is the thumbnail'
+      ratioCaption='3:4 frame'
       fit='cover'
       firstIsThumbnail
       onSelect={handleAdd}
       onDelete={handleDelete}
+      onReorder={handleReorder}
     />
   );
 }

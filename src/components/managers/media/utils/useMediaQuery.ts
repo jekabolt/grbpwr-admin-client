@@ -70,3 +70,41 @@ export function useDeleteMedia() {
     },
   });
 }
+
+export type BulkDeleteResult = { deleted: number[]; failed: { id: number; reason: string }[] };
+
+/**
+ * Удаление пачкой. Бакет умеет удалять только по одному, поэтому запросы идут подряд, а НЕ
+ * `Promise.all`: отказ на одном id не должен уносить остальные, и порядок отказов должен
+ * совпадать с порядком, в котором человек их видит.
+ *
+ * Возвращается разбор, а не бросается исключение: удаление двадцати снимков, где два стоят на
+ * витрине, — это НЕ провал операции, это восемнадцать удалённых и два названных отказа.
+ * Список инвалидируется один раз в конце, иначе сетка перерисовывалась бы на каждом ответе.
+ */
+export function useDeleteManyMedia() {
+  const queryClient = useQueryClient();
+  return useMutation<BulkDeleteResult, Error, number[]>({
+    mutationFn: async (ids: number[]) => {
+      const deleted: number[] = [];
+      const failed: { id: number; reason: string }[] = [];
+      for (const id of ids) {
+        try {
+          await adminService.DeleteFromBucket({ id });
+          deleted.push(id);
+        } catch (error) {
+          failed.push({
+            id,
+            reason:
+              error instanceof Error ? error.message : 'the bucket refused without an explanation',
+          });
+        }
+      }
+      return { deleted, failed };
+    },
+    retry: false,
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: mediaKeys.all });
+    },
+  });
+}

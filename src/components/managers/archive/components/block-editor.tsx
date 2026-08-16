@@ -167,6 +167,26 @@ export function BlockEditor({ index, item, productApi }: BlockEditorProps) {
     },
     [item.mediaIds, item.mediaUrls, setField],
   );
+  // Порядок линии — это порядок показа на витрине. Две параллельные колонки (`mediaIds` +
+  // `mediaUrls`) переставляются ОДНИМ движением: разъехавшись, они дают подпись от одного кадра
+  // на картинке другого.
+  // ПОТОЛОК ЛИНИИ ДЕРЖИТ КАЖДЫЙ ПИСАТЕЛЬ, А НЕ ТОЛЬКО ДОБАВЛЕНИЕ. Перестановка длины не меняет, но
+  // этой же дверью в список входит ВОЗВРАТ убранного кадра, и он приходил пятым в линию на четыре
+  // места: подпись читалась «media (5/4)», а на витрину уезжал лишний кадр.
+  const reorderLineMedia = useCallback(
+    (next: common_MediaFull[]) => {
+      const capped = next.slice(0, MEDIA_LINE_MAX);
+      setField(
+        'mediaIds',
+        capped.map((m) => m.id).filter((id): id is number => id != null),
+      );
+      setField(
+        'mediaUrls',
+        capped.map((m) => m.media?.thumbnail?.mediaUrl || m.media?.fullSize?.mediaUrl || ''),
+      );
+    },
+    [setField],
+  );
 
   switch (item.type) {
     case 'ARCHIVE_ITEM_TYPE_MAIN_MEDIA':
@@ -219,9 +239,14 @@ export function BlockEditor({ index, item, productApi }: BlockEditorProps) {
               aspectRatio={LINE_RATIOS.map((r) => ASPECT_RATIO_LABEL[r])}
               frameAspect={cssAspect}
               purpose='archive media line'
-              ratioCaption={count >= MEDIA_LINE_MAX ? 'max reached' : `up to ${MEDIA_LINE_MAX}`}
+              ratioCaption={
+                count >= MEDIA_LINE_MAX
+                  ? 'no slots left'
+                  : `${MEDIA_LINE_MAX - count} of ${MEDIA_LINE_MAX} slots left`
+              }
               onSelect={addLineMedia}
               onDelete={removeLineMedia}
+              onReorder={reorderLineMedia}
             />
           </div>
         </div>

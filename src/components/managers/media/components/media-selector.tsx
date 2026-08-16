@@ -1,12 +1,15 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
-import { useCallback, useEffect, useState } from 'react';
+import { useSnackBarStore } from 'lib/stores/store';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { Pill } from 'ui/components/pill';
+import { RatioGlyph } from 'ui/components/ratio-glyph';
 import Text from 'ui/components/text';
 import { MediaManager } from '..';
-import { matchesSlotRatio, readSlotAspect } from '../utils/calculate-aspect';
-import { usePasteFiles } from '../utils/usePasteFiles';
+import { matchesSlotRatio, parseAspect, readSlotAspect } from '../utils/calculate-aspect';
+import { filesOfKind, usePasteFiles } from '../utils/usePasteFiles';
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
 import { MediaIntakeDialog } from './media-intake-dialog';
@@ -18,7 +21,6 @@ interface MediaSelectorProps {
   aspectRatio?: string[];
   allowMultiple?: boolean;
   showVideos?: boolean;
-  isDeleteAccepted?: boolean;
   triggerClassName?: string;
   /** Custom trigger element (rendered through Radix `asChild`) in place of the default button —
    *  lets a caller demote the library to a quiet "browse all…" beside an inline add strip. */
@@ -32,7 +34,6 @@ export function MediaSelector({
   aspectRatio,
   allowMultiple = true,
   showVideos = true,
-  isDeleteAccepted = false,
   triggerClassName,
   trigger,
   saveSelectedMedia,
@@ -45,18 +46,43 @@ export function MediaSelector({
   const [cropMedia, setCropMedia] = useState<common_MediaFull | null>(null);
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [cropBlobUrl, setCropBlobUrl] = useState<string | null>(null);
+  /**
+   * Номер текущего захода в кроп. Ответ бакета приходит позже клика, и без сторожа поздний `.then`
+   * писал бы кадр отменённого или предыдущего захода: человек отменил кроп и выбрал другой снимок,
+   * а в рамке через секунду появляется первый. Блоб создаётся ТОЛЬКО после проверки — иначе
+   * протухший объект висел бы до перезагрузки, отозвать его уже некому.
+   */
+  const cropRequestRef = useRef(0);
   const [isUploading, setIsUploading] = useState(false);
   /** Файлы, вставленные ⌘V прямо в диалоге. Непусто — открыта приёмная модалка. */
   const [pasted, setPasted] = useState<File[]>([]);
 
   const uploadMedia = useUploadMedia();
+  const { showMessage } = useSnackBarStore();
 
   // A slot has a fixed ratio when it lists concrete ratios and no "Custom" (free-form) option.
-  const slot = readSlotAspect(aspectRatio);
+  // Разбор ЗАПОМИНАЕТСЯ по самому списку: вызывающие пишут его литералом прямо в JSX, и без
+  // этого `targetRatios` был бы новым массивом на каждый рендер — а по нему внутри библиотеки
+  // считаются полосы «встанут как есть» / «нужен кроп».
+  const aspectKey = (aspectRatio ?? []).join('|');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const slot = useMemo(() => readSlotAspect(aspectRatio), [aspectKey]);
+  const targetRatios = useMemo(
+    () => (slot.ratios.length ? slot.ratios : undefined),
+    [slot],
+  );
   const ratioConstrained = slot.constrained;
   const cropAspect = slot.primary;
   // Add one item per click (so each can be ratio-checked) when the slot is ratio-constrained.
   const oneAtATime = ratioConstrained;
+  /** Лоток в подвале: набирают пачкой и ставят разом. */
+  const trayMode = !oneAtATime && allowMultiple;
+  /**
+   * Подпись первого КОНКРЕТНОГО соотношения — та же запись, из которой взят `slot.primary`.
+   * Печатать `aspectRatio?.[0]` вслепую нельзя: у списка `['Custom','4:5']` нулевым лежит
+   * свободный кроп, и шапка сказала бы «нужно Custom».
+   */
+  const primaryLabel = (aspectRatio ?? []).find((r) => parseAspect(r) !== undefined);
 
   const matchesRatio = (m: common_MediaFull) => {
     const dim = m.media?.fullSize ?? m.media?.thumbnail;
@@ -70,6 +96,7 @@ export function MediaSelector({
   }, [cropBlobUrl]);
 
   const exitCrop = useCallback(() => {
+    cropRequestRef.current += 1;
     setCropMedia(null);
     setCropSrc(null);
     setCropBlobUrl(null);
@@ -98,17 +125,19 @@ export function MediaSelector({
   );
 
   const enterCrop = useCallback((m: common_MediaFull) => {
+    const request = ++cropRequestRef.current;
     const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
     setCropMedia(m);
     setCropSrc(url);
+    // Прежний блоб отзывается эффектом очистки по смене `cropBlobUrl`.
+    setCropBlobUrl(null);
     fetch(url, { mode: 'cors', credentials: 'omit' })
       .then((res) => (res.ok ? res.blob() : null))
       .then((blob) => {
-        if (blob) {
-          const obj = URL.createObjectURL(blob);
-          setCropBlobUrl(obj);
-          setCropSrc(obj);
-        }
+        if (!blob || cropRequestRef.current !== request) return;
+        const obj = URL.createObjectURL(blob);
+        setCropBlobUrl(obj);
+        setCropSrc(obj);
       })
       .catch(() => {
         /* keep direct url */
@@ -149,6 +178,36 @@ export function MediaSelector({
   //
   // Включено, только пока диалог открыт и не в режиме кропа: там ⌘V означал бы вставку поверх
   // кадрируемого снимка, а этого никто не просил.
+  /**
+   * ЕДИНСТВЕННЫЕ ВОРОТА ПРИЁМКИ — и предел живёт ровно здесь, на всех трёх дорогах сразу: ⌘V,
+   * «выбрать файл…» и бросок в сетку.
+   *
+   * Слот с фиксированным соотношением и одиночный слот принимают РОВНО ОДНУ картинку. Без предела
+   * приёмка проводит через кроп всё принесённое и ЗАГРУЖАЕТ каждое в бакет, а в слот встанет
+   * первое: выбрать три файла в обложку товара значило оставить два осиротевших объекта, о
+   * которых никто не узнает.
+   */
+  const takeFiles = useCallback(
+    (files: File[]) => {
+      if (!files.length) return;
+      // Бросок несёт что угодно, а приёмка открывает КРОП: PDF или zip показали бы пустой холст.
+      // ⌘V отсеивается самим перехватчиком буфера, у `input` фильтр — только подсказка диалога
+      // ОС, поэтому отбор стоит здесь, на общих воротах, и об отброшенном говорится вслух.
+      const kind = showVideos ? 'media' : 'image';
+      const usable = filesOfKind(files, kind);
+      if (!usable.length) {
+        showMessage(
+          kind === 'media' ? 'images and videos go here' : 'only images go here',
+          'error',
+        );
+        return;
+      }
+      const limit = oneAtATime || !allowMultiple ? 1 : undefined;
+      setPasted(limit != null ? usable.slice(0, limit) : usable);
+    },
+    [oneAtATime, allowMultiple, showVideos, showMessage],
+  );
+
   usePasteFiles(
     {
       // ОЧЕРЕДЬ ДЕРЖИТСЯ ВСЁ ВРЕМЯ, ПОКА ДИАЛОГ ОТКРЫТ, а принимается вставка только вне кропа и
@@ -158,12 +217,8 @@ export function MediaSelector({
       claims: open,
       accepts: open && !cropMedia && pasted.length === 0,
       accept: showVideos ? 'media' : 'image',
-      // Слот с фиксированным соотношением сторон и одиночный выбор принимают РОВНО ОДНУ картинку.
-      // Без предела приёмка провела бы через кроп все из буфера, а прикрепилась бы первая:
-      // остальные осели бы в библиотеке файлами, которых никто не просил.
-      limit: oneAtATime || !allowMultiple ? 1 : undefined,
     },
-    setPasted,
+    takeFiles,
   );
 
   const handleCropSave = async (croppedDataUrl: string) => {
@@ -212,18 +267,55 @@ export function MediaSelector({
         )}
       </DialogPrimitive.Trigger>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className='fixed inset-0 z-50 bg-overlay' />
-        <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-50 flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textInactiveColor bg-bgColor p-2.5'>
-          <div className='flex flex-shrink-0 items-center justify-between'>
-            <DialogPrimitive.Title className='text-lg uppercase'>
-              {cropMedia ? 'crop' : 'select'} {purpose ? purpose : 'media'}
+        <DialogPrimitive.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
+        <DialogPrimitive.Content className='fixed left-[50%] top-[50%] z-[var(--z-modal)] flex h-[90vh] w-full max-w-6xl translate-x-[-50%] translate-y-[-50%] flex-col border border-textInactiveColor bg-bgColor p-2.5'>
+          <div className='flex flex-shrink-0 flex-wrap items-center gap-2'>
+            {/* ХЛЕБНЫЕ КРОШКИ ВМЕСТО ПОДМЕНЫ ЗАГОЛОВКА. Кроп не отдельный экран, а второй шаг
+                того же выбора: раньше тело диалога подменялось целиком и слово в заголовке
+                менялось с «select» на «crop», из-за чего было неясно, куда делась библиотека и
+                как в неё вернуться. */}
+            {/* Заголовок ДИАЛОГА, а не страницы: 12px жирным прописным, как `SectionHeader`. */}
+            <DialogPrimitive.Title asChild>
+              <Text component='h2' variant='uppercase' tracking='section' className='font-bold'>
+                {purpose ? purpose : 'media'}
+              </Text>
             </DialogPrimitive.Title>
-            <div className='flex items-center gap-3'>
-              {!cropMedia && !oneAtATime && allowMultiple && selectedMedia.length > 0 && (
-                <Text variant='inactive'>{selectedMedia.length} selected</Text>
-              )}
+            <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
+              <span className={cropMedia ? '' : 'font-bold text-textColor'}>select</span>
+              {' › '}
+              <span className={cropMedia ? 'font-bold text-textColor' : ''}>crop</span>
+            </Text>
+
+            {/* ОДНА ПИЛЮЛЯ, И ОНА ГОВОРИТ ПРАВДУ. Требование — это `slot.constrained`, а не
+                «в списке есть конкретное соотношение»: список `['4:5','Custom']` конкретное
+                содержит, но НИЧЕГО не требует, и шапка показывала обе пилюли разом — «нужно 4:5»
+                и «любое соотношение» рядом. */}
+            {slot.constrained && primaryLabel && (
+              <Pill tone='ink'>
+                <span className='flex items-center gap-1'>
+                  <RatioGlyph ratio={primaryLabel} size={9} />
+                  needs {primaryLabel}
+                </span>
+              </Pill>
+            )}
+            {!slot.constrained && slot.hasCustom && (
+              <Pill>
+                {primaryLabel ? (
+                  <span className='flex items-center gap-1'>
+                    <RatioGlyph ratio={primaryLabel} size={9} />
+                    {primaryLabel} or free
+                  </span>
+                ) : (
+                  'any ratio'
+                )}
+              </Pill>
+            )}
+
+            <div className='ml-auto flex items-center gap-2'>
               <DialogPrimitive.Close asChild>
-                <Button className='py-1'>[x]</Button>
+                <Button className='py-1' aria-label='close'>
+                  ×
+                </Button>
               </DialogPrimitive.Close>
             </div>
           </div>
@@ -242,33 +334,77 @@ export function MediaSelector({
             </div>
           ) : (
             <>
-              <DialogPrimitive.Description className='mt-1 flex-shrink-0 text-small text-textInactiveColor'>
-                {pasted.length > 0
-                  ? 'review the pasted media…'
-                  : ratioConstrained
-                    ? `click an item · target ${aspectRatio?.[0]} — wrong-ratio images can be cropped · ⌘V pastes from the clipboard`
-                    : allowMultiple
-                      ? 'click items to select, then save · ⌘V pastes from the clipboard'
-                      : 'click an item to select it · ⌘V pastes from the clipboard'}
+              {/* Это предложение, а не метка: капсом в системе набирают только метку, кнопку и
+                  заголовок до четырёх слов. */}
+              <DialogPrimitive.Description asChild>
+                <Text size='micro' variant='label' component='p' className='mt-1 flex-shrink-0'>
+                  {pasted.length > 0
+                    ? 'sort out what you pasted'
+                    : oneAtATime
+                      ? 'a click places the frame at once · a frame of the wrong ratio opens cropping'
+                      : allowMultiple
+                        ? 'a click fills the tray, “add all” places them in one go'
+                        : 'a click places the frame and closes the dialog'}
+                </Text>
               </DialogPrimitive.Description>
 
-              <div className='mt-4 flex-1 min-h-0 overflow-y-scroll'>
+              <div className='mt-2.5 flex-1 min-h-0 overflow-y-scroll'>
                 <MediaManager
                   key={dialogKey}
                   aspectRatio={undefined}
+                  targetRatios={targetRatios}
+                  // Файл с диска и файл, брошенный в сетку, идут той же дорогой, что и ⌘V:
+                  // превью, кроп по пропорции этого слота, подтверждение. В общую очередь
+                  // библиотеки они не попадают.
+                  onFilesPicked={takeFiles}
+                  // НАБОР ЖИВЁТ ЗДЕСЬ, У ЛОТКА. Пока сетка вела свой список, крестик лотка не
+                  // говорил ей ничего: следующий выбор возвращал убранный кадр обратно.
+                  selected={trayMode ? selectedMedia : undefined}
                   allowMultiple={oneAtATime ? false : allowMultiple}
                   disabled={false}
                   showVideos={showVideos}
-                  showFilters={false}
+                  showFilters
                   onSelectionChange={handleSelectionChange}
                   selectionMode={true}
                 />
               </div>
 
+              {/* ЛОТОК ВЫБРАННОГО. Раньше о наборе говорил только счётчик «3 selected»: что
+                  именно набрано, приходилось помнить, а убрать лишнее — искать плитку в сетке. */}
+              {trayMode && selectedMedia.length > 0 && (
+                <div className='mt-2.5 flex flex-shrink-0 flex-wrap items-center gap-1.5 border-t border-hairline pt-2'>
+                  <Text size='micro' variant='label' component='span' className='uppercase tracking-label'>
+                    in the tray {selectedMedia.length}
+                  </Text>
+                  {selectedMedia.map((m) => (
+                    <span key={m.id} className='relative'>
+                      <img
+                        src={m.media?.thumbnail?.mediaUrl}
+                        alt=''
+                        className='size-10 border border-borderColor bg-bgZebra object-cover'
+                      />
+                      <button
+                        type='button'
+                        aria-label={`remove ${m.id} from the tray`}
+                        // Снимается ЗДЕСЬ, и сетка узнаёт об этом сразу: набор у неё тот же самый.
+                        onClick={() =>
+                          setSelectedMedia((prev) => prev.filter((x) => x.id !== m.id))
+                        }
+                        className='absolute -right-1 -top-1 flex size-4 items-center justify-center border border-borderColor bg-bgColor text-nano leading-none hover:bg-textColor hover:text-bgColor'
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {oneAtATime && allowMultiple && (
-                <div className='flex flex-shrink-0 items-center justify-between gap-4 border-t border-textInactiveColor pt-4'>
-                  <Text variant='inactive' size='small'>
-                    added items appear in the gallery — close when done
+                // ЛИНЕЙКА ВНУТРИ КОРОБКИ — `hairline`. `borderColor` держит ВНЕШНИЙ контур
+                // диалога, и подвал, отбитый им же, читался как второй бокс внутри первого.
+                <div className='flex flex-shrink-0 items-center justify-between gap-4 border-t border-hairline pt-2.5'>
+                  <Text variant='label' size='small'>
+                    every addition goes straight to the gallery, close when you have enough
                   </Text>
                   <DialogPrimitive.Close asChild>
                     <Button size='lg' variant='main' className='uppercase'>
@@ -278,8 +414,8 @@ export function MediaSelector({
                 </div>
               )}
 
-              {!oneAtATime && allowMultiple && (
-                <div className='flex flex-shrink-0 items-center justify-end gap-4 border-t border-textInactiveColor bg-bgColor pt-4'>
+              {trayMode && (
+                <div className='flex flex-shrink-0 items-center justify-end gap-4 border-t border-hairline bg-bgColor pt-2.5'>
                   <DialogPrimitive.Close asChild>
                     <Button size='lg' className='uppercase' variant='simpleReverse'>
                       cancel
@@ -292,7 +428,7 @@ export function MediaSelector({
                     onClick={handleSave}
                     disabled={selectedMedia.length === 0}
                   >
-                    save ({selectedMedia.length})
+                    add all ({selectedMedia.length})
                   </Button>
                 </div>
               )}
