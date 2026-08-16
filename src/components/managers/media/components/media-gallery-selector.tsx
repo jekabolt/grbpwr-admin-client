@@ -1,10 +1,13 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
+import { cn } from 'lib/utility';
 import { Button } from 'ui/components/button';
 import Media from 'ui/components/media';
 import { MediaViewer, mediaFullToViewerItem, useMediaViewer } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
-import { MediaSelector } from './media-selector';
+import { readSlotAspect } from '../utils/calculate-aspect';
+import { useMediaIntake } from '../utils/useMediaIntake';
+import { MediaSlot } from './media-slot';
 
 interface MediaGallerySelectorProps {
   media: common_MediaFull[];
@@ -30,7 +33,7 @@ export function MediaGallerySelector({
   editMode = true,
   aspectRatio,
   frameAspect,
-  label = 'select',
+  label = '+ add',
   purpose,
   ratioCaption,
   fit = 'cover',
@@ -40,10 +43,34 @@ export function MediaGallerySelector({
 }: MediaGallerySelectorProps) {
   const viewer = useMediaViewer();
   const viewerItems = media.map(mediaFullToViewerItem);
+  const slot = readSlotAspect(aspectRatio);
+
+  // ⌘V И БРОСОК РАБОТАЮТ НАД ВСЕЙ ГАЛЕРЕЕЙ, а не только над пустой клеткой в её конце. Целиться
+  // указателем в добавляющий слот, чтобы вставить картинку, — требование, которого никто не
+  // угадает: жест адресован галерее.
+  //
+  // Слот в конце сетки держит свою очередь, и это не двойная загрузка: ⌘V обрабатывает ВЕРХНИЙ в
+  // стопке приёмник — ровно один из двух, — а кладут результат оба одним и тем же `onSelect`.
+  const intake = useMediaIntake({
+    accept: 'media',
+    aspect: slot.primary,
+    lockAspect: slot.constrained,
+    purpose,
+    enabled: editMode,
+    onMedia: onSelect,
+  });
 
   return (
     <>
-      <div className='grid grid-cols-2 gap-2'>
+      <div
+        {...intake.regionHandlers}
+        className={cn(
+          'grid grid-cols-2 gap-2',
+          // Бросок на ЗАНЯТУЮ клетку тоже добавляет кадр — и это надо показать: без отклика жест
+          // над готовой галереей выглядит как промах мимо слота в её конце.
+          intake.dragging && 'outline outline-1 outline-offset-4 outline-textColor',
+        )}
+      >
         {media.map((m, i) => {
           const url = m.media?.thumbnail?.mediaUrl || m.media?.fullSize?.mediaUrl || '';
           const video = isVideo(m.media?.fullSize?.mediaUrl) || isVideo(url);
@@ -91,28 +118,24 @@ export function MediaGallerySelector({
             </div>
           );
         })}
+        {/* Слот «ещё кадр» стоит В САМОЙ СЕТКЕ и той же клеткой, что и снимки: пустое место и есть
+            средство его заполнить. Кнопка внутри пунктирной рамки читалась как отдельный контрол
+            рядом с галереей, а заполняет она именно эту клетку. */}
         {editMode && (
-          <div
-            className='relative flex flex-col items-center justify-center gap-2 border border-dashed border-textInactiveColor'
-            style={{ aspectRatio: frameAspect }}
-          >
-            <MediaSelector
-              label={label}
-              purpose={purpose}
-              aspectRatio={aspectRatio}
-              allowMultiple={true}
-              showVideos={true}
-              saveSelectedMedia={onSelect}
-              triggerClassName='px-3 py-1.5 cursor-pointer'
-            />
-            {ratioCaption && (
-              <Text variant='inactive' size='small'>
-                {ratioCaption}
-              </Text>
-            )}
-          </div>
+          <MediaSlot
+            aspectRatio={aspectRatio}
+            frameAspect={frameAspect}
+            label={label}
+            purpose={purpose}
+            hint={ratioCaption}
+            allowMultiple
+            showVideos
+            onSelect={onSelect}
+          />
         )}
       </div>
+
+      {intake.dialog}
 
       <MediaViewer items={viewerItems} {...viewer} />
     </>

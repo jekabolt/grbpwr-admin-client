@@ -5,9 +5,11 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { MediaManager } from '..';
-import { usePasteImage } from '../utils/usePasteImage';
+import { matchesSlotRatio, readSlotAspect } from '../utils/calculate-aspect';
+import { usePasteFiles } from '../utils/usePasteFiles';
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
+import { MediaIntakeDialog } from './media-intake-dialog';
 
 interface MediaSelectorProps {
   label: string;
@@ -22,12 +24,6 @@ interface MediaSelectorProps {
    *  lets a caller demote the library to a quiet "browse all…" beside an inline add strip. */
   trigger?: React.ReactNode;
   saveSelectedMedia: (media: common_MediaFull[]) => void;
-}
-
-function parseAspect(ratio?: string): number | undefined {
-  if (!ratio || ratio.toLowerCase() === 'custom') return undefined;
-  const [w, h] = ratio.split(':').map(Number);
-  return w && h ? w / h : undefined;
 }
 
 export function MediaSelector({
@@ -50,27 +46,21 @@ export function MediaSelector({
   const [cropSrc, setCropSrc] = useState<string | null>(null);
   const [cropBlobUrl, setCropBlobUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  /** Файлы, вставленные ⌘V прямо в диалоге. Непусто — открыта приёмная модалка. */
+  const [pasted, setPasted] = useState<File[]>([]);
 
   const uploadMedia = useUploadMedia();
 
   // A slot has a fixed ratio when it lists concrete ratios and no "Custom" (free-form) option.
-  const validRatios = (aspectRatio ?? [])
-    .filter((r) => r.toLowerCase() !== 'custom')
-    .map(parseAspect)
-    .filter((r): r is number => r !== undefined);
-  const hasCustom = (aspectRatio ?? []).some((r) => r.toLowerCase() === 'custom');
-  const ratioConstrained = validRatios.length > 0 && !hasCustom;
-  const cropAspect = validRatios[0];
+  const slot = readSlotAspect(aspectRatio);
+  const ratioConstrained = slot.constrained;
+  const cropAspect = slot.primary;
   // Add one item per click (so each can be ratio-checked) when the slot is ratio-constrained.
   const oneAtATime = ratioConstrained;
 
   const matchesRatio = (m: common_MediaFull) => {
     const dim = m.media?.fullSize ?? m.media?.thumbnail;
-    const w = dim?.width;
-    const h = dim?.height;
-    if (!w || !h) return false;
-    const r = w / h;
-    return validRatios.some((vr) => Math.abs(r - vr) / vr < 0.03);
+    return matchesSlotRatio(dim?.width, dim?.height, slot.ratios);
   };
 
   useEffect(() => {
@@ -153,35 +143,27 @@ export function MediaSelector({
   );
 
   // ⌘V ПРЯМО В ДИАЛОГЕ. Скриншот уже в буфере: заставлять сохранять его файлом, чтобы потом
-  // искать в библиотеке, — три шага ради картинки, которая в руках. Вставленное грузится и
-  // отдаётся владельцу тем же путём, что выбранное мышью, поэтому кроп по соотношению сторон
-  // работает и здесь: ratio-слот получит `enterCrop`, свободный — картинку как есть.
+  // искать в библиотеке, — три шага ради картинки, которая в руках. Вставленное проходит ту же
+  // приёмную модалку, что и вставка в слот: превью, кроп по соотношению этого слота,
+  // подтверждение, — и только потом уходит владельцу тем же путём, что выбранное мышью.
   //
   // Включено, только пока диалог открыт и не в режиме кропа: там ⌘V означал бы вставку поверх
   // кадрируемого снимка, а этого никто не просил.
-  const { pasting } = usePasteImage(
+  usePasteFiles(
     {
-      // ОЧЕРЕДЬ ДЕРЖИТСЯ ВСЁ ВРЕМЯ, ПОКА ДИАЛОГ ОТКРЫТ, а принимается вставка только вне кропа.
-      // Отдать очередь на время кадрирования значило бы уронить ⌘V в галерею ПОД диалогом: она
+      // ОЧЕРЕДЬ ДЕРЖИТСЯ ВСЁ ВРЕМЯ, ПОКА ДИАЛОГ ОТКРЫТ, а принимается вставка только вне кропа и
+      // приёмки. Отдать очередь на это время значило бы уронить ⌘V в галерею ПОД диалогом: она
       // осталась «горячей» (появление модалки само по себе не шлёт `pointerleave`), и картинка
       // прикрепилась бы туда мимо кропа, ради которого диалог и открыт.
       claims: open,
-      accepts: open && !cropMedia,
+      accepts: open && !cropMedia && pasted.length === 0,
+      accept: showVideos ? 'media' : 'image',
       // Слот с фиксированным соотношением сторон и одиночный выбор принимают РОВНО ОДНУ картинку.
-      // Без предела хук загрузил бы все из буфера, а прикрепилась бы первая: остальные осели бы в
-      // библиотеке файлами, которых никто не просил.
+      // Без предела приёмка провела бы через кроп все из буфера, а прикрепилась бы первая:
+      // остальные осели бы в библиотеке файлами, которых никто не просил.
       limit: oneAtATime || !allowMultiple ? 1 : undefined,
     },
-    (media) => {
-      const m = media[0];
-      if (!m) return;
-      const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
-      if (oneAtATime && !isVideo(url) && !matchesRatio(m)) {
-        enterCrop(m);
-        return;
-      }
-      commitMedia(media);
-    },
+    setPasted,
   );
 
   const handleCropSave = async (croppedDataUrl: string) => {
@@ -261,8 +243,8 @@ export function MediaSelector({
           ) : (
             <>
               <DialogPrimitive.Description className='mt-1 flex-shrink-0 text-small text-textInactiveColor'>
-                {pasting
-                  ? 'uploading pasted image…'
+                {pasted.length > 0
+                  ? 'review the pasted media…'
                   : ratioConstrained
                     ? `click an item · target ${aspectRatio?.[0]} — wrong-ratio images can be cropped · ⌘V pastes from the clipboard`
                     : allowMultiple
@@ -316,6 +298,20 @@ export function MediaSelector({
               )}
             </>
           )}
+
+          {/* Приёмка вставленного — поверх диалога библиотеки, той же дорогой, что и вставка
+              прямо в слот: превью, кроп, подтверждение. */}
+          <MediaIntakeDialog
+            files={pasted}
+            aspect={cropAspect}
+            lockAspect={ratioConstrained}
+            purpose={purpose}
+            onDone={(media) => {
+              setPasted([]);
+              commitMedia(media);
+            }}
+            onCancel={() => setPasted([])}
+          />
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

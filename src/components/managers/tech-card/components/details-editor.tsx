@@ -1,5 +1,5 @@
 import { common_MediaFull, common_TechCard } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useEffect, useMemo, useState } from 'react';
 import { useFormContext, useWatch } from 'react-hook-form';
@@ -235,23 +235,18 @@ export function DetailsEditor({ techCard }: { techCard?: common_TechCard }) {
                       </div>
                     );
                   })}
-                  <MediaSelector
+                  {/* Той же клеткой, что и снимки рядом: пустое место и есть слот. ⌘V кладёт сюда
+                      скриншот из мессенджера, минуя библиотеку. */}
+                  <MediaSlot
+                    aspectRatio={['Custom']}
+                    frameAspect='1/1'
+                    heightPx={100}
+                    compact
                     label='+ картинка'
                     purpose='construction reference'
-                    aspectRatio={['Custom']}
                     allowMultiple
                     showVideos={false}
-                    saveSelectedMedia={(picked) => addImages(key, picked)}
-                    // Matches the thumbnails it sits beside — an xs button next to 100px tiles read
-                    // as a stray control rather than the next slot in the strip.
-                    trigger={
-                      <button
-                        type='button'
-                        className='flex size-[100px] items-center justify-center border border-dashed border-textInactiveColor text-micro uppercase tracking-label text-labelColor hover:border-textColor hover:text-textColor'
-                      >
-                        + картинка
-                      </button>
-                    }
+                    onSelect={(picked) => addImages(key, picked)}
                   />
                 </div>
               </div>

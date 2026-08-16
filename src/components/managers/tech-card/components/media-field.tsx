@@ -1,5 +1,5 @@
 import { common_MediaFull, common_TechCardMediaKind } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { techCardMediaKindOptions } from 'constants/filter';
 import { isVideo } from 'lib/features/filterContentType';
 import { useFieldArray, useFormContext } from 'react-hook-form';
@@ -89,69 +89,67 @@ export function MediaField({
 
   return (
     <div className='space-y-3'>
-      {fields.length === 0 ? (
-        <Text variant='inactive' size='small'>
-          {emptyLabel}
-        </Text>
-      ) : (
-        <div className='grid grid-cols-2 gap-3 md:grid-cols-3'>
-          {fields.map((f, index) => {
-            const full = mediaById.get(f.mediaId);
-            const url = full?.media?.thumbnail?.mediaUrl || full?.media?.fullSize?.mediaUrl || '';
-            const video = isVideo(full?.media?.fullSize?.mediaUrl) || isVideo(url);
-            return (
-              <div key={f.id} className='space-y-2 border border-textInactiveColor p-2'>
-                <div
-                  className='relative overflow-hidden border border-textInactiveColor'
-                  style={{ aspectRatio: '3/4' }}
+      <div className='grid grid-cols-2 items-start gap-3 md:grid-cols-3'>
+        {fields.map((f, index) => {
+          const full = mediaById.get(f.mediaId);
+          const url = full?.media?.thumbnail?.mediaUrl || full?.media?.fullSize?.mediaUrl || '';
+          const video = isVideo(full?.media?.fullSize?.mediaUrl) || isVideo(url);
+          return (
+            <div key={f.id} className='space-y-2 border border-textInactiveColor p-2'>
+              <div
+                className='relative overflow-hidden border border-textInactiveColor'
+                style={{ aspectRatio: '3/4' }}
+              >
+                <Media
+                  type={video ? 'video' : 'image'}
+                  src={url}
+                  alt={full?.media?.blurhash || ''}
+                  fit='cover'
+                  aspectRatio='auto'
+                />
+                <button
+                  type='button'
+                  aria-label={`View sketch ${index + 1}`}
+                  onClick={() => viewer.openAt(index)}
+                  className='absolute inset-0 z-10 cursor-zoom-in focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+                />
+                <span className='pointer-events-none absolute left-1 top-1 z-20 bg-textColor px-1.5 py-0.5'>
+                  <Text className='!text-bgColor' size='small' variant='uppercase'>
+                    {index + 1}
+                  </Text>
+                </span>
+                <Button
+                  type='button'
+                  aria-label='remove sketch'
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    removeAt(index);
+                  }}
+                  className='absolute right-1 top-1 z-20 border border-textInactiveColor bg-bgColor px-1 leading-none'
                 >
-                  <Media
-                    type={video ? 'video' : 'image'}
-                    src={url}
-                    alt={full?.media?.blurhash || ''}
-                    fit='cover'
-                    aspectRatio='auto'
-                  />
-                  <button
-                    type='button'
-                    aria-label={`View sketch ${index + 1}`}
-                    onClick={() => viewer.openAt(index)}
-                    className='absolute inset-0 z-10 cursor-zoom-in focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
-                  />
-                  <span className='pointer-events-none absolute left-1 top-1 z-20 bg-textColor px-1.5 py-0.5'>
-                    <Text className='!text-bgColor' size='small' variant='uppercase'>
-                      {index + 1}
-                    </Text>
-                  </span>
-                  <Button
-                    type='button'
-                    aria-label='remove sketch'
-                    onClick={(e: React.MouseEvent) => {
-                      e.stopPropagation();
-                      removeAt(index);
-                    }}
-                    className='absolute right-1 top-1 z-20 border border-textInactiveColor bg-bgColor px-1 leading-none'
-                  >
-                    [x]
-                  </Button>
-                </div>
-                <SelectField name={`${name}.${index}.kind`} label='kind' items={kindOptions} />
-                <InputField name={`${name}.${index}.caption`} label='caption' />
+                  [x]
+                </Button>
               </div>
-            );
-          })}
-        </div>
-      )}
+              <SelectField name={`${name}.${index}.kind`} label='kind' items={kindOptions} />
+              <InputField name={`${name}.${index}.caption`} label='caption' />
+            </div>
+          );
+        })}
 
-      <MediaSelector
-        label={addLabel}
-        purpose={purpose}
-        aspectRatio={['Custom']}
-        allowMultiple
-        showVideos
-        saveSelectedMedia={handleAdd}
-        triggerClassName='uppercase px-3 py-1.5'
-      />
+        {/* Слот стоит СЛЕДУЮЩЕЙ КЛЕТКОЙ той же сетки: пустое место и есть средство его заполнить,
+            и ⌘V кладёт скриншот прямо сюда. Кнопка под сеткой читалась как ещё один контрол формы
+            и не говорила, что появится на её месте. */}
+        <MediaSlot
+          aspectRatio={['Custom']}
+          frameAspect='3/4'
+          label={addLabel}
+          hint={fields.length === 0 ? emptyLabel : undefined}
+          purpose={purpose}
+          allowMultiple
+          showVideos
+          onSelect={handleAdd}
+        />
+      </div>
 
       <MediaViewer items={viewerItems} {...viewer} />
     </div>

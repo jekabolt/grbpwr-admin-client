@@ -1,6 +1,7 @@
 import { cn } from 'lib/utility';
 import { useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
+import { PLACEHOLDER_SURFACE, placeholderClass } from 'ui/components/placeholder';
 import { usePendingFiles } from '../utils/usePendingFiles';
 
 export function DragDropArea({
@@ -9,12 +10,19 @@ export function DragDropArea({
   className,
   pendingFilesHook,
   showAddButton = false,
+  showAddTile = false,
 }: {
   children: React.ReactNode;
   mediaLength: number;
   className?: string;
   pendingFilesHook: ReturnType<typeof usePendingFiles>;
   showAddButton?: boolean;
+  /**
+   * Слот «добавить» ПЕРВОЙ КЛЕТКОЙ сетки. Кнопка в шапке — единственный вход на страницу, где всё
+   * остальное это плитки: слот в самой сетке показывает, что появится на его месте, и стоит там,
+   * куда смотрят.
+   */
+  showAddTile?: boolean;
 }) {
   const [isDragging, setIsDragging] = useState(false);
   const { previews, addFiles } = pendingFilesHook;
@@ -93,19 +101,40 @@ export function DragDropArea({
         onChange={handleFileInputChange}
       />
 
+      {showAddTile && mediaLength > 0 && (
+        <button
+          type='button'
+          onClick={handleAddButtonClick}
+          style={PLACEHOLDER_SURFACE}
+          className={cn(
+            placeholderClass({ dashed: true }),
+            'aspect-[4/5] w-full cursor-pointer flex-col gap-1 px-2 text-center text-labelColor hover:border-textColor hover:text-textColor',
+          )}
+        >
+          <span className='leading-tight'>+ add media</span>
+          <span className='text-nano normal-case leading-tight tracking-normal'>
+            ⌘V · drag a file · click to browse
+          </span>
+        </button>
+      )}
+
       {children}
 
       {mediaLength === 0 && !previews.length && (
         <button
           type='button'
           onClick={handleAddButtonClick}
-          className='col-span-2 flex min-h-[300px] flex-col items-center justify-center gap-2 border-2 border-dashed border-textInactiveColor text-textInactiveColor transition-colors hover:border-textInactiveColor hover:text-textColor lg:col-span-4'
+          style={PLACEHOLDER_SURFACE}
+          className={cn(
+            placeholderClass({ dashed: true }),
+            'col-span-2 min-h-[300px] cursor-pointer flex-col gap-2 text-labelColor transition-colors hover:border-textColor hover:text-textColor lg:col-span-4',
+          )}
         >
           <span className='text-lg leading-none'>+</span>
           {/* Две строки пустого состояния должны отличаться: приглашение — 12px жирным,
               подсказка — 10px. Раньше их разводили случайные 16px наследования. */}
           <span className='font-bold uppercase'>drag &amp; drop media here</span>
-          <span className='text-micro uppercase'>or click to browse</span>
+          <span className='text-micro uppercase'>⌘V · or click to browse</span>
         </button>
       )}
       {showAddButton && (

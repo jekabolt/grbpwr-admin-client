@@ -1,5 +1,5 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { MediaSlot } from 'components/managers/media/components/media-slot';
 import { MediaViewer, useMediaViewer } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 import { rememberMedia, resolveMedia } from '../api/tasksService';
@@ -43,52 +43,54 @@ export function MediaAttachments({
 
   return (
     <div className='flex flex-col gap-2'>
-      {value.length > 0 && (
-        <div className='flex flex-wrap gap-2'>
-          {value.map((id) => {
-            const m = resolved.find((x) => x.id === id);
-            const viewIndex = viewable.indexOf(m as NonNullable<typeof m>);
-            return (
-              <div key={id} className='relative h-16 w-16 border border-borderColor'>
-                {m?.thumbnail ? (
-                  <button
-                    type='button'
-                    aria-label='view attachment'
-                    onClick={() => viewIndex >= 0 && viewer.openAt(viewIndex)}
-                    className='block h-full w-full cursor-zoom-in'
-                  >
-                    <img src={m.thumbnail} alt='' className='h-full w-full object-cover' />
-                  </button>
-                ) : (
-                  <div className='flex h-full w-full items-center justify-center'>
-                    <Text size='nano' variant='label' component='span'>
-                      #{id}
-                    </Text>
-                  </div>
-                )}
+      <div className='flex flex-wrap items-start gap-2'>
+        {value.map((id) => {
+          const m = resolved.find((x) => x.id === id);
+          const viewIndex = viewable.indexOf(m as NonNullable<typeof m>);
+          return (
+            <div key={id} className='relative h-16 w-16 border border-borderColor'>
+              {m?.thumbnail ? (
                 <button
                   type='button'
-                  aria-label='remove attachment'
-                  onClick={() => onChange(value.filter((v) => v !== id))}
-                  className='absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center bg-textColor text-nano leading-none text-bgColor'
+                  aria-label='view attachment'
+                  onClick={() => viewIndex >= 0 && viewer.openAt(viewIndex)}
+                  className='block h-full w-full cursor-zoom-in'
                 >
-                  ×
+                  <img src={m.thumbnail} alt='' className='h-full w-full object-cover' />
                 </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+              ) : (
+                <div className='flex h-full w-full items-center justify-center'>
+                  <Text size='nano' variant='label' component='span'>
+                    #{id}
+                  </Text>
+                </div>
+              )}
+              <button
+                type='button'
+                aria-label='remove attachment'
+                onClick={() => onChange(value.filter((v) => v !== id))}
+                className='absolute -right-1 -top-1 z-10 flex h-4 w-4 items-center justify-center bg-textColor text-nano leading-none text-bgColor'
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
 
-      <MediaSelector
-        label='+ attach media'
-        purpose='attachment'
-        aspectRatio={['Custom']}
-        allowMultiple
-        showVideos
-        saveSelectedMedia={handleAdd}
-        triggerClassName='self-start uppercase px-2.5 py-1 text-micro tracking-label'
-      />
+        {/* Слот той же клеткой, что и вложения: 64 пикселя не вмещают ни глифа, ни подсказки,
+            поэтому `compact` — но клик, ⌘V и бросок работают ровно так же. */}
+        <MediaSlot
+          aspectRatio={['Custom']}
+          frameAspect='1/1'
+          heightPx={64}
+          compact
+          label='+ media'
+          purpose='attachment'
+          allowMultiple
+          showVideos
+          onSelect={handleAdd}
+        />
+      </div>
 
       <MediaViewer items={viewerItems} {...viewer} />
     </div>

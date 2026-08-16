@@ -10,6 +10,7 @@ import { MediaList } from './components/media-list';
 import { PendingMediaPlate } from './components/pending-media-plate';
 import { PreviewMedia } from './components/preview-media';
 import { useFilter } from './utils/useFilter';
+import { usePasteFiles } from './utils/usePasteFiles';
 import { useInfiniteMedia } from './utils/useMediaQuery';
 import { usePendingFiles } from './utils/usePendingFiles';
 import { usePreviewMedia } from './utils/usePreviewMedia';
@@ -48,6 +49,15 @@ export function MediaManager({
 
   // Standalone page shows a header + toolbar; the embedded selector (selectionMode) stays minimal.
   const isStandalone = !selectionMode;
+  const canUpload = canWrite(SECTION.media);
+
+  // ⌘V НА СТРАНИЦЕ БИБЛИОТЕКИ — в ту же очередь, куда попадает брошенный файл: плитка ожидания
+  // показывает превью, даёт кроп каждому кадру и грузит по кнопке.
+  //
+  // ТОЛЬКО НА САМОСТОЯТЕЛЬНОЙ СТРАНИЦЕ. Внутри диалога выбора менеджер монтируется ПОЗЖЕ самого
+  // диалога и, забрав очередь себе, увёл бы вставку из слота, ради которого диалог открыт, — в
+  // библиотеку, где её ещё пришлось бы искать.
+  usePasteFiles({ claims: isStandalone && canUpload, accept: 'media' }, pendingFilesHook.addFiles);
 
   const handleUploadClick = () => fileInputRef.current?.click();
 
@@ -150,7 +160,7 @@ export function MediaManager({
               className='hidden'
               onChange={handleFileChange}
             />
-            {canWrite(SECTION.media) && (
+            {canUpload && (
               <Button variant='main' size='lg' onClick={handleUploadClick}>
                 upload
               </Button>
@@ -185,6 +195,7 @@ export function MediaManager({
         selectionMode={selectionMode}
         pendingFilesHook={pendingFilesHook}
         showAddButton={false}
+        showAddTile={isStandalone && canUpload}
       />
       <PreviewMedia
         open={isPreviewOpen}
