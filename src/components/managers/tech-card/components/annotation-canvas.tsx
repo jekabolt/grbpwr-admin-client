@@ -1,10 +1,25 @@
+import * as Dialog from '@radix-ui/react-dialog';
 import { cn } from 'lib/utility';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import {
+  ArrowMarkerDef,
+  CalloutShape,
+  CALLOUT_COLOR_HEX,
+  PlacingShape,
+} from 'ui/components/annotation-shapes';
 import { Chip, ChipRow } from 'ui/components/chip';
 import Text from 'ui/components/text';
 
 import {
   ANNOTATION_COLORS,
+  ANNOTATION_KINDS,
   ANNOTATION_POINTS,
   type AnnotationColor,
   type AnnotationForm,
@@ -31,34 +46,30 @@ import {
 // mouseenter. На выпущенной карточке это убило бы не правку (её и так нет), а ЧТЕНИЕ —
 // изоляция перестала бы работать ровно там, где выносок много и они пересекаются.
 
-/** Толщина линий и размеры фигур в пикселях кадра — не масштабируются вместе с картинкой. */
+/** Радиус кружка пина в пикселях кадра. Прочие размеры фигур живут в общем примитиве. */
 const R_PIN = 9;
-const TICK = 7;
-const BRACKET_DROP = 10;
 /** Зеркало серверного предела: узнать о нём при сохранении всей карточки — поздно. */
 const MAX_ANNOTATIONS = 30;
 
-const COLOR_HEX: Record<Exclude<AnnotationColor, ''>, string> = {
-  red: '#d02b2b',
-  blue: '#2323ff',
-  green: '#0f7a34',
-  orange: '#d97a00',
-};
+/** Цвета живут в общем примитиве фигур: их читает и карточный эскиз. */
+const COLOR_HEX = CALLOUT_COLOR_HEX;
 
-const KIND_LABEL: Record<AnnotationKind, string> = {
+export const KIND_LABEL: Record<AnnotationKind, string> = {
   pin: 'пин',
   label: 'подпись',
   dim: 'мерка',
   bracket: 'участок',
   multi: 'мультилидер',
+  arc: 'дуга',
 };
 
-const KIND_HINT: Record<AnnotationKind, string> = {
+export const KIND_HINT: Record<AnnotationKind, string> = {
   pin: 'точка с номером — подпись читается в легенде под снимком',
   label: 'точка и подпись со стрелкой — «что тут делать»',
   dim: 'две точки, размерная линия с засечками — «по какому размеру»',
   bracket: 'две точки, скобка над участком — «на этом отрезке»',
   multi: 'одна подпись к нескольким местам — от 2 до 8 точек',
+  arc: 'три точки: начало, точка НА КРИВОЙ, конец — посадка оката, скругление борта, ход строчки',
 };
 
 type Pt = { x: number; y: number };
@@ -84,13 +95,39 @@ type PlateDrag = {
 /** Порог, разводящий клик по плашке и её перетаскивание, в долях кадра. */
 const PLATE_DRAG_THRESHOLD = 0.01;
 
+/**
+ * РЕЕСТР ЖИВЫХ ХОЛСТОВ — «правка ровно одна на экране».
+ *
+ * До полосы кадров холст был на экране один, и локальные `selected`/`points` были локальными по
+ * факту. Теперь их до десяти сразу (плюс одиннадцатый в зуме), и локальность превращается в три
+ * дефекта: выбор на кадре A не снимается выбором на кадре B, поэтому Delete срабатывает у ОБОИХ
+ * слушателей window и уносит две выноски с разных снимков; наполовину набранная мерка на A
+ * достраивается кликом по A уже после того, как человек начал новую на B; а `selected` — ИНДЕКС,
+ * и удаление в зуме сдвигает индекс наружного холста на чужую выноску, которую следующая же
+ * правка текста перезапишет.
+ *
+ * Лечится одним правилом: холст, начавший правку, гасит правку у всех остальных. Реестр модульный,
+ * потому что холсты не знают друг о друге и знать не должны — их родители разные (полоса шага,
+ * галерея эскиза, диалог зума).
+ */
+type CanvasClaim = { clearSelection: () => void; clearPoints: () => void };
+const liveCanvases = new Set<CanvasClaim>();
+
+/** Отдать правку себе: у всех прочих холстов гаснет и выбор, и незавершённый жест. */
+function claimEditing(me: CanvasClaim) {
+  for (const other of liveCanvases) {
+    if (other === me) continue;
+    other.clearSelection();
+    other.clearPoints();
+  }
+}
+
 const num = (v?: string) => {
   const n = Number((v ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 };
 const str = (n: number) => String(Math.round(n * 10000) / 10000);
 const ptsOf = (a: AnnotationForm): Pt[] => (a.points ?? []).map((p) => ({ x: num(p.x), y: num(p.y) }));
-const inkOf = (a: AnnotationForm) => (a.color ? COLOR_HEX[a.color as Exclude<AnnotationColor, ''>] : 'currentColor');
 
 export function AnnotationCanvas({
   src,
@@ -100,16 +137,44 @@ export function AnnotationCanvas({
   frozen = false,
   className,
   maxHeightClass,
+  heightPx,
+  toolbar = true,
+  placingKind: externalKind,
+  onPlaced,
+  cornerSlot,
+  zoomable = false,
+  renderPiecePicker,
+  pieceLabel,
 }: {
   src: string;
   alt?: string;
   /** Потолок высоты снимка (класс), когда место ограничено — печать. */
   maxHeightClass?: string;
+  /**
+   * Фиксированная высота снимка в пикселях: кадр становится «ростом с полосу», ширину берёт от
+   * своих пропорций. Так филмстрип выстраивается в ровный ряд, а альбомный снимок остаётся
+   * альбомным — картинку не режут, поэтому выноски по-прежнему ложатся на свои места.
+   */
+  heightPx?: number;
   annotations: AnnotationForm[];
   /** Отсутствует = холст только читается. Печать и архив зовут его именно так. */
   onChange?: (next: AnnotationForm[]) => void;
   frozen?: boolean;
   className?: string;
+  /** Своя панель видов. Полоса снимков держит ОДНУ панель на всю полосу и гасит эту. */
+  toolbar?: boolean;
+  /** Вид, выбранный СНАРУЖИ (общая панель полосы). undefined = холст решает сам. */
+  placingKind?: AnnotationKind | null;
+  /** Постановка завершена — общая панель снимает выбор вида. */
+  onPlaced?: () => void;
+  /** Кнопки поверх кадра (убрать снимок и прочее хозяйство владельца). */
+  cornerSlot?: ReactNode;
+  /** Показать кнопку «зум»: тот же холст во весь экран, с той же правкой. */
+  zoomable?: boolean;
+  /** Пикер детали кроя для редактора выноски. Отсутствует = поля детали нет вовсе. */
+  renderPiecePicker?: (value: string, onChange: (lineKey: string) => void) => ReactNode;
+  /** Имя детали по её ключу — для подписи и легенды, в том числе на печати. */
+  pieceLabel?: (lineKey: string) => string | undefined;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -117,8 +182,17 @@ export function AnnotationCanvas({
   // (клик) и переживает уход курсора, иначе поле ввода закрывалось бы от каждого движения.
   const [hovered, setHovered] = useState<number | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
-  // Незавершённая постановка: вид выбран, точки набираются кликами.
-  const [placing, setPlacing] = useState<{ kind: AnnotationKind; points: Pt[] } | null>(null);
+  // Незавершённая постановка. ВИД может прийти снаружи (общая панель полосы), а точки набираются
+  // всегда здесь: они принадлежат ЭТОМУ снимку, и общий счётчик на полосу достраивал бы мерку,
+  // начатую на первом кадре, вторым кликом по третьему.
+  const [ownKind, setOwnKind] = useState<AnnotationKind | null>(null);
+  const [points, setPoints] = useState<Pt[]>([]);
+  const placingKind = externalKind !== undefined ? externalKind : ownKind;
+  // Смена вида обнуляет набранное: две точки мерки не годятся началом дуги.
+  useEffect(() => {
+    setPoints([]);
+  }, [placingKind]);
+  const [zoomOpen, setZoomOpen] = useState(false);
   // Перетаскивание плашки. Без него перекрытие двух подписей НЕУСТРАНИМО: плашка ставится над
   // серединой якорей, и когда две выноски рядом, их подписи ложатся друг на друга навсегда.
   const [dragPlate, setDragPlate] = useState<PlateDrag | null>(null);
@@ -136,8 +210,26 @@ export function AnnotationCanvas({
   // Замыкание слушателей window живёт дольше рендера, поэтому «можно ли писать» и КУДА писать
   // читаются из ref'ов, а не из замыкания: карточку могли выпустить, пока палец на плашке, и
   // старый обработчик записал бы координаты в уже замороженную форму.
-  const liveRef = useRef({ editable, onChange });
-  liveRef.current = { editable, onChange };
+  const liveRef = useRef({ editable, onChange, annotations });
+  liveRef.current = { editable, onChange, annotations };
+
+  // ЗАЯВКА НА ПРАВКУ. Идентичность стабильна на всю жизнь холста, а функции внутри читают свежие
+  // сеттеры — реестр хранит ОДИН объект и не пересобирается на каждый рендер.
+  const claimRef = useRef<CanvasClaim>({ clearSelection: () => {}, clearPoints: () => {} });
+  claimRef.current.clearSelection = () => setSelected(null);
+  claimRef.current.clearPoints = () => setPoints([]);
+  useEffect(() => {
+    const me = claimRef.current;
+    liveCanvases.add(me);
+    return () => {
+      liveCanvases.delete(me);
+    };
+  }, []);
+  /** Выбрать выноску ЗДЕСЬ — и погасить правку на всех остальных холстах. */
+  const selectHere = useCallback((next: number | null) => {
+    if (next !== null) claimEditing(claimRef.current);
+    setSelected(next);
+  }, []);
 
   useLayoutEffect(() => {
     const el = boxRef.current;
@@ -155,8 +247,11 @@ export function AnnotationCanvas({
     if (!editable) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (placing) setPlacing(null);
-        else setSelected(null);
+        if (placingKind) {
+          setPoints([]);
+          setOwnKind(null);
+          onPlaced?.();
+        } else setSelected(null);
         return;
       }
       // Delete удаляет выбранную — но НЕ когда курсор в поле ввода: там та же клавиша стирает
@@ -169,7 +264,7 @@ export function AnnotationCanvas({
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [editable, placing, selected, annotations]);
+  }, [editable, placingKind, selected, annotations]);
 
   const px = useCallback((p: Pt) => ({ x: p.x * size.w, y: p.y * size.h }), [size]);
 
@@ -245,89 +340,114 @@ export function AnnotationCanvas({
     };
   }, [dragActive, commitDrag, annotations]);
 
-  const commit = (next: AnnotationForm[]) => onChange?.(next);
+  // ЗАПИСЬ ИДЁТ ЧЕРЕЗ liveRef, А НЕ ЧЕРЕЗ ЗАМЫКАНИЕ. Слушатель клавиатуры подписан на window и
+  // пересоздаётся только когда меняются его зависимости; проп `onChange` полосы несёт ИНДЕКС
+  // кадра, и после перестановки стрелками (`move`) сам кадр остаётся тем же (ключ — media_id), а
+  // индекс в нём уже чужой. Стрелка «раньше» и следом Delete записывали массив выносок этого
+  // снимка в тот, что занял его место, — потеря без единого сообщения.
+  const commit = (next: AnnotationForm[]) => liveRef.current.onChange?.(next);
 
   const patch = (i: number, fields: Partial<AnnotationForm>) => {
-    commit(annotations.map((a, k) => (k === i ? { ...a, ...fields } : a)));
+    commit(liveRef.current.annotations.map((a, k) => (k === i ? { ...a, ...fields } : a)));
   };
 
   const remove = (i: number) => {
-    commit(annotations.filter((_, k) => k !== i));
+    commit(liveRef.current.annotations.filter((_, k) => k !== i));
     setSelected(null);
   };
 
-  const finishPlacing = (kind: AnnotationKind, points: Pt[]) => {
+  const clearPlacing = () => {
+    setPoints([]);
+    setOwnKind(null);
+    onPlaced?.();
+  };
+
+  const finishPlacing = (kind: AnnotationKind, pts: Pt[]) => {
     const [min] = ANNOTATION_POINTS[kind];
-    if (points.length < min) return;
-    if (annotations.length >= MAX_ANNOTATIONS) {
-      setPlacing(null);
+    if (pts.length < min) return;
+    if (liveRef.current.annotations.length >= MAX_ANNOTATIONS) {
+      clearPlacing();
       return;
     }
     // Плашка ставится над серединой якорей — оттуда её почти никогда не приходится двигать,
     // а лидер строится сам.
-    const cx = points.reduce((s, p) => s + p.x, 0) / points.length;
-    const cy = points.reduce((s, p) => s + p.y, 0) / points.length;
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
     const next: AnnotationForm = {
       kind,
-      points: points.map((p) => ({ x: str(p.x), y: str(p.y) })),
+      points: pts.map((p) => ({ x: str(p.x), y: str(p.y) })),
       text: '',
       labelX: str(Math.min(0.96, Math.max(0.04, cx))),
       labelY: str(Math.min(0.96, Math.max(0.06, cy - 0.1))),
       color: '',
+      pieceLineKey: '',
     };
-    commit([...annotations, next]);
-    setPlacing(null);
+    const before = liveRef.current.annotations;
+    commit([...before, next]);
+    clearPlacing();
     // Выбор сразу — третий такт жеста «клик-клик-ввод»: поле подписи открывается само.
-    setSelected(annotations.length);
+    selectHere(before.length);
   };
 
   const onCanvasClick = (e: React.MouseEvent) => {
-    if (!editable || !placing || size.w === 0) return;
+    if (!editable || !placingKind || size.w === 0) return;
     const r = boxRef.current!.getBoundingClientRect();
     const p = {
       x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
       y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
     };
-    const points = [...placing.points, p];
-    const [, max] = ANNOTATION_POINTS[placing.kind];
-    if (points.length >= max) finishPlacing(placing.kind, points);
-    else setPlacing({ ...placing, points });
+    // Первая точка ЗДЕСЬ отменяет наполовину набранное у соседей: жест принадлежит одному снимку,
+    // и мерка, начатая на кадре A, не должна ждать своего второго клика, пока человек рисует на B.
+    if (points.length === 0) claimEditing(claimRef.current);
+    const next = [...points, p];
+    const [, max] = ANNOTATION_POINTS[placingKind];
+    if (next.length >= max) finishPlacing(placingKind, next);
+    else setPoints(next);
   };
 
-  const active = placing ? null : hovered;
+  const active = placingKind ? null : hovered;
   const dimmed = (i: number) => active !== null && active !== i;
+  const nameOf = (a: AnnotationForm) =>
+    a.pieceLineKey ? pieceLabel?.(a.pieceLineKey) : undefined;
+  const titleOf = (a: AnnotationForm, fallback: string) =>
+    [a.text?.trim(), nameOf(a)].filter(Boolean).join(' · ') || fallback;
 
   return (
-    <div className={cn('flex flex-col gap-1', className)}>
-      {editable && (
+    <div className={cn('flex flex-col gap-1', heightPx != null && 'w-fit', className)}>
+      {editable && toolbar && (
         <ChipRow>
           {annotations.length >= MAX_ANNOTATIONS ? (
             <Text size='micro' variant='label' component='span'>
               на снимок не больше {MAX_ANNOTATIONS} выносок — дальше их не прочесть
             </Text>
           ) : (
-            (Object.keys(KIND_LABEL) as AnnotationKind[]).map((k) => (
-            <Chip
-              key={k}
-              dashed={placing?.kind !== k}
-              onClick={() => setPlacing(placing?.kind === k ? null : { kind: k, points: [] })}
-              title={KIND_HINT[k]}
-            >
-              {KIND_LABEL[k]}
-            </Chip>
+            ANNOTATION_KINDS.map((k) => (
+              <Chip
+                key={k}
+                nonForm
+                dashed={placingKind !== k}
+                onClick={() => setOwnKind(placingKind === k ? null : k)}
+                title={KIND_HINT[k]}
+              >
+                {KIND_LABEL[k]}
+              </Chip>
             ))
           )}
-          {placing && (
+          {placingKind && (
             <>
               <Text size='micro' variant='label' component='span'>
-                {placingHint(placing.kind, placing.points.length)}
+                {placingHint(placingKind, points.length)}
               </Text>
-              {placing.points.length >= ANNOTATION_POINTS[placing.kind][0] && (
-                <Chip onClick={() => finishPlacing(placing.kind, placing.points)} title='закончить постановку'>
-                  готово · {placing.points.length}
+              {points.length >= ANNOTATION_POINTS[placingKind][0] && (
+                <Chip
+                  nonForm
+                  onClick={() => finishPlacing(placingKind, points)}
+                  title='закончить постановку'
+                >
+                  готово · {points.length}
                 </Chip>
               )}
-              <Chip dashed onClick={() => setPlacing(null)} title='отменить постановку'>
+              <Chip nonForm dashed onClick={clearPlacing} title='отменить постановку'>
                 отменить
               </Chip>
             </>
@@ -337,7 +457,11 @@ export function AnnotationCanvas({
 
       <div
         ref={boxRef}
-        className={cn('relative select-none border border-borderColor bg-bgZebra', placing && 'cursor-crosshair')}
+        className={cn(
+          'relative select-none border border-borderColor bg-bgZebra',
+          heightPx != null && 'w-fit',
+          placingKind && 'cursor-crosshair',
+        )}
         onClick={onCanvasClick}
       >
         {/* `max-h` кладётся на САМО изображение, а не на контейнер: коробка с ограниченной
@@ -347,7 +471,12 @@ export function AnnotationCanvas({
         <img
           src={src}
           alt={alt ?? ''}
-          className={cn('block h-auto w-full', maxHeightClass)}
+          className={cn(
+            'block',
+            heightPx != null ? 'h-auto w-auto max-w-none' : 'h-auto w-full',
+            maxHeightClass,
+          )}
+          style={heightPx != null ? { height: heightPx } : undefined}
           draggable={false}
         />
         {/* viewBox, А НЕ ПИКСЕЛЬНЫЕ width/height. Замер сделан для ЭКРАНА, а печать меняет ширину
@@ -362,9 +491,7 @@ export function AnnotationCanvas({
             aria-hidden
           >
             <defs>
-              <marker id='ann-arrow' viewBox='0 0 8 8' refX={7} refY={4} markerWidth={5} markerHeight={5} orient='auto-start-reverse'>
-                <path d='M0,1 L7,4 L0,7 z' fill='currentColor' />
-              </marker>
+              <ArrowMarkerDef />
             </defs>
             {annotations.map((a, i) => (
               <AnnotationShape
@@ -378,7 +505,7 @@ export function AnnotationCanvas({
                 labelAt={dragPlate?.index === i ? { x: dragPlate.x, y: dragPlate.y } : undefined}
               />
             ))}
-            {placing && <PlacingShape kind={placing.kind} points={placing.points} px={px} />}
+            {placingKind && <PlacingShape kind={placingKind} pts={points.map(px)} />}
           </svg>
         )}
 
@@ -391,6 +518,7 @@ export function AnnotationCanvas({
                 key={`plate:${i}`}
                 role={editable ? 'button' : undefined}
                 tabIndex={editable ? 0 : undefined}
+                title={titleOf(a, KIND_LABEL[a.kind ?? 'label'])}
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
                 onClick={(e) => {
@@ -399,12 +527,12 @@ export function AnnotationCanvas({
                     justDragged.current = false;
                     return;
                   }
-                  if (editable) setSelected(selected === i ? null : i);
+                  if (editable) selectHere(selected === i ? null : i);
                 }}
                 onKeyDown={(e) => {
                   if (!editable || (e.key !== 'Enter' && e.key !== ' ')) return;
                   e.preventDefault();
-                  setSelected(selected === i ? null : i);
+                  selectHere(selected === i ? null : i);
                 }}
                 className={cn(
                   'absolute max-w-[45%] -translate-x-1/2 -translate-y-1/2 cursor-pointer border bg-bgColor px-1 py-px text-left text-nano leading-tight',
@@ -412,7 +540,7 @@ export function AnnotationCanvas({
                   dimmed(i) && 'invisible',
                   // Во время постановки слой подписей НЕ ловит клик: точка под чужой плашкой иначе
                   // непоставима — вместо неё открывался бы редактор соседа.
-                  placing && 'pointer-events-none',
+                  placingKind && 'pointer-events-none',
                 )}
                 onPointerDown={(e) => {
                   if (!editable) return;
@@ -448,7 +576,7 @@ export function AnnotationCanvas({
                   color: a.color ? COLOR_HEX[a.color as Exclude<AnnotationColor, ''>] : undefined,
                 }}
               >
-                {a.text?.trim() || '—'}
+                {a.text?.trim() || nameOf(a) || '—'}
               </span>
             ),
           )}
@@ -468,19 +596,19 @@ export function AnnotationCanvas({
                 onMouseLeave={() => setHovered((h) => (h === i ? null : h))}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (editable) setSelected(selected === i ? null : i);
+                  if (editable) selectHere(selected === i ? null : i);
                 }}
                 onKeyDown={(e) => {
                   if (!editable || (e.key !== 'Enter' && e.key !== ' ')) return;
                   e.preventDefault();
-                  setSelected(selected === i ? null : i);
+                  selectHere(selected === i ? null : i);
                 }}
-                title={a.text?.trim() || `выноска ${pinNumber(annotations, i)}`}
+                title={titleOf(a, `выноска ${pinNumber(annotations, i)}`)}
                 className={cn(
                   'absolute flex -translate-x-1/2 -translate-y-1/2 cursor-pointer items-center justify-center rounded-full border bg-bgColor text-nano',
                   selected === i ? 'border-textColor' : 'border-borderColor',
                   dimmed(i) && 'invisible',
-                  placing && 'pointer-events-none',
+                  placingKind && 'pointer-events-none',
                 )}
                 style={{
                   left: `${p.x * 100}%`,
@@ -494,7 +622,70 @@ export function AnnotationCanvas({
               </span>
             );
           })}
+
+        {(zoomable || cornerSlot) && (
+          <div className='absolute right-1 top-1 z-[4] flex items-center gap-1'>
+            {cornerSlot}
+            {zoomable && (
+              <FrameButton
+                label='зум'
+                title='открыть снимок во весь экран — там же и ставить указания точнее'
+                onPress={() => {
+                  // ЗУМ ОБРЫВАЕТ НЕЗАВЕРШЁННУЮ ПОСТАНОВКУ. Полноэкранный холст — отдельная
+                  // поверхность со своей панелью видов и своими точками; продолжить в нём мерку,
+                  // начатую на миниатюре, нечем, а оставить режим включённым значило бы, что после
+                  // закрытия зума первый же клик по кадру уронит на него постороннюю фигуру.
+                  if (placingKind) clearPlacing();
+                  setZoomOpen(true);
+                }}
+              />
+            )}
+          </div>
+        )}
       </div>
+
+      {/* ПОЛОСА ПРЯЧЕТ СВОЙ ТУЛБАР — вместе с ним пряталось и «готово». У мультилидера якорей от
+          двух до восьми, и без этой кнопки закончить его раньше ВОСЬМИ было нечем: жест завершался
+          только по достижению максимума. Здесь же говорится и про упёршийся предел — иначе выбор
+          вида на полном снимке просто ничего не делал бы, молча. */}
+      {editable &&
+        !toolbar &&
+        // ТОЛЬКО У ТОГО КАДРА, ГДЕ ЖЕСТ ИДЁТ. Вид выбран на всю полосу, и условие «есть вид»
+        // напечатало бы одну и ту же подсказку под каждым из десяти снимков — полоса превратилась
+        // бы в столбик одинаковых строк. Строка появляется, когда на ЭТОМ кадре поставлена первая
+        // точка (общая подсказка «кликайте по нужному снимку» висит над полосой), либо когда этот
+        // кадр упёрся в предел и класть на него больше нечего.
+        ((placingKind && annotations.length >= MAX_ANNOTATIONS) || points.length > 0) && (
+        <ChipRow>
+          {annotations.length >= MAX_ANNOTATIONS ? (
+            <Text size='micro' variant='label' component='span'>
+              на этом снимке уже {MAX_ANNOTATIONS} выносок — дальше их не прочесть
+            </Text>
+          ) : (
+            <>
+              <Text size='micro' variant='label' component='span'>
+                {placingHint(placingKind as AnnotationKind, points.length)}
+              </Text>
+              {points.length >= ANNOTATION_POINTS[placingKind as AnnotationKind][0] &&
+                ANNOTATION_POINTS[placingKind as AnnotationKind][0] !==
+                  ANNOTATION_POINTS[placingKind as AnnotationKind][1] && (
+                  <Chip
+                    nonForm
+                    onClick={() => finishPlacing(placingKind as AnnotationKind, points)}
+                    title='закончить постановку'
+                  >
+                    готово · {points.length}
+                  </Chip>
+                )}
+              {points.length > 0 && (
+                <Chip nonForm dashed onClick={clearPlacing} title='отменить постановку'>
+                  отменить
+                </Chip>
+              )}
+            </>
+          )}
+        </ChipRow>
+      )}
 
       {editable && selected !== null && annotations[selected] && (
         <AnnotationEditor
@@ -502,21 +693,105 @@ export function AnnotationCanvas({
           number={pinNumber(annotations, selected)}
           onText={(text) => patch(selected, { text })}
           onColor={(color) => patch(selected, { color })}
+          onPiece={(pieceLineKey) => patch(selected, { pieceLineKey })}
           onRemove={() => remove(selected)}
           onClose={() => setSelected(null)}
+          renderPiecePicker={renderPiecePicker}
         />
       )}
 
       {/* ЛЕГЕНДА ТОЛЬКО ДЛЯ ПИНОВ. Остальные виды несут текст на себе, и повторять его списком
           значило бы печатать одно и то же дважды. */}
-      <PinLegend annotations={annotations} onHover={setHovered} />
+      <PinLegend annotations={annotations} onHover={setHovered} pieceLabel={pieceLabel} />
+
+      {/* ЗУМ — ТОТ ЖЕ ХОЛСТ, А НЕ СМОТРЕЛКА. Снимок узла бывает мелким, а указание ставят по
+          миллиметровой детали; открывать увеличенную копию только для чтения значило бы отправлять
+          человека ставить точку обратно на миниатюру, где он в неё и не попал. Правка здесь та же
+          самая, потому что и форма та же — координаты в долях кадра. */}
+      {zoomable && (
+        <Dialog.Root open={zoomOpen} onOpenChange={setZoomOpen}>
+          <Dialog.Portal>
+            <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-overlay' />
+            <Dialog.Content
+              aria-label={alt || 'снимок'}
+              className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-bgColor text-textColor focus:outline-none'
+            >
+              <Dialog.Title className='sr-only'>{alt || 'снимок'}</Dialog.Title>
+              <div className='flex shrink-0 items-center justify-between gap-4 border-b border-borderColor bg-bgSecondary px-2.5 py-1.5'>
+                <Text size='micro' variant='uppercase' tracking='group' component='span' className='truncate font-bold'>
+                  {alt || 'снимок'}
+                </Text>
+                <Dialog.Close className='shrink-0 cursor-pointer border border-borderColor bg-bgColor px-2.5 py-1 text-micro uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor'>
+                  закрыть ✕
+                </Dialog.Close>
+              </div>
+              <div className='min-h-0 flex-1 overflow-auto p-2 sm:p-4'>
+                <AnnotationCanvas
+                  src={src}
+                  alt={alt}
+                  annotations={annotations}
+                  onChange={onChange}
+                  frozen={frozen}
+                  maxHeightClass='max-h-[calc(100dvh-11rem)]'
+                  className='mx-auto w-fit'
+                  renderPiecePicker={renderPiecePicker}
+                  pieceLabel={pieceLabel}
+                />
+              </div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        </Dialog.Root>
+      )}
     </div>
+  );
+}
+
+/**
+ * Кнопка поверх кадра. Гасит СВОЙ указатель: иначе нажатие проходит вниз, на холст, и в режиме
+ * постановки вместо зума ставится точка ровно под кнопкой.
+ *
+ * Не `<button>`: холст живёт внутри общего `<fieldset disabled>` выпущенной карточки, а
+ * задизейбленность наследуется — на выпущенной карточке зум перестал бы открываться, то есть
+ * читать архив стало бы нечем.
+ */
+function FrameButton({
+  label,
+  title,
+  onPress,
+}: {
+  label: string;
+  title: string;
+  onPress: () => void;
+}) {
+  return (
+    <span
+      role='button'
+      tabIndex={0}
+      title={title}
+      aria-label={title}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation();
+        onPress();
+      }}
+      onKeyDown={(e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        e.preventDefault();
+        onPress();
+      }}
+      className='cursor-pointer border border-borderColor bg-bgColor px-1.5 py-px text-nano uppercase leading-none tracking-label hover:bg-textColor hover:text-bgColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-textColor'
+    >
+      {label}
+    </span>
   );
 }
 
 function placingHint(kind: AnnotationKind, placed: number): string {
   const [min, max] = ANNOTATION_POINTS[kind];
   if (max === 1) return 'кликните точку на снимке';
+  if (kind === 'arc') {
+    return ['кликните начало дуги', 'кликните точку НА дуге', 'кликните конец дуги'][placed] ?? '';
+  }
   if (min === max) return `кликните ${max} точки — поставлено ${placed}`;
   return `кликайте точки (от ${min} до ${max}) — поставлено ${placed}`;
 }
@@ -543,95 +818,17 @@ function AnnotationShape({
   labelAt?: Pt;
 }) {
   if (hidden) return null;
-  const pts = ptsOf(a).map(px);
-  if (pts.length === 0) return null;
-  const ink = inkOf(a);
-  const w = selected ? 2 : 1.5;
-  const label = px(labelAt ?? { x: num(a.labelX), y: num(a.labelY) });
-
-  switch (a.kind) {
-    case 'pin':
-      // Сам кружок — HTML-слоем выше; здесь только точка привязки, чтобы место было видно и
-      // тогда, когда номер перекрыт соседом.
-      return <circle cx={pts[0].x} cy={pts[0].y} r={2} fill={ink} />;
-    case 'label':
-      return (
-        <g stroke={ink} fill='none' strokeWidth={w}>
-          <circle cx={pts[0].x} cy={pts[0].y} r={3} fill={ink} />
-          <line x1={label.x} y1={label.y} x2={pts[0].x} y2={pts[0].y} markerEnd='url(#ann-arrow)' />
-        </g>
-      );
-    case 'dim': {
-      const [p, q] = pts;
-      // Засечки перпендикулярны линии — как в чертеже: они и делают линию РАЗМЕРНОЙ, а не просто
-      // отрезком между двумя точками.
-      const dx = q.x - p.x;
-      const dy = q.y - p.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = (-dy / len) * TICK;
-      const ny = (dx / len) * TICK;
-      return (
-        <g stroke={ink} strokeWidth={w} fill='none'>
-          <line x1={p.x} y1={p.y} x2={q.x} y2={q.y} />
-          <line x1={p.x - nx} y1={p.y - ny} x2={p.x + nx} y2={p.y + ny} />
-          <line x1={q.x - nx} y1={q.y - ny} x2={q.x + nx} y2={q.y + ny} />
-          <line x1={label.x} y1={label.y} x2={(p.x + q.x) / 2} y2={(p.y + q.y) / 2} strokeDasharray='2 2' />
-        </g>
-      );
-    }
-    case 'bracket': {
-      const [p, q] = pts;
-      const dx = q.x - p.x;
-      const dy = q.y - p.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const nx = (-dy / len) * BRACKET_DROP;
-      const ny = (dx / len) * BRACKET_DROP;
-      return (
-        <g stroke={ink} strokeWidth={w} fill='none'>
-          <path
-            d={`M${p.x},${p.y} L${p.x + nx},${p.y + ny} L${q.x + nx},${q.y + ny} L${q.x},${q.y}`}
-          />
-          <line
-            x1={label.x}
-            y1={label.y}
-            x2={(p.x + q.x) / 2 + nx}
-            y2={(p.y + q.y) / 2 + ny}
-            strokeDasharray='2 2'
-          />
-        </g>
-      );
-    }
-    case 'multi':
-      return (
-        <g stroke={ink} strokeWidth={w} fill='none'>
-          {pts.map((p, i) => (
-            <g key={i}>
-              <circle cx={p.x} cy={p.y} r={3} fill={ink} />
-              <line x1={label.x} y1={label.y} x2={p.x} y2={p.y} markerEnd='url(#ann-arrow)' />
-            </g>
-          ))}
-        </g>
-      );
-    default:
-      return null;
-  }
-}
-
-/** Незавершённая постановка: точки уже кликнуты, фигура ещё не создана. */
-function PlacingShape({ kind, points, px }: { kind: AnnotationKind; points: Pt[]; px: (p: Pt) => Pt }) {
-  const pts = points.map(px);
+  // Сама фигура рисуется ОБЩИМ примитивом (ui/annotation-shapes): те же засечки мерки и та же
+  // дуга на снимке шага и на карточном эскизе. Здесь остаётся только перевод долей кадра в
+  // пиксели и решение, что считать местом подписи.
   return (
-    <g stroke='currentColor' strokeWidth={1.5} fill='none' opacity={0.7}>
-      {pts.map((p, i) => (
-        <circle key={i} cx={p.x} cy={p.y} r={3} fill='currentColor' />
-      ))}
-      {pts.length > 1 && (
-        <polyline
-          points={pts.map((p) => `${p.x},${p.y}`).join(' ')}
-          strokeDasharray={kind === 'multi' ? '3 3' : undefined}
-        />
-      )}
-    </g>
+    <CalloutShape
+      kind={a.kind ?? 'pin'}
+      pts={ptsOf(a).map(px)}
+      label={px(labelAt ?? { x: num(a.labelX), y: num(a.labelY) })}
+      color={a.color || undefined}
+      strokeWidth={selected ? 2 : 1.5}
+    />
   );
 }
 
@@ -640,15 +837,19 @@ function AnnotationEditor({
   number,
   onText,
   onColor,
+  onPiece,
   onRemove,
   onClose,
+  renderPiecePicker,
 }: {
   a: AnnotationForm;
   number: number;
   onText: (v: string) => void;
   onColor: (v: AnnotationColor) => void;
+  onPiece: (v: string) => void;
   onRemove: () => void;
   onClose: () => void;
+  renderPiecePicker?: (value: string, onChange: (lineKey: string) => void) => ReactNode;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   // Третий такт жеста: точки поставлены — курсор уже в поле подписи, без ещё одного клика.
@@ -678,6 +879,17 @@ function AnnotationEditor({
           className='min-w-0 flex-1 border border-borderColor bg-bgColor px-1 py-px text-micro focus:border-textColor focus:outline-none'
         />
       </div>
+      {/* ДЕТАЛЬ КРОЯ, О КОТОРОЙ УКАЗАНИЕ. Ссылка, а не имя: имя переживает переименование хуже.
+          Пикер приходит снаружи — примитив не знает ни формы карточки, ни того, откуда берутся
+          силуэты; на печати и в архиве пикера нет вовсе, и поле просто не рисуется. */}
+      {renderPiecePicker && (
+        <div className='flex items-center gap-1.5'>
+          <Text size='micro' variant='label' component='span' className='shrink-0 uppercase'>
+            деталь:
+          </Text>
+          <div className='min-w-0 flex-1'>{renderPiecePicker(a.pieceLineKey ?? '', onPiece)}</div>
+        </div>
+      )}
       <ChipRow>
         <Text size='micro' variant='label' component='span' className='uppercase'>
           цвет:
@@ -685,6 +897,7 @@ function AnnotationEditor({
         {ANNOTATION_COLORS.map((c) => (
           <Chip
             key={c || 'ink'}
+            nonForm
             dashed={(a.color ?? '') !== c}
             onClick={() => onColor(c)}
             title={c ? 'цвет различает пересекающиеся выноски' : 'чернильный — как всё остальное на листе'}
@@ -697,10 +910,10 @@ function AnnotationEditor({
             {c || 'чернила'}
           </Chip>
         ))}
-        <Chip dashed onClick={onRemove} title='удалить выноску'>
+        <Chip nonForm dashed onClick={onRemove} title='удалить выноску'>
           удалить
         </Chip>
-        <Chip dashed onClick={onClose} title='закрыть правку'>
+        <Chip nonForm dashed onClick={onClose} title='закрыть правку'>
           готово
         </Chip>
       </ChipRow>
@@ -717,31 +930,44 @@ function AnnotationEditor({
 function PinLegend({
   annotations,
   onHover,
+  pieceLabel,
 }: {
   annotations: AnnotationForm[];
   onHover?: (i: number | null) => void;
+  pieceLabel?: (lineKey: string) => string | undefined;
 }) {
   const pins = annotations
     .map((a, i) => ({ a, i }))
-    .filter(({ a }) => a.kind === 'pin' && (a.text ?? '').trim());
+    .filter(
+      ({ a }) =>
+        a.kind === 'pin' && ((a.text ?? '').trim() || (a.pieceLineKey && pieceLabel?.(a.pieceLineKey))),
+    );
   if (pins.length === 0) return null;
   return (
     <div className='flex flex-col gap-0.5'>
-      {pins.map(({ a, i }) => (
-        <div
-          key={i}
-          className='flex items-baseline gap-1.5'
-          onMouseEnter={() => onHover?.(i)}
-          onMouseLeave={() => onHover?.(null)}
-        >
-          <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
-            {pinNumber(annotations, i)}
-          </Text>
-          <Text size='nano' component='span' className='min-w-0'>
-            {a.text}
-          </Text>
-        </div>
-      ))}
+      {pins.map(({ a, i }) => {
+        const piece = a.pieceLineKey ? pieceLabel?.(a.pieceLineKey) : undefined;
+        return (
+          <div
+            key={i}
+            className='flex items-baseline gap-1.5'
+            onMouseEnter={() => onHover?.(i)}
+            onMouseLeave={() => onHover?.(null)}
+          >
+            <Text size='nano' variant='label' component='span' className='shrink-0 tabular-nums'>
+              {pinNumber(annotations, i)}
+            </Text>
+            <Text size='nano' component='span' className='min-w-0'>
+              {a.text}
+            </Text>
+            {piece && (
+              <Text size='nano' variant='label' component='span' className='shrink-0 uppercase'>
+                {piece}
+              </Text>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

@@ -1,10 +1,12 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { usePasteImage } from 'components/managers/media/utils/usePasteImage';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AnnotatedImage, ImageCallout, type AnnotatedCallout } from './annotated-image';
+import { ArrowMarkerDef, CalloutShape } from './annotation-shapes';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
 import { MediaViewer, mediaFullListToViewerItems, useMediaViewer } from './media-viewer';
@@ -170,6 +172,25 @@ export type FocusedAnnotatorProps = {
   renderFocusedFooter?: (view: FocusedView, positionInViews: number) => ReactNode;
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
+  /**
+   * ВИДЫ УКАЗАНИЙ. Задан — панель «add callout» превращается в панель видов: пин (как было),
+   * мерка, скобка, дуга, подпись, мультилидер. Не задан — поверхность живёт ровно как жила, и
+   * примерка, которой геометрия не нужна, ничего не замечает.
+   *
+   * Список приходит СНАРУЖИ, вместе с числом якорей у каждого вида: правило «у мерки две точки»
+   * зеркалит серверное и живёт в доменном слое, а не здесь.
+   */
+  calloutKinds?: { value: string; label: string; hint: string; points: [number, number] }[];
+  /**
+   * Поверхность заморожена (выпущенная карточка). Гасит ⌘V.
+   *
+   * Заморозка карточки сделана общим `<fieldset disabled>`, и он глушит DOM-контролы — но НЕ
+   * слушателя на document. Без явного флага наведение на эскиз выпущенной карточки и ⌘V загружали
+   * бы медиа и дописывали его в форму, которую заморозили именно затем, чтобы её не меняли.
+   */
+  readOnly?: boolean;
+  /** Фигура собрана: якоря в долях кадра. Пин по-прежнему уходит через `onAddCallout`. */
+  onAddShape?: (mediaId: number, kind: string, points: { x: number; y: number }[]) => void;
   /** Grid only: when set, the grid is a fixed-HEIGHT filmstrip — every image is this many px tall
    *  and keeps its own aspect (natural width, so a landscape is wider), and only the horizontal axis
    *  scrolls. The image is never cropped, so callout pins still map 1:1. Unset = the default
@@ -200,8 +221,13 @@ export function FocusedAnnotator({
   renderFocusedFooter,
   carouselLabel,
   gridRowHeight,
+  calloutKinds,
+  onAddShape,
+  readOnly = false,
 }: FocusedAnnotatorProps) {
   const [addMode, setAddMode] = useState(false);
+  /** Вид, который сейчас ставят. null = обычный нумерованный пин (или режим выключен). */
+  const [shapeKind, setShapeKind] = useState<string | null>(null);
   const [showAllNotes, setShowAllNotes] = useState(false);
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -233,6 +259,14 @@ export function FocusedAnnotator({
     if (added.length && added[0] != null) setFocusedId(added[0]);
   }
 
+  // ⌘V ПРЯМО В ГАЛЕРЕЮ. Референс почти всегда рождается в буфере — скрин с чужого показа, кроп из
+  // лукбука, — и путь «сохранить файлом → открыть библиотеку → загрузить» стоит трёх шагов ради
+  // картинки, которая уже в руках. Включено, только пока указатель ВНУТРИ этой галереи: на
+  // странице их две (мудборд и эскиз) плюс полоса снимков у каждого шага, и без этого одна
+  // вставка ушла бы во все сразу.
+  const [hot, setHot] = useState(false);
+  const { pasting } = usePasteImage(hot && !readOnly, handlePick);
+
   // Removing the focused image falls focus back to the new first image.
   function handleRemoveMedia(view: FocusedView) {
     if (view.mediaId === focusedId) setFocusedId(null);
@@ -258,6 +292,39 @@ export function FocusedAnnotator({
     if (added.length) handlePick(added);
   }
 
+  // ПОСТАНОВКА ФИГУРЫ. Вид выбран на всю поверхность, а якоря копятся ПО КАРТИНКЕ: мерка,
+  // растянутая между передом и спинкой, — не мерка, поэтому клик по другому кадру начинает набор
+  // заново на нём, а не достраивает начатое на соседнем.
+  const [pending, setPending] = useState<{ mediaId: number; points: { x: number; y: number }[] }>({
+    mediaId: 0,
+    points: [],
+  });
+  const kindDef = calloutKinds?.find((k) => k.value === shapeKind);
+  const resetPending = () => setPending({ mediaId: 0, points: [] });
+
+  function handleCanvasClick(mediaId: number, x: number, y: number) {
+    // Пин — прежний путь: у него нет якорей, его место И ЕСТЬ маркер.
+    if (!kindDef || kindDef.value === 'pin' || !onAddShape) {
+      onAddCallout(mediaId, x, y);
+      return;
+    }
+    const base = pending.mediaId === mediaId ? pending.points : [];
+    const next = [...base, { x, y }];
+    const [, max] = kindDef.points;
+    if (next.length >= max) {
+      onAddShape(mediaId, kindDef.value, next);
+      resetPending();
+      // РЕЖИМ ГАСНЕТ ВМЕСТЕ С ВИДОМ. Снять только вид мало: `addMode` остался бы включённым, вид
+      // стал бы пустым, и СЛЕДУЮЩИЙ клик по эскизу — тот, которым разглядывают только что
+      // нарисованную мерку, — уронил бы на него посторонний нумерованный пин. Постановка это
+      // жест с концом.
+      setShapeKind(null);
+      setAddMode(false);
+      return;
+    }
+    setPending({ mediaId, points: next });
+  }
+
   const modeToggles = (
     <ChipRow>
       {notesMode === 'auto' && (
@@ -269,15 +336,71 @@ export function FocusedAnnotator({
           show all notes
         </Chip>
       )}
-      <Chip selected={addMode} pressed={addMode} onClick={() => setAddMode((v) => !v)}>
-        add callout
-      </Chip>
+      {calloutKinds?.length ? (
+        // Панель ВИДОВ вместо одной кнопки «add callout»: выбранный вид сам включает режим
+        // постановки, поэтому отдельного тумблера больше нет — он был бы вторым выключателем
+        // одного и того же.
+        <>
+          {calloutKinds.map((k) => (
+            <Chip
+              key={k.value}
+              selected={shapeKind === k.value}
+              pressed={shapeKind === k.value}
+              title={k.hint}
+              onClick={() => {
+                const on = shapeKind === k.value;
+                setShapeKind(on ? null : k.value);
+                setAddMode(!on);
+                resetPending();
+              }}
+            >
+              {k.label}
+            </Chip>
+          ))}
+          {/* «ГОТОВО» ДЛЯ ФИГУР С ПЛАВАЮЩИМ ЧИСЛОМ ЯКОРЕЙ. У мультилидера их от двух до восьми, и
+              без этой кнопки закончить его раньше ВОСЬМИ было нечем: жест завершался только по
+              достижению максимума, то есть «одна подпись к трём местам» была невыразима. */}
+          {kindDef &&
+            kindDef.points[0] !== kindDef.points[1] &&
+            pending.points.length >= kindDef.points[0] && (
+              <Chip
+                onClick={() => {
+                  onAddShape?.(pending.mediaId, kindDef.value, pending.points);
+                  resetPending();
+                  setShapeKind(null);
+                  setAddMode(false);
+                }}
+              >
+                готово · {pending.points.length}
+              </Chip>
+            )}
+          {addMode && (
+            <Chip
+              onClick={() => {
+                setShapeKind(null);
+                setAddMode(false);
+                resetPending();
+              }}
+            >
+              отменить
+            </Chip>
+          )}
+        </>
+      ) : (
+        <Chip selected={addMode} pressed={addMode} onClick={() => setAddMode((v) => !v)}>
+          add callout
+        </Chip>
+      )}
     </ChipRow>
   );
 
-  const hint = addMode
-    ? 'click an image to drop a callout · drag a pin to move it'
-    : 'hover a pin to read · click a pin to edit · use zoom to draw';
+  const hint = pasting
+    ? 'загружаю картинку из буфера…'
+    : !addMode
+    ? 'hover a pin to read · click a pin to edit · use zoom to draw · ⌘V вставит картинку из буфера'
+    : kindDef && kindDef.value !== 'pin'
+      ? `${kindDef.label}: кликайте якоря на ОДНОЙ картинке — поставлено ${pending.points.length} из ${kindDef.points[1]}`
+      : 'click an image to drop a callout · drag a pin to move it';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -302,7 +425,11 @@ export function FocusedAnnotator({
   );
 
   return (
-    <div className='space-y-2.5'>
+    <div
+      className='space-y-2.5'
+      onPointerEnter={() => setHot(true)}
+      onPointerLeave={() => setHot(false)}
+    >
       {hasMedia &&
         (isGrid ? (
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
@@ -392,7 +519,9 @@ export function FocusedAnnotator({
                     pinSize={pinSize}
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
                     noteClassName='w-60'
-                    onAdd={(x, y) => onAddCallout(v.mediaId, x, y)}
+                    onAdd={(x, y) => handleCanvasClick(v.mediaId, x, y)}
+                    pendingKind={shapeKind}
+                    pendingPoints={pending.mediaId === v.mediaId ? pending.points : undefined}
                     onMove={onMoveCallout}
                     onRemove={onRemoveCallout}
                     noteTitle={noteTitle}
@@ -480,7 +609,9 @@ export function FocusedAnnotator({
                 notesMode={notesMode}
                 showAllNotes={showAllNotes}
                 pinSize={pinSize}
-                onAdd={(x, y) => onAddCallout(focused.mediaId, x, y)}
+                onAdd={(x, y) => handleCanvasClick(focused.mediaId, x, y)}
+                pendingKind={shapeKind}
+                pendingPoints={pending.mediaId === focused.mediaId ? pending.points : undefined}
                 onMove={onMoveCallout}
                 onRemove={onRemoveCallout}
                 noteTitle={noteTitle}
@@ -565,22 +696,54 @@ export function FocusedAnnotator({
         items={viewerItems}
         {...viewer}
         overlayLabel='callouts'
-        renderOverlay={({ index: i, scale }) => {
+        renderOverlay={({ index: i, size, scale }) => {
           const v = views[i];
           if (!v) return null;
-          return calloutsFor(v.mediaId).map((c) =>
-            Number.isNaN(c.xNorm) || Number.isNaN(c.yNorm) ? null : (
-              <ImageCallout
-                key={c.key}
-                data={c}
-                title={noteTitle?.(c.key)}
-                scale={scale}
-                showAll
-                editable={false}
-                pinSize={pinSize}
-                renderNote={(opts) => renderNote(c.key, opts)}
-              />
-            ),
+          const list = calloutsFor(v.mediaId);
+          const drawn = list.filter((c) => (c.points?.length ?? 0) > 0);
+          return (
+            <>
+              {/* ФИГУРЫ И ЗДЕСЬ. Увеличенный просмотр — ровно то место, куда идут читать мерку:
+                  на плитке 300px «6 мм» между двумя засечками не разглядеть. Без этого слоя в
+                  зуме от мерки, скобки и дуги оставался один номер, то есть исчезало ровно то,
+                  ради чего зум и открыли. Размер сцены приходит готовым (`size`), поэтому мерить
+                  тут нечего. */}
+              {size.w > 0 && drawn.length > 0 && (
+                <svg
+                  className='pointer-events-none absolute inset-0 h-full w-full'
+                  viewBox={`0 0 ${size.w} ${size.h}`}
+                  preserveAspectRatio='none'
+                  aria-hidden
+                >
+                  <defs>
+                    <ArrowMarkerDef />
+                  </defs>
+                  {drawn.map((c) => (
+                    <CalloutShape
+                      key={c.key}
+                      kind={c.kind ?? 'pin'}
+                      pts={(c.points ?? []).map((p) => ({ x: p.x * size.w, y: p.y * size.h }))}
+                      label={{ x: c.xNorm * size.w, y: c.yNorm * size.h }}
+                      color={c.color || undefined}
+                    />
+                  ))}
+                </svg>
+              )}
+              {list.map((c) =>
+                Number.isNaN(c.xNorm) || Number.isNaN(c.yNorm) ? null : (
+                  <ImageCallout
+                    key={c.key}
+                    data={c}
+                    title={noteTitle?.(c.key)}
+                    scale={scale}
+                    showAll
+                    editable={false}
+                    pinSize={pinSize}
+                    renderNote={(opts) => renderNote(c.key, opts)}
+                  />
+                ),
+              )}
+            </>
           );
         }}
       />

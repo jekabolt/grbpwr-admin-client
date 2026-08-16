@@ -13,6 +13,12 @@ import {
   type ReactNode,
 } from 'react';
 
+import {
+  ArrowMarkerDef,
+  CalloutShape,
+  PlacingShape,
+  type ShapePoint,
+} from './annotation-shapes';
 import Text from './text';
 
 // A reusable image-annotation surface: numbered callout PINS placed on an image at normalised
@@ -49,6 +55,16 @@ export type AnnotatedCallout = {
   yNorm: number;
   /** Whether the note already has text (drives the hollow "needs a note" pin). */
   hasText: boolean;
+  // ГЕОМЕТРИЯ УКАЗАНИЯ. Пусто = обычный нумерованный пин, каким выноска и была до 0309 — то есть
+  // каждая на всех живых карточках. Якоря отдельно от маркера НАМЕРЕННО: маркер несёт номер, на
+  // который ссылаются деталь, операция и дефект, и таскать его вместе с концом мерки значило бы,
+  // что подвинуть подпись нельзя, не переставив саму мерку.
+  /** `dim` | `bracket` | `arc` | `label` | `multi`; пусто/`pin` — просто точка. */
+  kind?: string;
+  /** Якоря фигуры в долях кадра. */
+  points?: { x: number; y: number }[];
+  /** Цвет из закрытого списка; пусто = чернильный. */
+  color?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -194,6 +210,8 @@ export type ImageCalloutProps = {
   onPinPointerDown?: (e: ReactPointerEvent) => void;
   onRemove?: () => void;
   renderNote: (opts: { close: () => void }) => ReactNode;
+  /** Указатель вошёл в пин / ушёл с него — Stage гасит по этому чужие фигуры. */
+  onHoverChange?: (hovered: boolean) => void;
 };
 
 export function ImageCallout({
@@ -209,6 +227,7 @@ export function ImageCallout({
   onPinPointerDown,
   onRemove,
   renderNote,
+  onHoverChange,
 }: ImageCalloutProps) {
   const [open, setOpen] = useState(false);
   const pinnedRef = useRef(false); // clicked-open: survives pointer-leave
@@ -282,7 +301,23 @@ export function ImageCallout({
         {/* pin, centred on the anchor */}
         <Popover.Root open={!showAll && open} onOpenChange={(o) => (o ? openNow() : close())}>
           <Popover.Anchor asChild>
-            <div className='pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2'>
+            {/* НАВЕДЕНИЕ ЖИВЁТ НА ОБЁРТКЕ, А НЕ НА КНОПКЕ. Эскиз выпущенной карточки лежит внутри
+                общего `<fieldset disabled>`, а задизейбленность НАСЛЕДУЕТСЯ: нативный `<button>`
+                под таким предком не получает ни клика, ни `pointerenter`. На кнопке висело сразу
+                два ЧИТАТЕЛЬСКИХ жеста — всплытие записки и изоляция пересекающихся фигур, — и оба
+                умирали ровно там, где карточку только и остаётся что читать. Правка (перетаскивание
+                пина, клик-закрепление) остаётся на кнопке: её глушить как раз правильно. */}
+            <div
+              className='pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2'
+              onPointerEnter={() => {
+                onHoverChange?.(true);
+                if (!showAll) openNow();
+              }}
+              onPointerLeave={() => {
+                onHoverChange?.(false);
+                if (!showAll) closeSoon();
+              }}
+            >
               <CalloutPin
                 ref={pinRef}
                 number={data.number}
@@ -293,8 +328,6 @@ export function ImageCallout({
                 aria-label={`callout ${data.number}${data.hasText ? '' : ' (no note yet)'}`}
                 aria-expanded={showAll ? undefined : open}
                 onPointerDown={editable ? onPinPointerDown : undefined}
-                onPointerEnter={showAll ? undefined : openNow}
-                onPointerLeave={showAll ? undefined : closeSoon}
                 onFocus={showAll ? undefined : openNow}
                 onBlur={showAll ? undefined : closeSoon}
                 onClick={(e) => {
@@ -402,6 +435,9 @@ export type AnnotatedImageProps = {
    *  (a filmstrip row of equal-height, variable-width images). */
   frameClassName?: string;
   frameStyle?: React.CSSProperties;
+  /** Незавершённая постановка фигуры на ЭТОЙ картинке (вид + уже кликнутые якоря). */
+  pendingKind?: string | null;
+  pendingPoints?: ShapePoint[];
 };
 
 // ---------------------------------------------------------------------------
@@ -440,6 +476,9 @@ type StageProps = {
    *  the enlarged view; the enlarged view leaves it undefined so a plain click there does
    *  nothing (pan/zoom is the only background gesture). */
   onBackgroundView?: () => void;
+  /** Незавершённая постановка фигуры на ЭТОЙ картинке: вид и уже кликнутые якоря. */
+  pendingKind?: string | null;
+  pendingPoints?: ShapePoint[];
 };
 
 function Stage({
@@ -463,8 +502,26 @@ function Stage({
   noteClassName,
   cornerSlot,
   onBackgroundView,
+  pendingKind,
+  pendingPoints,
 }: StageProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
+  // Размер кадра в пикселях — фигуры считаются в них, а хранятся в долях. Без замера пришлось бы
+  // рисовать в процентах, и окружность на альбомном снимке стала бы эллипсом.
+  const [frame, setFrame] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => setFrame({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  // ИЗОЛЯЦИЯ: наведение на пин гасит ЧУЖИЕ фигуры. На эскизе их бывает десяток, они пересекаются,
+  // и прочесть одну мерку, не убрав соседние, невозможно. Гасятся именно фигуры, а не пины: пин
+  // несёт номер, по которому на выноску ссылаются, и прятать номера значило бы прятать адреса.
+  const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
   // Zoom/pan: refs hold live values for event handlers, mirrored to state to drive renders. With
   // `zoom` off these never change (scale 1, no pan) — the tile is a flat, passive picture.
@@ -738,12 +795,58 @@ function Stage({
           />
         )}
 
+        {/* СЛОЙ ГЕОМЕТРИИ — под пинами и записками, внутри трансформа: мерка обязана ехать вместе
+            с картинкой при зуме и панораме, иначе она указывала бы мимо ровно тогда, когда её и
+            приблизили, чтобы рассмотреть. viewBox в пикселях кадра, а не в процентах: в процентах
+            засечки на альбомном снимке стали бы косыми. */}
+        {frame.w > 0 && (
+          <svg
+            className='pointer-events-none absolute inset-0 h-full w-full'
+            viewBox={`0 0 ${frame.w} ${frame.h}`}
+            preserveAspectRatio='none'
+            aria-hidden
+          >
+            <defs>
+              <ArrowMarkerDef />
+            </defs>
+            {callouts.map((c) => {
+              const pts = c.points ?? [];
+              if (pts.length === 0) return null;
+              if (hoveredKey !== null && hoveredKey !== c.key) return null;
+              const at = (p: ShapePoint) => ({ x: p.x * frame.w, y: p.y * frame.h });
+              // Подпись фигуры — САМ нумерованный маркер: лидер тянется от него, и когда маркер
+              // перетаскивают, линия едет следом сама, без второй хранимой координаты.
+              const label = at(
+                dragState?.key === c.key
+                  ? { x: dragState.x, y: dragState.y }
+                  : { x: c.xNorm, y: c.yNorm },
+              );
+              return (
+                <CalloutShape
+                  key={c.key}
+                  kind={c.kind ?? 'pin'}
+                  pts={pts.map(at)}
+                  label={label}
+                  color={c.color || undefined}
+                />
+              );
+            })}
+            {pendingKind && (pendingPoints?.length ?? 0) > 0 && (
+              <PlacingShape
+                kind={pendingKind}
+                pts={(pendingPoints ?? []).map((p) => ({ x: p.x * frame.w, y: p.y * frame.h }))}
+              />
+            )}
+          </svg>
+        )}
+
         {callouts.map((c) => {
           if (Number.isNaN(c.xNorm) || Number.isNaN(c.yNorm)) return null;
           return (
             <ImageCallout
               key={c.key}
               data={c}
+              onHoverChange={(on) => setHoveredKey(on ? c.key : null)}
               title={noteTitle?.(c.key)}
               scale={scale}
               showAll={showAll}
@@ -810,6 +913,8 @@ export function AnnotatedImage({
   cornerSlot,
   frameClassName = 'w-full',
   frameStyle,
+  pendingKind,
+  pendingPoints,
 }: AnnotatedImageProps) {
   const [enlarged, setEnlarged] = useState(false);
 
@@ -845,6 +950,8 @@ export function AnnotatedImage({
     onRemove,
     pinSize,
     noteClassName,
+    pendingKind,
+    pendingPoints,
   } as const;
 
   return (
