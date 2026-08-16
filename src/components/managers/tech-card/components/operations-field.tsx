@@ -92,7 +92,7 @@ import { suggestUnitCode } from './assembly-suggest';
 import { AssemblySchematic } from './assembly-schematic';
 import { OperationMediaStrip } from './operation-media-strip';
 import { useSchematicPrefs } from './use-schematic-prefs';
-import { PieceRef, useFormPieces } from './piece-picker';
+import { PieceRef, PieceSinglePicker, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
 import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
@@ -2316,6 +2316,19 @@ function OperationEditor({
         name={`operations.${index}.media`}
         urlById={mediaUrls ?? EMPTY_MEDIA_URLS}
         frozen={frozen}
+        // ДЕТАЛЬ НА УКАЗАНИИ — тем же пикером и теми же силуэтами, что и состав шага рядом.
+        // Второй способ выбрать деталь на одном экране означал бы, что одна и та же деталь
+        // называется в двух местах по-разному.
+        renderPiecePicker={(value, onPick) => (
+          <PieceSinglePicker
+            pieces={pieces}
+            value={value}
+            onChange={(k) => onPick(k)}
+            placeholder='— деталь (необязательно) —'
+            shapeOf={(k) => pieceShapes?.get(pieceRefKey(k)) ?? null}
+          />
+        )}
+        pieceLabel={(k) => pieces.find((p) => p.lineKey === k)?.name}
       />
 
       <GroupLabel>materials this step consumes</GroupLabel>

@@ -14,8 +14,23 @@ import Textarea from 'ui/components/text-area';
 import InputField from 'ui/form/fields/input-field';
 import SelectField from 'ui/form/fields/select-field';
 import TextareaField from 'ui/form/fields/textarea-field';
-import { normalizePieceName } from './piece-picker';
-import { TechCardFormData } from './schema';
+import { cn } from 'lib/utility';
+import GenericPopover from 'ui/components/popover';
+import { Chip, ChipRow } from 'ui/components/chip';
+import { CALLOUT_COLOR_HEX } from 'ui/components/annotation-shapes';
+import { KIND_HINT, KIND_LABEL } from './annotation-canvas';
+import { PieceList, normalizePieceName, useFormPieces, type PieceRef } from './piece-picker';
+import type { FoundPiece } from './nesting/dxf-geometry';
+import { pieceRefKey } from './piece-block-refs';
+import { usePieceShapes } from './use-piece-shapes';
+import {
+  ANNOTATION_COLORS,
+  ANNOTATION_KINDS,
+  ANNOTATION_POINTS,
+  type AnnotationColor,
+  type AnnotationKind,
+  type TechCardFormData,
+} from './schema';
 
 const kindLabels: Record<string, string> = Object.fromEntries(
   techCardMediaKindOptions.map((o) => [o.value, o.label]),
@@ -43,6 +58,26 @@ type FormCallout = {
   mediaId?: number;
   posX?: string;
   posY?: string;
+  // ГЕОМЕТРИЯ УКАЗАНИЯ (0309). `posX/posY` по-прежнему «где стоит нумерованный маркер»; `points`
+  // держит якоря фигуры и у пина пуст.
+  kind?: AnnotationKind;
+  points?: { x: string; y: string }[];
+  color?: AnnotationColor;
+};
+
+// Виды указаний для панели галереи. Число ЯКОРЕЙ, а не точек вида: у карточного пина якорей ноль —
+// его единственная точка и есть нумерованный маркер, и дублировать её в якорях значило бы завести
+// два места для одной координаты.
+const CALLOUT_KINDS = ANNOTATION_KINDS.map((k) => ({
+  value: k as string,
+  label: KIND_LABEL[k],
+  hint: KIND_HINT[k],
+  points: (k === 'pin' ? [0, 0] : ANNOTATION_POINTS[k]) as [number, number],
+}));
+
+const numOf = (v?: string) => {
+  const n = Number((v ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 0;
 };
 
 // Media resolves to a URL only a tick after it's picked; an unresolved id is skipped (not rendered
@@ -205,6 +240,31 @@ function TechCardGallery({
         mediaId,
         posX: x.toFixed(3),
         posY: y.toFixed(3),
+        kind: 'pin',
+        points: [],
+        color: '',
+      },
+    ]);
+  }
+
+  // ФИГУРА: якоря пришли кликами, маркер ставится САМ — над серединой якорей и чуть выше, чтобы
+  // номер не сел на саму линию. Оттуда его почти никогда не приходится двигать, а если приходится
+  // — он перетаскивается как любой пин, и лидер едет следом.
+  function addShapeTo(mediaId: number, kind: string, pts: { x: number; y: number }[]) {
+    const cx = pts.reduce((s, p) => s + p.x, 0) / pts.length;
+    const cy = pts.reduce((s, p) => s + p.y, 0) / pts.length;
+    writeCallouts([
+      ...((getValues('callouts') ?? []) as FormCallout[]),
+      {
+        number: nextNumber(),
+        part: '',
+        description: '',
+        mediaId,
+        posX: Math.min(0.96, Math.max(0.04, cx)).toFixed(3),
+        posY: Math.min(0.96, Math.max(0.06, cy - 0.08)).toFixed(3),
+        kind: kind as AnnotationKind,
+        points: pts.map((p) => ({ x: p.x.toFixed(4), y: p.y.toFixed(4) })),
+        color: '',
       },
     ]);
   }
@@ -229,6 +289,9 @@ function TechCardGallery({
           xNorm: Number.isNaN(px) ? 0.5 : px,
           yNorm: Number.isNaN(py) ? 0.5 : py,
           hasText: !!x.c?.description?.trim(),
+          kind: x.c?.kind ?? 'pin',
+          points: (x.c?.points ?? []).map((pt) => ({ x: numOf(pt.x), y: numOf(pt.y) })),
+          color: x.c?.color ?? '',
         };
       });
 
@@ -248,6 +311,8 @@ function TechCardGallery({
       views={views}
       calloutsFor={calloutsFor}
       onAddCallout={addCalloutTo}
+      calloutKinds={CALLOUT_KINDS}
+      onAddShape={addShapeTo}
       onMoveCallout={(key, x, y) => {
         const i = keyToIndex.get(key);
         if (i == null) return;
@@ -322,7 +387,16 @@ function TechCardGallery({
 // note. With every view on screen carrying its own pins, this list's job narrows to
 // reaching UNPINNED callouts (a callout survives its image being removed), so it announces how many
 // there are and opens itself when any exist.
-function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
+function CalloutsList({
+  view,
+  pieces: cardPieces,
+  shapeOf,
+}: {
+  view: 'technical' | 'moodboard';
+  /** Детали кроя карточки — те же, что предлагает состав шага. */
+  pieces: PieceRef[];
+  shapeOf: (lineKey: string) => FoundPiece | null;
+}) {
   const { control, formState, getValues, setValue } = useFormContext<TechCardFormData>();
   // `fields` даёт стабильные ключи для React; удаление идёт КОРНЕВЫМ setValue — по той же
   // причине, что и в галерее: на «callouts» висят два useFieldArray, и remove одного не
@@ -371,30 +445,6 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
     name?: string;
     calloutNumber?: number;
   }>;
-  const pieceOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const p of pieces) {
-      const name = p.name?.trim();
-      if (!name || seen.has(name)) continue;
-      seen.add(name);
-      out.push(name);
-    }
-    return out;
-  }, [pieces]);
-
-  // Tolerant read: a value typed before this field was a picker (or left behind when its piece was
-  // renamed) still shows, flagged, instead of silently reading as empty and being dropped by the
-  // next save of an unrelated field.
-  const partOptionsFor = (current?: string) => {
-    const value = current?.trim();
-    const items = pieceOptions.map((p) => ({ value: p, label: p }));
-    if (value && !pieceOptions.includes(value)) {
-      items.unshift({ value, label: `${value} — not in pieces` });
-    }
-    return items;
-  };
-
   // ВТОРАЯ ПОЛОВИНА СВЯЗИ. Выноска называет деталь (`callout.part`), а деталь ссылается на выноску
   // НОМЕРОМ (`piece.calloutNumber`) — и рисуют пины, считают «открепление» и печатают тех-пак
   // именно по номеру. Клиент писал только первую половину: с тех пор как из таблицы деталей убрали
@@ -537,12 +587,17 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
                 </div>
               </div>
               <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
-                <SelectField
-                  name={`callouts.${index}.part`}
-                  label='part (код детали)'
-                  placeholder={pieceOptions.length ? 'pick a piece…' : 'no pieces on this card yet'}
-                  items={partOptionsFor(callouts[index]?.part)}
-                  onAfterChange={(v) => pinPieceToCallout(index, typeof v === 'string' ? v : '')}
+                {/* ДЕТАЛЬ — ПЛИТКАМИ С КОНТУРОМ, а не строкой в списке. Выноска называет деталь
+                    кроя, и узнать «полочку» среди двадцати имён вида FP_R_1 глазами нельзя, а по
+                    форме — можно с одного взгляда. Пикер и контуры те же, что у состава шага. */}
+                <CalloutPartPicker
+                  pieces={cardPieces}
+                  shapeOf={shapeOf}
+                  value={callouts[index]?.part ?? ''}
+                  onChange={(name) => {
+                    setValue(`callouts.${index}.part`, name, { shouldDirty: true });
+                    pinPieceToCallout(index, name);
+                  }}
                 />
                 <SelectField
                   name={`callouts.${index}.mediaId`}
@@ -565,11 +620,133 @@ function CalloutsList({ view }: { view: 'technical' | 'moodboard' }) {
                 rows={2}
                 maxLength={2000}
               />
+              {/* ГЕОМЕТРИЯ. Переставить якоря отсюда нельзя намеренно: их ставят НА КАРТИНКЕ, а
+                  четыре поля с числами вместо трёх кликов — не правка, а расшифровка. Здесь
+                  остаётся то, что от картинки не зависит: цвет и «вернуть точкой». */}
+              <CalloutGeometryRow
+                kind={callouts[index]?.kind ?? 'pin'}
+                color={callouts[index]?.color ?? ''}
+                onColor={(c) => setValue(`callouts.${index}.color`, c, { shouldDirty: true })}
+                onDemote={() => {
+                  setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
+                  setValue(`callouts.${index}.points`, [], { shouldDirty: true });
+                }}
+              />
             </div>
           ))
         )}
       </div>
     </Accordion>
+  );
+}
+
+// ПИКЕР ДЕТАЛИ ДЛЯ ВЫНОСКИ. Пишет ИМЯ, а не ключ: имя — это то, что несёт `callout.part`, на нём
+// стоит связь «деталь ↔ выноска» (pinPieceToCallout сверяет имена) и им печатается тех-пак.
+// Менять хранимое на ключ здесь значило бы переделывать обе половины связи заодно с пикером.
+function CalloutPartPicker({
+  pieces,
+  shapeOf,
+  value,
+  onChange,
+}: {
+  pieces: PieceRef[];
+  shapeOf: (lineKey: string) => FoundPiece | null;
+  value: string;
+  onChange: (name: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wanted = normalizePieceName(value);
+  const current = pieces.find((p) => normalizePieceName(p.name) === wanted);
+  // Имя, которого среди деталей нет (напечатано до пикера или деталь переименовали), показывается
+  // ФЛАГОМ, а не молча пустотой: иначе следующее сохранение унесло бы его без следа.
+  const dangling = !!value.trim() && !current;
+
+  return (
+    <div className='flex flex-col gap-0.5'>
+      <Text size='micro' variant='label' component='span' className='uppercase'>
+        деталь (код)
+      </Text>
+      <GenericPopover
+        open={open}
+        onOpenChange={setOpen}
+        noTail
+        className='w-64'
+        triggerProps={{
+          className: cn(
+            'flex min-h-[22px] w-full items-center justify-between gap-2 border bg-bgColor px-[7px] py-[3px] text-left text-textBaseSize uppercase transition-colors focus:border-textColor focus:outline-none',
+            dangling ? 'border-error text-error' : 'border-borderColor',
+            current ? 'text-textColor' : 'text-labelColor',
+          ),
+        }}
+        openElement={
+          <>
+            <span className='truncate'>
+              {current?.name ?? (dangling ? `${value} — нет среди деталей` : '— деталь —')}
+            </span>
+            <span aria-hidden className='shrink-0 text-labelColor'>
+              ▾
+            </span>
+          </>
+        }
+      >
+        <PieceList
+          pieces={pieces}
+          selected={current ? [current.lineKey] : []}
+          multiple={false}
+          shapeOf={shapeOf}
+          onToggle={(lineKey) => {
+            const picked = pieces.find((p) => p.lineKey === lineKey);
+            // Повторный выбор снимает связь — выноска про узел, а не про конкретную деталь.
+            onChange(picked && picked.lineKey !== current?.lineKey ? picked.name : '');
+            setOpen(false);
+          }}
+        />
+      </GenericPopover>
+    </div>
+  );
+}
+
+// Вид и цвет указания. Вид только читается: фигуру рисуют кликами по картинке, и «сменить вид» в
+// списке означало бы либо потерять якоря, либо принять их от другого вида — две точки мерки не
+// годятся началом дуги.
+function CalloutGeometryRow({
+  kind,
+  color,
+  onColor,
+  onDemote,
+}: {
+  kind: AnnotationKind;
+  color: AnnotationColor;
+  onColor: (c: AnnotationColor) => void;
+  onDemote: () => void;
+}) {
+  return (
+    <ChipRow>
+      <Text size='micro' variant='label' component='span' className='uppercase'>
+        {KIND_LABEL[kind]}
+      </Text>
+      {ANNOTATION_COLORS.map((c) => (
+        <Chip
+          key={c || 'ink'}
+          nonForm
+          dashed={color !== c}
+          onClick={() => onColor(c)}
+          title={c ? 'цвет различает пересекающиеся указания' : 'чернильный — как всё на листе'}
+        >
+          <span
+            aria-hidden
+            className='inline-block size-2 border border-borderColor'
+            style={{ background: c ? CALLOUT_COLOR_HEX[c] : 'currentColor' }}
+          />
+          {c || 'чернила'}
+        </Chip>
+      ))}
+      {kind !== 'pin' && (
+        <Chip nonForm dashed onClick={onDemote} title='убрать фигуру, оставить нумерованную точку'>
+          сделать точкой
+        </Chip>
+      )}
+    </ChipRow>
   );
 }
 
@@ -609,11 +786,20 @@ function MoodboardComments() {
 export function SketchTab({
   techCard,
   view = 'sketch',
+  active = false,
 }: {
   techCard?: common_TechCard;
   view?: 'sketch' | 'moodboard';
+  /** Вкладка на экране. Только она заказывает разбор чертежей — вкладки смонтированы все сразу,
+   *  и качать мегабайты за того, кто сюда не заходил, незачем (тот же довод, что в CONSTRUCTION). */
+  active?: boolean;
 }) {
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
+  // Силуэты деталей для пикера «деталь этой выноски»: та же пачка и тот же индекс, которыми
+  // рисует плитки вкладка деталей кроя. Своя эвристика разошлась бы с ней молча.
+  const pieces = useFormPieces();
+  const { shapeByKey } = usePieceShapes(active);
+  const shapeOf = (lineKey: string) => shapeByKey?.get(pieceRefKey(lineKey)) ?? null;
 
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
@@ -646,7 +832,7 @@ export function SketchTab({
           addLabel='add moodboard image'
           purpose='moodboard reference'
         />
-        <CalloutsList view='moodboard' />
+        <CalloutsList view='moodboard' pieces={pieces} shapeOf={shapeOf} />
         <MoodboardComments />
       </section>
     );
@@ -668,7 +854,7 @@ export function SketchTab({
         addLabel='add sketch'
         purpose='tech sketch'
       />
-      <CalloutsList view='technical' />
+      <CalloutsList view='technical' pieces={pieces} shapeOf={shapeOf} />
     </section>
   );
 }

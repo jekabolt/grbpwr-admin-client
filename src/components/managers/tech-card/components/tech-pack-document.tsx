@@ -16,6 +16,7 @@ import {
   common_MediaFull,
   common_TechCard,
   common_TechCardBomItem,
+  common_TechCardCallout,
   common_TechCardColorwayUsage,
   common_TechCardMachineProfile,
   common_TechCardOperation,
@@ -99,7 +100,8 @@ import { useCareVocabulary } from 'components/managers/product/components/care/u
 import { useMaterials } from 'components/managers/materials/components/useMaterials';
 import { useMedia, useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { useDictionary } from 'lib/providers/dictionary-provider';
-import { Fragment, ReactNode, useEffect, useMemo } from 'react';
+import { Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowMarkerDef, CalloutShape } from 'ui/components/annotation-shapes';
 import { decimalToInput } from 'utils/decimal';
 // ORIGIN, КОТОРЫЙ УЕДЕТ НА БУМАГУ И ОСТАНЕТСЯ ТАМ НАВСЕГДА — жил здесь локальной функцией, пока
 // печатных документов с QR было ровно один. Наряд на партию (run-pack-document.tsx) печатает такой
@@ -180,6 +182,74 @@ const dec = (d?: googletype_Decimal): string => decimalToInput(d) || '';
 // Тип СТРУКТУРНЫЙ, а не именованный: карточка приезжает сюда и как common_TechCard, и как её
 // вложенный insert, и связывать печать с одним из двух ради сигнатуры незачем — предикату нужны
 // ровно строки рецепта.
+// ГЕОМЕТРИЯ УКАЗАНИЙ НА ПЕЧАТИ (0309). Мерка между двумя точками, скобка над участком и дуга по
+// окату — инструкция швее, и лист без них несёт половину сказанного: номер есть, а «по какому
+// размеру» — нет.
+//
+// Размер коробки МЕРЯЕТСЯ, а фигуры кладутся в viewBox тех же пикселей: в процентах засечки мерки
+// на альбомном эскизе стали бы косыми, а окружность — эллипсом. Печать меняет ширину коробки
+// ПОСЛЕ замера, и ResizeObserver на это не стреляет, — с viewBox холст масштабируется вместе с
+// коробкой, пропорции которой равны пропорциям картинки, и указание остаётся на своём узле.
+function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [box, setBox] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = ref.current?.parentElement;
+    if (!el) return;
+    const measure = () => setBox({ w: el.clientWidth, h: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  const drawn = callouts.filter((c) => (c.points?.length ?? 0) > 0);
+  return (
+    <div ref={ref} className='pointer-events-none absolute inset-0'>
+      {box.w > 0 && drawn.length > 0 && (
+        <svg
+          className='h-full w-full'
+          viewBox={`0 0 ${box.w} ${box.h}`}
+          preserveAspectRatio='none'
+          aria-hidden
+        >
+          <defs>
+            <ArrowMarkerDef />
+          </defs>
+          {drawn.map((c, i) => (
+            <CalloutShape
+              key={i}
+              kind={annotationKindFromWire(c.kind)}
+              pts={(c.points ?? []).map((p) => ({
+                x: num(dec(p.x)) * box.w,
+                y: num(dec(p.y)) * box.h,
+              }))}
+              // Подпись фигуры — сам нумерованный маркер: лидер тянется к нему, и на бумаге он
+              // единственное, что можно прочесть глазами.
+              label={{ x: num(dec(c.posX)) * box.w, y: num(dec(c.posY)) * box.h }}
+              color={annotationColorFromWire(c.color) || undefined}
+            />
+          ))}
+        </svg>
+      )}
+    </div>
+  );
+}
+
+/** Вид указания словом в таблице выносок. Пин — не подпись: он и так «просто номер». */
+function calloutKindLabel(kind?: string): string {
+  const k = annotationKindFromWire(kind);
+  return k === 'pin' ? '' : ANNOTATION_KIND_PRINT[k];
+}
+
+const ANNOTATION_KIND_PRINT: Record<string, string> = {
+  pin: '',
+  label: 'подпись',
+  dim: 'мерка',
+  bracket: 'участок',
+  multi: 'мультилидер',
+  arc: 'дуга',
+};
+
 function bomTakesWastage(
   colorways: ReadonlyArray<{ usages?: common_TechCardColorwayUsage[] }> | undefined,
   b: { id?: number; lineKey?: string },
@@ -1083,6 +1153,7 @@ export function TechPackDocument({
       labelX: decimalToInput(a.labelX) || '0',
       labelY: decimalToInput(a.labelY) || '0',
       color: annotationColorFromWire(a.color),
+      pieceLineKey: a.pieceLineKey ?? '',
     }));
   // Highest-numbered release, if any — "latest" isn't guaranteed by response order.
   const latestRelease = (releasesData?.releases ?? []).reduce<
@@ -1515,6 +1586,10 @@ export function TechPackDocument({
                       увёл бы номера с их узлов. */}
                   <div className='relative block w-full border border-black'>
                     <img src={url} alt='' className='block h-auto w-full' />
+                    {/* ГЕОМЕТРИЯ УКАЗАНИЙ — на бумаге тоже. Мерка «6 мм» между двумя точками и
+                        скобка над участком это инструкция швее; напечатать только номер, оставив
+                        фигуру на экране, значило бы выдать в цех половину указания. */}
+                    <SketchGeometryLayer callouts={pins} />
                     {pins.map((c, j) => {
                       const x = num(dec(c.posX));
                       const y = num(dec(c.posY));
@@ -1568,7 +1643,12 @@ export function TechPackDocument({
                   return (
                     <tr key={i} className='break-inside-avoid'>
                       <td className={`${TD} text-center font-semibold`}>{number}</td>
-                      <td className={TD}>{c.part || '—'}</td>
+                      <td className={TD}>
+                        {c.part || '—'}
+                        {calloutKindLabel(c.kind) && (
+                          <span className='ml-1 text-labelColor'>· {calloutKindLabel(c.kind)}</span>
+                        )}
+                      </td>
                       <td className={TD}>
                         {pieces.length === 0
                           ? '—'

@@ -253,6 +253,7 @@ const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
     labelX: decimalToInput(a.labelX) || '0',
     labelY: decimalToInput(a.labelY) || '0',
     color: annotationColorFromWire(a.color),
+    pieceLineKey: a.pieceLineKey ?? '',
   }));
 
 function SnapshotOperations({

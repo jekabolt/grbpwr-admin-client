@@ -189,15 +189,9 @@ const mediaItemSchema = z.object({
   caption: z.string().optional().default(''), // carried (v2; no UI yet)
 });
 
-const calloutSchema = z.object({
-  number: z.number().optional().default(0),
-  part: z.string().optional().default(''),
-  description: z.string().optional().default(''),
-  dimensions: z.string().optional().default(''),
-  mediaId: z.number().optional().default(0), // pinned sketch (0 = unanchored)
-  posX: z.string().optional().default(''), // carried (v2; normalised 0..1 marker pos)
-  posY: z.string().optional().default(''), // carried (v2)
-});
+// `calloutSchema` живёт НИЖЕ, сразу за словарём видов выносок: с 0309 карточное указание несёт вид,
+// якоря и цвет, и ссылается на этот словарь ЗНАЧЕНИЕМ (`z.enum(ANNOTATION_KINDS)`), а не типом.
+// Объявленная здесь, схема падала бы на загрузке модуля с ReferenceError.
 
 // One cut-piece detail (деталь кроя) + its per-colourway fabric mapping (NF-05). materials is a
 // sparse list keyed by colorwayIndex; a colourway with no entry is simply unmapped. bomItemIndex /
@@ -755,7 +749,7 @@ const constructionSchema = z
 // чем является текст. Набор проектировался осями (якорь × геометрия × лидер × подпись), но
 // независимые поля пришлось бы валидировать комбинаторикой бессмыслицы — скобка с одной точкой,
 // номер на мерке. Сервер проверяет ровно эти же правила, теми же словами.
-export const ANNOTATION_KINDS = ['pin', 'label', 'dim', 'bracket', 'multi'] as const;
+export const ANNOTATION_KINDS = ['pin', 'label', 'dim', 'bracket', 'multi', 'arc'] as const;
 export type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
 
 /** Сколько точек у вида: [минимум, максимум]. Зеркало `PointsAllowed()` сервера. */
@@ -765,6 +759,10 @@ export const ANNOTATION_POINTS: Record<AnnotationKind, [number, number]> = {
   dim: [2, 2],
   bracket: [2, 2],
   multi: [2, 8],
+  // Начало, ТОЧКА НА КРИВОЙ, конец. Средняя лежит на самой дуге, а не управляет ей со стороны:
+  // управляющая точка Безье кривой не принадлежит, и ставящий её мышью каждый раз промахивается
+  // мимо линии, которую рисует.
+  arc: [3, 3],
 };
 
 // Цвет — закрытый список, а не свободный hex: лист швеи печатают и на чёрно-белом принтере, где
@@ -784,6 +782,7 @@ const ANNOTATION_KIND_WIRE: Record<AnnotationKind, string> = {
   dim: 'TECH_CARD_ANNOTATION_KIND_DIM',
   bracket: 'TECH_CARD_ANNOTATION_KIND_BRACKET',
   multi: 'TECH_CARD_ANNOTATION_KIND_MULTI',
+  arc: 'TECH_CARD_ANNOTATION_KIND_ARC',
 };
 const ANNOTATION_KIND_FORM = Object.fromEntries(
   Object.entries(ANNOTATION_KIND_WIRE).map(([k, v]) => [v, k as AnnotationKind]),
@@ -823,6 +822,10 @@ const annotationSchema = z.object({
   labelX: z.string().default('0'),
   labelY: z.string().default('0'),
   color: z.enum(ANNOTATION_COLORS).default(''),
+  // Деталь кроя, о которой указание. Тот же стабильный ключ, которым деталь адресуют вход операции
+  // и назначение материала, — не имя: имя переживает переименование хуже, чем ссылка. Пусто =
+  // указание не про конкретную деталь (а про узел, шов, посадку).
+  pieceLineKey: z.string().default(''),
 });
 
 const operationMediaSchema = z.object({
@@ -835,6 +838,27 @@ const operationMediaSchema = z.object({
 
 export type OperationMediaForm = z.infer<typeof operationMediaSchema>;
 export type AnnotationForm = z.infer<typeof annotationSchema>;
+export type CalloutForm = z.infer<typeof calloutSchema>;
+
+const calloutSchema = z.object({
+  number: z.number().optional().default(0),
+  part: z.string().optional().default(''),
+  description: z.string().optional().default(''),
+  dimensions: z.string().optional().default(''),
+  mediaId: z.number().optional().default(0), // pinned sketch (0 = unanchored)
+  posX: z.string().optional().default(''), // carried (v2; normalised 0..1 marker pos)
+  posY: z.string().optional().default(''), // carried (v2)
+  // ГЕОМЕТРИЯ УКАЗАНИЯ (0309) — тот же словарь видов, что у выносок на снимке шага, потому что
+  // ремесло одно: мерка между двумя точками, скобка над участком, дуга по окату. `posX/posY`
+  // сохраняют смысл «где стоит нумерованный маркер»; `points` держит якоря фигуры и у пина пуст.
+  //
+  // Схема объявлена ЗДЕСЬ, а не в annotationSchema: у карточной выноски нет ни своей плашки (её
+  // роль играет нумерованный маркер), ни своего текста (он в `description`) — общим типом были бы
+  // два поля, которые здесь всегда пусты.
+  kind: z.enum(ANNOTATION_KINDS).optional().default('pin'),
+  points: z.array(annotationPointSchema).optional().default([]),
+  color: z.enum(ANNOTATION_COLORS).optional().default(''),
+});
 
 const operationSchema = z.object({
   // THE TWO REQUIRED FIELDS, and the only two — both closed lists. The removed free-text `node`
@@ -1588,6 +1612,15 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
       mediaId: c.mediaId || 0,
       posX: decimalToInput(c.posX),
       posY: decimalToInput(c.posY),
+      // Вид приезжает ВСЕГДА (сервер отдаёт присутствующее поле), но `annotationKindFromWire`
+      // всё равно падает в пин на неизвестном значении: карточка, записанная до 0309, обязана
+      // прочитаться тем, чем была.
+      kind: annotationKindFromWire(c.kind),
+      points: (c.points ?? []).map((pt) => ({
+        x: decimalToInput(pt.x) || '0',
+        y: decimalToInput(pt.y) || '0',
+      })),
+      color: annotationColorFromWire(c.color),
     })),
     pieces: (insert?.pieces ?? []).map((p) => ({
       // Same rule as the BOM above — cut pieces are reconciled by line_key too, and migration 0168
@@ -1702,6 +1735,7 @@ export function mapTechCardToForm(techCard: common_TechCard): TechCardFormData {
           labelX: decimalToInput(a.labelX) || '0',
           labelY: decimalToInput(a.labelY) || '0',
           color: annotationColorFromWire(a.color),
+          pieceLineKey: a.pieceLineKey ?? '',
         })),
       })),
       operationNumber: o.operationNumber || 0,
@@ -2132,6 +2166,15 @@ export function mapFormToTechCardInsert(
       mediaId: c.mediaId || 0,
       posX: inputToDecimal(c.posX),
       posY: inputToDecimal(c.posY),
+      // ВИД ШЛЁТСЯ ВСЕГДА, круглым рейсом прочитанного. Присутствие поля и есть заявление «этот
+      // бандл про геометрию знает»: сервер, увидев молчание, несёт хранимую геометрию дальше — и
+      // именно поэтому промолчать здесь означало бы навсегда заморозить чужие мерки.
+      kind: annotationKindToWire(c.kind),
+      points: (c.points ?? []).map((pt) => ({
+        x: inputToDecimal(pt.x),
+        y: inputToDecimal(pt.y),
+      })),
+      color: annotationColorToWire(c.color),
     })),
     // NF-05 cut-pieces + fabric map. bomItemIndex / fusingBomItemIndex use explicit presence
     // (>= 0 real, undefined = unset), mirroring usages.bomItemIndex.
@@ -2410,6 +2453,7 @@ export function mapFormToTechCardInsert(
               labelX: inputToDecimal(a.labelX),
               labelY: inputToDecimal(a.labelY),
               color: annotationColorToWire(a.color),
+              pieceLineKey: (a.pieceLineKey ?? '').trim(),
             })),
           })),
         // operation number is positional (server is authoritative); send (i+1)*10 so a

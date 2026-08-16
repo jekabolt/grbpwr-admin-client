@@ -1,5 +1,6 @@
 import { common_MediaFull } from 'api/proto-http/admin';
 import { MediaSelector } from 'components/managers/media/components/media-selector';
+import { usePasteImage } from 'components/managers/media/utils/usePasteImage';
 import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
@@ -170,6 +171,17 @@ export type FocusedAnnotatorProps = {
   renderFocusedFooter?: (view: FocusedView, positionInViews: number) => ReactNode;
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
+  /**
+   * ВИДЫ УКАЗАНИЙ. Задан — панель «add callout» превращается в панель видов: пин (как было),
+   * мерка, скобка, дуга, подпись, мультилидер. Не задан — поверхность живёт ровно как жила, и
+   * примерка, которой геометрия не нужна, ничего не замечает.
+   *
+   * Список приходит СНАРУЖИ, вместе с числом якорей у каждого вида: правило «у мерки две точки»
+   * зеркалит серверное и живёт в доменном слое, а не здесь.
+   */
+  calloutKinds?: { value: string; label: string; hint: string; points: [number, number] }[];
+  /** Фигура собрана: якоря в долях кадра. Пин по-прежнему уходит через `onAddCallout`. */
+  onAddShape?: (mediaId: number, kind: string, points: { x: number; y: number }[]) => void;
   /** Grid only: when set, the grid is a fixed-HEIGHT filmstrip — every image is this many px tall
    *  and keeps its own aspect (natural width, so a landscape is wider), and only the horizontal axis
    *  scrolls. The image is never cropped, so callout pins still map 1:1. Unset = the default
@@ -200,8 +212,12 @@ export function FocusedAnnotator({
   renderFocusedFooter,
   carouselLabel,
   gridRowHeight,
+  calloutKinds,
+  onAddShape,
 }: FocusedAnnotatorProps) {
   const [addMode, setAddMode] = useState(false);
+  /** Вид, который сейчас ставят. null = обычный нумерованный пин (или режим выключен). */
+  const [shapeKind, setShapeKind] = useState<string | null>(null);
   const [showAllNotes, setShowAllNotes] = useState(false);
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -233,6 +249,14 @@ export function FocusedAnnotator({
     if (added.length && added[0] != null) setFocusedId(added[0]);
   }
 
+  // ⌘V ПРЯМО В ГАЛЕРЕЮ. Референс почти всегда рождается в буфере — скрин с чужого показа, кроп из
+  // лукбука, — и путь «сохранить файлом → открыть библиотеку → загрузить» стоит трёх шагов ради
+  // картинки, которая уже в руках. Включено, только пока указатель ВНУТРИ этой галереи: на
+  // странице их две (мудборд и эскиз) плюс полоса снимков у каждого шага, и без этого одна
+  // вставка ушла бы во все сразу.
+  const [hot, setHot] = useState(false);
+  const { pasting } = usePasteImage(hot, handlePick);
+
   // Removing the focused image falls focus back to the new first image.
   function handleRemoveMedia(view: FocusedView) {
     if (view.mediaId === focusedId) setFocusedId(null);
@@ -258,6 +282,34 @@ export function FocusedAnnotator({
     if (added.length) handlePick(added);
   }
 
+  // ПОСТАНОВКА ФИГУРЫ. Вид выбран на всю поверхность, а якоря копятся ПО КАРТИНКЕ: мерка,
+  // растянутая между передом и спинкой, — не мерка, поэтому клик по другому кадру начинает набор
+  // заново на нём, а не достраивает начатое на соседнем.
+  const [pending, setPending] = useState<{ mediaId: number; points: { x: number; y: number }[] }>({
+    mediaId: 0,
+    points: [],
+  });
+  const kindDef = calloutKinds?.find((k) => k.value === shapeKind);
+  const resetPending = () => setPending({ mediaId: 0, points: [] });
+
+  function handleCanvasClick(mediaId: number, x: number, y: number) {
+    // Пин — прежний путь: у него нет якорей, его место И ЕСТЬ маркер.
+    if (!kindDef || kindDef.value === 'pin' || !onAddShape) {
+      onAddCallout(mediaId, x, y);
+      return;
+    }
+    const base = pending.mediaId === mediaId ? pending.points : [];
+    const next = [...base, { x, y }];
+    const [, max] = kindDef.points;
+    if (next.length >= max) {
+      onAddShape(mediaId, kindDef.value, next);
+      resetPending();
+      setShapeKind(null);
+      return;
+    }
+    setPending({ mediaId, points: next });
+  }
+
   const modeToggles = (
     <ChipRow>
       {notesMode === 'auto' && (
@@ -269,15 +321,54 @@ export function FocusedAnnotator({
           show all notes
         </Chip>
       )}
-      <Chip selected={addMode} pressed={addMode} onClick={() => setAddMode((v) => !v)}>
-        add callout
-      </Chip>
+      {calloutKinds?.length ? (
+        // Панель ВИДОВ вместо одной кнопки «add callout»: выбранный вид сам включает режим
+        // постановки, поэтому отдельного тумблера больше нет — он был бы вторым выключателем
+        // одного и того же.
+        <>
+          {calloutKinds.map((k) => (
+            <Chip
+              key={k.value}
+              selected={shapeKind === k.value}
+              pressed={shapeKind === k.value}
+              title={k.hint}
+              onClick={() => {
+                const on = shapeKind === k.value;
+                setShapeKind(on ? null : k.value);
+                setAddMode(!on);
+                resetPending();
+              }}
+            >
+              {k.label}
+            </Chip>
+          ))}
+          {addMode && (
+            <Chip
+              onClick={() => {
+                setShapeKind(null);
+                setAddMode(false);
+                resetPending();
+              }}
+            >
+              отменить
+            </Chip>
+          )}
+        </>
+      ) : (
+        <Chip selected={addMode} pressed={addMode} onClick={() => setAddMode((v) => !v)}>
+          add callout
+        </Chip>
+      )}
     </ChipRow>
   );
 
-  const hint = addMode
-    ? 'click an image to drop a callout · drag a pin to move it'
-    : 'hover a pin to read · click a pin to edit · use zoom to draw';
+  const hint = pasting
+    ? 'загружаю картинку из буфера…'
+    : !addMode
+    ? 'hover a pin to read · click a pin to edit · use zoom to draw · ⌘V вставит картинку из буфера'
+    : kindDef && kindDef.value !== 'pin'
+      ? `${kindDef.label}: кликайте якоря на ОДНОЙ картинке — поставлено ${pending.points.length} из ${kindDef.points[1]}`
+      : 'click an image to drop a callout · drag a pin to move it';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -302,7 +393,11 @@ export function FocusedAnnotator({
   );
 
   return (
-    <div className='space-y-2.5'>
+    <div
+      className='space-y-2.5'
+      onPointerEnter={() => setHot(true)}
+      onPointerLeave={() => setHot(false)}
+    >
       {hasMedia &&
         (isGrid ? (
           // The toggles are modes of the whole sheet now, not of one focused image — so they sit
@@ -392,7 +487,9 @@ export function FocusedAnnotator({
                     pinSize={pinSize}
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
                     noteClassName='w-60'
-                    onAdd={(x, y) => onAddCallout(v.mediaId, x, y)}
+                    onAdd={(x, y) => handleCanvasClick(v.mediaId, x, y)}
+                    pendingKind={shapeKind}
+                    pendingPoints={pending.mediaId === v.mediaId ? pending.points : undefined}
                     onMove={onMoveCallout}
                     onRemove={onRemoveCallout}
                     noteTitle={noteTitle}
@@ -480,7 +577,9 @@ export function FocusedAnnotator({
                 notesMode={notesMode}
                 showAllNotes={showAllNotes}
                 pinSize={pinSize}
-                onAdd={(x, y) => onAddCallout(focused.mediaId, x, y)}
+                onAdd={(x, y) => handleCanvasClick(focused.mediaId, x, y)}
+                pendingKind={shapeKind}
+                pendingPoints={pending.mediaId === focused.mediaId ? pending.points : undefined}
                 onMove={onMoveCallout}
                 onRemove={onRemoveCallout}
                 noteTitle={noteTitle}

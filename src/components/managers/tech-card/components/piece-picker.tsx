@@ -265,12 +265,16 @@ export function PieceSinglePicker({
   onChange,
   placeholder = '— деталь —',
   disabled,
+  shapeOf,
 }: {
   pieces: PieceRef[];
   value: string;
   onChange: (lineKey: string, piece?: PieceRef) => void;
   placeholder?: string;
   disabled?: boolean;
+  /** Контур из чертежа — включает выбор ПЛИТКАМИ. См. шапку PieceList: без контуров сетка пустых
+   *  квадратов хуже списка, поэтому режим выбирается по наличию хотя бы одного силуэта. */
+  shapeOf?: (lineKey: string) => FoundPiece | null;
 }) {
   const [open, setOpen] = useState(false);
   const current = pieces.find((p) => p.lineKey === value);
@@ -312,7 +316,13 @@ export function PieceSinglePicker({
         </>
       }
     >
-      <PieceList pieces={pieces} selected={value ? [value] : []} onToggle={pick} multiple={false} />
+      <PieceList
+        pieces={pieces}
+        selected={value ? [value] : []}
+        onToggle={pick}
+        multiple={false}
+        shapeOf={shapeOf}
+      />
     </GenericPopover>
   );
 }

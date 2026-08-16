@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { MediaManager } from '..';
+import { usePasteImage } from '../utils/usePasteImage';
 import { useUploadMedia } from '../utils/useUploadMedia';
 import { MediaCropper } from './cropper';
 
@@ -151,6 +152,24 @@ export function MediaSelector({
     [oneAtATime, allowMultiple, saveSelectedMedia, closeAndReset, commitMedia, enterCrop],
   );
 
+  // ⌘V ПРЯМО В ДИАЛОГЕ. Скриншот уже в буфере: заставлять сохранять его файлом, чтобы потом
+  // искать в библиотеке, — три шага ради картинки, которая в руках. Вставленное грузится и
+  // отдаётся владельцу тем же путём, что выбранное мышью, поэтому кроп по соотношению сторон
+  // работает и здесь: ratio-слот получит `enterCrop`, свободный — картинку как есть.
+  //
+  // Включено, только пока диалог открыт и не в режиме кропа: там ⌘V означал бы вставку поверх
+  // кадрируемого снимка, а этого никто не просил.
+  const { pasting } = usePasteImage(open && !cropMedia, (media) => {
+    const m = media[0];
+    if (!m) return;
+    const url = m.media?.fullSize?.mediaUrl || m.media?.thumbnail?.mediaUrl || '';
+    if (oneAtATime && !isVideo(url) && !matchesRatio(m)) {
+      enterCrop(m);
+      return;
+    }
+    commitMedia(media);
+  });
+
   const handleCropSave = async (croppedDataUrl: string) => {
     setIsUploading(true);
     try {
@@ -228,11 +247,13 @@ export function MediaSelector({
           ) : (
             <>
               <DialogPrimitive.Description className='mt-1 flex-shrink-0 text-small text-textInactiveColor'>
-                {ratioConstrained
-                  ? `click an item · target ${aspectRatio?.[0]} — wrong-ratio images can be cropped`
-                  : allowMultiple
-                    ? 'click items to select, then save'
-                    : 'click an item to select it'}
+                {pasting
+                  ? 'uploading pasted image…'
+                  : ratioConstrained
+                    ? `click an item · target ${aspectRatio?.[0]} — wrong-ratio images can be cropped · ⌘V pastes from the clipboard`
+                    : allowMultiple
+                      ? 'click items to select, then save · ⌘V pastes from the clipboard'
+                      : 'click an item to select it · ⌘V pastes from the clipboard'}
               </DialogPrimitive.Description>
 
               <div className='mt-4 flex-1 min-h-0 overflow-y-scroll'>
