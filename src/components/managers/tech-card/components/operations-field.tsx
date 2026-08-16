@@ -80,7 +80,6 @@ import { cardHasDxf } from './nesting/card-has-dxf';
 import { type FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import {
-  assemblyReleaseCheck,
   assemblySweep,
   classifyAssemblyInputs,
   type AssemblyResult,
@@ -301,6 +300,10 @@ export const emptyOperation = {
   outputUnitKey: '',
   outputUnitName: '',
   bomLineKeys: [] as string[],
+  // Снимки шага — по тому же доводу, что и блоки оборудования выше: ключ, отсутствующий здесь,
+  // RHF не регистрирует вовсе. Пустой список у НОВОГО шага ничего не теряет, зато делает форму
+  // однородной: всякий читатель `operations.N.media` получает массив, а не `undefined`.
+  media: [] as OperationFormValue['media'],
 };
 
 type OperationFormValue = NonNullable<TechCardFormData['operations']>[number];
@@ -2750,7 +2753,14 @@ function OperationEditor({
   );
 }
 
-type ReplaceImpact = { operations: number; sam: number; pieceLinks: number; units: number };
+type ReplaceImpact = {
+  operations: number;
+  sam: number;
+  pieceLinks: number;
+  units: number;
+  photos: number;
+  equipment: number;
+};
 
 // #66: draft assembly operations from a plain-language description — «мы описываем все операции
 // словами (у нас есть знания о деталях/BOM), через OpenRouter генерируем структурированные
@@ -2972,6 +2982,24 @@ function GenerateOperationsPanel({
               </Text>
             </CalloutBox>
           )}
+          {(impact?.photos ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и <b>{impact?.photos}</b> снимков шагов вместе со всеми указаниями на них: мерками,
+                подписями, участками. Сервер откажет щитом, и единственный выход из отказа —
+                согласиться стереть снимки насовсем.
+              </Text>
+            </CalloutBox>
+          )}
+          {(impact?.equipment ?? 0) > 0 && (
+            <CalloutBox tone='error'>
+              <Text size='micro'>
+                и машинки с режимами ВТО у <b>{impact?.equipment}</b> шагов. Здесь щита нет: запись
+                пройдёт молча, и узнать о пропаже будет неоткуда — в цеху просто станут шить другой
+                иглой на другой машине.
+              </Text>
+            </CalloutBox>
+          )}
           <Text size='micro' variant='label'>
             вместо этого можно «добавить к списку» — черновик встанет после существующих операций.
           </Text>
@@ -3151,15 +3179,27 @@ export function OperationsField({
   // What «заменить весь список» would destroy, read at press time off form state — watching the
   // whole operations array here would re-render every row on every keystroke.
   const readReplaceImpact = (): ReplaceImpact => {
-    const ops = (getValues('operations') ?? []) as {
-      smv?: string;
-      inputKeys?: string[];
-      outputUnitKey?: string;
-    }[];
+    const ops = (getValues('operations') ?? []) as OperationFormValue[];
     return {
       operations: ops.length,
       sam: ops.filter((o) => (o.smv ?? '').trim()).length,
       pieceLinks: ops.filter((o) => (o.inputKeys ?? []).length > 0).length,
+      // СНИМКИ ШАГА С УКАЗАНИЯМИ. Черновик генератора их не несёт (`mapGeneratedOperationToForm`
+      // строит шаг с нуля), поэтому «заменить весь список» уносит каждую фотографию и каждую
+      // выноску на ней. Сервер потом откажет щитом медиа, но к этому моменту работа в форме уже
+      // потеряна, а единственный выход из отказа — согласиться стереть снимки НАВСЕГДА. Цена
+      // обязана читаться ДО нажатия.
+      photos: ops.reduce((n, o) => n + (o.media ?? []).length, 0),
+      // Машинные факты и режимы ВТО. У них щита с бекстопом нет вовсе, так что их пропажу вообще
+      // никто не окликнет: ни отказа, ни сообщения — просто в следующий раз шаг шьётся на другой
+      // машине другой иглой.
+      equipment: ops.filter(
+        (o) =>
+          (o.machineType && o.machineType !== NONE_MACHINE) ||
+          (o.machineProfileKey ?? '').trim() ||
+          (o.pressEquipment && o.pressEquipment !== NONE_PRESS_EQUIPMENT) ||
+          (o.pressProfileKey ?? '').trim(),
+      ).length,
       // РАЗМЕТКА УЗЛОВ — самый дорогой ручной ввод на карточке, и черновик сносит её целиком
       // вместе со списком. Сервер откажет бекстопом («запись не несёт узлов против карточки,
       // которая их несёт»), но узнать об этом на сохранении, уже потеряв работу в форме, —

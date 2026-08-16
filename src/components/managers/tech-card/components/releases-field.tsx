@@ -3,6 +3,7 @@ import { adminService } from 'api/api';
 import {
   common_TechCardBomItem,
   common_TechCardConstruction,
+  common_TechCardEquipmentDefaults,
   common_TechCardMachineProfile,
   common_TechCardOperation,
   common_TechCardOperationMedia,
@@ -259,11 +260,14 @@ const mediaAnnotations = (m: common_TechCardOperationMedia): AnnotationForm[] =>
 function SnapshotOperations({
   ops,
   pieces,
+  park,
   mediaUrlById,
 }: {
   ops: common_TechCardOperation[];
   /** Детали ИЗ ЭТОГО ЖЕ СНАПШОТА: имя должно быть тем, что было подписано, а не сегодняшним. */
   pieces: common_TechCardPiece[];
+  /** Парк оборудования ЭТОГО ЖЕ снапшота — шаг чаще всего не несёт машинку, а наследует её. */
+  park?: common_TechCardEquipmentDefaults;
   /** Адреса операционных снимков — из resolvedOperationMedia ЭТОГО ЖЕ СНАПШОТА, не живой карточки. */
   mediaUrlById: Map<number, string>;
 }) {
@@ -312,12 +316,27 @@ function SnapshotOperations({
           o.operationType && o.operationType !== 'TECH_CARD_OPERATION_TYPE_UNKNOWN'
             ? OPERATION_TYPE_LABELS[o.operationType]
             : '';
+        // МАШИНКА РАЗРЕШАЕТСЯ ЧЕРЕЗ ПАРК, как это делает печать. С 0306 шаг хранит только то, что
+        // ПЕРЕОПРЕДЕЛЯЕТ, а остальное берёт у профиля карточки; читая сырой `threadCount` (у
+        // наследующего шага он нулевой), архив печатал перечисление «overlock 504 / 514 / 516»
+        // там, где бумага того же релиза говорит «overlock 514». Один подписанный документ не
+        // может давать два ответа.
+        const machineProfile = (park?.machines ?? []).find(
+          (m) => !!o.machineProfileKey && m.profileKey === o.machineProfileKey,
+        );
+        const pressProfile = (park?.presses ?? []).find(
+          (pp) => !!o.pressProfileKey && pp.profileKey === o.pressProfileKey,
+        );
         const spec = isMachineStepType(o.operationType)
-          ? // Снапшот несёт и машинку, и число ниток — значит и подписанный релиз может назвать
-            // стежок конкретно. Вывод здесь — презентация записанного, а не правка записанного.
-            machineTypeLabelWithStitch(o.machineType, o.threadCount)
+          ? machineProfile
+            ? machineProfileName(machineProfile)
+            : // Профиля нет — шаг назвал машинку сам. Число ниток шага уже говорит, какой из трёх
+              // стежков имеется в виду, и сказать это вслух честнее перечисления.
+              machineTypeLabelWithStitch(o.machineType, o.threadCount)
           : isPressStepType(o.operationType)
-            ? [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
+            ? pressProfile
+              ? pressProfileName(pressProfile)
+              : [pressEquipmentLabel(o.pressEquipment), typeLabel].filter(Boolean).join(' · ')
             : typeLabel;
         // Фотографии шага — те же правила, что у печати: адрес есть только для картинки в
         // словаре снапшота, у остальных ничего не показываем (не заглушка).
@@ -498,6 +517,7 @@ function ReleaseSnapshot({
           <SnapshotOperations
             ops={snap.operations ?? []}
             pieces={snap.pieces ?? []}
+            park={snap.construction?.equipmentDefaults}
             mediaUrlById={mediaUrlById}
           />
 

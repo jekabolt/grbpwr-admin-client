@@ -480,6 +480,10 @@ export function AnnotationCanvas({
         <img
           src={src}
           alt={alt ?? ''}
+          // Вкладки карточки смонтированы ВСЕ разом (переключение — это `hidden`), поэтому без
+          // этого браузер тянет снимки шагов и картинки эскиза у того, кто зашёл поправить
+          // опечатку в шапке и до этих вкладок не дошёл. `lazy` подавляет загрузку до показа.
+          loading='lazy'
           className={cn(
             'block',
             heightPx != null ? 'h-auto w-auto max-w-none' : 'h-auto w-full',
@@ -862,9 +866,14 @@ function AnnotationEditor({
 }) {
   const ref = useRef<HTMLInputElement>(null);
   // Третий такт жеста: точки поставлены — курсор уже в поле подписи, без ещё одного клика.
+  //
+  // ЗАВИСИМОСТЬ — НОМЕР ВЫБРАННОЙ, А НЕ САМ ОБЪЕКТ. Выноска приезжает из `useWatch`, который отдаёт
+  // глубокую копию: её идентичность меняется на КАЖДУЮ запись под `operations.N.media`, в том числе
+  // на ввод подписи к кадру. Фокус тогда прыгал в поле выноски после первого же символа, и
+  // подпись к снимку набрать было нельзя.
   useEffect(() => {
     ref.current?.focus();
-  }, [a]);
+  }, [number, a.kind]);
 
   return (
     <div className='flex flex-col gap-1 border border-borderColor p-1.5'>

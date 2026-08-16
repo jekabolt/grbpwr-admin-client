@@ -123,6 +123,9 @@ export function AssemblySchematic({
   const toggle = (key: string) =>
     setPicked((cur) => (cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key]));
   const onTable = new Set(res.frontier);
+  // Живые УЗЛЫ фронтира (детали на столе — не узлы). Ровно та величина, которой рельс решает,
+  // сошёлся ли граф: правило выпуска требует РОВНО ОДИН терминал.
+  const liveUnits = res.frontier.filter((k) => res.units.has(k));
   const { LINE_H, HEAD_H, FOOT_H } = SCHEMATIC_METRICS;
   const looseSteps = blocks.find((b) => b.key === '')?.steps ?? [];
 
@@ -671,7 +674,11 @@ export function AssemblySchematic({
           {layout.boxes.map((box) => {
             const b = blocks.find((x) => x.key === box.key);
             if (!b) return null;
-            const terminal = res.frontier.includes(box.key) && res.units.has(box.key);
+            // «ГОТОВОЕ ИЗДЕЛИЕ» — ТОЛЬКО ЕДИНСТВЕННЫЙ ЖИВОЙ УЗЕЛ, тем же правилом, что у рельса.
+            // Раньше здесь стояло «узел жив», и при двух несведённых узлах схема помечала ✓ оба,
+            // пока рельс на том же графе показывал ✕ разрыв. Два ответа про одну карточку, причём
+            // именно про то, выпустится она или нет: правило 4 требует РОВНО ОДИН терминал.
+            const terminal = liveUnits.length === 1 && liveUnits[0] === box.key;
             return (
               <div key={box.key}>
                 <div

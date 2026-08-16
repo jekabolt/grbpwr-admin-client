@@ -1082,6 +1082,14 @@ export function TechCardForm({
     try {
       const res = await adminService.GetTechCard({ id: numId, vatCountryCode: undefined });
       lockOverride.current = res.techCard?.lockVersion ?? 0;
+      // И САМУ КАРТОЧКУ, А НЕ ТОЛЬКО НОМЕР ВЕРСИИ. Прочитанное здесь — это то, ЧТО лежит на
+      // сервере сейчас, и от него зависит не только замок: маппер записи спреадит `original`
+      // (поля, которых форма не ведёт), а щиты совместимости решают по нему, объявлять ли
+      // намерение снять узлы и снимки. Взяв одну версию и оставив в кэше вчерашнюю карточку, мы
+      // получали ровно тот отказ, от которого эта кнопка спасает: соседняя вкладка добавила узлы,
+      // наша карточка о них не знает, `assemblyCleared` зажат в false «потому что узлов нет» —
+      // и сервер отвергает запись, а кнопка «не потеряй работу» упирается в «перезагрузи и потеряй».
+      queryClient.setQueryData(techCardKeys.detail(numId), res);
     } catch (error) {
       showMessage(
         techCardErrorMessage(error, 'could not read the server’s version — try saving again'),

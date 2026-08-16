@@ -540,7 +540,7 @@ function Stage({
   };
 
   // Pin drag (reposition). `moved` guards against a plain click dirtying the form.
-  const dragRef = useRef<{ key: string; moved: boolean } | null>(null);
+  const dragRef = useRef<{ key: string; moved: boolean; startX: number; startY: number } | null>(null);
   const dragPosRef = useRef<{ x: number; y: number } | null>(null);
   const [dragState, setDragState] = useState<{ key: string; x: number; y: number } | null>(null);
 
@@ -625,8 +625,14 @@ function Stage({
       const d = dragRef.current;
       if (!d) return;
       const p = coords(e.clientX, e.clientY);
+      // ПОРОГ, А НЕ ПЕРВОЕ ЖЕ ДВИЖЕНИЕ. Без него клик по пину чуть мимо центра засчитывался
+      // перетаскиванием, и пин прыгал под курсор — то есть попытка ПРОЧЕСТЬ записку двигала
+      // указание. Тот же порог, что у панорамы этого файла, и тот же, что у плашки холста выносок.
+      if (!d.moved) {
+        if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) <= CLICK_MOVE_THRESHOLD) return;
+        d.moved = true;
+      }
       dragPosRef.current = p;
-      if (!d.moved) d.moved = true;
       setDragState({ key: d.key, ...p });
     }
     function up() {
@@ -648,7 +654,7 @@ function Stage({
   function startPinDrag(key: string, e: ReactPointerEvent) {
     if (!editable) return;
     e.stopPropagation();
-    dragRef.current = { key, moved: false };
+    dragRef.current = { key, moved: false, startX: e.clientX, startY: e.clientY };
     const p = coords(e.clientX, e.clientY);
     dragPosRef.current = p;
     setDragState({ key, ...p });
@@ -792,6 +798,9 @@ function Stage({
             alt={alt}
             className='absolute inset-0 h-full w-full object-cover'
             draggable={false}
+            // Та же причина, что у холста выносок: вкладки смонтированы все сразу, и без `lazy`
+            // открытие карточки ради шапки тянет весь мудборд и все эскизы в полный размер.
+            loading='lazy'
           />
         )}
 

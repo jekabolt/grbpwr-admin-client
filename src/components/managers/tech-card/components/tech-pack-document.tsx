@@ -564,6 +564,18 @@ export function TechPackDocument({
   }, [techCard.resolvedOperationMedia]);
   // Имя детали кроя по её ключу — для указаний на снимках шага. Указание может называть деталь
   // (`piece_line_key`), и на бумаге читается именно ИМЯ: ключ в цеху не значит ничего.
+  // Выноска печатается на листе ЭСКИЗА, если приколота к техническому изображению или не
+  // приколота вовсе. Мудбордовые (приколотые к картинке мудборда) на лист швеи не идут: мудборд —
+  // внутренний документ, и его нумерация своя.
+  const sketchMediaIds = useMemo(
+    () => new Set((tc?.technicalMedia ?? []).map((m) => wireInt(m.mediaId))),
+    [tc?.technicalMedia],
+  );
+  const printedOnSketch = (c: common_TechCardCallout) => {
+    const mid = wireInt(c.mediaId);
+    return mid === 0 || sketchMediaIds.has(mid);
+  };
+
   const pieceNameByKey = useMemo(() => {
     const byKey = new Map<string, string>();
     for (const p of tc?.pieces ?? []) {
@@ -1639,7 +1651,12 @@ export function TechPackDocument({
                 </tr>
               </thead>
               <tbody>
-                {(tc.callouts ?? []).map((c, i) => {
+                {/* ТОЛЬКО ВЫНОСКИ ЭТОГО ЛИСТА. Номера пер-листовые — эскиз и мудборд нумеруются
+                    независимо, — а фигуры выше уже отфильтрованы по `mediaId`. Таблица же брала
+                    ВСЕ выноски карточки, и записки, приколотые к мудборду, приезжали на лист швеи
+                    с номерами, которых на этом листе нет, вперемешку и с дублями. Непривязанная
+                    выноска остаётся здесь: она про изделие, а не про картинку. */}
+                {(tc.callouts ?? []).filter(printedOnSketch).map((c, i) => {
                   // СВЯЗЬ ВЫНОСКИ С ДЕТАЛЬЮ — половина, которой на бумаге не было. Номер на
                   // эскизе и строка в «cut pieces» жили порознь, и соединить их можно было только
                   // в голове. Номер выноски берём тем же фолбэком (`c.number || i + 1`), что и
