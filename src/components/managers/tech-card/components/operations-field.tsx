@@ -1320,12 +1320,23 @@ function RailStep({
           >
             ⠿
           </button>
-          <button
-            type='button'
+          {/* НЕ `<button>`: открыть шаг — ЧТЕНИЕ, а нативная кнопка внутри `<fieldset disabled>`
+              выпущенной карточки клика не получает. Получалось, что на подписанной карточке
+              открывался только первый шаг (он выбран по умолчанию), а остальные двенадцать
+              прочитать было нельзя вовсе — при том что строка подсвечивалась на наведении и
+              выглядела нажимаемой. Перетаскивание строки рядом остаётся кнопкой: это правка. */}
+          <span
+            role='button'
+            tabIndex={0}
             onClick={onSelect}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter' && e.key !== ' ') return;
+              e.preventDefault();
+              onSelect();
+            }}
             aria-current={selected}
             title={label}
-            className='flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
+            className='flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
           >
             <Text size='control' component='span' className='w-6 shrink-0 font-bold tabular-nums'>
               {opNumber}
@@ -1384,7 +1395,7 @@ function RailStep({
             >
               {smvMin > 0 ? smvMin.toFixed(1) : '—'}
             </Text>
-          </button>
+          </span>
         </div>
       )}
     </SortableEntity>

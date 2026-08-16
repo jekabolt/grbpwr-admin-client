@@ -338,6 +338,11 @@ function ConstructionSketch({
           {views.map((v) => (
             <Chip
               key={v.mediaId}
+              // `nonForm`: переключение проекции (перёд / спинка / деталь) — ЧТЕНИЕ, оно ничего не
+              // пишет. Обычный Chip рендерится нативной кнопкой, а та внутри `<fieldset disabled>`
+              // выпущенной карточки клика не получает: на подписанной карточке было видно только
+              // первое изображение, а спинку посмотреть было нельзя.
+              nonForm
               selected={v.mediaId === activeViewId}
               pressed={v.mediaId === activeViewId}
               onClick={() => setViewId(v.mediaId)}

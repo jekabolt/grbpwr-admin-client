@@ -68,3 +68,4 @@ Thumbs.db
 # nested git worktrees (local only)
 .claude/worktrees/
 scripts/.annotation-shape-*
+scripts/.draft-shape-*

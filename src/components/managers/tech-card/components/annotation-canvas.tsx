@@ -416,8 +416,16 @@ export function AnnotationCanvas({
 
   const active = placingKind ? null : hovered;
   const dimmed = (i: number) => active !== null && active !== i;
-  const nameOf = (a: AnnotationForm) =>
-    a.pieceLineKey ? pieceLabel?.(a.pieceLineKey) : undefined;
+  // ИМЯ ДЕТАЛИ ЛИБО ЕСТЬ, ЛИБО СКАЗАНО, ЧТО ЕЁ НЕТ. Ссылка на деталь СОВЕТУЮЩАЯ: сервер её формы
+  // не проверяет, деталь могли удалить на вкладке выкроек, и ключ остаётся висеть. Возвращать
+  // здесь `undefined` значило, что связь тихо исчезает с экрана — и висит в данных вечно, потому
+  // что перевыбрать её никто не догадается. Резолвер отсутствует вовсе (печать без карточки) —
+  // это другое: тогда сказать нечего, и молчание честно.
+  const nameOf = (a: AnnotationForm): string | undefined => {
+    if (!a.pieceLineKey) return undefined;
+    if (!pieceLabel) return undefined;
+    return pieceLabel(a.pieceLineKey) ?? 'деталь удалена';
+  };
   const titleOf = (a: AnnotationForm, fallback: string) =>
     [a.text?.trim(), nameOf(a)].filter(Boolean).join(' · ') || fallback;
 

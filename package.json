@@ -27,6 +27,7 @@
     "stitch:type": "node scripts/stitch-type-probe.mjs",
     "annotation:arc": "node scripts/annotation-arc-probe.mjs",
     "annotation:shapes": "node scripts/annotation-shape-probe.mjs",
+    "draft:shape": "node scripts/draft-shape-probe.mjs",
     "marker:area-field": "node scripts/area-field-probe.mjs",
     "lay:header": "node scripts/lay-header-probe.mjs",
     "fix": "yarn lint && yarn format",

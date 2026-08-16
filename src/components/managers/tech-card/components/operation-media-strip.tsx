@@ -87,7 +87,12 @@ export function OperationMediaStrip({
   // включается вставка у той, внутри которой стоит указатель.
   const [hot, setHot] = useState(false);
 
-  const urlOf = (mediaId: number) => urlById.get(mediaId) ?? sessionUrls.get(mediaId) ?? '';
+  // `wireInt` ВНУТРИ, а не на совести вызывающего. Оба словаря ключуются нормализованным id, а
+  // тип поля обещает `number` — сырое значение с провода (int64 приезжает СТРОКОЙ) тайпчекается и
+  // промахивается на каждом чтении. Единственный сегодняшний вызов нормализует сам; следующий
+  // может и забыть.
+  const urlOf = (mediaId: number | string) =>
+    urlById.get(wireInt(mediaId)) ?? sessionUrls.get(wireInt(mediaId)) ?? '';
 
   const add = (picked: common_MediaFull[]) => {
     const existing = new Set(

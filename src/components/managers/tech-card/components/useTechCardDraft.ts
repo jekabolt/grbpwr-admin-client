@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { UseFormReturn } from 'react-hook-form';
-import { TechCardFormData } from './schema';
+import { techCardSchema, TechCardFormData } from './schema';
 import { PersistedStaging } from './useTechCardStaging';
 
 // Autosave draft (Q9b). Persists the tech-card form to localStorage as the user edits and offers to
@@ -14,7 +14,13 @@ import { PersistedStaging } from './useTechCardStaging';
 // `staging` carries the sub-panel edits that are staged but not yet committed (19.6). Optional, so
 // a draft written before phase 19 still parses — and so a panel that cannot rebuild itself from a
 // snapshot simply contributes nothing rather than blocking the restore.
-type StoredDraft = { savedAt: number; data: TechCardFormData; staging?: PersistedStaging };
+type StoredDraft = {
+  savedAt: number;
+  data: TechCardFormData;
+  staging?: PersistedStaging;
+  /** Отпечаток набора полей формы на момент записи. Отсутствует у черновиков до этой правки. */
+  shape?: string;
+};
 
 // ВЕРСИЯ В КЛЮЧЕ, А НЕ МОЛЧАЛИВОЕ СТИРАНИЕ. Черновик, записанный ДО операционных фотографий, не
 // несёт поля `media` на операциях — восстановленный, он уехал бы командой «сотри все снимки со
@@ -23,6 +29,80 @@ type StoredDraft = { savedAt: number; data: TechCardFormData; staging?: Persiste
 // старые черновики. Цена — потеря несохранённых правок одним релизом, и она честнее.
 const PREFIX = 'plm.techcard.draft.v2.';
 const LEGACY_PREFIX = 'plm.techcard.draft.';
+
+/**
+ * ОТПЕЧАТОК НАБОРА ПОЛЕЙ — ЧТОБЫ ПОДНЯТЬ ВЕРСИЮ БЫЛО НЕЛЬЗЯ ЗАБЫТЬ.
+ *
+ * Версия в ключе выше защищает ОПЕРАЦИИ: у них нет стабильного ключа, поэтому правило «нет ключа —
+ * возьми с карточки» (оно есть у деталей и у выносок) для них невыразимо, и единственная защита от
+ * «черновик записан до поля X» — не предлагать такой черновик вовсе. Механизм рабочий, но РУЧНОЙ:
+ * он требует помнить о нём при каждом новом поле. Его уже один раз забыли — `pieceLineKey` на
+ * выноске добавился после последнего подъёма версии.
+ *
+ * Отпечаток снимает это с человека. Он считается из САМОЙ СХЕМЫ, а не из значения: у пустой
+ * карточки массивы пусты, и поля строки операции в значении просто отсутствуют — то есть ровно то,
+ * что теряется, в отпечаток бы и не попало. Схема же перечисляет их всегда.
+ *
+ * Хэш ни с чем внешним не сравнивается и не обязан быть стойким — важно единственное: он меняется
+ * вместе с составом формы. Если интроспекция когда-нибудь перестанет работать (zod сменит форму
+ * `_def`), отпечаток выродится в константу, и поведение вернётся к сегодняшнему — черновики
+ * принимаются, как принимались. Молчаливой поломки здесь быть не может.
+ */
+function schemaFieldPaths(): string[] {
+  const out: string[] = [];
+  const unwrap = (node: unknown): any => {
+    let cur: any = node;
+    for (let i = 0; i < 6; i++) {
+      const d = cur?._def ?? cur?.def;
+      if (!d) break;
+      if (d.innerType) {
+        cur = d.innerType;
+        continue;
+      }
+      if (d.element) {
+        cur = d.element;
+        continue;
+      }
+      break;
+    }
+    return cur;
+  };
+  const walk = (node: unknown, prefix: string, depth: number) => {
+    const inner = unwrap(node);
+    const shape = inner?.shape;
+    // ГЛУБИНА 4, А НЕ 2. Забытый случай был именно на третьем уровне: `pieceLineKey` на выноске
+    // снимка шага — это `operations.media.annotations.pieceLineKey`. Отпечаток, обрывающийся выше,
+    // не заметил бы ровно того поля, ради которого всё это и написано.
+    if (!shape || depth > 4) return;
+    for (const key of Object.keys(shape)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      out.push(path);
+      walk(shape[key], path, depth + 1);
+    }
+  };
+  walk(techCardSchema, '', 0);
+  return out;
+}
+
+function shapeFingerprint(): string {
+  let paths: string[] = [];
+  try {
+    paths = schemaFieldPaths();
+  } catch {
+    paths = [];
+  }
+  if (paths.length === 0) return 'introspection-unavailable';
+  paths.sort();
+  let h = 5381;
+  const joined = paths.join('|');
+  for (let i = 0; i < joined.length; i++) h = ((h << 5) + h + joined.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+const FORM_SHAPE = shapeFingerprint();
+
+/** Только для пробы: отпечаток и список путей, из которых он посчитан. */
+export const __draftShapeForTest = () => ({ shape: FORM_SHAPE, paths: schemaFieldPaths() });
 
 /**
  * Одноразовая выметка черновиков прошлой версии.
@@ -95,6 +175,15 @@ export function useTechCardDraft(
         setPending(null);
         return;
       }
+      // ЧЕРНОВИК ЧУЖОЙ ФОРМЫ НЕ ПРЕДЛАГАЕТСЯ. Отпечаток меняется от всякого нового поля, а поля
+      // операции переносить с карточки не по чему — у операции нет стабильного ключа. Восстановить
+      // такой черновик значит уехать на сервер с zod-дефолтом там, где поля не было, то есть с
+      // командой «сотри». Пусто у черновиков, записанных до этой проверки, — они тоже не наши.
+      if (draft && draft.shape !== FORM_SHAPE) {
+        localStorage.removeItem(storageKey);
+        setPending(null);
+        return;
+      }
       setPending(draft);
     } catch {
       setPending(null);
@@ -113,7 +202,12 @@ export function useTechCardDraft(
   // флаг в одном из них — значит не вычеркнуть его вовсе.
   const draftPayload = (values: TechCardFormData, st: typeof staging) => {
     const { assemblyCleared: _spent, mediaCleared: _spentMedia, ...data } = values;
-    return JSON.stringify({ savedAt: Date.now(), data, staging: st?.serialize() ?? [] });
+    return JSON.stringify({
+      savedAt: Date.now(),
+      data,
+      staging: st?.serialize() ?? [],
+      shape: FORM_SHAPE,
+    });
   };
 
   // Persist on change (debounced), but only once the user has actually edited (isDirty) — merely
