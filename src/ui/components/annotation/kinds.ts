@@ -212,3 +212,27 @@ export const COLOR_LABEL: Record<string, string> = {
   orange: 'оранжевый',
   white: 'белый',
 };
+
+/**
+ * Что делать следующим кликом. Текст зависит и от вида, и от того, сколько точек уже поставлено:
+ * «кликните 3 точки» на третьей точке — это подсказка, которая перестала подсказывать.
+ */
+export function placingHint(kind: string, placed: number): string {
+  const d = kindDef(kind);
+  const [min, max] = d.points;
+  if (d.grammar === 'ink') return 'зажмите и ведите — каждый штрих отдельное указание';
+  if (d.grammar === 'arc') {
+    return (
+      ['кликните начало дуги', 'кликните конец дуги', 'ведите изгиб и кликните'][placed] ??
+      'кликните изгиб'
+    );
+  }
+  if (d.grammar === 'polygon') {
+    if (placed === 0) return 'кликайте по границе области';
+    if (placed < min) return `нужно от ${min} точек — поставлено ${placed}`;
+    return `замкните о первую точку или нажмите Enter — поставлено ${placed}`;
+  }
+  if (max === 1) return 'кликните точку на снимке';
+  if (min === max) return `кликните ${max} точки — поставлено ${placed}`;
+  return `кликайте точки (от ${min} до ${max}) — поставлено ${placed}`;
+}

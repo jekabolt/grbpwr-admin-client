@@ -4,16 +4,15 @@ import { usePasteImage } from 'components/managers/media/utils/usePasteImage';
 import { cn } from 'lib/utility';
 import { useState, type ReactNode } from 'react';
 import { useFieldArray, useFormContext, useWatch } from 'react-hook-form';
+import { AnnotationToolbar, placingHint } from 'ui/components/annotation/toolbar';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { Placeholder } from 'ui/components/placeholder';
 import Text from 'ui/components/text';
 
-import { AnnotationCanvas, KIND_HINT, KIND_LABEL } from './annotation-canvas';
+import { AnnotationCanvas } from './annotation-canvas';
 import {
-  ANNOTATION_KINDS,
   wireInt,
   type AnnotationForm,
-  type AnnotationKind,
   type OperationMediaForm,
   type TechCardFormData,
 } from './schema';
@@ -68,8 +67,8 @@ export function OperationMediaStrip({
   /** Адреса сохранённых картинок с чтения карточки. */
   urlById: Map<number, string>;
   frozen?: boolean;
-  /** Пикер детали кроя для редактора выноски (силуэты из чертежа). */
-  renderPiecePicker?: (value: string, onChange: (lineKey: string) => void) => ReactNode;
+  /** Пикер детали кроя для редактора указания (силуэты из чертежа). Отдаёт выбранный ключ. */
+  renderPiecePicker?: (opts: { onPick: (lineKey: string) => void }) => ReactNode;
   pieceLabel?: (lineKey: string) => string | undefined;
 }) {
   const { control, setValue, getValues } = useFormContext<TechCardFormData>();
@@ -82,7 +81,12 @@ export function OperationMediaStrip({
   const watched = useWatch({ control, name }) as OperationMediaForm[] | undefined;
   // Вид, выбранный на ВСЮ полосу. Сбрасывается, как только фигура поставлена: постановка — жест с
   // концом, а залипший режим ставит вторую мерку следующим кликом по снимку, которого не просили.
-  const [placingKind, setPlacingKind] = useState<AnnotationKind | null>(null);
+  const [placingKind, setPlacingKind] = useState<string | null>(null);
+  // Сколько якорей набрано на ТОМ кадре, где идёт жест. Подсказку рисует общая панель — она одна,
+  // а кадров десять, и повторить её под каждым значило бы превратить полосу в столбик одинаковых
+  // строк. Кадры, где жеста нет, шлют ноль, поэтому максимум и есть «сколько набрано».
+  const [placedByFrame, setPlacedByFrame] = useState<Record<number, number>>({});
+  const placed = Math.max(0, ...Object.values(placedByFrame), 0);
   // Кадр, чья правка сейчас открыта. Нужен только затем, чтобы ⌘V не улетал в соседнюю полосу:
   // включается вставка у той, внутри которой стоит указатель.
   const [hot, setHot] = useState(false);
@@ -151,29 +155,17 @@ export function OperationMediaStrip({
         </Text>
         {/* ПАНЕЛЬ ВИДОВ ОДНА НА ПОЛОСУ — режимы принадлежат листу, а не кадру. */}
         {!frozen && fields.length > 0 && (
-          <ChipRow>
-            {ANNOTATION_KINDS.map((k) => (
-              <Chip
-                key={k}
-                nonForm
-                dashed={placingKind !== k}
-                onClick={() => setPlacingKind(placingKind === k ? null : k)}
-                title={KIND_HINT[k]}
-              >
-                {KIND_LABEL[k]}
-              </Chip>
-            ))}
-            {placingKind && (
-              <Chip nonForm dashed onClick={() => setPlacingKind(null)} title='отменить постановку'>
-                отменить
-              </Chip>
-            )}
-          </ChipRow>
-        )}
-        {placingKind && (
-          <Text size='micro' variant='label' component='span'>
-            кликайте по нужному снимку
-          </Text>
+          <AnnotationToolbar
+            tool={placingKind}
+            onTool={setPlacingKind}
+            hint={
+              placingKind
+                ? placed > 0
+                  ? placingHint(placingKind, placed)
+                  : 'кликайте по нужному снимку'
+                : undefined
+            }
+          />
         )}
         {pasting && (
           <Text size='micro' variant='label' component='span'>
@@ -239,9 +231,11 @@ export function OperationMediaStrip({
                       src={url}
                       alt={(current.caption ?? '').trim() || `фото узла ${i + 1}`}
                       heightPx={STRIP_HEIGHT}
-                      toolbar={false}
                       placingKind={placingKind}
                       onPlaced={() => setPlacingKind(null)}
+                      onPlacedCountChange={(n) =>
+                        setPlacedByFrame((prev) => (prev[i] === n ? prev : { ...prev, [i]: n }))
+                      }
                       zoomable
                       annotations={(current.annotations ?? []) as AnnotationForm[]}
                       frozen={frozen}
