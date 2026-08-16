@@ -5,11 +5,11 @@ import { useUploadMedia } from 'components/managers/media/utils/useUploadMedia';
 import { isVideo } from 'lib/features/filterContentType';
 import { cn } from 'lib/utility';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { AnnotatedImage, ImageCallout, type AnnotatedCallout } from './annotated-image';
-import { ArrowMarkerDef, CalloutShape } from './annotation/shapes';
+import { AnnotationSurface, type ShapePoint, type SurfaceCallout } from './annotation/surface';
+import { AnnotationToolbar, placingHint } from './annotation/toolbar';
+import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
-import { MediaViewer, mediaFullListToViewerItems, useMediaViewer } from './media-viewer';
 import { Placeholder } from './placeholder';
 import Text from './text';
 import { Toolbar, ToolbarSpacer } from './toolbar';
@@ -137,8 +137,17 @@ export type FocusedAnnotatorProps = {
   views: FocusedView[];
 
   /** Callouts pinned to one image, already mapped to the annotated-image marker shape. */
-  calloutsFor: (mediaId: number) => AnnotatedCallout[];
-  onAddCallout: (mediaId: number, xNorm: number, yNorm: number) => void;
+  calloutsFor: (mediaId: number) => SurfaceCallout[];
+  /**
+   * Указание поставлено. ОДИН колбэк на все виды, включая пин: раньше их было два (`onAddCallout`
+   * для точки и `onAddShape` для фигуры), и владельцу приходилось дважды писать одно и то же
+   * создание выноски — второй экземпляр немедленно разошёлся с первым по умолчаниям.
+   *
+   * У ПИНА ЯКОРЕЙ НЕТ: его единственная точка И ЕСТЬ нумерованный маркер, и дублировать её в
+   * якорях значило бы завести два места для одной координаты. Владелец кладёт `points[0]` в
+   * posX/posY и оставляет якоря пустыми.
+   */
+  onAddCallout: (mediaId: number, kind: string, points: ShapePoint[]) => void;
   onMoveCallout: (key: string, xNorm: number, yNorm: number) => void;
   onRemoveCallout: (key: string) => void;
   renderNote: (key: string, opts: { close: () => void }) => ReactNode;
@@ -173,14 +182,24 @@ export type FocusedAnnotatorProps = {
   /** Accessible label for the thumbnail carousel / the grid. */
   carouselLabel?: string;
   /**
-   * ВИДЫ УКАЗАНИЙ. Задан — панель «add callout» превращается в панель видов: пин (как было),
-   * мерка, скобка, дуга, подпись, мультилидер. Не задан — поверхность живёт ровно как жила, и
-   * примерка, которой геометрия не нужна, ничего не замечает.
+   * ВИДЫ УКАЗАНИЙ, доступные на этой поверхности — ключи общего реестра. Не задан — весь набор
+   * панели. Примерка передаёт `['pin']`: там указание это заметка о посадке, и мерка на фото
+   * примерки означала бы измерение, которого никто не делал.
    *
-   * Список приходит СНАРУЖИ, вместе с числом якорей у каждого вида: правило «у мерки две точки»
-   * зеркалит серверное и живёт в доменном слое, а не здесь.
+   * Число якорей у вида приходит из реестра, а не отсюда: «у мерки две точки» — знание отрисовки
+   * и жеста, и держать его в доменном слое значило бы держать его в двух местах.
    */
-  calloutKinds?: { value: string; label: string; hint: string; points: [number, number] }[];
+  calloutKinds?: string[];
+  /**
+   * Белая подложка под линиями указаний. Включать на ФОТОГРАФИЯХ (мудборд, примерка): чернильная
+   * линия на пёстром снимке тонет, и указание перестаёт быть видно ровно там, где его поставили.
+   * На ШТРИХОВОМ ЭСКИЗЕ выключать — подложка перекрыла бы линии самого чертежа.
+   *
+   * ПРОПОМ, А НЕ ПО НАЗВАНИЮ ЛИСТА: `purpose` это подпись для человека («tech sketch», «moodboard
+   * reference»), и решать по ней поведение значит связать отрисовку с текстом, который однажды
+   * перепишут, ничего не сломав на вид.
+   */
+  halo?: boolean;
   /**
    * Поверхность заморожена (выпущенная карточка): читать можно всё, писать нельзя ничего.
    *
@@ -196,8 +215,8 @@ export type FocusedAnnotatorProps = {
    * «показать все записки» — остаются живыми: выпущенную карточку именно читают.
    */
   readOnly?: boolean;
-  /** Фигура собрана: якоря в долях кадра. Пин по-прежнему уходит через `onAddCallout`. */
-  onAddShape?: (mediaId: number, kind: string, points: { x: number; y: number }[]) => void;
+  /** Якоря поставленной фигуры изменились — точку подвинули, добавили или убрали. */
+  onEditPoints?: (key: string, points: ShapePoint[]) => void;
   /** Grid only: when set, the grid is a fixed-HEIGHT filmstrip — every image is this many px tall
    *  and keeps its own aspect (natural width, so a landscape is wider), and only the horizontal axis
    *  scrolls. The image is never cropped, so callout pins still map 1:1. Unset = the default
@@ -229,16 +248,23 @@ export function FocusedAnnotator({
   carouselLabel,
   gridRowHeight,
   calloutKinds,
-  onAddShape,
+  onEditPoints,
+  halo = false,
   readOnly = false,
 }: FocusedAnnotatorProps) {
-  const [addMode, setAddMode] = useState(false);
-  /** Вид, который сейчас ставят. null = обычный нумерованный пин (или режим выключен). */
-  const [shapeKind, setShapeKind] = useState<string | null>(null);
+  /**
+   * Инструмент постановки. ОДНО состояние вместо трёх (`addMode` + `shapeKind` + набранные точки):
+   * они описывали одно и то же и умели рассогласоваться — вид снят, режим включён, и следующий
+   * клик по эскизу ронял на него посторонний пин. Точки теперь копятся ВНУТРИ поверхности, на
+   * своём кадре: мерка, растянутая между передом и спинкой, — не мерка.
+   */
+  const [tool, setTool] = useState<string | null>(null);
+  const [placed, setPlaced] = useState(0);
+  /** Индекс кадра, открытого во весь экран. */
+  const [zoomIndex, setZoomIndex] = useState<number | null>(null);
   const [showAllNotes, setShowAllNotes] = useState(false);
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
-  const viewer = useMediaViewer();
   const uploadMedia = useUploadMedia();
   // +1 for the trailing "+ add view" slot, which is part of what can overflow.
   const rail = useRailScroll(views.length + 1);
@@ -252,11 +278,6 @@ export function FocusedAnnotator({
   const focusedUrl = mediaUrl(focused?.full);
   const focusedAlt = focused && mediaLabel ? mediaLabel(focused, focusedPosition) : '';
 
-  const viewerItems = useMemo(
-    () => mediaFullListToViewerItems(views.map((v) => v.full)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [views.map((v) => v.mediaId).join(','), focusedUrl],
-  );
   const focusedViewerIndex = Math.max(0, focusedPosition);
 
   // Commit the pick through the caller, then focus the first freshly-added image so it is
@@ -299,39 +320,6 @@ export function FocusedAnnotator({
     if (added.length) handlePick(added);
   }
 
-  // ПОСТАНОВКА ФИГУРЫ. Вид выбран на всю поверхность, а якоря копятся ПО КАРТИНКЕ: мерка,
-  // растянутая между передом и спинкой, — не мерка, поэтому клик по другому кадру начинает набор
-  // заново на нём, а не достраивает начатое на соседнем.
-  const [pending, setPending] = useState<{ mediaId: number; points: { x: number; y: number }[] }>({
-    mediaId: 0,
-    points: [],
-  });
-  const kindDef = calloutKinds?.find((k) => k.value === shapeKind);
-  const resetPending = () => setPending({ mediaId: 0, points: [] });
-
-  function handleCanvasClick(mediaId: number, x: number, y: number) {
-    // Пин — прежний путь: у него нет якорей, его место И ЕСТЬ маркер.
-    if (!kindDef || kindDef.value === 'pin' || !onAddShape) {
-      onAddCallout(mediaId, x, y);
-      return;
-    }
-    const base = pending.mediaId === mediaId ? pending.points : [];
-    const next = [...base, { x, y }];
-    const [, max] = kindDef.points;
-    if (next.length >= max) {
-      onAddShape(mediaId, kindDef.value, next);
-      resetPending();
-      // РЕЖИМ ГАСНЕТ ВМЕСТЕ С ВИДОМ. Снять только вид мало: `addMode` остался бы включённым, вид
-      // стал бы пустым, и СЛЕДУЮЩИЙ клик по эскизу — тот, которым разглядывают только что
-      // нарисованную мерку, — уронил бы на него посторонний нумерованный пин. Постановка это
-      // жест с концом.
-      setShapeKind(null);
-      setAddMode(false);
-      return;
-    }
-    setPending({ mediaId, points: next });
-  }
-
   const modeToggles = (
     <ChipRow>
       {/* «показать все записки» — ЧИТАТЕЛЬСКИЙ режим, живёт и на выпущенной карточке. Всё
@@ -347,74 +335,28 @@ export function FocusedAnnotator({
           pressed={showAllNotes}
           onClick={() => setShowAllNotes((v) => !v)}
         >
-          show all notes
+          показать все записки
         </Chip>
       )}
-      {readOnly ? null : calloutKinds?.length ? (
-        // Панель ВИДОВ вместо одной кнопки «add callout»: выбранный вид сам включает режим
-        // постановки, поэтому отдельного тумблера больше нет — он был бы вторым выключателем
-        // одного и того же.
-        <>
-          {calloutKinds.map((k) => (
-            <Chip
-              key={k.value}
-              selected={shapeKind === k.value}
-              pressed={shapeKind === k.value}
-              title={k.hint}
-              onClick={() => {
-                const on = shapeKind === k.value;
-                setShapeKind(on ? null : k.value);
-                setAddMode(!on);
-                resetPending();
-              }}
-            >
-              {k.label}
-            </Chip>
-          ))}
-          {/* «ГОТОВО» ДЛЯ ФИГУР С ПЛАВАЮЩИМ ЧИСЛОМ ЯКОРЕЙ. У мультилидера их от двух до восьми, и
-              без этой кнопки закончить его раньше ВОСЬМИ было нечем: жест завершался только по
-              достижению максимума, то есть «одна подпись к трём местам» была невыразима. */}
-          {kindDef &&
-            kindDef.points[0] !== kindDef.points[1] &&
-            pending.points.length >= kindDef.points[0] && (
-              <Chip
-                onClick={() => {
-                  onAddShape?.(pending.mediaId, kindDef.value, pending.points);
-                  resetPending();
-                  setShapeKind(null);
-                  setAddMode(false);
-                }}
-              >
-                готово · {pending.points.length}
-              </Chip>
-            )}
-          {addMode && (
-            <Chip
-              onClick={() => {
-                setShapeKind(null);
-                setAddMode(false);
-                resetPending();
-              }}
-            >
-              отменить
-            </Chip>
-          )}
-        </>
-      ) : (
-        <Chip selected={addMode} pressed={addMode} onClick={() => setAddMode((v) => !v)}>
-          add callout
-        </Chip>
+      {/* ПАНЕЛЬ ВИДОВ — общая, та же, что у снимков шага сборки. Отдельного тумблера «add
+          callout» нет: выбранный вид сам и есть режим постановки, а два выключателя одного и
+          того же расходились ровно так, как расходились здесь. */}
+      {!readOnly && hasMedia && (
+        <AnnotationToolbar
+          tool={tool}
+          onTool={setTool}
+          kinds={calloutKinds}
+          hint={tool ? (placed > 0 ? placingHint(tool, placed) : 'кликайте по нужной картинке') : undefined}
+        />
       )}
     </ChipRow>
   );
 
   const hint = pasting
     ? 'загружаю картинку из буфера…'
-    : !addMode
-    ? 'hover a pin to read · click a pin to edit · use zoom to draw · ⌘V вставит картинку из буфера'
-    : kindDef && kindDef.value !== 'pin'
-      ? `${kindDef.label}: кликайте якоря на ОДНОЙ картинке — поставлено ${pending.points.length} из ${kindDef.points[1]}`
-      : 'click an image to drop a callout · drag a pin to move it';
+    : tool
+      ? placingHint(tool, placed)
+      : 'наведите на пин — прочесть · клик по пину или по линии — правка · ⌘V вставит картинку';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -516,39 +458,40 @@ export function FocusedAnnotator({
                     rowMode ? 'w-fit' : 'w-[300px] max-w-[85vw]',
                   )}
                 >
-                  <AnnotatedImage
+                  <AnnotationSurface
                     src={url}
                     alt={mediaLabel ? mediaLabel(v, i) : ''}
-                    type={isVideo(url) ? 'video' : 'image'}
+                    media={isVideo(url) ? 'video' : 'image'}
                     aspectRatio={mediaAspect(v.full, fallbackAspect)}
                     className={rowMode ? 'w-fit' : undefined}
                     frameClassName={rowMode ? 'w-auto' : 'w-full'}
                     frameStyle={rowMode ? { height: gridRowHeight } : undefined}
                     callouts={calloutsFor(v.mediaId)}
-                    editable={!readOnly}
-                    addMode={addMode && !readOnly}
-                    zoomable={false}
-                    notesMode={notesMode}
+                    labelMode='marker'
+                    frozen={readOnly}
+                    tool={tool}
+                    onToolDone={() => setTool(null)}
+                    onPlacedCountChange={setPlaced}
                     showAllNotes={showAllNotes}
                     pinSize={pinSize}
                     // The full 240px note now fits over a 300px tile, so it no longer needs trimming.
                     noteClassName='w-60'
-                    onAdd={(x, y) => handleCanvasClick(v.mediaId, x, y)}
-                    pendingKind={shapeKind}
-                    pendingPoints={pending.mediaId === v.mediaId ? pending.points : undefined}
-                    onMove={onMoveCallout}
+                    onAdd={(kind, points) => onAddCallout(v.mediaId, kind, points)}
+                    onEditPoints={onEditPoints}
+                    onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                     onRemove={onRemoveCallout}
                     noteTitle={noteTitle}
                     renderNote={renderNote}
+                    halo={halo}
                     cornerSlot={
                       <div className='flex items-center gap-1'>
                         {/* Зум — ЧИТАТЕЛЬСКИЙ жест и остаётся на выпущенной карточке: мерку и дугу
                             на плитке в 300px не разглядеть, увеличение и есть способ их прочесть. */}
                         <FrameButton
-                          ariaLabel={`zoom · pan · draw — image ${i + 1}`}
-                          onPress={() => viewer.openAt(i)}
+                          ariaLabel={`увеличить · панорама · правка — картинка ${i + 1}`}
+                          onPress={() => setZoomIndex(i)}
                         >
-                          zoom
+                          зум
                         </FrameButton>
                         {!readOnly && (
                           <FrameButton
@@ -617,31 +560,32 @@ export function FocusedAnnotator({
           {/* Focused image — annotate in place; the zoom control opens the lightbox for pan + draw */}
           {focused && (
             <div className='mx-auto w-full max-w-[26rem] space-y-2'>
-              <AnnotatedImage
+              <AnnotationSurface
                 src={focusedUrl}
                 alt={focusedAlt}
-                type={isVideo(focusedUrl) ? 'video' : 'image'}
+                media={isVideo(focusedUrl) ? 'video' : 'image'}
                 aspectRatio={mediaAspect(focused.full, fallbackAspect)}
                 callouts={calloutsFor(focused.mediaId)}
-                editable={!readOnly}
-                addMode={addMode && !readOnly}
-                zoomable={false}
-                notesMode={notesMode}
+                labelMode='marker'
+                frozen={readOnly}
+                tool={tool}
+                onToolDone={() => setTool(null)}
+                onPlacedCountChange={setPlaced}
                 showAllNotes={showAllNotes}
                 pinSize={pinSize}
-                onAdd={(x, y) => handleCanvasClick(focused.mediaId, x, y)}
-                pendingKind={shapeKind}
-                pendingPoints={pending.mediaId === focused.mediaId ? pending.points : undefined}
-                onMove={onMoveCallout}
+                onAdd={(kind, points) => onAddCallout(focused.mediaId, kind, points)}
+                onEditPoints={onEditPoints}
+                onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
                 onRemove={onRemoveCallout}
                 noteTitle={noteTitle}
                 renderNote={renderNote}
+                halo={halo}
                 cornerSlot={
                   <FrameButton
-                    ariaLabel='zoom · pan · draw'
-                    onPress={() => viewer.openAt(focusedViewerIndex)}
+                    ariaLabel='увеличить · панорама · правка'
+                    onPress={() => setZoomIndex(focusedViewerIndex)}
                   >
-                    zoom
+                    зум
                   </FrameButton>
                 }
               />
@@ -710,65 +654,33 @@ export function FocusedAnnotator({
           the control that adds one has to be reachable in that state too. */}
       {!isGrid && addControl}
 
-      {/* Shared lightbox — pan + freehand draw (session-only markup), with this surface's callouts
-          laid over the picture behind a toggle. Read-only there: the pins are for reading the notes
-          at a size where they can be read, and a drag on a zoomed stage means pan, not reposition —
-          editing stays on the tile, where the gesture is unambiguous. */}
-      <MediaViewer
-        items={viewerItems}
-        {...viewer}
-        overlayLabel='callouts'
-        renderOverlay={({ index: i, size, scale }) => {
-          const v = views[i];
-          if (!v) return null;
-          const list = calloutsFor(v.mediaId);
-          const drawn = list.filter((c) => (c.points?.length ?? 0) > 0);
-          return (
-            <>
-              {/* ФИГУРЫ И ЗДЕСЬ. Увеличенный просмотр — ровно то место, куда идут читать мерку:
-                  на плитке 300px «6 мм» между двумя засечками не разглядеть. Без этого слоя в
-                  зуме от мерки, скобки и дуги оставался один номер, то есть исчезало ровно то,
-                  ради чего зум и открыли. Размер сцены приходит готовым (`size`), поэтому мерить
-                  тут нечего. */}
-              {size.w > 0 && drawn.length > 0 && (
-                <svg
-                  className='pointer-events-none absolute inset-0 h-full w-full'
-                  viewBox={`0 0 ${size.w} ${size.h}`}
-                  preserveAspectRatio='none'
-                  aria-hidden
-                >
-                  <defs>
-                    <ArrowMarkerDef />
-                  </defs>
-                  {drawn.map((c) => (
-                    <CalloutShape
-                      key={c.key}
-                      kind={c.kind ?? 'pin'}
-                      pts={(c.points ?? []).map((p) => ({ x: p.x * size.w, y: p.y * size.h }))}
-                      label={{ x: c.xNorm * size.w, y: c.yNorm * size.h }}
-                      color={c.color || undefined}
-                    />
-                  ))}
-                </svg>
-              )}
-              {list.map((c) =>
-                Number.isNaN(c.xNorm) || Number.isNaN(c.yNorm) ? null : (
-                  <ImageCallout
-                    key={c.key}
-                    data={c}
-                    title={noteTitle?.(c.key)}
-                    scale={scale}
-                    showAll
-                    editable={false}
-                    pinSize={pinSize}
-                    renderNote={(opts) => renderNote(c.key, opts)}
-                  />
-                ),
-              )}
-            </>
-          );
-        }}
-      />
+      {/* УВЕЛИЧЕННЫЙ ВИД — ТА ЖЕ ПОВЕРХНОСТЬ, а не лайтбокс с нарисованной поверх копией.
+          Раньше здесь висел общий просмотрщик, которому фигуры и записки рисовали ВТОРЫМ
+          экземпляром кода: он умел показывать, но не править, и расходился с плиткой на каждой
+          правке первого. Теперь это тот же surface — со своей панелью видов, своим счётчиком
+          точек и полной правкой: указание по миллиметровой детали ставят именно в зуме. */}
+      {zoomIndex != null && views[zoomIndex] && (
+        <AnnotationZoomDialog
+          open
+          onOpenChange={(v) => !v && setZoomIndex(null)}
+          title={mediaLabel ? mediaLabel(views[zoomIndex], zoomIndex) : (carouselLabel ?? 'картинка')}
+          src={mediaUrl(views[zoomIndex].full)}
+          media={isVideo(mediaUrl(views[zoomIndex].full)) ? 'video' : 'image'}
+          callouts={calloutsFor(views[zoomIndex].mediaId)}
+          labelMode='marker'
+          frozen={readOnly}
+          toolKinds={calloutKinds}
+          showAllNotes={showAllNotes}
+          pinSize={pinSize}
+          halo={halo}
+          onAdd={(kind, points) => onAddCallout(views[zoomIndex].mediaId, kind, points)}
+          onEditPoints={onEditPoints}
+          onMoveLabel={(key, at) => onMoveCallout(key, at.x, at.y)}
+          onRemove={onRemoveCallout}
+          noteTitle={noteTitle}
+          renderNote={renderNote}
+        />
+      )}
     </div>
   );
 }
