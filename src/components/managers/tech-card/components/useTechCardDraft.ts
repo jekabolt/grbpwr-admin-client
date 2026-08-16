@@ -16,7 +16,12 @@ import { PersistedStaging } from './useTechCardStaging';
 // snapshot simply contributes nothing rather than blocking the restore.
 type StoredDraft = { savedAt: number; data: TechCardFormData; staging?: PersistedStaging };
 
-const PREFIX = 'plm.techcard.draft.';
+// ВЕРСИЯ В КЛЮЧЕ, А НЕ МОЛЧАЛИВОЕ СТИРАНИЕ. Черновик, записанный ДО операционных фотографий, не
+// несёт поля `media` на операциях — восстановленный, он уехал бы командой «сотри все снимки со
+// всех шагов» при первом же сохранении. Общего механизма мержа отсутствующих ключей с карточкой
+// здесь нет, и городить его ради одного поля несоразмерно; поднятая версия просто не предлагает
+// старые черновики. Цена — потеря несохранённых правок одним релизом, и она честнее.
+const PREFIX = 'plm.techcard.draft.v2.';
 const DEBOUNCE_MS = 800;
 
 export function useTechCardDraft(
@@ -82,7 +87,7 @@ export function useTechCardDraft(
   // Хелпер общий для ОБОИХ писателей (правки формы и правки сабпанелей) намеренно: вычеркнуть
   // флаг в одном из них — значит не вычеркнуть его вовсе.
   const draftPayload = (values: TechCardFormData, st: typeof staging) => {
-    const { assemblyCleared: _spent, ...data } = values;
+    const { assemblyCleared: _spent, mediaCleared: _spentMedia, ...data } = values;
     return JSON.stringify({ savedAt: Date.now(), data, staging: st?.serialize() ?? [] });
   };
 
@@ -341,6 +346,7 @@ export function useTechCardDraft(
     // спасает — ключ там ЕСТЬ. Намерение снять разметку не восстанавливается никогда: если оно
     // ещё актуально, его объявляют кнопкой заново.
     (data as Record<string, unknown>).assemblyCleared = false;
+    (data as Record<string, unknown>).mediaCleared = false;
 
     form.reset(data, { keepDefaultValues: true });
     // Seed the sub-panel snapshots BEFORE clearing `pending`. hydrate() also bumps the staging

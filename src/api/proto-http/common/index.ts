@@ -2524,6 +2524,62 @@ export type TechCardTopstitchMode =
   | "TECH_CARD_TOPSTITCH_MODE_UNKNOWN"
   | "TECH_CARD_TOPSTITCH_MODE_EDGE"
   | "TECH_CARD_TOPSTITCH_MODE_WIDTH";
+// TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
+// THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
+// path). Eleven fields left, and they left for three different reasons:
+// (a) THE CODE WROTE THEM, NOT A PERSON. `machine` and `stitches_per_cm` were filled from an
+// operation-type preset, `thread` from the linked BOM line, `placement` from the joined
+// piece names, and each was then stored as a fact and hashed into a signed digest. The
+// printed tech pack had to SUBTRACT `thread` from the material list to stop printing the
+// same string twice — a repair for a duplication that should not have existed.
+// (b) NOBODY READ THEM. `needle` duplicated material_thread_attr.needle_reco, which the thread
+// article already carries, and no consumer anywhere read the operation's copy.
+// (c) THEY ASKED A QUESTION WITH NO SINGLE ANSWER. `node` («узел / что», REQUIRED) offered a
+// list mixing seams, garment areas, pieces and materials, and repeated the verb the type
+// field already held. A working pattern-maker could not fill it and asked whether it was
+// needed. It is not replaced by an optional title: an optional field asking the same
+// unanswerable question just gets answered differently on every card.
+// WHAT A STEP IS NOW: a verb (operation_type), a place (zone), what it joins (piece_line_keys)
+// and what it consumes (bom_line_keys), and how long it takes (smv). Its heading is COMPOSED —
+// «join · side seams · Front + Back» — never typed.
+// EXACTLY TWO FIELDS ARE REQUIRED, and both are closed lists: operation_type and zone. Nothing
+// with free input is mandatory ever again; that pairing is what made `node` a trap.
+// EVERYTHING BELOW «отклонения» IS AN OVERRIDE: unset means INHERIT from the card
+// (TechCardConstruction, and TechCard.required_seam_allowance_mm for the allowance), which
+// inherits from the workshop. The inherited value is shown as a placeholder and NEVER written
+// into the row — the day it is written, «the technologist decided 4 st/cm» stops being
+// distinguishable from «it defaulted to 4», which is precisely today's defect.
+// ── ВЫНОСКИ НА ФОТО УЗЛА ────────────────────────────────────────────────────────────────────────
+// Выноска отвечает швее на два вопроса, которые не помещаются в текст шага: ЧТО тут делать и ПО
+// КАКОМУ РАЗМЕРУ. Поэтому она живёт поверх снимка узла, а не в описании.
+// ЗАКРЫТЫЙ СЛОВАРЬ `kind`, А НЕ СВОБОДНЫЕ ОСИ. Проектировался набор осями (якорь × геометрия ×
+// лидер × подпись), но хранить оси независимыми полями значит валидировать комбинаторику
+// бессмыслицы: скобка с одной точкой, номер на мерке, лидер у того, у чего нет якоря. Вид —
+// одно значение, и оно определяет и число точек, и что рисуется, и чем является текст.
+// СООБЩЕНИЕ НЕ ЗНАЕТ СЛОВА «ОПЕРАЦИЯ». Тот же тип пригодится карточному эскизу, детали кроя и
+// примерке — им нужно будет лишь своё поле, а не свой формат выноски.
+export type TechCardAnnotationKind =
+  | "TECH_CARD_ANNOTATION_KIND_UNKNOWN"
+  // 1 точка. Номер — позиция в списке; текст — заметка, читается в легенде.
+  | "TECH_CARD_ANNOTATION_KIND_PIN"
+  // 1 точка + плашка. Текст — подпись, лидер-стрелка строится сам.
+  | "TECH_CARD_ANNOTATION_KIND_LABEL"
+  // 2 точки. Размерная линия с засечками; текст — значение с единицами («6 мм»).
+  | "TECH_CARD_ANNOTATION_KIND_DIM"
+  // 2 точки. Скобка над участком; текст — что с этим участком делать.
+  | "TECH_CARD_ANNOTATION_KIND_BRACKET"
+  // 2..8 точек. Одна подпись, ветвящаяся к нескольким местам («закрепки ×3»).
+  | "TECH_CARD_ANNOTATION_KIND_MULTI";
+// Цвет выноски. ЗАКРЫТЫЙ СПИСОК, а не свободный hex: лист швеи печатается и на чёрно-белом
+// принтере, и произвольный цвет там превратился бы в неразличимый серый. Значение по умолчанию
+// (UNKNOWN) — чернильный, то есть тот же, каким рисуется всё остальное на листе; цвет РАЗЛИЧАЕТ
+// пересекающиеся выноски, а не кодирует смысл — смысл несёт вид и текст.
+export type TechCardAnnotationColor =
+  | "TECH_CARD_ANNOTATION_COLOR_UNKNOWN"
+  | "TECH_CARD_ANNOTATION_COLOR_RED"
+  | "TECH_CARD_ANNOTATION_COLOR_BLUE"
+  | "TECH_CARD_ANNOTATION_COLOR_GREEN"
+  | "TECH_CARD_ANNOTATION_COLOR_ORANGE";
 // TechCardIssueSeverity ranks a flagged construction issue.
 export type TechCardIssueSeverity =
   | "TECH_CARD_ISSUE_SEVERITY_UNKNOWN"
@@ -3612,31 +3668,36 @@ export type TechCardTopstitch = {
   rows: number | undefined;
 };
 
-// TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
-// THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
-// path). Eleven fields left, and they left for three different reasons:
-// (a) THE CODE WROTE THEM, NOT A PERSON. `machine` and `stitches_per_cm` were filled from an
-// operation-type preset, `thread` from the linked BOM line, `placement` from the joined
-// piece names, and each was then stored as a fact and hashed into a signed digest. The
-// printed tech pack had to SUBTRACT `thread` from the material list to stop printing the
-// same string twice — a repair for a duplication that should not have existed.
-// (b) NOBODY READ THEM. `needle` duplicated material_thread_attr.needle_reco, which the thread
-// article already carries, and no consumer anywhere read the operation's copy.
-// (c) THEY ASKED A QUESTION WITH NO SINGLE ANSWER. `node` («узел / что», REQUIRED) offered a
-// list mixing seams, garment areas, pieces and materials, and repeated the verb the type
-// field already held. A working pattern-maker could not fill it and asked whether it was
-// needed. It is not replaced by an optional title: an optional field asking the same
-// unanswerable question just gets answered differently on every card.
-// WHAT A STEP IS NOW: a verb (operation_type), a place (zone), what it joins (piece_line_keys)
-// and what it consumes (bom_line_keys), and how long it takes (smv). Its heading is COMPOSED —
-// «join · side seams · Front + Back» — never typed.
-// EXACTLY TWO FIELDS ARE REQUIRED, and both are closed lists: operation_type and zone. Nothing
-// with free input is mandatory ever again; that pairing is what made `node` a trap.
-// EVERYTHING BELOW «отклонения» IS AN OVERRIDE: unset means INHERIT from the card
-// (TechCardConstruction, and TechCard.required_seam_allowance_mm for the allowance), which
-// inherits from the workshop. The inherited value is shown as a placeholder and NEVER written
-// into the row — the day it is written, «the technologist decided 4 st/cm» stops being
-// distinguishable from «it defaulted to 4», which is precisely today's defect.
+// Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
+// карточных выносок. Decimal, а не float: промежуточный ввод и круговой рейс без потерь, и один
+// тип на обе системы координат карточки.
+export type TechCardAnnotationPoint = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+};
+
+export type TechCardAnnotation = {
+  kind: TechCardAnnotationKind | undefined;
+  // Число точек определяется видом и проверяется сервером: PIN/LABEL — 1, DIM/BRACKET — 2,
+  // MULTI — от 2 до 8.
+  points: TechCardAnnotationPoint[] | undefined;
+  text: string | undefined;
+  // Положение плашки с текстом, 0..1. Лидер НЕ хранится — он строится от плашки к якорю по
+  // правилу отрисовки; хранить его значило бы хранить производное и дать ему разойтись.
+  labelX: googletype_Decimal | undefined;
+  labelY: googletype_Decimal | undefined;
+  color: TechCardAnnotationColor | undefined;
+};
+
+// Одна картинка операции со своими выносками. Картинка ОПЕРАЦИОННАЯ: она принадлежит шагу, а не
+// карточке, и вложенность делает невалидную ссылку невыразимой — в отличие от карточных выносок,
+// которые операция адресует НОМЕРОМ, а номер позиционный и переживает пересортировку шагов плохо.
+export type TechCardOperationMedia = {
+  mediaId: number | undefined;
+  caption: string | undefined;
+  annotations: TechCardAnnotation[] | undefined;
+};
+
 export type TechCardOperation = {
   // --- core: what, where, with what, how long -------------------------------------------------
   operationNumber: number | undefined;
@@ -3726,6 +3787,9 @@ export type TechCardOperation = {
   // производителю. Имя без ключа — теневое значение, отклоняется. В дайджест секции НЕ входит:
   // имя не факт цеха, и хешировать его значило бы протухать подпись от невидимой правки.
   outputUnitName: string | undefined;
+  // Фотографии этого шага с выносками. До 10 на шаг, до 30 выносок на картинку — пределы
+  // проверяет сервер. Порядок списка — порядок показа и печати.
+  media: TechCardOperationMedia[] | undefined;
 };
 
 // TechCardIssue is a maker-flagged problem ("this seam is impossible") against an
@@ -4261,6 +4325,11 @@ export type TechCard = {
   // released-карточка теряла бы способность считать материалы: у детали кроя в контракте нет id,
   // только line_key, и любой ключ на piece_id был бы в слепке нулевым.
   pieceAreaScopes: TechCardPieceAreaScope[] | undefined;
+  // OUTPUT-ONLY: разрешённые операционные картинки карточки — дистинкт по media_id, тем же
+  // TechCardMediaFull, что мудборд и тех-эскизы. Write-сообщение операции возит только media_id:
+  // URL и размеры это read-данные, и класть их во вход записи значило бы принимать от клиента то,
+  // что сервер обязан знать сам.
+  resolvedOperationMedia: TechCardMediaFull[] | undefined;
 };
 
 // TechCardOutputVariant is one colour of an AUXILIARY card's warehouse output: "this card, in this

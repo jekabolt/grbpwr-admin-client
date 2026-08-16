@@ -90,6 +90,7 @@ import type { AssemblyStep as AssemblyStepShape } from './assembly-frontier';
 import { AssemblyCreateDialog, type CreatePrefill, type CreateResult } from './assembly-create-dialog';
 import { suggestUnitCode } from './assembly-suggest';
 import { AssemblySchematic } from './assembly-schematic';
+import { OperationMediaStrip } from './operation-media-strip';
 import { useSchematicPrefs } from './use-schematic-prefs';
 import { PieceRef, useFormPieces } from './piece-picker';
 import { UnitBlockHeader } from './unit-block';
@@ -97,6 +98,9 @@ import { PieceSilhouette, PieceTile, SILHOUETTE_INK } from './piece-silhouette';
 import { TechCardFormData } from './schema';
 import type { PieceShapeMap } from './use-piece-shapes';
 import { useWorkshopSettings } from 'components/managers/workshop/useWorkshopSettings';
+
+/** Стабильная пустая карта: `new Map()` в пропе рождал бы новую ссылку на каждый рендер. */
+const EMPTY_MEDIA_URLS: Map<number, string> = new Map();
 
 const NONE_OP_TYPE = 'TECH_CARD_OPERATION_TYPE_UNKNOWN';
 const NONE_ZONE = 'TECH_CARD_GARMENT_ZONE_UNKNOWN';
@@ -972,6 +976,60 @@ function BootstrapEatenRefs({
 // РАСПАКОВКА ПО ЗАМЫКАНИЮ, а не отбрасыванием: шаг со входами [SHELL, SL] после наивного
 // удаления узла остался бы с одним рукавом, а полочка и спинка, жившие внутри SHELL, к нему не
 // вернулись бы — карточка врала бы о том, что этот шаг сшивает.
+/**
+ * «Снять фотографии шагов» — путь отступления для операционных снимков.
+ *
+ * Он обязателен, а не удобен. Операции пишутся полной заменой, поэтому сервер отклоняет
+ * осведомлённую запись без снимков против карточки, у которой они есть, — иначе отставшая вкладка
+ * стирала бы десятки выносок молча. Значит убрать ПОСЛЕДНИЙ снимок руками, без объявленного
+ * намерения, было бы невозможно: сохранение упиралось бы в бекстоп.
+ *
+ * Кнопка видна и когда форма уже пуста, а сохранённая карточка ещё несёт снимки: ровно тот же
+ * довод, что у кнопки снятия разметки узлов — отказ, из которого нет выхода, хуже отказа.
+ */
+function ClearOperationMediaButton({ storedHasMedia }: { storedHasMedia: boolean }) {
+  const { getValues, setValue } = useFormContext<TechCardFormData>();
+  const showMessage = useSnackBarStore((st) => st.showMessage);
+  const [confirming, setConfirming] = useState(false);
+
+  const ops = (useWatch({ name: 'operations' }) ?? []) as Array<{ media?: unknown[] }>;
+  const inForm = ops.reduce((n, o) => n + (o?.media?.length ?? 0), 0);
+  if (inForm === 0 && !storedHasMedia) return null;
+
+  const clear = () => {
+    const list = (getValues('operations') ?? []) as Array<Record<string, unknown>>;
+    list.forEach((_, i) => setValue(`operations.${i}.media`, [], { shouldDirty: true }));
+    // Намерение живёт ровно одно сохранение: маппер записи гасит его сам, а черновик не хранит.
+    setValue('mediaCleared', true, { shouldDirty: true });
+    setConfirming(false);
+    showMessage('фотографии шагов сняты — сохраните карточку', 'success');
+  };
+
+  return (
+    <>
+      <Chip dashed onClick={() => setConfirming(true)} title='убрать все фотографии со всех шагов'>
+        снять фотографии шагов
+      </Chip>
+      <ConfirmationModal
+        open={confirming}
+        onOpenChange={setConfirming}
+        onConfirm={clear}
+        title='снять фотографии шагов'
+        confirmLabel='снять'
+        cancelLabel='оставить'
+        width='sm'
+      >
+        <Text size='micro'>
+          {inForm > 0
+            ? `со всех шагов будут убраны фотографии (${inForm}) вместе с выносками на них.`
+            : 'в форме фотографий уже нет; кнопка объявляет серверу намерение снять их с сохранённой карточки.'}{' '}
+          Сами файлы в библиотеке останутся.
+        </Text>
+      </ConfirmationModal>
+    </>
+  );
+}
+
 function ClearAssemblyButton({
   pieces,
   storedHasUnits,
@@ -1470,6 +1528,8 @@ function OperationEditor({
   onFlashPieces,
   onActiveBomChange,
   onDropPiece,
+  mediaUrls,
+  frozen = false,
 }: {
   index: number;
   bomLines: BomLine[];
@@ -1485,6 +1545,10 @@ function OperationEditor({
   onFlashPieces: () => void;
   onActiveBomChange?: (k: string | null) => void;
   onDropPiece: (index: number, lineKey: string) => void;
+  /** Адреса операционных снимков; форма возит только media_id. */
+  mediaUrls?: Map<number, string>;
+  /** Карточка выпущена: снимки и выноски читаются, но не правятся. */
+  frozen?: boolean;
 }) {
   const { control, getValues, setValue } = useFormContext<TechCardFormData>();
   const opNumber = (index + 1) * 10;
@@ -2231,6 +2295,15 @@ function OperationEditor({
         assembly={assembly}
       />
 
+      {/* ФОТО УЗЛА С УКАЗАНИЯМИ. Стоит рядом с материалами, а не в аккордеоне отклонений:
+          «что тут делать» — вопрос того же порядка, что «из чего», и прятать ответ за разворот
+          значило бы прятать половину инструкции. */}
+      <OperationMediaStrip
+        name={`operations.${index}.media`}
+        urlById={mediaUrls ?? EMPTY_MEDIA_URLS}
+        frozen={frozen}
+      />
+
       <GroupLabel>materials this step consumes</GroupLabel>
       {linkableBoms.length === 0 ? (
         <Text size='micro' variant='label'>
@@ -2890,15 +2963,21 @@ export function OperationsField({
   addRequest = null,
   onAdded,
   storedHasUnits = false,
+  storedHasMedia = false,
   frozen = false,
+  operationMediaUrls,
 }: {
   /** Несёт ли СОХРАНЁННАЯ карточка разметку — предикат тот же, что у маппера (§7.2 сервера). */
   storedHasUnits?: boolean;
+  /** Несёт ли СОХРАНЁННАЯ карточка фотографии шагов — предикат тот же, что у серверного щита. */
+  storedHasMedia?: boolean;
   /**
    * Карточка выпущена. Внешний `<fieldset disabled>` глушит кнопки, но НЕ pointer-обработчики на
    * div — а схема Ф7 стала жестовой. Поэтому гейт обязан быть явным, и он приезжает пропом.
    */
   frozen?: boolean;
+  /** Адреса операционных снимков с чтения карточки: форма возит только media_id. */
+  operationMediaUrls?: Map<number, string>;
   activePin?: number | null;
   onActivePinChange?: (n: number | null) => void;
   activeBom?: string | null;
@@ -3384,6 +3463,7 @@ export function OperationsField({
             {hasDxf ? '↔ детали кроя' : '+ new piece'}
           </Chip>
           <ClearAssemblyButton pieces={pieces} storedHasUnits={storedHasUnits} />
+          <ClearOperationMediaButton storedHasMedia={storedHasMedia} />
           <ToolbarSpacer />
           <Text
             size='micro'
@@ -3573,6 +3653,8 @@ export function OperationsField({
               onFlashPieces={flashPieces}
               onActiveBomChange={onActiveBomChange}
               onDropPiece={addInputToOperation}
+              mediaUrls={operationMediaUrls}
+              frozen={frozen}
             />
             </div>
           )}
