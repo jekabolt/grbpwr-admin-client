@@ -25,8 +25,25 @@ export type PlacementGrammar =
   /** Зажать и вести: один штрих — одно указание. */
   | 'ink';
 
+/**
+ * ПОРЯДОК И СОСТАВ ВИДОВ — ОДНИМ КОРТЕЖЕМ. Он же типизирует zod-схему карточки (`schema.ts`
+ * импортирует именно его), поэтому добавленный сюда вид немедленно становится обязательным во всех
+ * словарях ниже: пропущенная строка — ошибка компиляции, а не пустое место на экране.
+ */
+export const ANNOTATION_KIND_KEYS = [
+  'pin',
+  'label',
+  'dim',
+  'bracket',
+  'multi',
+  'arc',
+  'polygon',
+  'ink',
+] as const;
+export type AnnotationKindKey = (typeof ANNOTATION_KIND_KEYS)[number];
+
 export type KindDef = {
-  key: string;
+  key: AnnotationKindKey;
   /** Сколько якорей: [минимум, максимум]. Это правило ПОСТАНОВКИ. */
   points: [number, number];
   label: string;
@@ -182,21 +199,30 @@ const PIN = BY_KEY.get('pin') as KindDef;
  * object` при работе с мультилидером.
  */
 export function kindDef(kind: string | null | undefined): KindDef {
-  return (kind && BY_KEY.get(kind)) || PIN;
+  return (kind ? BY_KEY.get(kind as AnnotationKindKey) : undefined) ?? PIN;
 }
 
 /** Виды в порядке показа в панели. */
 export const PALETTE_KINDS: KindDef[] = DEFS.filter((d) => d.inPalette);
 
-/** Все известные ключи — для зеркала в zod. */
-export const ALL_KIND_KEYS: string[] = DEFS.map((d) => d.key);
+/**
+ * Все известные ключи. Собираются из кортежа, а не из `DEFS`: словарь может ошибиться порядком, а
+ * кортеж — источник и того, и другого.
+ */
+export const ALL_KIND_KEYS: readonly AnnotationKindKey[] = ANNOTATION_KIND_KEYS;
+
+// РЕЕСТР ОБЯЗАН ПОКРЫВАТЬ КОРТЕЖ ЦЕЛИКОМ. Проверка на загрузке модуля, а не в пробе: вид, для
+// которого забыли строку, иначе молча стал бы пином на всех четырёх поверхностях сразу.
+for (const key of ANNOTATION_KIND_KEYS) {
+  if (!BY_KEY.has(key)) throw new Error(`annotation kind registry is missing "${key}"`);
+}
 
 /**
  * Вид ХРАНЕНИЯ для подписи по числу якорей. Панель знает один вид «подпись»; провод различает
  * LABEL (одна стрелка) и MULTI (несколько). Различие — счётчик, поэтому его считают, а не
  * спрашивают у человека.
  */
-export function labelKindForPoints(count: number): string {
+export function labelKindForPoints(count: number): AnnotationKindKey {
   return count > 1 ? 'multi' : 'label';
 }
 

@@ -20,15 +20,11 @@ import { cn } from 'lib/utility';
 import GenericPopover from 'ui/components/popover';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { CALLOUT_COLOR_HEX } from 'ui/components/annotation/shapes';
-import { KIND_HINT, KIND_LABEL } from './annotation-canvas';
 import { PieceAddChip, normalizePieceName, useFormPieces, type PieceRef } from './piece-picker';
 import type { FoundPiece } from './nesting/dxf-geometry';
 import { pieceRefKey } from './piece-block-refs';
 import { usePieceShapes } from './use-piece-shapes';
 import {
-  ANNOTATION_COLORS,
-  ANNOTATION_KINDS,
-  ANNOTATION_POINTS,
   type AnnotationColor,
   type AnnotationKind,
   type TechCardFormData,

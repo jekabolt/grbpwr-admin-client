@@ -75,6 +75,7 @@ import {
   wireInt,
   type AnnotationForm,
 } from './schema';
+import { kindDef } from 'ui/components/annotation/kinds';
 import { AnnotationCanvas } from './annotation-canvas';
 import { skuToSeasonLabel } from './season-util';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
@@ -228,6 +229,11 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
               // единственное, что можно прочесть глазами.
               label={{ x: num(dec(c.posX)) * box.w, y: num(dec(c.posY)) * box.h }}
               color={annotationColorFromWire(c.color) || undefined}
+              // Пунктир и штриховка НА БУМАГЕ ОБЯЗАТЕЛЬНЫ: сплошная и пунктир на чертеже говорят
+              // разное, а контур и заливка — «эта граница» против «эта площадь». Потерять их при
+              // печати значит отдать в цех другое указание, чем видно на экране.
+              dashed={!!c.dashed}
+              filled={!!c.filled}
             />
           ))}
         </svg>
@@ -236,20 +242,17 @@ function SketchGeometryLayer({ callouts }: { callouts: common_TechCardCallout[] 
   );
 }
 
-/** Вид указания словом в таблице выносок. Пин — не подпись: он и так «просто номер». */
+/**
+ * Вид указания словом в таблице выносок. Пин — не подпись: он и так «просто номер».
+ *
+ * Название берётся из ОБЩЕГО РЕЕСТРА, а не из своего словаря: свой был четвёртой копией того же
+ * списка и первым же новым видом отстал бы — на бумаге появилась бы пустая клетка вида там, где
+ * на экране стоит зона.
+ */
 function calloutKindLabel(kind?: string): string {
   const k = annotationKindFromWire(kind);
-  return k === 'pin' ? '' : ANNOTATION_KIND_PRINT[k];
+  return k === 'pin' ? '' : kindDef(k).label;
 }
-
-const ANNOTATION_KIND_PRINT: Record<string, string> = {
-  pin: '',
-  label: 'подпись',
-  dim: 'мерка',
-  bracket: 'участок',
-  multi: 'мультилидер',
-  arc: 'дуга',
-};
 
 function bomTakesWastage(
   colorways: ReadonlyArray<{ usages?: common_TechCardColorwayUsage[] }> | undefined,
@@ -1661,7 +1664,10 @@ export function TechPackDocument({
                     <tr key={i} className='break-inside-avoid'>
                       <td className={`${TD} text-center font-semibold`}>{number}</td>
                       <td className={TD}>
-                        {c.part || '—'}
+                        {/* ВСЕ ДЕТАЛИ, А НЕ ПЕРВАЯ. У бумаги нет наведения и нет подсказки: список,
+                            сокращённый до «и ещё две», на листе швеи означает две потерянные
+                            детали. Указание законно называет несколько — узел собирает их вместе. */}
+                        {(c.parts?.length ? c.parts : c.part ? [c.part] : []).join(', ') || '—'}
                         {calloutKindLabel(c.kind) && (
                           <span className='ml-1 text-labelColor'>· {calloutKindLabel(c.kind)}</span>
                         )}

@@ -59,6 +59,12 @@ import {
   isCutSymmetryMarked,
 } from './piece-codes';
 import { z } from 'zod';
+import {
+  ANNOTATION_COLOR_KEYS,
+  ANNOTATION_KIND_KEYS,
+  type AnnotationColorKey,
+  type AnnotationKindKey,
+} from 'ui/components/annotation/kinds';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
 // the bare entity word. The generated client types both as `string`, so swapping them compiles
@@ -750,42 +756,22 @@ const constructionSchema = z
 // чем является текст. Набор проектировался осями (якорь × геометрия × лидер × подпись), но
 // независимые поля пришлось бы валидировать комбинаторикой бессмыслицы — скобка с одной точкой,
 // номер на мерке. Сервер проверяет ровно эти же правила, теми же словами.
-export const ANNOTATION_KINDS = [
-  'pin',
-  'label',
-  'dim',
-  'bracket',
-  'multi',
-  'arc',
-  'polygon',
-  'ink',
-] as const;
-export type AnnotationKind = (typeof ANNOTATION_KINDS)[number];
-
-/** Сколько точек у вида: [минимум, максимум]. Зеркало `PointsAllowed()` сервера. */
-export const ANNOTATION_POINTS: Record<AnnotationKind, [number, number]> = {
-  pin: [1, 1],
-  label: [1, 1],
-  dim: [2, 2],
-  bracket: [2, 2],
-  multi: [2, 8],
-  // Начало, ТОЧКА НА КРИВОЙ, конец. Средняя лежит на самой дуге, а не управляет ей со стороны:
-  // управляющая точка Безье кривой не принадлежит, и ставящий её мышью каждый раз промахивается
-  // мимо линии, которую рисует.
-  arc: [3, 3],
-  // Три угла — минимум, при котором область вообще есть: две точки это отрезок, замыкать нечего.
-  // Сорок — потолок читаемости: контур по сорока углам на печати сливается в кляксу.
-  polygon: [3, 40],
-  // Свободный след. Двести — потолок ХРАНЕНИЯ, а не рисования: сырой след с мыши набирает тысячи
-  // точек за секунду, и полоса прореживает его перед записью (см. simplifyInk).
-  ink: [2, 200],
-};
+// СЛОВАРЬ ВИДОВ ЖИВЁТ В РЕЕСТРЕ ОТРИСОВКИ (`ui/components/annotation/kinds`), а здесь только
+// зеркалится в zod и в провод. Раньше он был объявлен и тут, и там, и в двух местах холста —
+// четыре списка, каждый со своим набором ключей, и каждый новый вид требовал вспомнить про все
+// четыре. Один забытый роняет экран целиком: словарь без строки на пришедший ключ отдаёт undefined,
+// а код тут же его деструктурирует.
+//
+// Правило «у мерки две точки» — знание ЖЕСТА И ОТРИСОВКИ, поэтому живёт там же: им одинаково
+// пользуются снимок шага, эскиз, мудборд и примерка, а форма карточки о нём не знает вовсе.
+export const ANNOTATION_KINDS = ANNOTATION_KIND_KEYS;
+export type AnnotationKind = AnnotationKindKey;
 
 // Цвет — закрытый список, а не свободный hex: лист швеи печатают и на чёрно-белом принтере, где
 // произвольный цвет станет неразличимым серым. Пусто = чернильный, тот же, каким нарисовано всё
-// остальное. Цвет РАЗЛИЧАЕТ пересекающиеся выноски, а не кодирует смысл.
-export const ANNOTATION_COLORS = ['', 'red', 'blue', 'green', 'orange', 'white'] as const;
-export type AnnotationColor = (typeof ANNOTATION_COLORS)[number];
+// остальное. Цвет РАЗЛИЧАЕТ пересекающиеся указания, а не кодирует смысл.
+export const ANNOTATION_COLORS = ANNOTATION_COLOR_KEYS;
+export type AnnotationColor = AnnotationColorKey;
 
 /**
  * Вид выноски: провод ↔ форма. Неизвестное значение с провода становится пином, а не пустотой:
