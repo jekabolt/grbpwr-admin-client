@@ -16,29 +16,54 @@ type FormCallout = {
   posY?: string;
 };
 
-// The text detail behind the pins FittingMedia draws on the photos: same `callouts` field
-// array (React Hook Form keeps both in sync automatically), just as an editable list — number,
-// which photo it's pinned to, and the note itself. This is the "advanced" view: collapsed by
-// default once notes exist you'll want to skim them, but a click on a photo (which appends
-// here too) is normally enough on its own.
+// The text detail behind the pins FittingMedia draws on the photos: the same `callouts` field
+// array, just as an editable list — number, which photo it's pinned to, and the note itself. This
+// is the "advanced" view: collapsed by default; once notes exist you'll want to skim them, but a
+// click on a photo (which appends here too) is normally enough on its own.
+//
+// «REACT HOOK FORM ДЕРЖИТ ОБА СПИСКА В СОГЛАСИИ САМ» — ЗДЕСЬ СТОЯЛО ИМЕННО ЭТО, И ЭТО НЕПРАВДА.
+// Замерено на стенде: пин, поставленный на фотографии, НЕ появлялся в этом списке — счётчик так и
+// говорил «fit notes (4)» после пятого пина. Собственные мутаторы `useFieldArray` (`append`,
+// `remove`) до второго экземпляра на том же имени не доходят вообще. Поэтому состав правится
+// ТОЛЬКО через `writeCallouts` (setValue по имени массива), а `fields` остаются здесь ровно
+// источником устойчивых ключей — значения читаются живыми.
 export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_MediaFull> }) {
-  const { control, setValue } = useFormContext<FittingFormData>();
-  const { fields, append, remove } = useFieldArray({ control, name: 'callouts' });
+  const { control, setValue, getValues } = useFormContext<FittingFormData>();
+  const { fields } = useFieldArray({ control, name: 'callouts' });
   const mediaIds = (useWatch({ control, name: 'mediaIds' }) ?? []) as number[];
+  // ЖИВЫЕ ЗНАЧЕНИЯ, А НЕ `fields`. `fields` — СНИМОК состава на момент последней пересборки
+  // массива, и точечная запись (перепривязка пина к другому снимку, снятие пина при удалении
+  // фотографии) в него не попадает: заголовок продолжал называть прежнюю фотографию, пока сам
+  // селект под ним уже показывал новую. `fields` остаются только источником устойчивых ключей.
+  const values = (useWatch({ control, name: 'callouts' }) ?? []) as FormCallout[];
   const [open, toggle] = useDisclosure(fields.length > 0);
+
+  // Правка СОСТАВА — только через имя массива: собственные мутаторы `useFieldArray` не доходят до
+  // второго экземпляра на том же имени (он живёт в галерее), и заметка, заведённая здесь, не
+  // появлялась пином на фотографии, а удалённая здесь — не исчезала с неё.
+  const writeCallouts = (next: FormCallout[]) =>
+    setValue('callouts', next as FittingFormData['callouts'], { shouldDirty: true });
 
   const imageUrl = (id: number) => {
     const f = mediaById.get(id);
     return f?.media?.fullSize?.mediaUrl || f?.media?.thumbnail?.mediaUrl || '';
   };
-  // Only count photos that actually resolved to a media object, so a stale id never gets a
-  // "photo #N" label or shows up as a pin target.
-  const views = mediaIds.filter((id) => !!imageUrl(id));
+  // ТОТ ЖЕ РЯД И ТА ЖЕ НУМЕРАЦИЯ, ЧТО В ГАЛЕРЕЕ. Здесь стоял фильтр по разрешённому адресу, и от
+  // него ломалось ровно то, ради чего список существует: неразрешённая фотография выпадала из
+  // ряда, СДВИГАЯ номера всех следующих (заметка на третьем снимке подписывалась «photo #2»), а
+  // сама подписывалась «photo #0» с пустым селектом — то есть выглядела сломанной, хотя пин
+  // стоял на месте. Номер снимка — это позиция в `mediaIds`, и другого определения у него нет.
+  const views = mediaIds;
   const viewIndex = (id: number) => views.indexOf(id) + 1;
 
   const pinOptions = [
     { value: 0, label: '— unanchored —' },
-    ...views.map((id, i) => ({ value: id, label: `photo #${i + 1}` })),
+    ...views.map((id, i) => ({
+      value: id,
+      // Неразрешённый снимок остаётся законной мишенью пина: указание на нём живо, и увести его
+      // отсюда должно быть можно — но выбирать вслепую человека заставлять нельзя.
+      label: imageUrl(id) ? `photo #${i + 1}` : `photo #${i + 1} · address not resolved`,
+    })),
   ];
 
   return (
@@ -65,7 +90,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
             </Text>
           ) : (
             fields.map((f, index) => {
-              const pinnedTo = (f as FormCallout).mediaId ?? 0;
+              const pinnedTo = values[index]?.mediaId ?? 0;
               return (
                 <div key={f.id} className='flex flex-col gap-2'>
                   <GroupLabel
@@ -75,14 +100,27 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                         type='button'
                         variant='secondary'
                         aria-label='remove fit note'
-                        onClick={() => remove(index)}
+                        onClick={() =>
+                          writeCallouts(
+                            ((getValues('callouts') ?? []) as FormCallout[]).filter(
+                              (_, ci) => ci !== index,
+                            ),
+                          )
+                        }
                       >
                         ✕
                       </Button>
                     }
                   >
                     {`fit note ${index + 1}${
-                      pinnedTo > 0 ? ` · photo #${viewIndex(pinnedTo)}` : ' · unanchored'
+                      pinnedTo <= 0
+                        ? ' · unanchored'
+                        : viewIndex(pinnedTo) > 0
+                          ? ` · photo #${viewIndex(pinnedTo)}`
+                          : // Указание помнит снимок, которого в примерке БОЛЬШЕ НЕТ. «photo #0»
+                            // читалось как поломка нумерации; на деле это открепление, и назвать
+                            // его надо словом — иначе заметку не найти и не переприкрепить.
+                            ' · photo detached'
                     }`}
                   </GroupLabel>
                   <div className='grid grid-cols-1 gap-2 lg:grid-cols-2'>
@@ -94,7 +132,7 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                         number
                       </Text>
                       <Text variant='label' className='tabular-nums'>
-                        {(f as FormCallout).number ?? index + 1}
+                        {values[index]?.number ?? index + 1}
                       </Text>
                     </div>
                     <Controller
@@ -144,17 +182,23 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
             type='button'
             variant='main'
             className='uppercase'
-            onClick={() =>
+            onClick={() => {
               // max+1, not length+1: after a mid-list delete, length+1 collides with an existing
               // number — and the number is read-only, so a duplicate can't be fixed by hand.
-              append({
-                number: Math.max(0, ...fields.map((f) => (f as FormCallout).number ?? 0)) + 1,
-                note: '',
-                mediaId: 0,
-                posX: '',
-                posY: '',
-              })
-            }
+              // Считается по ЖИВЫМ значениям: `fields` — снимок, и после правки состава из
+              // галереи он назвал бы номер, который уже занят.
+              const current = (getValues('callouts') ?? []) as FormCallout[];
+              writeCallouts([
+                ...current,
+                {
+                  number: Math.max(0, ...current.map((c) => c.number ?? 0)) + 1,
+                  note: '',
+                  mediaId: 0,
+                  posX: '',
+                  posY: '',
+                },
+              ]);
+            }}
           >
             add fit note
           </Button>

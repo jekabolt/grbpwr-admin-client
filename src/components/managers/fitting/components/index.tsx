@@ -6,6 +6,7 @@ import {
   useCreateFitting,
   useUpdateFitting,
 } from 'components/managers/fittings/components/useFittingQuery';
+import { useMediaMap } from 'components/managers/media/utils/useMediaQuery';
 import { ModelMeasurementsView } from 'components/managers/model/components/measurements-view';
 import { useAllModels } from 'components/managers/models/components/useModelQuery';
 import { SamplePicker } from 'components/managers/tech-card/components/sample-picker';
@@ -136,13 +137,24 @@ export function FittingForm({
   // Resolved-media map shared by the photo carousel and the callouts editor, so a
   // freshly-picked photo can be annotated before the fitting is saved (saved
   // fitting.media + media picked this session).
+  //
+  // ТРЕТЬЯ СТУПЕНЬ — МЕДИАТЕКА, как у тех-карты (`details-editor`, `tech-pack-document`).
+  // GetFitting возвращает снимки разрешёнными, но это не единственный путь, которым id попадает
+  // на экран: AddFitting отвечает одним `{id}`, а UpdateFitting — пустым телом, поэтому между
+  // сохранением и приездом свежего GetFitting карта знает ровно то, что выбрано в этой сессии.
+  // Запасной путь стоит один запрос на пять минут (react-query отдаёт его из кэша) и убирает
+  // целый класс «снимок есть, а показать нечем».
   const [picked, setPicked] = useState<common_MediaFull[]>([]);
+  const libraryMap = useMediaMap();
   const mediaById = useMemo(() => {
     const m = new Map<number, common_MediaFull>();
+    // Порядок ступеней — от общего к частному: библиотека кладётся первой, ответ примерки и
+    // выбранное в этой сессии её перекрывают.
+    for (const [id, item] of libraryMap) m.set(id, item);
     for (const item of fitting?.media ?? []) if (item.id != null) m.set(item.id, item);
     for (const p of picked) if (p.id != null) m.set(p.id, p);
     return m;
-  }, [fitting?.media, picked]);
+  }, [fitting?.media, picked, libraryMap]);
 
   const patternsCount = (form.watch('patterns') ?? []).length;
 

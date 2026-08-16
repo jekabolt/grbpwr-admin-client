@@ -14,15 +14,21 @@ import { AnnotationToolbar, placingHint } from './annotation/toolbar';
 import { AnnotationZoomDialog } from './annotation/zoom-dialog';
 import { Button } from './button';
 import { Chip, ChipRow } from './chip';
+import { PLACEHOLDER_SURFACE } from './placeholder';
 import Text from './text';
 import { Toolbar, ToolbarSpacer } from './toolbar';
 
 // An annotate-in-place gallery. Two layouts over one set of bindings:
 //
-//   `focused`  ONE large image + a thumbnail carousel (the fitting photos).
-//   `grid`     EVERY view visible at once, each with its own pins (the tech-card sketch and
-//              moodboard). Comparing front to back is how a fitting conversation actually goes,
-//              so nothing should have to be clicked to see both.
+//   `grid`     EVERY view visible at once, each with its own pins — the tech-card sketch and
+//              moodboard AND the fitting photos. Comparing front to back is how both a tech
+//              review and a fitting conversation actually go, so nothing should have to be
+//              clicked to see both.
+//   `focused`  ONE large image + a thumbnail carousel. No caller left: the fitting used to stand
+//              here, and a second grammar on one component is what let the focused frame collapse
+//              to zero width unnoticed for a whole day. Kept because it is still a legitimate
+//              shape for a surface with one dominant image — but a new caller should ask whether
+//              it really wants a second grammar before reaching for it.
 //
 // It owns only the interaction grammar — the numbered callout PINS + hover/edit/✕ notes ride the
 // shared AnnotatedImage, so the phantom-callout hardening there (a ✕ press or an out-of-bounds
@@ -34,11 +40,19 @@ import { Toolbar, ToolbarSpacer } from './toolbar';
 // gallery driving the tech-card moodboard + technical sketch AND the fitting photos, each binding
 // its own React Hook Form fields, without this component knowing which form it sits in.
 
-/** One resolved, URL-bearing image the gallery shows. `key` is a stable React identity. */
+/**
+ * Одна картинка галереи. `key` — устойчивая личность для React.
+ *
+ * `full` МОЖЕТ НЕ РАЗРЕШИТЬСЯ, и это нормальное состояние, а не повод выбросить кадр. Вызывающие
+ * раньше фильтровали список по наличию адреса, и картинка, которую сервер не вернул, пропадала
+ * молча — вместе с указаниями, которые на ней стояли: их нельзя было ни прочесть, ни снять, а
+ * сохранялись они по-прежнему. Кадр без адреса остаётся в ряду, честно называет причину и
+ * держит свои пины (см. пустой `src` в AnnotationSurface).
+ */
 export type FocusedView = {
   key: string;
   mediaId: number;
-  full: common_MediaFull;
+  full?: common_MediaFull;
 };
 
 const mediaUrl = (full?: common_MediaFull): string =>
@@ -596,7 +610,16 @@ export function FocusedAnnotator({
                         : 'border-borderColor opacity-70 hover:opacity-100',
                     )}
                   >
-                    {video ? (
+                    {!url ? (
+                      // Кадр без адреса и в ленте остаётся кадром: полосатая заглушка вместо
+                      // значка битой картинки — по ней видно, что снимок есть, но показать нечем.
+                      <span
+                        style={PLACEHOLDER_SURFACE}
+                        className='flex size-full items-center justify-center text-nano leading-none text-labelColor'
+                      >
+                        ?
+                      </span>
+                    ) : video ? (
                       <video src={url} muted className='size-full object-cover' />
                     ) : (
                       <img src={url} alt='' draggable={false} className='size-full object-cover' />
