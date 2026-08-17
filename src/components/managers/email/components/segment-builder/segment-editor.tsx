@@ -30,7 +30,7 @@ import { usePreviewSegmentCount } from './usePreviewSegmentCount';
 
 function formatCount(n: number | undefined): string | undefined {
   if (typeof n !== 'number') return undefined;
-  return n.toLocaleString();
+  return n.toLocaleString('en-US');
 }
 
 export function SegmentEditor() {

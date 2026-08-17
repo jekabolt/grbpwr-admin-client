@@ -62,9 +62,7 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
   const showChart = newDays.length >= 3 || retDays.length >= 3;
 
   const chartDates = (retDays.length >= newDays.length ? retDays : newDays).map((p) =>
-    p.date
-      ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      : '',
+    p.date ? new Date(p.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
   );
 
   const chartOption: EChartsOption = {
@@ -172,13 +170,13 @@ export const NewVsReturningPanel: FC<NewVsReturningPanelProps> = ({ split }) => 
           <tbody>
             <tr className='border-b border-hairline'>
               <td className='p-2'>New</td>
-              <GridCell value={newOrders.value.toLocaleString()} />
+              <GridCell value={newOrders.value.toLocaleString('en-US')} />
               <GridCell value={formatCurrency(newRevenue.value)} />
               <GridCell value={formatCurrency(newAov.value)} />
             </tr>
             <tr>
               <td className='p-2'>Returning</td>
-              <GridCell value={retOrders.value.toLocaleString()} />
+              <GridCell value={retOrders.value.toLocaleString('en-US')} />
               <GridCell value={formatCurrency(retRevenue.value)} />
               <GridCell value={formatCurrency(retAov.value)} />
             </tr>

@@ -45,7 +45,7 @@ function localInputToEpoch(local: string): number {
 function fmtTime(epoch: number | undefined): string {
   if (!epoch || epoch <= 0) return '—';
   try {
-    return new Date(epoch * 1000).toLocaleString(undefined, {
+    return new Date(epoch * 1000).toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
       hour: '2-digit',

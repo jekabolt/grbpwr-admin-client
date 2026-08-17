@@ -68,7 +68,7 @@ export function toNumber(v: number | string | undefined | null): number | undefi
 export function fmtInt(n: number | string | undefined): string {
   const v = toNumber(n);
   if (v === undefined) return '0';
-  return Math.round(v).toLocaleString();
+  return Math.round(v).toLocaleString('en-US');
 }
 
 // Backend rates are fractions in [0,1]; render as a percentage. Defensive against a

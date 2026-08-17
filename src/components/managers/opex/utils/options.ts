@@ -75,7 +75,7 @@ export function monthLabel(month: string): string {
   if (!y || !m) return month;
   // The Date is UTC midnight of the 1st; format in UTC too, or UTC-negative zones
   // render the previous month's name over this month's data.
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, {
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
     timeZone: 'UTC',
@@ -86,7 +86,7 @@ export function monthLabel(month: string): string {
 export function monthLabelShort(month: string): string {
   const [y, m] = month.split('-').map(Number);
   if (!y || !m) return month;
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, {
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
     timeZone: 'UTC',
@@ -97,7 +97,7 @@ export function monthLabelShort(month: string): string {
 export function monthMini(month: string): string {
   const [y, m] = month.split('-').map(Number);
   if (!y || !m) return month;
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(undefined, {
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', {
     month: 'short',
     timeZone: 'UTC',
   });

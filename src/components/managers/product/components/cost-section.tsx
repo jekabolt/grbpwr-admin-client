@@ -132,7 +132,7 @@ export function ProductCostSection({
           )}
           {updatedAt && (
             <Text variant='inactive' size='small'>
-              updated {new Date(updatedAt).toLocaleDateString()}
+              updated {new Date(updatedAt).toLocaleDateString('en-US')}
             </Text>
           )}
         </div>

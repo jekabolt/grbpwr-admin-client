@@ -49,9 +49,7 @@ export const TimeSeriesChart: FC<TimeSeriesChartProps> = ({
     valueFormat === 'number' ? parseDecimal(p.value) || (p.count ?? 0) : parseDecimal(p.value);
 
   const dates = (data ?? []).map((p) =>
-    p.date
-      ? new Date(p.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-      : '',
+    p.date ? new Date(p.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '',
   );
   const values = (data ?? []).map(getValue);
   const counts = (data ?? []).map((p) => p.count ?? 0);

@@ -14,7 +14,7 @@ import Text from 'ui/components/text';
 import { useDeleteSegment, useSegments } from './components/useCampaign';
 
 function formatCount(n: number | undefined): string | undefined {
-  return typeof n === 'number' ? n.toLocaleString() : undefined;
+  return typeof n === 'number' ? n.toLocaleString('en-US') : undefined;
 }
 
 // last_count_at is int64, which the grpc-gateway marshaler emits as a JSON string
@@ -24,7 +24,7 @@ function formatWhen(epochSeconds: number | string | undefined): string | undefin
   if (!n || Number.isNaN(n) || n <= 0) return undefined;
   const d = new Date(n * 1000);
   if (Number.isNaN(d.getTime())) return undefined;
-  return d.toLocaleDateString();
+  return d.toLocaleDateString('en-US');
 }
 
 function SegmentCard({
