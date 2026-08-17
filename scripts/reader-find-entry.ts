@@ -7,6 +7,7 @@ export {
   findInText,
   hasTextLayer,
   isReadablePdf,
+  pageForSpread,
   pageOfHit,
   queryPattern,
   sliceMatch,

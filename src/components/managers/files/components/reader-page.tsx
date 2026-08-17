@@ -10,6 +10,9 @@ export interface PageHit extends Span {
   active: boolean;
 }
 
+/** Потолок отметок на одну страницу. Текущее совпадение сверх него рисуется всегда. */
+const MAX_BOXES_PER_PAGE = 300;
+
 interface Box {
   left: number;
   top: number;
@@ -69,21 +72,26 @@ export function ReaderPage({
       setSize({ w, h });
 
       const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      renderTask = page.render({
-        canvasContext: ctx,
-        viewport,
-        transform: density === 1 ? undefined : [density, 0, 0, density, 0, 0],
-      });
-      await renderTask.promise;
-      if (cancelled) return;
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        renderTask = page.render({
+          canvasContext: ctx,
+          viewport,
+          transform: density === 1 ? undefined : [density, 0, 0, density, 0, 0],
+        });
+        // Растр и текстовый слой строятся НЕЗАВИСИМО, и это не оптимизация. Ждать растр перед
+        // текстом значило бы: страница, которая не отрисовалась, НИКОГДА не получит текстового
+        // слоя — а счётчик всё равно считает на ней совпадения. Получилось бы «3 из 5» над
+        // белым листом без единой отметки, и само по себе это уже не починится.
+        renderTask.promise.catch(() => {});
+      }
 
       container.replaceChildren();
+      // Размеры слоя ставит сам pdfjs в конструкторе TextLayer (setLayerDimensions), причём
+      // НЕПОВЁРНУТЫМИ величинами плюс атрибут data-main-rotation. Наши width/height здесь были
+      // бы затёрты через две строки, поэтому их тут нет — доворот живёт в global.css.
       container.style.setProperty('--scale-factor', String(scale));
-      container.style.width = `${w}px`;
-      container.style.height = `${h}px`;
       const content = await page.getTextContent();
       if (cancelled) return;
       const pdfjs = await loadPdfjs();
@@ -124,6 +132,10 @@ export function ReaderPage({
     const base = container.getBoundingClientRect();
     const out: Box[] = [];
     for (const hit of hits) {
+      // Однобуквенный запрос по плотной странице даёт тысячи отметок — рисовать их все значит
+      // подвесить вкладку на каждом нажатии клавиши. Текущее совпадение рисуется ВСЕГДА:
+      // счётчик считает совпадения, а не прямоугольники, и врать он от этого не начинает.
+      if (!hit.active && out.length >= MAX_BOXES_PER_PAGE) continue;
       for (const slice of sliceMatch(state.page, hit)) {
         const node = state.divs[slice.run]?.firstChild;
         if (!node || node.nodeType !== Node.TEXT_NODE) continue;

@@ -432,3 +432,17 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
 .pdf-text-layer span::selection {
   background: rgba(0, 0, 0, 0.25);
 }
+/* Страница с /Rotate. pdfjs сам ставит сюда data-main-rotation и меряет слой НЕПОВЁРНУТЫМИ
+   размерами (rawDims), а доворачивает его вот этим правилом — в pdf_viewer.css оно глобальное,
+   поэтому при переносе стилей его легко не заметить. Без него на альбомной или сканированной
+   странице текстовый слой лежит поперёк растра, и КАЖДЫЙ прямоугольник поиска встаёт мимо
+   слова — молча, потому что растр при этом выглядит правильно. */
+.pdf-text-layer[data-main-rotation='90'] {
+  transform: rotate(90deg) translateY(-100%);
+}
+.pdf-text-layer[data-main-rotation='180'] {
+  transform: rotate(180deg) translate(-100%, -100%);
+}
+.pdf-text-layer[data-main-rotation='270'] {
+  transform: rotate(270deg) translateX(-100%);
+}

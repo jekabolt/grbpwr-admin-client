@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { PDFDocumentProxy } from 'pdfjs-dist';
+import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
 import {
   buildPageText,
   hasTextLayer,
@@ -83,17 +83,19 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
     let cancelled = false;
     setStatus('loading');
     setIndex(null);
-    let opened: PDFDocumentProxy | null = null;
+    // Явно, а не «оно само»: старый документ рушится в уборке этого же эффекта, и пока `doc`
+    // на него показывает, рельс и страница держат мёртвый PDFDocumentProxy.
+    setDoc(null);
+    let task: PDFDocumentLoadingTask | null = null;
 
     (async () => {
       const pdfjs = await loadPdfjs();
-      const task = pdfjs.getDocument({ url });
+      task = pdfjs.getDocument({ url });
       const loaded = await task.promise;
       if (cancelled) {
         loaded.destroy();
         return;
       }
-      opened = loaded;
       setDoc(loaded);
       setStatus('ready');
 
@@ -113,7 +115,10 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
 
     return () => {
       cancelled = true;
-      opened?.destroy();
+      // Рушим ЗАДАЧУ, а не документ: если ссылку обновили, пока файл ещё качается, документа
+      // просто нет — и старая закачка вместе с разбором в воркере доедет до конца впустую.
+      // destroy() задачи закрывает и её, и уже полученный из неё документ.
+      void task?.destroy().catch(() => {});
     };
   }, [url]);
 

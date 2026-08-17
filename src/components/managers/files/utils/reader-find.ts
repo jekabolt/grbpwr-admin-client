@@ -116,6 +116,29 @@ export function stepPage(page: number, spread: boolean, total: number, dir: 1 | 
   return Math.min(Math.max(1, Math.trunc(page) + dir * by), total);
 }
 
+/**
+ * На какую страницу встать, чтобы показать совпадение `target`, не сломав разворот.
+ *
+ * Без этого ↓ и ‹/› расходятся: ‹/› честно листает через два и держит пары, а прыжок к
+ * совпадению ставил бы страницу как есть — пары съезжали бы на одну, и уже показанная слева
+ * страница уезжала бы с экрана без причины.
+ */
+export function pageForSpread(
+  target: number,
+  current: number,
+  spread: boolean,
+  total: number,
+): number {
+  if (total <= 0) return 1;
+  const t = Math.min(Math.max(1, Math.trunc(target)), total);
+  if (!spread) return t;
+  // Уже видно — не двигаемся вовсе.
+  if (visiblePages(current, true, total).includes(t)) return current;
+  // Левая страница разворота держит чётность текущей — ту же, что задаёт stepPage.
+  const aligned = (t - current) % 2 === 0 ? t : t - 1;
+  return aligned >= 1 ? aligned : t;
+}
+
 export interface HitSync {
   /** Номер текущего совпадения, 1-based. 0 — совпадений нет вообще. */
   hit: number;

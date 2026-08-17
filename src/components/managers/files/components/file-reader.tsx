@@ -11,6 +11,7 @@ import {
   countsByPage,
   findAcrossPages,
   isReadablePdf,
+  pageForSpread,
   pageOfHit,
   stepHit,
   stepPage,
@@ -67,7 +68,11 @@ export function FileReaderModal({ id, onClose }: { id: number; onClose: () => vo
           }}
           onKeyDown={(e) => {
             if (!readable) return;
-            if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== 'f') return;
+            if (!(e.metaKey || e.ctrlKey)) return;
+            // code, а не только key: на русской раскладке физическая F приходит как «а», и по
+            // одному key ⌘F проваливался бы мимо — открывалась бы НАТИВНАЯ строка поиска
+            // браузера, которая по нарисованному в canvas документу не находит ничего.
+            if (e.code !== 'KeyF' && e.key.toLowerCase() !== 'f') return;
             e.preventDefault();
             setFindOpen(true);
             setFindFocus((n) => n + 1);
@@ -186,16 +191,25 @@ function PdfStage({
     // Текст всего документа нужен только поиску — и строится ровно в тот момент, когда его
     // открыли: getTextContent по трёхсотстраничному каталогу стоит секунд.
     buildIndex();
-    // focus перед select: select() сам по себе не переносит фокус во всех браузерах, и тогда
-    // ⌘F открывал бы строку, в которую нельзя печатать.
+  }, [findOpen, buildIndex]);
+
+  // sampleHasText в зависимостях не для красоты: у каталога со сканированной обложкой проба по
+  // первым страницам сначала говорит «текста нет», рисуется плашка — и поля ввода в этот момент
+  // НЕТ. Когда индекс дочитывает документ и плашка сменяется полем, сфокусировать его больше
+  // некому, и человек печатает в пустоту.
+  useEffect(() => {
+    if (!findOpen || !sampleHasText) return;
+    // focus перед select: select() сам по себе не переносит фокус во всех браузерах.
     inputRef.current?.focus();
     inputRef.current?.select();
-  }, [findOpen, findFocus, buildIndex]);
+  }, [findOpen, findFocus, sampleHasText]);
 
   const texts = useMemo(() => index?.map((p) => p.text) ?? null, [index]);
+  // findOpen в зависимостях: закрытая строка поиска обязана убрать и подсветку. Иначе ✕ прячет
+  // только панель, отметки остаются на странице, и снять их нечем — поля для очистки уже нет.
   const matches = useMemo(
-    () => (texts && query.trim() ? findAcrossPages(texts, query) : []),
-    [texts, query],
+    () => (findOpen && texts && query.trim() ? findAcrossPages(texts, query) : []),
+    [findOpen, texts, query],
   );
   const counts = useMemo(() => countsByPage(matches), [matches]);
   const shown = useMemo(() => visiblePages(page, spread, numPages), [page, spread, numPages]);
@@ -211,13 +225,18 @@ function PdfStage({
     return map;
   }, [matches, sync.hit, sync.onScreen]);
 
+  const showPage = (target: number) => setPage(pageForSpread(target, page, spread, numPages));
+
   const goHit = (dir: 1 | -1) => {
     if (!matches.length) return;
-    const next = stepHit(matches.length, sync.hit, dir);
+    // Если текущее совпадение НЕ на экране, первое нажатие показывает именно его, а не
+    // перескакивает через него. Иначе ↓ и подпись «1 из 5» говорят о разных совпадениях:
+    // человек читает «первое», жмёт «дальше» и оказывается на втором, не увидев первого.
+    const next = sync.onScreen ? stepHit(matches.length, sync.hit, dir) : sync.hit;
     setHit(next);
     // Страница идёт ЗА совпадением — это вторая половина синхронизации: syncHitToPages
     // подтягивает счётчик к странице, а здесь страница подтягивается к счётчику.
-    setPage(pageOfHit(matches, next));
+    showPage(pageOfHit(matches, next));
   };
 
   const counter = () => {
@@ -327,7 +346,7 @@ function PdfStage({
             {/* Совпадение осталось на другой странице — счётчик обязан это сказать, иначе
                 «3 из 5» указывает на подсветку, которой на экране нет. */}
             {!sync.onScreen && matches.length > 0 && (
-              <Button size='xs' variant='secondary' onClick={() => setPage(sync.page)}>
+              <Button size='xs' variant='secondary' onClick={() => showPage(sync.page)}>
                 оно на стр. {sync.page} — показать
               </Button>
             )}
@@ -365,6 +384,9 @@ function PdfStage({
             <Text size='micro' variant='label' className='max-w-[64ch]'>
               в этом pdf нет текстового слоя — страницы вставлены картинками или шрифты переведены
               в кривые. распознавание текста мы не делаем.
+              {/* Приговор вынесен по первым страницам. Если дальше текст найдётся, плашка
+                  сменится полем поиска — и человек должен понимать, почему она сменилась. */}
+              {indexing ? ' проверяем остальные страницы…' : ''}
             </Text>
             <ToolbarSpacer />
             <Button size='xs' variant='secondary' onClick={() => onFindOpenChange(false)}>

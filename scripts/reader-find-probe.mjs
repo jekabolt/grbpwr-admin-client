@@ -196,6 +196,56 @@ console.log('\n3e · visiblePages / stepPage: разворот');
   eq(m.stepPage(6, true, TOTAL, 1), 6, 'вперёд с последней некуда');
 }
 
+console.log('\n3f · pageForSpread: прыжок к совпадению не ломает разворот');
+{
+  eq(m.pageForSpread(5, 1, false, TOTAL), 5, 'без разворота — просто нужная страница');
+  // Совпадение уже видно в текущем развороте: двигаться некуда, и двигаться НЕЛЬЗЯ —
+  // иначе страница слева уезжает с экрана без причины.
+  eq(m.pageForSpread(4, 3, true, TOTAL), 3, 'цель уже в развороте [3,4] — страница не меняется');
+  eq(m.pageForSpread(3, 3, true, TOTAL), 3, 'цель и есть текущая — тоже без движения');
+  // Чётность левой страницы держится той же, что задаёт stepPage, иначе пары съезжают на одну.
+  eq(m.pageForSpread(6, 1, true, TOTAL), 5, 'цель 6 при развороте от 1 — встаём на 5, чтобы [5,6]');
+  eq(m.pageForSpread(5, 2, true, TOTAL), 4, 'цель 5 при развороте от 2 — встаём на 4, чтобы [4,5]');
+  eq(m.pageForSpread(1, 2, true, TOTAL), 1, 'у первой страницы отступать некуда — не уходим в ноль');
+  eq(m.pageForSpread(99, 1, true, TOTAL), 5, 'цель за пределами зажимается и всё равно выравнивается');
+}
+
+console.log('\n3g · ИНВАРИАНТ: куда бы ни прыгнули, цель ВИДНА');
+{
+  let broken = 0, checked = 0;
+  for (const spread of [false, true]) {
+    for (let current = 1; current <= TOTAL; current++) {
+      for (let target = 1; target <= TOTAL; target++) {
+        const landed = m.pageForSpread(target, current, spread, TOTAL);
+        checked++;
+        if (!m.visiblePages(landed, spread, TOTAL).includes(target)) broken++;
+      }
+    }
+  }
+  ck(broken === 0, `цель видна после прыжка во всех ${checked} сочетаниях`,
+    broken ? `${broken} провалов` : '');
+}
+
+console.log('\n3h · «показать» и ↓ говорят об ОДНОМ совпадении');
+{
+  // Ловушка, ради которой это здесь: совпадение не на экране, счётчик показывает «1 из 6».
+  // Если ↓ считает от sync.hit слепо, оно уедет на второе — первое человек так и не увидит.
+  const shown = m.visiblePages(5, false, TOTAL);       // страница 5, совпадений на ней нет
+  const s = m.syncHitToPages(DOC, 1, shown);
+  ck(s.onScreen === false && s.hit === 1, 'исходное состояние: «1 из 6», но не на экране',
+    JSON.stringify(s));
+  // Так теперь считает goHit: пока не на экране — сначала ПОКАЗАТЬ, а не шагнуть.
+  const next = s.onScreen ? m.stepHit(DOC.length, s.hit, 1) : s.hit;
+  eq(next, 1, 'первое нажатие ↓ остаётся на том же совпадении, что названо в счётчике');
+  const landed = m.pageForSpread(m.pageOfHit(DOC, next), 5, false, TOTAL);
+  eq(landed, 2, 'и уводит на страницу этого совпадения');
+  const after = m.syncHitToPages(DOC, next, m.visiblePages(landed, false, TOTAL));
+  eq(after, { hit: 1, page: 2, onScreen: true }, 'после нажатия оно на экране и номер не изменился');
+  // Второе нажатие уже шагает дальше.
+  const second = after.onScreen ? m.stepHit(DOC.length, after.hit, 1) : after.hit;
+  eq(second, 2, 'второе нажатие ↓ идёт к следующему совпадению');
+}
+
 // ── 4. РАСКЛАДКА МАТЧА ПО КУСКАМ (по ней рисуется подсветка) ──────────────────────────────
 
 console.log('\n4 · sliceMatch: подсветка не залезает в перенос и не теряет куски');
