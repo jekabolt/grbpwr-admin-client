@@ -6,6 +6,14 @@ import {
   common_FittingVerdict,
 } from 'api/proto-http/admin';
 import { ZERO_TIMESTAMP } from 'components/managers/fittings/components/utils';
+import {
+  ANNOTATION_COLOR_KEYS,
+  ANNOTATION_KIND_KEYS,
+  annotationColorFromWire,
+  annotationColorToWire,
+  annotationKindFromWire,
+  annotationKindToWire,
+} from 'ui/components/annotation/wire';
 import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import { z } from 'zod';
 import { normalizeFittingZone } from './zone-options';
@@ -29,6 +37,13 @@ const fittingPatternSchema = z.object({
   sizeBytes: z.number().optional().default(0),
 });
 
+// Якорь фигуры — доли кадра 0..1, СТРОКОЙ: тот же decimal, что на проводе и в колонке, круговой
+// рейс без округлений. То же правило, что у выносок тех-карты.
+const fittingAnnotationPointSchema = z.object({
+  x: z.string().default('0'),
+  y: z.string().default('0'),
+});
+
 // A numbered marker pinned onto a fitting photo, flagging what is wrong with the
 // fit at a point on the image. posX/posY are normalised (0..1) strings while in
 // the form (like the tech-card callouts) — converted to Decimal at the boundary.
@@ -38,6 +53,17 @@ const fittingCalloutSchema = z.object({
   mediaId: z.number().int().optional().default(0), // FK media(id); 0 = unanchored
   posX: z.string().optional().default(''),
   posY: z.string().optional().default(''),
+  // ГЕОМЕТРИЯ УКАЗАНИЯ (0319) — ТОТ ЖЕ реестр видов, что у эскиза, потому что ремесло одно:
+  // мерка между двумя точками, скобка над участком, обведённая зона заломов. `posX/posY`
+  // сохраняют смысл «где стоит нумерованный маркер» (на него ссылается номером замечание), а
+  // `points` держит якоря фигуры и у пина пуст.
+  kind: z.enum(ANNOTATION_KIND_KEYS).optional().default('pin'),
+  points: z.array(fittingAnnotationPointSchema).optional().default([]),
+  color: z.enum(ANNOTATION_COLOR_KEYS).optional().default(''),
+  // Пунктир и штриховка входят в АТОМАРНУЮ группу присутствия вместе с `kind`: бандл,
+  // промолчавший про вид, молчит про всю фигуру, и сервер несёт хранимую дальше целиком.
+  dashed: z.boolean().optional().default(false),
+  filled: z.boolean().optional().default(false),
 });
 
 // The structured "what to change" work list a fitting produces (S26). target is the change CATEGORY;
@@ -202,6 +228,17 @@ export function mapFittingToForm(fitting: common_Fitting): FittingFormData {
       mediaId: c.mediaId || 0,
       posX: decimalToInput(c.posX),
       posY: decimalToInput(c.posY),
+      // Вид приезжает ВСЕГДА (сервер отдаёт присутствующее поле), но `annotationKindFromWire`
+      // всё равно падает в пин на неизвестном значении: примерка, записанная до 0319, обязана
+      // прочитаться тем, чем была.
+      kind: annotationKindFromWire(c.kind),
+      points: (c.points ?? []).map((pt) => ({
+        x: decimalToInput(pt.x) || '0',
+        y: decimalToInput(pt.y) || '0',
+      })),
+      color: annotationColorFromWire(c.color),
+      dashed: !!c.dashed,
+      filled: !!c.filled,
     })),
     roundNumber: insert?.roundNumber || 0,
     // '' on the wire → the non-empty 'undecided' sentinel the Select needs
@@ -265,7 +302,11 @@ export function mapFormToFittingInsert(
         downloadUrl: undefined,
       })),
     mediaIds: data.mediaIds ?? [],
-    // note is required by the contract — drop markers left un-annotated on save.
+    // ЗАПИСКА ОБЯЗАТЕЛЬНА, И ЭТО ПРАВИЛО СЕРВЕРА, А НЕ ВКУС: dto отвечает «fitting callout note is
+    // required» и роняет сохранение ВСЕЙ примерки — вместе с вердиктом и замечаниями. Поэтому
+    // безымянное указание отсеивается здесь, а не улетает на провод; ценой того, что обведённая, но
+    // не подписанная зона не сохраняется. Молчать об этом нельзя: список заметок помечает такую
+    // строку словами «без текста не сохранится» (fitting-callouts.tsx).
     callouts: (data.callouts ?? [])
       .filter((c) => c.note?.trim())
       .map((c, i) => ({
@@ -274,6 +315,19 @@ export function mapFormToFittingInsert(
         mediaId: c.mediaId || 0,
         posX: inputToDecimal(c.posX),
         posY: inputToDecimal(c.posY),
+        // ВИД ШЛЁТСЯ ВСЕГДА, круговым рейсом прочитанного. Присутствие поля и есть заявление «этот
+        // бандл про геометрию знает»: сервер, увидев молчание, несёт хранимую геометрию дальше — и
+        // переносит её по номеру + снимку + ОБЕИМ координатам маркера, поэтому промолчать здесь
+        // означало бы заморозить чужие фигуры навсегда. Группа атомарна: вместе с видом уезжают
+        // якоря, цвет, пунктир и штриховка — вид без якорей достался бы точками прошлой правки.
+        kind: annotationKindToWire(c.kind),
+        points: (c.points ?? []).map((pt) => ({
+          x: inputToDecimal(pt.x),
+          y: inputToDecimal(pt.y),
+        })),
+        color: annotationColorToWire(c.color),
+        dashed: !!c.dashed,
+        filled: !!c.filled,
       })),
     // §4 round tracking (form-managed). roundNumber 0 = server auto-assigns per tech card;
     // the 'undecided' sentinel maps back to '' on the wire.
