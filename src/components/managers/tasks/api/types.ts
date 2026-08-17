@@ -1,3 +1,5 @@
+import type { AnnotationValue } from 'ui/components/annotation/canvas';
+
 // UI-facing view model for the kanban. Mirrors the generated client
 // (api/proto-http/admin: common_Task / common_TaskInsert @ proto 26a19e8) but
 // with required, defaulted fields (the generated types are all-optional) so
@@ -30,6 +32,18 @@ export type TaskPriority =
   | 'TASK_PRIORITY_MEDIUM'
   | 'TASK_PRIORITY_HIGH'
   | 'TASK_PRIORITY_URGENT';
+
+// УКАЗАНИЯ, НАРИСОВАННЫЕ НА ОДНОМ ВЛОЖЕНИИ. Тип значения — общий примитив указания
+// (`ui/components/annotation/canvas`): и снимок шага тех-карты, и вложение задачи хранят одно и то
+// же, потому что рисует их одна поверхность одним жестом.
+//
+// `pieceLineKey`/`pieceLineKeys` у задачи всегда пусты и СЕРВЕРОМ ОЧИЩАЮТСЯ: деталей кроя у
+// карточки нет, выбрать их здесь нечем, а ссылка на деталь чужой тех-карты — это висящий ключ.
+// Поле остаётся в типе только потому, что тип общий.
+export interface TaskMediaAnnotations {
+  mediaId: number;
+  annotations: AnnotationValue[];
+}
 
 // Resolved attachment (mapped from common_MediaFull) for card/drawer display.
 export interface TaskMedia {
@@ -75,6 +89,10 @@ export interface TaskInsert {
   fittingId: number; // примерка / try-on session (GetFitting)
   productionRunId: number; // производственная партия / production run (GetProductionRun); 0 = none
   sampleId: number; // образец / sample (GetSample); 0 = none (new-flow NF link)
+  // УКАЗАНИЯ НА ВЛОЖЕНИЯХ — ЧАСТЬ СОДЕРЖИМОГО, а не отдельный ресурс: сервер заменяет их ЦЕЛИКОМ
+  // вместе с карточкой, ровно как mediaIds. Присутствия у repeated-поля нет, поэтому клиент обязан
+  // слать то, что прочитал, — иначе первое же сохранение карточки стёрло бы всё нарисованное.
+  mediaAnnotations: TaskMediaAnnotations[];
 }
 
 // One resolved library attachment: enough to list and open it, nothing more.
@@ -162,6 +180,7 @@ export function emptyTaskInsert(): TaskInsert {
     fittingId: 0,
     productionRunId: 0,
     sampleId: 0,
+    mediaAnnotations: [],
   };
 }
 

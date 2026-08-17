@@ -4,7 +4,20 @@ import type {
   common_Task,
   common_TaskChecklistItem,
   common_TaskComment,
+  common_TaskInsert,
+  common_TaskMediaAnnotations,
+  common_TechCardAnnotation,
 } from 'api/proto-http/admin';
+import type { AnnotationValue } from 'ui/components/annotation/canvas';
+import {
+  annotationColorFromWire,
+  annotationColorToWire,
+  annotationKindFromWire,
+  annotationKindToWire,
+  type AnnotationColorKey,
+  type AnnotationKindKey,
+} from 'ui/components/annotation/wire';
+import { decimalToInput, inputToDecimal } from 'utils/decimal';
 import {
   ListTasksFilter,
   Task,
@@ -13,6 +26,7 @@ import {
   TaskComment,
   TaskInsert,
   TaskMedia,
+  TaskMediaAnnotations,
   TaskStatus,
 } from './types';
 
@@ -50,6 +64,14 @@ export function rememberMedia(items: TaskMedia[]) {
 export function resolveMedia(ids: number[]): TaskMedia[] {
   return ids.map((id) => mediaCache.get(id)).filter((m): m is TaskMedia => Boolean(m));
 }
+/**
+ * То же самое, но БЕЗ отсева нерезолвленных: неизвестный id остаётся на своём месте, с одним лишь
+ * номером. Нужно везде, где важна ПОЗИЦИЯ вложения в карточке — ссылки в тексте (`task-text.tsx`)
+ * называют вложение его номером, и выпавшая из середины строка сдвинула бы все номера за ней.
+ */
+export function orderedMedia(ids: number[]): TaskMedia[] {
+  return ids.map((id) => mediaCache.get(id) ?? { id });
+}
 
 // ---------------------------------------------------------------------------
 // Generated → UI mapping
@@ -60,6 +82,73 @@ function mapMedia(m: common_MediaFull): TaskMedia {
     thumbnail: m.media?.thumbnail?.mediaUrl,
     fullSize: m.media?.fullSize?.mediaUrl,
     blurhash: m.media?.blurhash,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// УКАЗАНИЯ НА ВЛОЖЕНИЯХ: провод ↔ форма.
+//
+// Координаты живут СТРОКАМИ по обе стороны — тот же decimal, что в JSON-колонке: круговой рейс
+// без округлений. Вид и цвет разрешаются общим словарём (`ui/components/annotation/wire`), тем же,
+// которым пользуется снимок шага тех-карты.
+// ---------------------------------------------------------------------------
+function mapAnnotation(a: common_TechCardAnnotation): AnnotationValue {
+  return {
+    kind: annotationKindFromWire(a.kind),
+    points: (a.points ?? []).map((p) => ({
+      x: decimalToInput(p.x) || '0',
+      y: decimalToInput(p.y) || '0',
+    })),
+    text: a.text ?? '',
+    labelX: decimalToInput(a.labelX) || '0',
+    labelY: decimalToInput(a.labelY) || '0',
+    color: annotationColorFromWire(a.color),
+    dashed: !!a.dashed,
+    filled: !!a.filled,
+    // Деталей кроя у задачи нет: сервер эти ключи очищает, и держать их в форме значило бы
+    // отправлять обратно то, чего он не принял.
+    pieceLineKey: '',
+    pieceLineKeys: [],
+  };
+}
+
+function mapMediaAnnotations(m: common_TaskMediaAnnotations): TaskMediaAnnotations {
+  return { mediaId: m.mediaId ?? 0, annotations: (m.annotations ?? []).map(mapAnnotation) };
+}
+
+function annotationToWire(a: AnnotationValue): common_TechCardAnnotation {
+  return {
+    kind: annotationKindToWire(a.kind as AnnotationKindKey),
+    points: (a.points ?? []).map((p) => ({ x: inputToDecimal(p.x), y: inputToDecimal(p.y) })),
+    text: (a.text ?? '').trim(),
+    labelX: inputToDecimal(a.labelX),
+    labelY: inputToDecimal(a.labelY),
+    color: annotationColorToWire(a.color as AnnotationColorKey),
+    dashed: !!a.dashed,
+    filled: !!a.filled,
+    pieceLineKey: '',
+    pieceLineKeys: [],
+  };
+}
+
+/**
+ * СОДЕРЖИМОЕ КАРТОЧКИ НА ПРОВОД. Раньше `TaskInsert` уходил в запрос как есть — он был
+ * структурно тем же самым. С указаниями это перестало быть правдой: у них координаты
+ * `google.type.Decimal`, а не строки, и вид с цветом — константы, а не ключи формы.
+ *
+ * НАБОР БЕЗ СВОЕЙ КАРТИНКИ НЕ УХОДИТ. Сервер такой набор отбрасывает молча (указание на снимке,
+ * снятом с карточки, нельзя ни увидеть, ни убрать), и отправлять его значило бы врать себе о том,
+ * что сохранилось. Отсев делается по ТОМУ ЖЕ списку вложений, который уезжает в этом же запросе.
+ */
+function taskInsertToWire(t: TaskInsert): common_TaskInsert {
+  return {
+    ...t,
+    mediaAnnotations: (t.mediaAnnotations ?? [])
+      .filter((m) => m.mediaId > 0 && t.mediaIds.includes(m.mediaId))
+      .map((m) => ({
+        mediaId: m.mediaId,
+        annotations: (m.annotations ?? []).map(annotationToWire),
+      })),
   };
 }
 
@@ -81,6 +170,7 @@ function mapInsert(i: common_Task['task']): TaskInsert {
     fittingId: i?.fittingId ?? 0,
     productionRunId: i?.productionRunId ?? 0,
     sampleId: i?.sampleId ?? 0,
+    mediaAnnotations: (i?.mediaAnnotations ?? []).map(mapMediaAnnotations),
   };
 }
 
@@ -178,9 +268,12 @@ export const tasksService: TasksService = {
     ),
 
   addTask: (content, board, status) =>
-    adminService.AddTask({ task: content, board, status }).then((r) => ({ id: r.id ?? 0 })),
+    adminService
+      .AddTask({ task: taskInsertToWire(content), board, status })
+      .then((r) => ({ id: r.id ?? 0 })),
 
-  updateTask: (id, content) => adminService.UpdateTask({ id, task: content }).then(() => undefined),
+  updateTask: (id, content) =>
+    adminService.UpdateTask({ id, task: taskInsertToWire(content) }).then(() => undefined),
 
   moveTask: (id, board, status, position) =>
     adminService.MoveTask({ id, board, status, position }).then(() => undefined),
