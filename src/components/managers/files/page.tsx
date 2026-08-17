@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { ROUTES, SECTION } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
+import { FilesDropOverlay } from './components/drop-overlay';
 import { FileCardModal } from './components/file-card-modal';
 import { FilesToolbar } from './components/files-toolbar';
 import { FileTile } from './components/file-tile';
+import { PasteIntakeModal } from './components/paste-intake-modal';
 import {
   EmptyLibraryState,
   EmptySearchState,
@@ -127,11 +130,12 @@ export default function FilesPage() {
     return () => clearTimeout(t);
   }, [searchInput, urlSearch, patch]);
 
-  // ОДНО ПРАВИЛО ТЕМ НА ВСЕ ВХОДЫ. Кнопка «загрузить» ставит пачку в ту же очередь и
-  // наследует ВСЕ выбранные чипы холста; при пустом выборе пачка уезжает в «разобрать».
+  // ТРИ ВХОДА, ОДНО ПРАВИЛО ТЕМ. Кнопка «загрузить», бросок и ⌘V ставят в одну очередь и
+  // наследуют ВСЕ выбранные чипы холста; при пустом выборе пачка уезжает в «разобрать».
   // Диалога загрузки больше нет: он держал очередь в своём состоянии и убивал отправку при
   // закрытии, а темы всё равно спрашивал ровно те, что уже выбраны на холсте.
   const pickerRef = useRef<HTMLInputElement>(null);
+  const [pasted, setPasted] = useState<File[]>([]);
 
   const topicsQuery = useFileTopics();
   const filesQuery = useLibraryFiles({ topicIds, untopiced, search: urlSearch, sort });
@@ -194,6 +198,11 @@ export default function FilesPage() {
   );
 
   const openPicker = () => pickerRef.current?.click();
+
+  // ⌘V ловится слушателем на document со стопкой приёмников (прецедент — медиа). Пока
+  // приёмная модалка открыта, повторный ⌘V ДОПИСЫВАЕТ в неё строку: вторая модалка поверх
+  // первой потеряла бы уже набранное имя.
+  usePasteFiles({ claims: writable }, (list) => setPasted((p) => [...p, ...list]));
 
   // Закрытие ЗАМЕЩАЕТ запись в истории. Иначе стек выглядит как [сетка, карточка, сетка], и
   // «назад» открывает ровно ту карточку, которую человек только что закрыл.
@@ -385,6 +394,35 @@ export default function FilesPage() {
             {total === undefined ? '' : ` из ${total}`}
           </Text>
         </div>
+      )}
+
+      {/* БРОСОК ПРИНИМАЕТ ВСЁ ОКНО — целиться некуда. Приёмник живёт и в режиме чтения: он
+          гасит бросок, чтобы браузер не ушёл по ссылке на файл, унеся вкладку с фильтром и
+          половиной очереди, и объясняет отказ словами. */}
+      <FilesDropOverlay
+        enabled={writable}
+        disabledNote={
+          mayWrite
+            ? 'включён режим чтения — переключите его в полосе сверху'
+            : 'нужно право files:write — попросите его у супер-админа'
+        }
+        topicLabels={chosenTopics.map((t) => t.name ?? '')}
+        onFiles={intake}
+      />
+
+      {/* ВСТАВКА ИЗ БУФЕРА СПРАШИВАЕТ ИМЯ. У картинки из буфера его нет, и без этого шага
+          библиотека набивается неотличимыми «image.png». */}
+      {pasted.length > 0 && (
+        <PasteIntakeModal
+          files={pasted}
+          topics={topics}
+          presetTopicIds={topicIds}
+          onCancel={() => setPasted([])}
+          onSubmit={(list, batch) => {
+            enqueue(list, batch);
+            setPasted([]);
+          }}
+        />
       )}
 
       {/* Полоса загрузки — фиксирована снизу и переживает и уход на другой экран раздела, и
