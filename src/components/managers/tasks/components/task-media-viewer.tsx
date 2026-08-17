@@ -1,3 +1,4 @@
+import { isVideo } from 'lib/features/filterContentType';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   indexOfPin,
@@ -55,7 +56,6 @@ export function useTaskMediaViewer({
   media,
   annotations,
   onChange,
-  onCommit,
   canWrite = false,
 }: {
   media: TaskMedia[];
@@ -66,12 +66,12 @@ export function useTaskMediaViewer({
    */
   onChange?: (next: TaskMediaAnnotations[]) => void;
   /**
-   * Диалог закрыт, и состав указаний отличается от того, каким его открыли. Владелец, у которого
-   * нет своей кнопки сохранения (страница карточки), пишет здесь; у формы её нет — там сохраняет
-   * общая кнопка модалки.
+   * Нет права записи — читать можно всё, писать нельзя ничего.
+   *
+   * СВОЕЙ ЗАПИСИ У ЭТОГО ХУКА НЕТ И НЕ ДОЛЖНО БЫТЬ. Рисуют там, где есть явная кнопка сохранения,
+   * то есть в форме правки: `UpdateTask` заменяет содержимое карточки ЦЕЛИКОМ, и запись «по
+   * закрытию просмотрщика» откатывала бы чужую правку описания, сделанную после последнего чтения.
    */
-  onCommit?: (next: TaskMediaAnnotations[]) => void;
-  /** Нет права записи — читать можно всё, писать нельзя ничего. */
   canWrite?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -104,15 +104,7 @@ export function useTaskMediaViewer({
     pendingSelect.current = null;
   });
 
-  // Состав указаний на момент ОТКРЫТИЯ: с ним сравнивается то, что получилось, — иначе владелец
-  // не отличит «порисовал» от «посмотрел и закрыл» и слал бы запись после каждого просмотра.
-  // Снимок берётся ЧЕРЕЗ ССЫЛКУ: `openAt` объявлена один раз на всю жизнь хука (её держат плитки
-  // и чипы), и замыкание запомнило бы состав, каким он был при первом рендере.
-  const openedWith = useRef<TaskMediaAnnotations[] | null>(null);
-  const live = useRef(annotations);
-  live.current = annotations;
   const openAt = useCallback((i: number) => {
-    openedWith.current = live.current;
     setIndex(i);
     setSelectedKey(null);
     setOpen(true);
@@ -149,9 +141,13 @@ export function useTaskMediaViewer({
     if (next.length) onChange([...annotations, { mediaId: currentId, annotations: next }]);
   }
 
+  const currentSrc = current?.fullSize || current?.thumbnail || '';
   const { surface } = useAnnotationSurface({
-    src: current?.fullSize || current?.thumbnail || '',
+    src: currentSrc,
     alt: current ? `attachment ${safeIndex + 1}` : '',
+    // ВИД МЕДИА ДОЕЗЖАЕТ ДО ПОВЕРХНОСТИ. Слот вложений принимает ролики (`showVideos`), и без
+    // этого поверхность рисовала бы `<video>`-файл тегом `<img>`: чёрный экран вместо ролика.
+    media: isVideo(currentSrc) ? 'video' : 'image',
     annotations: list,
     onChange: canWrite && onChange ? setForCurrent : undefined,
     frozen: !canWrite,
@@ -165,17 +161,16 @@ export function useTaskMediaViewer({
       ) : null,
   });
 
+  function go(i: number) {
+    setSelectedKey(null);
+    setIndex(i);
+  }
+
   function handleOpenChange(v: boolean) {
     setOpen(v);
-    if (v) {
-      openedWith.current = annotations;
-      return;
-    }
-    const was = openedWith.current;
-    openedWith.current = null;
-    setSelectedKey(null);
-    if (was && onCommit && JSON.stringify(was) !== JSON.stringify(annotations))
-      onCommit(annotations);
+    // Выбор не переживает закрытие: он адресуется индексом, а к следующему открытию список может
+    // быть уже другим.
+    if (!v) setSelectedKey(null);
   }
 
   const node = current ? (
@@ -185,8 +180,10 @@ export function useTaskMediaViewer({
       onOpenChange={handleOpenChange}
       title={`attachment ${safeIndex + 1}`}
       position={{ index: safeIndex, total: media.length }}
-      onPrev={safeIndex > 0 ? () => setIndex(safeIndex - 1) : undefined}
-      onNext={safeIndex < media.length - 1 ? () => setIndex(safeIndex + 1) : undefined}
+      // Выбор гасится и здесь, а не только сбросом диалога по смене адреса: один и тот же файл
+      // может стоять в ряду дважды, и тогда адрес не меняется, а набор указаний — да.
+      onPrev={safeIndex > 0 ? () => go(safeIndex - 1) : undefined}
+      onNext={safeIndex < media.length - 1 ? () => go(safeIndex + 1) : undefined}
     />
   ) : null;
 
