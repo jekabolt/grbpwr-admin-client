@@ -4,7 +4,6 @@ import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useCallback, useMemo, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { MediaViewer, useMediaViewer, type MediaViewerItem } from 'ui/components/media-viewer';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -44,7 +43,6 @@ export function AttachmentTiles({
   media: TaskMedia[];
   files: LibraryFile[];
 }) {
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const { canRead } = usePermissions();
   const mayOpenLibrary = canRead(SECTION.files);
@@ -83,8 +81,14 @@ export function AttachmentTiles({
   const openFile = (f: LibraryFile) => {
     // Открытие файла ведёт В РАЗДЕЛ ФАЙЛОВ, к его карточке: там живут темы, ответственные,
     // обсуждение и читалка, и держать их вторую копию в задаче незачем.
+    //
+    // СОСЕДНЯЯ ВКЛАДКА, а не переход на месте — тот же довод, что у ссылок на задачи из
+    // карточки файла. Уход по маршруту размонтирует страницу задачи вместе с её локальным
+    // состоянием, а там живёт набранная, но не отправленная реплика (`task-comments.tsx`
+    // держит черновик в `useState`): она исчезла бы молча, без единого вопроса. Плюс на
+    // вложение смотрят В ХОДЕ работы над задачей — уводить с неё незачем.
     if (mayOpenLibrary) {
-      navigate(`${ROUTES.files}/${f.id}`);
+      window.open(`${ROUTES.files}/${f.id}`, '_blank', 'noopener,noreferrer');
       return;
     }
     // Без `files:read` карточка ответила бы «нет прав» — тупик на ровном месте. Вложение при
