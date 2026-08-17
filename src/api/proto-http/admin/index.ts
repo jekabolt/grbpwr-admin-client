@@ -5113,6 +5113,12 @@ export type LibraryFile = {
   // .md that arrived as an upload, because reading text on the streaming upload
   // path would complicate the single hot path for a rare case.
   contentExcerpt: string | undefined;
+  // roles is what this file is IN EACH PROJECT it belongs to — one entry per
+  // (project, role) pair, and only for topics of kind `project` that actually
+  // carry a role. NOT a flat list of role labels, and that distinction is the
+  // whole feature: a file may be «исходники» in one shoot and «идея» in another,
+  // and a flat set would make «съёмка × идея» find it in the shoot too.
+  roles: LibraryFileRole[] | undefined;
 };
 
 // FileTopic is a topic LABEL, not a folder.
@@ -5123,6 +5129,22 @@ export type FileTopic = {
   // What this topic is about. Empty for most of them; the field is what lets a
   // label stand in for a project page without inventing a project entity.
   description: string | undefined;
+  // kind is "plain" | "project". A string rather than an enum for the same reason
+  // access_level below is one: the column is an ENUM in the database, the set is
+  // closed there, and anything else is refused rather than interpreted.
+  // Empty means the same as "plain" — a topic stored before this field existed.
+  kind: string | undefined;
+  // starts_at / ends_at are the project's dates as YYYY-MM-DD, empty when unset.
+  // A date, not a timestamp: «12–14 сентября» has no time zone, and giving it one
+  // would only raise the question of whose midnight the day starts at.
+  startsAt: string | undefined;
+  endsAt: string | undefined;
+  // archived hides the topic from the chips and the pickers while leaving it on
+  // the topics screen and reachable by direct link. It exists because projects
+  // ACCUMULATE and cannot be deleted (a project always has files, and the foreign
+  // key on the topic has no cascade): without an archive the chip rail grows
+  // monotonically and never shrinks.
+  archived: boolean | undefined;
 };
 
 // AdminRef is a lightweight admin-account reference for every people picker in
@@ -5140,6 +5162,42 @@ export type AdminRef = {
   // of super-admins is not a secret, and the difference between «доступа нет» and
   // «доступ выдаёт jekabolt» is the difference between a dead end and a minute.
   isSuper: boolean | undefined;
+};
+
+// LibraryFileRole is «what this file is in THIS project» — a pair, not a label.
+// The role lives on the (file, topic) LINK ROW, and this message is the shape of
+// that row on the wire. A flat list of role labels on the file would lose the
+// pairing: a photo that is «отобранное» in the shoot and «референс» in the
+// lookbook would carry both labels, and «съёмка × референс» would find it —
+// silently and wrongly. There is at most one role per (file, project), which is
+// not a rule anybody enforces: UNIQUE(file_id, topic_id) already gives exactly
+// one row per pair, and a row has exactly one role_id.
+export type LibraryFileRole = {
+  projectTopicId: number | undefined;
+  // The project's name, so a tile can print «осень 2026 · исходники» without a
+  // second lookup into the topics rail.
+  projectTopicName: string | undefined;
+  roleId: number | undefined;
+  roleName: string | undefined;
+};
+
+// FileRole is one entry of the CLOSED role vocabulary.
+// Closed on purpose, and the reason is the cross-project question: «все исходники
+// по всем съёмкам» only means anything while «исходники» is the SAME thing
+// everywhere. Free text diverges — not «might», but reliably: исходники /
+// исходные / raw / сырцы — and the filter starts quietly returning half the
+// truth. Autocomplete does not help: it suggests, it does not prevent.
+export type FileRole = {
+  id: number | undefined;
+  name: string | undefined;
+  // sort_order is the order of the sections on a project's page; equal values
+  // fall back to the name.
+  sortOrder: number | undefined;
+  archived: boolean | undefined;
+  // files_count is the CROSS-PROJECT count: how many files carry this role in any
+  // project. Counted under the visibility predicate, like every other count in
+  // this library, so different people legitimately see different numbers.
+  filesCount: number | undefined;
 };
 
 export type GetLibraryFileRequest = {
@@ -5193,6 +5251,23 @@ export type ListLibraryFilesRequest = {
   // person_role picks WHICH relation to the file is meant; UNKNOWN = either.
   // Ignored while person_id is unset — a role alone filters nothing.
   personRole: LibraryFilePersonRole | undefined;
+  // project_topic_id narrows to one project (a topic of kind `project`); 0 = no
+  // project filter. SINGLE-valued, unlike topic_ids: two projects through AND are
+  // «files lying in BOTH shoots», which is almost always empty, and a control that
+  // reliably returns nothing is a defect rather than a feature. It is technically
+  // an ordinary topic id, so it composes with topic_ids rather than replacing it.
+  projectTopicId: number | undefined;
+  // role_id narrows to files carrying that role. ALONE it is the cross-project
+  // question («все исходники по всем съёмкам»); TOGETHER with project_topic_id it
+  // is one section of a project's page — and the two conditions then apply to THE
+  // SAME link row, which is what makes the pair exact. 0 = no role filter.
+  roleId: number | undefined;
+  // without_role selects the files that are IN the project with no role yet — the
+  // intake heap a drop lands in. Only meaningful together with project_topic_id:
+  // on its own it would mean «almost the whole library», and it is REFUSED rather
+  // than ignored. A quietly ignored filter shows MORE than was asked for, and in
+  // this library that is how a name leaks.
+  withoutRole: boolean | undefined;
 };
 
 export type ListLibraryFilesResponse = {
@@ -5221,6 +5296,12 @@ export type DeleteLibraryFileResponse = {
 };
 
 export type ListFileTopicsRequest = {
+  // include_archived brings the archived topics back into the answer. Default
+  // false, which is the ONE behavioural change this contract makes for a client
+  // already shipped — and it is inert until somebody archives something.
+  // The topics SCREEN sets it (an archive you cannot see is not an archive), the
+  // canvas rail and the pickers do not.
+  includeArchived: boolean | undefined;
 };
 
 export type ListFileTopicsResponse = {
@@ -5286,6 +5367,106 @@ export type AssignLibraryFileTopicsResponse = {
   // assigned is how many (file, topic) links were actually created — pairs that
   // already existed are not counted.
   assigned: number | undefined;
+};
+
+// UpdateFileTopicMetaRequest is a NEW message, and that is why full-replacement
+// semantics are safe here: this rpc has no already-shipped client, so every caller
+// sends the whole form. Adding kind/dates/archived to RenameFileTopic instead
+// would have been one rpc cheaper and materially more dangerous — a client that
+// predates `kind` would send it empty and silently demote a project to a plain
+// topic on the next rename. The project has lost fields exactly that way before
+// (the tech-card draft wiping absent fields), so it is not a hypothetical.
+export type UpdateFileTopicMetaRequest = {
+  topicId: number | undefined;
+  // kind is "plain" | "project"; empty is read as "plain". Anything else is
+  // refused rather than interpreted.
+  // Demoting a project that still has roles on its link rows CLEARS those roles in
+  // the same transaction and reports how many were dropped: leaving them would
+  // leave rows whose role points into a topic that is no longer a project, and
+  // silently keeping them would make the next promotion resurrect labels nobody
+  // set.
+  kind: string | undefined;
+  // starts_at / ends_at are YYYY-MM-DD; empty clears the date.
+  startsAt: string | undefined;
+  endsAt: string | undefined;
+  archived: boolean | undefined;
+};
+
+export type UpdateFileTopicMetaResponse = {
+  // cleared_roles is how many link rows lost their role because the topic stopped
+  // being a project. 0 in every other case. The dialog reports it — a demotion
+  // that quietly dropped forty labels would be indistinguishable from one that
+  // dropped none.
+  clearedRoles: number | undefined;
+};
+
+export type ListFileRolesRequest = {
+  // include_archived — same split as the topics rail: the topics screen shows the
+  // archive, the chips and the pickers do not.
+  includeArchived: boolean | undefined;
+};
+
+export type ListFileRolesResponse = {
+  roles: FileRole[] | undefined;
+};
+
+// UpsertFileRoleRequest is the ONLY way a role comes into existence — the closed
+// vocabulary in one place. Neither `new_topics` on upload, nor the paste modal,
+// nor the bulk topic write can create one: they write into file_topic, and roles
+// do not live there.
+export type UpsertFileRoleRequest = {
+  // id = 0 creates, otherwise renames/reorders/(un)archives the existing role.
+  id: number | undefined;
+  name: string | undefined;
+  sortOrder: number | undefined;
+  archived: boolean | undefined;
+};
+
+export type UpsertFileRoleResponse = {
+  id: number | undefined;
+};
+
+// MergeFileRolesRequest is the standard repair for a vocabulary that drifted
+// anyway. It is SIMPLER than merging topics: a role is a column, not a link, so
+// there is nothing to deduplicate — every link row carrying the source ends up
+// carrying the target, and no row can end up carrying both.
+export type MergeFileRolesRequest = {
+  sourceId: number | undefined;
+  targetId: number | undefined;
+};
+
+export type MergeFileRolesResponse = {
+  // moved_links is how many (file, project) rows changed role. Counted under the
+  // visibility predicate, like the topic merge above: the number is read by a
+  // person, and «переехало 7» on a role where they can see two files is the same
+  // «there is something here you are not shown» signal the personal counts exist
+  // to remove. The move itself applies to everything.
+  movedLinks: number | undefined;
+};
+
+// SetLibraryFileRolesRequest sets ONE role on a batch of files IN ONE PROJECT.
+// It reads as «put these files into the project in role R»: a file that is not in
+// the project yet gets its link row created, which is what makes the button work
+// on a fresh drop. role_id = 0 CLEARS the role while leaving the file in the
+// project — «без роли» is a legal state, it is the intake heap.
+// Batch semantics are the ones AssignLibraryFileTopics already established: one
+// invisible id refuses the WHOLE batch. Partial application would answer
+// differently for a visible and an invisible id, and «проставилось 4 из 5» is
+// itself the confirmation that a fifth file exists.
+export type SetLibraryFileRolesRequest = {
+  fileIds: number[] | undefined;
+  // project_topic_id must be a topic of kind `project`: a role on a plain label is
+  // «это исходник ничего» and is refused, not stored.
+  projectTopicId: number | undefined;
+  // role_id = 0 clears the role. A role that is archived can still be CLEARED but
+  // not newly assigned — otherwise the archive would be a suggestion.
+  roleId: number | undefined;
+};
+
+export type SetLibraryFileRolesResponse = {
+  // updated is how many link rows now carry the requested role — including rows
+  // created by this call, excluding rows that already carried it.
+  updated: number | undefined;
 };
 
 export type SetLibraryFileOwnersRequest = {
@@ -13305,6 +13486,24 @@ export interface AdminService {
   // replacing bulk write would silently erase whatever a colleague labelled those
   // files with between the grid loading and the button being pressed.
   AssignLibraryFileTopics(request: AssignLibraryFileTopicsRequest): Promise<AssignLibraryFileTopicsResponse>;
+  // UpdateFileTopicMeta sets a topic's kind, dates and archive flag. A new message
+  // with full-replacement semantics — see the request for why this is not folded
+  // into RenameFileTopic.
+  UpdateFileTopicMeta(request: UpdateFileTopicMetaRequest): Promise<UpdateFileTopicMetaResponse>;
+  // ListFileRoles returns the role vocabulary with CROSS-PROJECT counts, each
+  // counted under the visibility predicate like every other count here.
+  ListFileRoles(request: ListFileRolesRequest): Promise<ListFileRolesResponse>;
+  // UpsertFileRole creates or edits one role. THE ONLY path that creates one —
+  // that is what «closed vocabulary» means mechanically rather than by discipline.
+  UpsertFileRole(request: UpsertFileRoleRequest): Promise<UpsertFileRoleResponse>;
+  // MergeFileRoles folds one role into another and deletes the source. The
+  // standard repair for a vocabulary that drifted; simpler than merging topics,
+  // because a role is a column and cannot collide with itself on a row.
+  MergeFileRoles(request: MergeFileRolesRequest): Promise<MergeFileRolesResponse>;
+  // SetLibraryFileRoles puts a batch of files into one project in one role (or
+  // clears the role). Same batch semantics as AssignLibraryFileTopics: one
+  // invisible id refuses the whole batch.
+  SetLibraryFileRoles(request: SetLibraryFileRolesRequest): Promise<SetLibraryFileRolesResponse>;
   // SetLibraryFileOwners REPLACES the file's set of owners (owners come in ones
   // and twos, and the picker has just shown the caller the whole current set, so
   // a full replace is honest here — unlike the bulk topic write above).
@@ -17138,6 +17337,15 @@ export function createAdminServiceClient(
       if (request.personRole) {
         queryParams.push(`personRole=${encodeURIComponent(request.personRole.toString())}`)
       }
+      if (request.projectTopicId) {
+        queryParams.push(`projectTopicId=${encodeURIComponent(request.projectTopicId.toString())}`)
+      }
+      if (request.roleId) {
+        queryParams.push(`roleId=${encodeURIComponent(request.roleId.toString())}`)
+      }
+      if (request.withoutRole) {
+        queryParams.push(`withoutRole=${encodeURIComponent(request.withoutRole.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -17192,6 +17400,9 @@ export function createAdminServiceClient(
       const path = `api/admin/files/topics/list`; // eslint-disable-line quotes
       const body = null;
       const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -17292,6 +17503,94 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "AssignLibraryFileTopics",
       }) as Promise<AssignLibraryFileTopicsResponse>;
+    },
+    UpdateFileTopicMeta(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/topics/meta`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateFileTopicMeta",
+      }) as Promise<UpdateFileTopicMetaResponse>;
+    },
+    ListFileRoles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/roles/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.includeArchived) {
+        queryParams.push(`includeArchived=${encodeURIComponent(request.includeArchived.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFileRoles",
+      }) as Promise<ListFileRolesResponse>;
+    },
+    UpsertFileRole(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/roles/upsert`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpsertFileRole",
+      }) as Promise<UpsertFileRoleResponse>;
+    },
+    MergeFileRoles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/roles/merge`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MergeFileRoles",
+      }) as Promise<MergeFileRolesResponse>;
+    },
+    SetLibraryFileRoles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/roles/assign`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetLibraryFileRoles",
+      }) as Promise<SetLibraryFileRolesResponse>;
     },
     SetLibraryFileOwners(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/files/owners`; // eslint-disable-line quotes

@@ -106,6 +106,15 @@ export const filesService = {
       // требуется, но и полагаться на роль как на самостоятельный фильтр нельзя.
       personId: req.personId ?? 0,
       personRole: (req.personRole ?? null) as LibraryFilePersonRole,
+      // ГРУППИРОВКА. Проект — это тема с типом `project`, роль живёт на СТРОКЕ СВЯЗИ
+      // «файл ↔ проект», а не меткой на файле: плоские метки теряют пару, и «съёмка ×
+      // референс» находило бы файл, который был референсом в лукбуке. Молча.
+      //
+      // Поэтому роль без проекта бессмысленна, и сервер её игнорирует. `withoutRole` —
+      // приёмник внутри проекта: «что я сюда положил и ещё не разобрал».
+      projectTopicId: req.projectTopicId ?? 0,
+      roleId: req.roleId ?? 0,
+      withoutRole: req.withoutRole ?? false,
     }),
   getFile: (id: number) => adminService.GetLibraryFile({ id }),
   updateFile: (args: {
@@ -133,7 +142,9 @@ export const filesService = {
    */
   setOwners: (fileId: number, adminIds: number[]) =>
     adminService.SetLibraryFileOwners({ fileId, adminIds }),
-  listTopics: () => adminService.ListFileTopics({}),
+  // Архивные проекты копятся, роли нет: без архива ряд чипов растёт монотонно и со временем
+  // делает холст хуже. Холст архив НЕ просит, экран словаря — просит.
+  listTopics: (includeArchived = false) => adminService.ListFileTopics({ includeArchived }),
   createTopic: (name: string, description = '') =>
     adminService.CreateFileTopic({ name, description }),
   renameTopic: (id: number, name: string, description = '') =>

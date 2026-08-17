@@ -178,7 +178,16 @@ export const filesKeys = {
     ] as const;
   },
   file: (id: number) => [...filesKeys.all, 'file', id] as const,
-  topics: () => [...filesKeys.all, 'topics'] as const,
+  /**
+   * АРХИВ ВХОДИТ В КЛЮЧ, И ЭТО НЕ УКРАШЕНИЕ. Один и тот же хук зовут пять экранов, и они
+   * спрашивают РАЗНОЕ: холст, полоса загрузки, пикер заметки и вложения задачи — «чем сузить
+   * сетку» (архив там мешает), словарь тем — «что вообще заведено» (без архива он врёт: тема
+   * никуда не делась, её убрали с глаз).
+   *
+   * Один ключ на два ответа означал бы, что первый пришедший экран кладёт свою версию в кэш, а
+   * следующий получает чужую — молча и через раз. Ровно этот класс уже ловился в волне.
+   */
+  topics: (includeArchived = false) => [...filesKeys.all, 'topics', includeArchived] as const,
 };
 
 /**
@@ -223,10 +232,10 @@ const PAGE_SIZE = 60;
  */
 const URL_SAFE_STALE_TIME = 30 * 60 * 1000;
 
-export function useFileTopics() {
+export function useFileTopics(includeArchived = false) {
   return useQuery({
-    queryKey: filesKeys.topics(),
-    queryFn: () => filesService.listTopics(),
+    queryKey: filesKeys.topics(includeArchived),
+    queryFn: () => filesService.listTopics(includeArchived),
     staleTime: URL_SAFE_STALE_TIME,
   });
 }
