@@ -29,8 +29,24 @@ import { FormatBar } from './format-bar';
  * должны. */
 const MIN_SELECTION = 24;
 
+/** Где стояла каретка и куда было прокручено поле. Переживает выход в чтение — см. `caret`. */
+export interface NoteCaret {
+  start: number;
+  end: number;
+  scroll: number;
+}
+
 export interface NoteEditorHandle {
-  focus: () => void;
+  /** Поставить фокус, и — если позиция передана — вернуть каретку и прокрутку туда же. */
+  focus: (at?: NoteCaret | null) => void;
+  /**
+   * Снимок каретки ПЕРЕД уходом из правки.
+   *
+   * Читается снаружи и заранее, а не в уборке эффекта: поле к тому моменту уже отсоединено, и
+   * `selectionStart` брать не с чего. Без снимка Esc и обратный ⌘E ставили каретку в НАЧАЛО
+   * заметки — замерено: правил сороковую строку из шестидесяти, вернулся в позицию 0.
+   */
+  caret: () => NoteCaret | null;
   /**
    * Забрал ли редактор нажатие Esc себе.
    *
@@ -83,7 +99,29 @@ export function NoteEditor({
   useImperativeHandle(
     handleRef,
     () => ({
-      focus: () => areaRef.current?.focus(),
+      focus: (at) => {
+        const area = areaRef.current;
+        if (!area) return;
+        area.focus();
+        if (!at) return;
+        // Позиция зажимается длиной ТЕКУЩЕГО текста: пока человек читал, заметку мог перечитать
+        // фон и она могла стать короче. Каретка за пределами текста — это молчаливый прыжок в
+        // конец, то есть тот же дефект, от которого снимок и заведён.
+        const max = area.value.length;
+        const start = Math.min(at.start, max);
+        const end = Math.min(at.end, max);
+        area.setSelectionRange(start, end);
+        area.scrollTop = at.scroll;
+      },
+      caret: () => {
+        const area = areaRef.current;
+        if (!area) return null;
+        return {
+          start: area.selectionStart ?? 0,
+          end: area.selectionEnd ?? 0,
+          scroll: area.scrollTop,
+        };
+      },
       consumeEscape: () => {
         if (!assistantOpen) return false;
         assistant.dismiss();
@@ -109,6 +147,9 @@ export function NoteEditor({
 
   const applySuggestion = useCallback(
     (s: AiSuggestion, edit: boolean) => {
+      const previous = value;
+      let next: string;
+
       if (!s.range) {
         // Пока помощник работал, человек мог дописывать — и предложение построено по ПРОШЛОЙ
         // версии буфера. Принять его тогда значит стереть эти дописанные строки, причём молча:
@@ -121,25 +162,47 @@ export function NoteEditor({
           );
           return;
         }
-        onChange(s.after);
+        next = s.after;
       } else {
         // Буфер мог измениться, пока помощник работал. Вставлять по старым границам вслепую
         // нельзя: это разрезало бы текст посередине слова и выглядело бы как порча файла.
         const { start, end } = s.range;
         if (value.slice(start, end) === s.before) {
-          onChange(value.slice(0, start) + s.after + value.slice(end));
+          next = value.slice(0, start) + s.after + value.slice(end);
         } else {
           const at = value.indexOf(s.before);
           if (at >= 0 && value.indexOf(s.before, at + 1) === -1) {
-            onChange(value.slice(0, at) + s.after + value.slice(at + s.before.length));
+            next = value.slice(0, at) + s.after + value.slice(at + s.before.length);
           } else {
             showMessage('текст изменился, пока помощник работал — вставлять некуда', 'error');
             return;
           }
         }
       }
-      assistant.dismiss();
+
+      onChange(next);
+      // Панель НЕ закрывается: она и есть единственное место, где остался прежний текст. Пока
+      // она на экране, принятое возвращается одной кнопкой — см. `applied` в `ai-panel.tsx`.
+      assistant.applied(previous, next, s.scope);
       if (edit) areaRef.current?.focus();
+    },
+    [assistant, onChange, showMessage, value],
+  );
+
+  /** Возврат к тексту до принятия. Отказывает, если после принятия текст уже правили руками:
+   * возврат обязан отменять СВОЁ действие, а не стирать набранное после него. */
+  const revertSuggestion = useCallback(
+    (previous: string, next: string) => {
+      if (value !== next) {
+        showMessage(
+          'после принятия текст уже правили — возврат стёр бы эти правки, поэтому он отказывается',
+          'error',
+        );
+        return;
+      }
+      onChange(previous);
+      assistant.dismiss();
+      areaRef.current?.focus();
     },
     [assistant, onChange, showMessage, value],
   );
@@ -205,6 +268,7 @@ export function NoteEditor({
         onCancel={assistant.cancel}
         onDismiss={assistant.dismiss}
         onAccept={applySuggestion}
+        onRevert={revertSuggestion}
         onRetry={(req) => assistant.run(req)}
       />
 

@@ -50,6 +50,16 @@ export type AiState =
   | { kind: 'idle' }
   | { kind: 'working'; scope: AiScope; runes: number }
   | { kind: 'ready'; suggestion: AiSuggestion }
+  /**
+   * Предложение принято — и панель НЕ закрывается.
+   *
+   * Закрытая панель делала «принять» необратимым: колонка «как сейчас» была единственной копией
+   * прежнего текста, ⌘Z сюда не достаёт (буфер меняет react, а не поле), а черновик браузера
+   * через полсекунды перезаписывался принятым. Подпись под колонками при этом обещала, что
+   * последнее слово за человеком. Теперь обещание выполняется кнопкой: обе версии остаются на
+   * экране, пока их не закрыли руками.
+   */
+  | { kind: 'applied'; previous: string; next: string; scope: AiScope }
   | { kind: 'off' }
   | { kind: 'toolong'; runes: number; scope: AiScope }
   | { kind: 'failed'; message: string; request: AiRequest };
@@ -127,7 +137,12 @@ export function useNoteAssistant() {
     setState({ kind: 'idle' });
   }, [stop]);
 
-  return { state, run, cancel, dismiss: cancel };
+  /** Предложение ушло в буфер. Обе версии остаются на экране — см. `applied` в `AiState`. */
+  const applied = useCallback((previous: string, next: string, scope: AiScope) => {
+    setState({ kind: 'applied', previous, next, scope });
+  }, []);
+
+  return { state, run, cancel, applied, dismiss: cancel };
 }
 
 export function AiPanel({
@@ -136,6 +151,7 @@ export function AiPanel({
   onCancel,
   onDismiss,
   onAccept,
+  onRevert,
   onRetry,
 }: {
   state: AiState;
@@ -145,6 +161,9 @@ export function AiPanel({
   onDismiss: () => void;
   /** `edit` — «править предложение»: тот же буфер, но сразу в режиме правки. */
   onAccept: (suggestion: AiSuggestion, edit: boolean) => void;
+  /** Вернуть буфер к тому, что было до «принять». `next` — чтобы возврат отказался работать,
+   * если после принятия текст успели поправить руками. */
+  onRevert: (previous: string, next: string) => void;
   onRetry: (request: AiRequest) => void;
 }) {
   if (state.kind === 'idle') return null;
@@ -226,6 +245,42 @@ export function AiPanel({
     );
   }
 
+  if (state.kind === 'applied') {
+    return (
+      <Section
+        title='предложение принято'
+        question='— текст в поле заменён, заметка при этом НЕ сохранена'
+        action={
+          <>
+            <Button
+              size='sm'
+              variant='secondary'
+              onClick={() => onRevert(state.previous, state.next)}
+            >
+              вернуть как было
+            </Button>
+            <Button size='sm' variant='main' onClick={onDismiss}>
+              закрыть
+            </Button>
+          </>
+        }
+      >
+        {/* Колонки те же и в том же порядке, что до принятия: слева прежний текст, справа
+            нынешний. Меняются только подписи — «как сейчас» после принятия означало бы уже не
+            то, что означало минуту назад. */}
+        <div className='grid gap-2.5 lg:grid-cols-2'>
+          <SuggestionColumn title='как было' source={state.previous} />
+          <SuggestionColumn title='стало' source={state.next} />
+        </div>
+
+        <Text size='micro' variant='label'>
+          возврат ставит в поле текст ровно до принятия. если после принятия вы уже правили текст
+          руками, возврат откажет — стирать набранное он не станет.
+        </Text>
+      </Section>
+    );
+  }
+
   const { suggestion } = state;
   return (
     <Section
@@ -261,7 +316,7 @@ export function AiPanel({
 
       <Text size='micro' variant='label'>
         принять — заменит текст заметки и оставит его несохранённым: последнее слово всё равно за
-        вами
+        вами. панель после этого не закроется, и принятое можно тут же вернуть.
       </Text>
     </Section>
   );
