@@ -28,6 +28,12 @@ import { tasksKeys } from '../hooks/useTasks';
  * Медиа рисуется здесь, потому что общего объекта с библиотекой у него нет: у медиа только
  * кадры и id. Плитка сделана ПО ТОЙ ЖЕ разметке (кадр 1:1 → бейдж в углу → подвал за
  * волосяной линией), иначе ряд читался бы как два разных списка.
+ *
+ * ЯЗЫК ЭКРАНА, А НЕ ЯЗЫК ВОЛНЫ. Раздел «файлы» русский целиком, экран задач — английский
+ * целиком, и граница проходит по разделу: русская подпись под английской шапкой это ровно то
+ * смешение, от которого правило и защищает. Поэтому интерфейсные строки ЗДЕСЬ английские
+ * строчными, как у соседних блоков задачи. Импортированная плитка `FileTile` остаётся русской:
+ * она чужая и живёт по правилам своего раздела.
  */
 export function AttachmentTiles({
   taskId,
@@ -109,8 +115,8 @@ export function AttachmentTiles({
               <button
                 type='button'
                 disabled={at === undefined}
-                title='медиа сайта · публичное'
-                aria-label={`медиа ${i + 1} из ${media.length} · публичное`}
+                title='site media · public'
+                aria-label={`media ${i + 1} of ${media.length} · public`}
                 onClick={() => at !== undefined && viewer.openAt(at)}
                 className='relative block w-full cursor-zoom-in bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-default'
               >
@@ -124,7 +130,7 @@ export function AttachmentTiles({
                 ) : (
                   <span className='flex aspect-square w-full items-center justify-center'>
                     <Text size='micro' variant='label' component='span' className='uppercase'>
-                      нет кадра
+                      no image
                     </Text>
                   </span>
                 )}
@@ -135,7 +141,7 @@ export function AttachmentTiles({
                   component='span'
                   className='absolute bottom-1 right-1 bg-textColor px-1 uppercase text-bgColor'
                 >
-                  медиа
+                  media
                 </Text>
               </button>
               <div className='flex min-w-0 flex-col gap-0.5 border-t border-hairline px-1.5 py-1'>
@@ -143,7 +149,7 @@ export function AttachmentTiles({
                     медиа уезжает на CDN сайта, файл библиотеки лежит в приватном бакете.
                     Пилюля чёрная, а не цветная: это факт, а не состояние. */}
                 <Pill tone='ink' className='self-start'>
-                  публичное
+                  public
                 </Pill>
               </div>
             </div>
@@ -162,13 +168,13 @@ export function AttachmentTiles({
 
       {media.length > 0 && (
         <Text size='micro' variant='label'>
-          медиа помечено в углу: оно публичное и уедет на сайт, файлы библиотеки — приватные.
+          media is badged in the corner: it goes out to the site, library files stay private.
         </Text>
       )}
       {files.length > 0 && !mayOpenLibrary && (
         <Text size='micro' variant='label'>
-          раздел «файлы» вам не открыт: плитка файла отдаёт его на скачивание, карточка не
-          откроется.
+          the files section is closed to you: a file tile hands you the file itself, its card
+          won’t open.
         </Text>
       )}
 
