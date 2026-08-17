@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
+import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { ROUTES, SECTION } from 'constants/routes';
@@ -16,6 +17,7 @@ import { NewNoteModal } from './components/new-note-modal';
 import { PasteIntakeModal } from './components/paste-intake-modal';
 import {
   EmptyLibraryState,
+  EmptyPersonState,
   EmptySearchState,
   EmptyTopicState,
   EmptyUntopicedState,
@@ -31,10 +33,14 @@ import { FilesUploadBar } from './components/upload-bar';
 import { useFileSelection } from './hooks/useFileSelection';
 import {
   filesKeys,
+  personIdFromUrl,
+  personRoleFromUrl,
+  personRoleToUrl,
+  useFilesTotal,
   useFileTopics,
   useLibraryFiles,
-  useSearchTotalEverywhere,
   type FilesSort,
+  type PersonRoleFilter,
 } from './hooks/useFiles';
 import { previewExpected } from './utils/format';
 import { useQueryClient } from '@tanstack/react-query';
@@ -91,6 +97,21 @@ export default function FilesPage() {
     return v === 'name' || v === 'size' ? v : 'new';
   })();
 
+  // ЧЕЛОВЕК — ТОЖЕ АДРЕС. «Вот всё, что ведёт паша» кидают в чат ровно так же, как ссылку на
+  // пересечение тем, и фильтр, живущий в состоянии компонента, такой ссылкой не передашь.
+  //
+  // Разбор ГЛУХ К МУСОРУ (`personIdFromUrl` / `personRoleFromUrl`): нечисловой id, отрицательный
+  // id, неизвестное слово роли — всё это не фильтрует и не роняет экран. Обрезанную ссылку
+  // присылают чаще, чем правят адрес руками, и отказ вместо выдачи был бы худшим из ответов.
+  //
+  // Роль без человека здесь ЖЕ и обнуляется — тем же приёмом, что `untopiced` глушит темы двумя
+  // десятками строк выше: сервер роль без `person_id` игнорирует, и рукописный `?role=own`
+  // иначе рисовал бы нажатое положение переключателя, которого в выдаче нет.
+  const personId = personIdFromUrl(params.get('person'));
+  const personRole: PersonRoleFilter = personId
+    ? personRoleFromUrl(params.get('role'))
+    : 'any';
+
   // Строка ввода отзывается сразу, а URL догоняет: писать в адрес на каждую букву значит
   // гонять запрос на каждую букву.
   const [searchInput, setSearchInput] = useState(urlSearch);
@@ -111,7 +132,16 @@ export default function FilesPage() {
   }, [urlSearch]);
 
   const patch = useCallback(
-    (next: Partial<{ topicIds: number[]; untopiced: boolean; q: string; sort: FilesSort }>) => {
+    (
+      next: Partial<{
+        topicIds: number[];
+        untopiced: boolean;
+        q: string;
+        sort: FilesSort;
+        personId: number;
+        personRole: PersonRoleFilter;
+      }>,
+    ) => {
       const p = new URLSearchParams(params);
       if (next.topicIds !== undefined) {
         p.delete('topic');
@@ -129,6 +159,20 @@ export default function FilesPage() {
         if (next.sort === 'new') p.delete('sort');
         else p.set('sort', next.sort);
       }
+      if (next.personRole !== undefined) {
+        const v = personRoleToUrl(next.personRole);
+        if (v) p.set('role', v);
+        else p.delete('role');
+      }
+      if (next.personId !== undefined) {
+        if (next.personId > 0) p.set('person', String(next.personId));
+        else p.delete('person');
+      }
+      // РОЛЬ БЕЗ ЧЕЛОВЕКА ИЗ АДРЕСА ВЫЧИЩАЕТСЯ ОДНОЙ СТРОКОЙ, а не в каждой ветке выше. Иначе
+      // порядок веток становится значимым (снять человека и поставить роль одним вызовом — и
+      // роль пережила бы человека), а в ссылке оставался бы фильтр, которого сервер не
+      // применяет. Одно правило в одном месте вместо двух согласованных.
+      if (personIdFromUrl(p.get('person')) <= 0) p.delete('role');
       setParams(p, { replace: true });
     },
     [params, setParams],
@@ -152,7 +196,14 @@ export default function FilesPage() {
   const [newNote, setNewNote] = useState(false);
 
   const topicsQuery = useFileTopics();
-  const filesQuery = useLibraryFiles({ topicIds, untopiced, search: urlSearch, sort });
+  // Тот же общий список людей, что читают пикер в полосе и оба блока карточки: один ключ, один
+  // запрос на 5 минут. Здесь он нужен ровно на подпись выбранного человека в пустом экране.
+  const { data: adminsData } = useAdmins();
+  // ОДИН ОБЪЕКТ ФИЛЬТРА на страницу и на оба вторых счёта: ослабленные варианты собираются из
+  // него же (`{...filter, topicIds: []}`), поэтому число в кнопке не может оказаться посчитанным
+  // не тем условием, под которым его потом покажут.
+  const filter = { topicIds, untopiced, search: urlSearch, sort, personId, personRole };
+  const filesQuery = useLibraryFiles(filter);
 
   const topics = topicsQuery.data?.topics ?? [];
   const files = useMemo(
@@ -187,7 +238,7 @@ export default function FilesPage() {
   const selection = useFileSelection();
   // Смена фильтра снимает выбор. Набранное в одном пересечении на экране следующего не видно
   // целиком, а полоса продолжала бы обещать действие над файлами, которых на экране нет.
-  const filterKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}`;
+  const filterKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}|${personId}|${personRole}`;
   const seenFilter = useRef(filterKey);
   const clearSelection = selection.clear;
   useEffect(() => {
@@ -203,6 +254,11 @@ export default function FilesPage() {
 
   // ОДИН ВХОД В ОЧЕРЕДЬ на все три жеста. Темы читаются в момент постановки: сузил фильтр
   // после броска — на уже стоящие в очереди строки это не влияет, у них свои темы.
+  //
+  // ЧЕЛОВЕК В НАСЛЕДОВАНИЕ НЕ ВХОДИТ, и это не упущение. Тема — свойство файла, её и вешают на
+  // пачку. Выбранный человек — свойство ВЗГЛЯДА: он ничего не говорит о том, что кладут в
+  // библиотеку. Загрузивший ставится сервером по сессии, а владельцем человек не становится от
+  // того, что кто-то смотрел на его файлы, — назначают владельца в карточке, осознанно.
   const intake = useCallback(
     (list: File[]) => {
       if (!writable || !list.length) return;
@@ -226,15 +282,36 @@ export default function FilesPage() {
     navigate({ pathname: ROUTES.files, search: params.toString() }, { replace: true });
   const openCard = (fileId: number) =>
     navigate({ pathname: `${ROUTES.files}/${fileId}`, search: params.toString() });
-  const showAll = () => patch({ topicIds: [], untopiced: false });
+  // КНОПКА СНИМАЕТ РОВНО ТО, ЧТО НАЗЫВАЕТ, — и это одно правило на обе кнопки пустого экрана.
+  //
+  // «Показать все файлы» названо ВСЕМИ файлами, значит и снимает всё, чем выдача сужена:
+  // темы, «разобрать» и человека. Оставь оно человека — кнопка на пустом экране, где пусто
+  // именно из-за человека, не изменила бы ничего видимого, а это худший исход из возможных:
+  // орган, который на глаз не работает.
+  //
+  // «Искать во всех темах (N)» названо ТЕМАМИ и снимает только их — а число рядом с ним
+  // посчитано с живым человеком (см. `everywhereQuery`), потому что именно он переживёт
+  // нажатие. Печатать там счёт без человека значило бы обещать сорок файлов и показать три.
+  const showAll = () => patch({ topicIds: [], untopiced: false, personId: 0 });
 
   // Второй счёт спрашивается только тогда, когда в узком фильтре не нашлось ничего: это
   // и есть число в кнопке «искать во всех темах (N)». Спрашивать его заранее — лишний
   // запрос на каждую букву в поиске.
   const narrowed = topicIds.length > 0 || untopiced;
-  const everywhereQuery = useSearchTotalEverywhere(
-    urlSearch,
-    narrowed && !filesQuery.isLoading && files.length === 0,
+  // «Ничего не нашлось» — это ОТВЕТ, а не отказ. Пока список не прочитался (`isError`), экран
+  // показывает `ListFailedState`, и второй счёт под ним не будет ни показан, ни осмыслен: он
+  // уйдёт в тот же не отвечающий сервер вторым запросом.
+  const nothingFound = !filesQuery.isLoading && !filesQuery.isError && files.length === 0;
+  const everywhereQuery = useFilesTotal(
+    { ...filter, topicIds: [], untopiced: false },
+    narrowed && nothingFound && !!urlSearch.trim(),
+  );
+  // ТРЕТИЙ СЧЁТ, по тому же правилу и с той же оговоркой: он один отличает «у паши тут ничего
+  // нет» от «паша это не ЗАГРУЖАЛ, но ведёт четыре штуки». Спрашивается только на пустой выдаче
+  // и только когда роль сужена, — иначе он ответил бы ровно то, что уже на экране.
+  const anyRoleQuery = useFilesTotal(
+    { ...filter, personRole: 'any' },
+    personId > 0 && personRole !== 'any' && nothingFound,
   );
 
   if (!mayRead) return <NoAccessState />;
@@ -245,20 +322,45 @@ export default function FilesPage() {
     .map((id) => topics.find((t) => Number(t.id) === id))
     .filter(Boolean) as typeof topics;
 
+  // ИМЯ БЕРЁТСЯ ТОЛЬКО ДЛЯ ПОДПИСИ, фильтрует по-прежнему id. `ListAdmins` отдаёт лишь живые
+  // аккаунты, поэтому имени может не быть вовсе — тогда пустой экран говорит `#id` и объясняет,
+  // почему имени нет, а не притворяется, что фильтра нет.
+  const pickedPerson = (adminsData?.admins ?? []).find((a) => Number(a.id ?? 0) === personId);
+  const personLabel = personId ? (pickedPerson?.username ?? `#${personId}`) : '';
+
   const emptyState = () => {
     if (urlSearch) {
       return (
         <EmptySearchState
           search={urlSearch}
           narrowed={narrowed}
+          personLabel={personLabel || undefined}
           everywhereTotal={
             everywhereQuery.data ? Number(everywhereQuery.data.total ?? 0) : undefined
           }
           onSearchEverywhere={() => patch({ topicIds: [], untopiced: false })}
+          onClearPerson={() => patch({ personId: 0 })}
           onClearSearch={() => {
             setSearchInput('');
             patch({ q: '' });
           }}
+        />
+      );
+    }
+    // ЧЕЛОВЕК СТОИТ ВЫШЕ ТЕМ, потому что он и есть заданный вопрос: чипы тем видно на экране
+    // всегда, а вот выбранный человек — свежее и уже действующее сужение, и «в теме пусто» на
+    // непустой теме прочлось бы как поломка темы. Ниже поиска: набранное слово человек помнит
+    // лучше всего, и «ничего не нашлось» про него — точнее.
+    if (personId) {
+      return (
+        <EmptyPersonState
+          personLabel={personLabel}
+          known={!!pickedPerson}
+          role={personRole}
+          narrowed={narrowed}
+          anyRoleTotal={anyRoleQuery.data ? Number(anyRoleQuery.data.total ?? 0) : undefined}
+          onAnyRole={() => patch({ personRole: 'any' })}
+          onShowAll={showAll}
         />
       );
     }
@@ -301,6 +403,10 @@ export default function FilesPage() {
           onSearch={setSearchInput}
           sort={sort}
           onSort={(v) => patch({ sort: v })}
+          personId={personId}
+          personRole={personRole}
+          onPerson={(id) => patch({ personId: id })}
+          onPersonRole={(r) => patch({ personRole: r })}
           mode={mayWrite ? mode : 'read'}
           onMode={setMode}
           canWrite={mayWrite}

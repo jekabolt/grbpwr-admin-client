@@ -9,7 +9,7 @@ import { HATCH } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { MAX_UPLOAD_BYTES, uploadLibraryPreview } from '../api/filesService';
-import { invalidateFileViews } from '../hooks/useFiles';
+import { invalidateFileViews, type PersonRoleFilter } from '../hooks/useFiles';
 import { formatBytes } from '../utils/format';
 import { rebuildPreview } from '../utils/preview';
 import { FailureText } from './failure-text';
@@ -241,21 +241,36 @@ export function EmptyUntopicedState({ onShowAll }: { onShowAll: () => void }) {
  * Когда искали ВНУТРИ выбранных тем, единственный полезный ответ — сколько нашлось бы без
  * них: иначе человек делает вывод, что поиск сломан, хотя сломан был фильтр. Число берётся
  * вторым запросом и только в этот момент — на каждое нажатие клавиши его спрашивать незачем.
+ *
+ * Фильтр по человеку сужает так же, и молчать о нём здесь нельзя: «ничего не нашлось» рядом с
+ * непрочитанным пикером человека — это ровно тот случай, когда виноват фильтр, а винят поиск.
+ * Своей кнопки со счётом у него нет намеренно: снять человека — не «поискать шире тем же
+ * запросом», а другой вопрос, и число к нему приписывать не за что.
  */
 export function EmptySearchState({
   search,
   narrowed,
+  personLabel,
   everywhereTotal,
   onSearchEverywhere,
+  onClearPerson,
   onClearSearch,
 }: {
   search: string;
   /** Поиск шёл в сузившем фильтре (выбраны темы или «разобрать»). */
   narrowed: boolean;
+  /** Имя выбранного человека (или `#id`, если такого аккаунта уже нет). */
+  personLabel?: string;
   everywhereTotal?: number;
   onSearchEverywhere: () => void;
+  onClearPerson: () => void;
   onClearSearch: () => void;
 }) {
+  // Оба сужения называются ОДНОЙ фразой: два фильтра, перечисленные порознь, читаются как две
+  // разные причины одной пустоты.
+  const where = [narrowed ? 'в выбранных темах' : '', personLabel ? `у ${personLabel}` : '']
+    .filter(Boolean)
+    .join(' и ');
   return (
     <StateFrame
       title='ничего не нашлось'
@@ -264,6 +279,11 @@ export function EmptySearchState({
           {narrowed && everywhereTotal !== undefined && everywhereTotal > 0 && (
             <Button size='sm' variant='main' onClick={onSearchEverywhere}>
               искать во всех темах ({everywhereTotal})
+            </Button>
+          )}
+          {personLabel && (
+            <Button size='sm' variant='secondary' onClick={onClearPerson}>
+              искать у всех людей
             </Button>
           )}
           <Button size='sm' variant='secondary' onClick={onClearSearch}>
@@ -275,11 +295,97 @@ export function EmptySearchState({
     >
       <Text size='micro' variant='label'>
         «{search}» не встретилось ни в имени файла, ни в названии темы, ни в имени того, кто
-        загрузил{narrowed ? ' — в выбранном фильтре' : ''}.
+        загрузил{where ? ` — ${where}` : ''}.
         {narrowed && everywhereTotal === 0
           ? ' во всех темах такого файла тоже нет.'
           : ''}
       </Text>
+    </StateFrame>
+  );
+}
+
+/**
+ * У ВЫБРАННОГО ЧЕЛОВЕКА ЗДЕСЬ НИЧЕГО НЕТ — и это законный ответ, а не поломка.
+ *
+ * Отдельное состояние нужно ровно потому, что предыдущие одиннадцать про человека не знают:
+ * «здесь пока ничего нет» на полной библиотеке прочли бы как сломавшийся раздел, а «в теме
+ * пусто» — как пустую тему. Пустота тут значит одно: с этим человеком в этой роли ни один
+ * файл не связан.
+ *
+ * ЭКРАН НЕ КЛЯНЁТСЯ, ЧТО У ЧЕЛОВЕКА ФАЙЛОВ НЕТ. Выдача считается предикатом видимости
+ * смотрящего: закрытый файл не попадает ни в список, ни в счёт. «Ничего нет» здесь всегда
+ * значит «ничего, что видно ВАМ», и сказать это надо вслух — иначе экран выдаёт ограничение
+ * доступа за факт о человеке.
+ */
+export function EmptyPersonState({
+  personLabel,
+  known,
+  role,
+  narrowed,
+  anyRoleTotal,
+  onAnyRole,
+  onShowAll,
+}: {
+  /** Имя из списка людей или `#id`, если аккаунта в нём нет. */
+  personLabel: string;
+  /** Такой аккаунт есть в `ListAdmins`. Нет — он отключён либо ссылка старая. */
+  known: boolean;
+  role: PersonRoleFilter;
+  /** Кроме человека фильтр сужен ещё темами или «разобрать». */
+  narrowed: boolean;
+  /** Сколько нашлось бы у него В ЛЮБОЙ РОЛИ. `undefined` — не спрашивали. */
+  anyRoleTotal?: number;
+  onAnyRole: () => void;
+  onShowAll: () => void;
+}) {
+  const title =
+    role === 'uploaded'
+      ? `${personLabel} сюда ничего не загружал`
+      : role === 'owner'
+        ? `${personLabel} не ведёт ни одного файла`
+        : `у ${personLabel} здесь ничего нет`;
+
+  return (
+    <StateFrame
+      title={title}
+      actions={
+        <>
+          {/* Кнопка ослабления НЕСЁТ ЧИСЛО — тот же довод, что у «искать во всех темах (N)»:
+              без него она обещает результат, которого может не быть, и второе пустое место
+              подряд человек прочтёт уже как поломку. Нет числа или оно ноль — кнопки нет. */}
+          {role !== 'any' && !!anyRoleTotal && (
+            <Button size='sm' variant='main' onClick={onAnyRole}>
+              в любой роли ({anyRoleTotal})
+            </Button>
+          )}
+          <Button size='sm' variant='secondary' onClick={onShowAll}>
+            показать все файлы
+          </Button>
+        </>
+      }
+      note='файлы, закрытые от вас, в этот ответ не попадают — у самого человека их может быть больше, чем видно отсюда'
+    >
+      <Text size='micro' variant='label'>
+        у файла две разные связи с человеком: <b>загрузил</b> — кто принёс его в библиотеку, и
+        этого с файла не снять уже никогда; <b>ведёт</b> — кто отвечает за него сейчас, к тому и
+        идут, когда файл устарел. чаще это один человек, но не всегда: загрузивший мог уйти, а
+        файл остаться.
+      </Text>
+      {narrowed && (
+        <Text size='micro' variant='label'>
+          человек — не единственное сужение: сверху выбраны ещё темы (или «разобрать»). пустым
+          может быть именно пересечение, а не человек — «показать все файлы» снимет всё разом.
+        </Text>
+      )}
+      {!known && (
+        // Фильтр при этом РАБОТАЕТ: сервер ищет по id, и «нет в списке» — не «не найден».
+        // Молчать об отсутствующем имени нельзя, иначе `#41` в пикере читается как сбой.
+        <Text size='micro' variant='label'>
+          имени у этого аккаунта здесь нет: он отключён или ссылку прислали давно. фильтр всё
+          равно считает верно — он спрашивает по номеру аккаунта, а не по имени, и потому не
+          путает однофамильцев.
+        </Text>
+      )}
     </StateFrame>
   );
 }
