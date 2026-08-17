@@ -116,7 +116,12 @@ function FilePicker({
   const [search, setSearch] = useState('');
   const [topicId, setTopicId] = useState(0);
   const topicsQuery = useFileTopics();
-  const filesQuery = useLibraryFiles({ topicId, untopiced: false, search });
+  const filesQuery = useLibraryFiles({
+    topicIds: topicId ? [topicId] : [],
+    untopiced: false,
+    search,
+    sort: 'new',
+  });
 
   const files = useMemo(
     () => (filesQuery.data?.pages ?? []).flatMap((p) => p.files ?? []),

@@ -2,6 +2,7 @@ import { adminService } from 'api/api';
 import type {
   common_OrderFactor,
   LibraryFile,
+  LibraryFileSort,
   ListLibraryFilesRequest,
 } from 'api/proto-http/admin';
 
@@ -31,9 +32,13 @@ function authHeader(): string {
   return token ? `Bearer ${token}` : '';
 }
 
-function uploadUrl(): string {
+function apiUrl(path: string): string {
   const base = (import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');
-  return `${base}/api/files/upload`;
+  return `${base}${path}`;
+}
+
+function uploadUrl(): string {
+  return apiUrl('/api/files/upload');
 }
 
 /**
@@ -126,6 +131,27 @@ export function uploadLibraryFile(args: {
   });
 }
 
+/**
+ * ЗАМЕНА ПРЕВЬЮ у уже загруженного файла.
+ *
+ * Отдельный HTTP-эндпоинт по той же причине, что и загрузка: картинка — это multipart-тело,
+ * а не поле gRPC-сообщения. Тело — ровно одна часть `preview`, лимит на сервере 2 МиБ.
+ */
+export async function uploadLibraryPreview(id: number, preview: Blob): Promise<void> {
+  const form = new FormData();
+  form.append('preview', preview, 'preview.webp');
+
+  const res = await fetch(apiUrl(`/api/files/${id}/preview`), {
+    method: 'POST',
+    headers: { 'Grpc-Metadata-Authorization': authHeader() },
+    body: form,
+  });
+  if (res.ok) return;
+
+  const body = await res.text().catch(() => '');
+  throw new Error(uploadErrorMessage(res.status, body));
+}
+
 export const filesService = {
   listFiles: (req: Partial<ListLibraryFilesRequest>) =>
     adminService.ListLibraryFiles({
@@ -135,6 +161,10 @@ export const filesService = {
       limit: req.limit ?? 60,
       offset: req.offset ?? 0,
       orderFactor: (req.orderFactor ?? null) as common_OrderFactor,
+      // Пересечение, а не объединение: файл обязан нести ВСЕ выбранные темы. Сузил выбор —
+      // файлов стало меньше; это и есть то, ради чего чипы нажимают второй раз.
+      topicIds: req.topicIds ?? [],
+      sortBy: (req.sortBy ?? null) as LibraryFileSort,
     }),
   getFile: (id: number) => adminService.GetLibraryFile({ id }),
   updateFile: (args: {
@@ -144,6 +174,14 @@ export const filesService = {
     newTopics: string[];
   }) => adminService.UpdateLibraryFile(args),
   deleteFile: (id: number) => adminService.DeleteLibraryFile({ id }),
+  /**
+   * ДОПИСЫВАЕТ темы пачке файлов, а не заменяет набор.
+   *
+   * Замена на пачке — это гонка с чужой правкой: выделение помнит темы на момент клика, а к
+   * моменту отправки кто-то уже мог повесить свой ярлык, и «replace» стёр бы его молча.
+   */
+  assignTopics: (args: { fileIds: number[]; topicIds: number[]; newTopics: string[] }) =>
+    adminService.AssignLibraryFileTopics(args),
   listTopics: () => adminService.ListFileTopics({}),
   createTopic: (name: string, description = '') =>
     adminService.CreateFileTopic({ name, description }),

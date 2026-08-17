@@ -29,20 +29,25 @@ type Row = {
  */
 export function UploadDialog({
   topics,
-  presetTopicId,
+  presetTopicIds,
   initialFiles,
   onClose,
   onDone,
 }: {
   topics: FileTopic[];
-  presetTopicId?: number;
+  /**
+   * «Открытая тема» холста — это НАБОР выбранных чипов, а не одна тема: пачка, брошенная при
+   * выбранных «packaging» и «atelier», обязана получить обе, иначе она немедленно выпадет из
+   * того самого пересечения, куда её и клали.
+   */
+  presetTopicIds?: number[];
   initialFiles?: File[];
   onClose: () => void;
   onDone: (summary: string) => void;
 }) {
   const { createTopic, invalidate } = useFilesMutations();
   const [rows, setRows] = useState<Row[]>([]);
-  const [selected, setSelected] = useState<number[]>(presetTopicId ? [presetTopicId] : []);
+  const [selected, setSelected] = useState<number[]>(presetTopicIds ?? []);
   const [newTopic, setNewTopic] = useState('');
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [running, setRunning] = useState(false);
