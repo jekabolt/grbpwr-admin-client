@@ -2,6 +2,7 @@ import { adminService } from 'api/api';
 import type {
   common_OrderFactor,
   LibraryFileSort,
+  LibraryFilePersonRole,
   ListLibraryFilesRequest,
 } from 'api/proto-http/admin';
 
@@ -97,6 +98,14 @@ export const filesService = {
       // файлов стало меньше; это и есть то, ради чего чипы нажимают второй раз.
       topicIds: req.topicIds ?? [],
       sortBy: (req.sortBy ?? null) as LibraryFileSort,
+      // ФИЛЬТР ПО ЧЕЛОВЕКУ БЬЁТ ПО ЖИВОМУ id АККАУНТА, а не по имени. Имя освобождается при
+      // удалении аккаунта и достаётся следующему однофамильцу — на бэкенде это закрыто
+      // отдельным тестом, и клиент обязан отдавать id, а не подставлять имя в `search`.
+      //
+      // Ноль = фильтра нет. Роль без человека сервер игнорирует, поэтому обнулять её здесь не
+      // требуется, но и полагаться на роль как на самостоятельный фильтр нельзя.
+      personId: req.personId ?? 0,
+      personRole: (req.personRole ?? null) as LibraryFilePersonRole,
     }),
   getFile: (id: number) => adminService.GetLibraryFile({ id }),
   updateFile: (args: {

@@ -86,6 +86,25 @@ export type LibraryFileSort =
   | "LIBRARY_FILE_SORT_UNKNOWN"
   | "LIBRARY_FILE_SORT_NAME"
   | "LIBRARY_FILE_SORT_SIZE";
+// LibraryFilePersonRole is the CAPACITY a person is on record for a file in.
+// «Файлы Паши» is TWO questions, and answering them as one loses the difference
+// that matters:
+// - ЗАГРУЗИЛ — the historical fact. The row carries a `uploaded_by` STRING next
+// to the LIVE `uploaded_by_id` link precisely because they have different
+// lifetimes: the name outlives the account and is freed for the next
+// namesake, the link is nulled by the deletion.
+// - ВЕДЁТ — current responsibility, the `owners` list: who to ask when the file
+// goes stale. It changes without the file changing at all.
+// So the filter is ONE person plus a role, never two independent people filters:
+// a person is asked about once, and the role says which of their two relations
+// to the file is meant.
+export type LibraryFilePersonRole =
+  // UNKNOWN is «в любой роли»: uploaded OR owns. It is the default because that
+  // is what «где он числится» means — a person looking for what a colleague has
+  // to do with a file does not yet know in which of the two ways.
+  | "LIBRARY_FILE_PERSON_ROLE_UNKNOWN"
+  | "LIBRARY_FILE_PERSON_ROLE_UPLOADED"
+  | "LIBRARY_FILE_PERSON_ROLE_OWNER";
 // StyleCostPriceSource is the Q4 price-ladder level a material line resolved to.
 export type StyleCostPriceSource =
   | "STYLE_COST_PRICE_SOURCE_UNKNOWN"
@@ -5157,6 +5176,23 @@ export type ListLibraryFilesRequest = {
   // keeps applying to THAT ordering only — name and size have their own fixed
   // directions (A→Z, largest first), so the two controls never contradict.
   sortBy: LibraryFileSort | undefined;
+  // person_id narrows the grid to the files ONE person is on record for, in the
+  // capacity person_role names. It is an ACCOUNT id, not a name — that is the
+  // whole point of the field, and the reason it is not folded into `search`
+  // above. `search` matches the uploader as a STRING, which is right for the one
+  // input a person types into («что заливал Паша») and wrong as a filter: the
+  // string outlives the account, admins.username is UNIQUE and frees the name on
+  // deletion, so a namesake hired later would inherit the whole history of the
+  // person who left. A picked account cannot be misread that way.
+  // 0 (and anything non-positive) means NO person filter, not «nobody»: the
+  // control is optional, and a stray 0 from a url is not worth an error over.
+  // An id that belongs to no account is not an error either — it just matches
+  // nothing. Refusing it would turn the field into an oracle for «does account
+  // N exist», answerable by counting up.
+  personId: number | undefined;
+  // person_role picks WHICH relation to the file is meant; UNKNOWN = either.
+  // Ignored while person_id is unset — a role alone filters nothing.
+  personRole: LibraryFilePersonRole | undefined;
 };
 
 export type ListLibraryFilesResponse = {
@@ -17095,6 +17131,12 @@ export function createAdminServiceClient(
       }
       if (request.sortBy) {
         queryParams.push(`sortBy=${encodeURIComponent(request.sortBy.toString())}`)
+      }
+      if (request.personId) {
+        queryParams.push(`personId=${encodeURIComponent(request.personId.toString())}`)
+      }
+      if (request.personRole) {
+        queryParams.push(`personRole=${encodeURIComponent(request.personRole.toString())}`)
       }
       let uri = path;
       if (queryParams.length > 0) {
