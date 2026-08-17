@@ -167,14 +167,10 @@ export const tasksService: TasksService = {
       r.task
         ? {
             ...mapTask(r.task),
-            files: (r.files ?? []).map((f) => ({
-              id: f.id ?? 0,
-              fileName: f.fileName ?? '',
-              sizeBytes: Number(f.sizeBytes ?? 0),
-              url: f.url ?? '',
-              downloadUrl: f.downloadUrl ?? '',
-              previewUrl: f.previewUrl ?? '',
-            })),
+            // Вложение проносится КАК ПРИЕХАЛО (`LibraryFile`): плитка вложения — та же, что
+            // в разделе «файлы», и ей нужны тема, загрузивший и тип содержимого, а не три
+            // ссылки. Подписанные ссылки внутри живут ровно столько, сколько этот ответ.
+            files: r.files ?? [],
           }
         : undefined,
     ),

@@ -7,7 +7,7 @@
 // placement (board / status / position) lives on Task and is set at AddTask /
 // changed only via MoveTask.
 
-import type { common_TaskMediaAnnotations } from 'api/proto-http/admin';
+import type { common_TaskMediaAnnotations, LibraryFile } from 'api/proto-http/admin';
 
 export type TaskBoard =
   | 'TASK_BOARD_UNKNOWN'
@@ -84,15 +84,14 @@ export interface TaskInsert {
   sampleId: number; // образец / sample (GetSample); 0 = none (new-flow NF link)
 }
 
-// One resolved library attachment: enough to list and open it, nothing more.
-export interface TaskFile {
-  id: number;
-  fileName: string;
-  sizeBytes: number;
-  url: string; // empty for types that must not render inline (svg, html)
-  downloadUrl: string;
-  previewUrl: string;
-}
+/*
+ * Здесь стоял урезанный `TaskFile` (id / имя / размер / три ссылки) — «ровно чтобы показать
+ * строкой и открыть». Вложения стали плитками, а плитка файла у раздела «файлы» уже есть, и
+ * она берёт `LibraryFile` целиком: тему, загрузившего, тип содержимого. Урезанный вид пришлось
+ * бы разворачивать обратно фальшивым `LibraryFile` на месте отрисовки — либо заводить вторую
+ * плитку для того же самого файла. Поэтому вложение хранится ровно тем, чем его прислал сервер
+ * (`GetTaskResponse.files` — это `LibraryFile`), а вид приводится к чему нужно на месте.
+ */
 
 // Stored card (common.Task): id + content + placement + resolved media + identity.
 export interface Task {
@@ -105,7 +104,7 @@ export interface Task {
   // Resolved library attachments, present only on GetTask (the list response carries
   // ids alone). They hold presigned urls with a short life, so they are never cached
   // beyond the response that minted them.
-  files: TaskFile[];
+  files: LibraryFile[];
   checklist: TaskChecklistItem[];
   createdBy: string; // AdminAccount.username
   createdAt: string;

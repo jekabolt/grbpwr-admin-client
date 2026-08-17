@@ -5,11 +5,9 @@ import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import { Avatar } from 'ui/components/avatar';
-import { formatBytes } from 'utils/pattern';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
-import { MediaGallery } from 'ui/components/media-gallery';
 import { Pill } from 'ui/components/pill';
 import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
@@ -29,6 +27,7 @@ import {
   useUnarchiveTask,
   useUpdateTask,
 } from '../hooks/useTasks';
+import { AttachmentTiles } from './attachment-tiles';
 import { taskLinks } from '../utils/links';
 import { BOARD_LABEL, BOARDS, dueMeta, STATUS_LABEL, STATUSES, toOptions } from '../utils/meta';
 
@@ -241,34 +240,7 @@ export function TaskDetail() {
             /* Одна секция на оба источника: для читающего карточку «вложение» — это
                вложение, независимо от того, в каком бакете лежат байты. */
             <Section title={`attachments · ${task.media.length + task.files.length}`}>
-              {task.media.length > 0 && (
-                <MediaGallery
-                  items={task.media.map((m) => ({
-                    src: m.fullSize || m.thumbnail || '',
-                    thumbnail: m.thumbnail,
-                  }))}
-                />
-              )}
-              {task.files.map((f) => (
-                <Row
-                  key={f.id}
-                  label={f.fileName}
-                  value={
-                    <span className='flex items-center justify-end gap-2'>
-                      <Text size='micro' variant='label' component='span'>
-                        {formatBytes(f.sizeBytes)}
-                      </Text>
-                      {(f.url || f.downloadUrl) && (
-                        <Button asChild size='xs' variant='secondary'>
-                          <a href={f.url || f.downloadUrl} target='_blank' rel='noopener noreferrer'>
-                            открыть
-                          </a>
-                        </Button>
-                      )}
-                    </span>
-                  }
-                />
-              ))}
+              <AttachmentTiles taskId={task.id} media={task.media} files={task.files} />
             </Section>
           )}
         </SectionStack>
