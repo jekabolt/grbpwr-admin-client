@@ -33,6 +33,7 @@ import { memo, useMemo } from 'react';
 import { normBlock } from './block-code';
 import { defaultContourLayer, layerOptions } from './contour-layer';
 import { defaultGrainLayer, grainLayerOptions } from './grain';
+import { NO_DXF_DOWNLOADED, sheetDownloadFailed } from './dxf-warnings';
 import {
   aliasIdentity,
   splitPiecesBySize,
@@ -98,15 +99,15 @@ export function dxfGeometryQuery(files: readonly ScopedDxfFile[]) {
             scopeByFile.set(fetched.length, snapshot[i].scopeKey);
             fetched.push(s.value);
           } else {
-            warnings.push(`${snapshot[i].name}: не удалось скачать`);
+            warnings.push(sheetDownloadFailed(snapshot[i].name));
           }
         });
-        if (fetched.length === 0) throw new Error('не удалось скачать ни один DXF с CDN');
+        if (fetched.length === 0) throw new Error(NO_DXF_DOWNLOADED);
         // ПРОВЕРКА ОТМЕНЫ ПЕРЕД РАЗБОРОМ. `fetchMediaBlob` не принимает signal, поэтому скачивание
         // само по себе не прерывается; а вот спавнить воркер и разбирать десятки мегабайт ради
         // результата, который уже никто не ждёт, незачем — до первого `parse` воркера ещё нет, и
         // `terminate()` по abort'у был no-op.
-        if (signal.aborted) throw new Error('разбор отменён');
+        if (signal.aborted) throw new Error('parsing cancelled');
         const out = await client.parse(fetched, {
           unit: 'auto',
           tol: NEST_DEFAULTS.tol,
@@ -297,7 +298,7 @@ export const PieceShape = memo(function PieceShape({
       viewBox={`${box.x} ${box.y} ${box.w} ${box.h}`}
       className={className ?? 'block h-full w-full'}
       role='img'
-      aria-label={`контур детали ${piece.blockName ?? piece.name}`}
+      aria-label={`piece contour ${piece.blockName ?? piece.name}`}
     >
       <polygon
         points={points}
@@ -392,7 +393,7 @@ export function SheetThumb({
       preserveAspectRatio='xMidYMid meet'
       className={className}
       role='img'
-      aria-label={`силуэты деталей: ${shapes.length}`}
+      aria-label={`piece silhouettes: ${shapes.length}`}
     >
       {placed.map(({ p, at }, i) => (
         <polygon

@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NestConfig, NestResult, PieceDTO, Unit } from 'lib/nesting/types';
 import { NEST_DEFAULTS } from 'lib/nesting/types';
 import { NestingWorkerClient } from 'lib/nesting/worker/client';
+import { NO_DXF_DOWNLOADED, sheetDownloadFailed } from './dxf-warnings';
 
 export type NestingFile = { name: string; url: string };
 
@@ -109,10 +110,10 @@ export function useNesting(files: NestingFile[] | null) {
         const fetchWarnings: string[] = [];
         settled.forEach((s, i) => {
           if (s.status === 'fulfilled') fetched.push(s.value);
-          else fetchWarnings.push(`${files[i].name}: не удалось скачать файл`);
+          else fetchWarnings.push(sheetDownloadFailed(files[i].name));
         });
         if (fetched.length === 0) {
-          setParse({ phase: 'error', message: 'не удалось скачать ни один DXF с CDN' });
+          setParse({ phase: 'error', message: NO_DXF_DOWNLOADED });
           return;
         }
         const out = await client().parse(fetched, {

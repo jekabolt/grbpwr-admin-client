@@ -67,19 +67,19 @@ export function MarkerLengthFormula({
   return (
     <StatGrid min={150}>
       <Stat
-        label='длина настила'
+        label='lay length'
         value={lengthCm > 0 ? fmtNum(lengthCm) : '—'}
-        sub={widthCm > 0 ? `см · раскройная ширина ${fmtNum(widthCm)} см` : 'см'}
+        sub={widthCm > 0 ? `cm · cutting width ${fmtNum(widthCm)} cm` : 'cm'}
       />
       <Stat
-        label='÷ изделий в настиле'
+        label='÷ garments in the lay'
         value={units > 0 ? units : '—'}
-        sub={unitsLabel || 'состав не читается'}
+        sub={unitsLabel || 'composition unreadable'}
       />
       <Stat
-        label='= расход на изделие'
+        label='= per-unit consumption'
         value={perGarment != null ? perGarment : '—'}
-        sub={unit ? `${unit} · отходы уже внутри` : 'единица слота не задана'}
+        sub={unit ? `${unit} · waste already inside` : 'slot unit not set'}
       />
     </StatGrid>
   );
@@ -156,9 +156,9 @@ export function MarkerAreaSplit({
       <DataTable>
         <thead>
           <tr>
-            <th>на что ушло полотно настила</th>
-            <th>см²</th>
-            <th>доля</th>
+            <th>where the lay cloth went</th>
+            <th>cm²</th>
+            <th>share</th>
           </tr>
         </thead>
         <tbody>
@@ -169,37 +169,38 @@ export function MarkerAreaSplit({
               никто не отвечает; сказано, что это одна и та же ВЕЛИЧИНА, посчитанная по разным
               данным, — и этого достаточно, чтобы два числа перестали читаться как два мнения. */}
           {row(
-            'площадь деталей',
+            'piece area',
             split.pieceCm2,
             nettoPerGarment && nettoPerGarment.value > 0
-              ? `это NETTO этой раскладки: ${nettoPerGarment.value} ${unit} на изделие. Ту же величину считает «по выкройкам» — но по СЕГОДНЯШНИМ файлам, и после правки лекал числа разойдутся`
-              : 'это NETTO — та же величина, что считает расчёт «по выкройкам», но по геометрии этой раскладки',
+              ? `this is the NETTO of this marker: ${nettoPerGarment.value} ${unit} per unit. “by patterns” computes the very same quantity — but from TODAY'S files, and once the pattern pieces are edited the two numbers will legitimately diverge`
+              : 'this is the NETTO — the same quantity the “by patterns” calculation gives, but on the geometry of this marker',
           )}
           {row(
-            'межлекальные выпады',
+            'waste between pieces',
             split.interPieceCm2,
-            'полотно между деталями и концы настила — за это и платит процент раскроя, когда норму вводят не раскладкой',
+            'the cloth between the pieces and the lay ends — this is what the cutting percent pays for when the norm is entered by something other than a marker',
           )}
           {row(
-            'кромка',
+            'selvedge',
             split.selvedgeCm2,
-            'по краям рулона, кроить нельзя — но куплена вместе с метром',
+            'along the edges of the roll, it cannot be cut from — but it is bought together with the metre',
           )}
         </tbody>
         <tfoot>
           <TotalRow>
-            <td>полотно настила</td>
+            <td>lay cloth</td>
             <td>{fmtInt(split.totalCm2)}</td>
             <td>100%</td>
           </TotalRow>
         </tfoot>
       </DataTable>
       <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
-        разложение выведено из КПД раскладки, её ширины и длины — оно объясняет число, но никуда не
-        уезжает и ни на что не умножается: измеренная длина уже оплатила все три слагаемых.
-        Слагаемые округлены до целых см², итог считается по неокруглённым — сумма столбца может
-        разойтись с ним на единицы. В рецепт те же отходы пишутся процентами ОТ ПЛОЩАДИ ДЕТАЛЕЙ
-        (шкала костинга), поэтому там числа другие — это одна и та же величина в двух шкалах
+        the split is derived from the marker's efficiency, its width and its length — it explains the
+        number, but it goes nowhere and is multiplied by nothing: the measured length has already paid
+        for all three terms. the terms are rounded to whole cm², the total is computed on the unrounded
+        ones — the column sum may differ from it by a few units. into the recipe the same waste is
+        written as percentages OF THE PIECE AREA (the costing scale), so the numbers there are
+        different — it is one and the same quantity on two scales
       </Text>
     </div>
   );
@@ -242,10 +243,10 @@ export function MarkerPerSizeTable({
     <DataTable>
       <thead>
         <tr>
-          <th>размер</th>
-          <th>расход{unit ? `, ${unit}` : ''}</th>
-          {anyArea && <th>площадь изделия, см²</th>}
-          <th>откуда число</th>
+          <th>size</th>
+          <th>consumption{unit ? `, ${unit}` : ''}</th>
+          {anyArea && <th>garment area, cm²</th>}
+          <th>where the number comes from</th>
         </tr>
       </thead>
       <tbody>
@@ -261,7 +262,7 @@ export function MarkerPerSizeTable({
                 {c && c.value > 0 ? (
                   c.value
                 ) : r.consumptionCm != null ? (
-                  <span className='text-labelColor'>{`${r.consumptionCm} см`}</span>
+                  <span className='text-labelColor'>{`${r.consumptionCm} cm`}</span>
                 ) : (
                   <EmptyCell />
                 )}

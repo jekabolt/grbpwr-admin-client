@@ -134,7 +134,7 @@ export function DxfSheetView({
     <div className='space-y-2'>
       {parse.phase === 'loading' && (
         <Text size='micro' variant='label' component='p'>
-          разбор DXF…
+          parsing DXF…
         </Text>
       )}
       {parse.phase === 'error' && <CalloutBox tone='error'>{parse.message}</CalloutBox>}
@@ -154,7 +154,7 @@ export function DxfSheetView({
             {sizeOpts.length > 1 && (
               <div className='flex flex-wrap items-center gap-1'>
                 <Text size='nano' variant='label' component='span'>
-                  размер:
+                  size:
                 </Text>
                 {sizeOpts.map((o) => (
                   <Button
@@ -163,10 +163,10 @@ export function DxfSheetView({
                     variant={o.size === shownSize ? 'main' : 'secondary'}
                     size={pillSize}
                     className={pillClass}
-                    title={`${o.count} деталей`}
+                    title={`${o.count} pieces`}
                     onClick={() => setActiveSize(o.size)}
                   >
-                    {o.size || (o.uni ? 'UNI · во всех размерах' : 'без размера')}
+                    {o.size || (o.uni ? 'UNI · in all sizes' : 'no size')}
                   </Button>
                 ))}
               </div>
@@ -174,7 +174,7 @@ export function DxfSheetView({
             {layerOpts.length > 1 && (
               <div className='flex flex-wrap items-center gap-1'>
                 <Text size='nano' variant='label' component='span'>
-                  контур:
+                  contour:
                 </Text>
                 {layerOpts.map((o) => (
                   <Button
@@ -185,12 +185,12 @@ export function DxfSheetView({
                     className={pillClass}
                     title={
                       o.checked === 0
-                        ? `слой ${o.layer}: ${o.pieces} контуров`
-                        : `слой ${o.layer}: градуируется у ${o.graded} из ${o.checked} деталей`
+                        ? `layer ${o.layer}: ${o.pieces} contours`
+                        : `layer ${o.layer}: graded on ${o.graded} of ${o.checked} pieces`
                     }
                     onClick={() => setActiveLayer(o.layer)}
                   >
-                    слой {o.layer || '—'}
+                    layer {o.layer || '—'}
                   </Button>
                 ))}
               </div>
@@ -200,7 +200,7 @@ export function DxfSheetView({
           {innerNames.length > 0 && (
             <div className='flex flex-wrap items-center gap-2'>
               <Text size='nano' variant='label' component='span'>
-                слои чертежа:
+                drawing layers:
               </Text>
               {innerNames.map(([layer, n]) => (
                 <label
@@ -244,8 +244,8 @@ export function DxfSheetView({
           />
 
           <Text size='nano' variant='label' component='p'>
-            деталей в размере: {shown.length}
-            {sizeOpts.length > 1 ? ` · размеров в файле: ${sizeOpts.filter((o) => o.size).length}` : ''}
+            pieces in this size: {shown.length}
+            {sizeOpts.length > 1 ? ` · sizes in the file: ${sizeOpts.filter((o) => o.size).length}` : ''}
           </Text>
         </>
       )}

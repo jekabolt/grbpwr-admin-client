@@ -155,7 +155,7 @@ export function MergeSizesModal({
     // на файл: промах мышью по всей папке не должен вешать вкладку на минуту.
     if (files.length > MAX_SHEETS) {
       setError(
-        `выбрано файлов: ${files.length} — это размерный ряд? Больше ${MAX_SHEETS} за раз не склеиваем.`,
+        `files picked: ${files.length} — is that a size range? we don't merge more than ${MAX_SHEETS} at a time.`,
       );
       return;
     }
@@ -193,19 +193,19 @@ export function MergeSizesModal({
       onCancel={() => {
         if (!busy) onClose();
       }}
-      title='склеить размеры в один DXF'
-      confirmLabel='загрузить в карточку'
-      cancelLabel='отмена'
+      title='merge sizes into one DXF'
+      confirmLabel='upload to the card'
+      cancelLabel='cancel'
       confirmDisabled={!built || busy || tooBig || singleSheet}
       width='lg'
       closeOnConfirm
     >
       <div className='space-y-2.5'>
         <Text size='micro' variant='label' component='p'>
-          CLO кладёт припуск на шов только для текущего размера — поэтому лекальщик выгружает
-          размеры по одному. Здесь они собираются в один чертёж: геометрия каждого блока копируется
-          дословно (надсечки, долевая, внутренние линии и текст на месте), а размеры вкладываются
-          друг в друга, как в выгрузке «все размеры».
+          CLO puts the seam allowance on the current size only — which is why the pattern maker
+          exports the sizes one by one. here they are collected into one drawing: the geometry of
+          every block is copied verbatim (notches, grainline, inner lines and text stay where they
+          are), and the sizes are nested into one another, as in an “all sizes” export.
         </Text>
 
         <div className='flex flex-wrap items-center gap-1.5'>
@@ -228,17 +228,17 @@ export function MergeSizesModal({
             disabled={busy}
             onClick={() => inputRef.current?.click()}
           >
-            {picked.length === 0 ? '+ выбрать файлы размеров' : 'выбрать другие файлы'}
+            {picked.length === 0 ? '+ pick size files' : 'pick other files'}
           </Button>
           {busy && (
             <Text size='nano' variant='label' component='span' className='uppercase tracking-label'>
-              разбор и склейка…
+              parsing and merging…
             </Text>
           )}
           {built && (
             <Button asChild variant='secondary' size='xs'>
               <a href={built.url} download={built.file.name}>
-                скачать файл
+                download the file
               </a>
             </Button>
           )}
@@ -254,18 +254,18 @@ export function MergeSizesModal({
 
         {singleSheet && (
           <Text size='micro' variant='label' component='p'>
-            выбран один файл — склеивать не с чем. Готовый чертёж грузится кнопкой «+ DXF»; сюда
-            складывают выгрузки ПО РАЗМЕРАМ, по одному файлу на размер.
+            one file picked — there is nothing to merge it with. a finished drawing is uploaded
+            with the “+ DXF” button; what goes here is the PER-SIZE exports, one file per size.
           </Text>
         )}
 
         {tooBig && built && (
           <CalloutBox tone='error'>
             <Text size='micro' component='p'>
-              склеенный файл {formatBytes(built.file.size)} — больше потолка загрузки (
-              {formatBytes(MAX_PATTERN_BYTES)}). Загрузить его в карточку нельзя; скачайте файл и
-              отдайте лекальщику, чтобы выгрузка была легче (обычно её раздувают сплайны и
-              внутренние линии).
+              the merged file is {formatBytes(built.file.size)} — over the upload ceiling (
+              {formatBytes(MAX_PATTERN_BYTES)}). it can't be uploaded to the card; download it and
+              hand it to the pattern maker so the export comes out lighter (splines and inner
+              lines are what usually bloats it).
             </Text>
           </CalloutBox>
         )}
@@ -290,17 +290,20 @@ export function MergeSizesModal({
                   )}
                   {row && (
                     <Text size='nano' variant='label' component='span'>
-                      деталей: {row.blocks}
+                      pieces: {row.blocks}
                     </Text>
                   )}
                   {row?.duplicateOf && (
-                    <Pill tone='warn' title={`те же блоки уже принёс ${row.duplicateOf}`}>
-                      дубль — не вошёл
+                    <Pill
+                      tone='warn'
+                      title={`the same blocks were already brought by ${row.duplicateOf}`}
+                    >
+                      duplicate — not included
                     </Pill>
                   )}
                   {!!row?.moved && (
-                    <Pill tone='attention' title='файл выгружен в своей системе координат'>
-                      перенесено деталей: {row.moved}
+                    <Pill tone='attention' title='the file was exported in its own coordinate system'>
+                      pieces moved: {row.moved}
                     </Pill>
                   )}
                 </div>
@@ -313,22 +316,22 @@ export function MergeSizesModal({
           <>
             <div className='flex flex-wrap items-center gap-1.5 border-b border-borderColor pb-1'>
               <Text size='micro' component='span'>
-                <b>склеено:</b> блоков {built.result.blocks.length}
-                {sizes.length > 0 ? `, размеры ${sizes.join(', ')}` : ''}
+                <b>merged:</b> blocks {built.result.blocks.length}
+                {sizes.length > 0 ? `, sizes ${sizes.join(', ')}` : ''}
               </Text>
               {built.result.skipped.length > 0 && (
                 <Pill
                   tone='warn'
                   title={built.result.skipped
-                    .map((s) => `${s.block}: уже принёс ${s.keptFrom}`)
+                    .map((s) => `${s.block}: already brought by ${s.keptFrom}`)
                     .join('; ')}
                 >
-                  повторных блоков: {built.result.skipped.length}
+                  repeated blocks: {built.result.skipped.length}
                 </Pill>
               )}
               {built.plan.maxShiftMm > 0 && (
                 <Pill tone='attention'>
-                  крупнейший перенос: {built.plan.maxShiftMm.toFixed(0)} мм
+                  largest move: {built.plan.maxShiftMm.toFixed(0)} mm
                 </Pill>
               )}
               <Text size='nano' variant='label' component='span' className='ml-auto'>

@@ -48,10 +48,10 @@ export function ModalRailSection({
   const tone = blockers.length > 0 ? 'warn' : warnings.length > 0 ? 'attention' : 'ok';
   const reasons =
     tone === 'ok'
-      ? 'ни ошибок, ни предупреждений'
+      ? 'no errors, no warnings'
       : [
-          blockers.length > 0 ? `блокирует: ${blockers.join('; ')}` : '',
-          warnings.length > 0 ? `предупреждения: ${warnings.join('; ')}` : '',
+          blockers.length > 0 ? `blocking: ${blockers.join('; ')}` : '',
+          warnings.length > 0 ? `warnings: ${warnings.join('; ')}` : '',
         ]
           .filter(Boolean)
           .join(' · ');

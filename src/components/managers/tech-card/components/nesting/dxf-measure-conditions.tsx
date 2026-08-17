@@ -32,6 +32,7 @@ import type { ContourAllowance } from './contour-allowance';
 import { layerAllowanceLabel, type LayerOption } from './contour-layer';
 import { applyLayerOptions, applySeamPrefill } from './dxf-apply-conditions';
 import { useDxfGeometry, useDxfIndex, type DxfBundle, type DxfIndex } from './dxf-geometry';
+import { isFetchFailure } from './dxf-warnings';
 
 export type DxfMeasureConditions = {
   /** Пачка DXF карточки — пустая означает «мерить не по чему», и это отдельная ветка. */
@@ -46,7 +47,7 @@ export type DxfMeasureConditions = {
   seamMm: number;
   /** Замер выбранного слоя (что в контуре уже лежит). null = не мерили. */
   measured: ContourAllowance | null;
-  /** Листы, которые не скачались или не разобрались — замер по такой пачке запрещён. */
+  /** Листы, которые не скачались, — замер по такой пачке запрещён. */
   downloadFailures: string[];
   /**
    * УСЛОВИЯ НЕПРИГОДНЫ ДЛЯ ЗАМЕРА — общий запрет обоим вызывающим: припуск не число, припуск выше
@@ -133,9 +134,7 @@ export function useDxfMeasureConditions(control: Control<TechCardFormData>): Dxf
 
   // ЧАСТИЧНО НЕ СКАЧАННАЯ ПАЧКА — не «просто предупреждение». Если свежий лист не скачался, а старая
   // ревизия в пачке есть, комплект соберётся по НЕЙ, и замер встанет по прошлой геометрии молча.
-  const downloadFailures = (geometry.data?.warnings ?? []).filter(
-    (w) => w.includes('не удалось скачать') || w.includes('не разобрал'),
-  );
+  const downloadFailures = (geometry.data?.warnings ?? []).filter(isFetchFailure);
 
   return {
     packSize: packFiles.length,
@@ -191,15 +190,15 @@ export function DxfMeasureConditionsFields({ state }: { state: DxfMeasureState }
           связи блок→деталь остаются на карточке и после удаления всех DXF. */}
       {state.packSize === 0 ? (
         <CalloutBox tone='warning'>
-          На карточке нет ни одного DXF — площади считать не по чему. Загрузите выкройки на вкладке
-          выкроек; связи деталей с блоками у вас уже есть.
+          the card carries no DXF at all — there is nothing to compute areas from. upload patterns
+          on the patterns tab; the piece-to-block links you already have.
         </CalloutBox>
       ) : (
-        state.parsePending && <Text size='micro'>качаем и разбираем выкройки…</Text>
+        state.parsePending && <Text size='micro'>downloading and parsing the patterns…</Text>
       )}
       {state.parseError && (
         <CalloutBox tone='warning'>
-          не удалось разобрать выкройки: {state.parseError.message || 'неизвестная ошибка'}
+          couldn't parse the patterns: {state.parseError.message || 'unknown error'}
         </CalloutBox>
       )}
       {/* ЧАСТИЧНО СКАЧАННАЯ ПАЧКА ХУЖЕ НЕСКАЧАННОЙ: комплект деталей может собраться по СТАРОЙ
@@ -207,20 +206,20 @@ export function DxfMeasureConditionsFields({ state }: { state: DxfMeasureState }
           предупреждение, а запрет. */}
       {state.downloadFailures.length > 0 && (
         <CalloutBox tone='warning'>
-          Часть выкроек не скачалась или не разобралась: {state.downloadFailures.join('; ')}. Замер
-          собрался бы по тем листам, что скачались, — например, по прежней ревизии, — и был бы
-          неотличим от верного. Повторите позже.
+          some of the patterns didn't download: {state.downloadFailures.join('; ')}. the measurement
+          would be assembled from the sheets that did download — from a previous revision, say —
+          and would be indistinguishable from a correct one. try again later.
         </CalloutBox>
       )}
 
       {f.layers.length > 1 && (
         <Selector
-          label='слой контура'
+          label='contour layer'
           value={state.layer}
           options={f.layers.map((o) => ({
             value: o.layer,
-            label: `слой ${o.layer || '—'} · деталей ${o.pieces}${
-              o.checked > 0 ? ` · градуируется ${o.graded}/${o.checked}` : ''
+            label: `layer ${o.layer || '—'} · pieces ${o.pieces}${
+              o.checked > 0 ? ` · graded ${o.graded}/${o.checked}` : ''
             }${layerAllowanceLabel(o) ? ` · ${layerAllowanceLabel(o)}` : ''}`,
           }))}
           onChange={(v: string | number) => {
@@ -232,7 +231,7 @@ export function DxfMeasureConditionsFields({ state }: { state: DxfMeasureState }
 
       <label className='flex flex-col gap-1'>
         <Text size='micro' variant='label' component='span'>
-          припуск на шов, мм
+          seam allowance, mm
         </Text>
         <input
           className='h-8 w-full border border-borderColor px-2 text-small'
@@ -241,7 +240,7 @@ export function DxfMeasureConditionsFields({ state }: { state: DxfMeasureState }
           onChange={(e) => f.setSeamInput(e.target.value.replace(/[^\d.,]/g, '').replace(',', '.'))}
         />
         <Text size='nano' variant='label' component='span'>
-          {f.seamInput.trim() === '' ? f.prefillWhy : 'введено руками'}
+          {f.seamInput.trim() === '' ? f.prefillWhy : 'typed by hand'}
         </Text>
       </label>
 
@@ -250,35 +249,35 @@ export function DxfMeasureConditionsFields({ state }: { state: DxfMeasureState }
           площади. Если запрос УПАЛ, мерить можно — иначе сломанная настройка остановила бы
           работу, — но подпись «ни карточка, ни цех, ни файл не назвали» в этом состоянии неверна,
           и молчать об этом нельзя. */}
-      {f.workshopPending && <Text size='micro'>читаем стандарт припуска цеха…</Text>}
+      {f.workshopPending && <Text size='micro'>reading the workshop's allowance standard…</Text>}
       {f.workshopError && (
         <CalloutBox tone='warning'>
-          Настройки цеха не читаются, поэтому цеховой стандарт припуска в предзаполнении НЕ
-          участвовал. Если он задан, замер выйдет посчитанным по другому припуску — проверьте число
-          в поле выше.
+          the workshop settings can't be read, so the workshop's allowance standard did NOT take
+          part in the prefill. if one is set, the measurement will come out computed on a different
+          allowance — check the number in the field above.
         </CalloutBox>
       )}
 
       {f.seamInvalid && (
         <CalloutBox tone='warning'>
-          Припуск читается не как число. Пустое поле означает предзаполнение ({f.prefillValue} мм),
-          а не ноль: молча посчитать ноль значило бы померить по линии шва.
+          the allowance doesn't read as a number. an empty field means the prefill (
+          {f.prefillValue} mm), not zero: silently counting zero would mean measuring along the seam line.
         </CalloutBox>
       )}
       {f.seamOverMax && (
         <CalloutBox tone='warning'>
-          Припуск больше {MAX_SEAM_ALLOWANCE_MM} мм — тот же потолок, что у раскладки и у сервера.
-          Столько не бывает; похоже, введены сантиметры вместо миллиметров.
+          the allowance is over {MAX_SEAM_ALLOWANCE_MM} mm — the same ceiling the marker and the
+          server use. there is no such allowance; it looks like centimetres were typed for millimetres.
         </CalloutBox>
       )}
       {/* ТОТ ЖЕ ОТКАЗ, ЧТО В РАСКЛАДКЕ, И ПО ТОЙ ЖЕ ПРИЧИНЕ — правило одно, а не две политики. */}
       {f.doubleAllowance && state.measured && (
         <CalloutBox tone='warning'>
-          {`Слой ${state.measured.layer || '—'} — это ЛИНИЯ КРОЯ: замерено, что он лежит на ${(
+          {`layer ${state.measured.layer || '—'} is the CUT LINE: it was measured to lie ${(
             engineCmToMm(state.measured.allowanceCm) ?? 0
-          ).toFixed(1)} мм снаружи линии шва. Добавленный сверху припуск ${state.seamMm.toFixed(
+          ).toFixed(1)} mm outside the seam line. an allowance of ${state.seamMm.toFixed(
             1,
-          )} мм посчитает его ДВАЖДЫ и раздует площадь по всему периметру каждой детали. Выходов два: поставить 0 (контур уже с припуском) либо выбрать слой с линией шва.`}
+          )} mm added on top would count it TWICE and inflate the area around the whole perimeter of every piece. there are two ways out: set 0 (the contour already carries the allowance) or pick a layer with the seam line.`}
         </CalloutBox>
       )}
     </>

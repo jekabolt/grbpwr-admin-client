@@ -53,8 +53,8 @@ export function markerInsertFromJob({
       warnings: [
         ...result.warnings,
         job.seamAllowanceMm > 0
-          ? `припуск на шов: ${job.seamAllowanceMm.toFixed(1)} мм (${job.seamAllowanceWhy}) — сохранён контур КРОЯ`
-          : 'припуск на шов: 0 — раскладывалась ЛИНИЯ ШВА, расход занижен относительно кроя',
+          ? `seam allowance: ${job.seamAllowanceMm.toFixed(1)} mm (${job.seamAllowanceWhy}) — the CUT contour was saved`
+          : 'seam allowance: 0 — the SEAM LINE was nested, consumption is understated against the cut',
         provenanceNote,
       ],
     },

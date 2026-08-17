@@ -246,16 +246,16 @@ export function uniConflictReason(conflicts: readonly UniConflict[]): string {
 }
 
 function sentenceOf(c: UniConflict): string {
-  const blocks = c.blocks.join('», «');
+  const blocks = c.blocks.join('”, “');
   switch (c.kind) {
     case 'area':
-      return `детали «${blocks}» помечены одной и той же неградуируемой деталью (${c.subject}), а нарисованы по-разному — числом контуров либо площадью. Какая из копий норма, сказать нечем: оставьте в выкройках одну либо снимите пометку UNI с той, что отличается`;
+      return `pieces “${blocks}” are marked as one and the same ungraded piece (${c.subject}), yet they are drawn differently — by number of contours or by area. nothing here can say which copy is the norm: leave one of them in the patterns, or take the UNI mark off the one that differs`;
     case 'duplicate':
-      return `деталь «${c.subject}» приехала в выкройках несколькими копиями («${blocks}») — это по-размерная выгрузка, склеенная в один файл, и каждая копия считалась бы отдельной деталью, то есть ткани ушло бы вдвое больше. Оставьте в выкройках одну копию и одну деталь кроя на неё`;
+      return `piece “${c.subject}” arrived in the patterns as several copies (“${blocks}”) — that is a per-size export merged into one file, and every copy would count as a separate piece, which means twice the fabric. leave one copy in the patterns and one cut piece for it`;
     case 'graded-vs-uni':
-      return `деталь «${c.subject}» есть в выкройках и размерным рядом, и с пометкой UNI («${blocks}») — эти два заявления противоречат друг другу: либо деталь градуируется, либо нет. Уберите лишние блоки из выкроек`;
+      return `piece “${c.subject}” is in the patterns both with a size range and with a UNI mark (“${blocks}”) — these two statements contradict each other: either the piece is graded or it isn't. remove the extra blocks from the patterns`;
     case 'declared-vs-graded':
-      return `на детали «${c.subject}» стоит галка «не градуируется», а в выкройках у неё размерный ряд («${blocks}») — сервер не примет пер-размерные площади помеченной детали и отвергнет весь замер целиком. Снимите галку, если деталь всё-таки градуируется, либо оставьте в выкройках один контур на все размеры`;
+      return `piece “${c.subject}” has the “not graded” box ticked, but in the patterns it has a size range (“${blocks}”) — the server won't accept per-size areas for a marked piece and will reject the whole measurement. untick the box if the piece is graded after all, or leave one contour for all sizes in the patterns`;
   }
 }
 

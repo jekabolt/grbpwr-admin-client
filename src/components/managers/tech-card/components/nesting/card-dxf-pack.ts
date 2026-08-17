@@ -16,6 +16,7 @@ import { isDxfUrl } from 'utils/pattern';
 import { fabricScopes, isRollGoodsSection, scopeKeyOfBinding } from '../bom-purpose';
 import type { TechCardFormData } from '../schema';
 import type { ScopedDxfFile } from './dxf-geometry';
+import { patternSheetName } from './sheet-name';
 
 type BomRow = { lineKey?: string; section?: string; purpose?: string; name?: string };
 type PatternRow = {
@@ -61,7 +62,7 @@ export function useCardDxfPack(): ScopedDxfFile[] {
         .filter((p) => !!p.url && isDxfUrl(p.url))
         .map((p) => ({
           scopeKey: scopeKeyOfBinding(p.fabricPurpose, p.bomLineKey, scopes),
-          name: p.name || p.filename || 'выкройка.dxf',
+          name: patternSheetName(p),
           url: p.url!,
         })),
     [patterns, scopes],

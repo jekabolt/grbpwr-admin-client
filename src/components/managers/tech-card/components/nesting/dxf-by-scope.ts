@@ -16,6 +16,7 @@
 // ничего, поэтому его свободно импортируют и главный бандл, и ленивый чанк.
 import { isDxfUrl } from 'utils/pattern';
 import { scopeKeyOfBinding, type FabricScope, type RollGoodsLine } from '../bom-purpose';
+import { patternSheetName } from './sheet-name';
 
 /** Сырая привязка листа, как она лежит в строке формы. */
 export type ScopeBinding = { fabricPurpose?: string; bomLineKey?: string };
@@ -48,14 +49,15 @@ export function dxfByScope<T>(
   return out;
 }
 
-/**
- * Имя листа для движка и для экспорта. Тройной фолбэк («имя» → «файл» → заглушка) существует
- * потому, что имя — это ещё и ключ провенанса в блобе маркера: пустая строка там читалась бы как
- * «источник неизвестен» у листа, у которого источник прекрасно известен.
- */
-export function patternSheetName(row: { name?: string; filename?: string }): string {
-  return row.name || row.filename || 'выкройка.dxf';
-}
+// Правило имени листа и его фолбэк переехали в `./sheet-name`: фолбэк — это СОХРАНЁННОЕ значение
+// (см. там), а сравнивать его умеет только `sameSheetName`. Реэкспорт — чтобы импорт отсюда,
+// который уже написан у соседей, остался рабочим.
+export {
+  FALLBACK_SHEET_NAME,
+  LEGACY_FALLBACK_SHEET_NAME,
+  patternSheetName,
+  sameSheetName,
+} from './sheet-name';
 
 /**
  * Строки выкроек карточки → DXF-листы по скоупам. Ровно то, что нужно ЗАПУСТИТЬ раскладку: PDF и

@@ -50,9 +50,9 @@ const NestingModal = lazy(() =>
 );
 
 const SOURCE_LABEL: Record<string, string> = {
-  auto: 'авто',
-  manual: 'ручная',
-  imported: 'импорт',
+  auto: 'auto',
+  manual: 'manual',
+  imported: 'imported',
 };
 
 // ── УСЛОВИЯ СЪЁМКИ В СТРОКЕ (Ф3) ────────────────────────────────────────────────────────
@@ -61,7 +61,7 @@ const SOURCE_LABEL: Record<string, string> = {
 // законное значение и означает «клали линию как нарисована», то есть УТВЕРЖДЕНИЕ о замере;
 // незаписанный припуск означает, что замера не делал никто. Ровно этим «старая норма» и
 // отличается от свежей раскладки с нулевым припуском, а на глаз они выглядели бы одинаково.
-const NOT_RECORDED = 'не записано';
+const NOT_RECORDED = 'not recorded';
 
 
 // Припуск, который РЕАЛЬНО лежит между линией шва и линией кроя, = наложенный раскладкой плюс
@@ -75,17 +75,17 @@ function allowanceText(c: MarkerConditions): { total: string; origin: string } |
   const seam = c.seamAllowanceMm ?? 0;
   const contour = c.contourAllowanceMm;
   return {
-    total: `${(seam + (contour ?? 0)).toFixed(1)} мм`,
+    total: `${(seam + (contour ?? 0)).toFixed(1)} mm`,
     origin:
       contour == null
         ? // Замерить было нечем (один замкнутый контур в блоке). Сумма поэтому неполная, и
           // молчать об этом нельзя: припуск может сидеть в контуре и не быть посчитанным.
-          'в контуре не замерен'
+          'not measured in the contour'
         : contour > 0
-          ? 'припуск уже в контуре'
+          ? 'allowance already in the contour'
           : seam > 0
-            ? 'наложен на линию шва'
-            : 'контур = линия шва',
+            ? 'applied onto the seam line'
+            : 'contour = seam line',
   };
 }
 
@@ -99,22 +99,22 @@ function conditionLines(c: MarkerConditions): string[] {
     c.contourLayer == null
       ? NOT_RECORDED
       : c.contourLayer === ''
-        ? 'слоёв не было'
+        ? 'there were no layers'
         : c.contourLayer;
   // ПУСТАЯ СТРОКА У ДОЛЕВОЙ — ЗНАЧЕНИЕ, а не пропуск: оператор мог осознанно выключить разворот.
   // Склеить её с «не записано» значило бы при пересборке чертежа развернуть детали, которые он
   // запретил разворачивать, — поэтому прото и держит поле optional.
   const grain =
-    c.grainLayer == null ? NOT_RECORDED : c.grainLayer === '' ? 'не разворачивать' : c.grainLayer;
-  const flip = c.allowFlip == null ? NOT_RECORDED : c.allowFlip ? 'разрешён' : 'запрещён';
-  return [`контур: ${contour}`, `долевая: ${grain}`, `переворот: ${flip}`];
+    c.grainLayer == null ? NOT_RECORDED : c.grainLayer === '' ? "don't rotate" : c.grainLayer;
+  const flip = c.allowFlip == null ? NOT_RECORDED : c.allowFlip ? 'allowed' : 'forbidden';
+  return [`contour: ${contour}`, `grainline: ${grain}`, `flip: ${flip}`];
 }
 
 const PIECE_SET_MATCHES = 'TECH_CARD_MARKER_PIECE_SET_STATUS_MATCHES';
 
 // Как назвать скоуп эксклюзивности словами. Скоуп — (карточка, строка BOM), то есть «одна норма
 // на ТКАНЬ»; непривязанная раскладка попадает в собственный скоуп «без ткани», и он тоже скоуп.
-const scopeWord = (slot: string) => (slot ? `ткани «${slot}»` : 'скоупа «без ткани»');
+const scopeWord = (slot: string) => (slot ? `fabric “${slot}”` : 'the “no fabric” scope');
 
 export function MarkersSection({
   techCard,
@@ -264,9 +264,9 @@ export function MarkersSection({
     try {
       const r = await adminService.GetTechCardMarker({ id });
       if (r.marker) setView(r.marker);
-      else showMessage('маркер не найден', 'error');
+      else showMessage('marker not found', 'error');
     } catch (e) {
-      showMessage(e instanceof Error && e.message ? e.message : 'не удалось открыть маркер', 'error');
+      showMessage(e instanceof Error && e.message ? e.message : "couldn't open the marker", 'error');
     } finally {
       setOpeningId(null);
     }
@@ -295,24 +295,24 @@ export function MarkersSection({
       const notRecalculated = r.recipesNotRecalculated !== false;
       setNormNote(
         norming.on
-          ? `норма ${scopeWord(norming.slot)} теперь «${norming.name}»${
-              prev ? `, прежней была «${prev.name ?? ''}»` : ''
+          ? `the norm of ${scopeWord(norming.slot)} is now “${norming.name}”${
+              prev ? `, the previous one was “${prev.name ?? ''}”` : ''
             }.${
               notRecalculated
-                ? ' Рецепты НЕ пересчитаны: расход, применённый в рецепт из прежней нормы, остался прежним числом. Если он должен измениться — примените новую раскладку в расходе колорвея вручную.'
+                ? ' recipes were NOT recalculated: the consumption applied into the recipe from the previous norm stayed the same number. if it has to change — apply the new marker in the colourway consumption by hand.'
                 : ''
             }`
-          : `«${norming.name}» больше не норма ${scopeWord(norming.slot)}. Другой нормы вместо неё не появилось — назначьте её, иначе костингу и гейту готовности нечего спрашивать.${
-              notRecalculated ? ' Рецепты не пересчитаны: применённый расход остался прежним.' : ''
+          : `“${norming.name}” is no longer the norm of ${scopeWord(norming.slot)}. no other norm appeared in its place — assign one, otherwise costing and the readiness gate have nothing to ask.${
+              notRecalculated ? ' recipes were not recalculated: the applied consumption stayed the same.' : ''
             }`,
       );
-      showMessage(norming.on ? 'норма назначена' : 'норма снята', 'success');
+      showMessage(norming.on ? 'norm assigned' : 'norm cleared', 'success');
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       setNorming(null);
     } catch (e) {
       showMessage(
-        e instanceof Error && e.message ? e.message : 'не удалось изменить норму',
+        e instanceof Error && e.message ? e.message : "couldn't change the norm",
         'error',
       );
     } finally {
@@ -325,12 +325,12 @@ export function MarkersSection({
     setDeleteBusy(true);
     try {
       await adminService.DeleteTechCardMarker({ id: deleting.id });
-      showMessage('маркер удалён', 'success');
+      showMessage('marker deleted', 'success');
       qc.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
       qc.invalidateQueries({ queryKey: techCardKeys.lists() });
       setDeleting(null);
     } catch (e) {
-      showMessage(e instanceof Error && e.message ? e.message : 'не удалось удалить маркер', 'error');
+      showMessage(e instanceof Error && e.message ? e.message : "couldn't delete the marker", 'error');
     } finally {
       setDeleteBusy(false);
     }
@@ -339,8 +339,7 @@ export function MarkersSection({
   if (markers.length === 0) {
     return (
       <Text size='micro' variant='label'>
-        сохранённых раскладок нет — запустите «⌗ раскладка» на плитке размера и нажмите
-        «сохранить раскладку»
+        there are no saved markers — run “⌗ marker” on the size tile and press “save marker”
       </Text>
     );
   }
@@ -350,9 +349,10 @@ export function MarkersSection({
       {conflicts.map((t) => (
         <CalloutBox key={t} tone='error'>
           <Text size='micro' component='p'>
-            <b>две нормы на одной ткани.</b> {t} Костинг и гейт берут самую свежую из них, то есть
-            ответ везде один — но выбран он датой, а не человеком. Нажмите «сделать нормой» на той
-            раскладке, по которой мерить: назначение снимет признак со второй.
+            <b>two norms on one fabric.</b> {t} costing and the gate take the freshest of them, so
+            the answer is the same everywhere — but it was picked by date, not by a person. press
+            “set as the norm” on the marker you mean to measure by: assigning it clears the flag on
+            the other.
           </Text>
         </CalloutBox>
       ))}
@@ -365,7 +365,7 @@ export function MarkersSection({
               {normNote}
             </Text>
             <Button type='button' variant='secondary' size='xs' onClick={() => setNormNote(null)}>
-              понятно
+              got it
             </Button>
           </div>
         </CalloutBox>
@@ -374,23 +374,23 @@ export function MarkersSection({
         <DataTable variant='grid' className='[&_td]:text-micro [&_th]:text-nano'>
           <thead>
             <tr>
-              <th>название</th>
+              <th>name</th>
               {/* СОСТАВ вместо размера: раскладка больше не «один размер», она называет, сколько
                   изделий какого размера кроит один настил. У снятых до Ф2 состав ровно один
                   размер, и колонка выглядит как прежняя. */}
-              <th>состав</th>
-              <th>слот BOM</th>
-              <th>ширина</th>
-              <th>длина</th>
-              <th>изделий</th>
-              <th>расход / ед</th>
-              <th>эфф.</th>
+              <th>composition</th>
+              <th>BOM slot</th>
+              <th>width</th>
+              <th>length</th>
+              <th>garments</th>
+              <th>consumption / unit</th>
+              <th>eff.</th>
               {/* УСЛОВИЯ СЪЁМКИ (Ф3). Без них длина настила — число без правил: раскладка по
                   линии шва и раскладка по линии кроя отличаются на припуск по всему периметру
                   КАЖДОЙ детали, а в колонке «длина» выглядят одинаково. */}
-              <th>припуск</th>
-              <th>слои / переворот</th>
-              <th>обновлён</th>
+              <th>seam allowance</th>
+              <th>layers / flip</th>
+              <th>updated</th>
               <th />
             </tr>
           </thead>
@@ -433,9 +433,9 @@ export function MarkersSection({
                           // соседней пилюли отказа в колонке расхода («смешанный состав»): это
                           // одна и та же категория — раскладка, числа с которой не берут.
                           <Pill tone='warn' title={scalarNormRefusal(m)}>
-                            черновик
+                            draft
                             {Number(m.totalCount ?? 0) > Number(m.placedCount ?? 0)
-                              ? ` · ${m.placedCount ?? 0} из ${m.totalCount ?? 0}`
+                              ? ` · ${m.placedCount ?? 0} of ${m.totalCount ?? 0}`
                               : ''}
                           </Pill>
                         )}
@@ -445,17 +445,17 @@ export function MarkersSection({
                           // только состояние.
                           <Pill
                             tone='ink'
-                            title='нормировочная раскладка ЭТОЙ ткани на карточке: по ней считает костинг и её спрашивает гейт готовности. Норма одна на ткань, а не одна на карточку.'
+                            title='the norming marker of THIS fabric on the card: costing computes by it and the readiness gate asks for it. there is one norm per fabric, not one per card.'
                           >
-                            норма
+                            norm
                           </Pill>
                         )}
                         {pieceSetChanged(m) && (
                           <Pill
                             tone='attention'
-                            title='набор деталей КАРТОЧКИ изменился с момента съёмки — раскладку надо перепроверить. Отпечаток карточный, поэтому деталь, добавленная на ДРУГУЮ ткань, поднимает признак и здесь: это «перепроверьте», а не «раскладка неверна».'
+                            title='the set of pieces on the CARD has changed since the capture — the marker has to be rechecked. the digest is card-wide, so a piece added on ANOTHER fabric raises the flag here too: this means “recheck”, not “the marker is wrong”.'
                           >
-                            набор изменился
+                            set changed
                           </Pill>
                         )}
                         {legacy && (
@@ -464,16 +464,16 @@ export function MarkersSection({
                           // снятая до Ф3, и красить их все значило бы закрасить весь список.
                           <Pill
                             tone='mut'
-                            title='условия съёмки не записаны: по какой линии мерено и с каким припуском — неизвестно. Костинг не отличит раскладку по линии шва от раскладки по линии кроя, а различаются они на припуск по всему периметру каждой детали. Пересними раскладку, чтобы норма стала сравнимой.'
+                            title='the capture conditions were not recorded: which line it was measured by, and with what allowance, is unknown. costing cannot tell a marker taken on the seam line from one taken on the cut line, and they differ by the allowance around the whole perimeter of every piece. re-capture the marker to make the norm comparable.'
                           >
-                            старая норма
+                            legacy norm
                           </Pill>
                         )}
                         {conflict && (
                           // Сервер сообщает конфликт ЯВНО и одним текстом на КАЖДОЙ строке
                           // скоупа: увидеть его с одной строки и пропустить с другой нельзя.
                           <Pill tone='warn' title={conflict}>
-                            конфликт норм
+                            norm conflict
                           </Pill>
                         )}
                         {setUnknown && !legacy && (
@@ -481,7 +481,7 @@ export function MarkersSection({
                           // подпись, а не бейдж. У старой нормы её не показываем — там про набор
                           // и так ничего не известно, и второе слово об одном и том же лишнее.
                           <Text size='nano' variant='label' component='span'>
-                            набор не сверялся
+                            set not checked
                           </Text>
                         )}
                       </span>
@@ -490,7 +490,7 @@ export function MarkersSection({
                   <td>
                     {compositionLabel(comp, sizeName) || (
                       <Text size='nano' variant='label' component='span'>
-                        состав не читается
+                        composition unreadable
                       </Text>
                     )}
                   </td>
@@ -499,7 +499,7 @@ export function MarkersSection({
                         from the same LEFT JOIN going NULL) — one honest label, no fake pill. */}
                     {m.bomItemName || (
                       <Text size='nano' variant='label' component='span'>
-                        не привязан / удалён
+                        not linked / deleted
                       </Text>
                     )}
                     {/* «общая» — это НЕ отсутствие данных: маркер снят до 0264 или ширина у всех
@@ -507,15 +507,15 @@ export function MarkersSection({
                         ячейка читалась бы как недозаполненная. */}
                     <span className='block text-nano text-labelColor'>
                       {colorwayLabelById.get(Number(m.colorwayId ?? 0)) ??
-                        (Number(m.colorwayId ?? 0) ? 'колорвей не в карточке' : 'общая')}
+                        (Number(m.colorwayId ?? 0) ? 'colourway not on the card' : 'shared')}
                     </span>
                   </td>
-                  <td>{decNum(m.fabricWidthCm)} см</td>
-                  <td>{decNum(m.usedLengthCm)} см</td>
+                  <td>{decNum(m.fabricWidthCm)} cm</td>
+                  <td>{decNum(m.usedLengthCm)} cm</td>
                   <td>{totalUnitsOf(m) || <EmptyCell />}</td>
                   <td className='font-semibold'>
                     {cons != null ? (
-                      `${cons} см`
+                      `${cons} cm`
                     ) : refusal ? (
                       // Слово, а не пустая ячейка: пустая читается как «ещё не посчитали», тогда
                       // как здесь считать НЕЧЕГО — и причина висит подсказкой на самой пилюле.
@@ -566,7 +566,7 @@ export function MarkersSection({
                         disabled={openingId === m.id}
                         onClick={() => openMarker(m.id ?? 0)}
                       >
-                        {openingId === m.id ? 'открываем…' : 'открыть'}
+                        {openingId === m.id ? 'opening…' : 'open'}
                       </Button>
                       {canEdit && (
                         // Отдельное действие, а не поле сохранения: пересохранение геометрии не
@@ -593,7 +593,7 @@ export function MarkersSection({
                             })
                           }
                         >
-                          {m.isNorm ? 'снять норму' : 'сделать нормой'}
+                          {m.isNorm ? 'clear the norm' : 'set as the norm'}
                         </Button>
                       )}
                       {canEdit && (
@@ -601,7 +601,7 @@ export function MarkersSection({
                           type='button'
                           variant='secondary'
                           size='xs'
-                          aria-label='удалить маркер'
+                          aria-label='delete marker'
                           onClick={() => setDeleting({ id: m.id ?? 0, name: m.name ?? '' })}
                         >
                           ✕
@@ -620,7 +620,7 @@ export function MarkersSection({
         <Suspense
           fallback={
             <Text size='micro' variant='label'>
-              загрузка модуля раскладки…
+              loading the marker module…
             </Text>
           }
         >
@@ -655,14 +655,14 @@ export function MarkersSection({
         onCancel={() => {
           if (!deleteBusy) setDeleting(null);
         }}
-        title='удалить маркер?'
-        confirmLabel={deleteBusy ? 'удаляем…' : 'удалить'}
+        title='delete the marker?'
+        confirmLabel={deleteBusy ? 'deleting…' : 'delete'}
         confirmDisabled={deleteBusy}
         closeOnConfirm={false}
       >
         <Text size='micro' component='p'>
-          «{deleting?.name}» будет удалён насовсем. Записанный в рецепты расход не изменится —
-          пропадёт только сам маркер и его подсказка в костинге.
+          “{deleting?.name}” will be deleted for good. the consumption already written into the
+          recipes will not change — only the marker itself and its hint in costing will go.
         </Text>
       </ConfirmationModal>
 
@@ -675,15 +675,15 @@ export function MarkersSection({
         onCancel={() => {
           if (!normBusy) setNorming(null);
         }}
-        title={norming?.on === false ? 'снять норму?' : 'сделать нормой?'}
+        title={norming?.on === false ? 'clear the norm?' : 'set as the norm?'}
         confirmLabel={
           norming?.on === false
             ? normBusy
-              ? 'снимаем…'
-              : 'снять норму'
+              ? 'clearing…'
+              : 'clear the norm'
             : normBusy
-              ? 'назначаем…'
-              : 'сделать нормой'
+              ? 'assigning…'
+              : 'set as the norm'
         }
         confirmDisabled={normBusy}
         closeOnConfirm={false}
@@ -691,33 +691,33 @@ export function MarkersSection({
         <div className='space-y-2'>
           {norming?.on === false ? (
             <Text size='micro' component='p'>
-              «{norming?.name}» перестанет быть нормой {scopeWord(norming?.slot ?? '')}. Другой
-              нормы вместо неё не появится: снятие ничего не назначает, и до следующего назначения
-              ткань останется ненормированной — гейт готовности это увидит.
+              “{norming?.name}” will stop being the norm of {scopeWord(norming?.slot ?? '')}. no
+              other norm will appear in its place: clearing assigns nothing, and until the next
+              assignment the fabric stays without a norm — the readiness gate will see that.
             </Text>
           ) : norming?.slot ? (
             <Text size='micro' component='p'>
-              «{norming?.name}» станет нормировочной раскладкой {scopeWord(norming?.slot ?? '')}: по
-              ней считает костинг и её спрашивает гейт готовности. Прежняя норма ЭТОЙ ЖЕ ткани
-              признак потеряет — норма одна на ткань, а не одна на карточку, и норм других тканей
-              это не касается.
+              “{norming?.name}” will become the norming marker of {scopeWord(norming?.slot ?? '')}:
+              costing computes by it and the readiness gate asks for it. the previous norm of THE
+              SAME fabric will lose the flag — there is one norm per fabric, not one per card, and
+              the norms of other fabrics are not affected.
             </Text>
           ) : (
             <Text size='micro' component='p'>
-              «{norming?.name}» не привязана к ткани, поэтому попадёт в собственный скоуп «без
-              ткани» — одна такая норма на карточку. Гейт готовности её всё равно не примет: он
-              спрашивает про ткань. Привяжите раскладку к слоту BOM, если она должна нормировать.
+              “{norming?.name}” is not linked to a fabric, so it lands in its own “no fabric” scope
+              — one such norm per card. the readiness gate will not accept it anyway: it asks about a
+              fabric. link the marker to a BOM slot if it is meant to norm.
             </Text>
           )}
           <Text size='micro' component='p'>
-            Рецепты не пересчитываются. Число, уже применённое в рецепт из прежней нормы, останется
-            прежним: применение — отдельное осознанное действие (расход колорвея → применить
-            раскладку). Признак говорит только, ПО КАКОЙ раскладке мерить, и сам ничего не считает.
+            recipes are not recalculated. the number already applied into a recipe from the previous
+            norm stays as it was: applying is a separate deliberate action (colourway consumption →
+            apply marker). the flag only says WHICH marker to measure by, and computes nothing itself.
           </Text>
           {norming?.on !== false && !!norming?.refusal && (
             <Text size='micro' variant='label' component='p'>
-              {norming.refusal} Нормой такую раскладку назначить можно — она остаётся замером
-              настила, — но применить её в рецепт одним числом нельзя.
+              {norming.refusal} such a marker can be set as the norm — it is still a measurement of
+              a lay — but it cannot be applied into a recipe as a single number.
             </Text>
           )}
         </div>

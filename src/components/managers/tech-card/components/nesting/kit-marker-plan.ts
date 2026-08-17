@@ -166,17 +166,17 @@ export function kitWidthDisagreement(jobWidthCm: number, rowWidthCm: number): st
   if (!Number.isFinite(rowWidthCm) || rowWidthCm <= 0) return '';
   if (!Number.isFinite(jobWidthCm) || jobWidthCm <= 0) return '';
   if (Math.abs(jobWidthCm - rowWidthCm) <= 0.5) return '';
-  return `раскладку считали бы на полотне ${jobWidthCm} см, а строка рецепта показывает раскройную ширину ${rowWidthCm} см — это разные ткани, и выбрать за вас нельзя. Ширину для раскладки даёт СОХРАНЁННЫЙ пин колорвея (ширина и кромка самого артикула), строка — свой черновик и строку BOM. Причин ровно две: либо артикул на строке сменили и карточку не сохранили — сохраните и повторите; либо у строки BOM заполнена СВОЯ ширина, не совпадающая с каталожной шириной артикула, — сведите их на вкладке BOM`;
+  return `the marker would be computed on ${jobWidthCm} cm of cloth, while the recipe line shows a cutting width of ${rowWidthCm} cm — these are different fabrics, and nothing here can choose for you. the width for the marker comes from the SAVED colourway pin (the width and selvedge of the article itself), the line comes from its own draft and its BOM line. there are exactly two causes: either the article on the line was changed and the card wasn't saved — save it and retry; or the BOM line has its OWN width filled in that doesn't match the article's catalog width — reconcile them on the BOM tab`;
 }
 
 /** Оговорка о границе — ОДНА формулировка на экран и на блоб раскладки (см. шапку). */
 export function kitBoundNote(sizeLabel: string): string {
-  return `настил на ОДИН комплект размера ${sizeLabel || '—'}: это ВЕРХНЯЯ ГРАНИЦА расхода, а не расход. Многокомплектный настил кладётся плотнее — мелкие детали одного изделия садятся в межлекальные выпады соседнего, — поэтому в цехе выйдет меньше. Точнее меряет «настил партии» (очередь раскроя на вкладке костинга): тот же движок на реальном составе партии.`;
+  return `a lay for ONE kit of size ${sizeLabel || '—'}: this is an UPPER BOUND on consumption, not the consumption. a multi-kit lay packs tighter — small pieces of one garment settle into the waste between pieces of the next — so the workshop will use less. the “run lay” measures it more precisely (the cutting queue on the costing tab): the same engine on the run's real composition.`;
 }
 
 /** Провенанс в блоб: чем снята геометрия. Читается через месяцы, когда спросить будет некого. */
 export function kitProvenanceNote(sizeLabel: string, scopeLabelText: string): string {
-  return `снято «раскладкой комплекта» с карточки ткани «${scopeLabelText}» в рецепте колорвея: ${kitBoundNote(sizeLabel)}`;
+  return `captured by “kit marker” from the fabric card “${scopeLabelText}” in the colourway recipe: ${kitBoundNote(sizeLabel)}`;
 }
 
 /**
@@ -203,7 +203,7 @@ export function kitInputDrift(args: {
   const was = Number(args.marker.totalCount ?? 0);
   if (was > 0 && args.todayInstances > 0 && was !== args.todayInstances) {
     out.push(
-      `в раскладке ${was} экземпляров деталей, а сегодняшний комплект даёт ${args.todayInstances} — набор деталей этой ткани или их количество на изделие изменились`,
+      `the marker holds ${was} piece instances, while today's kit gives ${args.todayInstances} — either the set of pieces for this fabric or their per-garment count has changed`,
     );
   }
   const wasWidth = Number(args.marker.fabricWidthCm?.value ?? '');
@@ -214,7 +214,7 @@ export function kitInputDrift(args: {
     Math.abs(wasWidth - args.todayWidthCm) > 0.5
   ) {
     out.push(
-      `раскладку мерили на полотне ${wasWidth} см, сегодня раскройная ширина ${args.todayWidthCm} см — расход не переносится между ширинами без пересчёта`,
+      `the marker was measured on ${wasWidth} cm of cloth, today the cutting width is ${args.todayWidthCm} cm — consumption doesn't carry across widths without a recompute`,
     );
   }
   return out.join('; ');

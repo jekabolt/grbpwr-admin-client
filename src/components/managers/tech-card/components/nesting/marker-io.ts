@@ -84,7 +84,7 @@ export function exportFileName(
         .replace(/\s+/g, '_'),
     );
   const prefix = productionRunId > 0 ? `PR${productionRunId}_` : '';
-  return `${prefix}${clean.join('-') || 'раскладка'}.${ext}`;
+  return `${prefix}${clean.join('-') || 'marker'}.${ext}`;
 }
 
 // google.type.Decimal encode/decode for marker figures (2 decimals is the storage scale).
@@ -182,8 +182,8 @@ export function isDraftMarker(s: common_TechCardMarkerSummary | undefined): bool
 export function draftRefusal(s: common_TechCardMarkerSummary): string {
   const placed = Number(s.placedCount ?? 0);
   const total = Number(s.totalCount ?? 0);
-  const counts = placed > 0 && total > placed ? ` (уложено ${placed} из ${total} деталей)` : '';
-  return `раскладка «${s.name ?? ''}» — ЧЕРНОВИК${counts}: часть деталей не легла, и измеренная длина короче настоящей. Нормой такое число быть не может — поднимите бюджет поиска и пересчитайте раскладку.`;
+  const counts = placed > 0 && total > placed ? ` (${placed} of ${total} pieces placed)` : '';
+  return `marker “${s.name ?? ''}” is a DRAFT${counts}: some of the pieces didn't fit, and the measured length is shorter than the real one. such a number can't be a norm — raise the search budget and recompute the marker.`;
 }
 
 // Одно слово на пилюлю: ЧЕМ именно раскладка не годится в норму. Живёт здесь, потому что мест, где
@@ -191,9 +191,9 @@ export function draftRefusal(s: common_TechCardMarkerSummary): string {
 // пропущенный кандидат), и три ветки, размноженные по ним копипастой, разъезжаются первой же
 // добавленной причиной — как это и случилось, когда к «смешанному составу» добавился черновик.
 export function refusalWord(s: common_TechCardMarkerSummary): string {
-  if (isDraftMarker(s)) return 'черновик';
-  if (compositionOf(s).length > 1) return 'смешанный состав';
-  return 'состав не читается';
+  if (isDraftMarker(s)) return 'draft';
+  if (compositionOf(s).length > 1) return 'mixed composition';
+  return 'composition unreadable';
 }
 
 // ОТКАЗ ВЫДАТЬ СКАЛЯРНУЮ НОРМУ. '' = расход на изделие можно применять в рецепт; непустая
@@ -217,10 +217,10 @@ export function scalarNormRefusal(s: common_TechCardMarkerSummary): string {
   if (isDraftMarker(s)) return draftRefusal(s);
   const comp = compositionOf(s);
   if (comp.length === 0) {
-    return `у раскладки «${s.name ?? ''}» не читается состав: сколько изделий она выкраивает — неизвестно, и расход на изделие назвать нечем. Переоткройте карточку; если не помогло, пересохраните раскладку.`;
+    return `marker “${s.name ?? ''}” has an unreadable composition: how many garments it cuts is unknown, and there is nothing to name the per-unit consumption from. reopen the card; if that didn't help, re-save the marker.`;
   }
   if (comp.length > 1) {
-    return `раскладка «${s.name ?? ''}» снята на смешанном составе (${comp.length} размеров) — расход на изделие у неё СРЕДНИЙ по составу: мелкие размеры завышает, крупные занижает. В рецепт такое число не пишется.`;
+    return `marker “${s.name ?? ''}” was captured on a mixed composition (${comp.length} sizes) — its per-unit consumption is the MEAN across that composition: it overstates the small sizes and understates the large ones. such a number is not written into a recipe.`;
   }
   return '';
 }
@@ -736,14 +736,14 @@ export function markerNormStaleness(
   if (!s) return { stale: false, reasons };
   if (pieceSetChanged(s)) {
     reasons.push(
-      'набор деталей кроя КАРТОЧКИ изменился после того, как сняли эту раскладку: длина измерена по прежнему набору. Отпечаток серверный и охватывает всю карточку — деталь могли добавить и в другой ткани, поэтому это повод перепроверить, а не приговор числу',
+      "the CARD's set of cut pieces changed after this marker was captured: the length was measured on the previous set. the digest is the server's and covers the whole card — a piece could have been added in a different fabric too, so this is a reason to re-check, not a verdict on the number",
     );
   }
   const was = decNum(s.fabricWidthCm);
   const now = Number((articleWidthCm ?? '').trim().replace(',', '.'));
   if (was > 0 && Number.isFinite(now) && now > 0 && Math.abs(was - now) > 0.5) {
     reasons.push(
-      `раскладку мерили на полотне ${was} см, а раскройная ширина артикула строки сейчас ${now} см — расход не переносится между ширинами без пересчёта`,
+      `the marker was measured on ${was} cm of cloth, while the cutting width of the line's article is now ${now} cm — consumption doesn't carry across widths without a recompute`,
     );
   }
   return { stale: reasons.length > 0, reasons };
@@ -1020,7 +1020,7 @@ export function markerToView(marker: common_TechCardMarker): {
   }
   const pieces: PieceDTO[] = (l.pieces ?? []).map((p) => ({
     id: p.pieceId ?? 0,
-    name: p.name || `деталь ${p.pieceId ?? 0}`,
+    name: p.name || `piece ${p.pieceId ?? 0}`,
     // v1 blobs have no block_name; '' keeps the round-trip honest instead of re-deriving one
     // from the display name (which may already be the synthetic «деталь N»).
     blockName: p.blockName || '',

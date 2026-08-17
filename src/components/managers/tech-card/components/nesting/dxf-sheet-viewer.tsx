@@ -24,7 +24,7 @@ export function DxfSheetViewer({
         if (!o) onClose();
       }}
       onConfirm={onClose}
-      title={title || 'выкройка (DXF)'}
+      title={title || 'pattern (DXF)'}
       width='lg'
       hideActions
     >

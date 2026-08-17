@@ -50,6 +50,7 @@ import {
   weightRefusalText,
   type WeightBasisResolution,
 } from './nesting/fabric-weight';
+import { isFetchFailure } from './nesting/dxf-warnings';
 import { bomUnitKind, bomUnitStep } from './nesting/marker-io';
 import type { TechCardFormData } from './schema';
 import { useFabricDxfPieces, type RecipePieceLink } from './use-fabric-dxf-pieces';
@@ -144,9 +145,7 @@ export default function DxfNormRecheck({
   // расчётом и унаследовала бы ту же ложь, только в более убедительном виде: у неё на каждой
   // строке площадь конкретной детали, и подделку такого вида глазом не поймать вовсе. Поэтому
   // условие вычисляется ЗДЕСЬ, снаружи вердикта, и гасит оба показа одним фактом.
-  const downloadFailures = (geometry.data?.warnings ?? []).filter(
-    (w) => w.includes('не удалось скачать') || w.includes('не разобрал'),
-  );
+  const downloadFailures = (geometry.data?.warnings ?? []).filter(isFetchFailure);
   // Размер, на котором показана разбивка. Состояние объявлено ЗДЕСЬ, среди хуков: ниже начинается
   // цепочка ранних возвратов, и хук, поставленный там, вызывался бы не на каждом рендере.
   const [pickedSize, setPickedSize] = useState<number | null>(null);
@@ -179,18 +178,18 @@ export default function DxfNormRecheck({
     if (pack.length === 0) {
       return (
         <Line>
-          пересчёт по текущим данным не делается: на карточке нет ни одного DXF. Про сохранённое
-          число это не говорит — его могли снять, когда выкройки ещё были загружены
+          no recompute on current data: the card carries no DXF at all. that says nothing about the
+          saved number — it could have been captured while the patterns were still uploaded
         </Line>
       );
     }
     if (geometry.isPending || workshop.isPending) {
-      return <Line>пересчитываем по текущим данным карточки…</Line>;
+      return <Line>recomputing on the card's current data…</Line>;
     }
     if (geometry.isError) {
       return (
         <Line>
-          {`пересчёт по текущим данным не удался: ${geometry.error?.message || 'неизвестная ошибка'}. Сохранённая норма продолжает действовать`}
+          {`the recompute on current data failed: ${geometry.error?.message || 'unknown error'}. the saved norm stays in force`}
         </Line>
       );
     }
@@ -201,7 +200,7 @@ export default function DxfNormRecheck({
     if (downloadFailures.length > 0) {
       return (
         <Line>
-          {`сравнения нет — часть выкроек не скачалась или не разобралась (${downloadFailures.join('; ')}): расчёт собрался бы по тем листам, что скачались, — например, по прежней ревизии — и совпадение или расхождение было бы ложным`}
+          {`no comparison — some of the patterns didn't download (${downloadFailures.join('; ')}): the calculation would be assembled from the sheets that did download — from a previous revision, say — and a match or a divergence would be false`}
         </Line>
       );
     }
@@ -212,18 +211,19 @@ export default function DxfNormRecheck({
     if (!(widthCm > 0)) {
       return (
         <Line>
-          пересчёт по текущим данным не делается: раскройная ширина артикула неизвестна — либо не
-          заполнена ширина рулона, либо кромка съедает её целиком. Делить площадь не на что
+          no recompute on current data: the cutting width of the article is unknown — either the
+          roll width is not filled in, or the selvedge eats it whole. there is nothing to divide the
+          area by
         </Line>
       );
     }
-    if (!outcome || !conditions) return <Line>пересчитываем по текущим данным карточки…</Line>;
+    if (!outcome || !conditions) return <Line>recomputing on the card's current data…</Line>;
     // Отказ геометрии — дословно, и БЕЗ утверждения, что сохранённое число неверно: его могли снять
     // при другом составе пачки или других условиях.
     if (!outcome.ok) {
       return (
         <Line>
-          {`сегодняшний пересчёт не сходится не с числом, а сам по себе: ${outcome.reason}. Про сохранённое число это не говорит — его могли снять при других данных карточки`}
+          {`today's recompute doesn't add up on its own, never mind against the number: ${outcome.reason}. that says nothing about the saved number — it could have been captured on different card data`}
         </Line>
       );
     }
@@ -239,8 +239,8 @@ export default function DxfNormRecheck({
       return (
         <Line>
           {unit
-            ? `для единицы «${unit}» пересчёт не считается — сравнивать умеем метры, сантиметры и килограммы`
-            : 'пересчёт не считается: у слота не заполнена единица — норма пишется в единице слота, заполните её на вкладке BOM'}
+            ? `for the unit “${unit}” the recompute is not computed — we can compare metres, centimetres and kilograms`
+            : 'the recompute is not computed: the slot has no unit filled in — the norm is written in the unit of the slot, fill it in on the BOM tab'}
         </Line>
       );
     }
@@ -249,7 +249,7 @@ export default function DxfNormRecheck({
       // Отказ называет, ЧЕГО не хватает — ширины или плотности: лечится он заполнением артикула,
       // а не сменой единицы слота. Пин колорвея меняет слова: искали у пинованного артикула.
       return (
-        <Line>{`пересчёт по текущим данным не делается: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`}</Line>
+        <Line>{`no recompute on current data: ${weightRefusalText(weightBasis.missing, weightBasis.pinned)}`}</Line>
       );
     }
 
@@ -322,38 +322,38 @@ export default function DxfNormRecheck({
     // карточки, и DXF подкладки, загруженный после применения, мог сменить победителя для верха.
     // На кг-слоте в условия входит и основа веса — она такой же вход пересчёта, как ширина, и
     // сегодняшняя: применяли, возможно, при другой.
-    const conditionsText = `слой ${conditions.layer || '—'} (сегодняшний слой по умолчанию — не обязательно тот, которым применяли), припуск ${conditions.prefill.value} мм (${conditions.prefill.why}), раскройная ширина ${articleWidth} см${
-      unitKind === 'kg' && fabric ? `, вес по основе: ${weightBasisLabel(fabric)}` : ''
+    const conditionsText = `layer ${conditions.layer || '—'} (today's default layer — not necessarily the one it was applied with), seam allowance ${conditions.prefill.value} mm (${conditions.prefill.why}), cutting width ${articleWidth} cm${
+      unitKind === 'kg' && fabric ? `, weight basis: ${weightBasisLabel(fabric)}` : ''
     }`;
 
     const notes: string[] = [];
     if (ambiguousSaved.length > 0) {
       notes.push(
-        `для размеров ${ambiguousSaved.map(sizeName).join(', ')} числовое сравнение не делается: ${
+        `for sizes ${ambiguousSaved.map(sizeName).join(', ')} no numeric comparison is made: ${
           outcome.areas.ambiguousPickPieces.length > 0
-            ? `детали ${outcome.areas.ambiguousPickPieces.map((n) => `«${n}»`).join(', ')} лежат`
-            : 'деталь лежит'
-        } на слое в нескольких совпадающих по площади копиях, и какая попадёт в расчёт, зависит от порядка листов в пачке`,
+            ? `pieces ${outcome.areas.ambiguousPickPieces.map((n) => `“${n}”`).join(', ')} lie`
+            : 'a piece lies'
+        } on the layer in several copies matching by area, and which one lands in the calculation depends on the order of the sheets in the pack`,
       );
     }
     if (incompleteToday.length > 0) {
       notes.push(
-        `для размеров ${incompleteToday.map(sizeName).join(', ')} комплект деталей сегодня не собрался — сравнить нечем`,
+        `for sizes ${incompleteToday.map(sizeName).join(', ')} the set of pieces didn't come together today — there is nothing to compare`,
       );
     }
     if (zeroToday.length > 0) {
       notes.push(
-        `для размеров ${zeroToday.map(sizeName).join(', ')} пересчитанное число округлилось в ноль в единице «${unit}» — сравнить нечем`,
+        `for sizes ${zeroToday.map(sizeName).join(', ')} the recomputed number rounded to zero in the unit “${unit}” — there is nothing to compare`,
       );
     }
     if (unreadable.length > 0) {
       notes.push(
-        `сохранённое число размеров ${unreadable.map(sizeName).join(', ')} не читается как число`,
+        `the saved number of sizes ${unreadable.map(sizeName).join(', ')} does not read as a number`,
       );
     }
     if (unsavedIncomplete.length > 0) {
       notes.push(
-        `размеры ${unsavedIncomplete.map(sizeName).join(', ')} нормы не имеют, и сегодняшние выкройки её не дадут: комплект деталей для них не собрался — применять «по выкройкам» пока не из чего`,
+        `sizes ${unsavedIncomplete.map(sizeName).join(', ')} have no norm, and today's patterns will not give one: the set of pieces for them didn't come together — there is nothing to apply “by patterns” from yet`,
       );
     }
     // ВЫПУКЛАЯ ОБОЛОЧКА — ЗАПАСНОЙ ГЕОМЕТРИЧЕСКИЙ ПУТЬ, и молчать о нём нельзя ни в применении (там
@@ -361,7 +361,7 @@ export default function DxfNormRecheck({
     // расхождение получены не тем же способом, каким считается обычная деталь.
     if (outcome.areas.hulled.length > 0) {
       notes.push(
-        `сегодняшняя площадь деталей ${outcome.areas.hulled.map((n) => `«${n}»`).join(', ')} взята по выпуклой оболочке (офсет припуска не сошёлся) — это площадь с запасом`,
+        `today's area of pieces ${outcome.areas.hulled.map((n) => `“${n}”`).join(', ')} is taken from the convex hull (the allowance offset didn't work out) — that is an area with a margin`,
       );
     }
     // Ошибка настроек цеха не останавливает пересчёт (сохранённая норма и так действует), но цеховой
@@ -369,7 +369,7 @@ export default function DxfNormRecheck({
     // источником умолчание. Без этой строки расхождение выглядело бы свойством выкроек.
     if (workshop.isError) {
       notes.push(
-        'настройки цеха не читаются, поэтому цеховой стандарт припуска в сегодняшних условиях не участвовал — если он задан, пересчёт считан по другому припуску',
+        "the workshop settings cannot be read, so the workshop allowance standard did not take part in today's conditions — if one is set, the recompute was counted on a different allowance",
       );
     }
 
@@ -377,30 +377,30 @@ export default function DxfNormRecheck({
       return (
         <>
           <span className='self-start'>
-            <Pill tone='attention'>не совпадает с расчётом по текущим данным</Pill>
+            <Pill tone='attention'>does not match the calculation on current data</Pill>
           </span>
           <Line>
-            {diverged.map((d) => `${sizeName(d.id)}: было ${d.was}, сейчас ${d.now}`).join(' · ')}
+            {diverged.map((d) => `${sizeName(d.id)}: was ${d.was}, now ${d.now}`).join(' · ')}
           </Line>
           {withinTolerance.length > 0 && (
             <Line>
-              {`в пределах допуска: ${withinTolerance
-                .map((d) => `${sizeName(d.id)}: было ${d.was}, сейчас ${d.now}`)
+              {`within tolerance: ${withinTolerance
+                .map((d) => `${sizeName(d.id)}: was ${d.was}, now ${d.now}`)
                 .join(' · ')}`}
             </Line>
           )}
-          <Line>{`считали сейчас так: ${conditionsText}`}</Line>
+          <Line>{`this is how it was counted just now: ${conditionsText}`}</Line>
           {/* «Выкройки изменились» писать ЗАПРЕЩЕНО: расхождение значит ровно то, что ниже. */}
           <Line>
-            в расчёт входит не только геометрия выкроек: состав деталей этой ткани, их количество на
-            изделие, связи деталей с блоками и порядок этих связей, назначение ткани в BOM,
-            размерный ряд и имена размеров, единица строки, раскройная ширина, слой и припуск — а на
-            слоте в килограммах ещё полная ширина рулона и плотность артикула — расхождение может
-            означать изменение любого из этих входов
+            the calculation takes in more than the geometry of the patterns: the set of pieces of this
+            fabric, their per-garment count, the piece-to-block links and the order of those links,
+            the purpose of the fabric in the BOM, the size range and the size names, the unit of the
+            line, the cutting width, the layer and the seam allowance — and on a slot in kilograms
+            the full roll width and the density of the article too — a divergence can mean a change in any of these inputs
           </Line>
           <Line>
-            какие условия были при применении, строка не записывает — сказать, что именно разошлось,
-            нечем
+            what the conditions were at the time of applying, the line does not record — there is
+            nothing to say what exactly diverged
           </Line>
           {notes.map((n, i) => (
             <Line key={i}>{n}</Line>
@@ -416,11 +416,11 @@ export default function DxfNormRecheck({
       return (
         <>
           <Line>
-            {`пересчёт по текущим данным карточки расходится не больше допуска (1% либо шаг единицы): ${withinTolerance
-              .map((d) => `${sizeName(d.id)}: было ${d.was}, сейчас ${d.now}`)
+            {`the recompute on the card's current data diverges by no more than the tolerance (1% or the step of the unit): ${withinTolerance
+              .map((d) => `${sizeName(d.id)}: was ${d.was}, now ${d.now}`)
               .join(' · ')}`}
           </Line>
-          <Line>{`считали сейчас так: ${conditionsText}`}</Line>
+          <Line>{`this is how it was counted just now: ${conditionsText}`}</Line>
         </>
       );
     }
@@ -430,7 +430,7 @@ export default function DxfNormRecheck({
     // только когда сравнились ВСЕ сохранённые размеры и ни один не оставил примечания.
     if (exact > 0 && notes.length === 0) {
       return (
-        <Line>{`пересчёт по текущим данным карточки даёт те же числа; ${conditionsText}`}</Line>
+        <Line>{`the recompute on the card's current data gives the same numbers; ${conditionsText}`}</Line>
       );
     }
     if (notes.length > 0) {
@@ -440,8 +440,8 @@ export default function DxfNormRecheck({
             по одному размеру молчала бы о разнице по другому. */}
           {withinTolerance.length > 0 && (
             <Line>
-              {`в пределах допуска: ${withinTolerance
-                .map((d) => `${sizeName(d.id)}: было ${d.was}, сейчас ${d.now}`)
+              {`within tolerance: ${withinTolerance
+                .map((d) => `${sizeName(d.id)}: was ${d.was}, now ${d.now}`)
                 .join(' · ')}`}
             </Line>
           )}
@@ -456,7 +456,7 @@ export default function DxfNormRecheck({
     // Сопоставлять скаляр с пер-размерным пересчётом нечем: это числа про разное.
     return (
       <Line>
-        {`сравнить не с чем: пер-размерных чисел в строке нет, а пересчёт по выкройкам даёт числа по размерам${
+        {`there is nothing to compare with: the line carries no per-size numbers, while the recompute by patterns gives numbers per size${
           conditions ? ` (${conditionsText})` : ''
         }`}
       </Line>
@@ -479,7 +479,7 @@ export default function DxfNormRecheck({
         <details className='pt-1'>
           <summary className='cursor-pointer'>
             <Text size='nano' variant='label' component='span' className='uppercase'>
-              расход по деталям
+              consumption by piece
             </Text>
           </summary>
           <div className='flex flex-col gap-1.5 pt-1'>
@@ -507,8 +507,8 @@ export default function DxfNormRecheck({
                 СРАВНЕНИЕ; здесь речь о самой таблице, и без этой строки её легко прочитать как
                 «вот из чего сложено сохранённое число». */}
             <Text size='nano' variant='label' component='p'>
-              разбор посчитан по СЕГОДНЯШНИМ выкройкам и сегодняшним условиям; сохранённую норму
-              могли снять при других — сверку «было / сейчас» смотрите выше
+              the parse is computed on TODAY's patterns and today's conditions; the saved norm may
+              have been captured on different ones — see the “was / now” check above
             </Text>
           </div>
         </details>

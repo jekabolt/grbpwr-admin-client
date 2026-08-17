@@ -259,7 +259,7 @@ console.log('\nF · ПЛОЩАДИ РАЗОШЛИСЬ — продолжение
   ck(out.ok, 'площади посчитались (расхождение ловится сверкой, а не разбором)');
   const check = m.checkClientAreas(m.continuationBasisOf(s), out.areas.areaBySize);
   ck(check.ok === false, 'сверка ОТКАЗЫВАЕТ');
-  ck(check.reason.includes('выкройки менялись'), 'называет причину', check.reason.slice(0, 80) + '…');
+  ck(check.reason.includes('the patterns changed after the capture'), 'называет причину', check.reason.slice(0, 80) + '…');
   const plan = m.perSizePlan({
     sizeIds: [SIZE.M, SIZE.L, SIZE.XL], bySize: m.latestPerSize([s]),
     continueFrom: s, clientAreas: out.areas.areaBySize,
@@ -293,7 +293,7 @@ console.log('\nG · РАЗМЕР БЕЗ ВЫКРОЕК — среднее, и о
   ck(plan.meanSizes.length === 1 && plan.meanSizes[0] === SIZE.XS,
      'план ОТДЕЛЬНО перечисляет размеры на среднем — экрану есть что назвать',
      JSON.stringify(plan.meanSizes));
-  ck(m.originLabel('mean') === 'СРЕДНЕЕ', 'подпись среднего — не «из раскладки»', m.originLabel('mean'));
+  ck(m.originLabel('mean') === 'MEAN', 'подпись среднего — не «из раскладки»', m.originLabel('mean'));
   ck(m.originLabel('area') !== m.originLabel('marker'),
      'продолженное и измеренное подписаны РАЗНО');
   // И оно действительно неверно для обоих краёв ряда — вот зачем пометка.
@@ -364,7 +364,7 @@ console.log('\nI · ОТКАЗЫ ПРОДОЛЖЕНИЯ вместо правд�
     marker: m.marker({ summary: bare, pieces: BLOB_PIECES }),
     parsed: FILE_OK, sizeIds: [SIZE.XL], tokensOfSize: (id) => TOKENS[id] ?? [], isSizeToken,
   });
-  ck(!noConditions.ok && noConditions.reason.includes('условия съёмки'),
+  ck(!noConditions.ok && noConditions.reason.includes('no capture conditions recorded'),
      'условия съёмки не записаны → отказ, а не догадка о припуске');
   // Полочки размера в файле нет (есть только рукав) — размер идёт в «без выкроек», а не в
   // частичную площадь: частичная меньше настоящей, а меньшая площадь молча ЗАНИЖАЕТ норму.
@@ -377,7 +377,7 @@ console.log('\nI · ОТКАЗЫ ПРОДОЛЖЕНИЯ вместо правд�
     parsed: [m.piece(7, 'POCKET', 50)], sizeIds: [SIZE.M, SIZE.XL],
     tokensOfSize: (id) => TOKENS[id] ?? [], isSizeToken,
   });
-  ck(!flat.ok && flat.reason.includes('не градуируется'),
+  ck(!flat.ok && flat.reason.includes('not a single piece is graded by size'),
      'ни одна деталь не градуируется → продолжение отказано');
   // Одна деталь разложена разным числом на изделие в разных размерах — какое у XL, не знает никто.
   const skewed = m.sizeAreasFromParsed({
@@ -389,7 +389,7 @@ console.log('\nI · ОТКАЗЫ ПРОДОЛЖЕНИЯ вместо правд�
     ] }),
     parsed: FILE_OK, sizeIds: [SIZE.XL], tokensOfSize: (id) => TOKENS[id] ?? [], isSizeToken,
   });
-  ck(!skewed.ok && skewed.reason.includes('разным числом на изделие'),
+  ck(!skewed.ok && skewed.reason.includes('a different per-garment count'),
      'разное количество на изделие у одной детали → отказ, а не выбор большего');
 }
 
