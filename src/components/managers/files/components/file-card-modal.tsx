@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FileTopic } from 'api/proto-http/admin';
+import { usePermissions } from 'components/managers/accounts/utils/permissions';
+import { SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -10,8 +12,11 @@ import Text from 'ui/components/text';
 import { useFilesMutations, useLibraryFile } from '../hooks/useFiles';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { isReadablePdf } from '../utils/reader-find';
+import { FileAccessSection } from './file-access-section';
+import { FileComments } from './file-comments';
 import { FileOwnersSection } from './file-owners-section';
 import { FileReaderModal } from './file-reader';
+import { FileTasksSection, useFileTasks } from './file-tasks-section';
 
 /**
  * Карточка файла — МОДАЛКА ПОВЕРХ СЕТКИ, а не отдельная страница.
@@ -39,6 +44,18 @@ export function FileCardModal({
   const { data, isLoading, isError, error, refetch } = useLibraryFile(id);
   const { updateFile, deleteFile } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
+  const { canRead } = usePermissions();
+
+  /**
+   * ЗАДАЧИ СПРАШИВАЕТ И ПОДВАЛ — тот же ключ, что у секции ниже, поэтому запрос один на двоих.
+   *
+   * Нужно это ради одной кнопки: сервер откажется удалять файл, который держит хотя бы одна
+   * задача, и сказать это ДО нажатия честнее, чем показать отказ после. Гейт `tasks:read`
+   * повторён здесь буква в букву — иначе секция гасила бы запрос, а подвал его включал, и на
+   * аккаунте без права он всё равно уходил бы за заведомым отказом.
+   */
+  const { data: fileTasks } = useFileTasks(id, canRead(SECTION.tasks));
+  const heldByTasks = (fileTasks?.tasks ?? []).length;
 
   const file = data?.file;
   const [name, setName] = useState('');
@@ -287,8 +304,13 @@ export function FileCardModal({
               значило бы обещать откат правки, которого у replace-набора нет. */}
           <FileOwnersSection file={file} writable={writable} />
 
-          {/* ↓ СЮДА дописываются секции следующих фаз: задачи (Ф4), обсуждение (Ф5),
-              доступ (Ф7). Тело скроллит, шапка и подвал закреплены. */}
+          {/* Порядок секций не случаен и держится на двух доводах. Задачи стоят выше доступа,
+              потому что объясняют выключенную кнопку в подвале — объяснение обязано быть выше
+              того, что объясняет. Лента идёт последней: она единственная растёт без предела, и
+              всё, что стоит под ней, на длинном треде уезжает за экран. */}
+          <FileTasksSection file={file} writable={writable} />
+          <FileAccessSection file={file} writable={writable} />
+          <FileComments file={file} writable={writable} />
 
           {failure && (
             <div className='border border-error px-2.5 py-2'>
@@ -332,10 +354,22 @@ export function FileCardModal({
                   только чтение
                 </Text>
               )}
+              {/* ПРИЧИНА СТОИТ РЯДОМ С ВЫКЛЮЧЕННОЙ КНОПКОЙ, а не только в подсказке при
+                  наведении: подсказку не увидит тот, кто вообще не понял, почему кнопка серая. */}
+              {writable && heldByTasks > 0 && (
+                <Text size='micro' variant='label' component='span'>
+                  отцепите его в разделе «задачи» выше
+                </Text>
+              )}
               <Button
                 size='sm'
                 variant='secondary'
-                disabled={!writable || deleteFile.isPending}
+                disabled={!writable || deleteFile.isPending || heldByTasks > 0}
+                title={
+                  heldByTasks > 0
+                    ? 'файл держат задачи — сервер откажет в удалении, пока он в них числится'
+                    : undefined
+                }
                 onClick={() => setConfirmDelete(true)}
               >
                 удалить

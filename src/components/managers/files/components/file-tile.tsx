@@ -3,6 +3,7 @@ import { cn } from 'lib/utility';
 import { Avatar } from 'ui/components/avatar';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
+import { asAccessLevel } from '../api/accessService';
 import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
 
 /**
@@ -47,6 +48,15 @@ export function FileTile({
   // превью у такого типа — сбой отрисовки; у .zip первой страницы не существует, и подпись
   // «не вышло» на нём была бы обещанием, которое никто не сможет выполнить.
   const failed = !file.previewUrl && previewExpected(file.contentType ?? undefined, name);
+  /**
+   * Уровень доступа и число реплик — то, ради чего иначе пришлось бы открыть карточку.
+   *
+   * Уровень не секрет от того, кто файл ВИДИТ: ограниченный файл до чужой сетки просто не
+   * доезжает, поэтому бейдж здесь ничего не выдаёт — он объясняет, почему файла не видит сосед.
+   * `team` не помечается: обычное состояние не бейджат, иначе бейдж перестаёт что-либо значить.
+   */
+  const level = asAccessLevel(file.accessLevel ?? undefined);
+  const comments = Number(file.commentsCount ?? 0);
 
   return (
     <div
@@ -144,6 +154,22 @@ export function FileTile({
         >
           {ext}
         </Text>
+        {/* Счётчик реплик — НАД КАДРОМ, а не в подвале плитки: подвал у плитки одной строки, и
+            четвёртый элемент в нём переносил бы её ровно у тех файлов, которые обсуждают, то
+            есть у самых нужных. Ноль не печатается: «0 реплик» это не факт, а шум.
+            «обсуждение · N», а не «N реплик»: склонение при числе живёт в модуле очереди
+            загрузки, и тащить её машину в плитку (а плитка стоит ещё и на карточке задачи)
+            ради одного слова — плохой обмен. */}
+        {comments > 0 && (
+          <Text
+            size='nano'
+            component='span'
+            title={`реплик в обсуждении: ${comments}`}
+            className='absolute bottom-1 left-1 bg-textColor px-1 uppercase text-bgColor tabular-nums'
+          >
+            обсуждение · {comments}
+          </Text>
+        )}
       </button>
 
       <div className='flex min-w-0 flex-col gap-0.5 border-t border-hairline px-1.5 py-1'>
@@ -152,13 +178,23 @@ export function FileTile({
         <Text size='micro' component='span' className='truncate font-bold uppercase'>
           {stemOf(name)}
         </Text>
-        <span className='flex min-w-0 items-center gap-1.5'>
+        <span className='flex min-w-0 flex-wrap items-center gap-1.5'>
           <Text size='micro' variant='label' component='span' className='flex-none tabular-nums'>
             {formatBytes(Number(file.sizeBytes ?? 0))}
           </Text>
           {noTopics && (
             <Pill tone='warn' className='flex-none'>
               без темы
+            </Pill>
+          )}
+          {level === 'link' && (
+            <Pill tone='attention' className='flex-none' title='файл открыт по публичной ссылке'>
+              по ссылке
+            </Pill>
+          )}
+          {level === 'people' && (
+            <Pill tone='ink' className='flex-none' title='файл виден только перечисленным людям'>
+              ограничен
             </Pill>
           )}
         </span>
