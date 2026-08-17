@@ -6,7 +6,7 @@ import { SECTION } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
-import { FilePanel } from './components/file-panel';
+import { FileCardModal } from './components/file-card-modal';
 import { FilesToolbar } from './components/files-toolbar';
 import { FileTile } from './components/file-tile';
 import { TopicChips, type TopicSelection } from './components/topic-chips';
@@ -271,7 +271,17 @@ export default function FilesPage() {
         />
       )}
 
-      {id && <FilePanel id={Number(id)} topics={topics} onClose={closeCard} />}
+      {/* Карточка — модальный роут ПОВЕРХ сетки: сетка остаётся смонтированной, поэтому
+          закрытие возвращает ровно тот экран, с которого ушли. Закрытие идёт с текущим
+          query, а не на голый /files: иначе оно стирало бы выбранные чипы и строку поиска. */}
+      {id && (
+        <FileCardModal
+          id={Number(id)}
+          topics={topics}
+          writable={writable}
+          onClose={closeCard}
+        />
+      )}
     </div>
   );
 }

@@ -13,6 +13,25 @@ export function extensionOf(fileName: string): string {
 }
 
 /**
+ * Дата по-русски.
+ *
+ * Не `lib/features/formateDate`: тот форматирует в en-US, а раздел «файлы» русский целиком —
+ * «August 17, 2026» посреди «загрузил» читается как чужая вставка.
+ */
+export function formatWhen(value: string | undefined): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('ru-RU', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/**
  * Имя без расширения — то, что подписывает плитку.
  *
  * Расширение с подписи снято не ради красоты: в холсте оно и так стоит бейджем в углу, а
