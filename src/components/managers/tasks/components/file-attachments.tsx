@@ -54,7 +54,10 @@ export function FileAttachments({
         <Text size='micro' variant='label' className='uppercase'>
           файлы библиотеки{value.length ? ` · ${value.length}` : ''}
         </Text>
-        <Button size='xs' variant='secondary' onClick={() => setPickerOpen(true)}>
+        {/* ЯВНЫЙ `type`. Этот блок живёт ВНУТРИ `<form>` правки задачи, а у кнопки без типа
+            браузер подразумевает `submit`: клик открывал пикер И отправлял форму — модалка
+            правки закрывалась вместе с пикером, и в ответ прилетало «task saved». */}
+        <Button type='button' size='xs' variant='secondary' onClick={() => setPickerOpen(true)}>
           прикрепить
         </Button>
       </div>
@@ -89,7 +92,7 @@ export function FileAttachments({
                   </a>
                 </Button>
               )}
-              <Button size='xs' variant='secondary' onClick={() => remove(Number(f.id))}>
+              <Button type='button' size='xs' variant='secondary' onClick={() => remove(Number(f.id))}>
                 убрать
               </Button>
             </div>
@@ -210,6 +213,7 @@ function FilePicker({
 
         {filesQuery.hasNextPage && (
           <Button
+            type='button'
             size='sm'
             variant='secondary'
             disabled={filesQuery.isFetchingNextPage}
@@ -219,7 +223,7 @@ function FilePicker({
           </Button>
         )}
 
-        <Button size='sm' onClick={onClose}>
+        <Button type='button' size='sm' onClick={onClose}>
           готово
         </Button>
       </div>

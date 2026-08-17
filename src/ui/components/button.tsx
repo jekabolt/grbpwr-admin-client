@@ -113,6 +113,11 @@ interface Props extends VariantProps<typeof buttonVariants> {
   loadingType?: 'default' | 'order-processing' | 'overlay';
   loadingReverse?: boolean;
   className?: string;
+  /**
+   * НЕОБЯЗАТЕЛЕН, И ЭТО ГЛАВНОЕ: без него получается `type='button'`, а не браузерный
+   * `submit`. Отправку формы теперь надо ЗАЯВИТЬ — `type='submit'`.
+   */
+  type?: 'button' | 'submit' | 'reset';
   [k: string]: unknown;
 }
 
@@ -125,10 +130,28 @@ export function Button({
   size,
   variant,
   className,
+  type,
   ...props
 }: Props) {
   // When asChild is true and loading, we can't use Slot because loading changes the content
   const Component = asChild && !loading ? Slot : 'button';
+
+  // УМОЛЧАНИЕ ТИПА — `button`, а не браузерный `submit`.
+  //
+  // Голая `<button>` внутри `<form>` по спецификации HTML отправляет форму. Кнопка «прикрепить
+  // файл» в карточке задачи одним кликом и открывала пикер, и сохраняла задачу: модалка правки
+  // закрывалась, пикер уезжал вместе с ней. Тип кнопки не проверяется ни типами, ни сборкой —
+  // единственное место, где эту ошибку можно закрыть на весь код разом, это сам примитив.
+  //
+  // Отправка теперь ЗАЯВЛЯЕТСЯ: `type='submit'` у кнопки, которая для этого и стоит (login,
+  // workshop, custom-order-form). Аудит перед сменой умолчания показал, что неявных отправок в
+  // приложении не осталось — все формы отправляются либо явным `submit`, либо обработчиком,
+  // который сам зовёт `handleSubmit()`.
+  //
+  // При `asChild` тип НЕ ставится: там рендерится `<a>`/`<Link>`, у которого `type` значит
+  // совсем другое (MIME-подсказка). Явно переданный проп при этом всё равно доезжает.
+  const typeProps =
+    Component === 'button' ? { type: type ?? 'button' } : type !== undefined ? { type } : {};
 
   const renderContent = () => {
     if (!loading) return children;
@@ -148,6 +171,7 @@ export function Button({
   return (
     <Component
       {...props}
+      {...typeProps}
       className={buttonVariants({
         variant,
         isLoading: loading,
