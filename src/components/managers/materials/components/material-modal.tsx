@@ -1177,7 +1177,7 @@ export function MaterialModal({
                     onChange={(e) => set({ fabricThicknessMm: sanitizeDecimal(e.target.value, 3) })}
                   />
                   <Text variant='label' size='micro'>
-                    A SINGLE PLY, millimeters. Stack height is computed from it and the ply count,
+                    A SINGLE PLY, millimetres. Stack height is computed from it and the ply count,
                     and checked against the workshop limit. Rules of thumb: chiffon 0.1–0.2, poplin
                     ~0.3, heavy coating 1.5–2.5. Empty = not measured, and then stack height is not
                     checked at all — measure it and the check starts working.

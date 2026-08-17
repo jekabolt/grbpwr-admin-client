@@ -49,7 +49,7 @@ const PROFILE_OPTIONS: { value: ModalProfile; label: string }[] = [
 
 const printPath = (techCardId: number) => ROUTES.techCardPrint.replace(':id', String(techCardId));
 
-const colorwaysWord = (n: number): string => (n === 1 ? 'colorway' : 'colorways');
+const colorwaysWord = (n: number): string => (n === 1 ? 'colourway' : 'colourways');
 
 // Различимые колор-модели прогона: на основной карте колорвей линии — это её product,
 // outputVariantId живёт только на линиях aux-карт (то же правило, что в scope.buildPrintScope).
@@ -146,7 +146,7 @@ export function PrintOptionsModal({
   const colorwayItems = [
     {
       value: 0,
-      label: 'all colorways',
+      label: 'all colourways',
       disabled: runId > 0 && runColorwayIds.length > 1 && colorways.length > 0,
     },
     ...colorways.map((cw) => {
@@ -247,11 +247,11 @@ export function PrintOptionsModal({
 
         <label className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            colorway
+            colourway
           </Text>
           <Select
             name='print-colorway'
-            placeholder='all colorways'
+            placeholder='all colourways'
             fullWidth
             value={String(colorwayId)}
             items={colorwayItems}

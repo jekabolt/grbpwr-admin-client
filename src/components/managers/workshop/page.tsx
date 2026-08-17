@@ -62,7 +62,7 @@ const workshopSchema = z
       if (!Number.isFinite(n)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'the table length is a number in centimeters',
+          message: 'the table length is a number in centimetres',
           path: ['cuttingTableLengthCm'],
         });
       } else if (decimals > 2) {
@@ -81,13 +81,13 @@ const workshopSchema = z
       } else if (n < MIN_TABLE_LENGTH_CM) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `the value is in CENTIMETERS — a 6 m table is 600, not 6 (minimum ${MIN_TABLE_LENGTH_CM})`,
+          message: `the value is in CENTIMETRES — a 6 m table is 600, not 6 (minimum ${MIN_TABLE_LENGTH_CM})`,
           path: ['cuttingTableLengthCm'],
         });
       } else if (n > MAX_TABLE_LENGTH_CM) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `the longest spreading tables are about 50 m (${MAX_TABLE_LENGTH_CM} cm); this looks like an extra zero or millimeters`,
+          message: `the longest spreading tables are about 50 m (${MAX_TABLE_LENGTH_CM} cm); this looks like an extra zero or millimetres`,
           path: ['cuttingTableLengthCm'],
         });
       }
@@ -111,7 +111,7 @@ const workshopSchema = z
       if (!Number.isFinite(n)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: 'the stack limit is a number in centimeters',
+          message: 'the stack limit is a number in centimetres',
           path: ['maxStackHeightCm'],
         });
       } else if (decimals > 2) {
@@ -130,7 +130,7 @@ const workshopSchema = z
       } else if (n > MAX_STACK_HEIGHT_CM) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          message: `the value is in CENTIMETERS — the longest knife takes about 30 cm, anything over ${MAX_STACK_HEIGHT_CM} is a unit mistake`,
+          message: `the value is in CENTIMETRES — the longest knife takes about 30 cm, anything over ${MAX_STACK_HEIGHT_CM} is a unit mistake`,
           path: ['maxStackHeightCm'],
         });
       }
@@ -279,7 +279,7 @@ export function WorkshopSettingsPage() {
                   The usable length of the spreading table. A marker can set a length of its own —
                   the workshop one is here so it doesn't have to be entered again on every marker.
                   Empty = not configured, and then the “marker is longer than the table” verdict is
-                  not given at all. The value is in CENTIMETERS: a 6 m table is 600, not 6.
+                  not given at all. The value is in CENTIMETRES: a 6 m table is 600, not 6.
                 </Text>
               </div>
 
@@ -310,7 +310,7 @@ export function WorkshopSettingsPage() {
                   disabled={!canEdit || isLoading || isError}
                 />
                 <Text size='micro' variant='label'>
-                  CENTIMETERS, NOT A PLY COUNT — 30 plies of chiffon is 2 cm, 30 plies of heavy
+                  CENTIMETRES, NOT A PLY COUNT — 30 plies of chiffon is 2 cm, 30 plies of heavy
                   coating is 30 cm; the knife is the constraint, and a knife cuts HEIGHT. Lay height
                   is computed as the ply count × the fabric thickness, and the thickness comes from
                   the article. One limit for the whole workshop. Empty = not configured, and then
