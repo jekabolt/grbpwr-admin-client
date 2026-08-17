@@ -1,4 +1,4 @@
-import { useAccounts } from 'components/managers/accounts/utils/hooks';
+import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useState } from 'react';
 import { Avatar } from 'ui/components/avatar';
 import GenericPopover from 'ui/components/popover';
@@ -10,6 +10,15 @@ import { useSetFulfillmentAssignee } from '../hooks/useFulfillment';
 // annotation hook (keyed by the order uuid); the board refetches on settle so the
 // face updates in place. The wrapping span stops the click bubbling to the card's
 // open handler, so tapping the face never also opens the detail.
+//
+// The candidates come from ListAdmins, not ListAccounts: the latter is gated on the accounts
+// section, so a packer with fulfillment:write and without accounts:read opened this popover onto
+// an empty list — "there is nobody to assign" where the truth was "you may not read accounts".
+//
+// The face on the card is drawn from the `assignee` PROP, i.e. from the order's own annotation,
+// and never resolved through the list — ListAdmins omits disabled accounts, so a card owned by
+// somebody who has since left keeps its face and its name. That same owner is also pinned into
+// the rows below, otherwise the popover would show no tick anywhere and read as unassigned.
 export function CardAssignee({
   orderUuid,
   assignee,
@@ -21,10 +30,12 @@ export function CardAssignee({
 }) {
   const [open, setOpen] = useState(false);
   const setAssignee = useSetFulfillmentAssignee(orderUuid);
-  const { data } = useAccounts(canWrite);
-  const usernames = (data?.accounts ?? [])
-    .filter((a) => !a.disabled && a.username)
-    .map((a) => a.username as string);
+  const { data } = useAdmins(canWrite);
+  const candidates = (data?.admins ?? [])
+    .map((a) => a.username)
+    .filter((u): u is string => !!u);
+  const usernames =
+    assignee && !candidates.includes(assignee) ? [assignee, ...candidates] : candidates;
 
   // Read-only viewers just see the face, never the picker.
   if (!canWrite) {
@@ -63,7 +74,7 @@ export function CardAssignee({
           ))}
           {usernames.length === 0 && (
             <Text size='micro' variant='label' component='span' className='px-1 py-1.5'>
-              no accounts to assign
+              nobody to assign
             </Text>
           )}
         </div>

@@ -10,12 +10,25 @@ const roleKeys = {
   assignments: (techCardId: number) => ['techCardRoleAssignments', techCardId] as const,
 };
 
-// Lightweight admin-account list for the role pickers.
-export function useAdmins() {
+// The panel-wide people list — every picker of a PERSON reads this one, not ListAccounts:
+// tech-card roles, file owners, task assignees, fulfillment cards. `ListAdmins` is allowlisted
+// (any authenticated account may call it) and carries no permissions, so a picker no longer
+// demands the accounts section from a screen that has nothing to do with managing accounts.
+//
+// IT IS A SOURCE OF OPTIONS, NEVER OF CAPTIONS. Disabled accounts are excluded on purpose —
+// offering work to somebody who cannot log in is the wrong answer — so whoever already holds
+// something must be named from the record itself; resolve a name through this list and the
+// person disappears from the screen the day their account is switched off.
+//
+// `enabled` exists for read-only views that render the same component without its picker: the
+// hook is called before that branch (hooks cannot be conditional), and the request would be
+// spent on a list nobody is going to see.
+export function useAdmins(enabled = true) {
   return useQuery({
     queryKey: roleKeys.admins,
     queryFn: () => adminService.ListAdmins({}),
     staleTime: 5 * 60 * 1000,
+    enabled,
   });
 }
 
