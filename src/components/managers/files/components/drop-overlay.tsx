@@ -70,8 +70,10 @@ export function FilesDropOverlay({
       e.preventDefault();
       if (e.dataTransfer) e.dataTransfer.dropEffect = live.current.enabled ? 'copy' : 'none';
     };
-    const onLeave = (e: DragEvent) => {
-      if (!hasFiles(e.dataTransfer)) return;
+    // Уход НЕ проверяет типы, в отличие от входа: если хоть один браузер отдаст на `dragleave`
+    // пустой `types`, счётчик перестанет опускаться и оверлей залипнет на весь сеанс. Лишний
+    // декремент безопасен — он зажат нулём.
+    const onLeave = () => {
       depth.current = Math.max(0, depth.current - 1);
       if (!depth.current) reset();
     };

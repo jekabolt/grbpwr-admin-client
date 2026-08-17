@@ -53,6 +53,12 @@ import { extensionOf, formatBytes } from '../utils/format';
  * эффекта: занятый низ экрана, страж закрытия вкладки и инвалидация выдачи.
  */
 
+/**
+ * Сколько принятых сервером файлов уже отражено в выдаче. Живёт в модуле, потому что полоса
+ * размонтируется на каждом уходе из раздела, а очередь — нет.
+ */
+let reflectedCompletions = 0;
+
 const PILL_TONE = {
   ok: 'ok',
   warn: 'warn',
@@ -246,14 +252,25 @@ export function FilesUploadBar() {
 
   // ПРИНЯТЫЙ ФАЙЛ МЕНЯЕТ ВЫДАЧУ. Инвалидация с задержкой: на пачке в сорок файлов
   // немедленная означала бы сорок перезапросов всех загруженных страниц подряд.
+  //
+  // Счётчик отражённого — МОДУЛЬНЫЙ, а не в компоненте: полосу размонтирует любой уход из
+  // раздела, а отправка при этом продолжается. Без него файлы, доехавшие «в фоне», не
+  // появлялись бы в сетке до истечения staleTime (полчаса) — выдача выглядела бы отставшей
+  // ровно у того, кто эти файлы и загрузил.
   useEffect(() => {
-    if (!completions) return;
-    const timer = setTimeout(() => qc.invalidateQueries({ queryKey: filesKeys.all }), 1200);
+    if (completions === reflectedCompletions) return;
+    const timer = setTimeout(() => {
+      reflectedCompletions = completions;
+      qc.invalidateQueries({ queryKey: filesKeys.all });
+    }, 1200);
     return () => clearTimeout(timer);
   }, [completions, qc]);
 
-  // ИТОГ ПАЧКИ СЛОВАМИ. Полосу часто сворачивают и уходят на другой экран — без этого
-  // сообщения окончание отправки не наступает нигде.
+  // ИТОГ ПАЧКИ СЛОВАМИ — ТОЛЬКО КОГДА ЕГО НЕ ВИДНО В САМОЙ ПОЛОСЕ.
+  //
+  // Развёрнутая полоса печатает ту же сводку в своей шапке, и тост поверх неё не добавлял бы
+  // ничего, зато накрывал бы собой первые строки очереди — ровно те, к которым после отказа
+  // и тянутся. Свёрнутую и убранную полосу читать негде, там он и нужен.
   const wasLive = useRef(false);
   useEffect(() => {
     if (live) {
@@ -262,9 +279,11 @@ export function FilesUploadBar() {
     }
     if (!wasLive.current) return;
     wasLive.current = false;
-    if (!queue.rows.length) return;
+    if (!queue.rows.length || (!collapsed && !hidden)) return;
     const { labels } = labelsOf(queue.rows);
-    showMessage(batchSummary(queue, labels), 'success');
+    const t2 = tally(queue);
+    // Тон по факту, а не по намерению: пачка, где половина не уехала, «успехом» не была.
+    showMessage(batchSummary(queue, labels), t2.lost + t2.fail ? 'error' : 'success');
     // Сводка снимается ровно на переходе «живое → отстоялось»; отдельные правки строк
     // (убрали одну, повторили другую) её не повторяют.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -275,8 +294,8 @@ export function FilesUploadBar() {
     if (!dup) return;
     setBusyRow(row.id);
     try {
-      // ДОПИСЫВАЮЩАЯ семантика: у оригинала свои темы, и replace стёр бы их ради пачки,
-      // которая копией так и не стала.
+      // ДОПИСЫВАЮЩАЯ семантика: у того файла свои темы, и replace стёр бы их ради тем пачки,
+      // которая пришла позже.
       const res = await filesService.assignTopics({
         fileIds: [dup.id],
         topicIds: row.topicIds,
@@ -324,8 +343,10 @@ export function FilesUploadBar() {
   // продолжает есть канал, становится невидимой совсем.
   if (hidden) {
     return createPortal(
-      <div className='fixed bottom-2.5 right-2.5 z-[var(--z-dock)]'>
-        <Button size='sm' variant='secondary' onClick={() => setHidden(false)}>
+      // ПО ЦЕНТРУ, А НЕ В УГЛУ: углы низа уже заняты — слева тосты, справа кнопка devtools в
+      // разработке. Возврат стоит там же, где стояла полоса, и читается как её след.
+      <div className='fixed bottom-2.5 left-1/2 z-[var(--z-dock)] -translate-x-1/2'>
+        <Button size='sm' variant='main' onClick={() => setHidden(false)}>
           показать загрузку ({rows.length})
         </Button>
       </div>,

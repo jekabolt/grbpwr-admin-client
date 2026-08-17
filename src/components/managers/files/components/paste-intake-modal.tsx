@@ -36,8 +36,11 @@ function pastedName(file: File, index: number): string {
       hour: '2-digit',
       minute: '2-digit',
     })
-    // ru-RU отдаёт «17.08, 13:40» — запятая в имени файла ни к чему.
-    .replace(',', '');
+    // ru-RU отдаёт «17.08, 13:40». Запятая в имени файла ни к чему, а двоеточие — прямой вред:
+    // в macOS оно незаконно, и скачанный файл лёг бы на диск под другим именем, чем в
+    // библиотеке. Расхождение имён — ровно то, из-за чего файл потом не находят.
+    .replace(',', '')
+    .replace(':', '-');
   const ext = (() => {
     const fromName = file.name.includes('.') ? file.name.split('.').pop() : '';
     if (fromName && fromName.length <= 5) return fromName.toLowerCase();
@@ -257,7 +260,7 @@ export function PasteIntakeModal({
         </div>
 
         <Text size='micro' variant='label' component='p'>
-          ⌘v ещё раз — добавит вторую картинку в ту же очередь
+          ⌘V ещё раз — добавит вторую картинку в ту же очередь
         </Text>
       </div>
     </ConfirmationModal>
