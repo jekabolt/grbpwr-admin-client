@@ -172,8 +172,8 @@ export function MarkerAreaSplit({
             'piece area',
             split.pieceCm2,
             nettoPerGarment && nettoPerGarment.value > 0
-              ? `this is the NETTO of this marker: ${nettoPerGarment.value} ${unit} per unit. “by patterns” computes the very same quantity — but from TODAY'S files, and once the pattern pieces are edited the two numbers will legitimately diverge`
-              : 'this is the NETTO — the same quantity the “by patterns” calculation gives, but on the geometry of this marker',
+              ? `this is the NETTO of this marker: ${nettoPerGarment.value} ${unit} per unit. “from the patterns” computes the very same quantity — but from TODAY'S files, and once the pattern pieces are edited the two numbers will legitimately diverge`
+              : 'this is the NETTO — the same quantity the “from the patterns” calculation gives, but on the geometry of this marker',
           )}
           {row(
             'waste between pieces',

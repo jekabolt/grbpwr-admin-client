@@ -353,7 +353,7 @@ export default function DxfNormRecheck({
     }
     if (unsavedIncomplete.length > 0) {
       notes.push(
-        `sizes ${unsavedIncomplete.map(sizeName).join(', ')} have no norm, and today's patterns will not give one: the set of pieces for them didn't come together — there is nothing to apply “by patterns” from yet`,
+        `sizes ${unsavedIncomplete.map(sizeName).join(', ')} have no norm, and today's patterns will not give one: the set of pieces for them didn't come together — there is nothing to apply “from the patterns” from yet`,
       );
     }
     // ВЫПУКЛАЯ ОБОЛОЧКА — ЗАПАСНОЙ ГЕОМЕТРИЧЕСКИЙ ПУТЬ, и молчать о нём нельзя ни в применении (там
@@ -456,7 +456,7 @@ export default function DxfNormRecheck({
     // Сопоставлять скаляр с пер-размерным пересчётом нечем: это числа про разное.
     return (
       <Line>
-        {`there is nothing to compare with: the line carries no per-size numbers, while the recompute by patterns gives numbers per size${
+        {`there is nothing to compare with: the line carries no per-size numbers, while the recompute from the patterns gives numbers per size${
           conditions ? ` (${conditionsText})` : ''
         }`}
       </Line>

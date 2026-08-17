@@ -751,7 +751,7 @@ function CuttingAllowance({
               <Text size='micro'>
                 There is no allowance. The netto norm will go into purchasing and into the cost AS
                 IS — without the waste between pieces and the lay ends, that is, understated. The
-                run readiness gate will not release a run on the pair “norm from patterns + percent
+                run readiness gate will not release a run on the pair “norm from the patterns + percent
                 not set”.
               </Text>
             </CalloutBox>

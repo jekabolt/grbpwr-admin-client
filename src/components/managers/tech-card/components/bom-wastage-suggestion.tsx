@@ -339,7 +339,7 @@ export function BomWastageSuggestion({
       {view === 'tooFew' ? (
         <Text size='micro' variant='label'>
           An actual appears once a marker is captured on the run's lay and the cloth measurement is
-          entered, and netto — once the lay's card has a norm “from patterns”. Three will add up and
+          entered, and netto — once the lay's card has a norm “from the patterns”. Three will add up and
           the median will appear here on its own; until then the percent is estimated by hand, and
           the panel substitutes no defaults.
           {skippedCount > 0
