@@ -3,7 +3,12 @@ import { useMemo, useState } from 'react';
 import type { LibraryFile } from 'api/proto-http/admin';
 import { filesService } from 'components/managers/files/api/filesService';
 import { filesKeys, useFileTopics, useLibraryFiles } from 'components/managers/files/hooks/useFiles';
-import { extensionOf, formatBytes } from 'components/managers/files/utils/format';
+import { extensionOf } from 'components/managers/files/utils/format';
+// ВЕС БЕРЁТСЯ У ОБЩЕГО ФОРМАТТЕРА, а не у раздела «файлы», хотя рядом с ним стоит
+// `extensionOf` оттуда же. Расширение языка не имеет, а единицы имеют: у раздела «файлы»
+// формат русский («500 кб»), и эта строка — собственная подпись ЭКРАНА ЗАДАЧ, английского
+// целиком. Арифметика у обоих одна и та же, различаются только слова.
+import { formatBytes } from 'utils/pattern';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
