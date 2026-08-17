@@ -124,7 +124,9 @@ export function FileTile({
           // существует — спиннера здесь не будет никогда, иначе плитка вечно выглядит
           // недогруженной.
           <span className='flex aspect-square w-full flex-col items-center justify-center gap-0.5'>
-            <Text size='stat' component='span' className='uppercase'>
+            {/* 12px жирным, а не `size='stat'`: stat — кегль стат-ячейки (16px), и вне её он
+                пробивает 12px-потолок DESIGN.md. Это было единственное такое место раздела. */}
+            <Text component='span' className='font-bold uppercase'>
               {ext}
             </Text>
             <Text size='micro' variant='label' component='span' className='uppercase'>

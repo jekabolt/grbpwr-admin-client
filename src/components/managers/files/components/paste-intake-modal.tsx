@@ -7,7 +7,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { inheritTopics, type BatchTopics } from '../upload/queue';
-import { formatBytes } from '../utils/format';
+import { extensionOf, formatBytes, kindWord } from '../utils/format';
 
 /**
  * ПРИЁМНАЯ МОДАЛКА ⌘V.
@@ -26,8 +26,17 @@ import { formatBytes } from '../utils/format';
  * `common_MediaFull` и публичный медиа-бакет, а библиотека приватная и хранит что угодно.
  */
 
-/** «вставка 17.08 13:40.png» — дата с временем, потому что вставок за день бывает много. */
+/**
+ * Имена, которыми браузер зовёт БЕЗЫМЯННОЕ. Скриншот из буфера приходит как «image.png» у
+ * всех подряд — вот у него имени и нет. У файла, скопированного из проводника, имя своё, и
+ * подменять его выдуманным нельзя: человек ищет файл по тому имени, под которым он его знает.
+ */
+const NAMELESS = /^(image|unknown|blob)\.(png|jpe?g|webp|gif|avif|tiff?|bmp)$/i;
+
+/** «вставка 17.08 13-40.png» — дата с временем, потому что вставок за день бывает много. */
 function pastedName(file: File, index: number): string {
+  const own = (file.name ?? '').trim();
+  if (own && !NAMELESS.test(own)) return own;
   const now = new Date();
   const stamp = now
     .toLocaleString('ru-RU', {
@@ -151,18 +160,32 @@ export function PasteIntakeModal({
 
         {files.map((file, i) => (
           <div key={`${file.name}-${file.size}-${i}`} className='flex items-start gap-2.5'>
-            <div className='w-[180px] flex-none border border-borderColor bg-bgSecondary'>
-              <img
-                src={urls[i]}
-                alt=''
-                onLoad={(e) =>
-                  setDims((d) => ({
-                    ...d,
-                    [i]: `${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`,
-                  }))
-                }
-                className='aspect-square w-full object-contain'
-              />
+            {/* В буфере бывает не только картинка: скопированный из проводника pdf или zip
+                приходит сюда тем же ⌘V. Тянуть в `img` то, что браузер нарисовать не может,
+                значит показать сломанный кадр — поэтому у остального плашка с расширением. */}
+            <div className='flex aspect-square w-[180px] flex-none items-center justify-center border border-borderColor bg-bgSecondary'>
+              {file.type.startsWith('image/') ? (
+                <img
+                  src={urls[i]}
+                  alt=''
+                  onLoad={(e) =>
+                    setDims((d) => ({
+                      ...d,
+                      [i]: `${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`,
+                    }))
+                  }
+                  className='size-full object-contain'
+                />
+              ) : (
+                <div className='flex flex-col items-center gap-0.5'>
+                  <Text component='span' className='font-bold uppercase'>
+                    {extensionOf(file.name)}
+                  </Text>
+                  <Text size='micro' variant='label' component='span' className='uppercase'>
+                    {kindWord(file.type, file.name)}
+                  </Text>
+                </div>
+              )}
             </div>
             <div className='flex min-w-0 flex-1 flex-col gap-1'>
               <Text size='micro' variant='label' component='p'>
@@ -214,10 +237,10 @@ export function PasteIntakeModal({
                     setSelected((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
                   }
                 >
+                  {/* Здесь стояло слово «открытая» — остаток от чужого чипа, и внутри
+                      «СЪЁМКА ОТКРЫТАЯ» оно не значило ничего. Что тема пришла с холста,
+                      сказано подсказкой и строкой под рядом чипов. */}
                   {t.name}
-                  {presetTopicIds.includes(id) && (
-                    <span className='opacity-70'>открытая</span>
-                  )}
                 </Chip>
               );
             })}
@@ -259,8 +282,13 @@ export function PasteIntakeModal({
           </Text>
         </div>
 
+        {/* ЧЕСТНАЯ ОГОВОРКА. Вставка намеренно не перехватывается, пока курсор стоит в поле
+            (иначе ⌘V в имени вставлял бы картинку вместо текста) — а эта модалка существует
+            ровно затем, чтобы человек стоял в поле имени. Без оговорки обещание не работает
+            именно там, где его читают. */}
         <Text size='micro' variant='label' component='p'>
-          ⌘V ещё раз — добавит вторую картинку в ту же очередь
+          ⌘V ещё раз добавит следующий файл в ту же вставку — но сначала уведите курсор из
+          поля: в поле ⌘V кладёт текст
         </Text>
       </div>
     </ConfirmationModal>

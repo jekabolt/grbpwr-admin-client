@@ -177,7 +177,10 @@ export function FileCardModal({
                 <img src={file.previewUrl} alt='' className='size-full object-contain' />
               ) : (
                 <div className='flex flex-col items-center gap-0.5'>
-                  <Text size='stat' component='span' className='uppercase'>
+                  {/* 12px, а не `size='stat'`: stat — это КЕГЛЬ СТАТ-ЯЧЕЙКИ (16px), и за
+                      пределами stat-ячейки он пробивает потолок в 12px, объявленный
+                      DESIGN.md. Вес держит жирность, а не размер. */}
+                  <Text component='span' className='font-bold uppercase'>
                     {extensionOf(file.fileName ?? '')}
                   </Text>
                   <Text size='micro' variant='label' component='span' className='uppercase'>
@@ -219,19 +222,21 @@ export function FileCardModal({
             <GroupLabel>темы</GroupLabel>
             <ChipRow>
               {topics.map((t) => (
+                // В ЧТЕНИИ ЧИП ВЫКЛЮЧЕН, А НЕ ПРОСТО МЁРТВ. Раньше он оставался кликабельным
+                // на вид (та же рамка, тот же курсор) и молчал на нажатие — а молчащий на
+                // нажатие элемент читается как поломка, а не как запрет.
                 <Chip
                   key={t.id}
                   selected={selected.includes(Number(t.id))}
                   pressed={selected.includes(Number(t.id))}
-                  onClick={
-                    writable
-                      ? () =>
-                          setSelected((p) =>
-                            p.includes(Number(t.id))
-                              ? p.filter((x) => x !== Number(t.id))
-                              : [...p, Number(t.id)],
-                          )
-                      : undefined
+                  disabled={!writable}
+                  title={writable ? undefined : 'только чтение — темы не переставить'}
+                  onClick={() =>
+                    setSelected((p) =>
+                      p.includes(Number(t.id))
+                        ? p.filter((x) => x !== Number(t.id))
+                        : [...p, Number(t.id)],
+                    )
                   }
                 >
                   {t.name}
@@ -252,24 +257,26 @@ export function FileCardModal({
                 </Text>
               )}
             </ChipRow>
-            {writable && (
-              <Input
-                name='newTopic'
-                value={newTopic}
-                placeholder='новая тема'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewTopic(e.target.value)}
-                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
-                  if (e.key !== 'Enter') return;
-                  e.preventDefault();
-                  const v = newTopic.trim();
-                  if (v && !newTopics.some((x) => x.toLowerCase() === v.toLowerCase())) {
-                    setNewTopics((p) => [...p, v]);
-                  }
-                  setNewTopic('');
-                }}
-                className='max-w-[220px]'
-              />
-            )}
+            {/* ВЫКЛЮЧЕНО, А НЕ СПРЯТАНО — то же правило, что объявлено на холсте: спрятанного
+                не попросишь, а выключенное поле рядом с чипами показывает, что тему тут
+                вообще заводят, и объясняет, почему сейчас нельзя. */}
+            <Input
+              name='newTopic'
+              value={newTopic}
+              disabled={!writable}
+              placeholder={writable ? 'новая тема' : 'только чтение'}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewTopic(e.target.value)}
+              onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                const v = newTopic.trim();
+                if (v && !newTopics.some((x) => x.toLowerCase() === v.toLowerCase())) {
+                  setNewTopics((p) => [...p, v]);
+                }
+                setNewTopic('');
+              }}
+              className='max-w-[220px]'
+            />
             <Text size='micro' variant='label'>
               тема — ярлык, а не папка: файл несёт сразу несколько или ни одной
             </Text>

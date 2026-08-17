@@ -132,15 +132,13 @@ export function useFilesMutations() {
     mutationFn: filesService.deleteFile,
     onSuccess: invalidate,
   });
-  const createTopic = useMutation({
-    mutationFn: (args: { name: string; description?: string }) =>
-      filesService.createTopic(args.name, args.description),
-    onSuccess: invalidate,
-  });
+  // `createTopic` здесь больше нет: тему заводят либо экраном тем (`topicsService.create`),
+  // либо попутно — списком `newTopics` в самом сохранении файла. Мутация-сирота осталась от
+  // третьего, снятого способа и только предлагала бы четвёртый путь к одной и той же записи.
   const assignTopics = useMutation({
     mutationFn: filesService.assignTopics,
     onSuccess: invalidate,
   });
 
-  return { updateFile, deleteFile, createTopic, assignTopics, invalidate };
+  return { updateFile, deleteFile, assignTopics, invalidate };
 }
