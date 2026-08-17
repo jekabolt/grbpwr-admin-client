@@ -4765,6 +4765,15 @@ export type common_TaskInsert = {
   // The ACTUAL start (when the card first entered IN_PROGRESS) is the
   // server-stamped Task.started_at, not this field. Unset = no planned start.
   startDate: wellKnownTimestamp | undefined;
+  // УКАЗАНИЯ, НАРИСОВАННЫЕ НА ВЛОЖЕННЫХ КАРТИНКАХ. «Тут шов кривой», «вот эту молнию», «отсюда
+  // досюда» — сказанное стрелкой на самом снимке, а не пересказанное словами в описании.
+  // ПОЛНАЯ ЗАМЕНА ВМЕСТЕ С СОДЕРЖИМЫМ, ровно как media_ids, и по той же причине: обе стороны
+  // пишет одна форма карточки, и присланный без указаний список означает «указаний больше нет».
+  // Присутствия у repeated-поля нет, поэтому клиент обязан слать то, что прочитал, — тот же
+  // круговой рейс, что у labels и media_ids.
+  // НАБОР БЕЗ СВОЕЙ КАРТИНКИ СБРАСЫВАЕТСЯ СЕРВЕРОМ: указание на снимке, снятом с карточки,
+  // нельзя ни увидеть, ни убрать, а хранить его значило бы копить невидимое.
+  mediaAnnotations: common_TaskMediaAnnotations[] | undefined;
 };
 
 export type common_TaskPriority =
@@ -4773,6 +4782,153 @@ export type common_TaskPriority =
   | "TASK_PRIORITY_MEDIUM"
   | "TASK_PRIORITY_HIGH"
   | "TASK_PRIORITY_URGENT";
+// TaskMediaAnnotations — указания одной прикреплённой картинки.
+// ТА ЖЕ СТРУКТУРА, ЧТО НА ЭСКИЗЕ ТЕХ-КАРТЫ И НА СНИМКЕ ШАГА СБОРКИ: `TechCardAnnotation`, вместе с
+// её видами, точками, цветом и пунктиром. Имя историческое — примитив указания в системе ОДИН (см.
+// довод миграций 0308/0309), и заводить рядом второй набор видов с второй проверкой ради задачи
+// значило бы развести их на первой же правке: человек рисует одним и тем же жестом, а читатель
+// смотрел бы в две системы.
+// `piece_line_key`/`piece_line_keys` у задачи смысла не имеют (деталей кроя у карточки нет) и
+// сервером ОЧИЩАЮТСЯ: ссылка на деталь чужой тех-карты, которую здесь нечем ни выбрать, ни
+// показать, — это висящий ключ, который однажды напечатают.
+export type common_TaskMediaAnnotations = {
+  mediaId: number | undefined;
+  annotations: common_TechCardAnnotation[] | undefined;
+};
+
+export type common_TechCardAnnotation = {
+  kind: common_TechCardAnnotationKind | undefined;
+  // Число точек определяется видом и проверяется сервером: PIN/LABEL — 1, DIM/BRACKET — 2,
+  // ARC — 3, MULTI — от 2 до 8.
+  points: common_TechCardAnnotationPoint[] | undefined;
+  text: string | undefined;
+  // Положение плашки с текстом, 0..1. Лидер НЕ хранится — он строится от плашки к якорю по
+  // правилу отрисовки; хранить его значило бы хранить производное и дать ему разойтись.
+  labelX: googletype_Decimal | undefined;
+  labelY: googletype_Decimal | undefined;
+  color: common_TechCardAnnotationColor | undefined;
+  // ДЕТАЛЬ КРОЯ, О КОТОРОЙ ЭТА ВЫНОСКА. Стабильный line_key детали ЭТОЙ ЖЕ карточки — тот же ключ,
+  // которым деталь адресуют вход операции и назначение материала, а не имя: имя переживает
+  // переименование хуже, чем ссылка.
+  // ССЫЛКА СОВЕТУЮЩАЯ, а не проверяемая. Указание можно поставить раньше, чем деталь заведена
+  // (снимок узла приходит с примерки, детали кроя рождаются из чертежа позже), и отказ сохранения
+  // всей карточки из-за неразрешимого ключа стоил бы дороже, чем висящая ссылка: клиент показывает
+  // «деталь удалена», человек перевыбирает. Ровно так же ведут себя piece_line_keys операции.
+  // УСТАРЕЛО в пользу piece_line_keys ниже, но не снято: клиент, который про список не знает,
+  // по-прежнему шлёт и читает это поле. Сервер отдаёт его ПЕРВЫМ элементом списка.
+  pieceLineKey: string | undefined;
+  // ПУНКТИР ВМЕСТО СПЛОШНОЙ. На чертеже это различие несёт смысл, а не украшает: сплошная —
+  // то, что видно и делают, пунктир — построение, припуск, линия под слоем. Поэтому поле входит
+  // в подпись секции, как и сам вид, а не остаётся оформлением вроде цвета.
+  // У PIN линии нет вовсе, и сервер приводит поле к false: два способа записать одно и то же
+  // «нечего рисовать пунктиром» разошлись бы в отпечатке.
+  dashed: boolean | undefined;
+  // ЗАШТРИХОВАТЬ ОБЛАСТЬ ПОД ПОЛИГОНОМ. Контур говорит «вот эта граница», штриховка — «вот эта
+  // площадь»; на дублировании и на пороке ткани это разные указания.
+  // Только у POLYGON. У прочих видов заливать нечего, и сервер приводит поле к false, а не
+  // отвергает карточку: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже,
+  // чем молчаливое приведение к тому единственному, что поле могло бы значить.
+  filled: boolean | undefined;
+  // ДЕТАЛИ КРОЯ, О КОТОРЫХ УКАЗАНИЕ. Список, а не одна: узел законно собирает несколько деталей
+  // сразу — «втачать рукав в пройму» это и рукав, и полочка, и спинка, и указание на снимке
+  // относится ко всем трём. Одиночным полем это выражалось выбором «какая из них главная»,
+  // которого у шва нет.
+  // СОВМЕСТИМОСТЬ БЕЗ ФЛАГА ПРИСУТСТВИЯ: пустой список читается как [piece_line_key], непустой
+  // вытесняет старое поле целиком. Клиенту, который шлёт только piece_line_key, ничего менять не
+  // нужно; сервер отдаёт оба, и piece_line_key = первый элемент списка.
+  pieceLineKeys: string[] | undefined;
+};
+
+// TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
+// THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
+// path). Eleven fields left, and they left for three different reasons:
+// (a) THE CODE WROTE THEM, NOT A PERSON. `machine` and `stitches_per_cm` were filled from an
+// operation-type preset, `thread` from the linked BOM line, `placement` from the joined
+// piece names, and each was then stored as a fact and hashed into a signed digest. The
+// printed tech pack had to SUBTRACT `thread` from the material list to stop printing the
+// same string twice — a repair for a duplication that should not have existed.
+// (b) NOBODY READ THEM. `needle` duplicated material_thread_attr.needle_reco, which the thread
+// article already carries, and no consumer anywhere read the operation's copy.
+// (c) THEY ASKED A QUESTION WITH NO SINGLE ANSWER. `node` («узел / что», REQUIRED) offered a
+// list mixing seams, garment areas, pieces and materials, and repeated the verb the type
+// field already held. A working pattern-maker could not fill it and asked whether it was
+// needed. It is not replaced by an optional title: an optional field asking the same
+// unanswerable question just gets answered differently on every card.
+// WHAT A STEP IS NOW: a verb (operation_type), a place (zone), what it joins (piece_line_keys)
+// and what it consumes (bom_line_keys), and how long it takes (smv). Its heading is COMPOSED —
+// «join · side seams · Front + Back» — never typed.
+// EXACTLY TWO FIELDS ARE REQUIRED, and both are closed lists: operation_type and zone. Nothing
+// with free input is mandatory ever again; that pairing is what made `node` a trap.
+// EVERYTHING BELOW «отклонения» IS AN OVERRIDE: unset means INHERIT from the card
+// (TechCardConstruction, and TechCard.required_seam_allowance_mm for the allowance), which
+// inherits from the workshop. The inherited value is shown as a placeholder and NEVER written
+// into the row — the day it is written, «the technologist decided 4 st/cm» stops being
+// distinguishable from «it defaulted to 4», which is precisely today's defect.
+// ── ВЫНОСКИ НА ФОТО УЗЛА ────────────────────────────────────────────────────────────────────────
+// Выноска отвечает швее на два вопроса, которые не помещаются в текст шага: ЧТО тут делать и ПО
+// КАКОМУ РАЗМЕРУ. Поэтому она живёт поверх снимка узла, а не в описании.
+// ЗАКРЫТЫЙ СЛОВАРЬ `kind`, А НЕ СВОБОДНЫЕ ОСИ. Проектировался набор осями (якорь × геометрия ×
+// лидер × подпись), но хранить оси независимыми полями значит валидировать комбинаторику
+// бессмыслицы: скобка с одной точкой, номер на мерке, лидер у того, у чего нет якоря. Вид —
+// одно значение, и оно определяет и число точек, и что рисуется, и чем является текст.
+// СООБЩЕНИЕ НЕ ЗНАЕТ СЛОВА «ОПЕРАЦИЯ». Тот же тип пригодится карточному эскизу, детали кроя и
+// примерке — им нужно будет лишь своё поле, а не свой формат выноски.
+export type common_TechCardAnnotationKind =
+  | "TECH_CARD_ANNOTATION_KIND_UNKNOWN"
+  // 1 точка. Номер — позиция в списке; текст — заметка, читается в легенде.
+  | "TECH_CARD_ANNOTATION_KIND_PIN"
+  // 1 точка + плашка. Текст — подпись, лидер-стрелка строится сам.
+  | "TECH_CARD_ANNOTATION_KIND_LABEL"
+  // 2 точки. Размерная линия с засечками; текст — значение с единицами («6 мм»).
+  | "TECH_CARD_ANNOTATION_KIND_DIM"
+  // 2 точки. Скобка над участком; текст — что с этим участком делать.
+  | "TECH_CARD_ANNOTATION_KIND_BRACKET"
+  // 2..8 точек. Одна подпись, ветвящаяся к нескольким местам («закрепки ×3»).
+  | "TECH_CARD_ANNOTATION_KIND_MULTI"
+  // 3 точки: начало, ТОЧКА НА КРИВОЙ, конец. Дуга — единственный способ показать линию, которая на
+  // изделии не прямая: посадку оката, скругление борта, ход отделочной строчки по кокетке. Отрезком
+  // это не сказать, а ломаной из десяти точек — сказать нельзя дважды одинаково.
+  // Средняя точка ЛЕЖИТ НА КРИВОЙ, а не управляет ей со стороны. Управляющая точка Безье не
+  // принадлежит кривой, и технолог, ставящий её мышью, каждый раз промахивается мимо линии, которую
+  // рисует; из трёх точек НА кривой управляющая считается однозначно (2·P1 − (P0+P2)/2).
+  | "TECH_CARD_ANNOTATION_KIND_ARC"
+  // 3..40 точек. ЗАМКНУТЫЙ КОНТУР — область, а не линия: «эту зону продублировать клеевой»,
+  // «здесь настрочить». Ни мерка, ни скобка область не выражают: они говорят про отрезок, а
+  // порок ткани и участок дублирования имеют форму пятна.
+  // Замыкание ПОДРАЗУМЕВАЕТСЯ и последней точкой не дублируется. Хранить повторение первой точки
+  // значило бы завести два места для одной координаты, которые однажды разойдутся: правка первой
+  // точки не догнала бы копию, и контур разомкнулся бы на волосок — незаметно на экране и
+  // предательски на печати.
+  | "TECH_CARD_ANNOTATION_KIND_POLYGON"
+  // 2..200 точек. СВОБОДНЫЙ СЛЕД МАРКЕРА — ломаная без правил, «обвёл и показал». Существует не
+  // вместо чертёжных видов, а рядом с ними: разговор у стола идёт быстрее, чем ставится мерка, и
+  // набросок, который не сделали, не заменяется точной фигурой, которую не сделали тоже.
+  // Верхний предел — не вкус: точки лежат decimal-парами в JSON, и след, снятый с каждого
+  // движения мыши, набирает тысячи за секунду. Клиент прореживает след ДО отправки, поэтому 200
+  // здесь потолок, а не норма.
+  | "TECH_CARD_ANNOTATION_KIND_INK";
+// Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
+// карточных выносок. Decimal, а не float: промежуточный ввод и круговой рейс без потерь, и один
+// тип на обе системы координат карточки.
+export type common_TechCardAnnotationPoint = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+};
+
+// Цвет выноски. ЗАКРЫТЫЙ СПИСОК, а не свободный hex: лист швеи печатается и на чёрно-белом
+// принтере, и произвольный цвет там превратился бы в неразличимый серый. Значение по умолчанию
+// (UNKNOWN) — чернильный, то есть тот же, каким рисуется всё остальное на листе; цвет РАЗЛИЧАЕТ
+// пересекающиеся выноски, а не кодирует смысл — смысл несёт вид и текст.
+export type common_TechCardAnnotationColor =
+  | "TECH_CARD_ANNOTATION_COLOR_UNKNOWN"
+  | "TECH_CARD_ANNOTATION_COLOR_RED"
+  | "TECH_CARD_ANNOTATION_COLOR_BLUE"
+  | "TECH_CARD_ANNOTATION_COLOR_GREEN"
+  | "TECH_CARD_ANNOTATION_COLOR_ORANGE"
+  // Белый. Единственный цвет, который читается на тёмной ткани, — а тёмная ткань это половина
+  // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
+  // на белом листе видно контур, а на чёрном снимке — саму линию.
+  | "TECH_CARD_ANNOTATION_COLOR_WHITE";
 // TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
 // task belongs to exactly one board. Extend by appending members (never reuse
 // numbers) — 0 stays UNKNOWN per proto3 convention.
@@ -6595,96 +6751,6 @@ export type common_TechCardCallout = {
   parts: string[] | undefined;
 };
 
-// TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
-// THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
-// path). Eleven fields left, and they left for three different reasons:
-// (a) THE CODE WROTE THEM, NOT A PERSON. `machine` and `stitches_per_cm` were filled from an
-// operation-type preset, `thread` from the linked BOM line, `placement` from the joined
-// piece names, and each was then stored as a fact and hashed into a signed digest. The
-// printed tech pack had to SUBTRACT `thread` from the material list to stop printing the
-// same string twice — a repair for a duplication that should not have existed.
-// (b) NOBODY READ THEM. `needle` duplicated material_thread_attr.needle_reco, which the thread
-// article already carries, and no consumer anywhere read the operation's copy.
-// (c) THEY ASKED A QUESTION WITH NO SINGLE ANSWER. `node` («узел / что», REQUIRED) offered a
-// list mixing seams, garment areas, pieces and materials, and repeated the verb the type
-// field already held. A working pattern-maker could not fill it and asked whether it was
-// needed. It is not replaced by an optional title: an optional field asking the same
-// unanswerable question just gets answered differently on every card.
-// WHAT A STEP IS NOW: a verb (operation_type), a place (zone), what it joins (piece_line_keys)
-// and what it consumes (bom_line_keys), and how long it takes (smv). Its heading is COMPOSED —
-// «join · side seams · Front + Back» — never typed.
-// EXACTLY TWO FIELDS ARE REQUIRED, and both are closed lists: operation_type and zone. Nothing
-// with free input is mandatory ever again; that pairing is what made `node` a trap.
-// EVERYTHING BELOW «отклонения» IS AN OVERRIDE: unset means INHERIT from the card
-// (TechCardConstruction, and TechCard.required_seam_allowance_mm for the allowance), which
-// inherits from the workshop. The inherited value is shown as a placeholder and NEVER written
-// into the row — the day it is written, «the technologist decided 4 st/cm» stops being
-// distinguishable from «it defaulted to 4», which is precisely today's defect.
-// ── ВЫНОСКИ НА ФОТО УЗЛА ────────────────────────────────────────────────────────────────────────
-// Выноска отвечает швее на два вопроса, которые не помещаются в текст шага: ЧТО тут делать и ПО
-// КАКОМУ РАЗМЕРУ. Поэтому она живёт поверх снимка узла, а не в описании.
-// ЗАКРЫТЫЙ СЛОВАРЬ `kind`, А НЕ СВОБОДНЫЕ ОСИ. Проектировался набор осями (якорь × геометрия ×
-// лидер × подпись), но хранить оси независимыми полями значит валидировать комбинаторику
-// бессмыслицы: скобка с одной точкой, номер на мерке, лидер у того, у чего нет якоря. Вид —
-// одно значение, и оно определяет и число точек, и что рисуется, и чем является текст.
-// СООБЩЕНИЕ НЕ ЗНАЕТ СЛОВА «ОПЕРАЦИЯ». Тот же тип пригодится карточному эскизу, детали кроя и
-// примерке — им нужно будет лишь своё поле, а не свой формат выноски.
-export type common_TechCardAnnotationKind =
-  | "TECH_CARD_ANNOTATION_KIND_UNKNOWN"
-  // 1 точка. Номер — позиция в списке; текст — заметка, читается в легенде.
-  | "TECH_CARD_ANNOTATION_KIND_PIN"
-  // 1 точка + плашка. Текст — подпись, лидер-стрелка строится сам.
-  | "TECH_CARD_ANNOTATION_KIND_LABEL"
-  // 2 точки. Размерная линия с засечками; текст — значение с единицами («6 мм»).
-  | "TECH_CARD_ANNOTATION_KIND_DIM"
-  // 2 точки. Скобка над участком; текст — что с этим участком делать.
-  | "TECH_CARD_ANNOTATION_KIND_BRACKET"
-  // 2..8 точек. Одна подпись, ветвящаяся к нескольким местам («закрепки ×3»).
-  | "TECH_CARD_ANNOTATION_KIND_MULTI"
-  // 3 точки: начало, ТОЧКА НА КРИВОЙ, конец. Дуга — единственный способ показать линию, которая на
-  // изделии не прямая: посадку оката, скругление борта, ход отделочной строчки по кокетке. Отрезком
-  // это не сказать, а ломаной из десяти точек — сказать нельзя дважды одинаково.
-  // Средняя точка ЛЕЖИТ НА КРИВОЙ, а не управляет ей со стороны. Управляющая точка Безье не
-  // принадлежит кривой, и технолог, ставящий её мышью, каждый раз промахивается мимо линии, которую
-  // рисует; из трёх точек НА кривой управляющая считается однозначно (2·P1 − (P0+P2)/2).
-  | "TECH_CARD_ANNOTATION_KIND_ARC"
-  // 3..40 точек. ЗАМКНУТЫЙ КОНТУР — область, а не линия: «эту зону продублировать клеевой»,
-  // «здесь настрочить». Ни мерка, ни скобка область не выражают: они говорят про отрезок, а
-  // порок ткани и участок дублирования имеют форму пятна.
-  // Замыкание ПОДРАЗУМЕВАЕТСЯ и последней точкой не дублируется. Хранить повторение первой точки
-  // значило бы завести два места для одной координаты, которые однажды разойдутся: правка первой
-  // точки не догнала бы копию, и контур разомкнулся бы на волосок — незаметно на экране и
-  // предательски на печати.
-  | "TECH_CARD_ANNOTATION_KIND_POLYGON"
-  // 2..200 точек. СВОБОДНЫЙ СЛЕД МАРКЕРА — ломаная без правил, «обвёл и показал». Существует не
-  // вместо чертёжных видов, а рядом с ними: разговор у стола идёт быстрее, чем ставится мерка, и
-  // набросок, который не сделали, не заменяется точной фигурой, которую не сделали тоже.
-  // Верхний предел — не вкус: точки лежат decimal-парами в JSON, и след, снятый с каждого
-  // движения мыши, набирает тысячи за секунду. Клиент прореживает след ДО отправки, поэтому 200
-  // здесь потолок, а не норма.
-  | "TECH_CARD_ANNOTATION_KIND_INK";
-// Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
-// карточных выносок. Decimal, а не float: промежуточный ввод и круговой рейс без потерь, и один
-// тип на обе системы координат карточки.
-export type common_TechCardAnnotationPoint = {
-  x: googletype_Decimal | undefined;
-  y: googletype_Decimal | undefined;
-};
-
-// Цвет выноски. ЗАКРЫТЫЙ СПИСОК, а не свободный hex: лист швеи печатается и на чёрно-белом
-// принтере, и произвольный цвет там превратился бы в неразличимый серый. Значение по умолчанию
-// (UNKNOWN) — чернильный, то есть тот же, каким рисуется всё остальное на листе; цвет РАЗЛИЧАЕТ
-// пересекающиеся выноски, а не кодирует смысл — смысл несёт вид и текст.
-export type common_TechCardAnnotationColor =
-  | "TECH_CARD_ANNOTATION_COLOR_UNKNOWN"
-  | "TECH_CARD_ANNOTATION_COLOR_RED"
-  | "TECH_CARD_ANNOTATION_COLOR_BLUE"
-  | "TECH_CARD_ANNOTATION_COLOR_GREEN"
-  | "TECH_CARD_ANNOTATION_COLOR_ORANGE"
-  // Белый. Единственный цвет, который читается на тёмной ткани, — а тёмная ткань это половина
-  // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
-  // на белом листе видно контур, а на чёрном снимке — саму линию.
-  | "TECH_CARD_ANNOTATION_COLOR_WHITE";
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
 // The per-colourway colour, placement and consumption live on TechCardColorwayUsage; the
 // BOM line is now a pure material-article catalog entry.
@@ -7388,49 +7454,6 @@ export type common_TechCardOperationMedia = {
   mediaId: number | undefined;
   caption: string | undefined;
   annotations: common_TechCardAnnotation[] | undefined;
-};
-
-export type common_TechCardAnnotation = {
-  kind: common_TechCardAnnotationKind | undefined;
-  // Число точек определяется видом и проверяется сервером: PIN/LABEL — 1, DIM/BRACKET — 2,
-  // ARC — 3, MULTI — от 2 до 8.
-  points: common_TechCardAnnotationPoint[] | undefined;
-  text: string | undefined;
-  // Положение плашки с текстом, 0..1. Лидер НЕ хранится — он строится от плашки к якорю по
-  // правилу отрисовки; хранить его значило бы хранить производное и дать ему разойтись.
-  labelX: googletype_Decimal | undefined;
-  labelY: googletype_Decimal | undefined;
-  color: common_TechCardAnnotationColor | undefined;
-  // ДЕТАЛЬ КРОЯ, О КОТОРОЙ ЭТА ВЫНОСКА. Стабильный line_key детали ЭТОЙ ЖЕ карточки — тот же ключ,
-  // которым деталь адресуют вход операции и назначение материала, а не имя: имя переживает
-  // переименование хуже, чем ссылка.
-  // ССЫЛКА СОВЕТУЮЩАЯ, а не проверяемая. Указание можно поставить раньше, чем деталь заведена
-  // (снимок узла приходит с примерки, детали кроя рождаются из чертежа позже), и отказ сохранения
-  // всей карточки из-за неразрешимого ключа стоил бы дороже, чем висящая ссылка: клиент показывает
-  // «деталь удалена», человек перевыбирает. Ровно так же ведут себя piece_line_keys операции.
-  // УСТАРЕЛО в пользу piece_line_keys ниже, но не снято: клиент, который про список не знает,
-  // по-прежнему шлёт и читает это поле. Сервер отдаёт его ПЕРВЫМ элементом списка.
-  pieceLineKey: string | undefined;
-  // ПУНКТИР ВМЕСТО СПЛОШНОЙ. На чертеже это различие несёт смысл, а не украшает: сплошная —
-  // то, что видно и делают, пунктир — построение, припуск, линия под слоем. Поэтому поле входит
-  // в подпись секции, как и сам вид, а не остаётся оформлением вроде цвета.
-  // У PIN линии нет вовсе, и сервер приводит поле к false: два способа записать одно и то же
-  // «нечего рисовать пунктиром» разошлись бы в отпечатке.
-  dashed: boolean | undefined;
-  // ЗАШТРИХОВАТЬ ОБЛАСТЬ ПОД ПОЛИГОНОМ. Контур говорит «вот эта граница», штриховка — «вот эта
-  // площадь»; на дублировании и на пороке ткани это разные указания.
-  // Только у POLYGON. У прочих видов заливать нечего, и сервер приводит поле к false, а не
-  // отвергает карточку: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже,
-  // чем молчаливое приведение к тому единственному, что поле могло бы значить.
-  filled: boolean | undefined;
-  // ДЕТАЛИ КРОЯ, О КОТОРЫХ УКАЗАНИЕ. Список, а не одна: узел законно собирает несколько деталей
-  // сразу — «втачать рукав в пройму» это и рукав, и полочка, и спинка, и указание на снимке
-  // относится ко всем трём. Одиночным полем это выражалось выбором «какая из них главная»,
-  // которого у шва нет.
-  // СОВМЕСТИМОСТЬ БЕЗ ФЛАГА ПРИСУТСТВИЯ: пустой список читается как [piece_line_key], непустой
-  // вытесняет старое поле целиком. Клиенту, который шлёт только piece_line_key, ничего менять не
-  // нужно; сервер отдаёт оба, и piece_line_key = первый элемент списка.
-  pieceLineKeys: string[] | undefined;
 };
 
 // TechCardLabel is one label / tag spec (Sheet «Этикетки и упаковка»).
