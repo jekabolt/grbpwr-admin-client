@@ -52,19 +52,19 @@ export function FileAttachments({
     <div className='flex flex-col gap-1'>
       <div className='flex items-center justify-between'>
         <Text size='micro' variant='label' className='uppercase'>
-          файлы библиотеки{value.length ? ` · ${value.length}` : ''}
+          library files{value.length ? ` · ${value.length}` : ''}
         </Text>
         {/* ЯВНЫЙ `type`. Этот блок живёт ВНУТРИ `<form>` правки задачи, а у кнопки без типа
             браузер подразумевает `submit`: клик открывал пикер И отправлял форму — модалка
             правки закрывалась вместе с пикером, и в ответ прилетало «task saved». */}
         <Button type='button' size='xs' variant='secondary' onClick={() => setPickerOpen(true)}>
-          прикрепить
+          attach
         </Button>
       </div>
 
       {files.length === 0 ? (
         <Text size='micro' variant='label'>
-          ничего не прикреплено
+          nothing attached
         </Text>
       ) : (
         <div className='flex flex-col'>
@@ -88,12 +88,12 @@ export function FileAttachments({
               {(f.url || f.downloadUrl) && (
                 <Button asChild size='xs' variant='secondary'>
                   <a href={f.url || f.downloadUrl} target='_blank' rel='noopener noreferrer'>
-                    открыть
+                    open
                   </a>
                 </Button>
               )}
               <Button type='button' size='xs' variant='secondary' onClick={() => remove(Number(f.id))}>
-                убрать
+                remove
               </Button>
             </div>
           ))}
@@ -144,7 +144,7 @@ function FilePicker({
         if (!o) onClose();
       }}
       onConfirm={onClose}
-      title='прикрепить файл'
+      title='attach a file'
       width='lg'
       hideActions
     >
@@ -152,12 +152,12 @@ function FilePicker({
         <Input
           name='pickerSearch'
           value={search}
-          placeholder='имя файла или тема'
+          placeholder='file name or topic'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
         />
         <ChipRow>
           <Chip selected={topicId === 0} onClick={() => setTopicId(0)}>
-            все
+            all
           </Chip>
           {topics.map((t) => (
             <Chip
@@ -172,11 +172,11 @@ function FilePicker({
 
         {filesQuery.isLoading ? (
           <Text size='micro' variant='label'>
-            загружаем…
+            loading…
           </Text>
         ) : files.length === 0 ? (
           <Text size='micro' variant='label'>
-            {search ? 'ничего не нашлось' : 'в библиотеке пока нет файлов'}
+            {search ? 'nothing found' : 'the library has no files yet'}
           </Text>
         ) : (
           <div className='max-h-[50vh] overflow-y-auto'>
@@ -219,12 +219,12 @@ function FilePicker({
             disabled={filesQuery.isFetchingNextPage}
             onClick={() => filesQuery.fetchNextPage()}
           >
-            показать ещё
+            show more
           </Button>
         )}
 
         <Button type='button' size='sm' onClick={onClose}>
-          готово
+          done
         </Button>
       </div>
     </ConfirmationModal>
