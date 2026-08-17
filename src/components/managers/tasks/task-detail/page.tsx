@@ -15,12 +15,14 @@ import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
-import { TaskBoard, TaskFormValues, TaskStatus } from '../api/types';
+import { TaskBoard, TaskFormValues, TaskMedia, TaskStatus } from '../api/types';
 import { LinkChip } from '../components/link-chip';
 import { PriorityTag } from '../components/task-card';
 import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
+import { useTaskMediaViewer } from '../components/task-media-viewer';
+import { TaskText } from '../components/task-text';
 import {
   useArchiveTask,
   useDeleteTask,
@@ -41,6 +43,10 @@ import { BOARD_LABEL, BOARDS, dueMeta, STATUS_LABEL, STATUSES, toOptions } from 
 
 const boardOptions = toOptions(BOARDS, BOARD_LABEL);
 const statusOptions = toOptions(STATUSES, STATUS_LABEL);
+
+// Пока карточка грузится, вложений нет — но хук вызывается до всякого раннего возврата, и новый
+// литерал на каждый рендер пересобирал бы его мемоизацию впустую.
+const NO_MEDIA: TaskMedia[] = [];
 
 // Local label node matching the fact rows' previous uppercase micro styling — the
 // shared `Row` takes a plain ReactNode label, it doesn't style it itself.
@@ -79,6 +85,10 @@ export function TaskDetail() {
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
+
+  // Единственная дверь к вложению на этом экране: ею открывают и плитку в галерее, и ссылку
+  // посреди описания, и ссылку из комментария.
+  const attachments = useTaskMediaViewer(task?.media ?? NO_MEDIA);
 
   // Memoized so a background refetch of useTask doesn't hand the open edit modal
   // a fresh object and reset the form mid-edit (react-query structural sharing
@@ -215,9 +225,7 @@ export function TaskDetail() {
         <SectionStack className='min-w-0'>
           <Section title='description'>
             {t.description ? (
-              <Text size='micro' component='span' className='whitespace-pre-wrap break-words'>
-                {t.description}
-              </Text>
+              <TaskText text={t.description} media={task.media} onOpen={attachments.openMedia} />
             ) : (
               <Text size='micro' variant='label' component='span'>
                 No description.
@@ -242,12 +250,7 @@ export function TaskDetail() {
                вложение, независимо от того, в каком бакете лежат байты. */
             <Section title={`attachments · ${task.media.length + task.files.length}`}>
               {task.media.length > 0 && (
-                <MediaGallery
-                  items={task.media.map((m) => ({
-                    src: m.fullSize || m.thumbnail || '',
-                    thumbnail: m.thumbnail,
-                  }))}
-                />
+                <MediaGallery items={attachments.items} onOpen={attachments.openIndex} />
               )}
               {task.files.map((f) => (
                 <Row
@@ -385,10 +388,12 @@ export function TaskDetail() {
               )}
             </Section>
 
-            <TaskComments taskId={task.id} />
+            <TaskComments taskId={task.id} media={task.media} onOpenMedia={attachments.openMedia} />
           </SectionStack>
         </aside>
       </div>
+
+      {attachments.node}
 
       {initial && (
         <TaskFormModal

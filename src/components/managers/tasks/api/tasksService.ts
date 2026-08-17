@@ -50,6 +50,14 @@ export function rememberMedia(items: TaskMedia[]) {
 export function resolveMedia(ids: number[]): TaskMedia[] {
   return ids.map((id) => mediaCache.get(id)).filter((m): m is TaskMedia => Boolean(m));
 }
+/**
+ * То же самое, но БЕЗ отсева нерезолвленных: неизвестный id остаётся на своём месте, с одним лишь
+ * номером. Нужно везде, где важна ПОЗИЦИЯ вложения в карточке — ссылки в тексте (`task-text.tsx`)
+ * называют вложение его номером, и выпавшая из середины строка сдвинула бы все номера за ней.
+ */
+export function orderedMedia(ids: number[]): TaskMedia[] {
+  return ids.map((id) => mediaCache.get(id) ?? { id });
+}
 
 // ---------------------------------------------------------------------------
 // Generated → UI mapping

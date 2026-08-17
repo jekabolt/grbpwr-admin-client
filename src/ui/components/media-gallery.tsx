@@ -11,6 +11,14 @@ interface MediaGalleryProps {
   fit?: 'cover' | 'contain';
   /** Rendered when there are no items (nothing by default). */
   emptyLabel?: React.ReactNode;
+  /**
+   * Открывает ВЛАДЕЛЕЦ — галерея тогда своей смотрелки не заводит и остаётся рядом плиток.
+   *
+   * Нужно там, где открыть кадр просят не только плитки: у задачи это ещё и ссылка посреди
+   * описания. Со своей смотрелкой внутри галерея была бы второй дверью в ту же комнату, и
+   * заменять просмотрщик пришлось бы в двух местах сразу.
+   */
+  onOpen?: (index: number) => void;
 }
 
 // Read-only, clickable thumbnail row. Any tile opens the shared MediaViewer at its
@@ -21,8 +29,10 @@ export function MediaGallery({
   tileClassName,
   fit = 'cover',
   emptyLabel,
+  onOpen,
 }: MediaGalleryProps) {
   const viewer = useMediaViewer();
+  const open = onOpen ?? viewer.openAt;
 
   if (items.length === 0) {
     return emptyLabel ? <>{emptyLabel}</> : null;
@@ -39,7 +49,7 @@ export function MediaGallery({
               key={i}
               type='button'
               aria-label={`View item ${i + 1} of ${items.length}`}
-              onClick={() => viewer.openAt(i)}
+              onClick={() => open(i)}
               className={cn(
                 'group relative block h-20 w-20 shrink-0 cursor-zoom-in overflow-hidden border border-textInactiveColor transition-colors hover:border-textInactiveColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor',
                 tileClassName,
@@ -75,7 +85,7 @@ export function MediaGallery({
         })}
       </div>
 
-      <MediaViewer items={items} {...viewer} />
+      {!onOpen && <MediaViewer items={items} {...viewer} />}
     </>
   );
 }

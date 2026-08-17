@@ -1,6 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Chip, ChipRow } from 'ui/components/chip';
+import { ViewerAction } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 
 import { AnnotationSurface, type AnnotationSurfaceProps } from './surface';
@@ -25,6 +26,11 @@ import { AnnotationToolbar, placingHint } from './toolbar';
 // СВОЯ ПАНЕЛЬ ВИДОВ И СВОЙ СЧЁТЧИК ТОЧЕК. Продолжить в диалоге мерку, начатую на миниатюре, нечем:
 // это другая поверхность, и незавершённый жест снаружи обрывается при открытии — иначе после
 // закрытия первый же клик по кадру уронил бы на него постороннюю фигуру.
+//
+// ЛИСТАНИЕ — НЕОБЯЗАТЕЛЬНОЕ. Там, где кадр один (эскиз тех-карты, мудборд, снимок шага сборки,
+// примерка), `onPrev`/`onNext`/`position` не задаются и не рисуется ничего. Там, где кадров ряд
+// (вложения задачи), окно обязано листать: закрывать полноэкранный вид ради соседнего снимка —
+// это выйти из комнаты, чтобы войти в неё же.
 
 export function AnnotationZoomDialog({
   open,
@@ -32,12 +38,20 @@ export function AnnotationZoomDialog({
   title,
   toolKinds,
   maxCallouts,
+  onPrev,
+  onNext,
+  position,
   ...surface
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   title: string;
   toolKinds?: string[];
+  /** Предыдущий / следующий кадр ряда. Не заданы — стрелок нет и клавиши ← → ничего не делают. */
+  onPrev?: () => void;
+  onNext?: () => void;
+  /** Подпись положения в ряду; `index` — с нуля, рисуется как `3 / 7`. */
+  position?: { index: number; total: number };
 } & Omit<AnnotationSurfaceProps, 'zoom' | 'heightPx' | 'aspectRatio' | 'tool' | 'onToolDone'>) {
   const [tool, setTool] = useState<string | null>(null);
   // ПОКАЗ УКАЗАНИЙ — ЧИТАТЕЛЬСКИЙ КОНТРОЛ, поэтому `nonForm`: на выпущенной карточке он обязан
@@ -46,6 +60,29 @@ export function AnnotationZoomDialog({
   const [showCallouts, setShowCallouts] = useState(true);
   const [placed, setPlaced] = useState(0);
   const editable = !surface.frozen && !!surface.onAdd;
+  const navigable = !!onPrev || !!onNext;
+
+  /**
+   * СМЕНА КАДРА ОБРЫВАЕТ НЕЗАВЕРШЁННУЮ ПОСТАНОВКУ И СНИМАЕТ ВЫБОР — ровно тот же довод, что у
+   * кнопки «зум» в `annotation-canvas.tsx`: это другая картинка и другая система координат.
+   * Точка, набранная на прошлом кадре, живёт в долях кадра, и на новом снимке те же доли
+   * означают другое место — вторая точка мерки легла бы не туда, куда целились, а выбранная
+   * выноска адресуется ключом, которого на новом кадре нет вовсе.
+   *
+   * Первый прогон пропускается: при ОТКРЫТИИ окна выбор, сделанный снаружи, обязан дожить до
+   * него — на нём же и открывают правку.
+   */
+  const shownSrc = useRef(surface.src);
+  const onSelect = surface.onSelect;
+  useEffect(() => {
+    if (shownSrc.current === surface.src) return;
+    shownSrc.current = surface.src;
+    setTool(null);
+    setPlaced(0);
+    // Выбор бывает и у владельца (лист эскиза): собственный сбрасывается пересозданием
+    // поверхности ниже, чужой — только так.
+    onSelect?.(null);
+  }, [surface.src, onSelect]);
 
   return (
     <Dialog.Root
@@ -59,15 +96,36 @@ export function AnnotationZoomDialog({
         <Dialog.Overlay className='fixed inset-0 z-[var(--z-modal)] bg-black/90' />
         <Dialog.Content
           aria-label={title}
+          onKeyDown={(e) => {
+            if (!navigable) return;
+            // НЕ КОГДА КУРСОР В ПОЛЕ ВВОДА: в подписи выноски стрелки двигают каретку, и
+            // перехватить их значило бы уносить человека на соседний снимок посреди слова.
+            const t = e.target as HTMLElement | null;
+            if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable))
+              return;
+            if (e.key === 'ArrowLeft' && onPrev) {
+              e.preventDefault();
+              onPrev();
+            } else if (e.key === 'ArrowRight' && onNext) {
+              e.preventDefault();
+              onNext();
+            }
+          }}
           className='fixed inset-0 z-[var(--z-modal)] flex flex-col bg-black/90 focus:outline-none'
         >
           <Dialog.Title className='sr-only'>{title}</Dialog.Title>
           <Dialog.Description className='sr-only'>
             Колесо или щипок меняют масштаб, перетаскивание двигает снимок. Указания ставятся и
             правятся здесь же.
+            {navigable ? ' Стрелки ← → листают кадры.' : ''}
           </Dialog.Description>
 
-          {/* ШАПКА — только имя и выход. Всё, чем ДЕЙСТВУЮТ, живёт внизу. */}
+          {/* ШАПКА — только имя, положение в ряду и выход. Всё, чем ДЕЙСТВУЮТ по снимку, живёт
+              внизу.
+              СТРЕЛКИ ЛИСТАНИЯ ТОЖЕ ЗДЕСЬ, А НЕ ПОВЕРХ КАДРА, как в обычном просмотрщике: кадр —
+              это поверхность, по которой ставят указания, и две кнопки, висящие над её левым и
+              правым краем, съедали бы клики ровно там, где чаще всего и приходится ставить
+              точку. */}
           <div className='flex shrink-0 items-center justify-between gap-4 px-4 py-3 text-bgColor'>
             <Text
               size='micro'
@@ -78,6 +136,37 @@ export function AnnotationZoomDialog({
             >
               {title}
             </Text>
+            {(navigable || position) && (
+              <span className='flex shrink-0 items-center gap-1.5'>
+                {navigable && (
+                  <ViewerAction
+                    aria-label='предыдущий кадр'
+                    disabled={!onPrev}
+                    onClick={onPrev}
+                    className='disabled:opacity-40'
+                  >
+                    ←
+                  </ViewerAction>
+                )}
+                {position && (
+                  <Text
+                    size='micro'
+                    component='span'
+                    className='tabular-nums text-bgColor'
+                  >{`${position.index + 1} / ${position.total}`}</Text>
+                )}
+                {navigable && (
+                  <ViewerAction
+                    aria-label='следующий кадр'
+                    disabled={!onNext}
+                    onClick={onNext}
+                    className='disabled:opacity-40'
+                  >
+                    →
+                  </ViewerAction>
+                )}
+              </span>
+            )}
             <Dialog.Close
               aria-label='закрыть увеличенный вид'
               className='flex size-8 shrink-0 items-center justify-center border border-bgColor/40 text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
@@ -95,6 +184,11 @@ export function AnnotationZoomDialog({
               достать его было бы нечем. Внешние отступы такого не делают. */}
           <div className='flex min-h-0 flex-1 flex-col overflow-hidden px-2 pb-2'>
             <AnnotationSurface
+              // ПОВЕРХНОСТЬ ПЕРЕСОЗДАЁТСЯ ПОД КАЖДЫЙ КАДР. Её собственные состояния — выбор,
+              // набранные точки, масштаб и сдвиг — привязаны к КОНКРЕТНОЙ картинке и сами по
+              // смене `src` не сбрасываются. Там, где кадр один, ключ постоянен и не значит
+              // ничего.
+              key={surface.src}
               {...surface}
               zoom
               tool={tool}

@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { DatePicker } from 'ui/components/date-picker';
@@ -6,6 +6,7 @@ import Input from 'ui/components/input';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
+import { orderedMedia } from '../api/tasksService';
 import { TaskFormValues } from '../api/types';
 import {
   BOARD_LABEL,
@@ -20,6 +21,7 @@ import { AssigneeSelect } from './assignee-select';
 import { LinkEditor } from './link-editor';
 import { FileAttachments } from './file-attachments';
 import { MediaAttachments } from './media-attachments';
+import { MediaRefRow } from './media-ref-row';
 
 /**
  * tskForm v2 — a real two-column editor inside the app's one modal shell
@@ -83,6 +85,14 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
     productionRunId: useWatch({ control, name: 'productionRunId' }),
   };
 
+  // Вставка ссылки правит поле СНАРУЖИ Controller'а: она меняет строку целиком и возвращает
+  // каретку, поэтому значение читается через useWatch, а пишется через setValue — с
+  // `shouldDirty`, иначе форма посчитала бы себя нетронутой и правку было бы не сохранить.
+  const description = useWatch({ control, name: 'description' });
+  const mediaIds = useWatch({ control, name: 'mediaIds' });
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const attachments = useMemo(() => orderedMedia(mediaIds ?? []), [mediaIds]);
+
   return (
     <ConfirmationModal
       open={open}
@@ -122,24 +132,36 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
         <div className='grid grid-cols-1 gap-x-6 gap-y-3 md:grid-cols-2'>
           {/* Left — the writing */}
           <div className='flex min-w-0 flex-col gap-3'>
-            <Field label='description'>
-              <Controller
-                control={control}
-                name='description'
-                render={({ field }) => (
-                  <Textarea
-                    variant='secondary'
-                    placeholder='add details or acceptance criteria…'
-                    className='mb-0 min-h-32 border border-borderColor'
-                    value={field.value}
-                    onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
-                      field.onChange(e.target.value)
-                    }
-                    onBlur={field.onBlur}
-                  />
-                )}
+            <div className='flex flex-col gap-1'>
+              <Field label='description'>
+                <Controller
+                  control={control}
+                  name='description'
+                  render={({ field }) => (
+                    <Textarea
+                      ref={descriptionRef}
+                      variant='secondary'
+                      placeholder='add details or acceptance criteria…'
+                      className='mb-0 min-h-32 border border-borderColor'
+                      value={field.value}
+                      onChange={(e: React.ChangeEvent<HTMLTextAreaElement>) =>
+                        field.onChange(e.target.value)
+                      }
+                      onBlur={field.onBlur}
+                    />
+                  )}
+                />
+              </Field>
+              {/* Ряд стоит ПОД полем, а не рядом с вложениями в правой колонке: вставляют его в
+                  текст, и рука не должна уходить через весь модал к списку вложений. Снаружи
+                  `<label>`: кнопка внутри подписи к полю — это второй адресат одного клика. */}
+              <MediaRefRow
+                media={attachments}
+                targetRef={descriptionRef}
+                value={description ?? ''}
+                onChange={(next) => setValue('description', next, { shouldDirty: true })}
               />
-            </Field>
+            </div>
             <Field label='priority'>
               <Controller
                 control={control}
