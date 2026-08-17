@@ -1,5 +1,5 @@
 import { isVideo } from 'lib/features/filterContentType';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
   indexOfPin,
   useAnnotationSurface,
@@ -56,6 +56,7 @@ export function useTaskMediaViewer({
   annotations,
   onChange,
   canWrite = false,
+  readOnlyNote,
 }: {
   media: TaskMedia[];
   annotations: TaskMediaAnnotations[];
@@ -72,6 +73,12 @@ export function useTaskMediaViewer({
    * закрытию просмотрщика» откатывала бы чужую правку описания, сделанную после последнего чтения.
    */
   canWrite?: boolean;
+  /**
+   * Что стоит на месте панели видов, когда здесь не рисуют. Задаёт ВЫЗЫВАЮЩИЙ: сказать «нажмите
+   * edit» можно только тому, у кого эта кнопка есть, а у читателя без права записи её нет —
+   * подсказка отправляла бы его к двери, которой он не увидит.
+   */
+  readOnlyNote?: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
@@ -174,6 +181,7 @@ export function useTaskMediaViewer({
       onOpenChange={handleOpenChange}
       title={`attachment ${safeIndex + 1}`}
       position={{ index: safeIndex, total: media.length }}
+      readOnlyNote={readOnlyNote}
       // Выбор гасится и здесь, а не только сбросом диалога по смене адреса: один и тот же файл
       // может стоять в ряду дважды, и тогда адрес не меняется, а набор указаний — да.
       onPrev={safeIndex > 0 ? () => go(safeIndex - 1) : undefined}
