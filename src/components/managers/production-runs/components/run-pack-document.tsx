@@ -202,7 +202,7 @@ export function RunPackDocument({
       const name = dc?.name ?? cw.colorCode ?? '';
       byId.set(wireInt(cw.colorwayId), `${cw.colorCode ? `${cw.colorCode} · ` : ''}${name}`);
     }
-    return (id: number) => byId.get(id) || (id > 0 ? `#${id}` : '(no colorway)');
+    return (id: number) => byId.get(id) || (id > 0 ? `#${id}` : '(no colourway)');
   }, [techCard?.colorways, dictionary?.colors]);
 
   const variantLabel = useMemo(() => {
@@ -234,7 +234,7 @@ export function RunPackDocument({
               ? colorwayLabel(productId)
               : variantId > 0
                 ? variantLabel(variantId)
-                : '(colorway not assigned)',
+                : '(colourway not assigned)',
           bySize: new Map(),
           total: 0,
         };
@@ -405,7 +405,7 @@ export function RunPackDocument({
           короче: не назови он свой скоуп вслух — и тираж одного цвета прочитают как весь заказ. */}
       {scopeColorwayId > 0 && (
         <p className='mb-3 break-inside-avoid border-2 border-black px-2 py-1 text-control uppercase'>
-          printed for one colorway: {colorwayLabel(scopeColorwayId)} — lines of this batch&apos;s
+          printed for one colourway: {colorwayLabel(scopeColorwayId)} — lines of this run&apos;s
           other colors are not on this sheet
         </p>
       )}
@@ -503,7 +503,7 @@ export function RunPackDocument({
             иначе два листа с разными числами неразличимы, и невозможно сказать, какой из них
             устарел. lock_version — версия прогона, generated_at — момент снимка кат-листа. */}
         <div className='mt-1 flex flex-wrap gap-x-4 text-nano uppercase text-labelColor'>
-          <span>batch revision now: lock_version {runLockVersion}</span>
+          <span>run revision now: lock_version {runLockVersion}</span>
           <span>
             cut list computed for: lock_version{' '}
             {cutPlanIsAuthoritative ? planLockVersion : 'UNKNOWN'}
@@ -521,7 +521,7 @@ export function RunPackDocument({
             верно, — но резать по его числам нельзя, и сказать это надо там, где читают первым. */}
         {revisionDrift && (
           <div className='mt-1 border-2 border-black px-2 py-1 text-control font-bold uppercase'>
-            the batch plan changed after the cut list was computed (batch lock_version{' '}
+            the run plan changed after the cut list was computed (run lock_version{' '}
             {runLockVersion}, cut list computed for {planLockVersion}) — quantities below are stale.
             Reprint the run pack before cutting.
           </div>
@@ -529,17 +529,17 @@ export function RunPackDocument({
       </header>
 
       {/* ЛИНИИ ПАРТИИ */}
-      <Sheet title='batch lines — how many we sew'>
+      <Sheet title='run lines — how many we sew'>
         {lineRows.length === 0 || plannedTotal === 0 ? (
           <Nothing>
-            the batch plan is empty — not a single &quot;colorway × size&quot; cell. Until they
+            the run plan is empty — not a single &quot;colourway × size&quot; cell. Until they
             exist, the cut list and material plan below have nothing to be computed from.
           </Nothing>
         ) : (
           <table className='w-full border-collapse text-micro'>
             <thead>
               <tr>
-                <th className={TH}>colorway</th>
+                <th className={TH}>colourway</th>
                 {lineSizeColumns.map((s) => (
                   <th key={s} className={`${TH} text-center`}>
                     {sizeLabel(s)}
@@ -575,20 +575,20 @@ export function RunPackDocument({
       </Sheet>
 
       {/* КАТ-ЛИСТ ПАРТИИ */}
-      <Sheet title='batch cut list — what to cut and from what'>
+      <Sheet title='run cut list — what to cut and from what'>
         {/* БЛОКЕРЫ ИДУТ ПЕРЕД ТАБЛИЦЕЙ И ОТДЕЛЬНЫМ БЛОКОМ. Это единственное место наряда, где цех
             обязан остановиться и спросить, а строка с прочерком в общей таблице читается как
             «кроить не из чего» и теряется среди сорока таких же. */}
         {cutBlockers.length > 0 && (
           <div className='mb-2 break-inside-avoid border-2 border-black p-2'>
             <div className='mb-1 text-control font-bold uppercase'>
-              stop — {cutBlockers.length} piece × colorway rows are not linked to an article
+              stop — {cutBlockers.length} piece × colourway rows are not linked to an article
             </div>
             <table className='w-full border-collapse text-micro'>
               <thead>
                 <tr>
                   <th className={TH}>piece</th>
-                  <th className={TH}>colorway</th>
+                  <th className={TH}>colourway</th>
                   <th className={`${TH} text-center`}>units</th>
                   <th className={TH}>why</th>
                 </tr>
@@ -623,7 +623,7 @@ export function RunPackDocument({
                   !cutPlanIsAuthoritative
                   ? 'cut list not computed: the server answered without a snapshot revision. This does NOT mean there is nothing to cut — it means nobody computed "how many to cut".'
                   : plannedTotal === 0
-                    ? 'no cut list because the batch has no lines: there is nothing to compute "how many to cut" from.'
+                    ? 'no cut list because the run has no lines: there is nothing to compute "how many to cut" from.'
                     : cutBlockers.length > 0
                       ? 'not a single piece is linked to an article — everything found is in the block above.'
                       : 'the tech card has no cut pieces — there is nothing to cut on this run pack.'}
@@ -634,7 +634,7 @@ export function RunPackDocument({
               <thead>
                 <tr>
                   <th className={TH}>piece</th>
-                  <th className={TH}>colorway</th>
+                  <th className={TH}>colourway</th>
                   {/* Количество на изделие и подпись «как кроится» стоят в ОДНОЙ клетке, как в
                       тех-паке: подпись уточняет именно это число, а отдельной колонкой на другом
                       конце строки она читается как ещё один атрибут детали. Побочно это снимает
@@ -767,7 +767,7 @@ export function RunPackDocument({
                   {/* colSpan = описательные колонки (деталь, колорвей, на изд., из чего) + вся
                       градация; итог стоит под колонкой «выкроить». Разъедется — таблица поедет. */}
                   <td className={`${TD} text-right uppercase`} colSpan={4 + cutSizeColumns.length}>
-                    batch total
+                    run total
                   </td>
                   {/* Итог считаем от ВИДИМЫХ строк, а не берём серверный piecesToCutTotal: тот
                       посчитан по всему прогону, и под таблицей одного колорвея он был бы суммой
@@ -783,10 +783,10 @@ export function RunPackDocument({
 
             <p className='mt-1 text-nano text-labelColor'>{PRINT_CUT_SYMMETRY_LEGEND}</p>
             <p className='text-nano text-labelColor'>
-              &quot;recipe pin&quot; — the article is assigned by the colorway recipe; &quot;slot
+              &quot;recipe pin&quot; — the article is assigned by the colourway recipe; &quot;slot
               default&quot; — the slot&apos;s default article from the BOM is used. &quot;Slot
               inferred&quot; — the recipe does not name this piece, the slot was substituted as the
-              colorway&apos;s only roll-goods fabric: confirm before cutting.
+              colourway&apos;s only roll-goods fabric: confirm before cutting.
             </p>
             {(cutPlan?.caveats ?? []).map((c, i) => (
               <p key={i} className='text-nano text-labelColor'>
@@ -811,7 +811,7 @@ export function RunPackDocument({
         ) : laysData?.applicable === false ? (
           <Nothing>
             {laysData.notApplicableReason ||
-              'this batch never has lays — the card is auxiliary, it has no cut pieces or markers.'}
+              'this run never has lays — the card is auxiliary, it has no cut pieces or markers.'}
           </Nothing>
         ) : (
           <>
@@ -819,7 +819,7 @@ export function RunPackDocument({
               <table className='mb-2 w-full border-collapse text-micro'>
                 <thead>
                   <tr>
-                    <th className={TH}>coverage: colorway</th>
+                    <th className={TH}>coverage: colourway</th>
                     {coverageSizes.map((s) => (
                       <th key={s} className={`${TH} text-center`}>
                         {sizeLabel(s)}
@@ -901,7 +901,7 @@ export function RunPackDocument({
                 <thead>
                   <tr>
                     <th className={TH}>lay</th>
-                    <th className={TH}>colorway · slot · article</th>
+                    <th className={TH}>colourway · slot · article</th>
                     <th className={TH}>mode</th>
                     <th className={TH}>sections (marker × plies)</th>
                     <th className={`${TH} text-center`}>plies</th>
@@ -970,7 +970,7 @@ export function RunPackDocument({
             об этом нельзя — склад выдал бы по нему ткань как под один цвет. */}
         {scopeColorwayId > 0 && (
           <p className='mb-2 break-inside-avoid border-2 border-black px-2 py-1 text-micro uppercase'>
-            this sheet is computed for the WHOLE batch, other colorways included — per-article
+            this sheet is computed for the WHOLE run, other colourways included — per-article
             requirements do not split by color
           </p>
         )}
@@ -996,7 +996,7 @@ export function RunPackDocument({
         {materialPlan?.planSource && materialRows.length > 0 ? (
           <p className='mb-1 text-nano uppercase text-labelColor'>
             {materialPlan.planSource === 'PRODUCTION_RUN_COVERAGE_SOURCE_LAYS'
-              ? "requirements computed from this batch's lays"
+              ? "requirements computed from this run's lays"
               : materialPlan.planSource === 'PRODUCTION_RUN_COVERAGE_SOURCE_MIXED'
                 ? 'requirements are mixed: some slots from lays, some from tech card norms'
                 : materialPlan.planSource === 'PRODUCTION_RUN_COVERAGE_SOURCE_NORM'
@@ -1014,8 +1014,8 @@ export function RunPackDocument({
         ) : materialRows.length === 0 ? (
           <Nothing>
             {plannedTotal === 0
-              ? 'no material requirements: the batch has no lines.'
-              : "requirements not computed — the card's colorways have no linked articles with norms."}
+              ? 'no material requirements: the run has no lines.'
+              : "requirements not computed — the card's colourways have no linked articles with norms."}
           </Nothing>
         ) : (
           <table className='w-full border-collapse text-micro'>
@@ -1070,7 +1070,7 @@ export function RunPackDocument({
       {/* УПАКОВКА — общий лист (print/sheets/packaging.tsx). Считаемая половина живёт в нём же:
           тираж передаётся пропом, а формулы (короб вверх, пусто вместо нуля) переехали туда
           дословно вместе с их обоснованием. */}
-      <PackagingSheet title='batch packaging' packaging={packaging} plannedTotal={plannedTotal} />
+      <PackagingSheet title='run packaging' packaging={packaging} plannedTotal={plannedTotal} />
     </div>
   );
 }
