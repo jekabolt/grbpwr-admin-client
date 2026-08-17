@@ -37,7 +37,8 @@
     "annotation:geometry": "node scripts/annotation-geometry-probe.mjs",
     "annotation:kinds": "node scripts/annotation-kinds-probe.mjs",
     "annotation:hit": "node scripts/annotation-hit-probe.mjs",
-    "annotation:frame": "node scripts/annotation-frame-probe.mjs"
+    "annotation:frame": "node scripts/annotation-frame-probe.mjs",
+    "reader:find": "node scripts/reader-find-probe.mjs"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.0.9",

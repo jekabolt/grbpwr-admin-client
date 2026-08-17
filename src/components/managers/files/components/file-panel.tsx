@@ -10,6 +10,8 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { useFilesMutations, useLibraryFile } from '../hooks/useFiles';
 import { extensionOf, formatBytes } from '../utils/format';
+import { isReadablePdf } from '../utils/reader-find';
+import { FileReaderModal } from './file-reader';
 
 /**
  * The file card: rename, retopic, view, download, delete.
@@ -39,6 +41,8 @@ export function FilePanel({
   const [newTopic, setNewTopic] = useState('');
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [reading, setReading] = useState(false);
+  const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
 
   useEffect(() => {
     if (!file) return;
@@ -109,6 +113,13 @@ export function FilePanel({
                 {file.uploadedBy ? ` · загрузил ${file.uploadedBy}` : ''}
               </Text>
               <div className='flex flex-wrap items-center gap-1.5'>
+                {/* «читать» — только у pdf. Остальным читалка отвечает «не читается в браузере»,
+                    и приводить туда из карточки нечестно: кнопка обещала бы чтение. */}
+                {readable && (
+                  <Button size='xs' onClick={() => setReading(true)}>
+                    читать
+                  </Button>
+                )}
                 {/* url is empty for types that must never render inline (svg, html):
                     the server withholds it rather than the client hiding a button. */}
                 {file.url && (
@@ -210,6 +221,8 @@ export function FilePanel({
           )}
         </div>
       )}
+
+      {reading && <FileReaderModal id={id} onClose={() => setReading(false)} />}
 
       <ConfirmationModal
         open={confirmDelete}

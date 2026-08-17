@@ -383,3 +383,52 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
     animation: none;
   }
 }
+
+/* Читалка pdf (managers/files/components/file-reader.tsx). Появление — тот же кроссфейд, что
+   у просмотрщика медиа: два способа открыть документ в одном разделе не должны выглядеть
+   по-разному. */
+.files-reader-overlay[data-state='open'],
+.files-reader-content[data-state='open'] {
+  animation: mediaViewerFadeIn 160ms ease-out;
+}
+.files-reader-overlay[data-state='closed'],
+.files-reader-content[data-state='closed'] {
+  animation: mediaViewerFadeOut 130ms ease-in;
+}
+@media (prefers-reduced-motion: reduce) {
+  .files-reader-overlay[data-state='open'],
+  .files-reader-overlay[data-state='closed'],
+  .files-reader-content[data-state='open'],
+  .files-reader-content[data-state='closed'] {
+    animation: none;
+  }
+}
+
+/* Текстовый слой страницы (managers/files/components/reader-page.tsx).
+   Разметку здесь строит сам pdfjs (TextLayer создаёт <span> с инлайновыми координатами), и
+   классов у неё нет — поэтому правила лежат в глобальном листе, а не в утилитах tailwind.
+   Слой прозрачный и лежит поверх растра: по нему идёт выделение мышью, и по нему же
+   считаются прямоугольники подсветки поиска. */
+.pdf-text-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 1;
+}
+.pdf-text-layer span {
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  color: transparent;
+  transform-origin: 0% 0%;
+}
+.pdf-text-layer br {
+  position: absolute;
+}
+.pdf-text-layer span::selection {
+  background: rgba(0, 0, 0, 0.25);
+}
