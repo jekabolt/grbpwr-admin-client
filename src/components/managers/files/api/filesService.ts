@@ -114,6 +114,16 @@ export const filesService = {
    */
   assignTopics: (args: { fileIds: number[]; topicIds: number[]; newTopics: string[] }) =>
     adminService.AssignLibraryFileTopics(args),
+  /**
+   * ЗАМЕНЯЕТ набор владельцев файла целиком — это не «добавить владельца».
+   *
+   * Отправлять сюда пересечение текущих владельцев со списком `ListAdmins` НЕЛЬЗЯ: список
+   * людей больше не содержит отключённых аккаунтов, и такое «очищение» молча сняло бы
+   * владение с человека, который просто отключён. Набор берётся из самого файла
+   * (`LibraryFile.owners`) и меняется только теми кликами, которые человек сделал.
+   */
+  setOwners: (fileId: number, adminIds: number[]) =>
+    adminService.SetLibraryFileOwners({ fileId, adminIds }),
   listTopics: () => adminService.ListFileTopics({}),
   createTopic: (name: string, description = '') =>
     adminService.CreateFileTopic({ name, description }),

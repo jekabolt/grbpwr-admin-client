@@ -1,5 +1,6 @@
 import type { LibraryFile } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
+import { Avatar } from 'ui/components/avatar';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
@@ -38,6 +39,9 @@ export function FileTile({
 }) {
   const name = file.fileName ?? '';
   const ext = extensionOf(name);
+  // Строка-имя, а не id: она переживает аккаунт, и «чьи это файлы» на глаз отвечается и для
+  // ушедшего из команды человека.
+  const uploader = file.uploadedBy ?? '';
   const noTopics = !(file.topics ?? []).length;
   // «Не вышло» против «не бывает». У картинки и pdf превью строит браузер, значит пустое
   // превью у такого типа — сбой отрисовки; у .zip первой страницы не существует, и подпись
@@ -51,6 +55,23 @@ export function FileTile({
         selected && 'outline outline-2 -outline-offset-2 outline-textColor',
       )}
     >
+      {/* ИНИЦИАЛЫ ЗАГРУЗИВШЕГО ДЕЛЯТ УГОЛ С ЧЕКБОКСОМ, и в споре чекбокс выигрывает: отметка
+          выбора — действие, инициалы — справка, а два глифа в одной точке читаются как один
+          сломанный. Поэтому инициалы гаснут ровно тогда, когда чекбокс проявляется: на
+          наведении, на фокусе внутри плитки и на выбранной плитке. Решается здесь, в
+          примитиве плитки, а не на холсте — иначе каждый следующий экран решал бы заново. */}
+      {uploader && (
+        <span
+          className={cn(
+            'pointer-events-none absolute left-1 top-1 z-10 transition-opacity',
+            selectable && 'group-hover:opacity-0 group-focus-within:opacity-0',
+            selected && 'opacity-0',
+          )}
+        >
+          <Avatar name={uploader} size={16} title={`загрузил ${uploader}`} />
+        </span>
+      )}
+
       {selectable && (
         <button
           type='button'
@@ -77,7 +98,11 @@ export function FileTile({
       <button
         type='button'
         onClick={onOpen}
-        title={name}
+        // Имя загрузившего дописано в подсказку самой плитки, а не повешено на инициалы:
+        // у инициалов `pointer-events-none` (иначе прозрачный кружок съедал бы клик по углу
+        // превью), и своей подсказки у них быть не может — а «кто такой AL» спрашивают ровно
+        // на наведении.
+        title={uploader ? `${name}\nзагрузил ${uploader}` : name}
         className='relative block w-full cursor-pointer bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         {file.previewUrl ? (

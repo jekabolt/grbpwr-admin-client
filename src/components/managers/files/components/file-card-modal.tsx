@@ -8,8 +8,9 @@ import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { useFilesMutations, useLibraryFile } from '../hooks/useFiles';
-import { extensionOf, formatBytes, formatWhen, kindWord } from '../utils/format';
+import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { isReadablePdf } from '../utils/reader-find';
+import { FileOwnersSection } from './file-owners-section';
 import { FileReaderModal } from './file-reader';
 
 /**
@@ -207,10 +208,9 @@ export function FileCardModal({
                   {kindWord(file.contentType ?? undefined, file.fileName ?? '')} ·{' '}
                   {file.contentType || 'тип неизвестен'}
                 </Text>
-                <Text size='micro' variant='label'>
-                  {file.uploadedBy ? `загрузил ${file.uploadedBy}` : 'кто загрузил — неизвестно'}
-                  {formatWhen(file.createdAt) ? `, ${formatWhen(file.createdAt)}` : ''}
-                </Text>
+                {/* Кто загрузил и когда — в блоке «ответственность» ниже: там же живут
+                    владельцы, и печатать загрузившего дважды значит показать одну роль как
+                    две. */}
               </div>
             </div>
           </div>
@@ -275,8 +275,13 @@ export function FileCardModal({
             </Text>
           </div>
 
-          {/* ↓ СЮДА дописываются секции следующих фаз: ответственность (Ф3), задачи (Ф4),
-              обсуждение (Ф5), доступ (Ф7). Тело скроллит, шапка и подвал закреплены. */}
+          {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «сохранить»:
+              владельцы меняются отдельным RPC, и складывать их в ту же «грязную» форму
+              значило бы обещать откат правки, которого у replace-набора нет. */}
+          <FileOwnersSection file={file} writable={writable} />
+
+          {/* ↓ СЮДА дописываются секции следующих фаз: задачи (Ф4), обсуждение (Ф5),
+              доступ (Ф7). Тело скроллит, шапка и подвал закреплены. */}
 
           {failure && (
             <div className='border border-error px-2.5 py-2'>
