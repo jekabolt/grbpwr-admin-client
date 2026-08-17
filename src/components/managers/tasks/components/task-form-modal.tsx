@@ -92,6 +92,7 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
   const mediaIds = useWatch({ control, name: 'mediaIds' });
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const attachments = useMemo(() => orderedMedia(mediaIds ?? []), [mediaIds]);
+  const mediaAnnotations = useWatch({ control, name: 'mediaAnnotations' }) ?? [];
 
   return (
     <ConfirmationModal
@@ -292,7 +293,16 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                     control={control}
                     name='mediaIds'
                     render={({ field }) => (
-                      <MediaAttachments value={field.value} onChange={field.onChange} />
+                      <MediaAttachments
+                        value={field.value}
+                        onChange={field.onChange}
+                        // Указания живут в СВОЁМ поле формы, а не внутри списка вложений: сервер
+                        // заменяет их вместе с содержимым карточки, и сохраняет их та же кнопка.
+                        annotations={mediaAnnotations}
+                        onAnnotationsChange={(next) =>
+                          setValue('mediaAnnotations', next, { shouldDirty: true })
+                        }
+                      />
                     )}
                   />
                 </div>

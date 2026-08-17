@@ -1,7 +1,7 @@
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { format } from 'date-fns';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { cn } from 'lib/utility';
 import { Avatar } from 'ui/components/avatar';
@@ -15,13 +15,19 @@ import { Row } from 'ui/components/row';
 import { Section, SectionStack } from 'ui/components/section';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
-import { TaskBoard, TaskFormValues, TaskMedia, TaskStatus } from '../api/types';
+import {
+  TaskBoard,
+  TaskFormValues,
+  TaskMedia,
+  TaskMediaAnnotations,
+  TaskStatus,
+} from '../api/types';
 import { LinkChip } from '../components/link-chip';
 import { PriorityTag } from '../components/task-card';
 import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
-import { useTaskMediaViewer } from '../components/task-media-viewer';
+import { annotationsOf, NotesMark, useTaskMediaViewer } from '../components/task-media-viewer';
 import { TaskText } from '../components/task-text';
 import {
   useArchiveTask,
@@ -47,6 +53,7 @@ const statusOptions = toOptions(STATUSES, STATUS_LABEL);
 // Пока карточка грузится, вложений нет — но хук вызывается до всякого раннего возврата, и новый
 // литерал на каждый рендер пересобирал бы его мемоизацию впустую.
 const NO_MEDIA: TaskMedia[] = [];
+const NO_ANNOTATIONS: TaskMediaAnnotations[] = [];
 
 // Local label node matching the fact rows' previous uppercase micro styling — the
 // shared `Row` takes a plain ReactNode label, it doesn't style it itself.
@@ -86,9 +93,48 @@ export function TaskDetail() {
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
 
+  /**
+   * УКАЗАНИЯ ПРАВЯТСЯ ПРЯМО ЗДЕСЬ, без открытия редактора карточки: нарисовать стрелку на снимке —
+   * это реплика в разговоре, а не правка полей.
+   *
+   * Черновик держится локально и пишется ОДНИМ запросом при закрытии диалога: сохранять на каждый
+   * штрих значило бы слать запись за записью, а не сохранять вовсе — потерять нарисованное при
+   * случайном уходе со страницы.
+   *
+   * ЭКСПОЗИЦИЯ К ПАРАЛЛЕЛЬНОЙ ПРАВКЕ ТУ ЖЕ, ЧТО У СЕЛЕКТОВ ДОСКИ И КОЛОНКИ НА ЭТОЙ ЖЕ СТРАНИЦЕ:
+   * запись идёт содержимым ПРОЧИТАННОЙ карточки, поэтому чужая правка, приехавшая между чтением и
+   * записью, будет затёрта. Не хуже и не лучше — тот же UpdateTask, других путей записи не
+   * заводится.
+   */
+  const [draft, setDraft] = useState<TaskMediaAnnotations[] | null>(null);
+  const annotations = draft ?? task?.task.mediaAnnotations ?? NO_ANNOTATIONS;
+
   // Единственная дверь к вложению на этом экране: ею открывают и плитку в галерее, и ссылку
   // посреди описания, и ссылку из комментария.
-  const attachments = useTaskMediaViewer(task?.media ?? NO_MEDIA);
+  const attachments = useTaskMediaViewer({
+    media: task?.media ?? NO_MEDIA,
+    annotations,
+    onChange: setDraft,
+    canWrite,
+    onCommit: (next) => {
+      if (!task) return;
+      updateTask.mutate({ id: task.id, content: { ...task.task, mediaAnnotations: next } });
+    },
+  });
+
+  /**
+   * ЧЕРНОВИК СНИМАЕТСЯ, КОГДА СЕРВЕРНОЕ ЧТЕНИЕ ЕГО ДОГНАЛО, а не когда запись ответила «ок».
+   * Между ответом и обновлением чтения проходит целый рейс: сними черновик по ответу — и отметки
+   * на плитках мигнут на старое число, а диалог, открытый в эту секунду, показал бы устаревшие
+   * указания, поверх которых рисование затёрло бы только что сохранённое.
+   *
+   * Отказ сервера черновик не снимает вовсе — нарисованное остаётся на экране, иначе провал записи
+   * выглядел бы как «указания исчезли сами».
+   */
+  useEffect(() => {
+    if (!draft || !task) return;
+    if (JSON.stringify(task.task.mediaAnnotations) === JSON.stringify(draft)) setDraft(null);
+  }, [task, draft]);
 
   // Memoized so a background refetch of useTask doesn't hand the open edit modal
   // a fresh object and reset the form mid-edit (react-query structural sharing
@@ -250,7 +296,13 @@ export function TaskDetail() {
                вложение, независимо от того, в каком бакете лежат байты. */
             <Section title={`attachments · ${task.media.length + task.files.length}`}>
               {task.media.length > 0 && (
-                <MediaGallery items={attachments.items} onOpen={attachments.openIndex} />
+                <MediaGallery
+                  items={attachments.items}
+                  onOpen={attachments.openIndex}
+                  badge={(i) => (
+                    <NotesMark count={annotationsOf(annotations, task.media[i]?.id ?? 0).length} />
+                  )}
+                />
               )}
               {task.files.map((f) => (
                 <Row

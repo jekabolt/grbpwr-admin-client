@@ -19,6 +19,12 @@ interface MediaGalleryProps {
    * заменять просмотрщик пришлось бы в двух местах сразу.
    */
   onOpen?: (index: number) => void;
+  /**
+   * Отметка в подвале плитки — то, что о кадре знает ВЛАДЕЛЕЦ, а не галерея (у задачи это число
+   * указаний на снимке). Полоса прижата к нижней кромке и залита белым: плитка здесь квадрат
+   * фиксированного размера, и настоящий подвал под ней сдвинул бы ряд.
+   */
+  badge?: (index: number) => React.ReactNode;
 }
 
 // Read-only, clickable thumbnail row. Any tile opens the shared MediaViewer at its
@@ -30,6 +36,7 @@ export function MediaGallery({
   fit = 'cover',
   emptyLabel,
   onOpen,
+  badge,
 }: MediaGalleryProps) {
   const viewer = useMediaViewer();
   const open = onOpen ?? viewer.openAt;
@@ -78,6 +85,11 @@ export function MediaGallery({
               {isVid && (
                 <span className='absolute bottom-0.5 right-0.5 bg-black/70 px-1 text-nano uppercase leading-tight text-white'>
                   video
+                </span>
+              )}
+              {badge?.(i) && (
+                <span className='absolute inset-x-0 bottom-0 border-t border-hairline bg-bgColor px-1 text-left leading-tight'>
+                  {badge(i)}
                 </span>
               )}
             </button>
