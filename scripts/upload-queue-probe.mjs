@@ -21,7 +21,9 @@
 //   9. действия строк         — ровно те, что осмысленны в состоянии;
 //  10. слова                  — сводка несёт все исходы, склонение честное;
 //  11. наследование тем       — пачка забирает чипы холста, вторая пачка первую не трогает;
-//  12. опоздавшие события     — ответ по убранной строке ничего не ломает.
+//  12. опоздавшие события     — ответ по убранной строке ничего не ломает;
+//  13. приёмник броска        — ссылка и файл гасятся ВЕЗДЕ, текст в живое поле — отдаётся
+//                               браузеру; иначе теряется либо вкладка, либо ввод текста.
 import { build as esbuild } from 'esbuild';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -614,6 +616,72 @@ console.log('\n12 · опоздавшие и незаконные события
   );
   ck(m.hasLiveUploads(mixed), 'живая отправка видна стражу beforeunload');
   ck(!m.canHideBar(mixed), 'пока идёт отправка — полосу не убрать');
+}
+
+/* ── 13 · ПРИЁМНИК БРОСКА ─────────────────────────────────────────────────────────────── */
+
+// ДВЕ ПОТЕРИ, ОДИН ПРЕДИКАТ. Пока гашение стояло под проверкой «в types есть Files», бросок
+// ссылки из соседней вкладки уносил вкладку по адресу картинки — вместе с фильтром и живой
+// очередью. Безусловное гашение вкладку спасло и отняло перетаскивание ТЕКСТА в поля: имя
+// темы, новое имя файла, строку поиска. Обе потери проверяются здесь, потому что в браузере
+// вторая половина видна только руками, а первая — только тем, что вкладка исчезла.
+console.log('\n13 · бросок: ссылка гасится везде, текст в живое поле — дело браузера');
+{
+  const target = (over = {}) => ({
+    tag: 'div',
+    type: '',
+    readOnly: false,
+    disabled: false,
+    editable: false,
+    ...over,
+  });
+  const field = (over = {}) => target({ tag: 'input', type: 'text', ...over });
+  // Ровно то, что кладут браузеры: ссылка и картинка из соседней вкладки несут uri-list,
+  // выделенный текст — нет, файл из finder — только Files.
+  const LINK = ['text/uri-list', 'text/html', 'text/plain'];
+  const IMAGE = ['text/html', 'text/uri-list', 'text/plain'];
+  const TEXT = ['text/plain', 'text/html'];
+  const FILES = ['Files'];
+
+  // Блокер: уход по адресу невозможен НИГДЕ, включая поле ввода. Исключение «поле + нет
+  // Files» пропустило бы ссылку в поле и оставило бы уход со страницы на обещании браузера.
+  ck(m.swallowsDrag(target(), LINK), 'ссылка над сеткой гасится');
+  ck(m.swallowsDrag(field(), LINK), 'ссылка гасится и над полем ввода — обещаний браузера не берём');
+  ck(m.swallowsDrag(field({ tag: 'textarea', type: '' }), IMAGE), 'картинка гасится и над textarea');
+  ck(m.swallowsDrag(target({ editable: true }), LINK), 'ссылка гасится и над редактируемым узлом');
+  ck(m.swallowsDrag(target(), FILES), 'файл гасится: его принимает раздел, а не браузер');
+  ck(m.swallowsDrag(field(), FILES), 'файл, брошенный в поле, тоже наш — поле его не съест');
+  ck(m.swallowsDrag(target(), []), 'перетаскивание без типов гасится: вставлять нечего');
+  ck(m.swallowsDrag(target(), undefined), 'отсутствующий dataTransfer гасится');
+
+  // Размен: то, ради чего исключение вообще заведено.
+  ck(!m.swallowsDrag(field(), TEXT), 'текст в живое поле — не гасим, иначе не вставить');
+  ck(!m.swallowsDrag(field({ type: 'search' }), TEXT), 'строка поиска — такое же поле');
+  ck(!m.swallowsDrag(field({ tag: 'textarea', type: '' }), TEXT), 'textarea тоже принимает текст');
+  ck(!m.swallowsDrag(target({ editable: true }), TEXT), 'редактируемый узел тоже');
+
+  // Границы исключения: всё, что текст не примет, остаётся под гашением — умолчание браузера
+  // над такой целью ничем не обещано.
+  ck(m.swallowsDrag(field({ readOnly: true }), TEXT), 'поле только для чтения — не приёмник текста');
+  ck(m.swallowsDrag(field({ disabled: true }), TEXT), 'выключенное поле — тоже');
+  ck(m.swallowsDrag(field({ type: 'file' }), TEXT), 'input type=file текст не принимает');
+  ck(m.swallowsDrag(field({ type: 'checkbox' }), TEXT), 'галочка — не поле ввода');
+  ck(m.swallowsDrag(field({ type: 'date' }), TEXT), 'дата текст не принимает');
+  ck(m.swallowsDrag(target({ tag: 'button' }), TEXT), 'кнопка — не поле ввода');
+  ck(m.swallowsDrag(target({ tag: 'select' }), TEXT), 'select — не поле ввода');
+  ck(m.swallowsDrag(target(), TEXT), 'текст над плиткой гасится: браузеру его девать некуда');
+
+  ck(m.isTextSink(field()), 'поле без атрибутов — приёмник текста');
+  ck(!m.isTextSink(target()), 'div — не приёмник');
+
+  // Снимок цели: не-элемент (window, document, null) читается как «не поле».
+  eq(
+    m.describeDropTarget(null),
+    { tag: '', type: '', readOnly: false, disabled: false, editable: false },
+    'у отсутствующей цели пустой снимок',
+  );
+  ck(m.swallowsDrag(m.describeDropTarget(null), TEXT), 'и она гасится');
+  ck(m.swallowsDrag(m.describeDropTarget(undefined), LINK), 'и с ссылкой тоже');
 }
 
 console.log(bad ? `\n${bad} расхождений\n` : '\nвсё сошлось\n');

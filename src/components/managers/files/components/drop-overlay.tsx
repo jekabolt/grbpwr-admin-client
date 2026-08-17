@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useSnackBarStore } from 'lib/stores/store';
 import Text from 'ui/components/text';
 import { MAX_UPLOAD_BYTES } from '../api/filesService';
+import { describeDropTarget, swallowsDrag } from '../upload/drop';
 import { plural } from '../upload/text';
 import { formatBytes } from '../utils/format';
 
@@ -15,11 +16,17 @@ import { formatBytes } from '../utils/format';
  * режиме чтения: отказаться принять файл можно словами, а увести человека со страницы —
  * нельзя.
  *
- * ГАШЕНИЕ БЕЗУСЛОВНО, А ПОКАЗ ОВЕРЛЕЯ — НЕТ. Это разные вопросы, и раньше они решались одной
- * проверкой `types` на 'Files'. У перетаскивания картинки из соседней вкладки типы —
+ * ГАШЕНИЕ ПОЧТИ БЕЗУСЛОВНО, А ПОКАЗ ОВЕРЛЕЯ — НЕТ. Это разные вопросы, и раньше они решались
+ * одной проверкой `types` на 'Files'. У перетаскивания картинки из соседней вкладки типы —
  * `text/uri-list` и `text/html`, файлов среди них нет: `preventDefault` не звался, и браузер
  * уходил по адресу картинки, унося вкладку вместе с наполовину уехавшей пачкой. Референс из
  * соседней вкладки тянут ежедневно — это не редкий случай, а обычный.
+ *
+ * «ПОЧТИ» — это ПЕРЕТАСКИВАНИЕ ТЕКСТА В ПОЛЕ. Гашение без единого исключения отняло у раздела
+ * обычное умение браузера: перетащить кусок текста в имя темы, в новое имя файла, в строку
+ * поиска. Исключение ровно одно и описано предикатом в `upload/drop.ts`: нет файлов, нет
+ * ссылки, есть простой текст, и цель — живое поле ввода. Ссылка не исключается даже над полем;
+ * почему — там же.
  *
  * Оверлей — `pointer-events-none` намеренно. Приёмник — окно, а элемент под курсором ловил
  * бы `dragenter`/`dragleave` на самом себе и мигал бы в такт движению мыши.
@@ -102,9 +109,11 @@ export function FilesDropOverlay({
       setDragging(true);
     };
     const onOver = (e: DragEvent) => {
-      // БЕЗУСЛОВНО. Без preventDefault на dragover браузер не отдаёт `drop` вовсе и уходит
-      // по адресу перетащенного — то есть уносит вкладку с живой очередью. Ссылку мы не
-      // примем, но и не пустим её никуда увести.
+      // Без preventDefault на dragover браузер не отдаёт `drop` вовсе и уходит по адресу
+      // перетащенного — то есть уносит вкладку с живой очередью. Ссылку мы не примем, но и не
+      // пустим её никуда увести. Единственный пропуск — текст, летящий в поле ввода: там
+      // умолчание браузера и есть нужное поведение, и гасить его нечем оправдать.
+      if (!swallowsDrag(describeDropTarget(e.target), e.dataTransfer?.types)) return;
       e.preventDefault();
       if (e.dataTransfer) {
         e.dataTransfer.dropEffect =
@@ -119,12 +128,14 @@ export function FilesDropOverlay({
       if (!depth.current) reset();
     };
     const onDrop = (e: DragEvent) => {
-      // Тоже БЕЗУСЛОВНО и первым действием: всё, что не погашено здесь, браузер открывает
-      // вместо страницы. Отказ (нет права, режим чтения, бросили ссылку) — это молчание или
-      // слова, но никогда не уход со страницы.
-      e.preventDefault();
+      // Первым действием и по тому же предикату, что и `dragover`: всё, что не погашено здесь,
+      // браузер открывает вместо страницы. Отказ (нет права, режим чтения, бросили ссылку) —
+      // это молчание или слова, но никогда не уход со страницы. Два обработчика обязаны решать
+      // ОДИНАКОВО: погашенный `dragover` при отпущенном `drop` — это и есть уход по адресу.
+      const swallow = swallowsDrag(describeDropTarget(e.target), e.dataTransfer?.types);
+      if (swallow) e.preventDefault();
       reset();
-      if (!hasFiles(e.dataTransfer) || !live.current.enabled) return;
+      if (!swallow || !hasFiles(e.dataTransfer) || !live.current.enabled) return;
 
       const { files, folders } = pickFiles(e.dataTransfer);
       // ПАПКА — НЕ ФАЙЛ. Браузер отдаёт её в `files` наравне с остальным, и до сих пор она

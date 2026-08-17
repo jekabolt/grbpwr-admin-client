@@ -39,6 +39,15 @@ export {
   statusOf,
 } from 'components/managers/files/upload/engine';
 
+// Приёмник броска — вход в очередь: решение «гасить или отдать браузеру» принимается ДО
+// первой строки и решает, останется ли вкладка на месте вместе со всей очередью.
+export {
+  describeDropTarget,
+  isTextSink,
+  swallowsDrag,
+} from 'components/managers/files/upload/drop';
+export type { DropTargetShape } from 'components/managers/files/upload/drop';
+
 export {
   actionLabel,
   batchSummary,
