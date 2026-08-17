@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
+import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { Button } from 'ui/components/button';
@@ -34,7 +35,13 @@ export default function FileTopicsPage() {
   const { canRead, canWrite, resolved } = usePermissions();
   const { showMessage } = useSnackBarStore();
   const mayRead = !resolved || canRead(SECTION.files);
-  const writable = canWrite(SECTION.files);
+  const mayWrite = canWrite(SECTION.files);
+  // РЕЖИМ ЧТЕНИЯ — ОДИН НА РАЗДЕЛ. Раньше этот экран знал только про право, и поставленный на
+  // холсте тумблер здесь молча отменялся: правка тем, удаление и полоса загрузки снова были
+  // включены. «Оба положения глушат один и тот же набор контролов» обязано быть правдой на
+  // обоих экранах, иначе «только чтение» означает разное в двух местах.
+  const writable = useFilesWritable(mayWrite);
+  const setMode = useFilesModeStore((s) => s.setMode);
 
   // Тот же хук, что у холста, а не свой `useQuery` по тому же ключу: у своего не было
   // `staleTime`, и один и тот же словарь тем жил по двум разным правилам протухания.
@@ -169,6 +176,24 @@ export default function FileTopicsPage() {
           }
         />
 
+        {/* ОТКАЗ ОБЪЯСНЯЕТСЯ СТРОКОЙ, а добровольный режим — ещё и выходом из него: тумблер
+            стоит на холсте, и человек, пришедший сюда с включённым чтением, иначе видел бы
+            ряд выключенных кнопок без единой подсказки, куда идти их включать. */}
+        {!writable && (
+          <div className='mb-2.5 flex flex-wrap items-center gap-2'>
+            <Text size='micro' variant='label'>
+              {mayWrite
+                ? 'режим чтения включён вами: правка тем, удаление и загрузка выключены, пока он стоит.'
+                : 'смотреть можно, менять нельзя: права files:write нет — попросите его у супер-админа.'}
+            </Text>
+            {mayWrite && (
+              <Button size='xs' variant='secondary' onClick={() => setMode('write')}>
+                включить запись
+              </Button>
+            )}
+          </div>
+        )}
+
         {topicsQuery.isLoading ? (
           <Text size='micro' variant='label'>
             загружаем…
@@ -257,44 +282,48 @@ export default function FileTopicsPage() {
         )}
       </div>
 
-      {writable && (
-        <div className='border border-borderColor bg-bgColor p-block'>
-          <SectionHeader title='новая тема' question='— описание объясняет, что сюда класть' />
-          <div className='flex flex-wrap items-end gap-2'>
-            <div className='flex flex-col gap-1'>
-              <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                имя
-              </Text>
-              <Input
-                name='newTopicName'
-                value={newName}
-                placeholder='например packaging'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
-                className='w-[200px]'
-              />
-            </div>
-            <div className='flex flex-1 flex-col gap-1'>
-              <Text size='micro' variant='label' tracking='label' className='uppercase'>
-                описание
-              </Text>
-              <Input
-                name='newTopicDesc'
-                value={newDesc}
-                placeholder='бирки, коробки, дилайны'
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewDesc(e.target.value)}
-                className='min-w-[220px]'
-              />
-            </div>
-            <Button
-              size='sm'
-              onClick={create}
-              disabled={!newName.trim() || createTopic.isPending}
-            >
-              {createTopic.isPending ? 'заводим…' : 'завести'}
-            </Button>
+      {/* БЛОК ВЫКЛЮЧАЕТСЯ, А НЕ ПРЯЧЕТСЯ — то же правило, что у остальных писателей раздела:
+          спрятанного не попросишь, а исчезнувший при переключении тумблера блок читается как
+          поломка экрана. Причина отказа названа строкой выше, у таблицы. */}
+      <div className='border border-borderColor bg-bgColor p-block'>
+        <SectionHeader title='новая тема' question='— описание объясняет, что сюда класть' />
+        <div className='flex flex-wrap items-end gap-2'>
+          <div className='flex flex-col gap-1'>
+            <Text size='micro' variant='label' tracking='label' className='uppercase'>
+              имя
+            </Text>
+            <Input
+              name='newTopicName'
+              value={newName}
+              placeholder='например packaging'
+              disabled={!writable}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
+              className='w-[200px]'
+            />
           </div>
+          <div className='flex flex-1 flex-col gap-1'>
+            <Text size='micro' variant='label' tracking='label' className='uppercase'>
+              описание
+            </Text>
+            <Input
+              name='newTopicDesc'
+              value={newDesc}
+              placeholder='бирки, коробки, дилайны'
+              disabled={!writable}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewDesc(e.target.value)}
+              className='min-w-[220px]'
+            />
+          </div>
+          <Button
+            size='sm'
+            onClick={create}
+            disabled={!writable || !newName.trim() || createTopic.isPending}
+            title={writable ? undefined : 'сейчас только чтение — темы не заводятся'}
+          >
+            {createTopic.isPending ? 'заводим…' : 'завести'}
+          </Button>
         </div>
-      )}
+      </div>
 
       <ConfirmationModal
         open={!!editing}
@@ -399,14 +428,19 @@ export default function FileTopicsPage() {
           вместе с живой очередью. А человек приходит сюда как раз с файлом в руке. */}
       <FilesDropOverlay
         enabled={writable}
-        disabledNote='нужно право files:write — попросите его у супер-админа'
+        disabledNote={
+          mayWrite
+            ? 'включён режим чтения — переключите его на холсте или строкой выше'
+            : 'нужно право files:write — попросите его у супер-админа'
+        }
         topicLabels={[]}
         onFiles={intake}
       />
 
       {/* Полоса загрузки стоит на ВСЕХ экранах раздела: пачку ставят на холсте и уходят сюда
-          разбирать темы, пока она едет — без полосы отправка стала бы невидимой. */}
-      <FilesUploadBar writable={writable} />
+          разбирать темы, пока она едет — без полосы отправка стала бы невидимой. Тумблер режима
+          она читает из стора сама, поэтому сюда уезжает ПРАВО, а не готовый `writable`. */}
+      <FilesUploadBar mayWrite={mayWrite} />
     </div>
   );
 }

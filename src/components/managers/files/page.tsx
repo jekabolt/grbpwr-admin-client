@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
+import { useFilesModeStore, useFilesWritable } from 'lib/stores/files-mode';
 import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { ROUTES, SECTION } from 'constants/routes';
 import { Button } from 'ui/components/button';
@@ -57,8 +58,14 @@ export default function FilesPage() {
   const mayWrite = canWrite(SECTION.files);
   // Тумблер добровольный, право — нет. Без files:write режим всегда «чтение», и оба положения
   // глушат ОДИН И ТОТ ЖЕ набор контролов: иначе «только чтение» означало бы разное в двух местах.
-  const [mode, setMode] = useState<'write' | 'read'>('write');
-  const writable = mayWrite && mode === 'write';
+  //
+  // ТУМБЛЕР ЖИВЁТ В СТОРЕ, А НЕ ЗДЕСЬ. Писатели раздела шире холста: полоса загрузки стоит и на
+  // экране тем, темы правятся там же. Пока положение было состоянием этого компонента, уход на
+  // соседний экран молча возвращал человека в запись — тумблер переставал действовать ровно
+  // тогда, когда он единственный и защищал.
+  const mode = useFilesModeStore((s) => s.mode);
+  const setMode = useFilesModeStore((s) => s.setMode);
+  const writable = useFilesWritable(mayWrite);
 
   // ФИЛЬТР ЖИВЁТ В URL. Ссылку на пересечение кидают в чат («вот всё, что и packaging, и
   // atelier»), и состояние, которого нет в адресе, такой ссылкой не передашь.
@@ -442,8 +449,10 @@ export default function FilesPage() {
       {/* Полоса загрузки — фиксирована снизу и переживает и уход на другой экран раздела, и
           открытие карточки: она только зритель стора, XHR живут не в ней. Режим чтения глушит
           и её пишущие кнопки — иначе «оба положения глушат один и тот же набор» было бы
-          неправдой ровно там, где стоит единственная кнопка отправки. */}
-      <FilesUploadBar writable={writable} />
+          неправдой ровно там, где стоит единственная кнопка отправки. Полосе передаётся ПРАВО,
+          а тумблер она читает из стора сама: экран, который забыл бы его подмешать, снова
+          сделал бы режим чтения местным. */}
+      <FilesUploadBar mayWrite={mayWrite} />
 
       {/* Карточка — модальный роут ПОВЕРХ сетки: сетка остаётся смонтированной, поэтому
           закрытие возвращает ровно тот экран, с которого ушли. Закрытие идёт с текущим

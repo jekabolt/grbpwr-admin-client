@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ROUTES } from 'constants/routes';
+import { useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
 import {
   noteUploadBarMounted,
@@ -178,7 +179,17 @@ function QueueRowView({
   );
 }
 
-export function FilesUploadBar({ writable }: { writable: boolean }) {
+export function FilesUploadBar({
+  mayWrite,
+}: {
+  /**
+   * ПРАВО, а не готовый `writable`. Тумблер «только чтение» полоса читает из стора сама:
+   * пока она получала его подмешанным снаружи, экран тем — второй, где она стоит, — про
+   * тумблер не знал, и поставленный на холсте режим чтения там молча отменялся.
+   */
+  mayWrite: boolean;
+}) {
+  const writable = useFilesWritable(mayWrite);
   const navigate = useNavigate();
   const location = useLocation();
   const qc = useQueryClient();
