@@ -139,7 +139,9 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
 
     if (token.startsWith('`')) {
       out.push(
-        <code key={key} className='bg-trackBg px-[3px]'>
+        // Зебра, а не `trackBg`: тот токен — дорожка полосы прогресса, и тинт текста ею
+        // означал бы, что два разных смысла делят один цвет.
+        <code key={key} className='bg-bgZebra px-[3px]'>
           {token.slice(1, -1)}
         </code>,
       );
@@ -163,17 +165,33 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
 
 function InlineLink({ image, label, href }: { image: boolean; label: string; href: string }) {
   const external = /^https?:\/\//i.test(href);
-  const internal = href.startsWith('/');
+  // `//evil.com` — это ЧУЖОЙ origin, а не путь внутри админки: браузер достраивает протокол
+  // страницы. Без второй половины условия такая ссылка попадала бы в react-router `Link`,
+  // рисовалась бы как внутренняя и уводила бы админа на чужой хост по ⌘-клику — готовая
+  // заготовка для фишинга под адресом админки, которую может написать любой с files:write.
+  const internal = href.startsWith('/') && !href.startsWith('//');
 
   if (image) {
     // Внешнюю картинку показываем; внутреннюю — плашкой. Резолв `/files/{id}` в свежий
     // preview_url приходит в T-8.9; до него `<img src="/files/12">` дал бы битый значок, то
     // есть соврал бы, что файла нет.
     if (external) {
-      return <img src={href} alt={label} className='my-1 block max-w-full border border-hairline' />;
+      return (
+        <img
+          src={href}
+          alt={label}
+          loading='lazy'
+          // Картинка с чужого хоста — это ещё и маячок: без этого в Referer уезжает адрес
+          // страницы админки, а в лог чужого сервера — ip каждого, кто открыл заметку.
+          referrerPolicy='no-referrer'
+          className='my-1 block max-w-full'
+        />
+      );
     }
     return (
-      <span className='inline-flex items-center gap-1 border border-borderColor px-1.5 py-px text-micro uppercase tracking-label text-labelColor'>
+      <span
+        className='inline-flex items-center gap-1 border border-borderColor px-1.5 py-px text-micro uppercase tracking-label text-labelColor'
+      >
         картинка
         {internal ? (
           <Link to={href} className='text-highlightColor underline'>
@@ -238,10 +256,13 @@ export function MarkdownView({ source, className }: { source: string; className?
           case 'rule':
             return <div key={key} className='my-2 border-t border-hairline' />;
           case 'h1':
+            // 12px, а не 18: восемнадцать в этой системе — размер заголовка СТРАНИЦЫ, и
+            // заметка, начинающаяся с `# ...`, рисовала бы второй такой же прямо под первым.
+            // Ступень задаёт линейка: 2px чернилами у первого уровня, волосяная у второго.
             return (
               <h1
                 key={key}
-                className='mt-2 mb-1.5 border-b-2 border-textColor pb-0.5 text-lg font-bold uppercase tracking-section'
+                className='mt-2 mb-1.5 border-b-2 border-textColor pb-0.5 font-bold uppercase tracking-section'
               >
                 {inline(b.lines[0], key)}
               </h1>
@@ -262,10 +283,13 @@ export function MarkdownView({ source, className }: { source: string; className?
               </h3>
             );
           case 'quote':
+            // ЛИНЕЙКА, А НЕ КОРОБКА. Рамка вокруг цитаты — это вторая коробка внутри блока
+            // заметки, чего система не допускает; вертикальная линейка слева выражает ту же
+            // вложенность одним из четырёх разрешённых весов.
             return (
               <blockquote
                 key={key}
-                className='my-1.5 border border-borderColor px-2 py-1 text-labelColor'
+                className='my-1.5 border-l-2 border-textColor pl-2.5 text-labelColor'
               >
                 {lineNodes(b.lines, key)}
               </blockquote>
@@ -291,8 +315,9 @@ export function MarkdownView({ source, className }: { source: string; className?
               <pre
                 key={key}
                 // Своего шрифта у блока кода нет и не нужно: весь админ и так набран
-                // моноширинным FeatureMono, второе семейство система прямо запрещает.
-                className='my-1.5 overflow-x-auto border border-hairline bg-bgZebra px-2 py-1.5'
+                // моноширинным FeatureMono, второе семейство система прямо запрещает. Заливка
+                // без рамки — тинт, а не вторая коробка внутри блока.
+                className='my-1.5 overflow-x-auto bg-bgZebra px-2 py-1.5'
               >
                 {b.lines.join('\n')}
               </pre>

@@ -39,7 +39,18 @@ function keyOf(id: number): string {
   return `${PREFIX}${id}`;
 }
 
-function read(id: number | undefined): NoteDraft | null {
+/**
+ * Прочитать черновик СИНХРОННО, прямо в тот момент, когда он нужен.
+ *
+ * Не состоянием хука — и это не стилистика. Черновик читается ровно один раз, в эффекте
+ * засева буфера, а состояние в react долетает только следующим рендером. Когда `:id` меняется
+ * без размонтирования (переход между двумя заметками, «назад» после сохранения отдельной
+ * версии), а текст новой заметки уже в кэше, эффект засева отработал бы РАНЬШЕ, чем состояние
+ * хука успело перечитать ключ, — увидел бы черновик прошлой заметки (то есть ничего), не
+ * показал бы предложение восстановить и следующим же эффектом стёр бы ключ. Набранный текст
+ * исчезал бы, ни разу не показавшись.
+ */
+export function readNoteDraft(id: number | undefined): NoteDraft | null {
   if (!id) return null;
   try {
     const raw = localStorage.getItem(keyOf(id));
@@ -59,14 +70,9 @@ function read(id: number | undefined): NoteDraft | null {
 }
 
 /**
- * Черновик одной заметки.
- *
- * `offer` — снимок, снятый ОДИН РАЗ при открытии. Дальше по нему рисуется предложение
- * «восстановить/отбросить», и собственная запись черновика его не трогает: иначе набор текста
- * пересобирал бы предложение восстановить этот же текст, и оно висело бы вечно.
+ * Запись черновика одной заметки. ЧТЕНИЕ здесь не живёт — см. `readNoteDraft`.
  */
 export function useNoteDraft(id: number | undefined) {
-  const [offer, setOffer] = useState<NoteDraft | null>(() => read(id));
   /** Браузер может отказать в записи (приватный режим, переполненная квота). Молчать об этом
    * нельзя: человек считает, что текст под защитой, а его там нет. */
   const [blocked, setBlocked] = useState(false);
@@ -74,7 +80,6 @@ export function useNoteDraft(id: number | undefined) {
   const pending = useRef<NoteDraft | null>(null);
 
   useEffect(() => {
-    setOffer(read(id));
     setBlocked(false);
   }, [id]);
 
@@ -119,9 +124,6 @@ export function useNoteDraft(id: number | undefined) {
     }
   }, [id]);
 
-  /** Предложение снимается, когда на него ответили; сам черновик при этом живёт. */
-  const dismissOffer = useCallback(() => setOffer(null), []);
-
   // Уход со страницы и закрытие вкладки — ровно те два случая, ради которых черновик и заведён;
   // отложенная на 500 мс запись обязана успеть в обоих.
   useEffect(() => {
@@ -136,8 +138,5 @@ export function useNoteDraft(id: number | undefined) {
   // Тождество объекта держится стабильным намеренно: экран кладёт его в зависимости эффекта,
   // который пишет черновик, и новый объект на каждый рендер гонял бы запись по кругу — а «не
   // грязно» означало бы `removeItem` из localStorage на каждый рендер.
-  return useMemo(
-    () => ({ offer, dismissOffer, write, clear, blocked }),
-    [blocked, clear, dismissOffer, offer, write],
-  );
+  return useMemo(() => ({ write, clear, blocked }), [blocked, clear, write]);
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import {
   formatNoteMarkdown,
@@ -98,7 +100,10 @@ export function useNoteAssistant() {
       try {
         const after = await formatNoteMarkdown(req.text, controller.signal);
         if (runIdRef.current !== id) return;
-        setState({ kind: 'ready', suggestion: { before: req.text, after, scope, range: req.range } });
+        setState({
+          kind: 'ready',
+          suggestion: { before: req.text, after, scope, range: req.range },
+        });
       } catch (e) {
         if (runIdRef.current !== id) return;
         if (e instanceof NoteFormatError) {
@@ -218,16 +223,13 @@ export function AiPanel({
 
   const { suggestion } = state;
   return (
-    <section className='space-y-stack border border-borderColor bg-bgColor p-block'>
-      <div className='flex flex-wrap items-baseline gap-2 border-b-2 border-textColor pb-1'>
-        <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
-          предложение помощника
-        </Text>
-        <Text size='micro' variant='label' component='span'>
-          — разметка расставлена, формулировки не переписаны
-          {suggestion.scope === 'selection' ? '; заменится только выделенное' : ''}
-        </Text>
-        <div className='ml-auto flex flex-wrap gap-1.5'>
+    <Section
+      title='предложение помощника'
+      question={`— разметка расставлена, формулировки не переписаны${
+        suggestion.scope === 'selection' ? '; заменится только выделенное' : ''
+      }`}
+      action={
+        <>
           <Button size='sm' variant='secondary' onClick={onDismiss}>
             отклонить
           </Button>
@@ -237,9 +239,9 @@ export function AiPanel({
           <Button size='sm' variant='main' onClick={() => onAccept(suggestion, false)}>
             принять
           </Button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {stale && (
         <Text size='micro' component='span' className='text-warning'>
           текст изменился, пока помощник работал: слева — та версия, которую он читал, и принять
@@ -256,25 +258,18 @@ export function AiPanel({
         принять — заменит текст заметки и оставит его несохранённым: последнее слово всё равно за
         вами
       </Text>
-    </section>
+    </Section>
   );
 }
 
 function SuggestionColumn({ title, source }: { title: string; source: string }) {
   return (
     <div>
-      <Text
-        size='micro'
-        variant='label'
-        tracking='group'
-        component='span'
-        className='font-bold uppercase'
-      >
-        {title}
-      </Text>
-      {/* Внутренняя коробка рисуется ВНУТРЕННИМ весом (#e6e6e6): #ccc — это внешний контур
-          блока, и вторая рамка того же тона читалась бы как второй блок внутри первого. */}
-      <div className='mt-1 max-h-[45vh] overflow-auto border border-hairline px-2.5 py-2'>
+      <GroupLabel flush>{title}</GroupLabel>
+      {/* Прокручиваемая полоса, а не вторая коробка: у области ограничена высота, и её границу
+          рисуют ЛИНЕЙКИ сверху и снизу внутренним весом. Рамка по всем четырём сторонам была бы
+          блоком внутри блока — ровно то, что система запрещает. */}
+      <div className='max-h-[45vh] overflow-auto border-y border-hairline py-2'>
         <MarkdownView source={source} />
       </div>
     </div>

@@ -9,6 +9,7 @@ import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { Pill } from 'ui/components/pill';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { filesService } from '../api/filesService';
@@ -20,7 +21,7 @@ import { formatBytes, formatWhenShort, stemOf } from '../utils/format';
 import { MarkdownView } from './markdown-view';
 import { NoteDiff } from './note-diff';
 import { NoteEditor, type NoteEditorHandle } from './note-editor';
-import { useNoteDraft } from './use-note-draft';
+import { readNoteDraft, useNoteDraft } from './use-note-draft';
 
 /**
  * ЭКРАН ЗАМЕТКИ (вариант md=v3 макета).
@@ -125,10 +126,21 @@ export function NotePage() {
     // ЧЕРНОВИК НЕ ПОДСТАВЛЯЕТСЯ МОЛЧА. Он может быть старше того, что за это время сохранил
     // кто-то другой, и тихая подстановка превратила бы «я вернулся на вкладку» в откат чужой
     // работы. Совпал с сервером — восстанавливать нечего, ключ просто убирается.
-    const offer = draft.offer;
-    if (offer && offer.content !== text) setDraftOffer(offer);
-    else if (offer) draft.clear();
-    draft.dismissOffer();
+    //
+    // Читается ЗДЕСЬ И СИНХРОННО, а не из состояния хука: при переходе между двумя заметками
+    // без размонтирования состояние долетело бы только следующим рендером, и этот эффект принял
+    // бы чужой (пустой) снимок за «черновика нет» — а следующий эффект стёр бы ключ новой
+    // заметки, ни разу его не показав.
+    const offer = readNoteDraft(id);
+    if (offer && offer.content !== text) {
+      setDraftOffer(offer);
+    } else {
+      // Предложение от ПРОШЛОЙ заметки обязано уйти вместе с ней: без этого баннер про
+      // «несохранённый черновик» переезжал бы на соседнюю заметку и предлагал бы влить в неё
+      // чужой текст.
+      setDraftOffer(null);
+      if (offer) draft.clear();
+    }
   }, [contentQuery.data, draft, id]);
 
   // Имя правится в режиме правки и уезжает обычным UpdateLibraryFile. Засевается из файла и
@@ -164,6 +176,10 @@ export function NotePage() {
   const save = useCallback(
     async (force: boolean) => {
       if (!file?.id || saving) return;
+      // Право проверяется ЗДЕСЬ, а не только на кнопках. Баннер конфликта живёт и в чтении, и
+      // переживает Esc: без этой строки «всё равно записать поверх» оставался бы нажимаемым
+      // после того, как раздел переключили в режим чтения, — обход заморозки писателей.
+      if (!writable) return;
       if (tooBig) {
         showMessage(
           `заметка весит ${formatBytes(bytes)} при пределе ${formatBytes(NOTE_MAX_BYTES)} — сервер такую не примет`,
@@ -205,12 +221,17 @@ export function NotePage() {
           });
         }
         if (nameDirty) {
-          // Темы уезжают ТЕКУЩИЕ, а не пустые: UpdateLibraryFile заменяет набор целиком, и
-          // пустой список снял бы с заметки все ярлыки заодно с переименованием.
+          // Темы уезжают СВЕЖИЕ, а не пустые и не из кэша: UpdateLibraryFile заменяет набор
+          // целиком, пустой список снял бы с заметки все ярлыки заодно с переименованием, а
+          // кэш файла живёт 30 минут — за это время коллега успевает повесить свой ярлык, и
+          // переименование сняло бы его молча, без всякого экрана конфликта. Поэтому файл
+          // перечитывается вплотную к записи.
+          const fresh = await fileQuery.refetch();
+          const topics = fresh.data?.file?.topics ?? file.topics ?? [];
           await filesService.updateFile({
             id: file.id,
             fileName: name.trim(),
-            topicIds: (file.topics ?? []).map((t) => t.id ?? 0).filter(Boolean),
+            topicIds: topics.map((t) => t.id ?? 0).filter(Boolean),
             newTopics: [],
           });
         }
@@ -229,6 +250,7 @@ export function NotePage() {
       contentQuery.data,
       draft,
       file,
+      fileQuery,
       name,
       nameDirty,
       qc,
@@ -236,13 +258,23 @@ export function NotePage() {
       showMessage,
       tooBig,
       value,
+      writable,
     ],
   );
 
   /** «Сохранить как отдельную заметку»: ваш буфер уезжает НОВЫМ файлом, чужая версия остаётся
    * на месте. Единственный исход конфликта, в котором не теряет никто. */
   const saveSeparately = useCallback(async () => {
-    if (!file?.id || savingSeparate) return;
+    if (!file?.id || savingSeparate || !writable) return;
+    if (tooBig) {
+      // Тот же потолок, что и у обычной записи: исход «где не теряет никто» не должен быть
+      // единственным, который выясняет свой отказ дольше всех — уже отправив 512 КиБ.
+      showMessage(
+        `заметка весит ${formatBytes(bytes)} при пределе ${formatBytes(NOTE_MAX_BYTES)} — сервер такую не примет`,
+        'error',
+      );
+      return;
+    }
     setSavingSeparate(true);
     try {
       const copyName = `${stemOf(name || file.fileName || 'заметка')} — моя версия`.slice(0, 240);
@@ -262,7 +294,19 @@ export function NotePage() {
     } finally {
       setSavingSeparate(false);
     }
-  }, [draft, file, name, navigate, qc, savingSeparate, showMessage, value]);
+  }, [
+    bytes,
+    draft,
+    file,
+    name,
+    navigate,
+    qc,
+    savingSeparate,
+    showMessage,
+    tooBig,
+    value,
+    writable,
+  ]);
 
   /* ── горячие клавиши ──────────────────────────────────────────────────────────────────── */
 
@@ -311,7 +355,9 @@ export function NotePage() {
     return (
       <PageShell>
         <CalloutBox tone='error' className='bg-bgColor'>
-          <Text size='micro'>такого адреса заметки не бывает — в нём должен стоять номер файла</Text>
+          <Text size='micro'>
+            такого адреса заметки не бывает — в нём должен стоять номер файла
+          </Text>
         </CalloutBox>
       </PageShell>
     );
@@ -329,7 +375,12 @@ export function NotePage() {
     );
   }
 
-  if (contentQuery.isError) {
+  // ЭКРАН ОТКАЗА — ТОЛЬКО ДО ЗАСЕВА. После того как текст один раз приехал, провалившееся
+  // фоновое перечитывание (а его запускает даже собственная инвалидация после «сохранить как
+  // отдельную заметку») в react-query ставит статус `error` при живых данных — и человек
+  // вместо своего редактора с набранным текстом увидел бы «этой заметки нет». Текст остался бы
+  // в черновике, но с экрана исчез бы, а очевидного пути назад нет.
+  if (contentQuery.isError && seededRef.current !== id) {
     const e = contentQuery.error;
     return (
       <PageShell>
@@ -339,7 +390,8 @@ export function NotePage() {
               {isForbidden(e)
                 ? 'эту заметку вам не показывают — нужно право files:read или доступ к самому файлу'
                 : isUnknownRoute(e)
-                  ? // 404 значит и «файла нет», и «шлюз такого не знает»: на стенде без выката Ф8 это второе. Различить их клиент не может и не притворяется.
+                  ? // 404 значит и «файла нет», и «шлюз такого не знает»: на стенде без выката
+                    // Ф8 это второе. Различить их клиент не может и не притворяется.
                     'этой заметки нет: либо файл удалён, либо бэкенд с заметками ещё не выкачен на этот стенд'
                   : noteErrorText(e, 'заметка не открылась')}
             </Text>
@@ -385,6 +437,27 @@ export function NotePage() {
             браузер не даёт сохранить черновик (приватное окно или переполненное хранилище) — до
             нажатия «сохранить» текст живёт только в этой вкладке
           </Text>
+        </CalloutBox>
+      )}
+
+      {/* Провал ПЕРЕЧИТЫВАНИЯ уже открытой заметки: экран менять нельзя (там набранный текст),
+          но и молчать нельзя — на нём последняя прочитанная версия, а не сегодняшняя. */}
+      {contentQuery.isError && (
+        <CalloutBox tone='note' className='bg-bgColor'>
+          <div className='flex flex-wrap items-baseline gap-2'>
+            <Text size='micro' component='span'>
+              перечитать заметку не удалось — на экране последняя прочитанная версия, ваш текст
+              цел. сохранение при этом всё равно сверит отпечатки.
+            </Text>
+            <Button
+              size='xs'
+              variant='secondary'
+              className='ml-auto'
+              onClick={() => contentQuery.refetch()}
+            >
+              перечитать
+            </Button>
+          </div>
         </CalloutBox>
       )}
 
@@ -457,17 +530,12 @@ export function NotePage() {
       )}
 
       {conflict && showDiff && (
-        <section className='space-y-stack border border-borderColor bg-bgColor p-block'>
-          <div className='flex flex-wrap items-baseline gap-2 border-b-2 border-textColor pb-1'>
-            <Text component='h3' variant='uppercase' tracking='section' className='font-bold'>
-              что разошлось
-            </Text>
-            <Text size='micro' variant='label' component='span'>
-              — чем именно ваша версия отличается от сохранённой
-            </Text>
-          </div>
+        <Section
+          title='что разошлось'
+          question='— чем именно ваша версия отличается от сохранённой'
+        >
           <NoteDiff theirs={conflict.content} mine={value} theirsBy={conflict.by} />
-        </section>
+        </Section>
       )}
     </>
   );
@@ -521,11 +589,11 @@ export function NotePage() {
                     disabled={!canSave || saving}
                     onClick={() => void save(false)}
                   >
-                    {saving ? 'сохраняем…' : 'сохранить ⌘S'}
+                    {saving ? 'сохраняем…' : 'сохранить ⌘s'}
                   </Button>
                 )}
                 <Button size='sm' variant='main' onClick={() => setEditing(true)}>
-                  править ⌘E
+                  править ⌘e
                 </Button>
               </>
             ) : (

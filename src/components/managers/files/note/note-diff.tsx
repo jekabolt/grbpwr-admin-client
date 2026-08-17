@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
 import { plural } from '../upload/text';
 
@@ -33,8 +34,10 @@ const MAX_LINES = 1200;
 
 /** Совпадающие начало и конец срезаются до таблицы: в реальном конфликте расходится середина. */
 export function diffLines(theirs: string, mine: string): { rows: Row[]; tooBig: boolean } {
-  const a = theirs.split('\n');
-  const b = mine.split('\n');
+  // Пустой текст — это НОЛЬ строк, а не одна пустая: `''.split('\n')` даёт `['']`, и раскладка
+  // рисовала бы «1 строка есть только у коллеги» там, где стирать нечего.
+  const a = theirs === '' ? [] : theirs.split('\n');
+  const b = mine === '' ? [] : mine.split('\n');
 
   let head = 0;
   while (head < a.length && head < b.length && a[head] === b[head]) head += 1;
@@ -140,7 +143,9 @@ export function NoteDiff({
           + {added} {plural(added, 'строка', 'строки', 'строк')} есть только у вас
         </Text>
       </div>
-      <div className='max-h-[50vh] overflow-auto border border-hairline'>
+      {/* Полоса с линейками сверху и снизу, а не коробка: блок внутри блока система запрещает,
+          а высоту прокрутки надо чем-то ограничить. */}
+      <div className='max-h-[50vh] overflow-auto border-y border-hairline'>
         {rows.map((r, i) => (
           <div
             key={i}
@@ -166,10 +171,10 @@ export function NoteDiff({
 function VersionColumn({ title, text }: { title: string; text: string }) {
   return (
     <div>
-      <Text size='micro' variant='label' component='span' className='uppercase'>
-        {title}
-      </Text>
-      <div className='mt-1 max-h-[40vh] overflow-auto border border-hairline px-2 py-1 whitespace-pre-wrap break-words'>
+      <GroupLabel flush>{title}</GroupLabel>
+      <div
+        className='max-h-[40vh] overflow-auto border-y border-hairline py-1 whitespace-pre-wrap break-words'
+      >
         {text}
       </div>
     </div>

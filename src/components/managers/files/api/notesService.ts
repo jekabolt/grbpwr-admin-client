@@ -94,7 +94,8 @@ export function noteErrorText(e: unknown, fallback: string): string {
   const raw = e instanceof Error ? e.message : '';
   const has = (s: string) => raw.toLowerCase().includes(s);
 
-  if (has('not a markdown note')) return 'этот файл не заметка — его открывают карточкой, а не редактором';
+  if (has('not a markdown note'))
+    return 'этот файл не заметка — его открывают карточкой, а не редактором';
   if (has('nothing was overwritten'))
     return 'кто-то сохранил свою версию, но прочитать её не удалось. ничего не перезаписано — попробуйте сохранить ещё раз';
   if (has('not a book')) return 'заметка длиннее, чем сервер принимает: предел 512 киб';
@@ -186,10 +187,15 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
   if (!res.ok) {
     const code = typeof body?.code === 'number' ? body.code : undefined;
     if (code === GRPC_FAILED_PRECONDITION) {
-      throw new NoteFormatError('off', body?.message ?? 'помощник не подключён');
+      throw new NoteFormatError('off', 'помощник не подключён');
     }
     if (code === GRPC_INVALID_ARGUMENT) {
-      throw new NoteFormatError('toolong', body?.message ?? 'текст не подошёл помощнику');
+      // InvalidArgument сервер отдаёт не только на превышение потолка (ещё — на пустое
+      // содержимое и на невалидный utf-8). Объявлять «текст слишком длинный» по одному коду
+      // значило бы показать «30 знаков при пределе 12 000» — фразу, которая опровергает сама
+      // себя. Длину клиент знает точно, вот она и решает.
+      const kind = runeLength(content) > NOTE_FORMAT_MAX_RUNES ? 'toolong' : 'error';
+      throw new NoteFormatError(kind, 'помощник не взял этот текст');
     }
     if (res.status === 401) {
       throw new NoteFormatError('error', 'сессия истекла — войдите заново');
@@ -202,7 +208,9 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
     if (res.status === 404 || res.status === 405 || res.status === 501) {
       throw new NoteFormatError('off', 'помощника на этом стенде нет');
     }
-    throw new NoteFormatError('error', body?.message || `помощник не ответил (${res.status})`);
+    // Слова сервера сюда НЕ едут: они английские, а раздел русский целиком, и панель печатает
+    // это сообщение дословно. Подробность остаётся в консоли — `api.ts` логирует ответ.
+    throw new NoteFormatError('error', `сервер ответил отказом (${res.status})`);
   }
 
   const formatted = body?.content ?? '';

@@ -180,7 +180,7 @@ export function NoteEditor({
           закончить правку
         </Button>
         <Button size='sm' variant='main' onClick={onSave} disabled={!canSave || saving}>
-          {saving ? 'сохраняем…' : 'сохранить ⌘S'}
+          {saving ? 'сохраняем…' : 'сохранить ⌘s'}
         </Button>
 
         <div className='w-full'>
