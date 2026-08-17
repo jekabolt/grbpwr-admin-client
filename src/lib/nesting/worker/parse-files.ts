@@ -102,7 +102,7 @@ export async function parseSheets(
       skippedBlocks += skipped;
       for (const b of seen) blockNames.add(b);
       detectedUnit = unit;
-      if (unitGuessed) warnings.push(`${sheet.name}: единицы не заданы в файле — принято ${unit}`);
+      if (unitGuessed) warnings.push(`${sheet.name}: units are not set in the file — ${unit} assumed`);
       for (const raw of raws) {
         const bb = bounds(raw.poly);
         // Normalize: local origin at bbox min corner — placement x/y then read naturally.
@@ -112,8 +112,8 @@ export async function parseSheets(
           // Two different questions, answered from the SOURCE rather than from each other:
           // what to show (a placeholder when the file carried no block), and which block this
           // came from (the alias key — '' only when there genuinely is none). Testing the label
-          // against 'модель' would misread a DXF whose block is literally named that.
-          name: raw.blockName == null ? `деталь ${nextId - 1}` : raw.name,
+          // against 'model' would misread a DXF whose block is literally named that.
+          name: raw.blockName == null ? `piece ${nextId - 1}` : raw.name,
           blockName: raw.blockName ?? '',
           layer: raw.layer,
           grain: raw.grain,

@@ -44,7 +44,7 @@ export function PatternViewerPage() {
 
   useEffect(() => {
     const styleNumber = (manifest?.style_number ?? '').trim();
-    document.title = styleNumber ? `${styleNumber} — выкройки` : 'выкройки';
+    document.title = styleNumber ? `${styleNumber} — patterns` : 'patterns';
   }, [manifest]);
 
   // Токены размеров для разбора имён блоков DXF — из размерного ряда КАРТЫ, присланного
@@ -99,7 +99,7 @@ export function PatternViewerPage() {
       <Shell>
         <Section>
           <Text size='micro' variant='label' component='p'>
-            загрузка…
+            loading…
           </Text>
         </Section>
       </Shell>
@@ -114,10 +114,10 @@ export function PatternViewerPage() {
         <Section>
           <CalloutBox tone='error'>
             <Text component='p'>
-              <b>ссылка недействительна</b>
+              <b>the link is not valid</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
-              попросите свежую распечатку тех-пака и отсканируйте QR ещё раз
+              ask for a fresh tech pack printout and scan the QR again
             </Text>
           </CalloutBox>
         </Section>
@@ -134,11 +134,11 @@ export function PatternViewerPage() {
         <Section>
           <CalloutBox tone='error'>
             <Text component='p'>
-              <b>вьюер настроен неправильно</b>
+              <b>the viewer is configured wrong</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
-              сервер ответил не тем — покажите этот экран разработчику, бумагу перепечатывать не
-              нужно
+              the server answered with the wrong thing — show this screen to a developer, the paper
+              does not need reprinting
             </Text>
           </CalloutBox>
         </Section>
@@ -151,7 +151,7 @@ export function PatternViewerPage() {
       <Shell>
         <Section>
           <div className='space-y-2.5'>
-            <Text component='p'>не удалось загрузить — похоже, нет связи</Text>
+            <Text component='p'>couldn't load — looks like there is no connection</Text>
             <Button
               type='button'
               variant='main'
@@ -159,7 +159,7 @@ export function PatternViewerPage() {
               className='min-h-11'
               onClick={() => setAttempt((n) => n + 1)}
             >
-              повторить
+              retry
             </Button>
           </div>
         </Section>
@@ -180,12 +180,12 @@ export function PatternViewerPage() {
         {drifted && (
           <CalloutBox tone='warning' className='space-y-1'>
             <Text size='large' component='p' className='uppercase'>
-              <b>выкройки изменились после печати</b>
+              <b>the patterns changed after printing</b>
             </Text>
             <Text component='p'>
               {paperGroup
-                ? `бумага в руках напечатана для листов версии ${stamp?.v} (${stamp?.n} шт.), а сейчас они версии ${currentV} (${currentN} шт.). Контуры на бумаге устарели — кроите по листам с ЭТОГО экрана и перепечатайте тех-пак.`
-                : 'бумага в руках указывает на группу листов, которой на карточке больше нет — выкройки перегруппированы после печати. Кроите по листам с ЭТОГО экрана и перепечатайте тех-пак.'}
+                ? `the paper in your hands was printed for sheets at version ${stamp?.v} (${stamp?.n} sheets), and now they are at version ${currentV} (${currentN} sheets). the contours on the paper are out of date — cut from the sheets on THIS screen and reprint the tech pack.`
+                : 'the paper in your hands points at a group of sheets that is no longer on the card — the patterns were regrouped after printing. cut from the sheets on THIS screen and reprint the tech pack.'}
             </Text>
           </CalloutBox>
         )}
@@ -193,7 +193,7 @@ export function PatternViewerPage() {
           <div className='space-y-2.5'>
             <div>
               <Text size='large' component='h1' className='uppercase'>
-                {styleNumber || 'тех-карта'}
+                {styleNumber || 'tech card'}
               </Text>
               {styleName && (
                 <Text variant='label' component='p'>
@@ -207,17 +207,15 @@ export function PatternViewerPage() {
 
         {activeGroup ? (
           <Section
-            title='листы'
-            question={
-              groups.length > 1 ? `— ${groupLabel(activeGroup)}` : '— просмотр и скачивание'
-            }
+            title='sheets'
+            question={groups.length > 1 ? `— ${groupLabel(activeGroup)}` : '— view and download'}
           >
             <SheetList sheets={activeGroup.sheets ?? []} dictTokens={dictTokens} />
           </Section>
         ) : (
-          <Section title='листы'>
+          <Section title='sheets'>
             <Text size='micro' variant='label' component='p'>
-              на карточке нет файлов выкроек
+              the card has no pattern files
             </Text>
           </Section>
         )}

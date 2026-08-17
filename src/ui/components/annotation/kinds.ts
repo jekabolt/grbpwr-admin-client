@@ -75,8 +75,8 @@ const DEFS: KindDef[] = [
   {
     key: 'pin',
     points: [1, 1],
-    label: 'пин',
-    hint: 'точка с номером — текст читается в легенде под снимком',
+    label: 'pin',
+    hint: 'a numbered point — the text is read in the legend under the picture',
     grammar: 'click',
     inPalette: true,
     dashable: false,
@@ -88,8 +88,8 @@ const DEFS: KindDef[] = [
   {
     key: 'label',
     points: [1, 1],
-    label: 'подпись',
-    hint: 'точка и подпись со стрелкой',
+    label: 'label',
+    hint: 'a point and a label on an arrow',
     grammar: 'click',
     inPalette: true,
     dashable: false,
@@ -101,8 +101,8 @@ const DEFS: KindDef[] = [
   {
     key: 'dim',
     points: [2, 2],
-    label: 'мерка',
-    hint: 'две точки, размерная линия с засечками — «по какому размеру»',
+    label: 'dimension',
+    hint: 'two points, a dimension line with ticks — “measure along this”',
     grammar: 'click',
     inPalette: true,
     dashable: true,
@@ -114,8 +114,8 @@ const DEFS: KindDef[] = [
   {
     key: 'bracket',
     points: [2, 2],
-    label: 'участок',
-    hint: 'две точки, скобка над отрезком — «на этом участке»',
+    label: 'span',
+    hint: 'two points, a bracket over the segment — “across this span”',
     grammar: 'click',
     inPalette: true,
     dashable: true,
@@ -127,8 +127,8 @@ const DEFS: KindDef[] = [
   {
     key: 'arc',
     points: [3, 3],
-    label: 'дуга',
-    hint: 'начало → конец → потяните изгиб: посадка оката, скругление борта, ход строчки',
+    label: 'arc',
+    hint: 'start → end → drag the bend: sleeve cap ease, a rounded front edge, the run of a stitch line',
     grammar: 'arc',
     inPalette: true,
     dashable: true,
@@ -140,8 +140,8 @@ const DEFS: KindDef[] = [
   {
     key: 'polygon',
     points: [3, 20],
-    label: 'зона',
-    hint: 'обведите область по точкам и замкните о первую — порок, дублирование, настрачивание',
+    label: 'zone',
+    hint: 'trace the area point by point and close it on the first one — a flaw, fusing, topstitching',
     grammar: 'polygon',
     inPalette: true,
     dashable: true,
@@ -155,8 +155,8 @@ const DEFS: KindDef[] = [
   {
     key: 'ink',
     points: [2, 64],
-    label: 'маркер',
-    hint: 'зажмите и ведите; каждый штрих — отдельное указание',
+    label: 'freehand',
+    hint: 'press and drag; every stroke is a separate callout',
     grammar: 'ink',
     inPalette: true,
     dashable: true,
@@ -179,8 +179,8 @@ const DEFS: KindDef[] = [
     // потерянная возможность — целый жест.
     key: 'multi',
     points: [2, 8],
-    label: 'мультилидер',
-    hint: 'одна подпись к нескольким местам — от 2 до 8 точек, «готово» заканчивает раньше',
+    label: 'multileader',
+    hint: 'one label for several places — from 2 to 8 points, “done” ends it sooner',
     grammar: 'click',
     inPalette: true,
     dashable: false,
@@ -235,12 +235,12 @@ export const ANNOTATION_COLOR_KEYS = ['', 'red', 'blue', 'green', 'orange', 'whi
 export type AnnotationColorKey = (typeof ANNOTATION_COLOR_KEYS)[number];
 
 export const COLOR_LABEL: Record<string, string> = {
-  '': 'чернила',
-  red: 'красный',
-  blue: 'синий',
-  green: 'зелёный',
-  orange: 'оранжевый',
-  white: 'белый',
+  '': 'ink',
+  red: 'red',
+  blue: 'blue',
+  green: 'green',
+  orange: 'orange',
+  white: 'white',
 };
 
 /**
@@ -250,19 +250,20 @@ export const COLOR_LABEL: Record<string, string> = {
 export function placingHint(kind: string, placed: number): string {
   const d = kindDef(kind);
   const [min, max] = d.points;
-  if (d.grammar === 'ink') return 'зажмите и ведите — каждый штрих отдельное указание';
+  if (d.grammar === 'ink') return 'press and drag — every stroke is a separate callout';
   if (d.grammar === 'arc') {
     return (
-      ['кликните начало дуги', 'кликните конец дуги', 'ведите изгиб и кликните'][placed] ??
-      'кликните изгиб'
+      ['click the start of the arc', 'click the end of the arc', 'drag the bend and click'][
+        placed
+      ] ?? 'click the bend'
     );
   }
   if (d.grammar === 'polygon') {
-    if (placed === 0) return 'кликайте по границе области';
-    if (placed < min) return `нужно от ${min} точек — поставлено ${placed}`;
-    return `замкните о первую точку или нажмите Enter — поставлено ${placed}`;
+    if (placed === 0) return 'click along the border of the area';
+    if (placed < min) return `at least ${min} points needed — ${placed} placed`;
+    return `close it on the first point or press Enter — ${placed} placed`;
   }
-  if (max === 1) return 'кликните точку на снимке';
-  if (min === max) return `кликните ${max} точки — поставлено ${placed}`;
-  return `кликайте точки (от ${min} до ${max}) — поставлено ${placed}`;
+  if (max === 1) return 'click a point on the picture';
+  if (min === max) return `click ${max} points — ${placed} placed`;
+  return `click points (from ${min} to ${max}) — ${placed} placed`;
 }

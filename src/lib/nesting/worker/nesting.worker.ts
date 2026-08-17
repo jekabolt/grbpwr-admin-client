@@ -42,12 +42,12 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
 
   // Every file failed → that's an error, not a note with an empty piece list.
   if (files.length > 0 && failedFiles === files.length) {
-    post({ type: 'error', id, message: warnings.join('; ') || 'не удалось разобрать DXF' });
+    post({ type: 'error', id, message: warnings.join('; ') || "couldn't parse DXF" });
     return;
   }
 
   if (out.length === 0 && warnings.length === 0)
-    warnings.push('в файлах не нашлось замкнутых контуров деталей');
+    warnings.push('no closed piece contours were found in the files');
   // Commit only when no newer parse started while this one awaited.
   if (seq === parseSeq) currentParse = { id, pieces: out };
   // failedFiles едет вместе с блоками: «часть листов не прочиталась» — это разница между
@@ -70,7 +70,7 @@ async function handleParse(id: number, files: File[], opts: ParseOpts): Promise<
 
 async function handleNest(id: number, parseId: number, config: NestConfig): Promise<void> {
   if (!currentParse || currentParse.id !== parseId) {
-    post({ type: 'error', id, message: 'данные деталей устарели — обновите разбор DXF' });
+    post({ type: 'error', id, message: 'the piece data is stale — re-run the DXF parse' });
     return;
   }
   // Разворот по долевой и ПРИПУСК НА ШОВ делаются ЗДЕСЬ, на той же геометрии, которую увидит
@@ -116,7 +116,7 @@ async function handleNest(id: number, parseId: number, config: NestConfig): Prom
   if (seam.hulled.length > 0) {
     result.warnings = [
       ...(result.warnings ?? []),
-      `контур заменён выпуклой оболочкой (припуск не сошёлся): ${seam.hulled.join(', ')} — РЕЗАТЬ ПО ЭТОМУ ФАЙЛУ НЕЛЬЗЯ, силуэт детали искажён`,
+      `the contour was replaced by a convex hull (the seam allowance didn't work out): ${seam.hulled.join(', ')} — DO NOT CUT FROM THIS FILE, the silhouette of the piece is distorted`,
     ];
   }
   post({ type: 'result', id, result });

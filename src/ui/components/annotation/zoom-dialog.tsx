@@ -115,9 +115,9 @@ export function AnnotationZoomDialog({
         >
           <Dialog.Title className='sr-only'>{title}</Dialog.Title>
           <Dialog.Description className='sr-only'>
-            Колесо или щипок меняют масштаб, перетаскивание двигает снимок. Указания ставятся и
-            правятся здесь же.
-            {navigable ? ' Стрелки ← → листают кадры.' : ''}
+            the wheel or a pinch changes the scale, dragging moves the picture. callouts are placed
+            and edited right here.
+            {navigable ? ' the ← → arrows page through the frames.' : ''}
           </Dialog.Description>
 
           {/* ШАПКА — только имя, положение в ряду и выход. Всё, чем ДЕЙСТВУЮТ по снимку, живёт
@@ -140,7 +140,7 @@ export function AnnotationZoomDialog({
               <span className='flex shrink-0 items-center gap-1.5'>
                 {navigable && (
                   <ViewerAction
-                    aria-label='предыдущий кадр'
+                    aria-label='previous frame'
                     disabled={!onPrev}
                     onClick={onPrev}
                     className='disabled:opacity-40'
@@ -157,7 +157,7 @@ export function AnnotationZoomDialog({
                 )}
                 {navigable && (
                   <ViewerAction
-                    aria-label='следующий кадр'
+                    aria-label='next frame'
                     disabled={!onNext}
                     onClick={onNext}
                     className='disabled:opacity-40'
@@ -168,7 +168,7 @@ export function AnnotationZoomDialog({
               </span>
             )}
             <Dialog.Close
-              aria-label='закрыть увеличенный вид'
+              aria-label='close the zoomed view'
               className='flex size-8 shrink-0 items-center justify-center border border-bgColor/40 text-bgColor transition-colors hover:bg-bgColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-bgColor'
             >
               ✕
@@ -224,9 +224,9 @@ export function AnnotationZoomDialog({
                 selected={showCallouts}
                 pressed={showCallouts}
                 onClick={() => setShowCallouts((v) => !v)}
-                title='спрятать все линии и посмотреть сам снимок'
+                title='hide all the lines and look at the picture itself'
               >
-                указания · {surface.callouts.length}
+                callouts · {surface.callouts.length}
               </Chip>
             </ChipRow>
             {editable && showCallouts && (

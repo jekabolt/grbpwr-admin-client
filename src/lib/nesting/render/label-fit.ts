@@ -749,7 +749,7 @@ export function planLayoutLabels(
     // первым при нехватке места (см. textCandidates): читаемое имя важнее пометки.
     const marks = [
       it.placement.rot ? `${it.placement.rot}°` : '',
-      it.placement.flipped ? 'зеркало' : '',
+      it.placement.flipped ? 'mirror' : '',
     ].filter(Boolean);
     const plan = planLabel({
       poly: it.poly,

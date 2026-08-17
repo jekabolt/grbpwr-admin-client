@@ -92,7 +92,7 @@ function noteMissingBlock(name: string, warnings: string[], tally: SkipTally): v
   const key = String(name ?? '');
   if (tally.warnedMissing.has(key)) return;
   tally.warnedMissing.add(key);
-  warnings.push(`INSERT ссылается на отсутствующий блок «${key}»`);
+  warnings.push(`INSERT references a missing block “${key}”`);
 }
 
 function expandInto(
@@ -119,7 +119,7 @@ function expandInto(
       }
       if (depth >= MAX_DEPTH) {
         tally.blocks++;
-        warnings.push(`блок «${ins.name}» вложен глубже ${MAX_DEPTH} уровней — пропущен`);
+        warnings.push(`block “${ins.name}” is nested deeper than ${MAX_DEPTH} levels — skipped`);
         continue;
       }
       const cols = Math.max(1, ins.columnCount || 1);
@@ -130,7 +130,7 @@ function expandInto(
           if (budget.left <= 0) {
             if (!budget.warned) {
               budget.warned = true;
-              warnings.push(`слишком много вложенных вставок блоков (> ${MAX_INSTANCES}) — часть пропущена`);
+              warnings.push(`too many nested block inserts (> ${MAX_INSTANCES}) — some are skipped`);
             }
             // Управление тем же `return`, что и раньше (бросаем и остаток сущностей этого уровня);
             // добавлен только счёт неразвёрнутых инстансов ЭТОЙ вставки.
@@ -224,7 +224,7 @@ export function expandGroups(
       if (placed < cols * rows) {
         if (!budget.warned) {
           budget.warned = true;
-          warnings.push(`слишком много вставок блоков (> ${MAX_INSTANCES}) — часть пропущена`);
+          warnings.push(`too many block inserts (> ${MAX_INSTANCES}) — some are skipped`);
         }
         tally.blocks += cols * rows - placed;
       }

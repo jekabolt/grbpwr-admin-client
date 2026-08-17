@@ -323,7 +323,7 @@ export function FocusedAnnotator({
             tool
               ? placed > 0
                 ? placingHint(tool, placed)
-                : 'кликайте по нужной картинке'
+                : 'click on the picture you need'
               : undefined
           }
         />
@@ -339,12 +339,12 @@ export function FocusedAnnotator({
     ) : null;
 
   const hint = intake.busy
-    ? 'принимаю картинку из буфера…'
+    ? 'taking the picture from the clipboard…'
     : intake.dragging
-      ? 'бросьте файл — откроется кроп'
+      ? 'drop the file — the crop will open'
       : tool
         ? placingHint(tool, placed)
-        : 'клик по пину или по линии — правка · текст читается в легенде под кадром · ⌘V вставит картинку';
+        : 'click a pin or a line to edit it · the text is read in the legend under the frame · ⌘V pastes a picture';
 
   // The focused layout's add-media control. Rendered OUTSIDE the hasMedia branch (below), because
   // with zero views it is the ONLY way to get a first image and its callers (the fitting form) have
@@ -481,10 +481,10 @@ export function FocusedAnnotator({
                         {/* Зум — ЧИТАТЕЛЬСКИЙ жест и остаётся на выпущенной карточке: мерку и дугу
                             на плитке в 300px не разглядеть, увеличение и есть способ их прочесть. */}
                         <FrameButton
-                          ariaLabel={`увеличить · панорама · правка — картинка ${i + 1}`}
+                          ariaLabel={`zoom · pan · edit — picture ${i + 1}`}
                           onPress={() => setZoomIndex(i)}
                         >
-                          зум
+                          zoom
                         </FrameButton>
                         {!readOnly && (
                           <FrameButton
@@ -573,10 +573,10 @@ export function FocusedAnnotator({
                 halo={halo}
                 cornerSlot={
                   <FrameButton
-                    ariaLabel='увеличить · панорама · правка'
+                    ariaLabel='zoom · pan · edit'
                     onPress={() => setZoomIndex(focusedViewerIndex)}
                   >
-                    зум
+                    zoom
                   </FrameButton>
                 }
               />
@@ -663,7 +663,7 @@ export function FocusedAnnotator({
         <AnnotationZoomDialog
           open
           onOpenChange={(v) => !v && setZoomIndex(null)}
-          title={mediaLabel ? mediaLabel(views[zoomIndex], zoomIndex) : carouselLabel ?? 'картинка'}
+          title={mediaLabel ? mediaLabel(views[zoomIndex], zoomIndex) : carouselLabel ?? 'picture'}
           src={mediaUrl(views[zoomIndex].full)}
           media={isVideo(mediaUrl(views[zoomIndex].full)) ? 'video' : 'image'}
           callouts={calloutsFor(views[zoomIndex].mediaId)}

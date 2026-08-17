@@ -41,10 +41,10 @@ export function AnnotationStyleRow({
           onClick={() => onColor(c)}
           title={
             c === 'white'
-              ? 'белый читается на тёмной ткани; на бумаге печатается полой линией'
+              ? 'white reads on dark fabric; on paper it prints as a hollow line'
               : c
-                ? 'цвет различает пересекающиеся указания'
-                : 'чернильный — как всё остальное на листе'
+                ? 'colour tells overlapping callouts apart'
+                : 'ink — the same as everything else on the sheet'
           }
         >
           {/* Свотч в рамке: белый на белом редакторе иначе не виден вовсе. */}
@@ -61,9 +61,9 @@ export function AnnotationStyleRow({
           dashed={!dashed}
           selected={dashed}
           onClick={() => onDashed(!dashed)}
-          title='пунктир — линия построения, припуск, линия под слоем; сплошная — то, что делают'
+          title='dashed — a construction line, a seam allowance, a line under a layer; solid — what is actually done'
         >
-          пунктир
+          dashed
         </Chip>
       )}
       {d.fillable && (
@@ -71,15 +71,15 @@ export function AnnotationStyleRow({
           dashed={!filled}
           selected={filled}
           onClick={() => onFilled(!filled)}
-          title='штриховка говорит «эта площадь»; один контур — «эта граница»'
+          title='hatching says “this area”; a bare contour says “this border”'
         >
-          штриховка
+          hatching
         </Chip>
       )}
       {!d.dashable && !d.fillable && (
         <Text size='nano' variant='label' component='span'>
           {d.key === 'pin' || d.key === 'label' || d.key === 'multi'
-            ? 'у подписи начертание одно: лидер со стрелкой'
+            ? 'a label has one style only: a leader with an arrow'
             : ''}
         </Text>
       )}

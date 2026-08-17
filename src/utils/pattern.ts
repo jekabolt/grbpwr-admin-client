@@ -70,11 +70,11 @@ export function clampPatternName(s: string): string {
 // every consumer of this helper.
 export function patternFileError(file: File, opts?: { dxfOnly?: boolean }): string | null {
   if (opts?.dxfOnly) {
-    if (!isDxfFile(file)) return 'Только DXF — PDF больше не принимается для выкроек тех карты.';
+    if (!isDxfFile(file)) return 'DXF only — a PDF is no longer accepted for tech card patterns.';
   } else if (!isPdfFile(file) && !isDxfFile(file)) {
-    return 'Только PDF или DXF.';
+    return 'PDF or DXF only.';
   }
-  if (file.size > MAX_PATTERN_BYTES) return 'Файл слишком большой — максимум 40 МБ.';
+  if (file.size > MAX_PATTERN_BYTES) return 'the file is too large — 40 MB at most.';
   return null;
 }
 
@@ -101,7 +101,8 @@ export function formatBytes(bytes?: number): string {
 export function patternUploadErrorMessage(error: unknown): string {
   const status = (error as { status?: number })?.status;
   const raw = error instanceof Error ? error.message : '';
-  if (status === 400) return raw || 'Файл отклонён — нужен корректный PDF или DXF (до 40 МБ).';
-  if (status && status >= 500) return 'Ошибка загрузки на сервере — попробуйте ещё раз.';
-  return raw || 'Не удалось загрузить файл.';
+  if (status === 400)
+    return raw || 'the file is refused — a valid PDF or DXF is needed (up to 40 MB).';
+  if (status && status >= 500) return 'upload error on the server — try again.';
+  return raw || "couldn't upload the file.";
 }

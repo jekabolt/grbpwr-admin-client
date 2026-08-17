@@ -501,7 +501,7 @@ export function AnnotationSurface({
         // ОТКАЗ ОБЯЗАН БЫТЬ ВИДЕН. Молча погасить инструмент — то же самое, что сделать вид, будто
         // фигура поставлена: человек ставит вторую, третью и узнаёт правду, только пересчитав
         // указания глазами.
-        setRefused('на этом кадре уже 30 указаний — дальше их не прочесть');
+        setRefused("this frame already has 30 callouts — any more and they can't be read");
       }
       if (!full) {
         // Вид ХРАНЕНИЯ у подписи считается по числу якорей: панель знает один вид, провод
@@ -1332,7 +1332,7 @@ export function AnnotationSurface({
               callouts.map((c) => {
                 const d = kindDef(c.kind);
                 const names = (c.pieceLineKeys ?? [])
-                  .map((k) => pieceLabel?.(k) ?? (pieceLabel ? 'деталь удалена' : undefined))
+                  .map((k) => pieceLabel?.(k) ?? (pieceLabel ? 'piece deleted' : undefined))
                   .filter(Boolean) as string[];
                 const text = (c.text ?? '').trim();
                 if (d.key === 'pin') {
@@ -1361,7 +1361,7 @@ export function AnnotationSurface({
                       // выноску: на листе из пятнадцати пинов недописанный иначе неотличим.
                       filled={!!(c.hasText ?? (c.text ?? '').trim())}
                       color={c.color || undefined}
-                      title={[text, ...names].filter(Boolean).join(' · ') || `выноска ${c.number ?? ''}`}
+                      title={[text, ...names].filter(Boolean).join(' · ') || `callout ${c.number ?? ''}`}
                       dimmed={dim(c.key)}
                       selected={selected === c.key}
                       interactive={!placing}
@@ -1437,7 +1437,7 @@ export function AnnotationSurface({
           {zoom && scale > 1 && (
             <FrameButton
               label={`${Math.round(scale * 100)}%`}
-              title='вернуть исходный масштаб'
+              title='back to the original scale'
               onPress={resetZoom}
               className='bottom-1 left-1'
             />
@@ -1484,13 +1484,13 @@ export function AnnotationSurface({
                 <Chip
                   nonForm
                   onClick={() => finishPlacing(def.key, points)}
-                  title='закончить постановку на этом числе точек'
+                  title='finish placing at this number of points'
                 >
-                  готово · {points.length}
+                  done · {points.length}
                 </Chip>
               )}
-              <Chip nonForm dashed onClick={cancelPlacing} title='отменить постановку'>
-                отменить
+              <Chip nonForm dashed onClick={cancelPlacing} title='cancel placing'>
+                cancel
               </Chip>
             </>
           )}
@@ -1730,12 +1730,12 @@ function Plate({
 }) {
   // Одно-два имени — инлайном; дальше счётчик: узкая плашка не резиновая, и счётчик честнее
   // трёх обрезанных имён. Полный список — в подсказке, в легенде и на бумаге.
-  const tail = names.length === 0 ? '' : names.length <= 2 ? names.join(', ') : `${names.length} детали`;
+  const tail = names.length === 0 ? '' : names.length <= 2 ? names.join(', ') : `${names.length} pieces`;
   return (
     <span
       role='button'
       tabIndex={0}
-      title={[text, ...names].filter(Boolean).join(' · ') || 'указание'}
+      title={[text, ...names].filter(Boolean).join(' · ') || 'callout'}
       onPointerEnter={() => onHover(true)}
       onPointerLeave={() => onHover(false)}
       onPointerDown={onPointerDown}
@@ -1806,7 +1806,7 @@ function PinLegend({
   return (
     <div className='flex flex-col gap-0.5'>
       {pins.map((c) => {
-        const names = (c.pieceLineKeys ?? []).map((k) => pieceLabel?.(k) ?? 'деталь удалена');
+        const names = (c.pieceLineKeys ?? []).map((k) => pieceLabel?.(k) ?? 'piece deleted');
         return (
           <div
             key={c.key}
@@ -1881,7 +1881,7 @@ function Handles({
             key={`ghost:${g.index}`}
             role='button'
             tabIndex={-1}
-            title='добавить вершину на этой стороне'
+            title='add a vertex on this side'
             onPointerDown={(e) => {
               e.stopPropagation();
               onInsert(g.index, g.at);
@@ -1913,8 +1913,8 @@ function Handles({
             tabIndex={0}
             title={
               isArmed
-                ? 'Delete уберёт эту точку'
-                : 'тащить — двигать точку; клик — выбрать её для удаления'
+                ? 'Delete will drop this point'
+                : 'drag — move the point; click — select it for deletion'
             }
             onPointerDown={(e) => onDrag(i, p, e)}
             onClick={(e) => {

@@ -29,7 +29,7 @@ function sheetKind(sheet: PvSheet): 'dxf' | 'pdf' | 'unknown' {
 function sizeLabel(sheet: PvSheet, kind: 'dxf' | 'pdf' | 'unknown'): string {
   const named = (sheet.size_name ?? '').trim();
   if (named) return named;
-  return kind === 'dxf' ? 'градуированный' : 'без размера';
+  return kind === 'dxf' ? 'graded' : 'sizeless';
 }
 
 function SheetBody({
@@ -45,7 +45,7 @@ function SheetBody({
   if (kind === 'pdf') return <PdfSheet sheet={sheet} />;
   return (
     <Text size='micro' variant='label' component='p'>
-      просмотр этого формата не поддерживается — скачайте файл
+      this format has no viewer — download the file
     </Text>
   );
 }
@@ -64,7 +64,7 @@ export function SheetList({
   if (sheets.length === 0) {
     return (
       <Text size='micro' variant='label' component='p'>
-        в этой группе нет листов
+        this group has no sheets
       </Text>
     );
   }
@@ -89,7 +89,7 @@ export function SheetList({
               >
                 <Text component='p' className='truncate'>
                   {open ? '− ' : '+ '}
-                  {(sheet.name ?? '').trim() || (sheet.filename ?? '').trim() || 'лист'}
+                  {(sheet.name ?? '').trim() || (sheet.filename ?? '').trim() || 'sheet'}
                 </Text>
                 <Text size='micro' variant='label' component='p' className='truncate'>
                   {[
@@ -104,7 +104,7 @@ export function SheetList({
               </button>
               {download && (
                 <Button asChild variant='secondary' size='lg' className='flex min-h-11 shrink-0 items-center'>
-                  <a href={download}>скачать</a>
+                  <a href={download}>download</a>
                 </Button>
               )}
             </div>

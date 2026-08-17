@@ -81,7 +81,7 @@ export function chainLoops(
   }
 
   if (openDropped > 0) {
-    warnings.push(`незамкнутых контуров отброшено: ${openDropped} (долевые, надсечки, разметка)`);
+    warnings.push(`${openDropped} open contours dropped (grainlines, notches, markings)`);
   }
   return { loops, openDropped };
 }

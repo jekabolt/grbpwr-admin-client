@@ -134,7 +134,7 @@ function headerComposition(rows: LayHeader['composition']): { human: string; mac
   }
   return kept.length === 0
     ? { human: '', machine: '' }
-    : { human: `размеры ${kept.join(' ')}`, machine: kept.join(';') };
+    : { human: `sizes ${kept.join(' ')}`, machine: kept.join(';') };
 }
 
 function headerFields(h: LayHeader): HeaderField[] {
@@ -147,16 +147,16 @@ function headerFields(h: LayHeader): HeaderField[] {
   // Тот же токен, что в имени файла раскройного экспорта (PR<runId>_…): лист и файл на столе
   // должны называть прогон одинаково, иначе их не сопоставить.
   push('run', runId ? String(runId) : '', `PR${runId}`, 0);
-  push('lay', headerStr(h.layName), `настил ${headerStr(h.layName)}`, 0);
-  push('colorway', headerStr(h.colorway), `цвет ${headerStr(h.colorway)}`, 0);
-  push('article', headerStr(h.articleCode), `арт. ${headerStr(h.articleCode)}`, 1);
+  push('lay', headerStr(h.layName), `lay ${headerStr(h.layName)}`, 0);
+  push('colorway', headerStr(h.colorway), `colourway ${headerStr(h.colorway)}`, 0);
+  push('article', headerStr(h.articleCode), `art. ${headerStr(h.articleCode)}`, 1);
   push('material', headerStr(h.materialName), headerStr(h.materialName), 1);
   const plies = headerCount(h.plies);
-  push('plies', plies ? String(plies) : '', `слоёв ${plies}`, 1);
+  push('plies', plies ? String(plies) : '', `plies ${plies}`, 1);
   const comp = headerComposition(h.composition);
   push('composition', comp.machine, comp.human, 2);
   const len = headerCm(h.lengthCm);
-  push('length_cm', len, `длина ${len} см`, 2);
+  push('length_cm', len, `length ${len} cm`, 2);
   push('date', headerDate(h.dateISO), headerDate(h.dateISO), 2);
   return out;
 }

@@ -136,7 +136,7 @@ export function AnnotationEditor({
               onClose();
             }
           }}
-          placeholder={d.key === 'dim' ? 'значение с единицами — «6 мм»' : 'что тут делать'}
+          placeholder={d.key === 'dim' ? 'a value with units — “6 mm”' : 'what to do here'}
           maxLength={maxLength}
           className='min-w-0 flex-1 resize-none border border-borderColor bg-bgColor px-1 py-px text-micro leading-snug text-textColor focus:border-textColor focus:outline-none'
         />
@@ -150,7 +150,7 @@ export function AnnotationEditor({
       {renderPiecePicker && (
         <div className='flex flex-wrap items-center gap-1'>
           <Text size='micro' variant='label' component='span' className='shrink-0 uppercase'>
-            детали:
+            pieces:
           </Text>
           <ChipRow>
             {pieceKeys.map((k) => {
@@ -159,12 +159,14 @@ export function AnnotationEditor({
                 <Chip
                   key={k}
                   tone={name ? 'default' : 'error'}
-                  title={name ? 'убрать деталь из указания' : 'детали с таким ключом больше нет'}
+                  title={
+                    name ? 'remove the piece from the callout' : 'no piece with this key any more'
+                  }
                   onRemove={() => onPieces(pieceKeys.filter((x) => !sameKey(x, k)))}
                 >
                   {/* ИМЯ ВИДНО ДАЖЕ У НЕИЗВЕСТНОЙ ДЕТАЛИ: без него не понять, что именно было
                       привязано, и восстановить связь можно только угадав. */}
-                  {name ?? `${k} — нет среди деталей`}
+                  {name ?? `${k} — not among the pieces`}
                 </Chip>
               );
             })}
@@ -201,16 +203,16 @@ export function AnnotationEditor({
       )}
 
       <ChipRow>
-        <Chip dashed onClick={onRemove} title='удалить указание целиком'>
-          удалить
+        <Chip dashed onClick={onRemove} title='delete the whole callout'>
+          delete
         </Chip>
         {onDemote && (
-          <Chip dashed onClick={onDemote} title='убрать фигуру, оставить нумерованную точку'>
-            сделать точкой
+          <Chip dashed onClick={onDemote} title='drop the shape, keep the numbered point'>
+            make it a point
           </Chip>
         )}
-        <Chip dashed onClick={onClose} title='закрыть правку (Esc или ⌘Enter)'>
-          готово
+        <Chip dashed onClick={onClose} title='close the editor (Esc or ⌘Enter)'>
+          done
         </Chip>
         {/* ПОДСКАЗКА ПРО РУЧКИ — ТОЛЬКО КОГДА ЯКОРЯ ЕСТЬ. `d.handles` отвечает на вопрос «правится
             ли ВИД ручками», а не «есть ли у ЭТОЙ фигуры хоть одна точка». У пина примерки якорей
@@ -218,7 +220,8 @@ export function AnnotationEditor({
             которого нет. Владелец, который про свои якоря молчит, получает прежнее поведение. */}
         {d.handles && (anchors ?? 1) > 0 && (
           <Text size='nano' variant='label' component='span'>
-            точки правятся ручками на кадре; клик по ручке и Delete убирают точку
+            points are edited by the handles on the frame; click a handle and press Delete to drop
+            the point
           </Text>
         )}
       </ChipRow>

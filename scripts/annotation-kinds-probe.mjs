@@ -147,12 +147,12 @@ for (const k of [...ALL_KIND_KEYS, ...junk]) {
   }
 }
 // Подсказка дуги ведёт по НОВОМУ жесту: начало, конец, изгиб — а не «три точки».
-check('дуга: первый шаг — начало', placingHint('arc', 0).includes('начало'));
-check('дуга: второй шаг — конец', placingHint('arc', 1).includes('конец'));
-check('дуга: третий шаг — изгиб', placingHint('arc', 2).includes('изгиб'));
-check('зона: подсказка про замыкание', placingHint('polygon', 3).includes('замкните'));
-check('зона: до минимума говорит, сколько нужно', placingHint('polygon', 1).includes('от 3'));
-check('маркер: подсказка про жест, а не про клики', placingHint('ink', 0).includes('ведите'));
+check('дуга: первый шаг — начало', placingHint('arc', 0).includes('start'));
+check('дуга: второй шаг — конец', placingHint('arc', 1).includes('the end'));
+check('дуга: третий шаг — изгиб', placingHint('arc', 2).includes('bend'));
+check('зона: подсказка про замыкание', placingHint('polygon', 3).includes('close it'));
+check('зона: до минимума говорит, сколько нужно', placingHint('polygon', 1).includes('at least 3'));
+check('маркер: подсказка про жест, а не про клики', placingHint('ink', 0).includes('drag'));
 
 // --- ЦВЕТА ------------------------------------------------------------------------------------
 check('шесть цветов вместе с чернилами', ANNOTATION_COLOR_KEYS.length === 6);

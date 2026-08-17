@@ -31,24 +31,24 @@ export function validateSeamAllowanceStandard(raw?: string): string | null {
 
   const n = Number(v);
   if (!Number.isFinite(n)) {
-    return 'припуск задаётся числом в миллиметрах — например 10 или 7; чтобы снять эталон, очистите поле';
+    return 'the seam allowance is a number in millimetres — 10 or 7, for example; to drop the standard, clear the field';
   }
   // The column is DECIMAL(6,1): a second digit would be dropped on the way in, silently changing the
   // standard everything downstream is compared against.
   const decimals = v.includes('.') ? v.split('.')[1].length : 0;
   if (decimals > 1) {
-    return 'не больше одного знака после запятой — колонка хранит десятые миллиметра, остальное потерялось бы молча';
+    return 'no more than one decimal place — the column stores tenths of a millimetre, the rest would be lost silently';
   }
   if (n < SEAM_ALLOWANCE_MIN_MM) {
-    return 'припуск не бывает отрицательным: 0 и больше; чтобы записать «эталон не задан», очистите поле, а не ставьте минус';
+    return 'a seam allowance is never negative: 0 and up; to record “the standard is not set”, clear the field instead of typing a minus';
   }
   if (n > SEAM_ALLOWANCE_MAX_MM) {
-    return `значение в МИЛЛИМЕТРАХ, а самый широкий реальный припуск — подгиб низа 40-50 мм; потолок ${SEAM_ALLOWANCE_MAX_MM}. Похоже на лишний ноль`;
+    return `the value is in MILLIMETRES, and the widest real allowance is a 40-50 mm bottom hem; the ceiling is ${SEAM_ALLOWANCE_MAX_MM}. looks like an extra zero`;
   }
   // Ловит ОБРАТНУЮ ошибку: «1» от человека, думающего в сантиметрах, — это десятая доля того, что он
   // имел в виду, и число совершенно правдоподобное. Ноль исключён: он настройка, а не опечатка.
   if (n > 0 && n < SEAM_ALLOWANCE_SUSPICIOUSLY_SMALL_MM) {
-    return 'значение в МИЛЛИМЕТРАХ — меньше 1 мм похоже на сантиметры в миллиметровом поле (10, а не 1); поставьте 0, если выкройки действительно несут линию кроя';
+    return 'the value is in MILLIMETRES — less than 1 mm looks like centimetres in a millimetre field (10, not 1); put 0 if the patterns really do carry the cut line';
   }
   return null;
 }

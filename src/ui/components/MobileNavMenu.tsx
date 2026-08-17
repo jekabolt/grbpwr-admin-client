@@ -80,7 +80,7 @@ export function MobileNavMenu() {
 
               <section>
                 <Text variant='uppercase' size='micro' className='text-labelColor'>
-                  {account?.username ? `аккаунт · ${account.username}` : 'аккаунт'}
+                  {account?.username ? `account · ${account.username}` : 'account'}
                 </Text>
                 <div className='mt-2 grid grid-cols-2 gap-2'>
                   <DialogPrimitives.Close asChild>
@@ -94,7 +94,7 @@ export function MobileNavMenu() {
                           : 'hover:bg-textColor hover:text-bgColor',
                       )}
                     >
-                      мой профиль
+                      my profile
                     </Link>
                   </DialogPrimitives.Close>
                 </div>
