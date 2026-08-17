@@ -124,7 +124,13 @@ export function FileTasksSection({
     // И весь раздел задач: прикрепление меняет вложения карточки задачи, а форма задачи
     // сохраняет `file_ids` ПОЛНЫМ НАБОРОМ — открытая на устаревших данных, она вернула бы
     // файл обратно (или снесла бы чужое прикрепление) первым же «сохранить».
-    qc.invalidateQueries({ queryKey: ['tasks'] });
+    //
+    // `refetchType: 'none'` — пометить протухшим, но не перекачивать СЕЙЧАС: единственный
+    // живой наблюдатель этого ключа в раскрытой карточке — пикер, и он тянет тысячу строк.
+    // Прикрепил три задачи подряд — три полных ListTasks впустую: строка и так уходит из
+    // списка свободных, потому что обновился список задач ФАЙЛА. Доска и карточка задачи
+    // сейчас не смонтированы и перечитают всё сами при первом же заходе.
+    qc.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' });
   };
 
   const attach = useMutation({
@@ -163,7 +169,9 @@ export function FileTasksSection({
       )
     : free;
 
-  const failure = attach.error ?? detach.error;
+  // Только отцепление: отказ прикрепления печатается ВНУТРИ пикера, где человек и находится.
+  // Общая переменная показывала бы одну и ту же фразу дважды — в модалке и под ней.
+  const failure = detach.error;
 
   return (
     <div className='flex flex-col gap-1'>
@@ -228,9 +236,15 @@ export function FileTasksSection({
                 <Pill tone='ink' className='flex-none tabular-nums'>
                   #{taskId}
                 </Pill>
+                {/* СОСЕДНЯЯ ВКЛАДКА, а не переход на месте. Уход по ссылке размонтировал бы
+                    карточку вместе с её вопросом «закрыть без сохранения»: набранное, но не
+                    сохранённое имя файла исчезло бы молча — ровно то, что этот вопрос и
+                    существует предотвращать. */}
                 <Link
                   to={`/tasks/${taskId}`}
-                  title={t.title ?? ''}
+                  target='_blank'
+                  rel='noopener noreferrer'
+                  title={`${t.title ?? ''}\nоткроется в соседней вкладке`}
                   className='min-w-0 flex-1 truncate underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                 >
                   <Text size='micro' component='span'>
@@ -291,6 +305,16 @@ export function FileTasksSection({
         <Text size='micro' variant='label'>
           пока файл здесь числится, удалить его нельзя: в задаче осталась бы ссылка в никуда.
           список включает и архивные задачи — архивная держит файл ровно так же.
+        </Text>
+      )}
+
+      {/* Причина выключенной кнопки — ТЕКСТОМ, как и у «удалить» в подвале карточки.
+          Подсказка при наведении объясняет только тому, кто уже заподозрил, что серая кнопка
+          что-то значит. */}
+      {mayRead && !mayLink && (
+        <Text size='micro' variant='label'>
+          прикрепить и отцепить может тот, у кого есть право tasks:write и включён режим
+          записи: связь живёт на стороне задачи, а не файла.
         </Text>
       )}
 

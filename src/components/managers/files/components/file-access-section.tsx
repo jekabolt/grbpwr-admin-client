@@ -106,7 +106,12 @@ export function FileAccessSection({
   const inCircle =
     !resolved ||
     isSuper ||
-    (!!me && (me === uploaderName || owners.some((o) => o.username === me)));
+    (!!me &&
+      // Загрузивший сверяется ОБЕИМИ половинами, как и на сервере: имя плюс живой
+      // `uploaded_by_id`. У файла, чей автор удалён, id обнулился каскадом, а имя-строка
+      // осталась — и заведённая заново учётка с тем же именем получила бы включённый
+      // переключатель уровня на чужом файле и отказ сервера в ответ на каждое нажатие.
+      ((me === uploaderName && uploaderId > 0) || owners.some((o) => o.username === me)));
   const mayEdit = writable && inCircle;
 
   const admins = useMemo(() => adminsData?.admins ?? [], [adminsData]);
@@ -133,10 +138,14 @@ export function FileAccessSection({
   const setAccess = useMutation({
     mutationFn: (args: { level: AccessLevel; adminIds: number[]; linkTtl: number }) =>
       accessService.set({ fileId, ...args }),
-    onSuccess: (res) => {
+    onSuccess: (res, vars) => {
       // Рисуем по СОХРАНЁННОМУ, а не по тому, что надеялись отправить: свежесозданный адрес
       // ссылки приезжает именно здесь.
       setApplied(res.access ?? undefined);
+      // Чип срока загорается только ПОСЛЕ того, как сервер принял. Нажми мы его сразу, отказ
+      // (нет прав, невыкаченный хендлер) оставил бы нажатым срок, которого нигде нет, — рядом
+      // со строкой, называющей прежний срок, и с плашкой об ошибке.
+      setChosenTtl(vars.level === 'link' ? vars.linkTtl : undefined);
       invalidate();
     },
   });
@@ -165,16 +174,24 @@ export function FileAccessSection({
   const currentTtl = chosenTtl ?? (link?.url ? (link.expiresAt ? undefined : 0) : undefined);
   const busy = setAccess.isPending || rotate.isPending;
 
+  /**
+   * Какой срок уедет вместе с уровнем `link`.
+   *
+   * Строка публичной ссылки ПЕРЕЖИВАЕТ смену уровня: ушёл на `team`, вернулся на `link` — это
+   * та же ссылка, и её бессрочность была осознанным выбором. Подставить сюда семь дней значит
+   * молча назначить смерть тому, что человек сделал вечным. Конечный срок восстановить нельзя
+   * (сервер хранит дату, а она уже уехала от момента выбора), поэтому у него тот же умолчательный
+   * срок, что и у новой ссылки, — и диалог называет вслух, какой именно применится.
+   */
+  const linkTtlFor = (next: AccessLevel): number => {
+    if (next !== 'link') return 0;
+    if (chosenTtl !== undefined) return chosenTtl;
+    if (link?.url) return link.expiresAt ? 168 : 0;
+    return 168;
+  };
+
   const applyLevel = (next: AccessLevel) => {
-    setAccess.mutate({
-      level: next,
-      adminIds: peopleIds,
-      // Срок берётся из ЯВНОГО выбора (`chosenTtl`), а не из `currentTtl`: у файла, который
-      // ещё ни разу не публиковали, ссылки нет, `expiresAt` пуст — и `currentTtl` честно
-      // читается как 0, то есть «бессрочно». Самое дорогое из возможных значений не имеет
-      // права быть тем, что подставляется молча. Семь дней — то, что подписано в диалоге.
-      linkTtl: next === 'link' ? (chosenTtl ?? 168) : 0,
-    });
+    setAccess.mutate({ level: next, adminIds: peopleIds, linkTtl: linkTtlFor(next) });
   };
 
   const openPicker = () => {
@@ -187,20 +204,33 @@ export function FileAccessSection({
   const q = query.trim().toLowerCase();
   const pickerRows = useMemo(() => {
     const seen = new Set<number>();
-    const list: { id: number; username: string; specialties: string[] }[] = [];
+    const list: { id: number; username: string; specialties: string[]; missing: boolean }[] = [];
+    // Отсутствие в `ListAdmins` считается ТОЛЬКО когда список пришёл: на пустом ответе (запрос
+    // ещё в пути или упал) отключённым выглядел бы каждый.
+    const known = new Set(admins.map((a) => Number(a.id ?? 0)).filter((n) => n > 0));
     // Сначала те, кто уже в списке: человека, которого нет в `ListAdmins` (учётка отключена),
     // иначе нельзя было бы ни оставить осознанно, ни убрать осознанно.
     people.forEach((p) => {
       const id = Number(p.id ?? 0);
       if (!id || seen.has(id)) return;
       seen.add(id);
-      list.push({ id, username: p.username ?? `#${id}`, specialties: p.specialties ?? [] });
+      list.push({
+        id,
+        username: p.username ?? `#${id}`,
+        specialties: p.specialties ?? [],
+        missing: known.size > 0 && !known.has(id),
+      });
     });
     admins.forEach((a) => {
       const id = Number(a.id ?? 0);
       if (!id || seen.has(id)) return;
       seen.add(id);
-      list.push({ id, username: a.username ?? `#${id}`, specialties: a.specialties ?? [] });
+      list.push({
+        id,
+        username: a.username ?? `#${id}`,
+        specialties: a.specialties ?? [],
+        missing: false,
+      });
     });
     return list;
   }, [people, admins]);
@@ -262,6 +292,12 @@ export function FileAccessSection({
 
   const shownEvents = allEvents ? events : events.slice(0, 5);
 
+  // Диалог перехода на `link` называет срок, который применится, вслух: у ссылки, сделанной
+  // бессрочной, он останется бессрочным, а не станет молча недельным.
+  const pendingTtl = linkTtlFor('link');
+  const pendingTtlLabel =
+    LINK_TTLS.find((t) => t.hours === pendingTtl)?.label ?? `${pendingTtl} ч`;
+
   return (
     <div className='flex flex-col gap-1'>
       <GroupLabel
@@ -289,8 +325,12 @@ export function FileAccessSection({
             {ACCESS_LEVEL_HINT[level]}
           </Text>
           <Text size='micro' variant='label'>
+            {/* Круг «загрузивший | владелец | супер» стоит на ЗАПИСИ, а не на чтении: блок
+                доступа читает любой, кто файл видит, — файл, который видеть нельзя, в ответе
+                не появляется вовсе. Поэтому 403 здесь означает отсутствие доступа к разделу
+                целиком, а не к этому блоку. */}
             {isForbidden(error)
-              ? 'подробности доступа (люди, ссылка, журнал) видны загрузившему, владельцу и супер-админу.'
+              ? 'нет доступа к разделу «файлы» — блок доступа читается вместе с ним.'
               : isUnknownRoute(error)
                 ? 'подробности доступа этот сервер ещё не отдаёт: либо сторона доступа не выкачена, либо файла уже нет.'
                 : errorText(error, 'блок доступа не прочитался')}
@@ -300,7 +340,11 @@ export function FileAccessSection({
         <>
           {/* ТРИ ПОЛОЖЕНИЯ ОДНОГО ПЕРЕКЛЮЧАТЕЛЯ. `radiogroup` не для украшения: он и есть то,
               чем «взаимоисключающие уровни» отличаются от трёх флажков — и на экране, и для
-              экранного диктора. */}
+              экранного диктора.
+              Стрелок здесь нет намеренно, и это ОТСТУПЛЕНИЕ от APG, а не недосмотр: в
+              каноническом radiogroup выбор следует за фокусом, а тут каждый выбор мгновенно
+              публикует файл наружу или прячет его от команды. Табом достижимо каждое
+              положение, Enter/Пробел спрашивают подтверждение — цена нажатия важнее канона. */}
           <div role='radiogroup' aria-label='уровень доступа' className='flex flex-col'>
             {ACCESS_LEVELS.map((l, i) => {
               const on = level === l;
@@ -387,10 +431,14 @@ export function FileAccessSection({
               >
                 кто видит файл
               </GroupLabel>
+              {/* Плашка НЕ повторяет подпись уровня (она стоит на двадцать пикселей выше и уже
+                  сказала, что файл пропадает у остальных), а называет следствие, которого не
+                  говорит больше никто: счётчик темы перестаёт быть фактом о теме. */}
               <CalloutBox tone='warning'>
                 <Text size='micro' component='span'>
-                  для всех остальных файла <b>не существует</b>: он пропадает из сетки, из поиска,
-                  из счётчиков тем и из задачи, к которой прикреплён. они не увидят даже имени.
+                  счётчики тем становятся <b>разными у разных людей</b>: у того, кому файл не
+                  виден, он не считается. это не сбой — либо счётчик врёт одним, либо имя файла
+                  утекает другим, и выбрано первое.
                 </Text>
               </CalloutBox>
               <div className='flex flex-col'>
@@ -415,7 +463,10 @@ export function FileAccessSection({
                         </Text>
                       )}
                     </div>
-                    {r.username === uploaderName ? (
+                    {/* Строка загрузившего узнаётся по КЛЮЧУ, а не по совпадению имён: тёзка,
+                        заведённый после удаления автора, — другой человек, и «всегда» вместо
+                        «убрать» сделало бы его несъёмным из списка, где сервер его не держит. */}
+                    {r.key.startsWith('up:') ? (
                       /* Загрузивший неудаляем, и это решает СЕРВЕР — он кладёт его в список сам.
                          Крестик здесь был бы обещанием, которое сервер отменит следующим
                          ответом. */
@@ -450,10 +501,14 @@ export function FileAccessSection({
 
           {level === 'link' && (
             <div className='flex flex-col gap-1'>
+              {/* Тот же довод, что у плашки уровня `people`: подпись уровня уже сказала, что
+                  ссылку откроет кто угодно. Здесь — то, чего не говорит больше ничто: у
+                  выданной ссылки нет отзыва поштучно. */}
               <CalloutBox tone='warning'>
                 <Text size='micro' component='span'>
-                  по этой ссылке файл откроет <b>кто угодно</b>, без входа в админку. ссылку
-                  можно переслать дальше — рассчитывайте на то, что перешлют.
+                  отозвать ссылку у одного человека <b>нельзя</b>: её можно только пересоздать
+                  целиком, и тогда перестанет работать и та копия, что лежит у своих. срок
+                  ограничивает окно, но не пересылку.
                 </Text>
               </CalloutBox>
               {shownUrl ? (
@@ -485,8 +540,12 @@ export function FileAccessSection({
               )}
 
               <div className='flex flex-wrap items-center gap-1.5'>
+                {/* «ПЕРЕСТАВИТЬ», а не «срок»: нажатым чип бывает только после выбора в этой
+                    сессии или у бессрочной ссылки — у ссылки с конечным сроком не горит ни
+                    один, и подпись «срок» над пустым рядом читалась бы как «срока нет». Сам
+                    срок назван строкой ниже. */}
                 <Text size='micro' variant='label' component='span'>
-                  срок:
+                  переставить срок:
                 </Text>
                 {LINK_TTLS.map((t) => (
                   <Chip
@@ -494,10 +553,9 @@ export function FileAccessSection({
                     selected={currentTtl === t.hours}
                     pressed={currentTtl === t.hours}
                     disabled={!mayEdit || busy}
-                    onClick={() => {
-                      setChosenTtl(t.hours);
-                      setAccess.mutate({ level: 'link', adminIds: peopleIds, linkTtl: t.hours });
-                    }}
+                    onClick={() =>
+                      setAccess.mutate({ level: 'link', adminIds: peopleIds, linkTtl: t.hours })
+                    }
                   >
                     {t.label}
                   </Chip>
@@ -615,8 +673,9 @@ export function FileAccessSection({
           {pendingLevel === 'link' && (
             <Text>
               файл станет доступен кому угодно со ссылкой, <b>без входа в админку</b>. ссылку
-              перешлют дальше — рассчитывайте на это. срок по умолчанию 7 дней, его можно
-              переставить сразу после.
+              перешлют дальше — рассчитывайте на это. срок: {pendingTtlLabel}
+              {pendingTtl === 0 ? ' — как у нынешней ссылки' : ''}, переставить можно сразу
+              после.
             </Text>
           )}
           {pendingLevel === 'people' && (
@@ -682,14 +741,21 @@ export function FileAccessSection({
             сервер держит в списке сам: снять его нельзя, иначе файл однажды остался бы без
             единого человека, который может его открыть.
           </Text>
-          <Input
-            name='accessQuery'
-            aria-label='поиск по имени или специальности'
-            value={query}
-            placeholder='имя или специальность'
-            className='max-w-[240px]'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-          />
+          <div className='flex flex-wrap items-center gap-2'>
+            <Input
+              name='accessQuery'
+              aria-label='поиск по имени или специальности'
+              value={query}
+              placeholder='имя или специальность'
+              className='max-w-[240px]'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+            />
+            {/* Счётчик рядом с поиском: отмеченные вне фильтра не видны, и без числа строка
+                «отмеченные — весь список» опровергается тем, что на экране их ноль. */}
+            <Text size='micro' variant='label' component='span' className='tabular-nums'>
+              отмечено {picked.length}
+            </Text>
+          </div>
           <div className='flex max-h-72 flex-col overflow-y-auto'>
             {found.map((p) => {
               const isUploader = uploaderId > 0 && p.id === uploaderId;
@@ -734,6 +800,14 @@ export function FileAccessSection({
                         ? 'загрузил файл · остаётся в списке всегда'
                         : p.specialties.join(', ') || 'специальность не указана'}
                     </Text>
+                    {/* Предупреждение об отключённом НЕ обрезается: это единственное место,
+                        где видно, что снятая здесь отметка необратима — такого человека нет в
+                        списке людей, и вернуть ему доступ будет неоткуда. */}
+                    {p.missing && !isUploader && (
+                      <Text size='nano' variant='label' component='span' className='uppercase'>
+                        аккаунт отключён · сняв отметку, вернуть его сюда будет нельзя
+                      </Text>
+                    )}
                   </span>
                 </button>
               );

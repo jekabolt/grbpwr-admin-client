@@ -64,7 +64,12 @@ function renderBody(text: string, known: Set<string>): React.ReactNode[] {
   let m = re.exec(text);
   while (m) {
     if (m.index > last) out.push(text.slice(last, m.index));
-    if (known.has(m[1].toLowerCase())) {
+    // «@» должна открывать СЛОВО, а не стоять внутри него: в «пиши на pasha@kirill.dev»
+    // подсветилось бы «@kirill», и обычный адрес почты выглядел бы обращением к человеку,
+    // которого никто не звал.
+    const before = m.index === 0 ? '' : text[m.index - 1];
+    const opensWord = !before || /[\s([{«"'—–-]/.test(before);
+    if (opensWord && known.has(m[1].toLowerCase())) {
       out.push(
         <span key={`m${key++}`} className='font-bold'>
           {m[0]}
@@ -132,9 +137,11 @@ export function FileComments({
   const [confirmDelete, setConfirmDelete] = useState<LibraryFileComment | undefined>(undefined);
 
   const invalidate = () => {
-    qc.invalidateQueries({ queryKey: commentsKeys.ofFile(fileId) });
-    // И сам файл: `comments_count` едет на нём, а из него — счётчик на плитке.
-    qc.invalidateQueries({ queryKey: filesKeys.file(fileId) });
+    // ВЕСЬ префикс `['files']`, а не только карточка. Счётчик на плитке приезжает на
+    // `comments_count`, а плитка рисуется из ВЫДАЧИ СПИСКА (`['files','list',…]`) — она не
+    // потомок ключа карточки, и точечная инвалидация оставляла бы плитку со старым числом на
+    // все 30 минут её staleTime. То же и для плиток вложений на карточке задачи.
+    qc.invalidateQueries({ queryKey: filesKeys.all });
   };
 
   const add = useMutation({
@@ -142,7 +149,9 @@ export function FileComments({
     onSuccess: () => {
       setDraft('');
       setMentioning(false);
-      setExpanded(true);
+      // Разворачивать ленту не нужно и вредно: она отсортирована от старых к новым, и
+      // свёрнутый хвост из трёх последних всегда содержит только что отправленное. Разворот
+      // вываливал бы в карточку весь тред из сорока реплик ровно там, где он и не помещается.
       invalidate();
     },
   });
@@ -159,11 +168,13 @@ export function FileComments({
     onSuccess: invalidate,
   });
 
-  // Правит и удаляет ТОЛЬКО автор (супер — любую), и это проверяет сервер. Сверка идёт по
-  // username-строке, потому что именно её несёт реплика: `author` — исторический факт на момент
-  // письма. Заведённая заново учётка с тем же именем увидела бы кнопки, но получила бы отказ —
-  // клиент здесь не охрана, а способ не показывать кнопку, которая заведомо не сработает.
-  const mine = (c: LibraryFileComment) => isSuper || (!!me && c.author === me);
+  // Правит и удаляет ТОЛЬКО автор (супер — любую), и это проверяет сервер. Сверка повторяет
+  // серверную ОБЕИМИ половинами: имя (`author` — исторический факт на момент письма) И живой
+  // `author_id`. Одного имени мало: у реплики удалённого аккаунта id обнулился каскадом, и
+  // заведённая заново учётка с тем же именем — другой человек. По имени она получила бы
+  // кнопки «править» и «удалить» на чужую реплику и отказ сервера в ответ.
+  const mine = (c: LibraryFileComment) =>
+    isSuper || (!!me && c.author === me && Number(c.authorId ?? 0) > 0);
 
   const shown = expanded ? comments : comments.slice(-PREVIEW_COUNT);
   const hidden = comments.length - shown.length;

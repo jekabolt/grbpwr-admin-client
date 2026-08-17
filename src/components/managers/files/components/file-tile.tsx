@@ -144,32 +144,40 @@ export function FileTile({
             </Text>
           </span>
         )}
-        {/* Бейдж расширения поверх кадра: у картинки и pdf превью показывает содержимое, а
-            чем файл открывать — нет. На плашке он избыточен, но снимать его там значило бы
-            держать две разные плитки. */}
-        <Text
-          size='nano'
-          component='span'
-          className='absolute bottom-1 right-1 bg-textColor px-1 uppercase text-bgColor'
-        >
-          {ext}
-        </Text>
-        {/* Счётчик реплик — НАД КАДРОМ, а не в подвале плитки: подвал у плитки одной строки, и
+        {/* ОДНА ПОЛОСА НА ДВЕ ПЛАШКИ, а не две абсолютные метки в противоположных углах: на
+            узкой плитке (сетка вложений задачи начинается со 130px) «обсуждение · 128» и
+            шестибуквенное расширение наезжали бы друг на друга двумя чёрными прямоугольниками.
+            Расширение неприкосновенно и стоит справа, счётчик слева жмётся и обрезается.
+
+            Счётчик — НАД КАДРОМ, а не в подвале плитки: подвал у плитки в одну строку, и
             четвёртый элемент в нём переносил бы её ровно у тех файлов, которые обсуждают, то
             есть у самых нужных. Ноль не печатается: «0 реплик» это не факт, а шум.
             «обсуждение · N», а не «N реплик»: склонение при числе живёт в модуле очереди
-            загрузки, и тащить её машину в плитку (а плитка стоит ещё и на карточке задачи)
-            ради одного слова — плохой обмен. */}
-        {comments > 0 && (
+            загрузки, и тащить её машину в плитку ради одного слова — плохой обмен. */}
+        <span className='pointer-events-none absolute inset-x-1 bottom-1 flex items-end justify-between gap-1'>
+          {comments > 0 ? (
+            <Text
+              size='nano'
+              component='span'
+              title={`реплик в обсуждении: ${comments}`}
+              className='min-w-0 truncate bg-textColor px-1 uppercase text-bgColor tabular-nums'
+            >
+              обсуждение · {comments}
+            </Text>
+          ) : (
+            <span />
+          )}
+          {/* Бейдж расширения поверх кадра: у картинки и pdf превью показывает содержимое, а
+              чем файл открывать — нет. На плашке он избыточен, но снимать его там значило бы
+              держать две разные плитки. */}
           <Text
             size='nano'
             component='span'
-            title={`реплик в обсуждении: ${comments}`}
-            className='absolute bottom-1 left-1 bg-textColor px-1 uppercase text-bgColor tabular-nums'
+            className='flex-none bg-textColor px-1 uppercase text-bgColor'
           >
-            обсуждение · {comments}
+            {ext}
           </Text>
-        )}
+        </span>
       </button>
 
       <div className='flex min-w-0 flex-col gap-0.5 border-t border-hairline px-1.5 py-1'>
