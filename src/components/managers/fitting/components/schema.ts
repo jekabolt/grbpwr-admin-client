@@ -66,6 +66,28 @@ const fittingCalloutSchema = z.object({
   filled: z.boolean().optional().default(false),
 });
 
+/**
+ * ЗАПИСКА ОБЯЗАТЕЛЬНА У ПИНА — ЗЕРКАЛО СЕРВЕРНОГО ПРАВИЛА, ДОСЛОВНО, ВКЛЮЧАЯ ОБРЕЗКУ ПРОБЕЛОВ.
+ *
+ * Без него форма отпускала сабмит с пустой точкой, и отказ приходил с сервера — ПО ОДНОМУ ЗА РЕЙС:
+ * dto отвечает первым нарушением и остальные в тот же ответ не кладёт. Обвёл две зоны без подписи,
+ * снял снимок (обе стали пустыми точками) — отказ про первую, дописал, сохранил, отказ про вторую.
+ * Здесь же подсвечиваются ВСЕ виноватые строки разом и не тратится ни одного рейса.
+ *
+ * ПРАВИЛО СТОИТ НА СТРОКЕ, А НЕ НА ФОРМЕ ЦЕЛИКОМ: путь ошибки (`callouts.3.note`) обязан указывать
+ * на конкретное поле — на нём стоит и сообщение под полем, и подсветка, и посадка серверного
+ * отказа. Общий `.refine` на массиве назвал бы только сам массив.
+ */
+const fittingCalloutSchemaChecked = fittingCalloutSchema.superRefine((c, ctx) => {
+  if ((c.kind ?? 'pin') !== 'pin') return;
+  if ((c.note ?? '').trim()) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ['note'],
+    message: 'у нумерованной точки записка и есть всё содержание — напишите, что не так, или нарисуйте фигуру',
+  });
+});
+
 // The structured "what to change" work list a fitting produces (S26). target is the change CATEGORY;
 // zone + pieceIds are the structured LOCATION; status (open|resolved) replaces the legacy boolean;
 // carriedFromId links an item to the one in the previous round it continues.
@@ -105,7 +127,7 @@ export const fittingSchema = z
     sizes: z.array(fittingSizeSchema).default([]),
     patterns: z.array(fittingPatternSchema).default([]),
     mediaIds: z.array(z.number()).default([]),
-    callouts: z.array(fittingCalloutSchema).default([]),
+    callouts: z.array(fittingCalloutSchemaChecked).default([]),
     // §4 round tracking: sequence number (0 = server auto-assigns per tech card), structured
     // outcome ('undecided' sentinel in the form ↔ '' on the wire), and the change-request work list.
     roundNumber: z.number().int().optional().default(0),

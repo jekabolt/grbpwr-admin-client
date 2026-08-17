@@ -7,6 +7,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import Select from 'ui/components/select';
 import Text from 'ui/components/text';
 import TextareaField from 'ui/form/fields/textarea-field';
+import { demoteCalloutToPin } from './callout-geometry';
 import { useDisclosure } from './disclosure';
 import { FittingFormData } from './schema';
 
@@ -180,8 +181,10 @@ export function FittingCallouts({ mediaById }: { mediaById: Map<number, common_M
                                 // фигура легла бы на новую фотографию по координатам старой — с
                                 // виду нормальная линия, показывающая не туда. Заметка остаётся,
                                 // геометрию рисуют заново там, где она теперь стоит.
-                                setValue(`callouts.${index}.kind`, 'pin', { shouldDirty: true });
-                                setValue(`callouts.${index}.points`, [], { shouldDirty: true });
+                                //
+                                // ТЕМ ЖЕ ПРАВИЛОМ, ЧТО И ОСТАЛЬНЫЕ ДВА ПУТИ: своя копия здесь уже
+                                // однажды разошлась — забывала погасить пунктир и штриховку.
+                                demoteCalloutToPin(setValue, index);
                               }
                               field.onChange(next);
                             }}

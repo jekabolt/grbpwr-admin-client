@@ -1,11 +1,14 @@
 import { common_MediaFull } from 'api/proto-http/admin';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useController, useFieldArray, useFormContext, useWatch } from 'react-hook-form';
 import { AnnotationEditor } from 'ui/components/annotation/editor';
 import { useEditHistory } from 'ui/components/annotation/history';
 import { rememberPen, type PenStyle, type SurfaceCallout } from 'ui/components/annotation/surface';
 import type { AnnotationColorKey, AnnotationKindKey } from 'ui/components/annotation/wire';
+import { ConfirmationModal } from 'ui/components/confirmation-modal';
+import Text from 'ui/components/text';
 import { FocusedAnnotator, type FocusedView } from 'ui/components/focused-annotator';
+import { demoteCalloutToPin, hasDrawnGeometry } from './callout-geometry';
 import { FittingFormData } from './schema';
 
 type FormCallout = {
@@ -27,6 +30,20 @@ const numOf = (v?: string) => {
   const n = Number((v ?? '').replace(',', '.'));
   return Number.isFinite(n) ? n : 0;
 };
+
+/**
+ * «1 нарисованное указание · 3 нарисованных указания · 5 нарисованных указаний».
+ *
+ * Число в этом вопросе — единственное, ради чего его вообще задают («сколько я сейчас потеряю»),
+ * и склеенное с ним «1 нарисованных указание» читается как сбой, а не как предупреждение.
+ */
+function drawnCalloutsPlural(n: number): string {
+  const mod100 = n % 100;
+  const mod10 = n % 10;
+  if (mod10 === 1 && mod100 !== 11) return 'нарисованное указание';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'нарисованных указания';
+  return 'нарисованных указаний';
+}
 
 // The fitting's "photos & fit notes" — the SAME surface as the tech-card sketch and moodboard,
 // in the same layout: a fixed-height filmstrip where every photo is on screen at once carrying its
@@ -119,28 +136,60 @@ export function FittingMedia({
     field.onChange((field.value ?? []).filter((v) => v !== view.mediaId));
   }
 
+  /**
+   * СНЯТИЕ КАДРА С НАРИСОВАННЫМ — ЧЕРЕЗ ПОДТВЕРЖДЕНИЕ, И ОНО НАЗЫВАЕТ ЧИСЛО.
+   *
+   * «✕» стоит вплотную к «зум», а цена промаха выросла: снятый кадр уносит с собой ВСЕ якоря
+   * своих указаний — обведённую зону, дугу, мерку, — и вернуть их повторным добавлением той же
+   * фотографии нельзя, в форме их уже нет. Спрашиваем только когда есть что терять: кадр без
+   * фигур снимается сразу, иначе подтверждение превратится в шум, который нажимают не читая.
+   *
+   * ПОДТВЕРЖДЕНИЕ ЖИВЁТ ЗДЕСЬ, А НЕ В ОБЩЕЙ ГАЛЕРЕЕ: у неё три вызывающих со своими правилами
+   * (у эскиза выноски адресуют деталь и операцию, у мудборда терять нечего), и вопрос, заданный
+   * за них всех, был бы задан не о том.
+   */
+  const [pendingRemoval, setPendingRemoval] = useState<{ view: FocusedView; shapes: number } | null>(
+    null,
+  );
+  function requestRemoveMedia(view: FocusedView) {
+    const shapes = callouts.filter((c) => c.mediaId === view.mediaId && hasDrawnGeometry(c)).length;
+    if (!shapes) {
+      removeMedia(view);
+      return;
+    }
+    setPendingRemoval({ view, shapes });
+  }
+
   // When a photo is removed from the fitting, un-pin any fit note that was on it — keep the note
   // text but drop the now-dead pin + coords so it isn't saved pointing at a media no longer
   // attached (which could never be shown/repositioned again). Driven off the mediaIds change so it
   // covers a photo removed from anywhere, not only the carousel control.
+  //
+  // ЗАПИСЬ В ИСТОРИЮ ЗДЕСЬ ОБЯЗАТЕЛЬНА, И ЭТО ЕДИНСТВЕННОЕ МЕСТО, ГДЕ ЕЁ НЕ БЫЛО. Пока снятие
+  // фотографии стоило только координат маркера, потеря возвращалась перетаскиванием. Теперь она
+  // стоит РОСЧЕРКА: обведённая зона, дуга и мерка становятся точками, и вернуть их нечем — якорей
+  // в форме больше нет. Хуже того, без записи ⌘Z перематывал бы ЧЕРЕЗ это разжалование, в снимок
+  // прошлого жеста, то есть в состояние, где фигуры ещё не рисовали.
   const prevMediaIdsRef = useRef<number[]>(mediaIds);
   useEffect(() => {
     const prev = prevMediaIdsRef.current;
     prevMediaIdsRef.current = mediaIds;
     const removed = prev.filter((id) => !mediaIds.includes(id));
     if (!removed.length) return;
-    callouts.forEach((c, i) => {
-      if (c.mediaId && removed.includes(c.mediaId)) {
-        setValue(`callouts.${i}.mediaId`, 0, { shouldDirty: true });
-        setValue(`callouts.${i}.posX`, '', { shouldDirty: true });
-        setValue(`callouts.${i}.posY`, '', { shouldDirty: true });
-        // ЯКОРЯ УХОДЯТ ВМЕСТЕ СО СНИМКОМ, как на эскизе. Доли кадра осмысленны только на СВОЁМ
-        // кадре: оставить их значило бы, что открепившаяся мерка, приколотая потом к другой
-        // фотографии, ляжет по координатам удалённой — с виду нормальная линия, показывающая не
-        // туда. Записка при этом остаётся: её писал человек, и она переживает снимок.
-        setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
-        setValue(`callouts.${i}.points`, [], { shouldDirty: true });
-      }
+    const orphaned = callouts
+      .map((c, i) => ({ c, i }))
+      .filter(({ c }) => !!c.mediaId && removed.includes(c.mediaId));
+    if (!orphaned.length) return;
+    history.record();
+    orphaned.forEach(({ i }) => {
+      setValue(`callouts.${i}.mediaId`, 0, { shouldDirty: true });
+      setValue(`callouts.${i}.posX`, '', { shouldDirty: true });
+      setValue(`callouts.${i}.posY`, '', { shouldDirty: true });
+      // ЯКОРЯ УХОДЯТ ВМЕСТЕ СО СНИМКОМ, как на эскизе. Доли кадра осмысленны только на СВОЁМ
+      // кадре: оставить их значило бы, что открепившаяся мерка, приколотая потом к другой
+      // фотографии, ляжет по координатам удалённой — с виду нормальная линия, показывающая не
+      // туда. Записка при этом остаётся: её писал человек, и она переживает снимок.
+      demoteCalloutToPin(setValue, i);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mediaIds]);
@@ -167,6 +216,15 @@ export function FittingMedia({
     // max+1, not length+1: after a mid-list delete, length+1 collides with an existing number —
     // and the number is read-only, so a duplicate can't be fixed by hand. change requests
     // reference fit notes BY number, so it must stay unique.
+    //
+    // ИЗВЕСТНЫЙ ДЕФЕКТ, НЕ ПОЧИНЕННЫЙ ЗДЕСЬ НАМЕРЕННО: max+1 переиспользует номер, если удалить
+    // заметку со СТАРШИМ номером — тогда замечание, ссылавшееся на удалённую, начинает показывать
+    // на новую. Эскиз от этого защищён, потому что считает максимум ещё и по всем ссылающимся
+    // (`referencedNumbers`), а у примерки ссылка живёт СВОБОДНЫМ ЧИСЛОМ в поле «callout #», и
+    // сосчитать её тем же способом нельзя: замечания на редактировании принадлежат не форме, а
+    // отдельному CRUD. Правильная починка — выбор выноски списком вместо ввода числа, и это
+    // отдельная работа. Дефект существовал и до геометрии; здесь он только записан, чтобы
+    // следующий не принял его за случайность.
     const current = (getValues('callouts') ?? []) as FormCallout[];
     const nextNumber =
       Math.max(0, ...current.map((c) => (Number.isFinite(c.number) ? Number(c.number) : 0))) + 1;
@@ -220,7 +278,7 @@ export function FittingMedia({
         };
       });
 
-  return (
+  const gallery = (
     <FocusedAnnotator
       // ТА ЖЕ РАСКЛАДКА, ЧТО У ЭСКИЗОВ, и по той же причине. Примерка стояла в `focused`: один
       // большой кадр, а всё остальное — ноготками под ним. Разговор на примерке идёт «спереди
@@ -323,20 +381,22 @@ export function FittingMedia({
                 ? undefined
                 : () => {
                     history.record();
-                    setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
-                    setValue(`callouts.${i}.points`, [], { shouldDirty: true });
-                    // Пунктир и штриховка у точки не значат ничего: сервер обнулил бы их сам, а
-                    // расхождение формы с хранимым делает примерку «изменённой» сразу после
-                    // сохранения.
-                    setValue(`callouts.${i}.dashed`, false, { shouldDirty: true });
-                    setValue(`callouts.${i}.filled`, false, { shouldDirty: true });
+                    demoteCalloutToPin(setValue, i);
                   }
             }
+            // ПОТОЛОК ТОТ ЖЕ, ЧТО У ПОЛЯ В СПИСКЕ ЗАМЕТОК. Записка живёт в ОДНОМ поле формы, а
+            // правится в двух местах; разные потолки означали, что набранная в списке заметка на
+            // 1200 знаков в редакторе под кадром просто не дописывается — браузер отказывает во
+            // вставке молча, и объяснения этому на экране нет.
+            maxLength={2000}
+            // Ручки правятся только там, где якоря есть. У пина примерки их нет вовсе (его точка
+            // живёт в маркере), и обещать ручки, которых не появится, — врать подсказкой.
+            anchors={c.points?.length ?? 0}
           />
         );
       }}
       onPickMedia={onPickMedia}
-      onRemoveMedia={removeMedia}
+      onRemoveMedia={requestRemoveMedia}
       addLabel='add fitting photo'
       purpose='fitting photos'
       // Снимок примерки — ФОТОГРАФИЯ, как и мудборд: чернильная линия на пёстром кадре тонет.
@@ -349,5 +409,31 @@ export function FittingMedia({
       mediaLabel={(_view, i) => `fitting photo ${i + 1}`}
       carouselLabel='fitting photos'
     />
+  );
+
+  if (!pendingRemoval) return gallery;
+  return (
+    <>
+      {gallery}
+      <ConfirmationModal
+        open
+        onOpenChange={(v) => !v && setPendingRemoval(null)}
+        title='снять снимок вместе с рисунками?'
+        confirmLabel='снять снимок'
+        cancelLabel='оставить'
+        onCancel={() => setPendingRemoval(null)}
+        onConfirm={() => {
+          removeMedia(pendingRemoval.view);
+          setPendingRemoval(null);
+        }}
+        width='sm'
+      >
+        <Text size='small'>
+          {`на этом снимке ${pendingRemoval.shapes} ${drawnCalloutsPlural(pendingRemoval.shapes)}` +
+            ' — зоны, дуги, мерки. Они станут простыми точками: номера и записки останутся, а' +
+            ' нарисованное исчезнет. Вернуть его повторным добавлением той же фотографии нельзя.'}
+        </Text>
+      </ConfirmationModal>
+    </>
   );
 }
