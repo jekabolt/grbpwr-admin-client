@@ -6,6 +6,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { AiPanel, useNoteAssistant, type AiRequest, type AiSuggestion } from './ai-panel';
+import { FormatBar } from './format-bar';
 
 /**
  * Правка заметки: полоса действий, поле во всю ширину и блок помощника.
@@ -19,8 +20,8 @@ import { AiPanel, useNoteAssistant, type AiRequest, type AiSuggestion } from './
  * наведение и `pointerdown` продолжают работать, и «только чтение» получается наполовину. Здесь
  * режим чтения просто не даёт этому компоненту появиться.
  *
- * Панели форматирования (B/I/списки) и вставки файла в тексте пока нет — это T-8.9 вместе с
- * пикером библиотеки и резолвом ссылок `/files/{id}`.
+ * Полоса форматирования и вставка файла живут в `format-bar.tsx`: вся возня с кареткой в
+ * управляемой `textarea` собрана там одним местом, а не размазана по обработчикам кнопок.
  */
 
 /** Наименьшее выделение, которое считается «форматируй только это». Пара случайно задетых
@@ -207,16 +208,22 @@ export function NoteEditor({
         onRetry={(req) => assistant.run(req)}
       />
 
-      {/* Поле — само по себе блок: белая заливка, внешний контур #ccc, без второй коробки
-          вокруг. Во всю ширину вьюпорта, как и чтение: вариант md=v3 выбран целиком. */}
-      <textarea
-        ref={areaRef}
-        name='noteContent'
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        spellCheck
-        className='block min-h-[60vh] w-full resize-y appearance-none rounded-none border border-borderColor bg-bgColor px-3 py-2.5 text-textBaseSize leading-relaxed focus:border-textColor focus:outline-none'
-      />
+      {/* Полоса форматирования и поле — ОДИН блок: белая заливка, внешний контур #ccc, а между
+          ними волосяная линейка. Полоса своей коробкой была бы второй коробкой поверх первой,
+          чего система не допускает; контур становится чернильным по фокусу внутри — тот же
+          признак фокуса, что у любого поля админки. Во всю ширину вьюпорта, как и чтение:
+          вариант md=v3 выбран целиком. */}
+      <div className='border border-borderColor bg-bgColor focus-within:border-textColor'>
+        <FormatBar areaRef={areaRef} value={value} onChange={onChange} />
+        <textarea
+          ref={areaRef}
+          name='noteContent'
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          spellCheck
+          className='block min-h-[60vh] w-full resize-y appearance-none rounded-none border-0 bg-bgColor px-3 py-2.5 text-textBaseSize leading-relaxed focus:outline-none'
+        />
+      </div>
     </>
   );
 }

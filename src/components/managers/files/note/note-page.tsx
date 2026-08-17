@@ -4,7 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useFilesWritable } from 'lib/stores/files-mode';
 import { useSnackBarStore } from 'lib/stores/store';
-import { ROUTES, SECTION } from 'constants/routes';
+// Адрес заметки НЕ собирается здесь: он живёт в `constants/routes` рядом с самим шаблоном
+// маршрута. Второй сборщик того же адреса разошёлся бы с первым молча — маршрут остался бы
+// рабочим, а ссылка «сохранить как отдельную заметку» вела бы в никуда.
+import { notePath, ROUTES, SECTION } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -42,15 +45,6 @@ import { readNoteDraft, useNoteDraft } from './use-note-draft';
  *    «мой текст пропал»: в чтении остаётся то, что набрано, и pill «не сохранено» вместе с
  *    кнопкой сохранения никуда не деваются.
  */
-
-/**
- * Адрес экрана. Роут прописывает оркестратор (`ROUTES` и `index.tsx` — не в этой задаче), а до
- * тех пор путь живёт здесь одной строкой: T-8.9 («открыть» у `.md` из карточки и с плитки) берёт
- * его отсюда, чтобы адрес существовал в одном месте, а не в трёх.
- */
-export function notePath(id: number): string {
-  return `/files/${id}/note`;
-}
 
 /** Ключ содержимого. Под общим префиксом `files`, чтобы разбор кэша раздела доставал и его. */
 function noteContentKey(id: number) {

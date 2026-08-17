@@ -1,6 +1,7 @@
 import { Fragment, useMemo, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { cn } from 'lib/utility';
+import { FileRefImage, FileRefsProvider, fileRefId, InlinePlate } from './file-refs';
 
 /**
  * Разметчик заметки — ровно те конструкции, которые в заметках действительно пишут.
@@ -12,11 +13,12 @@ import { cn } from 'lib/utility';
  * что где-то не забыли позвать экранирование. Макет (`files-section.html`, md=v3) собирает
  * строку html и экранирует первым шагом — здесь это просто не нужно.
  *
- * ЧЕГО ЗДЕСЬ ПОКА НЕТ. Ссылки вида `/files/{id}` на файл библиотеки и картинки, показанные
- * прямо в тексте, — это T-8.9: там появляется пикер, который их вставляет, и резолв
- * `GetLibraryFile` в свежий `preview_url` при каждом открытии. До тех пор внутренняя ссылка
- * ведёт на карточку файла обычной навигацией spa, а картинка с внутренним адресом рисуется
- * плашкой-ссылкой, а не битым `<img>`: битая картинка читается как «файл пропал», что неправда.
+ * ССЫЛКИ НА ФАЙЛЫ БИБЛИОТЕКИ. `/files/{id}` — внутренний адрес карточки: текстом он ведёт на неё
+ * навигацией spa (без перезагрузки), картинкой — резолвится в свежую подпись через
+ * `GetLibraryFile`. Резолв собран в одном месте (`file-refs.tsx`) и по всему документу сразу, а
+ * не хуком на каждый `<img>`: см. шапку того файла. Проверка адреса там же строгая — распознаётся
+ * ровно `/files/{цифры}` и ничего кроме, потому что распознанный адрес получает право попасть в
+ * `src`.
  */
 
 interface Block {
@@ -125,6 +127,45 @@ function parse(src: string): Block[] {
 /** `code` | **жирный** | *курсив* | [текст](адрес) | ![текст](адрес). Всё прочее — текст. */
 const INLINE = /(`[^`]+`)|(\*\*[^*]+?\*\*)|(\*[^*\s][^*]*?\*)|(!?\[[^\]]*\]\([^)\s]*\))/g;
 
+/** Адрес из токена `[..](адрес)`; для `![..](адрес)` — он же. */
+function tokenHref(token: string): string {
+  return token.slice(token.indexOf('](') + 2, -1);
+}
+
+/**
+ * Номера файлов, на которые ссылаются КАРТИНКИ этого документа, — по одному разу каждый.
+ *
+ * Собирается по уже разобранным блокам, а не по исходной строке, ради двух вещей: блок кода
+ * пропускается целиком (внутри ограды `![x](/files/1)` — это текст, и запрашивать файл ради него
+ * значит спрашивать про строку, которую никто не показывает), а свой экземпляр регулярки не
+ * делит `lastIndex` с разметчиком, который может выполняться прямо сейчас.
+ *
+ * Текстовые ссылки СЮДА НЕ ПОПАДАЮТ намеренно: им резолв не нужен (у ссылки есть свой текст, а
+ * ведёт она в spa), а заметка со списком из сорока ссылок иначе спрашивала бы сорок файлов ради
+ * подписи, которую и так видно.
+ */
+function collectFileRefIds(blocks: Block[]): number[] {
+  const re = new RegExp(INLINE.source, 'g');
+  const seen = new Set<number>();
+  const ids: number[] = [];
+  for (const b of blocks) {
+    if (b.kind === 'code') continue;
+    for (const line of b.lines) {
+      re.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = re.exec(line)) !== null) {
+        if (!m[0].startsWith('!')) continue;
+        const id = fileRefId(tokenHref(m[0]));
+        if (id !== null && !seen.has(id)) {
+          seen.add(id);
+          ids.push(id);
+        }
+      }
+    }
+  }
+  return ids;
+}
+
 function inline(text: string, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = [];
   let last = 0;
@@ -151,10 +192,8 @@ function inline(text: string, keyPrefix: string): ReactNode[] {
       out.push(<i key={key}>{token.slice(1, -1)}</i>);
     } else {
       const image = token.startsWith('!');
-      const cut = token.indexOf('](');
-      const label = token.slice(image ? 2 : 1, cut);
-      const href = token.slice(cut + 2, -1);
-      out.push(<InlineLink key={key} image={image} label={label} href={href} />);
+      const label = token.slice(image ? 2 : 1, token.indexOf(']('));
+      out.push(<InlineLink key={key} image={image} label={label} href={tokenHref(token)} />);
     }
 
     last = m.index + token.length;
@@ -172,9 +211,12 @@ function InlineLink({ image, label, href }: { image: boolean; label: string; hre
   const internal = href.startsWith('/') && !href.startsWith('//');
 
   if (image) {
-    // Внешнюю картинку показываем; внутреннюю — плашкой. Резолв `/files/{id}` в свежий
-    // preview_url приходит в T-8.9; до него `<img src="/files/12">` дал бы битый значок, то
-    // есть соврал бы, что файла нет.
+    // Файл библиотеки — единственный внутренний адрес, который умеет стать картинкой: у него
+    // есть чем её показать (свежая подпись из `GetLibraryFile`). Всё остальное внутреннее —
+    // плашка: `<img src="/files/12/note">` дал бы битый значок, то есть соврал бы, что файла нет.
+    const refId = fileRefId(href);
+    if (refId !== null) return <FileRefImage id={refId} label={label} />;
+
     if (external) {
       return (
         <img
@@ -189,18 +231,16 @@ function InlineLink({ image, label, href }: { image: boolean; label: string; hre
       );
     }
     return (
-      <span
-        className='inline-flex items-center gap-1 border border-borderColor px-1.5 py-px text-micro uppercase tracking-label text-labelColor'
-      >
+      <InlinePlate>
         картинка
         {internal ? (
-          <Link to={href} className='text-highlightColor underline'>
+          <Link to={href} className='text-highlightColor underline normal-case'>
             {label || href}
           </Link>
         ) : (
-          <span>{label || href}</span>
+          <span className='normal-case'>{label || href}</span>
         )}
-      </span>
+      </InlinePlate>
     );
   }
 
@@ -245,8 +285,11 @@ export function MarkdownView({ source, className }: { source: string; className?
   // Разбор — единственная дорогая операция на экране чтения (потолок заметки 512 КиБ), и она
   // не имеет права повторяться из-за перерисовки соседнего баннера.
   const blocks = useMemo(() => parse(source), [source]);
+  // Список номеров держится за разобранный документ, а не за строку: пока текст не изменился,
+  // набор запросов тот же самый, и перерисовка баннера не заводит новых.
+  const refIds = useMemo(() => collectFileRefIds(blocks), [blocks]);
 
-  return (
+  const doc = (
     <div className={cn('leading-relaxed break-words', className)}>
       {blocks.map((b, i) => {
         const key = `b${i}`;
@@ -328,4 +371,8 @@ export function MarkdownView({ source, className }: { source: string; className?
       })}
     </div>
   );
+
+  // Провайдер снаружи готового документа, а не внутри разметки: он и есть то «одно место»,
+  // которое спрашивает файлы за весь документ сразу.
+  return <FileRefsProvider ids={refIds}>{doc}</FileRefsProvider>;
 }
