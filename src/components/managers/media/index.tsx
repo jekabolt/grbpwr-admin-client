@@ -4,11 +4,13 @@ import { SECTION } from 'constants/routes';
 import { isVideo } from 'lib/features/filterContentType';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useInView } from 'react-intersection-observer';
+import { useNavigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
 import {
   MediaViewer,
   ViewerAction,
   mediaFullListToViewerItems,
+  mediaFullViewerSrc,
   useMediaViewer,
 } from 'ui/components/media-viewer';
 import { SideRailLayout } from 'ui/components/side-rail';
@@ -22,9 +24,10 @@ import { MediaRecropDialog } from './components/media-recrop-dialog';
 import { MediaSelectionBar } from './components/media-selection-bar';
 import { PendingMediaPlate } from './components/pending-media-plate';
 import { cropLoss, matchesSlotRatio } from './utils/calculate-aspect';
+import { mediaUsageRefs, usageRefHref, usageRefName, usageRefSlot } from './utils/media-usage';
 import { useFilter } from './utils/useFilter';
 import { usePasteFiles } from './utils/usePasteFiles';
-import { useInfiniteMedia } from './utils/useMediaQuery';
+import { useInfiniteMedia, useMediaUsage } from './utils/useMediaQuery';
 import { usePendingFiles } from './utils/usePendingFiles';
 import { useSelection } from './utils/useSelectMedia';
 
@@ -70,6 +73,7 @@ export function MediaManager({
 }: MediaLayoutProps) {
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage } = useInfiniteMedia();
   const { ref, inView } = useInView();
+  const navigate = useNavigate();
   const prevInViewRef = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Список СОБИРАЕТСЯ ОДИН РАЗ НА ОТВЕТ, а не на каждый рендер: пересобранный массив — новая
@@ -87,6 +91,16 @@ export function MediaManager({
   // Standalone page shows a header + toolbar; the embedded selector (selectionMode) stays minimal.
   const isStandalone = !selectionMode;
   const canUpload = canWrite(SECTION.media);
+
+  // ЗАНЯТОСТЬ СПРАШИВАЕТСЯ ОДИН РАЗ НА СТРАНИЦУ И ПО ВСЕЙ ЗАГРУЖЕННОЙ БИБЛИОТЕКЕ, а не по
+  // отфильтрованному: счётчики полки обязаны относиться к тому же знаменателю, что и остальные
+  // («counted over the N loaded so far»), а отбор по свободным иначе сузил бы сам себя.
+  // В диалоге выбора кадра под слот не спрашивается вовсе — там занятость не показывается нигде.
+  const {
+    usage,
+    isPending: usagePending,
+    isError: usageFailed,
+  } = useMediaUsage(media, isStandalone);
 
   // ⌘V НА СТРАНИЦЕ БИБЛИОТЕКИ — в ту же очередь, куда попадает брошенный файл: плитка ожидания
   // показывает превью, даёт кроп каждому кадру и грузит по кнопке.
@@ -123,15 +137,24 @@ export function MediaManager({
     order,
     search,
     ratio,
+    usageShelf,
     typeCounts,
     ratioCounts,
+    usageCounts,
     isFiltered,
     setType,
     setOrder,
     setSearch,
     setRatio,
+    setUsageShelf,
     reset,
-  } = useFilter(media, aspectRatio, videoSizes, showVideos === false ? 'image' : undefined);
+  } = useFilter(
+    media,
+    aspectRatio,
+    videoSizes,
+    showVideos === false ? 'image' : undefined,
+    usage,
+  );
 
   const selection = useSelection({
     allowMultiple,
@@ -176,13 +199,37 @@ export function MediaManager({
   // кадром, зажатым в 500×400, тремя колонками адресов и заблокированной кнопкой «upload». А
   // полноэкранный `MediaViewer` с зумом, диафильмом и рисованием, который в приложении был,
   // из библиотеки не открывался вовсе.
-  const viewerItems = mediaFullListToViewerItems(filteredMedia || []);
+  // Просмотрщик получает места ГОТОВЫМИ, вместе с адресами: разбирать `kind` в роут — знание о
+  // маршрутах админки, которому в примитиве `ui` не место (см. `usageRefHref`).
+  const viewerUsageOf = useCallback(
+    (id: number) =>
+      mediaUsageRefs(usage, id)?.map((ref) => ({
+        kind: ref.kind,
+        label: usageRefName(ref),
+        slot: usageRefSlot(ref),
+        href: usageRefHref(ref),
+      })),
+    [usage],
+  );
+
+  // РЯД ПРОСМОТРЩИКА ОТСЕИВАЕТСЯ ЗДЕСЬ, А НЕ ВНУТРИ НЕГО. `mediaFullListToViewerItems` выбрасывает
+  // кадры без адреса, и индекс, посчитанный по `filteredMedia`, разъезжался с рядом на каждой
+  // такой строке: открытым оказывался соседний снимок. Пока это стоило неверной картинки, теперь
+  // ценой была бы неверная подпись «ни на что не заведён, можно удалять» — про чужой файл.
+  const viewable = useMemo(
+    () => (filteredMedia || []).filter((m) => !!mediaFullViewerSrc(m)),
+    [filteredMedia],
+  );
+  const viewerItems = useMemo(
+    () => mediaFullListToViewerItems(viewable, viewerUsageOf),
+    [viewable, viewerUsageOf],
+  );
   const viewer = useMediaViewer();
-  const viewingMedia = filteredMedia?.[viewer.index];
+  const viewingMedia = viewable[viewer.index];
   const [recropping, setRecropping] = useState<common_MediaFull | undefined>(undefined);
 
   const handleView = (m: common_MediaFull) => {
-    const at = (filteredMedia || []).findIndex((x) => x.id === m.id);
+    const at = viewable.findIndex((x) => x.id === m.id);
     if (at >= 0) viewer.openAt(at);
   };
 
@@ -262,12 +309,15 @@ export function MediaManager({
     ];
   }, [fits, filteredMedia]);
 
+  const usageOf = useCallback((m: common_MediaFull) => mediaUsageRefs(usage, m.id), [usage]);
+
   const list = (
     <>
       <MediaList
         media={filteredMedia || []}
         bands={bands}
         fitOf={fitOf}
+        usageOf={usageOf}
         selection={selection}
         disabled={disabled}
         videoSizes={videoSizes}
@@ -285,6 +335,7 @@ export function MediaManager({
       {isStandalone && !disabled && (
         <MediaSelectionBar
           selected={selection.selectedMedia}
+          usage={usage}
           onClear={selection.clearSelection}
         />
       )}
@@ -376,12 +427,17 @@ export function MediaManager({
             <MediaRail
               type={type}
               ratio={ratio}
+              usageShelf={usageShelf}
               typeCounts={typeCounts}
               ratioCounts={ratioCounts}
+              usageCounts={usageCounts}
+              usagePending={usagePending}
+              usageFailed={usageFailed}
               isFiltered={isFiltered}
               loaded={media.length}
               onType={setType}
               onRatio={setRatio}
+              onUsage={setUsageShelf}
               onReset={reset}
             />
           }
@@ -398,6 +454,12 @@ export function MediaManager({
           open={viewer.open}
           onOpenChange={viewer.onOpenChange}
           onIndexChange={viewer.onIndexChange}
+          // Уходим роутером и закрываем просмотрщик за собой: голая ссылка перезагрузила бы
+          // приложение и выкинула подгруженные страницы вместе с очередью незалитых файлов.
+          onUsageNavigate={(href) => {
+            viewer.onOpenChange(false);
+            navigate(href);
+          }}
           actions={() =>
             canUpload && viewingMedia ? (
               <ViewerAction

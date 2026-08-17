@@ -1,5 +1,5 @@
 import { CopyIcon, EnterFullScreenIcon, TrashIcon } from '@radix-ui/react-icons';
-import { common_MediaFull } from 'api/proto-http/admin';
+import { MediaUsageRef, common_MediaFull } from 'api/proto-http/admin';
 import { isVideo } from 'lib/features/filterContentType';
 import { useSnackBarStore } from 'lib/stores/store';
 import { cn } from 'lib/utility';
@@ -10,6 +10,7 @@ import { RatioGlyph } from 'ui/components/ratio-glyph';
 import Text from 'ui/components/text';
 import { VideoSize } from '..';
 import { mediaAspectRatio, ratioLabel } from '../utils/calculate-aspect';
+import { usageRefLine, usageRefName, usageRefSlot } from '../utils/media-usage';
 import { useDeleteMedia } from '../utils/useMediaQuery';
 
 /**
@@ -40,6 +41,11 @@ interface MediaItemProps {
   selectionMode?: boolean;
   /** Заполняется только в диалоге выбора под слот с требованием к пропорции. */
   fit?: SlotFit;
+  /**
+   * Где стоит этот снимок. `undefined` — ещё не спрашивали, и подвал молчит: подпись «free» на
+   * невыясненном кадре — обещание, за которое отвечает бакет, а не мы.
+   */
+  usage?: MediaUsageRef[];
 }
 
 /** Квадратная кнопка-действие поверх кадра. Появляется по наведению и по фокусу с клавиатуры. */
@@ -81,6 +87,7 @@ export function MediaItem({
   onView,
   selectionMode = false,
   fit,
+  usage,
 }: MediaItemProps) {
   const mediaUrl = media.media?.thumbnail?.mediaUrl;
   const fullUrl = media.media?.fullSize?.mediaUrl || mediaUrl || '';
@@ -102,6 +109,9 @@ export function MediaItem({
   const aspectRatio = mediaAspectRatio(media, videoSizes);
   const video = isVideo(mediaUrl);
   const selectable = !disabled;
+  // ЗАНЯТО — ЭТО ТОЧНОЕ ЗНАНИЕ, а не отсутствие ответа: пока `usage` не приехал, плитка ведёт
+  // себя ровно как раньше (удаление предлагается, отказ бакета ловится постфактум).
+  const inUse = (usage?.length ?? 0) > 0;
 
   const handleVideoLoadEvent = (event: React.SyntheticEvent<HTMLVideoElement>) => {
     if (media.id) onVideoLoad(media.id, event);
@@ -269,6 +279,34 @@ export function MediaItem({
           <Text size='micro' variant='label' className='block'>
             delete {media.id} for good?
           </Text>
+          {/* ЗАНЯТО — ЭТО ПРЕДУПРЕЖДЕНИЕ, А НЕ ЗАПРЕТ, и ровно потому, что клиент не может знать
+              исход. Из семнадцати ссылок на медиа пять объявлены ON DELETE SET NULL (свотч
+              колорвея и раунда лаб-дипа, картинка материала, выноска тех-карты и примерки) —
+              там удаление ПРОЙДЁТ и просто обнулит указатель; остальные откажут по внешнему
+              ключу. Какая из них держит файл, `MediaUsageRef` не сообщает, а повторять эту
+              таблицу здесь нельзя: следующая миграция сменит действие, и клиент начнёт врать
+              молча. Поэтому места названы, исход назван возможным, а кнопка остаётся: убрать её
+              значило бы навсегда запретить удаление свотчей и выносок, которое до этой ветки
+              работало. */}
+          {inUse && (
+            <>
+              <ul className='mt-0.5 space-y-px'>
+                {usage?.map((ref, i) => (
+                  <li key={`${ref.kind}-${ref.entityId}-${ref.slot}-${i}`} className='truncate'>
+                    <Text size='micro' component='span'>
+                      {usageRefName(ref)}
+                    </Text>{' '}
+                    <Text size='micro' variant='label' component='span'>
+                      {usageRefSlot(ref)}
+                    </Text>
+                  </li>
+                ))}
+              </ul>
+              <Text size='micro' variant='label' className='mt-0.5 block'>
+                the bucket may refuse; where it does not, the picture leaves those places.
+              </Text>
+            </>
+          )}
           <div className='mt-1 flex gap-1'>
             {/* Красная кнопка остаётся своей вёрсткой: у `Button` нет тона «опасно», а цвет
                 текста из варианта перебивает добавленный класс — подпись пропала бы. Размеры и
@@ -288,10 +326,25 @@ export function MediaItem({
         </div>
       ) : (
         <div className='flex items-center gap-1.5 border-t border-hairline px-1.5 py-0.5'>
-          <Text size='micro' component='span' className='tabular-nums'>
+          <Text size='micro' component='span' className='flex-none tabular-nums'>
             {media.id}
           </Text>
-          <span className='ml-auto flex items-center gap-1 text-labelColor'>
+          {/* ОТМЕТКА «ЗАНЯТО» — СЛОВОМ И ЧЕРНИЛАМИ, БЕЗ ЦВЕТА. Цвет в этой системе носит только
+              состояние здоровья, а стоящий на витрине снимок — не поломка. Свободный кадр не
+              подписывается ничем: подпись «free» на каждой второй плитке утопила бы подвал, а
+              полка отбора и так называет обе цифры. Список мест уходит в `title` — верстать его
+              в полосе высотой в строку негде. */}
+          {inUse && (
+            <Text
+              size='micro'
+              component='span'
+              className='flex-none tabular-nums'
+              title={usage?.map(usageRefLine).join('\n')}
+            >
+              used {usage?.length}
+            </Text>
+          )}
+          <span className='ml-auto flex min-w-0 items-center gap-1 text-labelColor'>
             {fit ? (
               <Text size='micro' variant={fit.ok ? 'label' : undefined} component='span'>
                 {/* «срежет N%», а не «кроп N%»: то же слово, что и в галерее под кадром
@@ -306,7 +359,10 @@ export function MediaItem({
             ) : (
               <>
                 <RatioGlyph ratio={aspectRatio} width={width} height={height} size={10} />
-                <Text size='micro' variant='label' component='span'>
+                {/* Подпись соотношения — единственное, что здесь можно ужать: у безымянной
+                    пропорции ею становятся сами стороны («1447×1080»), и рядом с отметкой
+                    занятости она первой упирается в край плитки. */}
+                <Text size='micro' variant='label' component='span' className='truncate'>
                   {ratioLabel(aspectRatio, width, height)}
                 </Text>
               </>
