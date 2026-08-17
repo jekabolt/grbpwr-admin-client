@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { useSnackBarStore } from 'lib/stores/store';
+import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { ROUTES, SECTION } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
@@ -22,7 +22,7 @@ import {
 } from './components/gallery-states';
 import { FilesSelectionBar } from './components/selection-bar';
 import { MAX_TOPIC_FILTERS, TopicChips, type TopicSelection } from './components/topic-chips';
-import { UploadDialog } from './components/upload-dialog';
+import { FilesUploadBar } from './components/upload-bar';
 import { useFileSelection } from './hooks/useFileSelection';
 import {
   filesKeys,
@@ -48,7 +48,7 @@ export default function FilesPage() {
   const [params, setParams] = useSearchParams();
   const qc = useQueryClient();
   const { canRead, canWrite, resolved } = usePermissions();
-  const { showMessage } = useSnackBarStore();
+  const enqueue = useUploadQueueStore((s) => s.enqueue);
 
   const mayRead = !resolved || canRead(SECTION.files);
   const mayWrite = canWrite(SECTION.files);
@@ -127,9 +127,11 @@ export default function FilesPage() {
     return () => clearTimeout(t);
   }, [searchInput, urlSearch, patch]);
 
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [dropping, setDropping] = useState(false);
-  const [dropped, setDropped] = useState<File[] | null>(null);
+  // ОДНО ПРАВИЛО ТЕМ НА ВСЕ ВХОДЫ. Кнопка «загрузить» ставит пачку в ту же очередь и
+  // наследует ВСЕ выбранные чипы холста; при пустом выборе пачка уезжает в «разобрать».
+  // Диалога загрузки больше нет: он держал очередь в своём состоянии и убивал отправку при
+  // закрытии, а темы всё равно спрашивал ровно те, что уже выбраны на холсте.
+  const pickerRef = useRef<HTMLInputElement>(null);
 
   const topicsQuery = useFileTopics();
   const filesQuery = useLibraryFiles({ topicIds, untopiced, search: urlSearch, sort });
@@ -181,15 +183,17 @@ export default function FilesPage() {
     [selection.selected, files],
   );
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDropping(false);
-    if (!writable) return;
-    const list = Array.from(e.dataTransfer.files ?? []);
-    if (!list.length) return;
-    setDropped(list);
-    setUploadOpen(true);
-  };
+  // ОДИН ВХОД В ОЧЕРЕДЬ на все три жеста. Темы читаются в момент постановки: сузил фильтр
+  // после броска — на уже стоящие в очереди строки это не влияет, у них свои темы.
+  const intake = useCallback(
+    (list: File[]) => {
+      if (!writable || !list.length) return;
+      enqueue(list, { topicIds, newTopics: [] });
+    },
+    [writable, enqueue, topicIds],
+  );
+
+  const openPicker = () => pickerRef.current?.click();
 
   // Закрытие ЗАМЕЩАЕТ запись в истории. Иначе стек выглядит как [сетка, карточка, сетка], и
   // «назад» открывает ровно ту карточку, которую человек только что закрыл.
@@ -240,28 +244,30 @@ export default function FilesPage() {
           topics={chosenTopics}
           writable={writable}
           onShowAll={showAll}
-          onUpload={() => setUploadOpen(true)}
+          onUpload={openPicker}
         />
       );
     }
-    return <EmptyLibraryState writable={writable} onUpload={() => setUploadOpen(true)} />;
+    return <EmptyLibraryState writable={writable} onUpload={openPicker} />;
   };
 
   return (
-    <div
-      onDragOver={(e) => {
-        e.preventDefault();
-        if (writable) setDropping(true);
-      }}
-      onDragLeave={(e) => {
-        // dragleave всплывает с КАЖДОЙ плитки, через которую проходит курсор. Без этой
-        // проверки полоса приёмника мигает на каждом шаге мыши и дёргает сетку под ней.
-        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
-        setDropping(false);
-      }}
-      onDrop={onDrop}
-      className='flex flex-col gap-gutter'
-    >
+    <div className='flex flex-col gap-gutter'>
+      {/* Диалога выбора файлов у раздела больше нет: кнопка открывает системный выбор, а очередь
+          показывает полоса снизу. Поле скрытое — свой вид у него нестилизуемый. */}
+      <input
+        ref={pickerRef}
+        type='file'
+        multiple
+        hidden
+        onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+          const list = Array.from(e.target.files ?? []);
+          // Сброс значения — иначе повторный выбор ТОГО ЖЕ файла не поднимет `change`.
+          e.target.value = '';
+          intake(list);
+        }}
+      />
+
       {/* Один блок: полоса управления и словарь тем — это ОДНА поверхность, разделённая внутри
           волосяной линией, а не два бордера подряд. */}
       <div className='border border-borderColor bg-bgColor'>
@@ -273,7 +279,7 @@ export default function FilesPage() {
           mode={mayWrite ? mode : 'read'}
           onMode={setMode}
           canWrite={mayWrite}
-          onUpload={() => setUploadOpen(true)}
+          onUpload={openPicker}
           className='border-0'
         />
         <div className='border-t border-hairline px-2.5 py-2'>
@@ -308,14 +314,6 @@ export default function FilesPage() {
           </div>
         )}
       </div>
-
-      {dropping && writable && (
-        <div className='border border-dashed border-textColor bg-bgColor p-4'>
-          <Text size='micro' className='uppercase'>
-            отпустите, чтобы загрузить{topicIds.length ? ' — темы проставятся выбранные' : ''}
-          </Text>
-        </div>
-      )}
 
       {filesQuery.isLoading ? (
         <GallerySkeleton />
@@ -389,22 +387,9 @@ export default function FilesPage() {
         </div>
       )}
 
-      {uploadOpen && (
-        <UploadDialog
-          topics={topics}
-          presetTopicIds={topicIds}
-          initialFiles={dropped ?? undefined}
-          onClose={() => {
-            setUploadOpen(false);
-            setDropped(null);
-          }}
-          onDone={(summary) => {
-            setUploadOpen(false);
-            setDropped(null);
-            showMessage(summary, 'success');
-          }}
-        />
-      )}
+      {/* Полоса загрузки — фиксирована снизу и переживает и уход на другой экран раздела, и
+          открытие карточки: она только зритель стора, XHR живут не в ней. */}
+      <FilesUploadBar />
 
       {/* Карточка — модальный роут ПОВЕРХ сетки: сетка остаётся смонтированной, поэтому
           закрытие возвращает ровно тот экран, с которого ушли. Закрытие идёт с текущим

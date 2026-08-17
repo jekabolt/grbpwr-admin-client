@@ -127,20 +127,10 @@ export function previewExpected(contentType?: string, fileName?: string): boolea
   return ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'svg', 'avif'].includes(ext);
 }
 
-/**
- * Trims the noise a browser or an export tool leaves in a filename, so the name the
- * person confirms at upload is already close to the one they would have typed.
- * The upload dialog is the only moment they still remember what the file is.
+/*
+ * `tidyFileName` жил здесь, пока имя причёсывал диалог загрузки: там причёсанное стояло в
+ * поле ввода, и человек видел, что с ним сделали. В полосе поля нет, и очередь берёт имя
+ * БУКВАЛЬНО (`upload/queue.ts`): молчаливое «IMG_4821.jpg» → «IMG.jpg» сделало бы файл
+ * ненаходимым, и никто бы этого не заметил. Правку имени предлагает ⌘V-модалка — там она
+ * видна.
  */
-export function tidyFileName(name: string): string {
-  const i = name.lastIndexOf('.');
-  const ext = i > 0 ? name.slice(i) : '';
-  let stem = i > 0 ? name.slice(0, i) : name;
-  stem = stem
-    .replace(/\s*\(\d+\)\s*$/, '') // "grbpwr_graphic (1)" — the second download
-    .replace(/[_-]+(final|copy|v\d+|\d+)$/i, '') // "_final", "-v2", "_3"
-    .replace(/[_]+/g, ' ')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-  return (stem || 'file') + ext;
-}

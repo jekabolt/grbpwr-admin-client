@@ -15,6 +15,7 @@ import { SectionHeader } from 'ui/components/section-header';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { topicsService } from '../api/topicsService';
+import { FilesUploadBar } from '../components/upload-bar';
 import { filesKeys } from '../hooks/useFiles';
 
 /**
@@ -379,6 +380,10 @@ export default function FileTopicsPage() {
           пропадёт.
         </Text>
       </ConfirmationModal>
+
+      {/* Полоса загрузки стоит на ВСЕХ экранах раздела: пачку ставят на холсте и уходят сюда
+          разбирать темы, пока она едет — без полосы отправка стала бы невидимой. */}
+      <FilesUploadBar />
     </div>
   );
 }
