@@ -1,4 +1,4 @@
-import { common_MediaFull } from 'api/proto-http/admin';
+import { MediaUsageRef, common_MediaFull } from 'api/proto-http/admin';
 import { Fragment } from 'react';
 import { GroupLabel } from 'ui/components/group-label';
 import Text from 'ui/components/text';
@@ -36,6 +36,8 @@ interface MediaListProps {
   bands?: { key: string; title: string; hint?: string; items: common_MediaFull[] }[];
   /** Что рамка слота сделает с этим кадром. Считает вызывающий, список только раздаёт. */
   fitOf?: (media: common_MediaFull) => SlotFit | undefined;
+  /** Где стоит кадр. Той же дорогой, что и `fitOf`: спрашивает страница, список раздаёт. */
+  usageOf?: (media: common_MediaFull) => MediaUsageRef[] | undefined;
   onVideoLoad: (mediaId: number, event: React.SyntheticEvent<HTMLVideoElement>) => void;
   onView?: (media: common_MediaFull) => void | Promise<void>;
 }
@@ -53,6 +55,7 @@ export function MediaList({
   noMatch,
   bands,
   fitOf,
+  usageOf,
   onVideoLoad,
   onView,
 }: MediaListProps) {
@@ -68,6 +71,7 @@ export function MediaList({
       onView={onView}
       selectionMode={selectionMode}
       fit={fitOf?.(m)}
+      usage={usageOf?.(m)}
     />
   );
 

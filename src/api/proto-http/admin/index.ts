@@ -509,6 +509,31 @@ export type DeleteFromBucketRequest = {
 export type DeleteFromBucketResponse = {
 };
 
+export type GetMediaUsageRequest = {
+  mediaIds: number[] | undefined;
+};
+
+export type GetMediaUsageResponse = {
+  // One entry per requested id, including ids that turned out to be unreferenced (empty refs)
+  // and ids that no longer exist. Order is not guaranteed to match the request — match by media_id.
+  usages: MediaUsage[] | undefined;
+};
+
+export type MediaUsage = {
+  mediaId: number | undefined;
+  refs: MediaUsageRef[] | undefined;
+};
+
+// MediaUsageRef is one place holding on to a media item. Several refs may name the same
+// entity when it uses the file in more than one slot (a photo that is both the product
+// thumbnail and a gallery frame yields two refs with the same kind and entity_id).
+export type MediaUsageRef = {
+  kind: string | undefined;
+  entityId: number | undefined;
+  label: string | undefined;
+  slot: string | undefined;
+};
+
 // CreateColorway/UpdateColorway/UpdateStyle replace the coupled UpsertColorway (R2/R4 write
 // decomposition, §6). A colourway is created DRAFT against an existing style and carries only
 // colourway-owned fields; the style facts are patched separately through UpdateStyle under a shared
@@ -12207,6 +12232,15 @@ export interface AdminService {
   DeleteFromBucket(request: DeleteFromBucketRequest): Promise<DeleteFromBucketResponse>;
   // ListObjectsPaged lists all objects in the base folder.
   ListObjectsPaged(request: ListObjectsPagedRequest): Promise<ListObjectsPagedResponse>;
+  // GetMediaUsage reports, for each requested media id, every place that still references it.
+  // The media library otherwise cannot tell a free file from one standing on the storefront:
+  // common.MediaFull carries no back-references, so deleting was a gamble — the FK simply
+  // refuses (DeleteFromBucket returns FailedPrecondition) and the operator never learns which
+  // of the seventeen referencing columns held it. Batched by id on purpose: a library page
+  // asks about its whole visible grid in one call rather than one call per tile.
+  // A media id with no references comes back with an empty refs list, never omitted, so the
+  // client can render "unused" without guessing whether the id was simply dropped.
+  GetMediaUsage(request: GetMediaUsageRequest): Promise<GetMediaUsageResponse>;
   // CreateColorway creates a new DRAFT colourway attached to an existing style (R2/R4 write
   // decomposition; replaces the coupled UpsertColorway). It writes only colourway-owned fields — no
   // style facts (UpdateStyle), no variants (CreateVariant), no size chart (UpdateStyleSizeChart). The
@@ -13292,6 +13326,28 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "ListObjectsPaged",
       }) as Promise<ListObjectsPagedResponse>;
+    },
+    GetMediaUsage(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/content/usage`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.mediaIds) {
+        request.mediaIds.forEach((x) => {
+          queryParams.push(`mediaIds=${encodeURIComponent(x.toString())}`)
+        })
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetMediaUsage",
+      }) as Promise<GetMediaUsageResponse>;
     },
     CreateColorway(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/colorways`; // eslint-disable-line quotes

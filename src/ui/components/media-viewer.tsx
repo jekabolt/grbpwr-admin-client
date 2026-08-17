@@ -29,14 +29,32 @@ export interface MediaViewerItem {
     blurhash?: string;
     /** Размеры, которые бакет держит на один объект: оригинал, сжатое, миниатюра. */
     renditions?: { label: string; url?: string; width?: number; height?: number }[];
+    /**
+     * Где стоит этот снимок. Приходит СНАРУЖИ, рядом с `renditions`: просмотрщик остаётся
+     * смотрелкой и в сеть не ходит — иначе один и тот же вопрос задавали бы и сетка, и он.
+     *
+     * `undefined` — занятость не выяснена, и раздела в панели нет; пустой массив — файл
+     * действительно свободен, и это сказано словами. Адрес карточки считает вызывающий: роуты
+     * есть не у всякого пространства, и знать об этом примитиву `ui` не положено.
+     */
+    usage?: { kind?: string; label?: string; slot?: string; href?: string }[];
   };
+}
+
+/**
+ * Адрес, который просмотрщик поставит на сцену. Вынесен наружу, потому что по нему же
+ * отсеиваются кадры без адреса, а вызывающий обязан уметь отсеять их ТЕМ ЖЕ правилом — иначе
+ * его индексы разъедутся с рядом просмотрщика (см. `mediaFullListToViewerItems`).
+ */
+export function mediaFullViewerSrc(m: common_MediaFull): string {
+  const media = m.media;
+  return media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
 }
 
 /** Map a proto `common_MediaFull` to a viewer item (full-size preferred, thumb for the strip). */
 export function mediaFullToViewerItem(m: common_MediaFull): MediaViewerItem {
   const media = m.media;
-  const src =
-    media?.fullSize?.mediaUrl || media?.compressed?.mediaUrl || media?.thumbnail?.mediaUrl || '';
+  const src = mediaFullViewerSrc(m);
   const thumbnail = media?.thumbnail?.mediaUrl || media?.compressed?.mediaUrl || src;
   return {
     src,
@@ -63,8 +81,27 @@ export function mediaFullToViewerItem(m: common_MediaFull): MediaViewerItem {
   };
 }
 
-export function mediaFullListToViewerItems(list: common_MediaFull[]): MediaViewerItem[] {
-  return list.map(mediaFullToViewerItem).filter((i) => i.src);
+/**
+ * Список кадров для просмотрщика. `usageOf` необязателен и задан ТОЛЬКО здесь, у списка: сам
+ * `mediaFullToViewerItem` кое-где передаётся прямо в `Array.map`, и второй параметр у него
+ * молча заполнялся бы индексом.
+ *
+ * ВНИМАНИЕ НА ОТСЕВ: кадр без адреса выпадает, и ряд становится короче исходного. Вызывающий,
+ * который держит индекс (какой кадр открыт), обязан считать его по УЖЕ ОТСЕЯННОМУ ряду —
+ * `mediaFullViewerSrc` для того и вынесен наружу. Иначе одна безадресная строка сдвигает всё,
+ * что за ней, и панель приписывает одному файлу сведения другого.
+ */
+export function mediaFullListToViewerItems(
+  list: common_MediaFull[],
+  usageOf?: (id: number) => NonNullable<MediaViewerItem['meta']>['usage'],
+): MediaViewerItem[] {
+  return list
+    .map((m) => {
+      const item = mediaFullToViewerItem(m);
+      const usage = m.id != null ? usageOf?.(m.id) : undefined;
+      return usage ? { ...item, meta: { ...item.meta, usage } } : item;
+    })
+    .filter((i) => i.src);
 }
 
 export function resolveViewerType(item: MediaViewerItem): 'image' | 'video' {
@@ -140,6 +177,14 @@ interface MediaViewerProps {
    * галерея тех-карты не передаёт ничего.
    */
   actions?: (item: MediaViewerItem, index: number) => ReactNode;
+  /**
+   * Переход по ссылке из раздела «used in». Отдан наружу, потому что маршрутизатора здесь нет и
+   * быть не должно: голый `<a href>` внутри модалки перезагружает документ целиком — уносит
+   * подгруженные страницы библиотеки, очередь незалитых файлов и словарь, — а закрыть себя перед
+   * уходом просмотрщик сам не догадается. Адрес в `href` при этом остаётся: средний клик и
+   * «скопировать ссылку» должны работать как у настоящей ссылки.
+   */
+  onUsageNavigate?: (href: string) => void;
   // РАНЬШЕ ЗДЕСЬ БЫЛ `renderOverlay` — крючок, которым галерея эскиза рисовала поверх снимка СВОЮ
   // копию указаний: он умел показывать, но не править, и расходился с плиткой на каждой правке.
   // Теперь увеличенный вид указаний это `annotation/zoom-dialog` — та же поверхность, что и на
@@ -153,6 +198,7 @@ export function MediaViewer({
   onOpenChange,
   onIndexChange,
   actions,
+  onUsageNavigate,
 }: MediaViewerProps) {
   const [showMeta, setShowMeta] = useState(false);
   const count = items.length;
@@ -364,7 +410,9 @@ export function MediaViewer({
             )}
           </div>
 
-            {showMeta && current.meta && <MetaPanel meta={current.meta} />}
+            {showMeta && current.meta && (
+              <MetaPanel meta={current.meta} onUsageNavigate={onUsageNavigate} />
+            )}
           </div>
 
           {/* Filmstrip */}
@@ -430,7 +478,13 @@ export function MediaViewer({
  * плитку и был единственным способом что-то о снимке узнать. Панель тёмная, потому что стоит
  * на тёмной сцене: белая колонка сбоку от снимка светила бы в глаза ровно там, куда смотрят.
  */
-function MetaPanel({ meta }: { meta: NonNullable<MediaViewerItem['meta']> }) {
+function MetaPanel({
+  meta,
+  onUsageNavigate,
+}: {
+  meta: NonNullable<MediaViewerItem['meta']>;
+  onUsageNavigate?: (href: string) => void;
+}) {
   const [copied, setCopied] = useState<string | undefined>(undefined);
   const copy = (url?: string) => {
     if (!url) return;
@@ -482,6 +536,57 @@ function MetaPanel({ meta }: { meta: NonNullable<MediaViewerItem['meta']> }) {
               </ViewerAction>
             </div>
           ))}
+        </>
+      )}
+
+      {/* ГДЕ СТОИТ СНИМОК. Раздел рисуется, только когда ответ есть: `undefined` — «ещё не
+          спрашивали», и пустое «used in / —» на таком кадре читалось бы как «нигде», то есть
+          как разрешение удалить. Пустой массив — уже ответ, и он проговаривается словами. */}
+      {meta.usage && (
+        <>
+          <div className='mb-1 mt-3 border-b border-bgColor/20 pb-0.5 text-micro uppercase tracking-group text-bgColor/70'>
+            used in
+          </div>
+          {meta.usage.length === 0 ? (
+            <div className='py-1 text-micro text-bgColor/70'>
+              — nothing links to it, it can be deleted
+            </div>
+          ) : (
+            meta.usage.map((u, i) => (
+              <div
+                key={`${u.kind}-${u.href}-${u.slot}-${i}`}
+                className='border-b border-bgColor/20 py-1 text-micro'
+              >
+                {/* Ссылка белая с подчёркиванием, а не фиолетовая: сиреневый по системе — цвет
+                    ссылки на БЕЛОМ листе, на чёрной сцене он нечитаем. Роль несёт подчёркивание. */}
+                {u.href ? (
+                  <a
+                    href={u.href}
+                    className='block truncate underline'
+                    onClick={
+                      onUsageNavigate
+                        ? (e) => {
+                            // Только обычный левый клик: Cmd/Ctrl/средняя кнопка должны и дальше
+                            // открывать место в новой вкладке, не закрывая просмотрщик.
+                            if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+                            e.preventDefault();
+                            onUsageNavigate(u.href!);
+                          }
+                        : undefined
+                    }
+                  >
+                    {u.label || u.kind}
+                  </a>
+                ) : (
+                  <span className='block truncate'>{u.label || u.kind}</span>
+                )}
+                <div className='flex items-baseline gap-2 text-bgColor/70'>
+                  <span className='uppercase tracking-label'>{u.kind?.replace(/_/g, ' ')}</span>
+                  <span className='ml-auto truncate'>{u.slot || '—'}</span>
+                </div>
+              </div>
+            ))
+          )}
         </>
       )}
     </aside>
