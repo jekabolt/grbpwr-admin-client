@@ -4,6 +4,7 @@ import type {
   GetLibraryNoteContentResponse,
   SaveLibraryNoteContentResponse,
 } from 'api/proto-http/admin';
+import { formatBytes } from '../utils/format';
 
 /**
  * Заметки: чтение текста, запись под сравнением отпечатков и помощник разметки.
@@ -98,7 +99,11 @@ export function noteErrorText(e: unknown, fallback: string): string {
     return 'этот файл не заметка — его открывают карточкой, а не редактором';
   if (has('nothing was overwritten'))
     return 'кто-то сохранил свою версию, но прочитать её не удалось. ничего не перезаписано — попробуйте сохранить ещё раз';
-  if (has('not a book')) return 'заметка длиннее, чем сервер принимает: предел 512 киб';
+  // Предел печатает `formatBytes`, как и три другие строки про вес заметки на её экране.
+  // Вписанное руками «512 киб» было четвёртым написанием той же величины — рядом со «512 кб»
+  // из формата, и разъехаться им ничто не мешало.
+  if (has('not a book'))
+    return `заметка длиннее, чем сервер принимает: предел ${formatBytes(NOTE_MAX_BYTES)}`;
   if (has('valid utf-8')) return 'в тексте есть символы, которые сервер не принимает';
   if (has('file not found')) return 'файла больше нет';
   if (has('could not store') || has('could not save') || has('could not create'))
