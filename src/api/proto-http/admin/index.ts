@@ -79,6 +79,13 @@ export type RefundReason =
   | "REFUND_REASON_DEFECTIVE"
   | "REFUND_REASON_CHANGED_MIND"
   | "REFUND_REASON_OTHER";
+// LibraryFileSort is the grid's sort order for the columns that are not time.
+// UNKNOWN keeps the default (by created_at, direction from order_factor), which
+// is what a library is normally read by.
+export type LibraryFileSort =
+  | "LIBRARY_FILE_SORT_UNKNOWN"
+  | "LIBRARY_FILE_SORT_NAME"
+  | "LIBRARY_FILE_SORT_SIZE";
 // StyleCostPriceSource is the Q4 price-ladder level a material line resolved to.
 export type StyleCostPriceSource =
   | "STYLE_COST_PRICE_SOURCE_UNKNOWN"
@@ -4908,6 +4915,17 @@ export type ListLibraryFilesRequest = {
   limit: number | undefined;
   offset: number | undefined;
   orderFactor: common_OrderFactor | undefined;
+  // topic_ids is an INTERSECTION filter: a file matches only when it carries ALL
+  // of them. Union would be the wrong default here — picking a second chip is how
+  // a person NARROWS a grid of hundreds, and an OR-filter grows it instead.
+  // Bounded at 20; each id costs one EXISTS subquery.
+  // Precedence when several filters arrive at once: untopiced > topic_ids >
+  // topic_id. The single-topic field stays for the links already in circulation.
+  topicIds: number[] | undefined;
+  // sort_by picks a non-time ordering. UNKNOWN = by created_at, and order_factor
+  // keeps applying to THAT ordering only — name and size have their own fixed
+  // directions (A→Z, largest first), so the two controls never contradict.
+  sortBy: LibraryFileSort | undefined;
 };
 
 export type ListLibraryFilesResponse = {
@@ -4971,6 +4989,36 @@ export type DeleteFileTopicRequest = {
 };
 
 export type DeleteFileTopicResponse = {
+};
+
+export type MergeFileTopicsRequest = {
+  // source_id is the topic that disappears, target_id the one that survives.
+  // Merging a topic into itself is refused rather than treated as a no-op: it can
+  // only come from a mis-wired dialog, and answering "done" would hide that.
+  sourceId: number | undefined;
+  targetId: number | undefined;
+};
+
+export type MergeFileTopicsResponse = {
+  // moved_files is how many files gained the target topic (files already carrying
+  // both are not counted twice). The dialog reports it back — a merge is
+  // irreversible, so the person is owed the size of what just happened.
+  movedFiles: number | undefined;
+};
+
+export type AssignLibraryFileTopicsRequest = {
+  fileIds: number[] | undefined;
+  // topic_ids are existing topics, new_topics names typed on the fly; an existing
+  // name resolves to the existing topic instead of failing. Both are ADDED to
+  // whatever the files already carry.
+  topicIds: number[] | undefined;
+  newTopics: string[] | undefined;
+};
+
+export type AssignLibraryFileTopicsResponse = {
+  // assigned is how many (file, topic) links were actually created — pairs that
+  // already existed are not counted.
+  assigned: number | undefined;
 };
 
 export type UpdateTaskRequest = {
@@ -12766,6 +12814,18 @@ export interface AdminService {
   RenameFileTopic(request: RenameFileTopicRequest): Promise<RenameFileTopicResponse>;
   // DeleteFileTopic removes a topic, refused while files still carry it.
   DeleteFileTopic(request: DeleteFileTopicRequest): Promise<DeleteFileTopicResponse>;
+  // MergeFileTopics folds one topic into another: every file carrying the source
+  // ends up carrying the target, and the source topic ceases to exist. It is the
+  // only way out of the duplicates a free-form label vocabulary grows ("бирки" and
+  // "бирка"), which DeleteFileTopic cannot solve — it refuses on a topic that is
+  // in use, and that is exactly the topic that needs merging.
+  MergeFileTopics(request: MergeFileTopicsRequest): Promise<MergeFileTopicsResponse>;
+  // AssignLibraryFileTopics ADDS topics to a set of files. Additive, not
+  // replacing: UpdateLibraryFile already replaces the set of ONE file, where the
+  // caller has just seen that file's labels. A bulk action has not seen them, so a
+  // replacing bulk write would silently erase whatever a colleague labelled those
+  // files with between the grid loading and the button being pressed.
+  AssignLibraryFileTopics(request: AssignLibraryFileTopicsRequest): Promise<AssignLibraryFileTopicsResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.
   GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
@@ -16432,6 +16492,14 @@ export function createAdminServiceClient(
       if (request.orderFactor) {
         queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
       }
+      if (request.topicIds) {
+        request.topicIds.forEach((x) => {
+          queryParams.push(`topicIds=${encodeURIComponent(x.toString())}`)
+        })
+      }
+      if (request.sortBy) {
+        queryParams.push(`sortBy=${encodeURIComponent(request.sortBy.toString())}`)
+      }
       let uri = path;
       if (queryParams.length > 0) {
         uri += `?${queryParams.join("&")}`
@@ -16552,6 +16620,40 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteFileTopic",
       }) as Promise<DeleteFileTopicResponse>;
+    },
+    MergeFileTopics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/topics/merge`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "MergeFileTopics",
+      }) as Promise<MergeFileTopicsResponse>;
+    },
+    AssignLibraryFileTopics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/topics/assign`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AssignLibraryFileTopics",
+      }) as Promise<AssignLibraryFileTopicsResponse>;
     },
     GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes
