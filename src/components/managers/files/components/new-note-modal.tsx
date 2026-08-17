@@ -9,7 +9,8 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
-import { noteErrorText, notesService } from '../api/notesService';
+import { notesService } from '../api/notesService';
+import { failureText } from '../api/rpc-error';
 import { filesKeys } from '../hooks/useFiles';
 
 /**
@@ -72,7 +73,7 @@ export function NewNoteModal({
       showMessage('заметка создана, но открыть её не вышло — найдите её в библиотеке', 'success');
       onClose();
     } catch (e) {
-      setFailure(noteErrorText(e, 'не удалось создать заметку'));
+      setFailure(failureText(e, 'не удалось создать заметку'));
     } finally {
       setSaving(false);
     }

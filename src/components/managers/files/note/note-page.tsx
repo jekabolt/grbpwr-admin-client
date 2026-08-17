@@ -16,8 +16,9 @@ import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { filesService } from '../api/filesService';
-import { byteLength, noteErrorText, NOTE_MAX_BYTES, notesService } from '../api/notesService';
-import { isForbidden, isUnknownRoute } from '../api/rpc-error';
+import { byteLength, NOTE_MAX_BYTES, notesService } from '../api/notesService';
+import { failureText, isForbidden, isUnknownRoute } from '../api/rpc-error';
+import { FailureText } from '../components/failure-text';
 import { NoAccessState } from '../components/gallery-states';
 import { filesKeys, useLibraryFile } from '../hooks/useFiles';
 import { formatBytes, formatWhenShort, stemOf } from '../utils/format';
@@ -232,7 +233,7 @@ export function NotePage() {
         qc.invalidateQueries({ queryKey: filesKeys.file(file.id) });
         qc.invalidateQueries({ queryKey: [...filesKeys.all, 'list'] });
       } catch (e) {
-        showMessage(noteErrorText(e, 'не удалось сохранить заметку'), 'error');
+        showMessage(failureText(e, 'не удалось сохранить заметку'), 'error');
       } finally {
         setSaving(false);
       }
@@ -284,7 +285,7 @@ export function NotePage() {
       showMessage('ваша версия сохранена отдельной заметкой', 'success');
       if (newId) navigate(notePath(newId));
     } catch (e) {
-      showMessage(noteErrorText(e, 'не удалось создать отдельную заметку'), 'error');
+      showMessage(failureText(e, 'не удалось создать отдельную заметку'), 'error');
     } finally {
       setSavingSeparate(false);
     }
@@ -387,7 +388,7 @@ export function NotePage() {
                   ? // 404 значит и «файла нет», и «шлюз такого не знает»: на стенде без выката
                     // Ф8 это второе. Различить их клиент не может и не притворяется.
                     'этой заметки нет: либо файл удалён, либо бэкенд с заметками ещё не выкачен на этот стенд'
-                  : noteErrorText(e, 'заметка не открылась')}
+                  : <FailureText e={e} fallback='заметка не открылась' />}
             </Text>
             <div className='flex gap-1.5'>
               <Button size='sm' variant='secondary' onClick={() => contentQuery.refetch()}>
