@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import type { FileTopic, LibraryFile } from 'api/proto-http/admin';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAdmins } from 'components/managers/tech-card/components/useRoles';
+import { Avatar } from 'ui/components/avatar';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
@@ -74,10 +76,23 @@ export function GallerySkeleton({ count = 12 }: { count?: number }) {
   );
 }
 
-/** Раздел закрыт правами. Ни счётчиков, ни имён файлов — иначе экран рассказал бы то, чего
- * не должен. Имён тех, кто выдаёт права, здесь пока нет: `is_super` появляется в ответе
- * только в фазе людей (Ф3), и выдумывать список до неё было бы враньём. */
+/**
+ * Раздел закрыт правами — и экран НАЗЫВАЕТ, у кого просить.
+ *
+ * Ни счётчиков, ни имён файлов: этого экран рассказать не имеет права. Зато имена суперов
+ * он рассказать обязан. Разница между «доступа нет» и «доступ выдаёт jekabolt» — это разница
+ * между тупиком и решённым за минуту вопросом, а пустой отказ порождает сообщение в телеграм,
+ * то есть ровно тот способ работы, от которого раздел и уводит. Панель на шесть человек,
+ * которые знают друг друга: раскрытия здесь нет.
+ *
+ * Список берётся из `ListAdmins` (метод в allowlist — его видит любой аутентифицированный).
+ * Не ответил или суперов не назвал — экран деградирует до прежнего текста без имён, а не до
+ * пустоты на месте списка.
+ */
 export function NoAccessState() {
+  const { data } = useAdmins();
+  const supers = (data?.admins ?? []).filter((a) => a.isSuper && a.username);
+
   return (
     <StateFrame
       title='доступа к файлам нет'
@@ -85,9 +100,29 @@ export function NoAccessState() {
     >
       <Text size='micro' variant='label'>
         пункт «файлы» видно в меню у всех, поэтому вы сюда и попали. открыть библиотеку можно с
-        правом <b>files:read</b>, загружать — с <b>files:write</b>. попросите их у того, кто ведёт
-        аккаунты.
+        правом <b>files:read</b>, загружать — с <b>files:write</b>.
       </Text>
+      {supers.length ? (
+        <>
+          <Text size='micro' variant='label'>
+            доступ выдаёт кто-то из этих людей
+          </Text>
+          <div className='flex flex-wrap items-center justify-center gap-2'>
+            {supers.map((a) => (
+              <span key={a.id ?? a.username} className='flex items-center gap-1'>
+                <Avatar name={a.username} size={20} />
+                <Text size='micro' component='span' className='uppercase'>
+                  {a.username}
+                </Text>
+              </span>
+            ))}
+          </div>
+        </>
+      ) : (
+        <Text size='micro' variant='label'>
+          попросите их у того, кто ведёт аккаунты.
+        </Text>
+      )}
     </StateFrame>
   );
 }
