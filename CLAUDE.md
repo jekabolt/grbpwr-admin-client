@@ -36,11 +36,15 @@ There is **no test runner** configured. To verify a change, run `yarn build:chec
   wrong; the QR just stops working later, in a workshop.
 - Optional, almost never needed: `VITE_FILE_SHARE_ORIGIN` — the origin of the public file-share
   landing page (`{origin}/f/{token}`) that the access block and the shared-files screen copy to
-  the clipboard. It falls back to `VITE_PATTERN_VIEWER_ORIGIN` and then to
-  `window.location.origin`, so setting the pattern-viewer variable already covers it — all public
-  pages are the same SPA on the same host. Set this one only if `/f/` ever moves to a domain of
-  its own. The failure it guards against is the same silent one: a link copied from a Vercel
-  preview is handed to a contractor and dies with the alias.
+  the clipboard. It falls back to `VITE_PATTERN_VIEWER_ORIGIN` and then to the tab's own origin,
+  so setting the pattern-viewer variable already covers it — all public pages are the same SPA on
+  the same host. Set this one only if `/f/` ever moves to a domain of its own. The failure it
+  guards against is the same silent one: a link copied from a Vercel preview is handed to a
+  contractor and dies with the alias — which is why the tab fallback is refused when the tab
+  itself is provably ephemeral (`localhost`, a bare IP, `*.vercel.app`). On such a host the
+  address and its copy button are not rendered at all; on a stable host the tab origin *is* the
+  product origin and the button keeps working. See `src/components/file-share-viewer/link.ts`.
+  `.env.example` documents both variables.
 - `.env.example` lists a stale `REACT_APP_SERVER_URL` — the code uses `VITE_SERVER_URL`. Don't propagate the old name.
 
 ## Architecture

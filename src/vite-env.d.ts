@@ -18,7 +18,10 @@ interface ImportMetaEnv {
   /** Origin of the public file-share landing page (/f/{token}) copied out of the access
    *  block and the shared-files screen. Optional: unset it falls back to
    *  VITE_PATTERN_VIEWER_ORIGIN, which is the same host — all public pages are one SPA.
-   *  Set it only if /f/ ever moves to a domain of its own. */
+   *  Set it only if /f/ ever moves to a domain of its own. With NEITHER variable set the
+   *  tab's own origin is used, but only when that origin is not provably ephemeral
+   *  (localhost / bare IP / *.vercel.app) — there the address and its copy button are
+   *  hidden instead of handing out a link that dies off this machine. */
   readonly VITE_FILE_SHARE_ORIGIN?: string;
 }
 
