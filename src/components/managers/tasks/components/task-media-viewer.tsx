@@ -1,5 +1,5 @@
 import { isVideo } from 'lib/features/filterContentType';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   indexOfPin,
   useAnnotationSurface,
@@ -7,7 +7,6 @@ import {
 } from 'ui/components/annotation/canvas';
 import { AnnotationZoomDialog } from 'ui/components/annotation/zoom-dialog';
 import { Chip } from 'ui/components/chip';
-import type { MediaViewerItem } from 'ui/components/media-viewer';
 import Text from 'ui/components/text';
 import type { TaskMedia, TaskMediaAnnotations } from '../api/types';
 import { mediaRefToken, type MediaRef } from './task-text';
@@ -77,11 +76,6 @@ export function useTaskMediaViewer({
   const [open, setOpen] = useState(false);
   const [index, setIndex] = useState(0);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-
-  const items: MediaViewerItem[] = useMemo(
-    () => media.map((m) => ({ src: m.fullSize || m.thumbnail || '', thumbnail: m.thumbnail })),
-    [media],
-  );
 
   const safeIndex = media.length ? Math.min(Math.max(index, 0), media.length - 1) : 0;
   const current = media[safeIndex];
@@ -187,7 +181,11 @@ export function useTaskMediaViewer({
     />
   ) : null;
 
-  return { items, openIndex: openAt, openMedia, node };
+  // `items` (список кадров в форме `MediaViewerItem`) отсюда УБРАН. Он остался от лайтбокса
+  // `MediaViewer`, которым хук открывал вложения до перехода на поверхность указаний, и его
+  // единственным читателем была галерея `ui/components/media-gallery.tsx` — снятая вместе с ним.
+  // Возвращать список, который никто не читает, значит обещать вторую дверь к тем же кадрам.
+  return { openIndex: openAt, openMedia, node };
 }
 
 /**
