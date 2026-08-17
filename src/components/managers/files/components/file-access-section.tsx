@@ -15,6 +15,7 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import {
+  ACCESS_LEVEL_BADGE,
   ACCESS_LEVEL_HINT,
   ACCESS_LEVEL_TITLE,
   ACCESS_LEVELS,
@@ -23,8 +24,8 @@ import {
   LINK_TTLS,
   type AccessLevel,
 } from '../api/accessService';
-import { errorText, isForbidden, isUnknownRoute } from '../api/rpc-error';
-import { filesKeys } from '../hooks/useFiles';
+import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
+import { filesKeys, invalidateFileViews } from '../hooks/useFiles';
 import { formatWhen, formatWhenShort } from '../utils/format';
 
 /** Ключ вложен в `['files']`: витрина открытого и «закрыть доступ» из неё инвалидируют весь этот
@@ -91,6 +92,7 @@ export function FileAccessSection({
   // едет на файле именно затем, чтобы не спрашивать разрешения ради бейджа.
   const level: AccessLevel =
     asAccessLevel(access?.level) ?? asAccessLevel(file.accessLevel) ?? 'team';
+  const levelBadge = ACCESS_LEVEL_BADGE[level];
 
   const link = access?.link;
   const people = useMemo(() => access?.people ?? [], [access]);
@@ -121,6 +123,7 @@ export function FileAccessSection({
   const [query, setQuery] = useState('');
   const [pendingLevel, setPendingLevel] = useState<AccessLevel | undefined>(undefined);
   const [confirmRotate, setConfirmRotate] = useState(false);
+  const [confirmForever, setConfirmForever] = useState(false);
   const [chosenTtl, setChosenTtl] = useState<number | undefined>(undefined);
   const [allEvents, setAllEvents] = useState(false);
 
@@ -131,8 +134,10 @@ export function FileAccessSection({
 
   const invalidate = () => {
     // Весь префикс `['files']`: смена уровня меняет карточку, сетку, счётчики тем и витрину
-    // открытого. Перечислять их поимённо значит однажды забыть одну.
-    qc.invalidateQueries({ queryKey: filesKeys.all });
+    // открытого. Перечислять их поимённо значит однажды забыть одну. Плюс корень задач: тот
+    // же файл плиткой лежит во вложениях карточки задачи, и без него она до получаса
+    // показывала бы бейдж прежнего уровня — см. `invalidateFileViews`.
+    invalidateFileViews(qc);
   };
 
   const setAccess = useMutation({
@@ -146,6 +151,16 @@ export function FileAccessSection({
       // (нет прав, невыкаченный хендлер) оставил бы нажатым срок, которого нигде нет, — рядом
       // со строкой, называющей прежний срок, и с плашкой об ошибке.
       setChosenTtl(vars.level === 'link' ? vars.linkTtl : undefined);
+      // УРОВЕНЬ И СПИСОК ПРИЕЗЖАЮТ ВМЕСТЕ. `people` с пустым набором — законное состояние
+      // (файл остаётся у загрузившего, владельцев и супера), но почти никогда не то, ради
+      // чего уровень переключали: диалог прямо обещает спросить, кого добавить, — вот здесь
+      // это и спрашивается, пока намерение ещё в голове. Открытый пикер сюда не попадает:
+      // его собственное сохранение с пустым списком иначе открывало бы его заново.
+      if (vars.level === 'people' && vars.adminIds.length === 0 && !picking) {
+        setPicked([]);
+        setQuery('');
+        setPicking(true);
+      }
       invalidate();
     },
   });
@@ -173,6 +188,8 @@ export function FileAccessSection({
    */
   const currentTtl = chosenTtl ?? (link?.url ? (link.expiresAt ? undefined : 0) : undefined);
   const busy = setAccess.isPending || rotate.isPending;
+  /** Переключатель уровня не переставляется: либо круг правки не тот, либо запрос в пути. */
+  const frozen = !mayEdit || busy;
 
   /**
    * Какой срок уедет вместе с уровнем `link`.
@@ -302,9 +319,10 @@ export function FileAccessSection({
     <div className='flex flex-col gap-1'>
       <GroupLabel
         action={
-          level !== 'team' ? (
-            <Pill tone={level === 'link' ? 'attention' : 'ink'}>
-              {level === 'link' ? 'по ссылке' : 'ограничен'}
+          /* Бейдж — из ACCESS_LEVEL_BADGE, один источник с плиткой холста и строкой витрины. */
+          levelBadge ? (
+            <Pill tone={levelBadge.tone} title={levelBadge.title}>
+              {levelBadge.label}
             </Pill>
           ) : undefined
         }
@@ -329,11 +347,13 @@ export function FileAccessSection({
                 доступа читает любой, кто файл видит, — файл, который видеть нельзя, в ответе
                 не появляется вовсе. Поэтому 403 здесь означает отсутствие доступа к разделу
                 целиком, а не к этому блоку. */}
-            {isForbidden(error)
-              ? 'нет доступа к разделу «файлы» — блок доступа читается вместе с ним.'
-              : isUnknownRoute(error)
-                ? 'подробности доступа этот сервер ещё не отдаёт: либо сторона доступа не выкачена, либо файла уже нет.'
-                : errorText(error, 'блок доступа не прочитался')}
+            {isUnauthorized(error)
+              ? 'сессия истекла — войдите заново.'
+              : isForbidden(error)
+                ? 'нет доступа к разделу «файлы» — блок доступа читается вместе с ним.'
+                : isUnknownRoute(error)
+                  ? 'подробности доступа этот сервер ещё не отдаёт: либо сторона доступа не выкачена, либо файла уже нет.'
+                  : errorText(error, 'блок доступа не прочитался')}
           </Text>
         </div>
       ) : (
@@ -354,15 +374,25 @@ export function FileAccessSection({
                   type='button'
                   role='radio'
                   aria-checked={on}
-                  disabled={!mayEdit || busy}
+                  /* ЗАМОРОЖЕНО ПРОПОМ, А НЕ АТРИБУТОМ `disabled`. Обещание блока — «орган
+                     ВЫКЛЮЧЕН и подписан, а не спрятан: спрятанного не попросишь». С нативным
+                     `disabled` это обещание выполнялось только для зрячего с мышью: такая
+                     кнопка не берёт фокус вовсе, значит ни таб, ни экранный диктор до неё не
+                     доходят — а вместе с ней недостижима и подпись, называющая круг тех, кто
+                     доступ меняет. `aria-disabled` объявляет то же состояние, оставляя орган
+                     в порядке обхода; отказ живёт в обработчике. Тот же приём, что у
+                     read-only органов в остальной панели. */
+                  aria-disabled={frozen ? true : undefined}
                   onClick={() => {
-                    if (on) return;
+                    if (frozen || on) return;
                     setAccess.reset();
                     setPendingLevel(l);
                   }}
                   className={`flex items-start gap-2 px-1 py-1.5 text-left ${
                     i > 0 ? 'border-t border-hairline' : ''
-                  } enabled:hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor disabled:cursor-not-allowed`}
+                  } ${
+                    frozen ? 'cursor-not-allowed' : 'hover:bg-bgZebra'
+                  } focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor`}
                 >
                   <span
                     aria-hidden
@@ -553,9 +583,23 @@ export function FileAccessSection({
                     selected={currentTtl === t.hours}
                     pressed={currentTtl === t.hours}
                     disabled={!mayEdit || busy}
-                    onClick={() =>
-                      setAccess.mutate({ level: 'link', adminIds: peopleIds, linkTtl: t.hours })
-                    }
+                    /* «БЕССРОЧНО» СПРАШИВАЕТ, остальные три срока — нет, и разница не в
+                       осторожности, а в том, что возвращает время. Срок — единственное, что
+                       закрывает выданную наружу ссылку САМО; сняв его, человек оставляет файл
+                       открытым навсегда, и обратно это уже не приедет по календарю. Все три
+                       перехода уровня спрашивают, а это действие стоит столько же и уезжало
+                       одним кликом.
+                       Спрашиваем только про 0, а не про «любое увеличение срока»: сервер
+                       хранит ДАТУ окончания, а не выбранный срок, поэтому нынешние «7 дней»
+                       из даты не восстановить — «увеличение» пришлось бы угадывать, а
+                       вопрос, заданный не по делу, перестают читать. */
+                    onClick={() => {
+                      if (t.hours === 0 && currentTtl !== 0) {
+                        setConfirmForever(true);
+                        return;
+                      }
+                      setAccess.mutate({ level: 'link', adminIds: peopleIds, linkTtl: t.hours });
+                    }}
                   >
                     {t.label}
                   </Chip>
@@ -678,10 +722,26 @@ export function FileAccessSection({
               после.
             </Text>
           )}
-          {pendingLevel === 'people' && (
+          {/* ДВА ТЕКСТА, ПОТОМУ ЧТО ЭТО ДВА РАЗНЫХ СОБЫТИЯ. «Кроме перечисленных» — правда
+              ровно тогда, когда перечисленные есть; у файла, который ещё не ограничивали,
+              список ПУСТ, и обещание сужения читалось как «останется у тех, кого я выбрал»,
+              хотя выбранных ноль.
+              Круг, который переживает пустой список, — не «только вы»: предикат видимости на
+              сервере пропускает загрузившего, ВЛАДЕЛЬЦЕВ файла и супер-админа. Владелец,
+              переключивший уровень, себя наружу не запирает, и писать обратное значило бы
+              пугать выдуманным. */}
+          {pendingLevel === 'people' && peopleIds.length > 0 && (
             <Text>
               файл пропадёт у всех, кроме перечисленных: из сетки, из поиска, из счётчиков тем и
               из задачи, к которой он прикреплён. они не увидят даже имени файла.
+            </Text>
+          )}
+          {pendingLevel === 'people' && peopleIds.length === 0 && (
+            <Text>
+              <b>список пуст</b> — перечислять пока некого. файл пропадёт у всей команды: из
+              сетки, из поиска, из счётчиков тем и из задачи, к которой он прикреплён; имени
+              файла они тоже не увидят. видеть его останутся только загрузивший, владельцы файла
+              и супер-админ. кого добавить — спросим сразу после.
             </Text>
           )}
           {pendingLevel === 'team' && (
@@ -696,6 +756,22 @@ export function FileAccessSection({
             </Text>
           )}
         </div>
+      </ConfirmationModal>
+
+      <ConfirmationModal
+        open={confirmForever}
+        onOpenChange={setConfirmForever}
+        onConfirm={() => setAccess.mutate({ level: 'link', adminIds: peopleIds, linkTtl: 0 })}
+        title='сделать ссылку бессрочной'
+        confirmLabel='сделать бессрочной'
+        cancelLabel='оставить срок'
+        width='sm'
+      >
+        <Text>
+          у ссылки не станет срока: она будет открывать файл <b>пока её не пересоздадут или не
+          сменят уровень доступа</b>. это единственное, что закрывало её само — и после этого
+          закрывать её придётся руками, помня, что она где-то есть.
+        </Text>
       </ConfirmationModal>
 
       <ConfirmationModal
