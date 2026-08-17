@@ -3,6 +3,7 @@ import type { LibraryFile } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { FileTile } from 'components/managers/files/components/file-tile';
 import { ROUTES, SECTION } from 'constants/routes';
+import { useSnackBarStore } from 'lib/stores/store';
 import { useCallback, useRef } from 'react';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
@@ -61,6 +62,7 @@ export function AttachmentTiles({
   const qc = useQueryClient();
   const { canRead } = usePermissions();
   const mayOpenLibrary = canRead(SECTION.files);
+  const { showMessage } = useSnackBarStore();
 
   // ПРОТУХШАЯ ПОДПИСЬ — НЕ ПОЛОМКА. Превью файла библиотеки приезжает подписанной ссылкой на
   // 6–12 часов, а вкладку с задачей держат открытой дольше. Первый же сорвавшийся `<img>`
@@ -98,7 +100,14 @@ export function AttachmentTiles({
     // не даёт им ссылки для просмотра. Клиент это уважает и берёт `downloadUrl` — то есть
     // скачивание, а не показ. Аллоулист живёт на сервере; угадывать его здесь нельзя.
     const url = f.url || f.downloadUrl;
-    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+    if (url) {
+      window.open(url, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    // Ни адреса просмотра, ни адреса скачивания — сервер не выдал ни одного. Молчащий щелчок
+    // человек читает как «сломалась мышь» и жмёт ещё десять раз. Сказать «попробуйте в разделе
+    // файлов» нельзя: сюда попадают ровно те, у кого этого раздела нет.
+    showMessage('this file came without a link — nothing to open', 'error');
   };
 
   return (
@@ -115,8 +124,11 @@ export function AttachmentTiles({
           const openable = !!(m.fullSize || m.thumbnail);
           const notes = annotationsOf(annotations, m.id ?? 0).length;
           return (
+            // КЛЮЧ С ПОЗИЦИЕЙ, как в форме правки (`media-attachments.tsx`): один и тот же
+            // media_id может прийти с провода дважды, и одинаковые ключи React'а перепутали бы
+            // плитки местами — а позиция здесь ещё и адрес кадра в просмотрщике.
             <div
-              key={`m-${m.id}`}
+              key={`m-${i}-${m.id}`}
               className='flex h-full min-w-0 flex-col border border-borderColor bg-bgColor'
             >
               <button
@@ -147,9 +159,16 @@ export function AttachmentTiles({
                 )}
                 {/* Отметка указаний — В ЛЕВОМ углу, потому что правый занят ответом на вопрос
                     «что это за штука», и он один на оба ряда. Ставится ТОЛЬКО когда есть что
-                    отмечать: пустая отметка на каждой плитке перестаёт что-либо значить. */}
+                    отмечать: пустая отметка на каждой плитке перестаёт что-либо значить.
+
+                    ПОДЛОЖКА ОБЯЗАТЕЛЬНА. Отметка чернильная и лежит ПОВЕРХ снимка, а GRBPWR
+                    снимает много чёрного: без заливки «notes 3» пропадает на кадре целиком.
+                    В галерее, откуда отметку сюда перенесли, она стояла на белой полосе у
+                    нижней кромки плитки — и полоса была не украшением, а этим самым фоном.
+                    Белая плашка, а не чёрная как у бейджа: два одинаково чёрных
+                    прямоугольника в одной полосе читались бы как один разорванный. */}
                 {notes > 0 && (
-                  <span className='absolute bottom-1 left-1'>
+                  <span className='absolute bottom-1 left-1 bg-bgColor px-1'>
                     <NotesMark count={notes} />
                   </span>
                 )}

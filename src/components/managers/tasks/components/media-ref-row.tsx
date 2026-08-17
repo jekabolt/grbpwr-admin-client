@@ -62,8 +62,11 @@ export function MediaRefRow({
         {label}
       </Text>
       {media.map((m, i) => (
+        // КЛЮЧ С ПОЗИЦИЕЙ, как у плиток формы и карточки: один media_id может прийти с провода
+        // дважды, и на одинаковых ключах React перепутал бы кнопки местами — а каждая из них
+        // вставляет в текст СВОЙ номер.
         <button
-          key={m.id}
+          key={`${m.id}:${i}`}
           type='button'
           title={`insert a link to attachment ${i + 1}`}
           aria-label={`insert a link to attachment ${i + 1}`}
