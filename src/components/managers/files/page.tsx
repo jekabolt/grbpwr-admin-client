@@ -12,6 +12,7 @@ import { FilesDropOverlay } from './components/drop-overlay';
 import { FileCardModal } from './components/file-card-modal';
 import { FilesToolbar } from './components/files-toolbar';
 import { FileTile } from './components/file-tile';
+import { NewNoteModal } from './components/new-note-modal';
 import { PasteIntakeModal } from './components/paste-intake-modal';
 import {
   EmptyLibraryState,
@@ -148,6 +149,7 @@ export default function FilesPage() {
   // закрытии, а темы всё равно спрашивал ровно те, что уже выбраны на холсте.
   const pickerRef = useRef<HTMLInputElement>(null);
   const [pasted, setPasted] = useState<File[]>([]);
+  const [newNote, setNewNote] = useState(false);
 
   const topicsQuery = useFileTopics();
   const filesQuery = useLibraryFiles({ topicIds, untopiced, search: urlSearch, sort });
@@ -303,6 +305,7 @@ export default function FilesPage() {
           onMode={setMode}
           canWrite={mayWrite}
           onUpload={openPicker}
+          onNewNote={() => setNewNote(true)}
           className='border-0'
         />
         <div className='border-t border-hairline px-2.5 py-2'>
@@ -465,6 +468,10 @@ export default function FilesPage() {
           onClose={closeCard}
         />
       )}
+
+      {/* Модалка живёт РЯДОМ с карточкой, а не внутри полосы: полоса — управление сеткой, и
+          модалка, смонтированная в ней, исчезла бы вместе с полосой на экране тем. */}
+      {newNote && <NewNoteModal topics={topics} onClose={() => setNewNote(false)} />}
     </div>
   );
 }

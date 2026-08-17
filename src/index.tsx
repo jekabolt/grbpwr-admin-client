@@ -190,6 +190,7 @@ const MyProfile = lazyRoute(() =>
 const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
 const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
 const FilesShared = lazyRoute(() => import('components/managers/files/shared/shared-page'));
+const FileNote = lazyRoute(() => import('components/managers/files/note/note-page'));
 
 const Tasks = lazyRoute(() =>
   import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
@@ -425,6 +426,9 @@ root.render(
                   {/* Витрина открытого. Статический сегмент, как и «topics», поэтому «shared»
                       никогда не разберётся как `/files/:id`. */}
                   <Route path={ROUTES.filesShared} element={<FilesShared />} />
+                  {/* Заметка объявлена раньше `/files/:id` для читаемости; порядок и здесь ни
+                      на что не влияет — маршруты различаются длиной, а не рангом сегмента. */}
+                  <Route path={ROUTES.fileNote} element={<FileNote />} />
                   <Route path={ROUTES.file} element={<FilesLibrary />} />
                   <Route path={ROUTES.opex} element={<Opex />} />
                   {/* All accounting screens share one TooltipProvider (the design in

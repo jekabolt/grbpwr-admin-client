@@ -29,6 +29,7 @@ export function FilesToolbar({
   onMode,
   canWrite,
   onUpload,
+  onNewNote,
   className,
 }: {
   search: string;
@@ -40,6 +41,7 @@ export function FilesToolbar({
   onMode: (v: 'write' | 'read') => void;
   canWrite: boolean;
   onUpload: () => void;
+  onNewNote: () => void;
   /** Полоса — часть общего блока со словарём тем, поэтому свой внешний бордер она снимает. */
   className?: string;
 }) {
@@ -82,6 +84,12 @@ export function FilesToolbar({
         onClick={() => onMode(mode === 'write' ? 'read' : 'write')}
       >
         {writing ? 'режим: запись' : 'режим: только чтение'}
+      </Button>
+      {/* Заметка стоит РЯДОМ с загрузкой, а не в отдельном месте: и то и другое кладёт в
+          библиотеку новый файл, и для читающего полосу разницы между ними нет. Глушится тем же
+          `writing`, потому что создание — это запись. */}
+      <Button size='xs' variant='secondary' disabled={!writing} onClick={onNewNote}>
+        заметка
       </Button>
       <Button size='xs' variant='main' disabled={!writing} onClick={onUpload}>
         загрузить

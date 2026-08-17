@@ -332,3 +332,18 @@ export function isReadablePdf(fileName: string, contentType?: string): boolean {
   if ((contentType ?? '').toLowerCase().split(';')[0].trim() === 'application/pdf') return true;
   return fileName.toLowerCase().endsWith('.pdf');
 }
+
+/**
+ * Заметка ли это. Разбор ровно тот же, что у pdf выше, и по той же причине: тип приезжает
+ * заголовком от клиента, поэтому у него бывает и регистр, и `;charset=utf-8`.
+ *
+ * Расширение проверяется ВТОРЫМ и остаётся: `.md`, залитый файлом с чужой машины, приезжает
+ * то `text/markdown`, то `text/x-markdown`, то вовсе `application/octet-stream`. Открывать
+ * такой файл нечем — у `text/markdown` нет ссылки просмотра (в inline-аллоулист сервер его
+ * сознательно не берёт), — и без этой ветки у заметки не было бы ни одной кнопки открытия.
+ */
+export function isMarkdownNote(fileName: string, contentType?: string): boolean {
+  const ct = (contentType ?? '').toLowerCase().split(';')[0].trim();
+  if (ct === 'text/markdown' || ct === 'text/x-markdown') return true;
+  return fileName.toLowerCase().endsWith('.md');
+}

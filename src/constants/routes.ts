@@ -138,6 +138,13 @@ export enum ROUTES {
   // по рангу react-router, поэтому «shared» никогда не разберётся как идентификатор файла.
   filesShared = '/files/shared',
   file = '/files/:id',
+  // Заметка — ОТДЕЛЬНЫЙ экран, а не режим карточки: она открывается чтением во всю ширину,
+  // а карточка это модалка поверх сетки. Сегмент `note` стоит ПОСЛЕ `:id`, поэтому со
+  // статическими «topics»/«shared» не спорит вовсе — те живут на месте самого `:id`.
+  fileNote = '/files/:id/note',
+  // Собранный адрес заметки живёт в `notePath` внизу этого файла — рядом с шаблоном, из
+  // которого он собирается. Второй сборщик того же адреса заводить нельзя: ссылку на заметку
+  // ставят и карточка, и плитка, и текст другой заметки, и разойдутся они молча.
   accounts = '/accounts',
   // «Мой профиль» — СВОЙ аккаунт, отдельным адресом от `/accounts`.
   //
@@ -245,6 +252,16 @@ export const ADMIN_GROUP: NavGroup = {
 export const SIDE_BAR_ITEMS: NavItem[] = [...NAV_GROUPS, ADMIN_GROUP].flatMap(
   (group) => group.items,
 );
+
+/**
+ * Адрес экрана заметки. Собирается ИЗ `ROUTES.fileNote`, а не из второй такой же строки:
+ * ссылку на заметку ставят карточка файла, плитка холста и текст другой заметки, и три
+ * литерала разошлись бы при первой же правке шаблона, причём молча — маршрут остался бы
+ * рабочим, а ссылки перестали бы вести куда обещано.
+ */
+export function notePath(id: number): string {
+  return ROUTES.fileNote.replace(':id', String(id));
+}
 
 // True when `pathname` is at `route` or nested beneath it (e.g. /products/42 is under
 // /products). Used to highlight the active nav item and its parent group.

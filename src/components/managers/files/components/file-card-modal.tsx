@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { SECTION } from 'constants/routes';
+import { notePath, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
@@ -11,7 +12,7 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { useFilesMutations, useLibraryFile } from '../hooks/useFiles';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
-import { isReadablePdf } from '../utils/reader-find';
+import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
 import { FileAccessSection } from './file-access-section';
 import { FileComments } from './file-comments';
 import { FileOwnersSection } from './file-owners-section';
@@ -58,6 +59,7 @@ export function FileCardModal({
   const heldByTasks = (fileTasks?.tasks ?? []).length;
 
   const file = data?.file;
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [selected, setSelected] = useState<number[]>([]);
   const [newTopic, setNewTopic] = useState('');
@@ -66,7 +68,12 @@ export function FileCardModal({
   const [confirmClose, setConfirmClose] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [reading, setReading] = useState(false);
+  // Куда вести после вопроса «закрыть без сохранения». Вопрос один на оба выхода, потому что
+  // цена у них одна: набранное имя пропадает и там и там. Хранить намерение строкой, а не
+  // функцией: setState с функцией React принимает за обновляющую и зовёт её вместо записи.
+  const [closeIntent, setCloseIntent] = useState<'close' | 'note'>('close');
   const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
+  const note = isMarkdownNote(file?.fileName ?? '', file?.contentType ?? undefined);
 
   // НАБРАННОЕ, НО НЕ ЗАЭНТЕРЕННОЕ ИМЯ ТЕМЫ — ТОЖЕ ПРАВКА. Поле с текстом и мёртвая кнопка
   // рядом — тупик: человек видит заполненное поле и не понимает, чего от него ещё хотят.
@@ -94,6 +101,17 @@ export function FileCardModal({
     const sameTopics = was.size === now.size && [...was].every((x) => now.has(x));
     return name !== (file.fileName ?? '') || !sameTopics || pendingTopics.length > 0;
   }, [file, name, selected, pendingTopics]);
+
+  // Уход на экран заметки — это уход СО СТРАНИЦЫ, а не модалка поверх: карточка размонтируется
+  // вместе с несохранённым именем. Поэтому тот же вопрос, что и на закрытии.
+  const openNote = () => {
+    if (dirty) {
+      setCloseIntent('note');
+      setConfirmClose(true);
+      return;
+    }
+    navigate(notePath(id));
+  };
 
   const save = async () => {
     setFailure(undefined);
@@ -150,6 +168,7 @@ export function FileCardModal({
         // Клик вне модалки и Escape у Radix закрывают по умолчанию, и переименование
         // исчезало бы без единого слова — поэтому здесь стоит вопрос, а не выход.
         if (dirty) {
+          setCloseIntent('close');
           setConfirmClose(true);
           return;
         }
@@ -334,6 +353,14 @@ export function FileCardModal({
                 читать
               </Button>
             )}
+            {/* У ЗАМЕТКИ ЭТО ЕДИНСТВЕННАЯ КНОПКА ОТКРЫТИЯ. `text/markdown` в inline-аллоулист
+                сервер сознательно не берёт, поэтому `file.url` у неё пуст и кнопка «открыть»
+                ниже не рисуется вовсе; «скачать» отдаёт .md файлом, а не показывает текст. */}
+            {note && (
+              <Button size='sm' onClick={openNote}>
+                открыть заметку
+              </Button>
+            )}
             {/* url пуст у типов, которым inline запрещён (svg, html): сервер его не выдаёт —
                 клиент не прячет кнопку, кнопки просто нет. */}
             {file.url && (
@@ -384,9 +411,9 @@ export function FileCardModal({
       <ConfirmationModal
         open={confirmClose}
         onOpenChange={setConfirmClose}
-        onConfirm={onClose}
+        onConfirm={() => (closeIntent === 'note' ? navigate(notePath(id)) : onClose())}
         title='закрыть без сохранения'
-        confirmLabel='закрыть'
+        confirmLabel={closeIntent === 'note' ? 'открыть заметку' : 'закрыть'}
         cancelLabel='остаться'
         width='sm'
       >
