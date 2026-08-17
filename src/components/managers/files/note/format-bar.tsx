@@ -13,21 +13,22 @@ import { fileCardPath } from './file-refs';
  * работающий вариант: панель, дописывающая разметку в конец, в управляемой `textarea` читается
  * человеком как «съело текст» — он видит, что нажатие что-то сделало, но не там, где смотрел.
  *
- * Механика ровно из двух шагов, и оба нужны:
+ * Механика ровно из трёх шагов, и все три нужны:
  *
- * 1. `setRangeText` — правка идёт ЧЕРЕЗ САМО ПОЛЕ, а не через пересборку строки. Он двигает
- *    выделение сам, и, что важнее, после него `area.value` уже равен тому, что мы отдадим в
- *    `onChange`: react на перерисовке видит совпадение и НЕ трогает `value` узла, поэтому и
- *    сбрасывать каретку ему нечем.
- * 2. `useLayoutEffect` — та же позиция выставляется ещё раз, ПОСЛЕ того как react применил
- *    новое значение. Это страховка от первого шага: стоит любому звену в цепочке (нормализация
+ * 1. `execCommand('insertText')` — правка идёт ЧЕРЕЗ САМО ПОЛЕ, как будто её набрали. Способ
+ *    старый и объявлен устаревшим, но он единственный, который кладёт правку в НАТИВНУЮ СТОПКУ
+ *    ОТМЕНЫ: замерено на стенде — после нажатия «жирный» ⌘Z возвращает текст ровно на шаг
+ *    назад. Через `setRangeText` ⌘Z не делает НИЧЕГО: правка скриптом в стопку не попадает и
+ *    обнуляет то, что там было, — то есть человек теряет и отмену своего набора тоже.
+ * 2. `setRangeText` — запасной путь: если `execCommand` отказал или сделал не то (проверяется
+ *    сравнением с ожидаемой строкой, а не доверием к возвращённому `true`), поле приводится к
+ *    исходному виду и правится вторым способом. Пустая вставка (снятие разметки) идёт только
+ *    им: `insertText` пустой строкой в разных сборках означает разное.
+ * 3. `useLayoutEffect` — позиция каретки выставляется ещё раз, ПОСЛЕ того как react применил
+ *    новое значение. Это страховка от первых двух: стоит любому звену в цепочке (нормализация
  *    текста в `onChange`, чужой контролируемый враппер, ещё одна перерисовка между) переписать
  *    `value` — и каретка уезжает в конец, причём молча. Эффект сверяет `area.value` с тем, что
- *    он же и вставил, и правит позицию только если это его перерисовка.
- *
- * Цена, названная вслух: `setRangeText` — правка скриптом, и НАТИВНАЯ ОТМЕНА (⌘Z) на неё не
- * распространяется; браузер откатит последнее, что человек набрал руками, а нажатие кнопки
- * панели в стопке отмены не окажется. Замерено в chromium на стенде (`caret-probe`).
+ *    он же и вставил, и чужую перерисовку не трогает.
  *
  * ── ЧТО ЗДЕСЬ НЕ ДЕЛАЕТСЯ ───────────────────────────────────────────────────────────────────
  *
@@ -138,7 +139,9 @@ function inlineCodeEdit(text: string, start: number, end: number): Edit {
  * протяжка мышью до начала следующего абзаца превращала бы в список и его.
  */
 function lineSpan(text: string, start: number, end: number): [number, number] {
-  const ls = text.lastIndexOf('\n', Math.max(0, start - 1)) + 1;
+  // `lastIndexOf('\n', -1)` в js ищет от НУЛЯ, а не «нигде»: у текста, начинающегося с пустой
+  // строки, каретка в самом начале уезжала бы на вторую строку, и разметку получала бы она.
+  const ls = start === 0 ? 0 : text.lastIndexOf('\n', start - 1) + 1;
   const e = end > start && text[end - 1] === '\n' ? end - 1 : end;
   let le = text.indexOf('\n', e);
   if (le === -1) le = text.length;
@@ -179,9 +182,15 @@ function replaceLines(
   return { start: ls, end: le, text: next, sel: [caret, caret] };
 }
 
-/** Разметка НАЧАЛА строки — одна на строку: список, нумерация, цитата и заголовок сменяют друг
- * друга, а не наслаиваются («- 1. > текст» не значит ничего). */
-const LINE_MARK = /^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s?|#{1,6}\s*)/;
+/**
+ * Разметка НАЧАЛА строки — одна на строку: список, нумерация, цитата и заголовок сменяют друг
+ * друга, а не наслаиваются («- 1. > текст» не значит ничего).
+ *
+ * У решётки требуется пробел (`\s+`, а не `\s*`) ровно затем, чтобы `#хештег` остался словом:
+ * заголовком его не считает и разметчик, и съедать у него решётку при постановке пункта списка
+ * было бы правкой текста, о которой никто не просил.
+ */
+const LINE_MARK = /^\s*(?:[-*+]\s+|\d+[.)]\s+|>\s?|#{1,6}\s+)/;
 
 const LIST_RE = {
   ul: /^\s*[-*+]\s+/,
@@ -200,12 +209,14 @@ function lineMarkEdit(
     // Снимаем только если размечено ВСЁ выделенное: наполовину размеченный кусок кнопка
     // дописывает до конца, а не раздевает — это ближе к тому, зачем её нажали.
     const on = meaningful.length > 0 && meaningful.every((l) => LIST_RE[kind].test(l));
+    // Пустая строка — это НАЧАЛО списка: человек встал на пустое место и нажал кнопку, чтобы
+    // писать пункты. А вот пустая строка ВНУТРИ выделенного куска пунктом не становится: там
+    // она разделитель, и «- » в ней было бы пустым пунктом, которого никто не просил.
+    const blankOnly = meaningful.length === 0;
     let n = 0;
     return lines.map((l) => {
       if (on) return l.replace(LIST_RE[kind], '');
-      // Пустая строка внутри выделения пунктом не становится: «- » в пустой строке — это
-      // пустой пункт, которого никто не просил.
-      if (!l.trim()) return l;
+      if (!l.trim() && !blankOnly) return l;
       const bare = l.replace(LINE_MARK, '');
       n += 1;
       if (kind === 'ul') return `- ${bare}`;
@@ -227,8 +238,11 @@ function headingEdit(text: string, start: number, end: number): Edit {
     const first = /^\s*(#{1,3})\s/.exec(lines[0]);
     const level = first ? first[1].length : 0;
     const next = level >= 3 ? 0 : level + 1;
+    // Та же оговорка, что у списков: пустая строка получает решётку, если она и есть всё
+    // выделение (человек начинает заголовок), и не получает — если она разделитель внутри.
+    const blankOnly = lines.every((l) => !l.trim());
     return lines.map((l) => {
-      if (!l.trim()) return l;
+      if (!l.trim() && !blankOnly) return l;
       const bare = l.replace(LINE_MARK, '');
       return next === 0 ? bare : `${'#'.repeat(next)} ${bare}`;
     });
@@ -292,8 +306,14 @@ function linkLabel(raw: string): string {
 function fileEdit(text: string, start: number, end: number, f: LibraryFile): Edit {
   const [s, e] = trimEdges(text, start, end);
   const selected = linkLabel(text.slice(s, e));
-  const label = selected || linkLabel(f.fileName ?? '') || `файл ${f.id}`;
-  const next = `${insertsAsImage(f) ? '!' : ''}[${label}](${fileCardPath(Number(f.id))})`;
+  const id = Number(f.id);
+  const label = selected || linkLabel(f.fileName ?? '') || `файл ${id}`;
+  // Файл без номера — это выдача, из которой ссылку собрать не из чего. `/files/NaN` выглядел
+  // бы ссылкой и вёл бы в никуда, поэтому в текст уезжает одно имя.
+  const next =
+    Number.isSafeInteger(id) && id > 0
+      ? `${insertsAsImage(f) ? '!' : ''}[${label}](${fileCardPath(id)})`
+      : label;
   const at = s + next.length;
   return { start: s, end: e, text: next, sel: [at, at] };
 }
@@ -333,10 +353,40 @@ export function FormatBar({
       const text = area.value;
       const edit = make(text, area.selectionStart ?? 0, area.selectionEnd ?? 0);
 
+      const expected = text.slice(0, edit.start) + edit.text + text.slice(edit.end);
+
       area.focus();
-      area.setRangeText(edit.text, edit.start, edit.end, 'preserve');
+      let done = false;
+      if (edit.text !== '') {
+        area.setSelectionRange(edit.start, edit.end);
+        try {
+          done = document.execCommand('insertText', false, edit.text);
+        } catch {
+          done = false;
+        }
+        // Возвращённому `true` веры нет: команда объявлена устаревшей, и «сделал» от «сказал,
+        // что сделал» отличается только сравнением с ожидаемой строкой.
+        if (done && area.value !== expected) done = false;
+      }
+      if (!done) {
+        // Команда могла что-то успеть до того, как разошлась с ожиданием. Правка вторым
+        // способом по СТАРЫМ координатам поверх уже изменённого текста была бы промахом
+        // ровно того сорта, от которого весь этот файл, — поэтому сначала откат к исходному.
+        if (area.value !== text) {
+          const setter = Object.getOwnPropertyDescriptor(
+            HTMLTextAreaElement.prototype,
+            'value',
+          )?.set;
+          setter?.call(area, text);
+        }
+        area.setRangeText(edit.text, edit.start, edit.end, 'preserve');
+      }
+
       area.setSelectionRange(edit.sel[0], edit.sel[1]);
       pending.current = { value: area.value, sel: edit.sel };
+      // Зовётся ВСЕГДА, даже когда `execCommand` уже поднял свой `input` и react состояние
+      // обновил: второй вызов с тем же значением react отбрасывает сам, а без него запасной
+      // путь остался бы без единственного места, где о правке узнаёт страница.
       onChange(area.value);
     },
     [areaRef, onChange],
