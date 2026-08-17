@@ -417,7 +417,14 @@ function PdfStage({
               enter — следующее, shift+enter — предыдущее, esc — закрыть
             </Text>
             <ToolbarSpacer />
-            <Button size='xs' variant='secondary' onClick={() => onFindOpenChange(false)}>
+            {/* У крестика нет текста, а значит для скринридера у кнопки нет имени вовсе:
+                читается «кнопка». Имя даёт `aria-label`, и оно называет действие. */}
+            <Button
+              size='xs'
+              variant='secondary'
+              aria-label='закрыть поиск'
+              onClick={() => onFindOpenChange(false)}
+            >
               ✕
             </Button>
           </Toolbar>
@@ -434,7 +441,12 @@ function PdfStage({
               {indexing ? ' проверяем остальные страницы…' : ''}
             </Text>
             <ToolbarSpacer />
-            <Button size='xs' variant='secondary' onClick={() => onFindOpenChange(false)}>
+            <Button
+              size='xs'
+              variant='secondary'
+              aria-label='закрыть поиск'
+              onClick={() => onFindOpenChange(false)}
+            >
               ✕
             </Button>
           </Toolbar>

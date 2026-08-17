@@ -397,9 +397,12 @@ export function FileTasksSection({
               </Text>
             )}
           </div>
+          {/* «Закрыть», а не «готово»: прикрепление применяется сразу, накапливать и
+              подтверждать здесь нечего — кнопка только закрывает окно. Тот же довод и то же
+              слово, что у пикера файла в заметке. */}
           <div className='flex justify-end'>
             <Button size='sm' variant='secondary' onClick={() => setPicking(false)}>
-              готово
+              закрыть
             </Button>
           </div>
         </div>
