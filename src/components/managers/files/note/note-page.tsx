@@ -18,13 +18,14 @@ import { Toolbar, ToolbarSpacer } from 'ui/components/toolbar';
 import { filesService } from '../api/filesService';
 import { byteLength, NOTE_MAX_BYTES, notesService } from '../api/notesService';
 import { failureText, isForbidden, isUnknownRoute } from '../api/rpc-error';
+import { FilesDropOverlay } from '../components/drop-overlay';
 import { FailureText } from '../components/failure-text';
 import { NoAccessState } from '../components/gallery-states';
-import { filesKeys, useLibraryFile } from '../hooks/useFiles';
+import { filesKeys, invalidateFileViews, useLibraryFile } from '../hooks/useFiles';
 import { formatBytes, formatWhenShort, stemOf } from '../utils/format';
 import { MarkdownView } from './markdown-view';
 import { NoteDiff } from './note-diff';
-import { NoteEditor, type NoteEditorHandle } from './note-editor';
+import { NoteEditor, type NoteCaret, type NoteEditorHandle } from './note-editor';
 import { readNoteDraft, useNoteDraft } from './use-note-draft';
 
 /**
@@ -56,6 +57,20 @@ interface ConflictState {
   content: string;
   by: string;
   at: string;
+}
+
+/** Мак отличается тем, что в его текстовых полях живут emacs-привязки: ctrl+e там — «в конец
+ * строки», ctrl+a — «в начало». Проверка платформы нужна ровно для того, чтобы не отнимать их. */
+const IS_MAC =
+  typeof navigator !== 'undefined' &&
+  /Mac|iP(hone|ad|od)/.test(navigator.platform || navigator.userAgent);
+
+/** Живое текстовое поле — то, у которого своя работа с клавишами. */
+function isTextField(node: EventTarget | null): boolean {
+  const el = node as HTMLElement | null;
+  if (!el || typeof el.tagName !== 'string') return false;
+  const tag = el.tagName.toLowerCase();
+  return tag === 'textarea' || tag === 'input' || el.isContentEditable === true;
 }
 
 export function NotePage() {
@@ -95,25 +110,58 @@ export function NotePage() {
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [showDiff, setShowDiff] = useState(false);
   const [confirmOverwrite, setConfirmOverwrite] = useState(false);
+  /** Спрос перед тем, как черновик заменит уже набранное. См. `restoreDraft`. */
+  const [confirmRestore, setConfirmRestore] = useState(false);
   const [savingSeparate, setSavingSeparate] = useState(false);
   const editorRef = useRef<NoteEditorHandle | null>(null);
+  /** Где стояла каретка на выходе из правки: Esc и обратный ⌘E обязаны вернуть туда же, а не
+   * в начало заметки. Живёт здесь, а не в редакторе: редактор на это время размонтирован. */
+  const caretRef = useRef<NoteCaret | null>(null);
 
   const draft = useNoteDraft(Number.isFinite(id) && id > 0 ? id : undefined);
   const [draftOffer, setDraftOffer] = useState<{ content: string; base: string; at: number } | null>(
     null,
   );
 
-  /** Буфер засевается ОДИН РАЗ на заметку. Фоновое перечитывание не имеет права переписать то,
-   * что человек уже набрал, — а именно это делал бы простой `useEffect` на данные запроса. */
+  /** Буфер разошёлся с тем, что лежит на сервере. Стоит ВЫШЕ засева намеренно: засев про него
+   * спрашивает, и порядок объявления здесь — часть смысла, а не оформление. */
+  const contentDirty = value !== serverContent;
+
+  /**
+   * Засев буфера прочитанным текстом.
+   *
+   * ПЕРВЫЙ РАЗ — полный: текст, отпечаток, сброс правки и конфликта, разбор черновика.
+   *
+   * ДАЛЬШЕ — ТОЛЬКО ПО ЧИСТОМУ БУФЕРУ. Набранное фоновое перечитывание переписывать не имеет
+   * права, и раньше здесь стоял глухой запрет на второй засев вообще. Цена оказалась выше:
+   * кнопка «перечитать» в баннере отказа гасила баннер, но текст на экране навсегда оставался
+   * прошлой версией, а `base` — прошлым отпечатком, и следующее сохранение уезжало в конфликт
+   * на ровном месте. Поэтому запрет сужен до трёх случаев, где переписывать действительно
+   * нечего: буфер разошёлся с сервером, на экране конфликт, на экране предложение черновика.
+   */
   const seededRef = useRef<number | null>(null);
   useEffect(() => {
     const loaded = contentQuery.data;
-    if (!loaded || !Number.isFinite(id) || seededRef.current === id) return;
-    seededRef.current = id;
+    if (!loaded || !Number.isFinite(id)) return;
     const text = loaded.content ?? '';
+    const fresh = loaded.sha256 ?? '';
+
+    if (seededRef.current === id) {
+      if (contentDirty || conflict || draftOffer) return;
+      if (text === serverContent && fresh === base) return;
+      // Чистый буфер равен серверному тексту, поэтому потерять здесь нечего: меняется ровно
+      // то же, что увидел бы читатель, и вместе с текстом обновляется база сравнения.
+      setValue(text);
+      setServerContent(text);
+      setBase(fresh);
+      return;
+    }
+
+    seededRef.current = id;
+    caretRef.current = null;
     setValue(text);
     setServerContent(text);
-    setBase(loaded.sha256 ?? '');
+    setBase(fresh);
     setEditing(false);
     setConflict(null);
     setShowDiff(false);
@@ -136,18 +184,44 @@ export function NotePage() {
       setDraftOffer(null);
       if (offer) draft.clear();
     }
-  }, [contentQuery.data, draft, id]);
+  }, [base, conflict, contentDirty, contentQuery.data, draft, draftOffer, id, serverContent]);
 
-  // Имя правится в режиме правки и уезжает обычным UpdateLibraryFile. Засевается из файла и
-  // так же однократно.
+  /**
+   * Имя правится в режиме правки и уезжает обычным UpdateLibraryFile.
+   *
+   * ЧУЖОЕ ПЕРЕИМЕНОВАНИЕ ПОДХВАТЫВАЕТСЯ, ПОКА СВОЁ ИМЯ НЕ ТРОГАЛИ. Пока засев был однократным,
+   * переименование коллеги превращалось в дефект на ровном месте: карточка перечитывалась,
+   * `file.fileName` становился новым, поле оставалось старым — и от этого САМА зажигалась
+   * плашка «не сохранено», а следующее сохранение молча возвращало старое имя. Нового человек
+   * не видел вообще.
+   *
+   * Если своё имя УЖЕ правили, серверное не подставляется (это стёрло бы набранное), но и
+   * молчать нельзя — расхождение показывается баннером `renamedElsewhere`.
+   */
   const nameSeededRef = useRef<number | null>(null);
+  /** Имя, которое сервер показывал в прошлый раз: по нему видно, трогали ли поле руками. */
+  const serverNameRef = useRef('');
+  const [renamedElsewhere, setRenamedElsewhere] = useState('');
   useEffect(() => {
-    if (!file?.id || nameSeededRef.current === file.id) return;
-    nameSeededRef.current = file.id;
-    setName(file.fileName ?? '');
-  }, [file]);
+    if (!file?.id) return;
+    const server = file.fileName ?? '';
+    if (nameSeededRef.current !== file.id) {
+      nameSeededRef.current = file.id;
+      serverNameRef.current = server;
+      setRenamedElsewhere('');
+      setName(server);
+      return;
+    }
+    if (server === serverNameRef.current) return;
+    const untouched = name === serverNameRef.current;
+    serverNameRef.current = server;
+    if (untouched) setName(server);
+    // Серверное имя сравнялось с полем — значит это ПРИЕХАЛО НАШЕ ЖЕ сохранение, а не чужая
+    // правка. Без этой ветки баннер зажигался бы после собственного переименования и говорил
+    // про коллегу, которого не было.
+    else setRenamedElsewhere(server === name.trim() ? '' : server);
+  }, [file, name]);
 
-  const contentDirty = value !== serverContent;
   const nameDirty = !!file && name.trim() !== (file.fileName ?? '') && !!name.trim();
   const dirty = contentDirty || nameDirty;
 
@@ -230,8 +304,13 @@ export function NotePage() {
             newTopics: [],
           });
         }
-        qc.invalidateQueries({ queryKey: filesKeys.file(file.id) });
-        qc.invalidateQueries({ queryKey: [...filesKeys.all, 'list'] });
+        // ОДНОЙ ФУНКЦИЕЙ НА ВЕСЬ РАЗДЕЛ, а не двумя ключами поимённо. Поимённый список
+        // накрывал карточку файла и сетку — и проходил мимо витрины открытого
+        // (`['files','shared',…]`, staleTime 30 минут: до получаса со старым именем на экране,
+        // который существует, чтобы показывать правду о выложенном наружу) и мимо всего дерева
+        // задач, откуда рисуется плитка этой же заметки во вложениях карточки. `invalidateFileViews`
+        // знает про оба корня и уже используется тремя другими мутациями раздела.
+        invalidateFileViews(qc);
       } catch (e) {
         showMessage(failureText(e, 'не удалось сохранить заметку'), 'error');
       } finally {
@@ -280,7 +359,9 @@ export function NotePage() {
         content: value,
       });
       draft.clear();
-      qc.invalidateQueries({ queryKey: filesKeys.all });
+      // Новая заметка — это новый файл библиотеки: он обязан появиться и на витрине, и во
+      // вложениях, а не только в сетке. Тот же довод, что у обычного сохранения.
+      invalidateFileViews(qc);
       const newId = res.file?.id;
       showMessage('ваша версия сохранена отдельной заметкой', 'success');
       if (newId) navigate(notePath(newId));
@@ -305,11 +386,40 @@ export function NotePage() {
 
   /* ── горячие клавиши ──────────────────────────────────────────────────────────────────── */
 
-  const canSave = dirty && !tooBig && writable;
+  // `!!file?.id` — не украшение: запись идёт ПО НОМЕРУ ФАЙЛА, и без прочитанной карточки
+  // `save` выходит первой же строкой. Пока этого условия не было, кнопка «сохранить» оставалась
+  // активной и на нажатие не делала ничего и молча — замерено: ноль запросов, ноль сообщений.
+  const canSave = dirty && !tooBig && writable && !!file?.id;
+
+  /** Выход из правки. Снимает каретку ДО размонтирования редактора — иначе снимать её будет не с
+   * чего, и возврат по ⌘E ставил бы её в начало заметки. */
+  const leaveEdit = useCallback(() => {
+    caretRef.current = editorRef.current?.caret() ?? caretRef.current;
+    setEditing(false);
+  }, []);
+
+  /**
+   * Подставить черновик в поле.
+   *
+   * ПО ЧИСТОМУ БУФЕРУ — СРАЗУ, ПО НАБРАННОМУ — ТОЛЬКО С ПОДТВЕРЖДЕНИЕМ. Кнопка работала молча и
+   * тогда, когда человек, не ответив баннеру, уже начал печатать: набранное подменялось
+   * вчерашним черновиком без следа. Вернуть его было нечем — ⌘Z буфер react не отменяет, а в
+   * localStorage к тому времени лежал уже новый текст (черновик пишется по мере набора).
+   */
+  const restoreDraft = useCallback(() => {
+    if (!draftOffer) return;
+    setValue(draftOffer.content);
+    // База берётся ИЗ ЧЕРНОВИКА, а не с сервера: черновик произошёл от той версии, и подставить
+    // свежий отпечаток значило бы пройти сравнение под чужой правкой.
+    setBase(draftOffer.base);
+    setDraftOffer(null);
+    setConfirmRestore(false);
+    setEditing(true);
+  }, [draftOffer]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (confirmOverwrite) return;
+      if (confirmOverwrite || confirmRestore) return;
       const mod = e.metaKey || e.ctrlKey;
 
       // `code`, а не только `key`: на русской раскладке физическая S приходит как «ы», а E как
@@ -322,24 +432,30 @@ export function NotePage() {
         return;
       }
       if (mod && (e.code === 'KeyE' || e.key.toLowerCase() === 'e')) {
+        // CTRL+E ВНУТРИ ПОЛЯ НА МАКЕ — ЧУЖАЯ КЛАВИША. Там это штатное «в конец строки» (emacs-
+        // привязки живут во всех текстовых полях системы), и перехват выбрасывал человека из
+        // правки посреди набора. ⌘E остаётся везде; на прочих системах Ctrl+E остаётся тоже —
+        // там он ничего не значит.
+        if (IS_MAC && e.ctrlKey && !e.metaKey && isTextField(e.target)) return;
         if (!writable) return;
         e.preventDefault();
-        setEditing((v) => !v);
+        if (editing) leaveEdit();
+        else setEditing(true);
         return;
       }
       // Esc сначала предлагают редактору: пока открыт блок помощника, он значит «закрой
       // помощника», и только потом — «выйди из правки».
       if (e.key === 'Escape' && editing) {
         if (editorRef.current?.consumeEscape()) return;
-        setEditing(false);
+        leaveEdit();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [canSave, confirmOverwrite, editing, save, saving, writable]);
+  }, [canSave, confirmOverwrite, confirmRestore, editing, leaveEdit, save, saving, writable]);
 
   useEffect(() => {
-    if (editing) editorRef.current?.focus();
+    if (editing) editorRef.current?.focus(caretRef.current);
   }, [editing]);
 
   /* ── отказы ───────────────────────────────────────────────────────────────────────────── */
@@ -464,19 +580,13 @@ export function NotePage() {
               {draftOffer.at ? ` от ${formatWhenShort(new Date(draftOffer.at).toISOString())}` : ''}.
               он не подставлен сам: за это время заметку мог сохранить кто-то другой, и тихая
               подстановка была бы откатом чужой работы.
+              {contentDirty && ' в поле уже набрано другое — восстановление сначала спросит.'}
             </Text>
             <div className='ml-auto flex gap-1.5'>
               <Button
                 size='xs'
                 variant='secondary'
-                onClick={() => {
-                  setValue(draftOffer.content);
-                  // База берётся ИЗ ЧЕРНОВИКА, а не с сервера: черновик произошёл от той версии,
-                  // и подставить свежий отпечаток значило бы пройти сравнение под чужой правкой.
-                  setBase(draftOffer.base);
-                  setDraftOffer(null);
-                  setEditing(true);
-                }}
+                onClick={() => (contentDirty ? setConfirmRestore(true) : restoreDraft())}
               >
                 восстановить
               </Button>
@@ -524,6 +634,57 @@ export function NotePage() {
         </CalloutBox>
       )}
 
+      {/* Имя поменял кто-то другой, а своё уже правили. Молчать нельзя дважды: человек не увидел
+          бы нового имени вообще, а его сохранение вернуло бы старое — без всякого конфликта,
+          потому что имя едет обычным UpdateLibraryFile, без сравнения отпечатков. */}
+      {renamedElsewhere && renamedElsewhere !== name.trim() && (
+        <CalloutBox tone='warning'>
+          <div className='flex flex-wrap items-baseline gap-2'>
+            <Text size='micro' component='span'>
+              <b>файл переименовали, пока вы правили имя.</b> сейчас он называется «
+              {renamedElsewhere}», в вашем поле — «{name}». сохранение поставит ваше: у имени нет
+              сравнения версий, как у текста.
+            </Text>
+            <div className='ml-auto flex gap-1.5'>
+              <Button
+                size='xs'
+                variant='secondary'
+                onClick={() => {
+                  setName(renamedElsewhere);
+                  setRenamedElsewhere('');
+                }}
+              >
+                взять новое имя
+              </Button>
+              <Button size='xs' variant='secondary' onClick={() => setRenamedElsewhere('')}>
+                оставить своё
+              </Button>
+            </div>
+          </div>
+        </CalloutBox>
+      )}
+
+      {/* Карточка файла не прочиталась. Текст при этом виден и правится — но сохранять некуда:
+          запись идёт по номеру файла. Кнопка уже погашена (`canSave`), а это — объяснение. */}
+      {!file && !fileQuery.isLoading && (
+        <CalloutBox tone='error' className='bg-bgColor'>
+          <div className='flex flex-wrap items-baseline gap-2'>
+            <Text size='micro' component='span'>
+              <b>карточка файла не прочиталась — сохранить не выйдет.</b> текст цел, он на экране и
+              в черновике браузера; сохранение вернётся, как только карточка прочитается.
+            </Text>
+            <Button
+              size='xs'
+              variant='secondary'
+              className='ml-auto'
+              onClick={() => fileQuery.refetch()}
+            >
+              перечитать карточку
+            </Button>
+          </div>
+        </CalloutBox>
+      )}
+
       {conflict && showDiff && (
         <Section
           title='что разошлось'
@@ -549,7 +710,7 @@ export function NotePage() {
           savedLabel={savedLabel}
           canSave={canSave}
           onSave={() => void save(false)}
-          onLeaveEdit={() => setEditing(false)}
+          onLeaveEdit={leaveEdit}
           sizeHint={sizeHint}
           banners={banners}
         />
@@ -627,6 +788,22 @@ export function NotePage() {
           как отдельную заметку».
         </Text>
       </ConfirmationModal>
+
+      <ConfirmationModal
+        open={confirmRestore}
+        onOpenChange={setConfirmRestore}
+        onConfirm={restoreDraft}
+        title='восстановить черновик'
+        confirmLabel='заменить набранное'
+        cancelLabel='оставить набранное'
+        width='sm'
+      >
+        <Text>
+          в поле уже набрано то, чего в черновике нет. восстановление заменит набранное целиком, и
+          вернуть его будет неоткуда: ⌘z сюда не достаёт, а в браузерном черновике с первой же
+          набранной буквы лежит уже новый текст.
+        </Text>
+      </ConfirmationModal>
     </PageShell>
   );
 }
@@ -637,9 +814,40 @@ export function NotePage() {
  *
  * Белым НЕ красит: серый холст — это и есть разделитель между блоками, и обёртка, залившая его
  * белым, стёрла бы все границы разом.
+ *
+ * ── ГАШЕНИЕ БРОСКА ЖИВЁТ ЗДЕСЬ ──────────────────────────────────────────────────────────────
+ *
+ * Экран заметки был ЕДИНСТВЕННЫМ в разделе без приёмника броска. Замерено: на `/files` бросок
+ * погашен, на `/files/{id}/note` — нет, и браузер уходил по адресу брошенного файла прямо со
+ * страницы с набранным, но не сохранённым текстом. Референс в заметку тянут ежедневно — это
+ * обычный жест, а не редкий.
+ *
+ * В ОБОЛОЧКЕ, А НЕ В ГЛАВНОЙ ВЕТКЕ РЕНДЕРА: у экрана четыре ранних выхода (нет номера, читаем,
+ * заметка не открылась), и приёмник, стоящий только в пятой ветке, защищал бы не все состояния
+ * одного и того же адреса.
+ *
+ * ПРИНИМАТЬ ФАЙЛЫ ЭКРАН НЕ СТАЛ, и это выбор, а не упущение. Полоса отправки живёт на холсте и
+ * на витрине, здесь её нет: принятая пачка ехала бы невидимо — ни хода, ни отмены, ни причины
+ * отказа. Наследовать темы тоже не от чего (чипов холста здесь нет). Поэтому бросок гасится и
+ * объясняется словами, а законный путь назван там же: файл кладут в библиотеку и вставляют в
+ * заметку кнопкой «файл» над полем — она вставляет НОМЕР файла, который живёт столько же,
+ * сколько сама заметка, в отличие от подписанного адреса.
+ *
+ * Перетаскивание простого ТЕКСТА в поле остаётся браузерным: предикат `upload/drop.ts`
+ * пропускает ровно этот случай, и в заметке он нужен чаще, чем где-либо ещё в разделе.
  */
 function PageShell({ children }: { children: React.ReactNode }) {
-  return <div className='flex flex-col gap-gutter pb-gutter'>{children}</div>;
+  return (
+    <div className='flex flex-col gap-gutter pb-gutter'>
+      {children}
+      <FilesDropOverlay
+        enabled={false}
+        disabledNote='заметка файлов не принимает — положите файл в библиотеку и вставьте его в текст кнопкой «файл»'
+        topicLabels={[]}
+        onFiles={() => {}}
+      />
+    </div>
+  );
 }
 
 export default NotePage;
