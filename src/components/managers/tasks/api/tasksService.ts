@@ -74,6 +74,8 @@ function mapInsert(i: common_Task['task']): TaskInsert {
     labels: i?.labels ?? [],
     mediaIds: i?.mediaIds ?? [],
     fileIds: i?.fileIds ?? [],
+    // Проносим как есть: рисовать указания эта ветка не умеет, но и терять чужие не вправе.
+    mediaAnnotations: i?.mediaAnnotations,
     techCardId: i?.techCardId ?? 0,
     productId: i?.productId ?? 0,
     orderUuid: i?.orderUuid ?? '',

@@ -7,6 +7,8 @@
 // placement (board / status / position) lives on Task and is set at AddTask /
 // changed only via MoveTask.
 
+import type { common_TaskMediaAnnotations } from 'api/proto-http/admin';
+
 export type TaskBoard =
   | 'TASK_BOARD_UNKNOWN'
   | 'TASK_BOARD_DEVELOPMENT'
@@ -67,6 +69,11 @@ export interface TaskInsert {
   // in buckets with opposite privacy (media is public on the CDN); the UI merges them
   // into one attachments list so nobody has to hold that distinction in their head.
   fileIds: number[];
+  // Указания на вложенных картинках. Прилетело с ветки задач — та половина ещё не на
+  // клиентской бете, поэтому здесь поле только ПРОНОСИТСЯ через запись: если сервер
+  // вернул указания, они уедут обратно нетронутыми. Ронять их молчаливым undefined
+  // нельзя — правка описания задачи стёрла бы чужую разметку на картинке.
+  mediaAnnotations: common_TaskMediaAnnotations[] | undefined;
   // Optional typed links (0 / '' = none) — mirrors common.TaskInsert.
   techCardId: number;
   productId: number;
@@ -155,6 +162,7 @@ export function emptyTaskInsert(): TaskInsert {
     labels: [],
     mediaIds: [],
     fileIds: [],
+    mediaAnnotations: undefined,
     techCardId: 0,
     productId: 0,
     orderUuid: '',

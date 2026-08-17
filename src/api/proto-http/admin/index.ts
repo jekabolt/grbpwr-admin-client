@@ -4772,6 +4772,15 @@ export type common_TaskInsert = {
   // The ACTUAL start (when the card first entered IN_PROGRESS) is the
   // server-stamped Task.started_at, not this field. Unset = no planned start.
   startDate: wellKnownTimestamp | undefined;
+  // УКАЗАНИЯ, НАРИСОВАННЫЕ НА ВЛОЖЕННЫХ КАРТИНКАХ. «Тут шов кривой», «вот эту молнию», «отсюда
+  // досюда» — сказанное стрелкой на самом снимке, а не пересказанное словами в описании.
+  // ПОЛНАЯ ЗАМЕНА ВМЕСТЕ С СОДЕРЖИМЫМ, ровно как media_ids, и по той же причине: обе стороны
+  // пишет одна форма карточки, и присланный без указаний список означает «указаний больше нет».
+  // Присутствия у repeated-поля нет, поэтому клиент обязан слать то, что прочитал, — тот же
+  // круговой рейс, что у labels и media_ids.
+  // НАБОР БЕЗ СВОЕЙ КАРТИНКИ СБРАСЫВАЕТСЯ СЕРВЕРОМ: указание на снимке, снятом с карточки,
+  // нельзя ни увидеть, ни убрать, а хранить его значило бы копить невидимое.
+  mediaAnnotations: common_TaskMediaAnnotations[] | undefined;
 };
 
 export type common_TaskPriority =
@@ -4780,6 +4789,153 @@ export type common_TaskPriority =
   | "TASK_PRIORITY_MEDIUM"
   | "TASK_PRIORITY_HIGH"
   | "TASK_PRIORITY_URGENT";
+// TaskMediaAnnotations — указания одной прикреплённой картинки.
+// ТА ЖЕ СТРУКТУРА, ЧТО НА ЭСКИЗЕ ТЕХ-КАРТЫ И НА СНИМКЕ ШАГА СБОРКИ: `TechCardAnnotation`, вместе с
+// её видами, точками, цветом и пунктиром. Имя историческое — примитив указания в системе ОДИН (см.
+// довод миграций 0308/0309), и заводить рядом второй набор видов с второй проверкой ради задачи
+// значило бы развести их на первой же правке: человек рисует одним и тем же жестом, а читатель
+// смотрел бы в две системы.
+// `piece_line_key`/`piece_line_keys` у задачи смысла не имеют (деталей кроя у карточки нет) и
+// сервером ОЧИЩАЮТСЯ: ссылка на деталь чужой тех-карты, которую здесь нечем ни выбрать, ни
+// показать, — это висящий ключ, который однажды напечатают.
+export type common_TaskMediaAnnotations = {
+  mediaId: number | undefined;
+  annotations: common_TechCardAnnotation[] | undefined;
+};
+
+export type common_TechCardAnnotation = {
+  kind: common_TechCardAnnotationKind | undefined;
+  // Число точек определяется видом и проверяется сервером: PIN/LABEL — 1, DIM/BRACKET — 2,
+  // ARC — 3, MULTI — от 2 до 8.
+  points: common_TechCardAnnotationPoint[] | undefined;
+  text: string | undefined;
+  // Положение плашки с текстом, 0..1. Лидер НЕ хранится — он строится от плашки к якорю по
+  // правилу отрисовки; хранить его значило бы хранить производное и дать ему разойтись.
+  labelX: googletype_Decimal | undefined;
+  labelY: googletype_Decimal | undefined;
+  color: common_TechCardAnnotationColor | undefined;
+  // ДЕТАЛЬ КРОЯ, О КОТОРОЙ ЭТА ВЫНОСКА. Стабильный line_key детали ЭТОЙ ЖЕ карточки — тот же ключ,
+  // которым деталь адресуют вход операции и назначение материала, а не имя: имя переживает
+  // переименование хуже, чем ссылка.
+  // ССЫЛКА СОВЕТУЮЩАЯ, а не проверяемая. Указание можно поставить раньше, чем деталь заведена
+  // (снимок узла приходит с примерки, детали кроя рождаются из чертежа позже), и отказ сохранения
+  // всей карточки из-за неразрешимого ключа стоил бы дороже, чем висящая ссылка: клиент показывает
+  // «деталь удалена», человек перевыбирает. Ровно так же ведут себя piece_line_keys операции.
+  // УСТАРЕЛО в пользу piece_line_keys ниже, но не снято: клиент, который про список не знает,
+  // по-прежнему шлёт и читает это поле. Сервер отдаёт его ПЕРВЫМ элементом списка.
+  pieceLineKey: string | undefined;
+  // ПУНКТИР ВМЕСТО СПЛОШНОЙ. На чертеже это различие несёт смысл, а не украшает: сплошная —
+  // то, что видно и делают, пунктир — построение, припуск, линия под слоем. Поэтому поле входит
+  // в подпись секции, как и сам вид, а не остаётся оформлением вроде цвета.
+  // У PIN линии нет вовсе, и сервер приводит поле к false: два способа записать одно и то же
+  // «нечего рисовать пунктиром» разошлись бы в отпечатке.
+  dashed: boolean | undefined;
+  // ЗАШТРИХОВАТЬ ОБЛАСТЬ ПОД ПОЛИГОНОМ. Контур говорит «вот эта граница», штриховка — «вот эта
+  // площадь»; на дублировании и на пороке ткани это разные указания.
+  // Только у POLYGON. У прочих видов заливать нечего, и сервер приводит поле к false, а не
+  // отвергает карточку: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже,
+  // чем молчаливое приведение к тому единственному, что поле могло бы значить.
+  filled: boolean | undefined;
+  // ДЕТАЛИ КРОЯ, О КОТОРЫХ УКАЗАНИЕ. Список, а не одна: узел законно собирает несколько деталей
+  // сразу — «втачать рукав в пройму» это и рукав, и полочка, и спинка, и указание на снимке
+  // относится ко всем трём. Одиночным полем это выражалось выбором «какая из них главная»,
+  // которого у шва нет.
+  // СОВМЕСТИМОСТЬ БЕЗ ФЛАГА ПРИСУТСТВИЯ: пустой список читается как [piece_line_key], непустой
+  // вытесняет старое поле целиком. Клиенту, который шлёт только piece_line_key, ничего менять не
+  // нужно; сервер отдаёт оба, и piece_line_key = первый элемент списка.
+  pieceLineKeys: string[] | undefined;
+};
+
+// TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
+// THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
+// path). Eleven fields left, and they left for three different reasons:
+// (a) THE CODE WROTE THEM, NOT A PERSON. `machine` and `stitches_per_cm` were filled from an
+// operation-type preset, `thread` from the linked BOM line, `placement` from the joined
+// piece names, and each was then stored as a fact and hashed into a signed digest. The
+// printed tech pack had to SUBTRACT `thread` from the material list to stop printing the
+// same string twice — a repair for a duplication that should not have existed.
+// (b) NOBODY READ THEM. `needle` duplicated material_thread_attr.needle_reco, which the thread
+// article already carries, and no consumer anywhere read the operation's copy.
+// (c) THEY ASKED A QUESTION WITH NO SINGLE ANSWER. `node` («узел / что», REQUIRED) offered a
+// list mixing seams, garment areas, pieces and materials, and repeated the verb the type
+// field already held. A working pattern-maker could not fill it and asked whether it was
+// needed. It is not replaced by an optional title: an optional field asking the same
+// unanswerable question just gets answered differently on every card.
+// WHAT A STEP IS NOW: a verb (operation_type), a place (zone), what it joins (piece_line_keys)
+// and what it consumes (bom_line_keys), and how long it takes (smv). Its heading is COMPOSED —
+// «join · side seams · Front + Back» — never typed.
+// EXACTLY TWO FIELDS ARE REQUIRED, and both are closed lists: operation_type and zone. Nothing
+// with free input is mandatory ever again; that pairing is what made `node` a trap.
+// EVERYTHING BELOW «отклонения» IS AN OVERRIDE: unset means INHERIT from the card
+// (TechCardConstruction, and TechCard.required_seam_allowance_mm for the allowance), which
+// inherits from the workshop. The inherited value is shown as a placeholder and NEVER written
+// into the row — the day it is written, «the technologist decided 4 st/cm» stops being
+// distinguishable from «it defaulted to 4», which is precisely today's defect.
+// ── ВЫНОСКИ НА ФОТО УЗЛА ────────────────────────────────────────────────────────────────────────
+// Выноска отвечает швее на два вопроса, которые не помещаются в текст шага: ЧТО тут делать и ПО
+// КАКОМУ РАЗМЕРУ. Поэтому она живёт поверх снимка узла, а не в описании.
+// ЗАКРЫТЫЙ СЛОВАРЬ `kind`, А НЕ СВОБОДНЫЕ ОСИ. Проектировался набор осями (якорь × геометрия ×
+// лидер × подпись), но хранить оси независимыми полями значит валидировать комбинаторику
+// бессмыслицы: скобка с одной точкой, номер на мерке, лидер у того, у чего нет якоря. Вид —
+// одно значение, и оно определяет и число точек, и что рисуется, и чем является текст.
+// СООБЩЕНИЕ НЕ ЗНАЕТ СЛОВА «ОПЕРАЦИЯ». Тот же тип пригодится карточному эскизу, детали кроя и
+// примерке — им нужно будет лишь своё поле, а не свой формат выноски.
+export type common_TechCardAnnotationKind =
+  | "TECH_CARD_ANNOTATION_KIND_UNKNOWN"
+  // 1 точка. Номер — позиция в списке; текст — заметка, читается в легенде.
+  | "TECH_CARD_ANNOTATION_KIND_PIN"
+  // 1 точка + плашка. Текст — подпись, лидер-стрелка строится сам.
+  | "TECH_CARD_ANNOTATION_KIND_LABEL"
+  // 2 точки. Размерная линия с засечками; текст — значение с единицами («6 мм»).
+  | "TECH_CARD_ANNOTATION_KIND_DIM"
+  // 2 точки. Скобка над участком; текст — что с этим участком делать.
+  | "TECH_CARD_ANNOTATION_KIND_BRACKET"
+  // 2..8 точек. Одна подпись, ветвящаяся к нескольким местам («закрепки ×3»).
+  | "TECH_CARD_ANNOTATION_KIND_MULTI"
+  // 3 точки: начало, ТОЧКА НА КРИВОЙ, конец. Дуга — единственный способ показать линию, которая на
+  // изделии не прямая: посадку оката, скругление борта, ход отделочной строчки по кокетке. Отрезком
+  // это не сказать, а ломаной из десяти точек — сказать нельзя дважды одинаково.
+  // Средняя точка ЛЕЖИТ НА КРИВОЙ, а не управляет ей со стороны. Управляющая точка Безье не
+  // принадлежит кривой, и технолог, ставящий её мышью, каждый раз промахивается мимо линии, которую
+  // рисует; из трёх точек НА кривой управляющая считается однозначно (2·P1 − (P0+P2)/2).
+  | "TECH_CARD_ANNOTATION_KIND_ARC"
+  // 3..40 точек. ЗАМКНУТЫЙ КОНТУР — область, а не линия: «эту зону продублировать клеевой»,
+  // «здесь настрочить». Ни мерка, ни скобка область не выражают: они говорят про отрезок, а
+  // порок ткани и участок дублирования имеют форму пятна.
+  // Замыкание ПОДРАЗУМЕВАЕТСЯ и последней точкой не дублируется. Хранить повторение первой точки
+  // значило бы завести два места для одной координаты, которые однажды разойдутся: правка первой
+  // точки не догнала бы копию, и контур разомкнулся бы на волосок — незаметно на экране и
+  // предательски на печати.
+  | "TECH_CARD_ANNOTATION_KIND_POLYGON"
+  // 2..200 точек. СВОБОДНЫЙ СЛЕД МАРКЕРА — ломаная без правил, «обвёл и показал». Существует не
+  // вместо чертёжных видов, а рядом с ними: разговор у стола идёт быстрее, чем ставится мерка, и
+  // набросок, который не сделали, не заменяется точной фигурой, которую не сделали тоже.
+  // Верхний предел — не вкус: точки лежат decimal-парами в JSON, и след, снятый с каждого
+  // движения мыши, набирает тысячи за секунду. Клиент прореживает след ДО отправки, поэтому 200
+  // здесь потолок, а не норма.
+  | "TECH_CARD_ANNOTATION_KIND_INK";
+// Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
+// карточных выносок. Decimal, а не float: промежуточный ввод и круговой рейс без потерь, и один
+// тип на обе системы координат карточки.
+export type common_TechCardAnnotationPoint = {
+  x: googletype_Decimal | undefined;
+  y: googletype_Decimal | undefined;
+};
+
+// Цвет выноски. ЗАКРЫТЫЙ СПИСОК, а не свободный hex: лист швеи печатается и на чёрно-белом
+// принтере, и произвольный цвет там превратился бы в неразличимый серый. Значение по умолчанию
+// (UNKNOWN) — чернильный, то есть тот же, каким рисуется всё остальное на листе; цвет РАЗЛИЧАЕТ
+// пересекающиеся выноски, а не кодирует смысл — смысл несёт вид и текст.
+export type common_TechCardAnnotationColor =
+  | "TECH_CARD_ANNOTATION_COLOR_UNKNOWN"
+  | "TECH_CARD_ANNOTATION_COLOR_RED"
+  | "TECH_CARD_ANNOTATION_COLOR_BLUE"
+  | "TECH_CARD_ANNOTATION_COLOR_GREEN"
+  | "TECH_CARD_ANNOTATION_COLOR_ORANGE"
+  // Белый. Единственный цвет, который читается на тёмной ткани, — а тёмная ткань это половина
+  // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
+  // на белом листе видно контур, а на чёрном снимке — саму линию.
+  | "TECH_CARD_ANNOTATION_COLOR_WHITE";
 // TaskBoard is the department lane a task lives in. Fixed taxonomy for now; a
 // task belongs to exactly one board. Extend by appending members (never reuse
 // numbers) — 0 stays UNKNOWN per proto3 convention.
@@ -4880,6 +5036,38 @@ export type LibraryFile = {
   // still perfectly usable — the grid shows an extension plate instead.
   previewUrl: string | undefined;
   urlsExpireAt: wellKnownTimestamp | undefined;
+  // uploaded_by_id resolves the uploader to a LIVE account, next to the
+  // uploaded_by STRING above, which is the historical fact. They are not
+  // duplicates: the string outlives the account (a file keeps its author after
+  // the person leaves), the id stops existing with it (0 = no such account any
+  // more). Initials, specialties and the "may edit owners" circle all read the id.
+  uploadedById: number | undefined;
+  // owners are the people who KEEP this file — who to ask when it goes stale.
+  // Several are legal, and so is none: an empty list is honest, a
+  // randomly-assigned owner is not.
+  owners: AdminRef[] | undefined;
+  // comments_count is the size of the file's discussion, printed on the tile and
+  // the card. It rides on the file instead of costing a call per tile: the list
+  // resolves it for a whole page in ONE grouped query.
+  commentsCount: number | undefined;
+  // access_level is team | people | link. It only ever reaches somebody who can
+  // already SEE the file (a file one may not see is not in the answer at all), so
+  // the level is not a secret from its reader — it is what badges the tile «по
+  // ссылке» / «ограничен» instead of making the person open the card to find out.
+  accessLevel: string | undefined;
+  // content_updated_by / content_updated_at are «кто правил последним» for a note
+  // edited THROUGH THE EDITOR. They stand next to uploaded_by rather than
+  // replacing it: the upload is one fact, the last edit another. Empty/unset on a
+  // note that arrived as an upload and was never edited here — the card then
+  // falls back to the uploader, which is the truth in that case.
+  contentUpdatedBy: string | undefined;
+  contentUpdatedAt: wellKnownTimestamp | undefined;
+  // content_excerpt is the first lines of a note's text: the tile's preview where
+  // there is no picture to render at all (the one documented exception to «no
+  // preview → extension plate»). Written on save through the editor; empty for
+  // .md that arrived as an upload, because reading text on the streaming upload
+  // path would complicate the single hot path for a rare case.
+  contentExcerpt: string | undefined;
 };
 
 // FileTopic is a topic LABEL, not a folder.
@@ -4890,6 +5078,23 @@ export type FileTopic = {
   // What this topic is about. Empty for most of them; the field is what lets a
   // label stand in for a project page without inventing a project entity.
   description: string | undefined;
+};
+
+// AdminRef is a lightweight admin-account reference for every people picker in
+// the panel: tech-card roles, file owners, task assignees, @-mentions.
+export type AdminRef = {
+  id: number | undefined;
+  username: string | undefined;
+  // specialties is what this person says they do («конструктор», «фотограф»). It
+  // carries no rights whatsoever — it is a self-description that makes a picker
+  // of six similar usernames searchable, and prints the «kirill · конструктор»
+  // byline next to a name.
+  specialties: string[] | undefined;
+  // is_super feeds the "you have no access to this section" screen, which names
+  // WHO can grant it. Inside a panel of six people who know each other, the list
+  // of super-admins is not a secret, and the difference between «доступа нет» and
+  // «доступ выдаёт jekabolt» is the difference between a dead end and a minute.
+  isSuper: boolean | undefined;
 };
 
 export type GetLibraryFileRequest = {
@@ -5019,6 +5224,337 @@ export type AssignLibraryFileTopicsResponse = {
   // assigned is how many (file, topic) links were actually created — pairs that
   // already existed are not counted.
   assigned: number | undefined;
+};
+
+export type SetLibraryFileOwnersRequest = {
+  fileId: number | undefined;
+  // admin_ids is the FULL set of owners, not a delta. An empty list clears them,
+  // which is a legal state: «спросить будет некого» is a truthful answer, and the
+  // card says so.
+  adminIds: number[] | undefined;
+};
+
+export type SetLibraryFileOwnersResponse = {
+  // The resolved owners, so the card redraws from what was actually stored
+  // rather than from what it hoped it sent.
+  owners: AdminRef[] | undefined;
+};
+
+export type SetAccountSpecialtiesRequest = {
+  // username is whose specialties these are. Own username = no permission
+  // needed; anybody else's requires accounts:write.
+  username: string | undefined;
+  // specialty_ids picks from the existing vocabulary, new_specialties are names
+  // typed on the fly — the same grammar as a file's topics, and for the same
+  // reason: a vocabulary that can only be extended by an administrator stops
+  // being extended.
+  specialtyIds: number[] | undefined;
+  newSpecialties: string[] | undefined;
+};
+
+export type SetAccountSpecialtiesResponse = {
+  // The resolved set, names as STORED — a name typed in a different case
+  // collapses onto the existing entry, and the chips must show that.
+  specialties: string[] | undefined;
+};
+
+// LibraryFileTask is one task row AS THE FILE CARD DRAWS IT: the #id pill, the
+// title, the column, who is on it and when it is due. Deliberately not
+// common.Task — that message carries content, checklist, resolved media and its
+// own attachments, and shipping it per row would resolve a second file list for
+// every task a file happens to be linked to.
+export type LibraryFileTask = {
+  taskId: number | undefined;
+  title: string | undefined;
+  status: common_TaskStatus | undefined;
+  // assignee is an AdminAccount.username; "" = nobody is on it.
+  assignee: string | undefined;
+  // due_date unset = no deadline (the row then simply has no date, not "today").
+  dueDate: wellKnownTimestamp | undefined;
+  // board is the department lane, so the row can say WHERE the work lives — the
+  // same file is attached from several lanes at once.
+  board: common_TaskBoard | undefined;
+};
+
+export type ListLibraryFileTasksRequest = {
+  // id is the FILE's id (the path is /files/{id}/tasks — the file is the subject
+  // here, the tasks are the answer).
+  id: number | undefined;
+};
+
+export type ListLibraryFileTasksResponse = {
+  tasks: LibraryFileTask[] | undefined;
+};
+
+export type AttachLibraryFileToTaskRequest = {
+  fileId: number | undefined;
+  taskId: number | undefined;
+};
+
+export type AttachLibraryFileToTaskResponse = {
+};
+
+export type DetachLibraryFileFromTaskRequest = {
+  fileId: number | undefined;
+  taskId: number | undefined;
+};
+
+export type DetachLibraryFileFromTaskResponse = {
+};
+
+// LibraryFileComment is one remark in a file's discussion.
+export type LibraryFileComment = {
+  id: number | undefined;
+  fileId: number | undefined;
+  // author is the username AS OF WRITING — a historical fact that outlives the
+  // account, exactly like LibraryFile.uploaded_by. author_id resolves the same
+  // person to a LIVE account and becomes 0 when that account is deleted; the
+  // byline and the avatar read the id, the text of the feed reads the string.
+  author: string | undefined;
+  authorId: number | undefined;
+  // body is the raw text, @mentions included: the server stores what was typed.
+  body: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // edited_at unset = the remark was never edited. Set = the feed prints
+  // «изменено», because a silently rewritten remark is a rewritten conversation.
+  editedAt: wellKnownTimestamp | undefined;
+};
+
+export type ListLibraryFileCommentsRequest = {
+  id: number | undefined;
+};
+
+export type ListLibraryFileCommentsResponse = {
+  comments: LibraryFileComment[] | undefined;
+};
+
+export type AddLibraryFileCommentRequest = {
+  fileId: number | undefined;
+  body: string | undefined;
+};
+
+export type AddLibraryFileCommentResponse = {
+  // The stored remark, so the feed appends what the server actually wrote
+  // (author and timestamps are stamped there, never sent by the client).
+  comment: LibraryFileComment | undefined;
+};
+
+export type UpdateLibraryFileCommentRequest = {
+  id: number | undefined;
+  body: string | undefined;
+};
+
+export type UpdateLibraryFileCommentResponse = {
+  // Returned for edited_at: the «изменено» mark comes from the server's clock.
+  comment: LibraryFileComment | undefined;
+};
+
+export type DeleteLibraryFileCommentRequest = {
+  id: number | undefined;
+};
+
+export type DeleteLibraryFileCommentResponse = {
+};
+
+// LibraryFilePublicLink is the state of the ONE public link a file may carry.
+// The url is our own route plus an HMAC token, not a bucket url: the object
+// itself stays private and is only ever reached through a presigned url minted
+// per hit.
+export type LibraryFilePublicLink = {
+  // url is empty when the file has never been shared by link.
+  url: string | undefined;
+  // expires_at unset = the link does not expire on its own.
+  expiresAt: wellKnownTimestamp | undefined;
+  revoked: boolean | undefined;
+  // expired is computed, not stored: the level stays `link` after the date
+  // passes (nothing silently un-shares a file behind its owner's back), the route
+  // answers 404, and the UI badges «истёк». Deriving it here keeps two screens
+  // from each inventing their own comparison against server time.
+  expired: boolean | undefined;
+  // Best-effort statistics: the counter is bumped outside the read path, so it
+  // may lag by a hit. It answers «пользуются ли ссылкой вообще», not accounting.
+  lastAccessAt: wellKnownTimestamp | undefined;
+  accessCount: number | undefined;
+};
+
+// LibraryFileAccessEvent is one line of the journal: WHO changed WHAT and WHEN.
+// actor is a username string (it must survive the account being deleted — the
+// journal answers questions about a file that outlives its people).
+export type LibraryFileAccessEvent = {
+  id: number | undefined;
+  actor: string | undefined;
+  // what is a rendered description of the change («уровень → по ссылке»,
+  // «+ kirill», «срок 7 дней», «ссылка пересоздана»). Free text on purpose: the
+  // journal is read by people, and a code would need a translation table that
+  // drifts from the events it names.
+  what: string | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+};
+
+// LibraryFileAccess is the whole "who may see this file" state in one place, so
+// the card and the витрина read the same shape.
+export type LibraryFileAccess = {
+  // level is team | people | link.
+  level: string | undefined;
+  // people is meaningful only at level `people`. The uploader is always in it —
+  // the server puts them there rather than trusting the client to remember.
+  people: AdminRef[] | undefined;
+  link: LibraryFilePublicLink | undefined;
+};
+
+export type GetLibraryFileAccessRequest = {
+  id: number | undefined;
+};
+
+export type GetLibraryFileAccessResponse = {
+  access: LibraryFileAccess | undefined;
+  // events newest first — the journal is read to answer «кто это открыл», and
+  // the answer is almost always the last line.
+  events: LibraryFileAccessEvent[] | undefined;
+};
+
+export type SetLibraryFileAccessRequest = {
+  fileId: number | undefined;
+  // level is team | people | link; anything else is refused rather than
+  // interpreted (the column is an ENUM in the database for the same reason).
+  level: string | undefined;
+  // admin_ids is the FULL set of people for level `people`, replaced atomically
+  // with the level itself. Ignored at the other two levels — and NOT wiped, so
+  // switching team → people → team does not make a person retype the list.
+  adminIds: number[] | undefined;
+  // link_ttl is the life of the public link IN HOURS: 24 / 168 / 720 are the
+  // chips, 0 = no expiry. Hours rather than a Duration because it comes from a
+  // fixed set of chips and rides through the JSON gateway as a plain number.
+  // Only read at level `link`.
+  linkTtl: number | undefined;
+};
+
+export type SetLibraryFileAccessResponse = {
+  // The stored state, so the card redraws from what was written rather than from
+  // what it hoped it sent — same reason as SetLibraryFileOwnersResponse. The
+  // freshly minted url arrives here when the level became `link`.
+  access: LibraryFileAccess | undefined;
+};
+
+export type RotateLibraryFileLinkRequest = {
+  fileId: number | undefined;
+};
+
+export type RotateLibraryFileLinkResponse = {
+  // The NEW link. The old one is already dead when this returns — that is the
+  // whole operation, and the dialog must show what replaced it.
+  link: LibraryFilePublicLink | undefined;
+};
+
+// SharedLibraryFile is one row of the витрина: the file plus the answers to «кому
+// открыто» and «кто открыл».
+export type SharedLibraryFile = {
+  // file carries the preview, the name and access_level — the витрина draws the
+  // same tile the grid does, so it resolves the same message.
+  file: LibraryFile | undefined;
+  // people is the named list at level `people`; empty at level `link`, where the
+  // truthful answer is «кто угодно со ссылкой» and the screen says exactly that.
+  people: AdminRef[] | undefined;
+  link: LibraryFilePublicLink | undefined;
+  // shared_by / shared_at come from the journal: the actor and the time of the
+  // last event that established the CURRENT level. Not «who uploaded it» and not
+  // «who touched it last» — the question this column answers is who is
+  // responsible for the file being open right now.
+  sharedBy: string | undefined;
+  sharedAt: wellKnownTimestamp | undefined;
+};
+
+export type ListSharedLibraryFilesRequest = {
+  // level narrows the витрина: "" = everything special (both levels), "people" or
+  // "link" = one of them. The filter is server-side because the list is paged —
+  // filtering a page on the client would show «3 из 40» and mean neither.
+  level: string | undefined;
+  limit: number | undefined;
+  offset: number | undefined;
+};
+
+export type ListSharedLibraryFilesResponse = {
+  files: SharedLibraryFile[] | undefined;
+  total: number | undefined;
+};
+
+export type CreateLibraryNoteRequest = {
+  // file_name without the extension is fine — the server appends `.md`, and
+  // appending it twice is not a thing that happens.
+  fileName: string | undefined;
+  // Same topic grammar as everywhere else in the library: existing ids plus names
+  // typed on the fly, an existing name resolving to the existing topic.
+  topicIds: number[] | undefined;
+  newTopics: string[] | undefined;
+  // content may be empty — a note created to be written into tomorrow is a real
+  // case. Capped at 512 KiB: this is a note, not a book, and the cap is what
+  // keeps the whole text on the RPC path honest.
+  content: string | undefined;
+};
+
+export type CreateLibraryNoteResponse = {
+  // The created file, so the client can open the note screen straight away
+  // instead of listing to find what it just made.
+  file: LibraryFile | undefined;
+};
+
+export type GetLibraryNoteContentRequest = {
+  id: number | undefined;
+};
+
+export type GetLibraryNoteContentResponse = {
+  content: string | undefined;
+  // sha256 of exactly this content — the base the editor sends back when it
+  // saves. Without it there is no CAS, and every save is a blind overwrite.
+  sha256: string | undefined;
+  lastEditedBy: string | undefined;
+  lastEditedAt: wellKnownTimestamp | undefined;
+};
+
+export type SaveLibraryNoteContentRequest = {
+  fileId: number | undefined;
+  content: string | undefined;
+  // base_sha256 is the sha256 this edit started from. A mismatch means somebody
+  // else saved in the meantime.
+  baseSha256: string | undefined;
+  // force writes over that other version deliberately. It is the only path to a
+  // lost edit in the whole design, which is exactly why it must be asked for and
+  // is never a default.
+  force: boolean | undefined;
+};
+
+export type SaveLibraryNoteContentResponse = {
+  // conflict = true means NOTHING WAS WRITTEN and the fields below describe the
+  // version that is stored. A conflict is DATA, not a gRPC error: the client owes
+  // the person a banner and three choices (show the difference, save as a
+  // separate note, overwrite anyway), and an error status would cost a second
+  // request to build any of them.
+  conflict: boolean | undefined;
+  // current_sha256 is what is stored now — the caller's own text after a
+  // successful save, the other version after a conflict. Either way it is the
+  // base for this editor's NEXT save, so the client never has to re-read to keep
+  // editing.
+  currentSha256: string | undefined;
+  // current_content is filled ONLY on conflict (the successful case would just be
+  // echoing back what was sent, over the same 512 KiB budget).
+  currentContent: string | undefined;
+  lastEditedBy: string | undefined;
+  lastEditedAt: wellKnownTimestamp | undefined;
+};
+
+export type FormatLibraryNoteMarkdownRequest = {
+  // content is EXACTLY what goes to the model: the whole buffer or the selection,
+  // decided by the client. Nothing else — not the file name, not the topics, not
+  // the owners, not the discussion — so the leak perimeter is readable from one
+  // function. Capped at 12 000 runes; longer gets InvalidArgument and the client
+  // offers to send a selection instead.
+  content: string | undefined;
+};
+
+export type FormatLibraryNoteMarkdownResponse = {
+  // The suggestion. It is not stored anywhere: accepting it replaces the editor's
+  // BUFFER, and the write is a normal SaveLibraryNoteContent with its CAS.
+  content: string | undefined;
 };
 
 export type UpdateTaskRequest = {
@@ -6643,96 +7179,6 @@ export type common_TechCardCallout = {
   parts: string[] | undefined;
 };
 
-// TechCardOperation is one sewing step of the assembly order (Sheet «Обработка»).
-// THE BREAK (operations were never filled on prod, so this is one clean cut, not a migration
-// path). Eleven fields left, and they left for three different reasons:
-// (a) THE CODE WROTE THEM, NOT A PERSON. `machine` and `stitches_per_cm` were filled from an
-// operation-type preset, `thread` from the linked BOM line, `placement` from the joined
-// piece names, and each was then stored as a fact and hashed into a signed digest. The
-// printed tech pack had to SUBTRACT `thread` from the material list to stop printing the
-// same string twice — a repair for a duplication that should not have existed.
-// (b) NOBODY READ THEM. `needle` duplicated material_thread_attr.needle_reco, which the thread
-// article already carries, and no consumer anywhere read the operation's copy.
-// (c) THEY ASKED A QUESTION WITH NO SINGLE ANSWER. `node` («узел / что», REQUIRED) offered a
-// list mixing seams, garment areas, pieces and materials, and repeated the verb the type
-// field already held. A working pattern-maker could not fill it and asked whether it was
-// needed. It is not replaced by an optional title: an optional field asking the same
-// unanswerable question just gets answered differently on every card.
-// WHAT A STEP IS NOW: a verb (operation_type), a place (zone), what it joins (piece_line_keys)
-// and what it consumes (bom_line_keys), and how long it takes (smv). Its heading is COMPOSED —
-// «join · side seams · Front + Back» — never typed.
-// EXACTLY TWO FIELDS ARE REQUIRED, and both are closed lists: operation_type and zone. Nothing
-// with free input is mandatory ever again; that pairing is what made `node` a trap.
-// EVERYTHING BELOW «отклонения» IS AN OVERRIDE: unset means INHERIT from the card
-// (TechCardConstruction, and TechCard.required_seam_allowance_mm for the allowance), which
-// inherits from the workshop. The inherited value is shown as a placeholder and NEVER written
-// into the row — the day it is written, «the technologist decided 4 st/cm» stops being
-// distinguishable from «it defaulted to 4», which is precisely today's defect.
-// ── ВЫНОСКИ НА ФОТО УЗЛА ────────────────────────────────────────────────────────────────────────
-// Выноска отвечает швее на два вопроса, которые не помещаются в текст шага: ЧТО тут делать и ПО
-// КАКОМУ РАЗМЕРУ. Поэтому она живёт поверх снимка узла, а не в описании.
-// ЗАКРЫТЫЙ СЛОВАРЬ `kind`, А НЕ СВОБОДНЫЕ ОСИ. Проектировался набор осями (якорь × геометрия ×
-// лидер × подпись), но хранить оси независимыми полями значит валидировать комбинаторику
-// бессмыслицы: скобка с одной точкой, номер на мерке, лидер у того, у чего нет якоря. Вид —
-// одно значение, и оно определяет и число точек, и что рисуется, и чем является текст.
-// СООБЩЕНИЕ НЕ ЗНАЕТ СЛОВА «ОПЕРАЦИЯ». Тот же тип пригодится карточному эскизу, детали кроя и
-// примерке — им нужно будет лишь своё поле, а не свой формат выноски.
-export type common_TechCardAnnotationKind =
-  | "TECH_CARD_ANNOTATION_KIND_UNKNOWN"
-  // 1 точка. Номер — позиция в списке; текст — заметка, читается в легенде.
-  | "TECH_CARD_ANNOTATION_KIND_PIN"
-  // 1 точка + плашка. Текст — подпись, лидер-стрелка строится сам.
-  | "TECH_CARD_ANNOTATION_KIND_LABEL"
-  // 2 точки. Размерная линия с засечками; текст — значение с единицами («6 мм»).
-  | "TECH_CARD_ANNOTATION_KIND_DIM"
-  // 2 точки. Скобка над участком; текст — что с этим участком делать.
-  | "TECH_CARD_ANNOTATION_KIND_BRACKET"
-  // 2..8 точек. Одна подпись, ветвящаяся к нескольким местам («закрепки ×3»).
-  | "TECH_CARD_ANNOTATION_KIND_MULTI"
-  // 3 точки: начало, ТОЧКА НА КРИВОЙ, конец. Дуга — единственный способ показать линию, которая на
-  // изделии не прямая: посадку оката, скругление борта, ход отделочной строчки по кокетке. Отрезком
-  // это не сказать, а ломаной из десяти точек — сказать нельзя дважды одинаково.
-  // Средняя точка ЛЕЖИТ НА КРИВОЙ, а не управляет ей со стороны. Управляющая точка Безье не
-  // принадлежит кривой, и технолог, ставящий её мышью, каждый раз промахивается мимо линии, которую
-  // рисует; из трёх точек НА кривой управляющая считается однозначно (2·P1 − (P0+P2)/2).
-  | "TECH_CARD_ANNOTATION_KIND_ARC"
-  // 3..40 точек. ЗАМКНУТЫЙ КОНТУР — область, а не линия: «эту зону продублировать клеевой»,
-  // «здесь настрочить». Ни мерка, ни скобка область не выражают: они говорят про отрезок, а
-  // порок ткани и участок дублирования имеют форму пятна.
-  // Замыкание ПОДРАЗУМЕВАЕТСЯ и последней точкой не дублируется. Хранить повторение первой точки
-  // значило бы завести два места для одной координаты, которые однажды разойдутся: правка первой
-  // точки не догнала бы копию, и контур разомкнулся бы на волосок — незаметно на экране и
-  // предательски на печати.
-  | "TECH_CARD_ANNOTATION_KIND_POLYGON"
-  // 2..200 точек. СВОБОДНЫЙ СЛЕД МАРКЕРА — ломаная без правил, «обвёл и показал». Существует не
-  // вместо чертёжных видов, а рядом с ними: разговор у стола идёт быстрее, чем ставится мерка, и
-  // набросок, который не сделали, не заменяется точной фигурой, которую не сделали тоже.
-  // Верхний предел — не вкус: точки лежат decimal-парами в JSON, и след, снятый с каждого
-  // движения мыши, набирает тысячи за секунду. Клиент прореживает след ДО отправки, поэтому 200
-  // здесь потолок, а не норма.
-  | "TECH_CARD_ANNOTATION_KIND_INK";
-// Точка выноски в НОРМАЛИЗОВАННЫХ координатах кадра (0..1) — та же система, что у pos_x/pos_y
-// карточных выносок. Decimal, а не float: промежуточный ввод и круговой рейс без потерь, и один
-// тип на обе системы координат карточки.
-export type common_TechCardAnnotationPoint = {
-  x: googletype_Decimal | undefined;
-  y: googletype_Decimal | undefined;
-};
-
-// Цвет выноски. ЗАКРЫТЫЙ СПИСОК, а не свободный hex: лист швеи печатается и на чёрно-белом
-// принтере, и произвольный цвет там превратился бы в неразличимый серый. Значение по умолчанию
-// (UNKNOWN) — чернильный, то есть тот же, каким рисуется всё остальное на листе; цвет РАЗЛИЧАЕТ
-// пересекающиеся выноски, а не кодирует смысл — смысл несёт вид и текст.
-export type common_TechCardAnnotationColor =
-  | "TECH_CARD_ANNOTATION_COLOR_UNKNOWN"
-  | "TECH_CARD_ANNOTATION_COLOR_RED"
-  | "TECH_CARD_ANNOTATION_COLOR_BLUE"
-  | "TECH_CARD_ANNOTATION_COLOR_GREEN"
-  | "TECH_CARD_ANNOTATION_COLOR_ORANGE"
-  // Белый. Единственный цвет, который читается на тёмной ткани, — а тёмная ткань это половина
-  // снимков узла. На бумаге он не исчезает: отрисовка кладёт под белую линию тёмное гало, поэтому
-  // на белом листе видно контур, а на чёрном снимке — саму линию.
-  | "TECH_CARD_ANNOTATION_COLOR_WHITE";
 // TechCardBomItem is one bill-of-materials line — a catalog article (Sheet «Спецификация»).
 // The per-colourway colour, placement and consumption live on TechCardColorwayUsage; the
 // BOM line is now a pure material-article catalog entry.
@@ -7438,49 +7884,6 @@ export type common_TechCardOperationMedia = {
   annotations: common_TechCardAnnotation[] | undefined;
 };
 
-export type common_TechCardAnnotation = {
-  kind: common_TechCardAnnotationKind | undefined;
-  // Число точек определяется видом и проверяется сервером: PIN/LABEL — 1, DIM/BRACKET — 2,
-  // ARC — 3, MULTI — от 2 до 8.
-  points: common_TechCardAnnotationPoint[] | undefined;
-  text: string | undefined;
-  // Положение плашки с текстом, 0..1. Лидер НЕ хранится — он строится от плашки к якорю по
-  // правилу отрисовки; хранить его значило бы хранить производное и дать ему разойтись.
-  labelX: googletype_Decimal | undefined;
-  labelY: googletype_Decimal | undefined;
-  color: common_TechCardAnnotationColor | undefined;
-  // ДЕТАЛЬ КРОЯ, О КОТОРОЙ ЭТА ВЫНОСКА. Стабильный line_key детали ЭТОЙ ЖЕ карточки — тот же ключ,
-  // которым деталь адресуют вход операции и назначение материала, а не имя: имя переживает
-  // переименование хуже, чем ссылка.
-  // ССЫЛКА СОВЕТУЮЩАЯ, а не проверяемая. Указание можно поставить раньше, чем деталь заведена
-  // (снимок узла приходит с примерки, детали кроя рождаются из чертежа позже), и отказ сохранения
-  // всей карточки из-за неразрешимого ключа стоил бы дороже, чем висящая ссылка: клиент показывает
-  // «деталь удалена», человек перевыбирает. Ровно так же ведут себя piece_line_keys операции.
-  // УСТАРЕЛО в пользу piece_line_keys ниже, но не снято: клиент, который про список не знает,
-  // по-прежнему шлёт и читает это поле. Сервер отдаёт его ПЕРВЫМ элементом списка.
-  pieceLineKey: string | undefined;
-  // ПУНКТИР ВМЕСТО СПЛОШНОЙ. На чертеже это различие несёт смысл, а не украшает: сплошная —
-  // то, что видно и делают, пунктир — построение, припуск, линия под слоем. Поэтому поле входит
-  // в подпись секции, как и сам вид, а не остаётся оформлением вроде цвета.
-  // У PIN линии нет вовсе, и сервер приводит поле к false: два способа записать одно и то же
-  // «нечего рисовать пунктиром» разошлись бы в отпечатке.
-  dashed: boolean | undefined;
-  // ЗАШТРИХОВАТЬ ОБЛАСТЬ ПОД ПОЛИГОНОМ. Контур говорит «вот эта граница», штриховка — «вот эта
-  // площадь»; на дублировании и на пороке ткани это разные указания.
-  // Только у POLYGON. У прочих видов заливать нечего, и сервер приводит поле к false, а не
-  // отвергает карточку: бессмысленный флаг это не порча данных, а отказ здесь стоил бы дороже,
-  // чем молчаливое приведение к тому единственному, что поле могло бы значить.
-  filled: boolean | undefined;
-  // ДЕТАЛИ КРОЯ, О КОТОРЫХ УКАЗАНИЕ. Список, а не одна: узел законно собирает несколько деталей
-  // сразу — «втачать рукав в пройму» это и рукав, и полочка, и спинка, и указание на снимке
-  // относится ко всем трём. Одиночным полем это выражалось выбором «какая из них главная»,
-  // которого у шва нет.
-  // СОВМЕСТИМОСТЬ БЕЗ ФЛАГА ПРИСУТСТВИЯ: пустой список читается как [piece_line_key], непустой
-  // вытесняет старое поле целиком. Клиенту, который шлёт только piece_line_key, ничего менять не
-  // нужно; сервер отдаёт оба, и piece_line_key = первый элемент списка.
-  pieceLineKeys: string[] | undefined;
-};
-
 // TechCardLabel is one label / tag spec (Sheet «Этикетки и упаковка»).
 // TechCardLabel is the garment's label/tag SPEC — one of the three historically-unconnected "label"
 // concepts (S21): (a) THIS spec, (b) the shipment label (common/shipment.proto — a shipping document,
@@ -7996,17 +8399,18 @@ export type ListTechCardRoleAssignmentsResponse = {
   assignments: common_TechCardRoleAssignment[] | undefined;
 };
 
-// AdminRef is a lightweight admin-account reference for the role-assignment picker.
-export type AdminRef = {
-  id: number | undefined;
-  username: string | undefined;
-};
-
 export type ListAdminsRequest = {
 };
 
 export type ListAdminsResponse = {
   admins: AdminRef[] | undefined;
+  // specialties is the WHOLE vocabulary, not just the used part: the chip editor
+  // in an account offers it as a list, and a seeded entry nobody has picked yet
+  // would otherwise be invisible — which is how a dictionary ends up rewritten
+  // from scratch by every person who needs it. It rides on this response rather
+  // than costing a list call of its own, exactly like the two rail badges on
+  // ListFileTopicsResponse. Ordered by usage, then by name.
+  specialties: string[] | undefined;
 };
 
 export type GetTechCardRequest = {
@@ -11502,6 +11906,9 @@ export type AdminAccount = {
   permissions: AdminPermission[] | undefined;
   createdAt: wellKnownTimestamp | undefined;
   updatedAt: wellKnownTimestamp | undefined;
+  // specialties is the «чем занимается» column of the accounts table and the
+  // chips on the account card. It grants nothing — see AdminRef.specialties.
+  specialties: string[] | undefined;
 };
 
 // AdminSectionInfo describes a grantable section for the permission picker.
@@ -12826,6 +13233,109 @@ export interface AdminService {
   // replacing bulk write would silently erase whatever a colleague labelled those
   // files with between the grid loading and the button being pressed.
   AssignLibraryFileTopics(request: AssignLibraryFileTopicsRequest): Promise<AssignLibraryFileTopicsResponse>;
+  // SetLibraryFileOwners REPLACES the file's set of owners (owners come in ones
+  // and twos, and the picker has just shown the caller the whole current set, so
+  // a full replace is honest here — unlike the bulk topic write above).
+  // files:write is necessary but NOT sufficient: the handler additionally
+  // requires the caller to be the uploader, a current owner, or a super-admin.
+  // Without that circle, anybody holding files:write could make themselves the
+  // owner of anyone's file — and, once the access levels land, widen their own
+  // access to it by doing so.
+  SetLibraryFileOwners(request: SetLibraryFileOwnersRequest): Promise<SetLibraryFileOwnersResponse>;
+  // ListLibraryFileTasks answers «где этот файл ещё используется» from the FILE's
+  // side. The link it reads (task_file) is the very one the task form writes; the
+  // task form simply cannot answer this question, because it starts from a task.
+  // Gated by tasks:read, NOT files:read, and the section follows WHAT IS IN THE
+  // ANSWER rather than where the button is — precedent:
+  // GetMaterialCuttingCoefficientSuggestion. Titles, columns, assignees and
+  // deadlines are task content, and a files-only account must not read them
+  // sideways. Named consequence: the file card must SURVIVE PermissionDenied here
+  // by drawing «нет доступа к задачам», not by failing.
+  ListLibraryFileTasks(request: ListLibraryFileTasksRequest): Promise<ListLibraryFileTasksResponse>;
+  // AttachLibraryFileToTask links one file to one task, idempotently: a link that
+  // already exists is not an error, because the card cannot know what another tab
+  // did a second ago.
+  // Deliberately NOT done through UpdateTask: TaskInsert.file_ids is the FULL set
+  // of a task's attachments, so attaching from the file card through it would
+  // mean sending a set this screen has never seen. tasks:write for the same
+  // reason as the read above — the row belongs to the task (task_file cascades
+  // from it), not to the file.
+  AttachLibraryFileToTask(request: AttachLibraryFileToTaskRequest): Promise<AttachLibraryFileToTaskResponse>;
+  // DetachLibraryFileFromTask removes that link. Also idempotent, and for the
+  // same reason: two people clearing the same attachment must both be told it is
+  // gone, not one of them that it never was.
+  DetachLibraryFileFromTask(request: DetachLibraryFileFromTaskRequest): Promise<DetachLibraryFileFromTaskResponse>;
+  // ListLibraryFileComments returns the feed, oldest first.
+  ListLibraryFileComments(request: ListLibraryFileCommentsRequest): Promise<ListLibraryFileCommentsResponse>;
+  // AddLibraryFileComment appends one remark. Classified as a WRITE to the
+  // library: files:read reads the feed and cannot add to it, because a discussion
+  // is content OF the library rather than a view of it.
+  AddLibraryFileComment(request: AddLibraryFileCommentRequest): Promise<AddLibraryFileCommentResponse>;
+  // UpdateLibraryFileComment edits a remark and stamps edited_at — an edit that
+  // leaves no trace rewrites the past. files:write is necessary but NOT
+  // sufficient: the handler additionally requires the caller to be the AUTHOR
+  // (a super-admin may edit any), same "map holds one section, code checks the
+  // rest" shape as SetLibraryFileOwners.
+  UpdateLibraryFileComment(request: UpdateLibraryFileCommentRequest): Promise<UpdateLibraryFileCommentResponse>;
+  // DeleteLibraryFileComment removes one's own remark (a super-admin any), same
+  // second gate. The literal `comment` segment keeps this clear of DELETE
+  // /files/{id}, which is one segment shorter and therefore a different route.
+  DeleteLibraryFileComment(request: DeleteLibraryFileCommentRequest): Promise<DeleteLibraryFileCommentResponse>;
+  // GetLibraryFileAccess returns one file's access block: level, the named people,
+  // the public link with its expiry, and the journal of who changed what when.
+  // Declared before ListShared… — the Get-before-List convention of this file.
+  GetLibraryFileAccess(request: GetLibraryFileAccessRequest): Promise<GetLibraryFileAccessResponse>;
+  // SetLibraryFileAccess sets the level AND the list of people that goes with it
+  // ATOMICALLY. Two RPCs would leave a window in which a file is already `people`
+  // with an empty list — that is, invisible to everyone who was about to be added.
+  // files:write is necessary but NOT sufficient: the handler requires the same
+  // circle as SetLibraryFileOwners (uploader | current owner | super-admin).
+  // Otherwise any files:write account could publish somebody else's file to the
+  // internet.
+  SetLibraryFileAccess(request: SetLibraryFileAccessRequest): Promise<SetLibraryFileAccessResponse>;
+  // RotateLibraryFileLink mints a new link and kills the old one INSTANTLY: the
+  // token carries the epoch, so bumping the epoch is the revocation — there is no
+  // revocation list to consult and nothing to expire. Same handler circle as
+  // SetLibraryFileAccess.
+  RotateLibraryFileLink(request: RotateLibraryFileLinkRequest): Promise<RotateLibraryFileLinkResponse>;
+  // ListSharedLibraryFiles is the витрина: everything that is `people` or `link`
+  // RIGHT NOW, so "what have we actually opened up" is one screen instead of a
+  // walk through the grid. Two literal segments — the templated /files/{id} is one
+  // segment long and cannot shadow it.
+  // The listing runs under the same visibility predicate as the grid (a
+  // super-admin sees all of it), which is why two people can honestly see
+  // different numbers here. That is accepted, and the screen says so.
+  ListSharedLibraryFiles(request: ListSharedLibraryFilesRequest): Promise<ListSharedLibraryFilesResponse>;
+  // CreateLibraryNote creates that file together with its first text. The name is
+  // asked for up front — an untitled note is a note nobody finds later — and the
+  // `.md` suffix is appended by the server rather than demanded of the person.
+  CreateLibraryNote(request: CreateLibraryNoteRequest): Promise<CreateLibraryNoteResponse>;
+  // GetLibraryNoteContent returns the TEXT over the RPC rather than a presigned
+  // url, for two hard reasons: text/markdown is not inline-safe, so it only ever
+  // gets an attachment url; and fetching a presigned url from JS runs into the
+  // bucket's CORS, a lesson the patterns feature has already paid for.
+  GetLibraryNoteContent(request: GetLibraryNoteContentRequest): Promise<GetLibraryNoteContentResponse>;
+  // SaveLibraryNoteContent writes a new version under a COMPARE-AND-SET on
+  // sha256: the caller sends the sha256 it started from, and a row that moved
+  // underneath comes back as DATA (conflict = true, with the stored text), not as
+  // a gRPC error — the client draws «kirill сохранил свою версию, пока вы
+  // правили» and loses nothing, without a second round trip. `force` is the
+  // deliberate overwrite; without it, silently overwriting somebody's text is not
+  // reachable at all, which is the whole point of asking for it.
+  SaveLibraryNoteContent(request: SaveLibraryNoteContentRequest): Promise<SaveLibraryNoteContentResponse>;
+  // FormatLibraryNoteMarkdown turns the plain text the editor is holding into
+  // tidy markdown. It is a SUGGESTION and persists NOTHING: the answer replaces
+  // the editor's buffer only if the person accepts it, and the write still goes
+  // through SaveLibraryNoteContent with its CAS — so the assistant cannot
+  // overwrite a colleague's text even by racing it.
+  // The request carries the TEXT and NO file_id, and that is load-bearing: with
+  // no file id there is nothing for the visibility predicate to check, which is
+  // precisely why this RPC is legitimately absent from the list of points where
+  // the predicate stands. Adding file_id «for the logs» would create an RPC that
+  // takes a file id past the predicate.
+  // Classified as a WRITE (files:write) although it stores nothing — precedent
+  // GenerateTechCardOperations: AI-assisted authoring is authoring.
+  FormatLibraryNoteMarkdown(request: FormatLibraryNoteMarkdownRequest): Promise<FormatLibraryNoteMarkdownResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.
   GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
@@ -12881,8 +13391,14 @@ export interface AdminService {
   RemoveTechCardRoleAssignment(request: RemoveTechCardRoleAssignmentRequest): Promise<RemoveTechCardRoleAssignmentResponse>;
   // ListTechCardRoleAssignments lists a card's role assignments with resolved usernames (Q5).
   ListTechCardRoleAssignments(request: ListTechCardRoleAssignmentsRequest): Promise<ListTechCardRoleAssignmentsResponse>;
-  // ListAdmins is the lightweight admin-account picker source for role assignment (id + username
-  // only), gated tech_cards:read so a role-assigner need not hold the broader accounts:read.
+  // ListAdmins is the panel-wide people picker: id, username, self-declared specialties and the
+  // super flag of every account that can still be assigned something (disabled ones are excluded).
+  // ANY AUTHENTICATED ACCOUNT MAY CALL IT (allowlisted, not section-gated). A picker of people is
+  // needed from sections that do not contain one another — file owners, task assignees, tech-card
+  // roles — and the permission map allows exactly one section per method, so any single gate breaks
+  // the picker elsewhere as an EMPTY list, which reads like "there is nobody to pick" rather than
+  // like a refusal. Nothing in the answer says what anybody may DO: permissions travel on
+  // ListAccounts, which stays gated on the accounts section.
   ListAdmins(request: ListAdminsRequest): Promise<ListAdminsResponse>;
   // GetTechCard returns a tech card by id with its nested sections resolved.
   GetTechCard(request: GetTechCardRequest): Promise<GetTechCardResponse>;
@@ -13294,6 +13810,19 @@ export interface AdminService {
   // DeleteAccount removes an admin account (and its permissions). Requires the
   // accounts section (write).
   DeleteAccount(request: DeleteAccountRequest): Promise<DeleteAccountResponse>;
+  // SetAccountSpecialties REPLACES what an account says it does.
+  // NOT gated on the accounts section, and deliberately so: a person edits their
+  // OWN specialties without any grant, and only somebody else's requires
+  // accounts:write (checked inside the handler, since the interceptor would have
+  // cut the self-edit off before it). A field that needs an administrator to
+  // fill in stays empty — and an empty specialty vocabulary takes the owner
+  // picker and the people search down with it. The field carries no rights, so
+  // the worst a wrong self-description costs is being harder to find.
+  // The path is /account/ (singular) rather than /accounts/: everything under
+  // /accounts/ is account MANAGEMENT and requires that section, and a route that
+  // reads like management but is not would be the first thing to be gated by
+  // mistake.
+  SetAccountSpecialties(request: SetAccountSpecialtiesRequest): Promise<SetAccountSpecialtiesResponse>;
   ListAcctAccounts(request: ListAcctAccountsRequest): Promise<ListAcctAccountsResponse>;
   CreateAcctAccount(request: CreateAcctAccountRequest): Promise<CreateAcctAccountResponse>;
   // UpdateAcctAccount renames a custom (non-system) account; code and section are immutable.
@@ -16655,6 +17184,302 @@ export function createAdminServiceClient(
         method: "AssignLibraryFileTopics",
       }) as Promise<AssignLibraryFileTopicsResponse>;
     },
+    SetLibraryFileOwners(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/owners`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetLibraryFileOwners",
+      }) as Promise<SetLibraryFileOwnersResponse>;
+    },
+    ListLibraryFileTasks(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}/tasks`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryFileTasks",
+      }) as Promise<ListLibraryFileTasksResponse>;
+    },
+    AttachLibraryFileToTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/task/attach`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AttachLibraryFileToTask",
+      }) as Promise<AttachLibraryFileToTaskResponse>;
+    },
+    DetachLibraryFileFromTask(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/task/detach`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DetachLibraryFileFromTask",
+      }) as Promise<DetachLibraryFileFromTaskResponse>;
+    },
+    ListLibraryFileComments(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}/comments`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryFileComments",
+      }) as Promise<ListLibraryFileCommentsResponse>;
+    },
+    AddLibraryFileComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/comment/add`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "AddLibraryFileComment",
+      }) as Promise<AddLibraryFileCommentResponse>;
+    },
+    UpdateLibraryFileComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/comment/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateLibraryFileComment",
+      }) as Promise<UpdateLibraryFileCommentResponse>;
+    },
+    DeleteLibraryFileComment(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/comment/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteLibraryFileComment",
+      }) as Promise<DeleteLibraryFileCommentResponse>;
+    },
+    GetLibraryFileAccess(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}/access`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryFileAccess",
+      }) as Promise<GetLibraryFileAccessResponse>;
+    },
+    SetLibraryFileAccess(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/access/set`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetLibraryFileAccess",
+      }) as Promise<SetLibraryFileAccessResponse>;
+    },
+    RotateLibraryFileLink(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/access/rotate`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RotateLibraryFileLink",
+      }) as Promise<RotateLibraryFileLinkResponse>;
+    },
+    ListSharedLibraryFiles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/shared/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.level) {
+        queryParams.push(`level=${encodeURIComponent(request.level.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListSharedLibraryFiles",
+      }) as Promise<ListSharedLibraryFilesResponse>;
+    },
+    CreateLibraryNote(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/note/create`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateLibraryNote",
+      }) as Promise<CreateLibraryNoteResponse>;
+    },
+    GetLibraryNoteContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}/note`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryNoteContent",
+      }) as Promise<GetLibraryNoteContentResponse>;
+    },
+    SaveLibraryNoteContent(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/note/save`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SaveLibraryNoteContent",
+      }) as Promise<SaveLibraryNoteContentResponse>;
+    },
+    FormatLibraryNoteMarkdown(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/note/format`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "FormatLibraryNoteMarkdown",
+      }) as Promise<FormatLibraryNoteMarkdownResponse>;
+    },
     GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes
       const body = null;
@@ -19306,6 +20131,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteAccount",
       }) as Promise<DeleteAccountResponse>;
+    },
+    SetAccountSpecialties(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/account/specialties`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "SetAccountSpecialties",
+      }) as Promise<SetAccountSpecialtiesResponse>;
     },
     ListAcctAccounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/accounts`; // eslint-disable-line quotes
