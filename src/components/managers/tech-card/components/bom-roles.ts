@@ -1,5 +1,5 @@
 // The slot-role vocabulary. A BOM line's `name` is the ROLE the material plays in the garment
-// («основная ткань», «подкладка», «основная молния») — never the article's catalog name. The
+// («main fabric», «lining», «main zipper») — never the article's catalog name. The
 // article is per-colourway data: the slot's default (bom_item.material_id) plus each colourway's
 // pin (usage.material_id). The server agrees: bi.name wins verbatim on the read path and falls
 // back to the material name only when the stored role is EMPTY (store/techcard/materials.go), and
@@ -11,32 +11,28 @@
 
 const BOM_ROLE_SUGGESTIONS: Record<string, string[]> = {
   TECH_CARD_BOM_SECTION_FABRIC: [
-    'основная ткань',
-    'контрастная ткань',
-    'ткань капюшона',
-    'ткань карманов',
-    'отделочная ткань',
+    'main fabric',
+    'contrast fabric',
+    'hood fabric',
+    'pocket fabric',
+    'trim fabric',
   ],
-  TECH_CARD_BOM_SECTION_LINING: ['подкладка', 'подкладка карманов', 'подкладка капюшона'],
-  TECH_CARD_BOM_SECTION_INTERLINING: ['клеевая', 'дублерин воротника', 'дублерин планки'],
-  TECH_CARD_BOM_SECTION_INSULATION: ['утеплитель'],
+  TECH_CARD_BOM_SECTION_LINING: ['lining', 'pocket lining', 'hood lining'],
+  TECH_CARD_BOM_SECTION_INTERLINING: ['fusing', 'collar interlining', 'placket interlining'],
+  TECH_CARD_BOM_SECTION_INSULATION: ['insulation'],
   TECH_CARD_BOM_SECTION_HARDWARE: [
-    'основная молния',
-    'молния кармана',
-    'пуговицы',
-    'кнопки',
-    'люверсы',
-    'шнур-стоппер',
+    'main zipper',
+    'pocket zipper',
+    'buttons',
+    'snaps',
+    'eyelets',
+    'cord stopper',
   ],
-  TECH_CARD_BOM_SECTION_THREAD: [
-    'нитки основных швов',
-    'нитки отделочной строчки',
-    'нитки оверлока',
-  ],
-  TECH_CARD_BOM_SECTION_TRIM: ['резинка', 'шнур', 'бейка', 'тесьма'],
-  TECH_CARD_BOM_SECTION_LABEL: ['основная этикетка', 'размерник', 'составник', 'навесная бирка'],
-  TECH_CARD_BOM_SECTION_PACKAGING: ['пакет', 'коробка'],
-  TECH_CARD_BOM_SECTION_DECORATION: ['принт', 'вышивка', 'патч'],
+  TECH_CARD_BOM_SECTION_THREAD: ['main seam thread', 'topstitch thread', 'overlock thread'],
+  TECH_CARD_BOM_SECTION_TRIM: ['elastic', 'drawcord', 'binding', 'tape'],
+  TECH_CARD_BOM_SECTION_LABEL: ['main label', 'size label', 'content label', 'hangtag'],
+  TECH_CARD_BOM_SECTION_PACKAGING: ['polybag', 'carton'],
+  TECH_CARD_BOM_SECTION_DECORATION: ['print', 'embroidery', 'patch'],
 };
 
 export function roleSuggestions(section?: string): string[] {
@@ -44,7 +40,7 @@ export function roleSuggestions(section?: string): string[] {
 }
 
 // The natural first role of a section — prefill for the section's FIRST slot only. A second
-// fabric must be a deliberate answer («ткань капюшона»?), which is the whole point of asking.
+// fabric must be a deliberate answer («hood fabric»?), which is the whole point of asking.
 export function defaultRoleFor(section?: string): string {
   return roleSuggestions(section)[0] ?? '';
 }

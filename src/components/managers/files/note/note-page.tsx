@@ -283,7 +283,7 @@ export function NotePage() {
           setShowDiff(false);
           draft.clear();
           setSavedLabel(
-            new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }),
+            new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
           );
           qc.setQueryData(noteContentKey(file.id), {
             ...(contentQuery.data ?? {}),

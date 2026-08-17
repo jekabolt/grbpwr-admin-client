@@ -40,7 +40,7 @@ export function formatWhen(value: string | undefined): string {
   if (!value) return '';
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('ru-RU', {
+  return d.toLocaleString('en-US', {
     year: 'numeric',
     month: 'long',
     day: 'numeric',
@@ -62,7 +62,7 @@ export function formatWhenShort(value: string | undefined): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleString('ru-RU', {
+  return d.toLocaleString('en-US', {
     day: '2-digit',
     month: '2-digit',
     ...(sameYear ? {} : { year: '2-digit' }),
@@ -77,7 +77,7 @@ export function formatDay(value: string | undefined): string {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return '';
   const sameYear = d.getFullYear() === new Date().getFullYear();
-  return d.toLocaleDateString('ru-RU', {
+  return d.toLocaleDateString('en-US', {
     day: '2-digit',
     month: '2-digit',
     ...(sameYear ? {} : { year: '2-digit' }),
