@@ -65,6 +65,12 @@ import {
   type AnnotationColorKey,
   type AnnotationKindKey,
 } from 'ui/components/annotation/kinds';
+import {
+  annotationColorFromWire,
+  annotationColorToWire,
+  annotationKindFromWire,
+  annotationKindToWire,
+} from 'ui/components/annotation/wire';
 
 // TechCardInsert.purpose is the proto ENUM (TECH_CARD_PURPOSE_*), while ListTechCards.purpose is
 // the bare entity word. The generated client types both as `string`, so swapping them compiles
@@ -773,45 +779,16 @@ export type AnnotationKind = AnnotationKindKey;
 export const ANNOTATION_COLORS = ANNOTATION_COLOR_KEYS;
 export type AnnotationColor = AnnotationColorKey;
 
-/**
- * Вид выноски: провод ↔ форма. Неизвестное значение с провода становится пином, а не пустотой:
- * снимок с выноской неизвестного вида должен показать хоть что-то в том месте, где технолог её
- * поставил, — потерянная точка хуже неточной фигуры.
- */
-const ANNOTATION_KIND_WIRE: Record<AnnotationKind, string> = {
-  pin: 'TECH_CARD_ANNOTATION_KIND_PIN',
-  label: 'TECH_CARD_ANNOTATION_KIND_LABEL',
-  dim: 'TECH_CARD_ANNOTATION_KIND_DIM',
-  bracket: 'TECH_CARD_ANNOTATION_KIND_BRACKET',
-  multi: 'TECH_CARD_ANNOTATION_KIND_MULTI',
-  arc: 'TECH_CARD_ANNOTATION_KIND_ARC',
-  polygon: 'TECH_CARD_ANNOTATION_KIND_POLYGON',
-  ink: 'TECH_CARD_ANNOTATION_KIND_INK',
+// СЛОВАРИ ПРОВОДА ПЕРЕЕХАЛИ К РЕЕСТРУ ВИДОВ (`ui/components/annotation/wire`): указания рисует
+// теперь не только тех-карта, но и вложение задачи, а две копии таблицы «вид ↔ константа» — это
+// вид, который приезжает на один экран и не приезжает на другой. Реэкспорт оставлен намеренно:
+// схема остаётся тем единственным местом, куда смотрит домен тех-карты.
+export {
+  annotationColorFromWire,
+  annotationColorToWire,
+  annotationKindFromWire,
+  annotationKindToWire,
 };
-const ANNOTATION_KIND_FORM = Object.fromEntries(
-  Object.entries(ANNOTATION_KIND_WIRE).map(([k, v]) => [v, k as AnnotationKind]),
-) as Record<string, AnnotationKind>;
-
-export const annotationKindFromWire = (v?: string): AnnotationKind =>
-  ANNOTATION_KIND_FORM[v ?? ''] ?? 'pin';
-export const annotationKindToWire = (v?: AnnotationKind): common_TechCardAnnotationKind =>
-  (ANNOTATION_KIND_WIRE[v ?? 'pin'] ?? ANNOTATION_KIND_WIRE.pin) as common_TechCardAnnotationKind;
-
-const ANNOTATION_COLOR_WIRE: Record<string, string> = {
-  red: 'TECH_CARD_ANNOTATION_COLOR_RED',
-  blue: 'TECH_CARD_ANNOTATION_COLOR_BLUE',
-  green: 'TECH_CARD_ANNOTATION_COLOR_GREEN',
-  orange: 'TECH_CARD_ANNOTATION_COLOR_ORANGE',
-  white: 'TECH_CARD_ANNOTATION_COLOR_WHITE',
-};
-const ANNOTATION_COLOR_FORM = Object.fromEntries(
-  Object.entries(ANNOTATION_COLOR_WIRE).map(([k, v]) => [v, k as AnnotationColor]),
-) as Record<string, AnnotationColor>;
-
-export const annotationColorFromWire = (v?: string): AnnotationColor =>
-  ANNOTATION_COLOR_FORM[v ?? ''] ?? '';
-export const annotationColorToWire = (v?: AnnotationColor): common_TechCardAnnotationColor =>
-  (v ? ANNOTATION_COLOR_WIRE[v] : 'TECH_CARD_ANNOTATION_COLOR_UNKNOWN') as common_TechCardAnnotationColor;
 
 /**
  * СПИСОК ДЕТАЛЕЙ И ОДИНОЧНОЕ ПОЛЕ — ОДНО И ТО ЖЕ, записанное дважды. Правило свода общее для
