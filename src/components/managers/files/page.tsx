@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { useSnackBarStore } from 'lib/stores/store';
-import { SECTION } from 'constants/routes';
+import { ROUTES, SECTION } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
@@ -149,11 +149,12 @@ export default function FilesPage() {
   // целиком, а полоса продолжала бы обещать действие над файлами, которых на экране нет.
   const filterKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}`;
   const seenFilter = useRef(filterKey);
+  const clearSelection = selection.clear;
   useEffect(() => {
     if (seenFilter.current === filterKey) return;
     seenFilter.current = filterKey;
-    selection.clear();
-  }, [filterKey, selection]);
+    clearSelection();
+  }, [filterKey, clearSelection]);
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -165,9 +166,9 @@ export default function FilesPage() {
     setUploadOpen(true);
   };
 
-  const closeCard = () => navigate({ pathname: '/files', search: params.toString() });
+  const closeCard = () => navigate({ pathname: ROUTES.files, search: params.toString() });
   const openCard = (fileId: number) =>
-    navigate({ pathname: `/files/${fileId}`, search: params.toString() });
+    navigate({ pathname: `${ROUTES.files}/${fileId}`, search: params.toString() });
   const showAll = () => patch({ topicIds: [], untopiced: false });
 
   // Второй счёт спрашивается только тогда, когда в узком фильтре не нашлось ничего: это

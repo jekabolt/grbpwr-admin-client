@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FileTopic } from 'api/proto-http/admin';
+import { useSnackBarStore } from 'lib/stores/store';
 import { Button } from 'ui/components/button';
 import { Chip, ChipRow } from 'ui/components/chip';
 import { ConfirmationModal } from 'ui/components/confirmation-modal';
@@ -34,8 +35,9 @@ export function FileCardModal({
   writable: boolean;
   onClose: () => void;
 }) {
-  const { data, isLoading } = useLibraryFile(id);
+  const { data, isLoading, refetch } = useLibraryFile(id);
   const { updateFile, deleteFile } = useFilesMutations();
+  const { showMessage } = useSnackBarStore();
 
   const file = data?.file;
   const [name, setName] = useState('');
@@ -70,6 +72,19 @@ export function FileCardModal({
     setFailure(undefined);
     try {
       await updateFile.mutateAsync({ id, fileName: name.trim(), topicIds: selected, newTopics });
+      // ПЕРЕСИНХРОН РОВНО ЗДЕСЬ, а не в эффекте по объекту файла. Названные на лету темы
+      // существуют только после сохранения, и их id знает лишь сервер: без явного
+      // перечитывания чип остался бы «новым» навсегда, а форма — вечно грязной, и второе
+      // «сохранить» СНЯЛО бы только что созданную тему (её id не попал в `selected`).
+      const fresh = await refetch();
+      const f = fresh.data?.file;
+      if (f) {
+        setName(f.fileName ?? '');
+        setSelected((f.topics ?? []).map((t) => Number(t.id)));
+      }
+      setNewTopics([]);
+      setNewTopic('');
+      showMessage('сохранено', 'success');
     } catch (e) {
       setFailure(e instanceof Error ? e.message : 'не удалось сохранить');
     }
