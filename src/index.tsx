@@ -182,6 +182,7 @@ const Accounts = lazyRoute(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
 const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
+const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
 
 const Tasks = lazyRoute(() =>
   import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
@@ -408,6 +409,9 @@ root.render(
                   {/* Один компонент на оба адреса: /files/:id — это тот же экран с открытой
                       карточкой поверх сетки, а не отдельная страница. */}
                   <Route path={ROUTES.files} element={<FilesLibrary />} />
+                  {/* Объявлен раньше `/files/:id` для читаемости; порядок здесь ни на что не
+                      влияет — статический сегмент выигрывает у динамического по рангу. */}
+                  <Route path={ROUTES.fileTopics} element={<FileTopics />} />
                   <Route path={ROUTES.file} element={<FilesLibrary />} />
                   <Route path={ROUTES.opex} element={<Opex />} />
                   {/* All accounting screens share one TooltipProvider (the design in

@@ -1,3 +1,5 @@
+import { Link } from 'react-router-dom';
+import { ROUTES } from 'constants/routes';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import SelectComponent from 'ui/components/select';
@@ -64,6 +66,11 @@ export function FilesToolbar({
         className='max-w-[170px]'
       />
       <ToolbarSpacer />
+      {/* Словарь тем правится на своём экране: здесь чип по клику фильтрует, и правка имени
+          на том же элементе потребовала бы второго жеста. */}
+      <Button asChild size='xs' variant='secondary'>
+        <Link to={ROUTES.fileTopics}>темы</Link>
+      </Button>
       {/* Тумблер и права — ОДИН механизм. Без files:write он не «спрятан», а заблокирован в
           «чтении»: спрятанного не попросишь, а строка над сеткой объясняет, чего не хватает. */}
       <Button
