@@ -20,7 +20,7 @@ import { TaskChecklist } from '../components/task-checklist';
 import { TaskComments } from '../components/task-comments';
 import { TaskFormModal } from '../components/task-form-modal';
 import { orderedMedia } from '../api/tasksService';
-import { annotationsOf, NotesMark, useTaskMediaViewer } from '../components/task-media-viewer';
+import { useTaskMediaViewer } from '../components/task-media-viewer';
 import { TaskText } from '../components/task-text';
 import {
   useArchiveTask,
@@ -91,9 +91,12 @@ export function TaskDetail() {
    * сохранения, — то же правило, что у описания, ссылок и состава вложений.
    *
    * Правка отсюда стоила бы записи ВСЕЙ карточки содержимым последнего чтения: `UpdateTask`
-   * заменяет заголовок, описание, метки и ссылки целиком, а чтение живёт пять минут и не
-   * обновляется по фокусу окна. То есть «посмотрел картинку и закрыл» молча откатывало бы чужую
-   * правку описания, сделанную минуту назад. Инлайновые селекты доски и колонки на этой же
+   * заменяет заголовок, описание, метки и ссылки целиком, а перечитывать карточку по своей воле
+   * страница не станет — `staleTime` у чтения 30 секунд (`hooks/useTasks.ts`), но протухшее
+   * чтение перезапрашивается только на новом монтировании, а не по фокусу окна: открытая
+   * карточка висит с тем содержимым, с которым её открыли, хоть час. То есть «посмотрел картинку
+   * и закрыл» молча откатывало бы чужую правку описания, сделанную после открытия страницы.
+   * Инлайновые селекты доски и колонки на этой же
    * странице такого не делают и сравнением не годятся: они идут через `MoveTask`, которая
    * содержимого не касается вовсе.
    *
@@ -120,12 +123,25 @@ export function TaskDetail() {
   // посреди описания, и ссылку из комментария.
   const attachments = useTaskMediaViewer({ media, annotations });
 
-  // Memoized so a background refetch of useTask doesn't hand the open edit modal
-  // a fresh object and reset the form mid-edit (react-query structural sharing
-  // keeps `task` stable while its data is unchanged).
+  /**
+   * СЧИТАЕТСЯ ПО СОДЕРЖИМОМУ ФОРМЫ, А НЕ ПО ВСЕМУ ОТВЕТУ. Открытая модалка делает
+   * `reset(initial)` на каждую смену ссылки — и по `[task]` это значило «на каждое фоновое
+   * перечитывание».
+   *
+   * Структурное разделение react-query держит ссылку стабильной, пока данные не изменились, но
+   * `GetTask` несёт ещё и файлы библиотеки, а их подписанные ссылки МИНТУЮТСЯ НА КАЖДЫЙ ОТВЕТ:
+   * ответ никогда не равен предыдущему, и `task` меняется, хотя ни одно поле формы не менялось.
+   * Перечитывание при этом запускает сама страница — сорвавшееся превью зовёт
+   * `invalidateQueries` (attachment-tiles.tsx), а подпись живёт 6–12 часов при вкладке, открытой
+   * дольше. Итог был такой: человек печатает описание, у него на глазах срывается превью, и
+   * заголовок с описанием откатываются к серверным — без единого слова и без отмены по ⌘Z.
+   *
+   * Зависимости — ровно те три куска, из которых собирается `initial`. `task.task` (содержимое
+   * карточки) структурно разделяется и переживает ротацию подписей; доска и колонка — скаляры.
+   */
   const initial: TaskFormValues | null = useMemo(
     () => (task ? { ...task.task, board: task.board, status: task.status } : null),
-    [task],
+    [task?.task, task?.board, task?.status],
   );
 
   async function handleSubmit(values: TaskFormValues) {
