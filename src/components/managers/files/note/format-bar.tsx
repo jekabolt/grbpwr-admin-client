@@ -17,7 +17,7 @@ import { fileCardPath } from './file-refs';
  *
  * 1. `execCommand('insertText')` — правка идёт ЧЕРЕЗ САМО ПОЛЕ, как будто её набрали. Способ
  *    старый и объявлен устаревшим, но он единственный, который кладёт правку в НАТИВНУЮ СТОПКУ
- *    ОТМЕНЫ: замерено на стенде — после нажатия «жирный» ⌘Z возвращает текст ровно на шаг
+ *    ОТМЕНЫ: замерено на стенде — после нажатия «bold» ⌘Z возвращает текст ровно на шаг
  *    назад. Через `setRangeText` ⌘Z не делает НИЧЕГО: правка скриптом в стопку не попадает и
  *    обнуляет то, что там было, — то есть человек теряет и отмену своего набора тоже.
  * 2. `setRangeText` — запасной путь: если `execCommand` отказал или сделал не то (проверяется
@@ -33,7 +33,7 @@ import { fileCardPath } from './file-refs';
  * ── ЧТО ЗДЕСЬ НЕ ДЕЛАЕТСЯ ───────────────────────────────────────────────────────────────────
  *
  * Жирный поверх курсива не ВКЛАДЫВАЕТСЯ, а ЗАМЕНЯЕТ его. Причина в разметчике: `***текст***` он
- * не понимает вовсе (у него жирный — это `**` без звёздочек внутри), и «нажал жирный на
+ * не понимает вовсе (у него жирный — это `**` без звёздочек внутри), и «нажал «bold» на
  * курсиве» дало бы строку, показанную со звёздочками наружу. Кнопка обязана оставлять текст,
  * который её же разметчик покажет.
  */
@@ -98,7 +98,7 @@ function emphasisEdit(text: string, start: number, end: number, want: Emphasis):
     const body = text.slice(found.inner[0], found.inner[1]);
     const at = found.outer[0];
     if (found.marker === want) {
-      // Снять: то самое «нажал жирный на жирном».
+      // Снять: то самое «нажал «bold» на жирном».
       return { start: at, end: found.outer[1], text: body, sel: [at, at + body.length] };
     }
     // Заменить, а не вложить — см. шапку файла.
@@ -198,12 +198,7 @@ const LIST_RE = {
   quote: /^\s*>\s?/,
 } as const;
 
-function lineMarkEdit(
-  text: string,
-  start: number,
-  end: number,
-  kind: 'ul' | 'ol' | 'quote',
-): Edit {
+function lineMarkEdit(text: string, start: number, end: number, kind: 'ul' | 'ol' | 'quote'): Edit {
   return replaceLines(text, start, end, (lines) => {
     const meaningful = lines.filter((l) => l.trim());
     // Снимаем только если размечено ВСЁ выделенное: наполовину размеченный кусок кнопка
@@ -262,8 +257,8 @@ function fenceEdit(text: string, start: number, end: number): Edit {
   return { start: ls, end: le, text: next, sel: [ls + 4, ls + 4 + body.length] };
 }
 
-const LINK_LABEL = 'текст';
-const LINK_HREF = 'адрес';
+const LINK_LABEL = 'text';
+const LINK_HREF = 'url';
 
 /**
  * Ссылка. Выделили текст — он становится подписью, а выделенным оказывается ПЛЕЙСХОЛДЕР адреса:
@@ -307,7 +302,7 @@ function fileEdit(text: string, start: number, end: number, f: LibraryFile): Edi
   const [s, e] = trimEdges(text, start, end);
   const selected = linkLabel(text.slice(s, e));
   const id = Number(f.id);
-  const label = selected || linkLabel(f.fileName ?? '') || `файл ${id}`;
+  const label = selected || linkLabel(f.fileName ?? '') || `file ${id}`;
   // Файл без номера — это выдача, из которой ссылку собрать не из чего. `/files/NaN` выглядел
   // бы ссылкой и вёл бы в никуда, поэтому в текст уезжает одно имя.
   const next =
@@ -394,44 +389,46 @@ export function FormatBar({
 
   const actions: { label: string; title: string; run: () => void }[] = [
     {
-      label: 'жирный',
-      title: 'жирный — **текст**. повторное нажатие снимает',
+      label: 'bold',
+      title: 'bold — **text**. pressing again removes it',
       run: () => apply((t, s, e) => emphasisEdit(t, s, e, '**')),
     },
     {
-      label: 'курсив',
-      title: 'курсив — *текст*. повторное нажатие снимает',
+      label: 'italic',
+      title: 'italic — *text*. pressing again removes it',
       run: () => apply((t, s, e) => emphasisEdit(t, s, e, '*')),
     },
     {
-      label: 'заголовок',
-      title: 'заголовок по кругу: # → ## → ### → обычный текст',
+      label: 'heading',
+      title: 'heading round the circle: # → ## → ### → plain text',
       run: () => apply(headingEdit),
     },
     {
-      label: 'список',
-      title: 'маркированный список — «- пункт»',
+      label: 'list',
+      title: 'bulleted list — “- item”',
       run: () => apply((t, s, e) => lineMarkEdit(t, s, e, 'ul')),
     },
     {
-      label: 'нумерация',
-      title: 'нумерованный список — «1. пункт»',
+      label: 'numbering',
+      title: 'numbered list — “1. item”',
       run: () => apply((t, s, e) => lineMarkEdit(t, s, e, 'ol')),
     },
     {
-      label: 'цитата',
-      title: 'цитата — «> строка»',
+      label: 'quote',
+      title: 'quote — “> line”',
       run: () => apply((t, s, e) => lineMarkEdit(t, s, e, 'quote')),
     },
     {
-      label: 'код',
-      title: 'код: выделение в одну строку — `так`, в несколько — огорода ```',
+      label: 'code',
+      title: 'code: a selection on one line — `like this`, on several — a ``` fence',
       run: () =>
-        apply((t, s, e) => (t.slice(s, e).includes('\n') ? fenceEdit(t, s, e) : inlineCodeEdit(t, s, e))),
+        apply((t, s, e) =>
+          t.slice(s, e).includes('\n') ? fenceEdit(t, s, e) : inlineCodeEdit(t, s, e),
+        ),
     },
     {
-      label: 'ссылка',
-      title: 'ссылка — [подпись](адрес)',
+      label: 'link',
+      title: 'link — [label](url)',
       run: () => apply(linkEdit),
     },
   ];
@@ -460,11 +457,11 @@ export function FormatBar({
           type='button'
           size='xs'
           variant='secondary'
-          title='вставить ссылку на файл библиотеки; картинка встанет показом в тексте'
+          title='insert a link to a library file; a picture will stand shown inside the text'
           onMouseDown={(e: React.MouseEvent) => e.preventDefault()}
           onClick={() => setPickerOpen(true)}
         >
-          файл
+          file
         </Button>
       </div>
 

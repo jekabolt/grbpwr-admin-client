@@ -184,17 +184,17 @@ export function FileAccessSection({
         return base ? { ...base, link: res.link } : base;
       });
       invalidate();
-      showMessage('ссылка пересоздана — старая больше не работает', 'success');
+      showMessage('the link is rotated — the old one no longer works', 'success');
     },
   });
 
   /**
    * Какой чип срока считать нажатым.
    *
-   * Сервер хранит ДАТУ окончания, а не выбранный срок, и восстановить «7 дней» из даты нельзя:
+   * Сервер хранит ДАТУ окончания, а не выбранный срок, и восстановить «7 days» из даты нельзя:
    * дата уже уехала от момента выбора. Поэтому нажатым чип бывает ровно в двух случаях — либо
    * человек ткнул в него в этой сессии, либо у выданной ссылки нет срока вообще, и это честно
-   * «бессрочно». Пока ссылки не существует, не нажат ни один: подсвеченное «бессрочно» у
+   * «no expiry». Пока ссылки не существует, не нажат ни один: подсвеченное «no expiry» у
    * неопубликованного файла читалось бы как уже сделанный выбор.
    */
   const currentTtl = chosenTtl ?? (link?.url ? (link.expiresAt ? undefined : 0) : undefined);
@@ -225,7 +225,7 @@ export function FileAccessSection({
    * ТОЛЬКО при новом уровне `people`: на `team` и `link` присланный набор не читается вовсе,
    * строки `library_file_access_person` остаются лежать. Поэтому пустой список безопасен —
    * ограничив файл снова, набирать людей заново не придётся, и ровно это обещают оба диалога:
-   * и здешний, и «закрыть доступ» на витрине открытого.
+   * и здешний, и «close the access» на витрине открытого.
    *
    * Приведено к ОДНОМУ виду с витриной (`useCloseSharedAccess`), которая слала `[]` там, где
    * этот блок слал текущий список. Оба тела верны, но два разных тела на один RPC в одном и
@@ -309,11 +309,11 @@ export function FileAccessSection({
     if (!shownUrl) return;
     try {
       await navigator.clipboard.writeText(shownUrl);
-      showMessage('ссылка скопирована', 'success');
+      showMessage('link copied', 'success');
     } catch {
-      // Буфер обмена закрыт (не тот протокол, отказ в разрешении). Врать «скопировано» нельзя:
+      // Буфер обмена закрыт (не тот протокол, отказ в разрешении). Врать «copied» нельзя:
       // человек уйдёт вставлять пустоту.
-      showMessage('скопировать не вышло — выделите адрес и скопируйте вручную', 'error');
+      showMessage("couldn't copy — select the address and copy it by hand", 'error');
     }
   };
 
@@ -347,7 +347,7 @@ export function FileAccessSection({
       key: `up:${uploaderName}`,
       id: uploaderId > 0 ? uploaderId : undefined,
       username: uploaderName,
-      note: uploaderId > 0 && ownerIds.has(uploaderId) ? 'загрузил · ведёт файл' : 'загрузил',
+      note: uploaderId > 0 && ownerIds.has(uploaderId) ? 'uploaded · owns the file' : 'uploaded',
       pinned: true,
     });
     if (uploaderId > 0) listed.add(uploaderId);
@@ -363,7 +363,7 @@ export function FileAccessSection({
         username: p.username ?? `#${p.id}`,
         // Владелец, попавший и в список, назван владельцем: убрав его отсюда, доступа его не
         // лишишь — и строка после сохранения останется, только уже закреплённой.
-        note: [ownerIds.has(id) ? 'ведёт файл' : '', (p.specialties ?? []).join(', ')]
+        note: [ownerIds.has(id) ? 'owns the file' : '', (p.specialties ?? []).join(', ')]
           .filter(Boolean)
           .join(' · '),
       });
@@ -376,7 +376,7 @@ export function FileAccessSection({
       key: `own:${id}`,
       id,
       username: o.username ?? `#${id}`,
-      note: ['ведёт файл', (o.specialties ?? []).join(', ')].filter(Boolean).join(' · '),
+      note: ['owns the file', (o.specialties ?? []).join(', ')].filter(Boolean).join(' · '),
       pinned: true,
     });
   });
@@ -386,8 +386,7 @@ export function FileAccessSection({
   // Диалог перехода на `link` называет срок, который применится, вслух: у ссылки, сделанной
   // бессрочной, он останется бессрочным, а не станет молча недельным.
   const pendingTtl = linkTtlFor('link');
-  const pendingTtlLabel =
-    LINK_TTLS.find((t) => t.hours === pendingTtl)?.label ?? `${pendingTtl} ч`;
+  const pendingTtlLabel = LINK_TTLS.find((t) => t.hours === pendingTtl)?.label ?? `${pendingTtl} h`;
 
   return (
     <div className='flex flex-col gap-1'>
@@ -401,19 +400,19 @@ export function FileAccessSection({
           ) : undefined
         }
       >
-        доступ
+        access
       </GroupLabel>
 
       {isLoading ? (
         <Text size='micro' variant='label'>
-          загружаем…
+          loading…
         </Text>
       ) : isError ? (
         /* Блок не прочитался — но уровень известен из самого файла, и назвать его честнее, чем
-           показать пустое место: бейдж «по ссылке» на плитке иначе не с чем сверить. */
+           показать пустое место: бейдж «by link» на плитке иначе не с чем сверить. */
         <div className='flex flex-col gap-1'>
           <Text size='micro'>
-            уровень: <span className='font-bold'>{ACCESS_LEVEL_TITLE[level]}</span> —{' '}
+            level: <span className='font-bold'>{ACCESS_LEVEL_TITLE[level]}</span> —{' '}
             {ACCESS_LEVEL_HINT[level]}
           </Text>
           <Text size='micro' variant='label'>
@@ -421,13 +420,15 @@ export function FileAccessSection({
                 доступа читает любой, кто файл видит, — файл, который видеть нельзя, в ответе
                 не появляется вовсе. Поэтому 403 здесь означает отсутствие доступа к разделу
                 целиком, а не к этому блоку. */}
-            {isUnauthorized(error)
-              ? 'сессия истекла — войдите заново.'
-              : isForbidden(error)
-                ? 'нет доступа к разделу «файлы» — блок доступа читается вместе с ним.'
-                : isUnknownRoute(error)
-                  ? 'подробности доступа этот сервер ещё не отдаёт: либо сторона доступа не выкачена, либо файла уже нет.'
-                  : <FailureText e={error} fallback='блок доступа не прочитался' />}
+            {isUnauthorized(error) ? (
+              'the session expired — sign in again.'
+            ) : isForbidden(error) ? (
+              'no access to the “files” section — the access block is read together with it.'
+            ) : isUnknownRoute(error) ? (
+              "this server doesn't serve access details yet: either the access side isn't rolled out, or the file is already gone."
+            ) : (
+              <FailureText e={error} fallback="the access block didn't read" />
+            )}
           </Text>
         </div>
       ) : (
@@ -439,7 +440,7 @@ export function FileAccessSection({
               каноническом radiogroup выбор следует за фокусом, а тут каждый выбор мгновенно
               публикует файл наружу или прячет его от команды. Табом достижимо каждое
               положение, Enter/Пробел спрашивают подтверждение — цена нажатия важнее канона. */}
-          <div role='radiogroup' aria-label='уровень доступа' className='flex flex-col'>
+          <div role='radiogroup' aria-label='access level' className='flex flex-col'>
             {ACCESS_LEVELS.map((l, i) => {
               const on = level === l;
               return (
@@ -487,7 +488,7 @@ export function FileAccessSection({
                       </Text>
                       {on && (
                         <Text size='nano' variant='label' component='span' className='uppercase'>
-                          сейчас
+                          now
                         </Text>
                       )}
                     </span>
@@ -501,20 +502,21 @@ export function FileAccessSection({
           </div>
 
           <Text size='micro' variant='label'>
-            уровень один: включив другой, вы выключаете нынешний — сложить их нельзя.
+            the level is one: switching another on switches the current one off — they can't be
+            added up.
           </Text>
 
           {!inCircle && (
             <Text size='micro' variant='label'>
-              менять доступ может тот, кто загрузил файл, его владелец или супер-админ. остальным
-              уровень виден, но не переставляется.
+              access is changed by whoever uploaded the file, its owner or a super admin. everyone
+              else sees the level, but can't move it.
             </Text>
           )}
 
           {setAccess.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                <FailureText e={setAccess.error} fallback='не удалось изменить доступ' />
+                <FailureText e={setAccess.error} fallback="couldn't change the access" />
               </Text>
             </CalloutBox>
           )}
@@ -529,20 +531,20 @@ export function FileAccessSection({
                     disabled={!mayEdit || busy}
                     onClick={openPicker}
                   >
-                    изменить список
+                    change the list
                   </Button>
                 }
               >
-                кто видит файл
+                who sees the file
               </GroupLabel>
               {/* Плашка НЕ повторяет подпись уровня (она стоит на двадцать пикселей выше и уже
                   сказала, что файл пропадает у остальных), а называет следствие, которого не
                   говорит больше никто: счётчик темы перестаёт быть фактом о теме. */}
               <CalloutBox tone='warning'>
                 <Text size='micro' component='span'>
-                  счётчики тем становятся <b>разными у разных людей</b>: у того, кому файл не
-                  виден, он не считается. это не сбой — либо счётчик врёт одним, либо имя файла
-                  утекает другим, и выбрано первое.
+                  topic counters become <b>different for different people</b>: for the one who can't
+                  see the file, it isn't counted. this isn't a fault — either the counter lies to
+                  some, or the file name leaks to others, and the first was chosen.
                 </Text>
               </CalloutBox>
               <div className='flex flex-col'>
@@ -568,15 +570,19 @@ export function FileAccessSection({
                       )}
                     </div>
                     {/* Строка загрузившего узнаётся по КЛЮЧУ, а не по совпадению имён: тёзка,
-                        заведённый после удаления автора, — другой человек, и «всегда» вместо
-                        «убрать» сделало бы его несъёмным из списка, где сервер его не держит.
+                        заведённый после удаления автора, — другой человек, и «always» вместо
+                        «remove» сделало бы его несъёмным из списка, где сервер его не держит.
                         Тем же признаком помечен владелец: его видимость тоже не из списка. */}
                     {r.pinned ? (
                       /* Загрузивший и владелец неудаляемы отсюда, и это решает СЕРВЕР — он
                          пропускает их предикатом видимости мимо списка. Крестик здесь был бы
                          обещанием, которое сервер отменит следующим ответом. */
-                      <Pill tone='mut' className='ml-auto' title='видит файл всегда, не по списку'>
-                        всегда
+                      <Pill
+                        tone='mut'
+                        className='ml-auto'
+                        title='sees the file always, not by the list'
+                      >
+                        always
                       </Pill>
                     ) : (
                       !!r.id && (
@@ -585,7 +591,7 @@ export function FileAccessSection({
                           variant='secondary'
                           className='ml-auto'
                           disabled={!mayEdit || busy}
-                          aria-label={`убрать из списка ${r.username}`}
+                          aria-label={`remove ${r.username} from the list`}
                           onClick={() =>
                             setAccess.mutate({
                               level: 'people',
@@ -594,7 +600,7 @@ export function FileAccessSection({
                             })
                           }
                         >
-                          убрать
+                          remove
                         </Button>
                       )
                     )}
@@ -605,7 +611,7 @@ export function FileAccessSection({
                   может быть несколько, и они видят любой файл вообще. Сказать про него всё
                   равно надо, иначе список читается как исчерпывающий. */}
               <Text size='micro' variant='label'>
-                и супер-админ: он видит любой файл — этого не отменяет ни один список.
+                and a super admin: they see any file at all — no list cancels that.
               </Text>
             </div>
           )}
@@ -617,27 +623,27 @@ export function FileAccessSection({
                   выданной ссылки нет отзыва поштучно. */}
               <CalloutBox tone='warning'>
                 <Text size='micro' component='span'>
-                  отозвать ссылку у одного человека <b>нельзя</b>: её можно только пересоздать
-                  целиком, и тогда перестанет работать и та копия, что лежит у своих. срок
-                  ограничивает окно, но не пересылку.
+                  revoking the link from one person <b>is impossible</b>: it can only be rotated
+                  whole, and then the copy lying with your own people stops working too. an expiry
+                  limits the window, but not the forwarding.
                 </Text>
               </CalloutBox>
               {shownUrl ? (
                 <div className='flex flex-wrap items-center gap-1.5'>
                   <Input
                     name='publicLink'
-                    aria-label='публичная ссылка'
+                    aria-label='public link'
                     value={shownUrl}
                     readOnly
                     className='min-w-[220px] flex-1'
                     onFocus={(e: React.FocusEvent<HTMLInputElement>) => e.target.select()}
                   />
-                  {/* «Скопировать ссылку» — те же слова, что в строке витрины открытого: одно
+                  {/* «copy the link» — те же слова, что в строке витрины открытого: одно
                       действие над одним предметом, названное на двух экранах одинаково. */}
                   <Button size='sm' variant='secondary' onClick={copyLink}>
-                    скопировать ссылку
+                    copy the link
                   </Button>
-                  {link?.expired && <Pill tone='warn'>истёк</Pill>}
+                  {link?.expired && <Pill tone='warn'>expired</Pill>}
                 </div>
               ) : linkMinted ? (
                 /* ДВЕ ПРИЧИНЫ ПУСТОГО АДРЕСА, И СОВЕТ У НИХ РАЗНЫЙ.
@@ -645,34 +651,34 @@ export function FileAccessSection({
                    (токен не разобрался) — тогда виновата сама ссылка. Либо собирать адрес не из
                    чего: публичный домен контура не задан, а вкладка стоит на заведомо эфемерном
                    хосте (`localhost`, адрес по числам, `*.vercel.app`) — тогда ссылка ЖИВА, и
-                   «пересоздайте её» посылает человека ломать работающее вместо того, чтобы
+                   «rotate the link» посылает человека ломать работающее вместо того, чтобы
                    выставить переменную. Различает их разобравшийся токен.
                    Подставить сюда маршрут бэкенда нельзя ни в одном из случаев: его разошлют
                    вместо страницы и не узнают об этом никогда. */
                 shareToken ? (
                   <Text size='micro' variant='label'>
-                    публичный домен не настроен — копировать нечего. сама ссылка жива:
-                    выставьте <b>VITE_PATTERN_VIEWER_ORIGIN</b> на этом контуре, и адрес
-                    появится. пересоздавать ссылку не нужно.
+                    the public domain isn't configured — there's nothing to copy. the link itself is
+                    alive: set <b>VITE_PATTERN_VIEWER_ORIGIN</b> on this contour, and the address
+                    will appear. there's no need to rotate the link.
                   </Text>
                 ) : (
                   <Text size='micro' variant='label'>
-                    адрес ссылки не разобрался — копировать нечего. пересоздайте ссылку.
+                    the link address didn't parse — there's nothing to copy. rotate the link.
                   </Text>
                 )
               ) : (
                 <Text size='micro' variant='label'>
-                  ссылка ещё не создана — она появится здесь после сохранения уровня.
+                  the link isn't created yet — it will appear here once the level is saved.
                 </Text>
               )}
 
               <div className='flex flex-wrap items-center gap-1.5'>
-                {/* «ПЕРЕСТАВИТЬ», а не «срок»: нажатым чип бывает только после выбора в этой
-                    сессии или у бессрочной ссылки — у ссылки с конечным сроком не горит ни
-                    один, и подпись «срок» над пустым рядом читалась бы как «срока нет». Сам
+                {/* «MOVE THE EXPIRY», а не «expiry»: нажатым чип бывает только после выбора в
+                    этой сессии или у бессрочной ссылки — у ссылки с конечным сроком не горит ни
+                    один, и подпись «expiry» над пустым рядом читалась бы как «срока нет». Сам
                     срок назван строкой ниже. */}
                 <Text size='micro' variant='label' component='span'>
-                  переставить срок:
+                  move the expiry:
                 </Text>
                 {LINK_TTLS.map((t) => (
                   <Chip
@@ -680,14 +686,14 @@ export function FileAccessSection({
                     selected={currentTtl === t.hours}
                     pressed={currentTtl === t.hours}
                     disabled={!mayEdit || busy}
-                    /* «БЕССРОЧНО» СПРАШИВАЕТ, остальные три срока — нет, и разница не в
+                    /* «NO EXPIRY» СПРАШИВАЕТ, остальные три срока — нет, и разница не в
                        осторожности, а в том, что возвращает время. Срок — единственное, что
                        закрывает выданную наружу ссылку САМО; сняв его, человек оставляет файл
                        открытым навсегда, и обратно это уже не приедет по календарю. Все три
                        перехода уровня спрашивают, а это действие стоит столько же и уезжало
                        одним кликом.
                        Спрашиваем только про 0, а не про «любое увеличение срока»: сервер
-                       хранит ДАТУ окончания, а не выбранный срок, поэтому нынешние «7 дней»
+                       хранит ДАТУ окончания, а не выбранный срок, поэтому нынешние «7 days»
                        из даты не восстановить — «увеличение» пришлось бы угадывать, а
                        вопрос, заданный не по делу, перестают читать. */
                     onClick={() => {
@@ -708,8 +714,8 @@ export function FileAccessSection({
               </div>
               <Text size='micro' variant='label'>
                 {link?.expiresAt
-                  ? `сейчас: ${link.expired ? 'истекла' : 'действует'} до ${formatWhen(link.expiresAt)}`
-                  : 'сейчас: бессрочно — ссылка не перестанет работать сама.'}
+                  ? `now: ${link.expired ? 'expired' : 'valid'} until ${formatWhen(link.expiresAt)}`
+                  : "now: no expiry — the link won't stop working by itself."}
               </Text>
 
               <div className='flex flex-wrap items-center gap-1.5'>
@@ -722,35 +728,37 @@ export function FileAccessSection({
                     setConfirmRotate(true);
                   }}
                 >
-                  пересоздать ссылку
+                  rotate the link
                 </Button>
                 <Text size='micro' variant='label' component='span'>
-                  старая перестанет работать сразу — это и есть способ отозвать то, что уже
-                  переслали
+                  the old one stops working at once — this is exactly how you revoke what has
+                  already been forwarded
                 </Text>
               </div>
 
-              {/* «Открывали N раз» — те же слова, что в колонке витрины открытого: один и тот же
+              {/* «opened N times» — те же слова, что в колонке витрины открытого: один и тот же
                   счётчик, названный на двух экранах по-разному, читается как два разных числа.
-                  Склонение — из `upload/text.ts`: «открывали 2 раз» было в этой строке. */}
+                  Форма числа — из `upload/text.ts`: «opened 2 time» было в этой строке. */}
               {!!Number(link?.accessCount ?? 0) && (
                 <Text size='micro' variant='label' className='tabular-nums'>
-                  открывали {Number(link?.accessCount ?? 0)}{' '}
-                  {plural(Number(link?.accessCount ?? 0), 'раз', 'раза', 'раз')}
-                  {link?.lastAccessAt ? `, последний — ${formatWhenShort(link.lastAccessAt)}` : ''}.
-                  счётчик считается мимо горячего пути и может отставать на одно открытие.
+                  opened {Number(link?.accessCount ?? 0)}{' '}
+                  {plural(Number(link?.accessCount ?? 0), 'time')}
+                  {link?.lastAccessAt
+                    ? `, the last one — ${formatWhenShort(link.lastAccessAt)}`
+                    : ''}
+                  . the counter is tallied off the hot path and can lag by one open.
                 </Text>
               )}
 
               <Text size='micro' variant='label'>
-                svg и html по ссылке отдаются только скачиванием: открытые в браузере, они
-                выполнились бы как скрипт с нашего домена.
+                svg and html are given out by link only as a download: opened in a browser, they
+                would run as a script from our domain.
               </Text>
 
               {rotate.isError && (
                 <CalloutBox tone='error'>
                   <Text size='micro' component='span'>
-                    <FailureText e={rotate.error} fallback='не удалось пересоздать ссылку' />
+                    <FailureText e={rotate.error} fallback="couldn't rotate the link" />
                   </Text>
                 </CalloutBox>
               )}
@@ -762,17 +770,13 @@ export function FileAccessSection({
               <GroupLabel
                 action={
                   events.length > 5 ? (
-                    <Button
-                      size='xs'
-                      variant='secondary'
-                      onClick={() => setAllEvents((v) => !v)}
-                    >
-                      {allEvents ? 'свернуть' : 'показать все'}
+                    <Button size='xs' variant='secondary' onClick={() => setAllEvents((v) => !v)}>
+                      {allEvents ? 'collapse' : 'show all'}
                     </Button>
                   ) : undefined
                 }
               >
-                что меняли
+                what was changed
               </GroupLabel>
               <div className='flex flex-col'>
                 {shownEvents.map((e, i) => (
@@ -796,7 +800,7 @@ export function FileAccessSection({
                 ))}
               </div>
               <Text size='micro' variant='label'>
-                журнал нужен ровно для одного вопроса: «а кто вообще это выложил наружу».
+                the log is here for exactly one question: “so who put this outside at all”.
               </Text>
             </div>
           )}
@@ -813,21 +817,22 @@ export function FileAccessSection({
           if (pendingLevel) applyLevel(pendingLevel);
           setPendingLevel(undefined);
         }}
-        title={pendingLevel ? `доступ: ${ACCESS_LEVEL_TITLE[pendingLevel]}` : 'доступ'}
-        confirmLabel='применить'
-        cancelLabel='отмена'
+        title={pendingLevel ? `access: ${ACCESS_LEVEL_TITLE[pendingLevel]}` : 'access'}
+        confirmLabel='apply'
+        cancelLabel='cancel'
         width='sm'
       >
         <div className='flex flex-col gap-2'>
           {pendingLevel === 'link' && (
             <Text>
-              файл станет доступен кому угодно со ссылкой, <b>без входа в админку</b>. ссылку
-              перешлют дальше — рассчитывайте на это. срок: {pendingTtlLabel}
-              {pendingTtl === 0 ? ' — как у нынешней ссылки' : ''}, переставить можно сразу
-              после.
+              the file becomes available to anyone with the link,{' '}
+              <b>without signing in to the admin</b>. the link will be forwarded on — count on it.
+              expiry: {pendingTtlLabel}
+              {pendingTtl === 0 ? ' — the same as the current link' : ''}, it can be moved right
+              after.
             </Text>
           )}
-          {/* ДВА ТЕКСТА, ПОТОМУ ЧТО ЭТО ДВА РАЗНЫХ СОБЫТИЯ. «Кроме перечисленных» — правда
+          {/* ДВА ТЕКСТА, ПОТОМУ ЧТО ЭТО ДВА РАЗНЫХ СОБЫТИЯ. «except the listed ones» — правда
               ровно тогда, когда перечисленные есть; у файла, который ещё не ограничивали,
               список ПУСТ, и обещание сужения читалось как «останется у тех, кого я выбрал»,
               хотя выбранных ноль.
@@ -837,27 +842,30 @@ export function FileAccessSection({
               пугать выдуманным. */}
           {pendingLevel === 'people' && peopleIds.length > 0 && (
             <Text>
-              файл пропадёт у всех, кроме перечисленных: из сетки, из поиска, из счётчиков тем и
-              из задачи, к которой он прикреплён. они не увидят даже имени файла.
+              the file will disappear for everyone except the listed ones: from the grid, from
+              search, from the topic counters and from the task it is attached to. they won't even
+              see the file name.
             </Text>
           )}
           {pendingLevel === 'people' && peopleIds.length === 0 && (
             <Text>
-              <b>список пуст</b> — перечислять пока некого. файл пропадёт у всей команды: из
-              сетки, из поиска, из счётчиков тем и из задачи, к которой он прикреплён; имени
-              файла они тоже не увидят. видеть его останутся только загрузивший, владельцы файла
-              и супер-админ. кого добавить — спросим сразу после.
+              <b>the list is empty</b> — there is nobody to list yet. the file will disappear for
+              the whole team: from the grid, from search, from the topic counters and from the task
+              it is attached to; they won't see the file name either. the only ones left seeing it
+              are the uploader, the file owners and a super admin. who to add — we'll ask right
+              after.
             </Text>
           )}
           {pendingLevel === 'team' && (
             <Text>
-              файл снова увидит вся команда — все, у кого есть доступ к разделу «файлы».
+              the whole team will see the file again — everyone who has access to the “files”
+              section.
             </Text>
           )}
           {level === 'link' && pendingLevel !== 'link' && (
             <Text>
-              выданная публичная ссылка перестанет работать немедленно: тот, кому её переслали,
-              получит «ссылка не работает».
+              the issued public link will stop working immediately: whoever it was forwarded to will
+              get “the link doesn't work”.
             </Text>
           )}
         </div>
@@ -866,16 +874,19 @@ export function FileAccessSection({
       <ConfirmationModal
         open={confirmForever}
         onOpenChange={setConfirmForever}
-        onConfirm={() => setAccess.mutate({ level: 'link', adminIds: adminIdsFor('link'), linkTtl: 0 })}
-        title='сделать ссылку бессрочной'
-        confirmLabel='сделать бессрочной'
-        cancelLabel='оставить срок'
+        onConfirm={() =>
+          setAccess.mutate({ level: 'link', adminIds: adminIdsFor('link'), linkTtl: 0 })
+        }
+        title='make the link never expire'
+        confirmLabel='make it never expire'
+        cancelLabel='keep the expiry'
         width='sm'
       >
         <Text>
-          у ссылки не станет срока: она будет открывать файл <b>пока её не пересоздадут или не
-          сменят уровень доступа</b>. это единственное, что закрывало её само — и после этого
-          закрывать её придётся руками, помня, что она где-то есть.
+          the link will have no expiry: it will keep opening the file{' '}
+          <b>until it is rotated or the access level is changed</b>. this was the only thing that
+          closed it by itself — and after this you will have to close it by hand, remembering that
+          it is out there somewhere.
         </Text>
       </ConfirmationModal>
 
@@ -883,15 +894,15 @@ export function FileAccessSection({
         open={confirmRotate}
         onOpenChange={setConfirmRotate}
         onConfirm={() => rotate.mutate()}
-        title='пересоздать ссылку'
-        confirmLabel='пересоздать'
-        cancelLabel='оставить'
+        title='rotate the link'
+        confirmLabel='rotate'
+        cancelLabel='keep'
         width='sm'
       >
         <Text>
-          нынешняя ссылка умрёт <b>сразу</b>, и вернуть её будет неоткуда. если её кому-то уже
-          отправили — этот человек больше не откроет файл и получит «ссылка не работает». новый
-          адрес придётся разослать заново.
+          the current link will die <b>at once</b>, and there will be nowhere to bring it back from.
+          if it has already been sent to somebody — that person won't open the file any more and
+          will get “the link doesn't work”. the new address will have to be sent out again.
         </Text>
       </ConfirmationModal>
 
@@ -910,31 +921,31 @@ export function FileAccessSection({
             // старый список так, будто человек сам передумал.
           }
         }}
-        title='кто видит файл'
-        confirmLabel={setAccess.isPending ? 'сохраняем…' : 'сохранить'}
+        title='who sees the file'
+        confirmLabel={setAccess.isPending ? 'saving…' : 'save'}
         confirmDisabled={setAccess.isPending}
         closeOnConfirm={false}
         width='md'
       >
         <div className='flex flex-col gap-2'>
           <Text size='micro' variant='label'>
-            отмеченные — это ВЕСЬ список после сохранения, а не добавка к нему. загрузившего
-            сервер держит в списке сам: снять его нельзя, иначе файл однажды остался бы без
-            единого человека, который может его открыть.
+            the checked ones are the WHOLE list after saving, not an addition to it. the server
+            keeps the uploader in the list itself: they can't be unchecked, otherwise the file would
+            one day be left without a single person who can open it.
           </Text>
           <div className='flex flex-wrap items-center gap-2'>
             <Input
               name='accessQuery'
-              aria-label='поиск по имени или специальности'
+              aria-label='search by name or specialty'
               value={query}
-              placeholder='имя или специальность'
+              placeholder='name or specialty'
               className='max-w-[240px]'
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
             />
             {/* Счётчик рядом с поиском: отмеченные вне фильтра не видны, и без числа строка
-                «отмеченные — весь список» опровергается тем, что на экране их ноль. */}
+                «the checked ones are the WHOLE list» опровергается тем, что на экране их ноль. */}
             <Text size='micro' variant='label' component='span' className='tabular-nums'>
-              отмечено {picked.length}
+              checked {picked.length}
             </Text>
           </div>
           <div className='flex max-h-72 flex-col overflow-y-auto'>
@@ -978,15 +989,16 @@ export function FileAccessSection({
                       className='truncate uppercase'
                     >
                       {isUploader
-                        ? 'загрузил файл · остаётся в списке всегда'
-                        : p.specialties.join(', ') || 'специальность не указана'}
+                        ? 'uploaded the file · stays in the list always'
+                        : p.specialties.join(', ') || 'specialty not specified'}
                     </Text>
                     {/* Предупреждение об отключённом НЕ обрезается: это единственное место,
                         где видно, что снятая здесь отметка необратима — такого человека нет в
                         списке людей, и вернуть ему доступ будет неоткуда. */}
                     {p.missing && !isUploader && (
                       <Text size='nano' variant='label' component='span' className='uppercase'>
-                        аккаунт отключён · сняв отметку, вернуть его сюда будет нельзя
+                        the account is disabled · uncheck it and there will be no way to bring them
+                        back here
                       </Text>
                     )}
                   </span>
@@ -995,14 +1007,14 @@ export function FileAccessSection({
             })}
             {!found.length && (
               <Text size='micro' variant='label'>
-                никого с таким именем или специальностью нет.
+                there is nobody with such a name or specialty.
               </Text>
             )}
           </div>
           {setAccess.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                <FailureText e={setAccess.error} fallback='не удалось изменить список' />
+                <FailureText e={setAccess.error} fallback="couldn't change the list" />
               </Text>
             </CalloutBox>
           )}

@@ -31,7 +31,6 @@ import {
 import {
   actionLabel,
   inheritanceNote,
-  plural,
   rowWhy,
   statusLabel,
   statusTone,
@@ -138,7 +137,12 @@ function QueueRowView({
         </Text>
       </span>
 
-      <Text size='micro' variant='label' component='span' className='w-16 flex-none text-right tabular-nums'>
+      <Text
+        size='micro'
+        variant='label'
+        component='span'
+        className='w-16 flex-none text-right tabular-nums'
+      >
         {formatBytes(row.size)}
       </Text>
 
@@ -165,9 +169,9 @@ function QueueRowView({
               disabled={off}
               title={
                 writer && !writable
-                  ? 'сейчас только чтение — загрузка и правка выключены'
+                  ? 'right now it is read-only — uploading and editing are off'
                   : action === 'assignTopics' && noTopics
-                    ? 'у этой пачки не было тем — дописывать нечего'
+                    ? 'this batch had no topics — there is nothing to add'
                     : undefined
               }
               onClick={() => onAction(action, row)}
@@ -272,7 +276,9 @@ export function FilesUploadBar({
       return;
     }
     const apply = () =>
-      setInset(`${Math.max(0, Math.round(window.innerHeight - node.getBoundingClientRect().top))}px`);
+      setInset(
+        `${Math.max(0, Math.round(window.innerHeight - node.getBoundingClientRect().top))}px`,
+      );
     apply();
     const observer = new ResizeObserver(apply);
     observer.observe(node);
@@ -322,12 +328,12 @@ export function FilesUploadBar({
       // Те же слова, что у групповой простановки тем в полосе выделения: один и тот же исход,
       // названный в двух местах по-разному, читается как два разных исхода.
       showMessage(
-        n ? `${dup.name} — новых связей: ${n}` : `${dup.name} — эти темы уже стояли`,
+        n ? `${dup.name} — new links: ${n}` : `${dup.name} — these topics were already set`,
         'success',
       );
       qc.invalidateQueries({ queryKey: filesKeys.all });
     } catch (e) {
-      showMessage(failureText(e, 'не удалось дописать темы'), 'error');
+      showMessage(failureText(e, "couldn't add the topics"), 'error');
     } finally {
       setBusyRow(null);
     }
@@ -342,7 +348,7 @@ export function FilesUploadBar({
         // как есть и перепрашиваем выдачу: иначе доехавший файл всплыл бы через полчаса.
         if (row.status === 'run' && row.progress >= 1) {
           showMessage(
-            `${row.name} — файл уже ушёл целиком: если сервер успел его сохранить, он в библиотеке`,
+            `${row.name} — the file has already gone up whole: if the server managed to save it, it is in the library`,
             'success',
           );
           qc.invalidateQueries({ queryKey: filesKeys.all });
@@ -388,7 +394,7 @@ export function FilesUploadBar({
       // поверх этой кнопки.
       <div ref={dockRef} className='fixed bottom-2.5 left-1/2 z-[var(--z-dock)] -translate-x-1/2'>
         <Button size='sm' variant='main' onClick={() => setHidden(false)}>
-          показать загрузку ({rows.length})
+          show the upload ({rows.length})
         </Button>
       </div>,
       document.body,
@@ -401,7 +407,7 @@ export function FilesUploadBar({
     <div
       ref={dockRef}
       role='region'
-      aria-label='очередь загрузки'
+      aria-label='upload queue'
       // МЕБЕЛЬ СТРАНИЦЫ, А НЕ ТОСТ: очередь идёт фоном и ничего не спрашивает, поэтому она
       // ЛЕЖИТ НИЖЕ МОДАЛКИ (иначе накрыла бы подвал карточки файла — обе его кнопки).
       //
@@ -416,22 +422,27 @@ export function FilesUploadBar({
             !collapsed && 'border-b border-hairline',
           )}
         >
-          <Text component='h2' size='control' variant='uppercase' tracking='group' className='font-bold'>
-            загрузка
+          <Text
+            component='h2'
+            size='control'
+            variant='uppercase'
+            tracking='group'
+            className='font-bold'
+          >
+            upload
           </Text>
           {/* СВЁРНУТАЯ ПОЛОСА ЧИТАЕТСЯ БОКОВЫМ ЗРЕНИЕМ, поэтому сводка — слова, а не цвет:
-              «готово 3 из 7 · идёт 1 · обрыв» видно, не приглядываясь, а красную точку — нет. */}
+              «done 3 of 7 · going 1 · drop» видно, не приглядываясь, а красную точку — нет. */}
           <Text size='micro' variant='label' component='p' className='min-w-0 truncate'>
             {summaryLine(queue)}
           </Text>
-          {/* Склонение — из `upload/text.ts`, как и везде в разделе: «1 не ушли» в пилюле рядом
-              с аккуратной сводкой читается как недоделанный шаблон. */}
-          {notSent > 0 && (
-            <Pill tone='warn'>
-              {notSent} {plural(notSent, 'не ушёл', 'не ушли', 'не ушли')}
-            </Pill>
+          {/* Форма по числу — из `upload/text.ts`, как и везде в разделе: «1 didn't go up» в пилюле
+              рядом с аккуратной сводкой читается как недоделанный шаблон. Здесь форма одна на оба
+              числа, поэтому хелпер не зовётся. */}
+          {notSent > 0 && <Pill tone='warn'>{notSent} didn't go up</Pill>}
+          {pending.length > 0 && !pendingTopics.labels.length && (
+            <Pill tone='attention'>without topics</Pill>
           )}
-          {pending.length > 0 && !pendingTopics.labels.length && <Pill tone='attention'>без тем</Pill>}
 
           <div className='ml-auto flex flex-wrap items-center gap-1.5'>
             {/* Число — только те отказы, которые повтор ЛЕЧИТ. Сорок 401 после истёкшей
@@ -441,15 +452,15 @@ export function FilesUploadBar({
                 size='sm'
                 variant='main'
                 disabled={!writable}
-                title={writable ? undefined : 'сейчас только чтение — отправка выключена'}
+                title={writable ? undefined : 'right now it is read-only — uploading is off'}
                 onClick={retryAll}
               >
-                повторить все ({t.retryable})
+                retry all ({t.retryable})
               </Button>
             )}
             {t.done + t.dup + t.big > 0 && (
               <Button size='sm' variant='secondary' onClick={clearSettled}>
-                убрать отстоявшиеся ({t.done + t.dup + t.big})
+                dismiss the settled ({t.done + t.dup + t.big})
               </Button>
             )}
             {/* Повторяемый отказ поштучно не убирается (`rowActions`: у него одно действие —
@@ -460,10 +471,10 @@ export function FilesUploadBar({
               <Button
                 size='sm'
                 variant='secondary'
-                title='очередь забудет всё, включая отказы; отправленное останется в библиотеке'
+                title='the queue will forget everything, failures included; what was sent stays in the library'
                 onClick={reset}
               >
-                очистить
+                clear
               </Button>
             )}
             <Button
@@ -472,7 +483,7 @@ export function FilesUploadBar({
               aria-expanded={!collapsed}
               onClick={() => setCollapsed(!collapsed)}
             >
-              {collapsed ? 'развернуть' : 'свернуть'}
+              {collapsed ? 'unfold' : 'fold'}
             </Button>
             {/* «УБРАТЬ» ЗАБЛОКИРОВАНО, ПОКА ИДЁТ ОТПРАВКА: спрятать полосу можно, отправку —
                 нет, и полоса остаётся единственным местом, где отмена вообще существует. */}
@@ -480,10 +491,10 @@ export function FilesUploadBar({
               size='sm'
               variant='secondary'
               disabled={!canHide}
-              title={canHide ? undefined : 'пока идёт отправка — прятать нечего'}
+              title={canHide ? undefined : 'while the upload is running — there is nothing to hide'}
               onClick={() => setHidden(true)}
             >
-              убрать
+              hide
             </Button>
           </div>
         </div>
@@ -495,7 +506,11 @@ export function FilesUploadBar({
                 {inheritanceNote(pendingTopics.topics, pendingTopics.labels, pending.length)}
               </Text>
             )}
-            <div className='max-h-[42vh] overflow-y-auto' role='list' aria-label='файлы в очереди'>
+            <div
+              className='max-h-[42vh] overflow-y-auto'
+              role='list'
+              aria-label='files in the queue'
+            >
               {rows.map((row) => (
                 <QueueRowView
                   key={row.id}

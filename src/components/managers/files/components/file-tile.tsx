@@ -102,7 +102,7 @@ export function FileTile({
         <button
           type='button'
           aria-pressed={!!selected}
-          aria-label={selected ? `убрать из выбора ${name}` : `выбрать ${name}`}
+          aria-label={selected ? `remove ${name} from the selection` : `select ${name}`}
           onClick={(e) => {
             e.stopPropagation();
             onToggleSelect?.();
@@ -128,8 +128,8 @@ export function FileTile({
         // инициалы: у инициалов `pointer-events-none` (иначе прозрачный кружок съедал бы клик
         // по углу превью), своей подсказки у них быть не может — а «кто такой AL» спрашивают
         // ровно на наведении.
-        title={uploader ? `${name}\nзагрузил ${uploader}` : name}
-        aria-label={uploader ? `${name} · загрузил ${uploader}` : name}
+        title={uploader ? `${name}\nuploaded by ${uploader}` : name}
+        aria-label={uploader ? `${name} · uploaded by ${uploader}` : name}
         className='relative block w-full cursor-pointer bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         {file.previewUrl ? (
@@ -170,7 +170,7 @@ export function FileTile({
               {ext}
             </Text>
             <Text size='micro' variant='label' component='span' className='uppercase'>
-              {failed ? 'превью не вышло' : kindWord(file.contentType ?? undefined, name)}
+              {failed ? 'preview failed' : kindWord(file.contentType ?? undefined, name)}
             </Text>
           </span>
         )}
@@ -181,18 +181,18 @@ export function FileTile({
 
             Счётчик — НАД КАДРОМ, а не в подвале плитки: подвал у плитки в одну строку, и
             четвёртый элемент в нём переносил бы её ровно у тех файлов, которые обсуждают, то
-            есть у самых нужных. Ноль не печатается: «0 реплик» это не факт, а шум.
-            «обсуждение · N», а не «N реплик»: склонение при числе живёт в модуле очереди
+            есть у самых нужных. Ноль не печатается: «0 replies» это не факт, а шум.
+            «discussion · N», а не «N replies»: склонение при числе живёт в модуле очереди
             загрузки, и тащить её машину в плитку ради одного слова — плохой обмен. */}
         <span className='pointer-events-none absolute inset-x-1 bottom-1 flex items-end justify-between gap-1'>
           {comments > 0 ? (
             <Text
               size='nano'
               component='span'
-              title={`реплик в обсуждении: ${comments}`}
+              title={`replies in the discussion: ${comments}`}
               className='min-w-0 truncate bg-textColor px-1 uppercase text-bgColor tabular-nums'
             >
-              обсуждение · {comments}
+              discussion · {comments}
             </Text>
           ) : (
             <span />
@@ -222,7 +222,7 @@ export function FileTile({
           </Text>
           {noTopics && (
             <Pill tone='warn' className='flex-none'>
-              без темы
+              no topic
             </Pill>
           )}
           {/* Слово, цвет и подсказка — из ACCESS_LEVEL_BADGE: тот же бейдж стоит на витрине

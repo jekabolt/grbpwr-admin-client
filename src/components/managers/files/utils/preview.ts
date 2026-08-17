@@ -51,7 +51,10 @@ async function previewFromImage(file: File): Promise<Blob | null> {
       img.onerror = () => reject(new Error('image decode failed'));
       img.src = url;
     });
-    const natural = fit(img.naturalWidth || PREVIEW_MAX_EDGE, img.naturalHeight || PREVIEW_MAX_EDGE);
+    const natural = fit(
+      img.naturalWidth || PREVIEW_MAX_EDGE,
+      img.naturalHeight || PREVIEW_MAX_EDGE,
+    );
     const canvas = document.createElement('canvas');
     canvas.width = natural.w;
     canvas.height = natural.h;
@@ -141,7 +144,7 @@ export async function rebuildPreview(args: {
   fileName: string;
   contentType?: string;
 }): Promise<Blob> {
-  if (!args.downloadUrl) throw new Error('у файла нет ссылки на скачивание');
+  if (!args.downloadUrl) throw new Error('the file has no download link');
 
   let res: Response;
   try {
@@ -153,14 +156,14 @@ export async function rebuildPreview(args: {
     // (`storageReachable` в usePdfDocument); здесь проба не окупается — кнопка одна, ответ
     // мгновенный, и человеку хватает знать, что дело не в файле.
     throw new Error(
-      'файл не скачался: до хранилища не достучались или для этого адреса панели не открыт доступ к бакету',
+      "the file didn't download: the storage wasn't reachable, or the bucket isn't opened to this admin address",
     );
   }
-  if (!res.ok) throw new Error(`файл не отдался (${res.status})`);
+  if (!res.ok) throw new Error(`the file wasn't served (${res.status})`);
 
   const blob = await res.blob();
   const file = new File([blob], args.fileName, { type: args.contentType || blob.type });
   const preview = await buildPreview(file);
-  if (!preview) throw new Error('первую страницу нарисовать не вышло');
+  if (!preview) throw new Error("drawing the first page didn't work out");
   return preview;
 }

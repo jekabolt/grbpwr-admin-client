@@ -92,8 +92,7 @@ export function FileOwnersSection({
   const inCircle =
     !resolved ||
     isSuper ||
-    (!!me &&
-      ((me === uploaderName && uploaderId > 0) || owners.some((o) => o.username === me)));
+    (!!me && ((me === uploaderName && uploaderId > 0) || owners.some((o) => o.username === me)));
   const mayEdit = writable && inCircle;
 
   const [picking, setPicking] = useState(false);
@@ -146,7 +145,7 @@ export function FileOwnersSection({
   const byline = (username: string): string => {
     const spec = specialtiesOf.get(username);
     if (!spec) return '';
-    return spec.length ? spec.join(', ') : 'специальность не указана';
+    return spec.length ? spec.join(', ') : 'specialty not specified';
   };
 
   type PersonRow = {
@@ -163,8 +162,7 @@ export function FileOwnersSection({
   // в пути или упал) каждый владелец выглядел бы отключённым, и снятие каждого требовало бы
   // подтверждения, которое ничего не значит.
   const knownIds = new Set(admins.map((a) => Number(a.id ?? 0)).filter((n) => n > 0));
-  const isGone = (adminId?: number) =>
-    !!adminId && knownIds.size > 0 && !knownIds.has(adminId);
+  const isGone = (adminId?: number) => !!adminId && knownIds.size > 0 && !knownIds.has(adminId);
 
   const rows: PersonRow[] = [];
   if (uploaderName) {
@@ -172,9 +170,9 @@ export function FileOwnersSection({
       key: `up:${uploaderName}`,
       username: uploaderName,
       role: [
-        formatWhen(file.createdAt) ? `загрузил ${formatWhen(file.createdAt)}` : 'загрузил',
-        uploaderIsOwner ? 'ведёт файл' : '',
-        uploaderGone ? 'аккаунта больше нет' : '',
+        formatWhen(file.createdAt) ? `uploaded ${formatWhen(file.createdAt)}` : 'uploaded',
+        uploaderIsOwner ? 'owns the file' : '',
+        uploaderGone ? 'the account is gone' : '',
       ]
         .filter(Boolean)
         .join(' · '),
@@ -188,14 +186,13 @@ export function FileOwnersSection({
       rows.push({
         key: `own:${o.id}`,
         username: o.username ?? `#${o.id}`,
-        role: 'ведёт файл',
+        role: 'owns the file',
         ownerId: Number(o.id ?? 0) || undefined,
         gone: isGone(Number(o.id ?? 0)),
       }),
     );
 
-  const removeOwner = (adminId: number) =>
-    setOwners.mutate(ownerIds.filter((x) => x !== adminId));
+  const removeOwner = (adminId: number) => setOwners.mutate(ownerIds.filter((x) => x !== adminId));
 
   // СНЯТИЕ ОТКЛЮЧЁННОГО ВЛАДЕЛЬЦА НЕОБРАТИМО, и спросить об этом нужно ДО, а не подписать
   // после: такого человека нет в пикере, вернуть ему владение будет неоткуда. У живого
@@ -246,7 +243,7 @@ export function FileOwnersSection({
     <div className='flex flex-col gap-1'>
       <GroupLabel
         action={
-          // «Изменить список» — те же слова, что у близнеца в блоке доступа: два пикера людей,
+          // «change the list» — те же слова, что у близнеца в блоке доступа: два пикера людей,
           // устроенных одинаково, не должны звать одно действие двумя именами.
           <Button
             size='xs'
@@ -254,11 +251,11 @@ export function FileOwnersSection({
             disabled={!mayEdit || setOwners.isPending}
             onClick={openPicker}
           >
-            изменить список
+            change the list
           </Button>
         }
       >
-        ответственность
+        responsibility
       </GroupLabel>
 
       {/* Не «rows.length === 0»: у файла без загрузившего могут быть владельцы, и тогда
@@ -266,7 +263,7 @@ export function FileOwnersSection({
           читается как ответ на вопрос «кто его принёс». */}
       {!uploaderName && (
         <Text size='micro' variant='label'>
-          кто загрузил — неизвестно: файл старше, чем учёт людей в библиотеке.
+          who uploaded it is unknown: the file is older than the record of people in the library.
         </Text>
       )}
 
@@ -292,17 +289,15 @@ export function FileOwnersSection({
                 className='ml-auto'
                 disabled={!mayEdit || setOwners.isPending}
                 // Отключённого спрашиваем, живого — нет: у первого действие необратимо.
-                onClick={() =>
-                  r.gone ? setConfirmDrop(r) : removeOwner(Number(r.ownerId))
-                }
-                aria-label={`убрать из владельцев ${r.username}`}
+                onClick={() => (r.gone ? setConfirmDrop(r) : removeOwner(Number(r.ownerId)))}
+                aria-label={`remove ${r.username} from the owners`}
                 title={
                   r.gone
-                    ? 'аккаунта уже нет в списке людей — вернуть ему владение будет нельзя'
-                    : 'снимает только владение — факт загрузки остаётся'
+                    ? 'the account is no longer in the list of people — there will be no way to give ownership back'
+                    : 'removes only the ownership — the fact of the upload stays'
                 }
               >
-                убрать
+                remove
               </Button>
             )}
           </div>
@@ -311,21 +306,21 @@ export function FileOwnersSection({
 
       {owners.length === 0 && (
         <Text size='micro' variant='label'>
-          владельцев нет: если файл устареет, спросить будет некого. «загрузил» этого не
-          заменяет — человек мог уйти из команды, а файл остаться.
+          there are no owners: if the file goes stale, there will be nobody to ask. “uploaded”
+          doesn't replace that — the person could have left the team while the file stayed.
         </Text>
       )}
 
       {!inCircle && (
         <Text size='micro' variant='label'>
-          менять ответственность может тот, кто загрузил файл, его владелец или супер-админ.
+          responsibility is changed by whoever uploaded the file, its owner or a super admin.
         </Text>
       )}
 
       {setOwners.isError && (
         <CalloutBox tone='error'>
           <Text size='micro' component='span'>
-            <FailureText e={setOwners.error} fallback='не удалось изменить владельцев' />
+            <FailureText e={setOwners.error} fallback="couldn't change the owners" />
           </Text>
         </CalloutBox>
       )}
@@ -347,30 +342,30 @@ export function FileOwnersSection({
             // значит показать старый список так, будто человек сам передумал.
           }
         }}
-        title='кто ведёт файл'
-        confirmLabel={setOwners.isPending ? 'сохраняем…' : 'сохранить'}
+        title='who owns the file'
+        confirmLabel={setOwners.isPending ? 'saving…' : 'save'}
         confirmDisabled={setOwners.isPending}
         closeOnConfirm={false}
         width='md'
       >
         <div className='flex flex-col gap-2'>
           <Text size='micro' variant='label'>
-            отмеченные — это ВЕСЬ список владельцев после сохранения, а не добавка к нему.
-            снятая отметка снимает владение.
+            the checked ones are the WHOLE list of owners after saving, not an addition to it. an
+            unchecked box removes the ownership.
           </Text>
           <div className='flex flex-wrap items-center gap-2'>
             <Input
               name='ownerQuery'
-              aria-label='поиск по имени или специальности'
+              aria-label='search by name or specialty'
               value={query}
-              placeholder='имя или специальность'
+              placeholder='name or specialty'
               className='max-w-[240px]'
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
             />
             {/* Счётчик рядом с поиском: отмеченные вне фильтра не видны, и без числа строка
-                «отмеченные — весь список» опровергается тем, что на экране их ноль. */}
+                «the checked ones are the WHOLE list» опровергается тем, что на экране их ноль. */}
             <Text size='micro' variant='label' component='span' className='tabular-nums'>
-              отмечено {picked.length}
+              checked {picked.length}
             </Text>
           </div>
           {/* Строки — СТРОКИ, а не коробки: рамка на каждой была бы блоком внутри блока
@@ -408,17 +403,21 @@ export function FileOwnersSection({
                     >
                       {p.username}
                     </Text>
-                    <Text size='nano' variant='label' component='span' className='truncate uppercase'>
-                      {p.specialties.length
-                        ? p.specialties.join(', ')
-                        : 'специальность не указана'}
+                    <Text
+                      size='nano'
+                      variant='label'
+                      component='span'
+                      className='truncate uppercase'
+                    >
+                      {p.specialties.length ? p.specialties.join(', ') : 'specialty not specified'}
                     </Text>
                     {/* Предупреждение об отключённом НЕ обрезается: это единственное место,
                         где видно, что снятая здесь отметка необратима — в списке аккаунтов
                         такого человека уже нет, и вернуть его во владельцы будет неоткуда. */}
                     {p.missing && (
                       <Text size='nano' variant='label' component='span' className='uppercase'>
-                        аккаунт отключён · сняв отметку, вернуть его сюда будет нельзя
+                        the account is disabled · uncheck it and there will be no way to bring them
+                        back here
                       </Text>
                     )}
                   </span>
@@ -427,15 +426,15 @@ export function FileOwnersSection({
             })}
             {!found.length && (
               <Text size='micro' variant='label'>
-                никого с таким именем или специальностью нет. специальность человек ставит себе
-                сам в своём аккаунте.
+                there is nobody with such a name or specialty. a specialty is set by the person
+                themselves in their own account.
               </Text>
             )}
           </div>
           {setOwners.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                <FailureText e={setOwners.error} fallback='не удалось изменить владельцев' />
+                <FailureText e={setOwners.error} fallback="couldn't change the owners" />
               </Text>
             </CalloutBox>
           )}
@@ -449,14 +448,15 @@ export function FileOwnersSection({
           if (confirmDrop?.ownerId) removeOwner(Number(confirmDrop.ownerId));
           setConfirmDrop(undefined);
         }}
-        title='снять владение'
-        confirmLabel='снять'
+        title='remove the ownership'
+        confirmLabel='remove'
         width='sm'
       >
         <Text>
-          аккаунта <span className='uppercase'>{confirmDrop?.username}</span> нет в списке людей —
-          он отключён. снимете владение — назначить его обратно будет неоткуда: в пикере
-          отключённых нет. файл останется без этого владельца навсегда.
+          the account <span className='uppercase'>{confirmDrop?.username}</span> is not in the list
+          of people — it is disabled. remove the ownership and there will be nowhere to assign it
+          back from: the picker holds no disabled accounts. the file will stay without this owner
+          forever.
         </Text>
       </ConfirmationModal>
     </div>

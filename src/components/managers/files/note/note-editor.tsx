@@ -13,7 +13,7 @@ import { FormatBar } from './format-bar';
  *
  * Правка — НЕ состояние по умолчанию (вариант md=v3): заметку в девяти случаях из десяти
  * открывают почитать, поэтому редактор появляется по ⌘E и уходит по Esc. Цена названа в самом
- * макете: пока не нажал, непонятно, что текст вообще правится, — поэтому кнопка «править ⌘E»
+ * макете: пока не нажал, непонятно, что текст вообще правится, — поэтому кнопка «edit ⌘E»
  * стоит в шапке чтения, а не прячется в меню.
  *
  * ЗАМОРОЗКА ПИСАТЕЛЕЙ — ПРОПОМ. Никакого `fieldset[disabled]`: он глушит только клик и фокус, а
@@ -80,7 +80,7 @@ export function NoteEditor({
   onChange: (next: string) => void;
   dirty: boolean;
   saving: boolean;
-  /** «сохранено в 13:40» — время последней удачной записи; пусто, если её ещё не было. */
+  /** «saved at 13:40» — время последней удачной записи; пусто, если её ещё не было. */
   savedLabel: string;
   canSave: boolean;
   onSave: () => void;
@@ -88,7 +88,7 @@ export function NoteEditor({
   /** Слова про потолок содержимого, когда он близко или превышен. */
   sizeHint?: string;
   /** Баннеры страницы (черновик, конфликт, различия) — между полосой и полем, а не поверх
-   * текста: конфликт обязан стоять там, где на него смотрят, прежде чем нажать «сохранить». */
+   * текста: конфликт обязан стоять там, где на него смотрят, прежде чем нажать «save». */
   banners?: React.ReactNode;
 }) {
   const areaRef = useRef<HTMLTextAreaElement>(null);
@@ -132,7 +132,7 @@ export function NoteEditor({
   );
 
   /** Что уходит помощнику: выделение, если оно есть, иначе вся заметка. Это и есть тот
-   * «выделите кусок», который предлагает состояние `toolong`. */
+   * «select a piece of the text», который предлагает состояние `toolong`. */
   const buildRequest = useCallback((): AiRequest => {
     const area = areaRef.current;
     if (area) {
@@ -153,11 +153,11 @@ export function NoteEditor({
       if (!s.range) {
         // Пока помощник работал, человек мог дописывать — и предложение построено по ПРОШЛОЙ
         // версии буфера. Принять его тогда значит стереть эти дописанные строки, причём молча:
-        // в колонке «как сейчас» их нет, и заметить пропажу не по чему. Отказ обратим, потеря —
+        // в колонке «how it is now» их нет, и заметить пропажу не по чему. Отказ обратим, потеря —
         // нет, поэтому здесь отказ.
         if (value !== s.before) {
           showMessage(
-            'текст изменился, пока помощник работал — предложение построено по прошлой версии, попросите ещё раз',
+            'the text changed while the assistant was working — the suggestion is built on the previous version, ask again',
             'error',
           );
           return;
@@ -174,7 +174,10 @@ export function NoteEditor({
           if (at >= 0 && value.indexOf(s.before, at + 1) === -1) {
             next = value.slice(0, at) + s.after + value.slice(at + s.before.length);
           } else {
-            showMessage('текст изменился, пока помощник работал — вставлять некуда', 'error');
+            showMessage(
+              'the text changed while the assistant was working — there is nowhere to insert it',
+              'error',
+            );
             return;
           }
         }
@@ -195,7 +198,7 @@ export function NoteEditor({
     (previous: string, next: string) => {
       if (value !== next) {
         showMessage(
-          'после принятия текст уже правили — возврат стёр бы эти правки, поэтому он отказывается',
+          'the text has already been edited since accepting — the revert would erase those edits, so it refuses',
           'error',
         );
         return;
@@ -214,7 +217,7 @@ export function NoteEditor({
       <Toolbar>
         <label className='flex items-center gap-2'>
           <Text size='micro' variant='label' component='span' className='uppercase'>
-            имя
+            name
           </Text>
           <Input
             name='noteName'
@@ -230,27 +233,27 @@ export function NoteEditor({
           onClick={() => assistant.run(buildRequest())}
           disabled={working || !value.trim()}
         >
-          {working ? 'помощник читает…' : 'привести к markdown'}
+          {working ? 'the assistant is reading…' : 'bring to markdown'}
         </Button>
 
         <ToolbarSpacer />
 
         {dirty ? (
-          <Pill tone='attention'>не сохранено</Pill>
+          <Pill tone='attention'>not saved</Pill>
         ) : (
-          <Pill tone='ok'>{savedLabel ? `сохранено в ${savedLabel}` : 'сохранено'}</Pill>
+          <Pill tone='ok'>{savedLabel ? `saved at ${savedLabel}` : 'saved'}</Pill>
         )}
         <Button size='sm' variant='secondary' onClick={onLeaveEdit}>
-          закончить правку
+          finish editing
         </Button>
         <Button size='sm' variant='main' onClick={onSave} disabled={!canSave || saving}>
-          {saving ? 'сохраняем…' : 'сохранить ⌘s'}
+          {saving ? 'saving…' : 'save ⌘s'}
         </Button>
 
         <div className='w-full'>
           <Text size='micro' variant='label'>
-            esc — выйти из правки, ⌘s — сохранить. заметка — такой же файл библиотеки: темы,
-            владельцы, доступ и обсуждение живут в её карточке.
+            esc — leave editing, ⌘s — save. a note is the same kind of library file: topics, owners,
+            access and the discussion live in its card.
             {sizeHint ? ` ${sizeHint}` : ''}
           </Text>
         </div>

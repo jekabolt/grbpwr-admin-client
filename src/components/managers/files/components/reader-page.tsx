@@ -199,7 +199,7 @@ export function ReaderPage({
       {!size && (
         <div className='flex h-[520px] w-[380px] items-center justify-center'>
           <Text size='micro' variant='label'>
-            рисуем страницу…
+            drawing the page…
           </Text>
         </div>
       )}

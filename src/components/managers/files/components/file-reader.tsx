@@ -100,15 +100,15 @@ export function FileReaderModal({ id, onClose }: { id: number; onClose: () => vo
             setFindFocus((n) => n + 1);
           }}
         >
-          <Dialog.Title className='sr-only'>{name || 'читалка'}</Dialog.Title>
+          <Dialog.Title className='sr-only'>{name || 'reader'}</Dialog.Title>
           <Dialog.Description className='sr-only'>
-            просмотр документа с поиском по тексту
+            viewing a document with search over its text
           </Dialog.Description>
 
           {isLoading || !file ? (
-            <ReaderShell name={name || 'файл'}>
+            <ReaderShell name={name || 'file'}>
               <Text size='micro' variant='label'>
-                загружаем…
+                loading…
               </Text>
             </ReaderShell>
           ) : readable ? (
@@ -146,7 +146,7 @@ function ReaderShell({ name, children }: { name: string; children: React.ReactNo
         <ToolbarSpacer />
         <Dialog.Close asChild>
           <Button size='xs' variant='secondary'>
-            закрыть
+            close
           </Button>
         </Dialog.Close>
       </Toolbar>
@@ -163,15 +163,15 @@ function NotReadable({ name, downloadUrl }: { name: string; downloadUrl: string 
     <ReaderShell name={name}>
       <div className='flex max-w-[52ch] flex-col items-center gap-2 text-center'>
         <Text size='micro' className='uppercase'>
-          этот файл не читается в браузере
+          this file is not readable in a browser
         </Text>
         <Text size='micro' variant='label'>
-          {extensionOf(name)} — страницы у него нет, показывать нечего: открывается только в своей
-          программе.
+          {extensionOf(name)} — it has no page, there is nothing to show: it opens only in its own
+          program.
         </Text>
         {downloadUrl && (
           <Button asChild size='sm'>
-            <a href={downloadUrl}>скачать</a>
+            <a href={downloadUrl}>download</a>
           </Button>
         )}
       </div>
@@ -289,13 +289,13 @@ function PdfStage({
 
   const counter = () => {
     if (!applied.trim()) return '';
-    if (indexing || !index) return 'читаем текст…';
+    if (indexing || !index) return 'reading the text…';
     // ТРЕТЬЕ СОСТОЯНИЕ. Провалившийся разбор текста давал пустой индекс, а пустой индекс
     // неотличим от «искали и не нашли»: человек читал «нет совпадений» и делал вывод, что
     // слова в документе нет — хотя его просто не прочитали.
-    if (indexFailed) return 'текст не дочитался';
-    if (!matches.length) return 'нет совпадений';
-    return `${sync.hit} из ${matches.length}`;
+    if (indexFailed) return "the text didn't finish reading";
+    if (!matches.length) return 'no matches';
+    return `${sync.hit} of ${matches.length}`;
   };
 
   return (
@@ -303,12 +303,12 @@ function PdfStage({
       <Toolbar sticky>
         <b className='max-w-[34ch] truncate'>{name}</b>
         <Text size='micro' variant='label' className='tabular-nums'>
-          стр. {page} из {numPages || '—'}
+          p. {page} of {numPages || '—'}
         </Text>
         <Button
           size='xs'
           variant='secondary'
-          aria-label='предыдущая страница'
+          aria-label='previous page'
           disabled={page <= 1}
           onClick={() => setPage(stepPage(page, spread, numPages, -1))}
         >
@@ -317,7 +317,7 @@ function PdfStage({
         <Button
           size='xs'
           variant='secondary'
-          aria-label='следующая страница'
+          aria-label='next page'
           disabled={page >= numPages}
           onClick={() => setPage(stepPage(page, spread, numPages, 1))}
         >
@@ -326,7 +326,7 @@ function PdfStage({
         <Button
           size='xs'
           variant='secondary'
-          aria-label='уменьшить'
+          aria-label='zoom out'
           disabled={zoom <= ZOOM_MIN}
           onClick={() => setZoom(stepZoom(zoom, -1))}
         >
@@ -338,22 +338,22 @@ function PdfStage({
         <Button
           size='xs'
           variant='secondary'
-          aria-label='увеличить'
+          aria-label='zoom in'
           disabled={zoom >= ZOOM_MAX}
           onClick={() => setZoom(stepZoom(zoom, 1))}
         >
           +
         </Button>
-        {/* КНОПКА НАЗЫВАЕТ ДЕЙСТВИЕ, а не состояние: подпись «разворот» на включённом
+        {/* КНОПКА НАЗЫВАЕТ ДЕЙСТВИЕ, а не состояние: подпись «spread» на включённом
             развороте читалась как «нажми, чтобы развернуть» — и нажатие делало обратное.
             Текущее положение и так видно на экране, а сомнение снимает подсказка. */}
         <Button
           size='xs'
           variant='secondary'
-          title={spread ? 'сейчас: разворот' : 'сейчас: одна страница'}
+          title={spread ? 'now: a spread' : 'now: a single page'}
           onClick={() => setSpread((v) => !v)}
         >
-          {spread ? 'одна страница' : 'разворот'}
+          {spread ? 'single page' : 'spread'}
         </Button>
         <Button
           size='xs'
@@ -361,17 +361,17 @@ function PdfStage({
           aria-pressed={findOpen}
           onClick={() => onFindOpenChange(true)}
         >
-          {FIND_HOTKEY} поиск
+          {FIND_HOTKEY} find
         </Button>
         <ToolbarSpacer />
         {downloadUrl && (
           <Button asChild size='xs' variant='secondary'>
-            <a href={downloadUrl}>скачать</a>
+            <a href={downloadUrl}>download</a>
           </Button>
         )}
         <Dialog.Close asChild>
           <Button size='xs' variant='secondary'>
-            закрыть
+            close
           </Button>
         </Dialog.Close>
       </Toolbar>
@@ -384,9 +384,9 @@ function PdfStage({
             <Input
               ref={inputRef}
               name='readerQuery'
-              aria-label='искать в документе'
+              aria-label='search in the document'
               value={query}
-              placeholder='искать в документе'
+              placeholder='search in the document'
               className='max-w-[220px]'
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 setQuery(e.target.value);
@@ -407,13 +407,13 @@ function PdfStage({
                 «3 из 5» указывает на подсветку, которой на экране нет. */}
             {!sync.onScreen && matches.length > 0 && (
               <Button size='xs' variant='secondary' onClick={() => showPage(sync.page)}>
-                оно на стр. {sync.page} — показать
+                it is on p. {sync.page} — show
               </Button>
             )}
             <Button
               size='xs'
               variant='secondary'
-              aria-label='предыдущее совпадение'
+              aria-label='previous match'
               disabled={!matches.length}
               onClick={() => goHit(-1)}
             >
@@ -422,14 +422,14 @@ function PdfStage({
             <Button
               size='xs'
               variant='secondary'
-              aria-label='следующее совпадение'
+              aria-label='next match'
               disabled={!matches.length}
               onClick={() => goHit(1)}
             >
               ↓
             </Button>
             <Text size='nano' variant='label'>
-              enter — следующее, shift+enter — предыдущее, esc — закрыть
+              enter — next, shift+enter — previous, esc — close
             </Text>
             <ToolbarSpacer />
             {/* У крестика нет текста, а значит для скринридера у кнопки нет имени вовсе:
@@ -437,7 +437,7 @@ function PdfStage({
             <Button
               size='xs'
               variant='secondary'
-              aria-label='закрыть поиск'
+              aria-label='close the search'
               onClick={() => onFindOpenChange(false)}
             >
               ✕
@@ -446,20 +446,20 @@ function PdfStage({
         ) : (
           <Toolbar className='border-error'>
             <Text size='micro' variant='error' className='uppercase'>
-              искать нечего
+              nothing to search
             </Text>
             <Text size='micro' variant='label' className='max-w-[64ch]'>
-              в этом pdf нет текстового слоя — страницы вставлены картинками или шрифты переведены
-              в кривые. распознавание текста мы не делаем.
+              this pdf has no text layer — the pages are pasted in as pictures, or the fonts are
+              converted to outlines. we do not do text recognition.
               {/* Приговор вынесен по первым страницам. Если дальше текст найдётся, плашка
                   сменится полем поиска — и человек должен понимать, почему она сменилась. */}
-              {indexing ? ' проверяем остальные страницы…' : ''}
+              {indexing ? ' checking the remaining pages…' : ''}
             </Text>
             <ToolbarSpacer />
             <Button
               size='xs'
               variant='secondary'
-              aria-label='закрыть поиск'
+              aria-label='close the search'
               onClick={() => onFindOpenChange(false)}
             >
               ✕
@@ -471,11 +471,11 @@ function PdfStage({
         <div className='flex min-h-0 flex-1 items-center justify-center border border-borderColor bg-bgColor p-4'>
           <div className='flex max-w-[52ch] flex-col items-center gap-2 text-center'>
             <Text size='micro' className='uppercase'>
-              {failure?.head ?? 'файл не открылся'}
+              {failure?.head ?? "the file didn't open"}
             </Text>
             <Text size='micro' variant='label'>
               {failure?.detail ??
-                'не удалось получить файл — возможно, не настроен доступ к хранилищу.'}
+                "couldn't get the file — the access to the storage may not be set up."}
             </Text>
             <div className='flex items-center gap-2'>
               {/* «Обновить» перевыпускает подпись — и только. На повреждённом pdf, на удалённом
@@ -483,7 +483,7 @@ function PdfStage({
                   чинит: человек жмёт её по кругу и делает вывод, что панель сломана. */}
               {failure?.refreshable !== false && (
                 <Button size='sm' disabled={refreshing} onClick={onRefreshLink}>
-                  {refreshing ? 'обновляем…' : 'обновить'}
+                  {refreshing ? 'refreshing…' : 'refresh'}
                 </Button>
               )}
               {/* СКАЧАТЬ РАБОТАЕТ ТАМ, ГДЕ ЧТЕНИЕ НЕТ. Это не утешительная кнопка: переход по
@@ -492,7 +492,7 @@ function PdfStage({
                   файл забирается целым. */}
               {downloadUrl && (
                 <Button asChild size='sm' variant='secondary'>
-                  <a href={downloadUrl}>скачать</a>
+                  <a href={downloadUrl}>download</a>
                 </Button>
               )}
             </div>
@@ -501,7 +501,7 @@ function PdfStage({
       ) : status === 'loading' || !doc ? (
         <div className='flex min-h-0 flex-1 items-center justify-center border border-borderColor bg-bgColor p-4'>
           <Text size='micro' variant='label'>
-            открываем документ…
+            opening the document…
           </Text>
         </div>
       ) : (

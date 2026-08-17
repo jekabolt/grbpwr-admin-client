@@ -149,8 +149,8 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
       signal,
     });
   } catch {
-    if (signal.aborted) throw new NoteFormatError('aborted', 'отменено');
-    throw new NoteFormatError('error', 'связь оборвалась — помощник не ответил');
+    if (signal.aborted) throw new NoteFormatError('aborted', 'cancelled');
+    throw new NoteFormatError('error', "the connection dropped — the assistant didn't answer");
   }
 
   const text = await res.text().catch(() => '');
@@ -165,35 +165,35 @@ export async function formatNoteMarkdown(content: string, signal: AbortSignal): 
   if (!res.ok) {
     const code = typeof body?.code === 'number' ? body.code : undefined;
     if (code === GRPC_FAILED_PRECONDITION) {
-      throw new NoteFormatError('off', 'помощник не подключён');
+      throw new NoteFormatError('off', 'the assistant is not connected');
     }
     if (code === GRPC_INVALID_ARGUMENT) {
       // InvalidArgument сервер отдаёт не только на превышение потолка (ещё — на пустое
       // содержимое и на невалидный utf-8). Объявлять «текст слишком длинный» по одному коду
-      // значило бы показать «30 знаков при пределе 12 000» — фразу, которая опровергает сама
-      // себя. Длину клиент знает точно, вот она и решает.
+      // значило бы показать «30 characters against a limit of 12 000» — фразу, которая
+      // опровергает сама себя. Длину клиент знает точно, вот она и решает.
       const kind = runeLength(content) > NOTE_FORMAT_MAX_RUNES ? 'toolong' : 'error';
-      throw new NoteFormatError(kind, 'помощник не взял этот текст');
+      throw new NoteFormatError(kind, "the assistant didn't take this text");
     }
     if (res.status === 401) {
-      throw new NoteFormatError('error', 'сессия истекла — войдите заново');
+      throw new NoteFormatError('error', 'the session expired — sign in again');
     }
     if (res.status === 403) {
-      throw new NoteFormatError('error', 'нужно право files:write');
+      throw new NoteFormatError('error', 'the files:write right is needed');
     }
     // 404/405/501 — шлюз ещё не знает этого пути: бэкенд с помощником не выкачен. Для человека
     // это тот же исход, что и отсутствующий ключ, и врать про «ошибку» здесь незачем.
     if (res.status === 404 || res.status === 405 || res.status === 501) {
-      throw new NoteFormatError('off', 'помощника на этом стенде нет');
+      throw new NoteFormatError('off', 'this deployment has no assistant');
     }
-    // Слова сервера сюда НЕ едут: они английские, а раздел русский целиком, и панель печатает
-    // это сообщение дословно. Подробность остаётся в консоли — `api.ts` логирует ответ.
-    throw new NoteFormatError('error', `сервер ответил отказом (${res.status})`);
+    // Слова сервера сюда НЕ едут: панель печатает это сообщение дословно, а формулировки
+    // отказа принадлежат серверу. Подробность остаётся в консоли — `api.ts` логирует ответ.
+    throw new NoteFormatError('error', `the server answered with a refusal (${res.status})`);
   }
 
   const formatted = body?.content ?? '';
   if (!formatted.trim()) {
-    throw new NoteFormatError('error', 'помощник вернул пустой ответ — попробуйте ещё раз');
+    throw new NoteFormatError('error', 'the assistant returned an empty answer — try again');
   }
   return formatted;
 }

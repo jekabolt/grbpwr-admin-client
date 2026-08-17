@@ -100,17 +100,17 @@ export function NoAccessState() {
 
   return (
     <StateFrame
-      title='доступа к файлам нет'
-      note='пока права нет, показывать нечего: ни имён файлов, ни счётчиков'
+      title='no access to files'
+      note='while there is no right, there is nothing to show: no file names, no counters'
     >
       <Text size='micro' variant='label'>
-        пункт «файлы» видно в меню у всех, поэтому вы сюда и попали. открыть библиотеку можно с
-        правом <b>files:read</b>, загружать — с <b>files:write</b>.
+        the “files” item is visible in the menu to everyone, that is how you got here. the library
+        opens with the <b>files:read</b> right, uploading — with <b>files:write</b>.
       </Text>
       {supers.length ? (
         <>
           <Text size='micro' variant='label'>
-            доступ выдаёт кто-то из этих людей
+            access is handed out by one of these people
           </Text>
           <div className='flex flex-wrap items-center justify-center gap-2'>
             {supers.map((a) => (
@@ -128,7 +128,7 @@ export function NoAccessState() {
         // ведёт аккаунты», а через мгновение подменяет это именами, и человек читает первое.
         !isLoading && (
           <Text size='micro' variant='label'>
-            попросите их у того, кто ведёт аккаунты.
+            ask for them from whoever runs the accounts.
           </Text>
         )
       )}
@@ -145,22 +145,22 @@ export function EmptyLibraryState({
 }) {
   return (
     <StateFrame
-      title='здесь пока ничего нет'
+      title='there is nothing here yet'
       actions={
         writable ? (
           <Button size='sm' variant='main' onClick={onUpload}>
-            загрузить первые файлы
+            upload the first files
           </Button>
         ) : undefined
       }
       // Предел печатает `formatBytes`, а не своё деление на 1024²: у оверлея броска и у строки
       // очереди он уже печатается ею, и третий счёт того же числа однажды разойдётся с ними.
-      note={`до ${formatBytes(MAX_UPLOAD_BYTES)} на файл · картинки и pdf показывают первую страницу прямо в сетке · ссылки на скачивание живут 6–12 часов, поэтому файлы не утекают наружу`}
+      note={`up to ${formatBytes(MAX_UPLOAD_BYTES)} per file · pictures and pdf show the first page right in the grid · download links live 6–12 hours, so the files do not leak outside`}
     >
       <Text size='micro' variant='label'>
-        библиотека общая: то, что вы загрузите, увидит вся команда. <b>тема — ярлык, а не папка</b>
-        : один файл может нести и «brand», и «packaging» сразу, а может не нести ни одной — тогда
-        он попадёт в «разобрать».
+        the library is shared: what you upload will be seen by the whole team.{' '}
+        <b>a topic is a label, not a folder</b>: one file can carry both “brand” and “packaging” at
+        once, or carry none at all — then it lands in “unsorted”.
       </Text>
     </StateFrame>
   );
@@ -182,23 +182,23 @@ export function EmptyTopicState({
   const single = topics.length === 1 ? topics[0] : undefined;
   return (
     <StateFrame
-      title={single ? `в теме «${single.name}» пусто` : 'в этом пересечении пусто'}
+      title={single ? `the topic “${single.name}” is empty` : 'this intersection is empty'}
       actions={
         <>
           <Button size='sm' variant='secondary' onClick={onShowAll}>
-            показать все файлы
+            show all files
           </Button>
           {writable && (
             <Button size='sm' variant='secondary' onClick={onUpload}>
-              загрузить сюда
+              upload here
             </Button>
           )}
         </>
       }
       note={
         single
-          ? 'файл не «переезжает» в тему — ярлык вешается на него в карточке, и тем у одного файла может быть сколько нужно'
-          : `файла, который нёс бы сразу все выбранные темы (${names}), нет. снимите один чип — станет шире`
+          ? 'a file does not “move” into a topic — the label is hung on it in the card, and one file can carry as many topics as it needs'
+          : `there is no file that would carry all the selected topics at once (${names}). drop one chip — it gets wider`
       }
     >
       {single?.description ? (
@@ -208,8 +208,8 @@ export function EmptyTopicState({
       ) : (
         <Text size='micro' variant='label'>
           {single
-            ? 'никто ещё не поставил этот ярлык.'
-            : 'несколько тем сразу дают пересечение, а не сумму.'}
+            ? 'nobody has put this label on yet.'
+            : 'several topics at once give an intersection, not a sum.'}
         </Text>
       )}
     </StateFrame>
@@ -219,17 +219,17 @@ export function EmptyTopicState({
 export function EmptyUntopicedState({ onShowAll }: { onShowAll: () => void }) {
   return (
     <StateFrame
-      title='всё разобрано'
+      title='everything is sorted'
       actions={
         <Button size='sm' variant='secondary' onClick={onShowAll}>
-          показать все файлы
+          show all files
         </Button>
       }
     >
       <Text size='micro' variant='label'>
-        сюда падают файлы, которым не поставили ни одной темы. пусто — значит у каждого есть хотя
-        бы один ярлык и его найдут по теме, а не по памяти. новые загрузки без тем появятся здесь
-        же.
+        files that were given no topic at all fall in here. empty means every one of them carries at
+        least one label and will be found by topic, not from memory. new uploads without topics show
+        up right here.
       </Text>
     </StateFrame>
   );
@@ -250,7 +250,7 @@ export function EmptySearchState({
   onClearSearch,
 }: {
   search: string;
-  /** Поиск шёл в сузившем фильтре (выбраны темы или «разобрать»). */
+  /** Поиск шёл в сузившем фильтре (выбраны темы или «unsorted»). */
   narrowed: boolean;
   everywhereTotal?: number;
   onSearchEverywhere: () => void;
@@ -258,27 +258,25 @@ export function EmptySearchState({
 }) {
   return (
     <StateFrame
-      title='ничего не нашлось'
+      title='nothing was found'
       actions={
         <>
           {narrowed && everywhereTotal !== undefined && everywhereTotal > 0 && (
             <Button size='sm' variant='main' onClick={onSearchEverywhere}>
-              искать во всех темах ({everywhereTotal})
+              search in all topics ({everywhereTotal})
             </Button>
           )}
           <Button size='sm' variant='secondary' onClick={onClearSearch}>
-            очистить поиск
+            clear the search
           </Button>
         </>
       }
-      note='поиск идёт по кускам имени: «box» найдёт packaging_box_dieline.pdf. внутрь pdf он не заглядывает'
+      note='the search goes by pieces of the name: “box” will find packaging_box_dieline.pdf. it does not look inside a pdf'
     >
       <Text size='micro' variant='label'>
-        «{search}» не встретилось ни в имени файла, ни в названии темы, ни в имени того, кто
-        загрузил{narrowed ? ' — в выбранном фильтре' : ''}.
-        {narrowed && everywhereTotal === 0
-          ? ' во всех темах такого файла тоже нет.'
-          : ''}
+        “{search}” did not turn up in a file name, in a topic name, or in the name of whoever
+        uploaded it{narrowed ? ' — inside the chosen filter' : ''}.
+        {narrowed && everywhereTotal === 0 ? ' there is no such file in all topics either.' : ''}
       </Text>
     </StateFrame>
   );
@@ -291,23 +289,23 @@ export function ListFailedState({
   onRetry,
 }: {
   /** САМ ОТКАЗ, а не строка: разбор один на раздел и живёт на отрисовке. Отказ бывает
-   * содержательным («за раз можно пересечь не больше 20 тем»), и подменять его на «сервер не
-   * ответил» значит увести человека чинить связь вместо фильтра. */
+   * содержательным («no more than 20 topics can be crossed at a time»), и подменять его на «the
+   * server didn't answer» значит увести человека чинить связь вместо фильтра. */
   error?: unknown;
   onRetry: () => void;
 }) {
   return (
     <StateFrame
-      title='список не загрузился'
+      title={"the list didn't load"}
       actions={
         <Button size='sm' variant='secondary' onClick={onRetry}>
-          повторить
+          retry
         </Button>
       }
-      note='это не значит, что библиотека пуста — её просто сейчас не спросить'
+      note='this does not mean the library is empty — it just cannot be asked right now'
     >
       <Text size='micro' variant='label'>
-        <FailureText e={error} fallback='сервер не ответил.' />
+        <FailureText e={error} fallback="the server didn't answer." />
       </Text>
     </StateFrame>
   );
@@ -337,8 +335,8 @@ export function NextPageFailure({
             ответа не видит. «Связь оборвалась» здесь было догадкой, и на 403 она отправляла
             чинить не то. Число — без существительного, чтобы обойтись без склонения. */}
         <Text size='micro' component='span'>
-          следующая страница не догрузилась. уже показанное осталось на месте: {loaded}
-          {total ? ` из ${total}` : ''}.
+          the next page did not load. what is already shown stayed in place: {loaded}
+          {total ? ` of ${total}` : ''}.
         </Text>
         <Button
           size='sm'
@@ -347,7 +345,7 @@ export function NextPageFailure({
           disabled={retrying}
           onClick={onRetry}
         >
-          {retrying ? 'пробуем…' : 'повторить'}
+          {retrying ? 'trying…' : 'retry'}
         </Button>
       </div>
     </CalloutBox>
@@ -359,7 +357,7 @@ export function NextPageFailure({
  *
  * Различает их одно правило: превью бывает у картинок и pdf (их рисует браузер), значит
  * такой тип с пустым preview — сбой отрисовки, а не свойство формата. У .zip первой страницы
- * не существует, и кнопка «построить заново» была бы там вечным обещанием.
+ * не существует, и кнопка «build again» была бы там вечным обещанием.
  *
  * Строит клиент, ровно как при загрузке: качает файл по своей же ссылке, рисует первую
  * страницу в canvas и шлёт webp в эндпоинт замены превью.
@@ -387,7 +385,7 @@ export function RebuildPreview({ file, writable }: { file: LibraryFile; writable
     } catch (e) {
       // «Не вышло» не называло ничего. Оба пути отказа (скачивание файла и отправка картинки)
       // приезжают сюда со своими словами; запасная фраза нужна только на не-Error.
-      setError(e instanceof Error ? e.message : 'превью не построилось');
+      setError(e instanceof Error ? e.message : "the preview didn't build");
     } finally {
       setBusy(false);
     }
@@ -399,10 +397,10 @@ export function RebuildPreview({ file, writable }: { file: LibraryFile; writable
         size='xs'
         variant='secondary'
         disabled={busy || !writable}
-        title={writable ? undefined : 'только чтение — превью не перестроить'}
+        title={writable ? undefined : "read-only — the preview can't be rebuilt"}
         onClick={run}
       >
-        {busy ? 'строим…' : 'построить заново'}
+        {busy ? 'building…' : 'build again'}
       </Button>
       {error && (
         <Text size='nano' variant='label' component='span' className='block'>

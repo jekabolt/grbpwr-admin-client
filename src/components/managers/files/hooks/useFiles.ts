@@ -14,9 +14,9 @@ import { filesService } from '../api/filesService';
 export type FilesSort = 'new' | 'name' | 'size';
 
 export const SORT_LABEL: Record<FilesSort, string> = {
-  new: 'сначала новые',
-  name: 'по имени',
-  size: 'по размеру',
+  new: 'newest first',
+  name: 'by name',
+  size: 'by size',
 };
 
 function sortBy(sort: FilesSort): LibraryFileSort | undefined {

@@ -52,7 +52,7 @@ export default function FileTopicsPage() {
   const enqueue = useUploadQueueStore((s) => s.enqueue);
 
   // Бросок здесь принимает файлы БЕЗ ТЕМ: чипов холста на этом экране нет, наследовать
-  // нечего — пачка уезжает в «разобрать», и оверлей говорит это прямо.
+  // нечего — пачка уезжает в «unsorted», и оверлей говорит это прямо.
   const intake = useCallback(
     (list: File[]) => {
       if (!writable || !list.length) return;
@@ -98,15 +98,15 @@ export default function FileTopicsPage() {
   if (!mayRead) {
     return (
       <div className='border border-borderColor bg-bgColor p-block'>
-        <Text className='uppercase'>доступа к файлам нет</Text>
+        <Text className='uppercase'>no access to files</Text>
         <Text size='micro' variant='label' className='mt-1'>
-          словарь тем открывается тем же правом files:read, что и сама библиотека.
+          the topic dictionary is opened by the same files:read right as the library itself.
         </Text>
       </div>
     );
   }
 
-  // Один разбор на раздел: русская фраза по коду ответа и по таблице узнаваемых сообщений
+  // Один разбор на раздел: английская фраза по коду ответа и по таблице узнаваемых сообщений
   // сервера, а неузнанный отказ едет со словами сервера в скобках — тост берёт только строку.
   const fail = (e: unknown, fallback: string) => showMessage(failureText(e, fallback), 'error');
 
@@ -117,9 +117,9 @@ export default function FileTopicsPage() {
       await createTopic.mutateAsync({ name, description: newDesc.trim() });
       setNewName('');
       setNewDesc('');
-      showMessage(`тема «${name}» заведена`, 'success');
+      showMessage(`topic “${name}” created`, 'success');
     } catch (e) {
-      fail(e, 'не удалось завести тему');
+      fail(e, "couldn't create the topic");
     }
   };
 
@@ -132,9 +132,9 @@ export default function FileTopicsPage() {
         description: editDesc.trim(),
       });
       setEditing(undefined);
-      showMessage('сохранено', 'success');
+      showMessage('saved', 'success');
     } catch (e) {
-      fail(e, 'не удалось сохранить');
+      fail(e, "couldn't save");
     }
   };
 
@@ -149,11 +149,11 @@ export default function FileTopicsPage() {
       setMerging(undefined);
       setMergeTarget('');
       showMessage(
-        `«${merging.name}» слита в «${target?.name ?? ''}», перевешено файлов: ${Number(res.movedFiles ?? 0)}`,
+        `“${merging.name}” is merged into “${target?.name ?? ''}”, files rehung: ${Number(res.movedFiles ?? 0)}`,
         'success',
       );
     } catch (e) {
-      fail(e, 'не удалось слить темы');
+      fail(e, "couldn't merge the topics");
     }
   };
 
@@ -162,9 +162,9 @@ export default function FileTopicsPage() {
     try {
       await removeTopic.mutateAsync(Number(deleting.id));
       setDeleting(undefined);
-      showMessage('тема удалена', 'success');
+      showMessage('the topic is deleted', 'success');
     } catch (e) {
-      fail(e, 'не удалось удалить тему');
+      fail(e, "couldn't delete the topic");
     }
   };
 
@@ -172,11 +172,11 @@ export default function FileTopicsPage() {
     <div className='flex flex-col gap-gutter'>
       <div className='border border-borderColor bg-bgColor p-block'>
         <SectionHeader
-          title='темы'
-          question={`— ${topics.length} ${plural(topics.length, 'тема', 'темы', 'тем')} · ${untopicedCount} ${plural(untopicedCount, 'файл', 'файла', 'файлов')} без темы`}
+          title='topics'
+          question={`— ${topics.length} ${plural(topics.length, 'topic')} · ${untopicedCount} ${plural(untopicedCount, 'file')} without a topic`}
           action={
             <Button asChild size='xs' variant='secondary'>
-              <Link to={ROUTES.files}>к файлам</Link>
+              <Link to={ROUTES.files}>to the files</Link>
             </Button>
           }
         />
@@ -188,12 +188,12 @@ export default function FileTopicsPage() {
           <div className='mb-2.5 flex flex-wrap items-center gap-2'>
             <Text size='micro' variant='label'>
               {mayWrite
-                ? 'режим чтения включён вами: правка тем, удаление и загрузка выключены, пока он стоит.'
-                : 'смотреть можно, менять нельзя: права files:write нет — попросите его у супер-админа.'}
+                ? 'read mode is switched on by you: editing topics, deleting and uploading are off while it stands.'
+                : "you can look but you can't change: there is no files:write right — ask a super admin for it."}
             </Text>
             {mayWrite && (
               <Button size='xs' variant='secondary' onClick={() => setMode('write')}>
-                включить запись
+                switch writing on
               </Button>
             )}
           </div>
@@ -201,20 +201,20 @@ export default function FileTopicsPage() {
 
         {topicsQuery.isLoading ? (
           <Text size='micro' variant='label'>
-            загружаем…
+            loading…
           </Text>
         ) : topics.length === 0 ? (
           <Text size='micro' variant='label'>
-            тем пока нет. тема — ярлык, а не папка: её заводят в момент, когда она впервые
-            понадобилась файлу, и здесь она потом приводится в порядок.
+            no topics yet. a topic is a label, not a folder: it is created the moment a file first
+            needs it, and here it is later put in order.
           </Text>
         ) : (
           <DataTable>
             <thead>
               <tr>
-                <th data-align='left'>тема</th>
-                <th>файлов</th>
-                <th data-align='left'>описание</th>
+                <th data-align='left'>topic</th>
+                <th>files</th>
+                <th data-align='left'>description</th>
                 <th />
               </tr>
             </thead>
@@ -248,7 +248,7 @@ export default function FileTopicsPage() {
                             setEditDesc(t.description ?? '');
                           }}
                         >
-                          переименовать
+                          rename
                         </Button>
                         <Button
                           size='xs'
@@ -259,7 +259,7 @@ export default function FileTopicsPage() {
                             setMergeTarget('');
                           }}
                         >
-                          слить
+                          merge
                         </Button>
                         {/* Кнопка ВЫКЛЮЧЕНА, а не спрятана: причина отказа — число файлов в
                             теме, и она стоит рядом в той же строке. Спрятанная кнопка
@@ -270,12 +270,12 @@ export default function FileTopicsPage() {
                           disabled={!writable || n > 0}
                           title={
                             n > 0
-                              ? 'в теме есть файлы — сначала снимите ярлык или слейте её с другой'
+                              ? 'the topic has files — take the label off them first or merge it with another'
                               : undefined
                           }
                           onClick={() => setDeleting(t)}
                         >
-                          удалить
+                          delete
                         </Button>
                       </div>
                     </td>
@@ -291,16 +291,16 @@ export default function FileTopicsPage() {
           спрятанного не попросишь, а исчезнувший при переключении тумблера блок читается как
           поломка экрана. Причина отказа названа строкой выше, у таблицы. */}
       <div className='border border-borderColor bg-bgColor p-block'>
-        <SectionHeader title='новая тема' question='— описание объясняет, что сюда класть' />
+        <SectionHeader title='new topic' question='— the description explains what goes here' />
         <div className='flex flex-wrap items-end gap-2'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              имя
+              name
             </Text>
             <Input
               name='newTopicName'
               value={newName}
-              placeholder='например packaging'
+              placeholder='for example packaging'
               disabled={!writable}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewName(e.target.value)}
               className='w-[200px]'
@@ -308,12 +308,12 @@ export default function FileTopicsPage() {
           </div>
           <div className='flex flex-1 flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              описание
+              description
             </Text>
             <Input
               name='newTopicDesc'
               value={newDesc}
-              placeholder='бирки, коробки, дилайны'
+              placeholder='hangtags, boxes, dielines'
               disabled={!writable}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewDesc(e.target.value)}
               className='min-w-[220px]'
@@ -323,9 +323,9 @@ export default function FileTopicsPage() {
             size='sm'
             onClick={create}
             disabled={!writable || !newName.trim() || createTopic.isPending}
-            title={writable ? undefined : 'сейчас только чтение — темы не заводятся'}
+            title={writable ? undefined : 'right now it is read-only — topics are not created'}
           >
-            {createTopic.isPending ? 'заводим…' : 'завести'}
+            {createTopic.isPending ? 'creating…' : 'create'}
           </Button>
         </div>
       </div>
@@ -334,8 +334,8 @@ export default function FileTopicsPage() {
         open={!!editing}
         onOpenChange={(o) => !o && setEditing(undefined)}
         onConfirm={saveEdit}
-        title={`тема «${editing?.name ?? ''}»`}
-        confirmLabel={renameTopic.isPending ? 'сохраняем…' : 'сохранить'}
+        title={`topic “${editing?.name ?? ''}”`}
+        confirmLabel={renameTopic.isPending ? 'saving…' : 'save'}
         confirmDisabled={renameTopic.isPending || !editName.trim()}
         closeOnConfirm={false}
         width='md'
@@ -345,7 +345,7 @@ export default function FileTopicsPage() {
         <div className='flex flex-col gap-2'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              имя
+              name
             </Text>
             <Input
               name='editTopicName'
@@ -355,7 +355,7 @@ export default function FileTopicsPage() {
           </div>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              описание
+              description
             </Text>
             <Input
               name='editTopicDesc'
@@ -364,8 +364,8 @@ export default function FileTopicsPage() {
             />
           </div>
           <Text size='micro' variant='label'>
-            имя темы участвует в поиске по библиотеке: понятное имя здесь — это то, чем файлы
-            темы потом находятся.
+            the topic name takes part in the library search: a clear name here is what the files of
+            the topic are later found by.
           </Text>
         </div>
       </ConfirmationModal>
@@ -374,8 +374,8 @@ export default function FileTopicsPage() {
         open={!!merging}
         onOpenChange={(o) => !o && setMerging(undefined)}
         onConfirm={doMerge}
-        title={`слить «${merging?.name ?? ''}» в другую тему`}
-        confirmLabel={mergeTopics.isPending ? 'сливаем…' : 'слить'}
+        title={`merge “${merging?.name ?? ''}” into another topic`}
+        confirmLabel={mergeTopics.isPending ? 'merging…' : 'merge'}
         confirmDisabled={mergeTopics.isPending || !mergeTarget}
         closeOnConfirm={false}
         width='sm'
@@ -383,19 +383,19 @@ export default function FileTopicsPage() {
         <div className='flex flex-col gap-2'>
           <CalloutBox tone='error'>
             <Text size='micro' component='span'>
-              все файлы темы «{merging?.name}» получат выбранную тему, а сама «{merging?.name}»
-              исчезнет. <b>обратно это не разбирается.</b>
+              all files of the topic “{merging?.name}” will get the selected topic, and “
+              {merging?.name}” itself will disappear. <b>this does not come apart back.</b>
             </Text>
           </CalloutBox>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              во что сливаем
+              what we merge into
             </Text>
             <SelectComponent
               name='mergeTarget'
               value={mergeTarget}
               onValueChange={(v: string) => setMergeTarget(v)}
-              placeholder='выберите тему'
+              placeholder='pick a topic'
               items={topics
                 .filter((t) => Number(t.id) !== Number(merging?.id))
                 .map((t) => ({
@@ -406,8 +406,8 @@ export default function FileTopicsPage() {
             />
           </div>
           <Text size='micro' variant='label'>
-            слияние — единственный выход из дублей: удаление отказывает на непустой теме, а
-            сливать надо ровно такую.
+            merging is the only way out of duplicates: deleting refuses on a non-empty topic, and it
+            is exactly such a topic that has to be merged.
           </Text>
         </div>
       </ConfirmationModal>
@@ -416,15 +416,15 @@ export default function FileTopicsPage() {
         open={!!deleting}
         onOpenChange={(o) => !o && setDeleting(undefined)}
         onConfirm={doDelete}
-        title={`удалить тему «${deleting?.name ?? ''}»`}
-        confirmLabel={removeTopic.isPending ? 'удаляем…' : 'удалить тему'}
+        title={`delete the topic “${deleting?.name ?? ''}”`}
+        confirmLabel={removeTopic.isPending ? 'deleting…' : 'delete the topic'}
         confirmDisabled={removeTopic.isPending}
         closeOnConfirm={false}
         width='sm'
       >
         <Text>
-          тема пустая, удаление безопасно: ни один файл её не несёт, поэтому из выдач ничего не
-          пропадёт.
+          the topic is empty, deleting is safe: not a single file carries it, so nothing disappears
+          from the listings.
         </Text>
       </ConfirmationModal>
 
@@ -435,8 +435,8 @@ export default function FileTopicsPage() {
         enabled={writable}
         disabledNote={
           mayWrite
-            ? 'включён режим чтения — переключите его на холсте или строкой выше'
-            : 'нужно право files:write — попросите его у супер-админа'
+            ? 'read mode is on — switch it on the canvas or in the line above'
+            : 'the files:write right is needed — ask a super admin for it'
         }
         topicLabels={[]}
         onFiles={intake}

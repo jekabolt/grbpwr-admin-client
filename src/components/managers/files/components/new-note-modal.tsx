@@ -25,13 +25,7 @@ import { invalidateFileViews } from '../hooks/useFiles';
  * место, где её содержимое вообще набирают, и заводить второе поле ввода здесь значило бы
  * иметь два редактора одного текста.
  */
-export function NewNoteModal({
-  topics,
-  onClose,
-}: {
-  topics: FileTopic[];
-  onClose: () => void;
-}) {
+export function NewNoteModal({ topics, onClose }: { topics: FileTopic[]; onClose: () => void }) {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
@@ -73,10 +67,13 @@ export function NewNoteModal({
       }
       // Создалась, но id не приехал: закрывать молча нельзя — человек решит, что не вышло, и
       // нажмёт второй раз, получив вторую заметку с тем же именем.
-      showMessage('заметка создана, но открыть её не вышло — найдите её в библиотеке', 'success');
+      showMessage(
+        "the note is created, but opening it didn't work out — find it in the library",
+        'success',
+      );
       onClose();
     } catch (e) {
-      setFailure(failureText(e, 'не удалось создать заметку'));
+      setFailure(failureText(e, "couldn't create the note"));
     } finally {
       setSaving(false);
     }
@@ -90,29 +87,29 @@ export function NewNoteModal({
       }}
       onConfirm={create}
       closeOnConfirm={false}
-      title='новая заметка'
-      confirmLabel={saving ? 'создаём…' : 'создать и открыть'}
+      title='new note'
+      confirmLabel={saving ? 'creating…' : 'create and open'}
       confirmDisabled={!name.trim() || saving}
-      cancelLabel='отмена'
+      cancelLabel='cancel'
       width='sm'
     >
       <div className='flex flex-col gap-2.5'>
         <div className='flex flex-col gap-1'>
-          <GroupLabel>имя</GroupLabel>
+          <GroupLabel>name</GroupLabel>
           <Input
             name='noteName'
             value={name}
             autoFocus
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-            placeholder='например: бриф на съёмку'
+            placeholder='for example: a brief for the shoot'
           />
           <Text size='micro' variant='label'>
-            расширение .md дописывается само — искать заметку потом будут по этому имени
+            the .md extension is appended by itself — the note will later be looked for by this name
           </Text>
         </div>
 
         <div className='flex flex-col gap-1'>
-          <GroupLabel>темы</GroupLabel>
+          <GroupLabel>topics</GroupLabel>
           <ChipRow>
             {topics.map((t) => (
               <Chip
@@ -137,7 +134,7 @@ export function NewNoteModal({
             ))}
             {!topics.length && !newTopics.length && (
               <Text size='micro' variant='label' component='span'>
-                тем пока нет
+                no topics yet
               </Text>
             )}
           </ChipRow>
@@ -155,7 +152,7 @@ export function NewNoteModal({
               }
               setNewTopic('');
             }}
-            placeholder='новая тема — enter'
+            placeholder='new topic — enter'
           />
         </div>
 

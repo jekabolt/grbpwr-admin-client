@@ -52,17 +52,17 @@ export function FilesToolbar({
         name='search'
         value={search}
         onChange={(e: React.ChangeEvent<HTMLInputElement>) => onSearch(e.target.value)}
-        placeholder='имя файла, тема или человек'
+        placeholder='file name, topic or person'
         className='max-w-[260px]'
       />
       <Text size='micro' variant='label' className='max-w-[40ch]'>
-        ищет по именам, темам и людям, не по содержимому файла
+        searches by names, topics and people, not by the contents of a file
       </Text>
       <SelectComponent
         name='sort'
         value={sort}
         onValueChange={(v: string) => onSort(v as FilesSort)}
-        placeholder='порядок'
+        placeholder='order'
         items={SORT_ITEMS}
         customWidth={160}
         className='max-w-[170px]'
@@ -71,7 +71,7 @@ export function FilesToolbar({
       {/* Словарь тем правится на своём экране: здесь чип по клику фильтрует, и правка имени
           на том же элементе потребовала бы второго жеста. */}
       <Button asChild size='xs' variant='secondary'>
-        <Link to={ROUTES.fileTopics}>темы</Link>
+        <Link to={ROUTES.fileTopics}>topics</Link>
       </Button>
       {/* Тумблер и права — ОДИН механизм. Без files:write он не «спрятан», а заблокирован в
           «чтении»: спрятанного не попросишь, а строка над сеткой объясняет, чего не хватает.
@@ -89,22 +89,22 @@ export function FilesToolbar({
         title={
           canWrite
             ? writing
-              ? 'выключить запись — останется только чтение'
-              : 'включить запись'
-            : 'нужно право files:write'
+              ? 'switch writing off — only reading will be left'
+              : 'switch writing on'
+            : 'the files:write right is needed'
         }
         onClick={() => onMode(mode === 'write' ? 'read' : 'write')}
       >
-        {writing ? 'режим: запись' : 'режим: только чтение'}
+        {writing ? 'mode: writing' : 'mode: read-only'}
       </Button>
       {/* Заметка стоит РЯДОМ с загрузкой, а не в отдельном месте: и то и другое кладёт в
           библиотеку новый файл, и для читающего полосу разницы между ними нет. Глушится тем же
           `writing`, потому что создание — это запись. */}
       <Button size='xs' variant='secondary' disabled={!writing} onClick={onNewNote}>
-        заметка
+        note
       </Button>
       <Button size='xs' variant='main' disabled={!writing} onClick={onUpload}>
-        загрузить
+        upload
       </Button>
     </Toolbar>
   );

@@ -245,7 +245,7 @@ function InlineLink({ image, label, href }: { image: boolean; label: string; hre
     }
     return (
       <InlinePlate>
-        картинка
+        picture
         {internal ? (
           <Link to={href} className='text-highlightColor underline normal-case'>
             {label || href}

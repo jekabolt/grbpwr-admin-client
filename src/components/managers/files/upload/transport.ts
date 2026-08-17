@@ -118,7 +118,9 @@ export const browserUploadTransport: UploadTransport<File, Blob> = {
         } catch {
           // Ответ пришёл, но прочитать его нечем: файл, возможно, лежит. Это отказ сервера,
           // а не обрыв — повтор упрётся в дубликат, и это честнее, чем молчание.
-          reject(new UploadError(xhr.status, 'сервер ответил тем, что приложение не прочитало'));
+          reject(
+            new UploadError(xhr.status, "the server answered with something the app couldn't read"),
+          );
           return;
         }
         resolve({

@@ -136,14 +136,14 @@ export function FileCardModal({
         setSelected((f.topics ?? []).map((t) => Number(t.id)));
         setNewTopics([]);
         setNewTopic('');
-        showMessage('сохранено', 'success');
+        showMessage('saved', 'success');
       } else {
         // Сохранить вышло, перечитать — нет. Гасить чипы новых тем в этом месте нельзя: они
         // исчезли бы с экрана, хотя на сервере уже стоят, и файл выглядел бы непроставленным.
-        showMessage('сохранено, но список тем не перечитался — обновите страницу', 'success');
+        showMessage("saved, but the topic list didn't re-read — refresh the page", 'success');
       }
     } catch (e) {
-      setFailure({ e, fallback: 'не удалось сохранить' });
+      setFailure({ e, fallback: "couldn't save" });
     }
   };
 
@@ -157,7 +157,7 @@ export function FileCardModal({
       // Отказ ОСТАЁТСЯ НА ЭКРАНЕ: сервер называет задачи, которые держат файл, и это
       // единственный способ узнать, почему удаление не прошло. Тост уносит эти имена через
       // шесть секунд вместе с ответом на вопрос.
-      setFailure({ e, fallback: 'не удалось удалить' });
+      setFailure({ e, fallback: "couldn't delete" });
       setConfirmDelete(false);
     }
   };
@@ -178,33 +178,36 @@ export function FileCardModal({
         onClose();
       }}
       onConfirm={onClose}
-      title={file?.fileName || 'файл'}
+      title={file?.fileName || 'file'}
       width='lg'
       hideActions
     >
       {isLoading ? (
         <Text size='micro' variant='label'>
-          загружаем…
+          loading…
         </Text>
       ) : !file ? (
         /* УПАВШИЙ ЗАПРОС — НЕ ЗАГРУЗКА. У react-query у ошибки `isLoading` уже false, и без
            этой ветки карточка файла, удалённого после того, как ссылку кинули в чат, вечно
-           показывала бы «загружаем…». Сюда же приходит /files/abc, где id вовсе не число. */
+           показывала бы «loading…». Сюда же приходит /files/abc, где id вовсе не число. */
         <div className='flex flex-col items-start gap-2'>
-          <Text className='uppercase'>файл не открылся</Text>
+          <Text className='uppercase'>the file didn't open</Text>
           <Text size='micro' variant='label'>
             {Number.isFinite(id) && id > 0 ? (
-              <FailureText e={error} fallback='сервер не ответил про этот файл. возможно, его удалили.' />
+              <FailureText
+                e={error}
+                fallback="the server didn't answer about this file. it may have been deleted."
+              />
             ) : (
-              'в адресе не номер файла — ссылка испорчена.'
+              'the address holds no file number — the link is broken.'
             )}
           </Text>
           <div className='flex items-center gap-1.5'>
             <Button size='sm' variant='secondary' onClick={() => refetch()}>
-              повторить
+              retry
             </Button>
             <Button size='sm' variant='secondary' onClick={onClose}>
-              к списку
+              to the list
             </Button>
           </div>
         </div>
@@ -231,7 +234,7 @@ export function FileCardModal({
 
             <div className='flex min-w-[260px] flex-1 flex-col gap-2.5'>
               <div className='flex flex-col gap-1'>
-                <GroupLabel flush>имя</GroupLabel>
+                <GroupLabel flush>name</GroupLabel>
                 <Input
                   name='fileName'
                   value={name}
@@ -239,18 +242,18 @@ export function FileCardModal({
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
                 />
                 <Text size='micro' variant='label'>
-                  поиск идёт по имени — понятное имя здесь и есть то, чем файл потом находится
+                  search goes by name — a clear name here is exactly what the file is found by later
                 </Text>
               </div>
 
               <div>
-                <GroupLabel>что это</GroupLabel>
+                <GroupLabel>what this is</GroupLabel>
                 <Text size='micro' variant='label'>
                   {formatBytes(Number(file.sizeBytes ?? 0))} ·{' '}
                   {kindWord(file.contentType ?? undefined, file.fileName ?? '')} ·{' '}
-                  {file.contentType || 'тип неизвестен'}
+                  {file.contentType || 'type unknown'}
                 </Text>
-                {/* Кто загрузил и когда — в блоке «ответственность» ниже: там же живут
+                {/* Кто загрузил и когда — в блоке «responsibility» ниже: там же живут
                     владельцы, и печатать загрузившего дважды значит показать одну роль как
                     две. */}
               </div>
@@ -258,7 +261,7 @@ export function FileCardModal({
           </div>
 
           <div className='flex flex-col gap-1'>
-            <GroupLabel>темы</GroupLabel>
+            <GroupLabel>topics</GroupLabel>
             <ChipRow>
               {topics.map((t) => (
                 // В ЧТЕНИИ ЧИП ВЫКЛЮЧЕН, А НЕ ПРОСТО МЁРТВ. Раньше он оставался кликабельным
@@ -269,7 +272,7 @@ export function FileCardModal({
                   selected={selected.includes(Number(t.id))}
                   pressed={selected.includes(Number(t.id))}
                   disabled={!writable}
-                  title={writable ? undefined : 'только чтение — темы не переставить'}
+                  title={writable ? undefined : "read-only — the topics can't be moved"}
                   onClick={() =>
                     setSelected((p) =>
                       p.includes(Number(t.id))
@@ -292,7 +295,7 @@ export function FileCardModal({
               ))}
               {!topics.length && !newTopics.length && (
                 <Text size='micro' variant='label' component='span'>
-                  тем пока нет
+                  no topics yet
                 </Text>
               )}
             </ChipRow>
@@ -303,7 +306,7 @@ export function FileCardModal({
               name='newTopic'
               value={newTopic}
               disabled={!writable}
-              placeholder={writable ? 'новая тема' : 'только чтение'}
+              placeholder={writable ? 'new topic' : 'read-only'}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewTopic(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
                 if (e.key !== 'Enter') return;
@@ -317,11 +320,11 @@ export function FileCardModal({
               className='max-w-[220px]'
             />
             <Text size='micro' variant='label'>
-              тема — ярлык, а не папка: файл несёт сразу несколько или ни одной
+              a topic is a label, not a folder: a file carries several at once or none at all
             </Text>
           </div>
 
-          {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «сохранить»:
+          {/* Ответственность (Ф3) живёт СВОИМИ мутациями, а не общей кнопкой «save»:
               владельцы меняются отдельным RPC, и складывать их в ту же «грязную» форму
               значило бы обещать откат правки, которого у replace-набора нет. */}
           <FileOwnersSection file={file} writable={writable} />
@@ -348,22 +351,23 @@ export function FileCardModal({
           <div className='sticky bottom-0 -mx-2.5 -mb-2.5 flex flex-wrap items-center gap-1.5 border-t border-borderColor bg-bgColor px-2.5 py-1.5'>
             {writable && (
               <Button size='sm' onClick={save} disabled={!dirty || updateFile.isPending}>
-                {updateFile.isPending ? 'сохраняем…' : 'сохранить'}
+                {updateFile.isPending ? 'saving…' : 'save'}
               </Button>
             )}
-            {/* «читать» — только у pdf. Остальным читалка отвечает «не читается в браузере», и
+            {/* «read» — только у pdf. Остальным читалка отвечает «this file is not readable in
+                a browser», и
                 приводить туда из карточки нечестно: кнопка обещала бы чтение. */}
             {readable && (
               <Button size='sm' variant='secondary' onClick={() => setReading(true)}>
-                читать
+                read
               </Button>
             )}
             {/* У ЗАМЕТКИ ЭТО ЕДИНСТВЕННАЯ КНОПКА ОТКРЫТИЯ. `text/markdown` в inline-аллоулист
-                сервер сознательно не берёт, поэтому `file.url` у неё пуст и кнопка «открыть»
-                ниже не рисуется вовсе; «скачать» отдаёт .md файлом, а не показывает текст. */}
+                сервер сознательно не берёт, поэтому `file.url` у неё пуст и кнопка «open»
+                ниже не рисуется вовсе; «download» отдаёт .md файлом, а не показывает текст. */}
             {note && (
               <Button size='sm' onClick={openNote}>
-                открыть заметку
+                open the note
               </Button>
             )}
             {/* url пуст у типов, которым inline запрещён (svg, html): сервер его не выдаёт —
@@ -371,26 +375,26 @@ export function FileCardModal({
             {file.url && (
               <Button asChild size='sm' variant='secondary'>
                 <a href={file.url} target='_blank' rel='noopener noreferrer'>
-                  открыть
+                  open
                 </a>
               </Button>
             )}
             {file.downloadUrl && (
               <Button asChild size='sm' variant='secondary'>
-                <a href={file.downloadUrl}>скачать</a>
+                <a href={file.downloadUrl}>download</a>
               </Button>
             )}
             <div className='ml-auto flex items-center gap-1.5'>
               {!writable && (
                 <Text size='micro' variant='label' component='span'>
-                  только чтение
+                  read-only
                 </Text>
               )}
               {/* ПРИЧИНА СТОИТ РЯДОМ С ВЫКЛЮЧЕННОЙ КНОПКОЙ, а не только в подсказке при
                   наведении: подсказку не увидит тот, кто вообще не понял, почему кнопка серая. */}
               {writable && heldByTasks > 0 && (
                 <Text size='micro' variant='label' component='span'>
-                  отцепите его в разделе «задачи» выше
+                  detach it in the “tasks” section above
                 </Text>
               )}
               <Button
@@ -399,12 +403,12 @@ export function FileCardModal({
                 disabled={!writable || deleteFile.isPending || heldByTasks > 0}
                 title={
                   heldByTasks > 0
-                    ? 'файл держат задачи — сервер откажет в удалении, пока он в них числится'
+                    ? 'tasks hold the file — the server will refuse the deletion while it is listed in them'
                     : undefined
                 }
                 onClick={() => setConfirmDelete(true)}
               >
-                удалить
+                delete
               </Button>
             </div>
           </div>
@@ -417,14 +421,14 @@ export function FileCardModal({
         open={confirmClose}
         onOpenChange={setConfirmClose}
         onConfirm={() => (closeIntent === 'note' ? navigate(notePath(id)) : onClose())}
-        title='закрыть без сохранения'
-        confirmLabel={closeIntent === 'note' ? 'открыть заметку' : 'закрыть'}
-        cancelLabel='остаться'
+        title='close without saving'
+        confirmLabel={closeIntent === 'note' ? 'open the note' : 'close'}
+        cancelLabel='stay'
         width='sm'
       >
         <Text>
-          имя или набор тем изменены и не сохранены. закроете — правка пропадёт, вернуть её
-          будет неоткуда.
+          the name or the set of topics is changed and not saved. close it and the edit is gone,
+          with nowhere to bring it back from.
         </Text>
       </ConfirmationModal>
 
@@ -432,15 +436,16 @@ export function FileCardModal({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onConfirm={remove}
-        title='удалить файл'
-        confirmLabel={deleteFile.isPending ? 'удаляем…' : 'удалить'}
+        title='delete the file'
+        confirmLabel={deleteFile.isPending ? 'deleting…' : 'delete'}
         confirmDisabled={deleteFile.isPending}
         closeOnConfirm={false}
         width='sm'
       >
         <Text>
-          файл и его байты удаляются безвозвратно — вернуть их будет неоткуда. если файл
-          прикреплён к задачам, удаление не пройдёт и сообщение назовёт карточки.
+          the file and its bytes are deleted irreversibly — there will be nowhere to bring them back
+          from. if the file is attached to tasks, the deletion won't go through and the message will
+          name the cards.
         </Text>
       </ConfirmationModal>
     </ConfirmationModal>

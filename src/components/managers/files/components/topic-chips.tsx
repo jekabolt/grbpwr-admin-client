@@ -49,8 +49,8 @@ export function TopicChips({
 
   const toggle = (id: number) =>
     onChange({
-      // «Разобрать» и темы взаимоисключающи: сервер ставит untopiced выше topic_ids, так что
-      // выбранный чип поверх «разобрать» рисовал бы фильтр, которого в выдаче нет.
+      // «unsorted» и темы взаимоисключающи: сервер ставит untopiced выше topic_ids, так что
+      // выбранный чип поверх «unsorted» рисовал бы фильтр, которого в выдаче нет.
       untopiced: false,
       topicIds: selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id],
     });
@@ -59,24 +59,25 @@ export function TopicChips({
 
   // `matched` — размер ВСЕЙ текущей выдачи, а сервер применяет поиск в том же предикате, что
   // и темы. Приписать это число одному пересечению тем при непустом поиске значило бы
-  // поставить рядом чип «packaging 40» и подпись «packaging — 3 шт.» — два разных ответа про
+  // поставить рядом чип «packaging 40» и подпись «packaging — 3 pcs» — два разных ответа про
   // одно и то же в двух сантиметрах друг от друга.
-  const count = matched === undefined ? '' : ` — ${matched} шт.${searching ? ' по запросу' : ''}`;
+  const count =
+    matched === undefined ? '' : ` — ${matched} pcs${searching ? ' for the query' : ''}`;
 
   const caption = () => {
     if (untopiced) {
-      return 'файлы, на которых нет ни одной темы. разобрать — значит проставить ярлыки, а не разложить по папкам';
+      return 'files that have not a single topic on them. sorting them means putting labels on, not laying them out into folders';
     }
     if (atLimit) {
-      return `${MAX_TOPIC_FILTERS} тем — предел одного пересечения${count}. снимите чип, чтобы выбрать другой`;
+      return `${MAX_TOPIC_FILTERS} topics — the limit of one intersection${count}. drop a chip to pick another`;
     }
     if (selected.length > 1) {
-      return `пересечение: файлы, у которых есть все выбранные темы (${names.join(' + ')})${count}`;
+      return `intersection: files that have all the selected topics (${names.join(' + ')})${count}`;
     }
     if (selected.length === 1) {
-      return `тема «${names[0] ?? ''}»${count}. нажмите вторую тему, чтобы сузить до пересечения`;
+      return `topic “${names[0] ?? ''}”${count}. press a second topic to narrow it down to an intersection`;
     }
-    return 'несколько тем сразу дают пересечение, а не сумму: так ищут «бирку из packaging, которая ещё и atelier»';
+    return 'several topics at once give an intersection, not a sum: this is how you look for “a hangtag from packaging that is also atelier”';
   };
 
   return (
@@ -87,7 +88,7 @@ export function TopicChips({
           pressed={!selected.length && !untopiced}
           onClick={() => onChange({ topicIds: [], untopiced: false })}
         >
-          все
+          all
           <span className='tabular-nums opacity-70'>{totalFiles}</span>
         </Chip>
         <Chip
@@ -95,7 +96,7 @@ export function TopicChips({
           pressed={untopiced}
           onClick={() => onChange({ topicIds: [], untopiced: !untopiced })}
         >
-          разобрать
+          unsorted
           <span className='tabular-nums opacity-70'>{untopicedCount}</span>
         </Chip>
         {topics.map((t) => {
@@ -107,7 +108,11 @@ export function TopicChips({
               selected={on}
               pressed={on}
               disabled={atLimit && !on}
-              title={atLimit && !on ? `в одном пересечении не больше ${MAX_TOPIC_FILTERS} тем` : undefined}
+              title={
+                atLimit && !on
+                  ? `no more than ${MAX_TOPIC_FILTERS} topics in one intersection`
+                  : undefined
+              }
               onClick={() => toggle(id)}
             >
               {t.name}
@@ -117,7 +122,7 @@ export function TopicChips({
         })}
         {!topics.length && (
           <Text size='micro' variant='label' component='span'>
-            тем пока нет — они заводятся прямо при загрузке файла
+            no topics yet — they are started right as a file is uploaded
           </Text>
         )}
       </ChipRow>

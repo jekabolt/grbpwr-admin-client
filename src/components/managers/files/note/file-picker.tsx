@@ -65,7 +65,7 @@ export function NoteFilePicker({
         if (!o) onClose();
       }}
       onConfirm={onClose}
-      title='вставить файл в текст'
+      title='insert a file into the text'
       width='lg'
       hideActions
     >
@@ -73,21 +73,22 @@ export function NoteFilePicker({
         {/* Правило вставки названо ДО клика: иначе разница между картинкой и ссылкой
             обнаруживалась бы уже в тексте, и выглядела бы как случайность. */}
         <Text size='micro' variant='label'>
-          картинка встанет показом прямо в тексте, остальное — ссылкой на карточку файла. в
-          заметку уезжает НОМЕР файла, а не подписанный адрес: подпись живёт часы, заметка — годы.
+          a picture will stand shown right inside the text, everything else — as a link to the file
+          card. what goes into the note is the file NUMBER, not a signed address: a signature lives
+          hours, a note — years.
         </Text>
 
         <Input
           name='noteFileSearch'
           value={search}
-          placeholder='имя файла или тема'
+          placeholder='file name or topic'
           onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearch(e.target.value)}
         />
 
         {topics.length > 0 && (
           <ChipRow>
             <Chip selected={topicId === 0} onClick={() => setTopicId(0)}>
-              все
+              all
             </Chip>
             {topics.map((t) => (
               <Chip
@@ -103,22 +104,22 @@ export function NoteFilePicker({
 
         {filesQuery.isLoading ? (
           <Text size='micro' variant='label'>
-            загружаем…
+            loading…
           </Text>
         ) : filesQuery.isError ? (
           <div className='flex flex-wrap items-baseline gap-2'>
             <Text size='micro' variant='label' component='span'>
-              библиотека не открылась
+              the library didn't open
             </Text>
-            {/* «Повторить» — одно слово на весь раздел: так подписаны обе кнопки повтора в
+            {/* «retry» — одно слово на весь раздел: так подписаны обе кнопки повтора в
                 галерее, в карточке файла и в панели помощника. */}
             <Button size='xs' variant='secondary' onClick={() => filesQuery.refetch()}>
-              повторить
+              retry
             </Button>
           </div>
         ) : files.length === 0 ? (
           <Text size='micro' variant='label'>
-            {query ? 'ничего не нашлось' : 'в библиотеке пока нет файлов'}
+            {query ? 'nothing was found' : 'there are no files in the library yet'}
           </Text>
         ) : (
           <div className='max-h-[50vh] overflow-y-auto'>
@@ -162,14 +163,14 @@ export function NoteFilePicker({
             disabled={filesQuery.isFetchingNextPage}
             onClick={() => filesQuery.fetchNextPage()}
           >
-            показать ещё
+            show more
           </Button>
         )}
 
-        {/* «Закрыть», а не «готово»: выбор здесь одиночный и закрывает окно сам, поэтому кнопка
+        {/* «close», а не «done»: выбор здесь одиночный и закрывает окно сам, поэтому кнопка
             внизу означает уход без вставки. */}
         <Button size='sm' variant='secondary' onClick={onClose}>
-          закрыть
+          close
         </Button>
       </div>
     </ConfirmationModal>

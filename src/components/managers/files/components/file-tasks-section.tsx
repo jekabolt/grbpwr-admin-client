@@ -50,25 +50,25 @@ export function useFileTasks(fileId: number, enabled = true) {
   });
 }
 
-/** Статусы и доски ПО-РУССКИ. `STATUS_LABEL` из раздела задач английский, а тут раздел русский:
- *  «in progress» посреди «прикрепить к задаче» читается как чужая вставка. */
+/** Статусы и доски СВОИМ СПИСКОМ — те же слова, что у доски задач (`STATUS_LABEL`, `BOARD_LABEL`
+ *  в `tasks/utils/meta.ts`): один и тот же статус обязан называться одинаково на обоих экранах. */
 const STATUS_RU: Record<common_TaskStatus, string> = {
-  TASK_STATUS_UNKNOWN: 'без статуса',
-  TASK_STATUS_BACKLOG: 'бэклог',
-  TASK_STATUS_TODO: 'в очереди',
-  TASK_STATUS_IN_PROGRESS: 'в работе',
-  TASK_STATUS_REVIEW: 'на проверке',
-  TASK_STATUS_DONE: 'сделана',
+  TASK_STATUS_UNKNOWN: 'unknown',
+  TASK_STATUS_BACKLOG: 'backlog',
+  TASK_STATUS_TODO: 'to do',
+  TASK_STATUS_IN_PROGRESS: 'in progress',
+  TASK_STATUS_REVIEW: 'review',
+  TASK_STATUS_DONE: 'done',
 };
 
 const BOARD_RU: Record<common_TaskBoard, string> = {
   TASK_BOARD_UNKNOWN: '',
-  TASK_BOARD_DEVELOPMENT: 'разработка',
-  TASK_BOARD_DESIGN: 'дизайн',
-  TASK_BOARD_MARKETING: 'маркетинг',
-  TASK_BOARD_PRODUCTION: 'производство',
-  TASK_BOARD_SOURCING: 'закупки',
-  TASK_BOARD_CONTENT: 'контент',
+  TASK_BOARD_DEVELOPMENT: 'development',
+  TASK_BOARD_DESIGN: 'design',
+  TASK_BOARD_MARKETING: 'marketing',
+  TASK_BOARD_PRODUCTION: 'production',
+  TASK_BOARD_SOURCING: 'sourcing',
+  TASK_BOARD_CONTENT: 'content',
 };
 
 /** Зелёный = сделана, синий = в полёте, серый = ещё не начиналась. Цвет здесь всегда при слове. */
@@ -169,9 +169,7 @@ export function FileTasksSection({
   });
   const free = useMemo(() => {
     const list = allTasks?.tasks ?? [];
-    return list.filter(
-      (t) => !attachedIds.has(t.id) && !(t.task.fileIds ?? []).includes(fileId),
-    );
+    return list.filter((t) => !attachedIds.has(t.id) && !(t.task.fileIds ?? []).includes(fileId));
   }, [allTasks, attachedIds, fileId]);
 
   const q = query.trim().toLowerCase();
@@ -197,8 +195,8 @@ export function FileTasksSection({
               mayRead
                 ? mayLink
                   ? undefined
-                  : 'прикрепление — запись в задачи: нужно право tasks:write и режим записи'
-                : 'без доступа к задачам список не прочитать, а прикреплять вслепую нечего'
+                  : 'attaching is a write into tasks: the tasks:write right and write mode are needed'
+                : "without access to tasks the list can't be read, and there is nothing to attach blindly"
             }
             onClick={() => {
               attach.reset();
@@ -206,36 +204,38 @@ export function FileTasksSection({
               setPicking(true);
             }}
           >
-            прикрепить к задаче
+            attach to a task
           </Button>
         }
       >
-        задачи{tasks.length ? ` · ${tasks.length}` : ''}
+        tasks{tasks.length ? ` · ${tasks.length}` : ''}
       </GroupLabel>
 
       {!mayRead ? (
         /* НЕ ОШИБКА, А ЗАПРЕТ. Секция обязана пережить `PermissionDenied` словами: красная
            плашка на месте списка читалась бы как поломка файла, а не как отсутствие права. */
         <Text size='micro' variant='label'>
-          нет доступа к задачам — список того, что держит файл, виден с правом tasks:read.
+          no access to tasks — the list of what holds the file is visible with the tasks:read right.
         </Text>
       ) : isLoading ? (
         <Text size='micro' variant='label'>
-          загружаем…
+          loading…
         </Text>
       ) : isError ? (
         <Text size='micro' variant='label'>
-          {isUnauthorized(error)
-            ? 'сессия истекла — войдите заново.'
-            : isForbidden(error)
-              ? 'нет доступа к задачам — список того, что держит файл, виден с правом tasks:read.'
-              : isUnknownRoute(error)
-                ? 'задачи файла этот сервер ещё не отдаёт: либо сторона задач не выкачена, либо файла уже нет.'
-                : <FailureText e={error} fallback='список задач не прочитался' />}
+          {isUnauthorized(error) ? (
+            'the session expired — sign in again.'
+          ) : isForbidden(error) ? (
+            'no access to tasks — the list of what holds the file is visible with the tasks:read right.'
+          ) : isUnknownRoute(error) ? (
+            "this server doesn't serve the file's tasks yet: either the tasks side isn't rolled out, or the file is already gone."
+          ) : (
+            <FailureText e={error} fallback="the task list didn't read" />
+          )}
         </Text>
       ) : tasks.length === 0 ? (
         <Text size='micro' variant='label'>
-          файл ни к чему не прикреплён — его можно удалить.
+          the file isn't attached to anything — it can be deleted.
         </Text>
       ) : (
         <div className='flex flex-col'>
@@ -258,11 +258,11 @@ export function FileTasksSection({
                   to={`/tasks/${taskId}`}
                   target='_blank'
                   rel='noopener noreferrer'
-                  title={`${t.title ?? ''}\nоткроется в соседней вкладке`}
+                  title={`${t.title ?? ''}\nopens in the next tab`}
                   className='min-w-0 flex-1 truncate underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
                 >
                   <Text size='micro' component='span'>
-                    {t.title || `задача #${taskId}`}
+                    {t.title || `task #${taskId}`}
                   </Text>
                 </Link>
                 <Pill tone={statusTone(t.status)} className='flex-none'>
@@ -280,7 +280,7 @@ export function FileTasksSection({
                 )}
                 {/* Пустой `assignee` — это «никто не взял», и `Avatar` рисует ровно это
                     пунктирным кружком, а не выдумывает исполнителя. */}
-                <Avatar name={t.assignee ?? ''} size={18} title={t.assignee || 'никто не взял'} />
+                <Avatar name={t.assignee ?? ''} size={18} title={t.assignee || 'nobody took it'} />
                 {!!t.dueDate && (
                   <Text
                     size='nano'
@@ -293,7 +293,7 @@ export function FileTasksSection({
                 )}
                 {overdue && (
                   <Pill tone='warn' className='flex-none'>
-                    просрочена
+                    overdue
                   </Pill>
                 )}
                 {mayLink && (
@@ -303,10 +303,10 @@ export function FileTasksSection({
                     className='flex-none'
                     disabled={detach.isPending}
                     onClick={() => detach.mutate(taskId)}
-                    aria-label={`отцепить файл от задачи #${taskId}`}
-                    title='файл перестанет числиться в этой задаче; сам файл останется'
+                    aria-label={`detach the file from task #${taskId}`}
+                    title='the file will stop being listed in this task; the file itself stays'
                   >
-                    отцепить
+                    detach
                   </Button>
                 )}
               </div>
@@ -317,25 +317,25 @@ export function FileTasksSection({
 
       {mayRead && tasks.length > 0 && (
         <Text size='micro' variant='label'>
-          пока файл здесь числится, удалить его нельзя: в задаче осталась бы ссылка в никуда.
-          список включает и архивные задачи — архивная держит файл ровно так же.
+          while the file is listed here, it can't be deleted: a link to nowhere would remain in the
+          task. the list includes archived tasks too — an archived one holds the file just the same.
         </Text>
       )}
 
-      {/* Причина выключенной кнопки — ТЕКСТОМ, как и у «удалить» в подвале карточки.
+      {/* Причина выключенной кнопки — ТЕКСТОМ, как и у «delete» в подвале карточки.
           Подсказка при наведении объясняет только тому, кто уже заподозрил, что серая кнопка
           что-то значит. */}
       {mayRead && !mayLink && (
         <Text size='micro' variant='label'>
-          прикрепить и отцепить может тот, у кого есть право tasks:write и включён режим
-          записи: связь живёт на стороне задачи, а не файла.
+          attaching and detaching is for whoever has the tasks:write right and write mode on: the
+          link lives on the task side, not the file side.
         </Text>
       )}
 
       {!!failure && (
         <CalloutBox tone='error'>
           <Text size='micro' component='span'>
-            <FailureText e={failure} fallback='не удалось изменить связь файла с задачей' />
+            <FailureText e={failure} fallback="couldn't change the file's link with the task" />
           </Text>
         </CalloutBox>
       )}
@@ -347,34 +347,34 @@ export function FileTasksSection({
           setPicking(o);
         }}
         onConfirm={() => setPicking(false)}
-        title={`прикрепить «${file.fileName ?? 'файл'}» к задаче`}
+        title={`attach “${file.fileName ?? 'file'}” to a task`}
         width='md'
         hideActions
       >
         <div className='flex flex-col gap-2'>
           <Text size='micro' variant='label'>
-            прикрепление применяется сразу — окно можно закрыть, когда задач хватит. уже
-            прикреплённые из списка убраны.
+            attaching applies at once — the window can be closed once there are enough tasks. the
+            already attached ones are taken out of the list.
           </Text>
           <Input
             name='taskQuery'
-            aria-label='поиск задачи по названию или номеру'
+            aria-label='search for a task by title or number'
             value={query}
-            placeholder='название или #номер'
+            placeholder='title or #number'
             className='max-w-[260px]'
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
           />
           {attach.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                <FailureText e={attach.error} fallback='не удалось прикрепить файл к задаче' />
+                <FailureText e={attach.error} fallback="couldn't attach the file to the task" />
               </Text>
             </CalloutBox>
           )}
           <div className='flex max-h-72 flex-col overflow-y-auto'>
             {tasksLoading ? (
               <Text size='micro' variant='label'>
-                загружаем задачи…
+                loading tasks…
               </Text>
             ) : found.length ? (
               found.map((t) => (
@@ -389,32 +389,37 @@ export function FileTasksSection({
                     #{t.id}
                   </Pill>
                   <Text size='micro' component='span' className='min-w-0 flex-1 truncate'>
-                    {t.task.title || `задача #${t.id}`}
+                    {t.task.title || `task #${t.id}`}
                   </Text>
-                  <Text size='nano' variant='label' component='span' className='flex-none uppercase'>
+                  <Text
+                    size='nano'
+                    variant='label'
+                    component='span'
+                    className='flex-none uppercase'
+                  >
                     {STATUS_RU[t.status]}
                   </Text>
                   <Avatar
                     name={t.task.assignee}
                     size={18}
-                    title={t.task.assignee || 'никто не взял'}
+                    title={t.task.assignee || 'nobody took it'}
                   />
                 </button>
               ))
             ) : (
               <Text size='micro' variant='label'>
                 {free.length
-                  ? 'ни одной задачи с таким названием или номером.'
-                  : 'свободных задач нет — файл уже прикреплён ко всем, что видны.'}
+                  ? 'not a single task with such a title or number.'
+                  : 'there are no free tasks — the file is already attached to every one that is visible.'}
               </Text>
             )}
           </div>
-          {/* «Закрыть», а не «готово»: прикрепление применяется сразу, накапливать и
+          {/* «close», а не «done»: прикрепление применяется сразу, накапливать и
               подтверждать здесь нечего — кнопка только закрывает окно. Тот же довод и то же
               слово, что у пикера файла в заметке. */}
           <div className='flex justify-end'>
             <Button size='sm' variant='secondary' onClick={() => setPicking(false)}>
-              закрыть
+              close
             </Button>
           </div>
         </div>

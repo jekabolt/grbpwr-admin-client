@@ -106,9 +106,9 @@ export default function FilesSharedPage() {
   if (!mayRead) {
     return (
       <div className='border border-borderColor bg-bgColor p-block'>
-        <Text className='uppercase'>доступа к файлам нет</Text>
+        <Text className='uppercase'>there is no access to the files</Text>
         <Text size='micro' variant='label' className='mt-1'>
-          витрина открывается тем же правом files:read, что и сама библиотека.
+          shared files open by the same files:read right as the library itself.
         </Text>
       </div>
     );
@@ -122,33 +122,33 @@ export default function FilesSharedPage() {
     try {
       await closeAccess.mutateAsync(Number(closing.file?.id ?? 0));
       setClosing(undefined);
-      showMessage(`«${stemOf(name)}» снова виден только команде`, 'success');
+      showMessage(`“${stemOf(name)}” is visible only to the team again`, 'success');
     } catch (e) {
       // Слова сервера идут первыми, и `resolveFailure` это чтит: отказ по кругу правки
-      // написан на бэкенде ПО-РУССКИ и называет сам круг («загрузивший, действующий владелец
-      // или супер-админ») — заменить это на своё «нет прав» значило бы выбросить единственное,
+      // написан на бэкенде и называет сам круг («the uploader, a current owner, or a super
+      // admin») — заменить это на своё «нет прав» значило бы выбросить единственное,
       // что подсказывает, у кого просить.
-      showMessage(failureText(e, 'не удалось закрыть доступ'), 'error');
+      showMessage(failureText(e, "couldn't close the access"), 'error');
     }
   };
 
   const rail = (
     <SideRail>
-      <SideRailGroup flush>доступ</SideRailGroup>
+      <SideRailGroup flush>access</SideRailGroup>
       <SideRailItem
-        label='всё особое'
+        label='everything special'
         count={nAll}
         selected={filter === 'all'}
         onClick={() => pick('all')}
       />
       <SideRailItem
-        label='по ссылке'
+        label='by link'
         count={nLink}
         selected={filter === 'link'}
         onClick={() => pick('link')}
       />
       <SideRailItem
-        label='ограниченные'
+        label='restricted'
         count={nPeople}
         selected={filter === 'people'}
         onClick={() => pick('people')}
@@ -166,30 +166,30 @@ export default function FilesSharedPage() {
   // поимённо. Слова меняются вместе с числом.
   //
   // А пока числа нет, шапка НЕ НАЗЫВАЕТ НИ ОДНОГО: «неизвестно» — законный ответ, «0» — нет.
-  const files = `${shown} ${plural(shown, 'файл', 'файла', 'файлов')}`;
+  const files = `${shown} ${plural(shown, 'file')}`;
   const headline =
     total === undefined
       ? pageQuery.isLoading
-        ? '— считаем…'
-        : '— сколько именно, сейчас неизвестно: витрина не загрузилась'
+        ? '— counting…'
+        : "— exactly how many is unknown right now: shared files didn't load"
       : filter === 'link'
-        ? // Причастие склоняется вместе с числом: «1 файл открыт», «2 файла открыты», «5 файлов
-          // открыто». Одна форма на все три числа читается как недоделанный шаблон.
-          `— ${files} ${plural(shown, 'открыт', 'открыты', 'открыто')} по ссылке`
+        ? // Связка согласуется с числом: «1 file is open», «2 files are open». Одна форма на оба
+          // числа читается как недоделанный шаблон.
+          `— ${files} ${plural(shown, 'is', 'are')} open by link`
         : filter === 'people'
-          ? `— ${files} ${plural(shown, 'ограничен', 'ограничены', 'ограничено')} списком людей`
-          : `— ${files} видно не всей команде`;
+          ? `— ${files} ${plural(shown, 'is', 'are')} restricted to a list of people`
+          : `— ${files} ${plural(shown, 'is', 'are')} visible not to the whole team`;
 
   return (
     <div className='flex flex-col gap-gutter'>
       <SideRailLayout rail={rail}>
         <div className='flex flex-col gap-gutter'>
           <Section
-            title='открыто наружу'
+            title='open to the outside'
             question={headline}
             action={
               <Button asChild size='xs' variant='secondary'>
-                <Link to={ROUTES.files}>к файлам</Link>
+                <Link to={ROUTES.files}>to the files</Link>
               </Button>
             }
           >
@@ -201,12 +201,12 @@ export default function FilesSharedPage() {
               <div className='mb-2.5 flex flex-wrap items-center gap-2'>
                 <Text size='micro' variant='label'>
                   {mayWrite
-                    ? 'режим чтения включён вами: «закрыть доступ» и загрузка выключены, пока он стоит.'
-                    : 'смотреть можно, менять нельзя: права files:write нет — попросите его у супер-админа.'}
+                    ? 'the read mode is switched on by you: “close the access” and uploading are off while it stands.'
+                    : 'looking is allowed, changing is not: there is no files:write right — ask a super admin for it.'}
                 </Text>
                 {mayWrite && (
                   <Button size='xs' variant='secondary' onClick={() => setMode('write')}>
-                    включить запись
+                    switch writing on
                   </Button>
                 )}
               </div>
@@ -214,7 +214,7 @@ export default function FilesSharedPage() {
 
             {pageQuery.isLoading ? (
               <Text size='micro' variant='label'>
-                загружаем…
+                loading…
               </Text>
             ) : pageQuery.isError ? (
               // Без CalloutBox: он несёт свою рамку, а вокруг уже рамка блока — box-in-box,
@@ -222,17 +222,22 @@ export default function FilesSharedPage() {
               //
               // РАЗБОР ОТКАЗА ТОТ ЖЕ, ЧТО У СЕКЦИЙ КАРТОЧКИ, и по той же причине: этих RPC
               // нет ни на одном выкаченном бэкенде, значит первый настоящий заход сюда — это
-              // 501 от шлюза. «Обновите страницу» на него — совет, который не поможет никогда.
+              // 501 от шлюза. «refresh the page» на него — совет, который не поможет никогда.
               <div className='flex flex-col gap-1'>
-                <Text variant='error'>витрина не загрузилась</Text>
+                <Text variant='error'>shared files didn't load</Text>
                 <Text size='micro' variant='label'>
-                  {isUnauthorized(pageQuery.error)
-                    ? 'сессия истекла — войдите заново.'
-                    : isForbidden(pageQuery.error)
-                      ? 'нет доступа к разделу «файлы» — витрина открывается вместе с ним.'
-                      : isUnknownRoute(pageQuery.error)
-                        ? 'этот сервер ещё не отдаёт витрину открытого: сторона доступа не выкачена. обновление страницы не поможет — ждите выката.'
-                        : <FailureText e={pageQuery.error} fallback='сервер не ответил — попробуйте позже' />}
+                  {isUnauthorized(pageQuery.error) ? (
+                    'the session expired — sign in again.'
+                  ) : isForbidden(pageQuery.error) ? (
+                    'no access to the “files” section — shared files open together with it.'
+                  ) : isUnknownRoute(pageQuery.error) ? (
+                    "this server doesn't serve the list of shared files yet: the access side isn't rolled out. refreshing the page won't help — wait for the rollout."
+                  ) : (
+                    <FailureText
+                      e={pageQuery.error}
+                      fallback="the server didn't answer — try later"
+                    />
+                  )}
                 </Text>
               </div>
             ) : rows.length === 0 ? (
@@ -247,22 +252,22 @@ export default function FilesSharedPage() {
                     ? // Страница опустела под ногами: пока её смотрели, доступ закрыли (свой или
                       // чужой рукой), и список стал короче смещения. Без этой кнопки экран стал бы
                       // тупиком — постраничность ниже рисуется только рядом со строками.
-                      'на этой странице списка больше ничего нет — список стал короче, пока вы его смотрели.'
+                      'there is nothing left on this page of the list — the list got shorter while you were looking at it.'
                     : filter === 'link'
                       ? isSuper
-                        ? 'ни одного файла не открыто по ссылке.'
-                        : 'из видимого вам по ссылке не открыто ничего — но это не весь список.'
+                        ? 'not a single file is open by link.'
+                        : "of what is visible to you, nothing is open by link — but this isn't the whole list."
                       : filter === 'people'
                         ? isSuper
-                          ? 'ни один файл не ограничен списком людей.'
-                          : 'из видимого вам списком людей не ограничен ни один — но это не весь список.'
+                          ? 'not a single file is restricted to a list of people.'
+                          : "of what is visible to you, not one is restricted to a list of people — but this isn't the whole list."
                         : isSuper
-                          ? 'ничего не открыто — всё видно только команде.'
-                          : 'из видимого вам наружу не открыто ничего — но это не весь список.'}
+                          ? 'nothing is open — everything is visible only to the team.'
+                          : "of what is visible to you, nothing is open to the outside — but this isn't the whole list."}
                 </Text>
                 {offset > 0 && (
                   <Button size='xs' variant='secondary' onClick={() => setOffset(0)}>
-                    к началу списка
+                    to the start of the list
                   </Button>
                 )}
               </div>
@@ -272,11 +277,11 @@ export default function FilesSharedPage() {
                   <thead>
                     <tr>
                       <th style={{ width: 44 }} />
-                      <th data-align='left'>файл</th>
-                      <th data-align='left'>доступ</th>
-                      <th data-align='left'>кому</th>
-                      <th data-align='left'>кто открыл</th>
-                      <th data-align='left'>срок</th>
+                      <th data-align='left'>file</th>
+                      <th data-align='left'>access</th>
+                      <th data-align='left'>to whom</th>
+                      <th data-align='left'>who opened it</th>
+                      <th data-align='left'>expiry</th>
                       <th />
                     </tr>
                   </thead>
@@ -292,11 +297,14 @@ export default function FilesSharedPage() {
                         onClose={() => setClosing(row)}
                         onCopied={(ok) =>
                           ok
-                            ? showMessage('ссылка скопирована', 'success')
+                            ? showMessage('link copied', 'success')
                             : // Молчаливый отказ буфера читается как «кнопка сломана»: браузер
                               // отказывает без спроса (нет разрешения, не защищённый контекст), и
                               // единственный выход — показать адрес, чтобы его выделили руками.
-                              showMessage('буфер обмена недоступен — адрес есть в подсказке кнопки', 'error')
+                              showMessage(
+                                "the clipboard isn't available — the address is in the button's tooltip",
+                                'error',
+                              )
                         }
                       />
                     ))}
@@ -313,7 +321,7 @@ export default function FilesSharedPage() {
                       disabled={offset === 0}
                       onClick={() => setOffset(Math.max(0, offset - SHARED_PAGE_SIZE))}
                     >
-                      назад
+                      back
                     </Button>
                     <Button
                       size='xs'
@@ -321,10 +329,10 @@ export default function FilesSharedPage() {
                       disabled={to >= shown}
                       onClick={() => setOffset(offset + SHARED_PAGE_SIZE)}
                     >
-                      дальше
+                      further
                     </Button>
                     <Text size='micro' variant='label' component='span' className='tabular-nums'>
-                      {from}–{to} из {shown}
+                      {from}–{to} of {shown}
                     </Text>
                   </div>
                 )}
@@ -338,15 +346,15 @@ export default function FilesSharedPage() {
             <Text size='micro' component='p'>
               {isSuper ? (
                 <>
-                  <b>вы видите всё.</b> у остальных этот экран показывает только те открытые файлы,
-                  которые им и так видны, — поэтому «здесь пусто» у обычного аккаунта не означает,
-                  что наружу ничего не открыто.
+                  <b>you see everything.</b> for everyone else this screen shows only those open
+                  files that are visible to them anyway — that is why “it's empty here” on an
+                  ordinary account doesn't mean that nothing is open to the outside.
                 </>
               ) : (
                 <>
-                  <b>здесь только то, что видно вам.</b> ограниченный файл пропадает из чужих
-                  выдач целиком, поэтому полный список открытого есть лишь у супер-админа — и по
-                  той же причине счётчик темы у разных людей разный.
+                  <b>here is only what is visible to you.</b> a restricted file disappears from
+                  other people's listings entirely, so the full list of the open exists only for a
+                  super admin — and for the same reason the topic counter differs between people.
                 </>
               )}
             </Text>
@@ -358,9 +366,9 @@ export default function FilesSharedPage() {
         open={!!closing}
         onOpenChange={(o) => !o && setClosing(undefined)}
         onConfirm={doClose}
-        title={`закрыть доступ к «${stemOf(closing?.file?.fileName ?? '')}»`}
-        confirmLabel={closeAccess.isPending ? 'закрываем…' : 'закрыть доступ'}
-        cancelLabel='отмена'
+        title={`close the access to “${stemOf(closing?.file?.fileName ?? '')}”`}
+        confirmLabel={closeAccess.isPending ? 'closing…' : 'close the access'}
+        cancelLabel='cancel'
         confirmDisabled={closeAccess.isPending}
         closeOnConfirm={false}
         width='sm'
@@ -370,20 +378,20 @@ export default function FilesSharedPage() {
             <Text size='micro' component='p'>
               {closing?.file?.accessLevel === 'link' ? (
                 <>
-                  <b>выданная ссылка умрёт немедленно.</b> у всех, кому её переслали, она
-                  перестанет открываться — включая тех, о ком мы не знаем.
+                  <b>the issued link will die immediately.</b> for everyone it was forwarded to it
+                  will stop opening — including those we don't know about.
                 </>
               ) : (
                 <>
-                  <b>файл вернётся всей команде.</b> его снова увидит каждый, у кого есть доступ к
-                  разделу «файлы».
+                  <b>the file will come back to the whole team.</b> everyone who has access to the
+                  “files” section will see it again.
                 </>
               )}
             </Text>
           </CalloutBox>
           <Text size='micro' variant='label'>
-            список людей при этом не стирается: если файл понадобится ограничить снова, набирать
-            их заново не придётся.
+            the list of people isn't wiped by this: if the file has to be restricted again, there
+            will be no need to pick them anew.
           </Text>
         </div>
       </ConfirmationModal>
@@ -398,8 +406,8 @@ export default function FilesSharedPage() {
         enabled={writable}
         disabledNote={
           mayWrite
-            ? 'включён режим чтения — переключите его на холсте или строкой выше'
-            : 'нужно право files:write — попросите его у супер-админа'
+            ? 'the read mode is on — switch it on the canvas or in the line above'
+            : 'the files:write right is needed — ask a super admin for it'
         }
         topicLabels={[]}
         onFiles={intake}
@@ -498,7 +506,7 @@ function SharedRow({
       <td data-align='left'>
         {byLink ? (
           <Text size='micro' variant='label' component='span'>
-            кто угодно со ссылкой
+            anyone with the link
           </Text>
         ) : (
           <People people={row.people ?? []} />
@@ -526,16 +534,16 @@ function SharedRow({
         {byLink ? (
           <div className='flex flex-col items-start gap-0.5'>
             {link?.expired ? (
-              // «Истёк» — не «закрыт»: уровень остался `link`, маршрут отвечает 404, и файл
+              // «expired» — не «закрыт»: уровень остался `link`, маршрут отвечает 404, и файл
               // по-прежнему числится открытым. Пока уровень не сменили, он ждёт продления.
-              <Pill tone='warn'>истёк</Pill>
+              <Pill tone='warn'>expired</Pill>
             ) : link?.expiresAt ? (
               <Text size='micro' component='span' className='whitespace-nowrap tabular-nums'>
-                до {day(link.expiresAt)}
+                until {day(link.expiresAt)}
               </Text>
             ) : (
               <Text size='micro' component='span'>
-                бессрочно
+                no expiry
               </Text>
             )}
             {/* Единственный ответ на «пользуются ли ссылкой вообще». Счётчик сворачивается
@@ -543,8 +551,8 @@ function SharedRow({
                 вопроса достаточно. */}
             <Text size='nano' variant='label' component='span'>
               {Number(link?.accessCount ?? 0) > 0
-                ? `открывали ${Number(link?.accessCount)} ${plural(Number(link?.accessCount), 'раз', 'раза', 'раз')}`
-                : 'ещё не открывали'}
+                ? `opened ${Number(link?.accessCount)} ${plural(Number(link?.accessCount), 'time')}`
+                : 'not opened yet'}
             </Text>
           </div>
         ) : (
@@ -560,7 +568,7 @@ function SharedRow({
               потому что это второе действие над одной и той же ссылкой. */}
           {pageUrl ? (
             <Button size='xs' variant='secondary' onClick={copy} title={pageUrl}>
-              скопировать ссылку
+              copy the link
             </Button>
           ) : (
             byLink &&
@@ -580,13 +588,13 @@ function SharedRow({
                 className='max-w-[26ch] text-right'
                 title={
                   shareTokenOf(link.url)
-                    ? 'выставьте VITE_PATTERN_VIEWER_ORIGIN (или VITE_FILE_SHARE_ORIGIN) на этом контуре'
+                    ? 'set VITE_PATTERN_VIEWER_ORIGIN (or VITE_FILE_SHARE_ORIGIN) on this contour'
                     : undefined
                 }
               >
                 {shareTokenOf(link.url)
-                  ? 'публичный домен не настроен — копировать нечего, но сама ссылка жива'
-                  : 'адрес ссылки не разобрался — копировать нечего'}
+                  ? "the public domain isn't configured — nothing to copy, but the link itself is alive"
+                  : "the link address didn't parse — nothing to copy"}
               </Text>
             )
           )}
@@ -597,7 +605,7 @@ function SharedRow({
             variant='secondary'
             disabled={!mayClose}
             /* ТРИ ПРИЧИНЫ, А НЕ ДВЕ. Выключить кнопку могут круг правки, отсутствующее право и
-               добровольный режим чтения — и подсказка «нужно право files:write» у человека,
+               добровольный режим чтения — и подсказка «the files:write right is needed» у человека,
                у которого право ЕСТЬ, отправляла его просить уже выданное. Слова про режим — те
                же, что у приёмника броска ниже и у строки над таблицей: один отказ, названный на
                экране тремя способами, читается как три разных запрета. */
@@ -606,13 +614,13 @@ function SharedRow({
                 ? undefined
                 : !writable
                   ? mayWrite
-                    ? 'включён режим чтения — переключите его на холсте или строкой выше'
-                    : 'нужно право files:write — попросите его у супер-админа'
-                  : 'доступ меняет загрузивший, действующий владелец или супер-админ'
+                    ? 'the read mode is on — switch it on the canvas or in the line above'
+                    : 'the files:write right is needed — ask a super admin for it'
+                  : 'access is changed by the uploader, a current owner, or a super admin'
             }
             onClick={onClose}
           >
-            закрыть доступ
+            close the access
           </Button>
         </div>
       </td>

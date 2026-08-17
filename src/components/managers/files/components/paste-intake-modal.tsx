@@ -33,7 +33,7 @@ import { extensionOf, formatBytes, kindWord } from '../utils/format';
  */
 const NAMELESS = /^(image|unknown|blob)\.(png|jpe?g|webp|gif|avif|tiff?|bmp)$/i;
 
-/** «вставка 17.08 13-40.png» — дата с временем, потому что вставок за день бывает много. */
+/** «paste 17.08 13-40.png» — дата с временем, потому что вставок за день бывает много. */
 function pastedName(file: File, index: number): string {
   const own = (file.name ?? '').trim();
   if (own && !NAMELESS.test(own)) return own;
@@ -58,7 +58,7 @@ function pastedName(file: File, index: number): string {
   })();
   // Две картинки, вставленные в одну минуту, иначе получили бы одно имя на двоих.
   const suffix = index > 0 ? ` (${index + 1})` : '';
-  return `вставка ${stamp}${suffix}.${ext}`;
+  return `paste ${stamp}${suffix}.${ext}`;
 }
 
 function renameFile(file: File, name: string): File {
@@ -144,9 +144,11 @@ export function PasteIntakeModal({
         if (!o) onCancel();
       }}
       onConfirm={submit}
-      title={files.length > 1 ? `вставка из буфера · ${files.length}` : 'вставка из буфера'}
-      confirmLabel='загрузить'
-      cancelLabel='отмена'
+      title={
+        files.length > 1 ? `paste from the clipboard · ${files.length}` : 'paste from the clipboard'
+      }
+      confirmLabel='upload'
+      cancelLabel='cancel'
       confirmDisabled={!ready}
       closeOnConfirm={false}
       width='lg'
@@ -154,7 +156,8 @@ export function PasteIntakeModal({
       <div className='flex flex-col gap-2.5'>
         <CalloutBox tone='warning'>
           <Text size='micro' component='p'>
-            превью уже построено браузером, отправки ещё не было. закроете — ничего не уедет.
+            the preview is already built by the browser, there has been no upload yet. close it —
+            and nothing goes anywhere.
           </Text>
         </CalloutBox>
 
@@ -189,12 +192,18 @@ export function PasteIntakeModal({
             </div>
             <div className='flex min-w-0 flex-1 flex-col gap-1'>
               <Text size='micro' variant='label' component='p'>
-                {[dims[i], file.type || 'тип неизвестен', formatBytes(file.size)]
+                {[dims[i], file.type || 'type unknown', formatBytes(file.size)]
                   .filter(Boolean)
                   .join(' · ')}
               </Text>
-              <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
-                имя
+              <Text
+                size='micro'
+                variant='uppercase'
+                tracking='group'
+                component='p'
+                className='font-bold'
+              >
+                name
               </Text>
               <Input
                 name={`paste-name-${i}`}
@@ -205,8 +214,8 @@ export function PasteIntakeModal({
                 }
               />
               <Text size='micro' variant='label' component='p'>
-                у картинки из буфера имени нет — если не дать своё, в библиотеке появится
-                очередной «image.png», который потом не найдёт никакой поиск
+                a picture from the clipboard has no name — if you don't give it one, the library
+                gets yet another “image.png” that no search will find later
               </Text>
             </div>
           </div>
@@ -214,14 +223,20 @@ export function PasteIntakeModal({
 
         {noExtension && (
           <Text size='micro' variant='label' component='p'>
-            в имени нет расширения — так тоже можно, но по имени файл потом не узнают, чем его
-            открывать
+            the name has no extension — that is allowed too, but later the name won't tell what to
+            open the file with
           </Text>
         )}
 
         <div className='flex flex-col gap-1 border-t border-hairline pt-2'>
-          <Text size='micro' variant='uppercase' tracking='group' component='p' className='font-bold'>
-            темы
+          <Text
+            size='micro'
+            variant='uppercase'
+            tracking='group'
+            component='p'
+            className='font-bold'
+          >
+            topics
           </Text>
           <ChipRow>
             {topics.map((t) => {
@@ -232,7 +247,7 @@ export function PasteIntakeModal({
                   key={id}
                   selected={on}
                   pressed={on}
-                  title={presetTopicIds.includes(id) ? 'унаследована с холста' : undefined}
+                  title={presetTopicIds.includes(id) ? 'inherited from the canvas' : undefined}
                   onClick={() =>
                     setSelected((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
                   }
@@ -254,7 +269,7 @@ export function PasteIntakeModal({
             <Input
               name='paste-new-topic'
               value={newTopic}
-              placeholder='новая тема'
+              placeholder='new topic'
               autoComplete='off'
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setNewTopic(e.target.value)}
               onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -265,20 +280,20 @@ export function PasteIntakeModal({
               className='max-w-[220px]'
             />
             <Button size='xs' variant='secondary' disabled={!typed} onClick={addNewTopic}>
-              + новая
+              + new
             </Button>
           </div>
           <Text size='micro' variant='label' component='p'>
             {selected.length || pendingNew.length
-              ? `встанут на вставку: ${[
+              ? `will be set on the paste: ${[
                   ...selected
                     .map((id) => topics.find((t) => Number(t.id) === id)?.name)
                     .filter(Boolean),
                   ...pendingNew,
                 ].join(', ')}`
               : inheritedNames.length
-                ? 'темы сняты — вставка уедет в «разобрать»'
-                : 'тем нет — вставка уедет в «разобрать». это нормальный ход, разобрать можно позже'}
+                ? 'the topics are taken off — the paste will go to “unsorted”'
+                : 'no topics — the paste will go to “unsorted”. this is a normal move, you can sort them later'}
           </Text>
         </div>
 
@@ -287,8 +302,8 @@ export function PasteIntakeModal({
             ровно затем, чтобы человек стоял в поле имени. Без оговорки обещание не работает
             именно там, где его читают. */}
         <Text size='micro' variant='label' component='p'>
-          ⌘V ещё раз добавит следующий файл в ту же вставку — но сначала уведите курсор из
-          поля: в поле ⌘V кладёт текст
+          ⌘V again adds the next file to the same paste — but first take the cursor out of the
+          field: in a field ⌘V puts text
         </Text>
       </div>
     </ConfirmationModal>
