@@ -17,6 +17,7 @@ import { Progress } from 'ui/components/progress';
 import { SkeletonLine } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
 import { MAX_UPLOAD_BYTES, filesService } from '../api/filesService';
+import { failureText } from '../api/rpc-error';
 import { filesKeys, useFileTopics } from '../hooks/useFiles';
 import {
   barFraction,
@@ -326,7 +327,7 @@ export function FilesUploadBar({
       );
       qc.invalidateQueries({ queryKey: filesKeys.all });
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'не удалось дописать темы', 'error');
+      showMessage(failureText(e, 'не удалось дописать темы'), 'error');
     } finally {
       setBusyRow(null);
     }

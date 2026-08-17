@@ -16,8 +16,9 @@ import { Section } from 'ui/components/section';
 import { SideRail, SideRailGroup, SideRailItem, SideRailLayout } from 'ui/components/side-rail';
 import Text from 'ui/components/text';
 import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
-import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
+import { failureText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { FilesDropOverlay } from '../components/drop-overlay';
+import { FailureText } from '../components/failure-text';
 import { FilesUploadBar } from '../components/upload-bar';
 import { extensionOf, stemOf } from '../utils/format';
 import { plural } from '../upload/text';
@@ -108,10 +109,11 @@ export default function FilesSharedPage() {
       setClosing(undefined);
       showMessage(`«${stemOf(name)}» снова виден только команде`, 'success');
     } catch (e) {
-      // Слова сервера идут первыми: отказ по кругу правки называет сам круг («загрузивший,
-      // действующий владелец или супер-админ»), и заменить это на «нет прав» значит выбросить
-      // единственное, что подсказывает, у кого просить.
-      showMessage(e instanceof Error ? e.message : 'не удалось закрыть доступ', 'error');
+      // Слова сервера идут первыми, и `resolveFailure` это чтит: отказ по кругу правки
+      // написан на бэкенде ПО-РУССКИ и называет сам круг («загрузивший, действующий владелец
+      // или супер-админ») — заменить это на своё «нет прав» значило бы выбросить единственное,
+      // что подсказывает, у кого просить.
+      showMessage(failureText(e, 'не удалось закрыть доступ'), 'error');
     }
   };
 
@@ -208,7 +210,7 @@ export default function FilesSharedPage() {
                       ? 'нет доступа к разделу «файлы» — витрина открывается вместе с ним.'
                       : isUnknownRoute(pageQuery.error)
                         ? 'этот сервер ещё не отдаёт витрину открытого: сторона доступа не выкачена. обновление страницы не поможет — ждите выката.'
-                        : errorText(pageQuery.error, 'сервер не ответил — попробуйте позже')}
+                        : <FailureText e={pageQuery.error} fallback='сервер не ответил — попробуйте позже' />}
                 </Text>
               </div>
             ) : rows.length === 0 ? (

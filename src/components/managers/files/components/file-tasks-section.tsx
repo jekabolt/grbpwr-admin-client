@@ -15,9 +15,10 @@ import Input from 'ui/components/input';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { fileTasksService } from '../api/fileTasksService';
-import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
+import { isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { filesKeys } from '../hooks/useFiles';
 import { formatDay } from '../utils/format';
+import { FailureText } from './failure-text';
 
 /**
  * Ключ ВЛОЖЕН в `filesKeys.all` (`['files']`): всякая правка файла инвалидирует этот префикс
@@ -219,7 +220,7 @@ export function FileTasksSection({
               ? 'нет доступа к задачам — список того, что держит файл, виден с правом tasks:read.'
               : isUnknownRoute(error)
                 ? 'задачи файла этот сервер ещё не отдаёт: либо сторона задач не выкачена, либо файла уже нет.'
-                : errorText(error, 'список задач не прочитался')}
+                : <FailureText e={error} fallback='список задач не прочитался' />}
         </Text>
       ) : tasks.length === 0 ? (
         <Text size='micro' variant='label'>
@@ -323,7 +324,7 @@ export function FileTasksSection({
       {!!failure && (
         <CalloutBox tone='error'>
           <Text size='micro' component='span'>
-            {errorText(failure, 'не удалось изменить связь файла с задачей')}
+            <FailureText e={failure} fallback='не удалось изменить связь файла с задачей' />
           </Text>
         </CalloutBox>
       )}
@@ -355,7 +356,7 @@ export function FileTasksSection({
           {attach.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                {errorText(attach.error, 'не удалось прикрепить файл к задаче')}
+                <FailureText e={attach.error} fallback='не удалось прикрепить файл к задаче' />
               </Text>
             </CalloutBox>
           )}

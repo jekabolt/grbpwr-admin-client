@@ -13,6 +13,7 @@ import Text from 'ui/components/text';
 import { filesService } from '../api/filesService';
 import { filesKeys } from '../hooks/useFiles';
 import { formatWhen } from '../utils/format';
+import { FailureText } from './failure-text';
 
 /**
  * Ответственность за файл: кто загрузил и кто его ведёт.
@@ -313,9 +314,7 @@ export function FileOwnersSection({
       {setOwners.isError && (
         <CalloutBox tone='error'>
           <Text size='micro' component='span'>
-            {setOwners.error instanceof Error
-              ? setOwners.error.message
-              : 'не удалось изменить владельцев'}
+            <FailureText e={setOwners.error} fallback='не удалось изменить владельцев' />
           </Text>
         </CalloutBox>
       )}
@@ -425,9 +424,7 @@ export function FileOwnersSection({
           {setOwners.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                {setOwners.error instanceof Error
-                  ? setOwners.error.message
-                  : 'не удалось изменить владельцев'}
+                <FailureText e={setOwners.error} fallback='не удалось изменить владельцев' />
               </Text>
             </CalloutBox>
           )}

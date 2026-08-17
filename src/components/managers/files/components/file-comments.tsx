@@ -13,10 +13,11 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import Textarea from 'ui/components/text-area';
 import { commentsService } from '../api/commentsService';
-import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
+import { isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { filesKeys, invalidateFileViews } from '../hooks/useFiles';
 import { plural } from '../upload/text';
 import { formatWhenShort } from '../utils/format';
+import { FailureText } from './failure-text';
 
 /** Тот же довод, что у задач файла: ключ вложен в `['files']`, чтобы лента протухала вместе с
  *  карточкой, а счётчик на плитке и лента не расходились между собой. */
@@ -226,7 +227,7 @@ export function FileComments({
                 ? 'обсуждение этот сервер ещё не отдаёт: либо оно не выкачено, либо файла уже нет.'
                 : /* «Лента» была третьим словом для того, что шапка зовёт обсуждением, а строка
                      внутри — репликой. Три слова на два предмета человек читает как три предмета. */
-                  errorText(error, 'обсуждение не прочиталось')}
+                  <FailureText e={error} fallback='обсуждение не прочиталось' />}
         </Text>
       ) : comments.length === 0 ? (
         <Text size='micro' variant='label'>
@@ -348,14 +349,16 @@ export function FileComments({
               и она же появлялась после неудачного удаления. Называем то действие, которое
               действительно не прошло. */}
           <Text size='micro' component='span'>
-            {errorText(
-              failure,
-              add.error
-                ? 'реплика не отправилась'
-                : update.error
-                  ? 'правка реплики не сохранилась'
-                  : 'реплика не удалилась',
-            )}
+            <FailureText
+              e={failure}
+              fallback={
+                add.error
+                  ? 'реплика не отправилась'
+                  : update.error
+                    ? 'правка реплики не сохранилась'
+                    : 'реплика не удалилась'
+              }
+            />
           </Text>
         </CalloutBox>
       )}

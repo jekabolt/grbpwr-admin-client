@@ -24,10 +24,11 @@ import {
   LINK_TTLS,
   type AccessLevel,
 } from '../api/accessService';
-import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
+import { isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { filesKeys, invalidateFileViews } from '../hooks/useFiles';
 import { plural } from '../upload/text';
 import { formatWhen, formatWhenShort } from '../utils/format';
+import { FailureText } from './failure-text';
 
 /** Ключ вложен в `['files']`: витрина открытого и «закрыть доступ» из неё инвалидируют весь этот
  *  префикс, и блок в открытой карточке обязан протухнуть вместе с ними. */
@@ -354,7 +355,7 @@ export function FileAccessSection({
                 ? 'нет доступа к разделу «файлы» — блок доступа читается вместе с ним.'
                 : isUnknownRoute(error)
                   ? 'подробности доступа этот сервер ещё не отдаёт: либо сторона доступа не выкачена, либо файла уже нет.'
-                  : errorText(error, 'блок доступа не прочитался')}
+                  : <FailureText e={error} fallback='блок доступа не прочитался' />}
           </Text>
         </div>
       ) : (
@@ -441,7 +442,7 @@ export function FileAccessSection({
           {setAccess.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                {errorText(setAccess.error, 'не удалось изменить доступ')}
+                <FailureText e={setAccess.error} fallback='не удалось изменить доступ' />
               </Text>
             </CalloutBox>
           )}
@@ -652,7 +653,7 @@ export function FileAccessSection({
               {rotate.isError && (
                 <CalloutBox tone='error'>
                   <Text size='micro' component='span'>
-                    {errorText(rotate.error, 'не удалось пересоздать ссылку')}
+                    <FailureText e={rotate.error} fallback='не удалось пересоздать ссылку' />
                   </Text>
                 </CalloutBox>
               )}
@@ -904,7 +905,7 @@ export function FileAccessSection({
           {setAccess.isError && (
             <CalloutBox tone='error'>
               <Text size='micro' component='span'>
-                {errorText(setAccess.error, 'не удалось изменить список')}
+                <FailureText e={setAccess.error} fallback='не удалось изменить список' />
               </Text>
             </CalloutBox>
           )}

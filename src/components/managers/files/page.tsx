@@ -345,7 +345,7 @@ export default function FilesPage() {
         <GallerySkeleton />
       ) : filesQuery.isError && !files.length ? (
         <ListFailedState
-          error={filesQuery.error instanceof Error ? filesQuery.error.message : undefined}
+          error={filesQuery.error}
           onRetry={() => filesQuery.refetch()}
         />
       ) : files.length === 0 ? (

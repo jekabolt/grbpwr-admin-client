@@ -13,6 +13,7 @@ import Text from 'ui/components/text';
 import { useFilesMutations, useLibraryFile } from '../hooks/useFiles';
 import { extensionOf, formatBytes, kindWord } from '../utils/format';
 import { isMarkdownNote, isReadablePdf } from '../utils/reader-find';
+import { FailureText } from './failure-text';
 import { FileAccessSection } from './file-access-section';
 import { FileComments } from './file-comments';
 import { FileOwnersSection } from './file-owners-section';
@@ -66,7 +67,9 @@ export function FileCardModal({
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
-  const [failure, setFailure] = useState<string | undefined>(undefined);
+  // Отказ хранится ОШИБКОЙ, а не строкой: разбор (`rpc-error`) один на раздел и живёт на
+  // отрисовке, а запасная фраза у сохранения и у удаления разная — поэтому она едет рядом.
+  const [failure, setFailure] = useState<{ e: unknown; fallback: string } | undefined>(undefined);
   const [reading, setReading] = useState(false);
   // Куда вести после вопроса «закрыть без сохранения». Вопрос один на оба выхода, потому что
   // цена у них одна: набранное имя пропадает и там и там. Хранить намерение строкой, а не
@@ -140,7 +143,7 @@ export function FileCardModal({
         showMessage('сохранено, но список тем не перечитался — обновите страницу', 'success');
       }
     } catch (e) {
-      setFailure(e instanceof Error ? e.message : 'не удалось сохранить');
+      setFailure({ e, fallback: 'не удалось сохранить' });
     }
   };
 
@@ -154,7 +157,7 @@ export function FileCardModal({
       // Отказ ОСТАЁТСЯ НА ЭКРАНЕ: сервер называет задачи, которые держат файл, и это
       // единственный способ узнать, почему удаление не прошло. Тост уносит эти имена через
       // шесть секунд вместе с ответом на вопрос.
-      setFailure(e instanceof Error ? e.message : 'не удалось удалить');
+      setFailure({ e, fallback: 'не удалось удалить' });
       setConfirmDelete(false);
     }
   };
@@ -190,11 +193,11 @@ export function FileCardModal({
         <div className='flex flex-col items-start gap-2'>
           <Text className='uppercase'>файл не открылся</Text>
           <Text size='micro' variant='label'>
-            {Number.isFinite(id) && id > 0
-              ? isError && error instanceof Error
-                ? error.message
-                : 'сервер не ответил про этот файл. возможно, его удалили.'
-              : 'в адресе не номер файла — ссылка испорчена.'}
+            {Number.isFinite(id) && id > 0 ? (
+              <FailureText e={error} fallback='сервер не ответил про этот файл. возможно, его удалили.' />
+            ) : (
+              'в адресе не номер файла — ссылка испорчена.'
+            )}
           </Text>
           <div className='flex items-center gap-1.5'>
             <Button size='sm' variant='secondary' onClick={() => refetch()}>
@@ -333,7 +336,9 @@ export function FileCardModal({
 
           {failure && (
             <div className='border border-error px-2.5 py-2'>
-              <Text size='micro'>{failure}</Text>
+              <Text size='micro'>
+                <FailureText e={failure.e} fallback={failure.fallback} />
+              </Text>
             </div>
           )}
 

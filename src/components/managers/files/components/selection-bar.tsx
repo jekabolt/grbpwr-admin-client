@@ -8,6 +8,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { filesService } from '../api/filesService';
+import { failureText } from '../api/rpc-error';
 import { useFilesMutations } from '../hooks/useFiles';
 import { plural } from '../upload/text';
 
@@ -82,7 +83,7 @@ export function FilesSelectionBar({
       setNewTopic('');
       onClear();
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'не удалось проставить темы', 'error');
+      showMessage(failureText(e, 'не удалось проставить темы'), 'error');
     }
   };
 
@@ -141,7 +142,8 @@ export function FilesSelectionBar({
         failed.push({
           id,
           name: f.fileName ?? String(id),
-          reason: e instanceof Error ? e.message : 'отказ без объяснения',
+          // Причина строкой: список отказов печатает её в строке файла, а не блоком.
+          reason: failureText(e, 'отказ без объяснения'),
         });
       }
     }

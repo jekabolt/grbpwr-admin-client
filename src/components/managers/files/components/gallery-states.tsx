@@ -12,6 +12,7 @@ import { MAX_UPLOAD_BYTES, uploadLibraryPreview } from '../api/filesService';
 import { filesKeys } from '../hooks/useFiles';
 import { formatBytes } from '../utils/format';
 import { rebuildPreview } from '../utils/preview';
+import { FailureText } from './failure-text';
 
 /**
  * Пустое и сломанное в галерее.
@@ -289,9 +290,10 @@ export function ListFailedState({
   error,
   onRetry,
 }: {
-  /** Слова сервера. Отказ бывает содержательным («не больше 20 тем в одном фильтре»), и
-   * подменять его на «сервер не ответил» значит увести человека чинить связь вместо фильтра. */
-  error?: string;
+  /** САМ ОТКАЗ, а не строка: разбор один на раздел и живёт на отрисовке. Отказ бывает
+   * содержательным («за раз можно пересечь не больше 20 тем»), и подменять его на «сервер не
+   * ответил» значит увести человека чинить связь вместо фильтра. */
+  error?: unknown;
   onRetry: () => void;
 }) {
   return (
@@ -305,7 +307,7 @@ export function ListFailedState({
       note='это не значит, что библиотека пуста — её просто сейчас не спросить'
     >
       <Text size='micro' variant='label'>
-        {error || 'сервер не ответил.'}
+        <FailureText e={error} fallback='сервер не ответил.' />
       </Text>
     </StateFrame>
   );

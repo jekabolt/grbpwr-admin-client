@@ -16,6 +16,7 @@ import Input from 'ui/components/input';
 import { SectionHeader } from 'ui/components/section-header';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
+import { failureText } from '../api/rpc-error';
 import { topicsService } from '../api/topicsService';
 import { FilesDropOverlay } from '../components/drop-overlay';
 import { FilesUploadBar } from '../components/upload-bar';
@@ -102,8 +103,9 @@ export default function FileTopicsPage() {
     );
   }
 
-  const fail = (e: unknown, fallback: string) =>
-    showMessage(e instanceof Error ? e.message : fallback, 'error');
+  // Один разбор на раздел: русская фраза по коду ответа и по таблице узнаваемых сообщений
+  // сервера, а неузнанный отказ едет со словами сервера в скобках — тост берёт только строку.
+  const fail = (e: unknown, fallback: string) => showMessage(failureText(e, fallback), 'error');
 
   const create = async () => {
     const name = newName.trim();
