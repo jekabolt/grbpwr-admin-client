@@ -5258,6 +5258,16 @@ export type SetAccountSpecialtiesResponse = {
   specialties: string[] | undefined;
 };
 
+export type DeleteAccountSpecialtyRequest = {
+  // name is the vocabulary entry to remove, matched case- and
+  // accent-insensitively (the collation folds it), so a typo is deleted by
+  // whichever spelling of it the person is looking at.
+  name: string | undefined;
+};
+
+export type DeleteAccountSpecialtyResponse = {
+};
+
 // LibraryFileTask is one task row AS THE FILE CARD DRAWS IT: the #id pill, the
 // title, the column, who is on it and when it is due. Deliberately not
 // common.Task — that message carries content, checklist, resolved media and its
@@ -13788,6 +13798,12 @@ export interface AdminService {
   // GetCurrentAccount returns the calling account's identity and effective
   // permissions (what its token authorizes). Any authenticated admin may call it;
   // the admin panel uses it to decide which sections to show.
+  // permissions and is_super come from the TOKEN, so a permission change shows up
+  // only after the next login — deliberately, because that is also when
+  // enforcement changes. specialties is the exception and comes from the
+  // DATABASE: it is self-description, it is not in the token at all, and it is
+  // current as of this call. A client that used to read its own specialties out
+  // of ListAdmins because this field was always empty can stop doing that.
   GetCurrentAccount(request: GetCurrentAccountRequest): Promise<GetCurrentAccountResponse>;
   // ListAccountSections returns the catalog of grantable admin-panel sections
   // (for the permission picker). Any authenticated admin may call it.
@@ -13823,6 +13839,31 @@ export interface AdminService {
   // reads like management but is not would be the first thing to be gated by
   // mistake.
   SetAccountSpecialties(request: SetAccountSpecialtiesRequest): Promise<SetAccountSpecialtiesResponse>;
+  // DeleteAccountSpecialty removes ONE entry from the SHARED specialty
+  // vocabulary, by name.
+  // STRICTER THAN WRITING ONE, AND THAT ASYMMETRY IS THE POINT.
+  // SetAccountSpecialties above needs no grant because it edits one person's own
+  // byline, and a name it mints is additive: nobody else's screen loses
+  // anything. Deleting is the opposite — the vocabulary is shared, it rides on
+  // every people-picker response in the panel, and removing an entry takes a
+  // word away from everybody who might have picked it next. That touches other
+  // accounts, not one's own self-description, so it requires the accounts
+  // section (write) — the same grant that already governs editing somebody
+  // else's specialties. Hence the /accounts/ (plural) path: everything under it
+  // is account MANAGEMENT and is gated, and this is management.
+  // Refused, not silently forced, while accounts still carry the entry (the link
+  // FK is RESTRICT for exactly that), and the refusal says HOW MANY accounts
+  // hold it — a bare "нельзя" leaves the person with nothing to do next.
+  // Retiring an entry that is in use means moving those accounts off it first;
+  // there is deliberately no merge rpc here, because a person carries a handful
+  // of specialties they can re-pick, not a file's accumulated topic history.
+  // Addressed BY NAME, not by id: the vocabulary travels as plain strings
+  // (ListAdmins, ListAccounts), the panel is never shown a specialty id, and the
+  // name is unique case- and accent-insensitively by collation.
+  // POST .../delete rather than DELETE .../{name}: a specialty name is free-form
+  // text that may contain spaces or a slash, and putting it in the path would
+  // make deletion depend on how the word was typed.
+  DeleteAccountSpecialty(request: DeleteAccountSpecialtyRequest): Promise<DeleteAccountSpecialtyResponse>;
   ListAcctAccounts(request: ListAcctAccountsRequest): Promise<ListAcctAccountsResponse>;
   CreateAcctAccount(request: CreateAcctAccountRequest): Promise<CreateAcctAccountResponse>;
   // UpdateAcctAccount renames a custom (non-system) account; code and section are immutable.
@@ -20148,6 +20189,23 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "SetAccountSpecialties",
       }) as Promise<SetAccountSpecialtiesResponse>;
+    },
+    DeleteAccountSpecialty(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/accounts/specialties/delete`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteAccountSpecialty",
+      }) as Promise<DeleteAccountSpecialtyResponse>;
     },
     ListAcctAccounts(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/accounting/accounts`; // eslint-disable-line quotes
