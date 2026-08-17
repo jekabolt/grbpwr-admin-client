@@ -27,8 +27,12 @@ export function FileTile({
   selectable?: boolean;
   onToggleSelect?: () => void;
   onOpen: () => void;
-  /** Превью не открылось. Почти всегда это протухшая presigned-ссылка, а не порча файла. */
-  onPreviewError?: () => void;
+  /**
+   * Превью не открылось. Почти всегда это протухшая presigned-ссылка, а не порча файла.
+   * Отдаётся именно адрес: перепрашивать выдачу можно один раз на адрес, иначе по-настоящему
+   * битый объект гоняет её по кругу.
+   */
+  onPreviewError?: (url: string) => void;
   /** Досыл в подвал плитки — кнопка «построить заново» у состояния «превью не вышло». */
   children?: React.ReactNode;
 }) {
@@ -81,7 +85,7 @@ export function FileTile({
             src={file.previewUrl}
             alt=''
             loading='lazy'
-            onError={onPreviewError}
+            onError={() => onPreviewError?.(file.previewUrl ?? '')}
             className='aspect-square w-full object-contain'
           />
         ) : (

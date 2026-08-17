@@ -21,7 +21,7 @@ import {
   RebuildPreview,
 } from './components/gallery-states';
 import { FilesSelectionBar } from './components/selection-bar';
-import { TopicChips, type TopicSelection } from './components/topic-chips';
+import { MAX_TOPIC_FILTERS, TopicChips, type TopicSelection } from './components/topic-chips';
 import { UploadDialog } from './components/upload-dialog';
 import { useFileSelection } from './hooks/useFileSelection';
 import {
@@ -59,15 +59,21 @@ export default function FilesPage() {
 
   // ФИЛЬТР ЖИВЁТ В URL. Ссылку на пересечение кидают в чат («вот всё, что и packaging, и
   // atelier»), и состояние, которого нет в адресе, такой ссылкой не передашь.
+  const untopiced = params.get('untopiced') === '1';
   const topicIds = useMemo(
     () =>
-      params
-        .getAll('topic')
-        .map(Number)
-        .filter((n) => Number.isFinite(n) && n > 0),
-    [params],
+      // При `untopiced` темы игнорируются — так же, как их игнорирует сервер (приоритет
+      // untopiced > topic_ids). Иначе рукописный адрес рисовал бы горящие чипы, которых в
+      // выдаче нет, и экран спорил бы сам с собой.
+      untopiced
+        ? []
+        : params
+            .getAll('topic')
+            .map(Number)
+            .filter((n) => Number.isFinite(n) && n > 0)
+            .slice(0, MAX_TOPIC_FILTERS),
+    [params, untopiced],
   );
-  const untopiced = params.get('untopiced') === '1';
   const urlSearch = params.get('q') ?? '';
   const sort = ((): FilesSort => {
     const v = params.get('sort');
@@ -77,9 +83,14 @@ export default function FilesPage() {
   // Строка ввода отзывается сразу, а URL догоняет: писать в адрес на каждую букву значит
   // гонять запрос на каждую букву.
   const [searchInput, setSearchInput] = useState(urlSearch);
+  // Что мы сами только что записали в адрес. Без этой отметки эффект синхронизации откатывал
+  // бы поле к записанному значению, и символ, набранный между срабатыванием таймера и
+  // коммитом навигации, пропадал бы.
+  const pushedSearch = useRef(urlSearch);
   useEffect(() => {
+    if (urlSearch === pushedSearch.current) return;
     setSearchInput(urlSearch);
-    // Синхронизация только при внешней смене адреса (переход по ссылке, «очистить поиск»).
+    // Синхронизация только при ВНЕШНЕЙ смене адреса (переход по ссылке, «очистить поиск»).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlSearch]);
 
@@ -109,7 +120,10 @@ export default function FilesPage() {
 
   useEffect(() => {
     if (searchInput === urlSearch) return;
-    const t = setTimeout(() => patch({ q: searchInput }), 300);
+    const t = setTimeout(() => {
+      pushedSearch.current = searchInput;
+      patch({ q: searchInput });
+    }, 300);
     return () => clearTimeout(t);
   }, [searchInput, urlSearch, patch]);
 
@@ -131,15 +145,21 @@ export default function FilesPage() {
 
   // ПРОТУХШАЯ ССЫЛКА — НЕ ПОЛОМКА, а плата за приватный бакет: presigned живёт 6–12 часов, а
   // вкладку держат открытой дольше. Первый же сорвавшийся `<img>` перезапрашивает выдачу, и
-  // элемент перерисовывается на месте. Повторно за окно — молчим: у по-настоящему битого
-  // превью onError сработает у каждой плитки, и без задвижки это был бы вечный цикл запросов.
-  const relinkAt = useRef(0);
-  const onPreviewError = useCallback(() => {
-    const now = Date.now();
-    if (now - relinkAt.current < 30_000) return;
-    relinkAt.current = now;
-    qc.invalidateQueries({ queryKey: filesKeys.all });
-  }, [qc]);
+  // элемент перерисовывается на месте.
+  //
+  // Задвижка — ПО САМОМУ АДРЕСУ, а не по времени. У по-настоящему битого объекта (а не
+  // просроченной ссылки) onError возвращается и после перевыдачи, и таймер лишь замедлил бы
+  // вечный цикл до раза в полминуты: каждая инвалидация перекачивает ВСЕ загруженные страницы
+  // и меняет src у всех остальных плиток. Один адрес перепрашивается ровно один раз.
+  const relinked = useRef<Set<string>>(new Set());
+  const onPreviewError = useCallback(
+    (url: string) => {
+      if (!url || relinked.current.has(url)) return;
+      relinked.current.add(url);
+      qc.invalidateQueries({ queryKey: filesKeys.all });
+    },
+    [qc],
+  );
 
   const onTopics = (next: TopicSelection) =>
     patch({ topicIds: next.topicIds, untopiced: next.untopiced });
@@ -156,6 +176,11 @@ export default function FilesPage() {
     clearSelection();
   }, [filterKey, clearSelection]);
 
+  const selectedFresh = useMemo(
+    () => selection.selected.map((s) => files.find((f) => Number(f.id) === Number(s.id)) ?? s),
+    [selection.selected, files],
+  );
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDropping(false);
@@ -166,7 +191,10 @@ export default function FilesPage() {
     setUploadOpen(true);
   };
 
-  const closeCard = () => navigate({ pathname: ROUTES.files, search: params.toString() });
+  // Закрытие ЗАМЕЩАЕТ запись в истории. Иначе стек выглядит как [сетка, карточка, сетка], и
+  // «назад» открывает ровно ту карточку, которую человек только что закрыл.
+  const closeCard = () =>
+    navigate({ pathname: ROUTES.files, search: params.toString() }, { replace: true });
   const openCard = (fileId: number) =>
     navigate({ pathname: `${ROUTES.files}/${fileId}`, search: params.toString() });
   const showAll = () => patch({ topicIds: [], untopiced: false });
@@ -225,7 +253,12 @@ export default function FilesPage() {
         e.preventDefault();
         if (writable) setDropping(true);
       }}
-      onDragLeave={() => setDropping(false)}
+      onDragLeave={(e) => {
+        // dragleave всплывает с КАЖДОЙ плитки, через которую проходит курсор. Без этой
+        // проверки полоса приёмника мигает на каждом шаге мыши и дёргает сетку под ней.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDropping(false);
+      }}
       onDrop={onDrop}
       className='flex flex-col gap-gutter'
     >
@@ -251,6 +284,7 @@ export default function FilesPage() {
             totalFiles={totalFiles}
             untopicedCount={untopicedCount}
             matched={total === undefined ? undefined : Number(total)}
+            searching={!!urlSearch}
             onChange={onTopics}
           />
         </div>
@@ -286,7 +320,10 @@ export default function FilesPage() {
       {filesQuery.isLoading ? (
         <GallerySkeleton />
       ) : filesQuery.isError && !files.length ? (
-        <ListFailedState onRetry={() => filesQuery.refetch()} />
+        <ListFailedState
+          error={filesQuery.error instanceof Error ? filesQuery.error.message : undefined}
+          onRetry={() => filesQuery.refetch()}
+        />
       ) : files.length === 0 ? (
         emptyState()
       ) : (
@@ -324,8 +361,11 @@ export default function FilesPage() {
         />
       )}
 
+      {/* Набор отдаётся СВЕЖИМИ объектами из текущей выдачи, а не снимком на момент клика:
+          у снимка через несколько часов мёртвая presigned-ссылка, а после переименования из
+          карточки — устаревшее имя в списке того, что сейчас удалят. */}
       <FilesSelectionBar
-        selected={selection.selected}
+        selected={selectedFresh}
         topics={topics}
         writable={writable}
         onClear={selection.clear}

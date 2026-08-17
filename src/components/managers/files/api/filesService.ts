@@ -141,15 +141,50 @@ export async function uploadLibraryPreview(id: number, preview: Blob): Promise<v
   const form = new FormData();
   form.append('preview', preview, 'preview.webp');
 
-  const res = await fetch(apiUrl(`/api/files/${id}/preview`), {
-    method: 'POST',
-    headers: { 'Grpc-Metadata-Authorization': authHeader() },
-    body: form,
-  });
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(`/api/files/${id}/preview`), {
+      method: 'POST',
+      headers: { 'Grpc-Metadata-Authorization': authHeader() },
+      body: form,
+    });
+  } catch {
+    throw new Error('связь оборвалась — превью не заменилось');
+  }
   if (res.ok) return;
 
   const body = await res.text().catch(() => '');
-  throw new Error(uploadErrorMessage(res.status, body));
+  throw new Error(previewErrorMessage(res.status, body));
+}
+
+/**
+ * Слова про ПРЕВЬЮ, а не про загрузку файла.
+ *
+ * Заимствовать `uploadErrorMessage` здесь нельзя: у превью свой предел — 2 МиБ против 95 МБ
+ * у файла, и общий обработчик 413 сообщал бы «файл больше 95 мб» про картинку в пару сотен
+ * килобайт. Сервер называет причину сам, поэтому его слова идут первыми.
+ */
+function previewErrorMessage(status: number, body: string): string {
+  const parsed = (() => {
+    try {
+      return JSON.parse(body)?.error as string | undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  if (parsed) return parsed;
+  switch (status) {
+    case 401:
+      return 'сессия истекла — войдите заново';
+    case 403:
+      return 'нужно право files:write';
+    case 404:
+      return 'файла больше нет';
+    case 413:
+      return 'превью получилось слишком большим';
+    default:
+      return `превью не заменилось (${status})`;
+  }
 }
 
 export const filesService = {

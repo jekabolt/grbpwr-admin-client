@@ -5,6 +5,13 @@ import Text from 'ui/components/text';
 export type TopicSelection = { topicIds: number[]; untopiced: boolean };
 
 /**
+ * Столько тем сервер соглашается пересечь за раз (`entity.MaxLibraryTopicFilters`): каждая —
+ * отдельный EXISTS-подзапрос. Двадцать первый чип отвечал бы отказом вместо выдачи, поэтому
+ * граница видна здесь глушением, а не там ошибкой.
+ */
+export const MAX_TOPIC_FILTERS = 20;
+
+/**
  * Темы холста: строка чипов вместо рейла.
  *
  * Мультивыбор — ПЕРЕСЕЧЕНИЕ, а не сумма. Второй чип в этом разделе нажимают, чтобы сузить
@@ -22,6 +29,7 @@ export function TopicChips({
   totalFiles,
   untopicedCount,
   matched,
+  searching,
   onChange,
 }: {
   topics: FileTopic[];
@@ -31,6 +39,8 @@ export function TopicChips({
   untopicedCount: number;
   /** Сколько файлов отвечает текущему фильтру. `undefined` — ответ ещё не приехал. */
   matched?: number;
+  /** В строке поиска что-то есть, то есть `matched` — это НЕ размер пересечения тем. */
+  searching?: boolean;
   onChange: (next: TopicSelection) => void;
 }) {
   const names = selected
@@ -45,19 +55,26 @@ export function TopicChips({
       topicIds: selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id],
     });
 
+  const atLimit = selected.length >= MAX_TOPIC_FILTERS;
+
+  // `matched` — размер ВСЕЙ текущей выдачи, а сервер применяет поиск в том же предикате, что
+  // и темы. Приписать это число одному пересечению тем при непустом поиске значило бы
+  // поставить рядом чип «packaging 40» и подпись «packaging — 3 шт.» — два разных ответа про
+  // одно и то же в двух сантиметрах друг от друга.
+  const count = matched === undefined ? '' : ` — ${matched} шт.${searching ? ' по запросу' : ''}`;
+
   const caption = () => {
     if (untopiced) {
       return 'файлы, на которых нет ни одной темы. разобрать — значит проставить ярлыки, а не разложить по папкам';
     }
+    if (atLimit) {
+      return `${MAX_TOPIC_FILTERS} тем — предел одного пересечения${count}. снимите чип, чтобы выбрать другой`;
+    }
     if (selected.length > 1) {
-      return `пересечение: файлы, у которых есть все выбранные темы (${names.join(' + ')})${
-        matched === undefined ? '' : ` — ${matched} шт.`
-      }`;
+      return `пересечение: файлы, у которых есть все выбранные темы (${names.join(' + ')})${count}`;
     }
     if (selected.length === 1) {
-      return `тема «${names[0] ?? ''}»${
-        matched === undefined ? '' : ` — ${matched} шт.`
-      }. нажмите вторую тему, чтобы сузить до пересечения`;
+      return `тема «${names[0] ?? ''}»${count}. нажмите вторую тему, чтобы сузить до пересечения`;
     }
     return 'несколько тем сразу дают пересечение, а не сумму: так ищут «бирку из packaging, которая ещё и atelier»';
   };
@@ -85,7 +102,14 @@ export function TopicChips({
           const id = Number(t.id);
           const on = selected.includes(id);
           return (
-            <Chip key={id} selected={on} pressed={on} onClick={() => toggle(id)}>
+            <Chip
+              key={id}
+              selected={on}
+              pressed={on}
+              disabled={atLimit && !on}
+              title={atLimit && !on ? `в одном пересечении не больше ${MAX_TOPIC_FILTERS} тем` : undefined}
+              onClick={() => toggle(id)}
+            >
               {t.name}
               <span className='tabular-nums opacity-70'>{Number(t.filesCount ?? 0)}</span>
             </Chip>

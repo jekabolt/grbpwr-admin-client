@@ -78,6 +78,10 @@ export function useLibraryFiles(filter: FilesFilter) {
         offset: pageParam as number,
       }),
     getNextPageParam: (lastPage, allPages) => {
+      // Пустая страница при ненулевом total — это рассинхрон count и select под чужим
+      // удалением. Без этой проверки offset не растёт, и каждое «показать ещё» подшивает
+      // ещё одну пустую страницу, обещая продолжение, которого нет.
+      if (!lastPage.files?.length) return undefined;
       const loaded = allPages.reduce((n, p) => n + (p.files?.length ?? 0), 0);
       const total = Number(lastPage.total ?? 0);
       return loaded < total ? loaded : undefined;

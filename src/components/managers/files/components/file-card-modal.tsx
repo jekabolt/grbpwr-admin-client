@@ -35,7 +35,7 @@ export function FileCardModal({
   writable: boolean;
   onClose: () => void;
 }) {
-  const { data, isLoading, refetch } = useLibraryFile(id);
+  const { data, isLoading, isError, error, refetch } = useLibraryFile(id);
   const { updateFile, deleteFile } = useFilesMutations();
   const { showMessage } = useSnackBarStore();
 
@@ -45,9 +45,18 @@ export function FileCardModal({
   const [newTopic, setNewTopic] = useState('');
   const [newTopics, setNewTopics] = useState<string[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [failure, setFailure] = useState<string | undefined>(undefined);
   const [reading, setReading] = useState(false);
   const readable = isReadablePdf(file?.fileName ?? '', file?.contentType ?? undefined);
+
+  // НАБРАННОЕ, НО НЕ ЗАЭНТЕРЕННОЕ ИМЯ ТЕМЫ — ТОЖЕ ПРАВКА. Поле с текстом и мёртвая кнопка
+  // рядом — тупик: человек видит заполненное поле и не понимает, чего от него ещё хотят.
+  const pendingTopics = useMemo(() => {
+    const typed = newTopic.trim();
+    if (!typed || newTopics.some((x) => x.toLowerCase() === typed.toLowerCase())) return newTopics;
+    return [...newTopics, typed];
+  }, [newTopic, newTopics]);
 
   // Зависимость — id файла, а НЕ объект `file`. По объекту форма пересобиралась на каждый ответ
   // сервера, а ответ приходит не только при открытии: «обновить» в читалке (просроченная ссылка)
@@ -65,13 +74,18 @@ export function FileCardModal({
     const was = new Set((file.topics ?? []).map((t) => Number(t.id)));
     const now = new Set(selected);
     const sameTopics = was.size === now.size && [...was].every((x) => now.has(x));
-    return name !== (file.fileName ?? '') || !sameTopics || newTopics.length > 0;
-  }, [file, name, selected, newTopics]);
+    return name !== (file.fileName ?? '') || !sameTopics || pendingTopics.length > 0;
+  }, [file, name, selected, pendingTopics]);
 
   const save = async () => {
     setFailure(undefined);
     try {
-      await updateFile.mutateAsync({ id, fileName: name.trim(), topicIds: selected, newTopics });
+      await updateFile.mutateAsync({
+        id,
+        fileName: name.trim(),
+        topicIds: selected,
+        newTopics: pendingTopics,
+      });
       // ПЕРЕСИНХРОН РОВНО ЗДЕСЬ, а не в эффекте по объекту файла. Названные на лету темы
       // существуют только после сохранения, и их id знает лишь сервер: без явного
       // перечитывания чип остался бы «новым» навсегда, а форма — вечно грязной, и второе
@@ -81,10 +95,14 @@ export function FileCardModal({
       if (f) {
         setName(f.fileName ?? '');
         setSelected((f.topics ?? []).map((t) => Number(t.id)));
+        setNewTopics([]);
+        setNewTopic('');
+        showMessage('сохранено', 'success');
+      } else {
+        // Сохранить вышло, перечитать — нет. Гасить чипы новых тем в этом месте нельзя: они
+        // исчезли бы с экрана, хотя на сервере уже стоят, и файл выглядел бы непроставленным.
+        showMessage('сохранено, но список тем не перечитался — обновите страницу', 'success');
       }
-      setNewTopics([]);
-      setNewTopic('');
-      showMessage('сохранено', 'success');
     } catch (e) {
       setFailure(e instanceof Error ? e.message : 'не удалось сохранить');
     }
@@ -109,17 +127,47 @@ export function FileCardModal({
     <ConfirmationModal
       open
       onOpenChange={(o) => {
-        if (!o) onClose();
+        if (o) return;
+        // ПРОМАХ МИМО ПАНЕЛИ НЕ СТИРАЕТ ПРАВКУ. Карточка теперь форма: имя и набор тем.
+        // Клик вне модалки и Escape у Radix закрывают по умолчанию, и переименование
+        // исчезало бы без единого слова — поэтому здесь стоит вопрос, а не выход.
+        if (dirty) {
+          setConfirmClose(true);
+          return;
+        }
+        onClose();
       }}
       onConfirm={onClose}
       title={file?.fileName || 'файл'}
       width='lg'
       hideActions
     >
-      {isLoading || !file ? (
+      {isLoading ? (
         <Text size='micro' variant='label'>
           загружаем…
         </Text>
+      ) : !file ? (
+        /* УПАВШИЙ ЗАПРОС — НЕ ЗАГРУЗКА. У react-query у ошибки `isLoading` уже false, и без
+           этой ветки карточка файла, удалённого после того, как ссылку кинули в чат, вечно
+           показывала бы «загружаем…». Сюда же приходит /files/abc, где id вовсе не число. */
+        <div className='flex flex-col items-start gap-2'>
+          <Text className='uppercase'>файл не открылся</Text>
+          <Text size='micro' variant='label'>
+            {Number.isFinite(id) && id > 0
+              ? isError && error instanceof Error
+                ? error.message
+                : 'сервер не ответил про этот файл. возможно, его удалили.'
+              : 'в адресе не номер файла — ссылка испорчена.'}
+          </Text>
+          <div className='flex items-center gap-1.5'>
+            <Button size='sm' variant='secondary' onClick={() => refetch()}>
+              повторить
+            </Button>
+            <Button size='sm' variant='secondary' onClick={onClose}>
+              к списку
+            </Button>
+          </div>
+        </div>
       ) : (
         <div className='flex flex-col gap-2.5'>
           <div className='flex flex-wrap gap-2.5'>
@@ -174,6 +222,7 @@ export function FileCardModal({
                 <Chip
                   key={t.id}
                   selected={selected.includes(Number(t.id))}
+                  pressed={selected.includes(Number(t.id))}
                   onClick={
                     writable
                       ? () =>
@@ -285,6 +334,21 @@ export function FileCardModal({
       )}
 
       {reading && <FileReaderModal id={id} onClose={() => setReading(false)} />}
+
+      <ConfirmationModal
+        open={confirmClose}
+        onOpenChange={setConfirmClose}
+        onConfirm={onClose}
+        title='закрыть без сохранения'
+        confirmLabel='закрыть'
+        cancelLabel='остаться'
+        width='sm'
+      >
+        <Text>
+          имя или набор тем изменены и не сохранены. закроете — правка пропадёт, вернуть её
+          будет неоткуда.
+        </Text>
+      </ConfirmationModal>
 
       <ConfirmationModal
         open={confirmDelete}

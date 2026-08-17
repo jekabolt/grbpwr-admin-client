@@ -49,13 +49,21 @@ export function FilesSelectionBar({
 
   const ids = selected.map((f) => Number(f.id)).filter((n) => Number.isFinite(n) && n > 0);
 
+  // Набранное, но не «заэнтеренное» имя темы — тоже выбор. Без этого поле стоит заполненным,
+  // а «проставить» серой, и объяснить это человеку нечем.
+  const typed = newTopic.trim();
+  const pendingTopics =
+    typed && !newTopics.some((x) => x.toLowerCase() === typed.toLowerCase())
+      ? [...newTopics, typed]
+      : newTopics;
+
   const applyTopics = async () => {
-    if (!pickTopics.length && !newTopics.length) return;
+    if (!pickTopics.length && !pendingTopics.length) return;
     try {
       const res = await assignTopics.mutateAsync({
         fileIds: ids,
         topicIds: pickTopics,
-        newTopics,
+        newTopics: pendingTopics,
       });
       const n = Number(res.assigned ?? 0);
       // Сервер считает СОЗДАННЫЕ пары, а не файлы: у тех, кто ярлык уже нёс, ничего не
@@ -81,9 +89,13 @@ export function FilesSelectionBar({
    */
   const downloadAll = async () => {
     setDownloading(true);
+    let skipped = 0;
     try {
       for (const f of selected) {
-        if (!f.downloadUrl) continue;
+        if (!f.downloadUrl) {
+          skipped += 1;
+          continue;
+        }
         const a = document.createElement('a');
         a.href = f.downloadUrl;
         a.rel = 'noopener';
@@ -94,6 +106,16 @@ export function FilesSelectionBar({
       }
     } finally {
       setDownloading(false);
+      // Молча пропущенный файл — это «нажал, ничего не скачалось». Ссылки у файла может не
+      // быть только по одной причине: выдача, из которой он взят, пришла без них.
+      if (skipped) {
+        showMessage(
+          skipped === selected.length
+            ? 'ни у одного файла нет свежей ссылки — обновите страницу'
+            : `${skipped} без ссылки — обновите страницу и повторите для них`,
+          'error',
+        );
+      }
     }
   };
 
@@ -201,7 +223,7 @@ export function FilesSelectionBar({
         onConfirm={applyTopics}
         title={`проставить тему · ${selected.length}`}
         confirmLabel={assignTopics.isPending ? 'ставим…' : 'проставить'}
-        confirmDisabled={assignTopics.isPending || (!pickTopics.length && !newTopics.length)}
+        confirmDisabled={assignTopics.isPending || (!pickTopics.length && !pendingTopics.length)}
         closeOnConfirm={false}
         width='md'
       >
@@ -216,6 +238,7 @@ export function FilesSelectionBar({
               <Chip
                 key={t.id}
                 selected={pickTopics.includes(Number(t.id))}
+                pressed={pickTopics.includes(Number(t.id))}
                 onClick={() =>
                   setPickTopics((p) =>
                     p.includes(Number(t.id))

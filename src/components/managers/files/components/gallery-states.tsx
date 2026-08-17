@@ -240,7 +240,15 @@ export function EmptySearchState({
 
 /** Первая страница не пришла вовсе — показывать пока нечего, но и делать вид, что библиотека
  * пуста, нельзя: это два разных ответа. */
-export function ListFailedState({ onRetry }: { onRetry: () => void }) {
+export function ListFailedState({
+  error,
+  onRetry,
+}: {
+  /** Слова сервера. Отказ бывает содержательным («не больше 20 тем в одном фильтре»), и
+   * подменять его на «сервер не ответил» значит увести человека чинить связь вместо фильтра. */
+  error?: string;
+  onRetry: () => void;
+}) {
   return (
     <StateFrame
       title='список не загрузился'
@@ -249,9 +257,10 @@ export function ListFailedState({ onRetry }: { onRetry: () => void }) {
           повторить
         </Button>
       }
+      note='это не значит, что библиотека пуста — её просто сейчас не спросить'
     >
       <Text size='micro' variant='label'>
-        сервер не ответил. это не значит, что библиотека пуста — просто её сейчас не спросить.
+        {error || 'сервер не ответил.'}
       </Text>
     </StateFrame>
   );
