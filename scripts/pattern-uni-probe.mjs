@@ -322,8 +322,9 @@ const cardPiece = (name, block, over = {}) =>
 // Дословный текст прежнего отказа — переписан сюда РУКАМИ, а не считан из модуля: иначе правка
 // формулировки прошла бы мимо проверки «отказ остался прежним».
 const OLD_REFUSAL =
-  'в выкройках этой ткани ни одна деталь не градуируется по размерам — площадь каждого размера ' +
-  'вышла бы одинаковой, и это была бы не норма размера, а копия соседней. Похоже, выгружен только один размер';
+  "in this fabric's patterns not a single piece is graded by size — the area of every size would " +
+  'come out the same, and that would not be a size norm but a copy of its neighbour. it looks like ' +
+  'only one size was exported';
 
 console.log('\nT4.1 · скоуп из одних UNI-деталей получает норму: одно ЧЕСТНОЕ число всем размерам');
 {
@@ -424,8 +425,8 @@ console.log('\nT4.5 · sizeAreasFromParsed: доказательство бер�
   // Старый блоб без токена — отказ ДОСЛОВНО прежний: блоб галку не хранит и доказательством её не
   // сделать никакими правками карточки.
   const OLD_MARKER_REFUSAL =
-    'в раскладке ни одна деталь не градуируется по размерам — площадь любого размера получилась ' +
-    'бы одинаковой, и это была бы не норма размера, а копия соседней';
+    'in the marker not a single piece is graded by size — the area of any size would come out the ' +
+    'same, and that would not be a size norm but a copy of its neighbour';
   const plain = m.sizeAreasFromParsed({
     marker: marker(['POCKET_L', 'POCKET_R']),
     parsed: m.piecesOf(['POCKET_L', 'POCKET_R'], { areaCm2: 100 }),
@@ -497,14 +498,14 @@ console.log('\nT5.f · склейка размеров молчит про UNI-�
   const gradedFile = m.GRADED.map((n, i) =>
     m.piece(i + 10, n, { fileIndex: 1, originX: 0, originY: 0 }));
   const plan = m.planSizeMerge([...uniFile, ...gradedFile], ['pockets.dxf', 'main.dxf'], m.DICT, 'mm');
-  ck(!plan.warnings.some((w) => w.startsWith('pockets.dxf: в именах блоков')),
+  ck(!plan.warnings.some((w) => w.startsWith('pockets.dxf: no size recognised in the block names')),
      'про UNI-файл предупреждения нет', JSON.stringify(plan.warnings));
 
   // Тот же файл без токена — предупреждение осталось дословно: там размер действительно не опознан.
   const plainFile = ['POCKET_L', 'POCKET_R'].map((n, i) =>
     m.piece(i + 1, n, { fileIndex: 0, originX: 0, originY: 0 }));
   const plain = m.planSizeMerge([...plainFile, ...gradedFile], ['pockets.dxf', 'main.dxf'], m.DICT, 'mm');
-  ck(plain.warnings.includes('pockets.dxf: в именах блоков не опознан размер'),
+  ck(plain.warnings.includes('pockets.dxf: no size recognised in the block names'),
      'без токена предупреждение прежнее', JSON.stringify(plain.warnings));
 
   // Смешанный файл (один блок с токеном, другой без) — предупреждение ОСТАЁТСЯ: не опознан
@@ -512,7 +513,7 @@ console.log('\nT5.f · склейка размеров молчит про UNI-�
   const mixedFile = ['PCK_L_UNI_M', 'POCKET_R'].map((n, i) =>
     m.piece(i + 1, n, { fileIndex: 0, originX: 0, originY: 0 }));
   const mixed = m.planSizeMerge([...mixedFile, ...gradedFile], ['pockets.dxf', 'main.dxf'], m.DICT, 'mm');
-  ck(mixed.warnings.includes('pockets.dxf: в именах блоков не опознан размер'),
+  ck(mixed.warnings.includes('pockets.dxf: no size recognised in the block names'),
      'смешанный файл предупреждает по-прежнему', JSON.stringify(mixed.warnings));
 }
 
@@ -541,7 +542,7 @@ console.log('\nR2 · НОРМА: две детали кроя на одну uni-
   ck(two.ok === false, 'две детали кроя на один uniBase — ОТКАЗ', two.ok ? 'ok!' : '');
   ck(!two.ok && two.reason.includes('PCK_L_UNI_M') && two.reason.includes('PCK_L_UNI_S'),
      'отказ называет ОБА блока', !two.ok ? two.reason : '');
-  ck(!two.ok && two.reason.includes('вдвое'), 'и говорит, чем это кончится');
+  ck(!two.ok && two.reason.includes('twice the fabric'), 'и говорит, чем это кончится');
   // Настил на ТОМ ЖЕ входе дедупит (кроит одну копию) — расхождение бумаги и настила закрыто с
   // обеих сторон, и закрыто ОДНИМ правилом с разными ответами.
   const lay = layPieces(pieces, ROWS_2);
@@ -559,7 +560,7 @@ console.log('\nR2b · НОРМА: размерный ряд и UNI на одну
     cardPiece('спинка', 'BP'), cardPiece('рукав', 'SL_R'),
   ]);
   ck(out.ok === false, 'градуированная деталь рядом с uni — ОТКАЗ', out.ok ? 'ok!' : '');
-  ck(!out.ok && out.reason.includes('противоречат друг другу'),
+  ck(!out.ok && out.reason.includes('contradict each other'),
      'теми же словами, что на пути настила', !out.ok ? out.reason : '');
   ck(!out.ok && out.reason.includes('PCK_L_UNI_M'), 'с именем спорящего блока');
 }
@@ -611,7 +612,7 @@ console.log('\nR1 · БЛОБ: продолжение старой склеен�
      two.ok ? String(two.areas.agnosticCm2) : '');
   ck(!two.ok && two.reason.includes('PCK_L_UNI_M') && two.reason.includes('PCK_L_UNI_S'),
      'отказ называет обе копии', !two.ok ? two.reason : '');
-  ck(!two.ok && two.reason.includes('Переснимите раскладку'), 'и называет выход');
+  ck(!two.ok && two.reason.includes('re-capture the marker'), 'и называет выход');
 
   // Прежние проверки сюда не достают по построению: они ловят ОДНУ идентичность «и с хвостом, и
   // без», а тут идентичности разные. Убеждаемся, что сработала именно новая.
@@ -622,7 +623,7 @@ console.log('\nR1 · БЛОБ: продолжение старой склеен�
   const gradedPck = ['PCK_L_XS', 'PCK_L_S', 'PCK_L_M', 'PCK_L_L', 'PCK_L_XL'];
   const mixed = ask([...gradedPck, 'PCK_L_UNI_M', ...m.GRADED], [...gradedPck, 'PCK_L_UNI_M', ...m.GRADED]);
   ck(mixed.ok === false, 'ряд + UNI в блобе — отказ', mixed.ok ? 'ok!' : '');
-  ck(!mixed.ok && mixed.reason.includes('противоречат друг другу'), 'теми же словами',
+  ck(!mixed.ok && mixed.reason.includes('contradict each other'), 'теми же словами',
      !mixed.ok ? mixed.reason : '');
 
   // РЕГРЕССИЯ: разные uniBase в блобе — не копии, продолжение работает как прежде.
@@ -703,7 +704,7 @@ console.log('\nR4 · ГАЛКА против фактической градац
   ck(!flagged.ok && flagged.reason.includes('спинка'), 'отказ называет ДЕТАЛЬ',
      !flagged.ok ? flagged.reason : '');
   ck(!flagged.ok && flagged.reason.includes('BP_XS'), 'и называет её блоки');
-  ck(!flagged.ok && flagged.reason.includes('Снимите галку'), 'и говорит, что делать');
+  ck(!flagged.ok && flagged.reason.includes('untick the box'), 'и говорит, что делать');
   // Галка на детали, которая ДЕЙСТВИТЕЛЬНО не градуируется, — законна и работает (T4.2).
   const honest = ['PCK_L', 'PCK_R'].map((n, i) => m.piece(i + 1, n, { areaCm2: 100 }));
   const ok = normFor(honest, ['PCK_L', 'PCK_R'].map((n) => cardPiece(n, n, { ungraded: true })));
