@@ -34,6 +34,13 @@ There is **no test runner** configured. To verify a change, run `yarn build:chec
   dies when the branch is renamed. Set it to the stable admin host of that contour
   (`https://admin.beta.grbpwr.com`, `https://admin.grbpwr.com`). Nothing fails visibly when it is
   wrong; the QR just stops working later, in a workshop.
+- Optional, almost never needed: `VITE_FILE_SHARE_ORIGIN` — the origin of the public file-share
+  landing page (`{origin}/f/{token}`) that the access block and the shared-files screen copy to
+  the clipboard. It falls back to `VITE_PATTERN_VIEWER_ORIGIN` and then to
+  `window.location.origin`, so setting the pattern-viewer variable already covers it — all public
+  pages are the same SPA on the same host. Set this one only if `/f/` ever moves to a domain of
+  its own. The failure it guards against is the same silent one: a link copied from a Vercel
+  preview is handed to a contractor and dies with the alias.
 - `.env.example` lists a stale `REACT_APP_SERVER_URL` — the code uses `VITE_SERVER_URL`. Don't propagate the old name.
 
 ## Architecture

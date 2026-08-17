@@ -15,6 +15,11 @@ interface ImportMetaEnv {
    *  window.location.origin, so paper printed from a Vercel preview points at an
    *  ephemeral SSO-protected alias and the QR dies silently later. */
   readonly VITE_PATTERN_VIEWER_ORIGIN?: string;
+  /** Origin of the public file-share landing page (/f/{token}) copied out of the access
+   *  block and the shared-files screen. Optional: unset it falls back to
+   *  VITE_PATTERN_VIEWER_ORIGIN, which is the same host — all public pages are one SPA.
+   *  Set it only if /f/ ever moves to a domain of its own. */
+  readonly VITE_FILE_SHARE_ORIGIN?: string;
 }
 
 interface ImportMeta {
