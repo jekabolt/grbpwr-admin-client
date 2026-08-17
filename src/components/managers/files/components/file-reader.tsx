@@ -116,6 +116,10 @@ export function FileReaderModal({ id, onClose }: { id: number; onClose: () => vo
               name={name}
               url={file.url ?? ''}
               downloadUrl={file.downloadUrl ?? ''}
+              // Срок ссылок приезжает С СЕРВЕРА, и только он даёт право написать «истекла».
+              // Без него это слово было догадкой — и на файле, загруженном секунду назад,
+              // догадкой заведомо ложной.
+              urlsExpireAt={file.urlsExpireAt ?? null}
               refreshing={isFetching}
               onRefreshLink={() => {
                 refetch();
@@ -179,6 +183,7 @@ function PdfStage({
   name,
   url,
   downloadUrl,
+  urlsExpireAt,
   refreshing,
   onRefreshLink,
   findOpen,
@@ -188,14 +193,24 @@ function PdfStage({
   name: string;
   url: string;
   downloadUrl: string;
+  urlsExpireAt: string | null;
   refreshing: boolean;
   onRefreshLink: () => void;
   findOpen: boolean;
   onFindOpenChange: (open: boolean) => void;
   findFocus: number;
 }) {
-  const { doc, status, numPages, sampleHasText, index, indexFailed, indexing, buildIndex } =
-    usePdfDocument(url);
+  const {
+    doc,
+    status,
+    numPages,
+    sampleHasText,
+    index,
+    indexFailed,
+    indexing,
+    buildIndex,
+    failure,
+  } = usePdfDocument(url, urlsExpireAt);
   // Страница и масштаб живут ЗДЕСЬ, а не внутри загрузчика документа: обновление просроченной
   // ссылки меняет `url`, документ перезагружается — а человек обязан вернуться туда, где читал.
   const [page, setPage] = useState(1);
@@ -456,15 +471,31 @@ function PdfStage({
         <div className='flex min-h-0 flex-1 items-center justify-center border border-borderColor bg-bgColor p-4'>
           <div className='flex max-w-[52ch] flex-col items-center gap-2 text-center'>
             <Text size='micro' className='uppercase'>
-              ссылка истекла
+              {failure?.head ?? 'файл не открылся'}
             </Text>
             <Text size='micro' variant='label'>
-              ссылка на файл живёт несколько часов, а эта вкладка открыта дольше. обновим её и
-              вернёмся на ту же страницу.
+              {failure?.detail ??
+                'не удалось получить файл — возможно, не настроен доступ к хранилищу.'}
             </Text>
-            <Button size='sm' disabled={refreshing} onClick={onRefreshLink}>
-              {refreshing ? 'обновляем…' : 'обновить'}
-            </Button>
+            <div className='flex items-center gap-2'>
+              {/* «Обновить» перевыпускает подпись — и только. На повреждённом pdf, на удалённом
+                  объекте и на закрытом доступе к бакету она не чинит ничего, а обещает, что
+                  чинит: человек жмёт её по кругу и делает вывод, что панель сломана. */}
+              {failure?.refreshable !== false && (
+                <Button size='sm' disabled={refreshing} onClick={onRefreshLink}>
+                  {refreshing ? 'обновляем…' : 'обновить'}
+                </Button>
+              )}
+              {/* СКАЧАТЬ РАБОТАЕТ ТАМ, ГДЕ ЧТЕНИЕ НЕТ. Это не утешительная кнопка: переход по
+                  ссылке — навигация, а не запрос из скрипта, и правила CORS бакета к ней не
+                  применяются вовсе. Ровно в том случае, где читалка упирается в них насмерть,
+                  файл забирается целым. */}
+              {downloadUrl && (
+                <Button asChild size='sm' variant='secondary'>
+                  <a href={downloadUrl}>скачать</a>
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       ) : status === 'loading' || !doc ? (

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist';
 import {
+  resolveReaderFailure,
+  shouldRetryWithoutRange,
+  type ReaderFailure,
+} from '../api/rpc-error';
+import {
   buildPageText,
   hasTextLayer,
   TEXT_LAYER_SAMPLE_PAGES,
@@ -63,6 +68,29 @@ export async function pageTextOf(doc: PDFDocumentProxy, pageNumber: number): Pro
 
 export type PdfStatus = 'loading' | 'ready' | 'failed';
 
+/**
+ * ОТВЕТИЛО ЛИ ХРАНИЛИЩЕ ВООБЩЕ.
+ *
+ * Ошибка pdfjs на запрете CORS и на обрыве сети — одна и та же строка «Failed to fetch»: браузер
+ * сознательно не рассказывает странице, чем именно ей не дали ответ. Но режим `no-cors` правил
+ * CORS не проверяет — ответ приходит непрозрачным, читать его нечем, зато сам факт ответа виден.
+ * Значит: resolve — хранилище на связи и вопрос в доступе, reject — до хранилища не дошли.
+ *
+ * HEAD, а не GET: подписан url под GET, и HEAD прилетит отказом подписи — но нам нужен ровно
+ * факт ответа, а не его содержимое, и тащить ради него весь файл второй раз незачем.
+ *
+ * Идёт ТОЛЬКО по пути отказа: на успешном чтении лишних запросов не появляется.
+ */
+async function storageReachable(url: string, signal: AbortSignal): Promise<boolean | null> {
+  try {
+    await fetch(url, { mode: 'no-cors', method: 'HEAD', cache: 'no-store', signal });
+    return true;
+  } catch {
+    // Отменили мы сами (ушли со страницы, сменили ссылку) — это не ответ про сеть.
+    return signal.aborted ? null : false;
+  }
+}
+
 export interface PdfDocumentState {
   doc: PDFDocumentProxy | null;
   status: PdfStatus;
@@ -79,6 +107,13 @@ export interface PdfDocumentState {
   indexFailed: boolean;
   indexing: boolean;
   buildIndex: () => void;
+  /**
+   * ПОЧЕМУ не открылось — словами. Раньше здесь не было ничего, и экран на любой отказ писал
+   * «ссылка истекла»: на не настроенный доступ к бакету, на обрыв сети, на повреждённый файл и
+   * на файл, у которого ссылки просмотра не было вовсе. Из четырёх случаев фраза была верна в
+   * одном, а действие подсказывала бесполезное во всех остальных.
+   */
+  failure: ReaderFailure | null;
 }
 
 /**
@@ -86,9 +121,14 @@ export interface PdfDocumentState {
  * документ, но НЕ трогает страницу и масштаб — их держит вызывающий, и в этом весь смысл
  * кнопки «обновить»: человек возвращается туда же, где читал.
  */
-export function usePdfDocument(url: string | undefined): PdfDocumentState {
+export function usePdfDocument(
+  url: string | undefined,
+  /** Срок ссылок, который назвал сервер: без него «истекла» — догадка, а не факт. */
+  urlsExpireAt?: string | null,
+): PdfDocumentState {
   const [doc, setDoc] = useState<PDFDocumentProxy | null>(null);
   const [status, setStatus] = useState<PdfStatus>('loading');
+  const [failure, setFailure] = useState<ReaderFailure | null>(null);
   const [sampleHasText, setSampleHasText] = useState(true);
   const [index, setIndex] = useState<PageText[] | null>(null);
   const [indexFailed, setIndexFailed] = useState(false);
@@ -98,20 +138,36 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
   useEffect(() => {
     if (!url) {
       setStatus('failed');
+      setFailure(resolveReaderFailure({ error: null, reachable: null, url: '' }));
       return;
     }
     let cancelled = false;
     setStatus('loading');
+    setFailure(null);
     setIndex(null);
     // Явно, а не «оно само»: старый документ рушится в уборке этого же эффекта, и пока `doc`
     // на него показывает, рельс и страница держат мёртвый PDFDocumentProxy.
     setDoc(null);
     let task: PDFDocumentLoadingTask | null = null;
+    const probe = new AbortController();
 
     (async () => {
       const pdfjs = await loadPdfjs();
-      task = pdfjs.getDocument({ url });
-      const loaded = await task.promise;
+      let loaded: PDFDocumentProxy;
+      try {
+        task = pdfjs.getDocument({ url });
+        loaded = await task.promise;
+      } catch (e) {
+        if (cancelled) return;
+        // ОДИН повтор без диапазонов — и только на том отказе, который диапазоны и дают
+        // (см. shouldRetryWithoutRange). Не по умолчанию: без диапазонов первая страница
+        // ждёт полной закачки, а на каталоге в сорок мегабайт это сорок мегабайт вместо
+        // сотни килобайт. Платить эту цену на КАЖДОМ открытии ради случая, который здесь
+        // ещё ни разу не наблюдался, — плохой размен.
+        if (!shouldRetryWithoutRange(e)) throw e;
+        task = pdfjs.getDocument({ url, disableRange: true });
+        loaded = await task.promise;
+      }
       if (cancelled) {
         loaded.destroy();
         return;
@@ -119,28 +175,41 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
       setDoc(loaded);
       setStatus('ready');
 
-      const samples: string[] = [];
-      const upto = Math.min(TEXT_LAYER_SAMPLE_PAGES, loaded.numPages);
-      for (let n = 1; n <= upto; n++) {
-        const text = (await pageTextOf(loaded, n)).text;
-        if (cancelled) return;
-        samples.push(text);
+      // ПРОБА ТЕКСТА — В СВОЁМ try. Документ уже открыт и показан; сбой разбора его страниц
+      // не имеет права переводить экран в отказ. Раньше он это делал: `.catch` внизу был один
+      // на загрузку и на пробу, и полностью открытый документ сменялся плашкой «ссылка
+      // истекла» — на ссылке, по которой он только что приехал целиком.
+      try {
+        const samples: string[] = [];
+        const upto = Math.min(TEXT_LAYER_SAMPLE_PAGES, loaded.numPages);
+        for (let n = 1; n <= upto; n++) {
+          const text = (await pageTextOf(loaded, n)).text;
+          if (cancelled) return;
+          samples.push(text);
+        }
+        setSampleHasText(hasTextLayer(samples));
+      } catch {
+        // Текстового слоя не добыли — поиск об этом скажет сам. Документ читается.
       }
-      setSampleHasText(hasTextLayer(samples));
-    })().catch(() => {
-      // Просроченная ссылка, отозванный доступ, сеть — с клиента они неразличимы, и
-      // называть причину точнее, чем «ссылка не открылась», было бы выдумкой.
-      if (!cancelled) setStatus('failed');
+    })().catch(async (e) => {
+      if (cancelled) return;
+      // Проба идёт ЗДЕСЬ, а не в разборе: она сетевая и асинхронная, а разбор обязан
+      // оставаться чистой функцией — иначе его нечем проверить.
+      const reachable = await storageReachable(url, probe.signal);
+      if (cancelled) return;
+      setFailure(resolveReaderFailure({ error: e, reachable, url, urlsExpireAt }));
+      setStatus('failed');
     });
 
     return () => {
       cancelled = true;
+      probe.abort();
       // Рушим ЗАДАЧУ, а не документ: если ссылку обновили, пока файл ещё качается, документа
       // просто нет — и старая закачка вместе с разбором в воркере доедет до конца впустую.
       // destroy() задачи закрывает и её, и уже полученный из неё документ.
       void task?.destroy().catch(() => {});
     };
-  }, [url]);
+  }, [url, urlsExpireAt]);
 
   // Индекс строится ровно один раз на документ и только когда его попросили: getTextContent по
   // трёхсотстраничному каталогу стоит секунд, а большинство открытий читалки — просто чтение.
@@ -188,5 +257,6 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
     indexFailed,
     indexing,
     buildIndex,
+    failure,
   };
 }

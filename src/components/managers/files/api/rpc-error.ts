@@ -418,3 +418,181 @@ export function failureText(e: unknown, fallback: string): string {
   const f = resolveFailure(e, fallback);
   return f.raw ? `${f.text} (ответ сервера: ${f.raw})` : f.text;
 }
+
+/* ══ ОТКАЗ НЕ ОТ ШЛЮЗА: ЧИТАЛКА ═════════════════════════════════════════════════════════════
+ *
+ * Вторая машина в этом же модуле, и это осознанно.
+ *
+ * Всё выше разбирает отказ НАШЕГО шлюза: `status` из ответа, обёртка `rpc error: code = …`,
+ * таблица английских фраз бэкенда. У читалки источник другой — pdfjs идёт в БАКЕТ напрямую,
+ * мимо шлюза, и ни одного из этих признаков в его ошибке нет. Прогнать её через
+ * `resolveFailure` значило бы получить «не удалось открыть файл (ответ сервера: Failed to
+ * fetch)»: английская строка под русской шапкой, ровно то, от чего первая машина и защищает.
+ *
+ * Поэтому машина отдельная, а МОДУЛЬ ТОТ ЖЕ: правило раздела — один дом у разбора отказов, и
+ * второй файл разошёлся бы с этим молча. Разные здесь только вход (ошибка pdfjs, а не ответ
+ * шлюза) и форма выхода: у читалки отказ занимает весь экран, поэтому у него шапка, объяснение
+ * и признак «есть ли смысл жать «обновить»», а не строка с уликой.
+ *
+ * ЧТО ИЗМЕРЕНО (chromium + pdfjs 4.10.38, два origin'а, стенд в scratchpad/readerfix):
+ *
+ *   правила CORS на бакете нет   → UnknownErrorException «Failed to fetch»
+ *   правило есть, подпись 403    → UnexpectedResponseException, status 403
+ *   объекта нет (404)            → MissingPDFException
+ *   на месте pdf не pdf          → InvalidPDFException
+ *   кросс-доменный редирект      → UnknownErrorException «Failed to fetch» (origin обнулён)
+ *
+ * Первый и последний случай неотличимы от обрыва сети ПО ОШИБКЕ pdfjs — но отличимы пробой:
+ * запрос в режиме `no-cors` правил CORS не проверяет вовсе, поэтому он resolve'ится, если
+ * хранилище ответило хоть чем-нибудь, и reject'ится, только если до него не дошли. Это и есть
+ * `reachable` ниже, и без него «ссылка истекла» приходилось бы писать наугад.
+ */
+
+export type ReaderFailure = {
+  /** Короткая шапка, прописными. */
+  head: string;
+  /** Что произошло и что с этим делать. */
+  detail: string;
+  /** Есть ли смысл в кнопке «обновить»: она перевыпускает подпись, а не чинит бакет. */
+  refreshable: boolean;
+};
+
+/** Имя исключения pdfjs. У всех его исключений `name` проставлен конструктором. */
+function pdfErrorName(e: unknown): string {
+  if (e && typeof e === 'object') {
+    const n = (e as { name?: unknown }).name;
+    if (typeof n === 'string') return n;
+  }
+  return '';
+}
+
+function pdfErrorStatus(e: unknown): number | undefined {
+  if (e && typeof e === 'object') {
+    const s = (e as { status?: unknown }).status;
+    if (typeof s === 'number') return s;
+  }
+  return undefined;
+}
+
+/**
+ * Повторить ли загрузку БЕЗ диапазонов.
+ *
+ * pdfjs по умолчанию дочитывает документ запросами Range — это то, из-за чего каталог на сорок
+ * мегабайт открывается на первой странице, а не после полной закачки. Кросс-доменными они
+ * ходят без предполётной проверки (`Range` — заголовок из безопасного списка, измерено: 4
+ * запроса Range, 0 запросов OPTIONS), так что правилу CORS про них знать нечего.
+ *
+ * Но есть посредники, которые на Range отвечают 403 или 416, отдавая тот же объект целиком без
+ * него. Единственный дешёвый ответ на это — один повтор с `disableRange`. Цена повтора на
+ * НЕ этом случае — один лишний запрос на пути, который и так провалился.
+ */
+export function shouldRetryWithoutRange(e: unknown): boolean {
+  if (pdfErrorName(e) !== 'UnexpectedResponseException') return false;
+  const s = pdfErrorStatus(e);
+  return s === 403 || s === 416;
+}
+
+/** Отказ читалки словами. `reachable`: true — хранилище ответило, false — не дошли, null — не проверяли. */
+export function resolveReaderFailure(args: {
+  error: unknown;
+  reachable: boolean | null;
+  /** Пустая ссылка — свой случай: сети не было вовсе. */
+  url: string;
+  /** Срок, который назвал сервер (`urls_expire_at`). Пустой — срока не знаем. */
+  urlsExpireAt?: string | null;
+  now?: number;
+}): ReaderFailure {
+  const { error, reachable, url, urlsExpireAt } = args;
+  const now = args.now ?? Date.now();
+
+  if (!url) {
+    return {
+      head: 'нет ссылки на просмотр',
+      detail:
+        'сервер не дал ссылку для чтения этого файла: в браузере открываются только типы из его списка, остальное отдаётся только на скачивание. если тип у файла записан верно — попробуйте обновить.',
+      refreshable: true,
+    };
+  }
+
+  const name = pdfErrorName(error);
+  const status = pdfErrorStatus(error);
+
+  // Срок ЗНАЕМ от сервера, а не гадаем: подпись, выданную час назад, называть просроченной
+  // нельзя, сколько бы правдоподобно это ни звучало.
+  const expiresAt = urlsExpireAt ? Date.parse(urlsExpireAt) : NaN;
+  const trulyExpired = Number.isFinite(expiresAt) && expiresAt <= now;
+
+  if (name === 'UnexpectedResponseException' && status === 403) {
+    if (trulyExpired) {
+      return {
+        head: 'ссылка истекла',
+        detail:
+          'срок подписи на файл вышел, а вкладка открыта дольше. обновим ссылку и вернёмся на ту же страницу.',
+        refreshable: true,
+      };
+    }
+    return {
+      head: 'хранилище не отдало файл',
+      detail:
+        'хранилище ответило «доступ запрещён» (403), хотя срок ссылки ещё не вышел. обычно так выглядит убранный объект или изменённые права на бакет. файл всё ещё можно скачать.',
+      refreshable: true,
+    };
+  }
+
+  if (name === 'UnexpectedResponseException') {
+    return {
+      head: 'хранилище ответило ошибкой',
+      detail: `на запрос файла хранилище вернуло ${status ?? 'ошибку'}. повторите позже; файл можно скачать.`,
+      refreshable: true,
+    };
+  }
+
+  if (name === 'MissingPDFException') {
+    return {
+      head: 'файла нет в хранилище',
+      detail:
+        'библиотека про этот файл знает, а в хранилище его нет — объект удалили мимо панели. обновление ссылки тут не поможет.',
+      refreshable: false,
+    };
+  }
+
+  if (name === 'InvalidPDFException') {
+    return {
+      head: 'это не читается как pdf',
+      detail:
+        'файл не разбирается: он повреждён или под расширением .pdf лежит что-то другое. скачайте и откройте в своей программе.',
+      refreshable: false,
+    };
+  }
+
+  if (name === 'PasswordException') {
+    return {
+      head: 'pdf под паролем',
+      detail: 'документ зашифрован, пароль читалка не спрашивает. скачайте и откройте в программе.',
+      refreshable: false,
+    };
+  }
+
+  // Ответа браузер странице не отдал. Что именно помешало — говорит проба.
+  if (reachable === true) {
+    return {
+      head: 'браузер не пустил файл',
+      detail:
+        'хранилище ответило, но браузер не отдал ответ странице: для этого адреса панели не открыт доступ к бакету (cors). файл цел — скачивание работает, чтение в браузере заработает после настройки хранилища.',
+      refreshable: false,
+    };
+  }
+  if (reachable === false) {
+    return {
+      head: 'до хранилища не достучались',
+      detail: 'запрос к хранилищу не дошёл — похоже на обрыв связи. проверьте сеть и повторите.',
+      refreshable: true,
+    };
+  }
+  return {
+    head: 'файл не открылся',
+    detail:
+      'не удалось получить файл — возможно, не настроен доступ к хранилищу. файл можно скачать.',
+    refreshable: true,
+  };
+}
