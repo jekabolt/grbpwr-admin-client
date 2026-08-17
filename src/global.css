@@ -429,8 +429,10 @@ body[data-dock-bottom] .sticky.bottom-0:not([role='dialog'] *) {
 .pdf-text-layer br {
   position: absolute;
 }
+/* Выделение в невидимом текстовом слое — те же чернила системы, а не свой чёрный: цвет
+   берётся из токена и поедет вместе с ним, если палитру когда-нибудь тронут. */
 .pdf-text-layer span::selection {
-  background: rgba(0, 0, 0, 0.25);
+  background: color-mix(in srgb, var(--color-textColor) 25%, transparent);
 }
 /* Страница с /Rotate. pdfjs сам ставит сюда data-main-rotation и меряет слой НЕПОВЁРНУТЫМИ
    размерами (rawDims), а доворачивает его вот этим правилом — в pdf_viewer.css оно глобальное,

@@ -46,12 +46,106 @@ export function buildPageText(runs: TextRun[]): PageText {
   return { text, runs: spans };
 }
 
+/* ── нормализация: то, чем набранное отличается от свёрстанного ───────────────────────── */
+
+/** Мягкий перенос: на бумаге его не видно вовсе, а в тексте он стоит посреди слова. */
+const SOFT_HYPHEN = '\u00AD';
+/** Всё, что в тексте работает дефисом: обычный, типографский, неразрывный, минус. */
+const HYPHENS = new Set(['-', '\u2010', '\u2011', '\u2012', '\u2013', '\u2212']);
+/** Комбинирующие знаки: из них складываются «й» (и + краткая) и «ё» (е + умляут). */
+const COMBINING = /[\u0300-\u036F]/;
+/** Дефис + конец строки: ровно тот случай, когда слово разорвано переносом по слогам. */
+const HYPHEN_BREAK = /^[ \t]*\r?\n[ \t]*/;
+
 /**
- * Регэксп запроса. Пробелы внутри запроса становятся `\s+` по той же причине, что и выше:
+ * Текст, приведённый к тому виду, в котором его ищут, ПЛЮС обратный адрес каждого символа.
+ *
+ * Карта обязательна: подсветка живёт в координатах ИСХОДНОГО текста страницы (`PageText.runs`
+ * и `sliceMatch` считают именно там), а ищем мы в приведённом. Без карты совпадение нашлось бы
+ * верно, а прямоугольник встал бы мимо слова — и заметить это можно только глазами.
+ */
+export interface NormalizedText {
+  text: string;
+  /** `map[i]` — индекс в исходнике того символа, что дал `text[i]`; `map[text.length]` — конец. */
+  map: number[];
+}
+
+/**
+ * Приводит текст к виду, в котором «бутылка» находит «буты-\nлка».
+ *
+ * Три вещи, и все три приходят из настоящих pdf, а не из фантазии:
+ *   1. ПЕРЕНОС ПО СЛОГАМ. Вёрстка по ширине рвёт слово дефисом на конце строки. Человек ищет
+ *      слово целиком и не находит НИЧЕГО, глядя прямо на него;
+ *   2. МЯГКИЙ и НЕРАЗРЫВНЫЙ ДЕФИС. Первого не видно совсем, второй выглядит как обычный;
+ *   3. РАЗЛОЖЕННЫЕ «й» и «ё». pdf сплошь и рядом отдаёт их двумя символами, а с клавиатуры
+ *      приходит один. Внешне они неотличимы, поэтому провал читается как «поиск сломался».
+ *
+ * Чего эта функция НЕ делает: не склеивает «состав - и уход» (дефис между словами — не
+ * перенос), не приравнивает «й» к «и» и не трогает регистр — регистром занимается флаг `i`.
+ */
+export function normalizeForSearch(src: string): NormalizedText {
+  let text = '';
+  const map: number[] = [];
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    if (ch === SOFT_HYPHEN) {
+      i += 1;
+      continue;
+    }
+    if (HYPHENS.has(ch)) {
+      const brk = HYPHEN_BREAK.exec(src.slice(i + 1));
+      if (brk) {
+        // Дефис вместе с переносом исчезает целиком: половинки слова смыкаются.
+        i += 1 + brk[0].length;
+        continue;
+      }
+      text += '-';
+      map.push(i);
+      i += 1;
+      continue;
+    }
+    // База плюс висящие на ней комбинирующие знаки — один кластер, и складывается он целиком.
+    let j = i + 1;
+    while (j < src.length && COMBINING.test(src[j])) j += 1;
+    const composed = src.slice(i, j).normalize('NFC');
+    for (let k = 0; k < composed.length; k++) {
+      text += composed[k];
+      map.push(i);
+    }
+    i = j;
+  }
+  map.push(src.length);
+  return { text, map };
+}
+
+/**
+ * Приведённые тексты страниц. Поиск идёт по всему документу на каждую букву запроса, и
+ * пересчитывать разбор трёхсот страниц заново незачем: тексты страниц не меняются.
+ */
+const normalized = new Map<string, NormalizedText>();
+const NORMALIZED_CACHE_MAX = 400;
+
+function normalizedOf(src: string): NormalizedText {
+  const hit = normalized.get(src);
+  if (hit) return hit;
+  const made = normalizeForSearch(src);
+  // Чистим целиком, а не по одной записи: кэш здесь — ускорение, а не хранилище, и точность
+  // вытеснения не стоит ни строчки кода.
+  if (normalized.size >= NORMALIZED_CACHE_MAX) normalized.clear();
+  normalized.set(src, made);
+  return made;
+}
+
+/**
+ * Регэксп запроса — по ПРИВЕДЁННОМУ тексту (`normalizeForSearch`), а не по сырому: запрос
+ * набирают с клавиатуры, а текст приходит из вёрстки, и мирить их надо в одной системе.
+ *
+ * Пробелы внутри запроса становятся `\s+` по той же причине, что и синтетический перенос:
  * в тексте страницы на этом месте может стоять перенос, а человек ищет фразу, а не строку.
  */
 export function queryPattern(query: string): RegExp | null {
-  const words = query.trim().split(/\s+/).filter(Boolean);
+  const words = normalizeForSearch(query).text.trim().split(/\s+/).filter(Boolean);
   if (!words.length) return null;
   const escaped = words.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
   return new RegExp(escaped.join('\\s+'), 'gi');
@@ -62,18 +156,22 @@ export interface Span {
   end: number;
 }
 
+/** Совпадения в координатах ИСХОДНОГО текста — тех самых, в которых рисуется подсветка. */
 export function findInText(text: string, query: string): Span[] {
   const re = queryPattern(query);
   if (!re) return [];
+  const norm = normalizedOf(text);
   const out: Span[] = [];
   let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
+  while ((m = re.exec(norm.text)) !== null) {
     // Совпадение нулевой длины сдвинуло бы lastIndex на ноль — вечный цикл.
     if (m[0].length === 0) {
       re.lastIndex += 1;
       continue;
     }
-    out.push({ start: m.index, end: m.index + m[0].length });
+    // Конец берётся по адресу СЛЕДУЮЩЕГО символа: выброшенный мягкий перенос или дефис
+    // переноса попадают внутрь подсветки, и это правильно — они стоят внутри слова.
+    out.push({ start: norm.map[m.index], end: norm.map[m.index + m[0].length] });
   }
   return out;
 }

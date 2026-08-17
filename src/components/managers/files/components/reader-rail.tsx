@@ -119,6 +119,9 @@ function ReaderThumb({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: n
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       task = page.render({ canvasContext: ctx, viewport });
       await task.promise;
+      // Нарисованная миниатюра больше не нужна странице: без cleanup рельс на трёхстах
+      // страницах держит разбор каждой прокрученной мимо.
+      if (!cancelled) page.cleanup();
     })().catch(() => {
       // Не нарисовалась — остаётся белый прямоугольник нужного размера. Рельс от этого не ломается.
     });
@@ -135,7 +138,10 @@ function ReaderThumb({ doc, pageNumber }: { doc: PDFDocumentProxy; pageNumber: n
   return (
     // min-h держит место до отрисовки: без него нерисованные миниатюры схлопываются в нить,
     // весь рельс умещается в экран, и IntersectionObserver разом просит все триста страниц.
-    <div ref={holderRef} className='min-h-[96px] w-[76px] border border-borderColor bg-bgColor'>
+    //
+    // Рамки НЕТ: рельс — уже блок со своей рамкой, а блок в блоке против DESIGN.md. Белый
+    // лист миниатюры видно на серой подложке — той самой инверсией, на которой стоит система.
+    <div ref={holderRef} className='min-h-[96px] w-[76px] bg-bgSecondary'>
       <canvas ref={canvasRef} className='block w-full' />
     </div>
   );

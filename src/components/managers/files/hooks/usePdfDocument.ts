@@ -45,7 +45,12 @@ export function textRuns(items: unknown[]): TextRun[] {
 export async function pageTextOf(doc: PDFDocumentProxy, pageNumber: number): Promise<PageText> {
   const page = await doc.getPage(pageNumber);
   const content = await page.getTextContent();
-  return buildPageText(textRuns(content.items));
+  const text = buildPageText(textRuns(content.items));
+  // Разобранную страницу отпускаем сразу: индекс по каталогу в триста страниц иначе держит в
+  // памяти разбор всех трёхсот. cleanup() у страницы с идущим рендером — no-op, поэтому
+  // читаемой прямо сейчас странице он не мешает.
+  page.cleanup();
+  return text;
 }
 
 export type PdfStatus = 'loading' | 'ready' | 'failed';
@@ -58,6 +63,12 @@ export interface PdfDocumentState {
   sampleHasText: boolean;
   /** Текст всех страниц. Строится по требованию: он нужен только поиску. */
   index: PageText[] | null;
+  /**
+   * Разбор текста ОБОРВАЛСЯ. Третье состояние, без которого поиск врал: провал давал пустой
+   * индекс, а пустой индекс на экране неотличим от «искали и не нашли» — человек читал «нет
+   * совпадений» и делал вывод, что слова в документе нет.
+   */
+  indexFailed: boolean;
   indexing: boolean;
   buildIndex: () => void;
 }
@@ -72,6 +83,7 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
   const [status, setStatus] = useState<PdfStatus>('loading');
   const [sampleHasText, setSampleHasText] = useState(true);
   const [index, setIndex] = useState<PageText[] | null>(null);
+  const [indexFailed, setIndexFailed] = useState(false);
   const [indexing, setIndexing] = useState(false);
   const [indexRequested, setIndexRequested] = useState(false);
 
@@ -130,6 +142,7 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
     if (!doc || !indexRequested) return;
     let cancelled = false;
     setIndexing(true);
+    setIndexFailed(false);
     (async () => {
       const pages: PageText[] = [];
       for (let n = 1; n <= doc.numPages; n++) {
@@ -141,7 +154,12 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
     })()
       .catch(() => {
         // Пустой индекс, а не отсутствие индекса: иначе поиск вечно показывал бы «читаем текст…».
-        if (!cancelled) setIndex([]);
+        // Но пустой индекс сам по себе — ещё и «ничего не нашлось», поэтому провал ОБЪЯВЛЯЕТСЯ
+        // отдельным флагом: два разных ответа не имеют права выглядеть одинаково.
+        if (!cancelled) {
+          setIndex([]);
+          setIndexFailed(true);
+        }
       })
       .finally(() => {
         if (!cancelled) setIndexing(false);
@@ -159,6 +177,7 @@ export function usePdfDocument(url: string | undefined): PdfDocumentState {
     numPages: doc?.numPages ?? 0,
     sampleHasText,
     index,
+    indexFailed,
     indexing,
     buildIndex,
   };

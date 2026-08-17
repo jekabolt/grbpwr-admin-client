@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as Dialog from '@radix-ui/react-dialog';
+import { usePasteFiles } from 'components/managers/media/utils/usePasteFiles';
 import { Button } from 'ui/components/button';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
@@ -29,6 +30,19 @@ import { ReaderRail } from './reader-rail';
 const NO_HITS: PageHit[] = [];
 
 /**
+ * Как называется сочетание для поиска НА ЭТОЙ машине.
+ *
+ * «⌘f» на windows — несуществующая клавиша: подпись обещает то, чего на клавиатуре нет.
+ * Сам обработчик ловит и `metaKey`, и `ctrlKey`, так что различие чисто в словах.
+ */
+const FIND_HOTKEY = /Mac|iPhone|iPad/.test(
+  (typeof navigator === 'undefined' ? '' : navigator.platform) ||
+    (typeof navigator === 'undefined' ? '' : navigator.userAgent),
+)
+  ? '⌘f'
+  : 'ctrl+f';
+
+/**
  * Читалка pdf.
  *
  * Только pdf — и это не заглушка: `.md` открывается экраном заметки, а не здесь, и читалка про
@@ -49,6 +63,12 @@ export function FileReaderModal({ id, onClose }: { id: number; onClose: () => vo
   // Повторный ⌘F при уже открытой строке обязан выделить запрос целиком — как в браузере.
   const [findFocus, setFindFocus] = useState(0);
 
+  // ЧИТАЛКА ЗАБИРАЕТ ОЧЕРЕДЬ ⌘V, НО НЕ ПРИНИМАЕТ ФАЙЛЫ. Идиома стопки описана в
+  // `usePasteFiles`: верхний приёмник глотает вставку целиком, даже когда сам её не берёт.
+  // Без этого ⌘V поверх открытого документа открывал приёмную модалку загрузки в библиотеку —
+  // поверх читалки, из которой человек её не звал.
+  usePasteFiles({ claims: true, accepts: false, accept: 'any' }, () => {});
+
   return (
     <Dialog.Root
       open
@@ -58,8 +78,10 @@ export function FileReaderModal({ id, onClose }: { id: number; onClose: () => vo
     >
       <Dialog.Portal>
         <Dialog.Overlay className='files-reader-overlay fixed inset-0 z-[var(--z-modal)] bg-overlay' />
+        {/* Имени у диалога своего НЕТ: его даёт `Dialog.Title` ниже, то есть имя файла.
+            Стоявший здесь `aria-label='читалка'` спорил с ним за то, как читалку объявит
+            скринридер, и «читалка» побеждала имя открытого документа. */}
         <Dialog.Content
-          aria-label='читалка'
           className='files-reader-content fixed inset-0 z-[var(--z-modal)] flex flex-col gap-2.5 bg-pageBg p-2.5 focus:outline-none'
           onEscapeKeyDown={(e) => {
             if (!findOpen) return;
@@ -172,15 +194,26 @@ function PdfStage({
   onFindOpenChange: (open: boolean) => void;
   findFocus: number;
 }) {
-  const { doc, status, numPages, sampleHasText, index, indexing, buildIndex } = usePdfDocument(url);
+  const { doc, status, numPages, sampleHasText, index, indexFailed, indexing, buildIndex } =
+    usePdfDocument(url);
   // Страница и масштаб живут ЗДЕСЬ, а не внутри загрузчика документа: обновление просроченной
   // ссылки меняет `url`, документ перезагружается — а человек обязан вернуться туда, где читал.
   const [page, setPage] = useState(1);
   const [zoom, setZoom] = useState(100);
   const [spread, setSpread] = useState(false);
   const [query, setQuery] = useState('');
+  // ЗАПРОС, ПО КОТОРОМУ РЕАЛЬНО ИЩУТ, отстаёт от набранного на четверть секунды. Каждая буква
+  // стоит прохода по всем страницам документа и до трёхсот `getClientRects()` на видимой:
+  // однобуквенный запрос по каталогу в триста страниц клал набор текста целиком.
+  const [applied, setApplied] = useState('');
   const [hit, setHit] = useState(1);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (query === applied) return;
+    const t = setTimeout(() => setApplied(query), 250);
+    return () => clearTimeout(t);
+  }, [query, applied]);
 
   useEffect(() => {
     if (numPages && page > numPages) setPage(numPages);
@@ -208,8 +241,8 @@ function PdfStage({
   // findOpen в зависимостях: закрытая строка поиска обязана убрать и подсветку. Иначе ✕ прячет
   // только панель, отметки остаются на странице, и снять их нечем — поля для очистки уже нет.
   const matches = useMemo(
-    () => (findOpen && texts && query.trim() ? findAcrossPages(texts, query) : []),
-    [findOpen, texts, query],
+    () => (findOpen && texts && applied.trim() ? findAcrossPages(texts, applied) : []),
+    [findOpen, texts, applied],
   );
   const counts = useMemo(() => countsByPage(matches), [matches]);
   const shown = useMemo(() => visiblePages(page, spread, numPages), [page, spread, numPages]);
@@ -240,8 +273,12 @@ function PdfStage({
   };
 
   const counter = () => {
-    if (!query.trim()) return '';
+    if (!applied.trim()) return '';
     if (indexing || !index) return 'читаем текст…';
+    // ТРЕТЬЕ СОСТОЯНИЕ. Провалившийся разбор текста давал пустой индекс, а пустой индекс
+    // неотличим от «искали и не нашли»: человек читал «нет совпадений» и делал вывод, что
+    // слова в документе нет — хотя его просто не прочитали.
+    if (indexFailed) return 'текст не дочитался';
     if (!matches.length) return 'нет совпадений';
     return `${sync.hit} из ${matches.length}`;
   };
@@ -292,13 +329,16 @@ function PdfStage({
         >
           +
         </Button>
+        {/* КНОПКА НАЗЫВАЕТ ДЕЙСТВИЕ, а не состояние: подпись «разворот» на включённом
+            развороте читалась как «нажми, чтобы развернуть» — и нажатие делало обратное.
+            Текущее положение и так видно на экране, а сомнение снимает подсказка. */}
         <Button
           size='xs'
           variant='secondary'
-          aria-pressed={spread}
+          title={spread ? 'сейчас: разворот' : 'сейчас: одна страница'}
           onClick={() => setSpread((v) => !v)}
         >
-          {spread ? 'разворот' : 'одна страница'}
+          {spread ? 'одна страница' : 'разворот'}
         </Button>
         <Button
           size='xs'
@@ -306,7 +346,7 @@ function PdfStage({
           aria-pressed={findOpen}
           onClick={() => onFindOpenChange(true)}
         >
-          ⌘f поиск
+          {FIND_HOTKEY} поиск
         </Button>
         <ToolbarSpacer />
         {downloadUrl && (
@@ -324,9 +364,12 @@ function PdfStage({
       {findOpen &&
         (sampleHasText ? (
           <Toolbar>
+            {/* placeholder — не имя поля: он исчезает, как только в поле что-то набрали, и
+                скринридер после первой буквы объявляет поле безымянным. */}
             <Input
               ref={inputRef}
               name='readerQuery'
+              aria-label='искать в документе'
               value={query}
               placeholder='искать в документе'
               className='max-w-[220px]'
@@ -340,7 +383,9 @@ function PdfStage({
                 goHit(e.shiftKey ? -1 : 1);
               }}
             />
-            <Text size='micro' variant='label' className='tabular-nums'>
+            {/* Счётчик — единственный ответ на набранное, и меняется он не от нажатия, а сам
+                собой: без aria-live он остаётся немым для того, кто экран не видит. */}
+            <Text size='micro' variant='label' className='tabular-nums' aria-live='polite'>
               {counter()}
             </Text>
             {/* Совпадение осталось на другой странице — счётчик обязан это сказать, иначе
@@ -418,21 +463,32 @@ function PdfStage({
         </div>
       ) : (
         <div className='flex min-h-0 flex-1 gap-2.5'>
+          {/* Через showPage, а не setPage: клик по миниатюре — такой же переход к странице,
+              как ↓ и «показать», и он обязан держать пары разворота (`pageForSpread`, доказан
+              пробой). setPage ставил страницу как есть, пары съезжали на одну, и показанная
+              слева страница уезжала с экрана без причины. */}
           <ReaderRail
             doc={doc}
             numPages={numPages}
             current={page}
             visible={shown}
             counts={counts}
-            onPick={setPage}
+            onPick={showPage}
           />
-          <div className='min-h-0 flex-1 overflow-auto border border-borderColor bg-bgSecondary p-3.5'>
+          {/* СЦЕНА — ЗЕМЛЯ, А НЕ БЛОК: рамки у неё нет, потому что рамка есть у страницы, а
+              блок в блоке против DESIGN.md. Серая заливка и держит белый лист видимым. */}
+          <div className='min-h-0 flex-1 overflow-auto bg-bgSecondary p-3.5'>
             {/* w-max + mx-auto, а не justify-center: центрирование флексом обрезает ЛЕВЫЙ край
                 страницы, когда она шире окна, и на 200% до него уже не доскроллить. */}
             <div className='mx-auto flex w-max gap-3'>
-              {shown.map((n) => (
+              {shown.map((n, i) => (
                 <ReaderPage
-                  key={n}
+                  // Ключ — МЕСТО в развороте, а не номер страницы. По номеру каждый перелист
+                  // размонтировал сцену и монтировал новую: размер терялся, кадр схлопывался
+                  // в заглушку 380×520 и разворачивался обратно — страница «моргала» на
+                  // каждом нажатии ›. При ключе-месте инстанс живёт, и прежний размер держит
+                  // кадр, пока считается новый.
+                  key={i}
                   doc={doc}
                   pageNumber={n}
                   zoom={zoom}
