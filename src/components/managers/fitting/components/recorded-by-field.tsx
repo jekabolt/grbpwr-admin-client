@@ -14,8 +14,8 @@ const UNSET = '__unset__';
 // "recorded by" used to be free text — typos and inconsistent spellings meant the same person
 // showed up as several different strings across fittings. Pick from the same admin-account
 // list the tech-card roles picker uses (Q5) so it resolves to one canonical username; a
-// pre-existing free-text value still round-trips as its own selectable option instead of
-// silently vanishing when an old fitting is opened.
+// pre-existing value still round-trips as its own selectable option instead of silently
+// vanishing when an old fitting is opened.
 export function RecordedByField({ isEditMode }: { isEditMode: boolean }) {
   const { control, setValue } = useFormContext<FittingFormData>();
   const value = (useWatch({ control, name: 'recordedBy' }) as string) || '';
@@ -34,13 +34,18 @@ export function RecordedByField({ isEditMode }: { isEditMode: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditMode, currentUsername]);
 
+  // A saved value that the picker doesn't offer is NOT a legacy free-text typo any more:
+  // ListAdmins stopped returning disabled accounts (a picker must not offer somebody who left),
+  // so every fitting recorded by a person who has since been disabled would be relabelled
+  // "‹name› (legacy)" — a lie about data that was picked from this very list. The option still
+  // round-trips so the value never vanishes; it just isn't accused of anything.
   const knownUsernames = new Set(admins.map((a) => a.username).filter(Boolean));
   const items = [
     { value: UNSET, label: '— unset —' },
     ...admins
       .filter((a): a is typeof a & { username: string } => !!a.username)
       .map((a) => ({ value: a.username, label: a.username })),
-    ...(value && !knownUsernames.has(value) ? [{ value, label: `${value} (legacy)` }] : []),
+    ...(value && !knownUsernames.has(value) ? [{ value, label: value }] : []),
   ];
 
   return (
