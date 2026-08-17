@@ -151,6 +151,12 @@ export function FileComments({
 
   const add = useMutation({
     mutationFn: (body: string) => commentsService.add(fileId, body),
+    // ПОВТОР СОЗДАЁТ ВТОРУЮ РЕПЛИКУ, и это замерено: глобальный `mutations.retry: 1` (см.
+    // `src/index.tsx`) на обрыве связи шлёт отправку заново, а первая могла дойти — в ленте
+    // появляется дубль, который потом удаляют руками. Ответ сервера не несёт ключа
+    // идемпотентности, отличить «не дошло» от «дошло, но ответ потерян» клиенту нечем, и
+    // единственный честный выбор — не пытаться самому.
+    retry: 0,
     onSuccess: () => {
       setDraft('');
       setMentioning(false);
@@ -163,6 +169,9 @@ export function FileComments({
   const update = useMutation({
     mutationFn: (args: { id: number; body: string }) =>
       commentsService.update(args.id, args.body),
+    // Правка сама по себе переписывает одно и то же поле, но повтор на 403 — второй отказ на
+    // одно нажатие и вдвое отложенная фраза о нём. Один клик — один запрос, как у соседей.
+    retry: 0,
     onSuccess: () => {
       setEditingId(undefined);
       invalidate();
@@ -170,6 +179,9 @@ export function FileComments({
   });
   const remove = useMutation({
     mutationFn: (id: number) => commentsService.remove(id),
+    // Удаление разрушительно: второй запрос за одно нажатие бьёт по реплике, которой уже нет,
+    // и приносит отказ вместо успеха, который на самом деле состоялся.
+    retry: 0,
     onSuccess: invalidate,
   });
 

@@ -131,15 +131,26 @@ export function FileTasksSection({
     // Прикрепил три задачи подряд — три полных ListTasks впустую: строка и так уходит из
     // списка свободных, потому что обновился список задач ФАЙЛА. Доска и карточка задачи
     // сейчас не смонтированы и перечитают всё сами при первом же заходе.
-    qc.invalidateQueries({ queryKey: ['tasks'], refetchType: 'none' });
+    //
+    // Ключ — ИМПОРТОМ (`tasksKeys.all`), а не литералом `['tasks']`: литерал переживёт
+    // переименование корня задач молча, и инвалидация станет промахом мимо живого дерева,
+    // который ничем себя не обнаружит. Тот же довод, что записан в `invalidateFileViews`.
+    qc.invalidateQueries({ queryKey: tasksKeys.all, refetchType: 'none' });
   };
 
   const attach = useMutation({
     mutationFn: (taskId: number) => fileTasksService.attach(fileId, taskId),
+    // Глобальный `mutations.retry: 1` снят: связь файла с задачей заводится, а не
+    // переписывается. Повтор на обрыве — вторая попытка создать то, что могло уже создаться, а
+    // на 403 он лишь бьёт вторым запросом и вдвое оттягивает отказ на экране.
+    retry: 0,
     onSuccess: invalidate,
   });
   const detach = useMutation({
     mutationFn: (taskId: number) => fileTasksService.detach(fileId, taskId),
+    // Открепление разрушительно: у задачи форма сохраняет `file_ids` полным набором, и второй
+    // запрос за одно нажатие бьёт по состоянию, которое первый уже изменил.
+    retry: 0,
     onSuccess: invalidate,
   });
 

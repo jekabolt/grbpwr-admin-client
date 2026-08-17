@@ -172,6 +172,12 @@ export function useFilesMutations() {
     onSuccess: invalidate,
   });
   const deleteFile = useMutation({
+    // ПОВТОР СНЯТ ТОЧЕЧНО. Глобальный `mutations.retry: 1` (см. `src/index.tsx`) шлёт второй
+    // запрос на любой отказ: замерено, что 403 на удаление даёт ДВА DELETE подряд. На отказе
+    // повтор не меняет ничего, а на обрыве связи он бьёт вторым разрушительным запросом по
+    // файлу, который первый мог уже удалить, — и второй ответ («файла нет») человек прочтёт
+    // как причину, по которой удаление не вышло.
+    retry: 0,
     mutationFn: filesService.deleteFile,
     onSuccess: invalidate,
   });
