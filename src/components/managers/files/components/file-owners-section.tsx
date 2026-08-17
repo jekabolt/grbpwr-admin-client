@@ -234,13 +234,15 @@ export function FileOwnersSection({
     <div className='flex flex-col gap-1'>
       <GroupLabel
         action={
+          // «Изменить список» — те же слова, что у близнеца в блоке доступа: два пикера людей,
+          // устроенных одинаково, не должны звать одно действие двумя именами.
           <Button
             size='xs'
             variant='secondary'
             disabled={!mayEdit || setOwners.isPending}
             onClick={openPicker}
           >
-            изменить
+            изменить список
           </Button>
         }
       >
@@ -343,7 +345,7 @@ export function FileOwnersSection({
       >
         <div className='flex flex-col gap-2'>
           <Text size='micro' variant='label'>
-            отмеченные — это ВЕСЬ набор владельцев после сохранения, а не добавка к нему.
+            отмеченные — это ВЕСЬ список владельцев после сохранения, а не добавка к нему.
             снятая отметка снимает владение.
           </Text>
           <div className='flex flex-wrap items-center gap-2'>
@@ -356,7 +358,7 @@ export function FileOwnersSection({
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
             />
             {/* Счётчик рядом с поиском: отмеченные вне фильтра не видны, и без числа строка
-                «отмеченные — весь набор» опровергается тем, что на экране их ноль. */}
+                «отмеченные — весь список» опровергается тем, что на экране их ноль. */}
             <Text size='micro' variant='label' component='span' className='tabular-nums'>
               отмечено {picked.length}
             </Text>

@@ -110,8 +110,10 @@ export function NoteFilePicker({
             <Text size='micro' variant='label' component='span'>
               библиотека не открылась
             </Text>
+            {/* «Повторить» — одно слово на весь раздел: так подписаны обе кнопки повтора в
+                галерее, в карточке файла и в панели помощника. */}
             <Button size='xs' variant='secondary' onClick={() => filesQuery.refetch()}>
-              попробовать ещё раз
+              повторить
             </Button>
           </div>
         ) : files.length === 0 ? (

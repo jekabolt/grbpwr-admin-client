@@ -391,7 +391,7 @@ export function NotePage() {
             </Text>
             <div className='flex gap-1.5'>
               <Button size='sm' variant='secondary' onClick={() => contentQuery.refetch()}>
-                попробовать ещё раз
+                повторить
               </Button>
               <Button asChild size='sm' variant='secondary'>
                 <Link to={`${ROUTES.files}/${id}`}>открыть карточку файла</Link>
