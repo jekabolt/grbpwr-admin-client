@@ -34,7 +34,7 @@ export function FileOwnersSection({
   writable: boolean;
 }) {
   const qc = useQueryClient();
-  const { account, isSuper } = usePermissions();
+  const { account, isSuper, resolved } = usePermissions();
   const { data: adminsData } = useAdmins();
 
   const fileId = Number(file.id ?? 0);
@@ -78,8 +78,13 @@ export function FileOwnersSection({
   // КРУГ ПРАВКИ ТОТ ЖЕ, ЧТО В ХЕНДЛЕРЕ: загрузивший, действующий владелец, супер. Клиент его
   // повторяет не вместо сервера, а чтобы не подсовывать кнопку, которая гарантированно
   // ответит отказом; отказ сервера всё равно печатается ниже, если круг разошёлся.
+  //
+  // Пока личность не установлена — открыто, как и весь остальной гейтинг панели
+  // (`usePermissions` fail-open): иначе загрузивший файл человек на первых кадрах, а при
+  // упавшем `GetCurrentAccount` (retry: false) и навсегда, читал бы, что менять
+  // ответственность ему нельзя.
   const inCircle =
-    isSuper || (!!me && (me === uploaderName || owners.some((o) => o.username === me)));
+    !resolved || isSuper || (!!me && (me === uploaderName || owners.some((o) => o.username === me)));
   const mayEdit = writable && inCircle;
 
   const [picking, setPicking] = useState(false);
@@ -138,7 +143,16 @@ export function FileOwnersSection({
     role: string;
     /** «убрать» снимает ТОЛЬКО владение — факт загрузки не снимается ничем. */
     ownerId?: number;
+    /** Владелец, которого нет в `ListAdmins`: аккаунт отключён, назначить его заново нельзя. */
+    gone?: boolean;
   };
+
+  // Отсутствие в `ListAdmins` считаем ТОЛЬКО когда список пришёл: на пустом ответе (запрос ещё
+  // в пути или упал) каждый владелец выглядел бы отключённым, и снятие каждого требовало бы
+  // подтверждения, которое ничего не значит.
+  const knownIds = new Set(admins.map((a) => Number(a.id ?? 0)).filter((n) => n > 0));
+  const isGone = (adminId?: number) =>
+    !!adminId && knownIds.size > 0 && !knownIds.has(adminId);
 
   const rows: PersonRow[] = [];
   if (uploaderName) {
@@ -153,6 +167,7 @@ export function FileOwnersSection({
         .filter(Boolean)
         .join(' · '),
       ownerId: uploaderIsOwner ? uploaderId : undefined,
+      gone: uploaderIsOwner && isGone(uploaderId),
     });
   }
   owners
@@ -163,11 +178,17 @@ export function FileOwnersSection({
         username: o.username ?? `#${o.id}`,
         role: 'ведёт файл',
         ownerId: Number(o.id ?? 0) || undefined,
+        gone: isGone(Number(o.id ?? 0)),
       }),
     );
 
   const removeOwner = (adminId: number) =>
     setOwners.mutate(ownerIds.filter((x) => x !== adminId));
+
+  // СНЯТИЕ ОТКЛЮЧЁННОГО ВЛАДЕЛЬЦА НЕОБРАТИМО, и спросить об этом нужно ДО, а не подписать
+  // после: такого человека нет в пикере, вернуть ему владение будет неоткуда. У живого
+  // владельца подтверждения нет — там «убрать» стоит ровно столько, сколько стоит вернуть.
+  const [confirmDrop, setConfirmDrop] = useState<PersonRow | undefined>(undefined);
 
   // Строки пикера: СНАЧАЛА текущие владельцы (в том числе те, кого в `ListAdmins` уже нет),
   // потом остальные аккаунты. Владелец, которого не видно в списке, — это владелец, которого
@@ -250,14 +271,22 @@ export function FileOwnersSection({
                 {[r.role, byline(r.username)].filter(Boolean).join(' · ')}
               </Text>
             </div>
-            {r.ownerId && (
+            {!!r.ownerId && (
               <Button
                 size='xs'
                 variant='secondary'
                 className='ml-auto'
                 disabled={!mayEdit || setOwners.isPending}
-                onClick={() => removeOwner(Number(r.ownerId))}
-                title='снимает только владение — факт загрузки остаётся'
+                // Отключённого спрашиваем, живого — нет: у первого действие необратимо.
+                onClick={() =>
+                  r.gone ? setConfirmDrop(r) : removeOwner(Number(r.ownerId))
+                }
+                aria-label={`убрать из владельцев ${r.username}`}
+                title={
+                  r.gone
+                    ? 'аккаунта уже нет в списке людей — вернуть ему владение будет нельзя'
+                    : 'снимает только владение — факт загрузки остаётся'
+                }
               >
                 убрать
               </Button>
@@ -291,7 +320,12 @@ export function FileOwnersSection({
 
       <ConfirmationModal
         open={picking}
-        onOpenChange={setPicking}
+        onOpenChange={(o) => {
+          // Закрытая модалка не должна оставлять свой отказ кричать под списком строк:
+          // человек уже ушёл от того действия.
+          if (!o) setOwners.reset();
+          setPicking(o);
+        }}
         onConfirm={async () => {
           try {
             await setOwners.mutateAsync(picked);
@@ -312,13 +346,25 @@ export function FileOwnersSection({
             отмеченные — это ВЕСЬ набор владельцев после сохранения, а не добавка к нему.
             снятая отметка снимает владение.
           </Text>
-          <Input
-            name='ownerQuery'
-            value={query}
-            placeholder='имя или специальность'
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
-          />
-          <div className='flex max-h-72 flex-col gap-1 overflow-y-auto'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <Input
+              name='ownerQuery'
+              aria-label='поиск по имени или специальности'
+              value={query}
+              placeholder='имя или специальность'
+              className='max-w-[240px]'
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setQuery(e.target.value)}
+            />
+            {/* Счётчик рядом с поиском: отмеченные вне фильтра не видны, и без числа строка
+                «отмеченные — весь набор» опровергается тем, что на экране их ноль. */}
+            <Text size='micro' variant='label' component='span' className='tabular-nums'>
+              отмечено {picked.length}
+            </Text>
+          </div>
+          {/* Строки — СТРОКИ, а не коробки: рамка на каждой была бы блоком внутри блока
+              модалки, а разделяет строки в этой системе волосяная линия. Выбор несёт
+              отметка и жирное имя, а не второй бордер. */}
+          <div className='flex max-h-72 flex-col overflow-y-auto'>
             {found.map((p) => {
               const on = picked.includes(p.id);
               return (
@@ -331,9 +377,7 @@ export function FileOwnersSection({
                       prev.includes(p.id) ? prev.filter((x) => x !== p.id) : [...prev, p.id],
                     )
                   }
-                  className={`flex items-center gap-2 border px-2 py-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor ${
-                    on ? 'border-textColor' : 'border-borderColor hover:border-textColor'
-                  }`}
+                  className='flex items-center gap-2 border-b border-hairline px-1 py-1.5 text-left last:border-b-0 hover:bg-bgZebra focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
                 >
                   <span
                     aria-hidden
@@ -345,7 +389,11 @@ export function FileOwnersSection({
                   </span>
                   <Avatar name={p.username} size={20} />
                   <span className='flex min-w-0 flex-col'>
-                    <Text size='micro' component='span' className='truncate uppercase'>
+                    <Text
+                      size='micro'
+                      component='span'
+                      className={`truncate uppercase ${on ? 'font-bold' : ''}`}
+                    >
                       {p.username}
                     </Text>
                     <Text size='nano' variant='label' component='span' className='truncate uppercase'>
@@ -382,6 +430,24 @@ export function FileOwnersSection({
             </CalloutBox>
           )}
         </div>
+      </ConfirmationModal>
+
+      <ConfirmationModal
+        open={!!confirmDrop}
+        onOpenChange={(o) => !o && setConfirmDrop(undefined)}
+        onConfirm={() => {
+          if (confirmDrop?.ownerId) removeOwner(Number(confirmDrop.ownerId));
+          setConfirmDrop(undefined);
+        }}
+        title='снять владение'
+        confirmLabel='снять'
+        width='sm'
+      >
+        <Text>
+          аккаунта <span className='uppercase'>{confirmDrop?.username}</span> нет в списке людей —
+          он отключён. снимете владение — назначить его обратно будет неоткуда: в пикере
+          отключённых нет. файл останется без этого владельца навсегда.
+        </Text>
       </ConfirmationModal>
     </div>
   );

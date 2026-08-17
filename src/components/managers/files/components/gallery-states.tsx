@@ -90,7 +90,7 @@ export function GallerySkeleton({ count = 12 }: { count?: number }) {
  * пустоты на месте списка.
  */
 export function NoAccessState() {
-  const { data } = useAdmins();
+  const { data, isLoading } = useAdmins();
   const supers = (data?.admins ?? []).filter((a) => a.isSuper && a.username);
 
   return (
@@ -119,9 +119,13 @@ export function NoAccessState() {
           </div>
         </>
       ) : (
-        <Text size='micro' variant='label'>
-          попросите их у того, кто ведёт аккаунты.
-        </Text>
+        // Пока список в пути — молчим: иначе экран сначала говорит «попросите у того, кто
+        // ведёт аккаунты», а через мгновение подменяет это именами, и человек читает первое.
+        !isLoading && (
+          <Text size='micro' variant='label'>
+            попросите их у того, кто ведёт аккаунты.
+          </Text>
+        )
       )}
     </StateFrame>
   );

@@ -1,6 +1,9 @@
 import { AdminAccount } from 'api/proto-http/admin';
 import { useState } from 'react';
+import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { Button } from 'ui/components/button';
+import { GroupLabel } from 'ui/components/group-label';
+import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { AccountFormModal } from './components/account-form-modal';
 import { AccountsTable } from './components/accounts-table';
@@ -28,6 +31,20 @@ export function Accounts() {
   const accounts = data?.accounts ?? [];
   const sections = sectionsData?.sections ?? [];
 
+  /**
+   * СВОИ СПЕЦИАЛЬНОСТИ БЕРУТСЯ ИЗ `ListAdmins`, А НЕ ИЗ `GetCurrentAccount`.
+   *
+   * `GetCurrentAccount` собирает ответ из клеймов токена и в базу за специальностями не
+   * ходит — поле там всегда пустое. Покажи мы его, экран после перезагрузки рисовал бы
+   * «ничего не указано» у человека, у которого всё указано, а следующая добавка ушла бы
+   * набором из одного элемента и СТЁРЛА бы остальные: запись — это replace всего набора.
+   * `ListAdmins` доступен любому аутентифицированному и несёт специальности каждого.
+   */
+  const { data: adminsData } = useAdmins();
+  const mySpecialties = current?.username
+    ? adminsData?.admins?.find((a) => a.username === current.username)?.specialties
+    : undefined;
+
   // РАЗДЕЛ ЗАКРЫТ, НО СВОЙ АККАУНТ — НЕ РАЗДЕЛ. Чужие учётки и доступы отсюда не видны, а
   // «чем занимается» человек указывает себе сам, без accounts:write (решение Р1): поле,
   // которое нельзя заполнить без администратора аккаунтов, остаётся пустым — и пустым
@@ -35,23 +52,21 @@ export function Accounts() {
   if (!canView) {
     return (
       <div className='flex w-full flex-col gap-gutter pb-16'>
-        <div className='flex flex-col gap-2.5 border border-borderColor bg-bgColor p-block'>
-          <Text variant='uppercase'>мой аккаунт · {current?.username ?? '—'}</Text>
+        <Section
+          title={`мой аккаунт · ${current?.username ?? '—'}`}
+          question='— список аккаунтов и доступы выдаёт супер-админ'
+        >
           <Text variant='label' size='micro'>
-            список аккаунтов и доступы закрыты правами: их выдаёт супер-админ. это не мешает
-            указать, чем вы занимаетесь.
+            чужие учётки и права отсюда не видны. это не мешает указать, чем вы занимаетесь: по
+            этой подписи вас находят, когда назначают владельца файла.
           </Text>
-          <div className='flex flex-col gap-1'>
-            <Text variant='label' size='micro' component='span' className='uppercase'>
-              чем занимается
-            </Text>
-            <SpecialtiesField
-              username={current?.username}
-              specialties={current?.specialties}
-              editable={!!current?.username}
-            />
-          </div>
-        </div>
+          <GroupLabel>чем занимается</GroupLabel>
+          <SpecialtiesField
+            username={current?.username}
+            specialties={mySpecialties}
+            editable={!!current?.username}
+          />
+        </Section>
       </div>
     );
   }

@@ -62,13 +62,18 @@ export function FileTile({
           примитиве плитки, а не на холсте — иначе каждый следующий экран решал бы заново. */}
       {uploader && (
         <span
+          // `aria-hidden`, потому что это ГЛИФ, а не текст: без него скринридер читает
+          // болтающиеся посреди плитки две буквы «АЛ». Имя загрузившего целиком уезжает в
+          // `aria-label` кнопки ниже — там оно стоит рядом с именем файла, к которому
+          // относится.
+          aria-hidden
           className={cn(
             'pointer-events-none absolute left-1 top-1 z-10 transition-opacity',
             selectable && 'group-hover:opacity-0 group-focus-within:opacity-0',
             selected && 'opacity-0',
           )}
         >
-          <Avatar name={uploader} size={16} title={`загрузил ${uploader}`} />
+          <Avatar name={uploader} size={16} />
         </span>
       )}
 
@@ -98,11 +103,12 @@ export function FileTile({
       <button
         type='button'
         onClick={onOpen}
-        // Имя загрузившего дописано в подсказку самой плитки, а не повешено на инициалы:
-        // у инициалов `pointer-events-none` (иначе прозрачный кружок съедал бы клик по углу
-        // превью), и своей подсказки у них быть не может — а «кто такой AL» спрашивают ровно
-        // на наведении.
+        // Имя загрузившего дописано к подсказке и к имени самой плитки, а не повешено на
+        // инициалы: у инициалов `pointer-events-none` (иначе прозрачный кружок съедал бы клик
+        // по углу превью), своей подсказки у них быть не может — а «кто такой AL» спрашивают
+        // ровно на наведении.
         title={uploader ? `${name}\nзагрузил ${uploader}` : name}
+        aria-label={uploader ? `${name} · загрузил ${uploader}` : name}
         className='relative block w-full cursor-pointer bg-bgSecondary focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
       >
         {file.previewUrl ? (

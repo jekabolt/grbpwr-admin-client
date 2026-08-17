@@ -140,7 +140,9 @@ export function AccountsTable({
                 <SpecialtiesField
                   username={a.username}
                   specialties={a.specialties}
-                  editable={isSelf || canWrite}
+                  // Без имени писать некуда: кнопка правки, которая молча ничего не делает,
+                  // хуже её отсутствия.
+                  editable={(isSelf || canWrite) && !!a.username}
                 />
               </div>
 

@@ -46,6 +46,9 @@ export function SpecialtiesField({
   const [draft, setDraft] = useState<string[]>(stored);
   const storedKey = stored.join('|');
   useEffect(() => {
+    // Пока правка в полёте, серверное ЕЩЁ старое: приняв его, чип на секунду отскочил бы и
+    // вернулся. Следующий ответ всё равно принесёт свежий ключ.
+    if (save.isPending) return;
     setDraft(stored);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storedKey]);
@@ -68,24 +71,37 @@ export function SpecialtiesField({
 
   const apply = (next: string[]) => {
     if (!username) return;
+    const previous = mine;
     setDraft(next);
     save.mutate(
       { username, specialties: next },
-      // Отказ ОТКАТЫВАЕТ чипы к тому, что лежит на сервере: оставить их в «сохранённом» виде
-      // после отказа — это тихо соврать про состояние аккаунта. Слова об отказе показывает
-      // сам мутатор.
-      { onError: () => setDraft(stored) },
+      // Отказ откатывает к тому, что было ПЕРЕД ЭТИМ кликом, а не к пропам: пропы отстают на
+      // круг, и откат к ним снял бы заодно предыдущую, успешно сохранённую правку.
+      { onError: () => setDraft(previous) },
     );
   };
 
   const toggle = (name: string) =>
     apply(has(name) ? mine.filter((x) => x.toLowerCase() !== name.toLowerCase()) : [...mine, name]);
 
+  /**
+   * НАБРАННОЕ СОХРАНЯЕТСЯ ТОЛЬКО ЯВНЫМ ЖЕСТОМ — Enter или «добавить», и никогда по потере
+   * фокуса.
+   *
+   * Словарь специальностей ОБЩИЙ и НЕУДАЛЯЕМЫЙ: RPC удаления записи нет, а снятие её у себя
+   * лишь обнуляет счётчик использования. Коммит по blur означал бы, что переключение окна
+   * посреди слова навсегда вписывает «ретуш» в справочник, который видят все. Здесь это
+   * дороже, чем у тем файла, где недописанное имя правится следующей же правкой.
+   */
   const commitTyped = () => {
     const v = typed.trim();
+    if (!v || has(v)) {
+      setTyped('');
+      setAdding(false);
+      return;
+    }
     setTyped('');
     setAdding(false);
-    if (!v || has(v)) return;
     apply([...mine, v]);
   };
 
@@ -109,7 +125,12 @@ export function SpecialtiesField({
           </Text>
         )}
         {editable && (
-          <Button size='xs' variant='secondary' onClick={() => setOpen(true)}>
+          <Button
+            size='xs'
+            variant='secondary'
+            aria-label={`${mine.length ? 'изменить' : 'указать'} специальности · ${username ?? ''}`}
+            onClick={() => setOpen(true)}
+          >
             {mine.length ? 'изменить' : 'указать'}
           </Button>
         )}
@@ -134,7 +155,11 @@ export function SpecialtiesField({
         {adding ? (
           <span className='inline-flex items-center gap-1'>
             <Input
-              name='newSpecialty'
+              // Имя (а с ним и id) уникально на аккаунт: в списке аккаунтов таких полей может
+              // быть открыто несколько, а два одинаковых id — это подпись, указывающая не на
+              // то поле.
+              name={`newSpecialty-${username ?? 'me'}`}
+              aria-label='новая специальность'
               value={typed}
               autoFocus
               placeholder='своя специальность'
@@ -150,10 +175,12 @@ export function SpecialtiesField({
                 e.preventDefault();
                 commitTyped();
               }}
-              // Набранное, но не «заэнтеренное» слово — тоже выбор: уходя из поля, человек
-              // считает, что он его уже назвал.
-              onBlur={commitTyped}
             />
+            {/* Явная кнопка вместо коммита по blur: набранное мышью тоже должно уметь
+                сохраниться, а уход фокуса записью быть не может. */}
+            <Button size='xs' variant='secondary' disabled={busy} onClick={commitTyped}>
+              добавить
+            </Button>
           </span>
         ) : (
           <Chip dashed disabled={busy} onClick={() => setAdding(true)}>
