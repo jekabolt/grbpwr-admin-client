@@ -102,21 +102,21 @@ export function pieceAreaSheetsRefusal(
   scopeKey: string,
 ): string | null {
   const key = scopeKey.trim();
-  if (!key) return 'не определён скоуп ткани';
-  if (sheets.length === 0) return 'у этой ткани нет листов выкроек';
+  if (!key) return 'the fabric scope is undetermined';
+  if (sheets.length === 0) return 'this fabric has no pattern sheets';
   const keys = new Set(sheets.map(serverScopeKeyOfSheet));
   if (keys.size > 1) {
-    return 'листы этой ткани привязаны по-разному: часть — к назначению, часть — к строке BOM. Сервер хранит их в РАЗНЫХ скоупах, и замер отвечал бы за файлы, которых в его скоупе нет. Допривяжите листы к назначению (кнопка «⇄» в строке листа)';
+    return "the sheets of this fabric are bound differently: some to a purpose, some to a BOM line. the server keeps them in DIFFERENT scopes, and the measurement would answer for files that are not in its scope. bind the sheets to a purpose as well (the “⇄” button on the sheet row)";
   }
   const only = [...keys][0] ?? '';
   if (!only) {
-    return 'листы этой ткани не несут привязки к материалу — площадям не на чем висеть. Выберите материал в строке листа («⇄»)';
+    return 'the sheets of this fabric carry no binding to a material — the areas have nothing to hang on. pick a material on the sheet row (“⇄”)';
   }
   if (only !== key) {
-    return `листы этой ткани привязаны к строке BOM, а сама ткань разложена в назначение: сервер сложит замер в скоуп «${only}», а слот будет искать его в «${key}» — и не найдёт. Допривяжите листы к назначению (кнопка «⇄» в строке листа)`;
+    return `the sheets of this fabric are bound to a BOM line, while the fabric itself is sorted into a purpose: the server will file the measurement under scope “${only}”, and the slot will look for it in “${key}” — and won't find it. bind the sheets to a purpose as well (the “⇄” button on the sheet row)`;
   }
   if (sheets.some((sh) => !(sh.lineKey ?? '').trim())) {
-    return 'у части листов ещё нет идентификатора — сохраните карточку и повторите замер';
+    return 'some sheets have no identifier yet — save the card and retry the measurement';
   }
   return null;
 }
@@ -188,12 +188,12 @@ export function pieceAreaSizeRangeRefusal(
   if (added.length === 0 && dropped.length === 0) return null;
   const parts: string[] = [];
   if (added.length > 0) {
-    parts.push(`в форме есть, на сервере нет: ${added.map(nameOfSize).join(', ')}`);
+    parts.push(`in the form, not on the server: ${added.map(nameOfSize).join(', ')}`);
   }
   if (dropped.length > 0) {
-    parts.push(`на сервере есть, в форме убраны: ${dropped.map(nameOfSize).join(', ')}`);
+    parts.push(`on the server, removed from the form: ${dropped.map(nameOfSize).join(', ')}`);
   }
-  return `размерный ряд формы разошёлся с сохранённым (${parts.join('; ')}). Замер идёт по ряду формы, а принимает его сервер по своему — и отвергнет весь скоуп. Сохраните карточку (ряд из чертежа модалка «↔ детали кроя» добавляет в форму сама) либо перечитайте её, если ряд правили не вы, — и повторите замер`;
+  return `the form's size range has diverged from the saved one (${parts.join('; ')}). the measurement runs against the form's range, while the server accepts it against its own — and will reject the whole scope. save the card (the “↔ cut pieces” modal adds the drawing's range to the form by itself), or re-read the card if somebody else edited the range — and retry the measurement`;
 }
 
 // НИЖНЯЯ ГРАНИЦА ПЛОЩАДИ НА ПРОВОДЕ. На провод число уходит с двумя знаками, а колонка держит
@@ -242,7 +242,7 @@ export async function publishPieceAreas(args: {
     return {
       ok: false,
       reason:
-        'разбор не дал ни одной площади — проверьте слой контура и связи блоков с деталями',
+        'parsing produced no areas at all — check the contour layer and the block-to-piece links',
     };
   }
   const named = (key: string) => args.nameOfPiece?.(key) || key;
@@ -250,16 +250,16 @@ export async function publishPieceAreas(args: {
   if (unaddressed.length > 0) {
     return {
       ok: false,
-      reason: `${unaddressed.length} деталей ещё не сохранены на сервере — площадь ложится на деталь по её ключу, а его пока нет. Сохраните карточку и повторите замер`,
+      reason: `${unaddressed.length} ${unaddressed.length === 1 ? 'piece is' : 'pieces are'} not saved on the server yet — an area lands on a piece by its key, and there is no key yet. save the card and retry the measurement`,
     };
   }
   const tooSmall = rows.filter((a) => !(a.areaCm2 >= MIN_WIRE_AREA_CM2));
   if (tooSmall.length > 0) {
     return {
       ok: false,
-      reason: `площадь этих деталей нулевая или меньше сотой доли см²: ${[
+      reason: `the area of these pieces is zero or smaller than a hundredth of a cm²: ${[
         ...new Set(tooSmall.map((a) => named(a.pieceLineKey))),
-      ].join(', ')} — на проводе она станет нулём, которого не примет ни сервер, ни здравый смысл. Похоже, выбран не тот слой контура`,
+      ].join(', ')} — on the wire it becomes a zero that neither the server nor common sense will accept. looks like the wrong contour layer is picked`,
     };
   }
   const sheetLineKeys = args.sheets.map((sh) => (sh.lineKey ?? '').trim()).filter(Boolean);
@@ -286,6 +286,6 @@ export async function publishPieceAreas(args: {
   } catch (e) {
     const violations = extractFieldViolations(e);
     const first = violations.length > 0 ? violations[0].description : "";
-    return { ok: false, reason: first || 'сервер не принял замер площадей' };
+    return { ok: false, reason: first || "the server didn't accept the piece-area measurement" };
   }
 }

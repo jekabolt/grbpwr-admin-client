@@ -111,8 +111,8 @@ export function DxfApplyHint({
     return (
       <Text size='nano' variant='label' component='p'>
         {sizeIds.length === 0
-          ? 'по выкройкам расход посчитать нельзя: у карточки не заявлен размерный ряд — норма пишется на каждый размер, и писать её пока не для кого'
-          : 'по выкройкам расход посчитать нельзя: ни одна деталь кроя не отнесена к этой ткани — ни строкой рецепта («назначить детали» на карточке этой ткани, чуть ниже), ни материалом детали на вкладке деталей кроя. Без этого площадь изделия складывать не из чего'}
+          ? "consumption can't be computed from the patterns: the card has no size range declared — the norm is written per size, and there is nobody to write it for yet"
+          : "consumption can't be computed from the patterns: no cut piece is assigned to this fabric — neither by a recipe line (“assign pieces” on this fabric's card, just below), nor by a piece's material on the cut pieces tab. without that there is nothing to add the garment's area up from"}
       </Text>
     );
   }
@@ -123,11 +123,11 @@ export function DxfApplyHint({
   return (
     <div className='flex flex-wrap items-center gap-1.5'>
       <Button type='button' variant='secondary' size='xs' onClick={() => setOpen(true)}>
-        по выкройкам…
+        from the patterns…
       </Button>
       {!compact && (
         <Text size='nano' variant='label' component='span'>
-          площадь деталей ÷ раскройная ширина — netto, без межлекальных выпадов
+          piece area ÷ cutting width — net, without the waste between pieces
         </Text>
       )}
       {open && (

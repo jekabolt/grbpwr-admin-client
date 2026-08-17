@@ -92,10 +92,10 @@ function RequiredSeamAllowanceField() {
   const shopDefault = decimalToInput(data?.settings?.defaultSeamAllowanceMm).trim();
 
   const verdict = cardValue
-    ? `эталон этой карточки: ${cardValue} мм${shopDefault ? ` (цеховой ${shopDefault} мм перебит)` : ''}`
+    ? `this card's requirement: ${cardValue} mm${shopDefault ? ` (the workshop's ${shopDefault} mm is overridden)` : ''}`
     : shopDefault
-      ? `у карточки эталона нет — действует цеховой: ${shopDefault} мм`
-      : 'эталона нет ни у карточки, ни у цеха — сравнивать не с чем';
+      ? `the card has no requirement of its own — the workshop's applies: ${shopDefault} mm`
+      : 'neither the card nor the workshop sets one — there is nothing to compare against';
 
   return (
     <div className='flex flex-col gap-1'>
@@ -113,8 +113,8 @@ function RequiredSeamAllowanceField() {
           каскад показан плейсхолдером и вердиктом, а текстового двойника, от которого поле надо
           было отличать, больше нет. */}
       <Text size='micro' variant='label'>
-        Пусто = наследуется. 0 — другое: «кроим по линии как нарисована». Чтобы снять требование,
-        очистите поле, а не ставьте ноль.
+        empty = inherited. 0 is a different thing: “we cut along the line as drawn”. to drop the
+        requirement, clear the field rather than typing a zero.
       </Text>
     </div>
   );
@@ -239,7 +239,7 @@ function ConstructionSummary() {
       {opCount > 0 && unattached.length > 0 && (
         <CalloutBox tone='note' className='mt-2.5'>
           <Text size='micro'>
-            не привязаны ни к одной операции:{' '}
+            bound to no operation:{' '}
             {unattached.map((b) => b.name?.trim() || 'unnamed').join(' · ')}
           </Text>
         </CalloutBox>
@@ -247,9 +247,9 @@ function ConstructionSummary() {
       {labelsOffRoute && (
         <CalloutBox tone='note' className='mt-2.5'>
           <Text size='micro'>
-            этикеток задано {usedLabels}, но ни один шаг их не пришивает — этой работы нет ни в
-            маршруте для цеха, ни в SAM. Заведите шаг, который их ставит, и свяжите с ним строку
-            этикетки из BOM.
+            {usedLabels} labels are declared, but no step sews them on — that work is in neither
+            the workshop route nor the SAM. add a step that attaches them, and link the label's BOM
+            line to it.
           </Text>
         </CalloutBox>
       )}
@@ -320,12 +320,12 @@ function ConstructionSketch({
             component='span'
             className='px-2 text-center uppercase'
           >
-            нет тех. эскиза
+            no technical sketch
           </Text>
         </Canvas>
         <Text size='micro' variant='label'>
-          добавьте технический эскиз на вкладке sketch и расставьте на нём пины — здесь он покажется
-          рядом с операциями
+          add a technical sketch on the sketch tab and place pins on it — it will show up here
+          beside the operations
         </Text>
       </div>
     );
@@ -370,7 +370,7 @@ function ConstructionSketch({
               label={num || idx + 1}
               highlighted={!!activePin && num === activePin && num > 0}
               title={`#${num || idx + 1}${c.part?.trim() ? ` · ${c.part.trim()}` : ''}${
-                used ? '' : ' · не привязан к операции'
+                used ? '' : ' · not bound to an operation'
               }`}
               onMouseEnter={() => num > 0 && onActivePinChange(num)}
               onMouseLeave={() => onActivePinChange(null)}
@@ -380,7 +380,7 @@ function ConstructionSketch({
       </div>
 
       <Text size='micro' variant='label'>
-        наведите на операцию — её пин подсветится (и наоборот)
+        hover an operation — its pin lights up (and the other way round)
       </Text>
     </div>
   );
@@ -406,21 +406,21 @@ function shapesAffordance(shapes: PieceShapes): React.ReactNode | undefined {
   if (shapes.shapeByKey) {
     return shapes.foundCount === 0 ? (
       <Text size='micro' variant='label' component='span'>
-        детали не сопоставлены с блоками выкроек — вкладка PATTERNS
+        pieces aren't matched to pattern blocks — the PATTERNS tab
       </Text>
     ) : undefined;
   }
   if (shapes.error) {
     return (
       <Text size='micro' variant='error' component='span' title={shapes.error.message}>
-        выкройки не разобрались
+        the patterns didn't parse
       </Text>
     );
   }
   if (shapes.isLoading) {
     return (
       <Text size='micro' variant='label' component='span'>
-        разбираю выкройки…
+        parsing the patterns…
       </Text>
     );
   }

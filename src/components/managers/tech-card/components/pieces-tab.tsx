@@ -66,14 +66,8 @@ const selectCls =
 // fieldset глушит контролы, а не эффекты.
 const RELEASED_STATE = 'TECH_CARD_APPROVAL_STATE_RELEASED';
 
-// Русская форма счётчика деталей для сводки группы: «1 деталь · 2 детали · 5 деталей».
-const ruPieces = (n: number): string => {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'деталь';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'детали';
-  return 'деталей';
-};
+// The piece-count word for a group summary: “1 piece · 2 pieces”.
+const ruPieces = (n: number): string => (n === 1 ? 'piece' : 'pieces');
 
 // The marker diagram inside the selected-piece panel (13.1). Grainline is GEOMETRY — a picture
 // verifies it faster than a column of words — so the callout number each piece already carries is
@@ -144,15 +138,15 @@ function PieceDiagram({
             component='span'
             className='px-2 text-center uppercase'
           >
-            нет выносок
+            no callouts
           </Text>
         </Canvas>
         {/* Инструкция обязана называть ТО МЕСТО, где действие есть. Прежняя звала «проставить
             callout # у детали» — контрол, которого в этом блоке нет с 30.07; связь ставится
             выбором детали в самой выноске на вкладке sketch. */}
         <Text size='micro' variant='label'>
-          поставьте выноску на эскизе (вкладка sketch) и выберите в ней эту деталь в поле «part» —
-          пин появится здесь
+          place a callout on the sketch (the sketch tab) and pick this piece in its “part” field —
+          the pin shows up here
         </Text>
       </div>
     );
@@ -179,7 +173,7 @@ function PieceDiagram({
         })}
       </div>
       <Text size='micro' variant='label'>
-        наведите на плитку — её пин подсветится
+        hover a tile — its pin lights up
       </Text>
     </div>
   );
@@ -265,7 +259,7 @@ export function PiecesTab({
   // неразобранной строки — её название (то же правило, что у панели выкроек, без списка артикулов
   // — чип должен оставаться коротким).
   const scopeLabel = (s: FabricScope<RollGoodsLine>): string => {
-    if (!s.byPurpose) return s.lines[0]?.name?.trim() || 'без названия';
+    if (!s.byPurpose) return s.lines[0]?.name?.trim() || 'unnamed';
     return bomPurposeLabel(s.key);
   };
 
@@ -450,7 +444,7 @@ export function PiecesTab({
   const labelForPin = (n: number) =>
     pieces
       .filter((p) => (p.calloutNumber || 0) === n)
-      .map((p) => p.name?.trim() || 'без названия')
+      .map((p) => p.name?.trim() || 'unnamed')
       .join(' · ') || `#${n}`;
 
   // Переименование детали, ПРИКРЕПЛЁННОЙ к выноске, обязано дописаться в саму выноску.
@@ -540,9 +534,9 @@ export function PiecesTab({
     }
     // scopeKeyOfBinding резолвит либо в живой скоуп, либо в '' — единственный возможный остаток.
     for (const [, idx] of byScope) {
-      out.push({ key: 's:', label: 'связь без ткани', indices: idx });
+      out.push({ key: 's:', label: 'link without a fabric', indices: idx });
     }
-    if (unbound.length) out.push({ key: 'unbound', label: 'без блока DXF', indices: unbound });
+    if (unbound.length) out.push({ key: 'unbound', label: 'no DXF block', indices: unbound });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fields, pieces, blocksByPiece, scopes]);
@@ -685,16 +679,16 @@ export function PiecesTab({
   return (
     <>
       <Section
-        title='детали кроя'
-        question='— что кроится по этим выкройкам. Одни и те же детали для всех колорвеев. Из каких тканей (слоёв) кроится деталь в конкретном колорвее — правится строками детали в рецепте на вкладке colorways; здесь это видно в панели выбранной детали'
+        title='cut pieces'
+        question='— what gets cut from these patterns. the same pieces for every colourway. which fabrics (layers) a piece is cut from in a particular colourway is edited by the piece rows in the recipe on the colorways tab; here it is visible in the selected-piece panel'
         action={
           <div className='flex flex-wrap items-center gap-2'>
             {duplicateRows.size > 0 && (
               <Pill
                 tone='warn'
-                title='двум и более деталям дано одно имя. Имя — то, как деталь называют в операциях, рецептуре и на фабричном листе; сервер отвергает сохранение с дублем — имя должно быть уникальным.'
+                title='two or more pieces have been given the same name. the name is what a piece is called in operations, in the recipe and on the factory sheet; the server refuses a save with a duplicate — the name must be unique.'
               >
-                дубль имени: {duplicateRows.size}
+                duplicate name: {duplicateRows.size}
               </Pill>
             )}
             {geometry.isFetching && (
@@ -704,7 +698,7 @@ export function PiecesTab({
                 component='span'
                 className='uppercase tracking-label'
               >
-                разбор dxf…
+                parsing dxf…
               </Text>
             )}
             {/* Ручное заведение — последняя лазейка, и живёт она ровно до первого DXF: пока
@@ -735,18 +729,18 @@ export function PiecesTab({
           // карточке с чертежом больше нет, значит отправить оператора её искать.
           <Text size='micro' variant='label'>
             {hasDxf
-              ? 'деталей ещё нет — на карточке с чертежом они приходят из него: выберите материал на полке выше и нажмите «↔ детали кроя», и блоки DXF станут деталями'
-              : 'деталей ещё нет — заведите их из DXF кнопкой «↔ детали кроя» над этим блоком, либо добавьте вручную (полочка, спинка, воротник…)'}
+              ? 'no pieces yet — on a card with a drawing they come from it: pick a material on the shelf above and press “↔ cut pieces”, and the DXF blocks become pieces'
+              : 'no pieces yet — create them from a DXF with the “↔ cut pieces” button above this block, or add them by hand (front, back, collar…)'}
           </Text>
         ) : (
           <>
             <ChipRow>
               <Chip selected={filter === 'all'} onClick={() => setFilter('all')}>
-                все {fields.length}
+                all {fields.length}
               </Chip>
               {groups.map((g) => (
                 <Chip key={g.key} selected={filter === g.key} onClick={() => setFilter(g.key)}>
-                  {g.key === 'unbound' ? 'без блока' : g.label} {g.indices.length}
+                  {g.key === 'unbound' ? 'no block' : g.label} {g.indices.length}
                 </Chip>
               ))}
             </ChipRow>
@@ -754,7 +748,7 @@ export function PiecesTab({
             {geometry.isError && (
               <div className='flex flex-wrap items-center gap-2'>
                 <Text size='nano' component='span' className='break-words text-error'>
-                  {geometry.error?.message || 'не удалось разобрать файлы'}
+                  {geometry.error?.message || "couldn't parse the files"}
                 </Text>
                 <Button
                   type='button'
@@ -762,7 +756,7 @@ export function PiecesTab({
                   size='xs'
                   onClick={() => geometry.refetch()}
                 >
-                  ещё раз
+                  again
                 </Button>
               </div>
             )}
@@ -810,9 +804,9 @@ export function PiecesTab({
                       // (той же тревоги, что её пилюля в панели, — откреплённость канта не
                       // красит).
                       const flags: Array<{ k: string; cls: string; word: string }> = [];
-                      if (dup) flags.push({ k: 'dup', cls: 'text-error', word: 'дубль имени' });
+                      if (dup) flags.push({ k: 'dup', cls: 'text-error', word: 'duplicate name' });
                       if (detached)
-                        flags.push({ k: 'det', cls: 'text-warning', word: 'откреплена' });
+                        flags.push({ k: 'det', cls: 'text-warning', word: 'detached' });
                       return (
                         <div key={fields[pi]?.id ?? pi} {...pin.bind(callout > 0 ? callout : null)}>
                           <button
@@ -856,23 +850,23 @@ export function PiecesTab({
                                       разбора: сказать про такую деталь «разбор идёт» значило бы
                                       обещать форму, которой в файлах нет и не будет. */}
                                   {refs.length === 0
-                                    ? 'нет блока DXF'
+                                    ? 'no DXF block'
                                     : lostScope
-                                      ? 'ткань потеряна'
+                                      ? 'fabric lost'
                                       : geometry.isError
-                                        ? 'ошибка разбора'
+                                        ? 'parse error'
                                         : !index
-                                          ? 'разбор DXF…'
-                                          : 'нет в файлах'}
+                                          ? 'parsing DXF…'
+                                          : 'not in the files'}
                                 </Text>
                               )}
                             </div>
                             <Text size='micro' className='mt-1 w-full truncate font-bold uppercase'>
-                              {p.name?.trim() || 'без названия'}
+                              {p.name?.trim() || 'unnamed'}
                             </Text>
                             {found && (
                               <Text size='micro' variant='label' className='w-full truncate'>
-                                {fmtCm(found.piece.bboxW)} × {fmtCm(found.piece.bboxH)} см
+                                {fmtCm(found.piece.bboxW)} × {fmtCm(found.piece.bboxH)} cm
                               </Text>
                             )}
                             {flags.length > 0 && (
@@ -902,8 +896,8 @@ export function PiecesTab({
           показывают и выбирают. */}
       {sel && selIndex >= 0 && (
         <Section
-          title='деталь'
-          question='— выбранная на плитках выше: форма из чертежа, поля строки и происхождение имени'
+          title='piece'
+          question='— the one selected on the tiles above: the shape from the drawing, the row fields and where the name comes from'
           action={
             // Ручное удаление осталось ровно там, где деталь заводили руками, — у детали без
             // чертежа. У привязанной вместо кнопки адрес двери: удаление по факту чертежа живёт в
@@ -914,9 +908,9 @@ export function PiecesTab({
                 size='micro'
                 variant='label'
                 component='span'
-                title='деталь нарисована в чертеже (есть привязка к блоку DXF). Удалить её отсюда значило бы разойтись с файлом: блок никуда не делся, и следующее сопоставление заведёт деталь заново — уже без операций и строк рецепта, которые уедут вместе с ней. Модалка «↔ детали кроя» предлагает удаление тогда, когда блок ИСЧЕЗ из чертежа, и называет, что при этом теряется.'
+                title='the piece is drawn in the drawing (it has a DXF block link). deleting it from here would diverge from the file: the block has not gone anywhere, and the next matching would create the piece again — this time without the operations and recipe lines that leave with it. the “↔ cut pieces” modal offers deletion when the block has DISAPPEARED from the drawing, and it names what is lost with it.'
               >
-                удаляется через «↔ детали кроя» на панели выкроек над этим блоком
+                deleted through “↔ cut pieces” on the patterns panel above this block
               </Text>
             ) : (
               <Button
@@ -926,12 +920,12 @@ export function PiecesTab({
                 aria-label='remove piece'
                 title={
                   selRecipeHold
-                    ? `вместе с деталью уедут её строки рецепта (${selRecipeHold.colorways.join(', ')})`
+                    ? `the piece's recipe lines leave with it (${selRecipeHold.colorways.join(', ')})`
                     : undefined
                 }
                 onClick={removeSelected}
               >
-                ✕ удалить деталь
+                ✕ delete the piece
               </Button>
             )
           }
@@ -952,14 +946,14 @@ export function PiecesTab({
                         удалили или переклассифицировали), значило бы обвинить чертёж в том, чего
                         он не делал. */}
                     {selRefs.length === 0
-                      ? 'у этой детали нет привязанного блока DXF'
+                      ? 'this piece has no DXF block linked'
                       : selRefs.every((r) => !r.scopeKey)
-                        ? `у связи с «${selRefs[0].block}» потеряна ткань — перепривяжите лист на панели выкроек`
+                        ? `the link to “${selRefs[0].block}” has lost its fabric — re-bind the sheet on the patterns panel`
                         : geometry.isError
-                          ? geometry.error?.message || 'не удалось разобрать файлы'
+                          ? geometry.error?.message || "couldn't parse the files"
                           : !index
-                            ? 'разбор DXF…'
-                            : `блока «${selRefs[0].block}» в разобранных файлах нет — файл перезалили без него?`}
+                            ? 'parsing DXF…'
+                            : `block “${selRefs[0].block}” is not in the parsed files — was the file re-uploaded without it?`}
                   </Text>
                 )}
               </div>
@@ -968,19 +962,19 @@ export function PiecesTab({
                   <Text size='nano' variant='label' component='span' className='break-words'>
                     {selFound.block}
                     {selFound.size
-                      ? ` · размер ${selFound.size}${selFound.sizes.length > 1 ? ` из ${selFound.sizes.length}` : ''}`
+                      ? ` · size ${selFound.size}${selFound.sizes.length > 1 ? ` of ${selFound.sizes.length}` : ''}`
                       : ''}
                   </Text>
                   <Text size='nano' variant='label' component='span'>
-                    {fmtCm(selFound.piece.bboxW)}×{fmtCm(selFound.piece.bboxH)} см
-                    {selFound.instances > 1 ? ` · ×${selFound.instances} в чертеже` : ''}
+                    {fmtCm(selFound.piece.bboxW)}×{fmtCm(selFound.piece.bboxH)} cm
+                    {selFound.instances > 1 ? ` · ×${selFound.instances} in the drawing` : ''}
                   </Text>
                 </>
               )}
               {index && (
                 <Text size='nano' variant='label' component='span'>
-                  слой {(selFound ? selFound.layer : index.contourLayer) || '—'}
-                  {index.grainLayer ? `, долевая красным (слой ${index.grainLayer})` : ''}
+                  layer {(selFound ? selFound.layer : index.contourLayer) || '—'}
+                  {index.grainLayer ? `, grainline in red (layer ${index.grainLayer})` : ''}
                 </Text>
               )}
               <PieceDiagram
@@ -1016,7 +1010,7 @@ export function PiecesTab({
                 />
                 {selDup && (
                   <Text size='micro' variant='error'>
-                    такая деталь уже есть — имя должно быть уникальным
+                    a piece with this name already exists — the name must be unique
                   </Text>
                 )}
               </div>
@@ -1030,22 +1024,22 @@ export function PiecesTab({
                   {selRefs.length > 0 && (
                     <Pill
                       tone='mut'
-                      title={`деталь привязана к блокам DXF: ${selRefs.map((b) => b.block).join(', ')}. ЕСЛИ в файле у блока есть линия долевой, раскладка развернёт деталь по ней и слово отсюда на укладку не влияет; если линии нет — деталь ляжет как нарисована. Слово печатается в тех-пак в любом случае. Форму этого блока видно на плитке и в этой панели.`}
+                      title={`the piece is linked to DXF blocks: ${selRefs.map((b) => b.block).join(', ')}. IF the block in the file carries a grainline, the marker rotates the piece by it and the word here does not affect the placement; if there is no line — the piece lies as drawn. the word is printed in the tech pack either way. the shape of this block is visible on the tile and in this panel.`}
                     >
-                      блок DXF привязан
+                      DXF block linked
                     </Pill>
                   )}
                   {selCallout > 0 && !detachedKeys.has(selKey) && (
                     <Text size='micro' variant='label' component='span'>
-                      выноска #{selCallout} — имя приходит с неё
+                      callout #{selCallout} — the name comes from it
                     </Text>
                   )}
                   {detachedKeys.has(selKey) && (
                     <Pill
                       tone='attention'
-                      title='выноска, на которую ссылалась деталь, удалена со скетча (или перестала быть техническим эскизом) — выберите эту деталь в нужной выноске на вкладке sketch'
+                      title='the callout the piece referenced has been deleted from the sketch (or stopped being a technical sketch) — pick this piece in the right callout on the sketch tab'
                     >
-                      откреплена от выноски
+                      detached from the callout
                     </Pill>
                   )}
                 </div>
@@ -1057,7 +1051,7 @@ export function PiecesTab({
               {selLayerRows.length > 0 && (
                 <div className='flex flex-col gap-0.5'>
                   <Text size='micro' variant='label' component='span' className='uppercase'>
-                    слои детали — из рецепта
+                    piece layers — from the recipe
                   </Text>
                   {selLayerRows.map((r, i) => (
                     <Text key={i} size='micro' component='p'>
@@ -1065,8 +1059,8 @@ export function PiecesTab({
                     </Text>
                   ))}
                   <Text size='nano' variant='label' component='p'>
-                    редактируется на вкладке colorways — строками этой детали в рецепте колорвея.
-                    Удаление детали уносит эти строки вместе с ней
+                    edited on the colorways tab — by this piece's rows in the colourway recipe.
+                    deleting the piece takes those rows with it
                   </Text>
                 </div>
               )}
@@ -1076,7 +1070,7 @@ export function PiecesTab({
                   тогда об уезжающих строках сказать больше некому. */}
               {selRecipeHold && selLayerRows.length === 0 && (
                 <Text size='nano' variant='label' component='p'>
-                  {`деталь держат строки рецепта колорвеев ${selRecipeHold.colorways.join(', ')} (слой назвать нечем — строка ссылается на строку BOM, которой в карточке уже нет). Удаление детали уносит их вместе с ней`}
+                  {`the piece is held by recipe rows of colourways ${selRecipeHold.colorways.join(', ')} (there is nothing to name the layer with — the row references a BOM line that is no longer on the card). deleting the piece takes them with it`}
                 </Text>
               )}
 
@@ -1120,12 +1114,12 @@ export function PiecesTab({
                 {!!sel.fused && (
                   <div className='col-span-2 lg:col-span-3'>
                     <Text size='micro' variant='label' component='label' className='uppercase'>
-                      как дублируется
+                      how it's fused
                     </Text>
                     <div className='flex items-start gap-2.5'>
                       <select
                         className={`${selectCls} flex-1`}
-                        aria-label='как дублируется'
+                        aria-label="how it's fused"
                         data-field={`pieces.${selIndex}.fusingMode`}
                         value={sel.fusingMode ?? UNSET_FUSING_MODE}
                         onChange={(e) => {
@@ -1152,8 +1146,8 @@ export function PiecesTab({
                             min='0.5'
                             max='100'
                             step='0.5'
-                            placeholder='мм'
-                            aria-label='ширина клеевой полосы, мм'
+                            placeholder='mm'
+                            aria-label='fusing strip width, mm'
                             data-field={`pieces.${selIndex}.fusingWidthMm`}
                             aria-invalid={!sel.fusingWidthMm?.trim()}
                             value={sel.fusingWidthMm ?? ''}
@@ -1176,12 +1170,12 @@ export function PiecesTab({
                 )}
                 <div>
                   <Text size='micro' variant='label' component='label' className='uppercase'>
-                    не градуируется
+                    ungraded
                   </Text>
                   <div className='flex min-h-[22px] items-center'>
                     <input
                       type='checkbox'
-                      aria-label='не градуируется — во всех размерах'
+                      aria-label='ungraded — the same in every size'
                       checked={!!sel.ungraded}
                       onChange={(e) =>
                         setValue(`pieces.${selIndex}.ungraded`, e.target.checked, {
@@ -1198,8 +1192,8 @@ export function PiecesTab({
                     // именно так и называет.
                     <Text size='nano' variant='label'>
                       {sel.ungraded
-                        ? 'определено по имени блока в DXF (UNI)'
-                        : 'в имени блока стоит UNI — пометка снята вручную'}
+                        ? 'determined from the block name in the DXF (UNI)'
+                        : 'the block name carries UNI — the mark was cleared by hand'}
                     </Text>
                   )}
                 </div>
@@ -1235,7 +1229,7 @@ export function PiecesTab({
                       the раскладка rotates the piece by. Saying so is the point: a word that
                       contradicts the file is worse than no word at all. */}
                   <Text size='micro' variant='label'>
-                    слово в тех-пак; кроит линия из файла
+                    the word goes into the tech pack; the line from the file does the cutting
                   </Text>
                 </div>
                 <div>
@@ -1257,26 +1251,26 @@ export function PiecesTab({
                     нашлось». Сказано здесь же, одним абзацем: галка отвечает на вопрос про
                     ДЕТАЛЬ, а не про файл. */}
                 <Text size='micro' variant='label'>
-                  не градуируется — деталь одна на весь размерный ряд: карман, шлёвка, обтачка
-                  нарисованы один раз и входят в комплект КАЖДОГО размера целиком. Крой так себя и
-                  вёл всегда, а вот норма расхода у скоупа из одних таких деталей отказывалась
-                  считаться словами «похоже, выгружен только один размер» — потому что
-                  «безразмерная» и «размер не распознали» были для разбора одним и тем же. Галка
-                  превращает это в заявление. Токен UNI в имени блока DXF отвечает на тот же вопрос
-                  и предзаполняет галку у детали, заведённой из чертежа; у детали, уже сохранённой в
-                  карточке, ответ берётся из неё самой — снятую галку токен обратно не поставит.
-                  Замер площадей у помеченной детали бывает только общий: пер-размерные строки
-                  сервер отвергает.
+                  ungraded — one piece for the whole size range: a pocket, a belt loop, a facing are
+                  drawn once and go into the set of EVERY size in full. cutting has always behaved
+                  that way, but the consumption norm for a scope made only of such pieces refused to
+                  compute, saying “looks like only one size was exported” — because “sizeless” and
+                  “the size wasn't recognised” were one and the same thing to the parser. the
+                  checkbox turns this into a statement. the UNI token in a DXF block name answers the
+                  same question and pre-fills the checkbox for a piece created from a drawing; for a
+                  piece already saved on the card the answer is taken from the piece itself — the
+                  token won't put a cleared checkbox back. an area measurement on a marked piece is
+                  only ever a common one: the server refuses per-size rows.
                 </Text>
                 {/* Said once, under the fields. The four values are the ones the server's CHECK
                     accepts — anything else fails the whole card save, which is why this stopped
                     being a free-text field with suggestions. */}
                 <Text size='micro' variant='label'>
-                  долевая — закрытый список (lengthwise / crosswise / bias / any): сервер отвергает
-                  любое другое значение и роняет сохранение всей карточки. У детали, заведённой из
-                  DXF, реальное направление задаёт линия долевой в самом файле — по ней раскладка
-                  разворачивает деталь, а слово здесь только печатается в тех-пак и не должно ему
-                  противоречить.
+                  grainline is a closed list (lengthwise / crosswise / bias / any): the server
+                  refuses any other value and fails the save of the whole card. for a piece created
+                  from a DXF the real direction is set by the grainline in the file itself — the
+                  marker rotates the piece by it, while the word here is only printed in the tech
+                  pack and must not contradict it.
                 </Text>
               </div>
             </div>
@@ -1300,21 +1294,21 @@ export function PiecesTab({
             dropSelected();
           }}
           onCancel={() => setConfirmDrop(false)}
-          title={`удалить деталь «${sel.name?.trim() || '—'}»?`}
-          confirmLabel='удалить деталь и её строки рецепта'
+          title={`delete piece “${sel.name?.trim() || '—'}”?`}
+          confirmLabel='delete the piece and its recipe rows'
         >
           <div className='space-y-2'>
             <CalloutBox tone='warning'>
-              {`Вместе с деталью будут удалены её строки в рецепте: ${selRecipeHold.rows} шт. в колорвеях ${selRecipeHold.colorways.join(', ')} (и в архивных, если они есть, — карточка их не показывает). Это назначения ткани на эту деталь: без самой детали они ни во что не входят.`}
+              {`its rows in the recipe will be deleted along with the piece: ${selRecipeHold.rows} pcs in colourways ${selRecipeHold.colorways.join(', ')} (and in archived ones, if there are any — the card doesn't show them). these are fabric assignments onto this piece: without the piece itself they are part of nothing.`}
             </CalloutBox>
             {selRecipeHold.withNorm > 0 && (
               <CalloutBox tone='warning'>
-                {`Из них ${selRecipeHold.withNorm} несут вписанную НОРМУ расхода — это числа, которые кто-то считал, и восстановить их будет неоткуда. Если деталь удаляется по ошибке, отмените и проверьте рецепт на вкладке colorways.`}
+                {`${selRecipeHold.withNorm} of them carry a written-in consumption NORM — those are numbers somebody computed, and there will be nowhere to restore them from. if the piece is being deleted by mistake, cancel and check the recipe on the colorways tab.`}
               </CalloutBox>
             )}
             <Text size='nano' variant='label' component='p'>
-              удаление применяется при СОХРАНЕНИИ карточки — до него ничего не потеряно, и отменить
-              его можно, перечитав карточку
+              the deletion is applied when the card is SAVED — until then nothing is lost, and it
+              can be undone by re-reading the card
             </Text>
           </div>
         </ConfirmationModal>

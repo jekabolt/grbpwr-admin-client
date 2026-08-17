@@ -218,11 +218,11 @@ const B = fixture(
   is('вердикт: узел на узел — поглощение ЦЕЛЬЮ', v('SHELL', 'HOOD'), { ok: true, absorbInto: 'HOOD' });
   is('вердикт: тащим съеденное — отказ с причиной', v('FR', 'SL'), {
     ok: false,
-    reason: '«FR» уже съеден шагом 10 и лежит внутри узла SHELL',
+    reason: '“FR” is already consumed by step 10 and sits inside unit SHELL',
   });
   is('вердикт: цель съедена — отказ с причиной', v('SL', 'HD'), {
     ok: false,
-    reason: '«HD» уже съеден шагом 20 и лежит внутри узла HOOD',
+    reason: '“HD” is already consumed by step 20 and sits inside unit HOOD',
   });
   // Не отказ, а отсутствие жеста: объяснять нечего, и снекбар был бы шумом.
   is('вердикт: нода сама на себя — жеста нет', v('SL', 'SL'), null);

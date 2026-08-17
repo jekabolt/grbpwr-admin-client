@@ -14,12 +14,12 @@ export function PieceLegend() {
     <Accordion
       title={
         <Text size='control' variant='uppercase' tracking='label' component='span'>
-          обозначения деталей
+          piece codes
         </Text>
       }
       meta={
         <Text size='micro' variant='label' component='span'>
-          {pieceBaseCodes.length} кодов
+          {pieceBaseCodes.length} codes
         </Text>
       }
     >
@@ -37,7 +37,7 @@ export function PieceLegend() {
         ))}
       </div>
 
-      <GroupLabel>модификаторы</GroupLabel>
+      <GroupLabel>modifiers</GroupLabel>
       {pieceModifiers.map((m) => (
         <Row
           key={m.mod}
@@ -51,7 +51,7 @@ export function PieceLegend() {
       ))}
 
       <Text size='micro' variant='label' className='mt-1.5'>
-        {'коды комбинируются: FP_R_1 · PCK_f · BP_L<M>'}
+        {'codes combine: FP_R_1 · PCK_f · BP_L<M>'}
       </Text>
     </Accordion>
   );

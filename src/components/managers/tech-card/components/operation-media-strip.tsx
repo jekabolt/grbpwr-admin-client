@@ -153,7 +153,7 @@ export function OperationMediaStrip({
     <div className='flex flex-col gap-1.5' {...intake.regionHandlers}>
       <div className='flex flex-wrap items-center gap-2'>
         <Text size='micro' variant='label' component='span' className='uppercase'>
-          фото узла{fields.length > 0 ? ` · ${fields.length}` : ''}
+          unit photos{fields.length > 0 ? ` · ${fields.length}` : ''}
         </Text>
         {/* ПАНЕЛЬ ВИДОВ ОДНА НА ПОЛОСУ — режимы принадлежат листу, а не кадру. */}
         {!frozen && fields.length > 0 && (
@@ -164,14 +164,14 @@ export function OperationMediaStrip({
               placingKind
                 ? placed > 0
                   ? placingHint(placingKind, placed)
-                  : 'кликайте по нужному снимку'
+                  : 'click the shot you need'
                 : undefined
             }
           />
         )}
         {(intake.busy || intake.dragging) && (
           <Text size='micro' variant='label' component='span'>
-            {intake.busy ? 'принимаю картинку из буфера…' : 'бросьте файл — откроется кроп'}
+            {intake.busy ? 'accepting the image from the clipboard…' : 'drop the file — the crop opens'}
           </Text>
         )}
       </div>
@@ -181,14 +181,14 @@ export function OperationMediaStrip({
         // читалась как ещё один контрол в ряду полей шага и терялась среди них; полосатый
         // плейсхолдер во всю ширину — это и есть слот, и он выглядит слотом.
         frozen ? (
-          <Placeholder label='фотографий у этого шага нет' className='h-20 w-full border-dashed' />
+          <Placeholder label='this step has no photos' className='h-20 w-full border-dashed' />
         ) : (
           <MediaSlot
             aspectRatio={['Custom']}
             heightPx={80}
             sizeClassName='w-full'
-            label='+ фото узла'
-            hint='на снимке ставят указания: мерки, подписи, участки'
+            label='+ unit photo'
+            hint='callouts go on the shot: measurements, captions, spans'
             allowMultiple
             limit={MAX_MEDIA_PER_STEP}
             showVideos={false}
@@ -215,7 +215,7 @@ export function OperationMediaStrip({
                       // это состояние ЭТОГО снимка.
                       key={wireInt(current.mediaId)}
                       src={url}
-                      alt={(current.caption ?? '').trim() || `фото узла ${i + 1}`}
+                      alt={(current.caption ?? '').trim() || `unit photo ${i + 1}`}
                       heightPx={STRIP_HEIGHT}
                       placingKind={placingKind}
                       onPlaced={() => setPlacingKind(null)}
@@ -236,7 +236,7 @@ export function OperationMediaStrip({
                         !frozen ? (
                           <StripButton
                             label='✕'
-                            title='снять снимок с шага; сам файл в библиотеке остаётся'
+                            title='remove the shot from the step; the file itself stays in the library'
                             onPress={() => remove(i)}
                           />
                         ) : undefined
@@ -246,7 +246,7 @@ export function OperationMediaStrip({
                     // ЧЕСТНОЕ СОСТОЯНИЕ, А НЕ ПУСТОЙ ПРЯМОУГОЛЬНИК: адрес не пришёл ни с чтения,
                     // ни из сессии — значит картинку показать нечем, и сказать это надо словом.
                     <Placeholder
-                      label='адрес не разрешён — сохраните карточку'
+                      label='address not resolved — save the card'
                       className='w-40 px-2 text-center'
                       style={{ height: STRIP_HEIGHT }}
                     />
@@ -262,7 +262,7 @@ export function OperationMediaStrip({
                           nonForm
                           dashed
                           onClick={() => i > 0 && move(i, i - 1)}
-                          title='раньше в порядке показа и печати'
+                          title='earlier in the display and print order'
                         >
                           ←
                         </Chip>
@@ -270,7 +270,7 @@ export function OperationMediaStrip({
                           nonForm
                           dashed
                           onClick={() => i < fields.length - 1 && move(i, i + 1)}
-                          title='позже в порядке показа и печати'
+                          title='later in the display and print order'
                         >
                           →
                         </Chip>
@@ -284,7 +284,7 @@ export function OperationMediaStrip({
                       onChange={(e) =>
                         setValue(`${name}.${i}.caption`, e.target.value, { shouldDirty: true })
                       }
-                      placeholder='подпись — что на снимке'
+                      placeholder="caption — what's on the shot"
                       maxLength={255}
                       className={cn(
                         'w-full border border-borderColor bg-bgColor px-1 py-px text-micro',
@@ -309,7 +309,7 @@ export function OperationMediaStrip({
                 heightPx={STRIP_HEIGHT}
                 sizeClassName='w-28'
                 compact
-                label='+ ещё'
+                label='+ more'
                 allowMultiple
                 limit={MAX_MEDIA_PER_STEP - fields.length}
                 showVideos={false}
@@ -321,7 +321,8 @@ export function OperationMediaStrip({
 
           {!frozen && full && (
             <Text size='micro' variant='label'>
-              на шаг не больше {MAX_MEDIA_PER_STEP} фотографий — длинную полосу перестают листать
+              no more than {MAX_MEDIA_PER_STEP} photos per step — a long strip stops being scrolled
+              through
             </Text>
           )}
         </>

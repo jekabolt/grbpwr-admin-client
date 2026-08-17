@@ -262,7 +262,7 @@ export default function DxfApplyDialog({
     // Не уезжают только площади — и об этом говорится вслух, вместе с тем, что делать.
     if (publishTarget && outcome?.ok && sourceDirty) {
       showMessage(
-        'норма применена; площади НЕ сохранены: выкройки или связи блок→деталь правлены и не сохранены — сервер сверяет комплект по сохранённым связям. Сохраните карточку и замерьте площади на вкладке выкроек',
+        'the norm is applied; the areas are NOT saved: the patterns or the block→piece links have been edited and not saved — the server checks the set against the saved links. save the card and measure the areas on the patterns tab',
         'error',
       );
     } else if (publishTarget && outcome?.ok) {
@@ -276,7 +276,7 @@ export default function DxfApplyDialog({
         nameOfPiece: (key) => pieces.find((p) => (p.lineKey ?? '').trim() === key)?.name ?? key,
       }).then((res) => {
         if (!res.ok) {
-          showMessage(`норма применена, но площади не сохранены: ${res.reason}`, 'error');
+          showMessage(`the norm is applied, but the areas were not saved: ${res.reason}`, 'error');
           return;
         }
         // Состояние замера показывает вкладка выкроек, и читает она его ИЗ ОТВЕТА СЕРВЕРА (свежесть
@@ -315,8 +315,8 @@ export default function DxfApplyDialog({
       }}
       onConfirm={apply}
       onCancel={onClose}
-      title='норма расхода по выкройкам'
-      confirmLabel='применить по размерам'
+      title='consumption norm from the patterns'
+      confirmLabel='apply per size'
       confirmDisabled={!applicable}
       closeOnConfirm={false}
       // Ширина по умолчанию (`md` — не фиксированная, а МИНИМУМ): с уходом таблицы «расход по
@@ -336,19 +336,22 @@ export default function DxfApplyDialog({
           // к ней, а не пересказывает её состояние (второго запроса отсюда не делается: диалог
           // не знает, набраны ли замеры, и не должен врать в обе стороны).
           <CalloutBox tone='warning'>
-            У слота НЕ ЗАДАН процент раскроя. Netto без него уходит в себестоимость и в закупку как
-            итог — то есть занижает их на все отходы кроя. Заполните процент раскроя слота на
-            вкладке BOM, тогда применение станет доступно: там у поля есть предложение «процент по
-            факту настилов» — медиана по замерам прошлых раскроев артикула, когда их набралось три;
-            пока их меньше, процент оценивается руками. Коэффициент раскроя артикула сюда не
-            переносите: он меряется от длины раскладки и межлекальных выпадов не содержит.
+            the slot has NO wastage percent set. without it the net figure goes into the cost and
+            into purchasing as the final number — that is, it understates both by all the cutting
+            waste. fill in the slot's wastage percent on the BOM tab and applying becomes available:
+            the field there carries a suggestion, “wastage percent from actual lays” — the median
+            over measurements of this article's past cuttings, once three of them have accumulated;
+            while there are fewer, the percent is estimated by hand. don't carry the article's
+            cutting coefficient over here: it is measured from the marker length and contains none
+            of the waste between pieces.
           </CalloutBox>
         )}
 
         {!(widthCm > 0) && (
           <CalloutBox tone='warning'>
-            У артикула не заполнена ширина полотна — делить площадь не на что. Подставить номинал
-            нельзя: ошибка ширины входит в норму линейно и не видна ни в одном числе.
+            the article has no cloth width filled in — there is nothing to divide the area by. a
+            nominal value can't be substituted: an error in the width enters the norm linearly and is
+            invisible in every number.
           </CalloutBox>
         )}
 
@@ -366,8 +369,8 @@ export default function DxfApplyDialog({
             {unitKind === 'kg' && !weightBasis.ok
               ? weightRefusalText(weightBasis.missing, weightBasis.pinned)
               : unit
-                ? `Единица слота «${unit}» не принимает ни длину, ни вес: применить можно в метрах, сантиметрах или килограммах.`
-                : 'У слота не заполнена единица — норма пишется в единице слота, и применить её не в чем. Заполните единицу на вкладке BOM.'}
+                ? `the slot's unit “${unit}” takes neither length nor weight: it can be applied in metres, centimetres or kilograms.`
+                : "the slot has no unit filled in — the norm is written in the slot's unit, and there is nothing to apply it in. fill in the unit on the BOM tab."}
           </CalloutBox>
         )}
         {/* НОЛЬ ПОСЛЕ ОКРУГЛЕНИЯ — НЕ НОРМА. Метры округляются до трёх знаков (столько держит
@@ -379,15 +382,16 @@ export default function DxfApplyDialog({
         {outcome?.ok && rows.some((r) => r.conv != null && !(r.conv.value > 0)) && (
           <CalloutBox tone='warning'>
             {unitKind === 'kg'
-              ? `После перевода в «${unit}» норма округляется в ноль — вес на изделие меньше половины грамма. Ноль означал бы «ткань не нужна». Слот весовой: единицу на сантиметры не менять (это сменит размерность строки и разойдётся с закупочной ценой за килограмм) — проверьте плотность и ширину артикула и тот ли слой контура выбран.`
-              : `После перевода в «${unit || '—'}» норма округляется в ноль — площадь слишком мала для этой единицы. Ноль означал бы «ткань не нужна»; выберите единицу мельче (см) или проверьте, тот ли слой контура выбран.`}
+              ? `after conversion to “${unit}” the norm rounds to zero — the weight per garment is under half a gram. a zero would mean “no fabric is needed”. the slot is a weight one: don't change its unit to centimetres (that would change the line's dimension and diverge from the purchase price per kilogram) — check the article's density and width, and whether the right contour layer is picked.`
+              : `after conversion to “${unit || '—'}” the norm rounds to zero — the area is too small for this unit. a zero would mean “no fabric is needed”; pick a finer unit (cm), or check whether the right contour layer is picked.`}
           </CalloutBox>
         )}
         {outcome?.ok && outcome.areas.sizesIncomplete.length > 0 && (
           <CalloutBox tone='warning'>
-            Не нашлись все детали для размеров:{' '}
-            {outcome.areas.sizesIncomplete.map(sizeName).join(', ')}. Норма пишется на ВЕСЬ ряд или
-            не пишется вовсе: непокрытый размер в плане прогона взял бы скаляр, которого здесь нет.
+            not all pieces were found for the sizes:{' '}
+            {outcome.areas.sizesIncomplete.map(sizeName).join(', ')}. the norm is written for the
+            WHOLE range or not at all: an uncovered size would take the scalar in the run plan, and
+            there is none here.
           </CalloutBox>
         )}
 
@@ -409,7 +413,7 @@ export default function DxfApplyDialog({
                 />
               }
             >
-              {`норма · размер ${formatSizeName(sizeName(shownSize))}`}
+              {`norm · size ${formatSizeName(sizeName(shownSize))}`}
             </GroupLabel>
             <div className='flex flex-col gap-1.5 pt-1'>
               <NettoFormula
@@ -424,8 +428,8 @@ export default function DxfApplyDialog({
                   чего нельзя не прочитать, потому что от него зависит, верна ли закупка. */}
               <Text size='nano' variant='label' component='p' className='max-w-[90ch]'>
                 {Number.isFinite(wastage)
-                  ? `NETTO: межлекальных выпадов и концов настила в числе НЕТ — их доначисляет процент раскроя слота (${wastagePercent}%). Кромка уже внутри: она оплачена делением на раскройную ширину`
-                  : 'NETTO: межлекальных выпадов и концов настила в числе нет. Кромка уже внутри — она оплачена делением на раскройную ширину'}
+                  ? `NET: the waste between pieces and the lay ends are NOT in this number — the slot's wastage percent adds them on top (${wastagePercent}%). the selvedge is already inside: it is paid for by dividing by the cutting width`
+                  : "NET: the waste between pieces and the lay ends are not in this number. the selvedge is already inside — it is paid for by dividing by the cutting width"}
               </Text>
             </div>
           </div>
@@ -433,13 +437,13 @@ export default function DxfApplyDialog({
 
         {outcome?.ok && rows.length > 0 && (
           <div>
-            <GroupLabel flush>норма по всему ряду — это и уедет в строку</GroupLabel>
+            <GroupLabel flush>the norm across the whole range — this is what goes into the line</GroupLabel>
             <div className='pt-1'>
               <DataTable>
                 <thead>
                   <tr>
-                    <th>размер</th>
-                    <th>площадь, см²</th>
+                    <th>size</th>
+                    <th>area, cm²</th>
                     <th>netto{unit ? `, ${unit}` : ''}</th>
                   </tr>
                 </thead>
@@ -461,13 +465,13 @@ export default function DxfApplyDialog({
               </DataTable>
             </div>
             <Text size='nano' variant='label' component='p' className='pt-1'>
-              {`${rows.length} из ${sizeIds.length} ${sizeIds.length === 1 ? 'размера' : 'размеров'} ряда`}
+              {`${rows.length} of ${sizeIds.length} ${sizeIds.length === 1 ? 'size' : 'sizes'} in the range`}
               {' · '}
-              деталей градуируется: {outcome.areas.gradedPieces} из {pieces.length}
+              pieces graded: {outcome.areas.gradedPieces} of {pieces.length}
               {outcome.areas.sizelessCm2 > 0
-                ? ` · безразмерные детали: ${Math.round(outcome.areas.sizelessCm2)} см² в каждом размере`
+                ? ` · sizeless pieces: ${Math.round(outcome.areas.sizelessCm2)} cm² in every size`
                 : ''}
-              {' · себестоимость стиля — среднее по ряду, базовый размер для этого не нужен'}
+              {' · the style cost is the average over the range, no base size is needed for that'}
             </Text>
             {/* Кг-число без основы не проверить ничем: формула целиком, с числами, до нажатия. */}
             {unitKind === 'kg' && fabric && (
@@ -495,7 +499,7 @@ export default function DxfApplyDialog({
             что предзаполнен замером самого файла и в большинстве случаев верен; но менять его
             приходится тому, кого число не устроило, — то есть ровно после того, как он его увидел. */}
         <div>
-          <GroupLabel flush>условия замера</GroupLabel>
+          <GroupLabel flush>measurement conditions</GroupLabel>
           {/* ПОЛЯ НЕ ТЯНУТСЯ НА ВСЮ ШИРИНУ ОКНА. Общий блок условий рисует их `w-full`, и это
               правильно в узком диалоге, из которого он приехал; здесь окно `lg`, и растянутый на
               тысячу пикселей селект слоя читается как ошибка вёрстки, а не как поле. Ограничение
@@ -516,41 +520,42 @@ export default function DxfApplyDialog({
             `<fieldset disabled>`, и раскрывашка на `<button>` там умерла бы молча. */}
         <details className='border border-hairline px-2 py-1'>
           <summary className='cursor-pointer text-micro uppercase'>
-            почему это netto и что доначисляет процент раскроя
+            why this is net, and what the wastage percent adds on top
           </summary>
           <div className='flex max-w-[90ch] flex-col gap-1 pt-1.5'>
             <Text size='nano' variant='label' component='p'>
-              Считается Σ(площадь деталей × количество на изделие) ÷ раскройная ширина. Межлекальных
-              выпадов и концов настила в этом числе нет и быть не может — их знает только раскладка;
-              за них платит процент раскроя слота
-              {Number.isFinite(wastage) ? ` (${wastagePercent}%)` : ''}, и сервер доначисляет его
-              именно потому, что источник не «из раскладки».
+              it is computed as Σ(piece area × count per garment) ÷ cutting width. the waste between
+              pieces and the lay ends are not and cannot be in this number — only a marker knows
+              them; the slot's wastage percent pays for them
+              {Number.isFinite(wastage) ? ` (${wastagePercent}%)` : ''}, and the server adds it on
+              top precisely because the source is not “from a marker”.
             </Text>
             <Text size='nano' variant='label' component='p'>
-              Кромка в процент НЕ входит: netto-длина получена делением на РАСКРОЙНУЮ ширину (рулон
-              − 2×кромка), то есть купленный метр рулона несёт кромку с собой и она уже оплачена
-              этим делением — ровно один раз. Заложив её в процент, вы посчитаете её дважды.
+              the selvedge is NOT part of the percent: the net length comes from dividing by the
+              CUTTING width (roll − 2×selvedge), so a purchased metre of the roll carries its selvedge
+              with it and it is already paid for by that division — exactly once. build it into the
+              percent and you count it twice.
             </Text>
             {unitKind === 'kg' && (
               <Text size='nano' variant='label' component='p'>
-                Слот в килограммах: netto-длина переводится в вес по ПОЛНОЙ ширине рулона (кромку
-                покупают, и она весит — тот же один раз, не второй) и плотности артикула. Обе ширины
-                в одном расчёте, так и должно быть.
+                a slot in kilograms: the net length is converted to weight by the FULL roll width
+                (the selvedge is bought, and it weighs — the same once, not twice) and the article's
+                density. both widths in one calculation, and that is how it should be.
               </Text>
             )}
             <Text size='nano' variant='label' component='p'>
-              Раскладка, когда она появится, даст ИЗМЕРЕННОЕ число и заменит это: в её длине отходы
-              уже лежат внутри, и процент раскроя слота к ней не начисляется.
+              a marker, once there is one, gives a MEASURED number and replaces this: its length
+              already has the waste inside it, and the slot's wastage percent is not added to it.
             </Text>
             {outcome?.ok && outcome.areas.hulled.length > 0 && (
               <Text size='nano' variant='label' component='p'>
-                {`контур заменён выпуклой оболочкой (площадь с запасом): ${outcome.areas.hulled.join(', ')}`}
+                {`the contour was replaced with a convex hull (the area is overstated): ${outcome.areas.hulled.join(', ')}`}
               </Text>
             )}
           </div>
         </details>
 
-        <Pill tone='mut'>источник будет записан как «по выкройкам»</Pill>
+        <Pill tone='mut'>the source will be recorded as “from the patterns”</Pill>
       </div>
     </ConfirmationModal>
   );

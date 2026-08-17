@@ -165,8 +165,8 @@ export function combineVerdict(
     const eater = res.consumedBy.get(key);
     if (eater === undefined) return null;
     const into = steps[eater]?.outputUnitKey ?? '';
-    const where = into ? ` и лежит внутри узла ${into}` : '';
-    return `«${key}» уже съеден шагом ${(eater + 1) * 10}${where}`;
+    const where = into ? ` and sits inside unit ${into}` : '';
+    return `“${key}” is already consumed by step ${(eater + 1) * 10}${where}`;
   };
 
   const dragEaten = eatenReason(dragKey);
@@ -176,8 +176,8 @@ export function combineVerdict(
 
   // Нода может быть неизвестной раскладке только на битом состоянии; отказ честнее молчания.
   const known = (key: string) => res.frontier.includes(key);
-  if (!known(dragKey)) return { ok: false, reason: `«${dragKey}» не лежит на столе` };
-  if (!known(targetKey)) return { ok: false, reason: `«${targetKey}» не лежит на столе` };
+  if (!known(dragKey)) return { ok: false, reason: `“${dragKey}” isn't on the table` };
+  if (!known(targetKey)) return { ok: false, reason: `“${targetKey}” isn't on the table` };
 
   // Цель — живой узел: предлагается ПОГЛОЩЕНИЕ, и узел сохраняет свою идентичность. Именно цели,
   // а не тащимой ноды: «дособрать GARMENT рукавом» и «собрать новый узел из GARMENT и рукава» —

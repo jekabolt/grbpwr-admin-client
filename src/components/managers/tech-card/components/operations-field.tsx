@@ -234,13 +234,13 @@ type ExpectedMaterial = { section: string; what: string };
 const OPERATION_TYPE_EXPECTS: Partial<Record<common_TechCardOperationType, ExpectedMaterial>> = {
   TECH_CARD_OPERATION_TYPE_FUSING: {
     section: 'TECH_CARD_BOM_SECTION_INTERLINING',
-    what: 'клеевую',
+    what: 'fusing',
   },
 };
 const MACHINE_TYPE_EXPECTS: Partial<Record<common_TechCardMachineType, ExpectedMaterial>> = {
   TECH_CARD_MACHINE_TYPE_BUTTON_ATTACH: {
     section: 'TECH_CARD_BOM_SECTION_HARDWARE',
-    what: 'фурнитуру',
+    what: 'hardware',
   },
 };
 
@@ -248,12 +248,12 @@ const MACHINE_TYPE_EXPECTS: Partial<Record<common_TechCardMachineType, ExpectedM
 // form («hardware (пуговицы / молнии / кнопки)») — right for a select, far too wide for a caption
 // sitting above a row of chips.
 const LINKABLE_SECTION_LABEL: Record<string, string> = {
-  TECH_CARD_BOM_SECTION_HARDWARE: 'фурнитура',
-  TECH_CARD_BOM_SECTION_THREAD: 'нитки',
-  TECH_CARD_BOM_SECTION_INTERLINING: 'клеевые',
-  TECH_CARD_BOM_SECTION_TRIM: 'тесьма / резинка',
-  TECH_CARD_BOM_SECTION_DECORATION: 'декор',
-  TECH_CARD_BOM_SECTION_LABEL: 'этикетки',
+  TECH_CARD_BOM_SECTION_HARDWARE: 'hardware',
+  TECH_CARD_BOM_SECTION_THREAD: 'thread',
+  TECH_CARD_BOM_SECTION_INTERLINING: 'fusing',
+  TECH_CARD_BOM_SECTION_TRIM: 'trim / elastic',
+  TECH_CARD_BOM_SECTION_DECORATION: 'decoration',
+  TECH_CARD_BOM_SECTION_LABEL: 'labels',
 };
 
 // A new step starts EMPTY on every override. Nothing is pre-filled from a preset any more: the
@@ -414,9 +414,9 @@ function colorwayArticleText(c: {
   missing: boolean;
   articles: string[];
 }): string {
-  if (!c.inRecipe) return 'не в рецепте';
+  if (!c.inRecipe) return 'not in the recipe';
   if (!c.missing) return c.articles.join(' / ');
-  return c.articles.length > 0 ? `${c.articles.join(' / ')} + нет артикула` : 'нет артикула';
+  return c.articles.length > 0 ? `${c.articles.join(' / ')} + no article` : 'no article';
 }
 
 // Reads a drag payload back as a piece lineKey — the private MIME type first, the prefixed
@@ -633,7 +633,7 @@ function AssemblyTray({
           <Chip
             key={`unit:${key}`}
             onClick={() => onAdd(key)}
-            title={`${title}: узел из ${unit?.leaves.length ?? 0} деталей — кликните, чтобы добавить к открытому шагу`}
+            title={`${title}: a unit of ${unit?.leaves.length ?? 0} pieces — click to add it to the open step`}
           >
             ▣ {key}
           </Chip>
@@ -654,9 +654,9 @@ function AssemblyTray({
           <Chip
             dashed
             onClick={() => setConsumedOpen((v) => !v)}
-            title='детали, уже вошедшие в узлы: их нельзя взять повторно — строка детали съедается ровно одним джойном'
+            title='pieces that have already gone into units: they cannot be taken again — a piece row is consumed by exactly one join'
           >
-            уже в узлах · {eaten.length}
+            already in units · {eaten.length}
           </Chip>
           {consumedOpen &&
             eaten.map((p) => {
@@ -701,7 +701,7 @@ function TrayChip({
       e.dataTransfer.effectAllowed = 'copy';
     },
   };
-  const hint = `${piece.name} — кликните, чтобы добавить к открытому шагу, или перетащите на любой`;
+  const hint = `${piece.name} — click to add it to the open step, or drag it onto any step`;
 
   // ПЛИТКА — это КНОПКА с плиткой внутри, а не чип с картинкой. Чип меряется строкой текста, и
   // 56-пиксельный квадрат внутри него растянул бы чип по вертикали, оставив канту чипа роль рамки
@@ -803,14 +803,14 @@ function ProducesBlock({
   const declare = () => {
     if (usable.length < 2) {
       showMessage(
-        'узел из одного входа — это обработка, а не узел: возьмите на шаг хотя бы два входа',
+        'a unit made of a single input is processing, not a unit: take at least two inputs into the step',
         'error',
       );
       return;
     }
     const code = suggest();
     if (byKey.has(code)) {
-      showMessage(`ключ «${code}» занят деталью — у деталей и узлов одно пространство имён`, 'error');
+      showMessage(`the key “${code}” is taken by a piece — pieces and units share one namespace`, 'error');
       return;
     }
     setValue(`operations.${index}.outputUnitKey`, code, { shouldDirty: true });
@@ -825,11 +825,11 @@ function ProducesBlock({
       <GroupLabel>produces</GroupLabel>
       {!outputKey ? (
         <ChipRow>
-          <Chip dashed onClick={declare} title='объявить, что этот шаг собирает узел'>
-            ▣ сделать узлом
+          <Chip dashed onClick={declare} title='declare that this step assembles a unit'>
+            ▣ make it a unit
           </Chip>
           <Text size='micro' variant='label' component='span'>
-            шаг ничего не собирает — его входы остаются доступными следующим шагам
+            the step assembles nothing — its inputs stay available to the next steps
           </Text>
         </ChipRow>
       ) : (
@@ -841,14 +841,14 @@ function ProducesBlock({
                 должно позволять её набрать. */}
             <InputField
               name={`operations.${index}.outputUnitKey`}
-              label='код узла'
+              label='unit code'
               placeholder='SHELL'
               maxLength={64}
             />
             <InputField
               name={`operations.${index}.outputUnitName`}
-              label='имя узла'
-              placeholder='корпус'
+              label='unit name'
+              placeholder='body'
               maxLength={255}
             />
             <Chip
@@ -857,19 +857,19 @@ function ProducesBlock({
                 setValue(`operations.${index}.outputUnitKey`, '', { shouldDirty: true });
                 setValue(`operations.${index}.outputUnitName`, '', { shouldDirty: true });
               }}
-              title='шаг перестанет собирать узел; его входы вернутся на стол следующим шагам'
+              title='the step stops assembling the unit; its inputs return to the table for the next steps'
             >
-              растворить
+              dissolve
             </Chip>
           </div>
           {absorbs && (
             <Text size='micro' variant='label' className='mt-1'>
-              поглощение: узел {outputKey} сохраняет идентичность и получает содержимое этого шага
+              absorption: unit {outputKey} keeps its identity and gains the contents of this step
             </Text>
           )}
           {!outputName && (
             <Text size='micro' variant='label' className='mt-1'>
-              имя необязательно, но на печати и в цехе читают его, а не код
+              the name is optional, but in print and on the floor people read it, not the code
             </Text>
           )}
           {/* Узел должен быть произведён ИМЕННО ЭТИМ шагом (или им поглощён). Предыдущий гейт
@@ -952,7 +952,7 @@ function BootstrapEatenRefs({
       setValue(`operations.${i}.inputKeys`, next, { shouldDirty: true });
     });
     setValue('assemblyCleared', false, { shouldDirty: true });
-    showMessage(`ссылки на съеденные детали заменены узлом ${outputKey} в ${affected.length} шагах`, 'success');
+    showMessage(`references to consumed pieces replaced with unit ${outputKey} in ${affected.length} steps`, 'success');
   };
 
   return (
@@ -960,9 +960,9 @@ function BootstrapEatenRefs({
       <Chip
         dashed
         onClick={apply}
-        title={`шаги ниже ссылаются на детали, которые этот узел съедает; замена обязательна — иначе сервер отвергнет всю карточку`}
+        title={`the steps below reference pieces this unit consumes; the replacement is mandatory — otherwise the server refuses the whole card`}
       >
-        заменить съеденные ссылки узлом · {affected.length}
+        replace the consumed references with the unit · {affected.length}
       </Chip>
     </ChipRow>
   );
@@ -1019,28 +1019,28 @@ function ClearOperationMediaButton({
     // Намерение живёт ровно одно сохранение: маппер записи гасит его сам, а черновик не хранит.
     setValue('mediaCleared', true, { shouldDirty: true });
     setConfirming(false);
-    showMessage('фотографии шагов сняты — сохраните карточку', 'success');
+    showMessage('the step photos are cleared — save the card', 'success');
   };
 
   return (
     <>
-      <Chip dashed onClick={() => setConfirming(true)} title='убрать все фотографии со всех шагов'>
-        снять фотографии шагов
+      <Chip dashed onClick={() => setConfirming(true)} title='remove every photo from every step'>
+        clear the step photos
       </Chip>
       <ConfirmationModal
         open={confirming}
         onOpenChange={setConfirming}
         onConfirm={clear}
-        title='снять фотографии шагов'
-        confirmLabel='снять'
-        cancelLabel='оставить'
+        title='clear the step photos'
+        confirmLabel='clear'
+        cancelLabel='keep'
         width='sm'
       >
         <Text size='micro'>
           {inForm > 0
-            ? `со всех шагов будут убраны фотографии (${inForm}) вместе с выносками на них.`
-            : 'в форме фотографий уже нет; кнопка объявляет серверу намерение снять их с сохранённой карточки.'}{' '}
-          Сами файлы в библиотеке останутся.
+            ? `photos (${inForm}) will be removed from every step, along with the callouts on them.`
+            : "there are no photos in the form any more; the button declares to the server the intent to clear them from the saved card."}{' '}
+          the files themselves stay in the library.
         </Text>
       </ConfirmationModal>
     </>
@@ -1127,8 +1127,8 @@ function ClearAssemblyButton({
     setConfirming(false);
     showMessage(
       droppedDangling > 0
-        ? `разметка узлов снята; оборванных ссылок отброшено: ${droppedDangling} — сохраните карточку`
-        : 'разметка узлов снята — сохраните карточку, чтобы это применилось',
+        ? `the unit markup is cleared; dangling references dropped: ${droppedDangling} — save the card`
+        : 'the unit markup is cleared — save the card for it to apply',
       'success',
     );
   };
@@ -1138,24 +1138,24 @@ function ClearAssemblyButton({
       <Chip
         dashed
         onClick={() => setConfirming(true)}
-        title='снять разметку узлов со всей карточки: входы-узлы вернутся в детали по составу'
+        title='clear the unit markup across the whole card: unit inputs go back to pieces by their contents'
       >
-        снять разметку{inForm > 0 ? ` · ${inForm}` : ''}
+        clear the unit markup{inForm > 0 ? ` · ${inForm}` : ''}
       </Chip>
       <ConfirmationModal
         open={confirming}
         onOpenChange={setConfirming}
         onConfirm={clear}
-        title='снять разметку узлов?'
-        confirmLabel='снять'
+        title='clear the unit markup?'
+        confirmLabel='clear'
       >
         <Text size='micro'>
           {inForm > 0
-            ? `Узлов на карточке: ${inForm}.`
-            : 'В форме узлов уже нет, но сохранённая карточка размечена — снятие подтвердит это серверу.'}{' '}
-          Входы-узлы вернутся в детали по составу,
-          выходные ключи будут очищены. Подпись секции CONSTRUCTION станет «изменено после
-          подписи» — это правда, а не дефект: содержание действительно поменялось.
+            ? `units on the card: ${inForm}.`
+            : 'there are no units in the form any more, but the saved card is marked up — clearing confirms that to the server.'}{' '}
+          unit inputs go back to pieces by their contents, and the output keys are cleared. the
+          CONSTRUCTION sign-off becomes “changed after the sign-off” — that is the truth, not a
+          defect: the content really did change.
         </Text>
       </ConfirmationModal>
     </>
@@ -1186,9 +1186,9 @@ function StepNumberDrift() {
   return (
     <CalloutBox tone='error'>
       <Text size='micro'>
-        номера шагов переедут при сохранении:{' '}
-        <b>{moves.map((m) => `${m.from}→${m.to}`).join(', ')}</b>. Ссылки дефектов переедут вместе
-        с шагами автоматически, а напечатанные номера в уже выданных тех-паках — нет.
+        the step numbers will move on save:{' '}
+        <b>{moves.map((m) => `${m.from}→${m.to}`).join(', ')}</b>. defect references move with the
+        steps automatically, but the numbers already printed in issued tech packs do not.
       </Text>
     </CalloutBox>
   );
@@ -1368,8 +1368,8 @@ function RailStep({
                 // при нарушении сборки — то есть про другое, и уводил искать не туда.
                 title={
                   assemblyBroken && !hasError
-                    ? 'шаг ломает сборку: вход не лежит на столе на этом шаге — откройте шаг'
-                    : 'в шаге есть незаполненное обязательное поле'
+                    ? 'the step breaks the assembly: an input is not on the table at this step — open the step'
+                    : 'the step has an unfilled required field'
                 }
               >
                 !
@@ -1381,7 +1381,7 @@ function RailStep({
                 variant='label'
                 component='span'
                 className='shrink-0 tabular-nums'
-                title={`пин #${calloutNumber} на эскизе`}
+                title={`pin #${calloutNumber} on the sketch`}
               >
                 #{calloutNumber}
               </Text>
@@ -2253,8 +2253,8 @@ function OperationEditor({
               />
               <button
                 type='button'
-                aria-label={`убрать деталь ${byKey.get(k)?.name ?? ''}`}
-                title='убрать деталь со шага'
+                aria-label={`remove piece ${byKey.get(k)?.name ?? ''}`}
+                title='remove the piece from the step'
                 onClick={() => removePieceKey(k)}
                 className='absolute top-0 right-0 flex size-4 items-center justify-center bg-bgColor/80 text-nano leading-none text-labelColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
               >
@@ -2284,7 +2284,7 @@ function OperationEditor({
         {chosenUnits.map((k) => (
           <Chip
             key={`u:${k}`}
-            title={`узел ${k}: ${assembly.res.units.get(k)?.leaves.length ?? 0} деталей внутри`}
+            title={`unit ${k}: ${assembly.res.units.get(k)?.leaves.length ?? 0} pieces inside`}
             onRemove={() => removePieceKey(k)}
           >
             ▣ {k}
@@ -2396,7 +2396,7 @@ function OperationEditor({
             <Text key={`${slot.lineKey}:${i}`} size='micro' variant='label' className='mt-1'>
               {slot.name} →{' '}
               {!slot.usedAnywhere
-                ? 'слот не используется ни в одном рецепте колорвея'
+                ? 'the slot is not used in any colourway recipe'
                 : slot.uniform
                   ? slot.uniformArticle
                   : slot.perColorway
@@ -2439,7 +2439,7 @@ function OperationEditor({
           exists in the BOM, and blocking the save would make the check the operator's enemy. */}
       {expectsMaterial && (
         <Text size='micro' variant='label' className='mt-1'>
-          такой шаг обычно потребляет {expectsMaterial.what} — ни одной строки не привязано
+          a step like this usually consumes {expectsMaterial.what} — no line is linked
         </Text>
       )}
 
@@ -2555,7 +2555,7 @@ function OperationEditor({
                   name={`operations.${index}.threadTensionNote`}
                   label='tension note'
                   maxLength={64}
-                  placeholder='на 0.5 туже, dial 4'
+                  placeholder='0.5 tighter, dial 4'
                 />
               )}
               {/* «stitch width» is the zigzag amplitude / the overlock bite. NOT the topstitch
@@ -2599,7 +2599,7 @@ function OperationEditor({
                 </div>
               }
             >
-              ВТО mode
+              pressing mode
             </GroupLabel>
             <div className='grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2 xl:grid-cols-3'>
               <EncodedSelectField<string>
@@ -2816,7 +2816,7 @@ function GenerateOperationsPanel({
       });
       const operations = res.operations ?? [];
       if (operations.length === 0) {
-        setError('AI не вернул ни одной операции — уточните описание и попробуйте снова');
+        setError('the AI returned no operations — refine the description and try again');
       } else {
         setDraft({ operations, model: res.model, notes: res.notes });
       }
@@ -2825,7 +2825,7 @@ function GenerateOperationsPanel({
       setError(
         status === 412
           ? AI_NOT_CONFIGURED_MESSAGE
-          : fieldErrorSummary(e, 'Не удалось сгенерировать операции'),
+          : fieldErrorSummary(e, "couldn't generate the operations"),
       );
     } finally {
       setGenerating(false);
@@ -2852,29 +2852,28 @@ function GenerateOperationsPanel({
             <Pill tone='attention'>{`draft: ${draft.operations.length}`}</Pill>
           ) : (
             <Text size='micro' variant='label' component='span'>
-              черновик
+              draft
             </Text>
           )
         }
       >
         <div className='space-y-2'>
           <Text size='micro' variant='label'>
-            Опишите конструкцию своими словами — узлы, детали, материалы, порядок сборки. AI
-            предложит структурированные операции по этому описанию и данным карты (детали, BOM) —
-            это ЧЕРНОВИК, технолог должен проверить его перед сохранением.
+            describe the construction in your own words — units, pieces, materials, the order of
+            assembly. the AI proposes structured operations from that description and the card's
+            data (pieces, BOM) — this is a DRAFT, and the technologist must check it before saving.
           </Text>
 
           {!techCardId ? (
             <Text size='micro' variant='label'>
-              сначала сохраните тех.карту — генерация использует уже сохранённые детали и BOM как
-              контекст
+              save the tech card first — generation uses the already saved pieces and BOM as context
             </Text>
           ) : (
             <>
               <Textarea
                 name='ai-operations-description'
                 variant='secondary'
-                placeholder='например: втачать рукав в открытую пройму, боковые швы стачать оверлоком 4 нитки, низ подогнуть 2 см и настрочить в край…'
+                placeholder='e.g.: set the sleeve into an open armhole, overlock the side seams with 4 threads, turn the hem up 2 cm and edge-stitch it…'
                 className='mb-0 min-h-24 border border-borderColor'
                 maxLength={4000}
                 value={description}
@@ -2891,7 +2890,7 @@ function GenerateOperationsPanel({
                 disabled={generating || !description.trim()}
                 onClick={generate}
               >
-                сгенерировать операции
+                generate operations
               </Button>
             </>
           )}
@@ -2907,7 +2906,7 @@ function GenerateOperationsPanel({
               <GroupLabel
                 action={
                   <Text size='micro' variant='label' component='span'>
-                    операций: {draft.operations.length}
+                    operations: {draft.operations.length}
                     {draft.model ? ` · ${draft.model}` : ''}
                   </Text>
                 }
@@ -2944,7 +2943,7 @@ function GenerateOperationsPanel({
               <div className='flex flex-wrap gap-1.5'>
                 {hasExistingOperations && (
                   <Button type='button' variant='main' size='sm' onClick={() => accept('append')}>
-                    добавить к списку
+                    append to the list
                   </Button>
                 )}
                 <Button
@@ -2955,10 +2954,10 @@ function GenerateOperationsPanel({
                     hasExistingOperations ? setImpact(readReplaceImpact()) : accept('append')
                   }
                 >
-                  {hasExistingOperations ? 'заменить весь список' : 'принять в список'}
+                  {hasExistingOperations ? 'replace the whole list' : 'accept into the list'}
                 </Button>
                 <Button type='button' variant='secondary' size='sm' onClick={() => setDraft(null)}>
-                  отклонить черновик
+                  discard the draft
                 </Button>
               </div>
             </div>
@@ -2969,49 +2968,50 @@ function GenerateOperationsPanel({
       <ConfirmationModal
         open={impact != null}
         onOpenChange={(next) => !next && setImpact(null)}
-        title='заменить весь список операций'
+        title='replace the whole list of operations'
         width='sm'
-        confirmLabel='заменить'
-        cancelLabel='отмена'
+        confirmLabel='replace'
+        cancelLabel='cancel'
         onConfirm={() => accept('replace')}
       >
         <div className='space-y-1.5'>
           <CalloutBox tone='error'>
             <Text size='micro'>
-              будет удалено <b>{impact?.operations ?? 0}</b> операций: SAM у{' '}
-              <b>{impact?.sam ?? 0}</b> из них и привязки деталей у <b>{impact?.pieceLinks ?? 0}</b>
-              . Ссылки дефектов на номера операций тоже будут сброшены.
+              <b>{impact?.operations ?? 0}</b> operations will be deleted: the SAM on{' '}
+              <b>{impact?.sam ?? 0}</b> of them and the piece links on <b>{impact?.pieceLinks ?? 0}</b>
+              . defect references to operation numbers will be reset too.
             </Text>
           </CalloutBox>
           {(impact?.units ?? 0) > 0 && (
             <CalloutBox tone='error'>
               <Text size='micro'>
-                и <b>{impact?.units}</b> узлов сборки: черновик их не несёт, поэтому разметка
-                исчезнет целиком. Сервер такую запись отклонит — снимать разметку нужно кнопкой
-                «снять разметку», а не заменой списка.
+                and <b>{impact?.units}</b> assembly units: the draft does not carry them, so the
+                markup disappears entirely. the server refuses such a write — the markup has to be
+                cleared with the “clear the unit markup” button, not by replacing the list.
               </Text>
             </CalloutBox>
           )}
           {(impact?.photos ?? 0) > 0 && (
             <CalloutBox tone='error'>
               <Text size='micro'>
-                и <b>{impact?.photos}</b> снимков шагов вместе со всеми указаниями на них: мерками,
-                подписями, участками. Сервер откажет щитом, и единственный выход из отказа —
-                согласиться стереть снимки насовсем.
+                and <b>{impact?.photos}</b> step photos along with every callout on them:
+                measurements, captions, spans. the server refuses with a shield, and the only way out
+                of that refusal is to agree to erase the photos for good.
               </Text>
             </CalloutBox>
           )}
           {(impact?.equipment ?? 0) > 0 && (
             <CalloutBox tone='error'>
               <Text size='micro'>
-                и машинки с режимами ВТО у <b>{impact?.equipment}</b> шагов. Здесь щита нет: запись
-                пройдёт молча, и узнать о пропаже будет неоткуда — в цеху просто станут шить другой
-                иглой на другой машине.
+                and the machines and pressing modes on <b>{impact?.equipment}</b> steps. there is no
+                shield here: the write goes through silently, and there will be nowhere to learn
+                about the loss — the floor will simply start sewing with a different needle on a
+                different machine.
               </Text>
             </CalloutBox>
           )}
           <Text size='micro' variant='label'>
-            вместо этого можно «добавить к списку» — черновик встанет после существующих операций.
+            instead you can “append to the list” — the draft lands after the existing operations.
           </Text>
         </div>
       </ConfirmationModal>
@@ -3250,7 +3250,7 @@ export function OperationsField({
 
   const pinOptions = useMemo<PickerOption[]>(
     () => [
-      { value: 0, label: '— пин —' },
+      { value: 0, label: '— pin —' },
       ...callouts
         .filter((c) => (c.number ?? 0) > 0)
         .map((c) => ({
@@ -3399,8 +3399,8 @@ export function OperationsField({
       const into = eater !== undefined ? steps[eater]?.outputUnitKey : '';
       showMessage(
         into
-          ? `«${key}» на этом шаге уже внутри узла ${into} — взять её повторно нельзя`
-          : `«${key}» на этом шаге ещё не лежит на столе`,
+          ? `“${key}” is already inside unit ${into} at this step — it cannot be taken again`
+          : `“${key}” is not on the table yet at this step`,
         'error',
       );
       return;
@@ -3503,10 +3503,10 @@ export function OperationsField({
   return (
     <div className='space-y-2.5'>
       <Text size='micro' variant='label'>
-        Шаги сборки по порядку — слева вся последовательность, справа открытый шаг целиком. Номера
-        (10/20/30) проставляются по позиции: перетащите <b>⠿</b>, чтобы поменять порядок. Тип шага
-        говорит, ЧТО делают, машинка или оборудование ВТО — НА ЧЁМ; пустое поле в настройках значит
-        «наследую», и подсказка в нём называет и значение, и источник.
+        assembly steps in order — the whole sequence on the left, the open step in full on the
+        right. the numbers (10/20/30) follow the position: drag <b>⠿</b> to change the order. the
+        step type says WHAT is done, the machine or the pressing equipment — ON WHAT; an empty field
+        in the settings means “inherit”, and its placeholder names both the value and the source.
       </Text>
 
       <StepNumberDrift />
@@ -3534,11 +3534,11 @@ export function OperationsField({
       <div ref={trayRef} className={cn(fields.length === 0 && 'hidden')}>
         <Toolbar sticky>
           <Text size='micro' variant='label' component='span' className='uppercase'>
-            детали:
+            pieces:
           </Text>
           {pieces.length === 0 ? (
             <Text size='micro' variant='label' component='span'>
-              деталей ещё нет
+              no pieces yet
             </Text>
           ) : (
             <AssemblyTray
@@ -3557,11 +3557,11 @@ export function OperationsField({
             onClick={goToPiecesTab}
             title={
               hasDxf
-                ? 'детали заводятся из DXF — «↔ детали кроя» на вкладке patterns'
-                : 'создать деталь на вкладке PATTERNS'
+                ? 'pieces are created from a DXF — “↔ cut pieces” on the patterns tab'
+                : 'create a piece on the PATTERNS tab'
             }
           >
-            {hasDxf ? '↔ детали кроя' : '+ new piece'}
+            {hasDxf ? '↔ cut pieces' : '+ new piece'}
           </Chip>
           <ToolbarSpacer />
           <Text
@@ -3571,8 +3571,8 @@ export function OperationsField({
             className={cn(highlightPieces && 'font-bold text-textColor')}
           >
             {highlightPieces
-              ? `кликните деталь → шаг ${(selectedIndex + 1) * 10}`
-              : `клик → шаг ${(selectedIndex + 1) * 10}`}
+              ? `click a piece → step ${(selectedIndex + 1) * 10}`
+              : `click → step ${(selectedIndex + 1) * 10}`}
           </Text>
         </Toolbar>
       </div>
@@ -3584,21 +3584,21 @@ export function OperationsField({
       {fields.length === 0 && effectiveMode !== 'schematic' ? (
         <div className='flex flex-col items-center gap-2 border border-dashed border-borderColor px-3 py-8 text-center'>
           <Text size='micro' variant='label'>
-            последовательность сборки пока пуста. Добавьте первый шаг — или опишите конструкцию
-            словами и сгенерируйте черновик ниже.
+            the assembly sequence is empty so far. add the first step — or describe the construction
+            in words and generate a draft below.
           </Text>
           <div className='flex items-center gap-2'>
             <Button type='button' variant='main' size='sm' onClick={addOperation}>
-              + операция
+              + operation
             </Button>
             {pieces.length > 0 && (
               <Chip
                 nonForm
                 dashed
                 onClick={() => setMode('schematic')}
-                title='разложить детали и собрать узлы жестами'
+                title='lay the pieces out and assemble units by gestures'
               >
-                собрать на схеме
+                assemble on the schematic
               </Chip>
             )}
           </div>
@@ -3628,17 +3628,17 @@ export function OperationsField({
                     nonForm
                     dashed
                     onClick={() => setMode(effectiveMode === 'schematic' ? 'list' : 'schematic')}
-                    title='схема сборки или список шагов — оба редактируют одни данные'
+                    title='the assembly schematic or the list of steps — both edit the same data'
                   >
-                    {effectiveMode === 'schematic' ? 'списком' : 'схемой'}
+                    {effectiveMode === 'schematic' ? 'as a list' : 'as a schematic'}
                   </Chip>
                   <Text size='micro' variant='label' component='span'>
-                    ⠿ перетащить
+                    ⠿ drag
                   </Text>
                 </div>
               }
             >
-              последовательность
+              sequence
             </GroupLabel>
             {effectiveMode === 'schematic' ? (
               <AssemblySchematic
@@ -3657,7 +3657,7 @@ export function OperationsField({
                     >[0]['zone'],
                     pieceNames: [],
                   }) ||
-                  'шаг'
+                  'step'
                 }
                 pieceNameOf={(k) => pieces.find((p) => p.lineKey === k)?.name ?? k}
                 onPickStep={(i) => {
@@ -3725,7 +3725,7 @@ export function OperationsField({
               className='mt-0.5 w-full border border-dashed border-borderColor py-1 text-labelColor transition-colors hover:border-textColor hover:text-textColor focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-textColor'
             >
               <Text size='control' variant='uppercase' tracking='label' component='span'>
-                + операция
+                + operation
               </Text>
             </button>
             <RailTotal />

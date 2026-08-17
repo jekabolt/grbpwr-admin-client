@@ -250,14 +250,14 @@ export default function PieceAreasDialog({
     }
     setBusy(false);
     if (!res.ok) {
-      showMessage(`площади не сохранены: ${res.reason}`, 'error');
+      showMessage(`the areas were not saved: ${res.reason}`, 'error');
       return;
     }
     // Свежесть замера считает СЕРВЕР и отдаёт её на чтении карточки — без этого сброса плитка
     // ткани продолжала бы писать «площади не замерены» над только что записанным замером.
     queryClient.invalidateQueries({ queryKey: techCardKeys.detail(techCardId) });
     showMessage(
-      `площади деталей сохранены (${res.stored}) — костинг посчитает оценку снизу по площади деталей`,
+      `piece areas saved (${res.stored}) — costing will compute a lower-bound estimate from the piece area`,
       'success',
     );
     onClose();
@@ -276,32 +276,33 @@ export default function PieceAreasDialog({
       onCancel={() => {
         if (!busy) onClose();
       }}
-      title={`площади деталей · ${scopeLabel}`}
-      confirmLabel={busy ? 'сохраняем…' : 'замерить и сохранить'}
+      title={`piece areas · ${scopeLabel}`}
+      confirmLabel={busy ? 'saving…' : 'measure and save'}
       confirmDisabled={!runnable}
       closeOnConfirm={false}
     >
       <div className='space-y-2'>
         <CalloutBox tone='note'>
-          Замеряется площадь каждой детали кроя этой ткани по её выкройкам. Пишутся ТОЛЬКО площади:
-          ни норма расхода, ни рецепт колорвея не меняются. Что это даёт — костинг посчитает оценку
-          снизу по площади деталей: слот, которому назначены детали кроя, получит цену и БЕЗ строки
-          «на изделие» — площадь деталей ÷ раскройную ширину. Это NETTO и нижняя граница:
-          межлекальных выпадов в ней нет, их знает только раскладка, и она же заменит оценку, когда
-          появится. Замер полностью заменяет прежний по этой ткани.
+          the area of every cut piece of this fabric is measured from its patterns. ONLY areas are
+          written: neither the consumption norm nor the colourway recipe changes. what it buys you —
+          costing computes a lower-bound estimate from the piece area: a slot that has cut pieces
+          assigned to it gets a price even WITHOUT a “per garment” line — piece area ÷ cutting width.
+          this is NET and a lower bound: the waste between pieces is not in it, only a marker knows
+          that, and a marker will replace the estimate once there is one. the measurement fully
+          replaces the previous one for this fabric.
         </CalloutBox>
 
         {current.phase !== 'none' && (
           <Text size='nano' variant='label' component='p'>
-            {`сейчас на сервере: деталей ${current.pieces}, слой ${
+            {`on the server right now: ${current.pieces} pieces, layer ${
               current.contourLayer || '—'
-            }, припуск ${current.seamMm || '—'} мм${
+            }, seam allowance ${current.seamMm || '—'} mm${
               current.phase === 'stale'
-                ? ' — сервер считает замер устаревшим: выкройки или связи менялись после него'
+                ? ' — the server considers the measurement stale: the patterns or the links changed after it'
                 : current.phase === 'partial'
-                  ? ` — замерены не все листы этой ткани (без замера: ${current.missing})`
+                  ? ` — not every sheet of this fabric has been measured (unmeasured: ${current.missing})`
                   : ''
-            }. Новый замер заменит его целиком.`}
+            }. a new measurement replaces it entirely.`}
           </Text>
         )}
 
@@ -328,17 +329,18 @@ export default function PieceAreasDialog({
             сервер не может увидеть, нельзя. */}
         {sourceDirty && (
           <CalloutBox tone='warning'>
-            Выкройки или связи блок→деталь правлены и ещё не сохранены. Сервер сверяет комплект по
-            СОХРАНЁННЫМ связям, поэтому несохранённые он не учтёт: если правлены связи этой ткани —
-            откажет, сославшись на отсутствие связей блок→деталь; если правки касались другой ткани
-            — замер запишется, но по прежним связям. Различить эти случаи здесь нечем, а цена
-            ошибки — записанные площади не той геометрии. Сохраните карточку и повторите замер.
+            the patterns or the block→piece links have been edited and not saved yet. the server
+            checks the set against the SAVED links, so it will not count the unsaved ones: if the
+            links of this fabric were edited it refuses, citing the absence of block→piece links; if
+            the edits touched another fabric the measurement is written, but against the old links.
+            there is nothing here to tell those two cases apart, and the cost of the mistake is areas
+            recorded for the wrong geometry. save the card and retry the measurement.
           </CalloutBox>
         )}
 
         {unsavedPieces.length > 0 && (
           <CalloutBox tone='warning'>
-            {`Эти детали ещё не сохранены на сервере: ${unsavedPieces.join(', ')}. Площадь ложится на деталь по её ключу, а его пока нет — набор уехал бы без них и выглядел бы полным. Сохраните карточку и повторите замер.`}
+            {`these pieces are not saved on the server yet: ${unsavedPieces.join(', ')}. an area lands on a piece by its key, and there is no key yet — the set would travel without them and look complete. save the card and retry the measurement.`}
           </CalloutBox>
         )}
 
@@ -346,22 +348,22 @@ export default function PieceAreasDialog({
             перебором по чертежу — это то же самое, что не сказать ничего. */}
         {incompleteSizes.length > 0 && (
           <CalloutBox tone='warning'>
-            {`Комплект собрался не для всех размеров ряда, поэтому замер не записывается вовсе: ${incompleteSizes
+            {`the set did not come together for every size in the range, so the measurement is not written at all: ${incompleteSizes
               .map(
                 (s) =>
-                  `${sizeName(s.sizeId)} — ${s.piece ? `нет детали «${s.piece}»` : 'нулевая площадь'}`,
+                  `${sizeName(s.sizeId)} — ${s.piece ? `piece “${s.piece}” is missing` : 'zero area'}`,
               )
               .join(
                 '; ',
-              )}. Частичный набор сервер принял бы как полный, и оценка по нему вышла бы заниженной ровно на недостающее.`}
+              )}. the server would take a partial set as a complete one, and the estimate from it would be understated by exactly what is missing.`}
           </CalloutBox>
         )}
 
         {pieces.length === 0 && (
           <CalloutBox tone='warning'>
-            Ни одна деталь кроя не связана с блоками чертежа этой ткани — мерить нечего. Свяжите их
-            кнопкой «↔ детали кроя» здесь же: связь блок→деталь и есть то, по чему площадь ложится
-            на деталь.
+            no cut piece is linked to a drawing block of this fabric — there is nothing to measure.
+            link them with the “↔ cut pieces” button right here: the block→piece link is exactly what
+            makes an area land on a piece.
           </CalloutBox>
         )}
 
@@ -376,14 +378,14 @@ export default function PieceAreasDialog({
             <DataTable variant='grid' className='[&_td]:text-micro'>
               <thead>
                 <tr>
-                  <th>размер</th>
-                  <th>площадь изделия, см²</th>
-                  <th>м²</th>
+                  <th>size</th>
+                  <th>garment area, cm²</th>
+                  <th>m²</th>
                   {/* Погонная длина — САМАЯ ПОНЯТНАЯ ИЗ ТРЁХ КОЛОНОК: «92 см полотна на изделие»
                       оператор проверяет опытом мгновенно, а квадратные сантиметры — никогда.
                       Ширина названа в заголовке, потому что без неё длина ничего не значит. */}
                   <th>
-                    {cuttingWidthCm ? `netto, см при ${fmtWidth(cuttingWidthCm)} см` : 'netto, см'}
+                    {cuttingWidthCm ? `net, cm at ${fmtWidth(cuttingWidthCm)} cm` : 'net, cm'}
                   </th>
                 </tr>
               </thead>
@@ -411,16 +413,16 @@ export default function PieceAreasDialog({
               </tbody>
             </DataTable>
             <Text size='nano' variant='label'>
-              {`деталей: ${pieces.length} · градуируется: ${outcome.areas.gradedPieces}${
+              {`pieces: ${pieces.length} · graded: ${outcome.areas.gradedPieces}${
                 outcome.areas.sizelessCm2 > 0
-                  ? ` · безразмерные детали: ${Math.round(outcome.areas.sizelessCm2)} см² в каждом размере`
+                  ? ` · sizeless pieces: ${Math.round(outcome.areas.sizelessCm2)} cm² in every size`
                   : ''
               }`}
             </Text>
             <Text size='nano' variant='label'>
-              в таблице — площадь ИЗДЕЛИЯ (с количеством деталей на изделие); на сервер уезжает
-              площадь ОДНОГО экземпляра каждой детали, а кратность умножает читатель — она живёт на
-              детали и правится отдельно
+              the table shows the GARMENT's area (with the number of pieces per garment); what
+              travels to the server is the area of ONE instance of each piece, and the multiplier is
+              applied by the reader — it lives on the piece and is edited separately
             </Text>
             {/* ОТСУТСТВИЕ ДЛИНЫ ОБЯЗАНО НАЗЫВАТЬ ПРИЧИНУ. Пустая колонка молча читается как «длина
                 ноль» или как поломка; подставить сюда номинальные 140 см вместо неизвестной ширины
@@ -429,26 +431,27 @@ export default function PieceAreasDialog({
                 там причину называют соседняя клетка с нулём и блокирующая плашка выше. */}
             <Text size='nano' variant='label'>
               {cuttingWidthCm
-                ? `netto — площадь ÷ раскройную ширину (${fmtWidth(cuttingWidthCm)} см = рулон − 2×кромка). Это нижняя граница: межлекальных выпадов и концов настила в ней нет, их знает только раскладка`
-                : 'погонная длина не показана: у этой ткани не заполнена ширина полотна хотя бы на одной строке BOM этого назначения, либо строки называют разные ширины — делить площадь не на что, а подставить номинал вместо неизвестной ширины значило бы спрятать ошибку, которую потом не видно ни в одном числе'}
+                ? `net — area ÷ cutting width (${fmtWidth(cuttingWidthCm)} cm = roll − 2×selvedge). this is a lower bound: the waste between pieces and the lay ends are not in it, only a marker knows those`
+                : 'the running length is not shown: for this fabric the cloth width is empty on at least one BOM line of this purpose, or the lines name different widths — there is nothing to divide the area by, and substituting a nominal value for an unknown width would hide a mistake that is invisible in every number afterwards'}
             </Text>
             {outcome.areas.hulled.length > 0 && (
               <CalloutBox tone='note'>
-                контур заменён выпуклой оболочкой (площадь с запасом):{' '}
+                the contour was replaced with a convex hull (the area is overstated):{' '}
                 {outcome.areas.hulled.join(', ')}
               </CalloutBox>
             )}
             {outcome.areas.ambiguousPickPieces.length > 0 && (
               <CalloutBox tone='note'>
-                у деталей {outcome.areas.ambiguousPickPieces.map((n) => `«${n}»`).join(', ')} на
-                слое несколько совпадающих по площади копий — в замер попала первая, то есть выбор
-                зависит от порядка листов в пачке. Такая строка помечается на сервере.
+                pieces {outcome.areas.ambiguousPickPieces.map((n) => `“${n}”`).join(', ')} have
+                several copies of matching area on the layer — the first one went into the
+                measurement, which means the choice depends on the order of the sheets in the pack.
+                such a row is flagged on the server.
               </CalloutBox>
             )}
           </>
         )}
 
-        <Pill tone='mut'>пишутся только площади — норма и рецепт не меняются</Pill>
+        <Pill tone='mut'>only areas are written — the norm and the recipe don't change</Pill>
       </div>
     </ConfirmationModal>
   );

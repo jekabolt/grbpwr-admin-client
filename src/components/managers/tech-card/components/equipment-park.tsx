@@ -730,8 +730,8 @@ function MachineProfiles({
 
       {fields.length === 0 ? (
         <Text size='micro' variant='label'>
-          Ни одной машинки. Пока их нет, машинный шаг наследовать нечего — все его настройки
-          придётся вписывать в сам шаг.
+          no machines at all. while there are none, a machine step has nothing to inherit — every
+          one of its settings has to be typed into the step itself.
         </Text>
       ) : (
         <Tiles min={150}>
@@ -814,7 +814,7 @@ function MachineProfiles({
               name={machineField(selIndex, 'label')}
               label='name (optional)'
               maxLength={64}
-              placeholder='оверлок у окна'
+              placeholder='overlock by the window'
             />
             {/* NOT DISABLED BY «ALREADY USED»: two profiles of one type is the ordinary case. It is
                 not disabled by «already referenced» either — «I picked coverstitch and it is a
@@ -875,7 +875,7 @@ function MachineProfiles({
                 name={machineField(selIndex, 'threadTensionNote')}
                 label='tension note'
                 maxLength={64}
-                placeholder='на 0.5 туже, dial 4'
+                placeholder='0.5 tighter, dial 4'
               />
             )}
             <SelectField
@@ -905,7 +905,7 @@ function MachineProfiles({
               name={machineField(selIndex, 'note')}
               label='note'
               maxLength={255}
-              placeholder='Juki DDL-8700, стол у окна'
+              placeholder='Juki DDL-8700, table by the window'
             />
           </div>
         </div>
@@ -913,7 +913,7 @@ function MachineProfiles({
 
       <ProfileChangeDialog
         pending={pending}
-        what='машинку'
+        what='machine'
         onCancel={() => {
           // Declining a RETYPE has to put the value back — the control already wrote the new one,
           // and leaving it there would apply the change the operator just refused, minus the
@@ -1012,7 +1012,7 @@ function PressProfiles({
               append(row);
               setSelected(row.profileKey);
             }}
-            title='add a pressing mode — temperature, dwell, pressure and steam a ВТО step inherits'
+            title='add a pressing mode — temperature, dwell, pressure and steam a pressing step inherits'
           >
             + press mode
           </Chip>
@@ -1023,7 +1023,8 @@ function PressProfiles({
 
       {fields.length === 0 ? (
         <Text size='micro' variant='label'>
-          Ни одного режима ВТО. Шаг с утюгом или прессом будет нести свои градусы и секунды сам.
+          no pressing modes at all. a step with an iron or a press will carry its own degrees and
+          seconds itself.
         </Text>
       ) : (
         <Tiles min={150}>
@@ -1101,7 +1102,7 @@ function PressProfiles({
               name={pressField(selIndex, 'label')}
               label='name (optional)'
               maxLength={64}
-              placeholder='пресс для дублирования'
+              placeholder='fusing press'
             />
             <SelectField
               name={pressField(selIndex, 'pressEquipment')}
@@ -1153,7 +1154,7 @@ function PressProfiles({
               name={pressField(selIndex, 'note')}
               label='note'
               maxLength={255}
-              placeholder='нижняя подушка без пара'
+              placeholder='lower buck, no steam'
             />
           </div>
         </div>
@@ -1161,7 +1162,7 @@ function PressProfiles({
 
       <ProfileChangeDialog
         pending={pending}
-        what='оборудование'
+        what='equipment'
         onCancel={() => {
           if (pending?.kind === 'retype') {
             setValue(pressField(pending.index, 'pressEquipment'), pending.from ?? '', DIRTY);
@@ -1185,9 +1186,10 @@ function PressProfiles({
 // halves are different kinds of loss and are named apart.
 function usesSentence(u: ProfileUse): string {
   const parts: string[] = [];
-  if (u.byKey > 0) parts.push(`${u.byKey} шаг(ов) ссылаются на него явно`);
-  if (u.byType > 0) parts.push(`${u.byType} наследуют его по типу оборудования`);
-  return parts.length ? `используется: ${parts.join(', ')}` : 'ни один шаг его не наследует';
+  if (u.byKey > 0)
+    parts.push(`${u.byKey} ${u.byKey === 1 ? 'step references' : 'steps reference'} it explicitly`);
+  if (u.byType > 0) parts.push(`${u.byType} inherit it by equipment type`);
+  return parts.length ? `in use: ${parts.join(', ')}` : 'no step inherits it';
 }
 
 // ══ THE BLOCK ══════════════════════════════════════════════════════════════════════════════════
@@ -1243,13 +1245,13 @@ function ProfileChangeDialog({
       onOpenChange={(o) => !o && onCancel()}
       onConfirm={onConfirm}
       onCancel={onCancel}
-      title={retype ? `сменить ${what} у профиля?` : 'удалить профиль оборудования?'}
-      confirmLabel={retype ? 'сменить' : 'удалить'}
+      title={retype ? `change the ${what} of this profile?` : 'delete the equipment profile?'}
+      confirmLabel={retype ? 'change' : 'delete'}
       width='sm'
       // `false`, AND IT IS LOAD-BEARING HERE rather than a preference. The shell's auto-close calls
       // `onOpenChange(false)` right after `onConfirm()`, and this dialog routes that through
       // onCancel — which for a retype PUTS THE OLD VALUE BACK. Left at the default, pressing
-      // «сменить» would detach the references and then silently restore the machine, i.e. do the
+      // “change” would detach the references and then silently restore the machine, i.e. do the
       // one half of the change that cannot be undone and none of the half that was asked for. The
       // dialog closes anyway: `open` is derived from `pending`, and both handlers clear it. (Radix
       // fires onOpenChange only for ESC / overlay / ✕ — every one of which IS a decline.)
@@ -1261,8 +1263,8 @@ function ProfileChangeDialog({
             one. */}
         <Text size='micro'>
           {retype
-            ? `«${pending?.name}» — вот что это изменит:`
-            : `«${pending?.name}» — это изменит то, что наследуют шаги:`}
+            ? `“${pending?.name}” — here is what this changes:`
+            : `“${pending?.name}” — this changes what the steps inherit:`}
         </Text>
         {/* THE HALF THAT MAKES A RETYPE WORSE THAN A DELETE: a deleted profile leaves its key in the
             step, visible as «profile not found» and re-assignable. A retype CLEARS those keys, and
@@ -1270,25 +1272,26 @@ function ProfileChangeDialog({
             Counted separately from the two below because it does not always come with them. */}
         {retype && detaching > 0 && (
           <Text size='micro'>
-            {detaching} шаг(ов) ссылались на него явно и ссылку ПОТЕРЯЮТ: профиль другого типа
-            сервер не принимает. Вернуть прежнее значение потом — не вернуть ссылки, их придётся
-            проставить заново.
+            {detaching} {detaching === 1 ? 'step referenced' : 'steps referenced'} it explicitly and
+            will LOSE that reference: the server doesn't accept a profile of another type. putting
+            the old value back later does not bring the references back — they have to be set again.
           </Text>
         )}
         {/* «Not set» is a delete in all but name: the mapper drops a row with no type from the
             payload, so the profile disappears on save without ever passing the delete dialog. */}
         {retype && pending?.drops && (
           <Text size='micro'>
-            «Не задано» — это ещё и удаление: профиль без типа на сервер не уезжает, так что при
-            сохранении он из карточки исчезнет.
+            “not set” is a delete as well: a profile with no type never travels to the server, so on
+            save it disappears from the card.
           </Text>
         )}
         {/* «станет not set» would be the overstatement: the density has a rung BELOW the profile
             (construction.defaultStitchesPerCm), so some fields fall back rather than empty out. */}
         {impact.losing > 0 && (
           <Text size='micro'>
-            {impact.losing} шаг(ов) перестанут наследовать этот профиль — их пустые поля вернутся к
-            дефолтам карточки, а где дефолта нет, станут «not set».
+            {impact.losing} {impact.losing === 1 ? 'step stops' : 'steps stop'} inheriting this
+            profile — their empty fields fall back to the card defaults, and where there is no
+            default they become “not set”.
           </Text>
         )}
         {/* THE HALF NOBODY EXPECTS, and the reason this dialog is computed rather than counted:
@@ -1296,8 +1299,9 @@ function ProfileChangeDialog({
             inherited NOTHING (because «the overlock» was not an answer) starts inheriting it. */}
         {impact.gaining > 0 && (
           <Text size='micro'>
-            {impact.gaining} шаг(ов), наоборот, НАЧНУТ наследовать оставшийся профиль этого
-            оборудования — сейчас выбор неоднозначен, и они не наследуют ничего.
+            {impact.gaining} {impact.gaining === 1 ? 'step' : 'steps'}, on the contrary, WILL START
+            inheriting the remaining profile of this equipment — right now the choice is ambiguous,
+            and they inherit nothing.
           </Text>
         )}
         {/* The reference paragraph is conditional TWICE. On a change that only GIVES steps something
@@ -1307,12 +1311,12 @@ function ProfileChangeDialog({
             clears it — that is the paragraph above, and printing both would say two things. */}
         {!retype && impact.losing > 0 && (
           <Text size='micro' variant='label'>
-            Явная ссылка останется в шаге видимой («profile not found») — её видно и можно
-            переназначить; наследование по типу оборудования оборвётся молча.
+            an explicit reference stays visible in the step (“profile not found”) — it can be seen
+            and re-assigned; inheritance by equipment type breaks silently.
           </Text>
         )}
         <Text size='micro' variant='label'>
-          Сами шаги не удаляются и не ломаются, сохранение карточки не блокируется.
+          the steps themselves are neither deleted nor broken, and saving the card isn't blocked.
         </Text>
       </div>
     </ConfirmationModal>
@@ -1662,8 +1666,8 @@ function AdoptChip({
   // step stays ambiguous and inherits nothing at all. What IS certain is that this step will inherit
   // them, and that anything else already resolving to that profile moves with it.
   const promise = updating
-    ? `${moving} настройк(и) уедут в профиль «${targetName}» и очистятся в шаге: он начнёт их наследовать. Шаги, которые уже наследуют этот профиль, увидят новые значения.`
-    : `${moving} настройк(и) уедут в новый профиль карточки и очистятся в шаге: он начнёт их наследовать вместо того, чтобы держать свою копию.`;
+    ? `${moving} ${moving === 1 ? 'setting moves' : 'settings move'} into profile “${targetName}” and clear in the step: it starts inheriting them. steps that already inherit this profile will see the new values.`
+    : `${moving} ${moving === 1 ? 'setting moves' : 'settings move'} into a new card profile and clear in the step: it starts inheriting them instead of holding its own copy.`;
   return (
     <Chip dashed disabled={disabled} onClick={onClick} title={reason || promise}>
       ↑ {what}

@@ -528,14 +528,14 @@ function TechCardGallery({
             extra={
               <div className='flex items-center gap-1.5'>
                 <Text size='micro' variant='label' component='span' className='shrink-0 uppercase'>
-                  размер{unitLabel ? ` (${unitLabel})` : ''}:
+                  dimensions{unitLabel ? ` (${unitLabel})` : ''}:
                 </Text>
                 <input
                   value={c.dimensions ?? ''}
                   onChange={(e) =>
                     setValue(`callouts.${i}.dimensions`, e.target.value, { shouldDirty: true })
                   }
-                  placeholder='например 14 × 16'
+                  placeholder='e.g. 14 × 16'
                   maxLength={255}
                   className='min-w-0 flex-1 border border-borderColor bg-bgColor px-1 py-px text-micro focus:border-textColor focus:outline-none'
                 />
@@ -603,29 +603,29 @@ function TechCardGallery({
             type='button'
             variant='secondary'
             size='xs'
-            title={`деталь названа, но не ссылается на выноску: ${unlinked
+            title={`a piece is named but doesn't reference a callout: ${unlinked
               .map(({ c }) => `#${c.number} → ${calloutParts(c).join(', ')}`)
               .join('; ')}`}
             onClick={() => unlinked.forEach(({ c, i }) => pinPieceToCallout(i, calloutParts(c)))}
           >
-            связать детали с выносками ({unlinked.length})
+            link pieces to callouts ({unlinked.length})
           </Button>
           <Text size='nano' variant='label' component='span'>
-            без связи деталь не знает своей выноски: пин не рисуется в «деталях кроя» и не
-            печатается в тех-паке
+            without the link a piece doesn't know its callout: the pin isn't drawn on “cut pieces”
+            and isn't printed in the tech pack
           </Text>
         </div>
       )}
       {strays.length > 0 && (
       <div className='flex flex-col gap-1 border border-dashed border-borderColor p-2'>
         <Text size='micro' variant='label' component='span' className='uppercase'>
-          указания без картинки · {strays.length}
+          callouts without an image · {strays.length}
         </Text>
         <Text size='nano' variant='label'>
-          они не стоят ни на одной картинке — снимок сняли или выноска пришла со старой карточки.
-          Вернуть её на лист можно, СОХРАНИВ НОМЕР: на номер ссылаются деталь, операция и дефект, и
-          «удалить и поставить заново» порвало бы эти ссылки. Маркер встанет в середину — оттуда его
-          перетаскивают куда надо.
+          they don't stand on any image — the shot was removed, or the callout came from an older
+          card. you can put it back on the sheet KEEPING ITS NUMBER: a piece, an operation and a
+          defect all reference that number, and “delete it and place it again” would tear those
+          references. the marker lands in the middle — drag it from there to where it belongs.
         </Text>
         {strays.map(({ c, i }) => (
           <div key={i} className='flex items-baseline gap-1.5'>
@@ -654,9 +654,9 @@ function TechCardGallery({
                       setValue(`callouts.${i}.kind`, 'pin', { shouldDirty: true });
                       setValue(`callouts.${i}.points`, [], { shouldDirty: true });
                     }}
-                    title={`поставить на ${isMoodboard ? 'M' : 'T'}#${mi + 1}, сохранив номер`}
+                    title={`place it on ${isMoodboard ? 'M' : 'T'}#${mi + 1}, keeping its number`}
                   >
-                    на {isMoodboard ? 'M' : 'T'}#{mi + 1}
+                    onto {isMoodboard ? 'M' : 'T'}#{mi + 1}
                   </Chip>
                 ))}
                 <Chip
@@ -667,9 +667,9 @@ function TechCardGallery({
                       ((getValues('callouts') ?? []) as FormCallout[]).filter((_, ci) => ci !== i),
                     );
                   }}
-                  title='удалить указание, которое ни на чём не стоит'
+                  title='delete a callout that stands on nothing'
                 >
-                  удалить
+                  delete
                 </Chip>
               </ChipRow>
             )}

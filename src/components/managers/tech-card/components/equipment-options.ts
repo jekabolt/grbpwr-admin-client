@@ -197,10 +197,10 @@ export const pressProfileProcessOptions: Array<{
   value: common_TechCardOperationType;
   label: string;
 }> = [
-  { value: 'TECH_CARD_OPERATION_TYPE_UNKNOWN', label: 'any ВТО step' },
-  { value: 'TECH_CARD_OPERATION_TYPE_PRESS', label: 'press (заутюжить / отпарить)' },
-  { value: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN', label: 'press open (разутюжить)' },
-  { value: 'TECH_CARD_OPERATION_TYPE_FUSING', label: 'fusing (дублирование)' },
+  { value: 'TECH_CARD_OPERATION_TYPE_UNKNOWN', label: 'any pressing step' },
+  { value: 'TECH_CARD_OPERATION_TYPE_PRESS', label: 'press (to one side / steam)' },
+  { value: 'TECH_CARD_OPERATION_TYPE_PRESS_OPEN', label: 'press open' },
+  { value: 'TECH_CARD_OPERATION_TYPE_FUSING', label: 'fusing' },
 ];
 
 // The same four processes in one word, for a tile that has room for a pill and not for a sentence.

@@ -48,10 +48,10 @@ export const pieceCodeOptions = pieceBaseCodes.map((p) => p.code);
 // direction does not matter for this piece", and omitting it would make a stored `any` unrenderable
 // in a closed picker.
 export const grainlineOptions: Array<{ value: string; label: string }> = [
-  { value: 'lengthwise', label: 'lengthwise — долевая' },
-  { value: 'crosswise', label: 'crosswise — поперечная' },
-  { value: 'bias', label: 'bias — косая' },
-  { value: 'any', label: 'any — направление не важно' },
+  { value: 'lengthwise', label: 'lengthwise' },
+  { value: 'crosswise', label: 'crosswise' },
+  { value: 'bias', label: 'bias' },
+  { value: 'any', label: "any — direction doesn't matter" },
 ];
 
 const grainlineValues = new Set(grainlineOptions.map((o) => o.value));
@@ -67,9 +67,9 @@ const grainlineValues = new Set(grainlineOptions.map((o) => o.value));
 // stays blank.
 export function grainlineOptionsFor(current?: string): Array<{ value: string; label: string }> {
   const value = (current ?? '').trim();
-  const items = [{ value: '', label: '— (сохранится как lengthwise)' }, ...grainlineOptions];
+  const items = [{ value: '', label: '— (saves as lengthwise)' }, ...grainlineOptions];
   if (value && !grainlineValues.has(value)) {
-    items.splice(1, 0, { value, label: `${value} — не из списка` });
+    items.splice(1, 0, { value, label: `${value} — not in the list` });
   }
   return items;
 }
@@ -172,9 +172,9 @@ export function cutSymmetryCountInvalid(
 // сохранения.
 
 const CUT_SYMMETRY_SHORT: Record<string, string> = {
-  [IDENTICAL_CUT_SYMMETRY]: 'одинаковые',
-  TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED: 'зеркальные пары',
-  TECH_CARD_PIECE_CUT_SYMMETRY_FOLD: 'со сгибом',
+  [IDENTICAL_CUT_SYMMETRY]: 'identical copies',
+  TECH_CARD_PIECE_CUT_SYMMETRY_MIRRORED: 'mirrored pairs',
+  TECH_CARD_PIECE_CUT_SYMMETRY_FOLD: 'on fold',
 };
 
 /**
@@ -197,7 +197,7 @@ export function cutSymmetryBadge(
     return { label, tone: v === IDENTICAL_CUT_SYMMETRY ? 'mut' : 'ink' };
   }
   if (cutSymmetryUnanswered(v, piecesPerGarment)) {
-    return { label: 'парность не указана', tone: 'attention' };
+    return { label: 'pairing not specified', tone: 'attention' };
   }
   return null;
 }
@@ -223,17 +223,17 @@ export function cutSymmetryPrintCaption(
     // Нечётное число сюда не доезжает (CHECK в БД + проверка формы), но если доехало — печатаем
     // сам факт парности без деления, а не выдуманную половину.
     return Number.isInteger(n) && n >= 2 && n % 2 === 0
-      ? `зеркальные пары (${n / 2} + ${n / 2})`
-      : 'зеркальные пары';
+      ? `mirrored pairs (${n / 2} + ${n / 2})`
+      : 'mirrored pairs';
   }
-  if (v === 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD') return 'со сгибом';
+  if (v === 'TECH_CARD_PIECE_CUT_SYMMETRY_FOLD') return 'on fold';
   if (v === IDENTICAL_CUT_SYMMETRY) return '';
-  return cutSymmetryUnanswered(v, piecesPerGarment) ? 'парность не указана' : '';
+  return cutSymmetryUnanswered(v, piecesPerGarment) ? 'pairing not specified' : '';
 }
 
 /** Легенда словаря — печатается один раз под таблицей деталей, а не в каждой строке. */
 export const CUT_SYMMETRY_PRINT_LEGEND =
-  'зеркальные пары — половина панелей кроится в зеркале (левая / правая), а не копиями; со сгибом — деталь кроится по сгибу ткани; «парность не указана» — в карточке на этот вопрос ещё никто не ответил, уточните до раскроя.';
+  'mirrored pairs — half of the panels are cut mirrored (left / right), not as copies; on fold — the piece is cut on the fold of the fabric; “pairing not specified” — nobody has answered this question on the card yet, clarify it before cutting.';
 
 // --- КАК ИМЕННО ДУБЛИРУЕТСЯ ДЕТАЛЬ (0304) ------------------------------------------------------
 //
@@ -265,10 +265,10 @@ export const fusingModeOptions: Array<{
 }> = [
   // Пункт НАЗВАН, а не оставлен пустым, ровно как «— не размечено» у кроя: пустая опция читается
   // как «значение по умолчанию», то есть как ответ «целиком», которого никто не давал.
-  { value: UNSET_FUSING_MODE, label: '— не размечено' },
-  { value: 'TECH_CARD_PIECE_FUSING_MODE_FULL', label: 'вся деталь' },
-  { value: FUSING_MODE_SEAM, label: 'по припуску' },
-  { value: FUSING_MODE_STRIP, label: 'полосой, мм' },
+  { value: UNSET_FUSING_MODE, label: '— not marked' },
+  { value: 'TECH_CARD_PIECE_FUSING_MODE_FULL', label: 'the whole piece' },
+  { value: FUSING_MODE_SEAM, label: 'along the seam allowance' },
+  { value: FUSING_MODE_STRIP, label: 'as a strip, mm' },
 ];
 
 const fusingModeValues = new Set<string>(fusingModeOptions.map((o) => o.value));
@@ -279,7 +279,7 @@ export function fusingModeOptionsFor(current?: string): Array<{ value: string; l
   const value = (current ?? '').trim();
   const items: Array<{ value: string; label: string }> = [...fusingModeOptions];
   if (value && !fusingModeValues.has(value)) {
-    items.splice(1, 0, { value, label: `${value} — не из списка` });
+    items.splice(1, 0, { value, label: `${value} — not in the list` });
   }
   return items;
 }
@@ -308,11 +308,11 @@ export function fusingPrintCaption(value: string | undefined, widthMm?: string):
   const v = (value ?? '').trim();
   if (v === FUSING_MODE_STRIP) {
     const w = (widthMm ?? '').trim();
-    return w ? `полосой ${w} мм` : 'полосой (ширина не указана)';
+    return w ? `strip ${w} mm` : 'strip (width not specified)';
   }
-  if (v === FUSING_MODE_SEAM) return 'по припуску';
-  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'вся деталь';
-  return 'способ не указан';
+  if (v === FUSING_MODE_SEAM) return 'along the seam allowance';
+  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'the whole piece';
+  return 'method not specified';
 }
 
 /**
@@ -324,9 +324,9 @@ export function fusingPrintCaption(value: string | undefined, widthMm?: string):
  */
 export function fusingHint(mode?: string): string {
   const v = (mode ?? '').trim();
-  if (v === FUSING_MODE_STRIP) return 'ширина полосы вдоль среза, в миллиметрах (до 100)';
+  if (v === FUSING_MODE_STRIP) return 'strip width along the cut edge, in millimetres (up to 100)';
   if (v === FUSING_MODE_SEAM)
-    return 'ширина полосы = припуск на шов по карточке (иначе по настройкам цеха)';
-  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'клеевая кроится по тому же лекалу целиком';
-  return 'не размечено: цех увидит «дублируется» без указания, где именно лежит клеевая';
+    return "strip width = the card's seam allowance (otherwise the workshop settings)";
+  if (v === 'TECH_CARD_PIECE_FUSING_MODE_FULL') return 'the fusing is cut whole, from the same pattern piece';
+  return 'not marked: the workshop will see “fused” with no indication of where exactly the fusing sits';
 }

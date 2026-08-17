@@ -32,7 +32,7 @@ export function useFormPieces(): PieceRef[] {
         .filter((p) => !!p.lineKey?.trim())
         .map((p) => ({
           lineKey: p.lineKey as string,
-          name: p.name?.trim() || 'без названия',
+          name: p.name?.trim() || 'unnamed',
         })),
     [raw],
   );
@@ -96,7 +96,7 @@ export function PieceList({
       <input
         autoFocus
         className={searchCls}
-        placeholder='найти деталь'
+        placeholder='find a piece'
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         onKeyDown={(e) => {
@@ -119,7 +119,7 @@ export function PieceList({
           <Text size='micro' variant='label' className={visual ? 'col-span-full' : undefined}>
             {/* Куда идти за деталью, этот попап не подсказывает намеренно: он всплывает и над
                 рецептом колорвея, где вкладки patterns под рукой нет. */}
-            {pieces.length === 0 ? 'деталей ещё нет' : 'ничего не найдено'}
+            {pieces.length === 0 ? 'no pieces yet' : 'nothing found'}
           </Text>
         )}
         {matches.map((p) => {
@@ -154,7 +154,7 @@ export function PieceList({
               key={p.lineKey}
               type='button'
               aria-pressed={on}
-              title={`${p.name}${found ? '' : ' · нет в выкройках'}`}
+              title={`${p.name}${found ? '' : ' · not in the patterns'}`}
               onClick={() => onToggle(p.lineKey)}
               className={cn(
                 'flex min-w-0 flex-col border text-left transition-colors',
@@ -171,8 +171,8 @@ export function PieceList({
                   // изделия вышла бы неполной). Узнать это в момент выбора дешевле, чем из отказа
                   // диалога через два экрана.
                   <Text size='nano' variant='label' component='span' className='text-center'>
-                    нет
-                    <br />в выкройках
+                    not
+                    <br />in the patterns
                   </Text>
                 )}
               </span>
@@ -235,22 +235,23 @@ export function PieceMultiPicker({
           </Chip>
         ))}
         <GenericPopover
-          title='детали'
+          title='pieces'
           className='w-64'
           triggerProps={{ className: 'flex items-center' }}
-          openElement={<Chip dashed>{chosen.length === 0 ? '+ выбрать детали' : '+ ещё'}</Chip>}
+          openElement={<Chip dashed>{chosen.length === 0 ? '+ pick pieces' : '+ more'}</Chip>}
         >
           <PieceList pieces={pieces} selected={value} onToggle={toggle} multiple />
         </GenericPopover>
       </ChipRow>
       {dangling.length > 0 && (
         <Text size='micro' className='text-error'>
-          {dangling.length} деталь(и) удалены с вкладки PATTERNS — выберите заново
+          {dangling.length} {dangling.length === 1 ? 'piece' : 'pieces'} deleted on the PATTERNS
+          tab — pick again
         </Text>
       )}
       {hint && (
         <Text size='micro' variant='label'>
-          {chosen.length > 1 ? `соединяет: ${summary}` : hint}
+          {chosen.length > 1 ? `joins: ${summary}` : hint}
         </Text>
       )}
     </div>
@@ -271,7 +272,7 @@ export function PieceAddChip({
   selected,
   onPick,
   shapeOf,
-  label = '＋ деталь',
+  label = '＋ piece',
 }: {
   pieces: PieceRef[];
   selected: string[];
@@ -311,7 +312,7 @@ export function PieceSinglePicker({
   pieces,
   value,
   onChange,
-  placeholder = '— деталь —',
+  placeholder = '— piece —',
   disabled,
   shapeOf,
 }: {
@@ -356,7 +357,7 @@ export function PieceSinglePicker({
       openElement={
         <>
           <span className='truncate'>
-            {current?.name ?? (value ? 'деталь удалена — выберите заново' : placeholder)}
+            {current?.name ?? (value ? 'the piece was deleted — pick again' : placeholder)}
           </span>
           <span aria-hidden className='shrink-0 text-labelColor'>
             ▾

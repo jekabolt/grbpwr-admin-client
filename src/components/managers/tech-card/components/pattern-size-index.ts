@@ -71,8 +71,8 @@ export async function publishPatternSizeIndex(input: {
   sizeTokens: string[];
 }): Promise<PublishSizeIndexResult> {
   const { techCardId, sheets, sizeTokens } = input;
-  if (!techCardId) return { ok: false, reason: 'карточка ещё не сохранена' };
-  if (sheets.length === 0) return { ok: false, reason: 'в скоупе нет листов' };
+  if (!techCardId) return { ok: false, reason: "the card isn't saved yet" };
+  if (sheets.length === 0) return { ok: false, reason: 'no sheets in this scope' };
 
   // Один вызов = один скоуп. Панель группирует по РАЗРЕШЁННОМУ скоупу, и на полуразобранной
   // карточке одна группа законно объединяет несколько серверных скоупов (лист лежит на строке,
@@ -85,15 +85,15 @@ export async function publishPatternSizeIndex(input: {
     return {
       ok: false,
       reason:
-        'листы этой группы привязаны по-разному (часть — к назначению, часть — к строке BOM): допривяжите их к назначению, тогда индекс сохранится',
+        'the sheets in this group are bound differently (some to a purpose, some to a BOM line): bind them all to a purpose and the index will save',
     };
   }
   const scopeKey = [...keys][0];
-  if (!scopeKey) return { ok: false, reason: 'листы ни к чему не привязаны' };
+  if (!scopeKey) return { ok: false, reason: 'the sheets are bound to nothing' };
 
   const sheetLineKeys = sheets.map((s) => (s.lineKey ?? '').trim()).filter(Boolean);
   if (sheetLineKeys.length !== sheets.length) {
-    return { ok: false, reason: 'у части листов нет идентификатора — сохраните карточку' };
+    return { ok: false, reason: 'some sheets have no identifier — save the card' };
   }
 
   try {
@@ -121,9 +121,9 @@ export async function publishPatternSizeIndex(input: {
     if (stale) {
       return {
         ok: false,
-        reason: 'на сервере другой набор листов — сохраните карточку и повторите проверку',
+        reason: 'the server has a different set of sheets — save the card and retry the check',
       };
     }
-    return { ok: false, reason: e instanceof Error ? e.message : 'сервер не принял индекс' };
+    return { ok: false, reason: e instanceof Error ? e.message : "the server didn't accept the index" };
   }
 }
