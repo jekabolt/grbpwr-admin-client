@@ -181,6 +181,8 @@ const RunPackPrint = lazyRoute(() =>
 const Accounts = lazyRoute(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
+const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
+
 const Tasks = lazyRoute(() =>
   import('components/managers/tasks').then((m) => ({ default: m.Tasks })),
 );
@@ -403,6 +405,10 @@ root.render(
                   <Route path={ROUTES.productionRun} element={<ProductionRunDetail />} />
                   <Route path={ROUTES.productionRuns} element={<ProductionRuns />} />
                   <Route path={ROUTES.tasks} element={<Tasks />} />
+                  {/* Один компонент на оба адреса: /files/:id — это тот же экран с открытой
+                      карточкой поверх сетки, а не отдельная страница. */}
+                  <Route path={ROUTES.files} element={<FilesLibrary />} />
+                  <Route path={ROUTES.file} element={<FilesLibrary />} />
                   <Route path={ROUTES.opex} element={<Opex />} />
                   {/* All accounting screens share one TooltipProvider (the design in
                       ui/components/tooltip.tsx): <Tooltip> is raw Radix and throws without a

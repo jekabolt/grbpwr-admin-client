@@ -5938,6 +5938,13 @@ export type TaskInsert = {
   dueDate: wellKnownTimestamp | undefined;
   labels: string[] | undefined;
   mediaIds: number[] | undefined;
+  // Attached files from the private files library. Separate from media_ids
+  // because the two live in buckets with opposite privacy: media is public-read
+  // on the CDN (it ships to the storefront), library files are private and leave
+  // only through a short-lived presigned url. The UI merges both into a single
+  // "attachments" list — the split is a storage fact, not a distinction a person
+  // should have to hold in their head.
+  fileIds: number[] | undefined;
   // Optional typed links to existing admin entities (0 / "" = none). Follows the
   // fitting precedent (several nullable typed FKs, NOT a polymorphic entity_type
   // ref) so a card can deep-link to the artifact it is about while that artifact
@@ -5991,6 +5998,10 @@ export type Task = {
   // (never client-supplied, never cleared on later moves). Unset = the card has
   // not been started yet. This is distinct from the planned TaskInsert.start_date.
   startedAt: wellKnownTimestamp | undefined;
+  // Ids of the attached library files. Only the ids: the resolved files, with
+  // their expiring presigned urls, ride on admin.GetTaskResponse.files, because
+  // this message is reused in contexts that get persisted.
+  fileIds: number[] | undefined;
 };
 
 // TaskCommentInsert is the writable payload for a comment. author is set

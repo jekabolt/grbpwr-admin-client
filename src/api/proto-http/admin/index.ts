@@ -4742,6 +4742,13 @@ export type common_TaskInsert = {
   dueDate: wellKnownTimestamp | undefined;
   labels: string[] | undefined;
   mediaIds: number[] | undefined;
+  // Attached files from the private files library. Separate from media_ids
+  // because the two live in buckets with opposite privacy: media is public-read
+  // on the CDN (it ships to the storefront), library files are private and leave
+  // only through a short-lived presigned url. The UI merges both into a single
+  // "attachments" list — the split is a storage fact, not a distinction a person
+  // should have to hold in their head.
+  fileIds: number[] | undefined;
   // Optional typed links to existing admin entities (0 / "" = none). Follows the
   // fitting precedent (several nullable typed FKs, NOT a polymorphic entity_type
   // ref) so a card can deep-link to the artifact it is about while that artifact
@@ -4795,6 +4802,10 @@ export type GetTaskRequest = {
 
 export type GetTaskResponse = {
   task: common_Task | undefined;
+  // Resolved library attachments, carrying freshly minted presigned urls.
+  // common.Task itself only carries their ids: it is reused in contexts that get
+  // persisted, and a url with a 6-12h life must never be written down anywhere.
+  files: LibraryFile[] | undefined;
 };
 
 // Task is a stored kanban card: its content (TaskInsert), its placement on the
@@ -4819,6 +4830,10 @@ export type common_Task = {
   // (never client-supplied, never cleared on later moves). Unset = the card has
   // not been started yet. This is distinct from the planned TaskInsert.start_date.
   startedAt: wellKnownTimestamp | undefined;
+  // Ids of the attached library files. Only the ids: the resolved files, with
+  // their expiring presigned urls, ride on admin.GetTaskResponse.files, because
+  // this message is reused in contexts that get persisted.
+  fileIds: number[] | undefined;
 };
 
 // TaskChecklistItem is one row of a task's checklist — a lightweight subtask with
@@ -4832,6 +4847,130 @@ export type common_TaskChecklistItem = {
   isDone: boolean | undefined;
   position: number | undefined;
   createdAt: wellKnownTimestamp | undefined;
+};
+
+// LibraryFile is one file in the shared library.
+// The three url fields are minted per response and expire — they are never
+// persisted, which is why this message lives in admin.proto rather than common.*
+// (common messages get serialised into durable release snapshots, and a stored
+// presigned url would be a link that rots).
+export type LibraryFile = {
+  id: number | undefined;
+  fileName: string | undefined;
+  contentType: string | undefined;
+  sizeBytes: number | undefined;
+  sha256: string | undefined;
+  uploadedBy: string | undefined;
+  topics: FileTopic[] | undefined;
+  createdAt: wellKnownTimestamp | undefined;
+  // url views the file in place. EMPTY for anything not inline-safe: svg and html
+  // would execute on the bucket's origin, so they get download_url only.
+  url: string | undefined;
+  // download_url always works and carries a content-disposition: attachment.
+  downloadUrl: string | undefined;
+  // preview_url is the browser-rendered thumbnail; empty when there is none (the
+  // render failed, or the type has no sensible preview). A file without one is
+  // still perfectly usable — the grid shows an extension plate instead.
+  previewUrl: string | undefined;
+  urlsExpireAt: wellKnownTimestamp | undefined;
+};
+
+// FileTopic is a topic LABEL, not a folder.
+export type FileTopic = {
+  id: number | undefined;
+  name: string | undefined;
+  filesCount: number | undefined;
+  // What this topic is about. Empty for most of them; the field is what lets a
+  // label stand in for a project page without inventing a project entity.
+  description: string | undefined;
+};
+
+export type GetLibraryFileRequest = {
+  id: number | undefined;
+};
+
+export type GetLibraryFileResponse = {
+  file: LibraryFile | undefined;
+};
+
+export type ListLibraryFilesRequest = {
+  // topic_id filters to one topic; 0 means no topic filter.
+  topicId: number | undefined;
+  // untopiced selects only files carrying no topic at all («Разобрать»). Takes
+  // precedence over topic_id — they are two views of the same rail.
+  untopiced: boolean | undefined;
+  // search matches the file name OR the name of a topic the file carries. Both,
+  // because graphic PDFs exported from design tools carry no extractable text at
+  // all, so names and topics are the only things there are to match on. The
+  // implementation is a LIKE today; FULLTEXT or embeddings can replace it behind
+  // this same field without changing the contract.
+  search: string | undefined;
+  limit: number | undefined;
+  offset: number | undefined;
+  orderFactor: common_OrderFactor | undefined;
+};
+
+export type ListLibraryFilesResponse = {
+  files: LibraryFile[] | undefined;
+  total: number | undefined;
+};
+
+export type UpdateLibraryFileRequest = {
+  id: number | undefined;
+  fileName: string | undefined;
+  // topic_ids is the FULL replacement set, not a delta.
+  topicIds: number[] | undefined;
+  // new_topics are names typed on the fly; existing names resolve to the existing
+  // topic rather than failing.
+  newTopics: string[] | undefined;
+};
+
+export type UpdateLibraryFileResponse = {
+};
+
+export type DeleteLibraryFileRequest = {
+  id: number | undefined;
+};
+
+export type DeleteLibraryFileResponse = {
+};
+
+export type ListFileTopicsRequest = {
+};
+
+export type ListFileTopicsResponse = {
+  topics: FileTopic[] | undefined;
+  // The two rail badges. They live here rather than costing a separate list call
+  // each: untopiced_count is how many files carry no topic, total_files how many
+  // exist at all.
+  untopicedCount: number | undefined;
+  totalFiles: number | undefined;
+};
+
+export type CreateFileTopicRequest = {
+  name: string | undefined;
+  description: string | undefined;
+};
+
+export type CreateFileTopicResponse = {
+  id: number | undefined;
+};
+
+export type RenameFileTopicRequest = {
+  id: number | undefined;
+  name: string | undefined;
+  // Sent together with the name: one dialog edits both.
+  description: string | undefined;
+};
+
+export type RenameFileTopicResponse = {
+};
+
+export type DeleteFileTopicRequest = {
+  id: number | undefined;
+};
+
+export type DeleteFileTopicResponse = {
 };
 
 export type UpdateTaskRequest = {
@@ -12606,6 +12745,27 @@ export interface AdminService {
   SetTaskChecklistItemDone(request: SetTaskChecklistItemDoneRequest): Promise<SetTaskChecklistItemDoneResponse>;
   // DeleteTaskChecklistItem removes a checklist item.
   DeleteTaskChecklistItem(request: DeleteTaskChecklistItemRequest): Promise<DeleteTaskChecklistItemResponse>;
+  // GetLibraryFile returns one file with its topics and freshly minted urls.
+  GetLibraryFile(request: GetLibraryFileRequest): Promise<GetLibraryFileResponse>;
+  // ListLibraryFiles is the grid: a page of files filtered by topic, by "no topic
+  // at all", or by a search that matches file names AND topic names.
+  // Declared AFTER GET /files/{id} on purpose — same reason as the task routes:
+  // in grpc-gateway v2 the later registration wins, so a literal path must come
+  // after the templated one or it gets shadowed by it.
+  ListLibraryFiles(request: ListLibraryFilesRequest): Promise<ListLibraryFilesResponse>;
+  // UpdateLibraryFile renames a file and REPLACES its topic set.
+  UpdateLibraryFile(request: UpdateLibraryFileRequest): Promise<UpdateLibraryFileResponse>;
+  // DeleteLibraryFile removes a file and its bytes. Refused while any task holds
+  // it — the error names the holding cards.
+  DeleteLibraryFile(request: DeleteLibraryFileRequest): Promise<DeleteLibraryFileResponse>;
+  // ListFileTopics is the rail: topics ordered by usage, plus the two badges.
+  ListFileTopics(request: ListFileTopicsRequest): Promise<ListFileTopicsResponse>;
+  // CreateFileTopic creates a topic, or returns the existing one with that name.
+  CreateFileTopic(request: CreateFileTopicRequest): Promise<CreateFileTopicResponse>;
+  // RenameFileTopic updates a topic's name and description together.
+  RenameFileTopic(request: RenameFileTopicRequest): Promise<RenameFileTopicResponse>;
+  // DeleteFileTopic removes a topic, refused while files still carry it.
+  DeleteFileTopic(request: DeleteFileTopicRequest): Promise<DeleteFileTopicResponse>;
   // GetFulfillmentBoard returns the three columns of cards (compact order +
   // annotation summary), oldest order first within each column.
   GetFulfillmentBoard(request: GetFulfillmentBoardRequest): Promise<GetFulfillmentBoardResponse>;
@@ -16229,6 +16389,169 @@ export function createAdminServiceClient(
         service: "AdminService",
         method: "DeleteTaskChecklistItem",
       }) as Promise<DeleteTaskChecklistItemResponse>;
+    },
+    GetLibraryFile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "GetLibraryFile",
+      }) as Promise<GetLibraryFileResponse>;
+    },
+    ListLibraryFiles(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      if (request.topicId) {
+        queryParams.push(`topicId=${encodeURIComponent(request.topicId.toString())}`)
+      }
+      if (request.untopiced) {
+        queryParams.push(`untopiced=${encodeURIComponent(request.untopiced.toString())}`)
+      }
+      if (request.search) {
+        queryParams.push(`search=${encodeURIComponent(request.search.toString())}`)
+      }
+      if (request.limit) {
+        queryParams.push(`limit=${encodeURIComponent(request.limit.toString())}`)
+      }
+      if (request.offset) {
+        queryParams.push(`offset=${encodeURIComponent(request.offset.toString())}`)
+      }
+      if (request.orderFactor) {
+        queryParams.push(`orderFactor=${encodeURIComponent(request.orderFactor.toString())}`)
+      }
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListLibraryFiles",
+      }) as Promise<ListLibraryFilesResponse>;
+    },
+    UpdateLibraryFile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/update`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "UpdateLibraryFile",
+      }) as Promise<UpdateLibraryFileResponse>;
+    },
+    DeleteLibraryFile(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteLibraryFile",
+      }) as Promise<DeleteLibraryFileResponse>;
+    },
+    ListFileTopics(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/topics/list`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "GET",
+        body,
+      }, {
+        service: "AdminService",
+        method: "ListFileTopics",
+      }) as Promise<ListFileTopicsResponse>;
+    },
+    CreateFileTopic(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/topics/create`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "CreateFileTopic",
+      }) as Promise<CreateFileTopicResponse>;
+    },
+    RenameFileTopic(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      const path = `api/admin/files/topics/rename`; // eslint-disable-line quotes
+      const body = JSON.stringify(request);
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "POST",
+        body,
+      }, {
+        service: "AdminService",
+        method: "RenameFileTopic",
+      }) as Promise<RenameFileTopicResponse>;
+    },
+    DeleteFileTopic(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
+      if (!request.id) {
+        throw new Error("missing required field request.id");
+      }
+      const path = `api/admin/files/topics/${request.id}`; // eslint-disable-line quotes
+      const body = null;
+      const queryParams: string[] = [];
+      let uri = path;
+      if (queryParams.length > 0) {
+        uri += `?${queryParams.join("&")}`
+      }
+      return handler({
+        path: uri,
+        method: "DELETE",
+        body,
+      }, {
+        service: "AdminService",
+        method: "DeleteFileTopic",
+      }) as Promise<DeleteFileTopicResponse>;
     },
     GetFulfillmentBoard(request) { // eslint-disable-line @typescript-eslint/no-unused-vars
       const path = `api/admin/fulfillment/board`; // eslint-disable-line quotes

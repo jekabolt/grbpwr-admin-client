@@ -63,6 +63,10 @@ export interface TaskInsert {
   startDate: string | undefined; // RFC3339; undefined = no planned start
   labels: string[];
   mediaIds: number[];
+  // Files from the private library. Kept separate from mediaIds because the two live
+  // in buckets with opposite privacy (media is public on the CDN); the UI merges them
+  // into one attachments list so nobody has to hold that distinction in their head.
+  fileIds: number[];
   // Optional typed links (0 / '' = none) — mirrors common.TaskInsert.
   techCardId: number;
   productId: number;
@@ -73,6 +77,16 @@ export interface TaskInsert {
   sampleId: number; // образец / sample (GetSample); 0 = none (new-flow NF link)
 }
 
+// One resolved library attachment: enough to list and open it, nothing more.
+export interface TaskFile {
+  id: number;
+  fileName: string;
+  sizeBytes: number;
+  url: string; // empty for types that must not render inline (svg, html)
+  downloadUrl: string;
+  previewUrl: string;
+}
+
 // Stored card (common.Task): id + content + placement + resolved media + identity.
 export interface Task {
   id: number;
@@ -81,6 +95,10 @@ export interface Task {
   status: TaskStatus;
   position: number;
   media: TaskMedia[];
+  // Resolved library attachments, present only on GetTask (the list response carries
+  // ids alone). They hold presigned urls with a short life, so they are never cached
+  // beyond the response that minted them.
+  files: TaskFile[];
   checklist: TaskChecklistItem[];
   createdBy: string; // AdminAccount.username
   createdAt: string;
@@ -136,6 +154,7 @@ export function emptyTaskInsert(): TaskInsert {
     startDate: undefined,
     labels: [],
     mediaIds: [],
+    fileIds: [],
     techCardId: 0,
     productId: 0,
     orderUuid: '',

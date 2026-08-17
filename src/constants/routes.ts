@@ -36,6 +36,7 @@ export const SECTION = {
   models: 'models',
   fittings: 'fittings',
   techCards: 'tech_cards',
+  files: 'files',
   production: 'production',
   tasks: 'tasks',
   accounts: 'accounts',
@@ -113,6 +114,10 @@ export enum ROUTES {
   productionRunPrint = '/production-runs/:id/print',
   tasks = '/tasks',
   taskDetails = '/tasks/:id',
+  // Библиотека файлов. Карточка файла — отдельный адрес, а не состояние экрана: ссылку на
+  // файл кидают в чат вместо самого файла, и именно этим команда узнаёт, что библиотека есть.
+  files = '/files',
+  file = '/files/:id',
   accounts = '/accounts',
   opex = '/opex',
   accounting = '/accounting',
@@ -139,6 +144,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: 'orders', route: ROUTES.orders, section: SECTION.orders },
       { label: 'fulfillment', route: ROUTES.fulfillment, section: SECTION.fulfillment },
       { label: 'tasks', route: ROUTES.tasks, section: SECTION.tasks },
+      { label: 'files', route: ROUTES.files, section: SECTION.files },
     ],
   },
   {

@@ -18,6 +18,7 @@ import {
 } from '../utils/meta';
 import { AssigneeSelect } from './assignee-select';
 import { LinkEditor } from './link-editor';
+import { FileAttachments } from './file-attachments';
 import { MediaAttachments } from './media-attachments';
 
 /**
@@ -255,14 +256,32 @@ export function TaskFormModal({ open, onOpenChange, mode, initial, saving, onSub
                 setLink={(f, v) => setValue(f, v as never, { shouldDirty: true })}
               />
             </Field>
-            <Field label='media'>
-              <Controller
-                control={control}
-                name='mediaIds'
-                render={({ field }) => (
-                  <MediaAttachments value={field.value} onChange={field.onChange} />
-                )}
-              />
+            {/* Одно поле «вложения» на два источника. Разделение публичного медиа-бакета
+                и приватной библиотеки — факт хранилища, а не различие, которое человек
+                должен держать в голове, заполняя карточку. Подпись «сайт» у медиа
+                говорит единственное, что здесь практически важно: это уедет на CDN. */}
+            <Field label='вложения'>
+              <div className='flex flex-col gap-2.5'>
+                <div className='flex flex-col gap-1'>
+                  <Text size='micro' variant='label' className='uppercase'>
+                    медиа сайта · публичные
+                  </Text>
+                  <Controller
+                    control={control}
+                    name='mediaIds'
+                    render={({ field }) => (
+                      <MediaAttachments value={field.value} onChange={field.onChange} />
+                    )}
+                  />
+                </div>
+                <Controller
+                  control={control}
+                  name='fileIds'
+                  render={({ field }) => (
+                    <FileAttachments value={field.value} onChange={field.onChange} />
+                  )}
+                />
+              </div>
             </Field>
           </div>
         </div>

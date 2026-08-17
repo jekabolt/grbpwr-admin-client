@@ -73,6 +73,7 @@ function mapInsert(i: common_Task['task']): TaskInsert {
     startDate: i?.startDate || undefined,
     labels: i?.labels ?? [],
     mediaIds: i?.mediaIds ?? [],
+    fileIds: i?.fileIds ?? [],
     techCardId: i?.techCardId ?? 0,
     productId: i?.productId ?? 0,
     orderUuid: i?.orderUuid ?? '',
@@ -102,6 +103,8 @@ function mapTask(t: common_Task): Task {
     status: t.status ?? 'TASK_STATUS_UNKNOWN',
     position: t.position ?? 0,
     media,
+    // Resolved only by GetTask; a list row knows the ids and nothing else.
+    files: [],
     checklist: (t.checklist ?? []).map(mapChecklistItem).sort((a, b) => a.position - b.position),
     createdBy: t.createdBy ?? '',
     createdAt: t.createdAt ?? '',
@@ -157,7 +160,22 @@ export const tasksService: TasksService = {
       })
       .then((r) => ({ tasks: (r.tasks ?? []).map(mapTask), total: r.total ?? 0 })),
 
-  getTask: (id) => adminService.GetTask({ id }).then((r) => (r.task ? mapTask(r.task) : undefined)),
+  getTask: (id) =>
+    adminService.GetTask({ id }).then((r) =>
+      r.task
+        ? {
+            ...mapTask(r.task),
+            files: (r.files ?? []).map((f) => ({
+              id: f.id ?? 0,
+              fileName: f.fileName ?? '',
+              sizeBytes: Number(f.sizeBytes ?? 0),
+              url: f.url ?? '',
+              downloadUrl: f.downloadUrl ?? '',
+              previewUrl: f.previewUrl ?? '',
+            })),
+          }
+        : undefined,
+    ),
 
   addTask: (content, board, status) =>
     adminService.AddTask({ task: content, board, status }).then((r) => ({ id: r.id ?? 0 })),
