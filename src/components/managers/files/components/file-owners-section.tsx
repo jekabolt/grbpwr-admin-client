@@ -11,7 +11,7 @@ import { GroupLabel } from 'ui/components/group-label';
 import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { filesService } from '../api/filesService';
-import { filesKeys } from '../hooks/useFiles';
+import { invalidateFileViews } from '../hooks/useFiles';
 import { formatWhen } from '../utils/format';
 import { FailureText } from './failure-text';
 
@@ -84,8 +84,16 @@ export function FileOwnersSection({
   // (`usePermissions` fail-open): иначе загрузивший файл человек на первых кадрах, а при
   // упавшем `GetCurrentAccount` (retry: false) и навсегда, читал бы, что менять
   // ответственность ему нельзя.
+  // Загрузивший сверяется ОБЕИМИ половинами — имя И живой `uploaded_by_id`, — ровно как в
+  // `mayEditLibraryFileOwners` на бэкенде и как в соседнем блоке доступа. Имя-строка переживает
+  // аккаунт (id обнуляется каскадом, `uploaderGone` двумя строками выше про это и говорит), а
+  // username освобождается: заведённая заново учётка с тем же именем получила бы включённую
+  // кнопку «изменить список» на чужом файле и отказ сервера на каждое нажатие.
   const inCircle =
-    !resolved || isSuper || (!!me && (me === uploaderName || owners.some((o) => o.username === me)));
+    !resolved ||
+    isSuper ||
+    (!!me &&
+      ((me === uploaderName && uploaderId > 0) || owners.some((o) => o.username === me)));
   const mayEdit = writable && inCircle;
 
   const [picking, setPicking] = useState(false);
@@ -98,7 +106,10 @@ export function FileOwnersSection({
       // Сервер перечитывает владельцев у себя и возвращает СОХРАНЁННОЕ — по нему и рисуем,
       // а не по тому, что надеялись отправить.
       setApplied(res.owners ?? []);
-      qc.invalidateQueries({ queryKey: filesKeys.all });
+      // ДВА КОРНЯ, а не один: та же плитка файла лежит во вложениях карточки ЗАДАЧИ и приезжает
+      // из `['tasks','detail',id]` — дерева, которого `['files']` не накрывает. Смена
+      // ответственности меняет и её — см. `invalidateFileViews`.
+      invalidateFileViews(qc);
     },
   });
 

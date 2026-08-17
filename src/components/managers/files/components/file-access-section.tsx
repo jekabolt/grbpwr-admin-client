@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { AdminRef, LibraryFile, LibraryFileAccess } from 'api/proto-http/admin';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { publicFilePageUrl } from 'components/file-share-viewer/link';
+import { publicFilePageUrl, shareTokenOf } from 'components/file-share-viewer/link';
 import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { useSnackBarStore } from 'lib/stores/store';
 import { Avatar } from 'ui/components/avatar';
@@ -145,6 +145,11 @@ export function FileAccessSection({
   const setAccess = useMutation({
     mutationFn: (args: { level: AccessLevel; adminIds: number[]; linkTtl: number }) =>
       accessService.set({ fileId, ...args }),
+    // Глобальный `mutations.retry: 1` из `src/index.tsx` здесь снят: смена уровня публикует
+    // файл наружу или убивает выданную ссылку, и второй запрос за одно нажатие — второй такой
+    // же разрушительный переход. На 403 повтор не меняет ничего, а на обрыве связи первый
+    // запрос мог уже примениться.
+    retry: 0,
     onSuccess: (res, vars) => {
       // Рисуем по СОХРАНЁННОМУ, а не по тому, что надеялись отправить: свежесозданный адрес
       // ссылки приезжает именно здесь.
@@ -169,6 +174,10 @@ export function FileAccessSection({
 
   const rotate = useMutation({
     mutationFn: () => accessService.rotate(fileId),
+    // Повтор пересоздания НЕ идемпотентен вдвойне: он минтит ВТОРОЙ токен и убивает первый —
+    // тот самый, который человек мог уже увидеть на экране и скопировать. Один клик — одна
+    // ссылка.
+    retry: 0,
     onSuccess: (res) => {
       setApplied((prev) => {
         const base = prev ?? access;
@@ -209,8 +218,24 @@ export function FileAccessSection({
     return 168;
   };
 
+  /**
+   * СПИСОК ЛЮДЕЙ ЕДЕТ ТОЛЬКО С УРОВНЕМ `people`, и на остальных уходит пустым.
+   *
+   * Сервер трогает поимённый список ровно одним вызовом `replaceAccessPeople` и зовёт его
+   * ТОЛЬКО при новом уровне `people`: на `team` и `link` присланный набор не читается вовсе,
+   * строки `library_file_access_person` остаются лежать. Поэтому пустой список безопасен —
+   * ограничив файл снова, набирать людей заново не придётся, и ровно это обещают оба диалога:
+   * и здешний, и «закрыть доступ» на витрине открытого.
+   *
+   * Приведено к ОДНОМУ виду с витриной (`useCloseSharedAccess`), которая слала `[]` там, где
+   * этот блок слал текущий список. Оба тела верны, но два разных тела на один RPC в одном и
+   * том же переходе — это клиент, спорящий сам с собой: читающий код не может решить, какое из
+   * двух утверждений про сервер истинно, и однажды починит не то.
+   */
+  const adminIdsFor = (next: AccessLevel): number[] => (next === 'people' ? peopleIds : []);
+
   const applyLevel = (next: AccessLevel) => {
-    setAccess.mutate({ level: next, adminIds: peopleIds, linkTtl: linkTtlFor(next) });
+    setAccess.mutate({ level: next, adminIds: adminIdsFor(next), linkTtl: linkTtlFor(next) });
   };
 
   const openPicker = () => {
@@ -276,6 +301,9 @@ export function FileAccessSection({
    */
   const shownUrl = publicFilePageUrl(link?.url);
   const linkMinted = !!link?.url;
+  // Токен из адреса маршрута — тем же разбором, что и у самой сборки адреса. Он и отличает
+  // «ссылка не того вида» от «домен не настроен»: разобрался — значит ссылка цела.
+  const shareToken = shareTokenOf(link?.url);
 
   const copyLink = async () => {
     if (!shownUrl) return;
@@ -289,25 +317,69 @@ export function FileAccessSection({
     }
   };
 
-  const peopleRows: { key: string; id?: number; username: string; note: string }[] = [];
+  /**
+   * КТО ВИДИТ ФАЙЛ — ВЕСЬ КРУГ, А НЕ ОДИН СПИСОК.
+   *
+   * Предикат видимости на сервере пропускает четверых: перечисленных, загрузившего, ВЛАДЕЛЬЦЕВ
+   * файла и супер-админа. Список собирался из двух первых — и блок, к которому приходят с
+   * единственным вопросом «кто сейчас видит этот закрытый файл», отвечал неполно, хотя его
+   * собственный диалог двумя экранами ниже перечисляет всех четверых вслух. Аудит, который
+   * называет не всех, хуже отсутствующего: по нему принимают решение.
+   *
+   * Супер-админа в списке нет намеренно: это не человек при файле, а роль в панели, и печатать
+   * её строкой значило бы перечислять всех суперов у каждого файла. Про него говорит диалог.
+   *
+   * Владелец и загрузивший ЗАКРЕПЛЕНЫ (`pinned`): их видимость не из списка и списком не
+   * снимается. «Убрать» у такой строки было бы обещанием, которого сервер не выполнит.
+   */
+  const peopleRows: {
+    key: string;
+    id?: number;
+    username: string;
+    note: string;
+    /** Видит файл не по списку, а по роли — убрать из списка нельзя. */
+    pinned?: boolean;
+  }[] = [];
+  const ownerIds = new Set(owners.map((o) => Number(o.id ?? 0)).filter((n) => n > 0));
+  const listed = new Set<number>();
   if (uploaderName) {
     peopleRows.push({
       key: `up:${uploaderName}`,
       id: uploaderId > 0 ? uploaderId : undefined,
       username: uploaderName,
-      note: 'загрузил',
+      note: uploaderId > 0 && ownerIds.has(uploaderId) ? 'загрузил · ведёт файл' : 'загрузил',
+      pinned: true,
     });
+    if (uploaderId > 0) listed.add(uploaderId);
   }
   people
-    .filter((p) => !(uploaderId > 0 && Number(p.id ?? 0) === uploaderId))
-    .forEach((p: AdminRef) =>
+    .filter((p) => !listed.has(Number(p.id ?? 0)))
+    .forEach((p: AdminRef) => {
+      const id = Number(p.id ?? 0);
+      if (id > 0) listed.add(id);
       peopleRows.push({
         key: `p:${p.id}`,
-        id: Number(p.id ?? 0) || undefined,
+        id: id || undefined,
         username: p.username ?? `#${p.id}`,
-        note: (p.specialties ?? []).join(', '),
-      }),
-    );
+        // Владелец, попавший и в список, назван владельцем: убрав его отсюда, доступа его не
+        // лишишь — и строка после сохранения останется, только уже закреплённой.
+        note: [ownerIds.has(id) ? 'ведёт файл' : '', (p.specialties ?? []).join(', ')]
+          .filter(Boolean)
+          .join(' · '),
+      });
+    });
+  owners.forEach((o: AdminRef) => {
+    const id = Number(o.id ?? 0);
+    if (!id || listed.has(id)) return;
+    listed.add(id);
+    peopleRows.push({
+      key: `own:${id}`,
+      id,
+      username: o.username ?? `#${id}`,
+      note: ['ведёт файл', (o.specialties ?? []).join(', ')].filter(Boolean).join(' · '),
+      pinned: true,
+    });
+  });
 
   const shownEvents = allEvents ? events : events.slice(0, 5);
 
@@ -497,12 +569,13 @@ export function FileAccessSection({
                     </div>
                     {/* Строка загрузившего узнаётся по КЛЮЧУ, а не по совпадению имён: тёзка,
                         заведённый после удаления автора, — другой человек, и «всегда» вместо
-                        «убрать» сделало бы его несъёмным из списка, где сервер его не держит. */}
-                    {r.key.startsWith('up:') ? (
-                      /* Загрузивший неудаляем, и это решает СЕРВЕР — он кладёт его в список сам.
-                         Крестик здесь был бы обещанием, которое сервер отменит следующим
-                         ответом. */
-                      <Pill tone='mut' className='ml-auto'>
+                        «убрать» сделало бы его несъёмным из списка, где сервер его не держит.
+                        Тем же признаком помечен владелец: его видимость тоже не из списка. */}
+                    {r.pinned ? (
+                      /* Загрузивший и владелец неудаляемы отсюда, и это решает СЕРВЕР — он
+                         пропускает их предикатом видимости мимо списка. Крестик здесь был бы
+                         обещанием, которое сервер отменит следующим ответом. */
+                      <Pill tone='mut' className='ml-auto' title='видит файл всегда, не по списку'>
                         всегда
                       </Pill>
                     ) : (
@@ -528,6 +601,12 @@ export function FileAccessSection({
                   </div>
                 ))}
               </div>
+              {/* Четвёртый в круге — не человек, а роль, и строкой его не напечатать: суперов
+                  может быть несколько, и они видят любой файл вообще. Сказать про него всё
+                  равно надо, иначе список читается как исчерпывающий. */}
+              <Text size='micro' variant='label'>
+                и супер-админ: он видит любой файл — этого не отменяет ни один список.
+              </Text>
             </div>
           )}
 
@@ -561,12 +640,26 @@ export function FileAccessSection({
                   {link?.expired && <Pill tone='warn'>истёк</Pill>}
                 </div>
               ) : linkMinted ? (
-                /* Ссылка выдана, но её адрес не того вида, из которого собирается страница
-                   приземления. Подставить сюда маршрут нельзя: его разошлют вместо страницы и
-                   не узнают об этом никогда. */
-                <Text size='micro' variant='label'>
-                  адрес ссылки не разобрался — копировать нечего. пересоздайте ссылку.
-                </Text>
+                /* ДВЕ ПРИЧИНЫ ПУСТОГО АДРЕСА, И СОВЕТ У НИХ РАЗНЫЙ.
+                   Либо адрес ссылки не того вида, из которого собирается страница приземления
+                   (токен не разобрался) — тогда виновата сама ссылка. Либо собирать адрес не из
+                   чего: публичный домен контура не задан, а вкладка стоит на заведомо эфемерном
+                   хосте (`localhost`, адрес по числам, `*.vercel.app`) — тогда ссылка ЖИВА, и
+                   «пересоздайте её» посылает человека ломать работающее вместо того, чтобы
+                   выставить переменную. Различает их разобравшийся токен.
+                   Подставить сюда маршрут бэкенда нельзя ни в одном из случаев: его разошлют
+                   вместо страницы и не узнают об этом никогда. */
+                shareToken ? (
+                  <Text size='micro' variant='label'>
+                    публичный домен не настроен — копировать нечего. сама ссылка жива:
+                    выставьте <b>VITE_PATTERN_VIEWER_ORIGIN</b> на этом контуре, и адрес
+                    появится. пересоздавать ссылку не нужно.
+                  </Text>
+                ) : (
+                  <Text size='micro' variant='label'>
+                    адрес ссылки не разобрался — копировать нечего. пересоздайте ссылку.
+                  </Text>
+                )
               ) : (
                 <Text size='micro' variant='label'>
                   ссылка ещё не создана — она появится здесь после сохранения уровня.
@@ -602,7 +695,11 @@ export function FileAccessSection({
                         setConfirmForever(true);
                         return;
                       }
-                      setAccess.mutate({ level: 'link', adminIds: peopleIds, linkTtl: t.hours });
+                      setAccess.mutate({
+                        level: 'link',
+                        adminIds: adminIdsFor('link'),
+                        linkTtl: t.hours,
+                      });
                     }}
                   >
                     {t.label}
@@ -769,7 +866,7 @@ export function FileAccessSection({
       <ConfirmationModal
         open={confirmForever}
         onOpenChange={setConfirmForever}
-        onConfirm={() => setAccess.mutate({ level: 'link', adminIds: peopleIds, linkTtl: 0 })}
+        onConfirm={() => setAccess.mutate({ level: 'link', adminIds: adminIdsFor('link'), linkTtl: 0 })}
         title='сделать ссылку бессрочной'
         confirmLabel='сделать бессрочной'
         cancelLabel='оставить срок'
