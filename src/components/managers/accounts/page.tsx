@@ -1,14 +1,12 @@
 import { AdminAccount } from 'api/proto-http/admin';
+import { ROUTES } from 'constants/routes';
 import { useState } from 'react';
-import { useAdmins } from 'components/managers/tech-card/components/useRoles';
+import { Navigate } from 'react-router-dom';
 import { Button } from 'ui/components/button';
-import { GroupLabel } from 'ui/components/group-label';
-import { Section } from 'ui/components/section';
 import Text from 'ui/components/text';
 import { AccountFormModal } from './components/account-form-modal';
 import { AccountsTable } from './components/accounts-table';
 import { ResetPasswordModal } from './components/reset-password-modal';
-import { SpecialtiesField } from './components/specialties-field';
 import { useAccountSections, useAccounts } from './utils/hooks';
 import { usePermissions } from './utils/permissions';
 
@@ -18,10 +16,18 @@ export function Accounts() {
     canManageAccountsWrite,
     account: current,
     resolved,
+    isLoading: accountLoading,
   } = usePermissions();
-  const canView = !resolved || canManageAccounts;
+  // Гейт остаётся fail-open ровно в том виде, в каком был: закрываем экран, только когда
+  // личность приехала и она НЕ управляет аккаунтами. Легаси-бэкенд, у которого
+  // GetCurrentAccount падает, по-прежнему оставляет раздел открытым.
+  const denied = resolved && !canManageAccounts;
 
-  const { data, isLoading, isError, error } = useAccounts(canView);
+  // `enabled` ждёт, пока личность отстреляется. Раньше `!resolved` в первые миллисекунды
+  // означал «показывать всё», и `ListAccounts` уходил в сеть ещё до того, как выяснялось,
+  // что человеку туда нельзя: 403 в логе и попытка прочитать чужие учётки на каждую
+  // перезагрузку /accounts под ограниченным аккаунтом.
+  const { data, isLoading, isError, error } = useAccounts(!accountLoading && !denied);
   const { data: sectionsData, isLoading: sectionsLoading } = useAccountSections();
 
   const [formMode, setFormMode] = useState<'create' | 'edit' | null>(null);
@@ -31,45 +37,14 @@ export function Accounts() {
   const accounts = data?.accounts ?? [];
   const sections = sectionsData?.sections ?? [];
 
-  /**
-   * СВОИ СПЕЦИАЛЬНОСТИ БЕРУТСЯ ИЗ `ListAdmins`, А НЕ ИЗ `GetCurrentAccount`.
-   *
-   * `GetCurrentAccount` собирает ответ из клеймов токена и в базу за специальностями не
-   * ходит — поле там всегда пустое. Покажи мы его, экран после перезагрузки рисовал бы
-   * «ничего не указано» у человека, у которого всё указано, а следующая добавка ушла бы
-   * набором из одного элемента и СТЁРЛА бы остальные: запись — это replace всего набора.
-   * `ListAdmins` доступен любому аутентифицированному и несёт специальности каждого.
-   */
-  const { data: adminsData } = useAdmins();
-  const mySpecialties = current?.username
-    ? adminsData?.admins?.find((a) => a.username === current.username)?.specialties
-    : undefined;
+  // Пока личность в пути — ни шапки, ни скелета: под ограниченным аккаунтом это был бы
+  // заголовок «admin accounts» на полсекунды перед редиректом.
+  if (accountLoading) return null;
 
-  // РАЗДЕЛ ЗАКРЫТ, НО СВОЙ АККАУНТ — НЕ РАЗДЕЛ. Чужие учётки и доступы отсюда не видны, а
-  // «чем занимается» человек указывает себе сам, без accounts:write (решение Р1): поле,
-  // которое нельзя заполнить без администратора аккаунтов, остаётся пустым — и пустым
-  // остаётся пикер владельцев файла, ради которого оно и заводилось.
-  if (!canView) {
-    return (
-      <div className='flex w-full flex-col gap-gutter pb-16'>
-        <Section
-          title={`мой аккаунт · ${current?.username ?? '—'}`}
-          question='— список аккаунтов и доступы выдаёт супер-админ'
-        >
-          <Text variant='label' size='micro'>
-            чужие учётки и права отсюда не видны. это не мешает указать, чем вы занимаетесь: по
-            этой подписи вас находят, когда назначают владельца файла.
-          </Text>
-          <GroupLabel>чем занимается</GroupLabel>
-          <SpecialtiesField
-            username={current?.username}
-            specialties={mySpecialties}
-            editable={!!current?.username}
-          />
-        </Section>
-      </div>
-    );
-  }
+  // РАЗДЕЛ ЗАКРЫТ, НО СВОЙ АККАУНТ — НЕ РАЗДЕЛ: человек уезжает на «мой профиль», где правит
+  // своё самоописание без accounts:write (решение Р1). Карточка живёт ТАМ, а не веткой здесь —
+  // один экран на один адрес, и на /me нет ни импорта списка аккаунтов, ни модалок прав.
+  if (denied) return <Navigate to={ROUTES.me} replace />;
 
   return (
     <div className='flex w-full flex-col gap-4 pb-16'>

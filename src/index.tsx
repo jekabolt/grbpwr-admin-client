@@ -181,6 +181,12 @@ const RunPackPrint = lazyRoute(() =>
 const Accounts = lazyRoute(() =>
   import('components/managers/accounts').then((m) => ({ default: m.Accounts })),
 );
+// Прямым путём, а НЕ через баррель `components/managers/accounts`: баррель тянет `page.tsx`,
+// а с ним таблицу аккаунтов и модалки прав. Профиль открыт любому вошедшему, и его чанк не
+// должен содержать управление чужими учётками даже мёртвым кодом.
+const MyProfile = lazyRoute(() =>
+  import('components/managers/accounts/profile-page').then((m) => ({ default: m.MyProfile })),
+);
 const FilesLibrary = lazyRoute(() => import('components/managers/files/page'));
 const FileTopics = lazyRoute(() => import('components/managers/files/topics/topics-page'));
 
@@ -435,6 +441,10 @@ root.render(
                   <Route path={ROUTES.employees} element={<Employees />} />
                   <Route path={ROUTES.taskDetails} element={<TaskDetail />} />
                   <Route path={ROUTES.accounts} element={<Accounts />} />
+                  {/* Свой аккаунт открыт любому вошедшему и потому НЕ гейтится секцией —
+                      в отличие от /accounts, который гейт закрывает и который уводит сюда
+                      редиректом, когда accounts:read нет. */}
+                  <Route path={ROUTES.me} element={<MyProfile />} />
                 </Route>
                 {/* Layout-less protected route: a standalone page so the browser print
                     engine (Safari especially) renders the document in normal flow, with

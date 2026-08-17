@@ -51,6 +51,24 @@ export const Layout: FC<LayoutProps> = ({ children }) => {
           <div className='hidden lg:block'>
             <NavDropdownMenu groups={[ADMIN_GROUP]} align='end' onOpenChange={setIsNavOpen} />
           </div>
+          {/* «Мой профиль» стоит рядом с «logout», а не в выпадающем «admin», и это не
+              вкусовщина: пункты «admin» гейтятся правами и у фотографа группа исчезает целиком,
+              а профиль обязан быть виден каждому. Здесь же он оказывается в единственном месте
+              шапки, которое и так про личность вошедшего — «выйти» и «это я» одна категория.
+              Ниже lg шапка держит только menu / логотип / logout: там пункт живёт в ящике
+              (MobileNavMenu), иначе три подписи не помещаются в 12 строк высоты. */}
+          {/* Скрытие — на обёртке, а не на самой кнопке: базовый класс `Button` — это `block`,
+              cva собирает строку через clsx без tailwind-merge, и `hidden` на кнопке оставил бы
+              в разметке оба display-класса, разводя их только порядком правил в таблице стилей.
+              Тот же приём, что у соседнего выпадающего «admin». */}
+          <div className='hidden lg:block'>
+            <Button
+              asChild
+              className='px-2 underline-offset-2 transition-colors hover:underline hover:opacity-70'
+            >
+              <Link to={ROUTES.me}>мой профиль</Link>
+            </Button>
+          </div>
           <Button
             className='px-2 underline-offset-2 hover:underline transition-colors hover:opacity-70 cursor-pointer'
             onClick={handleLogout}

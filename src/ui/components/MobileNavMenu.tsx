@@ -3,7 +3,7 @@
 import * as DialogPrimitives from '@radix-ui/react-dialog';
 
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
-import { ADMIN_GROUP, isActiveRoute, NAV_GROUPS } from 'constants/routes';
+import { ADMIN_GROUP, isActiveRoute, NAV_GROUPS, ROUTES } from 'constants/routes';
 import { cn } from 'lib/utility';
 import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -12,13 +12,19 @@ import Text from './text';
 
 export function MobileNavMenu() {
   const [open, setOpen] = useState(false);
-  const { canRead } = usePermissions();
+  const { canRead, account } = usePermissions();
   const { pathname } = useLocation();
 
   // Same grouped source as desktop; drop unreadable items, then drop empty groups.
   const groups = [...NAV_GROUPS, ADMIN_GROUP]
     .map((group) => ({ ...group, items: group.items.filter((item) => canRead(item.section)) }))
     .filter((group) => group.items.length > 0);
+
+  // «Мой профиль» — вне гейтов и вне `groups`: он не привязан ни к какой секции, и человек
+  // без единого выданного раздела (у которого весь список выше пуст) обязан видеть в ящике
+  // хотя бы его. На десктопе тот же пункт живёт в шапке рядом с «logout»; здесь шапка занята
+  // тремя элементами, поэтому он приходит последней плиткой.
+  const profileActive = isActiveRoute(pathname, ROUTES.me);
 
   return (
     <DialogPrimitives.Root open={open} onOpenChange={setOpen}>
@@ -71,6 +77,28 @@ export function MobileNavMenu() {
                   </div>
                 </section>
               ))}
+
+              <section>
+                <Text variant='uppercase' size='micro' className='text-labelColor'>
+                  {account?.username ? `аккаунт · ${account.username}` : 'аккаунт'}
+                </Text>
+                <div className='mt-2 grid grid-cols-2 gap-2'>
+                  <DialogPrimitives.Close asChild>
+                    <Link
+                      to={ROUTES.me}
+                      aria-current={profileActive ? 'page' : undefined}
+                      className={cn(
+                        'flex min-h-12 items-center justify-center border border-textInactiveColor px-2 py-3 text-center leading-tight uppercase transition-colors active:opacity-80',
+                        profileActive
+                          ? 'bg-textColor text-bgColor'
+                          : 'hover:bg-textColor hover:text-bgColor',
+                      )}
+                    >
+                      мой профиль
+                    </Link>
+                  </DialogPrimitives.Close>
+                </div>
+              </section>
             </div>
           </div>
         </DialogPrimitives.Content>
