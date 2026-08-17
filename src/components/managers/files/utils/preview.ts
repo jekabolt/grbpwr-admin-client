@@ -124,3 +124,38 @@ export async function buildPreview(file: File): Promise<Blob | null> {
     return null;
   }
 }
+
+/**
+ * Строит превью для файла, который УЖЕ лежит в бакете.
+ *
+ * Тем же кодом, что и при загрузке: сервер ничего не растеризует и растеризовать не будет —
+ * это означало бы pdf-стек внутри go-контейнера. Файл качается по своей же presigned-ссылке,
+ * первая страница рисуется в canvas, наружу уходит webp.
+ *
+ * В отличие от `buildPreview`, здесь ошибка ГРОМКАЯ. При загрузке превью — удобство: файл
+ * встанет в библиотеку и без него. Здесь человек нажал кнопку и ждёт ответа, и тихое `null`
+ * выглядело бы как «нажал, ничего не произошло, наверное сломано».
+ */
+export async function rebuildPreview(args: {
+  downloadUrl: string;
+  fileName: string;
+  contentType?: string;
+}): Promise<Blob> {
+  if (!args.downloadUrl) throw new Error('у файла нет ссылки на скачивание');
+
+  let res: Response;
+  try {
+    res = await fetch(args.downloadUrl);
+  } catch {
+    // Сюда же приходит отказ CORS: браузеру он неотличим от обрыва сети. Это ровно тот же
+    // путь, которым читалка тянет pdf, — если не работает здесь, не работает и там.
+    throw new Error('файл не скачался — обновите страницу и попробуйте ещё раз');
+  }
+  if (!res.ok) throw new Error(`файл не отдался (${res.status})`);
+
+  const blob = await res.blob();
+  const file = new File([blob], args.fileName, { type: args.contentType || blob.type });
+  const preview = await buildPreview(file);
+  if (!preview) throw new Error('первую страницу нарисовать не вышло');
+  return preview;
+}

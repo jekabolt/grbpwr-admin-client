@@ -2,7 +2,7 @@ import type { LibraryFile } from 'api/proto-http/admin';
 import { cn } from 'lib/utility';
 import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
-import { extensionOf, formatBytes, kindWord, stemOf } from '../utils/format';
+import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
 
 /**
  * Плитка холста.
@@ -35,6 +35,10 @@ export function FileTile({
   const name = file.fileName ?? '';
   const ext = extensionOf(name);
   const noTopics = !(file.topics ?? []).length;
+  // «Не вышло» против «не бывает». У картинки и pdf превью строит браузер, значит пустое
+  // превью у такого типа — сбой отрисовки; у .zip первой страницы не существует, и подпись
+  // «не вышло» на нём была бы обещанием, которое никто не сможет выполнить.
+  const failed = !file.previewUrl && previewExpected(file.contentType ?? undefined, name);
 
   return (
     <div
@@ -89,7 +93,7 @@ export function FileTile({
               {ext}
             </Text>
             <Text size='micro' variant='label' component='span' className='uppercase'>
-              {kindWord(file.contentType ?? undefined, name)}
+              {failed ? 'превью не вышло' : kindWord(file.contentType ?? undefined, name)}
             </Text>
           </span>
         )}

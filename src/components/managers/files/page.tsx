@@ -9,11 +9,29 @@ import { Tiles } from 'ui/components/tiles';
 import { FileCardModal } from './components/file-card-modal';
 import { FilesToolbar } from './components/files-toolbar';
 import { FileTile } from './components/file-tile';
+import {
+  EmptyLibraryState,
+  EmptySearchState,
+  EmptyTopicState,
+  EmptyUntopicedState,
+  GallerySkeleton,
+  ListFailedState,
+  NextPageFailure,
+  NoAccessState,
+  RebuildPreview,
+} from './components/gallery-states';
 import { FilesSelectionBar } from './components/selection-bar';
 import { TopicChips, type TopicSelection } from './components/topic-chips';
 import { UploadDialog } from './components/upload-dialog';
 import { useFileSelection } from './hooks/useFileSelection';
-import { filesKeys, useFileTopics, useLibraryFiles, type FilesSort } from './hooks/useFiles';
+import {
+  filesKeys,
+  useFileTopics,
+  useLibraryFiles,
+  useSearchTotalEverywhere,
+  type FilesSort,
+} from './hooks/useFiles';
+import { previewExpected } from './utils/format';
 import { useQueryClient } from '@tanstack/react-query';
 
 /**
@@ -150,20 +168,55 @@ export default function FilesPage() {
   const closeCard = () => navigate({ pathname: '/files', search: params.toString() });
   const openCard = (fileId: number) =>
     navigate({ pathname: `/files/${fileId}`, search: params.toString() });
+  const showAll = () => patch({ topicIds: [], untopiced: false });
 
-  if (!mayRead) {
-    return (
-      <div className='border border-borderColor bg-bgColor p-block'>
-        <Text className='uppercase'>доступа к файлам нет</Text>
-        <Text size='micro' variant='label' className='mt-1 max-w-[70ch]'>
-          пункт «файлы» видно в меню у всех, поэтому вы сюда и попали. открыть библиотеку можно с
-          правом files:read, загружать — с files:write.
-        </Text>
-      </div>
-    );
-  }
+  // Второй счёт спрашивается только тогда, когда в узком фильтре не нашлось ничего: это
+  // и есть число в кнопке «искать во всех темах (N)». Спрашивать его заранее — лишний
+  // запрос на каждую букву в поиске.
+  const narrowed = topicIds.length > 0 || untopiced;
+  const everywhereQuery = useSearchTotalEverywhere(
+    urlSearch,
+    narrowed && !filesQuery.isLoading && files.length === 0,
+  );
 
-  const activeTopic = topicIds.length === 1 ? topics.find((t) => Number(t.id) === topicIds[0]) : undefined;
+  if (!mayRead) return <NoAccessState />;
+
+  const activeTopic =
+    topicIds.length === 1 ? topics.find((t) => Number(t.id) === topicIds[0]) : undefined;
+  const chosenTopics = topicIds
+    .map((id) => topics.find((t) => Number(t.id) === id))
+    .filter(Boolean) as typeof topics;
+
+  const emptyState = () => {
+    if (urlSearch) {
+      return (
+        <EmptySearchState
+          search={urlSearch}
+          narrowed={narrowed}
+          everywhereTotal={
+            everywhereQuery.data ? Number(everywhereQuery.data.total ?? 0) : undefined
+          }
+          onSearchEverywhere={() => patch({ topicIds: [], untopiced: false })}
+          onClearSearch={() => {
+            setSearchInput('');
+            patch({ q: '' });
+          }}
+        />
+      );
+    }
+    if (untopiced) return <EmptyUntopicedState onShowAll={showAll} />;
+    if (topicIds.length) {
+      return (
+        <EmptyTopicState
+          topics={chosenTopics}
+          writable={writable}
+          onShowAll={showAll}
+          onUpload={() => setUploadOpen(true)}
+        />
+      );
+    }
+    return <EmptyLibraryState writable={writable} onUpload={() => setUploadOpen(true)} />;
+  };
 
   return (
     <div
@@ -200,11 +253,15 @@ export default function FilesPage() {
             onChange={onTopics}
           />
         </div>
-        {!mayWrite && (
+        {/* ТОЛЬКО ЧТЕНИЕ ОБЪЯСНЯЕТСЯ СТРОКОЙ. Кнопки выключены, а не спрятаны: спрятанного не
+            попросишь, а выключенную без объяснения жмут и считают поломкой. Оба положения —
+            и вынужденное, и добровольное — глушат один и тот же набор контролов. */}
+        {!writable && (
           <div className='border-t border-hairline px-2.5 py-2'>
             <Text size='micro' variant='label'>
-              смотреть и скачивать можно, менять нельзя: права files:write нет. кнопки не спрятаны,
-              а выключены — спрятанного не попросишь.
+              {mayWrite
+                ? 'режим чтения включён вами: загрузка, правка и удаление выключены, пока он стоит.'
+                : 'смотреть и скачивать можно, менять нельзя: права files:write нет.'}
             </Text>
           </div>
         )}
@@ -226,21 +283,11 @@ export default function FilesPage() {
       )}
 
       {filesQuery.isLoading ? (
-        <Text size='micro' variant='label'>
-          загружаем…
-        </Text>
+        <GallerySkeleton />
+      ) : filesQuery.isError && !files.length ? (
+        <ListFailedState onRetry={() => filesQuery.refetch()} />
       ) : files.length === 0 ? (
-        <div className='border border-borderColor bg-bgColor p-block'>
-          <Text size='micro' variant='label'>
-            {urlSearch
-              ? `ничего не нашлось по запросу «${urlSearch}»`
-              : untopiced
-                ? 'всё разобрано — файлов без темы нет'
-                : topicIds.length
-                  ? 'в этом наборе тем пока пусто'
-                  : 'библиотека пуста'}
-          </Text>
-        </div>
+        emptyState()
       ) : (
         <Tiles min={190}>
           {files.map((f) => (
@@ -252,9 +299,28 @@ export default function FilesPage() {
               onToggleSelect={() => selection.toggle(f)}
               onOpen={() => openCard(Number(f.id))}
               onPreviewError={onPreviewError}
-            />
+            >
+              {/* Кнопка есть только там, где превью ОБЯЗАНО было получиться, и только у того,
+                  кто может писать: на .zip она обещала бы невозможное. */}
+              {writable &&
+                !f.previewUrl &&
+                previewExpected(f.contentType ?? undefined, f.fileName ?? '') && (
+                  <RebuildPreview file={f} />
+                )}
+            </FileTile>
           ))}
         </Tiles>
+      )}
+
+      {/* ОБРЫВ ПРИ ЛИСТАНИИ — ПОЛОСА ПОД СПИСКОМ, а не вместо него: уже показанные страницы
+          остаются на месте, позиция прокрутки не съезжает. */}
+      {filesQuery.isFetchNextPageError && (
+        <NextPageFailure
+          loaded={files.length}
+          total={total === undefined ? undefined : Number(total)}
+          retrying={filesQuery.isFetchingNextPage}
+          onRetry={() => filesQuery.fetchNextPage()}
+        />
       )}
 
       <FilesSelectionBar
@@ -265,8 +331,8 @@ export default function FilesPage() {
         onDropped={selection.drop}
       />
 
-      {filesQuery.hasNextPage && (
-        <div>
+      {filesQuery.hasNextPage && !filesQuery.isFetchNextPageError && (
+        <div className='flex items-center gap-2.5'>
           <Button
             size='sm'
             variant='secondary'
@@ -275,6 +341,10 @@ export default function FilesPage() {
           >
             {filesQuery.isFetchingNextPage ? 'загружаем…' : 'показать ещё'}
           </Button>
+          <Text size='micro' variant='label'>
+            показано {files.length}
+            {total === undefined ? '' : ` из ${total}`}
+          </Text>
         </div>
       )}
 
