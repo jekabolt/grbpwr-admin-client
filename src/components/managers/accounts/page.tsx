@@ -1,11 +1,11 @@
 import { AdminAccount } from 'api/proto-http/admin';
 import { useState } from 'react';
 import { Button } from 'ui/components/button';
-import { CalloutBox } from 'ui/components/callout-box';
 import Text from 'ui/components/text';
 import { AccountFormModal } from './components/account-form-modal';
 import { AccountsTable } from './components/accounts-table';
 import { ResetPasswordModal } from './components/reset-password-modal';
+import { SpecialtiesField } from './components/specialties-field';
 import { useAccountSections, useAccounts } from './utils/hooks';
 import { usePermissions } from './utils/permissions';
 
@@ -28,19 +28,31 @@ export function Accounts() {
   const accounts = data?.accounts ?? [];
   const sections = sectionsData?.sections ?? [];
 
+  // РАЗДЕЛ ЗАКРЫТ, НО СВОЙ АККАУНТ — НЕ РАЗДЕЛ. Чужие учётки и доступы отсюда не видны, а
+  // «чем занимается» человек указывает себе сам, без accounts:write (решение Р1): поле,
+  // которое нельзя заполнить без администратора аккаунтов, остаётся пустым — и пустым
+  // остаётся пикер владельцев файла, ради которого оно и заводилось.
   if (!canView) {
     return (
-      <CalloutBox
-        tone='note'
-        className='mx-auto flex max-w-md flex-col items-center gap-2 p-10 text-center'
-      >
-        <Text variant='uppercase' size='large'>
-          admin accounts
-        </Text>
-        <Text variant='label' size='small'>
-          You don’t have access to this section. Ask a super admin to grant it.
-        </Text>
-      </CalloutBox>
+      <div className='flex w-full flex-col gap-gutter pb-16'>
+        <div className='flex flex-col gap-2.5 border border-borderColor bg-bgColor p-block'>
+          <Text variant='uppercase'>мой аккаунт · {current?.username ?? '—'}</Text>
+          <Text variant='label' size='micro'>
+            список аккаунтов и доступы закрыты правами: их выдаёт супер-админ. это не мешает
+            указать, чем вы занимаетесь.
+          </Text>
+          <div className='flex flex-col gap-1'>
+            <Text variant='label' size='micro' component='span' className='uppercase'>
+              чем занимается
+            </Text>
+            <SpecialtiesField
+              username={current?.username}
+              specialties={current?.specialties}
+              editable={!!current?.username}
+            />
+          </div>
+        </div>
+      </div>
     );
   }
 

@@ -116,6 +116,45 @@ export function useResetAccountPassword() {
   });
 }
 
+/**
+ * «Чем занимается» — самоописание аккаунта. Прав оно не несёт ни грамма: по нему человека
+ * находят в пикере владельцев файла и в упоминаниях, и только. Поэтому СВОЮ специальность
+ * человек правит сам, без accounts:write (решение Р1) — поле, которое нельзя заполнить без
+ * администратора аккаунтов, остаётся пустым, а пустой справочник обесценивает и пикер, и
+ * поиск людей, ради которых он заводился.
+ */
+export function useSetAccountSpecialties() {
+  const queryClient = useQueryClient();
+  const { showMessage } = useSnackBarStore();
+  return useMutation({
+    // Словарь приезжает клиенту ИМЕНАМИ (`ListAdminsResponse.specialties`), без id — id
+    // специальности в контракте не публикуется вовсе. Поэтому весь выбранный набор уезжает
+    // именами в `new_specialties`: сервер схлопывает имя на существующую запись словаря
+    // (upsert по уникальному имени), так что повторный выбор ничего не плодит, а имя,
+    // набранное в другом регистре, ложится на ту же запись.
+    mutationFn: (vars: { username: string; specialties: string[] }) =>
+      adminService.SetAccountSpecialties({
+        username: vars.username,
+        specialtyIds: [],
+        newSpecialties: vars.specialties,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: accountsKeys.list() });
+      queryClient.invalidateQueries({ queryKey: accountsKeys.current() });
+      // Пикер владельцев файла и подписи людей читают ListAdmins (ключ `['admins']` в
+      // tech-card/components/useRoles). Без этой строки новая специальность не нашлась бы
+      // поиском по людям до перезагрузки вкладки.
+      queryClient.invalidateQueries({ queryKey: ['admins'] });
+      showMessage('специальности сохранены', 'success');
+    },
+    onError: (error) =>
+      showMessage(
+        error instanceof Error ? error.message : 'не удалось сохранить специальности',
+        'error',
+      ),
+  });
+}
+
 export function useDeleteAccount() {
   const queryClient = useQueryClient();
   const { showMessage } = useSnackBarStore();

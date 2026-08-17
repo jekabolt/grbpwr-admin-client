@@ -7,6 +7,7 @@ import { ConfirmationModal } from 'ui/components/confirmation-modal';
 import Text from 'ui/components/text';
 import { formatDateShort } from '../../orders-catalog/components/utility';
 import { ACCESS, useDeleteAccount, useSetAccountDisabled } from '../utils/hooks';
+import { SpecialtiesField } from './specialties-field';
 
 const ACCESS_ABBR: Record<string, string> = {
   [ACCESS.READ]: 'R',
@@ -127,6 +128,20 @@ export function AccountsTable({
                   )}
                 </div>
                 <StatusBadge disabled={a.disabled} />
+              </div>
+
+              {/* «Чем занимается» стоит ВЫШЕ доступов и отдельно от них намеренно: это
+                  самоописание, а не право. Своё правит сам человек, чужое — только
+                  accounts:write. */}
+              <div className='flex flex-col gap-1'>
+                <Text variant='label' size='micro' component='span' className='uppercase'>
+                  чем занимается
+                </Text>
+                <SpecialtiesField
+                  username={a.username}
+                  specialties={a.specialties}
+                  editable={isSelf || canWrite}
+                />
               </div>
 
               <AccessChips account={a} />
