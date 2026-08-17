@@ -1115,13 +1115,13 @@ function SampleReturns({
         // Датой возврата ставим сегодня — как во всех остальных движениях склада. Пустая строка
         // тоже принимается, но кладёт в ленту строку без даты, и она встаёт в порядок иначе.
         occurredAt: todayISO(),
-        comment: 'возврат с семпла',
+        comment: 'return from the sample',
         productId: 0,
         lotId: 0,
       });
-      showMessage('материал вернулся на склад', 'success');
+      showMessage('the material is back in stock', 'success');
     } catch (e) {
-      showMessage(e instanceof Error ? e.message : 'не удалось вернуть материал', 'error');
+      showMessage(e instanceof Error ? e.message : "couldn't return the material", 'error');
     } finally {
       setPending(0);
     }
@@ -1129,7 +1129,7 @@ function SampleReturns({
 
   return (
     <div className='flex flex-col gap-1'>
-      <GroupLabel>на семпле сейчас</GroupLabel>
+      <GroupLabel>on the sample right now</GroupLabel>
       {outstanding.map((r) => {
         const info = materialInfo.get(r.materialId);
         return (
@@ -1137,7 +1137,7 @@ function SampleReturns({
             key={r.materialId}
             label={
               <Text size='micro' component='span'>
-                {info?.label ?? `материал #${r.materialId}`}
+                {info?.label ?? `material #${r.materialId}`}
               </Text>
             }
             value={
@@ -1155,7 +1155,7 @@ function SampleReturns({
                     disabled={pending !== 0}
                     onClick={() => returnAll(r.materialId, r.qty)}
                   >
-                    {pending === r.materialId ? 'возвращаем…' : 'вернуть на склад'}
+                    {pending === r.materialId ? 'returning…' : 'return to stock'}
                   </Button>
                 )}
               </span>
@@ -1167,8 +1167,8 @@ function SampleReturns({
           в том месте, где действие, а не только в диалоге удаления, куда оператор ещё не дошёл. */}
       <Text size='micro' variant='label'>
         {scrapped
-          ? 'семпл списан — склад не принимает по нему возврат: материал ушёл вместе с семплом. пока это так, семпл не удаляется, и он же остаётся записью о съеденной ткани.'
-          : 'пока здесь что-то есть, семпл не удаляется — материал числится за ним. если ткань действительно израсходована, семпл и есть запись об этом, и удалять его нечего.'}
+          ? 'the sample is scrapped — stock takes no return against it: the material left together with the sample. while that is so, the sample is not deleted, and it is itself the record of the fabric that was eaten.'
+          : 'while anything is left here, the sample is not deleted — the material is still charged to it. if the fabric really has been consumed, the sample is precisely the record of that, and there is nothing to delete.'}
       </Text>
     </div>
   );
@@ -1183,22 +1183,18 @@ function verdictTone(v?: string): 'ok' | 'warn' | 'attention' | 'mut' {
   return 'mut';
 }
 
-// Russian plural agreement for "примерка" (1 примерка, 2 примерки, 5/11 примерок, 21 примерка…).
+// Plural agreement for "fitting" (1 fitting, 2 fittings) — two forms, not a naive trailing -s.
 function fittingsWord(n: number): string {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'примерка';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return 'примерки';
-  return 'примерок';
+  return n === 1 ? 'fitting' : 'fittings';
 }
 
-// Card-board summary text (owner decision 1, quoted verbatim): "N примерок · последний вердикт" —
+// Card-board summary text (owner decision 1, quoted verbatim): "N fittings · last verdict" —
 // read without opening the sample. Fittings arrive newest-first (ListFittings ORDER_FACTOR_DESC,
 // preserved by useSampleFittings' grouping), so the first entry is the latest.
 export function fittingsSummary(fittings: common_Fitting[]): string {
-  if (!fittings.length) return 'нет примерок';
+  if (!fittings.length) return 'no fittings';
   const n = fittings.length;
-  return `${n} ${fittingsWord(n)} · последний вердикт: ${verdictLabel(fittings[0].fitting?.verdict)}`;
+  return `${n} ${fittingsWord(n)} · last verdict: ${verdictLabel(fittings[0].fitting?.verdict)}`;
 }
 
 /** Unresolved change requests across a sample's fittings — the editor's "N open" pill. */
@@ -1261,7 +1257,7 @@ export function SampleFittings({
           {fittingsSummary(fittings)}
         </Text>
         <Button asChild variant='secondary' size='sm'>
-          <Link to={addHref}>+ примерка на этом семпле</Link>
+          <Link to={addHref}>+ fitting on this sample</Link>
         </Button>
       </div>
       {fittings.length > 0 && (

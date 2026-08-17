@@ -109,8 +109,13 @@ export function LabelsChecklist({
   ]
     .filter(Boolean)
     .join(' · ');
+  // The "none" arm must know the CURRENT default (`no polybag`, tech-card-options) as well as the
+  // legacy Cyrillic one still stored on older cards: this is a NEGATIVE matcher, so a value it
+  // fails to recognise reads as «a polybag is specified» — the chip would tick green on the one
+  // answer that means the opposite.
   const polybagPresent =
-    matches(packaging.polybag, /.+/) && !matches(packaging.polybag, /без пакет|no bag|none/i);
+    matches(packaging.polybag, /.+/) &&
+    !matches(packaging.polybag, /без пакет|no polybag|no bag|none/i);
   const greetingCardPresent = matches(
     packagingText,
     /card|карт|открыт|привет|thank|greet|благодар/i,
@@ -138,7 +143,10 @@ export function LabelsChecklist({
       name: 'composition',
       labelType: TYPE.CARE,
       present: !!careLabel?.note?.trim(),
-      hint: joinDetail('composition', careLabel?.note?.trim() ? 'in the care label' : 'not specified'),
+      hint: joinDetail(
+        'composition',
+        careLabel?.note?.trim() ? 'in the care label' : 'not specified',
+      ),
     },
     labelItem('origin', 'origin', TYPE.ORIGIN, 'manual'),
   ];
@@ -217,7 +225,7 @@ export function LabelsChecklist({
           {present} / {counted.length}
         </Text>
         <Text size='nano' variant='label' component='span' className='ml-auto uppercase'>
-          подсказка
+          hint
         </Text>
       </div>
       <div className='flex flex-col gap-1.5'>

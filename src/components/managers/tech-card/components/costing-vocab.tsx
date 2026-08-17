@@ -22,13 +22,13 @@ import Text from 'ui/components/text';
  */
 
 /** The problem axis. Two states, two words, everywhere on the tab. */
-export const NO_PRICE = 'нет цены';
-export const noFx = (currency?: string) => (currency ? `нет курса ${currency}` : 'нет курса');
+export const NO_PRICE = 'no price';
+export const noFx = (currency?: string) => (currency ? `no ${currency} rate` : 'no rate');
 
 /** The provenance axis. Neutral by construction — NONE is absence, and absence is a problem, not a source. */
 const ORIGIN_LABEL: Partial<Record<StyleCostPriceSource, string>> = {
-  STYLE_COST_PRICE_SOURCE_BOM_SNAPSHOT: 'снимок плана',
-  STYLE_COST_PRICE_SOURCE_CATALOG_LATEST: 'каталог',
+  STYLE_COST_PRICE_SOURCE_BOM_SNAPSHOT: 'plan snapshot',
+  STYLE_COST_PRICE_SOURCE_CATALOG_LATEST: 'catalog',
 };
 
 /**
@@ -43,11 +43,11 @@ const ORIGIN_LABEL: Partial<Record<StyleCostPriceSource, string>> = {
  * называется он вслух: у такого числа нет геометрии, по которой его можно проверить.
  */
 const NORM_SOURCE_LABEL: Record<string, string> = {
-  marker: 'из раскладки',
-  dxf: 'по выкройкам',
+  marker: 'from the marker',
+  dxf: 'from the patterns',
 };
 export const normSourceLabel = (source?: string) =>
-  NORM_SOURCE_LABEL[(source ?? '').trim().toLowerCase()] ?? 'введено руками';
+  NORM_SOURCE_LABEL[(source ?? '').trim().toLowerCase()] ?? 'entered by hand';
 
 /**
  * СТУПЕНЬ ЦИФРЫ — третья ось словаря, рядом с «откуда цена» и «проблема».
@@ -62,8 +62,8 @@ export const normSourceLabel = (source?: string) =>
  * `has_estimate` — утверждение СЕРВЕРА, а не вывод клиента: он сам отказывается засевать таким
  * числом `product.cost_price`, и это единственный признак, по которому ступень вообще узнаётся.
  */
-export const TIER_ESTIMATE = 'оценка снизу';
-export const TIER_PLAN = 'план';
+export const TIER_ESTIMATE = 'lower-bound estimate';
+export const TIER_PLAN = 'plan';
 
 /**
  * ПОЧЕМУ ЭТО НИЖНЯЯ ГРАНИЦА — одной фразой, дословно одинаковой везде.
@@ -73,10 +73,11 @@ export const TIER_PLAN = 'план';
  * в которую ошибаться дороже всего — согласует цену по цифре, которой не бывает на фабрике.
  */
 export const ESTIMATE_WHY =
-  'Расход части тканей выведен из геометрии: площадь деталей кроя ÷ раскройную ширину. Это NETTO — ' +
-  'межлекальных выпадов, концов настила и стыков в нём нет и быть не может, их знает только ' +
-  'раскладка. Настоящая себестоимость ВЫШЕ этой, а маржа — НИЖЕ; поэтому сервер такой цифрой не ' +
-  'сеет cost_price продукта, и цель маржи по ней не считается выполненной.';
+  'the consumption of some fabrics is derived from geometry: the area of the cut pieces ÷ the ' +
+  'cutting width. this is NETTO — waste between pieces, lay ends and joins are not in it and ' +
+  'cannot be, only the marker knows them. the real cost is HIGHER than this one, and the margin — ' +
+  'LOWER; that is why the server does not seed the product cost_price with such a number, and the ' +
+  'margin target is not counted as met by it.';
 
 /**
  * Where a material line's price came from, and when. Renders `—` for NONE rather than a red
@@ -175,7 +176,7 @@ export function HelpMark({
           <span
             role='button'
             tabIndex={0}
-            aria-label={`что такое «${title}»`}
+            aria-label={`what is “${title}”`}
             onKeyDown={onKeyDown}
             className={`inline-flex size-[13px] shrink-0 cursor-help items-center justify-center border border-borderColor align-middle text-nano leading-none text-labelColor hover:border-textColor hover:text-textColor ${focus}`}
           >

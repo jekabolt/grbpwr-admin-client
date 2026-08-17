@@ -246,7 +246,7 @@ function PreSavePrompt({
       <div className='grid w-full max-w-md grid-cols-3 gap-2'>
         <PreSaveTile label='on-garment items' />
         <PreSaveTile label='packaging recipe' />
-        <PreSaveTile label='dust bag (пыльник)' />
+        <PreSaveTile label='dust bag' />
       </div>
       {canWrite && (
         <Button
@@ -1071,7 +1071,7 @@ export function TechCardForm({
   const onInvalid = (errors: FieldErrors<TechCardFormData>) => {
     const flat = flattenFieldErrors(errors as FieldErrors);
     if (flat.length === 0) {
-      showMessage('Проверьте поля с ошибками', 'error');
+      showMessage('check the fields with errors', 'error');
       return;
     }
     const first = flat[0];
@@ -1459,11 +1459,11 @@ export function TechCardForm({
       {draft.pending && (
         <CalloutBox tone='warning' className='mt-2.5 flex flex-wrap items-center gap-2'>
           <Text size='micro'>
-            Найден несохранённый черновик
+            an unsaved draft was found
             {draft.pending.savedAt
-              ? ` от ${new Date(draft.pending.savedAt).toLocaleString()}`
+              ? ` from ${new Date(draft.pending.savedAt).toLocaleString('en-US')}`
               : ''}{' '}
-            — восстановить его или отбросить?
+            — restore it or discard it?
           </Text>
           <div className='ml-auto flex gap-1.5'>
             <Button type='button' variant='main' size='sm' onClick={draft.restore}>
@@ -1565,13 +1565,13 @@ export function TechCardForm({
                       card can advance to PROTO
                     </Text>
                   )}
-                  <InputField name='name' label='name *' placeholder='название изделия' />
+                  <InputField name='name' label='name *' placeholder='garment name' />
                   <SeasonField />
                   {isEditMode && (
                     <Text variant='label' size='micro'>
-                      Смена сезона перевыпускает SKU всех колорвеев стиля. Если хотя бы один уже
-                      заморожен (были заказы или печатались этикетки) — сохранение будет отклонено,
-                      для такого случая есть clone for season.
+                      changing the season re-issues the SKU of every colourway of the style. if even
+                      one of them is already frozen (there were orders, or labels were printed) —
+                      the save will be rejected; for that case there is clone for season.
                     </Text>
                   )}
                   <CollectionField />
@@ -1696,7 +1696,7 @@ export function TechCardForm({
                   label='concept (design intent)'
                   rows={3}
                   maxLength={2000}
-                  placeholder='что это за вещь — идея, референс, назначение'
+                  placeholder='what this thing is — the idea, the reference, the purpose'
                 />
                 <DetailsEditor techCard={techCard} />
                 <TextareaField name='notes' label='notes' rows={2} maxLength={2000} />
@@ -1797,10 +1797,10 @@ export function TechCardForm({
                     на одну цифру и только притворялся планом — не возвращать его сюда. */}
                 <SizeIdsField colorways={techCard?.colorways} />
               </Section>
-              <Section title='размерная таблица (межурменты) — общая для всех колорвеев стиля'>
+              <Section title='size chart (measurements) — shared by every colourway of the style'>
                 <SizeChartField styleId={numId} canEdit={canWrite(SECTION.techCards) && !frozen} />
               </Section>
-              <Section title='выкройки (DXF) — по материалам'>
+              <Section title='patterns (DXF) — by material'>
                 <PatternsField
                   techCardId={numId || undefined}
                   // Разбор DXF стартует сам, но только на ОТКРЫТОЙ вкладке: этот SectionStack
@@ -1821,7 +1821,7 @@ export function TechCardForm({
                   ONCE for every card shape, so there is exactly one useFieldArray('pieces') and one
                   set of [data-field] anchors for revealField to walk to. */}
               <PiecesTab techCard={techCard} active={activeTab === 'patterns'} />
-              <Section title='раскладки (маркеры) — расход ткани по размерам'>
+              <Section title='markers — fabric consumption by size'>
                 <MarkersSection
                   techCard={techCard}
                   techCardId={numId || 0}
@@ -1832,7 +1832,7 @@ export function TechCardForm({
 
             {/* BOM */}
             <div hidden={activeTab !== 'bom'}>
-              <Section title='bill of materials — справочник артикулов'>
+              <Section title='bill of materials — the article reference'>
                 {/* Structured style fibre composition (S17/M1) — typed composition_entries, read-only. */}
                 {(techCard?.compositionEntries?.length ?? 0) > 0 && (
                   <div className='border-b border-textInactiveColor pb-3'>
@@ -2018,7 +2018,10 @@ export function TechCardForm({
             neither. The `question` clause is the whole fix. */}
           {canReadCosting && (
             <SectionStack hidden={activeTab !== 'costing'}>
-              <Section title='план стиля' question='— что изделие должно стоить по BOM и статьям'>
+              <Section
+                title='style plan'
+                question='— what the garment should cost by BOM and by line items'
+              >
                 {/* Costing gap at the point of action. The tech-card payload only carries the plan
                   costing rollup (not each colorway's product cost_price), so this is a style-level
                   signal; per-colorway precision lives on each product's detail page. */}
@@ -2030,10 +2033,10 @@ export function TechCardForm({
                 ) && (
                   <CalloutBox tone='warning' className='mb-2.5'>
                     <Text size='micro'>
-                      Себестоимость этого стиля не задана — маржу, окупаемость и экономику его
-                      колорвеев посчитать не из чего, а проданные товары считаются в аналитике «без
-                      себестоимости» и занижают покрытие по магазину. Добавьте материалы в BOM или
-                      впишите статью ниже.
+                      this style has no cost set — there is nothing to compute the margin, the
+                      payback and the economics of its colourways from, and goods sold are counted in
+                      analytics as “without a cost” and drag the shop's coverage down. add materials
+                      to the BOM or write a line item below.
                     </Text>
                   </CalloutBox>
                 )}
@@ -2045,8 +2048,8 @@ export function TechCardForm({
               <fieldset disabled={frozen} className='m-0 min-w-0 border-0 p-0'>
                 {isEditMode && numId && (
                   <Section
-                    title='оценка по колорвею'
-                    question='— тот же расчёт построчно, и факт из прогонов рядом с планом'
+                    title='estimate by colourway'
+                    question='— the same calculation line by line, with the actual from the runs next to the plan'
                   >
                     {/* `active` gates the per-colourway fan-out. Every tab of this form is MOUNTED
                       at once and merely CSS-hidden, so without this the matrix would fire one
@@ -2064,13 +2067,13 @@ export function TechCardForm({
                   RPC needs a saved card id). */}
                 <Section
                   title='R&D'
-                  question='— периодные деньги стиля: в unit cost и COGS не входят никогда'
+                  question="— the style's period money: never part of the unit cost or of COGS"
                 >
                   {isEditMode && numId ? (
                     <DevExpensesField techCardId={numId} />
                   ) : (
                     <Text variant='inactive' size='small'>
-                      сначала сохраните тех-карту — потом сюда можно писать расходы на разработку
+                      save the tech card first — then development expenses can be written here
                     </Text>
                   )}
                 </Section>

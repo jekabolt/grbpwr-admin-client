@@ -112,7 +112,7 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
   // Слова — из общего словаря (costing-vocab), а не свои: ровно эту пилюлю вкладка КОСТИНГ теперь
   // печатает у своей цифры, и два написания одной ступени на двух поверхностях одного экрана —
   // это то, ради чего словарь заведён.
-  const tier = !unitCost ? 'нет расчёта' : rollup?.hasEstimate ? TIER_ESTIMATE : TIER_PLAN;
+  const tier = !unitCost ? 'no calculation' : rollup?.hasEstimate ? TIER_ESTIMATE : TIER_PLAN;
   const tierTone = rollup?.hasEstimate && unitCost ? 'attention' : 'mut';
 
   const materialsPerUnit = decimalToInput(rollup?.materialsPerUnit).trim();
@@ -138,14 +138,14 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
       const perSize = (u.sizeConsumptions ?? []).some((s) => decimalToInput(s.consumption).trim());
       return {
         key: u.bomLineKey || `${wireInt(u.bomItemId)}-${i}`,
-        name: bom?.name?.trim() || u.placement?.trim() || 'строка без названия',
+        name: bom?.name?.trim() || u.placement?.trim() || 'unnamed line',
         // ПЕР-РАЗМЕРНАЯ НОРМА ПОБЕЖДАЕТ СКАЛЯР — как на сервере: себестоимость стиля берёт по ней
         // среднее по размерному ряду. Печатать здесь скаляр значило бы назвать нормой число,
         // которого расчёт не берёт, поэтому вместо него сказано, ЧТО норма пер-размерная.
         // Единица нормы — единица СТРОКИ BOM, и только она (единица артикула это единица склада,
         // и пин колорвея на артикул другой размерности законен).
         qty: perSize
-          ? 'по размерам'
+          ? 'per size'
           : scalar || count
             ? `${scalar || count}${unit ? ` ${unit}` : ''}`
             : '',
@@ -194,7 +194,7 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
       const unit = e.unit?.trim() || bom?.unit?.trim() || '';
       return {
         key: `est-${key}`,
-        name: bom?.name?.trim() || e.scopeKey?.trim() || 'ткань без названия',
+        name: bom?.name?.trim() || e.scopeKey?.trim() || 'unnamed fabric',
         qty: `${decimalToInput(e.perGarment).trim()}${unit ? ` ${unit}` : ''}`,
         source: TIER_ESTIMATE,
       };
@@ -214,17 +214,17 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
     // открывают в примерочной, где считают посадку, а не деньги. Ровно на lg рейл секций и сам
     // перестаёт быть рейлом. Костинг оттуда — один тап по рейлу.
     <aside
-      aria-label='себестоимость стиля'
+      aria-label='style cost'
       className='fixed top-1/2 right-0 z-[var(--z-sticky)] hidden -translate-y-1/2 print:hidden lg:block'
     >
       {open ? (
         <Section
-          title='себестоимость'
-          question='— то, что сервер посчитал при последнем сохранении'
+          title='cost'
+          question='— what the server computed at the last save'
           className='max-h-[70vh] w-[320px] overflow-y-auto'
           action={
             <Button type='button' variant='secondary' size='xs' aria-expanded onClick={toggle}>
-              свернуть ✕
+              collapse ✕
             </Button>
           }
         >
@@ -232,7 +232,7 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
             <Text size='statBig'>{label}</Text>
             <div className='mt-1 flex flex-wrap items-center gap-1.5'>
               <Pill tone={tierTone}>{tier}</Pill>
-              {costingDirty && <Pill tone='attention'>черновик</Pill>}
+              {costingDirty && <Pill tone='attention'>draft</Pill>}
               {rollup?.hasUnpriced && <Pill tone='warn'>{NO_PRICE}</Pill>}
               {rollup?.hasUnconvertedCurrencies && <Pill tone='warn'>{noFx()}</Pill>}
             </div>
@@ -242,21 +242,23 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
               «Стиль» и «партия» — разные вопросы, и спутать их дороже всего: партия из одних XL,
               посчитанная по средней ряда, выглядит нормально и врёт на всю разницу градации. */}
           <Text size='micro' variant='label'>
-            за изделие · СТИЛЬ (средним по размерному ряду), не партия · пересчитывается при
-            сохранении карточки
-            {costingDirty ? ' — в форме есть несохранённые статьи, цифра ещё прежняя' : ''}
+            per unit · the STYLE (averaged over the size range), not a run · recomputed when the
+            card is saved
+            {costingDirty
+              ? ' — the form has unsaved line items, the figure is still the old one'
+              : ''}
           </Text>
 
           <div>
-            <GroupLabel flush>материалы</GroupLabel>
-            <Row label='на изделие' value={money(materialsPerUnit, cur)} />
+            <GroupLabel flush>materials</GroupLabel>
+            <Row label='per unit' value={money(materialsPerUnit, cur)} />
             {/* Валютные корзины сервера: строка BOM в другой валюте в materials_per_unit не входит,
                 но здесь она есть — сервер её не роняет молча, и полоса тоже. Подпись — теми же
                 словами, что на вкладке костинга. */}
             {materialsTotal.map((line, i) => (
               <Row
                 key={`${line.currency || 'none'}-${i}`}
-                label={`материалы · ${line.currency || 'без валюты'}`}
+                label={`materials · ${line.currency || 'no currency'}`}
                 value={decimalToInput(line.amount) || '—'}
               />
             ))}
@@ -264,7 +266,7 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
 
           <div>
             <GroupLabel>
-              {`рецепт · ${primary?.colorCode?.trim() || primary?.baseSku?.trim() || 'основной колорвей'}`}
+              {`recipe · ${primary?.colorCode?.trim() || primary?.baseSku?.trim() || 'primary colourway'}`}
             </GroupLabel>
             {recipeRows.length > 0 ? (
               recipeRows.map((r) => (
@@ -288,10 +290,10 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
                     ненулевые: их дала площадь деталей. Старый текст на ней противоречил цифре в
                     двух строках над собой. */}
                 {!primary
-                  ? 'у карточки нет колорвеев — расход задавать не на чем'
+                  ? 'the card has no colourways — there is nothing to set consumption on'
                   : estimateRows.length > 0
-                    ? 'своей нормы расхода у тканей нет — материалы посчитаны по площади деталей, слоты перечислены ниже'
-                    : 'в рецепте этого колорвея нет строк расхода на изделие — материалы считаются нулевыми'}
+                    ? 'the fabrics have no consumption norm of their own — the materials are computed from the piece areas, the slots are listed below'
+                    : "this colourway's recipe has no per-unit consumption lines — the materials are counted as zero"}
               </Text>
             )}
           </div>
@@ -309,7 +311,7 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
               полосе второй расчёт денег рядом с серверным. */}
           {estimateRows.length > 0 && (
             <div>
-              <GroupLabel>{`слоты без нормы · ${TIER_ESTIMATE}`}</GroupLabel>
+              <GroupLabel>{`slots without a norm · ${TIER_ESTIMATE}`}</GroupLabel>
               {estimateRows.map((r) => (
                 <Row
                   key={r.key}
@@ -321,7 +323,7 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
                       </Text>
                     </span>
                   }
-                  value='в общем итоге'
+                  value='in the overall total'
                 />
               ))}
             </div>
@@ -330,7 +332,7 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
           {/* Ссылка, а не кнопка: вкладка живёт в URL (?tab=), и <a> переживает и замороженную
               релизом карточку, и аккаунт с одним лишь costing:read. */}
           <Button asChild variant='secondary' size='sm'>
-            <Link to='?tab=costing'>костинг — маржа, проблемы, партия</Link>
+            <Link to='?tab=costing'>costing — margin, problems, run</Link>
           </Button>
         </Section>
       ) : (
@@ -341,11 +343,11 @@ export function MoneyPanel({ techCard }: { techCard?: common_TechCard }) {
           type='button'
           onClick={toggle}
           aria-expanded={false}
-          title='себестоимость стиля — развернуть'
+          title='style cost — expand'
           className='flex cursor-pointer items-center gap-2 border border-borderColor bg-bgColor px-1.5 py-3 [writing-mode:vertical-rl] hover:border-textColor focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-textColor'
         >
           <Text size='nano' variant='label' tracking='label' component='span' className='uppercase'>
-            себестоимость
+            cost
           </Text>
           {/* Без ручного tabular-nums: разрядность выравнивают КОЛОНКИ цифр, и она вшита в
               примитив там, где колонка есть (Row, stat). Здесь число одно. */}

@@ -316,7 +316,7 @@ export function SampleCutPieces({
   const view = useSampleCutView(techCard, colorwayId);
 
   if (!colorwayId) return <NoColourway />;
-  if (!view.ready) return <NoPieces what='детали кроя' />;
+  if (!view.ready) return <NoPieces what='cut pieces' />;
 
   return (
     <div className='flex flex-col gap-2'>

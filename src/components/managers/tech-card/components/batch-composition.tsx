@@ -8,7 +8,6 @@ import {
   runDetailPath,
   runStatusLabel,
 } from 'components/managers/production-runs/components/options';
-import { pluralRu } from 'components/managers/production-runs/components/run-readiness';
 import {
   runColorwayRows,
   runGridColumns,
@@ -203,7 +202,7 @@ export function BatchComposition({
       {
         onSuccess: (res) => {
           setDirty(false);
-          showMessage('Черновик партии создан — ткань не занята', 'success');
+          showMessage('run draft created — no fabric is committed', 'success');
           const id = (res as { id?: number })?.id ?? 0;
           if (id) onCreated?.(id);
         },
@@ -232,7 +231,7 @@ export function BatchComposition({
       {
         onSuccess: () => {
           setDirty(false);
-          showMessage('Состав черновика сохранён', 'success');
+          showMessage('the draft composition is saved', 'success');
         },
         onError: (e) => setError(updateRunErrorMessage(e)),
       },
@@ -245,16 +244,16 @@ export function BatchComposition({
   // количества ничего не считает и ничего не значит, а удалять её потом придётся руками.
   const blockedReason =
     columns.length === 0
-      ? 'у карточки пустой размерный ряд — количества вводить не по чему'
+      ? 'the card has an empty size range — there is nothing to enter quantities against'
       : rows.length === 0
-        ? 'у карточки нет живых колорвеев с продуктом — составлять партию не из чего'
+        ? 'the card has no live colourways with a product — there is nothing to compose a run from'
         : grandTotal === 0
-          ? 'ни одной клетки не заполнено — пустую партию создавать нечего'
+          ? 'not a single cell is filled in — there is no empty run worth creating'
           : '';
 
   const title = isNew
-    ? 'новая партия — черновик расчёта'
-    : `состав партии #${run?.id} · ${runStatusLabel(run?.run?.status)}`;
+    ? 'new run — a draft calculation'
+    : `run composition #${run?.id} · ${runStatusLabel(run?.run?.status)}`;
 
   return (
     <div className='flex w-full min-w-0 flex-col gap-1.5'>
@@ -263,13 +262,13 @@ export function BatchComposition({
         action={
           isNew && onCancel ? (
             <Button type='button' variant='underline' size='xs' onClick={onCancel}>
-              отмена
+              cancel
             </Button>
           ) : !isNew && run?.id ? (
             // Ссылка, а не кнопка: на released-карточке вкладка лежит в `<fieldset disabled>`,
             // который глушит любую <button>, но не <a>.
             <Button asChild variant='underline' size='xs'>
-              <Link to={runDetailPath(run.id)}>страница партии ↗</Link>
+              <Link to={runDetailPath(run.id)}>run page ↗</Link>
             </Button>
           ) : undefined
         }
@@ -283,7 +282,7 @@ export function BatchComposition({
           <table className='border-collapse'>
             <thead>
               <tr>
-                <th className={`${cellBox} text-left uppercase`}>колорвей</th>
+                <th className={`${cellBox} text-left uppercase`}>colourway</th>
                 {columns.map((s) => (
                   <th key={s} className={`${cellBox} text-right uppercase`}>
                     {sizeLabel(s)}
@@ -335,11 +334,11 @@ export function BatchComposition({
       <div className='flex flex-wrap items-center gap-x-3 gap-y-1'>
         <Text size='micro' variant='label' component='span'>
           {grandTotal > 0
-            ? `${grandTotal} ${pluralRu(grandTotal, 'изделие', 'изделия', 'изделий')} в партии`
+            ? `${grandTotal} ${grandTotal === 1 ? 'garment' : 'garments'} in the run`
             : editable
               ? // Причина, по которой нечего сохранять, — только там, где сохраняют.
-                blockedReason || 'количества не введены'
-              : 'в партии нет ни одного количества'}
+                blockedReason || 'no quantities entered'
+              : 'the run has no quantities at all'}
         </Text>
         {editable ? (
           <Button
@@ -350,7 +349,7 @@ export function BatchComposition({
             title={blockedReason || undefined}
             onClick={isNew ? create : update}
           >
-            {save.isPending ? 'сохраняем…' : isNew ? 'создать черновик' : 'сохранить состав'}
+            {save.isPending ? 'saving…' : isNew ? 'create a draft' : 'save the composition'}
           </Button>
         ) : null}
       </div>
@@ -360,17 +359,17 @@ export function BatchComposition({
       {!editable && !isNew ? (
         <Text size='micro' variant='label'>
           {!canPlan
-            ? 'состав партии правит роль с доступом к производству'
+            ? 'the run composition is edited by a role with production access'
             : !gridCoversRun
-              ? 'в партии есть строки без продукта или размера (выпуск вспомогательной карточки) — такой состав правится только на странице партии'
-              : 'у не-черновой партии правка состава двигает РЕЗЕРВЫ ТКАНИ: сервер приводит резерв к новой потребности при каждом сохранении. Это производственное решение, и принимается оно на странице партии, где рядом виден вердикт готовности, — а не побочным эффектом прикидки в костинге. Здесь можно создать черновик и считать по нему.'}
+              ? 'the run has lines without a product or a size (an auxiliary card is being made) — such a composition is edited only on the run page'
+              : 'on a run that is not a draft, editing the composition moves FABRIC RESERVES: the server brings the reserve in line with the new requirement on every save. that is a production decision, and it is taken on the run page, where the readiness verdict is visible next to it — not as a side effect of a rough estimate in costing. here you can create a draft and count on that.'}
         </Text>
       ) : null}
 
       {editable && !isNew ? (
         <Text size='micro' variant='label'>
-          черновик ничего не занимает — ни резерва ткани, ни наряда; резерв, гейт готовности и наряд
-          навешиваются при переводе в план
+          a draft commits nothing — neither a fabric reserve nor a run pack; the reserve, the
+          readiness gate and the run pack are attached when it moves to plan
         </Text>
       ) : null}
 

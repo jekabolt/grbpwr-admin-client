@@ -118,17 +118,21 @@ function LabelRow({ index, onRemove }: { index: number; onRemove: () => void }) 
           options={labelAttachmentOptions}
         />
         <InputField name={`labels.${index}.size`} label='size' />
-        <InputField name={`labels.${index}.note`} label={isCare ? 'состав / care text' : 'note'} />
+        <InputField
+          name={`labels.${index}.note`}
+          label={isCare ? 'composition / care text' : 'note'}
+        />
         <div>
           <SelectField
             name={`labels.${index}.bomItemId`}
-            label='материал (BOM)'
+            label='material (BOM)'
             items={bomItemOptions}
             valueAsNumber
           />
           {bomItemDangling && (
             <Text size='micro' className='text-error'>
-              строки BOM больше нет — сохранение будет отклонено, выберите другую или «not linked»
+              this BOM line no longer exists — the save will be rejected, pick another one or “not
+              linked”
             </Text>
           )}
         </div>
@@ -194,7 +198,8 @@ function LabelPreview() {
       <div className='border border-borderColor bg-bgColor p-3'>
         {empty ? (
           <Text size='micro' variant='label' className='text-center'>
-            заполните состав (BOM), символы ухода или origin — здесь появится этикетка как на печать
+            fill in the composition (BOM), the care symbols or origin — the label will appear here
+            as it prints
           </Text>
         ) : (
           <div className='mx-auto flex max-w-[240px] flex-col items-center gap-2 text-center'>
@@ -314,13 +319,13 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
       if (hasAnyComposition(bomItems)) {
         // composition strings exist but yielded no %s — most likely percentages weren't set
         showMessage(
-          'Состав указан, но без процентов: в поле composition (BOM) нажмите «select» и задайте % для каждого материала',
+          'composition is set but without percentages: in the composition (BOM) field press “select” and set a % for every material',
           'error',
         );
         onMissingComposition?.();
       } else {
         showMessage(
-          'Нет состава: на вкладке BOM в поле composition нажмите «select» и выберите материалы с процентами (открываю BOM)',
+          'no composition: on the BOM tab, in the composition field, press “select” and pick materials with percentages (opening BOM)',
           'error',
         );
         onMissingComposition?.();
@@ -333,7 +338,10 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
     } else {
       append({ ...emptyLabel, labelType: CARE, note: text });
     }
-    showMessage('состав записан в этикетку «care» (поле «состав / care text»)', 'success');
+    showMessage(
+      'the composition is written into the “care” label (the “composition / care text” field)',
+      'success',
+    );
   };
 
   return (
@@ -343,7 +351,7 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
             and the completeness checklist are secondary and sit below, separated by a rule. */}
         <Toolbar>
           <Button type='button' variant='secondary' size='sm' onClick={generateCare}>
-            сгенерировать состав / уход
+            generate composition / care
           </Button>
           <ToolbarSpacer />
           <Button type='button' variant='main' size='sm' onClick={() => append({ ...emptyLabel })}>
@@ -351,8 +359,9 @@ export function LabelsField({ onMissingComposition }: { onMissingComposition?: (
           </Button>
         </Toolbar>
         <Text size='micro' variant='label'>
-          собирает состав из BOM (composition) → пишет в этикетку «care». Символы стирки/глажки
-          выбираются пикером «care symbols». Страна — из этикетки «origin», если есть.
+          collects the composition from BOM (composition) → writes it into the “care” label.
+          wash/iron symbols are picked with the “care symbols” picker. the country comes from the
+          “origin” label, if there is one.
         </Text>
 
         {fields.length === 0 ? (

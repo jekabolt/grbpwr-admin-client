@@ -421,7 +421,10 @@ export function TechPackDocument({
     }));
     const pieceKeys = new Set(pieces.map((pc) => pc.lineKey));
     const steps = ops.map((o) => ({
-      inputs: classifyAssemblyInputs(pieceKeys, o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? [])),
+      inputs: classifyAssemblyInputs(
+        pieceKeys,
+        o.inputKeys?.length ? o.inputKeys : (o.pieceLineKeys ?? []),
+      ),
       outputUnitKey: (o.outputUnitKey ?? '').trim(),
       outputUnitName: (o.outputUnitName ?? '').trim(),
     }));
@@ -487,7 +490,12 @@ export function TechPackDocument({
   /** Что печатать заголовками: узлы, если карточка размечена, иначе зоны. */
   const printGroups =
     assemblyGroups ??
-    operationGroups.map((g) => ({ key: g.zone, label: g.label, sub: '', operations: g.operations }));
+    operationGroups.map((g) => ({
+      key: g.zone,
+      label: g.label,
+      sub: '',
+      operations: g.operations,
+    }));
 
   // Раскладки скоупа: раскладка привязана к колорвею, а colorwayId = 0 означает общую для всех
   // цветов. Общая печатается всегда — она и есть норма этого стиля.
@@ -584,7 +592,7 @@ export function TechPackDocument({
     const byKey = new Map<string, string>();
     for (const p of tc?.pieces ?? []) {
       const k = p.lineKey?.trim();
-      if (k) byKey.set(k, p.name?.trim() || '(без имени)');
+      if (k) byKey.set(k, p.name?.trim() || '(unnamed)');
     }
     return (lineKey: string) => byKey.get(lineKey);
   }, [tc?.pieces]);
@@ -2358,7 +2366,9 @@ export function TechPackDocument({
                       {/* Только у НАЗВАННОГО профиля: без имени жирная строка выше и есть имя
                           машинки, и вторая такая же прочиталась бы как другая машинка. */}
                       {m.label?.trim() && (
-                        <div className='text-labelColor'>{machineTypeLabel(m.machineType) || '—'}</div>
+                        <div className='text-labelColor'>
+                          {machineTypeLabel(m.machineType) || '—'}
+                        </div>
                       )}
                     </td>
                     <td className={TD}>
@@ -2512,10 +2522,7 @@ export function TechPackDocument({
                               ) : (
                                 <div className='flex flex-col gap-0.5'>
                                   {materials.map((m, j) => (
-                                    <div
-                                      key={j}
-                                      className={m.missing ? 'font-bold uppercase' : ''}
-                                    >
+                                    <div key={j} className={m.missing ? 'font-bold uppercase' : ''}>
                                       {m.missing ? `⚠ ${m.name}` : m.name}
                                       {m.kind ? (
                                         <span className='text-labelColor'> · {m.kind}</span>

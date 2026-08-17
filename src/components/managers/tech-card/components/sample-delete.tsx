@@ -68,7 +68,7 @@ function Fixes({ blockers }: { blockers?: SampleDeletionEntry[] }) {
   if (fixes.length === 0) return null;
   return (
     <div className='mt-1.5 flex flex-col gap-1'>
-      <GroupLabel flush>что сделать</GroupLabel>
+      <GroupLabel flush>what to do</GroupLabel>
       {fixes.map((f) => (
         <Text key={f} size='micro'>
           {f}
@@ -114,7 +114,7 @@ export function SampleDeleteControl({
     del.mutate(sampleId, {
       onSuccess: () => {
         setOpen(false);
-        showMessage(`сэмпл ${label} удалён`, 'success');
+        showMessage(`sample ${label} deleted`, 'success');
         onDeleted();
       },
       onError: (e) => {
@@ -122,7 +122,7 @@ export function SampleDeleteControl({
         // лежит та же серверная фраза вместе с советом. Печатаем ИХ, а не «не удалось удалить».
         const fresh = extractFieldViolations(e).map((v) => v.description);
         if (fresh.length > 0) setLateBlockers(fresh);
-        else showMessage(e instanceof Error ? e.message : 'не удалось удалить сэмпл', 'error');
+        else showMessage(e instanceof Error ? e.message : "couldn't delete the sample", 'error');
       },
     });
   }
@@ -137,7 +137,7 @@ export function SampleDeleteControl({
   return (
     <>
       <Button type='button' variant='secondary' size='sm' onClick={openDialog}>
-        удалить сэмпл
+        delete the sample
       </Button>
 
       <ConfirmationModal
@@ -147,9 +147,9 @@ export function SampleDeleteControl({
           if (!next) setLateBlockers([]);
         }}
         width='sm'
-        title={`удалить сэмпл ${label}`}
+        title={`delete sample ${label}`}
         hideActions={!offerDelete}
-        confirmLabel='удалить сэмпл'
+        confirmLabel='delete the sample'
         confirmDisabled={del.isPending}
         // Модалка НЕ закрывается по клику «да»: удаление может отказать (мир изменился), и закрытая
         // форма унесла бы с собой единственное место, где видно почему.
@@ -159,7 +159,7 @@ export function SampleDeleteControl({
         <div className='flex flex-col gap-1.5'>
           {preview.isPending && (
             <Text size='micro' variant='label'>
-              считаем, что будет удалено…
+              working out what will be deleted…
             </Text>
           )}
 
@@ -168,7 +168,7 @@ export function SampleDeleteControl({
               <Text size='micro'>
                 {preview.error instanceof Error
                   ? preview.error.message
-                  : 'не удалось получить вердикт'}
+                  : "couldn't get the verdict"}
               </Text>
             </CalloutBox>
           )}
@@ -176,9 +176,10 @@ export function SampleDeleteControl({
           {verdict && !deletable && (
             <>
               <Text size='micro'>
-                этот сэмпл удалить нельзя — за ним ещё числится то, что удаление стёрло бы молча.
+                this sample can't be deleted — things are still charged to it that deleting would
+                wipe silently.
               </Text>
-              <GroupLabel flush>что держит</GroupLabel>
+              <GroupLabel flush>what holds it</GroupLabel>
               <EntryList entries={verdict.blockers} />
               <Fixes blockers={verdict.blockers} />
             </>
@@ -187,18 +188,18 @@ export function SampleDeleteControl({
           {verdict && deletable && (
             <>
               <Text size='micro'>
-                сэмпл <b>{label}</b> будет удалён безвозвратно.
+                sample <b>{label}</b> will be deleted irreversibly.
               </Text>
               {/* ПОЧЕМУ удаление разрешено — отдельной строкой и серым: это факт сервера, а не
                   обещание, что за семплом ничего не было. */}
               <Text size='micro' variant='label'>
-                удаление разрешено потому, что весь материал вернулся на склад и на семпле нет
-                примерок.
+                deleting is allowed because all the material is back in stock and the sample has no
+                fittings.
               </Text>
 
               {(verdict.cascade?.length ?? 0) > 0 && (
                 <>
-                  <GroupLabel flush>удалится вместе с ним</GroupLabel>
+                  <GroupLabel flush>will be deleted along with it</GroupLabel>
                   <EntryList entries={verdict.cascade} />
                 </>
               )}
@@ -209,7 +210,7 @@ export function SampleDeleteControl({
                   Отказать не за что, но узнать это оператор обязан ДО подтверждения. */}
               {(verdict.orphans?.length ?? 0) > 0 && (
                 <CalloutBox tone='warning' className='mt-1.5'>
-                  <GroupLabel flush>переживёт удаление и потеряет семпл</GroupLabel>
+                  <GroupLabel flush>will survive the deletion and lose the sample</GroupLabel>
                   <EntryList entries={verdict.orphans} />
                 </CalloutBox>
               )}
@@ -220,7 +221,7 @@ export function SampleDeleteControl({
               на семпл списали ткань или записали примерку. Печатаем свежие фразы сервера. */}
           {lateBlockers.length > 0 && (
             <CalloutBox tone='error' className='mt-1.5'>
-              <GroupLabel flush>удаление отменено — данные изменились</GroupLabel>
+              <GroupLabel flush>deletion cancelled — the data changed</GroupLabel>
               {lateBlockers.map((text, i) => (
                 <Row
                   key={i}
@@ -232,8 +233,8 @@ export function SampleDeleteControl({
                 />
               ))}
               <Text size='micro' variant='label' className='mt-1'>
-                эти факты появились уже после того, как проверка разрешила удаление. закройте и
-                откройте диалог, чтобы пересчитать вердикт.
+                these facts appeared after the check had already allowed the deletion. close and
+                reopen the dialog to recompute the verdict.
               </Text>
             </CalloutBox>
           )}

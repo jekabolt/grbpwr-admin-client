@@ -2,7 +2,7 @@
 // closed-select item lists). Hints, not closed sets, unless used via SelectField.
 
 // Units of measure for a BOM article / usage (ComboField → bom_item.unit).
-export const unitOptions = ['м', 'см', 'г', 'кг', 'pcs', 'компл', 'м²', 'пог.м', 'рулон'];
+export const unitOptions = ['m', 'cm', 'g', 'kg', 'pcs', 'set', 'm2', 'roll'];
 
 // FOUR LISTS USED TO LIVE HERE AND ARE GONE with the columns they described (0289):
 // `placementOptions` (operation.placement — the garment zone absorbed it), `mainStitchTypeOptions`
@@ -33,56 +33,61 @@ export const hemFinishOptions = [
 
 // Packaging suggestion lists.
 export const foldingMethodOptions = [
-  'на вешалке',
-  'сложить пополам',
-  'сложить втрое',
-  'рулоном',
-  'в коробке плоско',
+  'on a hanger',
+  'folded in half',
+  'folded in three',
+  'rolled',
+  'flat in the box',
 ];
 
 export const polybagOptions = [
-  'индивидуальный пакет',
-  'пакет с клапаном',
+  'individual polybag',
+  'polybag with a flap',
   'biodegradable',
-  'без пакета',
+  'no polybag',
 ];
 
-export const bagStickerOptions = ['размерный', 'штрих-код', 'состав/уход', 'без стикера'];
+export const bagStickerOptions = ['size', 'barcode', 'composition/care', 'no sticker'];
 
 // inserts = loose items dropped in the box alongside the product, not part of it. Everyone
 // starts blank — hint list only, backend takes free text.
 export const insertsOptions = [
-  'папиросная бумага',
+  'tissue paper',
   'thank-you card',
   'care card',
-  'стикер',
-  'без вложений',
+  'sticker',
+  'no inserts',
 ];
 
 // Construction-description aspects (details[]). The editor seeds these named rows; users can
 // add custom keys too. key is the stable proto value; label is what the tailor sees.
 export const detailAspects: Array<{ key: string; label: string }> = [
-  { key: 'silhouette', label: 'силуэт / посадка' },
-  { key: 'collar', label: 'воротник / горловина' },
-  { key: 'fastening', label: 'застёжка' },
-  { key: 'pockets', label: 'карманы' },
-  { key: 'sleeveCuff', label: 'рукав / манжета' },
-  { key: 'topstitching', label: 'отстрочка' },
-  { key: 'extraDetails', label: 'доп. детали' },
-  { key: 'auxMaterials', label: 'вспом. материалы' },
+  { key: 'silhouette', label: 'silhouette / fit' },
+  { key: 'collar', label: 'collar / neckline' },
+  { key: 'fastening', label: 'fastening' },
+  { key: 'pockets', label: 'pockets' },
+  { key: 'sleeveCuff', label: 'sleeve / cuff' },
+  { key: 'topstitching', label: 'topstitching' },
+  { key: 'extraDetails', label: 'extra details' },
+  { key: 'auxMaterials', label: 'aux materials' },
 ];
 
 export const detailKeyLabel = (key?: string): string =>
-  detailAspects.find((a) => a.key === key)?.label || key?.trim() || 'аспект';
+  detailAspects.find((a) => a.key === key)?.label || key?.trim() || 'aspect';
 
 // Label placement / attachment suggestion lists.
 export const labelPlacementOptions = [
-  'горловина (центр)',
-  'боковой шов (левый)',
-  'боковой шов (правый)',
-  'пояс (внутри)',
-  'подкладка',
-  'карман',
+  'neckline (centre)',
+  'side seam (left)',
+  'side seam (right)',
+  'waistband (inside)',
+  'lining',
+  'pocket',
 ];
 
-export const labelAttachmentOptions = ['втачать в шов', 'настрочить', 'термоперенос', 'подвесная'];
+export const labelAttachmentOptions = [
+  'sewn into the seam',
+  'topstitched',
+  'heat transfer',
+  'hangtag',
+];

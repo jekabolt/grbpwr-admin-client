@@ -36,7 +36,7 @@ export function StagedChangesChip({
       <div className='flex min-w-56 flex-col gap-1'>
         {cardBodyDirty && (
           <div className='flex items-baseline justify-between gap-3'>
-            <Text size='micro'>карточка — header &amp; tabs</Text>
+            <Text size='micro'>card — header &amp; tabs</Text>
             <Text size='nano' variant='label' className='uppercase'>
               staged
             </Text>

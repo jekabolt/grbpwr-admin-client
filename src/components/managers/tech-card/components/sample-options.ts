@@ -19,13 +19,13 @@ export const sampleStatusOptions = [
 // fabric_source (owner decision, UX pass): the wire values (sample|production) are NOT renamed —
 // only how the field reads in the UI. "Sample fabric" read as unexplained jargon; spell out what
 // each side actually means so purpose (proto/fit/sms/PP) and fabric choice visibly line up.
-export const sampleFabricSourceFieldLabel = 'ткань: подменная (sample) / боевая (production)';
+export const sampleFabricSourceFieldLabel = 'fabric: stand-in (sample) / final (production)';
 export const sampleFabricSourceHint =
-  'подменная — черновая ткань, только проверить посадку/крой; боевая — финальная ткань стиля. Обычно PP-семпл шьют из боевой, proto/fit/sms — из подменной.';
+  "stand-in — a rough fabric, only to check the fit and the cut; final — the style's own fabric. a PP sample is usually sewn from the final fabric, proto/fit/sms — from a stand-in.";
 
 export const sampleFabricSourceOptions = [
-  { value: 'sample', label: 'подменная (sample)' },
-  { value: 'production', label: 'боевая (production)' },
+  { value: 'sample', label: 'stand-in (sample)' },
+  { value: 'production', label: 'final (production)' },
 ];
 
 const label = (opts: { value: string; label: string }[], v?: string) =>
@@ -35,11 +35,11 @@ export const samplePurposeLabel = (v?: string) => label(samplePurposeOptions, v)
 export const sampleStatusLabel = (v?: string) => label(sampleStatusOptions, v);
 export const sampleFabricSourceLabel = (v?: string) => label(sampleFabricSourceOptions, v);
 
-// Round badge text for a sample card (owner decision 1, quoted verbatim: «раунд N») — round_number
+// Round badge text for a sample card (owner decision 1, quoted verbatim: «round N») — round_number
 // 0 means "not assigned yet" (server auto-assigns on save), so it reads as "—", not a misleading
-// "раунд 0".
+// "round 0".
 export function sampleRoundLabel(n?: number): string {
-  return n && n > 0 ? `раунд ${n}` : 'раунд —';
+  return n && n > 0 ? `round ${n}` : 'round —';
 }
 
 // --- Card-board chip styling (owner decision: cards/chips read faster than a dense table or a

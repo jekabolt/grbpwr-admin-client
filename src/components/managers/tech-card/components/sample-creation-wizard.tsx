@@ -70,7 +70,7 @@ const emptyBasics: BasicsDraft = {
 };
 
 const colorwayText = (c?: Colorway): string =>
-  c ? c.name || c.code || `колорвей #${c.id ?? '?'}` : '—';
+  c ? c.name || c.code || `colourway #${c.id ?? '?'}` : '—';
 
 export function SampleCreationWizard({
   techCardId,

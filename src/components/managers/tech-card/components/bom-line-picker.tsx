@@ -127,13 +127,13 @@ export function useBomItemIdOptions(currentId: number): {
         : {
             // Never selectable, so the value only has to be unique among the options.
             value: `unsaved-${b.lineKey || i}`,
-            label: `${bomLineLabel(b, i)} · сначала сохраните карту`,
+            label: `${bomLineLabel(b, i)} · save the card first`,
             disabled: true,
           },
     );
   });
   const dangling = currentId > 0 && !bomItems.some((b) => (b.id ?? 0) === currentId);
-  if (dangling) options.push({ value: currentId, label: `#${currentId} · строка BOM удалена?` });
+  if (dangling) options.push({ value: currentId, label: `#${currentId} · BOM line deleted?` });
   return { options, dangling };
 }
 

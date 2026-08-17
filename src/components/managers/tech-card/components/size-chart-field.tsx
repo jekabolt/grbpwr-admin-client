@@ -204,7 +204,7 @@ export function SizeChartField({ styleId, canEdit }: { styleId?: number; canEdit
     const edited = touched.size;
     staging.stage({
       key: STAGING_KEY,
-      label: `размерная таблица — ${edited} ${edited === 1 ? 'cell' : 'cells'}`,
+      label: `size chart — ${edited} ${edited === 1 ? 'cell' : 'cells'}`,
       order: COMMIT_ORDER.sizeChart,
       commit: commitChart,
       settle: () => {
