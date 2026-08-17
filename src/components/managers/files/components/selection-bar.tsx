@@ -9,8 +9,15 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { filesService } from '../api/filesService';
 import { useFilesMutations } from '../hooks/useFiles';
+import { plural } from '../upload/text';
 
 type Refusal = { id: number; name: string; reason: string };
+
+/** «1 файл», «2 файла», «5 файлов» — склонение берётся из модуля очереди загрузки
+ *  (`upload/text.ts`), второй машины в разделе нет и заводить её нельзя: две расходятся молча. */
+function files(n: number): string {
+  return `${n} ${plural(n, 'файл', 'файла', 'файлов')}`;
+}
 
 /**
  * Полоса групповых действий.
@@ -68,7 +75,7 @@ export function FilesSelectionBar({
       const n = Number(res.assigned ?? 0);
       // Сервер считает СОЗДАННЫЕ пары, а не файлы: у тех, кто ярлык уже нёс, ничего не
       // произошло, и «проставлено 12» на восьми файлах было бы враньём в обе стороны.
-      showMessage(n ? `новых связей: ${n}` : 'у всех уже были эти темы', 'success');
+      showMessage(n ? `новых связей: ${n}` : 'эти темы уже стояли', 'success');
       setAssigning(false);
       setPickTopics([]);
       setNewTopics([]);
@@ -112,7 +119,7 @@ export function FilesSelectionBar({
         showMessage(
           skipped === selected.length
             ? 'ни у одного файла нет свежей ссылки — обновите страницу'
-            : `${skipped} без ссылки — обновите страницу и повторите для них`,
+            : `${files(skipped)} без свежей ссылки — обновите страницу и повторите для них`,
           'error',
         );
       }
@@ -144,7 +151,7 @@ export function FilesSelectionBar({
     onDropped(gone);
     setRefusals(failed);
     if (!failed.length) {
-      showMessage(`удалено ${gone.length}`, 'success');
+      showMessage(`удалено: ${files(gone.length)}`, 'success');
       onClear();
     }
   };
@@ -154,8 +161,8 @@ export function FilesSelectionBar({
       {refusals.length > 0 && (
         <CalloutBox tone='error'>
           <Text component='span' className='block'>
-            не удалось удалить {refusals.length}. почти всегда причина одна: файл прикреплён к
-            задаче, и в ней осталась бы ссылка в никуда.
+            не удалось удалить {files(refusals.length)}. почти всегда причина одна: файл
+            прикреплён к задаче, и в ней осталась бы ссылка в никуда.
           </Text>
           <ul className='mt-1.5 space-y-0.5'>
             {refusals.map((r) => (
@@ -169,8 +176,10 @@ export function FilesSelectionBar({
               </li>
             ))}
           </ul>
+          {/* Кнопка называет ДЕЙСТВИЕ, а не согласие: «понятно» ничего не обещает, а нажатие
+              убирает со страницы именно этот список имён. */}
           <Button size='sm' className='mt-2' onClick={() => setRefusals([])}>
-            понятно
+            убрать список
           </Button>
         </CalloutBox>
       )}
@@ -178,7 +187,7 @@ export function FilesSelectionBar({
       {selected.length > 0 && (
         <div className='sticky bottom-0 z-[var(--z-sticky)] flex flex-wrap items-center gap-2.5 bg-textColor px-2.5 py-1.5 text-bgColor'>
           <Text component='span' className='tabular-nums'>
-            выбрано {selected.length}
+            выбрано {files(selected.length)}
           </Text>
           {!writable && (
             <Text component='span' className='opacity-70'>
@@ -221,7 +230,7 @@ export function FilesSelectionBar({
         open={assigning}
         onOpenChange={setAssigning}
         onConfirm={applyTopics}
-        title={`проставить тему · ${selected.length}`}
+        title={`проставить тему · ${files(selected.length)}`}
         confirmLabel={assignTopics.isPending ? 'ставим…' : 'проставить'}
         confirmDisabled={assignTopics.isPending || (!pickTopics.length && !pendingTopics.length)}
         closeOnConfirm={false}
@@ -279,7 +288,7 @@ export function FilesSelectionBar({
         open={confirmDelete}
         onOpenChange={setConfirmDelete}
         onConfirm={deleteAll}
-        title={`удалить ${ids.length} из библиотеки`}
+        title={`удалить из библиотеки ${files(ids.length)}`}
         confirmLabel={deleting ? 'удаляем…' : 'удалить безвозвратно'}
         confirmDisabled={deleting}
         closeOnConfirm={false}

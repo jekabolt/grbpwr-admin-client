@@ -503,7 +503,7 @@ function SharedRow({
                 вопроса достаточно. */}
             <Text size='nano' variant='label' component='span'>
               {Number(link?.accessCount ?? 0) > 0
-                ? `открывали ${Number(link?.accessCount)}`
+                ? `открывали ${Number(link?.accessCount)} ${plural(Number(link?.accessCount), 'раз', 'раза', 'раз')}`
                 : 'ещё не открывали'}
             </Text>
           </div>

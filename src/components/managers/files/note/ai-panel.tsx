@@ -10,6 +10,7 @@ import {
   NOTE_FORMAT_MAX_RUNES,
   runeLength,
 } from '../api/notesService';
+import { plural } from '../upload/text';
 import { MarkdownView } from './markdown-view';
 
 /**
@@ -159,8 +160,10 @@ export function AiPanel({
             <b>помощник не подключён.</b> ключ модели на этом стенде не задан — заметку это никак
             не ограничивает, просто кнопка ничего не сделает.
           </Text>
+          {/* «Закрыть», а не «понятно»: соседние два состояния этой же панели закрываются
+              кнопкой с таким именем, и кнопка называет действие, а не согласие. */}
           <Button size='xs' variant='secondary' className='ml-auto' onClick={onDismiss}>
-            понятно
+            закрыть
           </Button>
         </div>
       </CalloutBox>
@@ -173,8 +176,9 @@ export function AiPanel({
         <div className='flex flex-wrap items-baseline gap-2'>
           <Text size='micro' component='span'>
             <b>текст длиннее, чем помощник берёт за раз</b> — {state.runes.toLocaleString('ru-RU')}{' '}
-            знаков при пределе {NOTE_FORMAT_MAX_RUNES.toLocaleString('ru-RU')}. выделите кусок в
-            тексте и нажмите ещё раз: уйдёт только выделенное, и заменится тоже только оно.
+            {plural(state.runes, 'знак', 'знака', 'знаков')} при пределе{' '}
+            {NOTE_FORMAT_MAX_RUNES.toLocaleString('ru-RU')}. выделите кусок в тексте и нажмите ещё
+            раз: уйдёт только выделенное, и заменится тоже только оно.
           </Text>
           <Button size='xs' variant='secondary' className='ml-auto' onClick={onDismiss}>
             закрыть
@@ -191,7 +195,8 @@ export function AiPanel({
           <Text size='micro' component='span'>
             <b>помощник читает текст…</b> уходит{' '}
             {state.scope === 'selection' ? 'выделенный фрагмент' : 'содержимое заметки целиком'},{' '}
-            {state.runes.toLocaleString('ru-RU')} знаков. имя файла, темы и обсуждение не уходят.
+            {state.runes.toLocaleString('ru-RU')} {plural(state.runes, 'знак', 'знака', 'знаков')}.
+            имя файла, темы и обсуждение не уходят.
           </Text>
           <Button size='xs' variant='secondary' className='ml-auto' onClick={onCancel}>
             отменить

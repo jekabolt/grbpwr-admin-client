@@ -30,6 +30,7 @@ import {
 import {
   actionLabel,
   inheritanceNote,
+  plural,
   rowWhy,
   statusLabel,
   statusTone,
@@ -317,8 +318,10 @@ export function FilesUploadBar({
         newTopics: row.newTopics,
       });
       const n = Number(res.assigned ?? 0);
+      // Те же слова, что у групповой простановки тем в полосе выделения: один и тот же исход,
+      // названный в двух местах по-разному, читается как два разных исхода.
       showMessage(
-        n ? `${dup.name}: новых связей ${n}` : `${dup.name}: эти темы уже стояли`,
+        n ? `${dup.name} — новых связей: ${n}` : `${dup.name} — эти темы уже стояли`,
         'success',
       );
       qc.invalidateQueries({ queryKey: filesKeys.all });
@@ -338,7 +341,7 @@ export function FilesUploadBar({
         // как есть и перепрашиваем выдачу: иначе доехавший файл всплыл бы через полчаса.
         if (row.status === 'run' && row.progress >= 1) {
           showMessage(
-            `${row.name}: файл уже ушёл целиком — если сервер успел его сохранить, он в библиотеке`,
+            `${row.name} — файл уже ушёл целиком: если сервер успел его сохранить, он в библиотеке`,
             'success',
           );
           qc.invalidateQueries({ queryKey: filesKeys.all });
@@ -420,7 +423,13 @@ export function FilesUploadBar({
           <Text size='micro' variant='label' component='p' className='min-w-0 truncate'>
             {summaryLine(queue)}
           </Text>
-          {notSent > 0 && <Pill tone='warn'>{notSent} не ушли</Pill>}
+          {/* Склонение — из `upload/text.ts`, как и везде в разделе: «1 не ушли» в пилюле рядом
+              с аккуратной сводкой читается как недоделанный шаблон. */}
+          {notSent > 0 && (
+            <Pill tone='warn'>
+              {notSent} {plural(notSent, 'не ушёл', 'не ушли', 'не ушли')}
+            </Pill>
+          )}
           {pending.length > 0 && !pendingTopics.labels.length && <Pill tone='attention'>без тем</Pill>}
 
           <div className='ml-auto flex flex-wrap items-center gap-1.5'>

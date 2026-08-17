@@ -26,6 +26,7 @@ import {
 } from '../api/accessService';
 import { errorText, isForbidden, isUnauthorized, isUnknownRoute } from '../api/rpc-error';
 import { filesKeys, invalidateFileViews } from '../hooks/useFiles';
+import { plural } from '../upload/text';
 import { formatWhen, formatWhenShort } from '../utils/format';
 
 /** Ключ вложен в `['files']`: витрина открытого и «закрыть доступ» из неё инвалидируют весь этот
@@ -551,8 +552,10 @@ export function FileAccessSection({
                     className='min-w-[220px] flex-1'
                     onFocus={(e: React.FocusEvent<HTMLInputElement>) => e.target.select()}
                   />
+                  {/* «Скопировать ссылку» — те же слова, что в строке витрины открытого: одно
+                      действие над одним предметом, названное на двух экранах одинаково. */}
                   <Button size='sm' variant='secondary' onClick={copyLink}>
-                    скопировать
+                    скопировать ссылку
                   </Button>
                   {link?.expired && <Pill tone='warn'>истёк</Pill>}
                 </div>
@@ -629,9 +632,13 @@ export function FileAccessSection({
                 </Text>
               </div>
 
+              {/* «Открывали N раз» — те же слова, что в колонке витрины открытого: один и тот же
+                  счётчик, названный на двух экранах по-разному, читается как два разных числа.
+                  Склонение — из `upload/text.ts`: «открывали 2 раз» было в этой строке. */}
               {!!Number(link?.accessCount ?? 0) && (
                 <Text size='micro' variant='label' className='tabular-nums'>
-                  открывали {Number(link?.accessCount ?? 0)} раз
+                  открывали {Number(link?.accessCount ?? 0)}{' '}
+                  {plural(Number(link?.accessCount ?? 0), 'раз', 'раза', 'раз')}
                   {link?.lastAccessAt ? `, последний — ${formatWhenShort(link.lastAccessAt)}` : ''}.
                   счётчик считается мимо горячего пути и может отставать на одно открытие.
                 </Text>
