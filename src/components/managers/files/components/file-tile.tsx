@@ -5,6 +5,7 @@ import { Pill } from 'ui/components/pill';
 import Text from 'ui/components/text';
 import { ACCESS_LEVEL_BADGE, asAccessLevel } from '../api/accessService';
 import { extensionOf, formatBytes, kindWord, previewExpected, stemOf } from '../utils/format';
+import { isMarkdownNote } from '../utils/reader-find';
 
 /**
  * Плитка холста.
@@ -58,6 +59,15 @@ export function FileTile({
   const level = asAccessLevel(file.accessLevel ?? undefined);
   const badge = level ? ACCESS_LEVEL_BADGE[level] : undefined;
   const comments = Number(file.commentsCount ?? 0);
+  /**
+   * Выдержка заметки вместо кадра. Пустая у `.md`, залитого ФАЙЛОМ, а не набранного в
+   * редакторе: сервер не читает содержимое на пути загрузки, и колонка дозаполнится первым
+   * сохранением через экран заметки. Пустая строка здесь и означает «показывай расширение»,
+   * поэтому проверка на `trim`, а не на наличие поля.
+   */
+  const excerpt = isMarkdownNote(name, file.contentType ?? undefined)
+    ? (file.contentExcerpt ?? '').trim()
+    : '';
 
   return (
     <div
@@ -130,6 +140,25 @@ export function FileTile({
             onError={() => onPreviewError?.(file.previewUrl ?? '')}
             className='aspect-square w-full object-contain'
           />
+        ) : excerpt ? (
+          // ИСКЛЮЧЕНИЕ ИЗ «У КОГО НЕТ КАДРА — ТОТ ПОКАЗЫВАЕТ РАСШИРЕНИЕ»: у заметки картинки
+          // нет и не будет, но есть текст, и первые строки отвечают на вопрос «что это»
+          // лучше, чем глиф «MD» на всех заметках сразу. Выравнивание по левому краю, а не по
+          // центру, — это текст, а не метка.
+          //
+          // Обрезка строками, а не символами: `line-clamp` считает по отрисованным строкам,
+          // поэтому одинаково выглядит и на узкой плитке вложений задачи (от 130px), и на
+          // широкой холста. Сервер и так режет выдержку по 500 символов.
+          <span className='flex aspect-square w-full flex-col justify-start overflow-hidden p-2'>
+            <Text
+              size='micro'
+              variant='label'
+              component='span'
+              className='line-clamp-[9] whitespace-pre-wrap break-words text-left'
+            >
+              {excerpt}
+            </Text>
+          </span>
         ) : (
           // ЗАКОНЧЕННОЕ СОСТОЯНИЕ, А НЕ ЗАГРУЗКА. У .zip и .step первой страницы не
           // существует — спиннера здесь не будет никогда, иначе плитка вечно выглядит
