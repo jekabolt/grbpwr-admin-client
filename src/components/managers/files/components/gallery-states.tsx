@@ -5,6 +5,7 @@ import { useAdmins } from 'components/managers/tech-card/components/useRoles';
 import { Avatar } from 'ui/components/avatar';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
+import { HATCH } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { MAX_UPLOAD_BYTES, uploadLibraryPreview } from '../api/filesService';
@@ -19,7 +20,9 @@ import { rebuildPreview } from '../utils/preview';
  * который человек здесь видит, чаще всего именно такой.
  */
 
-const HATCH = 'repeating-linear-gradient(45deg,#f4f4f4,#f4f4f4 6px,#ececec 6px,#ececec 12px)';
+// Штриховка — общая (`ui/components/skeleton`), а не своя копия той же строки: две копии
+// расходятся на первой же правке, и скелет галереи стал бы другого серого, чем скелеты
+// таблиц.
 
 function StateFrame({
   title,
@@ -353,7 +356,7 @@ export function NextPageFailure({
  * Строит клиент, ровно как при загрузке: качает файл по своей же ссылке, рисует первую
  * страницу в canvas и шлёт webp в эндпоинт замены превью.
  */
-export function RebuildPreview({ file }: { file: LibraryFile }) {
+export function RebuildPreview({ file, writable }: { file: LibraryFile; writable: boolean }) {
   const qc = useQueryClient();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -378,7 +381,13 @@ export function RebuildPreview({ file }: { file: LibraryFile }) {
 
   return (
     <div className='flex flex-col gap-0.5'>
-      <Button size='xs' variant='secondary' disabled={busy} onClick={run}>
+      <Button
+        size='xs'
+        variant='secondary'
+        disabled={busy || !writable}
+        title={writable ? undefined : 'только чтение — превью не перестроить'}
+        onClick={run}
+      >
         {busy ? 'строим…' : 'построить заново'}
       </Button>
       {error && (

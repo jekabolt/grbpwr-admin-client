@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSnackBarStore } from 'lib/stores/store';
 import Text from 'ui/components/text';
+import { MAX_UPLOAD_BYTES } from '../api/filesService';
 import { plural } from '../upload/text';
+import { formatBytes } from '../utils/format';
 
 /**
  * БРОСОК ПРИНИМАЕТ ВСЁ ОКНО.
@@ -12,6 +15,12 @@ import { plural } from '../upload/text';
  * режиме чтения: отказаться принять файл можно словами, а увести человека со страницы —
  * нельзя.
  *
+ * ГАШЕНИЕ БЕЗУСЛОВНО, А ПОКАЗ ОВЕРЛЕЯ — НЕТ. Это разные вопросы, и раньше они решались одной
+ * проверкой `types` на 'Files'. У перетаскивания картинки из соседней вкладки типы —
+ * `text/uri-list` и `text/html`, файлов среди них нет: `preventDefault` не звался, и браузер
+ * уходил по адресу картинки, унося вкладку вместе с наполовину уехавшей пачкой. Референс из
+ * соседней вкладки тянут ежедневно — это не редкий случай, а обычный.
+ *
  * Оверлей — `pointer-events-none` намеренно. Приёмник — окно, а элемент под курсором ловил
  * бы `dragenter`/`dragleave` на самом себе и мигал бы в такт движению мыши.
  *
@@ -19,6 +28,34 @@ import { plural } from '../upload/text';
  * наследует ВСЕ выбранные чипы холста. Оверлей называет их ДО отпускания, пока решение ещё
  * можно передумать.
  */
+/**
+ * Разбирает брошенное на файлы и папки.
+ *
+ * Папку от файла отличает только `webkitGetAsEntry()`: в `dataTransfer.files` она лежит
+ * обычным `File` с нулевым размером и пустым типом, и по этим признакам её не опознать —
+ * файл нулевой длины существует. Записей нет вовсе (старый браузер, странный источник) —
+ * берём `files` как есть: лучше попытаться отправить, чем отказать всей пачке.
+ */
+function pickFiles(dt: DataTransfer | null): { files: File[]; folders: string[] } {
+  const files: File[] = [];
+  const folders: string[] = [];
+  const items = Array.from(dt?.items ?? []).filter((i) => i.kind === 'file');
+  const entries = items.map((i) => (i.webkitGetAsEntry ? i.webkitGetAsEntry() : null));
+  if (!items.length || entries.every((x) => x === null)) {
+    return { files: Array.from(dt?.files ?? []), folders };
+  }
+  items.forEach((item, i) => {
+    const entry = entries[i];
+    if (entry && entry.isDirectory) {
+      folders.push(entry.name);
+      return;
+    }
+    const file = item.getAsFile();
+    if (file) files.push(file);
+  });
+  return { files, folders };
+}
+
 export function FilesDropOverlay({
   enabled,
   disabledNote,
@@ -65,10 +102,14 @@ export function FilesDropOverlay({
       setDragging(true);
     };
     const onOver = (e: DragEvent) => {
-      if (!hasFiles(e.dataTransfer)) return;
-      // Без этого браузер откажется отдавать `drop` вовсе.
+      // БЕЗУСЛОВНО. Без preventDefault на dragover браузер не отдаёт `drop` вовсе и уходит
+      // по адресу перетащенного — то есть уносит вкладку с живой очередью. Ссылку мы не
+      // примем, но и не пустим её никуда увести.
       e.preventDefault();
-      if (e.dataTransfer) e.dataTransfer.dropEffect = live.current.enabled ? 'copy' : 'none';
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect =
+          live.current.enabled && hasFiles(e.dataTransfer) ? 'copy' : 'none';
+      }
     };
     // Уход НЕ проверяет типы, в отличие от входа: если хоть один браузер отдаст на `dragleave`
     // пустой `types`, счётчик перестанет опускаться и оверлей залипнет на весь сеанс. Лишний
@@ -78,12 +119,26 @@ export function FilesDropOverlay({
       if (!depth.current) reset();
     };
     const onDrop = (e: DragEvent) => {
-      if (!hasFiles(e.dataTransfer)) return;
+      // Тоже БЕЗУСЛОВНО и первым действием: всё, что не погашено здесь, браузер открывает
+      // вместо страницы. Отказ (нет права, режим чтения, бросили ссылку) — это молчание или
+      // слова, но никогда не уход со страницы.
       e.preventDefault();
       reset();
-      if (!live.current.enabled) return;
-      const list = Array.from(e.dataTransfer?.files ?? []);
-      if (list.length) live.current.onFiles(list);
+      if (!hasFiles(e.dataTransfer) || !live.current.enabled) return;
+
+      const { files, folders } = pickFiles(e.dataTransfer);
+      // ПАПКА — НЕ ФАЙЛ. Браузер отдаёт её в `files` наравне с остальным, и до сих пор она
+      // становилась строкой-призраком: отправка уходила пустой и падала с диагнозом «связь
+      // оборвалась», хотя связь была в полном порядке.
+      if (folders.length) {
+        useSnackBarStore
+          .getState()
+          .showMessage(
+            `папку загрузить нельзя: ${folders.join(', ')}. откройте её и бросьте файлы`,
+            'error',
+          );
+      }
+      if (files.length) live.current.onFiles(files);
     };
 
     window.addEventListener('dragenter', onEnter);
@@ -122,7 +177,7 @@ export function FilesDropOverlay({
                 : 'тем нет — файлы уйдут в «разобрать»'}
             </Text>
             <Text size='micro' component='p' className='opacity-75'>
-              до 95 мб на файл · превью браузер нарисует до отправки
+              до {formatBytes(MAX_UPLOAD_BYTES)} на файл · превью браузер нарисует до отправки
             </Text>
           </>
         ) : (

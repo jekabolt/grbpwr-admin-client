@@ -11,7 +11,12 @@ import { cn } from 'lib/utility';
  * animation vocabulary and a shimmer would be the only one.
  */
 
-const HATCH =
+/**
+ * Штриховка «места под ответ». Экспортируется, потому что её уже переписывали от руки в
+ * четырёх местах: четыре копии одной строки — это четыре разных серых, как только одну из
+ * них поправят.
+ */
+export const HATCH =
   'repeating-linear-gradient(45deg,#f4f4f4,#f4f4f4 6px,#ececec 6px,#ececec 12px)';
 
 export function SkeletonLine({ width, className }: { width?: number | string; className?: string }) {

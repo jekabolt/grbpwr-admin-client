@@ -19,6 +19,24 @@ import { UploadError, type UploadTransport } from './engine';
 
 const UPLOAD_PATH = '/api/files/upload';
 
+/**
+ * СКОЛЬКО ЖДАТЬ ДВИЖЕНИЯ БАЙТОВ.
+ *
+ * Не общее время запроса: 95 мб на домашнем канале законно едут двадцать минут, и глухой
+ * потолок обрывал бы ровно те отправки, ради которых очередь и написана. Здесь другое —
+ * сколько соединение имеет право МОЛЧАТЬ. Пока прогресс идёт, таймер взводится заново;
+ * замолчавшее навсегда соединение держало единственный канал очереди вечно, и ни один
+ * следующий файл из пачки не уезжал.
+ */
+const STALL_MS = 120_000;
+
+/**
+ * Потолок ВСЕГО запроса, включая ответ сервера. Сторожевой таймер снимается, как только
+ * байты ушли: дальше сервер считает sha256 и кладёт файл в бакет, и своего прогресса у этого
+ * нет. Час — заведомо больше любой честной отправки и заведомо меньше «никогда».
+ */
+const HARD_TIMEOUT_MS = 60 * 60 * 1000;
+
 function endpoint(): string {
   const base = (import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');
   return `${base}${UPLOAD_PATH}`;
@@ -61,12 +79,35 @@ export const browserUploadTransport: UploadTransport<File, Blob> = {
 
       const xhr = new XMLHttpRequest();
       xhr.open('POST', endpoint(), true);
+      // Раньше `ontimeout` стоял, а `timeout` не выставлялся — обработчик был мёртвым кодом,
+      // и зависший запрос держал единственный канал очереди столько, сколько открыта вкладка.
+      xhr.timeout = HARD_TIMEOUT_MS;
       xhr.setRequestHeader('Grpc-Metadata-Authorization', authHeader());
 
+      // Сторож молчания. Взводится на отправке и перевзводится каждым куском; как только
+      // тело ушло целиком — снимается: ожидание ответа сервера идёт без прогресса и под
+      // сторожем считалось бы обрывом.
+      let stall: ReturnType<typeof setTimeout> | null = null;
+      let stalled = false;
+      const disarm = () => {
+        if (stall) clearTimeout(stall);
+        stall = null;
+      };
+      const arm = () => {
+        disarm();
+        stall = setTimeout(() => {
+          stalled = true;
+          xhr.abort();
+        }, STALL_MS);
+      };
+
       xhr.upload.onprogress = (e) => {
+        arm();
         if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
       };
+      xhr.upload.onloadend = disarm;
       xhr.onload = () => {
+        disarm();
         if (xhr.status < 200 || xhr.status >= 300) {
           reject(new UploadError(xhr.status, errorText(xhr.status, xhr.responseText)));
           return;
@@ -89,15 +130,27 @@ export const browserUploadTransport: UploadTransport<File, Blob> = {
       };
       // status 0: связь оборвалась. Тот же код приходит на потолок размера тела в
       // инфраструктуре — поэтому у `lost` в тексте оставлено место обеим причинам.
-      xhr.onerror = () => reject(new UploadError(0, 'connection dropped'));
-      xhr.ontimeout = () => reject(new UploadError(0, 'connection timed out'));
-      xhr.onabort = () => reject(new UploadError(0, 'aborted'));
+      xhr.onerror = () => {
+        disarm();
+        reject(new UploadError(0, 'connection dropped'));
+      };
+      xhr.ontimeout = () => {
+        disarm();
+        reject(new UploadError(0, 'connection timed out'));
+      };
+      // Отмена по сторожу молчания — это ОБРЫВ, а не отмена человеком: `signal` при ней не
+      // взведён, поэтому движок покажет строку как «связь оборвалась» и предложит повторить.
+      xhr.onabort = () => {
+        disarm();
+        reject(new UploadError(0, stalled ? 'connection went silent' : 'aborted'));
+      };
 
       if (signal.aborted) {
         reject(new UploadError(0, 'aborted'));
         return;
       }
       signal.addEventListener('abort', () => xhr.abort(), { once: true });
+      arm();
       xhr.send(form);
     });
   },

@@ -1,4 +1,22 @@
-export { formatBytes } from 'utils/pattern';
+/**
+ * Размер файла ПО-РУССКИ и строчными.
+ *
+ * Свой, а не `utils/pattern`: тот подписывает `B/KB/MB/GB`, и на одном экране раздела
+ * оказывались плитка «500 KB», оверлей броска «до 95 мб» и строка очереди «412 MB при пределе
+ * 95 MB» — три написания одной величины подряд. Р4 говорит: раздел русский, строчными.
+ *
+ * Делим на 1024, и подпись это признаёт: «мб» в русском обиходе — ровно мебибайт, а предел
+ * сервера (95 MiB) и подпись «до 95 мб» после этого совпадают буква в букву. Пока подписью
+ * было «MB», они расходились на 4%, и отказ 413 приходил на файл, который клиент назвал
+ * проходным.
+ */
+export function formatBytes(bytes?: number): string {
+  if (!bytes || bytes <= 0) return '0 б';
+  const units = ['б', 'кб', 'мб', 'гб'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const v = bytes / 1024 ** i;
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
 
 /**
  * The extension, uppercased, for the plate a file shows when it has no preview.

@@ -1,12 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { ROUTES } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
 import {
+  noteUploadBarMounted,
   useCanHideUploadBar,
-  useUploadIsLive,
   useUploadQueueStore,
 } from 'lib/stores/upload-queue';
 import { cn } from 'lib/utility';
@@ -28,7 +28,6 @@ import {
 } from '../upload/queue';
 import {
   actionLabel,
-  batchSummary,
   inheritanceNote,
   rowWhy,
   statusLabel,
@@ -101,13 +100,19 @@ function RowMini({ row }: { row: QueueRow }) {
   );
 }
 
+/** Действия, которые ПИШУТ: повтор уводит файл в библиотеку, «дать темы» правит чужую запись. */
+const WRITER_ACTIONS: QueueAction[] = ['retry', 'assignTopics'];
+
 function QueueRowView({
   row,
   busy,
+  writable,
   onAction,
 }: {
   row: QueueRow;
   busy: boolean;
+  /** Право плюс тумблер режима. Отмена и «убрать» живут и без него: они ничего не пишут. */
+  writable: boolean;
   onAction: (action: QueueAction, row: QueueRow) => void;
 }) {
   const actions = rowActions(row);
@@ -134,7 +139,10 @@ function QueueRowView({
         {formatBytes(row.size)}
       </Text>
 
-      <span className='w-[110px] flex-none'>
+      {/* Полоска — та же величина, что уже сказана словами в пилюле рядом, поэтому для
+          скринридера она молчит: безымянный progressbar иначе читается как «60 процентов»
+          посреди строки, без ответа на вопрос «чего именно». */}
+      <span className='w-[110px] flex-none' aria-hidden>
         <Progress value={barFraction(row) * 100} />
       </span>
 
@@ -143,29 +151,36 @@ function QueueRowView({
       </span>
 
       <span className='flex flex-none items-center gap-1'>
-        {actions.map((action) => (
-          <Button
-            key={action}
-            size='xs'
-            variant='secondary'
-            disabled={busy || (action === 'assignTopics' && noTopics)}
-            title={
-              action === 'assignTopics' && noTopics
-                ? 'у этой пачки не было тем — дописывать нечего'
-                : undefined
-            }
-            onClick={() => onAction(action, row)}
-          >
-            {actionLabel(action)}
-          </Button>
-        ))}
+        {actions.map((action) => {
+          const writer = WRITER_ACTIONS.includes(action);
+          const off = busy || (writer && !writable) || (action === 'assignTopics' && noTopics);
+          return (
+            <Button
+              key={action}
+              size='xs'
+              variant='secondary'
+              disabled={off}
+              title={
+                writer && !writable
+                  ? 'сейчас только чтение — загрузка и правка выключены'
+                  : action === 'assignTopics' && noTopics
+                    ? 'у этой пачки не было тем — дописывать нечего'
+                    : undefined
+              }
+              onClick={() => onAction(action, row)}
+            >
+              {actionLabel(action)}
+            </Button>
+          );
+        })}
       </span>
     </div>
   );
 }
 
-export function FilesUploadBar() {
+export function FilesUploadBar({ writable }: { writable: boolean }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const qc = useQueryClient();
   const { showMessage } = useSnackBarStore();
 
@@ -181,8 +196,8 @@ export function FilesUploadBar() {
   const retryAll = useUploadQueueStore((s) => s.retryAll);
   const clearSettled = useUploadQueueStore((s) => s.clearSettled);
   const reset = useUploadQueueStore((s) => s.reset);
+  const setTopicNames = useUploadQueueStore((s) => s.setTopicNames);
 
-  const live = useUploadIsLive();
   const canHide = useCanHideUploadBar();
   const rows = queue.rows;
   const t = tally(queue);
@@ -193,12 +208,26 @@ export function FilesUploadBar() {
   const dockRef = useRef<HTMLDivElement>(null);
   const [busyRow, setBusyRow] = useState<string | null>(null);
 
+  // Пока полоса на экране, итог пачки печатает она сама; ушла — итог достаётся тостом из
+  // стора. Стор обязан знать, кто из двоих сейчас на месте.
+  useEffect(() => noteUploadBarMounted(), []);
+
   /** Имена тем по id — для строки «что унаследует пачка» и итоговой сводки. */
   const nameOf = useMemo(() => {
     const map = new Map<number, string>();
     (dictionary ?? []).forEach((x) => map.set(Number(x.id), x.name ?? ''));
     return (id: number) => map.get(id) ?? `#${id}`;
   }, [dictionary]);
+
+  // Словарь уезжает в стор: итоговую сводку показывают и тому, кто из раздела ушёл, а там
+  // react-query уже не спросить — «#7» вместо «съёмка» ему ничего не скажет.
+  useEffect(() => {
+    const names: Record<number, string> = {};
+    (dictionary ?? []).forEach((x) => {
+      names[Number(x.id)] = x.name ?? '';
+    });
+    setTopicNames(names);
+  }, [dictionary, setTopicNames]);
 
   const labelsOf = useMemo(
     () => (list: QueueRow[]) => {
@@ -219,13 +248,18 @@ export function FilesUploadBar() {
 
   // ЗАНЯТЫЙ НИЗ ЭКРАНА. Полоса перекрывает последний ряд плиток, а под ней живая сетка —
   // страница обязана узнать высоту полосы, иначе последний ряд навсегда останется под ней.
+  //
+  // Меряется РАССТОЯНИЕ ОТ НИЗА ОКНА, а не высота узла: свёрнутая до кнопки «показать
+  // загрузку» полоса висит в 10px над краем, и по высоте кнопки полоса выделения всё равно
+  // ложилась бы поверх неё.
   useLayoutEffect(() => {
     const node = dockRef.current;
     if (!node) {
       setInset('');
       return;
     }
-    const apply = () => setInset(`${node.offsetHeight}px`);
+    const apply = () =>
+      setInset(`${Math.max(0, Math.round(window.innerHeight - node.getBoundingClientRect().top))}px`);
     apply();
     const observer = new ResizeObserver(apply);
     observer.observe(node);
@@ -235,20 +269,9 @@ export function FilesUploadBar() {
     };
   }, [collapsed, hidden, rows.length]);
 
-  // СТРАЖ ЗАКРЫТИЯ ВКЛАДКИ. Сейчас закрытие молча убивает отправку: XHR умирает вместе с
-  // документом, и половина пачки просто не доезжает — узнать об этом можно только по тому,
-  // что файлов в библиотеке меньше, чем бросали.
-  useEffect(() => {
-    if (!live) return;
-    const guard = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      // Текст свой браузеры давно не показывают, но непустое значение всё ещё включает диалог.
-      e.returnValue = '';
-      return '';
-    };
-    window.addEventListener('beforeunload', guard);
-    return () => window.removeEventListener('beforeunload', guard);
-  }, [live]);
+  // СТРАЖ ЗАКРЫТИЯ ВКЛАДКИ переехал В СТОР (`lib/stores/upload-queue`): здесь он защищал
+  // только тех, кто не уходил с двух экранов раздела, — то есть как раз не тот случай,
+  // ради которого очередь и вынесена из компонентов.
 
   // ПРИНЯТЫЙ ФАЙЛ МЕНЯЕТ ВЫДАЧУ. Инвалидация с задержкой: на пачке в сорок файлов
   // немедленная означала бы сорок перезапросов всех загруженных страниц подряд.
@@ -266,28 +289,9 @@ export function FilesUploadBar() {
     return () => clearTimeout(timer);
   }, [completions, qc]);
 
-  // ИТОГ ПАЧКИ СЛОВАМИ — ТОЛЬКО КОГДА ЕГО НЕ ВИДНО В САМОЙ ПОЛОСЕ.
-  //
-  // Развёрнутая полоса печатает ту же сводку в своей шапке, и тост поверх неё не добавлял бы
-  // ничего, зато накрывал бы собой первые строки очереди — ровно те, к которым после отказа
-  // и тянутся. Свёрнутую и убранную полосу читать негде, там он и нужен.
-  const wasLive = useRef(false);
-  useEffect(() => {
-    if (live) {
-      wasLive.current = true;
-      return;
-    }
-    if (!wasLive.current) return;
-    wasLive.current = false;
-    if (!queue.rows.length || (!collapsed && !hidden)) return;
-    const { labels } = labelsOf(queue.rows);
-    const t2 = tally(queue);
-    // Тон по факту, а не по намерению: пачка, где половина не уехала, «успехом» не была.
-    showMessage(batchSummary(queue, labels), t2.lost + t2.fail ? 'error' : 'success');
-    // Сводка снимается ровно на переходе «живое → отстоялось»; отдельные правки строк
-    // (убрали одну, повторили другую) её не повторяют.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live]);
+  // ИТОГ ПАЧКИ СЛОВАМИ тоже переехал в стор — по той же причине: его показывают ровно тому,
+  // кто ушёл со страницы и в полосу больше не смотрит. Стор знает, смонтирована ли полоса
+  // (`noteUploadBarMounted`) и свёрнута ли она, и молчит, когда итог и так перед глазами.
 
   const giveTopics = async (row: QueueRow) => {
     const dup = row.duplicateOf;
@@ -317,6 +321,17 @@ export function FilesUploadBar() {
   const onAction = (action: QueueAction, row: QueueRow) => {
     switch (action) {
       case 'cancel':
+        // ОТМЕНА НА 100% УЖЕ НИЧЕГО НЕ ОТМЕНЯЕТ: байты ушли, и сервер, скорее всего, файл
+        // сохранил — обрыв соединения происходит уже после. Молчать здесь нельзя (человек
+        // уверен, что отменил) и обещать нельзя (ответа мы не дождались), поэтому говорим
+        // как есть и перепрашиваем выдачу: иначе доехавший файл всплыл бы через полчаса.
+        if (row.status === 'run' && row.progress >= 1) {
+          showMessage(
+            `${row.name}: файл уже ушёл целиком — если сервер успел его сохранить, он в библиотеке`,
+            'success',
+          );
+          qc.invalidateQueries({ queryKey: filesKeys.all });
+        }
         cancel(row.id);
         return;
       case 'dismiss':
@@ -327,7 +342,14 @@ export function FilesUploadBar() {
         return;
       case 'reveal':
         // Карточка оригинала — модальный роут поверх сетки; полоса при этом остаётся на месте.
-        if (row.duplicateOf) navigate(`${ROUTES.files}/${row.duplicateOf.id}`);
+        // С ТЕКУЩИМ ПОИСКОМ: голый /files/:id стирает выбранные чипы и строку поиска, а
+        // холст держит прямо противоположный контракт — фильтр живёт в адресе.
+        if (row.duplicateOf) {
+          navigate({
+            pathname: `${ROUTES.files}/${row.duplicateOf.id}`,
+            search: location.search,
+          });
+        }
         return;
       case 'assignTopics':
         void giveTopics(row);
@@ -345,7 +367,11 @@ export function FilesUploadBar() {
     return createPortal(
       // ПО ЦЕНТРУ, А НЕ В УГЛУ: углы низа уже заняты — слева тосты, справа кнопка devtools в
       // разработке. Возврат стоит там же, где стояла полоса, и читается как её след.
-      <div className='fixed bottom-2.5 left-1/2 z-[var(--z-dock)] -translate-x-1/2'>
+      //
+      // Тот же `dockRef`, что у развёрнутой полосы: убранная полоса ТОЖЕ занимает низ экрана,
+      // и без объявленной высоты полоса группового выбора (`sticky bottom-0`) ложилась прямо
+      // поверх этой кнопки.
+      <div ref={dockRef} className='fixed bottom-2.5 left-1/2 z-[var(--z-dock)] -translate-x-1/2'>
         <Button size='sm' variant='main' onClick={() => setHidden(false)}>
           показать загрузку ({rows.length})
         </Button>
@@ -363,7 +389,10 @@ export function FilesUploadBar() {
       aria-label='очередь загрузки'
       // МЕБЕЛЬ СТРАНИЦЫ, А НЕ ТОСТ: очередь идёт фоном и ничего не спрашивает, поэтому она
       // ЛЕЖИТ НИЖЕ МОДАЛКИ (иначе накрыла бы подвал карточки файла — обе его кнопки).
-      className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t-2 border-textColor bg-bgColor'
+      //
+      // Край — обычная 1px рамка: 2px чернилами по DESIGN.md — это линейка ПОД ЗАГОЛОВКОМ
+      // блока, а не кант мебели, и лишний вес здесь читается как заголовок страницы.
+      className='fixed inset-x-0 bottom-0 z-[var(--z-dock)] border-t border-borderColor bg-bgColor'
     >
       <div className='mx-auto w-full max-w-[1400px] px-2.5'>
         <div
@@ -384,9 +413,17 @@ export function FilesUploadBar() {
           {pending.length > 0 && !pendingTopics.labels.length && <Pill tone='attention'>без тем</Pill>}
 
           <div className='ml-auto flex flex-wrap items-center gap-1.5'>
-            {t.lost + t.fail > 0 && (
-              <Button size='sm' variant='main' onClick={retryAll}>
-                повторить все ({t.lost + t.fail})
+            {/* Число — только те отказы, которые повтор ЛЕЧИТ. Сорок 401 после истёкшей
+                сессии кнопка не предлагает: она отправила бы их заново за тем же ответом. */}
+            {t.retryable > 0 && (
+              <Button
+                size='sm'
+                variant='main'
+                disabled={!writable}
+                title={writable ? undefined : 'сейчас только чтение — отправка выключена'}
+                onClick={retryAll}
+              >
+                повторить все ({t.retryable})
               </Button>
             )}
             {t.done + t.dup + t.big > 0 && (
@@ -394,9 +431,10 @@ export function FilesUploadBar() {
                 убрать отстоявшиеся ({t.done + t.dup + t.big})
               </Button>
             )}
-            {/* ОТКАЗЫ ПОШТУЧНО НЕ УБИРАЮТСЯ (`rowActions`: у lost/fail есть только «повторить»),
-                поэтому строке, которая никогда не уедет, нужен выход целой очередью. Кнопка
-                появляется только на отстоявшейся очереди — иначе она обрывала бы живую отправку. */}
+            {/* Повторяемый отказ поштучно не убирается (`rowActions`: у него одно действие —
+                «повторить»), поэтому строке, которая никогда не уедет, нужен выход целой
+                очередью. Кнопка появляется только на отстоявшейся очереди — иначе она
+                обрывала бы живую отправку. */}
             {canHide && t.lost + t.fail > 0 && (
               <Button
                 size='sm'
@@ -442,6 +480,7 @@ export function FilesUploadBar() {
                   key={row.id}
                   row={row}
                   busy={busyRow === row.id}
+                  writable={writable}
                   onAction={onAction}
                 />
               ))}

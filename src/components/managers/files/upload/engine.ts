@@ -125,10 +125,13 @@ export function createUploadEngine<S extends UploadSource, P>(
     pump();
   }
 
+  // `previewing` НЕ чистится здесь намеренно: рендер отменённой строки продолжает крутиться
+  // (pdfjs не умеет отменяться), и убрать её из множества занятых значит открыть второй
+  // параллельный разбор. Множество ведёт `startPreview` — от старта до фактического конца
+  // работы, чем бы строка к тому времени ни стала.
   function forget(id: string): void {
     sources.delete(id);
     previews.delete(id);
-    previewing.delete(id);
     aborts.delete(id);
   }
 
@@ -143,8 +146,15 @@ export function createUploadEngine<S extends UploadSource, P>(
       return;
     }
     const finish = (preview: P | null) => {
-      previews.set(id, preview);
       previewing.delete(id);
+      // Строку могли отменить, пока рендер шёл. Класть её превью в карту нельзя: `forget`
+      // уже прошёл, чистить эту запись больше некому — blob остался бы в памяти навсегда.
+      // Насос при этом двинуть НАДО: канал превью только что освободился.
+      if (!sources.has(id)) {
+        pump();
+        return;
+      }
+      previews.set(id, preview);
       dispatch({ type: 'preview', id, ok: Boolean(preview) });
     };
     transport.buildPreview(source).then(
@@ -268,7 +278,9 @@ export function createUploadEngine<S extends UploadSource, P>(
       state.rows.forEach((r) => abort(r.id));
       sources.clear();
       previews.clear();
-      previewing.clear();
+      // `previewing` не чистится по той же причине, что и в `forget`: уже запущенный разбор
+      // pdf не прекращается оттого, что очередь забыли, и очищенное множество пустило бы
+      // поверх него второй. Каждая работа снимает свою запись сама, когда кончится.
       aborts.clear();
       state = createQueue();
       onChange?.(state);

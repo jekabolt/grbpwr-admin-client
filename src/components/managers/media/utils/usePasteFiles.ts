@@ -40,25 +40,32 @@ const isEditableTarget = (t: EventTarget | null): boolean => {
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable === true;
 };
 
-/** Что слот согласен принять. Видео берётся только там, где слот его показывает. */
-export type PasteAccept = 'image' | 'media';
+/**
+ * Что приёмник согласен взять. Видео берётся только там, где слот его показывает; `any` —
+ * для библиотеки файлов, которая хранит что угодно и по типу ничего не отбирает.
+ */
+export type PasteAccept = 'image' | 'media' | 'any';
 
 export const isImageFile = (f: File) => f.type.startsWith('image/');
 export const isVideoFile = (f: File) => f.type.startsWith('video/');
 export const isMediaFile = (f: File) => isImageFile(f) || isVideoFile(f);
 
+const takes = (accept: PasteAccept): ((f: File) => boolean) =>
+  accept === 'any' ? () => true : accept === 'media' ? isMediaFile : isImageFile;
+
 export function filesOfKind(files: File[], accept: PasteAccept): File[] {
-  return files.filter(accept === 'media' ? isMediaFile : isImageFile);
+  return files.filter(takes(accept));
 }
 
-/** Медиа-файлы из буфера. Пусто — вставляли не медиа (текст, файл другого рода). */
+/** Файлы из буфера. Пусто — вставляли не файл (текст, кусок разметки). */
 function mediaFromClipboard(data: DataTransfer | null, accept: PasteAccept): File[] {
   if (!data) return [];
   const out: File[] = [];
+  const suits = takes(accept);
   for (const item of Array.from(data.items ?? [])) {
     if (item.kind !== 'file') continue;
     const file = item.getAsFile();
-    if (file && (accept === 'media' ? isMediaFile(file) : isImageFile(file))) out.push(file);
+    if (file && suits(file)) out.push(file);
   }
   return out;
 }

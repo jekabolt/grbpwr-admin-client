@@ -6,13 +6,15 @@
  * сводка — это СЛОВА, а не цвет: «готово 3 из 7 · обрыв · дубликат» видно, не приглядываясь,
  * а красную точку в углу — нет.
  */
-import { formatBytes } from 'utils/pattern';
+import { formatBytes } from '../utils/format';
 import {
   DEFAULT_MAX_UPLOAD_BYTES,
+  hopelessReason,
   type BatchTopics,
   type QueueAction,
   type QueueRow,
   type QueueState,
+  type QueueTally,
   tally,
 } from './queue';
 
@@ -48,7 +50,9 @@ export function statusLabel(row: QueueRow): string {
     case 'lost':
       return `обрыв на ${pct(row.progress)}%`;
     case 'fail':
-      return 'отказ сервера';
+      // Безнадёжный отказ называется своей причиной: «отказ сервера» на истёкшей сессии
+      // отправляет чинить не то.
+      return hopelessReason(row.failure?.status) ?? 'отказ сервера';
     default:
       return '';
   }
@@ -88,7 +92,9 @@ export function rowWhy(row: QueueRow, cap: number = DEFAULT_MAX_UPLOAD_BYTES): s
     case 'done':
       return 'лежит в библиотеке';
     case 'big':
-      return `${formatBytes(row.size)} при пределе ${formatBytes(cap)} — отправка не начнётся. разбейте архив или положите ссылкой`;
+      // «положите ссылкой» тут стояло от прежней жизни: сущности «ссылка» в библиотеке нет, и
+      // совет отсылал к тому, чего человек не найдёт.
+      return `${formatBytes(row.size)} при пределе ${formatBytes(cap)} — отправка не начнётся. разбейте на части или сожмите сильнее`;
     // СЕРВЕР НЕ ОТКАЗЫВАЕТ ДУБЛИКАТУ, а только опознаёт его: `sha256` в `library_file` —
     // обычный индекс («duplicate hint now, dedup later» в 0312), файл сохраняется вторым
     // экземпляром. Слова про «второй копии не будет» были бы прямым враньём: человек ушёл бы
@@ -100,8 +106,20 @@ export function rowWhy(row: QueueRow, cap: number = DEFAULT_MAX_UPLOAD_BYTES): s
     case 'lost':
       return `связь оборвалась на ${pct(row.progress)}% — сервер файл не получил, отправку можно повторить`;
     case 'fail': {
-      const code = row.failure?.status ? ` ${row.failure.status}` : '';
-      return `сервер ответил${code} на ${pct(row.progress)}% — файл не сохранён. повторить; если снова тот же ответ — покажите код разработчику`;
+      // БЕЗНАДЁЖНЫЙ ОТКАЗ НЕ ЗОВЁТ ПОВТОРЯТЬ. Истёкшая сессия посреди пачки из сорока файлов
+      // раньше давала сорок строк со словом «повторить», и повтор возвращал те же сорок 401.
+      switch (row.failure?.status) {
+        case 401:
+          return 'сессия истекла — войдите заново и поставьте файл в очередь ещё раз. повтор сейчас вернёт тот же отказ';
+        case 403:
+          return 'нужно право files:write — повтор ничего не изменит, попросите право у супер-админа';
+        case 413:
+          return `сервер отрезал файл по размеру — он принимает до ${formatBytes(cap)}. повтор упрётся в тот же предел`;
+        default: {
+          const code = row.failure?.status ? ` ${row.failure.status}` : '';
+          return `сервер ответил${code} на ${pct(row.progress)}% — файл не сохранён. повторить; если снова тот же ответ — покажите код разработчику`;
+        }
+      }
     }
     default:
       return '';
@@ -126,16 +144,29 @@ export function actionLabel(action: QueueAction): string {
 }
 
 /**
+ * ОДНА ПАРА ЧИСЕЛ НА ОДИН ИСХОД.
+ *
+ * «Сколько доехало из скольких» считается ровно одним способом — `landed` из `attempted`, —
+ * и им пользуются обе строки: сводка свёрнутой полосы и итоговый тост. Раньше они считали
+ * по-разному («готово 3 из 8» против «отправлено 3 из 10»), и человек видел оба числа за
+ * одну минуту, на одном и том же экране.
+ *
+ * Доехавшим считается и ДУБЛИКАТ: сервер его не отвергает, файл сохраняется второй копией.
+ * Не доехавшим — только слишком большой, он в сеть не уходил вовсе, поэтому вынут из
+ * знаменателя и назван отдельным слагаемым.
+ */
+export function deliveryCount(t: QueueTally): string {
+  return `${t.landed} из ${t.attempted}`;
+}
+
+/**
  * Сводка пачки одной строкой — единственное, что видно в свёрнутой полосе. Поэтому здесь
  * перечислены ВСЕ исходы сразу, а не только плохие: «готово 3 из 7 · идёт 1 · обрыв».
- * Из знаменателя «из N» вынуты слишком большие (в сеть не ушло ни байта) и дубликаты — они
- * названы в этой же строке отдельными слагаемыми, и считать их дважды значило бы не сойтись
- * с собственной строкой.
  */
 export function summaryLine(state: QueueState): string {
   const t = tally(state);
   const parts: string[] = [];
-  if (t.done) parts.push(`готово ${t.done} из ${t.all - t.big - t.dup}`);
+  if (t.landed) parts.push(`готово ${deliveryCount(t)}`);
   if (t.run) parts.push(`идёт ${t.run}`);
   if (t.prev) parts.push(`превью ${t.prev}`);
   if (t.wait) parts.push(`в очереди ${t.wait}`);
@@ -149,10 +180,10 @@ export function summaryLine(state: QueueState): string {
 /** Итог пачки, когда всё отстоялось: что уехало, что нет и куда легло. */
 export function batchSummary(state: QueueState, topicLabels: readonly string[]): string {
   const t = tally(state);
-  const parts = [`отправлено ${t.done} из ${t.all}`];
+  const parts = [`отправлено ${deliveryCount(t)}`];
   if (t.dup)
     parts.push(
-      `${t.dup} ${plural(t.dup, 'дубликат', 'дубликата', 'дубликатов')} — такое уже лежало`,
+      `${t.dup} ${plural(t.dup, 'дубликат', 'дубликата', 'дубликатов')} — такое уже лежало, сохранено второй копией`,
     );
   if (t.big) parts.push(`${t.big} не пролезет по весу`);
   if (t.lost)
@@ -175,11 +206,16 @@ export function inheritanceNote(
   topicLabels: readonly string[],
   fileCount: number,
 ): string {
-  const files = `${fileCount} ${plural(fileCount, 'файл', 'файла', 'файлов')}`;
   if (!topics.topicIds.length && !topics.newTopics.length) {
     return 'ни одной темы — пачка уедет в «разобрать». это нормальный ход: разобрать можно позже, пачкой';
   }
   const n = topicLabels.length;
   const verb = plural(n, 'тема встанет', 'темы встанут', 'тем встанет');
-  return `${n} ${verb} на все ${files} пачки: ${topicLabels.join(', ')}; поштучно правится потом, в карточке`;
+  // «на все 1 файл пачки» получалось само собой, пока число подставлялось в одну форму на все
+  // случаи. Один файл — это не «все».
+  const where =
+    fileCount === 1
+      ? 'на этот файл'
+      : `на все ${fileCount} ${plural(fileCount, 'файл', 'файла', 'файлов')} пачки`;
+  return `${n} ${verb} ${where}: ${topicLabels.join(', ')}; поштучно правится потом, в карточке`;
 }

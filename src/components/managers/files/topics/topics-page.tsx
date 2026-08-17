@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import type { FileTopic } from 'api/proto-http/admin';
 import { usePermissions } from 'components/managers/accounts/utils/permissions';
 import { ROUTES, SECTION } from 'constants/routes';
 import { useSnackBarStore } from 'lib/stores/store';
+import { useUploadQueueStore } from 'lib/stores/upload-queue';
 import { Button } from 'ui/components/button';
 import { CalloutBox } from 'ui/components/callout-box';
 import { Chip } from 'ui/components/chip';
@@ -15,8 +16,10 @@ import { SectionHeader } from 'ui/components/section-header';
 import SelectComponent from 'ui/components/select';
 import Text from 'ui/components/text';
 import { topicsService } from '../api/topicsService';
+import { FilesDropOverlay } from '../components/drop-overlay';
 import { FilesUploadBar } from '../components/upload-bar';
-import { filesKeys } from '../hooks/useFiles';
+import { filesKeys, useFileTopics } from '../hooks/useFiles';
+import { plural } from '../upload/text';
 
 /**
  * Управление темами — ОТДЕЛЬНЫЙ экран.
@@ -33,12 +36,22 @@ export default function FileTopicsPage() {
   const mayRead = !resolved || canRead(SECTION.files);
   const writable = canWrite(SECTION.files);
 
-  const topicsQuery = useQuery({
-    queryKey: filesKeys.topics(),
-    queryFn: () => topicsService.list(),
-  });
+  // Тот же хук, что у холста, а не свой `useQuery` по тому же ключу: у своего не было
+  // `staleTime`, и один и тот же словарь тем жил по двум разным правилам протухания.
+  const topicsQuery = useFileTopics();
   const topics = topicsQuery.data?.topics ?? [];
   const untopicedCount = Number(topicsQuery.data?.untopicedCount ?? 0);
+  const enqueue = useUploadQueueStore((s) => s.enqueue);
+
+  // Бросок здесь принимает файлы БЕЗ ТЕМ: чипов холста на этом экране нет, наследовать
+  // нечего — пачка уезжает в «разобрать», и оверлей говорит это прямо.
+  const intake = useCallback(
+    (list: File[]) => {
+      if (!writable || !list.length) return;
+      enqueue(list, { topicIds: [], newTopics: [] });
+    },
+    [writable, enqueue],
+  );
 
   const invalidate = () => qc.invalidateQueries({ queryKey: filesKeys.all });
 
@@ -148,7 +161,7 @@ export default function FileTopicsPage() {
       <div className='border border-borderColor bg-bgColor p-block'>
         <SectionHeader
           title='темы'
-          question={`— ${topics.length} тем · ${untopicedCount} файлов без темы`}
+          question={`— ${topics.length} ${plural(topics.length, 'тема', 'темы', 'тем')} · ${untopicedCount} ${plural(untopicedCount, 'файл', 'файла', 'файлов')} без темы`}
           action={
             <Button asChild size='xs' variant='secondary'>
               <Link to={ROUTES.files}>к файлам</Link>
@@ -381,9 +394,19 @@ export default function FileTopicsPage() {
         </Text>
       </ConfirmationModal>
 
+      {/* ПРИЁМНИК БРОСКА СТОИТ И ЗДЕСЬ. Без него экран тем принимал бросок ГОЛЫМ БРАУЗЕРОМ:
+          файл или ссылка, отпущенные над этой страницей, уводили вкладку по своему адресу —
+          вместе с живой очередью. А человек приходит сюда как раз с файлом в руке. */}
+      <FilesDropOverlay
+        enabled={writable}
+        disabledNote='нужно право files:write — попросите его у супер-админа'
+        topicLabels={[]}
+        onFiles={intake}
+      />
+
       {/* Полоса загрузки стоит на ВСЕХ экранах раздела: пачку ставят на холсте и уходят сюда
           разбирать темы, пока она едет — без полосы отправка стала бы невидимой. */}
-      <FilesUploadBar />
+      <FilesUploadBar writable={writable} />
     </div>
   );
 }

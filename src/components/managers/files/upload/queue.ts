@@ -152,6 +152,32 @@ export function failureKind(status: number): 'lost' | 'fail' {
 }
 
 /**
+ * ОТКАЗЫ, КОТОРЫЕ ПОВТОР НЕ ЛЕЧИТ, — и потому «повторить» им не предлагают.
+ *
+ * Истёкшая сессия посреди пачки из сорока файлов даёт сорок одинаковых строк, и «повторить
+ * все» долбит 401 столько раз, сколько по ней нажмут. Права и предел размера ведут себя так
+ * же: ответ будет тем же самым, а человеку нужно СДЕЛАТЬ другое — войти заново, попросить
+ * право, разбить файл. Слова здесь те же, что у сервисного модуля (`api/filesService.ts`).
+ */
+export function hopelessReason(status?: number): string | null {
+  switch (status) {
+    case 401:
+      return 'сессия истекла';
+    case 403:
+      return 'нет права files:write';
+    case 413:
+      return 'больше предела сервера';
+    default:
+      return null;
+  }
+}
+
+/** Отказ, который имеет смысл повторить: связь и всё, что не безнадёжно по существу. */
+export function canRetry(row: QueueRow): boolean {
+  return isFailed(row.status) && hopelessReason(row.failure?.status) === null;
+}
+
+/**
  * Превью «бывает» у картинок и pdf — их рисует браузер (`utils/preview.ts`). У всего
  * остального превью не будет никогда, и строка сразу встаёт в очередь: спиннер там был бы
  * враньём, а не ожиданием.
@@ -283,14 +309,16 @@ export function reduce(state: QueueState, e: QueueEvent): QueueState {
       });
     case 'retry':
       return withRow(state, e.id, (r) =>
-        isFailed(r.status) ? { ...r, status: 'wait', progress: 0, failure: undefined } : null,
+        canRetry(r) ? { ...r, status: 'wait', progress: 0, failure: undefined } : null,
       );
     case 'retryAll': {
-      if (!state.rows.some((r) => isFailed(r.status))) return state;
+      // Безнадёжные отказы «повторить все» НЕ трогает: сорок 401 после истёкшей сессии
+      // уехали бы в сеть заново и вернулись бы теми же сорока 401.
+      if (!state.rows.some(canRetry)) return state;
       return {
         ...state,
         rows: state.rows.map((r) =>
-          isFailed(r.status) ? { ...r, status: 'wait', progress: 0, failure: undefined } : r,
+          canRetry(r) ? { ...r, status: 'wait', progress: 0, failure: undefined } : r,
         ),
       };
     }
@@ -335,6 +363,12 @@ export interface QueueTally {
   live: number;
   /** Сколько строк можно отправить прямо сейчас (включая повторяемые). */
   sendable: number;
+  /** Отказы, которые повтор может вылечить. Число в кнопке «повторить все». */
+  retryable: number;
+  /** Файл у сервера: и `done`, и `dup` — дубликат сохранён второй копией, а не отвергнут. */
+  landed: number;
+  /** Сколько строк вообще уходило в сеть: всё, кроме отрезанных по размеру. */
+  attempted: number;
 }
 
 export function tally(state: QueueState): QueueTally {
@@ -351,9 +385,17 @@ export function tally(state: QueueState): QueueTally {
     fail: n('fail'),
     live: 0,
     sendable: 0,
+    retryable: 0,
+    landed: 0,
+    attempted: 0,
   };
   t.live = t.wait + t.prev + t.run;
   t.sendable = t.wait + t.lost + t.fail;
+  t.retryable = state.rows.filter(canRetry).length;
+  // ОДНА ПАРА ЧИСЕЛ НА ВЕСЬ МОДУЛЬ. И свёрнутая полоса, и итоговый тост считают этими двумя
+  // величинами, потому что человек видит обе строки за одну минуту и разойтись им нельзя.
+  t.landed = t.done + t.dup;
+  t.attempted = t.all - t.big;
   return t;
 }
 
@@ -383,12 +425,23 @@ export function nextToSend(state: QueueState, concurrency = UPLOAD_CONCURRENCY):
 }
 
 /**
- * Следующая строка на построение превью. Канал превью свой: pdfjs рисует первую страницу
- * пока сеть занята чужим файлом. Одна за раз — рендер тяжёлый, и десять параллельных
- * pdfjs-задач кладут вкладку.
+ * Сколько превью строится ОДНОВРЕМЕННО. Одно: разбор pdf тяжёлый, и десять параллельных
+ * pdfjs-задач кладут вкладку колом.
+ */
+export const PREVIEW_CONCURRENCY = 1;
+
+/**
+ * Следующая строка на построение превью. Канал превью свой: pdfjs рисует первую страницу,
+ * пока сеть занята чужим файлом.
+ *
+ * ЗАНЯТОСТЬ СЧИТАЕТСЯ ПО МНОЖЕСТВУ РАБОТ, а не по пересечению с рядами очереди. Разница
+ * видна ровно при отмене: строка из очереди исчезает мгновенно, а её рендер продолжает
+ * крутиться — pdfjs отменять не умеет. Пока занятость мерили строками, каждая отмена
+ * «освобождала» канал под новый разбор: замерено 3 pdf → 1 рендер, после отмены первой → 2
+ * параллельных, после второй → 3. Десять тяжёлых pdf и пять отмен подряд — и вкладка встаёт.
  */
 export function nextToPreview(state: QueueState, busy: ReadonlySet<string>): QueueRow | null {
-  if (state.rows.some((r) => r.status === 'prev' && busy.has(r.id))) return null;
+  if (busy.size >= PREVIEW_CONCURRENCY) return null;
   return state.rows.find((r) => r.status === 'prev' && !busy.has(r.id)) ?? null;
 }
 
@@ -401,8 +454,9 @@ export type QueueAction = 'cancel' | 'dismiss' | 'retry' | 'reveal' | 'assignTop
  * темы пачки дописываются существующему файлу (`AssignLibraryFileTopics`, семантика
  * дописывающая). Ради этого строка и хранит `topicIds`/`newTopics` после отправки.
  *
- * У `lost`/`fail` — только «повторить»: так решено макетом. Строка, которая никогда не
- * уедет, уходит вместе со всей полосой, а не поштучно.
+ * У `lost`/`fail` — «повторить», и только пока повтор что-то меняет: 401, 403 и 413 вернут
+ * ровно тот же ответ, поэтому им остаётся «убрать», а слова строки говорят, что делать
+ * вместо повтора.
  */
 export function rowActions(row: QueueRow): QueueAction[] {
   switch (row.status) {
@@ -417,7 +471,7 @@ export function rowActions(row: QueueRow): QueueAction[] {
       return ['reveal', 'assignTopics', 'dismiss'];
     case 'lost':
     case 'fail':
-      return ['retry'];
+      return canRetry(row) ? ['retry'] : ['dismiss'];
     default:
       return [];
   }
