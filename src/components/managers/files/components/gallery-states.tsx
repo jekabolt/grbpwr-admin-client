@@ -10,6 +10,7 @@ import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { MAX_UPLOAD_BYTES, uploadLibraryPreview } from '../api/filesService';
 import { filesKeys } from '../hooks/useFiles';
+import { formatBytes } from '../utils/format';
 import { rebuildPreview } from '../utils/preview';
 
 /**
@@ -151,7 +152,9 @@ export function EmptyLibraryState({
           </Button>
         ) : undefined
       }
-      note={`до ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))} мб на файл · картинки и pdf показывают первую страницу прямо в сетке · ссылки на скачивание живут 6–12 часов, поэтому файлы не утекают наружу`}
+      // Предел печатает `formatBytes`, а не своё деление на 1024²: у оверлея броска и у строки
+      // очереди он уже печатается ею, и третий счёт того же числа однажды разойдётся с ними.
+      note={`до ${formatBytes(MAX_UPLOAD_BYTES)} на файл · картинки и pdf показывают первую страницу прямо в сетке · ссылки на скачивание живут 6–12 часов, поэтому файлы не утекают наружу`}
     >
       <Text size='micro' variant='label'>
         библиотека общая: то, что вы загрузите, увидит вся команда. <b>тема — ярлык, а не папка</b>
@@ -328,9 +331,12 @@ export function NextPageFailure({
   return (
     <CalloutBox tone='error'>
       <div className='flex flex-wrap items-center gap-2.5'>
+        {/* Причина НЕ называется: сюда приходит и обрыв связи, и отказ сервера, а полоса кода
+            ответа не видит. «Связь оборвалась» здесь было догадкой, и на 403 она отправляла
+            чинить не то. Число — без существительного, чтобы обойтись без склонения. */}
         <Text size='micro' component='span'>
-          следующая страница не догрузилась — связь оборвалась. загруженные {loaded}
-          {total ? ` из ${total}` : ''} остались на месте.
+          следующая страница не догрузилась. уже показанное осталось на месте: {loaded}
+          {total ? ` из ${total}` : ''}.
         </Text>
         <Button
           size='sm'
@@ -373,7 +379,9 @@ export function RebuildPreview({ file, writable }: { file: LibraryFile; writable
       await uploadLibraryPreview(Number(file.id), blob);
       qc.invalidateQueries({ queryKey: filesKeys.all });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'не вышло');
+      // «Не вышло» не называло ничего. Оба пути отказа (скачивание файла и отправка картинки)
+      // приезжают сюда со своими словами; запасная фраза нужна только на не-Error.
+      setError(e instanceof Error ? e.message : 'превью не построилось');
     } finally {
       setBusy(false);
     }
