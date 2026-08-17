@@ -40,9 +40,9 @@ import {
 export { stampWhen };
 
 export const LAY_MODE_LABEL: Record<string, string> = {
-  PRODUCTION_LAY_MODE_FACE_UP: 'лицом вверх',
-  PRODUCTION_LAY_MODE_FACE_TO_FACE: 'лицом к лицу',
-  PRODUCTION_LAY_MODE_UNSPECIFIED: 'режим не задан',
+  PRODUCTION_LAY_MODE_FACE_UP: 'face up',
+  PRODUCTION_LAY_MODE_FACE_TO_FACE: 'face to face',
+  PRODUCTION_LAY_MODE_UNSPECIFIED: 'mode not set',
 };
 
 // Сантиметры проводом, метры на экране: цех считает настил в метрах ткани, а хранится он в см,
@@ -116,7 +116,7 @@ export function LayCard({
 
   const title = [
     colorwayLabel(lay.colorwayId ?? 0),
-    lay.bomItemName || 'слот не назван',
+    lay.bomItemName || 'slot not named',
     lay.materialName || '',
   ]
     .filter(Boolean)
@@ -134,20 +134,20 @@ export function LayCard({
                 Тон attention: в словаре тонов (ui/components/pill.tsx:5-13) именно он и значит
                 «changed, stale». */}
             {stale ? (
-              <Pill tone='attention'>количества изменились</Pill>
+              <Pill tone='attention'>quantities changed</Pill>
             ) : (
               <Pill tone={VERDICT_PILL[verdict]}>{VERDICT_WORD[verdict]}</Pill>
             )}
             {canEdit ? (
               <>
                 <Button type='button' variant='secondary' size='xs' onClick={onEdit}>
-                  править
+                  edit
                 </Button>
                 <Button
                   type='button'
                   variant='secondary'
                   size='xs'
-                  aria-label={`удалить настил ${lay.name || title}`}
+                  aria-label={`delete lay ${lay.name || title}`}
                   onClick={onDelete}
                 >
                   ✕
@@ -164,17 +164,17 @@ export function LayCard({
       {/* Незаданные концевые потери печатаются как «—», а НЕ как «0 см»: ноль здесь означал бы
           «потерь нет», то есть занижение потребности, выданное за измерение. */}
       <Row
-        label={`${LAY_MODE_LABEL[lay.mode ?? ''] ?? 'режим не задан'} · концевые потери ${
+        label={`${LAY_MODE_LABEL[lay.mode ?? ''] ?? 'mode not set'} · end losses ${
           cmValue(lay.endLossCm) ?? '—'
-        } см на конец слоя`}
-        value={`${sections.length} секц. · ${totalPlies} сл.`}
+        } cm per ply end`}
+        value={`${sections.length} sect. · ${totalPlies} plies`}
       />
       <Row
-        label='ткань + концевые = план настила'
+        label='fabric + end losses = lay plan'
         value={
           planned
-            ? `${clothLen || '—'} + ${endLoss || '—'} = ${planned} м`
-            : '— пересчитается на сервере'
+            ? `${clothLen || '—'} + ${endLoss || '—'} = ${planned} m`
+            : '— will be recomputed on the server'
         }
       />
       <StackHeightRow lay={lay} checks={checks} />
@@ -190,11 +190,11 @@ export function LayCard({
           <Fragment key={key}>
             <Row
               tone='label'
-              label={`${i + 1}. ${s.markerName || `раскладка #${s.markerId ?? 0}`}`}
+              label={`${i + 1}. ${s.markerName || `marker #${s.markerId ?? 0}`}`}
               value={
                 <span className='inline-flex items-center gap-2'>
                   <span className='tabular-nums'>
-                    {s.plies ?? 0} сл · {cmValue(s.sectionLengthCm) ?? '—'} см
+                    {s.plies ?? 0} plies · {cmValue(s.sectionLengthCm) ?? '—'} cm
                   </span>
                   {onPlotter && (s.markerId ?? 0) > 0 && (
                     <Button
@@ -202,10 +202,10 @@ export function LayCard({
                       variant='underline'
                       size='xs'
                       disabled={plottingKey === key}
-                      title='DXF для раскройного плоттера: контуры, кромка и ШАПКА (прогон, цвет, артикул, слои, состав, длина). БЕЗ линии шва и надсечек — их восстанавливают по выкройкам, а на странице прогона выкроек нет'
+                      title='DXF for the cutting plotter: contours, selvedge and the HEADER (run, colour, article, plies, composition, length). WITHOUT the seam line and notches — those are restored from the patterns, and there are no patterns on the run page'
                       onClick={() => onPlotter(s, key)}
                     >
-                      {plottingKey === key ? 'готовим…' : 'плоттер'}
+                      {plottingKey === key ? 'preparing…' : 'plotter'}
                     </Button>
                   )}
                 </span>
@@ -227,7 +227,7 @@ export function LayCard({
       <div className='mt-1 flex flex-col'>
         {allLayChecks(lay).length === 0 ? (
           <Text size='micro' variant='label'>
-            ? проверки годности не приехали — вердикта по этому настилу нет
+            ? the fitness checks didn't arrive — there is no verdict on this lay
           </Text>
         ) : (
           checks.map((c, i) => <CheckLine key={c.key || i} check={c} />)
@@ -268,16 +268,16 @@ function StackHeightRow({
     return (
       <Row
         tone='label'
-        label='высота стопки'
-        value={`${VERDICT_GLYPH.unknown} не считается`}
+        label='stack height'
+        value={`${VERDICT_GLYPH.unknown} not computed`}
         className={VERDICT_TEXT.unknown}
       />
     );
   }
   return (
     <Row
-      label='высота стопки'
-      value={`${VERDICT_GLYPH[verdict]} ${height} см`}
+      label='stack height'
+      value={`${VERDICT_GLYPH[verdict]} ${height} cm`}
       className={VERDICT_TEXT[verdict]}
     />
   );
@@ -307,7 +307,11 @@ function LotAndFactRows({
   if (lot === 'none' && !hasFact) {
     return (
       <>
-        <Row tone='label' label='рулон и факт расхода' value='цех ещё не отчитался' />
+        <Row
+          tone='label'
+          label='roll and actual consumption'
+          value="the workshop hasn't reported yet"
+        />
         {/* Даже под схлопнутой строкой «на изделие» обязано сказать про необратимость: на закрытой
             партии невнесённый замер не внести уже никогда, и молчание здесь заставило бы оператора
             искать кнопку, которой нет. На открытой партии ClothRows молчит сам (см. его гейт). */}
@@ -335,7 +339,7 @@ function LotAndFactRows({
           рулон. Незаполненное поле выглядит серым, названный рулон — обычным текстом, а причина
           отрыва идёт приглушённой припиской, чтобы не спорить с самим кодом. */}
       <Row
-        label='рулон'
+        label='roll'
         tone={lot === 'none' ? 'label' : undefined}
         value={
           lot === 'named' ? (
@@ -343,25 +347,25 @@ function LotAndFactRows({
           ) : lot === 'detached' ? (
             <span>
               {lay.lotCode}{' '}
-              <span className='text-labelColor'>· удалён из складского справочника</span>
+              <span className='text-labelColor'>· deleted from the stock directory</span>
             </span>
           ) : (
-            'не назван'
+            'not named'
           )
         }
       />
 
       <Row
-        label={hasFact && method ? `факт расхода · ${method}` : 'факт расхода'}
+        label={hasFact && method ? `actual consumption · ${method}` : 'actual consumption'}
         tone={hasFact ? undefined : 'label'}
         value={
           !hasFact ? (
-            'не введён'
+            'not entered'
           ) : unit ? (
             `${qty} ${unit}`
           ) : (
             <span>
-              {qty} <span className='text-labelColor'>· единица не распознана</span>
+              {qty} <span className='text-labelColor'>· unit not recognized</span>
             </span>
           )
         }
@@ -373,8 +377,8 @@ function LotAndFactRows({
       {hasFact ? (
         <Row
           tone='label'
-          label='замер'
-          value={`${lay.actualBy || 'автор не записан'}${when ? ` · ${when}` : ''}`}
+          label='measurement'
+          value={`${lay.actualBy || 'author not recorded'}${when ? ` · ${when}` : ''}`}
         />
       ) : null}
 
@@ -417,7 +421,11 @@ function ClothRows({
       if (!r.frozen) return null;
       return (
         <>
-          <Row tone='label' label='на изделие' value='замера нет — уже не посчитается' />
+          <Row
+            tone='label'
+            label='per garment'
+            value="there is no measurement — it won't be computed anymore"
+          />
           <Text size='nano' variant='label'>
             {FROZEN_FACT_NOTE}
           </Text>
@@ -427,10 +435,10 @@ function ClothRows({
     if (r.kind === 'no-receipts') {
       return (
         <>
-          <Row tone='label' label='на изделие' value='крой не отчитан' />
+          <Row tone='label' label='per garment' value='the cutting is not reported' />
           <Text size='nano' variant='label'>
-            приёмка кроя — в блоке ниже; пустая клетка там значит «не считали», а не ноль, поэтому
-            делить пока не на что.
+            the cut receipt is in the block below; an empty cell there means “not counted”, not
+            zero, so there is nothing to divide by yet.
           </Text>
         </>
       );
@@ -438,38 +446,39 @@ function ClothRows({
     if (r.kind === 'zero-cut') {
       return (
         <>
-          <Row className='text-error' label='на изделие — выкроено 0' value='не делится' />
+          <Row className='text-error' label='per garment — 0 cut' value="doesn't divide" />
           {/* «Посчитанный ноль» не утверждается: cut_qty NOT NULL, пустое поле формы уезжает нулём,
               и сохранённая строка не различает «посчитали, вышло 0» и «не заполнили». */}
           <Text size='nano' variant='label'>
-            полотно потрачено, изделий не записано; ноль мог быть и не введён — сохранённая строка
-            не различает посчитанный ноль и незаполненное поле
+            the cloth is spent, no garments are recorded; the zero may not have been entered at all
+            — the saved row doesn't distinguish a counted zero from an unfilled field
           </Text>
         </>
       );
     }
     // mixed-units в карточке ОДНОГО настила недостижим (у замера одна единица) — защита на случай
     // будущего вызова с несколькими настилами.
-    return <Row tone='label' label={`на изделие — ${clothRefusalText(r)}`} value='не считается' />;
+    return <Row tone='label' label={`per garment — ${clothRefusalText(r)}`} value='not computed' />;
   }
 
   const u = perUnit.unitLabel;
   return (
     <>
       <Row
-        label={`на изделие · крой${perUnit.mixed ? ' — среднее по составу настила' : ''}`}
-        value={`${fmtQty(perUnit.perCut)} ${u}/изд`}
+        label={`per garment · cutting${perUnit.mixed ? ' — average over the lay composition' : ''}`}
+        value={`${fmtQty(perUnit.perCut)} ${u}/garment`}
       />
       {perUnit.missingSizes.length > 0 ? (
         // Направление ошибки называется вместе с числом: неполный знаменатель ЗАВЫШАЕТ «на
         // изделие», и оператор обязан знать, куда число поедет при дозаполнении.
         <Text size='nano' className='text-warning'>
-          приёмка не по всем размерам настила (нет: {perUnit.missingSizes.map(sizeLabel).join(', ')}
-          ) — знаменатель занижен, «на изделие» завышено и будет уменьшаться по мере ввода
+          the receipt does not cover all sizes of the lay (missing:{' '}
+          {perUnit.missingSizes.map(sizeLabel).join(', ')}) — the denominator is understated, “per
+          garment” is overstated and will go down as the entry is filled in
         </Text>
       ) : null}
       <Row
-        label='на изделие · годное'
+        label='per garment · good'
         // «Принято 0» НЕ ГОВОРИТ «годных нет», и утверждать это нельзя: колонка accepted_qty —
         // NOT NULL DEFAULT 0, а сохранённая строка с незаполненной приёмкой возвращается нулём,
         // неотличимым от посчитанного нуля (различие «пусто ≠ ноль» живёт только на НЕсохранённом
@@ -477,8 +486,8 @@ function ClothRows({
         className={perUnit.perAccepted == null ? 'text-error' : undefined}
         value={
           perUnit.perAccepted == null
-            ? 'принято 0 — годных нет либо приёмка в пошив не заполнена'
-            : `${fmtQty(perUnit.perAccepted)} ${u}/изд`
+            ? "0 accepted — either there are no good ones or the receipt into sewing isn't filled in"
+            : `${fmtQty(perUnit.perAccepted)} ${u}/garment`
         }
       />
       {/* «Принято больше выкроенного» — невозможное состояние данных: принять в пошив больше, чем
@@ -486,15 +495,15 @@ function ClothRows({
           только принято < выкроено), поэтому аномалия называется здесь, рядом со своим числом. */}
       {perUnit.acceptedOverCut ? (
         <Text size='nano' className='text-error'>
-          принято {perUnit.acceptedTotal} при выкроенных {perUnit.cutTotal} — так не бывает:
-          какое-то из чисел врёт, проверьте строки приёмки
+          {perUnit.acceptedTotal} accepted against {perUnit.cutTotal} cut — that doesn't happen:
+          one of the numbers is lying, check the receipt rows
         </Text>
       ) : null}
       {perUnit.scrapPerGood != null ? (
         <Row
           className='text-error'
-          label='цена брака кроя в ткани'
-          value={`+${fmtQty(perUnit.scrapPerGood)} ${u} на годное`}
+          label='the price of cutting scrap in fabric'
+          value={`+${fmtQty(perUnit.scrapPerGood)} ${u} per good one`}
         />
       ) : null}
       {/* «Принято меньше выкроенного» имеет ДВЕ причины, и данные их не различают: брак кроя и
@@ -505,9 +514,9 @@ function ClothRows({
           (perAccepted == null) уже объяснила строка «годное» — второй раз не говорим. */}
       {perUnit.acceptedZeroRows.length > 0 && perUnit.perAccepted != null ? (
         <Text size='nano' className='text-warning'>
-          у размеров {perUnit.acceptedZeroRows.map((z) => sizeLabel(z.sizeId)).join(', ')} принято
-          ровно 0 — если приёмку в пошив там просто не заполнили, годное занижено и «цена брака»
-          завышена
+          sizes {perUnit.acceptedZeroRows.map((z) => sizeLabel(z.sizeId)).join(', ')} have exactly 0
+          accepted — if the receipt into sewing was simply not filled in there, the good count is
+          understated and the “price of scrap” is overstated
         </Text>
       ) : null}
       <NormRow norm={norm} sizeLabel={sizeLabel} />
@@ -531,8 +540,8 @@ function NormRow({
       <>
         <Row
           tone='label'
-          label={`к норме на изделие — ${normRefusalText(norm.refusal, sizeLabel)}`}
-          value='? не считается'
+          label={`against the norm per garment — ${normRefusalText(norm.refusal, sizeLabel)}`}
+          value='? not computed'
         />
         {/* И отказ обязан говорить, в ЧЬЕЙ рецептуре искали: «нормы нет» в ревизии прогона —
             не то же, что в живой карточке. Молчит только 'card-failed' — там неизвестно, какая
@@ -554,8 +563,8 @@ function NormRow({
   return (
     <>
       <Row
-        label='к норме на изделие'
-        value={`норма ${fmtQty(norm.normPerUnit)} ${norm.unitLabel}/изд · ${d.text}`}
+        label='against the norm per garment'
+        value={`norm ${fmtQty(norm.normPerUnit)} ${norm.unitLabel}/garment · ${d.text}`}
         // Красный — потому что расход выше нормы это ПОТЕРЯ; минус зелёным не красится по той же
         // причине, что у дрейфа: «меньше нормы» — повод спросить, всё ли отчитано.
         className={d.over ? 'text-error' : undefined}
@@ -564,13 +573,13 @@ function NormRow({
           ТОЛЬКО на слагаемые без отходов внутри: «по раскладке + руками · догроссена процентом»
           читалось бы как (0.6 + 0.4) × 1.1, тогда как посчитано 0.6 + 0.4 × 1.1. */}
       <Text size='nano' variant='label'>
-        норма {norm.sourceLabel}
+        norm {norm.sourceLabel}
         {norm.grossed
           ? norm.partlyGrossed
-            ? ` · процент раскроя слота ${fmtQty(norm.wastagePct ?? 0)}% начислен только на часть без отходов внутри, «по раскладке» взята как есть`
-            : ` · догроссена процентом раскроя слота ${fmtQty(norm.wastagePct ?? 0)}%`
-          : ' · отходы кроя уже внутри нормы'}
-        {norm.weighted ? ' · взвешена по выкроенному составу' : ''}
+            ? ` · the slot wastage percent ${fmtQty(norm.wastagePct ?? 0)}% is charged only on the part without waste inside, “by the marker” is taken as is`
+            : ` · grossed up by the slot wastage percent ${fmtQty(norm.wastagePct ?? 0)}%`
+          : ' · the cutting waste is already inside the norm'}
+        {norm.weighted ? ' · weighted by the cut composition' : ''}
       </Text>
       {/* С ЧЕМ сравнивали (Ф: ревизия прогона / живая карточка). Отдельной строкой и с тревожным
           тоном на нечитаемом снапшоте: молчаливый фолбэк на живую карту выдавал бы её за
@@ -600,18 +609,18 @@ function DriftRow({ drift }: { drift?: googletype_Decimal }) {
     return (
       <Row
         tone='label'
-        label='дрейф к плану настила — сравнить не с чем: нет плана настила либо единица факта не сводится с ним'
-        value={`${VERDICT_GLYPH.unknown} не считается`}
+        label='drift against the lay plan — there is nothing to compare with: either there is no lay plan or the unit of the actual does not reduce to it'
+        value={`${VERDICT_GLYPH.unknown} not computed`}
         className={VERDICT_TEXT.unknown}
       />
     );
   }
   const shown = Number(raw.toFixed(1));
   const sign = shown > 0 ? '+' : shown < 0 ? '−' : '';
-  const word = shown > 0 ? 'перерасход' : shown < 0 ? 'меньше плана' : 'сошлось';
+  const word = shown > 0 ? 'overrun' : shown < 0 ? 'under the plan' : 'matched';
   return (
     <Row
-      label='дрейф к плану настила'
+      label='drift against the lay plan'
       value={`${sign}${Math.abs(shown).toFixed(1)}% ${word}`}
       // Красный — потому что перерасход это ПОТЕРЯ, а не потому что это вердикт проверки: дрейф
       // ничего не запрещает, он кормит калибровку коэффициента.
@@ -627,7 +636,7 @@ function CheckLine({ check, indent }: { check: common_ProductionLayCheck; indent
       {VERDICT_GLYPH[verdict]}{' '}
       {/* «не проверено» произносится ВСЛУХ перед названием проверки: молчаливый серый глиф
           прочитался бы как приглушённое «ок». */}
-      {verdict === 'unknown' ? 'не проверено: ' : ''}
+      {verdict === 'unknown' ? 'not checked: ' : ''}
       {check.label || check.key}
       {check.detail ? ` — ${check.detail}` : ''}
     </Text>
@@ -662,12 +671,12 @@ function StaleDisclosure({
   return (
     <details className='mt-1'>
       <summary className='cursor-pointer text-micro uppercase tracking-label text-warning'>
-        строки прогона изменились после того, как настил был построен
+        the run lines changed after the lay was built
       </summary>
       <div className='mt-1 flex flex-col gap-1'>
         <Text size='small' className='tabular-nums'>
           {diff.length === 0
-            ? 'снимок и текущие строки не разошлись ни в одном размере'
+            ? 'the snapshot and the current lines do not diverge in any size'
             : diff
                 .map(
                   (d) =>
@@ -680,7 +689,7 @@ function StaleDisclosure({
         {canEdit ? (
           <div className='flex flex-wrap items-center gap-1.5'>
             <Button type='button' variant='secondary' size='xs' onClick={onEdit}>
-              пересобрать
+              rebuild
             </Button>
             <Button
               type='button'
@@ -689,7 +698,7 @@ function StaleDisclosure({
               disabled={reaffirming}
               onClick={onReaffirm}
             >
-              {reaffirming ? 'подтверждаю…' : 'количества проверены'}
+              {reaffirming ? 'confirming…' : 'quantities checked'}
             </Button>
           </div>
         ) : null}

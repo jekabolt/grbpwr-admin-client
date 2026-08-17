@@ -101,7 +101,7 @@ export function RunReceiptTable({
   if (rows.length === 0)
     return (
       <Text variant='inactive' size='small'>
-        строк нет — план партии пуст
+        no lines — the run plan is empty
       </Text>
     );
 
@@ -113,10 +113,10 @@ export function RunReceiptTable({
           {columns.map((s) => (
             <th key={s}>{sizeLabel(s)}</th>
           ))}
-          <th>Σ план</th>
-          <th>принято</th>
-          <th>осталось</th>
-          <th>брак</th>
+          <th>Σ planned</th>
+          <th>received</th>
+          <th>left</th>
+          <th>defect</th>
         </tr>
       </thead>
       <tbody>
@@ -132,7 +132,7 @@ export function RunReceiptTable({
                       {c.received}/{c.planned}
                       {c.defect > 0 ? (
                         <Text size='micro' variant='label' className='uppercase'>
-                          брак {c.defect}
+                          defect {c.defect}
                         </Text>
                       ) : null}
                     </>

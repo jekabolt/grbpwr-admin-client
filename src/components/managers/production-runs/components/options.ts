@@ -19,7 +19,7 @@ export const runPackPath = (id: number) => ROUTES.productionRunPrint.replace(':i
 // повышать его до плана надо уметь с производственных экранов, а не только из костинга, где он
 // заводится. Статус, которого нет в этом списке, нельзя ни выбрать, ни снять.
 export const runStatusOptions: { value: common_ProductionRunStatus; label: string }[] = [
-  { value: 'PRODUCTION_RUN_STATUS_DRAFT', label: 'черновик' },
+  { value: 'PRODUCTION_RUN_STATUS_DRAFT', label: 'draft' },
   { value: 'PRODUCTION_RUN_STATUS_PLANNED', label: 'planned' },
   { value: 'PRODUCTION_RUN_STATUS_IN_PROGRESS', label: 'in progress' },
   { value: 'PRODUCTION_RUN_STATUS_CLOSED', label: 'closed' },
@@ -32,7 +32,7 @@ export const runStatusLabel = (s?: common_ProductionRunStatus | string): string 
     // существующего статуса читалась как партия без статуса. Дороже всего это было ровно там, где
     // черновик и заводится: кнопки базы расчёта на вкладке костинга подписывались «партия #12 · —».
     case 'PRODUCTION_RUN_STATUS_DRAFT':
-      return 'черновик';
+      return 'draft';
     case 'PRODUCTION_RUN_STATUS_PLANNED':
       return 'planned';
     case 'PRODUCTION_RUN_STATUS_IN_PROGRESS':

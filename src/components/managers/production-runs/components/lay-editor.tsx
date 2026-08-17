@@ -214,8 +214,8 @@ export function LayEditor({
       // то, ради чего выбор вообще существует (Р8): маркер шире рулона не выкроится ни в один
       // проход. «Не замерена» пишется словами — пустое место прочиталось бы как «совпадает с
       // номиналом», а это ровно то, чего measured_width_cm не утверждает.
-      label: `${l.lotCode || `#${l.id}`} · ${width ? `${width} см` : 'ширина не замерена'}${
-        l.archived ? ' · архив' : ''
+      label: `${l.lotCode || `#${l.id}`} · ${width ? `${width} cm` : 'width not measured'}${
+        l.archived ? ' · archived' : ''
       }`,
     };
   });
@@ -250,16 +250,16 @@ export function LayEditor({
   });
 
   const problems: string[] = [];
-  if (!bomLineKey) problems.push('не выбрана ткань (слот BOM), которую этот настил кроит');
-  if (colorwayId <= 0) problems.push('настил не привязан к колорвею — класть его не на что');
-  if (sections.length === 0) problems.push('нет ни одной секции');
-  if (sections.some((s) => s.markerId <= 0)) problems.push('в какой-то секции не выбрана раскладка');
-  if (sections.some((s) => sectionPlies(s) <= 0)) problems.push('в какой-то секции не задано число слоёв');
+  if (!bomLineKey) problems.push("the fabric (BOM slot) this lay cuts isn't selected");
+  if (colorwayId <= 0) problems.push("the lay isn't bound to a colourway — there is nothing to lay it on");
+  if (sections.length === 0) problems.push('no sections at all');
+  if (sections.some((s) => s.markerId <= 0)) problems.push('some section has no marker selected');
+  if (sections.some((s) => sectionPlies(s) <= 0)) problems.push('some section has no ply count set');
   if (
     mode === 'PRODUCTION_LAY_MODE_FACE_TO_FACE' &&
     sections.some((s) => sectionPlies(s) > 0 && sectionPlies(s) % 2 !== 0)
   ) {
-    problems.push('лицом к лицу слои складываются парами — нечётное число слоёв неисполнимо');
+    problems.push("face to face, plies fold in pairs — an odd ply count can't be executed");
   }
   // «ФАКТ ЦЕЛИКОМ ИЛИ НИКАК», и импликация ОДНОСТОРОННЯЯ: количество ⇒ единица И метод. Обратное
   // не требуется — единица, выбранная раньше количества, это наполовину заполненная форма, а не
@@ -271,14 +271,14 @@ export function LayEditor({
   const factQtyTyped = actualQty.trim() !== '';
   if (factQtyTyped && !(parseDecimalNumber(actualQty) > 0)) {
     problems.push(
-      'факт расхода — положительное число; чтобы отозвать замер, очистите поле целиком',
+      'the actual consumption is a positive number; to withdraw the measurement, clear the field entirely',
     );
   }
   if (factQtyTyped && !actualUom) {
-    problems.push('введено количество факта, но не сказано, в чём оно измерено');
+    problems.push("an actual quantity is entered, but it isn't said what it is measured in");
   }
   if (factQtyTyped && !actualMethod) {
-    problems.push('введено количество факта, но не сказано, как его замерили');
+    problems.push("an actual quantity is entered, but it isn't said how it was measured");
   }
 
   const submit = () => {
@@ -338,7 +338,7 @@ export function LayEditor({
       },
       {
         onSuccess: () => {
-          showMessage(isNew ? 'Настил создан' : 'Настил сохранён', 'success');
+          showMessage(isNew ? 'lay created' : 'lay saved', 'success');
           onOpenChange(false);
         },
         onError: (e) => showMessage(layErrorMessage(e), 'error'),
@@ -355,13 +355,13 @@ export function LayEditor({
       // сервера — а отказ здесь штатен (конфликт версии, нечётные слои, чужой маркер).
       closeOnConfirm={false}
       width='lg'
-      title={`${isNew ? 'новый настил' : 'настил'} · ${colorwayLabel(colorwayId)}`}
-      confirmLabel={busy ? 'сохраняю…' : isNew ? 'создать настил' : 'сохранить'}
+      title={`${isNew ? 'new lay' : 'lay'} · ${colorwayLabel(colorwayId)}`}
+      confirmLabel={busy ? 'saving…' : isNew ? 'create lay' : 'save'}
       confirmDisabled={busy || problems.length > 0}
-      cancelLabel='закрыть'
+      cancelLabel='close'
     >
       <div className='flex flex-col gap-2.5'>
-        <GroupLabel flush>что и чем кроим</GroupLabel>
+        <GroupLabel flush>what we cut and from what</GroupLabel>
 
         {/* Идентичность настила — пара (колорвей, СЛОТ). У нового выбираются ОБЕ половины, даже
             когда обе приехали засевом с кнопки «+ настил»: показать выбор и дать его поправить
@@ -369,7 +369,7 @@ export function LayEditor({
             только читается — сменить её значит сделать другой настил. */}
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            колорвей
+            colourway
           </Text>
           {isNew ? (
             <SelectComponent
@@ -377,7 +377,7 @@ export function LayEditor({
               items={colorwayOptions.map((c) => ({ value: c.colorwayId, label: c.label }))}
               value={colorwayId || ''}
               onValueChange={(v: string) => setColorwayId(Number(v) || 0)}
-              placeholder='— выберите колорвей —'
+              placeholder='— select a colourway —'
               fullWidth
             />
           ) : (
@@ -387,7 +387,7 @@ export function LayEditor({
 
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            ткань настила
+            lay fabric
           </Text>
           {isNew ? (
             <SelectComponent
@@ -401,7 +401,7 @@ export function LayEditor({
                 setBomLineKey(v);
                 setLotId(0);
               }}
-              placeholder='— выберите слот —'
+              placeholder='— select a slot —'
               fullWidth
             />
           ) : (
@@ -414,7 +414,7 @@ export function LayEditor({
 
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            режим настилания
+            spreading mode
           </Text>
           <ChipRow>
             {(
@@ -427,14 +427,14 @@ export function LayEditor({
           </ChipRow>
           <Text size='micro' variant='label'>
             {mode === 'PRODUCTION_LAY_MODE_FACE_TO_FACE'
-              ? 'слои ложатся парами: число слоёв в каждой секции обязано быть чётным, а направленную ткань так стелить нельзя — нижние слои разворачивают ворс.'
-              : 'все слои лицом вверх: чётность не требуется, направленная ткань допустима, зеркальные детали обязаны лежать в раскладке парами.'}
+              ? "plies lie in pairs: the ply count in every section has to be even, and a directional fabric can't be spread this way — the lower plies reverse the nap."
+              : 'all plies face up: evenness is not required, a directional fabric is allowed, mirrored pieces have to lie in the marker in pairs.'}
           </Text>
         </div>
 
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            концевые потери, см на ОДИН конец ОДНОГО слоя
+            lay end losses, cm per ONE end of ONE ply
           </Text>
           <Input
             name='lay-end-loss'
@@ -446,14 +446,14 @@ export function LayEditor({
             }
           />
           <Text size='micro' variant='label'>
-            типовое значение 2–5 см; полные потери = 2 × это число × сумма слоёв.{' '}
+            a typical value is 2–5 cm; the full losses = 2 × this number × the sum of plies.{' '}
             {isNew && seedEndLossCm
-              ? `Значение ${seedEndLossCm} взято из настилов этой партии — это ваше число, а не измерение; поправьте, если стол другой.`
-              : `Значение ${LAY_END_LOSS_DEFAULT_CM} проставлено по умолчанию — поправьте под свой цех.`}
+              ? `the value ${seedEndLossCm} is taken from the lays of this run — it's your number, not a measurement; correct it if the table is different.`
+              : `the value ${LAY_END_LOSS_DEFAULT_CM} is filled in by default — correct it for your own workshop.`}
           </Text>
         </div>
 
-        <GroupLabel>секции</GroupLabel>
+        <GroupLabel>sections</GroupLabel>
         <LaySectionRows
           sections={sections}
           onChange={setSections}
@@ -469,41 +469,38 @@ export function LayEditor({
               { runId, techCardId, sourceMarkerId },
               {
                 onSuccess: () =>
-                  showMessage(
-                    'Раскладка скопирована в прогон — выберите её в секции',
-                    'success',
-                  ),
+                  showMessage('marker copied into the run — select it in the section', 'success'),
                 onError: (e) => showMessage(layErrorMessage(e), 'error'),
               },
             )
           }
         />
 
-        <GroupLabel>сколько ткани это съест</GroupLabel>
+        <GroupLabel>how much fabric this will eat</GroupLabel>
         <StatGrid>
-          <Stat label='слоёв всего' value={totalPlies > 0 ? String(totalPlies) : '—'} />
-          <Stat label='ткань' value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} м` : '—'} />
+          <Stat label='plies in total' value={totalPlies > 0 ? String(totalPlies) : '—'} />
+          <Stat label='fabric' value={clothCm > 0 ? `${(clothCm / 100).toFixed(2)} m` : '—'} />
           <Stat
-            label='концевые'
-            value={endLossTotalCm > 0 ? `${(endLossTotalCm / 100).toFixed(2)} м` : '—'}
+            label='end losses'
+            value={endLossTotalCm > 0 ? `${(endLossTotalCm / 100).toFixed(2)} m` : '—'}
           />
           <Stat
-            label='план настила'
-            value={plannedCm > 0 ? `${(plannedCm / 100).toFixed(2)} м` : '—'}
+            label='lay plan'
+            value={plannedCm > 0 ? `${(plannedCm / 100).toFixed(2)} m` : '—'}
           />
           {/* Высота стопки НЕ СЧИТАЕТСЯ на клиенте, и это не лень: толщина ткани живёт на артикуле
               и по проводу сюда не едет. Показать «0 см» значило бы сказать «влезает», а это
               третий, отдельный ответ — «не проверено». */}
-          <Stat label='высота стопки' value='—' sub='считается на сервере при сохранении' />
+          <Stat label='stack height' value='—' sub='computed on the server when saving' />
         </StatGrid>
 
         {/* ЦЕХОВАЯ ПОЛОВИНА НАСТИЛА. Всё выше — план, который строит планировщик; всё ниже знает
             только тот, кто стоял у стола: с какого рулона стелили и сколько ткани реально ушло. */}
-        <GroupLabel>рулон и факт расхода</GroupLabel>
+        <GroupLabel>roll and actual consumption</GroupLabel>
 
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            с какого рулона стелили
+            which roll it was spread from
           </Text>
           {materialId > 0 ? (
             <SelectComponent
@@ -512,28 +509,28 @@ export function LayEditor({
               // настила, а не пропуск в форме, и вернуться в него надо уметь так же, как в него
               // попасть. Заставлять выбирать рулон значило бы требовать от планировщика знания,
               // которое появляется только у стола.
-              items={[{ value: 0, label: '— рулон не назван —' }, ...lotItems]}
+              items={[{ value: 0, label: '— roll not named —' }, ...lotItems]}
               value={String(lotId)}
               onValueChange={(v: string) => setLotId(Number(v) || 0)}
-              placeholder={lots.isLoading ? 'рулоны загружаются…' : '— рулон не назван —'}
+              placeholder={lots.isLoading ? 'loading rolls…' : '— roll not named —'}
               disabled={busy || lots.isLoading}
               fullWidth
             />
           ) : (
             <Text size='small' variant='inactive'>
-              артикул этого слота не определяется (строка BOM не связана с каталогом либо слот
-              удалён) — рулоны выбирать не из чего
+              the article of this slot can't be resolved (the BOM line isn't linked to the catalog
+              or the slot is deleted) — there is nothing to pick rolls from
             </Text>
           )}
           <Text size='micro' variant='label'>
-            Рядом с кодом стоит ИЗМЕРЕННАЯ ширина рулона: маркер шире неё не выкроится ни в один
-            проход, и сервер отвечает на это запретом (проверка «ширина рулона»). Рулон без замера
-            даёт «не проверено», а не «влезает».
+            next to the code stands the MEASURED roll width: a marker wider than it won't be cut in
+            any single pass, and the server answers that with a refusal (the “roll width” check). a
+            roll without a measurement gives “not checked”, not “it fits”.
           </Text>
           {lots.isError ? (
             <Text size='micro' className='text-error'>
-              список рулонов не читается — сохранить настил всё равно можно, рулон останется
-              прежним
+              the list of rolls can't be read — the lay can still be saved, the roll will stay the
+              same
             </Text>
           ) : null}
           {/* Рулон, которого больше нет в справочнике. Настил называет его по снимку кода — это
@@ -541,9 +538,9 @@ export function LayEditor({
           {lotState === 'detached' ? (
             <CalloutBox tone='note'>
               <Text size='small'>
-                Рулон <b>{existing?.lotCode}</b> удалён из складского справочника. Настил называет
-                его по снимку кода; выбрать его заново в списке нельзя — только назвать другой
-                живой рулон.
+                roll <b>{existing?.lotCode}</b> is deleted from the stock directory. the lay names
+                it from a snapshot of the code; it can't be picked again in the list — only another
+                live roll can be named.
               </Text>
             </CalloutBox>
           ) : null}
@@ -552,7 +549,7 @@ export function LayEditor({
         <div className='flex flex-wrap items-end gap-2.5'>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              сколько реально ушло
+              how much actually went
             </Text>
             <Input
               name='lay-actual-qty'
@@ -567,14 +564,14 @@ export function LayEditor({
           </div>
           <div className='flex flex-col gap-1'>
             <Text size='micro' variant='label' tracking='label' className='uppercase'>
-              единица
+              unit
             </Text>
             <SelectComponent
               name='lay-actual-uom'
               items={FACT_UNIT_OPTIONS.map((u) => ({ value: u, label: MATERIAL_UNIT_LABEL[u] }))}
               value={actualUom}
               onValueChange={(v: string) => setActualUom(v as common_MaterialUnit)}
-              placeholder='— единица —'
+              placeholder='— unit —'
               disabled={busy}
               customWidth={200}
             />
@@ -583,7 +580,7 @@ export function LayEditor({
 
         <div className='flex flex-col gap-1'>
           <Text size='micro' variant='label' tracking='label' className='uppercase'>
-            чем замеряли
+            what it was measured with
           </Text>
           <ChipRow>
             {LAY_ACTUAL_METHODS.map((m) => (
@@ -599,15 +596,16 @@ export function LayEditor({
             ))}
           </ChipRow>
           <Text size='micro' variant='label'>
-            Количество, единица и метод едут ВМЕСТЕ: число без единицы нечем сложить, а число без
-            метода — число, о точности которого нечего сказать. Пустое количество отзывает замер
-            целиком. Дрейф к плану настила пересчитает сервер.
+            the quantity, the unit and the method travel TOGETHER: a number without a unit can't be
+            added up, and a number without a method is a number about whose accuracy there is
+            nothing to say. an empty quantity withdraws the measurement entirely. the drift against
+            the lay plan is recomputed by the server.
           </Text>
           {existing?.actualBy || existing?.actualAt ? (
             <Text size='micro' variant='label'>
-              последний замер: {existing?.actualBy || 'автор не записан'}
-              {stampWhen(existing?.actualAt) ? ` · ${stampWhen(existing?.actualAt)}` : ''}. Подпись
-              переписывается только тогда, когда меняется само измерение.
+              last measurement: {existing?.actualBy || 'author not recorded'}
+              {stampWhen(existing?.actualAt) ? ` · ${stampWhen(existing?.actualAt)}` : ''}. the
+              sign-off is rewritten only when the measurement itself changes.
             </Text>
           ) : null}
         </div>
@@ -617,7 +615,7 @@ export function LayEditor({
             показать причину отказа, а не отправлять за ней обратно на карточку. */}
         {existing && allLayChecks(existing).length > 0 ? (
           <>
-            <GroupLabel>проверки на последнем чтении</GroupLabel>
+            <GroupLabel>checks as of the last read</GroupLabel>
             <div className='flex flex-col'>
               {allLayChecks(existing).map((c, i) => {
                 const v = layVerdict(c.status);
@@ -626,7 +624,7 @@ export function LayEditor({
                   // приезжает по разу на КАЖДУЮ секцию, и трёхсекционный настил дал бы три
                   // одинаковых ключа.
                   <Text key={`${c.key || 'check'}-${i}`} size='micro' className={VERDICT_TEXT[v]}>
-                    {VERDICT_GLYPH[v]} {v === 'unknown' ? 'не проверено: ' : ''}
+                    {VERDICT_GLYPH[v]} {v === 'unknown' ? 'not checked: ' : ''}
                     {c.label || c.key}
                     {c.detail ? ` — ${c.detail}` : ''}
                   </Text>
@@ -636,11 +634,11 @@ export function LayEditor({
           </>
         ) : null}
 
-        <GroupLabel>подпись</GroupLabel>
+        <GroupLabel>caption</GroupLabel>
         <div className='flex flex-col gap-1'>
           <Input
             name='lay-name'
-            placeholder='имя настила (для цеха)'
+            placeholder='lay name (for the workshop)'
             value={name}
             disabled={busy}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
@@ -648,14 +646,14 @@ export function LayEditor({
           <textarea
             className='min-h-[44px] w-full resize-y border border-borderColor bg-bgColor px-[7px] py-[3px] text-textBaseSize focus:border-textColor focus:outline-none'
             rows={2}
-            placeholder='примечание'
+            placeholder='note'
             disabled={busy}
             value={note}
             onChange={(e) => setNote(e.target.value)}
           />
           <Text size='micro' variant='label'>
-            Правка имени, примечания или порядка снимок количеств НЕ трогает — иначе бейдж
-            «количества изменились» отмывался бы случайно.
+            editing the name, the note or the order does NOT touch the quantity snapshot —
+            otherwise the “quantities changed” badge would be washed off by accident.
           </Text>
         </div>
 

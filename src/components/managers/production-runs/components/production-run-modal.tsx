@@ -129,7 +129,7 @@ export function ProductionRunModal({
     // No create branch: this modal is only ever opened on an existing run. A missing id here is a
     // caller bug, not an operator one — refuse loudly rather than silently minting a run.
     if (!isEdit || !run?.id) {
-      showMessage('Нет прогона для правки — создание живёт в отдельной модалке', 'error');
+      showMessage('no run to edit — creation lives in a separate modal', 'error');
       return;
     }
     // Patch only the meta; RMW preserves lines / costs / marker edited on the detail page.
@@ -257,7 +257,7 @@ export function ProductionRunModal({
                 />
               </label>
               <label className='flex flex-col gap-1'>
-                <Text size='small'>promised (обещано)</Text>
+                <Text size='small'>promised</Text>
                 <input
                   className={cell}
                   type='date'
@@ -265,8 +265,7 @@ export function ProductionRunModal({
                   onChange={(e) => set({ promisedAt: e.target.value })}
                 />
                 <Text variant='label' size='small'>
-                  the delivery date this batch is committed to; an open run past it reads as
-                  «опаздывает»
+                  the delivery date this run is committed to; an open run past it reads as “late”
                 </Text>
               </label>
               <label className='flex flex-col gap-1'>

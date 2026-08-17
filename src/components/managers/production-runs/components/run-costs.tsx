@@ -159,9 +159,9 @@ export function RunCosts({
     <div className='flex flex-col gap-2'>
       <div className='flex items-center justify-between'>
         <Text variant='uppercase' size='small'>
-          actual costs · начислено
+          actual costs · accrued
           {locked ? (
-            <span className='ml-2 lowercase text-labelColor'>· закрыто, правки невозможны</span>
+            <span className='ml-2 lowercase text-labelColor'>· closed, edits aren't possible</span>
           ) : null}
         </Text>
         {canEditCosts && (
@@ -237,22 +237,22 @@ export function RunCosts({
             </select>
             <input
               className={cell}
-              placeholder='№ счёта / документа'
+              placeholder='invoice / document no.'
               disabled={!canEditCosts}
               value={c.documentRef}
               onChange={(e) => patchCost(i, { documentRef: e.target.value })}
-              title='документ поставщика за этой статьёй — шаг от «начислено» к «оплачено»'
+              title='the supplier document behind this cost article — the step from “accrued” to “paid”'
             />
             <select
               className={cell}
               disabled={!canEditCosts}
               value={c.apStatus}
               onChange={(e) => patchCost(i, { apStatus: e.target.value })}
-              title='статус оплаты: начислено — счёта ещё нет; получен счёт; оплачено'
+              title='payment status: accrued — no invoice yet; invoice received; paid'
             >
-              <option value=''>начислено</option>
-              <option value='invoiced'>получен счёт</option>
-              <option value='paid'>оплачено</option>
+              <option value=''>accrued</option>
+              <option value='invoiced'>invoice received</option>
+              <option value='paid'>paid</option>
             </select>
             <div className='flex items-center gap-1'>
               <input

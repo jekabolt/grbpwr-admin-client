@@ -191,7 +191,7 @@ export function MaterialPlan({
           material plan
           {locked ? (
             <span className='ml-2 lowercase text-labelColor'>
-              · партия закрыта — выдача материалов невозможна
+              · the run is closed — materials can't be issued
             </span>
           ) : null}
         </Text>

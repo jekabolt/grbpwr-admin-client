@@ -13,17 +13,17 @@
 import { RpLine, RpManifest } from './manifest';
 
 const RUN_STATUS: Record<string, string> = {
-  planned: 'запланирована',
-  in_progress: 'в работе',
-  partially_received: 'частично принята',
-  received: 'принята',
-  closed: 'закрыта',
-  cancelled: 'ОТМЕНЕНА',
+  planned: 'planned',
+  in_progress: 'in progress',
+  partially_received: 'partially received',
+  received: 'received',
+  closed: 'closed',
+  cancelled: 'CANCELLED',
 };
 
 export const runStatusWord = (s?: string): string => {
   const v = (s ?? '').trim();
-  if (!v) return 'статус не задан';
+  if (!v) return 'status not set';
   return RUN_STATUS[v] ?? v;
 };
 
@@ -33,13 +33,13 @@ export const runStatusWord = (s?: string): string => {
 export const runStatusIsStop = (s?: string): boolean => (s ?? '').trim() === 'cancelled';
 
 const LAY_MODE: Record<string, string> = {
-  face_up: 'лицом вверх',
-  face_to_face: 'лицом к лицу',
+  face_up: 'face up',
+  face_to_face: 'face to face',
 };
 
 export const layModeWord = (m?: string): string => {
   const v = (m ?? '').trim();
-  if (!v) return 'режим не задан';
+  if (!v) return 'mode not set';
   return LAY_MODE[v] ?? v;
 };
 
@@ -59,12 +59,12 @@ export const lineKeyOf = (l: { colorway_id?: number; output_variant_id?: number 
 export const lineLabelOf = (l: RpLine): string =>
   (l.colorway_name ?? '').trim() ||
   (l.output_variant_name ?? '').trim() ||
-  ((l.colorway_id ?? 0) > 0 ? `#${l.colorway_id}` : '(колор-модель не назначена)');
+  ((l.colorway_id ?? 0) > 0 ? `#${l.colorway_id}` : '(colourway not assigned)');
 
 // Имя размера по id — из ОСИ МАНИФЕСТА, а не из словаря: словарь это авторизованный fetch, которого
 // у публичной страницы нет, и заголовок колонки обязан называть размер тем же словом, что клетка.
 export const sizeNamerOf = (m?: RpManifest | null) => {
   const byId = new Map<number, string>();
   for (const s of m?.sizes ?? []) byId.set(s.id ?? 0, (s.name ?? '').trim());
-  return (id: number): string => byId.get(id) || (id > 0 ? `#${id}` : 'б/р');
+  return (id: number): string => byId.get(id) || (id > 0 ? `#${id}` : 'no size');
 };

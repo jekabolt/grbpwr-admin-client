@@ -113,8 +113,10 @@ export function useDeleteCutReceipt() {
 export function cutReceiptErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
   const msg = e instanceof Error ? e.message : '';
-  if (status === 409) return 'Эту пару только что внесли в другом окне — обновите страницу и повторите';
-  if (status === 404) return 'Настил или строка приёмки не найдены — возможно, настил удалён';
-  if (status === 400) return msg || 'Сервер не принял эти числа';
-  return msg || 'Не удалось сохранить приёмку кроя';
+  if (status === 409)
+    return 'this pair was just entered in another window — refresh the page and retry';
+  if (status === 404)
+    return "the lay or the receipt line wasn't found — the lay may have been deleted";
+  if (status === 400) return msg || "the server didn't accept these numbers";
+  return msg || "couldn't save the cut receipt";
 }

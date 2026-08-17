@@ -238,7 +238,7 @@ export function ReceiveModal({
       const rec = Number(r.received);
       const def = Number(r.defect);
       if (!Number.isFinite(rec) || rec < 0 || !Number.isFinite(def) || def < 0) {
-        showMessage('Количества «принято годных» / «брак» должны быть нулём или больше', 'error');
+        showMessage('the “good received” / “defect” quantities must be zero or more', 'error');
         return;
       }
     }
@@ -256,15 +256,12 @@ export function ReceiveModal({
     if (counted.length === 0 && !(isFinal && isPartiallyReceived)) {
       // The one legal empty receipt is the FINAL short-close of a partially received run — the
       // operator declares the series complete without a last delivery.
-      showMessage(
-        'Ничего не посчитано — введите годные и/или брак хотя бы по одной строке',
-        'error',
-      );
+      showMessage('nothing counted — enter good and/or defect on at least one line', 'error');
       return;
     }
     if (counted.some((l) => !l.lineKey)) {
       // Every stored line carries a key since 0230; a keyless row means a stale pre-deploy read.
-      showMessage('Партия прочитана до обновления — обновите страницу и попробуйте снова', 'error');
+      showMessage('the run was read before an update — refresh the page and try again', 'error');
       return;
     }
     // All-scrap is a real outcome now: the run closes with the defect recorded and NOTHING posted
@@ -285,13 +282,13 @@ export function ReceiveModal({
       });
       showMessage(
         !isFinal
-          ? 'Поставка принята: партия остаётся открытой для следующих приёмок'
+          ? 'delivery received: the run stays open for further receipts'
           : isAux
             ? 'Run received · material stock posted'
             : counted.length === 0
-              ? 'Партия закрыта: остаток объявлен непришедшим'
+              ? 'run closed: the remainder is declared undelivered'
               : allScrap
-                ? 'Партия принята: весь выпуск брак, сток не пополнялся'
+                ? 'run received: the whole output is defect, stock was not topped up'
                 : res.costPriceUpdated
                   ? 'Run received · product cost updated'
                   : 'Run received · stock posted',
@@ -320,9 +317,9 @@ export function ReceiveModal({
           </div>
           <DialogPrimitives.Description className='sr-only'>
             Count the GOOD units and the defective ones per line, then post the good ones as stock
-            into each line's product. Брак НЕ списывает материалы второй раз — ткань уже в стоимости
-            партии; scrap разрешается учётом при закрытии серии, seconds уходят в B-сток той же
-            модели.
+            into each line's product. Defects are NOT written off the materials a second time — the
+            fabric is already in the run's cost; scrap is settled by accounting when the series
+            closes, seconds go into B-stock of the same model.
           </DialogPrimitives.Description>
 
           <div className='flex flex-col gap-4 p-4'>
@@ -339,10 +336,11 @@ export function ReceiveModal({
                 the warehouse by exactly the defective units. Say so where the numbers are typed. */}
             {rows.length > 0 ? (
               <Text variant='inactive' size='small'>
-                «принято годных» — единицы, которые уйдут на склад и в продажу; именно это число
-                постится в сток. «брак (не попадёт на склад)» — отдельный счётчик, он НЕ входит в
-                годные: сервер считает процент брака как брак / (годные + брак), а стоимость брака
-                поглощается себестоимостью годных единиц.
+                “good received” — the units that go to the warehouse and on sale; this is exactly
+                the number posted to stock. “defect (won't go to stock)” — a separate counter, it is
+                NOT part of the good ones: the server computes the defect rate as defect / (good +
+                defect), and the cost of the defects is absorbed into the unit cost of the good
+                units.
               </Text>
             ) : null}
 
@@ -360,10 +358,10 @@ export function ReceiveModal({
                     colour
                   </Text>
                   <Text variant='uppercase' size='small'>
-                    принято годных
+                    good received
                   </Text>
-                  <Text variant='uppercase' size='small' title='не попадёт на склад'>
-                    брак
+                  <Text variant='uppercase' size='small' title="won't go to stock">
+                    defect
                   </Text>
                   {variantRows.map(({ r, i }) => {
                     const v = variantById.get(r.outputVariantId);
@@ -418,10 +416,10 @@ export function ReceiveModal({
                     quantity
                   </Text>
                   <Text variant='uppercase' size='small'>
-                    принято годных
+                    good received
                   </Text>
-                  <Text variant='uppercase' size='small' title='не попадёт на склад'>
-                    брак
+                  <Text variant='uppercase' size='small' title="won't go to stock">
+                    defect
                   </Text>
                   <RowInputs
                     label={auxUnit || 'units'}
@@ -460,17 +458,17 @@ export function ReceiveModal({
                       size
                     </Text>
                     <Text variant='uppercase' size='small'>
-                      принято годных
+                      good received
                     </Text>
-                    <Text variant='uppercase' size='small' title='не попадёт в A-сток'>
-                      брак
+                    <Text variant='uppercase' size='small' title="won't go into A-stock">
+                      defect
                     </Text>
                     <Text
                       variant='uppercase'
                       size='small'
-                      title='scrap — списание по правилу учёта; seconds — B-сток той же модели (уценка, пока не продаётся)'
+                      title='scrap — written off by the accounting rule; seconds — B-stock of the same model (marked down, not on sale yet)'
                     >
-                      судьба брака
+                      defect disposition
                     </Text>
                     {g.items.map(({ r, i }) => (
                       <RowInputs
@@ -523,17 +521,17 @@ export function ReceiveModal({
                   onChange={(e) => setFinalReceipt(e.target.checked)}
                 />
                 <Text size='small'>
-                  финальная приёмка — партия объявляется полностью принятой
+                  final receipt — the run is declared fully received
                   {finalReceipt && remainderAfterThis > 0
-                    ? ` (остаток ${remainderAfterThis} шт. будет закрыт как непришедший)`
+                    ? ` (the remaining ${remainderAfterThis} pcs will be closed as undelivered)`
                     : ''}
                 </Text>
               </label>
             ) : null}
             {!isFinal ? (
               <Text variant='inactive' size='small'>
-                частичная приёмка: эта поставка бронируется на склад, партия останется открытой —
-                следующие поставки принимаются той же кнопкой, финальная приёмка закроет серию.
+                partial receipt: this delivery is booked into stock and the run stays open — further
+                deliveries are received with the same button, and a final receipt closes the series.
               </Text>
             ) : null}
 
@@ -580,7 +578,7 @@ export function ReceiveModal({
             <Text variant='inactive' size='small'>
               {isAux
                 ? 'Receiving posts the GOOD quantity into the material warehouse (the defect count is recorded, not stocked) in one atomic step.'
-                : 'Receiving posts the GOOD quantity of each line into its own product (the defect count is recorded, not stocked) in one atomic step. Финальная приёмка переводит партию в received — после этого её нельзя удалить. Если весь выпуск брак — партия закроется приёмкой брака, сток не изменится.'}
+                : "Receiving posts the GOOD quantity of each line into its own product (the defect count is recorded, not stocked) in one atomic step. A final receipt moves the run to received — after that it can't be deleted. If the whole output is defect, the run closes with a defect receipt and stock doesn't change."}
             </Text>
           </div>
 
@@ -595,7 +593,7 @@ export function ReceiveModal({
               disabled={busy || rows.length === 0}
               onClick={submit}
             >
-              {busy ? 'receiving…' : isFinal ? 'receive' : 'принять поставку'}
+              {busy ? 'receiving…' : isFinal ? 'receive' : 'receive the delivery'}
             </Button>
           </div>
         </DialogPrimitives.Content>
@@ -654,7 +652,7 @@ function RowInputs({
         <span className='text-textInactiveColor'>
           {sub ? `· ${sub} ` : ''}· plan {planned}
           {alreadyGood > 0 || alreadyDefect > 0
-            ? ` · уже принято ${alreadyGood}${alreadyDefect > 0 ? ` (+${alreadyDefect} брак)` : ''} · осталось ${Math.max(0, planned - alreadyGood)}`
+            ? ` · already received ${alreadyGood}${alreadyDefect > 0 ? ` (+${alreadyDefect} defect)` : ''} · left ${Math.max(0, planned - alreadyGood)}`
             : ''}
         </span>
       </Text>
@@ -665,14 +663,14 @@ function RowInputs({
       <input
         className={`${cell} w-20`}
         inputMode='numeric'
-        aria-label={`${label} принято годных`}
+        aria-label={`${label} good received`}
         value={received}
         onChange={(e) => onReceived(e.target.value.replace(/[^0-9]/g, ''))}
       />
       <input
         className={`${cell} w-20`}
         inputMode='numeric'
-        aria-label={`${label} брак`}
+        aria-label={`${label} defect`}
         value={defect}
         onChange={(e) => onDefect(e.target.value.replace(/[^0-9]/g, ''))}
       />

@@ -71,9 +71,9 @@ export function LaySectionRows({
         <thead>
           <tr>
             <th>#</th>
-            <th data-align='left'>раскладка</th>
-            <th>слоёв</th>
-            <th>длина секции</th>
+            <th data-align='left'>marker</th>
+            <th>plies</th>
+            <th>section length</th>
             <th />
           </tr>
         </thead>
@@ -109,7 +109,7 @@ export function LaySectionRows({
                     className='w-16 text-right'
                     inputMode='numeric'
                     aria-invalid={oddInFaceToFace || undefined}
-                    aria-label={`слоёв в секции ${i + 1}`}
+                    aria-label={`plies in section ${i + 1}`}
                     disabled={disabled}
                     value={s.plies}
                     onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
@@ -118,11 +118,11 @@ export function LaySectionRows({
                   />
                   {oddInFaceToFace ? (
                     <Text size='micro' className='text-error'>
-                      нечётно
+                      odd
                     </Text>
                   ) : null}
                 </td>
-                <td>{sectionLen == null ? <EmptyCell /> : `${sectionLen.toFixed(1)} см`}</td>
+                <td>{sectionLen == null ? <EmptyCell /> : `${sectionLen.toFixed(1)} cm`}</td>
                 <td>
                   <div className='flex items-center justify-end gap-1'>
                     <Button
@@ -130,7 +130,7 @@ export function LaySectionRows({
                       variant='secondary'
                       size='xs'
                       disabled={disabled || i === 0}
-                      aria-label={`поднять секцию ${i + 1}`}
+                      aria-label={`move section ${i + 1} up`}
                       onClick={() => move(i, -1)}
                     >
                       ↑
@@ -140,7 +140,7 @@ export function LaySectionRows({
                       variant='secondary'
                       size='xs'
                       disabled={disabled || i === sections.length - 1}
-                      aria-label={`опустить секцию ${i + 1}`}
+                      aria-label={`move section ${i + 1} down`}
                       onClick={() => move(i, 1)}
                     >
                       ↓
@@ -150,7 +150,7 @@ export function LaySectionRows({
                       variant='secondary'
                       size='xs'
                       disabled={disabled}
-                      aria-label={`удалить секцию ${i + 1}`}
+                      aria-label={`delete section ${i + 1}`}
                       onClick={() => onChange(sections.filter((_, idx) => idx !== i))}
                     >
                       ✕
@@ -165,7 +165,7 @@ export function LaySectionRows({
 
       {sections.length === 0 ? (
         <Text size='small' variant='inactive'>
-          у настила нет ни одной секции — добавьте хотя бы одну, иначе кроить нечем
+          the lay has no sections at all — add at least one, otherwise there is nothing to cut
         </Text>
       ) : null}
 
@@ -177,7 +177,7 @@ export function LaySectionRows({
           disabled={disabled}
           onClick={() => onChange([...sections, newSectionDraft()])}
         >
-          + секция
+          + section
         </Button>
       </div>
     </div>

@@ -52,7 +52,7 @@ export function useUpdateRunSection() {
       qc.invalidateQueries({ queryKey: devExpenseKeys.all });
     },
     // A rejected save leaves the screen showing the version the server just refused. Refetch on
-    // failure too, so "обновите страницу" lands on a page that is already reloading itself instead
+    // failure too, so "refresh the page" lands on a page that is already reloading itself instead
     // of one the operator must reload by hand before a retry can succeed.
     onError: (_e, v) => {
       qc.invalidateQueries({ queryKey: productionRunKeys.all });
@@ -66,7 +66,7 @@ export function useUpdateRunSection() {
 // silently retrying would re-introduce the last-write-wins the lock exists to prevent.
 export function updateRunErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
-  if (status === 409) return 'Партия изменена в другом окне — обновите страницу';
+  if (status === 409) return 'the run changed in another window — refresh the page';
   return e instanceof Error ? e.message : 'Could not save the run changes';
 }
 
@@ -311,10 +311,10 @@ export function useReverseRunReceipt() {
 export function reversalErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
   const msg = e instanceof Error ? e.message : '';
-  if (status === 409) return 'Партия изменена в другом окне — обновите страницу и повторите';
+  if (status === 409) return 'the run changed in another window — refresh the page and retry';
   if (status === 412 || status === 400)
-    return msg || 'Реверс невозможен в текущем состоянии квитанции';
-  return msg || 'Не удалось отменить приёмку';
+    return msg || "the reversal isn't possible in the receipt's current state";
+  return msg || "couldn't reverse the receipt";
 }
 
 // Friendly copy for the receipt command's refusals. 409 (Aborted) = the run changed under the
@@ -325,10 +325,11 @@ export function receiptErrorMessage(e: unknown): string {
   const status = (e as { status?: number } | undefined)?.status;
   const msg = e instanceof Error ? e.message : '';
   if (msg.includes('idempotency key'))
-    return 'Эта приёмка уже была проведена с другими цифрами — обновите страницу';
-  if (status === 409) return 'Партия изменена в другом окне — обновите страницу и пересчитайте';
-  if (status === 412 || status === 400) return msg || 'Приёмка невозможна в текущем статусе партии';
-  return msg || 'Не удалось провести приёмку';
+    return 'this receipt has already been posted with different numbers — refresh the page';
+  if (status === 409) return 'the run changed in another window — refresh the page and recount';
+  if (status === 412 || status === 400)
+    return msg || "the receipt can't be posted in the run's current status";
+  return msg || "couldn't post the receipt";
 }
 
 // Friendly copy for the delete guard. FAILED_PRECONDITION (received/closed) → 400; NOT_FOUND → 404.

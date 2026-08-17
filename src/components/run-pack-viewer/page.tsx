@@ -52,7 +52,7 @@ export function RunPackViewerPage() {
 
   useEffect(() => {
     const runId = manifest?.run_id ?? 0;
-    document.title = runId ? `PR-${runId} — наряд на партию` : 'наряд на партию';
+    document.title = runId ? `PR-${runId} — run pack` : 'run pack';
   }, [manifest]);
 
   const subset = useMemo(() => readSubset(search), [search]);
@@ -75,7 +75,7 @@ export function RunPackViewerPage() {
       <Shell>
         <Section>
           <Text size='micro' variant='label' component='p'>
-            загрузка…
+            loading…
           </Text>
         </Section>
       </Shell>
@@ -90,10 +90,10 @@ export function RunPackViewerPage() {
         <Section>
           <CalloutBox tone='error'>
             <Text component='p'>
-              <b>ссылка недействительна</b>
+              <b>the link is invalid</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
-              возьмите свежую распечатку наряда и отсканируйте QR ещё раз
+              take a fresh printout of the run pack and scan the QR again
             </Text>
           </CalloutBox>
         </Section>
@@ -110,11 +110,11 @@ export function RunPackViewerPage() {
         <Section>
           <CalloutBox tone='error'>
             <Text component='p'>
-              <b>вьюер настроен неправильно</b>
+              <b>the viewer is misconfigured</b>
             </Text>
             <Text size='micro' variant='label' component='p'>
-              сервер ответил не тем — покажите этот экран разработчику, бумагу перепечатывать не
-              нужно
+              the server answered with the wrong thing — show this screen to a developer, there is no
+              need to reprint the paper
             </Text>
           </CalloutBox>
         </Section>
@@ -127,7 +127,7 @@ export function RunPackViewerPage() {
       <Shell>
         <Section>
           <div className='space-y-2.5'>
-            <Text component='p'>не удалось загрузить — похоже, нет связи</Text>
+            <Text component='p'>couldn't load — looks like there's no connection</Text>
             <Button
               type='button'
               variant='main'
@@ -135,7 +135,7 @@ export function RunPackViewerPage() {
               className='min-h-11'
               onClick={() => setAttempt((n) => n + 1)}
             >
-              повторить
+              retry
             </Button>
           </div>
         </Section>
@@ -156,12 +156,12 @@ export function RunPackViewerPage() {
         {drifted && (
           <CalloutBox tone='warning' className='space-y-1'>
             <Text size='large' component='p' className='uppercase'>
-              <b>план изменился после печати</b>
+              <b>the plan changed after printing</b>
             </Text>
             <Text component='p'>
-              бумага в руках напечатана для версии {printedVersion}, а партия сейчас версии{' '}
-              {currentVersion}. Числа на листе устарели — режьте по ЭТОМУ экрану и перепечатайте
-              наряд.
+              the paper in your hands was printed for version {printedVersion}, and the run is now at
+              version {currentVersion}. the numbers on the sheet are out of date — cut from THIS
+              screen and reprint the run pack.
             </Text>
           </CalloutBox>
         )}
@@ -170,7 +170,7 @@ export function RunPackViewerPage() {
           <RunHeader m={m} garments={view.garments} garmentsRecomputed={view.recomputed} />
         </Section>
 
-        <Section title='свой кат-лист' question='— покажите только то, что кроите вы'>
+        <Section title='your cut list' question='— show only what you cut'>
           <SubsetFilter
             lines={m.lines ?? []}
             sizes={m.sizes ?? []}
@@ -184,7 +184,7 @@ export function RunPackViewerPage() {
           />
         </Section>
 
-        <Section title='линии партии' question='— сколько шьём'>
+        <Section title='run lines' question='— how many we sew'>
           <LinesMatrix
             lines={view.lines ?? []}
             axis={view.axis}
@@ -193,7 +193,7 @@ export function RunPackViewerPage() {
           />
         </Section>
 
-        <Section title='кат-лист партии' question='— что и из чего кроить'>
+        <Section title='run cut list' question='— what to cut and what from'>
           <div className='space-y-block'>
             {/* БЛОКЕРЫ ПЕРЕД ТАБЛИЦЕЙ. Это единственное место наряда, где цех обязан остановиться и
                 спросить, а строка с прочерком в общей таблице теряется среди сорока таких же. */}
@@ -206,18 +206,18 @@ export function RunPackViewerPage() {
               caveats={caveats}
               empty={
                 filtered
-                  ? 'в выбранное подмножество не попала ни одна строка кат-листа — снимите фильтр, чтобы увидеть остальные.'
+                  ? 'not a single cut list row fell into the selected subset — clear the filter to see the rest.'
                   : (view.cutBlockers ?? []).length > 0
-                    ? 'ни одна деталь не привязалась к артикулу — всё, что нашлось, стоит в блоке выше.'
+                    ? 'not a single piece linked to an article — everything that was found is in the block above.'
                     : (m.lines ?? []).length === 0
-                      ? 'кат-листа нет, потому что нет линий партии: считать «сколько выкроить» не от чего.'
-                      : 'в тех-карте не заведено ни одной детали кроя — кроить по этому наряду нечего.'
+                      ? 'there is no cut list because there are no run lines: nothing to count “how much to cut” from.'
+                      : 'the tech card has no cut pieces at all — there is nothing to cut from this run pack.'
               }
             />
           </div>
         </Section>
 
-        <Section title='настилы' question='— что лежит на столе'>
+        <Section title='lays' question='— what lies on the table'>
           <Lays
             lays={view.lays}
             applicable={m.lays_applicable}
@@ -226,15 +226,18 @@ export function RunPackViewerPage() {
           />
         </Section>
 
-        <Section title='материалы' question='— чего не хватает, чтобы кроить'>
+        <Section title='materials' question='— what is missing to cut'>
           <MaterialBlockers blockers={view.materialBlockers ?? []} />
         </Section>
 
         <Section>
           <Text size='micro' variant='label' component='p'>
-            наряд живой: количества берутся из партии прямо сейчас. Версия партии {currentVersion}
-            {m.generated_at ? ` · снимок ${m.generated_at.slice(0, 16).replace('T', ' ')} UTC` : ''}
-            . Денег в наряде нет — костинг сюда не приезжает вовсе.
+            the run pack is live: quantities are taken from the run right now. run version{' '}
+            {currentVersion}
+            {m.generated_at
+              ? ` · snapshot ${m.generated_at.slice(0, 16).replace('T', ' ')} UTC`
+              : ''}
+            . there is no money in the run pack — costing does not come here at all.
           </Text>
         </Section>
       </SectionStack>

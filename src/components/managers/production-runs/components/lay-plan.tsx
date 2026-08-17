@@ -109,7 +109,7 @@ export function LayPlan({
         new Date().toISOString(),
       );
       if (!out.ok) {
-        showMessage(`Плоттерный файл не собрался — ${out.reason}`, 'error');
+        showMessage(`the plotter file didn't build — ${out.reason}`, 'error');
         return;
       }
       const url = URL.createObjectURL(new Blob([out.dxf], { type: 'application/dxf' }));
@@ -151,7 +151,7 @@ export function LayPlan({
       const name = dc?.name ?? cw.colorCode ?? '';
       byId.set(cw.colorwayId ?? 0, `${cw.colorCode ? `${cw.colorCode} · ` : ''}${name}`);
     }
-    return (id: number) => byId.get(id) || (id > 0 ? `#${id}` : '(без колорвея)');
+    return (id: number) => byId.get(id) || (id > 0 ? `#${id}` : '(no colourway)');
   }, [techCard?.colorways, dictionary?.colors]);
 
   const sizeLabel = useMemo(
@@ -180,7 +180,7 @@ export function LayPlan({
       m.set(
         key,
         buildClothReport(
-          [layClothInput(lay, byLay.get(key) ?? [], lay.name || lay.bomItemName || 'настил')],
+          [layClothInput(lay, byLay.get(key) ?? [], lay.name || lay.bomItemName || 'lay')],
           factFrozen,
           // Ревизия прогона ещё читается → norm = undefined: сравнение молчит, а не мерится
           // «пока» живой картой. Карточка (снапшот или живая) не приехала → тоже undefined.
@@ -213,12 +213,12 @@ export function LayPlan({
     const m = new Map<number, { lineKey: string; name: string }>();
     for (const b of bomItems) {
       const id = wireInt(b.id);
-      if (id > 0 && b.lineKey) m.set(id, { lineKey: b.lineKey, name: b.name || `слот #${id}` });
+      if (id > 0 && b.lineKey) m.set(id, { lineKey: b.lineKey, name: b.name || `slot #${id}` });
     }
     for (const l of lays) {
       const id = wireInt(l.bomItemId);
       if (id > 0 && l.bomLineKey && !m.has(id))
-        m.set(id, { lineKey: l.bomLineKey, name: l.bomItemName || `слот #${id}` });
+        m.set(id, { lineKey: l.bomLineKey, name: l.bomItemName || `slot #${id}` });
     }
     return m;
   }, [bomItems, lays]);
@@ -285,7 +285,7 @@ export function LayPlan({
   const slotSummary = useMemo(() => {
     const byColorway = new Map<number, Set<string>>();
     for (const p of neededPairs) {
-      const name = slotByItemId.get(p.bomItemId)?.name ?? `слот #${p.bomItemId}`;
+      const name = slotByItemId.get(p.bomItemId)?.name ?? `slot #${p.bomItemId}`;
       const set = byColorway.get(p.colorwayId) ?? new Set<string>();
       set.add(name);
       byColorway.set(p.colorwayId, set);
@@ -351,7 +351,8 @@ export function LayPlan({
         reaffirmQuantities: true,
       },
       {
-        onSuccess: () => showMessage('Количества подтверждены — настил перекрывает план', 'success'),
+        onSuccess: () =>
+          showMessage('quantities reaffirmed — the lay covers the plan', 'success'),
         onError: (e) => showMessage(layErrorMessage(e), 'error'),
       },
     );
@@ -360,20 +361,20 @@ export function LayPlan({
   return (
     <Section
       id={id}
-      title='шаг 3 · как раскроить'
-      question='Настилы: сколько слоёв какой раскладкой стелим, и покрывают ли они план партии.'
+      title='step 3 · how to cut'
+      question='lays: how many plies we spread with which marker, and whether they cover the run plan.'
       action={
         neededPairs.length > 0 ? (
           <Text size='micro' variant='label' tracking='label' component='span' className='uppercase'>
-            настелено: {layedPairs} из {neededPairs.length} пар
+            spread: {layedPairs} of {neededPairs.length} pairs
           </Text>
         ) : null
       }
     >
       {isLoading ? (
-        <Text size='small'>загрузка…</Text>
+        <Text size='small'>loading…</Text>
       ) : isError ? (
-        <Text size='small'>План настилов недоступен.</Text>
+        <Text size='small'>the lay plan is unavailable.</Text>
       ) : (
         <>
           <LayCoverageTable
@@ -392,16 +393,16 @@ export function LayPlan({
           {unknownCount > 0 ? (
             <CalloutBox tone='note'>
               <Text size='small'>
-                <b>{unknownCount}</b> дет. в клетках покрытия посчитать не удалось — симметрия кроя
-                не размечена, деталь неатрибутируема к карточке или её слот не резолвится. Такие
-                клетки НЕ засчитаны ни как покрытые, ни как нехватка.
+                <b>{unknownCount}</b> pieces in the coverage cells couldn't be counted — the cut
+                symmetry isn't marked up, the piece can't be attributed to the card, or its slot
+                doesn't resolve. Such cells are counted NEITHER as covered NOR as a shortfall.
               </Text>
             </CalloutBox>
           ) : null}
 
           {lays.length === 0 ? (
             <Text size='small' variant='inactive'>
-              настилов ещё нет — потребность в материалах считается по нормам тех-карты
+              no lays yet — the material requirement is computed from the tech card norms
             </Text>
           ) : (
             <div className='flex flex-col'>
@@ -446,8 +447,8 @@ export function LayPlan({
                   // было бы хуже, чем сказанное вслух.
                   return (
                     <Text key={`${p.colorwayId}:${p.bomItemId}`} size='micro' className='text-error'>
-                      {colorwayLabel(p.colorwayId)} · слот #{p.bomItemId} удалён из BOM — настил на
-                      него не построить
+                      {colorwayLabel(p.colorwayId)} · slot #{p.bomItemId} was removed from the BOM —
+                      no lay can be built on it
                     </Text>
                   );
                 }
@@ -461,7 +462,7 @@ export function LayPlan({
                       setEditing({ colorwayId: p.colorwayId, bomLineKey: slot.lineKey })
                     }
                   >
-                    + настил: {colorwayLabel(p.colorwayId)} · {slot.name}
+                    + lay: {colorwayLabel(p.colorwayId)} · {slot.name}
                   </Button>
                 );
               })}
@@ -482,14 +483,14 @@ export function LayPlan({
                 size='sm'
                 onClick={() => setEditing({ colorwayId: colorwayIds[0], bomLineKey: '' })}
               >
-                + ещё настил
+                + another lay
               </Button>
             </div>
           ) : null}
 
           {locked && canEdit ? (
             <Text size='small' variant='inactive'>
-              партия закрыта — настил это план, а не история, и правится только на открытой партии
+              the run is closed — a lay is a plan, not history, and is edited only on an open run
             </Text>
           ) : null}
 
@@ -535,8 +536,8 @@ export function LayPlan({
         onOpenChange={(o) => {
           if (!o) setDeleting(null);
         }}
-        title={`удалить настил ${deleting?.name || deleting?.bomItemName || ''}?`}
-        confirmLabel={del.isPending ? 'удаляю…' : 'удалить'}
+        title={`delete the lay ${deleting?.name || deleting?.bomItemName || ''}?`}
+        confirmLabel={del.isPending ? 'deleting…' : 'delete'}
         confirmDisabled={del.isPending}
         closeOnConfirm={false}
         onConfirm={() => {
@@ -546,7 +547,7 @@ export function LayPlan({
             {
               onSuccess: () => {
                 setDeleting(null);
-                showMessage('Настил удалён', 'success');
+                showMessage('lay deleted', 'success');
               },
               onError: (e) => showMessage(layErrorMessage(e), 'error'),
             },
@@ -554,9 +555,9 @@ export function LayPlan({
         }}
       >
         <Text size='small'>
-          Секции настила удалятся вместе с ним. Раскройные раскладки прогона останутся — их можно
-          будет переиспользовать в другом настиле. Потребность в материалах по этой паре вернётся к
-          норме тех-карты.
+          the lay's sections are deleted together with it. the run's cutting markers stay — they can
+          be reused in another lay. the material requirement for this pair falls back to the tech
+          card norm.
         </Text>
       </ConfirmationModal>
     </Section>

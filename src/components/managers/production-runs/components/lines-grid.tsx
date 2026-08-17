@@ -228,16 +228,16 @@ export function LinesGrid({
       copiedQty += planned;
     }
     const skipped = [
-      skippedColorways.size > 0 ? `колор-моделей вне сетки — ${skippedColorways.size}` : '',
-      skippedSizes > 0 ? `клеток с размером вне колонок — ${skippedSizes}` : '',
+      skippedColorways.size > 0 ? `colour-models outside the grid — ${skippedColorways.size}` : '',
+      skippedSizes > 0 ? `cells with a size outside the columns — ${skippedSizes}` : '',
     ].filter(Boolean);
-    const from = `PR-${sourceRun.id}${runDate(sourceRun.createdAt) ? ` от ${runDate(sourceRun.createdAt)}` : ''}`;
+    const from = `PR-${sourceRun.id}${runDate(sourceRun.createdAt) ? ` dated ${runDate(sourceRun.createdAt)}` : ''}`;
     if (filledCells === 0) {
       // Ничего не заполнено — это ответ, а не сбой, и он обязан назвать причину: пустых клеток,
       // которые прошлый прогон умеет закрыть, просто не осталось.
       showMessage(
-        `Из ${from} копировать нечего: пустых клеток под его количества нет${
-          skipped.length ? ` (не перенесено: ${skipped.join(', ')})` : ''
+        `nothing to copy from ${from}: there are no empty cells for its quantities${
+          skipped.length ? ` (not carried over: ${skipped.join(', ')})` : ''
         }`,
         'error',
       );
@@ -246,9 +246,11 @@ export function LinesGrid({
     setDirty(true);
     setQty(next);
     showMessage(
-      `Скопировано из ${from}: ${copiedQty} шт в ${filledCells} пустых клеток${
-        skipped.length ? `; не перенесено: ${skipped.join(', ')}` : ''
-      }. Проверьте — это прошлая партия, а не норма`,
+      `copied from ${from}: ${copiedQty} pcs into ${filledCells} empty ${
+        filledCells === 1 ? 'cell' : 'cells'
+      }${
+        skipped.length ? `; not carried over: ${skipped.join(', ')}` : ''
+      }. check it — this is a past run, not a norm`,
       'success',
     );
   };
@@ -259,11 +261,11 @@ export function LinesGrid({
   // повторяем — но в title причина есть всегда.
   const copyBlockedReason =
     rows.length === 0
-      ? 'сначала добавьте колор-модель — копирование заполняет строки, которые уже есть в сетке'
+      ? 'add a colour-model first — copying fills rows that are already in the grid'
       : runsFetching && !sourceRun
-        ? 'ищем прошлые прогоны этого стиля…'
+        ? 'looking for past runs of this style…'
         : !sourceRun
-          ? 'у этого стиля нет прошлых прогонов с количествами (отменённые не в счёт) — сетку набирают руками'
+          ? "this style has no past runs with quantities (cancelled ones don't count) — the grid is filled in by hand"
           : undefined;
 
   const rowTotal = (productId: number) =>
@@ -355,7 +357,7 @@ export function LinesGrid({
               size='lg'
               className='uppercase'
               disabled={!!copyBlockedReason || update.isPending}
-              title={copyBlockedReason ?? `количества из прошлого прогона PR-${sourceRun?.id}`}
+              title={copyBlockedReason ?? `quantities from the past run PR-${sourceRun?.id}`}
               onClick={copyFromPreviousRun}
             >
               {sourceRun ? `copy from PR-${sourceRun.id}` : 'copy from previous run'}
