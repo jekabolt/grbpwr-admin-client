@@ -20,7 +20,7 @@ import { failureText } from '../api/rpc-error';
 import { topicsService } from '../api/topicsService';
 import { FilesDropOverlay } from '../components/drop-overlay';
 import { FilesUploadBar } from '../components/upload-bar';
-import { filesKeys, useFileTopics } from '../hooks/useFiles';
+import { invalidateFileViews, useFileTopics } from '../hooks/useFiles';
 import { plural } from '../upload/text';
 
 /**
@@ -61,7 +61,10 @@ export default function FileTopicsPage() {
     [writable, enqueue],
   );
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: filesKeys.all });
+  // Оба корня, а не один: тема — это подпись НА ПЛИТКЕ ФАЙЛА, а плитка живёт ещё и во вложениях
+  // карточки задачи, где приезжает из `['tasks','detail',id]`. Переименование и слияние тем
+  // иначе оставляли бы в задаче прежнее имя темы (`invalidateFileViews`).
+  const invalidate = () => invalidateFileViews(qc);
 
   const createTopic = useMutation({
     mutationFn: (a: { name: string; description: string }) =>
