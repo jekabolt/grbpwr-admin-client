@@ -9,7 +9,7 @@ import { HATCH } from 'ui/components/skeleton';
 import Text from 'ui/components/text';
 import { Tiles } from 'ui/components/tiles';
 import { MAX_UPLOAD_BYTES, uploadLibraryPreview } from '../api/filesService';
-import { filesKeys } from '../hooks/useFiles';
+import { invalidateFileViews } from '../hooks/useFiles';
 import { formatBytes } from '../utils/format';
 import { rebuildPreview } from '../utils/preview';
 import { FailureText } from './failure-text';
@@ -379,7 +379,11 @@ export function RebuildPreview({ file, writable }: { file: LibraryFile; writable
         contentType: file.contentType ?? undefined,
       });
       await uploadLibraryPreview(Number(file.id), blob);
-      qc.invalidateQueries({ queryKey: filesKeys.all });
+      // ОБА КОРНЯ: перестроенная миниатюра — это ровно то, что видно на плитке вложения в
+      // карточке задачи, а та приезжает из `['tasks','detail',id]`, куда `['files']` не
+      // достаёт. С одним корнем человек чинил превью и полчаса видел старое — на том самом
+      // экране, ради которого его и чинил (см. `invalidateFileViews`).
+      invalidateFileViews(qc);
     } catch (e) {
       // «Не вышло» не называло ничего. Оба пути отказа (скачивание файла и отправка картинки)
       // приезжают сюда со своими словами; запасная фраза нужна только на не-Error.

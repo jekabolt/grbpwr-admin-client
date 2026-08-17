@@ -11,7 +11,7 @@ import Input from 'ui/components/input';
 import Text from 'ui/components/text';
 import { notesService } from '../api/notesService';
 import { failureText } from '../api/rpc-error';
-import { filesKeys } from '../hooks/useFiles';
+import { invalidateFileViews } from '../hooks/useFiles';
 
 /**
  * Создание заметки: ИМЯ СПРАШИВАЕТСЯ СРАЗУ.
@@ -63,7 +63,10 @@ export function NewNoteModal({
         content: '',
       });
       const id = res.file?.id;
-      qc.invalidateQueries({ queryKey: filesKeys.all });
+      // ОБА КОРНЯ, а не только `['files']`: новая заметка — обычный файл библиотеки, её тут же
+      // прикрепляют к задаче, и список вложений карточки задачи живёт в своём дереве ключей
+      // (см. `invalidateFileViews`). Плюс витрина открытого — она вложена в `['files']`.
+      invalidateFileViews(qc);
       if (id) {
         navigate(notePath(id));
         return;
