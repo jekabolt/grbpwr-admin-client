@@ -68,7 +68,9 @@ export function MediaAttachments({
           const m = resolved.find((x) => x.id === id);
           const notes = annotationsOf(annotations, id).length;
           return (
-            <div key={id} className='w-16'>
+            // КЛЮЧ С ПОЗИЦИЕЙ: один и тот же файл может оказаться в списке дважды (через пикер не
+            // пройдёт, а с провода — да), и одинаковые ключи React'а перепутали бы плитки местами.
+            <div key={`${id}:${index}`} className='w-16'>
               <div className='relative h-16 w-16 border border-borderColor'>
                 {m?.thumbnail ? (
                   <button

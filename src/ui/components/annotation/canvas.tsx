@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { AnnotationEditor } from './editor';
 import { useEditHistory } from './history';
@@ -78,6 +78,13 @@ export function indexOfPin(list: AnnotationValue[], number: number): number {
 export type AnnotationSurfaceOptions = {
   src: string;
   alt?: string;
+  /**
+   * Вид медиа. Не задан — картинка.
+   *
+   * Обязан доезжать до поверхности: без него ролик рисуется как `<img src="...mp4">`, то есть
+   * никак, и вместе с ним пропадает всё, что на кадре нарисовано.
+   */
+  media?: 'image' | 'video';
   annotations: AnnotationValue[];
   /** Отсутствует = холст только читается. Печать и архив зовут его именно так. */
   onChange?: (next: AnnotationValue[]) => void;
@@ -112,6 +119,7 @@ export type AnnotationSurfaceOptions = {
 export function useAnnotationSurface({
   src,
   alt,
+  media,
   annotations,
   onChange,
   frozen = false,
@@ -124,6 +132,25 @@ export function useAnnotationSurface({
   // ⌘Z откатывает ЖЕСТ над фигурой. Правка текста сюда не входит: там откат принадлежит браузеру.
   const history = useEditHistory(annotations, (prev) => onChange?.(prev));
   const editable = !frozen && !!onChange;
+
+  /**
+   * СМЕНА КАДРА ЗАБЫВАЕТ ИСТОРИЮ ОТКАТА — иначе ⌘Z переносит указания с одного снимка на другой.
+   *
+   * Хук бывает ОДИН НА РЯД (вложения задачи листаются стрелками внутри одного диалога), а стек
+   * снимков помнит списки, каждый из которых принадлежит СВОЕЙ картинке. Замерено: нарисовать на
+   * первом кадре, перейти на второй, нарисовать, дважды ⌘Z — второй откат доставал снимок списка
+   * ПЕРВОГО кадра и записывал его в набор второго, то есть подменял чужие указания (а если на
+   * первом ничего не было — стирал их). `canUndo` от этого не спасает: он смотрит только на
+   * непустоту стека, а не на то, чьи в нём списки.
+   *
+   * Синхронно в рендере, а не эффектом: между сменой `src` и эффектом помещается нажатие клавиши,
+   * и оно откатило бы чужое.
+   */
+  const historySrc = useRef(src);
+  if (historySrc.current !== src) {
+    historySrc.current = src;
+    history.reset();
+  }
 
   // ВЬЮ-МОДЕЛЬ. Ключ — ИНДЕКС строкой: у выноски снимка шага своей идентичности нет (массив лежит
   // в JSON-колонке), и заводить её ради ключа значило бы добавить поле, которого сервер не хранит.
@@ -161,6 +188,7 @@ export function useAnnotationSurface({
   const surface = {
     src,
     alt,
+    media,
     callouts,
     frozen,
     pieceLabel,
@@ -276,6 +304,7 @@ export function useAnnotationSurface({
 export function AnnotationCanvas({
   src,
   alt,
+  media,
   annotations,
   onChange,
   frozen = false,
@@ -305,12 +334,16 @@ export function AnnotationCanvas({
   zoomable?: boolean;
   /** Сколько якорей набрано — общая панель полосы рисует подсказку сама. */
   onPlacedCountChange?: (n: number) => void;
-} & AnnotationSurfaceOptions) {
+  // ВЫБОР И ДОБАВОЧНАЯ СТРОКА РЕДАКТОРА СЮДА НЕ ВХОДЯТ. Инлайн-кадр держит выбор сам, и принимать
+  // пропы, которые молча не доезжают до поверхности, хуже, чем их не иметь: вызывающий читает
+  // сигнатуру как обещание.
+} & Omit<AnnotationSurfaceOptions, 'selectedKey' | 'onSelect' | 'renderExtraEditor'>) {
   const [ownKind, setOwnKind] = useState<string | null>(null);
   const [zoomOpen, setZoomOpen] = useState(false);
   const { surface } = useAnnotationSurface({
     src,
     alt,
+    media,
     annotations,
     onChange,
     frozen,

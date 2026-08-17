@@ -1103,6 +1103,12 @@ export function AnnotationSurface({
           // Вписанный кадр занимает всё доступное место, упираясь в ту сторону, которая кончится
           // раньше. Без `min-h-0` он не ужимается по высоте внутри flex-родителя.
           fitting && 'h-auto max-h-full w-full min-h-0 self-center',
+          // ...А ПОКА ПРОПОРЦИЙ НЕТ — КАДР ВСЁ РАВНО ЗАНИМАЕТ МЕСТО. Собственные пропорции берутся
+          // у загруженного файла, и «ещё не загрузился» — не единственная причина их не получить:
+          // 404, CORS, пустой адрес. Раньше в этих случаях высота кадра выходила нулевой, а вместе
+          // с ней исчезали и слой указаний, и штатная заглушка «адрес не разрешён» — то есть
+          // сломанный снимок выглядел как пустой чёрный экран, без единого слова о причине.
+          fit && !fitting && 'w-full min-h-0 flex-1 self-center',
           heightPx != null && 'w-fit',
           // `touch-action` объявляется ЗАРАНЕЕ: браузер выбирает поведение жеста в момент касания,
           // и запрет, выставленный позже, уже ничего не решает — палец уводит страницу в
@@ -1138,7 +1144,7 @@ export function AnnotationSurface({
             панелью, и на первом открытии тоже — при `img.complete === true`, то есть картинка была
             загружена, а не «ещё не приехала». */}
         <div
-          className={fitting || aspectRatio ? 'absolute inset-0' : 'relative'}
+          className={fit || aspectRatio ? 'absolute inset-0' : 'relative'}
           style={zoom ? { transform: `translate3d(${pos.x}px, ${pos.y}px, 0) scale(${scale})` } : undefined}
         >
           {!src ? (
@@ -1161,11 +1167,21 @@ export function AnnotationSurface({
             <video
               src={src}
               className={cn(
-                aspectRatio ? 'absolute inset-0 h-full w-full object-cover' : 'block w-full',
+                fit || aspectRatio ? 'absolute inset-0 h-full w-full object-cover' : 'block w-full',
               )}
+              // ПРОПОРЦИИ У ВИДЕО СВОИ И ПРИЕЗЖАЮТ ИНАЧЕ: `onLoad` у `<video>` не бывает, а кадр
+              // обязан совпасть с картинкой — он и есть система координат указаний. Без этого
+              // вписанный кадр с роликом остался бы без пропорций навсегда.
+              onLoadedMetadata={(e) => {
+                const el = e.currentTarget;
+                if (fit && el.videoWidth > 0 && el.videoHeight > 0) {
+                  setNaturalRatio(el.videoWidth / el.videoHeight);
+                }
+              }}
               muted
               loop
               playsInline
+              controls={zoom}
             />
           ) : (
             /* `max-h` кладётся на САМО изображение, а не на контейнер: коробка с ограниченной
@@ -1187,7 +1203,7 @@ export function AnnotationSurface({
                 }
               }}
               className={cn(
-                fitting || aspectRatio
+                fit || aspectRatio
                   ? 'absolute inset-0 h-full w-full object-cover'
                   : heightPx != null
                     ? 'block h-auto w-auto max-w-none'
