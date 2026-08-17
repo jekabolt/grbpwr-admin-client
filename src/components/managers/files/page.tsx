@@ -9,8 +9,10 @@ import { Tiles } from 'ui/components/tiles';
 import { FileCardModal } from './components/file-card-modal';
 import { FilesToolbar } from './components/files-toolbar';
 import { FileTile } from './components/file-tile';
+import { FilesSelectionBar } from './components/selection-bar';
 import { TopicChips, type TopicSelection } from './components/topic-chips';
 import { UploadDialog } from './components/upload-dialog';
+import { useFileSelection } from './hooks/useFileSelection';
 import { filesKeys, useFileTopics, useLibraryFiles, type FilesSort } from './hooks/useFiles';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -124,6 +126,17 @@ export default function FilesPage() {
   const onTopics = (next: TopicSelection) =>
     patch({ topicIds: next.topicIds, untopiced: next.untopiced });
 
+  const selection = useFileSelection();
+  // Смена фильтра снимает выбор. Набранное в одном пересечении на экране следующего не видно
+  // целиком, а полоса продолжала бы обещать действие над файлами, которых на экране нет.
+  const filterKey = `${topicIds.join(',')}|${untopiced}|${urlSearch}`;
+  const seenFilter = useRef(filterKey);
+  useEffect(() => {
+    if (seenFilter.current === filterKey) return;
+    seenFilter.current = filterKey;
+    selection.clear();
+  }, [filterKey, selection]);
+
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDropping(false);
@@ -234,12 +247,23 @@ export default function FilesPage() {
             <FileTile
               key={f.id}
               file={f}
+              selectable
+              selected={selection.isSelected(Number(f.id))}
+              onToggleSelect={() => selection.toggle(f)}
               onOpen={() => openCard(Number(f.id))}
               onPreviewError={onPreviewError}
             />
           ))}
         </Tiles>
       )}
+
+      <FilesSelectionBar
+        selected={selection.selected}
+        topics={topics}
+        writable={writable}
+        onClear={selection.clear}
+        onDropped={selection.drop}
+      />
 
       {filesQuery.hasNextPage && (
         <div>
