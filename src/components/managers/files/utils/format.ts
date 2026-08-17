@@ -50,6 +50,44 @@ export function formatWhen(value: string | undefined): string {
 }
 
 /**
+ * Короткая дата — «17.08 18:47».
+ *
+ * Не замена `formatWhen`, а её пара для ЛЕНТ: в обсуждении и в журнале доступа дата стоит на
+ * каждой строке, и «17 августа 2026 г., 18:47» двадцать раз подряд вытесняет с экрана сам
+ * разговор. Год появляется только у прошлогодней записи — там он и есть та единственная
+ * величина, которая отличает её от сегодняшней.
+ */
+export function formatWhenShort(value: string | undefined): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    ...(sameYear ? {} : { year: '2-digit' }),
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+/** Только день — для срока задачи, у которого час ничего не значит. */
+export function formatDay(value: string | undefined): string {
+  if (!value) return '';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('ru-RU', {
+    day: '2-digit',
+    month: '2-digit',
+    ...(sameYear ? {} : { year: '2-digit' }),
+  });
+}
+
+/* Склонение при числе живёт в `upload/text.ts` (`plural`) и заводить второе здесь незачем:
+   одна и та же функция под двумя именами расходится ровно тогда, когда её впервые исправят. */
+
+/**
  * Имя без расширения — то, что подписывает плитку.
  *
  * Расширение с подписи снято не ради красоты: в холсте оно и так стоит бейджем в углу, а
